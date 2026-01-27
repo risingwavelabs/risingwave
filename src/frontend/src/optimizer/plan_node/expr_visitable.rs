@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,13 +14,13 @@
 
 use super::*;
 
-/// Vistis expressions in a `PlanRef`.
+/// Visits expressions in a `PlanRef`.
 /// To visit recursively, call `visit_exprs_recursive` on [`VisitExprsRecursive`].
 pub trait ExprVisitable {
     fn visit_exprs(&self, _v: &mut dyn ExprVisitor) {}
 }
 
-impl ExprVisitable for PlanRef {
+impl<C: ConventionMarker> ExprVisitable for PlanRef<C> {
     fn visit_exprs(&self, v: &mut dyn ExprVisitor) {
         self.deref().visit_exprs(v);
     }

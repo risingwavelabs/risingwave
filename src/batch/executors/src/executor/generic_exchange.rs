@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -51,7 +51,7 @@ pub struct GenericExchangeExecutor<CS> {
     identity: String,
 
     /// Batch metrics.
-    /// None: Local mode don't record mertics.
+    /// None: Local mode don't record metrics.
     metrics: Option<BatchMetrics>,
 }
 
@@ -102,10 +102,10 @@ impl CreateSource for DefaultCreateSource {
             );
 
             let mask_failed_serving_worker = || {
-                if let Some(worker_node_manager) = context.worker_node_manager() {
-                    if let Some(worker) =
+                if let Some(worker_node_manager) = context.worker_node_manager()
+                    && let Some(worker) =
                         worker_node_manager
-                            .list_worker_nodes()
+                            .list_compute_nodes()
                             .iter()
                             .find(|worker| {
                                 worker
@@ -114,13 +114,12 @@ impl CreateSource for DefaultCreateSource {
                                     .is_some_and(|h| HostAddr::from(h) == peer_addr)
                                     && worker.property.as_ref().is_some_and(|p| p.is_serving)
                             })
-                    {
-                        let duration = Duration::from_secs(std::cmp::max(
-                            context.get_config().mask_worker_temporary_secs as u64,
-                            1,
-                        ));
-                        worker_node_manager.mask_worker_node(worker.id, duration);
-                    }
+                {
+                    let duration = Duration::from_secs(std::cmp::max(
+                        context.get_config().mask_worker_temporary_secs as u64,
+                        1,
+                    ));
+                    worker_node_manager.mask_worker_node(worker.id, duration);
                 }
             };
 
@@ -163,11 +162,11 @@ impl BoxedExecutorBuilder for GenericExchangeExecutorBuilder {
         let sequential = node.get_sequential();
 
         ensure!(!node.get_sources().is_empty());
-        let proto_sources: Vec<PbExchangeSource> = node.get_sources().to_vec();
+        let proto_sources: Vec<PbExchangeSource> = node.get_sources().clone();
         let source_creators =
             vec![DefaultCreateSource::new(source.context().client_pool()); proto_sources.len()];
 
-        let input_schema: Vec<NodeField> = node.get_input_schema().to_vec();
+        let input_schema: Vec<NodeField> = node.get_input_schema().clone();
         let fields = input_schema.iter().map(Field::from).collect::<Vec<Field>>();
         Ok(Box::new(ExchangeExecutor {
             proto_sources,

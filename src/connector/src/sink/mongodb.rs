@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -25,10 +25,10 @@ use mongodb::bson::{Array, Bson, Document, bson, doc};
 use mongodb::{Client, Namespace};
 use risingwave_common::array::{Op, RowRef, StreamChunk};
 use risingwave_common::catalog::Schema;
-use risingwave_common::log::LogSuppresser;
+use risingwave_common::log::LogSuppressor;
 use risingwave_common::row::Row;
 use risingwave_common::types::ScalarRefImpl;
-use serde_derive::Deserialize;
+use serde::Deserialize;
 use serde_with::{DisplayFromStr, serde_as};
 use thiserror_ext::AsReport;
 use with_options::WithOptions;
@@ -40,10 +40,11 @@ use super::writer::{
 };
 use crate::connector_common::MongodbCommon;
 use crate::deserialize_bool_from_string;
+use crate::enforce_secret::EnforceSecret;
 use crate::sink::encoder::RowEncoder;
 use crate::sink::{
-    DummySinkCommitCoordinator, Result, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT,
-    Sink, SinkError, SinkParam, SinkWriterParam,
+    Result, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT, Sink, SinkError, SinkParam,
+    SinkWriterParam,
 };
 
 mod send_bulk_write_command_future {
@@ -57,6 +58,7 @@ mod send_bulk_write_command_future {
 
     pub(super) type SendBulkWriteCommandFuture = impl Future<Output = Result<()>> + 'static;
 
+    #[define_opaque(SendBulkWriteCommandFuture)]
     pub(super) fn send_bulk_write_commands(
         db: Database,
         upsert: Option<Document>,
@@ -110,7 +112,7 @@ const MONGODB_SEND_FUTURE_BUFFER_MAX_SIZE: usize = 4096;
 
 pub const MONGODB_PK_NAME: &str = "_id";
 
-static LOG_SUPPERSSER: LazyLock<LogSuppresser> = LazyLock::new(LogSuppresser::default);
+static LOG_SUPPRESSOR: LazyLock<LogSuppressor> = LazyLock::new(LogSuppressor::default);
 
 const fn _default_bulk_write_max_entries() -> usize {
     1024
@@ -147,6 +149,12 @@ pub struct MongodbConfig {
     #[serde_as(as = "DisplayFromStr")]
     #[deprecated]
     pub bulk_write_max_entries: usize,
+}
+
+impl EnforceSecret for MongodbConfig {
+    fn enforce_one(prop: &str) -> crate::error::ConnectorResult<()> {
+        MongodbCommon::enforce_one(prop)
+    }
 }
 
 impl MongodbConfig {
@@ -213,10 +221,21 @@ pub struct MongodbSink {
     is_append_only: bool,
 }
 
+impl EnforceSecret for MongodbSink {
+    fn enforce_secret<'a>(
+        prop_iter: impl Iterator<Item = &'a str>,
+    ) -> crate::sink::ConnectorResult<()> {
+        for prop in prop_iter {
+            MongodbConfig::enforce_one(prop)?;
+        }
+        Ok(())
+    }
+}
+
 impl MongodbSink {
     pub fn new(param: SinkParam) -> Result<Self> {
         let config = MongodbConfig::from_btreemap(param.properties.clone())?;
-        let pk_indices = param.downstream_pk.clone();
+        let pk_indices = param.downstream_pk_or_empty();
         let is_append_only = param.sink_type.is_append_only();
         let schema = param.schema();
         Ok(Self {
@@ -238,7 +257,6 @@ impl TryFrom<SinkParam> for MongodbSink {
 }
 
 impl Sink for MongodbSink {
-    type Coordinator = DummySinkCommitCoordinator;
     type LogSinker = AsyncTruncateLogSinkerOf<MongodbSinkWriter>;
 
     const SINK_NAME: &'static str = MONGODB_SINK;
@@ -429,7 +447,7 @@ impl MongodbSinkWriter {
         let mut insert_builder: HashMap<MongodbNamespace, InsertCommandBuilder> = HashMap::new();
         for (op, row) in chunk.rows() {
             if op != Op::Insert {
-                if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
+                if let Ok(suppressed_count) = LOG_SUPPRESSOR.check() {
                     tracing::warn!(
                         suppressed_count,
                         ?op,
@@ -462,6 +480,7 @@ pub type MongodbSinkDeliveryFuture = impl TryFuture<Ok = (), Error = SinkError> 
 impl AsyncTruncateSinkWriter for MongodbSinkWriter {
     type DeliveryFuture = MongodbSinkDeliveryFuture;
 
+    #[define_opaque(MongodbSinkDeliveryFuture)]
     async fn write_chunk<'a>(
         &'a mut self,
         chunk: StreamChunk,
@@ -618,7 +637,7 @@ impl MongodbPayloadWriter {
                 Some(ScalarRefImpl::Utf8(v)) => match v.parse::<Namespace>() {
                     Ok(ns) => Some(ns),
                     Err(err) => {
-                        if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
+                        if let Ok(suppressed_count) = LOG_SUPPRESSOR.check() {
                             tracing::warn!(
                                 suppressed_count,
                                 error = %err.as_report(),
@@ -630,7 +649,7 @@ impl MongodbPayloadWriter {
                     }
                 },
                 _ => {
-                    if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
+                    if let Ok(suppressed_count) = LOG_SUPPRESSOR.check() {
                         tracing::warn!(
                             suppressed_count,
                             "the value of collection.name.field is null, fallback to use default collection.name"

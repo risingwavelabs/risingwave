@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,8 +16,9 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 
 use itertools::Itertools;
+use risingwave_common::bail;
 use risingwave_common::catalog::TableId;
-use risingwave_common::config::default::compaction_config;
+use risingwave_common::config::meta::default::compaction_config;
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_hummock_sdk::change_log::ChangeLogDelta;
 use risingwave_hummock_sdk::compaction_group::group_split::split_sst_with_table_ids;
@@ -26,12 +27,12 @@ use risingwave_hummock_sdk::table_stats::{
     PbTableStatsMap, add_prost_table_stats_map, purge_prost_table_stats, to_prost_table_stats_map,
 };
 use risingwave_hummock_sdk::table_watermark::TableWatermarks;
+use risingwave_hummock_sdk::vector_index::VectorIndexDelta;
 use risingwave_hummock_sdk::version::HummockVersionStateTableInfo;
 use risingwave_hummock_sdk::{
     CompactionGroupId, HummockContextId, HummockSstableObjectId, LocalSstableInfo,
 };
-use risingwave_pb::hummock::CompactionConfig;
-use risingwave_pb::hummock::compact_task::{self};
+use risingwave_pb::hummock::{CompactionConfig, compact_task};
 use sea_orm::TransactionTrait;
 
 use crate::hummock::error::{Error, Result};
@@ -44,7 +45,7 @@ use crate::hummock::metrics_utils::{
     get_or_create_local_table_stat, trigger_epoch_stat, trigger_local_table_stat, trigger_sst_stat,
 };
 use crate::hummock::model::CompactionGroup;
-use crate::hummock::sequence::{next_compaction_group_id, next_sstable_object_id};
+use crate::hummock::sequence::{next_compaction_group_id, next_sstable_id};
 use crate::hummock::time_travel::should_mark_next_time_travel_version_snapshot;
 use crate::hummock::{
     HummockManager, commit_multi_var_with_provided_txn, start_measure_real_process_timer,
@@ -61,8 +62,11 @@ pub struct CommitEpochInfo {
     pub sst_to_context: HashMap<HummockSstableObjectId, HummockContextId>,
     pub new_table_fragment_infos: Vec<NewTableFragmentInfo>,
     pub change_log_delta: HashMap<TableId, ChangeLogDelta>,
+    pub vector_index_delta: HashMap<TableId, VectorIndexDelta>,
     /// `table_id` -> `committed_epoch`
     pub tables_to_commit: HashMap<TableId, u64>,
+
+    pub truncate_tables: HashSet<TableId>,
 }
 
 impl HummockManager {
@@ -75,7 +79,9 @@ impl HummockManager {
             sst_to_context,
             new_table_fragment_infos,
             change_log_delta,
+            vector_index_delta,
             tables_to_commit,
+            truncate_tables,
         } = commit_info;
         let mut versioning_guard = self.versioning.write().await;
         let _timer = start_measure_real_process_timer!(self, "commit_epoch");
@@ -192,6 +198,22 @@ impl HummockManager {
         let group_id_to_sub_levels =
             rewrite_commit_sstables_to_sub_level(commit_sstables, &group_id_to_config);
 
+        // build group_id to truncate tables
+        let mut group_id_to_truncate_tables: HashMap<u64, HashSet<TableId>> = HashMap::new();
+        for table_id in &truncate_tables {
+            if let Some(compaction_group_id) = table_compaction_group_mapping.get(table_id) {
+                group_id_to_truncate_tables
+                    .entry(*compaction_group_id)
+                    .or_default()
+                    .insert(*table_id);
+            } else {
+                bail!(
+                    "table {} doesn't belong to any compaction group, skip truncating",
+                    table_id
+                );
+            }
+        }
+
         let time_travel_delta = version.pre_commit_epoch(
             &tables_to_commit,
             new_compaction_groups,
@@ -199,7 +221,10 @@ impl HummockManager {
             &new_table_ids,
             new_table_watermarks,
             change_log_delta,
+            vector_index_delta,
+            group_id_to_truncate_tables,
         );
+
         if should_mark_next_time_travel_version_snapshot(&time_travel_delta) {
             // Unable to invoke mark_next_time_travel_version_snapshot because versioning is already mutable borrowed.
             versioning.time_travel_snapshot_interval_counter = u64::MAX;
@@ -211,7 +236,11 @@ impl HummockManager {
             self.env.notification_manager(),
         );
         add_prost_table_stats_map(&mut version_stats.table_stats, &table_stats_change);
-        if purge_prost_table_stats(&mut version_stats.table_stats, version.latest_version()) {
+        if purge_prost_table_stats(
+            &mut version_stats.table_stats,
+            version.latest_version(),
+            &truncate_tables,
+        ) {
             self.metrics.version_stats.reset();
             versioning.local_metrics.clear();
         }
@@ -263,7 +292,6 @@ impl HummockManager {
             .await
             .map_err(|e| Error::Internal(e.into()))?
             .into_iter()
-            .map(|id| id.try_into().unwrap())
             .collect();
         let mut txn = self.env.meta_store_ref().conn.begin().await?;
         let version_snapshot_sst_ids = self
@@ -349,9 +377,9 @@ impl HummockManager {
         let mut sst_to_cg_vec = Vec::with_capacity(sstables.len());
         let commit_object_id_vec = sstables.iter().map(|s| s.sst_info.object_id).collect_vec();
         for commit_sst in sstables {
-            let mut group_table_ids: BTreeMap<u64, Vec<u32>> = BTreeMap::new();
+            let mut group_table_ids: BTreeMap<u64, Vec<TableId>> = BTreeMap::new();
             for table_id in &commit_sst.sst_info.table_ids {
-                match table_compaction_group_mapping.get(&TableId::new(*table_id)) {
+                match table_compaction_group_mapping.get(table_id) {
                     Some(cg_id_from_meta) => {
                         group_table_ids
                             .entry(*cg_id_from_meta)
@@ -360,8 +388,8 @@ impl HummockManager {
                     }
                     None => {
                         tracing::warn!(
-                            table_id = *table_id,
-                            object_id = commit_sst.sst_info.object_id,
+                            %table_id,
+                            object_id = %commit_sst.sst_info.object_id,
                             "table doesn't belong to any compaction group",
                         );
                     }
@@ -375,7 +403,7 @@ impl HummockManager {
         // Generate new SST IDs for each compaction group
         // `next_sstable_object_id` will update the global SST ID and reserve the new SST IDs
         // So we need to get the new SST ID first and then split the SSTs
-        let mut new_sst_id = next_sstable_object_id(&self.env, new_sst_id_number).await?;
+        let mut new_sst_id = next_sstable_id(&self.env, new_sst_id_number).await?;
         let mut commit_sstables: BTreeMap<u64, Vec<SstableInfo>> = BTreeMap::new();
 
         for (mut sst, group_table_ids) in sst_to_cg_vec {
@@ -408,8 +436,8 @@ impl HummockManager {
 
                 if new_sst_size == 0 {
                     tracing::warn!(
-                        id = sst.sst_info.sst_id,
-                        object_id = sst.sst_info.object_id,
+                        id = %sst.sst_info.sst_id,
+                        object_id = %sst.sst_info.object_id,
                         match_ids = ?match_ids,
                         "Sstable doesn't contain any data for tables",
                     );
@@ -418,8 +446,8 @@ impl HummockManager {
                 let old_sst_size = origin_sst_size.saturating_sub(new_sst_size);
                 if old_sst_size == 0 {
                     tracing::warn!(
-                        id = sst.sst_info.sst_id,
-                        object_id = sst.sst_info.object_id,
+                        id = %sst.sst_info.sst_id,
+                        object_id = %sst.sst_info.object_id,
                         match_ids = ?match_ids,
                         origin_sst_size = origin_sst_size,
                         new_sst_size = new_sst_size,
@@ -463,7 +491,7 @@ fn on_handle_add_new_table(
         if let Some(info) = state_table_info.info().get(table_id) {
             return Err(Error::CompactionGroup(format!(
                 "table {} already exist {:?}",
-                table_id.table_id, info,
+                table_id, info,
             )));
         }
         table_compaction_group_mapping.insert(*table_id, compaction_group_id);
@@ -516,7 +544,7 @@ fn rewrite_commit_sstables_to_sub_level(
     overlapping_sstables
 }
 
-fn is_ordered_subset(vec_1: &Vec<u64>, vec_2: &Vec<u64>) -> bool {
+fn is_ordered_subset<T: PartialEq>(vec_1: &Vec<T>, vec_2: &Vec<T>) -> bool {
     let mut vec_2_iter = vec_2.iter().peekable();
     for item in vec_1 {
         if vec_2_iter.peek() == Some(&item) {

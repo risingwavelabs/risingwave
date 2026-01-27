@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -42,7 +42,7 @@ impl Access for BytesAccess<'_> {
             }
             return Err(AccessError::Undefined {
                 name: path[0].to_owned(),
-                path: self.column_name.as_ref().unwrap().to_string(),
+                path: self.column_name.as_ref().unwrap().clone(),
             });
         }
         Err(AccessError::TypeError {

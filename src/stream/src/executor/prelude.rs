@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -34,7 +34,7 @@ pub use crate::executor::error::{StreamExecutorError, StreamExecutorResult};
 pub use crate::executor::monitor::streaming_stats::StreamingMetrics;
 pub use crate::executor::{
     Barrier, BoxedMessageStream, Execute, Executor, ExecutorInfo, Message, MessageStream,
-    MessageStreamItem, Mutation, PkDataTypes, PkIndices, PkIndicesRef, Watermark,
+    MessageStreamItem, Mutation, StreamKey, StreamKeyDataTypes, StreamKeyRef, Watermark,
     expect_first_barrier, expect_first_barrier_from_aligned_stream,
 };
 pub use crate::task::{ActorId, AtomicU64Ref};

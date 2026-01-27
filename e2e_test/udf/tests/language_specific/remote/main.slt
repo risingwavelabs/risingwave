@@ -7,6 +7,7 @@ python3 e2e_test/udf/remote_python/test.py &
 sleep 1s
 
 include ./test.slt.part
+include ./determinism.slt.part
 
 system ok
 pkill -f e2e_test/udf/remote_python/test.py

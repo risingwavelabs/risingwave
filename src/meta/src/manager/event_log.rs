@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -149,7 +149,7 @@ impl EventLogManger {
         self.event_logs
             .read()
             .values()
-            .flat_map(|v| v.iter().map(|e| e.payload.to_owned()))
+            .flat_map(|v| v.iter().map(|e| e.payload.clone()))
             .collect()
     }
 }

@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -104,6 +104,10 @@ impl StreamChunkBuilder {
         }
     }
 
+    pub fn build_empty(data_types: Vec<DataType>) -> StreamChunk {
+        Self::new(1, data_types).take_inner()
+    }
+
     /// Get the current number of rows in the builder.
     pub fn size(&self) -> usize {
         self.size
@@ -138,17 +142,12 @@ impl StreamChunkBuilder {
     #[must_use]
     pub fn append_record(&mut self, record: Record<impl Row>) -> Option<StreamChunk> {
         match record {
-            Record::Insert { new_row } => {
-                self.append_iter_inner::<true>(Op::Insert, new_row.iter().enumerate())
-            }
-            Record::Delete { old_row } => {
-                self.append_iter_inner::<true>(Op::Delete, old_row.iter().enumerate())
-            }
+            Record::Insert { new_row } => self.append_row(Op::Insert, new_row),
+            Record::Delete { old_row } => self.append_row(Op::Delete, old_row),
             Record::Update { old_row, new_row } => {
-                let none =
-                    self.append_iter_inner::<true>(Op::UpdateDelete, old_row.iter().enumerate());
+                let none = self.append_row(Op::UpdateDelete, old_row);
                 assert!(none.is_none());
-                self.append_iter_inner::<true>(Op::UpdateInsert, new_row.iter().enumerate())
+                self.append_row(Op::UpdateInsert, new_row)
             }
         }
     }
@@ -161,6 +160,10 @@ impl StreamChunkBuilder {
         if self.size == 0 {
             return None;
         }
+        Some(self.take_inner())
+    }
+
+    fn take_inner(&mut self) -> StreamChunk {
         self.size = 0;
 
         let ops = std::mem::replace(&mut self.ops, Vec::with_capacity(self.initial_capacity));
@@ -179,7 +182,7 @@ impl StreamChunkBuilder {
             .collect::<Vec<_>>();
         let vis = std::mem::take(&mut self.vis_builder).finish();
 
-        Some(StreamChunk::with_visibility(ops, columns, vis))
+        StreamChunk::with_visibility(ops, columns, vis)
     }
 
     #[must_use]
@@ -244,7 +247,7 @@ mod tests {
 
         let res = builder.append_row_invisible(Op::Delete, row.clone());
         assert!(res.is_none());
-        let res = builder.append_iter(Op::Delete, row.clone().iter().enumerate());
+        let res = builder.append_iter(Op::Delete, row.iter().enumerate());
         assert!(res.is_none());
         let res = builder.append_record(Record::Insert {
             new_row: row.clone(),
@@ -265,7 +268,7 @@ mod tests {
         assert!(res.is_none());
         let res = builder.append_record(Record::Update {
             old_row: row.clone(),
-            new_row: row.clone(),
+            new_row: row,
         });
         assert_eq!(
             res,
@@ -318,7 +321,7 @@ mod tests {
 
         let res = builder.append_row(Op::UpdateDelete, row.clone());
         assert!(res.is_none());
-        let res = builder.append_row(Op::UpdateDelete, row.clone()); // note this is an inconsistency
+        let res = builder.append_row(Op::UpdateDelete, row); // note this is an inconsistency
         assert_eq!(
             res,
             Some(StreamChunk::from_pretty(

@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -42,7 +42,7 @@ fn read_rw_user_secrets_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwUser
         Some(user) => {
             if !user.is_super {
                 return Err(ErrorCode::PermissionDenied(
-                    "permission denied for table rw_user_secrets".to_owned(),
+                    "permission denied for table \"rw_catalog.rw_user_secrets\"".to_owned(),
                 )
                 .into());
             }

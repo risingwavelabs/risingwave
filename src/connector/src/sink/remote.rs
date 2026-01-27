@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -24,14 +24,15 @@ use async_trait::async_trait;
 use await_tree::{InstrumentAwait, span};
 use futures::TryStreamExt;
 use futures::future::select;
-use jni::JavaVM;
+use phf::phf_set;
 use prost::Message;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::bail;
 use risingwave_common::catalog::{ColumnDesc, ColumnId};
+use risingwave_common::global_jvm::Jvm;
 use risingwave_common::session_config::sink_decouple::SinkDecouple;
 use risingwave_common::types::DataType;
-use risingwave_jni_core::jvm_runtime::{JVM, execute_with_jni_env};
+use risingwave_jni_core::jvm_runtime::execute_with_jni_env;
 use risingwave_jni_core::{
     JniReceiverType, JniSenderType, JniSinkWriterStreamRequest, call_static_method, gen_class_name,
 };
@@ -51,25 +52,25 @@ use risingwave_rpc_client::{
     SinkWriterStreamHandle,
 };
 use rw_futures_util::drop_either_future;
-use sea_orm::DatabaseConnection;
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc;
-use tokio::sync::mpsc::{Receiver, unbounded_channel};
+use tokio::sync::mpsc::{Receiver, UnboundedSender, unbounded_channel};
 use tokio::task::spawn_blocking;
 use tokio_stream::wrappers::ReceiverStream;
 use tracing::warn;
 
-use super::SinkCommittedEpochSubscriber;
 use super::elasticsearch_opensearch::elasticsearch_converter::{
     StreamChunkConverter, is_remote_es_sink,
 };
 use super::elasticsearch_opensearch::elasticsearch_opensearch_config::ES_OPTION_DELIMITER;
+use crate::connector_common::IcebergSinkCompactionUpdate;
+use crate::enforce_secret::EnforceSecret;
 use crate::error::ConnectorResult;
 use crate::sink::coordinate::CoordinatedLogSinker;
 use crate::sink::log_store::{LogStoreReadItem, LogStoreResult, TruncateOffset};
 use crate::sink::writer::SinkWriter;
 use crate::sink::{
-    DummySinkCommitCoordinator, LogSinker, Result, Sink, SinkCommitCoordinator, SinkError,
+    LogSinker, Result, SinglePhaseCommitCoordinator, Sink, SinkCommitCoordinator, SinkError,
     SinkLogReader, SinkParam, SinkWriterMetrics, SinkWriterParam,
 };
 
@@ -79,21 +80,24 @@ macro_rules! def_remote_sink {
             //todo!, delete java impl
             // { ElasticSearchJava, ElasticSearchJavaSink, "elasticsearch_v1" }
             // { OpensearchJava, OpenSearchJavaSink, "opensearch_v1"}
-            { Cassandra, CassandraSink, "cassandra" }
-            { Jdbc, JdbcSink, "jdbc" }
-            { DeltaLake, DeltaLakeSink, "deltalake" }
-            { HttpJava, HttpJavaSink, "http" }
+            { Cassandra, CassandraSink, "cassandra", [ "cassandra.url" ] }
+            { Jdbc, JdbcSink, "jdbc", [ "jdbc.url" ] }
         }
     };
-    ({ $variant_name:ident, $sink_type_name:ident, $sink_name:expr }) => {
+    ({ $variant_name:ident, $sink_type_name:ident, $sink_name:expr, [ $($enforce_secret_prop:expr),* ] }) => {
         #[derive(Debug)]
         pub struct $variant_name;
         impl RemoteSinkTrait for $variant_name {
             const SINK_NAME: &'static str = $sink_name;
         }
+        impl EnforceSecret for $variant_name {
+            const ENFORCE_SECRET_PROPERTIES: phf::Set<&'static str> = phf_set! {
+                $($enforce_secret_prop),*
+            };
+        }
         pub type $sink_type_name = RemoteSink<$variant_name>;
     };
-    ({ $variant_name:ident, $sink_type_name:ident, $sink_name:expr, |$desc:ident| $body:expr }) => {
+    ({ $variant_name:ident, $sink_type_name:ident, $sink_name:expr, [ $($enforce_secret_prop:expr),* ], |$desc:ident| $body:expr }) => {
         #[derive(Debug)]
         pub struct $variant_name;
         impl RemoteSinkTrait for $variant_name {
@@ -101,6 +105,11 @@ macro_rules! def_remote_sink {
             fn default_sink_decouple($desc: &SinkDesc) -> bool {
                 $body
             }
+        }
+        impl EnforceSecret for $variant_name {
+            const ENFORCE_SECRET_PROPERTIES: phf::Set<&'static str> = phf_set! {
+                $($enforce_secret_prop),*
+            };
         }
         pub type $sink_type_name = RemoteSink<$variant_name>;
     };
@@ -119,7 +128,7 @@ macro_rules! def_remote_sink {
 
 def_remote_sink!();
 
-pub trait RemoteSinkTrait: Send + Sync + 'static {
+pub trait RemoteSinkTrait: EnforceSecret + Send + Sync + 'static {
     const SINK_NAME: &'static str;
     fn default_sink_decouple() -> bool {
         true
@@ -130,6 +139,10 @@ pub trait RemoteSinkTrait: Send + Sync + 'static {
 pub struct RemoteSink<R: RemoteSinkTrait> {
     param: SinkParam,
     _phantom: PhantomData<R>,
+}
+
+impl<R: RemoteSinkTrait> EnforceSecret for RemoteSink<R> {
+    const ENFORCE_SECRET_PROPERTIES: phf::Set<&'static str> = R::ENFORCE_SECRET_PROPERTIES;
 }
 
 impl<R: RemoteSinkTrait> TryFrom<SinkParam> for RemoteSink<R> {
@@ -144,7 +157,6 @@ impl<R: RemoteSinkTrait> TryFrom<SinkParam> for RemoteSink<R> {
 }
 
 impl<R: RemoteSinkTrait> Sink for RemoteSink<R> {
-    type Coordinator = DummySinkCommitCoordinator;
     type LogSinker = RemoteLogSinker;
 
     const SINK_NAME: &'static str = R::SINK_NAME;
@@ -174,7 +186,7 @@ async fn validate_remote_sink(param: &SinkParam, sink_name: &str) -> ConnectorRe
     //         .map_err(|e| anyhow::anyhow!(e))?;
     // }
     if is_remote_es_sink(sink_name)
-        && param.downstream_pk.len() > 1
+        && param.downstream_pk_or_empty().len() > 1
         && !param.properties.contains_key(ES_OPTION_DELIMITER)
     {
         bail!("Es sink only supports single pk or pk with delimiter option");
@@ -198,7 +210,7 @@ async fn validate_remote_sink(param: &SinkParam, sink_name: &str) -> ConnectorRe
                     | DataType::Jsonb
                     | DataType::Bytea => Ok(()),
             DataType::List(list) => {
-                if is_remote_es_sink(sink_name) || matches!(list.as_ref(), DataType::Int16 | DataType::Int32 | DataType::Int64 | DataType::Float32 | DataType::Float64 | DataType::Varchar){
+                if is_remote_es_sink(sink_name) || matches!(list.elem(), DataType::Int16 | DataType::Int32 | DataType::Int64 | DataType::Float32 | DataType::Float64 | DataType::Varchar){
                     Ok(())
                 } else{
                     Err(SinkError::Remote(anyhow!(
@@ -219,13 +231,14 @@ async fn validate_remote_sink(param: &SinkParam, sink_name: &str) -> ConnectorRe
                     )))
                 }
             },
+            DataType::Vector(_) |
             DataType::Serial | DataType::Int256 | DataType::Map(_) => Err(SinkError::Remote(anyhow!(
                             "remote sink supports Int16, Int32, Int64, Float32, Float64, Boolean, Decimal, Time, Date, Interval, Jsonb, Timestamp, Timestamptz, Bytea, List and Varchar, (Es sink support Struct) got {:?}: {:?}",
                             col.name,
                             col.data_type,
                         )))}})?;
 
-    let jvm = JVM.get_or_init()?;
+    let jvm = Jvm::get_or_init()?;
     let sink_param = param.to_proto();
 
     spawn_blocking(move || -> anyhow::Result<()> {
@@ -302,7 +315,7 @@ impl RemoteLogSinker {
             stream_chunk_converter: StreamChunkConverter::new(
                 sink_name,
                 sink_param.schema(),
-                &sink_param.downstream_pk,
+                &sink_param.downstream_pk_or_empty(),
                 &sink_param.properties,
                 sink_param.sink_type.is_append_only(),
             )?,
@@ -512,6 +525,10 @@ pub struct CoordinatedRemoteSink<R: RemoteSinkTrait> {
     _phantom: PhantomData<R>,
 }
 
+impl<R: RemoteSinkTrait> EnforceSecret for CoordinatedRemoteSink<R> {
+    const ENFORCE_SECRET_PROPERTIES: phf::Set<&'static str> = R::ENFORCE_SECRET_PROPERTIES;
+}
+
 impl<R: RemoteSinkTrait> TryFrom<SinkParam> for CoordinatedRemoteSink<R> {
     type Error = SinkError;
 
@@ -524,7 +541,6 @@ impl<R: RemoteSinkTrait> TryFrom<SinkParam> for CoordinatedRemoteSink<R> {
 }
 
 impl<R: RemoteSinkTrait> Sink for CoordinatedRemoteSink<R> {
-    type Coordinator = RemoteCoordinator;
     type LogSinker = CoordinatedLogSinker<CoordinatedRemoteSinkWriter>;
 
     const SINK_NAME: &'static str = R::SINK_NAME;
@@ -549,8 +565,12 @@ impl<R: RemoteSinkTrait> Sink for CoordinatedRemoteSink<R> {
         true
     }
 
-    async fn new_coordinator(&self, _db: DatabaseConnection) -> Result<Self::Coordinator> {
-        RemoteCoordinator::new::<R>(self.param.clone()).await
+    async fn new_coordinator(
+        &self,
+        _iceberg_compact_stat_sender: Option<UnboundedSender<IcebergSinkCompactionUpdate>>,
+    ) -> Result<SinkCommitCoordinator> {
+        let coordinator = RemoteCoordinator::new::<R>(self.param.clone()).await?;
+        Ok(SinkCommitCoordinator::SinglePhase(Box::new(coordinator)))
     }
 }
 
@@ -668,25 +688,23 @@ impl RemoteCoordinator {
 }
 
 #[async_trait]
-impl SinkCommitCoordinator for RemoteCoordinator {
-    async fn init(&mut self, _subscriber: SinkCommittedEpochSubscriber) -> Result<Option<u64>> {
-        Ok(None)
+impl SinglePhaseCommitCoordinator for RemoteCoordinator {
+    async fn init(&mut self) -> Result<()> {
+        Ok(())
     }
 
-    async fn commit(&mut self, epoch: u64, metadata: Vec<SinkMetadata>) -> Result<()> {
+    async fn commit_data(&mut self, epoch: u64, metadata: Vec<SinkMetadata>) -> Result<()> {
         Ok(self.stream_handle.commit(epoch, metadata).await?)
     }
 }
 
 struct EmbeddedConnectorClient {
-    jvm: &'static JavaVM,
+    jvm: Jvm,
 }
 
 impl EmbeddedConnectorClient {
     fn new() -> Result<Self> {
-        let jvm = JVM
-            .get_or_init()
-            .context("failed to create EmbeddedConnectorClient")?;
+        let jvm = Jvm::get_or_init().context("failed to create EmbeddedConnectorClient")?;
         Ok(EmbeddedConnectorClient { jvm })
     }
 
@@ -811,8 +829,8 @@ mod test {
     use risingwave_pb::connector_service::{SinkWriterStreamRequest, SinkWriterStreamResponse};
     use tokio::sync::mpsc;
 
-    use crate::sink::SinkWriter;
     use crate::sink::remote::CoordinatedRemoteSinkWriter;
+    use crate::sink::writer::SinkWriter;
 
     #[tokio::test]
     async fn test_epoch_check() {

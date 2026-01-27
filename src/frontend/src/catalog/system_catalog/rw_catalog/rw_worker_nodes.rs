@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -39,6 +39,7 @@ struct RwWorkerNode {
     system_total_cpu_cores: Option<i64>,
     started_at: Option<Timestamptz>,
     resource_group: Option<String>,
+    is_iceberg_compactor: Option<bool>,
 }
 
 #[system_catalog(table, "rw_catalog.rw_worker_nodes")]
@@ -53,8 +54,9 @@ async fn read_rw_worker_nodes_info(reader: &SysCatalogReaderImpl) -> Result<Vec<
             let property = worker.property.as_ref();
             let resource = worker.resource.as_ref();
             let is_compute = worker.get_type().unwrap() == WorkerType::ComputeNode;
+            let is_compactor = worker.get_type().unwrap() == WorkerType::Compactor;
             RwWorkerNode {
-                id: worker.id as i32,
+                id: worker.id.as_i32_id(),
                 host: host.map(|h| h.host.clone()),
                 port: host.map(|h| h.port.to_string()),
                 r#type: worker.get_type().unwrap().as_str_name().into(),
@@ -76,7 +78,7 @@ async fn read_rw_worker_nodes_info(reader: &SysCatalogReaderImpl) -> Result<Vec<
                     None
                 },
                 internal_rpc_host_addr: property.map(|p| p.internal_rpc_host_addr.clone()),
-                rw_version: resource.map(|r| r.rw_version.to_owned()),
+                rw_version: resource.map(|r| r.rw_version.clone()),
                 system_total_memory_bytes: resource.map(|r| r.total_memory_bytes as _),
                 system_total_cpu_cores: resource.map(|r| r.total_cpu_cores as _),
                 started_at: worker
@@ -84,6 +86,11 @@ async fn read_rw_worker_nodes_info(reader: &SysCatalogReaderImpl) -> Result<Vec<
                     .map(|ts| Timestamptz::from_secs(ts as i64).unwrap()),
                 resource_group: if is_compute {
                     property.and_then(|p| p.resource_group.clone())
+                } else {
+                    None
+                },
+                is_iceberg_compactor: if is_compactor {
+                    property.map(|p| p.is_iceberg_compactor)
                 } else {
                     None
                 },

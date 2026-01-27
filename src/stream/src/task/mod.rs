@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,187 +12,98 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, HashSet};
+//! # Stream Task Management Architecture
+//!
+//! This module contains the core stream task management system that handles streaming
+//! computation actors and barrier coordination in RisingWave.
+//!
+//! ## Architecture Overview
+//!
+//! The stream task management system consists of the following layered components:
+//!
+//! ### External Interface Layer
+//! - Meta Service: Central coordination service
+//! - [`LocalStreamManager`]: Public API handler for StreamService/StreamExchangeService
+//!
+//! ### Core Control Layer
+//! - [`LocalBarrierWorker`]: Central event coordinator and barrier processor
+//!   - Owns [`ControlStreamHandle`]: Bidirectional communication with Meta Service
+//!   - Manages [`ManagedBarrierState`]: Multi-partial-graph barrier state coordinator
+//!     + [`PartialGraphState`]: Per-partial-graph barrier state manager
+//!       - Uses [`StreamActorManager`]: Actor factory and lifecycle manager
+//!       - Manages [`PartialGraphManagedBarrierState`]: Per-partial-graph barrier coordination
+//!
+//! ### Actor Execution Layer
+//! - Stream Actors: Individual computation units
+//! - [`LocalBarrierManager`]: Actor-to-system event bridge
+//!
+//! ## Key Event Types
+//!
+//! - [`risingwave_pb::stream_service::streaming_control_stream_request::Request`]: Barrier injection events sent from Meta Service to [`ControlStreamHandle`]
+//! - [`LocalActorOperation`]: Meta control events sent from [`LocalStreamManager`] to [`barrier_worker::LocalBarrierWorker`]
+//! - [`LocalBarrierEvent`]: Events sent from actors via [`LocalBarrierManager`] to [`barrier_worker::managed_state::PartialGraphState`]
+//!
+//! ## Data Flow and Event Processing
+//!
+//! ### 1. Barrier Flow
+//! This is the primary coordination mechanism for checkpoints and barriers:
+//!
+//! 1. Meta Service sends [`risingwave_pb::stream_service::InjectBarrierRequest`] via `streaming_control_stream`
+//! 2. [`barrier_worker::ControlStreamHandle`] (owned by [`barrier_worker::LocalBarrierWorker`]) receives the request
+//! 3. [`barrier_worker::LocalBarrierWorker`] processes the request and calls [`barrier_worker::LocalBarrierWorker::send_barrier()`]
+//!    - [`barrier_worker::managed_state::PartialGraphState::transform_to_issued`] creates new actors if needed
+//!    - [`barrier_worker::managed_state::PartialGraphManagedBarrierState::transform_to_issued`] transitions to `Issued` state
+//!    - [`barrier_worker::managed_state::InflightActorState::issue_barrier`] sends barriers to individual actors
+//! 4. Stream Actors receive barriers and process them
+//! 5. Stream Actors finish processing barriers and send [`LocalBarrierEvent::ReportActorCollected`] via [`LocalBarrierManager::collect`]
+//! 6. [`barrier_worker::managed_state::PartialGraphState::poll_next_event`] processes the collection via [`PartialGraphState::collect`]
+//! 6. [`barrier_worker::LocalBarrierWorker::complete_barrier`] initiates state store sync if needed
+//! 7. [`barrier_worker::LocalBarrierWorker::on_epoch_completed`] sends [`risingwave_pb::stream_service::BarrierCompleteResponse`] to Meta Service
+//!
+//! ### 2. Actor Lifecycle Management
+//! How actors are created, managed, and destroyed:
+//!
+//! 1. Meta Service sends [`risingwave_pb::stream_service::InjectBarrierRequest`] with `actors_to_build`
+//! 2. [`barrier_worker::managed_state::PartialGraphState::transform_to_issued`] processes new actors
+//! 3. [`StreamActorManager::spawn_actor`] creates and starts actor tasks
+//! 4. [`barrier_worker::managed_state::InflightActorState::start`] tracks actor in system
+//!
+//! ### 3. Error Handling Flow
+//! How errors propagate through the system:
+//!
+//! 1. Stream Actors encounter errors and call [`LocalBarrierManager::notify_failure`]
+//! 2. [`LocalBarrierManager`] sends error via `actor_failure_rx`
+//! 3. [`barrier_worker::managed_state::PartialGraphState::poll_next_event`] sends `ActorError` event
+//! 4. [`barrier_worker::LocalBarrierWorker::on_partial_graph_failure`] suspends partial graph and reports to Meta Service
+//! 5. Meta Service responds with [`risingwave_pb::stream_service::streaming_control_stream_request::ResetPartialGraphsRequest`]
+//! 6. [`barrier_worker::LocalBarrierWorker::reset_partial_graphs`] starts partial graph reset process
+//! 7. [`barrier_worker::managed_state::SuspendedPartialGraphState::reset`] cleans up actors and state
 
-use anyhow::anyhow;
-use parking_lot::{MappedMutexGuard, Mutex, MutexGuard};
-use risingwave_common::config::StreamingConfig;
-use risingwave_common::util::addr::HostAddr;
-use risingwave_rpc_client::ComputeClientPoolRef;
+#[expect(unused_imports, reason = "used for doc-link")]
+use barrier_worker::managed_state::{
+    ManagedBarrierState, PartialGraphManagedBarrierState, PartialGraphState,
+};
 
-use crate::error::StreamResult;
-use crate::executor::exchange::permit::{self, Receiver, Sender};
-
+use crate::executor::exchange::permit::{Receiver, Sender};
+mod actor_manager;
 mod barrier_manager;
+mod barrier_worker;
 mod env;
 mod stream_manager;
 
+pub use actor_manager::*;
 pub use barrier_manager::*;
+pub use barrier_worker::*;
 pub use env::*;
-use risingwave_common::catalog::DatabaseId;
+pub use risingwave_common::id::{ActorId, FragmentId};
+use risingwave_pb::id::PartialGraphId;
 pub use stream_manager::*;
 
 pub type ConsumableChannelPair = (Option<Sender>, Option<Receiver>);
-pub type ActorId = u32;
-pub type FragmentId = u32;
-pub type DispatcherId = u64;
+pub type DispatcherId = FragmentId;
+/// (`upstream_actor_id`, `downstream_actor_id`)
 pub type UpDownActorIds = (ActorId, ActorId);
 pub type UpDownFragmentIds = (FragmentId, FragmentId);
 
-#[derive(Hash, Eq, PartialEq, Copy, Clone, Debug)]
-pub(crate) struct PartialGraphId(u32);
-
 #[cfg(test)]
-pub(crate) const TEST_DATABASE_ID: risingwave_common::catalog::DatabaseId =
-    risingwave_common::catalog::DatabaseId::new(u32::MAX);
-
-#[cfg(test)]
-pub(crate) const TEST_PARTIAL_GRAPH_ID: PartialGraphId = PartialGraphId(u32::MAX);
-
-impl PartialGraphId {
-    fn new(id: u32) -> Self {
-        Self(id)
-    }
-}
-
-impl From<PartialGraphId> for u32 {
-    fn from(val: PartialGraphId) -> u32 {
-        val.0
-    }
-}
-
-/// Stores the information which may be modified from the data plane.
-///
-/// The data structure is created in `LocalBarrierWorker` and is shared by actors created
-/// between two recoveries. In every recovery, the `LocalBarrierWorker` will create a new instance of
-/// `SharedContext`, and the original one becomes stale. The new one is shared by actors created after
-/// recovery.
-pub struct SharedContext {
-    pub(crate) database_id: DatabaseId,
-    term_id: String,
-
-    /// Stores the senders and receivers for later `Processor`'s usage.
-    ///
-    /// Each actor has several senders and several receivers. Senders and receivers are created
-    /// during `update_actors` and stored in a channel map. Upon `build_actors`, all these channels
-    /// will be taken out and built into the executors and outputs.
-    /// One sender or one receiver can be uniquely determined by the upstream and downstream actor
-    /// id.
-    ///
-    /// There are three cases when we need local channels to pass around messages:
-    /// 1. pass `Message` between two local actors
-    /// 2. The RPC client at the downstream actor forwards received `Message` to one channel in
-    ///    `ReceiverExecutor` or `MergerExecutor`.
-    /// 3. The RPC `Output` at the upstream actor forwards received `Message` to
-    ///    `ExchangeServiceImpl`.
-    ///
-    /// The channel serves as a buffer because `ExchangeServiceImpl`
-    /// is on the server-side and we will also introduce backpressure.
-    channel_map: Mutex<HashMap<UpDownActorIds, ConsumableChannelPair>>,
-
-    /// Stores the local address.
-    ///
-    /// It is used to test whether an actor is local or not,
-    /// thus determining whether we should setup local channel only or remote rpc connection
-    /// between two actors/actors.
-    pub(crate) addr: HostAddr,
-
-    /// Compute client pool for streaming gRPC exchange.
-    // TODO: currently the client pool won't be cleared. Should remove compute clients when
-    // disconnected.
-    pub(crate) compute_client_pool: ComputeClientPoolRef,
-
-    pub(crate) config: StreamingConfig,
-}
-
-impl std::fmt::Debug for SharedContext {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("SharedContext")
-            .field("addr", &self.addr)
-            .finish_non_exhaustive()
-    }
-}
-
-impl SharedContext {
-    pub fn new(database_id: DatabaseId, env: &StreamEnvironment, term_id: String) -> Self {
-        Self {
-            database_id,
-            term_id,
-            channel_map: Default::default(),
-            addr: env.server_address().clone(),
-            config: env.config().as_ref().to_owned(),
-            compute_client_pool: env.client_pool(),
-        }
-    }
-
-    pub fn term_id(&self) -> String {
-        self.term_id.clone()
-    }
-
-    #[cfg(test)]
-    pub fn for_test() -> Self {
-        use std::sync::Arc;
-
-        use risingwave_common::config::StreamingDeveloperConfig;
-        use risingwave_rpc_client::ComputeClientPool;
-
-        Self {
-            database_id: TEST_DATABASE_ID,
-            term_id: "for_test".into(),
-            channel_map: Default::default(),
-            addr: LOCAL_TEST_ADDR.clone(),
-            config: StreamingConfig {
-                developer: StreamingDeveloperConfig {
-                    exchange_initial_permits: permit::for_test::INITIAL_PERMITS,
-                    exchange_batched_permits: permit::for_test::BATCHED_PERMITS,
-                    exchange_concurrent_barriers: permit::for_test::CONCURRENT_BARRIERS,
-                    ..Default::default()
-                },
-                ..Default::default()
-            },
-            compute_client_pool: Arc::new(ComputeClientPool::for_test()),
-        }
-    }
-
-    /// Get the channel pair for the given actor ids. If the channel pair does not exist, create one
-    /// with the configured permits.
-    fn get_or_insert_channels(
-        &self,
-        ids: UpDownActorIds,
-    ) -> MappedMutexGuard<'_, ConsumableChannelPair> {
-        MutexGuard::map(self.channel_map.lock(), |map| {
-            map.entry(ids).or_insert_with(|| {
-                let (tx, rx) = permit::channel(
-                    self.config.developer.exchange_initial_permits,
-                    self.config.developer.exchange_batched_permits,
-                    self.config.developer.exchange_concurrent_barriers,
-                );
-                (Some(tx), Some(rx))
-            })
-        })
-    }
-
-    pub fn take_sender(&self, ids: &UpDownActorIds) -> StreamResult<Sender> {
-        self.get_or_insert_channels(*ids)
-            .0
-            .take()
-            .ok_or_else(|| anyhow!("sender for {ids:?} has already been taken").into())
-    }
-
-    pub fn take_receiver(&self, ids: UpDownActorIds) -> StreamResult<Receiver> {
-        self.get_or_insert_channels(ids)
-            .1
-            .take()
-            .ok_or_else(|| anyhow!("receiver for {ids:?} has already been taken").into())
-    }
-
-    pub fn config(&self) -> &StreamingConfig {
-        &self.config
-    }
-
-    pub(super) fn drop_actors(&self, actors: &HashSet<ActorId>) {
-        self.channel_map
-            .lock()
-            .retain(|(up_id, _), _| !actors.contains(up_id));
-    }
-}
+pub(crate) const TEST_PARTIAL_GRAPH_ID: PartialGraphId = PartialGraphId::new(233);

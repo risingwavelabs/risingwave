@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,7 +16,6 @@ use std::collections::HashMap;
 use std::ops::Deref;
 use std::rc::Rc;
 
-use either::Either;
 use itertools::Itertools;
 use risingwave_common::catalog::{
     ColumnCatalog, Engine, Field, RISINGWAVE_ICEBERG_ROW_ID, ROW_ID_COLUMN_NAME, Schema,
@@ -26,15 +25,16 @@ use risingwave_common::{bail, bail_not_implemented};
 use risingwave_sqlparser::ast::AsOf;
 
 use crate::binder::{
-    BoundBackCteRef, BoundBaseTable, BoundJoin, BoundShare, BoundShareInput, BoundSource,
+    BoundBaseTable, BoundGapFill, BoundJoin, BoundShare, BoundShareInput, BoundSource,
     BoundSystemTable, BoundWatermark, BoundWindowTableFunction, Relation, WindowTableFunctionKind,
 };
 use crate::error::{ErrorCode, Result};
 use crate::expr::{CastContext, Expr, ExprImpl, ExprType, FunctionCall, InputRef, Literal};
 use crate::optimizer::plan_node::generic::SourceNodeKind;
 use crate::optimizer::plan_node::{
-    LogicalApply, LogicalCteRef, LogicalHopWindow, LogicalJoin, LogicalProject, LogicalScan,
-    LogicalShare, LogicalSource, LogicalSysScan, LogicalTableFunction, LogicalValues, PlanRef,
+    LogicalApply, LogicalGapFill, LogicalHopWindow, LogicalJoin, LogicalPlanRef as PlanRef,
+    LogicalProject, LogicalScan, LogicalShare, LogicalSource, LogicalSysScan, LogicalTableFunction,
+    LogicalValues,
 };
 use crate::optimizer::property::Cardinality;
 use crate::planner::{PlanFor, Planner};
@@ -59,16 +59,14 @@ impl Planner {
                 with_ordinality,
             } => self.plan_table_function(tf, with_ordinality),
             Relation::Watermark(tf) => self.plan_watermark(*tf),
-            // note that rcte (i.e., RecursiveUnion) is included *implicitly* in share.
             Relation::Share(share) => self.plan_share(*share),
-            Relation::BackCteRef(cte_ref) => self.plan_cte_ref(*cte_ref),
+            Relation::GapFill(bound_gap_fill) => self.plan_gap_fill(*bound_gap_fill),
         }
     }
 
     pub(crate) fn plan_sys_table(&mut self, sys_table: BoundSystemTable) -> Result<PlanRef> {
         Ok(LogicalSysScan::create(
-            sys_table.sys_table_catalog.name().to_owned(),
-            Rc::new(sys_table.sys_table_catalog.table_desc()),
+            sys_table.sys_table_catalog,
             self.ctx(),
             Cardinality::unknown(), // TODO(card): cardinality of system table
         )
@@ -77,24 +75,10 @@ impl Planner {
 
     pub(super) fn plan_base_table(&mut self, base_table: &BoundBaseTable) -> Result<PlanRef> {
         let as_of = base_table.as_of.clone();
-        let table_cardinality = base_table.table_catalog.cardinality;
-        let scan = LogicalScan::create(
-            base_table.table_catalog.name().to_owned(),
-            base_table.table_catalog.clone(),
-            base_table
-                .table_indexes
-                .iter()
-                .map(|x| x.as_ref().clone().into())
-                .collect(),
-            self.ctx(),
-            as_of.clone(),
-            table_cardinality,
-        );
+        let scan = LogicalScan::from_base_table(base_table, self.ctx(), as_of.clone());
 
-        match (base_table.table_catalog.engine, self.plan_for()) {
-            (Engine::Hummock, PlanFor::Stream)
-            | (Engine::Hummock, PlanFor::Batch)
-            | (Engine::Hummock, PlanFor::BatchDql) => {
+        match base_table.table_catalog.engine {
+            Engine::Hummock => {
                 match as_of {
                     None
                     | Some(AsOf::ProcessTime)
@@ -107,110 +91,119 @@ impl Planner {
                 };
                 Ok(scan.into())
             }
-            (Engine::Iceberg, PlanFor::Stream) | (Engine::Iceberg, PlanFor::Batch) => {
-                match as_of {
-                    None
-                    | Some(AsOf::VersionNum(_))
-                    | Some(AsOf::TimestampString(_))
-                    | Some(AsOf::TimestampNum(_)) => {}
-                    Some(AsOf::ProcessTime) | Some(AsOf::ProcessTimeWithInterval(_)) => {
-                        bail_not_implemented!("As Of ProcessTime() is not supported yet.")
+            Engine::Iceberg => {
+                let is_append_only = base_table.table_catalog.append_only;
+                let use_iceberg_source = match (self.plan_for(), is_append_only) {
+                    (PlanFor::StreamIcebergEngineInternal, _) => false,
+                    (PlanFor::BatchDql, _) => true,
+                    (PlanFor::Stream | PlanFor::Batch, is_append_only) => is_append_only,
+                };
+
+                if !use_iceberg_source {
+                    match as_of {
+                        None
+                        | Some(AsOf::VersionNum(_))
+                        | Some(AsOf::TimestampString(_))
+                        | Some(AsOf::TimestampNum(_)) => {}
+                        Some(AsOf::ProcessTime) | Some(AsOf::ProcessTimeWithInterval(_)) => {
+                            bail_not_implemented!("As Of ProcessTime() is not supported yet.")
+                        }
+                        Some(AsOf::VersionString(_)) => {
+                            bail_not_implemented!("As Of Version is not supported yet.")
+                        }
                     }
-                    Some(AsOf::VersionString(_)) => {
-                        bail_not_implemented!("As Of Version is not supported yet.")
-                    }
-                }
-                Ok(scan.into())
-            }
-            (Engine::Iceberg, PlanFor::BatchDql) => {
-                match as_of {
-                    None
-                    | Some(AsOf::VersionNum(_))
-                    | Some(AsOf::TimestampString(_))
-                    | Some(AsOf::TimestampNum(_)) => {}
-                    Some(AsOf::ProcessTime) | Some(AsOf::ProcessTimeWithInterval(_)) => {
-                        bail_not_implemented!("As Of ProcessTime() is not supported yet.")
-                    }
-                    Some(AsOf::VersionString(_)) => {
-                        bail_not_implemented!("As Of Version is not supported yet.")
-                    }
-                }
-                let opt_ctx = self.ctx();
-                let session = opt_ctx.session_ctx();
-                let db_name = &session.database();
-                let catalog_reader = session.env().catalog_reader().read_guard();
-                let mut source_catalog = None;
-                for schema in catalog_reader.iter_schemas(db_name).unwrap() {
-                    if schema
-                        .get_table_by_id(&base_table.table_catalog.id)
-                        .is_some()
-                    {
-                        source_catalog = schema.get_source_by_name(
-                            &base_table.table_catalog.iceberg_source_name().unwrap(),
-                        );
-                        break;
-                    }
-                }
-                if let Some(source_catalog) = source_catalog {
-                    let column_map: HashMap<String, (usize, ColumnCatalog)> = source_catalog
-                        .columns
-                        .clone()
-                        .into_iter()
-                        .enumerate()
-                        .map(|(i, column)| (column.name().to_owned(), (i, column)))
-                        .collect();
-                    let exprs = scan
-                        .table_catalog()
-                        .column_schema()
-                        .fields()
-                        .iter()
-                        .map(|field| {
-                            let source_filed_name = if field.name == ROW_ID_COLUMN_NAME {
-                                RISINGWAVE_ICEBERG_ROW_ID
-                            } else {
-                                &field.name
-                            };
-                            if let Some((i, source_column)) = column_map.get(source_filed_name) {
-                                if source_column.column_desc.data_type == field.data_type {
-                                    ExprImpl::InputRef(
-                                        InputRef::new(*i, field.data_type.clone()).into(),
-                                    )
-                                } else {
-                                    let mut input_ref = ExprImpl::InputRef(
-                                        InputRef::new(
-                                            *i,
-                                            source_column.column_desc.data_type.clone(),
-                                        )
-                                        .into(),
-                                    );
-                                    FunctionCall::cast_mut(
-                                        &mut input_ref,
-                                        field.data_type().clone(),
-                                        CastContext::Explicit,
-                                    )
-                                    .unwrap();
-                                    input_ref
-                                }
-                            } else {
-                                // fields like `_rw_timestamp`, would not be found in source.
-                                ExprImpl::Literal(
-                                    Literal::new(None, field.data_type.clone()).into(),
-                                )
-                            }
-                        })
-                        .collect_vec();
-                    let logical_source = LogicalSource::with_catalog(
-                        Rc::new(source_catalog.deref().clone()),
-                        SourceNodeKind::CreateMViewOrBatch,
-                        self.ctx(),
-                        as_of,
-                    )?;
-                    Ok(LogicalProject::new(logical_source.into(), exprs).into())
+                    Ok(scan.into())
                 } else {
-                    bail!(
-                        "failed to plan a iceberg engine table: {}. Can't find the corresponding iceberg source. Maybe you need to recreate the table",
-                        base_table.table_catalog.name()
-                    );
+                    match as_of {
+                        None
+                        | Some(AsOf::VersionNum(_))
+                        | Some(AsOf::TimestampString(_))
+                        | Some(AsOf::TimestampNum(_)) => {}
+                        Some(AsOf::ProcessTime) | Some(AsOf::ProcessTimeWithInterval(_)) => {
+                            bail_not_implemented!("As Of ProcessTime() is not supported yet.")
+                        }
+                        Some(AsOf::VersionString(_)) => {
+                            bail_not_implemented!("As Of Version is not supported yet.")
+                        }
+                    }
+                    let opt_ctx = self.ctx();
+                    let session = opt_ctx.session_ctx();
+                    let db_name = &session.database();
+                    let catalog_reader = session.env().catalog_reader().read_guard();
+                    let mut source_catalog = None;
+                    for schema in catalog_reader.iter_schemas(db_name).unwrap() {
+                        if schema
+                            .get_table_by_id(base_table.table_catalog.id)
+                            .is_some()
+                        {
+                            source_catalog = schema.get_source_by_name(
+                                &base_table.table_catalog.iceberg_source_name().unwrap(),
+                            );
+                            break;
+                        }
+                    }
+                    if let Some(source_catalog) = source_catalog {
+                        let column_map: HashMap<String, (usize, ColumnCatalog)> = source_catalog
+                            .columns
+                            .clone()
+                            .into_iter()
+                            .enumerate()
+                            .map(|(i, column)| (column.name().to_owned(), (i, column)))
+                            .collect();
+                        let exprs = scan
+                            .table()
+                            .column_schema()
+                            .fields()
+                            .iter()
+                            .map(|field| {
+                                let source_filed_name = if field.name == ROW_ID_COLUMN_NAME {
+                                    RISINGWAVE_ICEBERG_ROW_ID
+                                } else {
+                                    &field.name
+                                };
+                                if let Some((i, source_column)) = column_map.get(source_filed_name)
+                                {
+                                    if source_column.column_desc.data_type == field.data_type {
+                                        ExprImpl::InputRef(
+                                            InputRef::new(*i, field.data_type.clone()).into(),
+                                        )
+                                    } else {
+                                        let mut input_ref = ExprImpl::InputRef(
+                                            InputRef::new(
+                                                *i,
+                                                source_column.column_desc.data_type.clone(),
+                                            )
+                                            .into(),
+                                        );
+                                        FunctionCall::cast_mut(
+                                            &mut input_ref,
+                                            &field.data_type(),
+                                            CastContext::Explicit,
+                                        )
+                                        .unwrap();
+                                        input_ref
+                                    }
+                                } else {
+                                    // fields like `_rw_timestamp`, would not be found in source.
+                                    ExprImpl::Literal(
+                                        Literal::new(None, field.data_type.clone()).into(),
+                                    )
+                                }
+                            })
+                            .collect_vec();
+                        let logical_source = LogicalSource::with_catalog(
+                            Rc::new(source_catalog.deref().clone()),
+                            SourceNodeKind::CreateMViewOrBatch,
+                            self.ctx(),
+                            as_of,
+                        )?;
+                        Ok(LogicalProject::new(logical_source.into(), exprs).into())
+                    } else {
+                        bail!(
+                            "failed to plan a iceberg engine table: {}. Can't find the corresponding iceberg source. Maybe you need to recreate the table",
+                            base_table.table_catalog.name()
+                        );
+                    }
                 }
             }
         }
@@ -234,6 +227,36 @@ impl Planner {
                 }
                 Some(AsOf::VersionString(_)) => {
                     bail_not_implemented!("As Of Version is not supported yet.")
+                }
+            }
+
+            // validate the source has pk. We raise an error here to avoid panic in expect_stream_key later
+            // for a nicer error message.
+            if matches!(self.plan_for(), PlanFor::Stream) {
+                let has_pk =
+                    source.catalog.row_id_index.is_some() || !source.catalog.pk_col_ids.is_empty();
+                if !has_pk {
+                    // in older version, iceberg source doesn't have row_id, thus may hit this
+                    let is_iceberg = source.catalog.is_iceberg_connector();
+                    // only iceberg should hit this.
+                    debug_assert!(is_iceberg);
+                    if is_iceberg {
+                        return Err(ErrorCode::BindError(format!(
+                        "Cannot create a stream job from an iceberg source without a primary key.\nThe iceberg source might be created in an older version of RisingWave. Please try recreating the source.\nSource: {:?}",
+                        source.catalog
+                    ))
+                    .into());
+                    } else {
+                        return Err(ErrorCode::BindError(format!(
+                            "Cannot create a stream job from a source without a primary key.
+This is a bug. We would appreciate a bug report at:
+https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Fbug&template=bug_report.yml
+
+source: {:?}",
+                            source.catalog
+                        ))
+                        .into());
+                    }
                 }
             }
             Ok(LogicalSource::with_catalog(
@@ -342,13 +365,11 @@ impl Planner {
 
     pub(super) fn plan_share(&mut self, share: BoundShare) -> Result<PlanRef> {
         match share.input {
-            BoundShareInput::Query(Either::Left(nonrecursive_query)) => {
+            BoundShareInput::Query(query) => {
                 let id = share.share_id;
                 match self.share_cache.get(&id) {
                     None => {
-                        let result = self
-                            .plan_query(nonrecursive_query)?
-                            .into_unordered_subplan();
+                        let result = self.plan_query(query)?.into_unordered_subplan();
                         let logical_share = LogicalShare::create(result);
                         self.share_cache.insert(id, logical_share.clone());
                         Ok(logical_share)
@@ -356,12 +377,6 @@ impl Planner {
                     Some(result) => Ok(result.clone()),
                 }
             }
-            // for the recursive union in rcte
-            BoundShareInput::Query(Either::Right(recursive_union)) => self.plan_recursive_union(
-                *recursive_union.base,
-                *recursive_union.recursive,
-                share.share_id,
-            ),
             BoundShareInput::ChangeLog(relation) => {
                 let id = share.share_id;
                 let result = self.plan_changelog(relation)?;
@@ -376,10 +391,15 @@ impl Planner {
         todo!("plan watermark");
     }
 
-    pub(super) fn plan_cte_ref(&mut self, cte_ref: BoundBackCteRef) -> Result<PlanRef> {
-        // TODO: this is actually duplicated from `plan_recursive_union`, refactor?
-        let base = self.plan_set_expr(cte_ref.base, vec![], &[])?;
-        Ok(LogicalCteRef::create(cte_ref.share_id, base))
+    pub(super) fn plan_gap_fill(&mut self, gap_fill: BoundGapFill) -> Result<PlanRef> {
+        let input = self.plan_relation(gap_fill.input)?;
+        Ok(LogicalGapFill::new(
+            input,
+            gap_fill.time_col,
+            gap_fill.interval,
+            gap_fill.fill_strategies,
+        )
+        .into())
     }
 
     fn collect_col_data_types_for_tumble_window(relation: &Relation) -> Result<Vec<DataType>> {

@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -23,7 +23,6 @@ use risingwave_pb::common::PbColumnOrder;
 use super::super::plan_node::*;
 use crate::error::Result;
 
-// TODO(rc): use this type to replace all `Vec<ColumnOrder>`
 #[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
 pub struct Order {
     pub column_orders: Vec<ColumnOrder>,
@@ -37,6 +36,7 @@ impl Order {
     pub fn to_protobuf(&self) -> Vec<PbColumnOrder> {
         self.column_orders
             .iter()
+            .copied()
             .map(ColumnOrder::to_protobuf)
             .collect_vec()
     }
@@ -93,7 +93,7 @@ const ANY_ORDER: Order = Order {
 };
 
 impl Order {
-    pub fn enforce_if_not_satisfies(&self, plan: PlanRef) -> Result<PlanRef> {
+    pub fn enforce_if_not_satisfies(&self, plan: BatchPlanRef) -> Result<BatchPlanRef> {
         use crate::optimizer::plan_node::batch::prelude::*;
 
         if !plan.order().satisfies(self) {
@@ -103,8 +103,7 @@ impl Order {
         }
     }
 
-    fn enforce(&self, plan: PlanRef) -> PlanRef {
-        assert_eq!(plan.convention(), Convention::Batch);
+    fn enforce(&self, plan: BatchPlanRef) -> BatchPlanRef {
         BatchSort::new(plan, self.clone()).into()
     }
 

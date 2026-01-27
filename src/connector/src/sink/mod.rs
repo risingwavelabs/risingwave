@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -11,24 +11,29 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-pub mod big_query;
+
+feature_gated_sink_mod!(big_query, "bigquery");
 pub mod boxed;
 pub mod catalog;
-pub mod clickhouse;
+feature_gated_sink_mod!(clickhouse, ClickHouse, "clickhouse");
 pub mod coordinate;
 pub mod decouple_checkpoint_log_sink;
-pub mod deltalake;
-pub mod doris;
+feature_gated_sink_mod!(deltalake, DeltaLake, "deltalake");
+feature_gated_sink_mod!(doris, "doris");
+#[cfg(any(feature = "sink-doris", feature = "sink-starrocks"))]
 pub mod doris_starrocks_connector;
 pub mod dynamodb;
 pub mod elasticsearch_opensearch;
 pub mod encoder;
 pub mod file_sink;
 pub mod formatter;
-pub mod google_pubsub;
+feature_gated_sink_mod!(google_pubsub, GooglePubSub, "google_pubsub");
 pub mod iceberg;
 pub mod kafka;
 pub mod kinesis;
+use risingwave_common::bail;
+use risingwave_pb::stream_plan::PbSinkSchemaChange;
+pub mod jdbc_jni_client;
 pub mod log_store;
 pub mod mock_coordination_client;
 pub mod mongodb;
@@ -38,30 +43,32 @@ pub mod postgres;
 pub mod pulsar;
 pub mod redis;
 pub mod remote;
+pub mod snowflake_redshift;
 pub mod sqlserver;
-pub mod starrocks;
+feature_gated_sink_mod!(starrocks, "starrocks");
 pub mod test_sink;
 pub mod trivial;
 pub mod utils;
 pub mod writer;
+pub mod prelude {
+    pub use crate::sink::{
+        Result, SINK_TYPE_APPEND_ONLY, SINK_USER_FORCE_APPEND_ONLY_OPTION,
+        SINK_USER_FORCE_COMPACTION, Sink, SinkError, SinkParam, SinkWriterParam,
+    };
+}
 
 use std::collections::BTreeMap;
 use std::future::Future;
 use std::sync::{Arc, LazyLock};
 
-use ::clickhouse::error::Error as ClickHouseError;
-use ::deltalake::DeltaTableError;
 use ::redis::RedisError;
 use anyhow::anyhow;
 use async_trait::async_trait;
-use clickhouse::CLICKHOUSE_SINK;
 use decouple_checkpoint_log_sink::{
     COMMIT_CHECKPOINT_INTERVAL, DEFAULT_COMMIT_CHECKPOINT_INTERVAL_WITH_SINK_DECOUPLE,
     DEFAULT_COMMIT_CHECKPOINT_INTERVAL_WITHOUT_SINK_DECOUPLE,
 };
-use deltalake::DELTALAKE_SINK;
 use futures::future::BoxFuture;
-use iceberg::ICEBERG_SINK;
 use opendal::Error as OpendalError;
 use prometheus::Registry;
 use risingwave_common::array::ArrayError;
@@ -82,23 +89,31 @@ use risingwave_common::{
 };
 use risingwave_pb::catalog::PbSinkType;
 use risingwave_pb::connector_service::{PbSinkParam, SinkMetadata, TableSchema};
+use risingwave_pb::id::ExecutorId;
 use risingwave_rpc_client::MetaClient;
 use risingwave_rpc_client::error::RpcError;
-use sea_orm::DatabaseConnection;
 use starrocks::STARROCKS_SINK;
 use thiserror::Error;
 use thiserror_ext::AsReport;
-use tokio::sync::mpsc::UnboundedReceiver;
+use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 pub use tracing;
 
 use self::catalog::{SinkFormatDesc, SinkType};
+use self::clickhouse::CLICKHOUSE_SINK;
+use self::deltalake::DELTALAKE_SINK;
+use self::iceberg::ICEBERG_SINK;
 use self::mock_coordination_client::{MockMetaClient, SinkCoordinationRpcClientEnum};
-use crate::error::ConnectorError;
+use crate::WithPropertiesExt;
+use crate::connector_common::IcebergSinkCompactionUpdate;
+use crate::error::{ConnectorError, ConnectorResult};
+use crate::sink::boxed::{BoxSinglePhaseCoordinator, BoxTwoPhaseCoordinator};
 use crate::sink::catalog::desc::SinkDesc;
 use crate::sink::catalog::{SinkCatalog, SinkId};
+use crate::sink::decouple_checkpoint_log_sink::ICEBERG_DEFAULT_COMMIT_CHECKPOINT_INTERVAL;
 use crate::sink::file_sink::fs::FsSink;
 use crate::sink::log_store::{LogReader, LogStoreReadItem, LogStoreResult, TruncateOffset};
-use crate::sink::writer::SinkWriter;
+use crate::sink::snowflake_redshift::snowflake::SNOWFLAKE_SINK_V2;
+use crate::sink::utils::feature_gated_sink_mod;
 
 const BOUNDED_CHANNEL_SIZE: usize = 16;
 #[macro_export]
@@ -106,42 +121,41 @@ macro_rules! for_all_sinks {
     ($macro:path $(, $arg:tt)*) => {
         $macro! {
             {
-                { Redis, $crate::sink::redis::RedisSink },
-                { Kafka, $crate::sink::kafka::KafkaSink },
-                { Pulsar, $crate::sink::pulsar::PulsarSink },
-                { BlackHole, $crate::sink::trivial::BlackHoleSink },
-                { Kinesis, $crate::sink::kinesis::KinesisSink },
-                { ClickHouse, $crate::sink::clickhouse::ClickHouseSink },
-                { Iceberg, $crate::sink::iceberg::IcebergSink },
-                { Mqtt, $crate::sink::mqtt::MqttSink },
-                { GooglePubSub, $crate::sink::google_pubsub::GooglePubSubSink },
-                { Nats, $crate::sink::nats::NatsSink },
-                { Jdbc, $crate::sink::remote::JdbcSink },
-                // { ElasticSearchJava, $crate::sink::remote::ElasticSearchJavaSink },
-                // { OpensearchJava, $crate::sink::remote::OpenSearchJavaSink },
-                { ElasticSearch, $crate::sink::elasticsearch_opensearch::elasticsearch::ElasticSearchSink },
-                { Opensearch, $crate::sink::elasticsearch_opensearch::opensearch::OpenSearchSink },
-                { Cassandra, $crate::sink::remote::CassandraSink },
-                { HttpJava, $crate::sink::remote::HttpJavaSink },
-                { Doris, $crate::sink::doris::DorisSink },
-                { Starrocks, $crate::sink::starrocks::StarrocksSink },
-                { S3, $crate::sink::file_sink::opendal_sink::FileSink<$crate::sink::file_sink::s3::S3Sink>},
+                { Redis, $crate::sink::redis::RedisSink, $crate::sink::redis::RedisConfig },
+                { Kafka, $crate::sink::kafka::KafkaSink, $crate::sink::kafka::KafkaConfig },
+                { Pulsar, $crate::sink::pulsar::PulsarSink, $crate::sink::pulsar::PulsarConfig },
+                { BlackHole, $crate::sink::trivial::BlackHoleSink, () },
+                { Kinesis, $crate::sink::kinesis::KinesisSink, $crate::sink::kinesis::KinesisSinkConfig },
+                { ClickHouse, $crate::sink::clickhouse::ClickHouseSink, $crate::sink::clickhouse::ClickHouseConfig },
+                { Iceberg, $crate::sink::iceberg::IcebergSink, $crate::sink::iceberg::IcebergConfig },
+                { Mqtt, $crate::sink::mqtt::MqttSink, $crate::sink::mqtt::MqttConfig },
+                { GooglePubSub, $crate::sink::google_pubsub::GooglePubSubSink, $crate::sink::google_pubsub::GooglePubSubConfig },
+                { Nats, $crate::sink::nats::NatsSink, $crate::sink::nats::NatsConfig },
+                { Jdbc, $crate::sink::remote::JdbcSink, () },
+                { ElasticSearch, $crate::sink::elasticsearch_opensearch::elasticsearch::ElasticSearchSink, $crate::sink::elasticsearch_opensearch::elasticsearch_opensearch_config::ElasticSearchConfig },
+                { Opensearch, $crate::sink::elasticsearch_opensearch::opensearch::OpenSearchSink, $crate::sink::elasticsearch_opensearch::elasticsearch_opensearch_config::OpenSearchConfig },
+                { Cassandra, $crate::sink::remote::CassandraSink, () },
+                { Doris, $crate::sink::doris::DorisSink, $crate::sink::doris::DorisConfig },
+                { Starrocks, $crate::sink::starrocks::StarrocksSink, $crate::sink::starrocks::StarrocksConfig },
+                { S3, $crate::sink::file_sink::opendal_sink::FileSink<$crate::sink::file_sink::s3::S3Sink>, $crate::sink::file_sink::s3::S3Config },
 
-                { Gcs, $crate::sink::file_sink::opendal_sink::FileSink<$crate::sink::file_sink::gcs::GcsSink>  },
-                { Azblob, $crate::sink::file_sink::opendal_sink::FileSink<$crate::sink::file_sink::azblob::AzblobSink>},
-                { Webhdfs, $crate::sink::file_sink::opendal_sink::FileSink<$crate::sink::file_sink::webhdfs::WebhdfsSink>},
+                { Gcs, $crate::sink::file_sink::opendal_sink::FileSink<$crate::sink::file_sink::gcs::GcsSink>, $crate::sink::file_sink::gcs::GcsConfig },
+                { Azblob, $crate::sink::file_sink::opendal_sink::FileSink<$crate::sink::file_sink::azblob::AzblobSink>, $crate::sink::file_sink::azblob::AzblobConfig },
+                { Webhdfs, $crate::sink::file_sink::opendal_sink::FileSink<$crate::sink::file_sink::webhdfs::WebhdfsSink>, $crate::sink::file_sink::webhdfs::WebhdfsConfig },
 
-                { Fs, $crate::sink::file_sink::opendal_sink::FileSink<FsSink>  },
-                { Snowflake, $crate::sink::file_sink::opendal_sink::FileSink<$crate::sink::file_sink::s3::SnowflakeSink>},
-                { DeltaLake, $crate::sink::deltalake::DeltaLakeSink },
-                { BigQuery, $crate::sink::big_query::BigQuerySink },
-                { DynamoDb, $crate::sink::dynamodb::DynamoDbSink },
-                { Mongodb, $crate::sink::mongodb::MongodbSink },
-                { SqlServer, $crate::sink::sqlserver::SqlServerSink },
-                { Postgres, $crate::sink::postgres::PostgresSink },
+                { Fs, $crate::sink::file_sink::opendal_sink::FileSink<FsSink>, $crate::sink::file_sink::fs::FsConfig },
+                { SnowflakeV2, $crate::sink::snowflake_redshift::snowflake::SnowflakeV2Sink, $crate::sink::snowflake_redshift::snowflake::SnowflakeV2Config },
+                { Snowflake, $crate::sink::file_sink::opendal_sink::FileSink<$crate::sink::file_sink::s3::SnowflakeSink>, $crate::sink::file_sink::s3::SnowflakeConfig },
+                { RedShift, $crate::sink::snowflake_redshift::redshift::RedshiftSink, $crate::sink::snowflake_redshift::redshift::RedShiftConfig },
+                { DeltaLake, $crate::sink::deltalake::DeltaLakeSink, $crate::sink::deltalake::DeltaLakeConfig },
+                { BigQuery, $crate::sink::big_query::BigQuerySink, $crate::sink::big_query::BigQueryConfig },
+                { DynamoDb, $crate::sink::dynamodb::DynamoDbSink, $crate::sink::dynamodb::DynamoDbConfig },
+                { Mongodb, $crate::sink::mongodb::MongodbSink, $crate::sink::mongodb::MongodbConfig },
+                { SqlServer, $crate::sink::sqlserver::SqlServerSink, $crate::sink::sqlserver::SqlServerConfig },
+                { Postgres, $crate::sink::postgres::PostgresSink, $crate::sink::postgres::PostgresConfig },
 
-                { Test, $crate::sink::test_sink::TestSink },
-                { Table, $crate::sink::trivial::TableSink }
+                { Test, $crate::sink::test_sink::TestSink, () },
+                { Table, $crate::sink::trivial::TableSink, () }
             }
             $(,$arg)*
         }
@@ -149,8 +163,37 @@ macro_rules! for_all_sinks {
 }
 
 #[macro_export]
+macro_rules! generate_config_use_clauses {
+    ({$({ $variant_name:ident, $sink_type:ty, $($config_type:tt)+ }), *}) => {
+        $(
+            $crate::generate_config_use_single! { $($config_type)+ }
+        )*
+    };
+}
+
+#[macro_export]
+macro_rules! generate_config_use_single {
+    // Skip () config types
+    (()) => {};
+
+    // Generate use clause for actual config types
+    ($config_type:path) => {
+        #[allow(unused_imports)]
+        pub(super) use $config_type;
+    };
+}
+
+// Convenience macro that uses for_all_sinks
+#[macro_export]
+macro_rules! use_all_sink_configs {
+    () => {
+        $crate::for_all_sinks! { $crate::generate_config_use_clauses }
+    };
+}
+
+#[macro_export]
 macro_rules! dispatch_sink {
-    ({$({$variant_name:ident, $sink_type:ty}),*}, $impl:tt, $sink:tt, $body:tt) => {{
+    ({$({$variant_name:ident, $sink_type:ty, $config_type:ty}),*}, $impl:tt, $sink:tt, $body:tt) => {{
         use $crate::sink::SinkImpl;
 
         match $impl {
@@ -166,7 +209,7 @@ macro_rules! dispatch_sink {
 
 #[macro_export]
 macro_rules! match_sink_name_str {
-    ({$({$variant_name:ident, $sink_type:ty}),*}, $name_str:tt, $type_name:ident, $body:tt, $on_other_closure:tt) => {{
+    ({$({$variant_name:ident, $sink_type:ty, $config_type:ty}),*}, $name_str:tt, $type_name:ident, $body:tt, $on_other_closure:tt) => {{
         use $crate::sink::Sink;
         match $name_str {
             $(
@@ -187,11 +230,17 @@ macro_rules! match_sink_name_str {
 
 pub const CONNECTOR_TYPE_KEY: &str = "connector";
 pub const SINK_TYPE_OPTION: &str = "type";
-pub const SINK_WITHOUT_BACKFILL: &str = "snapshot";
+/// `snapshot = false` corresponds to [`risingwave_pb::stream_plan::StreamScanType::UpstreamOnly`]
+pub const SINK_SNAPSHOT_OPTION: &str = "snapshot";
 pub const SINK_TYPE_APPEND_ONLY: &str = "append-only";
 pub const SINK_TYPE_DEBEZIUM: &str = "debezium";
 pub const SINK_TYPE_UPSERT: &str = "upsert";
+pub const SINK_TYPE_RETRACT: &str = "retract";
+/// Whether to drop DELETE and convert UPDATE to INSERT in the sink executor.
+pub const SINK_USER_IGNORE_DELETE_OPTION: &str = "ignore_delete";
+/// Alias for [`SINK_USER_IGNORE_DELETE_OPTION`], kept for backward compatibility.
 pub const SINK_USER_FORCE_APPEND_ONLY_OPTION: &str = "force_append_only";
+pub const SINK_USER_FORCE_COMPACTION: &str = "force_compaction";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SinkParam {
@@ -199,8 +248,11 @@ pub struct SinkParam {
     pub sink_name: String,
     pub properties: BTreeMap<String, String>,
     pub columns: Vec<ColumnDesc>,
-    pub downstream_pk: Vec<usize>,
+    /// User-defined primary key indices for upsert sink, if any.
+    pub downstream_pk: Option<Vec<usize>>,
     pub sink_type: SinkType,
+    /// Whether to drop DELETE and convert UPDATE to INSERT in the sink executor.
+    pub ignore_delete: bool,
     pub format_desc: Option<SinkFormatDesc>,
     pub db_name: String,
 
@@ -214,6 +266,7 @@ pub struct SinkParam {
 
 impl SinkParam {
     pub fn from_proto(pb_param: PbSinkParam) -> Self {
+        let ignore_delete = pb_param.ignore_delete();
         let table_schema = pb_param.table_schema.expect("should contain table schema");
         let format_desc = match pb_param.format_desc {
             Some(f) => f.try_into().ok(),
@@ -231,14 +284,19 @@ impl SinkParam {
             sink_name: pb_param.sink_name,
             properties: pb_param.properties,
             columns: table_schema.columns.iter().map(ColumnDesc::from).collect(),
-            downstream_pk: table_schema
-                .pk_indices
-                .iter()
-                .map(|i| *i as usize)
-                .collect(),
+            downstream_pk: if table_schema.pk_indices.is_empty() {
+                None
+            } else {
+                Some(
+                    (table_schema.pk_indices.iter())
+                        .map(|i| *i as usize)
+                        .collect(),
+                )
+            },
             sink_type: SinkType::from_proto(
                 PbSinkType::try_from(pb_param.sink_type).expect("should be able to convert"),
             ),
+            ignore_delete,
             format_desc,
             db_name: pb_param.db_name,
             sink_from_name: pb_param.sink_from_name,
@@ -247,17 +305,19 @@ impl SinkParam {
 
     pub fn to_proto(&self) -> PbSinkParam {
         PbSinkParam {
-            sink_id: self.sink_id.sink_id,
+            sink_id: self.sink_id,
             sink_name: self.sink_name.clone(),
             properties: self.properties.clone(),
             table_schema: Some(TableSchema {
                 columns: self.columns.iter().map(|col| col.to_protobuf()).collect(),
-                pk_indices: self.downstream_pk.iter().map(|i| *i as u32).collect(),
+                pk_indices: (self.downstream_pk.as_ref())
+                    .map_or_else(Vec::new, |pk| pk.iter().map(|i| *i as u32).collect()),
             }),
             sink_type: self.sink_type.to_proto().into(),
             format_desc: self.format_desc.as_ref().map(|f| f.to_proto()),
             db_name: self.db_name.clone(),
             sink_from_name: self.sink_from_name.clone(),
+            raw_ignore_delete: self.ignore_delete,
         }
     }
 
@@ -265,6 +325,15 @@ impl SinkParam {
         Schema {
             fields: self.columns.iter().map(Field::from).collect(),
         }
+    }
+
+    /// Get the downstream primary key indices specified by the user. If not specified, return
+    /// an empty vector.
+    ///
+    /// Prefer directly accessing the `downstream_pk` field, as it uses `None` to represent
+    /// unspecified values, making it clearer.
+    pub fn downstream_pk_or_empty(&self) -> Vec<usize> {
+        self.downstream_pk.clone().unwrap_or_default()
     }
 
     // `SinkParams` should only be used when there is a secret context.
@@ -298,11 +367,27 @@ impl SinkParam {
             columns,
             downstream_pk: sink_catalog.downstream_pk,
             sink_type: sink_catalog.sink_type,
+            ignore_delete: sink_catalog.ignore_delete,
             format_desc: format_desc_with_secret,
             db_name: sink_catalog.db_name,
             sink_from_name: sink_catalog.sink_from_name,
         })
     }
+}
+
+pub fn enforce_secret_sink(props: &impl WithPropertiesExt) -> ConnectorResult<()> {
+    use crate::enforce_secret::EnforceSecret;
+
+    let connector = props
+        .get_connector()
+        .ok_or_else(|| anyhow!("Must specify 'connector' in WITH clause"))?;
+    let key_iter = props.key_iter();
+    match_sink_name_str!(
+        connector.as_str(),
+        PropType,
+        PropType::enforce_secret(key_iter),
+        |other| bail!("connector '{}' is not supported", other)
+    )
 }
 
 pub static GLOBAL_SINK_METRICS: LazyLock<SinkMetrics> =
@@ -331,6 +416,7 @@ pub struct SinkMetrics {
     pub iceberg_position_delete_cache_num: LabelGuardedIntGaugeVec,
     pub iceberg_partition_num: LabelGuardedIntGaugeVec,
     pub iceberg_write_bytes: LabelGuardedIntCounterVec,
+    pub iceberg_snapshot_num: LabelGuardedIntGaugeVec,
 }
 
 impl SinkMetrics {
@@ -456,6 +542,14 @@ impl SinkMetrics {
         )
         .unwrap();
 
+        let iceberg_snapshot_num = register_guarded_int_gauge_vec_with_registry!(
+            "iceberg_snapshot_num",
+            "The snapshot number of iceberg table",
+            &["sink_name", "catalog_name", "table_name"],
+            registry
+        )
+        .unwrap();
+
         Self {
             sink_commit_duration,
             connector_sink_rows_received,
@@ -472,6 +566,7 @@ impl SinkMetrics {
             iceberg_position_delete_cache_num,
             iceberg_partition_num,
             iceberg_write_bytes,
+            iceberg_snapshot_num,
         }
     }
 }
@@ -479,7 +574,7 @@ impl SinkMetrics {
 #[derive(Clone)]
 pub struct SinkWriterParam {
     // TODO(eric): deprecate executor_id
-    pub executor_id: u64,
+    pub executor_id: ExecutorId,
     pub vnode_bitmap: Option<Bitmap>,
     pub meta_client: Option<SinkMetaClient>,
     // The val has two effect:
@@ -554,7 +649,7 @@ impl SinkMetaClient {
 
     pub async fn add_sink_fail_evet_log(
         &self,
-        sink_id: u32,
+        sink_id: SinkId,
         sink_name: String,
         connector: String,
         error: String,
@@ -567,7 +662,7 @@ impl SinkMetaClient {
                 {
                     Ok(_) => {}
                     Err(e) => {
-                        tracing::warn!(error = %e.as_report(), sink_id = sink_id, "Fialed to add sink fail event to event log.");
+                        tracing::warn!(error = %e.as_report(), %sink_id, "Failed to add sink fail event to event log.");
                     }
                 }
             }
@@ -584,7 +679,7 @@ impl SinkWriterParam {
             meta_client: Default::default(),
             extra_partition_col_idx: Default::default(),
 
-            actor_id: 1,
+            actor_id: 1.into(),
             sink_id: SinkId::new(1),
             sink_name: "test_sink".to_owned(),
             connector: "test_connector".to_owned(),
@@ -596,13 +691,13 @@ impl SinkWriterParam {
 fn is_sink_support_commit_checkpoint_interval(sink_name: &str) -> bool {
     matches!(
         sink_name,
-        ICEBERG_SINK | CLICKHOUSE_SINK | STARROCKS_SINK | DELTALAKE_SINK
+        ICEBERG_SINK | CLICKHOUSE_SINK | STARROCKS_SINK | DELTALAKE_SINK | SNOWFLAKE_SINK_V2
     )
 }
 pub trait Sink: TryFrom<SinkParam, Error = SinkError> {
     const SINK_NAME: &'static str;
+
     type LogSinker: LogSinker;
-    type Coordinator: SinkCommitCoordinator;
 
     fn set_default_commit_checkpoint_interval(
         desc: &mut SinkDesc,
@@ -624,10 +719,17 @@ pub trait Sink: TryFrom<SinkParam, Error = SinkError> {
                 }
                 None => match user_specified {
                     SinkDecouple::Default | SinkDecouple::Enable => {
-                        desc.properties.insert(
-                            COMMIT_CHECKPOINT_INTERVAL.to_owned(),
-                            DEFAULT_COMMIT_CHECKPOINT_INTERVAL_WITH_SINK_DECOUPLE.to_string(),
-                        );
+                        if matches!(Self::SINK_NAME, ICEBERG_SINK) {
+                            desc.properties.insert(
+                                COMMIT_CHECKPOINT_INTERVAL.to_owned(),
+                                ICEBERG_DEFAULT_COMMIT_CHECKPOINT_INTERVAL.to_string(),
+                            );
+                        } else {
+                            desc.properties.insert(
+                                COMMIT_CHECKPOINT_INTERVAL.to_owned(),
+                                DEFAULT_COMMIT_CHECKPOINT_INTERVAL_WITH_SINK_DECOUPLE.to_string(),
+                            );
+                        }
                     }
                     SinkDecouple::Disable => {
                         desc.properties.insert(
@@ -649,6 +751,14 @@ pub trait Sink: TryFrom<SinkParam, Error = SinkError> {
         }
     }
 
+    fn support_schema_change() -> bool {
+        false
+    }
+
+    fn validate_alter_config(_config: &BTreeMap<String, String>) -> Result<()> {
+        Ok(())
+    }
+
     async fn validate(&self) -> Result<()>;
     async fn new_log_sinker(&self, writer_param: SinkWriterParam) -> Result<Self::LogSinker>;
 
@@ -656,8 +766,10 @@ pub trait Sink: TryFrom<SinkParam, Error = SinkError> {
         false
     }
 
-    #[expect(clippy::unused_async)]
-    async fn new_coordinator(&self, _db: DatabaseConnection) -> Result<Self::Coordinator> {
+    async fn new_coordinator(
+        &self,
+        _iceberg_compact_stat_sender: Option<UnboundedSender<IcebergSinkCompactionUpdate>>,
+    ) -> Result<SinkCommitCoordinator> {
         Err(SinkError::Coordinator(anyhow!("no coordinator")))
     }
 }
@@ -710,28 +822,64 @@ pub type SinkCommittedEpochSubscriber = Arc<
         + 'static,
 >;
 
-#[async_trait]
-pub trait SinkCommitCoordinator {
-    /// Initialize the sink committer coordinator, return the log store rewind start offset.
-    async fn init(&mut self, subscriber: SinkCommittedEpochSubscriber) -> Result<Option<u64>>;
-    /// After collecting the metadata from each sink writer, a coordinator will call `commit` with
-    /// the set of metadata. The metadata is serialized into bytes, because the metadata is expected
-    /// to be passed between different gRPC node, so in this general trait, the metadata is
-    /// serialized bytes.
-    async fn commit(&mut self, epoch: u64, metadata: Vec<SinkMetadata>) -> Result<()>;
+pub enum SinkCommitCoordinator {
+    SinglePhase(BoxSinglePhaseCoordinator),
+    TwoPhase(BoxTwoPhaseCoordinator),
 }
 
-pub struct DummySinkCommitCoordinator;
+#[async_trait]
+pub trait SinglePhaseCommitCoordinator {
+    /// Initialize the sink committer coordinator.
+    async fn init(&mut self) -> Result<()>;
+
+    /// Commit data directly using single-phase strategy.
+    async fn commit_data(&mut self, epoch: u64, metadata: Vec<SinkMetadata>) -> Result<()>;
+
+    /// Idempotent implementation is required, because `commit_schema_change` in the same epoch could be called multiple
+    /// times.
+    async fn commit_schema_change(
+        &mut self,
+        _epoch: u64,
+        _schema_change: PbSinkSchemaChange,
+    ) -> Result<()> {
+        Err(SinkError::Coordinator(anyhow!(
+            "Schema change is not implemented for single-phase commit coordinator {}",
+            std::any::type_name::<Self>()
+        )))
+    }
+}
 
 #[async_trait]
-impl SinkCommitCoordinator for DummySinkCommitCoordinator {
-    async fn init(&mut self, _subscriber: SinkCommittedEpochSubscriber) -> Result<Option<u64>> {
-        Ok(None)
+pub trait TwoPhaseCommitCoordinator {
+    /// Initialize the sink committer coordinator.
+    async fn init(&mut self) -> Result<()>;
+
+    /// Return serialized commit metadata to be passed to `commit`.
+    async fn pre_commit(
+        &mut self,
+        epoch: u64,
+        metadata: Vec<SinkMetadata>,
+        schema_change: Option<PbSinkSchemaChange>,
+    ) -> Result<Option<Vec<u8>>>;
+
+    /// Idempotent implementation is required, because `commit_data` in the same epoch could be called multiple times.
+    async fn commit_data(&mut self, epoch: u64, commit_metadata: Vec<u8>) -> Result<()>;
+
+    /// Idempotent implementation is required, because `commit_schema_change` in the same epoch could be called multiple
+    /// times.
+    async fn commit_schema_change(
+        &mut self,
+        _epoch: u64,
+        _schema_change: PbSinkSchemaChange,
+    ) -> Result<()> {
+        Err(SinkError::Coordinator(anyhow!(
+            "Schema change is not implemented for two-phase commit coordinator {}",
+            std::any::type_name::<Self>()
+        )))
     }
 
-    async fn commit(&mut self, _epoch: u64, _metadata: Vec<SinkMetadata>) -> Result<()> {
-        Ok(())
-    }
+    /// Idempotent implementation is required, because `abort` in the same epoch could be called multiple times.
+    async fn abort(&mut self, epoch: u64, commit_metadata: Vec<u8>);
 }
 
 impl SinkImpl {
@@ -781,7 +929,7 @@ macro_rules! def_sink_impl {
     () => {
         $crate::for_all_sinks! { def_sink_impl }
     };
-    ({ $({ $variant_name:ident, $sink_type:ty }),* }) => {
+    ({ $({ $variant_name:ident, $sink_type:ty, $config_type:ty }),* }) => {
         #[derive(Debug)]
         pub enum SinkImpl {
             $(
@@ -970,18 +1118,6 @@ impl From<ArrayError> for SinkError {
 impl From<RpcError> for SinkError {
     fn from(value: RpcError) -> Self {
         SinkError::Remote(anyhow!(value))
-    }
-}
-
-impl From<ClickHouseError> for SinkError {
-    fn from(value: ClickHouseError) -> Self {
-        SinkError::ClickHouse(value.to_report_string())
-    }
-}
-
-impl From<DeltaTableError> for SinkError {
-    fn from(value: DeltaTableError) -> Self {
-        SinkError::DeltaLake(anyhow!(value))
     }
 }
 

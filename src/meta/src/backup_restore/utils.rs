@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -38,15 +38,35 @@ pub async fn get_meta_store(opts: RestoreOpts) -> BackupResult<SqlMetaStore> {
         },
         MetaBackend::Postgres => MetaStoreBackend::Sql {
             endpoint: format!(
-                "postgres://{}:{}@{}/{}",
-                opts.sql_username, opts.sql_password, opts.sql_endpoint, opts.sql_database
+                "postgres://{}:{}@{}/{}{}",
+                opts.sql_username,
+                opts.sql_password,
+                opts.sql_endpoint,
+                opts.sql_database,
+                if let Some(params) = &opts.sql_url_params
+                    && !params.is_empty()
+                {
+                    format!("?{}", params)
+                } else {
+                    "".to_owned()
+                }
             ),
             config: MetaStoreConfig::default(),
         },
         MetaBackend::Mysql => MetaStoreBackend::Sql {
             endpoint: format!(
-                "mysql://{}:{}@{}/{}",
-                opts.sql_username, opts.sql_password, opts.sql_endpoint, opts.sql_database
+                "mysql://{}:{}@{}/{}{}",
+                opts.sql_username,
+                opts.sql_password,
+                opts.sql_endpoint,
+                opts.sql_database,
+                if let Some(params) = &opts.sql_url_params
+                    && !params.is_empty()
+                {
+                    format!("?{}", params)
+                } else {
+                    "".to_owned()
+                }
             ),
             config: MetaStoreConfig::default(),
         },

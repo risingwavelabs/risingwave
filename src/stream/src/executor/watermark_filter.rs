@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -27,14 +27,14 @@ use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_pb::expr::expr_node::Type;
 use risingwave_storage::table::batch_table::BatchTable;
 
-use super::filter::FilterExecutor;
+use super::filter::FilterExecutorInner;
 use crate::executor::prelude::*;
 use crate::task::ActorEvalErrorReport;
 
 /// The executor will generate a `Watermark` after each chunk.
 /// This will also guarantee all later rows with event time **less than** the watermark will be
 /// filtered.
-pub struct WatermarkFilterExecutor<S: StateStore> {
+pub struct WatermarkFilterExecutorInner<S: StateStore, const UPSERT: bool> {
     ctx: ActorContextRef,
 
     input: Executor,
@@ -48,7 +48,11 @@ pub struct WatermarkFilterExecutor<S: StateStore> {
     eval_error_report: ActorEvalErrorReport,
 }
 
-impl<S: StateStore> WatermarkFilterExecutor<S> {
+pub type WatermarkFilterExecutor<S> = WatermarkFilterExecutorInner<S, false>;
+pub type UpsertWatermarkFilterExecutor<S> = WatermarkFilterExecutorInner<S, true>;
+
+impl<S: StateStore, const UPSERT: bool> WatermarkFilterExecutorInner<S, UPSERT> {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         ctx: ActorContextRef,
         input: Executor,
@@ -70,14 +74,14 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
     }
 }
 
-impl<S: StateStore> Execute for WatermarkFilterExecutor<S> {
+impl<S: StateStore, const UPSERT: bool> Execute for WatermarkFilterExecutorInner<S, UPSERT> {
     fn execute(self: Box<Self>) -> super::BoxedMessageStream {
         self.execute_inner().boxed()
     }
 }
 const UPDATE_GLOBAL_WATERMARK_FREQUENCY_WHEN_IDLE: usize = 5;
 
-impl<S: StateStore> WatermarkFilterExecutor<S> {
+impl<S: StateStore, const UPSERT: bool> WatermarkFilterExecutorInner<S, UPSERT> {
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(self: Box<Self>) {
         let Self {
@@ -133,7 +137,7 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
             let msg = msg?;
             match msg {
                 Message::Chunk(chunk) => {
-                    let chunk = chunk.compact();
+                    let chunk = chunk.compact_vis();
 
                     // Empty chunk should not be processed.
                     if chunk.cardinality() == 0 {
@@ -158,7 +162,7 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
                     // NULL watermark should not be considered.
                     let max_watermark = watermark_array
                         .iter()
-                        .flatten()
+                        .flatten() // skip NULL values
                         .max_by(DefaultOrd::default_cmp);
 
                     if let Some(max_watermark) = max_watermark {
@@ -178,7 +182,9 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
                     if let Some(expr) = watermark_filter_expr {
                         let pred_output = expr.eval_infallible(chunk.data_chunk()).await;
 
-                        if let Some(output_chunk) = FilterExecutor::filter(chunk, pred_output)? {
+                        if let Some(output_chunk) =
+                            FilterExecutorInner::<UPSERT>::filter(chunk, pred_output)?
+                        {
                             yield Message::Chunk(output_chunk);
                         };
                     } else {
@@ -346,7 +352,7 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
         let handle_watermark_row = |watermark_row: Option<OwnedRow>| match watermark_row {
             Some(row) => {
                 if row.len() == 1 {
-                    Ok::<_, StreamExecutorError>(row[0].to_owned())
+                    Ok::<_, StreamExecutorError>(row[0].clone())
                 } else {
                     bail!("The watermark row should only contain 1 datum");
                 }
@@ -415,7 +421,7 @@ mod tests {
         table_id: u32,
     ) -> (BatchTable<MemoryStateStore>, StateTable<MemoryStateStore>) {
         let table = Table {
-            id: table_id,
+            id: table_id.into(),
             columns: data_types
                 .iter()
                 .enumerate()
@@ -489,15 +495,15 @@ mod tests {
         let source = source.into_executor(schema, vec![0]);
 
         let ctx = ActorContext::for_test(123);
-        let info = ExecutorInfo::new(
+        let info = ExecutorInfo::for_test(
             source.schema().clone(),
-            source.pk_indices().to_vec(),
+            source.stream_key().to_vec(),
             "WatermarkFilterExecutor".to_owned(),
             0,
         );
         let eval_error_report = ActorEvalErrorReport {
             actor_context: ctx.clone(),
-            identity: info.identity.clone().into(),
+            identity: info.identity.into(),
         };
 
         (
@@ -555,7 +561,7 @@ mod tests {
         tx.push_chunk(chunk1);
         let chunk = executor.next().await.unwrap().unwrap();
         assert_eq!(
-            chunk.into_chunk().unwrap().compact(),
+            chunk.into_chunk().unwrap().compact_vis(),
             StreamChunk::from_pretty(
                 "  I TS
                  + 1 2022-11-07T00:00:00
@@ -579,7 +585,7 @@ mod tests {
         tx.push_chunk(chunk2);
         let chunk = executor.next().await.unwrap().unwrap();
         assert_eq!(
-            chunk.into_chunk().unwrap().compact(),
+            chunk.into_chunk().unwrap().compact_vis(),
             StreamChunk::from_pretty(
                 "  I TS
                  + 4 2022-11-07T00:00:00
@@ -622,7 +628,7 @@ mod tests {
         tx.push_chunk(chunk3);
         let chunk = executor.next().await.unwrap().unwrap();
         assert_eq!(
-            chunk.into_chunk().unwrap().compact(),
+            chunk.into_chunk().unwrap().compact_vis(),
             StreamChunk::from_pretty(
                 "  I TS
                  + 7 2022-11-14T00:00:00

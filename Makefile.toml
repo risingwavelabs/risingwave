@@ -2,11 +2,14 @@ extend = [
     { path = "src/risedevtool/grafana.toml" },
     { path = "src/risedevtool/prometheus.toml" },
     { path = "src/risedevtool/minio.toml" },
+    { path = "src/risedevtool/lakekeeper.toml" },
     { path = "src/risedevtool/tempo.toml" },
     { path = "src/risedevtool/gcloud-pubsub.toml" },
     { path = "src/risedevtool/redis.toml" },
     { path = "src/risedevtool/connector.toml" },
     { path = "src/risedevtool/risedev-components.toml" },
+    { path = "src/risedevtool/moat.toml" },
+    { path = "src/risedevtool/adbc.toml" },
     { path = "src/sqlparser/sqlparser_test.toml" },
     { path = "src/frontend/planner_test/planner_test.toml" },
     { path = "src/tests/compaction_test/Makefile.toml" },
@@ -36,10 +39,9 @@ env_scripts = [
   is_not_release = not ${is_release}
   is_dynamic_linking = get_env ENABLE_DYNAMIC_LINKING
   is_hummock_trace = get_env ENABLE_HUMMOCK_TRACE
-  is_external_udf_enabled = get_env ENABLE_EXTERNAL_UDF
-  is_wasm_udf_enabled = get_env ENABLE_WASM_UDF
-  is_js_udf_enabled = get_env ENABLE_JS_UDF
-  is_python_udf_enabled = get_env ENABLE_PYTHON_UDF
+  is_udf_enabled = get_env ENABLE_UDF
+  is_datafusion_enabled = get_env ENABLE_DATAFUSION
+  is_default_features_disabled = get_env DISABLE_DEFAULT_FEATURES
 
   if ${is_sanitizer_enabled}
     set_env RISEDEV_CARGO_BUILD_EXTRA_ARGS "--timings -Zbuild-std --target ${CARGO_MAKE_RUST_TARGET_TRIPLE}"
@@ -57,35 +59,55 @@ env_scripts = [
   end
 
   if ${is_not_release} and ${is_dynamic_linking}
-    set_env RISINGWAVE_FEATURE_FLAGS "--features rw-dynamic-link --no-default-features"
+    set_env RISINGWAVE_FEATURE_FLAGS "--features rw-dynamic-link"
   else
     set_env RISINGWAVE_FEATURE_FLAGS "--features rw-static-link"
   end
 
-  if ${is_external_udf_enabled}
+  if ${is_udf_enabled}
     flags = get_env RISINGWAVE_FEATURE_FLAGS
-    set_env RISINGWAVE_FEATURE_FLAGS "${flags} --features external-udf"
+    set_env RISINGWAVE_FEATURE_FLAGS "${flags} --features udf"
   end
 
-  if ${is_wasm_udf_enabled}
-    flags = get_env RISINGWAVE_FEATURE_FLAGS
-    set_env RISINGWAVE_FEATURE_FLAGS "${flags} --features wasm-udf"
-  end
+  flags = get_env RISINGWAVE_FEATURE_FLAGS
 
-  if ${is_js_udf_enabled}
-    flags = get_env RISINGWAVE_FEATURE_FLAGS
-    set_env RISINGWAVE_FEATURE_FLAGS "${flags} --features js-udf"
-  end
-
-  if ${is_python_udf_enabled}
-    flags = get_env RISINGWAVE_FEATURE_FLAGS
-    set_env RISINGWAVE_FEATURE_FLAGS "${flags} --features python-udf"
+  if ${is_default_features_disabled}
+    set_env RISINGWAVE_FEATURE_FLAGS "${flags} --no-default-features"
   end
 
   if ${is_hummock_trace}
     set_env BUILD_HUMMOCK_TRACE_CMD "-p risingwave_storage --features hm-trace"
   else
     set_env BUILD_HUMMOCK_TRACE_CMD ""
+  end
+
+  if ${is_datafusion_enabled}
+    flags = get_env RISINGWAVE_FEATURE_FLAGS
+    set_env RISINGWAVE_FEATURE_FLAGS "${flags} --features datafusion"
+  end
+
+  is_adbc_enabled = get_env ENABLE_ADBC
+  if ${is_adbc_enabled}
+    # Set the ADBC driver manager path for runtime loading
+    set_env ADBC_DRIVER_PATH "${PREFIX_BIN}/adbc"
+    # Add ADBC library path to LD_LIBRARY_PATH (Linux) or DYLD_LIBRARY_PATH (macOS)
+    os_name = os_family
+    if eq ${os_name} "linux"
+      existing_ld_path = get_env LD_LIBRARY_PATH
+      if ${existing_ld_path}
+        set_env LD_LIBRARY_PATH "${PREFIX_BIN}/adbc:${existing_ld_path}"
+      else
+        set_env LD_LIBRARY_PATH "${PREFIX_BIN}/adbc"
+      end
+    else
+      # macOS
+      existing_dyld_path = get_env DYLD_LIBRARY_PATH
+      if ${existing_dyld_path}
+        set_env DYLD_LIBRARY_PATH "${PREFIX_BIN}/adbc:${existing_dyld_path}"
+      else
+        set_env DYLD_LIBRARY_PATH "${PREFIX_BIN}/adbc"
+      end
+    end
   end
 
   is_ci = get_env RISINGWAVE_CI
@@ -265,21 +287,65 @@ script = '''
 #!/usr/bin/env bash
 set -e
 
+LOG_SIZE_LIMIT=8192
+LOG_LINE_DUPLICATE_LIMIT=1000
+TMP_FILE=$(mktemp)
+
+bye() {
+  local status=$?
+  if [[ $status -eq 2 ]]; then
+    echo "Please disable unnecessary logs by doing following:"
+    echo "- Use DEBUG or TRACE level for logs that are debugging-oriented."
+    echo "- Use LogSuppressor to apply rate limit to verbose logs."
+  fi
+  if [[ $status -ne 0 ]]; then
+    echo "You may download the log files from the \"Artifacts\" tab."
+  fi
+  rm -f "${TMP_FILE}"
+  exit $status
+}
+trap bye EXIT
+
 echo "~~~ Check logs"
+echo "Log file sizes:"
 du -ah ${PREFIX_LOG}
 
+# Check if there is any panic in log.
 for out_file in ${PREFIX_LOG}/*.log
 do
   if grep "panicked at" "$out_file" -C 100; then
-    echo "$(tput setaf 1)\"panicked at\" found in $out_file$(tput sgr0), please check if there's any bugs in this PR."
-    echo "You may find \"risedev-logs\" artifacts and download logs after all workflows finish."
+    echo "$(tput setaf 1)ERROR: \"panicked at\" found in $out_file$(tput sgr0). Please check if there's any bugs in this PR."
     exit 1
   fi
 done
 
-if (( "$(du -sk ${PREFIX_LOG} | cut -f1)" > 8192 )) ; then
-    echo "$(tput setaf 1)ERROR: log size is significantly large ($(du -sh ${PREFIX_LOG} | cut -f1)).$(tput sgr0) Please disable unnecessary logs."
-    exit 1
+# Check if there are too many duplicated lines in log.
+log_files=( "${PREFIX_LOG}"/*.log )
+if [ -e "${log_files[0]}" ]; then
+  # Extract timestamped lines, drop empties, and normalize strings/numbers to spot repeated patterns.
+  sed -En 's/^[0-9]{4}-[0-9]{2}-[0-9]{2}[T ][0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]+)?(Z|[+-][0-9]{2}:[0-9]{2})?[[:space:]]+//p' "${log_files[@]}" \
+    | awk 'NF { print }' \
+    | perl -pe 'BEGIN { $ph = "<...>"; } s/"([^"\\]|\\.)*"/$ph/g; s/(?<![[:alnum:]_])-?[0-9]+(\.[0-9]+)?(?![[:alnum:]_])/$ph/g' \
+    > "${TMP_FILE}"
+
+  total_lines=$(wc -l < "${TMP_FILE}")
+  if [ "$total_lines" -gt 0 ]; then
+    top_duplicates=$(sort "${TMP_FILE}" | uniq -c | sort -nr | head -30)
+    echo "Top duplicated lines:"
+    echo "(Note: DEBUG/TRACE logs are shown here but won't fail the check.)"
+    echo "$top_duplicates"
+    max_count=$(echo "$top_duplicates" | awk '{count=$1; $1=""; sub(/^ /,""); if ($1 !~ /^DEBUG/) { print count; exit }}')
+    if [ "${max_count:-0}" -gt ${LOG_LINE_DUPLICATE_LIMIT} ]; then
+      echo "$(tput setaf 1)ERROR: non-DEBUG/TRACE log line repeated too many times (up to ${max_count}).$(tput sgr0)"
+      exit 2
+    fi
+  fi
+fi
+
+# Check if the total log size is too large.
+if (( "$(du -sk ${PREFIX_LOG} | cut -f1)" > ${LOG_SIZE_LIMIT} )) ; then
+  echo "$(tput setaf 1)ERROR: total log size is significantly large ($(du -sh ${PREFIX_LOG} | cut -f1)).$(tput sgr0)"
+  exit 2
 fi
 '''
 
@@ -387,14 +453,18 @@ script = '''
 
 set -e
 
-rw_path=$(command -v risingwave || true)
-if [[ -z "${rw_path}" ]]; then
-  echo "$(tput setaf 1)$(tput bold)[ERROR]$(tput sgr0) env $(tput setaf 5)USE_SYSTEM_RISINGWAVE$(tput sgr0) is set, but $(tput setaf 5)risingwave$(tput sgr0) is not found in PATH."
-  exit 1
+if [[ "${USE_SYSTEM_RISINGWAVE}" == docker:* ]]; then
+  tag="${USE_SYSTEM_RISINGWAVE#docker:}"
+  echo "$(tput setaf 5)$(tput bold)[Info]$(tput sgr0) env $(tput setaf 5)USE_SYSTEM_RISINGWAVE$(tput sgr0) is set, will use docker image $(tput setaf 5)risingwavelabs/risingwave:${tag}$(tput sgr0)."
+else
+  rw_path=$(command -v risingwave || true)
+  if [[ -z "${rw_path}" ]]; then
+    echo "$(tput setaf 1)$(tput bold)[ERROR]$(tput sgr0) env $(tput setaf 5)USE_SYSTEM_RISINGWAVE$(tput sgr0) is set, but $(tput setaf 5)risingwave$(tput sgr0) is not found in PATH."
+    exit 1
+  fi
+  version=$(risingwave --version)
+  echo "$(tput setaf 5)$(tput bold)[Info]$(tput sgr0) env $(tput setaf 5)USE_SYSTEM_RISINGWAVE$(tput sgr0) is set, will use $(tput setaf 5)$version$(tput sgr0) found at $rw_path."
 fi
-
-version=$(risingwave --version)
-echo "$(tput setaf 5)$(tput bold)[Info]$(tput sgr0) env $(tput setaf 5)USE_SYSTEM_RISINGWAVE$(tput sgr0) is set, will use $(tput setaf 5)$version$(tput sgr0) found at $rw_path."
 '''
 
 [tasks.b]
@@ -492,7 +562,7 @@ private = true
 category = "RiseDev - Build"
 description = "Build Rust docs"
 condition = { env_set = ["ENABLE_BUILD_RUST"] }
-env = { RUSTDOCFLAGS = "--markdown-css ../../docs/rustdoc/rust.css --markdown-no-toc --index-page docs/rustdoc/index.md -Zunstable-options" }
+env = { RUSTDOCFLAGS = "--markdown-css ../../docs/rustdoc/rust.css --markdown-no-toc --index-page docs/rustdoc/index.md -Zunstable-options -Zhigher-ranked-assumptions" }
 script = '''
 #!/usr/bin/env bash
 
@@ -526,9 +596,11 @@ dependencies = [
     "download-tempo",
     "download-mcli",
     "download-minio",
+    "download-lakekeeper",
     "download-prometheus",
     "download-pubsub",
     "download-redis",
+    "download-moat"
 ]
 
 [tasks.create-user-profiles-file]
@@ -570,18 +642,6 @@ dependencies = [
     "post-build-risingwave",
     "test-system-risingwave",
     "prepare-config",
-]
-
-[tasks.pre-start-benchmark]
-category = "RiseDev - Prepare"
-description = "Download necessary tools to deploy a benchmark env"
-dependencies = [
-    "download-minio",
-    "download-mcli",
-    "download-grafana",
-    "download-prometheus",
-    "download-tempo",
-    "download-redis",
 ]
 
 [tasks.pre-start-playground]
@@ -762,6 +822,12 @@ if [[ -n ${containers} ]]; then
   docker stop ${containers}
 fi
 
+# Wait for a while for all components to gracefully exit to dump profiling data for coverage.
+if [[ -n ${LLVM_PROFILE_FILE:-} ]]; then
+  echo "Waiting for 5 seconds for coverage data to be dumped..."
+  sleep 5
+fi
+
 ${TMUX} kill-server
 test $? -eq 0 || { echo "Failed to stop all RiseDev components."; exit 1; }
 '''
@@ -872,6 +938,8 @@ category = "RiseDev - Build"
 dependencies = ["prepare"]
 condition = { env_set = [
     "ENABLE_BUILD_RW_CONNECTOR",
+], env_not_set = [
+    "USE_SYSTEM_RISINGWAVE",
 ], files_modified = { input = [
     "./java/connector-node/**/*",
 ], output = [
@@ -1112,7 +1180,7 @@ test $? -eq 0 || exit 1
 private = true
 category = "RiseDev - Check"
 description = "Run cargo sort check and attempt to fix"
-install_crate = { min_version = "1.0.9", crate_name = "cargo-sort", binary = "cargo", test_arg = [
+install_crate = { min_version = "2.0.1", crate_name = "cargo-sort", binary = "cargo", test_arg = [
     "sort",
     "--help",
 ], install_command = "binstall" }
@@ -1146,7 +1214,9 @@ script = """
 #!/usr/bin/env bash
 
 echo "Running $(tput setaf 4)cargo clippy$(tput sgr0) checks"
+set -x
 cargo clippy $@ ${RISINGWAVE_FEATURE_FLAGS}
+set +x
 echo "If cargo clippy check failed or generates warning, you may run $(tput setaf 4)cargo clippy --workspace --all-targets --fix$(tput sgr0) to fix it. Note that clippy fix requires manual review, as not all auto fixes are guaranteed to be reasonable."
 echo "Alternately, you may run $(tput setaf 4)./risedev cf {package_names}$(tput sgr0) to fix those packages (e.g. frontend, meta)."
 """
@@ -1175,7 +1245,7 @@ fi
 private = true
 category = "RiseDev - Check"
 description = "Run cargo typos-cli check"
-install_crate = { min_version = "1.30.2", crate_name = "typos-cli", binary = "typos", test_arg = [
+install_crate = { min_version = "1.39.0", crate_name = "typos-cli", binary = "typos", test_arg = [
     "--help",
 ], install_command = "binstall" }
 script = """
@@ -1185,6 +1255,26 @@ if ! typos ; then
   echo "Hint: use 'typos -w' to fix."
 fi
 """
+
+[tasks.check-license-header]
+category = "RiseDev - Check"
+description = "Check license headers by HawkEye"
+install_crate = { min_version = "6.3.0", crate_name = "hawkeye", binary = "hawkeye", test_arg = [
+    "--help",
+], install_command = "binstall" }
+command = "hawkeye"
+args = ["check", "${@}"]
+env = { RUST_LOG = "info" }
+
+[tasks.fix-license-header]
+category = "RiseDev - Check"
+description = "Auto-fix license headers by HawkEye"
+install_crate = { min_version = "6.3.0", crate_name = "hawkeye", binary = "hawkeye", test_arg = [
+    "--help",
+], install_command = "binstall" }
+command = "hawkeye"
+args = ["format", "${@}"]
+env = { RUST_LOG = "info" }
 
 [tasks.check-udeps]
 private = true
@@ -1317,6 +1407,14 @@ env = { RISEDEV_CLEAN_START = true }
 args = ["${@}"]
 description = "Clean data and start a full RisingWave dev cluster using risedev-dev"
 
+[tasks.ci-resume]
+category = "RiseDev - CI"
+dependencies = ["pre-start-dev"]
+command = "target/debug/risedev-dev" # `risedev-dev` is always built in dev profile
+env = { RISEDEV_CLEAN_START = false }
+args = ["${@}"]
+description = "Resume a full RisingWave dev cluster without cleaning data (useful for offline schema change tests)"
+
 [tasks.ci-kill]
 category = "RiseDev - CI"
 dependencies = ["k", "check-logs", "wait-processes-exit"]
@@ -1344,7 +1442,7 @@ echo "All processes has exited."
 
 [tasks.slt]
 category = "RiseDev - Test - SQLLogicTest"
-install_crate = { min_version = "0.27.1", crate_name = "sqllogictest-bin", binary = "sqllogictest", test_arg = [
+install_crate = { min_version = "0.29.0", crate_name = "sqllogictest-bin", binary = "sqllogictest", test_arg = [
     "--help",
 ], install_command = "binstall" }
 dependencies = ["check-and-load-risedev-env-file"]
@@ -1399,56 +1497,6 @@ set -e
 cargo run -p risedev --bin risedev-docslt -- "$@"
 '''
 
-[tasks.compose]
-category = "RiseDev - Compose"
-description = "Compose a docker-compose.yaml file"
-script = '''
-#!/usr/bin/env bash
-set -e
-rm -rf ${PREFIX_DOCKER}/*
-mkdir -p "${PREFIX_DOCKER}"
-cargo run -p risedev --bin risedev-compose -- -d "${PREFIX_DOCKER}" "$@"
-echo docker-compose file generated in $(tput setaf 4)${PREFIX_DOCKER}$(tput sgr0)
-'''
-
-[tasks.compose-deploy]
-category = "RiseDev - Compose"
-description = "Compose a docker-compose.yaml deploy directory"
-script = '''
-#!/usr/bin/env bash
-set -e
-rm -rf "${PREFIX_DOCKER}"/*
-mkdir -p "${PREFIX_DOCKER}"
-cargo run -p risedev --bin risedev-compose -- -d "${PREFIX_DOCKER}" --deploy "$@"
-echo docker-compose file and deploy.sh generated in $(tput setaf 4)${PREFIX_DOCKER}$(tput sgr0)
-echo If you are ready, run $(tput setaf 4)./risedev apply-compose-deploy$(tput sgr0) to do the deployment.
-'''
-
-[tasks.apply-compose-deploy]
-category = "RiseDev - Compose"
-description = "Run deploy.sh"
-script = '''
-#!/usr/bin/env bash
-set -e
-
-.risingwave/rw-docker/deploy.sh "$@"
-
-echo
-echo "Deploy finished!"
-
-cat .risingwave/rw-docker/_message.partial.sh
-'''
-
-[tasks.apply-compose-docker]
-category = "RiseDev - Compose"
-description = "Run deploy.sh"
-script = '''
-#!/usr/bin/env bash
-set -e
-
-cp -a .risingwave/rw-docker/* docker
-'''
-
 [tasks.generate-example-config]
 private = true
 category = "Misc"
@@ -1460,9 +1508,10 @@ UPDATE_EXPECT=1 cargo test --package risingwave_common --lib -- config::tests::t
 [tasks.generate-with-options]
 private = true
 category = "Misc"
-description = "This command extracts WITH options from the Rust code and maintains them in a single source of truth `with_options.yaml`"
+description = "This command extracts WITH options from the Rust code and maintains them in a single source of truth `with_options.yaml` and generates changeable fields Rust code"
 script = '''
 UPDATE_EXPECT=1 cargo test -p risingwave_connector tests::test_with_options_yaml_up_to_date
+UPDATE_EXPECT=1 cargo test -p risingwave_connector tests::test_allow_alter_on_fly_fields_rust_up_to_date
 '''
 
 [tasks.backwards-compat-test]
@@ -1492,4 +1541,109 @@ set -euo pipefail
 cat ${PREFIX_CONFIG}/risedev-env
 echo "Hint: To load the environment variables into the shell, you may run:"
 echo "$(tput setaf 4)\set -a; source ${PREFIX_CONFIG}/risedev-env; set +a$(tput sgr0)"
+'''
+
+[tasks.restart]
+category = "RiseDev - Start/Stop"
+description = "Restart a specific node in the cluster"
+script = '''
+#!/usr/bin/env bash
+
+set -e
+
+NODE_NAME="$1"
+
+if [[ -z "${NODE_NAME}" ]]; then
+  echo "Usage: ./risedev restart <node_name>"
+  echo "Available nodes:"
+  ${TMUX} list-windows -t risedev | grep -v active | cut -d'(' -f1
+  exit 1
+fi
+
+COMMAND_FILE="${PREFIX_CONFIG}/risedev_commands.yaml"
+
+if [[ ! -f "${COMMAND_FILE}" ]]; then
+  echo "Error: Command file ${COMMAND_FILE} not found. Did you start the cluster with './risedev d'?"
+  exit 1
+fi
+
+COMMAND=$(yq ".${NODE_NAME}" "${COMMAND_FILE}")
+
+if [[ -z "${COMMAND}" ]]; then
+  echo "Error: Node '${NODE_NAME}' not found in ${COMMAND_FILE}"
+  echo "Available nodes:"
+  ${TMUX} list-windows -t risedev | grep -v active | cut -d'(' -f1
+  exit 1
+fi
+
+echo "killing existing node ${NODE_NAME}..."
+${TMUX} kill-window -t "${NODE_NAME}"
+
+echo "Restarting node ${NODE_NAME}..."
+eval "${COMMAND}"
+
+echo "Node ${NODE_NAME} restarted."
+'''
+
+[tasks.sql-bench]
+category = "RiseDev - Benchmark"
+description = "Run a local or remote sql benchmark on a RisingWave instance"
+script = "./develop/sql_bench/main.py $@"
+
+[tasks.build-sqlsmith-reducer]
+category = "RiseDev - Build"
+description = "Build Sqlsmith Reducer"
+condition = { env_true = ["ENABLE_BUILD_RUST"] }
+script = '''
+#!/usr/bin/env bash
+
+set -e
+
+[[ -z "${RISEDEV_RUSTFLAGS}" ]] || export RUSTFLAGS="${RISEDEV_RUSTFLAGS}"
+echo + RUSTFLAGS="${RUSTFLAGS:-<not set>}"
+echo + cargo build -p risedev
+cargo build -p risedev
+
+set -xe
+cargo build --bin sqlsmith-reducer \
+  --profile "${RISINGWAVE_BUILD_PROFILE}" \
+  ${RISINGWAVE_FEATURE_FLAGS} \
+  ${RISEDEV_CARGO_BUILD_EXTRA_ARGS}
+'''
+
+[tasks.sr]
+alias = "sql-reduce-short"
+
+[tasks.sql-reduce-short]
+category = "RiseDev - Reduce"
+description = "Reduce a failing SQL query while preserving error"
+dependencies = ["pre-start-dev", "build-sqlsmith-reducer"]
+script = '''
+#!/usr/bin/env bash
+INPUT_FILE="$1"
+OUTPUT_FILE=".sqlsmith/reduced.sql"
+LOG_FILE=".sqlsmith/sqlsmith.log"
+
+if [[ -z "${INPUT_FILE:-}" ]]; then
+  echo "Please pass in the query file path for shrinking."
+  exit 1
+fi
+
+mkdir -p '.sqlsmith'
+echo "Shrinking: $INPUT_FILE"
+
+RUST_LOG=info target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}/sqlsmith-reducer --input-file "$INPUT_FILE" --output-file "$OUTPUT_FILE" --run-rw-cmd "./risedev k && ./risedev d" 1>"$LOG_FILE" 2>&1
+
+echo "Shrunk file: $OUTPUT_FILE"
+echo "Log file: $LOG_FILE"
+'''
+
+[tasks.sql-reduce-full]
+category = "RiseDev - Reduce"
+description = "Reduce a failing SQL query while preserving error"
+dependencies = ["pre-start-dev", "build-sqlsmith-reducer"]
+script = '''
+#!/usr/bin/env bash
+
+target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}/sqlsmith-reducer "$@"
 '''

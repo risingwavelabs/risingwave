@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -211,6 +211,7 @@ where
 #[function("is_distinct_from(interval, interval) -> boolean")]
 #[function("is_distinct_from(timestamp, timestamp) -> boolean")]
 #[function("is_distinct_from(timestamptz, timestamptz) -> boolean")]
+#[function("is_distinct_from(jsonb, jsonb) -> boolean")]
 #[function("is_distinct_from(date, timestamp) -> boolean")]
 #[function("is_distinct_from(timestamp, date) -> boolean")]
 #[function("is_distinct_from(time, interval) -> boolean")]
@@ -242,6 +243,7 @@ where
 #[function("is_not_distinct_from(interval, interval) -> boolean")]
 #[function("is_not_distinct_from(timestamp, timestamp) -> boolean")]
 #[function("is_not_distinct_from(timestamptz, timestamptz) -> boolean")]
+#[function("is_not_distinct_from(jsonb, jsonb) -> boolean")]
 #[function("is_not_distinct_from(date, timestamp) -> boolean")]
 #[function("is_not_distinct_from(timestamp, date) -> boolean")]
 #[function("is_not_distinct_from(time, interval) -> boolean")]
@@ -624,7 +626,7 @@ mod tests {
         const NAME: &'static str = "boolean";
 
         fn test_from(i: usize) -> Self {
-            i % 2 == 0
+            i.is_multiple_of(2)
         }
     }
 

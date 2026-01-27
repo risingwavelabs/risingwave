@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,16 +16,14 @@ use itertools::Itertools;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::{DataType, ScalarImpl};
 
-use super::{BoxedRule, Rule};
+use super::prelude::{PlanRef, *};
 use crate::expr::{Expr, TableFunctionType};
-use crate::optimizer::PlanRef;
 use crate::optimizer::plan_node::generic::GenericPlanRef;
-// use crate::optimizer::plan_node::{LogicalMySqlQuery, LogicalTableFunction};
 use crate::optimizer::plan_node::{LogicalMySqlQuery, LogicalTableFunction};
 
 /// Transform a special `TableFunction` (with `MYSQL_QUERY` table function type) into a `LogicalMySqlQuery`
 pub struct TableFunctionToMySqlQueryRule {}
-impl Rule for TableFunctionToMySqlQueryRule {
+impl Rule<Logical> for TableFunctionToMySqlQueryRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let logical_table_function: &LogicalTableFunction = plan.as_logical_table_function()?;
         if logical_table_function.table_function.function_type != TableFunctionType::MysqlQuery {
@@ -34,7 +32,7 @@ impl Rule for TableFunctionToMySqlQueryRule {
         assert!(!logical_table_function.with_ordinality);
         let table_function_return_type = logical_table_function.table_function().return_type();
 
-        if let DataType::Struct(st) = table_function_return_type.clone() {
+        if let DataType::Struct(st) = table_function_return_type {
             let fields = st
                 .iter()
                 .map(|(name, data_type)| Field::with_name(data_type.clone(), name.to_owned()))

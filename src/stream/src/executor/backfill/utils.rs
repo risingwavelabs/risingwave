@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::borrow::Cow;
+use std::cmp::{max, min};
 use std::collections::HashMap;
 use std::ops::Bound;
 
@@ -40,9 +41,7 @@ use risingwave_storage::row_serde::value_serde::ValueRowSerde;
 use risingwave_storage::table::collect_data_chunk_with_builder;
 
 use crate::common::table::state_table::{ReplicatedStateTable, StateTableInner};
-use crate::executor::{
-    Message, PkIndicesRef, StreamExecutorError, StreamExecutorResult, Watermark,
-};
+use crate::executor::{Message, StreamExecutorError, StreamExecutorResult, Watermark};
 
 /// `vnode`, `is_finished`, `row_count`, all occupy 1 column each.
 pub const METADATA_STATE_LEN: usize = 3;
@@ -301,10 +300,10 @@ impl BackfillProgressPerVnode {
 pub(crate) fn mark_chunk(
     chunk: StreamChunk,
     current_pos: &OwnedRow,
-    pk_in_output_indices: PkIndicesRef<'_>,
+    pk_in_output_indices: &[usize],
     pk_order: &[OrderType],
 ) -> StreamChunk {
-    let chunk = chunk.compact();
+    let chunk = chunk.compact_vis();
     mark_chunk_inner(chunk, current_pos, pk_in_output_indices, pk_order)
 }
 
@@ -312,11 +311,11 @@ pub(crate) fn mark_cdc_chunk(
     offset_parse_func: &CdcOffsetParseFunc,
     chunk: StreamChunk,
     current_pos: &OwnedRow,
-    pk_in_output_indices: PkIndicesRef<'_>,
+    pk_in_output_indices: &[usize],
     pk_order: &[OrderType],
     last_cdc_offset: Option<CdcOffset>,
 ) -> StreamExecutorResult<StreamChunk> {
-    let chunk = chunk.compact();
+    let chunk = chunk.compact_vis();
     mark_cdc_chunk_inner(
         offset_parse_func,
         chunk,
@@ -334,7 +333,7 @@ pub(crate) fn mark_cdc_chunk(
 pub(crate) fn mark_chunk_ref_by_vnode<S: StateStore, SD: ValueRowSerde>(
     chunk: &StreamChunk,
     backfill_state: &BackfillState,
-    pk_in_output_indices: PkIndicesRef<'_>,
+    pk_in_output_indices: &[usize],
     upstream_table: &ReplicatedStateTable<S, SD>,
     pk_order: &[OrderType],
 ) -> StreamExecutorResult<StreamChunk> {
@@ -358,6 +357,18 @@ pub(crate) fn mark_chunk_ref_by_vnode<S: StateStore, SD: ValueRowSerde>(
                 cmp_datum_iter(pk.iter(), current_pos.iter(), pk_order.iter().copied()).is_le()
             }
         };
+        if !visible {
+            tracing::trace!(
+                source = "upstream",
+                state = "process_barrier",
+                action = "mark_chunk",
+                ?vnode,
+                ?op,
+                ?pk,
+                ?row,
+                "update_filtered",
+            );
+        }
         new_visibility.append(visible);
 
         normalize_unmatched_updates(
@@ -380,7 +391,7 @@ pub(crate) fn mark_chunk_ref_by_vnode<S: StateStore, SD: ValueRowSerde>(
 fn mark_chunk_inner(
     chunk: StreamChunk,
     current_pos: &OwnedRow,
-    pk_in_output_indices: PkIndicesRef<'_>,
+    pk_in_output_indices: &[usize],
     pk_order: &[OrderType],
 ) -> StreamChunk {
     let (data, ops) = chunk.into_parts();
@@ -458,7 +469,7 @@ fn mark_cdc_chunk_inner(
     chunk: StreamChunk,
     current_pos: &OwnedRow,
     last_cdc_offset: Option<CdcOffset>,
-    pk_in_output_indices: PkIndicesRef<'_>,
+    pk_in_output_indices: &[usize],
     pk_order: &[OrderType],
 ) -> StreamExecutorResult<StreamChunk> {
     let (data, ops) = chunk.into_parts();
@@ -851,9 +862,10 @@ pub fn create_builder(
 ) -> DataChunkBuilder {
     let batch_size = match rate_limit {
         RateLimit::Disabled | RateLimit::Pause => chunk_size,
-        RateLimit::Fixed(limit) if limit.get() as usize >= chunk_size => chunk_size,
-        RateLimit::Fixed(limit) => limit.get() as usize,
+        RateLimit::Fixed(limit) => min(limit.get() as usize, chunk_size),
     };
+    // Ensure that the batch size is at least 2, to have enough space for two rows in a single update.
+    let batch_size = max(2, batch_size);
     DataChunkBuilder::new(data_types, batch_size)
 }
 

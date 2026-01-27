@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use risingwave_common::bail;
@@ -23,21 +24,44 @@ use risingwave_pb::plan_common::PbColumnCatalog;
 #[expect(deprecated)]
 use super::fs_reader::LegacyFsSourceReader;
 use super::reader::SourceReader;
-use crate::WithOptionsSecResolved;
 use crate::error::ConnectorResult;
-use crate::parser::additional_columns::source_add_partition_offset_cols;
+use crate::parser::additional_columns::{
+    derive_pulsar_message_id_data_column, source_add_partition_offset_cols,
+};
 use crate::parser::{EncodingProperties, ProtocolProperties, SpecificParserConfig};
 use crate::source::monitor::SourceMetrics;
 use crate::source::{SourceColumnDesc, SourceColumnType, UPSTREAM_SOURCE_KEY};
+use crate::{WithOptionsSecResolved, WithPropertiesExt};
 
 pub const DEFAULT_CONNECTOR_MESSAGE_BUFFER_SIZE: usize = 16;
 
 /// `SourceDesc` describes a stream source.
 #[derive(Debug, Clone)]
 pub struct SourceDesc {
+    pub source_info: PbStreamSourceInfo,
     pub source: SourceReader,
     pub columns: Vec<SourceColumnDesc>,
     pub metrics: Arc<SourceMetrics>,
+}
+
+impl SourceDesc {
+    pub fn update_reader(
+        &mut self,
+        props_plaintext: HashMap<String, String>,
+    ) -> ConnectorResult<()> {
+        let props_wrapper =
+            WithOptionsSecResolved::without_secrets(props_plaintext.into_iter().collect());
+        let parser_config = SpecificParserConfig::new(&self.source_info, &props_wrapper)?;
+
+        let reader = SourceReader::new(
+            props_wrapper,
+            self.columns.clone(),
+            self.source.connector_message_buffer_size,
+            parser_config,
+        )?;
+        self.source = reader;
+        Ok(())
+    }
 }
 
 /// `FsSourceDesc` describes a stream source.
@@ -90,8 +114,20 @@ impl SourceDescBuilder {
             .get(UPSTREAM_SOURCE_KEY)
             .map(|s| s.to_lowercase())
             .unwrap();
-        let (columns_exist, additional_columns) =
-            source_add_partition_offset_cols(&self.columns, &connector_name, false);
+        let (columns_exist, additional_columns) = {
+            let (mut columns_exist, mut additional_columns) =
+                source_add_partition_offset_cols(&self.columns, &connector_name, false);
+
+            // add `message_id_data` column for pulsar source, which is used for ack message
+            if self.with_properties.is_pulsar_connector() {
+                derive_pulsar_message_id_data_column(
+                    &connector_name,
+                    &mut columns_exist,
+                    &mut additional_columns,
+                );
+            }
+            (columns_exist, additional_columns)
+        };
 
         let mut columns: Vec<_> = self
             .columns
@@ -134,6 +170,7 @@ impl SourceDescBuilder {
             source,
             columns,
             metrics: self.metrics,
+            source_info: self.source_info,
         })
     }
 
@@ -210,8 +247,7 @@ pub mod test_utils {
                 ))
             })
             .collect();
-        let options_with_secret =
-            crate::WithOptionsSecResolved::without_secrets(with_properties.clone());
+        let options_with_secret = crate::WithOptionsSecResolved::without_secrets(with_properties);
         SourceDescBuilder {
             columns,
             metrics: Default::default(),

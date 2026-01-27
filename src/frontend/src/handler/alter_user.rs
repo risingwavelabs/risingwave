@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,7 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use pgwire::pg_response::{PgResponse, StatementType};
+use std::collections::HashSet;
+
+use pgwire::pg_response::StatementType;
+use risingwave_common::catalog::{DEFAULT_SUPER_USER_FOR_ADMIN, is_reserved_admin_user};
 use risingwave_pb::user::UserInfo;
 use risingwave_pb::user::update_user_request::UpdateField;
 use risingwave_sqlparser::ast::{AlterUserStatement, ObjectName, UserOption, UserOptions};
@@ -32,7 +35,26 @@ fn alter_prost_user_info(
     mut user_info: UserInfo,
     options: &UserOptions,
     session_user: &UserCatalog,
-) -> Result<(UserInfo, Vec<UpdateField>)> {
+) -> Result<(UserInfo, Vec<UpdateField>, Vec<String>)> {
+    let change_self_password_only = session_user.id == user_info.id
+        && options.0.len() == 1
+        && matches!(
+            &options.0[0],
+            UserOption::EncryptedPassword(_) | UserOption::Password(_) | UserOption::OAuth(_)
+        );
+    let require_admin = user_info.is_admin
+        || options
+            .0
+            .iter()
+            .any(|option| matches!(option, UserOption::Admin | UserOption::NoAdmin));
+    if !change_self_password_only && require_admin && !session_user.is_admin {
+        return Err(PermissionDenied(format!(
+            "{} cannot be altered with admin option",
+            user_info.name
+        ))
+        .into());
+    }
+
     if !session_user.is_super {
         let require_super = user_info.is_super
             || options
@@ -47,71 +69,77 @@ fn alter_prost_user_info(
             .into());
         }
 
-        let change_self_password = session_user.id == user_info.id
-            && options.0.len() == 1
-            && matches!(
-                &options.0[0],
-                UserOption::EncryptedPassword(_) | UserOption::Password(_)
-            );
-        if !session_user.can_create_user && !change_self_password {
-            return Err(PermissionDenied("Do not have the privilege".to_owned()).into());
+        if !session_user.can_create_user && !change_self_password_only {
+            return Err(PermissionDenied("permission denied to alter user".to_owned()).into());
         }
     }
 
-    let mut update_fields = Vec::new();
+    let mut update_fields = HashSet::new();
+    let mut notices = vec![];
+
     for option in &options.0 {
         match option {
             UserOption::SuperUser => {
                 user_info.is_super = true;
-                update_fields.push(UpdateField::Super);
+                update_fields.insert(UpdateField::Super);
             }
             UserOption::NoSuperUser => {
                 user_info.is_super = false;
-                update_fields.push(UpdateField::Super);
+                update_fields.insert(UpdateField::Super);
             }
             UserOption::CreateDB => {
                 user_info.can_create_db = true;
-                update_fields.push(UpdateField::CreateDb);
+                update_fields.insert(UpdateField::CreateDb);
             }
             UserOption::NoCreateDB => {
                 user_info.can_create_db = false;
-                update_fields.push(UpdateField::CreateDb);
+                update_fields.insert(UpdateField::CreateDb);
             }
             UserOption::CreateUser => {
                 user_info.can_create_user = true;
-                update_fields.push(UpdateField::CreateUser);
+                update_fields.insert(UpdateField::CreateUser);
             }
             UserOption::NoCreateUser => {
                 user_info.can_create_user = false;
-                update_fields.push(UpdateField::CreateUser);
+                update_fields.insert(UpdateField::CreateUser);
             }
             UserOption::Login => {
                 user_info.can_login = true;
-                update_fields.push(UpdateField::Login);
+                update_fields.insert(UpdateField::Login);
             }
             UserOption::NoLogin => {
                 user_info.can_login = false;
-                update_fields.push(UpdateField::Login);
+                update_fields.insert(UpdateField::Login);
+            }
+            UserOption::Admin => {
+                user_info.is_admin = true;
+                update_fields.insert(UpdateField::Admin);
+            }
+            UserOption::NoAdmin => {
+                user_info.is_admin = false;
+                update_fields.insert(UpdateField::Admin);
             }
             UserOption::EncryptedPassword(p) => {
-                // TODO: Behaviour of PostgreSQL: Notice when password is empty string.
                 if !p.0.is_empty() {
                     user_info.auth_info = encrypted_password(&user_info.name, &p.0);
                 } else {
                     user_info.auth_info = None;
+                    notices
+                        .push("empty string is not a valid password, clearing password".to_owned());
                 };
-                update_fields.push(UpdateField::AuthInfo);
+                update_fields.insert(UpdateField::AuthInfo);
             }
             UserOption::Password(opt) => {
-                // TODO: Behaviour of PostgreSQL: Notice when password is empty string.
                 if let Some(password) = opt
                     && !password.0.is_empty()
                 {
                     user_info.auth_info = encrypted_password(&user_info.name, &password.0);
                 } else {
                     user_info.auth_info = None;
+                    notices
+                        .push("empty string is not a valid password, clearing password".to_owned());
                 }
-                update_fields.push(UpdateField::AuthInfo);
+                update_fields.insert(UpdateField::AuthInfo);
             }
             UserOption::OAuth(options) => {
                 let auth_info = build_oauth_info(options).ok_or_else(|| {
@@ -121,11 +149,24 @@ fn alter_prost_user_info(
                     ))
                 })?;
                 user_info.auth_info = Some(auth_info);
-                update_fields.push(UpdateField::AuthInfo)
+                update_fields.insert(UpdateField::AuthInfo);
             }
         }
     }
-    Ok((user_info, update_fields))
+
+    if user_info.is_admin && !user_info.is_super {
+        user_info.is_super = true;
+        update_fields.insert(UpdateField::Super);
+        if options
+            .0
+            .iter()
+            .any(|option| matches!(option, UserOption::NoSuperUser))
+        {
+            notices.push("admin users must remain superusers, ignoring NOSUPERUSER".to_owned());
+        }
+    }
+
+    Ok((user_info, update_fields.into_iter().collect(), notices))
 }
 
 fn alter_rename_prost_user_info(
@@ -138,20 +179,26 @@ fn alter_rename_prost_user_info(
     }
 
     if !session_user.is_super {
-        if user_info.is_super {
-            return Err(
-                PermissionDenied("must be superuser to rename superusers".to_owned()).into(),
-            );
-        }
-
-        if !session_user.can_create_user {
-            return Err(
-                PermissionDenied("Do not have the privilege to rename user".to_owned()).into(),
-            );
-        }
+        return Err(PermissionDenied("must be superuser to rename users".to_owned()).into());
     }
 
-    user_info.name = Binder::resolve_user_name(new_name)?;
+    let new_name = Binder::resolve_user_name(new_name)?;
+    if is_reserved_admin_user(&new_name) {
+        return Err(PermissionDenied(format!(
+            "{} is reserved for admin",
+            DEFAULT_SUPER_USER_FOR_ADMIN
+        ))
+        .into());
+    }
+    if is_reserved_admin_user(&user_info.name) {
+        return Err(PermissionDenied(format!(
+            "{} cannot be renamed",
+            DEFAULT_SUPER_USER_FOR_ADMIN
+        ))
+        .into());
+    }
+
+    user_info.name = new_name;
     user_info.auth_info = None;
     Ok((user_info, vec![UpdateField::Rename, UpdateField::AuthInfo]))
 }
@@ -161,25 +208,27 @@ pub async fn handle_alter_user(
     stmt: AlterUserStatement,
 ) -> Result<RwPgResponse> {
     let session = handler_args.session;
-    let (user_info, update_fields) = {
+    let (user_info, update_fields, notices) = {
         let user_name = Binder::resolve_user_name(stmt.user_name.clone())?;
         let user_reader = session.env().user_info_reader().read_guard();
 
         let old_info = user_reader
             .get_user_by_name(&user_name)
-            .ok_or(CatalogError::NotFound("user", user_name))?
+            .ok_or(CatalogError::not_found("user", user_name))?
             .to_prost();
 
         let session_user = user_reader
             .get_user_by_name(&session.user_name())
-            .ok_or_else(|| CatalogError::NotFound("user", session.user_name().to_owned()))?;
+            .ok_or_else(|| CatalogError::not_found("user", session.user_name()))?;
 
         match stmt.mode {
             risingwave_sqlparser::ast::AlterUserMode::Options(options) => {
                 alter_prost_user_info(old_info, &options, session_user)?
             }
             risingwave_sqlparser::ast::AlterUserMode::Rename(new_name) => {
-                alter_rename_prost_user_info(old_info, new_name, session_user)?
+                let (user_info, fields) =
+                    alter_rename_prost_user_info(old_info, new_name, session_user)?;
+                (user_info, fields, vec![])
             }
         }
     };
@@ -188,13 +237,20 @@ pub async fn handle_alter_user(
     user_info_writer
         .update_user(user_info, update_fields)
         .await?;
-    Ok(PgResponse::empty_result(StatementType::UPDATE_USER))
+    let mut response_builder = RwPgResponse::builder(StatementType::UPDATE_USER);
+    for notice in notices {
+        response_builder = response_builder.notice(notice);
+    }
+    Ok(response_builder.into())
 }
 
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
 
+    use risingwave_common::catalog::{
+        DEFAULT_DATABASE_NAME, DEFAULT_SUPER_USER_FOR_ADMIN, DEFAULT_SUPER_USER_FOR_ADMIN_ID,
+    };
     use risingwave_pb::user::AuthInfo;
     use risingwave_pb::user::auth_info::EncryptionType;
 
@@ -241,5 +297,73 @@ mod tests {
                 metadata: HashMap::new(),
             })
         );
+    }
+
+    #[tokio::test]
+    async fn test_alter_admin_user() {
+        let frontend = LocalFrontend::new(Default::default()).await;
+        let session = frontend.session_ref();
+        let user_info_reader = session.env().user_info_reader();
+
+        // Create admin user
+        frontend
+            .run_user_sql(
+                "CREATE USER admin_user WITH ADMIN",
+                DEFAULT_DATABASE_NAME.to_owned(),
+                DEFAULT_SUPER_USER_FOR_ADMIN.to_owned(),
+                DEFAULT_SUPER_USER_FOR_ADMIN_ID,
+            )
+            .await
+            .unwrap();
+
+        let admin_user = user_info_reader
+            .read_guard()
+            .get_user_by_name("admin_user")
+            .cloned()
+            .unwrap();
+
+        // Should be both admin and superuser
+        assert!(admin_user.is_admin);
+        assert!(admin_user.is_super);
+
+        // Try to remove superuser status from admin user - should be ignored with notice
+        frontend
+            .run_user_sql(
+                "ALTER USER admin_user WITH NOSUPERUSER",
+                DEFAULT_DATABASE_NAME.to_owned(),
+                DEFAULT_SUPER_USER_FOR_ADMIN.to_owned(),
+                DEFAULT_SUPER_USER_FOR_ADMIN_ID,
+            )
+            .await
+            .unwrap();
+
+        let admin_user_after = user_info_reader
+            .read_guard()
+            .get_user_by_name("admin_user")
+            .cloned()
+            .unwrap();
+
+        assert!(admin_user_after.is_admin);
+        assert!(admin_user_after.is_super);
+
+        // Now remove admin and super status from admin user
+        frontend
+            .run_user_sql(
+                "ALTER USER admin_user WITH NOADMIN NOSUPERUSER",
+                DEFAULT_DATABASE_NAME.to_owned(),
+                DEFAULT_SUPER_USER_FOR_ADMIN.to_owned(),
+                DEFAULT_SUPER_USER_FOR_ADMIN_ID,
+            )
+            .await
+            .unwrap();
+
+        let admin_user_after = user_info_reader
+            .read_guard()
+            .get_user_by_name("admin_user")
+            .cloned()
+            .unwrap();
+
+        assert!(!admin_user_after.is_admin);
+        assert!(!admin_user_after.is_super);
     }
 }

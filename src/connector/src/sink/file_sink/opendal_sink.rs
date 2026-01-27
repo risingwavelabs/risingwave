@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -23,25 +23,29 @@ use bytes::BytesMut;
 use chrono::{TimeZone, Utc};
 use opendal::{FuturesAsyncWriter, Operator, Writer as OpendalWriter};
 use parquet::arrow::AsyncArrowWriter;
+use parquet::basic::Compression;
 use parquet::file::properties::WriterProperties;
 use risingwave_common::array::arrow::IcebergArrowConvert;
 use risingwave_common::array::arrow::arrow_schema_iceberg::{self, SchemaRef};
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::catalog::Schema;
+use risingwave_pb::id::ExecutorId;
 use serde::Deserialize;
 use serde_json::Value;
 use serde_with::{DisplayFromStr, serde_as};
 use strum_macros::{Display, EnumString};
 use tokio_util::compat::{Compat, FuturesAsyncWriteCompatExt};
+use uuid::Uuid;
 use with_options::WithOptions;
 
+use crate::enforce_secret::EnforceSecret;
 use crate::sink::catalog::SinkEncode;
 use crate::sink::encoder::{
     JsonEncoder, JsonbHandlingMode, RowEncoder, TimeHandlingMode, TimestampHandlingMode,
     TimestamptzHandlingMode,
 };
 use crate::sink::file_sink::batching_log_sink::BatchingLogSinker;
-use crate::sink::{DummySinkCommitCoordinator, Result, Sink, SinkError, SinkFormatDesc, SinkParam};
+use crate::sink::{Result, Sink, SinkError, SinkFormatDesc, SinkParam};
 use crate::source::TryFromBTreeMap;
 use crate::with_options::WithOptions;
 
@@ -75,6 +79,8 @@ pub struct FileSink<S: OpendalSinkBackend> {
     pub(crate) engine_type: EngineType,
     pub(crate) _marker: PhantomData<S>,
 }
+
+impl<S: OpendalSinkBackend> EnforceSecret for FileSink<S> {}
 
 /// The `OpendalSinkBackend` trait unifies the behavior of various sink backends
 /// implemented through `OpenDAL`(`<https://github.com/apache/opendal>`).
@@ -114,12 +120,16 @@ pub enum EngineType {
 }
 
 impl<S: OpendalSinkBackend> Sink for FileSink<S> {
-    type Coordinator = DummySinkCommitCoordinator;
     type LogSinker = BatchingLogSinker;
 
     const SINK_NAME: &'static str = S::SINK_NAME;
 
     async fn validate(&self) -> Result<()> {
+        if matches!(self.engine_type, EngineType::Snowflake) {
+            risingwave_common::license::Feature::SnowflakeSink
+                .check_available()
+                .map_err(|e| anyhow::anyhow!(e))?;
+        }
         if !self.is_append_only {
             return Err(SinkError::Config(anyhow!(
                 "File sink only supports append-only mode at present. \
@@ -166,9 +176,9 @@ impl<S: OpendalSinkBackend> TryFrom<SinkParam> for FileSink<S> {
     fn try_from(param: SinkParam) -> std::result::Result<Self, Self::Error> {
         let schema = param.schema();
         let config = S::from_btreemap(param.properties)?;
-        let path = S::get_path(config.clone()).clone();
+        let path = S::get_path(config.clone());
         let op = S::new_operator(config.clone())?;
-        let batching_strategy = S::get_batching_strategy(config.clone());
+        let batching_strategy = S::get_batching_strategy(config);
         let engine_type = S::get_engine_type();
         let format_desc = match param.format_desc {
             Some(desc) => desc,
@@ -198,7 +208,8 @@ pub struct OpenDalSinkWriter {
     operator: Operator,
     sink_writer: Option<FileWriterEnum>,
     write_path: String,
-    executor_id: u64,
+    executor_id: ExecutorId,
+    unique_writer_id: Uuid,
     encode_type: SinkEncode,
     row_encoder: JsonEncoder,
     engine_type: EngineType,
@@ -243,7 +254,8 @@ impl OpenDalSinkWriter {
                     if w.bytes_written() > 0 {
                         let metadata = w.close().await?;
                         tracing::info!(
-                            "writer {:?}_{:?}finish write file, metadata: {:?}",
+                            "writer {} (executor_id: {}, created_time: {}) finish write file, metadata: {:?}",
+                            self.unique_writer_id,
                             self.executor_id,
                             self.created_time
                                 .duration_since(UNIX_EPOCH)
@@ -274,7 +286,7 @@ impl OpenDalSinkWriter {
 
 /// Private methods related to batching.
 impl OpenDalSinkWriter {
-    /// Method for judging whether batch condiction is met.
+    /// Method for judging whether batch condition is met.
     fn can_commit(&self) -> bool {
         self.duration_seconds_since_writer_created() >= self.batching_strategy.rollover_seconds
             || self.current_bached_row_num >= self.batching_strategy.max_row_count
@@ -349,7 +361,7 @@ impl OpenDalSinkWriter {
         operator: Operator,
         write_path: &str,
         rw_schema: Schema,
-        executor_id: u64,
+        executor_id: ExecutorId,
         format_desc: &SinkFormatDesc,
         engine_type: EngineType,
         batching_strategy: BatchingStrategy,
@@ -371,6 +383,7 @@ impl OpenDalSinkWriter {
             operator,
             sink_writer: None,
             executor_id,
+            unique_writer_id: Uuid::now_v7(),
             encode_type: format_desc.encode.clone(),
             row_encoder,
             engine_type,
@@ -396,7 +409,7 @@ impl OpenDalSinkWriter {
         // With batching in place, the file writing process is decoupled from checkpoints.
         // The current file naming convention is as follows:
         // 1. A subdirectory is defined based on `path_partition_prefix` (e.g., by day、hour or month or none.).
-        // 2. The file name includes the `executor_id` and the creation time in seconds since the UNIX epoch.
+        // 2. The file name includes a unique UUID (v7, which contains timestamp) and the creation time in seconds since the UNIX epoch.
         // If the engine type is `Fs`, the path is automatically handled, and the filename does not include a path prefix.
         // 3. For the Snowflake Sink, the `write_path` parameter can be empty.
         // When the `write_path` is not specified, the data will be written to the root of the specified bucket.
@@ -411,7 +424,7 @@ impl OpenDalSinkWriter {
                 "{}{}{}_{}.{}",
                 base_path,
                 self.path_partition_prefix(&create_time),
-                self.executor_id,
+                self.unique_writer_id,
                 create_time.as_secs(),
                 suffix,
             )
@@ -424,10 +437,13 @@ impl OpenDalSinkWriter {
     }
 
     async fn create_sink_writer(&mut self) -> Result<()> {
+        // Update the `created_time` to the current time when creating a new writer.
+        self.created_time = SystemTime::now();
+
         let object_writer = self.create_object_writer().await?;
         match self.encode_type {
             SinkEncode::Parquet => {
-                let props = WriterProperties::builder();
+                let props = WriterProperties::builder().set_compression(Compression::SNAPPY);
                 let parquet_writer: tokio_util::compat::Compat<opendal::FuturesAsyncWriter> =
                     object_writer.into_futures_async_write().compat_write();
                 self.sink_writer = Some(FileWriterEnum::ParquetFileWriter(
@@ -443,8 +459,6 @@ impl OpenDalSinkWriter {
             }
         }
         self.current_bached_row_num = 0;
-
-        self.created_time = SystemTime::now();
 
         Ok(())
     }

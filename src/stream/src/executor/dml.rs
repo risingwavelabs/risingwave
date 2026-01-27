@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -23,6 +23,7 @@ use risingwave_common::transaction::transaction_message::TxnMsg;
 use risingwave_common_rate_limit::{MonitoredRateLimiter, RateLimit, RateLimiter};
 use risingwave_dml::dml_manager::DmlManagerRef;
 use risingwave_expr::codegen::BoxStream;
+use risingwave_pb::common::ThrottleType;
 
 use crate::executor::prelude::*;
 use crate::executor::stream_reader::StreamReaderWithPause;
@@ -159,11 +160,12 @@ impl DmlExecutor {
                             match mutation {
                                 Mutation::Pause => stream.pause_stream(),
                                 Mutation::Resume => stream.resume_stream(),
-                                Mutation::Throttle(actor_to_apply) => {
-                                    if let Some(new_rate_limit) =
-                                        actor_to_apply.get(&self.actor_ctx.id)
+                                Mutation::Throttle(fragment_to_apply) => {
+                                    if let Some(entry) =
+                                        fragment_to_apply.get(&self.actor_ctx.fragment_id)
+                                        && entry.throttle_type() == ThrottleType::Dml
                                     {
-                                        let new_rate_limit = (*new_rate_limit).into();
+                                        let new_rate_limit = entry.rate_limit.into();
                                         let old_rate_limit =
                                             self.rate_limiter.update(new_rate_limit);
 
@@ -171,7 +173,7 @@ impl DmlExecutor {
                                             tracing::info!(
                                                 old_rate_limit = ?old_rate_limit,
                                                 new_rate_limit = ?new_rate_limit,
-                                                actor_id,
+                                                %actor_id,
                                                 "dml rate limit changed",
                                             );
                                         }
@@ -359,16 +361,14 @@ async fn apply_dml_rate_limit(
                     }
                     RateLimit::Fixed(limit) => {
                         let max_permits = limit.get();
-                        let required_permits = chunk.compute_rate_limit_chunk_permits();
+                        let required_permits = chunk.rate_limit_permits();
                         if required_permits <= max_permits {
                             rate_limiter.wait(required_permits).await;
                             yield TxnMsg::Data(txn_id, chunk);
                         } else {
                             // Split the chunk into smaller chunks.
                             for small_chunk in chunk.split(max_permits as _) {
-                                let required_permits =
-                                    small_chunk.compute_rate_limit_chunk_permits();
-                                rate_limiter.wait(required_permits).await;
+                                rate_limiter.wait_chunk(&small_chunk).await;
                                 yield TxnMsg::Data(txn_id, small_chunk);
                             }
                         }
@@ -404,11 +404,11 @@ mod tests {
             ColumnDesc::unnamed(ColumnId::new(0), DataType::Int64),
             ColumnDesc::unnamed(ColumnId::new(1), DataType::Int64),
         ];
-        let pk_indices = vec![0];
+        let stream_key = vec![0];
         let dml_manager = Arc::new(DmlManager::for_test());
 
         let (mut tx, source) = MockSource::channel();
-        let source = source.into_executor(schema, pk_indices);
+        let source = source.into_executor(schema, stream_key);
 
         let dml_executor = DmlExecutor::new(
             ActorContext::for_test(0),

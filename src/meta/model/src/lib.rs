@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,19 +14,19 @@
 
 use std::collections::BTreeMap;
 
+pub use risingwave_common::id::*;
 use risingwave_pb::catalog::{PbCreateType, PbStreamJobStatus};
 use risingwave_pb::meta::table_fragments::PbState as PbStreamJobState;
 use risingwave_pb::secret::PbSecretRef;
-use risingwave_pb::stream_plan::PbStreamNode;
+use risingwave_pb::stream_plan::{PbDispatcherType, PbStreamNode};
 use sea_orm::entity::prelude::*;
-use sea_orm::{DeriveActiveEnum, EnumIter, FromJsonQueryResult};
+use sea_orm::{DeriveActiveEnum, EnumIter, FromJsonQueryResult, Value};
 use serde::{Deserialize, Serialize};
 
 pub mod prelude;
 
-pub mod actor;
-pub mod actor_dispatcher;
 pub mod catalog_version;
+pub mod cdc_table_snapshot_split;
 pub mod cluster;
 pub mod compaction_config;
 pub mod compaction_status;
@@ -36,6 +36,7 @@ pub mod database;
 pub mod exactly_once_iceberg_sink;
 pub mod fragment;
 pub mod fragment_relation;
+pub mod fragment_splits;
 pub mod function;
 pub mod hummock_epoch_to_version;
 pub mod hummock_gc_history;
@@ -47,9 +48,13 @@ pub mod hummock_time_travel_delta;
 pub mod hummock_time_travel_version;
 pub mod hummock_version_delta;
 pub mod hummock_version_stats;
+pub mod iceberg_namespace_properties;
+pub mod iceberg_tables;
 pub mod index;
 pub mod object;
 pub mod object_dependency;
+pub mod pending_sink_state;
+pub mod refresh_job;
 pub mod schema;
 pub mod secret;
 pub mod serde_seaql_migration;
@@ -61,38 +66,23 @@ pub mod subscription;
 pub mod system_parameter;
 pub mod table;
 pub mod user;
+pub mod user_default_privilege;
 pub mod user_privilege;
 pub mod view;
 pub mod worker;
 pub mod worker_property;
 
-pub type WorkerId = i32;
-
 pub type TransactionId = i32;
 
-pub type ObjectId = i32;
-pub type DatabaseId = ObjectId;
-pub type SchemaId = ObjectId;
-pub type TableId = ObjectId;
-pub type SourceId = ObjectId;
-pub type SinkId = ObjectId;
-pub type SubscriptionId = ObjectId;
-pub type IndexId = ObjectId;
-pub type ViewId = ObjectId;
-pub type FunctionId = ObjectId;
-pub type ConnectionId = ObjectId;
-pub type SecretId = ObjectId;
 pub type UserId = i32;
 pub type PrivilegeId = i32;
+pub type DefaultPrivilegeId = i32;
 
 pub type HummockVersionId = i64;
 pub type Epoch = i64;
 pub type CompactionGroupId = i64;
 pub type CompactionTaskId = i64;
 pub type HummockSstableObjectId = i64;
-
-pub type FragmentId = i32;
-pub type ActorId = i32;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, EnumIter, DeriveActiveEnum, Serialize, Deserialize)]
 #[sea_orm(rs_type = "String", db_type = "string(None)")]
@@ -154,7 +144,17 @@ impl From<PbCreateType> for CreateType {
     }
 }
 
+impl CreateType {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            CreateType::Background => "BACKGROUND",
+            CreateType::Foreground => "FOREGROUND",
+        }
+    }
+}
+
 /// Defines struct with a single pb field that derives `FromJsonQueryResult`, it will helps to map json value stored in database to Pb struct.
+#[macro_export]
 macro_rules! derive_from_json_struct {
     ($struct_name:ident, $field_type:ty) => {
         #[derive(Clone, Debug, PartialEq, FromJsonQueryResult, Serialize, Deserialize, Default)]
@@ -323,6 +323,8 @@ macro_rules! derive_btreemap_from_blob {
 
 pub(crate) use {derive_array_from_blob, derive_from_blob};
 
+derive_from_json_struct!(TableIdArray, Vec<TableId>);
+
 derive_from_json_struct!(I32Array, Vec<i32>);
 
 impl From<Vec<u32>> for I32Array {
@@ -334,18 +336,6 @@ impl From<Vec<u32>> for I32Array {
 impl I32Array {
     pub fn into_u32_array(self) -> Vec<u32> {
         self.0.into_iter().map(|id| id as _).collect()
-    }
-}
-
-derive_from_json_struct!(ActorUpstreamActors, BTreeMap<FragmentId, Vec<ActorId>>);
-
-impl From<BTreeMap<u32, Vec<u32>>> for ActorUpstreamActors {
-    fn from(val: BTreeMap<u32, Vec<u32>>) -> Self {
-        let mut map = BTreeMap::new();
-        for (k, v) in val {
-            map.insert(k as _, v.into_iter().map(|a| a as _).collect());
-        }
-        Self(map)
     }
 }
 
@@ -410,6 +400,21 @@ derive_from_blob!(ConnectorSplits, risingwave_pb::source::ConnectorSplits);
 derive_from_blob!(VnodeBitmap, risingwave_pb::common::Buffer);
 derive_from_blob!(ActorMapping, risingwave_pb::stream_plan::PbActorMapping);
 derive_from_blob!(ExprContext, risingwave_pb::plan_common::PbExprContext);
+derive_from_blob!(
+    SourceRefreshMode,
+    risingwave_pb::plan_common::PbSourceRefreshMode
+);
+
+derive_from_blob!(
+    SinkSchemachange,
+    risingwave_pb::stream_plan::PbSinkSchemaChange
+);
+
+derive_array_from_blob!(
+    TypePairArray,
+    risingwave_pb::stream_plan::dispatch_output_mapping::TypePair,
+    PbTypePairArray
+);
 
 derive_array_from_blob!(
     HummockVersionDeltaArray,
@@ -425,3 +430,41 @@ pub enum StreamingParallelism {
 }
 
 impl Eq for StreamingParallelism {}
+
+#[derive(
+    Hash, Copy, Clone, Debug, PartialEq, Eq, EnumIter, DeriveActiveEnum, Serialize, Deserialize,
+)]
+#[sea_orm(rs_type = "String", db_type = "string(None)")]
+pub enum DispatcherType {
+    #[sea_orm(string_value = "HASH")]
+    Hash,
+    #[sea_orm(string_value = "BROADCAST")]
+    Broadcast,
+    #[sea_orm(string_value = "SIMPLE")]
+    Simple,
+    #[sea_orm(string_value = "NO_SHUFFLE")]
+    NoShuffle,
+}
+
+impl From<PbDispatcherType> for DispatcherType {
+    fn from(val: PbDispatcherType) -> Self {
+        match val {
+            PbDispatcherType::Unspecified => unreachable!(),
+            PbDispatcherType::Hash => DispatcherType::Hash,
+            PbDispatcherType::Broadcast => DispatcherType::Broadcast,
+            PbDispatcherType::Simple => DispatcherType::Simple,
+            PbDispatcherType::NoShuffle => DispatcherType::NoShuffle,
+        }
+    }
+}
+
+impl From<DispatcherType> for PbDispatcherType {
+    fn from(val: DispatcherType) -> Self {
+        match val {
+            DispatcherType::Hash => PbDispatcherType::Hash,
+            DispatcherType::Broadcast => PbDispatcherType::Broadcast,
+            DispatcherType::Simple => PbDispatcherType::Simple,
+            DispatcherType::NoShuffle => PbDispatcherType::NoShuffle,
+        }
+    }
+}

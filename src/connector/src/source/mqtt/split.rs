@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,7 +18,7 @@ use serde::{Deserialize, Serialize};
 use crate::error::ConnectorResult;
 use crate::source::{SplitId, SplitMetaData};
 
-/// The states of a NATS split, which will be persisted to checkpoint.
+/// The states of a MQTT split, which will be persisted to checkpoint.
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Hash)]
 pub struct MqttSplit {
     pub(crate) topic: String,

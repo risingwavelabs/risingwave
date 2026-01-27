@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -68,7 +68,7 @@ impl MetaSrvEnv {
 
         let updater = {
             let mgr = self.system_params_manager_impl_ref();
-            let path = path.to_path_buf();
+            let path = path.clone();
 
             async move {
                 // Let the watcher live until the end of the updater to prevent dropping (then stopping).
@@ -131,7 +131,7 @@ mod tests {
     //     sub: "rw-test",
     //     iss: Test,
     //     tier: Free,              <- difference from the default license in debug build
-    //     cpu_core_limit: None,
+    //     rwu_limit: None,
     //     exp: 9999999999,
     // }
     const INITIAL_KEY: &str = "eyJhbGciOiJSUzUxMiIsInR5cCI6IkpXVCJ9.\
@@ -149,10 +149,13 @@ mod tests {
         let key_file = tempfile::NamedTempFile::new().unwrap();
         std::fs::write(key_file.path(), INITIAL_KEY).unwrap();
 
-        let srv = MetaSrvEnv::for_test_opts(MetaOpts {
-            license_key_path: Some(key_file.path().to_path_buf()),
-            ..MetaOpts::test(false)
-        })
+        let srv = MetaSrvEnv::for_test_opts(
+            MetaOpts {
+                license_key_path: Some(key_file.path().to_path_buf()),
+                ..MetaOpts::test(false)
+            },
+            |_| (),
+        )
         .await;
         let _updater_handle = srv.may_start_watch_license_key_file().unwrap().unwrap();
 

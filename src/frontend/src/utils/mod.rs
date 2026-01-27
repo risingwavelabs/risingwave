@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -38,6 +38,8 @@ pub(crate) mod group_by;
 pub mod overwrite_options;
 pub use group_by::*;
 pub use overwrite_options::*;
+mod iceberg_predicate;
+pub use iceberg_predicate::*;
 
 use crate::expr::{Expr, ExprImpl, ExprRewriter, InputRef};
 
@@ -56,12 +58,15 @@ pub struct Substitute {
 
 impl ExprRewriter for Substitute {
     fn rewrite_input_ref(&mut self, input_ref: InputRef) -> ExprImpl {
-        assert_eq!(
-            input_ref.return_type(),
-            self.mapping[input_ref.index()].return_type(),
-            "Type mismatch when substituting {:?} with {:?}",
+        assert!(
+            input_ref
+                .return_type()
+                .equals_datatype(&self.mapping[input_ref.index()].return_type()),
+            "Type mismatch when substituting {:?} of {:?} with {:?} of {:?}",
             input_ref,
+            input_ref.return_type(),
             self.mapping[input_ref.index()],
+            self.mapping[input_ref.index()].return_type()
         );
         self.mapping[input_ref.index()].clone()
     }

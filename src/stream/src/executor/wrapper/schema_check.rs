@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -31,7 +31,8 @@ pub async fn schema_check(info: Arc<ExecutorInfo>, input: impl MessageStream) {
             Message::Chunk(chunk) => risingwave_common::util::schema_check::schema_check(
                 info.schema.fields().iter().map(|f| &f.data_type),
                 chunk.columns(),
-            ),
+            )
+            .map_err(|e| format!("{e}\nchunk:\n{}", chunk.to_pretty())),
             Message::Watermark(watermark) => {
                 let expected = info.schema.fields()[watermark.col_idx].data_type();
                 let found = &watermark.data_type;

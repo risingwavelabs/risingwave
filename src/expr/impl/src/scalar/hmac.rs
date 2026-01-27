@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -24,10 +24,10 @@ pub fn hmac(secret: &str, payload: &[u8], sha_type: &str) -> Result<Box<[u8]>> {
     } else if sha_type == "sha256" {
         Ok(hmac_sha256(secret, payload))
     } else {
-        return Err(ExprError::InvalidParam {
+        Err(ExprError::InvalidParam {
             name: "sha_type",
             reason: format!("Unsupported SHA type: {}", sha_type).into(),
-        });
+        })
     }
 }
 

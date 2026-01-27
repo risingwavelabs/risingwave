@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,8 +16,8 @@ use risingwave_common::catalog::{Schema, TableId};
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_connector::error::ConnectorResult;
 use risingwave_connector::source::cdc::external::{
-    CdcOffset, CdcTableType, ExternalTableConfig, ExternalTableReader, ExternalTableReaderImpl,
-    SchemaTableName,
+    CdcOffset, ExternalCdcTableType, ExternalTableConfig, ExternalTableReader,
+    ExternalTableReaderImpl, SchemaTableName,
 };
 
 /// This struct represents an external table to be read during backfill
@@ -35,7 +35,7 @@ pub struct ExternalStorageTable {
 
     config: ExternalTableConfig,
 
-    table_type: CdcTableType,
+    table_type: ExternalCdcTableType,
 
     /// The schema of the output columns, i.e., this table VIEWED BY some executor like
     /// `RowSeqScanExecutor`.
@@ -59,7 +59,7 @@ impl ExternalStorageTable {
         }: SchemaTableName,
         database_name: String,
         config: ExternalTableConfig,
-        table_type: CdcTableType,
+        table_type: ExternalCdcTableType,
         schema: Schema,
         pk_order_types: Vec<OrderType>,
         pk_indices: Vec<usize>,
@@ -74,6 +74,21 @@ impl ExternalStorageTable {
             schema,
             pk_order_types,
             pk_indices,
+        }
+    }
+
+    #[cfg(test)]
+    pub fn for_test_undefined() -> Self {
+        Self {
+            table_id: 1.into(),
+            table_name: "for_test_table_name".into(),
+            schema_name: "for_test_schema_name".into(),
+            database_name: "for_test_database_name".into(),
+            config: ExternalTableConfig::default(),
+            table_type: ExternalCdcTableType::Undefined,
+            schema: Schema::empty().to_owned(),
+            pk_order_types: vec![],
+            pk_indices: vec![],
         }
     }
 
@@ -106,6 +121,10 @@ impl ExternalStorageTable {
                 self.config.clone(),
                 self.schema.clone(),
                 self.pk_indices.clone(),
+                SchemaTableName {
+                    schema_name: self.schema_name.clone(),
+                    table_name: self.table_name.clone(),
+                },
             )
             .await
     }
@@ -116,6 +135,10 @@ impl ExternalStorageTable {
 
     pub fn database_name(&self) -> &str {
         self.database_name.as_str()
+    }
+
+    pub fn table_type(&self) -> &ExternalCdcTableType {
+        &self.table_type
     }
 
     pub async fn current_cdc_offset(

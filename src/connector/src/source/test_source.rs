@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,7 +19,7 @@ use async_trait::async_trait;
 use parking_lot::Mutex;
 use risingwave_common::bail;
 use risingwave_common::types::JsonbVal;
-use serde_derive::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize};
 use with_options::WithOptions;
 
 use crate::enforce_secret::EnforceSecret;

@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,10 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::borrow::Cow;
 use std::collections::HashMap;
 
-use regex::Regex;
-use risingwave_common::catalog::Schema;
+use regex::{Captures, Regex};
+use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::row::Row;
 use risingwave_common::types::{DataType, ScalarRefImpl, ToText};
 use thiserror_ext::AsReport;
@@ -28,7 +29,8 @@ pub enum TemplateEncoder {
     String(TemplateStringEncoder),
     RedisGeoKey(TemplateRedisGeoKeyEncoder),
     RedisGeoValue(TemplateRedisGeoValueEncoder),
-    RedisPubSubKey(TemplateRedisPubSubKeyEncoder),
+    RedisPubSubKey(TemplateRedisPubSubStreamKeyEncoder),
+    RedisStreamValue(TemplateRedisStreamValueEncoder),
 }
 impl TemplateEncoder {
     pub fn new_string(schema: Schema, col_indices: Option<Vec<usize>>, template: String) -> Self {
@@ -57,14 +59,28 @@ impl TemplateEncoder {
         ))
     }
 
-    pub fn new_pubsub_key(
+    pub fn new_pubsub_stream_key(
         schema: Schema,
         col_indices: Option<Vec<usize>>,
         channel: Option<String>,
         channel_column: Option<String>,
     ) -> Result<Self> {
         Ok(TemplateEncoder::RedisPubSubKey(
-            TemplateRedisPubSubKeyEncoder::new(schema, col_indices, channel, channel_column)?,
+            TemplateRedisPubSubStreamKeyEncoder::new(schema, col_indices, channel, channel_column)?,
+        ))
+    }
+
+    pub fn new_stream_value(
+        schema: Schema,
+        col_indices: Option<Vec<usize>>,
+        key_template: String,
+        value_template: String,
+    ) -> Self {
+        TemplateEncoder::RedisStreamValue(TemplateRedisStreamValueEncoder::new(
+            schema,
+            col_indices,
+            key_template,
+            value_template,
         ))
     }
 }
@@ -77,6 +93,7 @@ impl RowEncoder for TemplateEncoder {
             TemplateEncoder::RedisGeoValue(encoder) => &encoder.schema,
             TemplateEncoder::RedisGeoKey(encoder) => &encoder.key_encoder.schema,
             TemplateEncoder::RedisPubSubKey(encoder) => &encoder.schema,
+            TemplateEncoder::RedisStreamValue(encoder) => &encoder.value_encoder.schema,
         }
     }
 
@@ -86,6 +103,9 @@ impl RowEncoder for TemplateEncoder {
             TemplateEncoder::RedisGeoValue(encoder) => encoder.col_indices.as_deref(),
             TemplateEncoder::RedisGeoKey(encoder) => encoder.key_encoder.col_indices.as_deref(),
             TemplateEncoder::RedisPubSubKey(encoder) => encoder.col_indices.as_deref(),
+            TemplateEncoder::RedisStreamValue(encoder) => {
+                encoder.value_encoder.col_indices.as_deref()
+            }
         }
     }
 
@@ -101,39 +121,46 @@ impl RowEncoder for TemplateEncoder {
             TemplateEncoder::RedisGeoValue(encoder) => encoder.encode_cols(row, col_indices),
             TemplateEncoder::RedisGeoKey(encoder) => encoder.encode_cols(row, col_indices),
             TemplateEncoder::RedisPubSubKey(encoder) => encoder.encode_cols(row, col_indices),
+            TemplateEncoder::RedisStreamValue(encoder) => encoder.encode_cols(row, col_indices),
         }
     }
 }
 /// Encode a row according to a specified string template `user_id:{user_id}`.
 /// Data is encoded to string with [`ToText`].
 pub struct TemplateStringEncoder {
-    schema: Schema,
+    field_name_to_index: HashMap<String, (usize, Field)>,
     col_indices: Option<Vec<usize>>,
     template: String,
+    schema: Schema,
 }
 
 /// todo! improve the performance.
 impl TemplateStringEncoder {
     pub fn new(schema: Schema, col_indices: Option<Vec<usize>>, template: String) -> Self {
+        let field_name_to_index = schema
+            .fields()
+            .iter()
+            .enumerate()
+            .map(|(index, field)| (field.name.clone(), (index, field.clone())))
+            .collect();
         Self {
-            schema,
+            field_name_to_index,
             col_indices,
             template,
+            schema,
         }
     }
 
     pub fn check_string_format(format: &str, map: &HashMap<String, DataType>) -> Result<()> {
         // We will check if the string inside {} corresponds to a column name in rw.
-        // In other words, the content within {} should exclusively consist of column names from rw,
-        // which means '{{column_name}}' or '{{column_name1},{column_name2}}' would be incorrect.
-        let re = Regex::new(r"\{([^}]*)\}").unwrap();
+        let re = Regex::new(r"(\\\})|(\\\{)|\{([^}]*)\}").unwrap();
         if !re.is_match(format) {
             return Err(SinkError::Redis(
                 "Can't find {} in key_format or value_format".to_owned(),
             ));
         }
         for capture in re.captures_iter(format) {
-            if let Some(inner_content) = capture.get(1)
+            if let Some(inner_content) = capture.get(3)
                 && !map.contains_key(inner_content.as_str())
             {
                 return Err(SinkError::Redis(format!(
@@ -150,19 +177,27 @@ impl TemplateStringEncoder {
         row: impl Row,
         col_indices: impl Iterator<Item = usize>,
     ) -> Result<String> {
-        let mut s = self.template.clone();
-
-        for idx in col_indices {
-            let field = &self.schema[idx];
-            let name = &field.name;
-            let data = row.datum_at(idx);
-            // TODO: timestamptz ToText also depends on TimeZone
-            s = s.replace(
-                &format!("{{{}}}", name),
-                &data.to_text_with_type(&field.data_type),
-            );
-        }
-        Ok(s)
+        let s = self.template.clone();
+        let re = Regex::new(r"(\\\})|(\\\{)|\{([^}]*)\}").unwrap();
+        let col_indices: Vec<_> = col_indices.collect();
+        let replaced = re.replace_all(s.as_ref(), |caps: &Captures<'_>| {
+            if caps.get(1).is_some() {
+                Cow::Borrowed("}")
+            } else if caps.get(2).is_some() {
+                Cow::Borrowed("{")
+            } else if let Some(content) = caps.get(3) {
+                let (idx, field) = self.field_name_to_index.get(content.as_str()).unwrap();
+                if col_indices.contains(idx) {
+                    let data = row.datum_at(*idx).to_text_with_type(&field.data_type);
+                    Cow::Owned(data)
+                } else {
+                    Cow::Borrowed("")
+                }
+            } else {
+                Cow::Borrowed("")
+            }
+        });
+        Ok(replaced.to_string())
     }
 }
 
@@ -267,24 +302,23 @@ impl TemplateRedisGeoKeyEncoder {
         let member = row
             .datum_at(self.member_col)
             .ok_or_else(|| SinkError::Redis("member is null".to_owned()))?
-            .to_text()
-            .clone();
+            .to_text();
         let key = self.key_encoder.encode_cols(row, col_indices)?;
         Ok(TemplateEncoderOutput::RedisGeoKey((key, member)))
     }
 }
 
-pub enum TemplateRedisPubSubKeyEncoderInner {
-    PubSubName(String),
-    PubSubColumnIndex(usize),
+pub enum TemplateRedisPubSubStreamKeyEncoderInner {
+    PubSubStreamName(String),
+    PubSubStreamColumnIndex(usize),
 }
-pub struct TemplateRedisPubSubKeyEncoder {
-    inner: TemplateRedisPubSubKeyEncoderInner,
+pub struct TemplateRedisPubSubStreamKeyEncoder {
+    inner: TemplateRedisPubSubStreamKeyEncoderInner,
     schema: Schema,
     col_indices: Option<Vec<usize>>,
 }
 
-impl TemplateRedisPubSubKeyEncoder {
+impl TemplateRedisPubSubStreamKeyEncoder {
     pub fn new(
         schema: Schema,
         col_indices: Option<Vec<usize>>,
@@ -293,7 +327,7 @@ impl TemplateRedisPubSubKeyEncoder {
     ) -> Result<Self> {
         if let Some(channel) = channel {
             return Ok(Self {
-                inner: TemplateRedisPubSubKeyEncoderInner::PubSubName(channel),
+                inner: TemplateRedisPubSubStreamKeyEncoderInner::PubSubStreamName(channel),
                 schema,
                 col_indices,
             });
@@ -310,7 +344,9 @@ impl TemplateRedisPubSubKeyEncoder {
                     ))
                 })?;
             return Ok(Self {
-                inner: TemplateRedisPubSubKeyEncoderInner::PubSubColumnIndex(channel_column_index),
+                inner: TemplateRedisPubSubStreamKeyEncoderInner::PubSubStreamColumnIndex(
+                    channel_column_index,
+                ),
                 schema,
                 col_indices,
             });
@@ -326,18 +362,54 @@ impl TemplateRedisPubSubKeyEncoder {
         _col_indices: impl Iterator<Item = usize>,
     ) -> Result<TemplateEncoderOutput> {
         match &self.inner {
-            TemplateRedisPubSubKeyEncoderInner::PubSubName(channel) => {
-                Ok(TemplateEncoderOutput::RedisPubSubKey(channel.clone()))
+            TemplateRedisPubSubStreamKeyEncoderInner::PubSubStreamName(channel) => {
+                Ok(TemplateEncoderOutput::RedisPubSubStreamKey(channel.clone()))
             }
-            TemplateRedisPubSubKeyEncoderInner::PubSubColumnIndex(pubsub_col) => {
+            TemplateRedisPubSubStreamKeyEncoderInner::PubSubStreamColumnIndex(pubsub_col) => {
                 let pubsub_key = row
                     .datum_at(*pubsub_col)
                     .ok_or_else(|| SinkError::Redis("pubsub_key is null".to_owned()))?
-                    .to_text()
-                    .clone();
-                Ok(TemplateEncoderOutput::RedisPubSubKey(pubsub_key))
+                    .to_text();
+                Ok(TemplateEncoderOutput::RedisPubSubStreamKey(pubsub_key))
             }
         }
+    }
+}
+
+pub struct TemplateRedisStreamValueEncoder {
+    key_encoder: TemplateStringEncoder,
+    value_encoder: TemplateStringEncoder,
+}
+
+impl TemplateRedisStreamValueEncoder {
+    pub fn new(
+        schema: Schema,
+        col_indices: Option<Vec<usize>>,
+        key_template: String,
+        value_template: String,
+    ) -> Self {
+        let key_encoder =
+            TemplateStringEncoder::new(schema.clone(), col_indices.clone(), key_template);
+        let value_encoder = TemplateStringEncoder::new(schema, col_indices, value_template);
+        Self {
+            key_encoder,
+            value_encoder,
+        }
+    }
+
+    pub fn encode_cols(
+        &self,
+        row: impl Row,
+        col_indices: impl Iterator<Item = usize>,
+    ) -> Result<TemplateEncoderOutput> {
+        let col_indices: Vec<_> = col_indices.collect();
+        let key = self
+            .key_encoder
+            .encode_cols(&row, col_indices.clone().into_iter())?;
+        let value = self
+            .value_encoder
+            .encode_cols(row, col_indices.into_iter())?;
+        Ok(TemplateEncoderOutput::RedisStreamValue((key, value)))
     }
 }
 
@@ -349,7 +421,8 @@ pub enum TemplateEncoderOutput {
     // The key of redis's geospatial, including redis's key and member
     RedisGeoKey((String, String)),
 
-    RedisPubSubKey(String),
+    RedisPubSubStreamKey(String),
+    RedisStreamValue((String, String)),
 }
 
 impl TemplateEncoderOutput {
@@ -360,9 +433,12 @@ impl TemplateEncoderOutput {
                 "RedisGeoKey can't convert to string".to_owned(),
             )),
             TemplateEncoderOutput::RedisGeoValue(_) => Err(SinkError::Encode(
-                "RedisGeoVelue can't convert to string".to_owned(),
+                "RedisGeoValue can't convert to string".to_owned(),
             )),
-            TemplateEncoderOutput::RedisPubSubKey(s) => Ok(s),
+            TemplateEncoderOutput::RedisPubSubStreamKey(s) => Ok(s),
+            TemplateEncoderOutput::RedisStreamValue((_, _)) => Err(SinkError::Encode(
+                "RedisStreamValue can't convert to string".to_owned(),
+            )),
         }
     }
 }
@@ -375,9 +451,12 @@ impl SerTo<String> for TemplateEncoderOutput {
                 "RedisGeoKey can't convert to string".to_owned(),
             )),
             TemplateEncoderOutput::RedisGeoValue(_) => Err(SinkError::Encode(
-                "RedisGeoVelue can't convert to string".to_owned(),
+                "RedisGeoValue can't convert to string".to_owned(),
             )),
-            TemplateEncoderOutput::RedisPubSubKey(s) => Ok(s),
+            TemplateEncoderOutput::RedisPubSubStreamKey(s) => Ok(s),
+            TemplateEncoderOutput::RedisStreamValue((_, _)) => Err(SinkError::Encode(
+                "RedisStreamValue can't convert to string".to_owned(),
+            )),
         }
     }
 }
@@ -391,7 +470,8 @@ pub enum RedisSinkPayloadWriterInput {
     RedisGeoValue((String, String)),
     // The key of redis's geospatial, including redis's key and member
     RedisGeoKey((String, String)),
-    RedisPubSubKey(String),
+    RedisPubSubStreamKey(String),
+    RedisStreamValue((String, String)),
 }
 
 impl SerTo<RedisSinkPayloadWriterInput> for TemplateEncoderOutput {
@@ -404,8 +484,11 @@ impl SerTo<RedisSinkPayloadWriterInput> for TemplateEncoderOutput {
             TemplateEncoderOutput::RedisGeoValue((key, member)) => {
                 Ok(RedisSinkPayloadWriterInput::RedisGeoValue((key, member)))
             }
-            TemplateEncoderOutput::RedisPubSubKey(s) => {
-                Ok(RedisSinkPayloadWriterInput::RedisPubSubKey(s))
+            TemplateEncoderOutput::RedisPubSubStreamKey(s) => {
+                Ok(RedisSinkPayloadWriterInput::RedisPubSubStreamKey(s))
+            }
+            TemplateEncoderOutput::RedisStreamValue((key, value)) => {
+                Ok(RedisSinkPayloadWriterInput::RedisStreamValue((key, value)))
             }
         }
     }
@@ -417,5 +500,215 @@ impl<T: SerTo<Vec<u8>>> SerTo<RedisSinkPayloadWriterInput> for T {
         Ok(RedisSinkPayloadWriterInput::String(
             String::from_utf8(bytes).map_err(|e| SinkError::Redis(e.to_report_string()))?,
         ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use risingwave_common::catalog::{Field, Schema};
+    use risingwave_common::row::OwnedRow;
+    use risingwave_common::types::{DataType, ScalarImpl};
+
+    use super::*;
+
+    #[test]
+    fn test_template_format_validation() {
+        // Create a schema with test columns
+        let schema = Schema::new(vec![
+            Field {
+                data_type: DataType::Int32,
+                name: "id".to_owned(),
+            },
+            Field {
+                data_type: DataType::Varchar,
+                name: "name".to_owned(),
+            },
+            Field {
+                data_type: DataType::Varchar,
+                name: "email".to_owned(),
+            },
+        ]);
+
+        // Create a map of column names to their data types
+        let mut map = HashMap::new();
+        for field in schema.fields() {
+            map.insert(field.name.clone(), field.data_type.clone());
+        }
+
+        // Test various template formats
+        let valid_templates = vec![
+            "user:{id}",
+            "user:\\{{id}",
+            "user:\\{{id}\\}",
+            "user:\\{{id},{name}\\}",
+            "user:\\{prefix{id},suffix{name}\\}",
+            "user:\\{prefix{id},suffix{name},email:{email}\\}",
+            "user:\\{nested\\{deeply{id}\\}\\}",
+            "user:\\{outer\\{inner{id}\\},another{name}\\}",
+            "user:\\{complex\\{structure\\{with{id}\\},and{name}\\},email:{email}\\}",
+            "user:{id}{name}",
+            "user:\\\\{id}",
+            "user:\\\\\\{id}",
+            "user:\\a{id}",
+            "user:\\b{name}",
+            "user:{id}{name}{email}",
+        ];
+
+        for template in valid_templates {
+            // Validate the template format
+            assert!(
+                TemplateStringEncoder::check_string_format(template, &map).is_ok(),
+                "Template '{}' should be valid",
+                template
+            );
+        }
+
+        // Test invalid templates
+        let invalid_templates = vec![
+            "user:no_braces",        // No braces
+            "user:{invalid_column}", // Non-existent column
+            "user:{id",              // Unclosed brace
+            "user:id}",              // Unopened brace
+            "sadsadsad{}qw4e2ewq21", // Empty braces
+            "user:{}",
+            "user:{\\id}",
+        ];
+
+        for template in invalid_templates {
+            // Validate the template format
+            assert!(
+                TemplateStringEncoder::check_string_format(template, &map).is_err(),
+                "Template '{}' should be invalid",
+                template
+            );
+        }
+    }
+
+    #[test]
+    fn test_template_encoding() {
+        // Create a schema with test columns
+        let schema = Schema::new(vec![
+            Field {
+                data_type: DataType::Int32,
+                name: "id".to_owned(),
+            },
+            Field {
+                data_type: DataType::Varchar,
+                name: "name".to_owned(),
+            },
+            Field {
+                data_type: DataType::Varchar,
+                name: "email".to_owned(),
+            },
+        ]);
+
+        // Test cases with different template formats
+        let test_cases = vec![
+            ("user:{id}", "user:123", vec![0]),
+            ("user:\\{id\\}", "user:{id}", vec![0]),
+            ("user:\\{id,name\\}", "user:{id,name}", vec![0, 1]),
+            (
+                "user:\\{prefix{id},suffix{name}\\}",
+                "user:{prefix123,suffixJohn Doe}",
+                vec![0, 1],
+            ),
+            (
+                "user:\\{nested\\{deeply{id}\\}\\}",
+                "user:{nested{deeply123}}",
+                vec![0],
+            ),
+            (
+                "user:\\{outer\\{inner{id}\\},another{name}\\}",
+                "user:{outer{inner123},anotherJohn Doe}",
+                vec![0, 1],
+            ),
+            ("user:{id}{name}", "user:123John Doe", vec![0, 1]),
+            ("user:\\{id\\}{name}", "user:{id}John Doe", vec![0, 1]),
+            ("user:\\\\{id}", "user:\\{id}", vec![0]),
+            ("user:\\\\\\{id}", "user:\\\\{id}", vec![0]),
+            ("user:\\a{id}", "user:\\a123", vec![0]),
+            ("user:\\b{name}", "user:\\bJohn Doe", vec![1]),
+            (
+                "user:{id}{name}{email}",
+                "user:123John Doejohn@example.com",
+                vec![0, 1, 2],
+            ),
+        ];
+
+        for (template, expected, col_indices) in test_cases {
+            // Create an encoder with the template
+            let encoder = TemplateStringEncoder::new(
+                schema.clone(),
+                Some(col_indices.clone()),
+                template.to_owned(),
+            );
+
+            // Create a test row
+            let row = OwnedRow::new(vec![
+                Some(ScalarImpl::Int32(123)),
+                Some(ScalarImpl::Utf8("John Doe".into())),
+                Some(ScalarImpl::Utf8("john@example.com".into())),
+            ]);
+
+            // Encode the row
+            let result = encoder.encode_cols(row, col_indices.into_iter()).unwrap();
+
+            // Check the result
+            assert_eq!(result, expected, "Template '{}' encoding failed", template);
+        }
+    }
+
+    #[test]
+    fn test_complex_nested_template() {
+        // Create a schema with test columns
+        let schema = Schema::new(vec![
+            Field {
+                data_type: DataType::Int32,
+                name: "id".to_owned(),
+            },
+            Field {
+                data_type: DataType::Varchar,
+                name: "name".to_owned(),
+            },
+            Field {
+                data_type: DataType::Varchar,
+                name: "email".to_owned(),
+            },
+        ]);
+
+        // Create a map of column names to their data types
+        let mut map = HashMap::new();
+        for field in schema.fields() {
+            map.insert(field.name.clone(), field.data_type.clone());
+        }
+
+        // Test a very complex nested template
+        let complex_template = "user:\\{prefix{id},suffix{name},email:{email},nested\\{deeply{id}\\},outer\\{inner{name}\\}\\}";
+
+        // Validate the template format
+        assert!(TemplateStringEncoder::check_string_format(complex_template, &map).is_ok());
+
+        // Create an encoder with the template
+        let encoder = TemplateStringEncoder::new(
+            schema,
+            Some(vec![0, 1, 2]), // Include all columns
+            complex_template.to_owned(),
+        );
+
+        // Create a test row
+        let row = OwnedRow::new(vec![
+            Some(ScalarImpl::Int32(123)),
+            Some(ScalarImpl::Utf8("John Doe".into())),
+            Some(ScalarImpl::Utf8("john@example.com".into())),
+        ]);
+
+        // Encode the row
+        let result = encoder.encode_cols(row, vec![0, 1, 2].into_iter()).unwrap();
+
+        // Check that all column values are in the result
+        assert_eq!(
+            result,
+            "user:{prefix123,suffixJohn Doe,email:john@example.com,nested{deeply123},outer{innerJohn Doe}}"
+        );
     }
 }

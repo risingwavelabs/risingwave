@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -82,10 +82,10 @@ pub fn init_collector() {
         let path = Path::new(&path);
         tracing::info!("Hummock Tracing log path {}", path.to_string_lossy());
 
-        if let Some(parent) = path.parent() {
-            if !parent.exists() {
-                create_dir_all(parent).unwrap();
-            }
+        if let Some(parent) = path.parent()
+            && !parent.exists()
+        {
+            create_dir_all(parent).unwrap();
         }
         let f = OpenOptions::new()
             .write(true)
@@ -283,7 +283,10 @@ impl TraceSpan {
                     .map(|(epoch, table_ids)| {
                         (
                             *epoch,
-                            table_ids.iter().map(|table_id| table_id.table_id).collect(),
+                            table_ids
+                                .iter()
+                                .map(|table_id| table_id.as_raw_id())
+                                .collect(),
                         )
                     })
                     .collect(),

@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -11,6 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use futures_async_stream::try_stream;
@@ -277,6 +278,10 @@ mod tests {
                 encoding_config: EncodingProperties::Json(crate::parser::JsonProperties {
                     use_schema_registry: false,
                     timestamptz_handling: None,
+                    timestamp_handling: None,
+                    time_handling: None,
+                    bigint_unsigned_handling: None,
+                    handle_toast_columns: false,
                 }),
             },
             data_types,

@@ -33,7 +33,6 @@
   eowc_stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [v1, min, agg], stream_key: [v1], pk_columns: [v1], pk_conflict: NoCheck, watermark_columns: [v1] }
-    ├── tables: [ Materialize: 4294967294 ]
     └── StreamProject { exprs: [v1, min(v2), count(distinct v3)], output_watermarks: [[v1]] }
         └── StreamHashAgg [append_only, eowc] { group_key: [v1], aggs: [min(v2), count(distinct v3), count], output_watermarks: [[v1]] }
             ├── tables: [ HashAggState: 0, HashAggDedupForCol2: 1 ]
@@ -104,7 +103,6 @@
   eowc_stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [window_start, max], stream_key: [window_start], pk_columns: [window_start], pk_conflict: NoCheck, watermark_columns: [window_start] }
-    ├── tables: [ Materialize: 4294967294 ]
     └── StreamProject { exprs: [$expr1, max(t.b)], output_watermarks: [[$expr1]] }
         └── StreamHashAgg [append_only, eowc] { group_key: [$expr1], aggs: [max(t.b), count], output_watermarks: [[$expr1]] } { tables: [ HashAggState: 0 ] }
             └── StreamExchange Hash([0]) from 1
@@ -144,7 +142,6 @@
   eowc_stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [lag, _row_id(hidden), b(hidden)], stream_key: [_row_id, b], pk_columns: [_row_id, b], pk_conflict: NoCheck }
-    ├── tables: [ Materialize: 4294967294 ]
     └── StreamProject { exprs: [first_value, _row_id, b] }
         └── StreamEowcOverWindow { window_functions: [first_value(a) OVER(PARTITION BY b ORDER BY tm ASC ROWS BETWEEN 2 PRECEDING AND 2 PRECEDING)] }
             ├── tables: [ EowcOverWindow: 0 ]

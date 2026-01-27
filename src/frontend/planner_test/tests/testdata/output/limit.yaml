@@ -66,8 +66,10 @@
     (select *, RANK() OVER (ORDER BY v) AS rank from t)
     where rank <= 2;
   optimized_logical_plan_for_batch: |-
-    LogicalTopN { order: [t.v ASC], limit: 2, offset: 0, with_ties: true }
-    └─LogicalScan { table: t, columns: [t.v] }
+    LogicalProject { exprs: [t.v] }
+    └─LogicalFilter { predicate: (rank <= 2:Int32) }
+      └─LogicalOverWindow { window_functions: [rank() OVER(ORDER BY t.v ASCROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
+        └─LogicalScan { table: t, columns: [t.v] }
 - sql: |
     create table t (v int);
     select * from t order by v offset 1 fetch next 2 rows with ties;
@@ -80,26 +82,28 @@
     BatchLimit { limit: 1, offset: 0 }
     └─BatchValues { rows: [[1:Int32]] }
   stream_plan: |-
-    StreamMaterialize { columns: [c, _row_id(hidden)], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
-    └─StreamTopN [append_only] { order: [1:Int32 ASC], limit: 1, offset: 0 }
-      └─StreamValues { rows: [[1:Int32, 0:Int64]] }
+    StreamMaterialize { columns: [c], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
+    └─StreamProject { exprs: [1:Int32] }
+      └─StreamTopN [append_only] { order: [1:Int32 ASC], limit: 1, offset: 0 }
+        └─StreamValues { rows: [[1:Int32, 0:Int64]] }
 - sql: |
     select 1 c limit 1 offset 2
   batch_plan: |-
     BatchLimit { limit: 1, offset: 2 }
     └─BatchValues { rows: [[1:Int32]] }
   stream_plan: |-
-    StreamMaterialize { columns: [c, _row_id(hidden)], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
-    └─StreamTopN [append_only] { order: [1:Int32 ASC], limit: 1, offset: 2 }
-      └─StreamValues { rows: [[1:Int32, 0:Int64]] }
+    StreamMaterialize { columns: [c], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
+    └─StreamProject { exprs: [1:Int32] }
+      └─StreamTopN [append_only] { order: [1:Int32 ASC], limit: 1, offset: 2 }
+        └─StreamValues { rows: [[1:Int32, 0:Int64]] }
 - sql: |
     select 1 c order by 1 limit 1
   batch_plan: |-
     BatchTopN { order: [1:Int32 ASC], limit: 1, offset: 0 }
     └─BatchValues { rows: [[1:Int32]] }
   stream_plan: |-
-    StreamMaterialize { columns: [c, _row_id(hidden)], stream_key: [], pk_columns: [c], pk_conflict: NoCheck }
-    └─StreamExchange { dist: HashShard(1:Int32) }
+    StreamMaterialize { columns: [c], stream_key: [], pk_columns: [c], pk_conflict: NoCheck }
+    └─StreamProject { exprs: [1:Int32] }
       └─StreamTopN [append_only] { order: [1:Int32 ASC], limit: 1, offset: 0 }
         └─StreamValues { rows: [[1:Int32, 0:Int64]] }
 - sql: |
@@ -118,9 +122,8 @@
     └─BatchValues { rows: [[1:Int32], [1:Int32]] }
   stream_plan: |-
     StreamMaterialize { columns: [c, _row_id(hidden)], stream_key: [_row_id], pk_columns: [c, _row_id], pk_conflict: NoCheck }
-    └─StreamExchange { dist: HashShard(1:Int32) }
-      └─StreamTopN [append_only] { order: [1:Int32 ASC], limit: 10, offset: 0 }
-        └─StreamValues { rows: [[1:Int32, 0:Int64], [1:Int32, 1:Int64]] }
+    └─StreamTopN [append_only] { order: [1:Int32 ASC], limit: 10, offset: 0 }
+      └─StreamValues { rows: [[1:Int32, 0:Int64], [1:Int32, 1:Int64]] }
 - sql: |
     create table t (a int);
     select count(*) from t limit 1;
@@ -132,12 +135,13 @@
           └─BatchScan { table: t, columns: [], distribution: SomeShard }
   stream_plan: |-
     StreamMaterialize { columns: [count], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
-    └─StreamTopN { order: [sum0(count) ASC], limit: 1, offset: 0 }
-      └─StreamProject { exprs: [sum0(count)] }
-        └─StreamSimpleAgg { aggs: [sum0(count), count] }
-          └─StreamExchange { dist: Single }
-            └─StreamStatelessSimpleAgg { aggs: [count] }
-              └─StreamTableScan { table: t, columns: [t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+    └─StreamProject { exprs: [sum0(count)] }
+      └─StreamTopN { order: [sum0(count) ASC], limit: 1, offset: 0 }
+        └─StreamProject { exprs: [sum0(count)] }
+          └─StreamSimpleAgg [append_only] { aggs: [sum0(count), count] }
+            └─StreamExchange { dist: Single }
+              └─StreamStatelessSimpleAgg { aggs: [count] }
+                └─StreamTableScan { table: t, columns: [t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - sql: |
     create table t (a int);
     select count(*) from t order by 1 limit 1;
@@ -155,12 +159,13 @@
           └─BatchScan { table: t, columns: [], distribution: SomeShard }
   stream_plan: |-
     StreamMaterialize { columns: [count], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
-    └─StreamTopN { order: [sum0(count) ASC], limit: 1, offset: 0 }
-      └─StreamProject { exprs: [sum0(count)] }
-        └─StreamSimpleAgg { aggs: [sum0(count), count] }
-          └─StreamExchange { dist: Single }
-            └─StreamStatelessSimpleAgg { aggs: [count] }
-              └─StreamTableScan { table: t, columns: [t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+    └─StreamProject { exprs: [sum0(count)] }
+      └─StreamTopN { order: [sum0(count) ASC], limit: 1, offset: 0 }
+        └─StreamProject { exprs: [sum0(count)] }
+          └─StreamSimpleAgg [append_only] { aggs: [sum0(count), count] }
+            └─StreamExchange { dist: Single }
+              └─StreamStatelessSimpleAgg { aggs: [count] }
+                └─StreamTableScan { table: t, columns: [t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - sql: |
     create table t (a int primary key);
     select * from t limit 1;

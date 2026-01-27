@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -69,10 +69,10 @@ where
     /// Update the number of sealed Sstables.
     task_progress: Option<Arc<TaskProgress>>,
 
-    last_table_id: u32,
+    last_table_id: TableId,
 
     vnode_count: usize,
-    table_vnode_partition: BTreeMap<u32, u32>,
+    table_vnode_partition: BTreeMap<TableId, u32>,
     split_weight_by_vnode: u32,
     /// When vnode of the coming key is greater than `largest_vnode_in_current_partition`, we will
     /// switch SST.
@@ -95,7 +95,7 @@ where
         builder_factory: F,
         compactor_metrics: Arc<CompactorMetrics>,
         task_progress: Option<Arc<TaskProgress>>,
-        table_vnode_partition: BTreeMap<u32, u32>,
+        table_vnode_partition: BTreeMap<TableId, u32>,
         concurrent_uploading_sst_count: Option<usize>,
         compaction_catalog_agent_ref: CompactionCatalogAgentRef,
     ) -> Self {
@@ -108,7 +108,7 @@ where
             current_builder: None,
             compactor_metrics,
             task_progress,
-            last_table_id: 0,
+            last_table_id: 0.into(),
             table_vnode_partition,
             vnode_count,
             split_weight_by_vnode: 0,
@@ -129,7 +129,7 @@ where
             current_builder: None,
             compactor_metrics: Arc::new(CompactorMetrics::unused()),
             task_progress: None,
-            last_table_id: 0,
+            last_table_id: 0.into(),
             table_vnode_partition: BTreeMap::default(),
             vnode_count: VirtualNode::COUNT_FOR_TEST,
             split_weight_by_vnode: 0,
@@ -205,10 +205,10 @@ where
         // the captured reference to `current_builder` is also required to be `Send`, and then
         // `current_builder` itself is required to be `Sync`, which is unnecessary.
         let mut need_seal_current = false;
-        if let Some(builder) = self.current_builder.as_mut() {
-            if is_new_user_key {
-                need_seal_current = switch_builder || builder.reach_capacity();
-            }
+        if let Some(builder) = self.current_builder.as_mut()
+            && is_new_user_key
+        {
+            need_seal_current = switch_builder || builder.reach_capacity();
         }
 
         if need_seal_current {
@@ -229,36 +229,35 @@ where
 
     pub fn check_switch_builder(&mut self, user_key: &UserKey<&[u8]>) -> bool {
         let mut switch_builder = false;
-        if user_key.table_id.table_id != self.last_table_id {
-            let new_vnode_partition_count =
-                self.table_vnode_partition.get(&user_key.table_id.table_id);
+        if user_key.table_id != self.last_table_id {
+            let new_vnode_partition_count = self.table_vnode_partition.get(&user_key.table_id);
 
             self.vnode_count = self
                 .compaction_catalog_agent_ref
-                .vnode_count(user_key.table_id.table_id);
+                .vnode_count(user_key.table_id);
             self.largest_vnode_in_current_partition = self.vnode_count - 1;
 
             if new_vnode_partition_count.is_some()
                 || self.table_vnode_partition.contains_key(&self.last_table_id)
             {
-                if new_vnode_partition_count.is_some() {
-                    if (*new_vnode_partition_count.unwrap() as usize) > self.vnode_count {
+                if let Some(new_vnode_partition_count) = new_vnode_partition_count {
+                    if (*new_vnode_partition_count as usize) > self.vnode_count {
                         tracing::warn!(
                             "vnode partition count {} is larger than vnode count {}",
-                            new_vnode_partition_count.unwrap(),
+                            new_vnode_partition_count,
                             self.vnode_count
                         );
 
                         self.split_weight_by_vnode = 0;
                     } else {
-                        self.split_weight_by_vnode = *new_vnode_partition_count.unwrap()
+                        self.split_weight_by_vnode = *new_vnode_partition_count;
                     };
                 } else {
                     self.split_weight_by_vnode = 0;
                 }
 
                 // table_id change
-                self.last_table_id = user_key.table_id.table_id;
+                self.last_table_id = user_key.table_id;
                 switch_builder = true;
                 if self.split_weight_by_vnode > 1 {
                     self.largest_vnode_in_current_partition =
@@ -393,11 +392,11 @@ impl TableBuilderFactory for LocalTableBuilderFactory {
             .clone()
             .create_sst_writer(id, writer_options);
         let table_id_to_vnode = HashMap::from_iter(vec![(
-            TableId::default().table_id(),
+            TableId::default().as_raw_id(),
             VirtualNode::COUNT_FOR_TEST,
         )]);
         let table_id_to_watermark_serde =
-            HashMap::from_iter(vec![(TableId::default().table_id(), None)]);
+            HashMap::from_iter(vec![(TableId::default().as_raw_id(), None)]);
         let builder = SstableBuilder::for_test(
             id,
             writer,
@@ -548,8 +547,11 @@ mod tests {
         };
 
         {
-            let table_partition_vnode =
-                BTreeMap::from([(1_u32, 4_u32), (2_u32, 4_u32), (3_u32, 4_u32)]);
+            let table_partition_vnode = BTreeMap::from([
+                (1_u32.into(), 4_u32),
+                (2_u32.into(), 4_u32),
+                (3_u32.into(), 4_u32),
+            ]);
 
             let compaction_catalog_agent_ref =
                 CompactionCatalogAgent::for_test(vec![0, 1, 2, 3, 4, 5]);
@@ -603,16 +605,21 @@ mod tests {
 
         {
             // Test different table vnode count
-            let table_partition_vnode =
-                BTreeMap::from([(1_u32, 4_u32), (2_u32, 4_u32), (3_u32, 4_u32)]);
+            let table_partition_vnode = BTreeMap::from([
+                (1_u32.into(), 4_u32),
+                (2_u32.into(), 4_u32),
+                (3_u32.into(), 4_u32),
+            ]);
 
-            let table_id_to_vnode = HashMap::from_iter(vec![(1, 64), (2, 128), (3, 256)]);
+            let table_id_to_vnode =
+                HashMap::from_iter(vec![(1.into(), 64), (2.into(), 128), (3.into(), 256)]);
             let table_id_to_watermark_serde =
-                HashMap::from_iter(vec![(1, None), (2, None), (3, None)]);
+                HashMap::from_iter(vec![(1.into(), None), (2.into(), None), (3.into(), None)]);
             let compaction_catalog_agent_ref = Arc::new(CompactionCatalogAgent::new(
                 FilterKeyExtractorImpl::FullKey(FullKeyFilterKeyExtractor),
                 table_id_to_vnode,
                 table_id_to_watermark_serde,
+                HashMap::default(),
             ));
 
             let mut builder = CapacitySplitTableBuilder::new(

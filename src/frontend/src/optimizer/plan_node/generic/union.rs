@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -68,6 +68,17 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for Union<PlanRef> {
 }
 
 impl<PlanRef: GenericPlanRef> Union<PlanRef> {
+    pub fn clone_with_inputs<OtherPlanRef>(
+        &self,
+        inputs: Vec<OtherPlanRef>,
+    ) -> Union<OtherPlanRef> {
+        Union {
+            all: self.all,
+            inputs,
+            source_col: self.source_col,
+        }
+    }
+
     pub fn fields_pretty<'a>(&self) -> StrAssocArr<'a> {
         vec![("all", Pretty::debug(&self.all))]
     }

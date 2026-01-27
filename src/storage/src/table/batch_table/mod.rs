@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,7 +19,7 @@ use std::sync::Arc;
 
 use await_tree::{InstrumentAwait, SpanExt};
 use bytes::{Bytes, BytesMut};
-use foyer::CacheHint;
+use foyer::Hint;
 use futures::future::try_join_all;
 use futures::{Stream, StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
@@ -42,6 +42,8 @@ use risingwave_hummock_sdk::key::{
 };
 use risingwave_pb::plan_common::StorageTableDesc;
 use tracing::trace;
+mod vector_index_reader;
+pub use vector_index_reader::VectorIndexReader;
 
 use crate::StateStore;
 use crate::error::{StorageError, StorageResult};
@@ -135,9 +137,7 @@ impl<S: StateStore> BatchTableInner<S, EitherSerde> {
         vnodes: Option<Arc<Bitmap>>,
         table_desc: &StorageTableDesc,
     ) -> Self {
-        let table_id = TableId {
-            table_id: table_desc.table_id,
-        };
+        let table_id = table_desc.table_id;
         let column_descs = table_desc
             .columns
             .iter()
@@ -394,8 +394,7 @@ impl<S: StateStore, SD: ValueRowSerde> BatchTableInner<S, SD> {
 
         let read_options = ReadOptions {
             prefix_hint,
-            retention_seconds: self.table_option.retention_seconds,
-            cache_policy: CachePolicy::Fill(CacheHint::Normal),
+            cache_policy: CachePolicy::Fill(Hint::Normal),
             ..Default::default()
         };
         let read_snapshot = self
@@ -404,14 +403,13 @@ impl<S: StateStore, SD: ValueRowSerde> BatchTableInner<S, SD> {
                 wait_epoch,
                 NewReadSnapshotOptions {
                     table_id: self.table_id,
+                    table_option: self.table_option,
                 },
             )
             .await?;
-        // TODO: may avoid the clone here when making the `on_key_value_fn` non-static
-        let row_serde = self.row_serde.clone();
         match read_snapshot
             .on_key_value(serialized_pk, read_options, move |key, value| {
-                let row = row_serde.deserialize(value)?;
+                let row = self.row_serde.deserialize(value)?;
                 Ok((key.epoch_with_gap.pure_epoch(), row))
             })
             .await?
@@ -530,6 +528,7 @@ mod merge_vnode_stream {
 
     pub(super) type SortKeyType = Bytes; // TODO: may use Vec
 
+    #[define_opaque(MergedVnodeStream)]
     pub(super) fn merge_stream<
         R: Send,
         RowSt: Stream<Item = StorageResult<((), R)>> + Send,
@@ -627,6 +626,7 @@ impl<S: StateStore, SD: ValueRowSerde> BatchTableInner<S, SD> {
                 wait_epoch,
                 NewReadSnapshotOptions {
                     table_id: self.table_id,
+                    table_option: self.table_option,
                 },
             )
             .await?;
@@ -668,8 +668,8 @@ impl<S: StateStore, SD: ValueRowSerde> BatchTableInner<S, SD> {
         let cache_policy = match &encoded_key_range {
             // To prevent unbounded range scan queries from polluting the block cache, use the
             // low priority fill policy.
-            (Unbounded, _) | (_, Unbounded) => CachePolicy::Fill(CacheHint::Low),
-            _ => CachePolicy::Fill(CacheHint::Normal),
+            (Unbounded, _) | (_, Unbounded) => CachePolicy::Fill(Hint::Low),
+            _ => CachePolicy::Fill(Hint::Normal),
         };
 
         let table_key_range = prefixed_range_with_vnode::<&Bytes>(encoded_key_range, vnode);
@@ -679,7 +679,6 @@ impl<S: StateStore, SD: ValueRowSerde> BatchTableInner<S, SD> {
             {
                 let read_options = ReadOptions {
                     prefix_hint,
-                    retention_seconds: self.table_option.retention_seconds,
                     prefetch_options,
                     cache_policy,
                 };
@@ -925,6 +924,7 @@ impl<S: StateStore, SD: ValueRowSerde> BatchTableInner<S, SD> {
                 epoch,
                 NewReadSnapshotOptions {
                     table_id: self.table_id,
+                    table_option: self.table_option,
                 },
             )
             .await?;

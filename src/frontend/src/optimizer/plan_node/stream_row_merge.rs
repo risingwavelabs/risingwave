@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,17 +19,18 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
-use crate::PlanRef;
 use crate::error::Result;
 use crate::expr::{ExprRewriter, ExprVisitor};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::generic::{GenericPlanRef, PhysicalPlanRef};
-use crate::optimizer::plan_node::stream::StreamPlanRef;
+use crate::optimizer::plan_node::stream::StreamPlanNodeMetadata;
 use crate::optimizer::plan_node::utils::{Distill, childless_record};
 use crate::optimizer::plan_node::{
-    ExprRewritable, PlanBase, PlanTreeNodeBinary, Stream, StreamNode,
+    ExprRewritable, PlanBase, PlanTreeNodeBinary, Stream, StreamNode, StreamPlanRef as PlanRef,
 };
-use crate::optimizer::property::{FunctionalDependencySet, WatermarkColumns};
+use crate::optimizer::property::{
+    Distribution, FunctionalDependencySet, MonotonicityMap, StreamKind, WatermarkColumns,
+};
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
 /// `StreamRowMerge` is used for merging two streams with the same stream key and distribution.
@@ -57,8 +58,14 @@ impl StreamRowMerge {
         assert_eq!(lhs_mapping.target_size(), rhs_mapping.target_size());
         assert_eq!(lhs_input.distribution(), rhs_input.distribution());
         assert_eq!(lhs_input.stream_key(), rhs_input.stream_key());
-        let functional_dependency =
-            FunctionalDependencySet::with_key(lhs_mapping.target_size(), &[]);
+        assert_eq!(lhs_input.stream_kind(), rhs_input.stream_kind());
+
+        // Currently, `RowMerge` only supports and is only used for merging singleton inputs, typically
+        // simple agg and approx percentile agg. We check the input's properties here for sanity.
+        assert_eq!(lhs_input.distribution(), &Distribution::Single);
+        assert_eq!(lhs_input.stream_key(), Some(&[][..]));
+        assert_eq!(lhs_input.stream_kind(), StreamKind::Retract);
+
         let mut schema_fields = Vec::with_capacity(lhs_mapping.target_size());
         let o2i_lhs = lhs_mapping
             .inverse()
@@ -80,18 +87,16 @@ impl StreamRowMerge {
         }
         let schema = Schema::new(schema_fields);
         assert!(!schema.is_empty());
-        let watermark_columns = WatermarkColumns::new();
-
         let base = PlanBase::new_stream(
             lhs_input.ctx(),
             schema,
-            lhs_input.stream_key().map(|k| k.to_vec()),
-            functional_dependency,
-            lhs_input.distribution().clone(),
-            lhs_input.append_only(),
+            Some(vec![]),
+            FunctionalDependencySet::new(lhs_mapping.target_size()),
+            Distribution::Single,
+            StreamKind::Retract,
             lhs_input.emit_on_window_close(),
-            watermark_columns,
-            lhs_input.columns_monotonicity().clone(),
+            WatermarkColumns::new(),
+            MonotonicityMap::new(),
         );
         Ok(Self {
             base,
@@ -116,7 +121,7 @@ impl Distill for StreamRowMerge {
     }
 }
 
-impl PlanTreeNodeBinary for StreamRowMerge {
+impl PlanTreeNodeBinary<Stream> for StreamRowMerge {
     fn left(&self) -> PlanRef {
         self.lhs_input.clone()
     }
@@ -136,7 +141,7 @@ impl PlanTreeNodeBinary for StreamRowMerge {
     }
 }
 
-impl_plan_tree_node_for_binary! { StreamRowMerge }
+impl_plan_tree_node_for_binary! { Stream, StreamRowMerge }
 
 impl StreamNode for StreamRowMerge {
     fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> PbNodeBody {
@@ -147,7 +152,7 @@ impl StreamNode for StreamRowMerge {
     }
 }
 
-impl ExprRewritable for StreamRowMerge {
+impl ExprRewritable<Stream> for StreamRowMerge {
     fn has_rewritable_expr(&self) -> bool {
         false
     }

@@ -19,6 +19,7 @@ query ii
 select t.value, sum00(weight) OVER (PARTITION BY value) from (values (1, 1), (null, 2), (3, 3)) as t(value, weight);
 ----
 1 1
+NULL 2
 3 3
 
 statement ok

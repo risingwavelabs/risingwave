@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -168,7 +168,7 @@ impl SessionFrameGap {
         self.add_expr = Some(Arc::new(build_func(
             PbExprType::Add,
             order_data_type.clone(),
-            vec![input_expr.clone().boxed(), gap_expr.clone().boxed()],
+            vec![input_expr.boxed(), gap_expr.boxed()],
         )?));
         Ok(())
     }

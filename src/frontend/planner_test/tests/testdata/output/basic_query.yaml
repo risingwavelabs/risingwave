@@ -216,9 +216,8 @@
     create index idx on t(col);
     select id from idx;
   stream_plan: |-
-    StreamMaterialize { columns: [id], stream_key: [id], pk_columns: [id], pk_conflict: NoCheck }
-    └─StreamExchange { dist: HashShard(idx.id) }
-      └─StreamTableScan { table: idx, columns: [idx.id], stream_scan_type: ArrangementBackfill, stream_key: [idx.id], pk: [col, id], dist: SomeShard }
+    StreamMaterialize { columns: [id, idx.col(hidden)], stream_key: [idx.col, id], pk_columns: [idx.col, id], pk_conflict: NoCheck }
+    └─StreamTableScan { table: idx, columns: [idx.id, idx.col], stream_scan_type: ArrangementBackfill, stream_key: [idx.col, idx.id], pk: [col, id], dist: UpstreamHashShard(idx.col) }
 - sql: |
     select * from generate_series(1, 10000000, 1) where Now() is null;
   batch_plan: 'BatchValues { rows: [] }'

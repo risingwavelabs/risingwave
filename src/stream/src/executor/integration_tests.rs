@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,7 +20,6 @@ use futures_async_stream::try_stream;
 use multimap::MultiMap;
 use risingwave_common::array::*;
 use risingwave_common::catalog::Field;
-use risingwave_common::config;
 use risingwave_common::types::*;
 use risingwave_common::util::epoch::{EpochExt, test_epoch};
 use risingwave_expr::aggregate::AggCall;
@@ -52,7 +51,7 @@ async fn test_merger_sum_aggr() {
     };
 
     let barrier_test_env = LocalBarrierTestEnv::for_test().await;
-    let mut next_actor_id = 0;
+    let mut next_actor_id = 0.into();
     let next_actor_id = &mut next_actor_id;
     let mut actors = HashSet::new();
     let mut gen_next_actor_id = || {
@@ -72,9 +71,9 @@ async fn test_merger_sum_aggr() {
         let (tx, rx) = channel_for_test();
         let actor_future = async move {
             let input = Executor::new(
-                ExecutorInfo::new(
+                ExecutorInfo::for_test(
                     input_schema,
-                    PkIndices::new(),
+                    StreamKey::new(),
                     "ReceiverExecutor".to_owned(),
                     0,
                 ),
@@ -92,7 +91,7 @@ async fn test_merger_sum_aggr() {
                     .unwrap();
             let consumer = SenderConsumer {
                 input: aggregator.boxed(),
-                channel: Output::new(233, tx),
+                channel: Output::new(233.into(), tx),
             };
 
             let actor = Actor::new(
@@ -125,7 +124,7 @@ async fn test_merger_sum_aggr() {
         let (actor_future, channel) = make_actor(rx);
         outputs.push(channel);
         actor_futures.push(actor_future);
-        inputs.push(Output::new(233, tx));
+        inputs.push(Output::new(233.into(), tx));
     }
 
     // create a round robin dispatcher, which dispatches messages to the actors
@@ -133,32 +132,31 @@ async fn test_merger_sum_aggr() {
     let actor_id = gen_next_actor_id();
     let (input, rx) = channel_for_test();
     let actor_future = {
-        let shared_context = barrier_test_env.shared_context.clone();
         let local_barrier_manager = barrier_test_env.local_barrier_manager.clone();
+        let config = local_barrier_manager.env.global_config().clone();
         let expr_context = expr_context.clone();
         async move {
             let receiver_op = Executor::new(
-                ExecutorInfo::new(
+                ExecutorInfo::for_test(
                     // input schema of local simple agg
                     Schema::new(vec![Field::unnamed(DataType::Int64)]),
-                    PkIndices::new(),
+                    StreamKey::new(),
                     "ReceiverExecutor".to_owned(),
                     0,
                 ),
                 ReceiverExecutor::for_test(actor_id, rx, local_barrier_manager.clone()).boxed(),
             );
-            let dispatcher = DispatchExecutor::new(
+            let (dispatcher, _tx) = DispatchExecutor::for_test(
                 receiver_op,
                 vec![DispatcherImpl::RoundRobin(RoundRobinDataDispatcher::new(
                     inputs,
-                    vec![0],
-                    0,
+                    DispatchOutputMapping::Simple(vec![0]),
+                    0.into(),
                 ))],
-                0,
-                0,
-                shared_context.clone(),
+                0.into(),
+                0.into(),
+                config,
                 metrics,
-                config::default::developer::stream_chunk_size(),
             );
             let actor = Actor::new(
                 dispatcher,
@@ -188,10 +186,10 @@ async fn test_merger_sum_aggr() {
                 Field::unnamed(DataType::Int64),
             ]);
             let merger = Executor::new(
-                ExecutorInfo::new(
+                ExecutorInfo::for_test(
                     // output schema of local simple agg
                     schema.clone(),
-                    PkIndices::new(),
+                    StreamKey::new(),
                     "MergeExecutor".to_owned(),
                     0,
                 ),
@@ -200,6 +198,8 @@ async fn test_merger_sum_aggr() {
                     outputs,
                     local_barrier_manager.clone(),
                     schema,
+                    100,
+                    None,
                 )
                 .boxed(),
             );
@@ -284,8 +284,10 @@ async fn test_merger_sum_aggr() {
             .unwrap();
         epoch.inc_epoch();
     }
-    let b = Barrier::new_test_barrier(epoch)
-        .with_mutation(Mutation::Stop(actors.clone().into_iter().collect()));
+    let b = Barrier::new_test_barrier(epoch).with_mutation(Mutation::Stop(StopMutation {
+        dropped_actors: actors.clone().into_iter().collect(),
+        ..Default::default()
+    }));
     barrier_test_env.inject_barrier(&b, actors);
     input
         .send(Message::Barrier(b.into_dispatcher()).into())

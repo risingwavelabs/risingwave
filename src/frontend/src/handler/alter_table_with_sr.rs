@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -39,9 +39,10 @@ pub async fn handle_refresh_schema(
     table_name: ObjectName,
 ) -> Result<RwPgResponse> {
     let session = handler_args.session;
-    let original_table = fetch_table_catalog_for_alter(session.as_ref(), &table_name)?;
+    let (original_table, has_incoming_sinks) =
+        fetch_table_catalog_for_alter(session.as_ref(), &table_name)?;
 
-    if !original_table.incoming_sinks.is_empty() {
+    if has_incoming_sinks {
         bail_not_implemented!("alter table with incoming sinks");
     }
 
@@ -61,7 +62,7 @@ pub async fn handle_refresh_schema(
         .create_sql_ast_purified()
         .context("unable to parse original table definition")?;
 
-    let (source, table, graph, col_index_mapping, job_type) = {
+    let (source, table, graph, job_type) = {
         let result = get_replace_table_plan(
             &session,
             table_name,
@@ -71,9 +72,7 @@ pub async fn handle_refresh_schema(
         )
         .await;
         match result {
-            Ok((source, table, graph, col_index_mapping, job_type)) => {
-                Ok((source, table, graph, col_index_mapping, job_type))
-            }
+            Ok((source, table, graph, job_type)) => Ok((source, table, graph, job_type)),
             Err(e) => {
                 let report = e.to_report_string();
                 // NOTE(yuhao): This is a workaround for reporting errors when columns to drop is referenced by generated column.
@@ -95,7 +94,12 @@ pub async fn handle_refresh_schema(
     let catalog_writer = session.catalog_writer()?;
 
     catalog_writer
-        .replace_table(source, table, graph, col_index_mapping, job_type)
+        .replace_table(
+            source.map(|x| x.to_prost()),
+            table.to_prost(),
+            graph,
+            job_type,
+        )
         .await?;
 
     Ok(PgResponse::empty_result(StatementType::ALTER_TABLE))

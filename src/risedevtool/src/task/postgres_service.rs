@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -30,9 +30,16 @@ impl DockerServiceConfig for PostgresConfig {
 
     fn args(&self) -> Vec<String> {
         // Enable CDC.
-        ["-c", "wal_level=logical", "-c", "max_replication_slots=30"]
-            .map(String::from)
-            .to_vec()
+        [
+            "-c",
+            "wal_level=logical",
+            "-c",
+            "max_replication_slots=30",
+            "-c",
+            "log_statement=all",
+        ]
+        .map(String::from)
+        .to_vec()
     }
 
     fn envs(&self) -> Vec<(String, String)> {
@@ -55,6 +62,10 @@ impl DockerServiceConfig for PostgresConfig {
     fn data_path(&self) -> Option<String> {
         self.persist_data
             .then(|| "/var/lib/postgresql/data".to_owned())
+    }
+
+    fn latency_ms(&self) -> u32 {
+        self.latency_ms
     }
 }
 

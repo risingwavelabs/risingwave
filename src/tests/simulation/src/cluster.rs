@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -226,8 +226,7 @@ metrics_level = "Disabled"
 [meta]
 default_parallelism = {default_parallelism}
 "#
-            )
-            .to_owned();
+            );
             file.write_all(config_data.as_bytes())
                 .expect("failed to write config file");
             file.into_temp_path()
@@ -338,6 +337,11 @@ default_parallelism = {default_parallelism}
             ..Default::default()
         }
     }
+
+    /// Returns the total number of cores for streaming compute nodes.
+    pub fn total_streaming_cores(&self) -> u32 {
+        (self.compute_nodes * self.compute_node_cores) as u32
+    }
 }
 
 /// A risingwave cluster.
@@ -434,7 +438,7 @@ impl Cluster {
         for i in 1..=conf.meta_nodes {
             meta_addrs.push(format!("http://meta-{i}:5690"));
         }
-        std::env::set_var("RW_META_ADDR", meta_addrs.join(","));
+        unsafe { std::env::set_var("RW_META_ADDR", meta_addrs.join(",")) };
 
         let sqlite_file_handle: NamedTempFile = NamedTempFile::new().unwrap();
         let file_path = sqlite_file_handle.path().display().to_string();
@@ -485,6 +489,8 @@ impl Cluster {
                 conf.config_path.as_str(),
                 "--listen-addr",
                 "0.0.0.0:4566",
+                "--health-check-listener-addr",
+                "0.0.0.0:6786",
                 "--advertise-addr",
                 &format!("192.168.2.{i}:4566"),
                 "--temp-secret-file-dir",
@@ -663,7 +669,7 @@ impl Cluster {
         let rand_nodes = worker_nodes
             .iter()
             .choose_multiple(&mut rand::rng(), n)
-            .to_vec();
+            .clone();
         Ok(rand_nodes.iter().cloned().cloned().collect_vec())
     }
 
@@ -763,7 +769,7 @@ impl Cluster {
         self.kill_nodes(nodes, opts.restart_delay_secs).await
     }
 
-    /// Kill the given nodes by their names and restart them in 2s + restart_delay_secs with a
+    /// Kill the given nodes by their names and restart them in 2s + `restart_delay_secs` with a
     /// probability of 0.1.
     #[cfg_or_panic(madsim)]
     pub async fn kill_nodes(
@@ -902,6 +908,45 @@ impl Cluster {
             }
         }
     }
+
+    pub async fn wait_for_recovery(&mut self) -> Result<()> {
+        let timeout = Duration::from_secs(200);
+        let mut session = self.start_session();
+        tokio::time::timeout(timeout, async {
+            loop {
+                if let Ok(result) = session.run("select rw_recovery_status()").await
+                    && result == "RUNNING"
+                {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_nanos(10)).await;
+            }
+        })
+        .await?;
+        Ok(())
+    }
+
+    /// This function only works if all actors in your cluster are following adaptive scaling.
+    pub async fn wait_for_scale(&mut self, parallelism: usize) -> Result<()> {
+        let timeout = Duration::from_secs(200);
+        let mut session = self.start_session();
+        tokio::time::timeout(timeout, async {
+            loop {
+                let parallelism_sql = format!(
+                    "select count(parallelism) filter (where parallelism != {parallelism})\
+                from (select count(*) parallelism from rw_actors group by fragment_id);"
+                );
+                if let Ok(result) = session.run(&parallelism_sql).await
+                    && result == "0"
+                {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_nanos(10)).await;
+            }
+        })
+        .await?;
+        Ok(())
+    }
 }
 
 type SessionRequest = (
@@ -916,6 +961,16 @@ pub struct Session {
 }
 
 impl Session {
+    /// Run the given SQLs on the session.
+    pub async fn run_all(&mut self, sqls: Vec<impl Into<String>>) -> Result<Vec<String>> {
+        let mut results = Vec::with_capacity(sqls.len());
+        for sql in sqls {
+            let result = self.run(sql).await?;
+            results.push(result);
+        }
+        Ok(results)
+    }
+
     /// Run the given SQL query on the session.
     pub async fn run(&mut self, sql: impl Into<String>) -> Result<String> {
         let (tx, rx) = oneshot::channel();

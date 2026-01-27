@@ -1,0 +1,246 @@
+control substitution on
+
+statement ok
+create secret s1 with ( backend = 'meta' ) as '1000000000';
+
+
+statement ok
+create secret s2 with ( backend = 'meta' ) as '2000000000';
+
+# ==== test non shared source ====
+
+statement ok
+set streaming_use_shared_source to false;
+
+system ok
+rpk topic create test_alter_non_shared_source -X brokers=message_queue_sasl_1:19092 -X sasl.mechanism=PLAIN -X user=dev -X pass=rw
+
+system ok
+cat << EOF | rpk topic produce test_alter_non_shared_source -X brokers=message_queue_sasl_1:19092 -X sasl.mechanism=PLAIN -X user=dev -X pass=rw
+{"x": 1}
+{"x": 2}
+{"x": 3}
+EOF
+
+system ok
+rpk topic create test_alter_non_shared_source -X brokers=message_queue_sasl_2:19093 -X sasl.mechanism=PLAIN -X user=dev1 -X pass=rw
+
+system ok
+cat << EOF | rpk topic produce test_alter_non_shared_source -X brokers=message_queue_sasl_2:19093 -X sasl.mechanism=PLAIN -X user=dev1 -X pass=rw
+{"x": 4}
+{"x": 5}
+{"x": 6}
+EOF
+
+statement ok
+create secret s_broker with ( backend = 'meta' ) as 'message_queue_sasl_1:19092';
+
+statement ok
+create secret s_username with ( backend = 'meta' ) as 'dev';
+
+statement ok
+create source non_shared_source_1 (x int) with (
+    connector = 'kafka',
+    properties.receive.message.max.bytes = secret s1,
+    properties.bootstrap.server = secret s_broker,
+    properties.security.protocol = 'SASL_PLAINTEXT',
+    properties.sasl.mechanism = 'PLAIN',
+    properties.sasl.username = secret s_username,
+    properties.sasl.password = 'rw',
+    topic = 'test_alter_non_shared_source'
+) format plain encode json;
+
+statement ok
+create materialized view non_shared_source_1_mv as select * from non_shared_source_1;
+
+statement ok
+create source non_shared_source_2 (x int) with (
+    connector = 'kafka',
+    properties.receive.message.max.bytes = secret s1,
+    properties.bootstrap.server = secret s_broker,
+    properties.security.protocol = 'SASL_PLAINTEXT',
+    properties.sasl.mechanism = 'PLAIN',
+    properties.sasl.username = secret s_username,
+    properties.sasl.password = 'rw',
+    topic = 'test_alter_non_shared_source'
+) format plain encode json;
+
+sleep 2s
+
+# ingest from message_queue_sasl_1
+query I retry 3 backoff 1s
+select * from non_shared_source_1_mv order by x;
+----
+1
+2
+3
+
+
+statement ok
+alter secret s_broker with ( backend = 'meta' ) as 'message_queue_sasl_2:19093';
+
+statement ok
+alter secret s_username with ( backend = 'meta' ) as 'dev1';
+
+# alter source connector also triggers re-apply secret
+statement ok
+alter source non_shared_source_1 connector WITH (properties.receive.message.max.bytes = secret s2);
+
+statement ok
+alter source non_shared_source_2 connector WITH (properties.receive.message.max.bytes = secret s2);
+
+query I
+select count(*)  from rw_sources where definition ILIKE '%secret s2%' and name = 'non_shared_source_1';
+----
+1
+
+
+query I
+select count(*)  from rw_sources where definition ILIKE '%secret s2%' and name = 'non_shared_source_2';
+----
+1
+
+
+system ok
+cat << EOF | rpk topic produce test_alter_non_shared_source -X brokers=message_queue_sasl_2:19093 -X sasl.mechanism=PLAIN -X user=dev1 -X pass=rw
+{"x": 7}
+{"x": 8}
+{"x": 9}
+EOF
+
+sleep 5s
+
+# the alter source connector applies to existing stream jobs
+query I retry 3 backoff 1s
+select * from non_shared_source_1_mv order by x;
+----
+1
+2
+3
+7
+8
+9
+
+
+# ==== test non shared source with connection ====
+
+system ok
+rpk topic create test_alter_non_shared_source_conn -X brokers=message_queue_sasl_1:19092 -X sasl.mechanism=PLAIN -X user=dev -X pass=rw
+
+system ok
+cat << EOF | rpk topic produce test_alter_non_shared_source_conn -X brokers=message_queue_sasl_1:19092 -X sasl.mechanism=PLAIN -X user=dev -X pass=rw
+{"x": 1}
+{"x": 2}
+{"x": 3}
+EOF
+
+system ok
+rpk topic create test_alter_non_shared_source_conn -X brokers=message_queue_sasl_2:19093 -X sasl.mechanism=PLAIN -X user=dev1 -X pass=rw
+
+system ok
+cat << EOF | rpk topic produce test_alter_non_shared_source_conn -X brokers=message_queue_sasl_2:19093 -X sasl.mechanism=PLAIN -X user=dev1 -X pass=rw
+{"x": 4}
+{"x": 5}
+{"x": 6}
+EOF
+
+statement ok
+create secret s_broker_conn with ( backend = 'meta' ) as 'message_queue_sasl_1:19092';
+
+statement ok
+create connection kafka_conn_non_shared with (
+    type = 'kafka',
+    properties.bootstrap.server = secret s_broker_conn,
+    properties.security.protocol = 'SASL_PLAINTEXT',
+    properties.sasl.mechanism = 'PLAIN',
+    properties.sasl.username = 'dev',
+    properties.sasl.password = 'rw'
+);
+
+statement ok
+create source non_shared_conn_source (x int) with (
+    connector = 'kafka',
+    connection = kafka_conn_non_shared,
+    topic = 'test_alter_non_shared_source_conn'
+) format plain encode json;
+
+statement ok
+create materialized view non_shared_conn_source_mv as select * from non_shared_conn_source;
+
+query I retry 3 backoff 1s
+select * from non_shared_conn_source_mv order by x;
+----
+1
+2
+3
+
+statement ok
+alter secret s_broker_conn with ( backend = 'meta' ) as 'message_queue_sasl_2:19093';
+
+# KafkaConnection only allows altering SASL/security fields, not bootstrap server.
+# Changing the broker is done by altering the underlying secret, and `ALTER CONNECTION` triggers
+# re-applying secrets and broadcasting updated props to dependent sources.
+statement ok
+alter connection kafka_conn_non_shared connector with (properties.sasl.username = 'dev1');
+
+system ok
+cat << EOF | rpk topic produce test_alter_non_shared_source_conn -X brokers=message_queue_sasl_2:19093 -X sasl.mechanism=PLAIN -X user=dev1 -X pass=rw
+{"x": 7}
+{"x": 8}
+{"x": 9}
+EOF
+
+# add data to original broker, it should not be ingested
+system ok
+cat << EOF | rpk topic produce test_alter_non_shared_source_conn -X brokers=message_queue_sasl_1:19092 -X sasl.mechanism=PLAIN -X user=dev -X pass=rw
+{"x": 10}
+{"x": 11}
+{"x": 12}
+EOF
+
+
+query I retry 10 backoff 1s
+select * from non_shared_conn_source_mv order by x;
+----
+1
+2
+3
+7
+8
+9
+
+
+# ==== clean up ====
+
+statement ok
+drop source non_shared_source_1 cascade;
+
+statement ok
+drop source non_shared_source_2 cascade;
+
+statement ok
+drop materialized view non_shared_conn_source_mv;
+
+statement ok
+drop source non_shared_conn_source;
+
+statement ok
+drop connection kafka_conn_non_shared;
+
+statement ok
+drop secret s_broker_conn;
+
+system ok
+rpk topic delete test_alter_non_shared_source -X brokers=message_queue_sasl_1:19092 -X sasl.mechanism=PLAIN -X user=dev -X pass=rw
+
+system ok
+rpk topic delete test_alter_non_shared_source -X brokers=message_queue_sasl_2:19093 -X sasl.mechanism=PLAIN -X user=dev1 -X pass=rw
+
+system ok
+rpk topic delete test_alter_non_shared_source_conn -X brokers=message_queue_sasl_1:19092 -X sasl.mechanism=PLAIN -X user=dev -X pass=rw
+
+system ok
+rpk topic delete test_alter_non_shared_source_conn -X brokers=message_queue_sasl_2:19093 -X sasl.mechanism=PLAIN -X user=dev1 -X pass=rw
+
+statement ok
+set streaming_use_shared_source to true;

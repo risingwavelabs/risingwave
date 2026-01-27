@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,13 +13,12 @@
 // limitations under the License.
 
 #![allow(clippy::derive_partial_eq_without_eq)]
-#![feature(array_chunks)]
+#![warn(clippy::large_futures, clippy::large_stack_frames)]
 #![feature(coroutines)]
 #![feature(proc_macro_hygiene)]
 #![feature(stmt_expr_attributes)]
 #![feature(box_patterns)]
 #![feature(trait_alias)]
-#![feature(let_chains)]
 #![feature(box_into_inner)]
 #![feature(type_alias_impl_trait)]
 #![feature(associated_type_defaults)]
@@ -33,9 +32,12 @@
 #![feature(register_tool)]
 #![feature(assert_matches)]
 #![feature(never_type)]
+#![feature(map_try_insert)]
 #![register_tool(rw)]
 #![recursion_limit = "256"]
 #![feature(min_specialization)]
+#![feature(custom_inner_attributes)]
+#![feature(iter_array_chunks)]
 
 use std::time::Duration;
 
@@ -43,6 +45,9 @@ use duration_str::parse_std;
 use serde::de;
 
 pub mod aws_utils;
+
+pub mod allow_alter_on_fly_fields;
+
 mod enforce_secret;
 pub mod error;
 mod macros;
@@ -62,6 +67,11 @@ pub use with_options::{Get, GetKeyIter, WithOptionsSecResolved, WithPropertiesEx
 
 #[cfg(test)]
 mod with_options_test;
+
+pub const AUTO_SCHEMA_CHANGE_KEY: &str = "auto.schema.change";
+pub const SINK_CREATE_TABLE_IF_NOT_EXISTS_KEY: &str = "create_table_if_not_exists";
+pub const SINK_TARGET_TABLE_NAME: &str = "table.name";
+pub const SINK_INTERMEDIATE_TABLE_NAME: &str = "intermediate.table.name";
 
 pub(crate) fn deserialize_u32_from_string<'de, D>(deserializer: D) -> Result<u32, D::Error>
 where
@@ -162,11 +172,30 @@ where
     ))
 }
 
+pub(crate) fn deserialize_optional_duration_from_string<'de, D>(
+    deserializer: D,
+) -> Result<Option<Duration>, D::Error>
+where
+    D: de::Deserializer<'de>,
+{
+    let s: Option<String> = de::Deserialize::deserialize(deserializer)?;
+    if let Some(s) = s {
+        let duration = parse_std(&s).map_err(|_| de::Error::invalid_value(
+            de::Unexpected::Str(&s),
+            &"The String value unit support for one of:[“y”,“mon”,“w”,“d”,“h”,“m”,“s”, “ms”, “µs”, “ns”]",
+        ))?;
+        Ok(Some(duration))
+    } else {
+        Ok(None)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use expect_test::expect_file;
 
     use crate::with_options_test::{
+        generate_allow_alter_on_fly_fields_combined, generate_with_options_yaml_connection,
         generate_with_options_yaml_sink, generate_with_options_yaml_source,
     };
 
@@ -178,6 +207,16 @@ mod tests {
         expect_file!("../with_options_source.yaml").assert_eq(&generate_with_options_yaml_source());
 
         expect_file!("../with_options_sink.yaml").assert_eq(&generate_with_options_yaml_sink());
+
+        expect_file!("../with_options_connection.yaml")
+            .assert_eq(&generate_with_options_yaml_connection());
+    }
+
+    /// This test ensures that the `allow_alter_on_fly` fields Rust file is up-to-date.
+    #[test]
+    fn test_allow_alter_on_fly_fields_rust_up_to_date() {
+        expect_file!("../src/allow_alter_on_fly_fields.rs")
+            .assert_eq(&generate_allow_alter_on_fly_fields_combined());
     }
 
     /// Test some serde behavior we rely on.

@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -199,9 +199,6 @@ impl FromStr for Timestamptz {
         };
         if ret.time.tz_offset.is_none() {
             return Err(ERROR_MSG);
-        }
-        if ret.date.year < 1600 {
-            return Err("parsing timestamptz with year < 1600 unsupported");
         }
         Ok(Timestamptz(
             ret.timestamp_tz()

@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -59,6 +59,7 @@ enum Commands {
 pub enum Components {
     #[clap(name = "minio")]
     Minio,
+    Lakekeeper,
     Hdfs,
     PrometheusAndGrafana,
     Pubsub,
@@ -74,16 +75,18 @@ pub enum Components {
     HummockTrace,
     Coredump,
     NoBacktrace,
-    ExternalUdf,
-    WasmUdf,
-    JsUdf,
-    PythonUdf,
+    Udf,
+    NoDefaultFeatures,
+    Moat,
+    DataFusion,
+    Adbc,
 }
 
 impl Components {
     pub fn title(&self) -> String {
         match self {
             Self::Minio => "[Component] Hummock: MinIO + MinIO-CLI",
+            Self::Lakekeeper => "[Component] Apache Iceberg: Lakekeeper REST Catalog",
             Self::Hdfs => "[Component] Hummock: Hdfs Backend",
             Self::PrometheusAndGrafana => "[Component] Metrics: Prometheus + Grafana",
             Self::Pubsub => "[Component] Google Pubsub",
@@ -99,10 +102,11 @@ impl Components {
             Self::HummockTrace => "[Build] Hummock Trace",
             Self::Coredump => "[Runtime] Enable coredump",
             Self::NoBacktrace => "[Runtime] Disable backtrace",
-            Self::ExternalUdf => "[Build] Enable external UDF",
-            Self::WasmUdf => "[Build] Enable Wasm UDF",
-            Self::JsUdf => "[Build] Enable JS UDF",
-            Self::PythonUdf => "[Build] Enable Python UDF",
+            Self::Udf => "[Build] Enable UDF",
+            Self::NoDefaultFeatures => "[Build] Disable default features",
+            Self::Moat => "[Component] Enable Moat",
+            Self::DataFusion => "[Build] Enable DataFusion",
+            Self::Adbc => "[Component] ADBC Snowflake Driver",
         }
         .into()
     }
@@ -112,6 +116,11 @@ impl Components {
             Self::Minio => {
                 "
 Required by Hummock state store."
+            }
+            Self::Lakekeeper => {
+                "
+Required if you want to use Apache Iceberg REST Catalog.
+Provides catalog and metadata management for Apache Iceberg tables."
             }
             Self::Hdfs => {
                 "
@@ -201,10 +210,31 @@ As a result, RisingWave will dump the core on panics.
 With this option enabled, RiseDev will not set `RUST_BACKTRACE` when launching nodes.
                 "
             }
-            Self::ExternalUdf => "Required if you want to support external UDF.",
-            Self::WasmUdf => "Required if you want to support WASM UDF.",
-            Self::JsUdf => "Required if you want to support JS UDF.",
-            Self::PythonUdf => "Required if you want to support Python UDF.",
+            Self::Udf => {
+                "
+Add --features udf to build command (by default disabled).
+Required if you want to support UDF."
+            }
+            Self::NoDefaultFeatures => {
+                "
+Add --no-default-features to build command.
+Currently, default features are: rw-static-link, all-connectors
+"
+            }
+            Self::Moat => {
+                "
+Enable Moat as distributed hybrid cache service."
+            }
+            Self::DataFusion => {
+                "
+Enable DataFusion as the optional query engine for Iceberg tables."
+            }
+            Self::Adbc => {
+                "
+Enable ADBC (Arrow Database Connectivity) Snowflake driver support.
+Required if you want to use ADBC Snowflake source.
+This will download the ADBC Snowflake driver shared library (.so/.dylib)."
+            }
         }
         .into()
     }
@@ -212,6 +242,7 @@ With this option enabled, RiseDev will not set `RUST_BACKTRACE` when launching n
     pub fn from_env(env: impl AsRef<str>) -> Option<Self> {
         match env.as_ref() {
             "ENABLE_MINIO" => Some(Self::Minio),
+            "ENABLE_LAKEKEEPER" => Some(Self::Lakekeeper),
             "ENABLE_HDFS" => Some(Self::Hdfs),
             "ENABLE_PROMETHEUS_GRAFANA" => Some(Self::PrometheusAndGrafana),
             "ENABLE_PUBSUB" => Some(Self::Pubsub),
@@ -227,10 +258,11 @@ With this option enabled, RiseDev will not set `RUST_BACKTRACE` when launching n
             "ENABLE_HUMMOCK_TRACE" => Some(Self::HummockTrace),
             "ENABLE_COREDUMP" => Some(Self::Coredump),
             "DISABLE_BACKTRACE" => Some(Self::NoBacktrace),
-            "ENABLE_EXTERNAL_UDF" => Some(Self::ExternalUdf),
-            "ENABLE_WASM_UDF" => Some(Self::WasmUdf),
-            "ENABLE_JS_UDF" => Some(Self::JsUdf),
-            "ENABLE_PYTHON_UDF" => Some(Self::PythonUdf),
+            "ENABLE_UDF" => Some(Self::Udf),
+            "DISABLE_DEFAULT_FEATURES" => Some(Self::NoDefaultFeatures),
+            "ENABLE_MOAT" => Some(Self::Moat),
+            "ENABLE_DATAFUSION" => Some(Self::DataFusion),
+            "ENABLE_ADBC" => Some(Self::Adbc),
             _ => None,
         }
     }
@@ -238,6 +270,7 @@ With this option enabled, RiseDev will not set `RUST_BACKTRACE` when launching n
     pub fn env(&self) -> String {
         match self {
             Self::Minio => "ENABLE_MINIO",
+            Self::Lakekeeper => "ENABLE_LAKEKEEPER",
             Self::Hdfs => "ENABLE_HDFS",
             Self::PrometheusAndGrafana => "ENABLE_PROMETHEUS_GRAFANA",
             Self::Pubsub => "ENABLE_PUBSUB",
@@ -253,10 +286,11 @@ With this option enabled, RiseDev will not set `RUST_BACKTRACE` when launching n
             Self::HummockTrace => "ENABLE_HUMMOCK_TRACE",
             Self::Coredump => "ENABLE_COREDUMP",
             Self::NoBacktrace => "DISABLE_BACKTRACE",
-            Self::ExternalUdf => "ENABLE_EXTERNAL_UDF",
-            Self::WasmUdf => "ENABLE_WASM_UDF",
-            Self::JsUdf => "ENABLE_JS_UDF",
-            Self::PythonUdf => "ENABLE_PYTHON_UDF",
+            Self::Udf => "ENABLE_UDF",
+            Self::NoDefaultFeatures => "DISABLE_DEFAULT_FEATURES",
+            Self::Moat => "ENABLE_MOAT",
+            Self::DataFusion => "ENABLE_DATAFUSION",
+            Self::Adbc => "ENABLE_ADBC",
         }
         .into()
     }
@@ -298,7 +332,7 @@ fn configure(chosen: &[Components]) -> Result<Option<Vec<Components>>> {
                 style("Space").reverse(),
             )
         )
-        .items_checked(&items)
+        .items_checked(items)
         .max_length(ITEMS_PER_PAGE)
         .interact_opt()? else {
         return Ok(None);

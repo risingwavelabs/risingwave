@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use super::*;
-use crate::catalog::CatalogError;
 use crate::catalog::root_catalog::SchemaPath;
 use crate::{Binder, bind_data_type};
 
@@ -22,7 +21,7 @@ pub async fn handle_drop_function(
     handler_args: HandlerArgs,
     if_exists: bool,
     mut func_desc: Vec<FunctionDesc>,
-    _option: Option<ReferentialAction>,
+    option: Option<ReferentialAction>,
     aggregate: bool,
 ) -> Result<RwPgResponse> {
     if func_desc.len() != 1 {
@@ -38,7 +37,7 @@ pub async fn handle_drop_function(
     let session = handler_args.session;
     let db_name = &session.database();
     let (schema_name, function_name) =
-        Binder::resolve_schema_qualified_name(db_name, func_desc.name)?;
+        Binder::resolve_schema_qualified_name(db_name, &func_desc.name)?;
     let search_path = session.config().search_path();
     let user_name = &session.user_name();
     let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
@@ -90,20 +89,23 @@ pub async fn handle_drop_function(
                 }
                 function.id
             }
-            Err(CatalogError::NotFound(kind, _)) if kind == "function" && if_exists => {
-                return Ok(RwPgResponse::builder(stmt_type)
-                    .notice(format!(
-                        "function \"{}\" does not exist, skipping",
-                        function_name
-                    ))
-                    .into());
+            Err(e) => {
+                if if_exists && e.is_not_found("function") {
+                    return Ok(RwPgResponse::builder(stmt_type)
+                        .notice(format!(
+                            "function \"{}\" does not exist, skipping",
+                            function_name
+                        ))
+                        .into());
+                }
+                return Err(e.into());
             }
-            Err(e) => return Err(e.into()),
         }
     };
 
     let catalog_writer = session.catalog_writer()?;
-    catalog_writer.drop_function(function_id).await?;
+    let cascade = matches!(option, Some(ReferentialAction::Cascade));
+    catalog_writer.drop_function(function_id, cascade).await?;
 
     Ok(PgResponse::empty_result(stmt_type))
 }

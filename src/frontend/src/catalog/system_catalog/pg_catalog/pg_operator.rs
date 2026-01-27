@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,7 +16,7 @@ use risingwave_common::types::Fields;
 use risingwave_frontend_macro::system_catalog;
 
 /// The catalog `pg_operator` stores operator info.
-/// Reference: [`https://www.postgresql.org/docs/current/catalog-pg-operator.html`]
+/// Reference: `https://www.postgresql.org/docs/current/catalog-pg-operator.html`
 #[system_catalog(view, "pg_catalog.pg_operator")]
 #[derive(Fields)]
 struct PgOpclass {

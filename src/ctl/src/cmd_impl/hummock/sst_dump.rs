@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -27,11 +27,12 @@ use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::value_encoding::column_aware_row_encoding::ColumnAwareSerde;
 use risingwave_common::util::value_encoding::{BasicSerde, EitherSerde, ValueRowDeserializer};
 use risingwave_frontend::TableCatalog;
-use risingwave_hummock_sdk::HummockSstableObjectId;
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::level::Level;
 use risingwave_hummock_sdk::sstable_info::{SstableInfo, SstableInfoInner};
+use risingwave_hummock_sdk::{HummockObjectId, HummockSstableObjectId};
 use risingwave_object_store::object::{ObjectMetadata, ObjectStoreImpl};
+use risingwave_pb::id::TableId;
 use risingwave_rpc_client::MetaClient;
 use risingwave_storage::hummock::value::HummockValue;
 use risingwave_storage::hummock::{
@@ -43,7 +44,7 @@ use risingwave_storage::row_serde::value_serde::ValueRowSerdeNew;
 use crate::CtlContext;
 use crate::common::HummockServiceOpts;
 
-type TableData = HashMap<u32, TableCatalog>;
+type TableData = HashMap<TableId, TableCatalog>;
 
 #[derive(Args, Debug)]
 pub struct SstDumpArgs {
@@ -126,10 +127,9 @@ pub async fn sst_dump(context: &CtlContext, args: SstDumpArgs) -> anyhow::Result
             let obj = obj_store.metadata(&obj_path).await?;
             print_object(&obj);
             let meta_offset = get_meta_offset_from_object(&obj, obj_store.as_ref()).await?;
-            let obj_id = SstableStore::get_object_id_from_path(&obj.key);
             sst_dump_via_sstable_store(
                 &sstable_store,
-                obj_id,
+                (*obj_id).into(),
                 meta_offset,
                 obj.total_size as u64,
                 &table_data,
@@ -138,13 +138,23 @@ pub async fn sst_dump(context: &CtlContext, args: SstDumpArgs) -> anyhow::Result
             .await?;
         } else {
             let mut metadata_iter = sstable_store
-                .list_object_metadata_from_object_store(None, None, None)
+                .list_sst_object_metadata_from_object_store(None, None, None)
                 .await?;
             while let Some(obj) = metadata_iter.try_next().await? {
                 print_object(&obj);
+                let obj_id = SstableStore::get_object_id_from_path(&obj.key);
+                let obj_id = match obj_id {
+                    HummockObjectId::Sstable(obj_id) => obj_id,
+                    HummockObjectId::VectorFile(_) | HummockObjectId::HnswGraphFile(_) => {
+                        println!(
+                            "object id {:?} not a sstable object id: {}. skip",
+                            obj_id, obj.key
+                        );
+                        continue;
+                    }
+                };
                 let meta_offset =
                     get_meta_offset_from_object(&obj, sstable_store.store().as_ref()).await?;
-                let obj_id = SstableStore::get_object_id_from_path(&obj.key);
                 sst_dump_via_sstable_store(
                     &sstable_store,
                     obj_id,
@@ -204,7 +214,18 @@ pub async fn sst_dump_via_sstable_store(
         object_id,
         file_size,
         meta_offset,
-        ..Default::default()
+        // below are default unused value
+        sst_id: 0.into(),
+        key_range: Default::default(),
+        table_ids: vec![],
+        stale_key_count: 0,
+        total_key_count: 0,
+        min_epoch: 0,
+        max_epoch: 0,
+        uncompressed_file_size: 0,
+        range_tombstone_count: 0,
+        bloom_filter_kind: Default::default(),
+        sst_size: 0,
     }
     .into();
     let sstable_cache = sstable_store
@@ -347,7 +368,7 @@ fn print_table_column(
     humm_val: HummockValue<&[u8]>,
     table_data: &TableData,
 ) -> anyhow::Result<()> {
-    let table_id = full_key.user_key.table_id.table_id();
+    let table_id = full_key.user_key.table_id;
 
     print!("\t\t table: id={}, ", table_id);
     let table_catalog = match table_data.get(&table_id) {

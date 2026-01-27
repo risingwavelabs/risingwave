@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -28,6 +28,13 @@ pub struct Dedup<PlanRef> {
 }
 
 impl<PlanRef: GenericPlanRef> Dedup<PlanRef> {
+    pub fn clone_with_input<OtherPlanRef>(&self, input: OtherPlanRef) -> Dedup<OtherPlanRef> {
+        Dedup {
+            input,
+            dedup_cols: self.dedup_cols.clone(),
+        }
+    }
+
     pub fn new(input: PlanRef, dedup_cols: Vec<usize>) -> Self {
         debug_assert!(
             dedup_cols.iter().all(|&idx| idx < input.schema().len()),

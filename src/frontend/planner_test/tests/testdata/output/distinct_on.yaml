@@ -33,6 +33,22 @@
         └─StreamExchange { dist: HashShard(t2.k) }
           └─StreamProject { exprs: [(t2.k + t2.v) as $expr1, t2.k, t2._row_id] }
             └─StreamTableScan { table: t2, columns: [t2.k, t2.v, t2._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t2._row_id], pk: [_row_id], dist: UpstreamHashShard(t2._row_id) }
+- name: distinct on order by uses original column name
+  sql: |
+    create table t (a int, b int);
+    select distinct on (a) a as x, b from t order by a, b;
+  batch_plan: |-
+    BatchExchange { order: [t.a ASC, t.b ASC], dist: Single }
+    └─BatchSort { order: [t.a ASC, t.b ASC] }
+      └─BatchGroupTopN { order: [t.a ASC, t.b ASC], limit: 1, offset: 0, group_key: [t.a] }
+        └─BatchExchange { order: [], dist: HashShard(t.a) }
+          └─BatchScan { table: t, columns: [t.a, t.b], distribution: SomeShard }
+  stream_plan: |-
+    StreamMaterialize { columns: [x, b], stream_key: [x], pk_columns: [x, b], pk_conflict: NoCheck }
+    └─StreamProject { exprs: [t.a, t.b] }
+      └─StreamGroupTopN { order: [t.a ASC, t.b ASC], limit: 1, offset: 0, group_key: [t.a] }
+        └─StreamExchange { dist: HashShard(t.a) }
+          └─StreamTableScan { table: t, columns: [t.a, t.b, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - sql: |
     create table t (a int, b int, c int);
     select distinct on (foo, b) a as foo, b from t;
@@ -115,3 +131,54 @@
         └─BatchExchange { order: [], dist: HashShard($expr1) }
           └─BatchProject { exprs: [t.a, t.b, t.c, (t.a + 1:Int32) as $expr1] }
             └─BatchScan { table: t, columns: [t.a, t.b, t.c], distribution: SomeShard }
+- sql: |
+    create table t (a int, b int, c int);
+    select count(*) from (select distinct on(a) * from t);
+  logical_plan: |-
+    LogicalProject { exprs: [count] }
+    └─LogicalAgg { aggs: [count] }
+      └─LogicalProject { exprs: [] }
+        └─LogicalDedup { dedup_cols: [t.a] }
+          └─LogicalProject { exprs: [t.a, t.b, t.c] }
+            └─LogicalScan { table: t, columns: [t.a, t.b, t.c, t._row_id, t._rw_timestamp] }
+  batch_plan: |-
+    BatchSimpleAgg { aggs: [sum0(count)] }
+    └─BatchExchange { order: [], dist: Single }
+      └─BatchSimpleAgg { aggs: [count] }
+        └─BatchGroupTopN { order: [], limit: 1, offset: 0, group_key: [t.a] }
+          └─BatchExchange { order: [], dist: HashShard(t.a) }
+            └─BatchScan { table: t, columns: [t.a], distribution: SomeShard }
+- sql: |
+    create table t (a int, b int, c int);
+    select count(*) from (select distinct on(b) * from t);
+  logical_plan: |-
+    LogicalProject { exprs: [count] }
+    └─LogicalAgg { aggs: [count] }
+      └─LogicalProject { exprs: [] }
+        └─LogicalDedup { dedup_cols: [t.b] }
+          └─LogicalProject { exprs: [t.a, t.b, t.c] }
+            └─LogicalScan { table: t, columns: [t.a, t.b, t.c, t._row_id, t._rw_timestamp] }
+  batch_plan: |-
+    BatchSimpleAgg { aggs: [sum0(count)] }
+    └─BatchExchange { order: [], dist: Single }
+      └─BatchSimpleAgg { aggs: [count] }
+        └─BatchGroupTopN { order: [], limit: 1, offset: 0, group_key: [t.b] }
+          └─BatchExchange { order: [], dist: HashShard(t.b) }
+            └─BatchScan { table: t, columns: [t.b], distribution: SomeShard }
+- sql: |
+    create table t (a int, b int, c int);
+    select count(*) from (select distinct on(a,b) * from t);
+  logical_plan: |-
+    LogicalProject { exprs: [count] }
+    └─LogicalAgg { aggs: [count] }
+      └─LogicalProject { exprs: [] }
+        └─LogicalDedup { dedup_cols: [t.a, t.b] }
+          └─LogicalProject { exprs: [t.a, t.b, t.c] }
+            └─LogicalScan { table: t, columns: [t.a, t.b, t.c, t._row_id, t._rw_timestamp] }
+  batch_plan: |-
+    BatchSimpleAgg { aggs: [sum0(count)] }
+    └─BatchExchange { order: [], dist: Single }
+      └─BatchSimpleAgg { aggs: [count] }
+        └─BatchGroupTopN { order: [], limit: 1, offset: 0, group_key: [t.a, t.b] }
+          └─BatchExchange { order: [], dist: HashShard(t.a, t.b) }
+            └─BatchScan { table: t, columns: [t.a, t.b], distribution: SomeShard }

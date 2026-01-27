@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,6 +15,7 @@
 use std::collections::HashMap;
 
 use risingwave_pb::hummock::{HummockVersionStats, TableStats as PbTableStats};
+use risingwave_pb::id::TableId;
 use sea_orm::FromJsonQueryResult;
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -35,7 +36,7 @@ pub enum Relation {}
 impl ActiveModelBehavior for ActiveModel {}
 
 #[derive(Clone, Debug, PartialEq, Eq, FromJsonQueryResult, Serialize, Deserialize, Default)]
-pub struct TableStats(pub HashMap<u32, PbTableStats>);
+pub struct TableStats(pub HashMap<TableId, PbTableStats>);
 
 impl From<Model> for HummockVersionStats {
     fn from(value: Model) -> Self {

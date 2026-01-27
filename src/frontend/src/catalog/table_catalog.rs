@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,20 +15,24 @@
 use std::assert_matches::assert_matches;
 use std::collections::{HashMap, HashSet};
 
-use anyhow::Context as _;
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::catalog::{
-    ColumnCatalog, ConflictBehavior, CreateType, Engine, Field, Schema, StreamJobStatus, TableDesc,
-    TableId, TableVersionId,
+    ColumnCatalog, ColumnDesc, ConflictBehavior, CreateType, Engine, Field, ICEBERG_SINK_PREFIX,
+    ICEBERG_SOURCE_PREFIX, Schema, StreamJobStatus, TableDesc, TableId, TableVersionId,
 };
 use risingwave_common::hash::{VnodeCount, VnodeCountCompat};
+use risingwave_common::id::{JobId, SourceId};
 use risingwave_common::util::epoch::Epoch;
 use risingwave_common::util::sort_util::ColumnOrder;
+use risingwave_connector::source::cdc::external::ExternalCdcTableType;
 use risingwave_pb::catalog::table::{
-    OptionalAssociatedSourceId, PbEngine, PbTableType, PbTableVersion,
+    CdcTableType as PbCdcTableType, PbEngine, PbTableType, PbTableVersion,
 };
-use risingwave_pb::catalog::{PbCreateType, PbStreamJobStatus, PbTable, PbWebhookSourceInfo};
+use risingwave_pb::catalog::{
+    PbCreateType, PbStreamJobStatus, PbTable, PbVectorIndexInfo, PbWebhookSourceInfo,
+};
+use risingwave_pb::common::PbColumnOrder;
 use risingwave_pb::plan_common::DefaultColumnDesc;
 use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
 use risingwave_sqlparser::ast;
@@ -36,7 +40,7 @@ use risingwave_sqlparser::parser::Parser;
 use thiserror_ext::AsReport as _;
 
 use super::purify::try_purify_table_source_create_sql_ast;
-use super::{ColumnId, DatabaseId, FragmentId, OwnedByUserCatalog, SchemaId, SinkId};
+use super::{ColumnId, DatabaseId, FragmentId, OwnedByUserCatalog, SchemaId};
 use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::ExprImpl;
 use crate::optimizer::property::Cardinality;
@@ -83,11 +87,9 @@ pub struct TableCatalog {
 
     pub database_id: DatabaseId,
 
-    pub associated_source_id: Option<TableId>, // TODO: use SourceId
+    pub associated_source_id: Option<SourceId>, // TODO: use SourceId
 
     pub name: String,
-
-    pub dependent_relations: Vec<TableId>,
 
     /// All columns in this table.
     pub columns: Vec<ColumnCatalog>,
@@ -96,6 +98,8 @@ pub struct TableCatalog {
     pub pk: Vec<ColumnOrder>,
 
     /// `pk_indices` of the corresponding materialize operator's output.
+    /// For the backward compatibility, we should use `stream_key()` method to get the stream key.
+    /// never use this field directly.
     pub stream_key: Vec<usize>,
 
     /// Type of the table. Used to distinguish user-created tables, materialized views, index
@@ -143,7 +147,7 @@ pub struct TableCatalog {
     /// `No Check`.
     pub conflict_behavior: ConflictBehavior,
 
-    pub version_column_index: Option<usize>,
+    pub version_column_indices: Vec<usize>,
 
     pub read_prefix_len_hint: usize,
 
@@ -161,9 +165,6 @@ pub struct TableCatalog {
 
     pub initialized_at_epoch: Option<Epoch>,
 
-    /// Indicate whether to use watermark cache for state table.
-    pub cleaned_by_watermark: bool,
-
     /// Indicate whether to create table in background or foreground.
     pub create_type: CreateType,
 
@@ -173,9 +174,6 @@ pub struct TableCatalog {
 
     /// description of table, set by `comment on`.
     pub description: Option<String>,
-
-    /// Incoming sinks, used for sink into table
-    pub incoming_sinks: Vec<SinkId>,
 
     pub created_at_cluster_version: Option<String>,
 
@@ -195,34 +193,39 @@ pub struct TableCatalog {
 
     pub webhook_info: Option<PbWebhookSourceInfo>,
 
-    pub job_id: Option<TableId>,
+    pub job_id: Option<JobId>,
 
     pub engine: Engine,
 
     pub clean_watermark_index_in_pk: Option<usize>,
+
+    /// Indices of watermark columns in all columns that should be used for state cleaning.
+    /// This replaces `clean_watermark_index_in_pk` but is kept for backward compatibility.
+    /// When set, this takes precedence over `clean_watermark_index_in_pk`.
+    pub clean_watermark_indices: Vec<usize>,
+
+    /// Whether the table supports manual refresh operations
+    pub refreshable: bool,
+
+    pub vector_index_info: Option<PbVectorIndexInfo>,
+
+    pub cdc_table_type: Option<ExternalCdcTableType>,
 }
 
-pub const ICEBERG_SOURCE_PREFIX: &str = "__iceberg_source_";
-pub const ICEBERG_SINK_PREFIX: &str = "__iceberg_sink_";
-
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+#[cfg_attr(test, derive(Default))]
 pub enum TableType {
     /// Tables created by `CREATE TABLE`.
+    #[cfg_attr(test, default)]
     Table,
     /// Tables created by `CREATE MATERIALIZED VIEW`.
     MaterializedView,
     /// Tables serving as index for `TableType::Table` or `TableType::MaterializedView`.
     /// An index has both a `TableCatalog` and an `IndexCatalog`.
     Index,
+    VectorIndex,
     /// Internal tables for executors.
     Internal,
-}
-
-#[cfg(test)]
-impl Default for TableType {
-    fn default() -> Self {
-        Self::Table
-    }
 }
 
 impl TableType {
@@ -232,6 +235,7 @@ impl TableType {
             PbTableType::MaterializedView => Self::MaterializedView,
             PbTableType::Index => Self::Index,
             PbTableType::Internal => Self::Internal,
+            PbTableType::VectorIndex => Self::VectorIndex,
             PbTableType::Unspecified => unreachable!(),
         }
     }
@@ -241,6 +245,7 @@ impl TableType {
             Self::Table => PbTableType::Table,
             Self::MaterializedView => PbTableType::MaterializedView,
             Self::Index => PbTableType::Index,
+            Self::VectorIndex => PbTableType::VectorIndex,
             Self::Internal => PbTableType::Internal,
         }
     }
@@ -287,7 +292,7 @@ impl TableCatalog {
     /// See [`Self::create_sql_ast_purified`] for more details.
     pub fn create_sql_purified(&self) -> String {
         self.create_sql_ast_purified()
-            .map(|stmt| stmt.to_string())
+            .and_then(|stmt| stmt.try_to_string().map_err(Into::into))
             .unwrap_or_else(|_| self.create_sql())
     }
 
@@ -334,11 +339,6 @@ impl TableCatalog {
 
     pub fn with_id(mut self, id: TableId) -> Self {
         self.id = id;
-        self
-    }
-
-    pub fn with_cleaned_by_watermark(mut self, cleaned_by_watermark: bool) -> Self {
-        self.cleaned_by_watermark = cleaned_by_watermark;
         self
     }
 
@@ -391,7 +391,7 @@ impl TableCatalog {
             TableType::MaterializedView => {
                 "Use `DROP MATERIALIZED VIEW` to drop a materialized view."
             }
-            TableType::Index => "Use `DROP INDEX` to drop an index.",
+            TableType::Index | TableType::VectorIndex => "Use `DROP INDEX` to drop an index.",
             TableType::Table => "Use `DROP TABLE` to drop a table.",
             TableType::Internal => "Internal tables cannot be dropped.",
         };
@@ -401,7 +401,7 @@ impl TableCatalog {
 
     /// Get the table catalog's associated source id.
     #[must_use]
-    pub fn associated_source_id(&self) -> Option<TableId> {
+    pub fn associated_source_id(&self) -> Option<SourceId> {
         self.associated_source_id
     }
 
@@ -443,6 +443,29 @@ impl TableCatalog {
             .collect()
     }
 
+    /// Derive the stream key, which must include all distribution keys.
+    /// For backward compatibility, if distribution key is not in stream key(e.g. indexes created in old versions),
+    /// we need to add them to stream key.
+    pub fn stream_key(&self) -> Vec<usize> {
+        // if distribution key is not in stream key, we need to add them to stream key
+        if self
+            .distribution_key
+            .iter()
+            .any(|dist_key| !self.stream_key.contains(dist_key))
+        {
+            let mut new_stream_key = self.distribution_key.clone();
+            let mut seen: HashSet<usize> = self.distribution_key.iter().copied().collect();
+            for &key in &self.stream_key {
+                if seen.insert(key) {
+                    new_stream_key.push(key);
+                }
+            }
+            new_stream_key
+        } else {
+            self.stream_key.clone()
+        }
+    }
+
     /// Get a [`TableDesc`] of the table.
     ///
     /// Note: this must be called on existing tables, otherwise it will fail to get the vnode count
@@ -455,7 +478,7 @@ impl TableCatalog {
         TableDesc {
             table_id: self.id,
             pk: self.pk.clone(),
-            stream_key: self.stream_key.clone(),
+            stream_key: self.stream_key(),
             columns: self.columns.iter().map(|c| c.column_desc.clone()).collect(),
             distribution_key: self.distribution_key.clone(),
             append_only: self.append_only,
@@ -487,7 +510,7 @@ impl TableCatalog {
     /// See [`Self::create_sql_ast`] for more details.
     pub fn create_sql(&self) -> String {
         self.create_sql_ast()
-            .map(|stmt| stmt.to_string())
+            .and_then(|stmt| stmt.try_to_string().map_err(Into::into))
             .unwrap_or_else(|_| self.definition.clone())
     }
 
@@ -511,11 +534,7 @@ impl TableCatalog {
     }
 
     fn create_sql_ast_from_persisted(&self) -> Result<ast::Statement> {
-        Ok(Parser::parse_sql(&self.definition)
-            .context("unable to parse definition sql")?
-            .into_iter()
-            .exactly_one()
-            .context("expecting exactly one statement in definition")?)
+        Ok(Parser::parse_exactly_one(&self.definition)?)
     }
 
     /// Get a reference to the table catalog's version.
@@ -529,15 +548,18 @@ impl TableCatalog {
     }
 
     /// Get the total vnode count of the table.
-    ///
-    /// Panics if it's called on an incomplete (and not yet persisted) table catalog.
     pub fn vnode_count(&self) -> usize {
-        self.vnode_count.value()
+        if self.id().is_placeholder() {
+            0
+        } else {
+            // Panics if it's called on an incomplete (and not yet persisted) table catalog.
+            self.vnode_count.value()
+        }
     }
 
     pub fn to_prost(&self) -> PbTable {
         PbTable {
-            id: self.id.table_id,
+            id: self.id,
             schema_id: self.schema_id,
             database_id: self.database_id,
             name: self.name.clone(),
@@ -548,11 +570,8 @@ impl TableCatalog {
                 .map(|c| c.to_protobuf())
                 .collect(),
             pk: self.pk.iter().map(|o| o.to_protobuf()).collect(),
-            stream_key: self.stream_key.iter().map(|x| *x as _).collect(),
-            dependent_relations: vec![],
-            optional_associated_source_id: self
-                .associated_source_id
-                .map(|source_id| OptionalAssociatedSourceId::AssociatedSourceId(source_id.into())),
+            stream_key: self.stream_key().iter().map(|x| *x as _).collect(),
+            optional_associated_source_id: self.associated_source_id.map(Into::into),
             table_type: self.table_type.to_prost() as i32,
             distribution_key: self
                 .distribution_key
@@ -572,28 +591,46 @@ impl TableCatalog {
             watermark_indices: self.watermark_columns.ones().map(|x| x as _).collect_vec(),
             dist_key_in_pk: self.dist_key_in_pk.iter().map(|x| *x as _).collect(),
             handle_pk_conflict_behavior: self.conflict_behavior.to_protobuf().into(),
-            version_column_index: self.version_column_index.map(|value| value as u32),
+            version_column_indices: self
+                .version_column_indices
+                .iter()
+                .map(|&idx| idx as u32)
+                .collect(),
             cardinality: Some(self.cardinality.to_protobuf()),
             initialized_at_epoch: self.initialized_at_epoch.map(|epoch| epoch.0),
             created_at_epoch: self.created_at_epoch.map(|epoch| epoch.0),
-            cleaned_by_watermark: self.cleaned_by_watermark,
+            #[expect(deprecated)]
+            cleaned_by_watermark: false,
             stream_job_status: self.stream_job_status.to_proto().into(),
             create_type: self.create_type.to_proto().into(),
             description: self.description.clone(),
-            incoming_sinks: self.incoming_sinks.clone(),
+            #[expect(deprecated)]
+            incoming_sinks: vec![],
             created_at_cluster_version: self.created_at_cluster_version.clone(),
             initialized_at_cluster_version: self.initialized_at_cluster_version.clone(),
             retention_seconds: self.retention_seconds,
             cdc_table_id: self.cdc_table_id.clone(),
             maybe_vnode_count: self.vnode_count.to_protobuf(),
             webhook_info: self.webhook_info.clone(),
-            job_id: self.job_id.map(|id| id.table_id),
+            job_id: self.job_id,
             engine: Some(self.engine.to_protobuf().into()),
+            #[expect(deprecated)]
             clean_watermark_index_in_pk: self.clean_watermark_index_in_pk.map(|x| x as i32),
+            clean_watermark_indices: self
+                .clean_watermark_indices
+                .iter()
+                .map(|&x| x as u32)
+                .collect(),
+            refreshable: self.refreshable,
+            vector_index_info: self.vector_index_info,
+            cdc_table_type: self
+                .cdc_table_type
+                .clone()
+                .map(|t| PbCdcTableType::from(t) as i32),
         }
     }
 
-    /// Get columns excluding hidden columns and generated golumns.
+    /// Get columns excluding hidden columns and generated columns.
     pub fn columns_to_insert(&self) -> impl Iterator<Item = &ColumnCatalog> {
         self.columns
             .iter()
@@ -688,6 +725,26 @@ impl TableCatalog {
     pub fn is_iceberg_engine_table(&self) -> bool {
         self.engine == Engine::Iceberg
     }
+
+    pub fn order_column_indices(&self) -> impl Iterator<Item = usize> + '_ {
+        self.pk.iter().map(|col| col.column_index)
+    }
+
+    pub fn get_id_to_op_idx_mapping(&self) -> HashMap<ColumnId, usize> {
+        ColumnDesc::get_id_to_op_idx_mapping(&self.columns, None)
+    }
+
+    pub fn order_column_ids(&self) -> Vec<ColumnId> {
+        self.pk
+            .iter()
+            .map(|col| self.columns[col.column_index].column_desc.column_id)
+            .collect()
+    }
+
+    pub fn arrange_key_orders_protobuf(&self) -> Vec<PbColumnOrder> {
+        // Set materialize key as arrange key + pk
+        self.pk.iter().map(|x| x.to_protobuf()).collect()
+    }
 }
 
 impl From<PbTable> for TableCatalog {
@@ -703,9 +760,7 @@ impl From<PbTable> for TableCatalog {
             .get_stream_job_status()
             .unwrap_or(PbStreamJobStatus::Created);
         let create_type = tb.get_create_type().unwrap_or(PbCreateType::Foreground);
-        let associated_source_id = tb.optional_associated_source_id.map(|id| match id {
-            OptionalAssociatedSourceId::AssociatedSourceId(id) => id,
-        });
+        let associated_source_id = tb.optional_associated_source_id.map(Into::into);
         let name = tb.name.clone();
 
         let vnode_count = tb.vnode_count_inner();
@@ -719,7 +774,11 @@ impl From<PbTable> for TableCatalog {
         let mut col_index: HashMap<i32, usize> = HashMap::new();
 
         let conflict_behavior = ConflictBehavior::from_protobuf(&tb_conflict_behavior);
-        let version_column_index = tb.version_column_index.map(|value| value as usize);
+        let version_column_indices: Vec<usize> = tb
+            .version_column_indices
+            .iter()
+            .map(|&idx| idx as usize)
+            .collect();
         let mut columns: Vec<ColumnCatalog> =
             tb.columns.into_iter().map(ColumnCatalog::from).collect();
         if columns.iter().all(|c| !c.is_rw_timestamp_column()) {
@@ -744,10 +803,10 @@ impl From<PbTable> for TableCatalog {
         let engine = Engine::from_protobuf(&tb_engine);
 
         Self {
-            id: id.into(),
+            id,
             schema_id: tb.schema_id,
             database_id: tb.database_id,
-            associated_source_id: associated_source_id.map(Into::into),
+            associated_source_id,
             name,
             pk,
             columns,
@@ -767,7 +826,7 @@ impl From<PbTable> for TableCatalog {
             value_indices: tb.value_indices.iter().map(|x| *x as _).collect(),
             definition: tb.definition,
             conflict_behavior,
-            version_column_index,
+            version_column_indices,
             read_prefix_len_hint: tb.read_prefix_len_hint as usize,
             version: tb.version.map(TableVersion::from_prost),
             watermark_columns,
@@ -778,25 +837,31 @@ impl From<PbTable> for TableCatalog {
                 .unwrap_or_else(Cardinality::unknown),
             created_at_epoch: tb.created_at_epoch.map(Epoch::from),
             initialized_at_epoch: tb.initialized_at_epoch.map(Epoch::from),
-            cleaned_by_watermark: tb.cleaned_by_watermark,
             create_type: CreateType::from_proto(create_type),
             stream_job_status: StreamJobStatus::from_proto(stream_job_status),
             description: tb.description,
-            incoming_sinks: tb.incoming_sinks.clone(),
             created_at_cluster_version: tb.created_at_cluster_version.clone(),
             initialized_at_cluster_version: tb.initialized_at_cluster_version.clone(),
             retention_seconds: tb.retention_seconds,
-            dependent_relations: tb
-                .dependent_relations
-                .into_iter()
-                .map(TableId::from)
-                .collect_vec(),
             cdc_table_id: tb.cdc_table_id,
             vnode_count,
             webhook_info: tb.webhook_info,
-            job_id: tb.job_id.map(TableId::from),
+            job_id: tb.job_id,
             engine,
+            #[expect(deprecated)]
             clean_watermark_index_in_pk: tb.clean_watermark_index_in_pk.map(|x| x as usize),
+            clean_watermark_indices: tb
+                .clean_watermark_indices
+                .iter()
+                .map(|&x| x as usize)
+                .collect(),
+
+            refreshable: tb.refreshable,
+            vector_index_info: tb.vector_index_info,
+            cdc_table_type: tb
+                .cdc_table_type
+                .and_then(|t| PbCdcTableType::try_from(t).ok())
+                .map(ExternalCdcTableType::from),
         }
     }
 }
@@ -829,9 +894,9 @@ mod tests {
     #[test]
     fn test_into_table_catalog() {
         let table: TableCatalog = PbTable {
-            id: 0,
-            schema_id: 0,
-            database_id: 0,
+            id: 0.into(),
+            schema_id: 0.into(),
+            database_id: 0.into(),
             name: "test".to_owned(),
             table_type: PbTableType::Table as i32,
             columns: vec![
@@ -851,14 +916,12 @@ mod tests {
             ],
             pk: vec![ColumnOrder::new(0, OrderType::ascending()).to_protobuf()],
             stream_key: vec![0],
-            dependent_relations: vec![],
             distribution_key: vec![0],
-            optional_associated_source_id: OptionalAssociatedSourceId::AssociatedSourceId(233)
-                .into(),
+            optional_associated_source_id: Some(SourceId::new(233).into()),
             append_only: false,
             owner: risingwave_common::catalog::DEFAULT_SUPER_USER_ID,
             retention_seconds: Some(300),
-            fragment_id: 0,
+            fragment_id: 0.into(),
             dml_fragment_id: None,
             initialized_at_epoch: None,
             value_indices: vec![0],
@@ -875,20 +938,28 @@ mod tests {
             dist_key_in_pk: vec![0],
             cardinality: None,
             created_at_epoch: None,
+            #[expect(deprecated)]
             cleaned_by_watermark: false,
             stream_job_status: PbStreamJobStatus::Created.into(),
             create_type: PbCreateType::Foreground.into(),
             description: Some("description".to_owned()),
+            #[expect(deprecated)]
             incoming_sinks: vec![],
             created_at_cluster_version: None,
             initialized_at_cluster_version: None,
-            version_column_index: None,
+            version_column_indices: Vec::new(),
             cdc_table_id: None,
             maybe_vnode_count: VnodeCount::set(233).to_protobuf(),
             webhook_info: None,
             job_id: None,
             engine: Some(PbEngine::Hummock as i32),
+            #[expect(deprecated)]
             clean_watermark_index_in_pk: None,
+            clean_watermark_indices: vec![],
+
+            refreshable: false,
+            vector_index_info: None,
+            cdc_table_type: None,
         }
         .into();
 
@@ -896,9 +967,9 @@ mod tests {
             table,
             TableCatalog {
                 id: TableId::new(0),
-                schema_id: 0,
-                database_id: 0,
-                associated_source_id: Some(TableId::new(233)),
+                schema_id: 0.into(),
+                database_id: 0.into(),
+                associated_source_id: Some(SourceId::new(233)),
                 name: "test".to_owned(),
                 table_type: TableType::Table,
                 columns: vec![
@@ -929,7 +1000,7 @@ mod tests {
                 append_only: false,
                 owner: risingwave_common::catalog::DEFAULT_SUPER_USER_ID,
                 retention_seconds: Some(300),
-                fragment_id: 0,
+                fragment_id: 0.into(),
                 dml_fragment_id: None,
                 vnode_col_index: None,
                 row_id_index: None,
@@ -943,21 +1014,23 @@ mod tests {
                 cardinality: Cardinality::unknown(),
                 created_at_epoch: None,
                 initialized_at_epoch: None,
-                cleaned_by_watermark: false,
                 stream_job_status: StreamJobStatus::Created,
                 create_type: CreateType::Foreground,
                 description: Some("description".to_owned()),
-                incoming_sinks: vec![],
                 created_at_cluster_version: None,
                 initialized_at_cluster_version: None,
-                dependent_relations: vec![],
-                version_column_index: None,
+                version_column_indices: Vec::new(),
                 cdc_table_id: None,
                 vnode_count: VnodeCount::set(233),
                 webhook_info: None,
                 job_id: None,
                 engine: Engine::Hummock,
                 clean_watermark_index_in_pk: None,
+                clean_watermark_indices: vec![],
+
+                refreshable: false,
+                vector_index_info: None,
+                cdc_table_type: None,
             }
         );
         assert_eq!(table, TableCatalog::from(table.to_prost()));

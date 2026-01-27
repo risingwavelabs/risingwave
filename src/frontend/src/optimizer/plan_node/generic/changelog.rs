@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -45,6 +45,14 @@ impl<PlanRef: GenericPlanRef> ChangeLog<PlanRef> {
             input,
             need_op,
             need_changelog_row_id,
+        }
+    }
+
+    pub fn clone_with_input<OtherPlanRef>(&self, input: OtherPlanRef) -> ChangeLog<OtherPlanRef> {
+        ChangeLog {
+            input,
+            need_op: self.need_op,
+            need_changelog_row_id: self.need_changelog_row_id,
         }
     }
 

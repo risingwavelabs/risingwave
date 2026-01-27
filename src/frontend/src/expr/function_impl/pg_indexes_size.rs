@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -36,14 +36,13 @@ fn pg_indexes_size_impl(catalog: &CatalogReader, db_name: &str, oid: i32) -> Res
     let mut sum = 0;
     for schema in database.iter_schemas() {
         for index in schema.iter_index() {
-            if index.primary_table.id().table_id == oid as u32 {
-                if let Some(table_stats) = catalog
+            if index.primary_table.id().as_raw_id() == oid as u32
+                && let Some(table_stats) = catalog
                     .table_stats()
                     .table_stats
-                    .get(&index.primary_table.id().table_id)
-                {
-                    sum += table_stats.total_key_size + table_stats.total_value_size;
-                }
+                    .get(&index.primary_table.id())
+            {
+                sum += table_stats.total_key_size + table_stats.total_value_size;
             }
         }
     }

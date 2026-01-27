@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -40,7 +40,6 @@ pub struct InsertExecutor {
     table_version_id: TableVersionId,
     dml_manager: DmlManagerRef,
     child: BoxedExecutor,
-    #[expect(dead_code)]
     chunk_size: usize,
     schema: Schema,
     identity: String,
@@ -106,7 +105,7 @@ impl InsertExecutor {
     #[try_stream(boxed, ok = DataChunk, error = BatchError)]
     async fn do_execute(self: Box<Self>) {
         let data_types = self.child.schema().data_types();
-        let mut builder = DataChunkBuilder::new(data_types, 1024);
+        let mut builder = DataChunkBuilder::new(data_types, self.chunk_size);
 
         let table_dml_handle = self
             .dml_manager
@@ -212,7 +211,7 @@ impl BoxedExecutorBuilder for InsertExecutor {
             NodeBody::Insert
         )?;
 
-        let table_id = TableId::new(insert_node.table_id);
+        let table_id = insert_node.table_id;
         let column_indices = insert_node
             .column_indices
             .iter()
@@ -258,7 +257,7 @@ mod tests {
     use std::ops::Bound;
 
     use assert_matches::assert_matches;
-    use foyer::CacheHint;
+    use foyer::Hint;
     use futures::StreamExt;
     use risingwave_common::array::{Array, ArrayImpl, I32Array, StructArray};
     use risingwave_common::catalog::{
@@ -389,7 +388,7 @@ mod tests {
                 epoch,
                 None,
                 ReadOptions {
-                    cache_policy: CachePolicy::Fill(CacheHint::Normal),
+                    cache_policy: CachePolicy::Fill(Hint::Normal),
                     ..Default::default()
                 },
             )

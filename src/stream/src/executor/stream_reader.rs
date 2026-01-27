@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -38,6 +38,7 @@ mod stream_reader_with_pause {
         PollNext,
     >;
 
+    #[define_opaque(StreamReaderWithPauseInner)]
     pub(super) fn new_inner<M, const BIASED: bool>(
         message_stream: ReaderArm<M>,
         data_stream: ReaderArm<M>,
@@ -85,6 +86,11 @@ impl<const BIASED: bool, M: Send + 'static> StreamReaderWithPause<BIASED, M> {
             inner,
             paused: false,
         }
+    }
+
+    #[allow(dead_code)]
+    pub fn only_left(message_stream: ExecutorMessageStream) -> Self {
+        Self::new(message_stream, futures::stream::empty().boxed())
     }
 
     /// Replace the data stream with a new one for given `stream`. Used for split change.

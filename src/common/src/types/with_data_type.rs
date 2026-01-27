@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -120,7 +120,7 @@ where
     T: WithDataType,
 {
     fn default_data_type() -> DataType {
-        DataType::List(Box::new(T::default_data_type()))
+        DataType::list(T::default_data_type())
     }
 }
 
@@ -129,7 +129,7 @@ where
     T: WithDataType,
 {
     fn default_data_type() -> DataType {
-        DataType::List(Box::new(T::default_data_type()))
+        DataType::list(T::default_data_type())
     }
 }
 

@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -98,6 +98,6 @@ impl Task for ConfigureTmuxTask {
     }
 
     fn id(&self) -> String {
-        "tmux".into()
+        "tmux-configure".into()
     }
 }

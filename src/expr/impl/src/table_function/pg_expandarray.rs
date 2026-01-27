@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -43,7 +43,7 @@ fn _pg_expandarray(array: ListRef<'_>) -> impl Iterator<Item = (Option<ScalarRef
 
 fn infer_type(args: &[DataType]) -> Result<DataType> {
     Ok(DataType::Struct(StructType::new(vec![
-        ("x", args[0].as_list().clone()),
+        ("x", args[0].as_list_elem().clone()),
         ("n", DataType::Int32),
     ])))
 }

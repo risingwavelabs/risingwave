@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,11 +13,12 @@
 // limitations under the License.
 
 use phf::{Set, phf_set};
+use risingwave_common::id::ActorId;
 use rumqttc::tokio_rustls::rustls;
 use rumqttc::v5::mqttbytes::QoS;
 use rumqttc::v5::mqttbytes::v5::ConnectProperties;
 use rumqttc::v5::{AsyncClient, EventLoop, MqttOptions};
-use serde_derive::Deserialize;
+use serde::Deserialize;
 use serde_with::{DisplayFromStr, serde_as};
 use strum_macros::{Display, EnumString};
 use with_options::WithOptions;
@@ -39,14 +40,14 @@ pub enum QualityOfService {
 #[serde_as]
 #[derive(Deserialize, Debug, Clone, WithOptions)]
 pub struct MqttCommon {
-    /// The url of the broker to connect to. e.g. tcp://localhost.
+    /// The url of the broker to connect to. e.g. <tcp://localhost>.
     /// Must be prefixed with one of either `tcp://`, `mqtt://`, `ssl://`,`mqtts://`,
     /// to denote the protocol for establishing a connection with the broker.
     /// `mqtts://`, `ssl://` will use the native certificates if no ca is specified
     pub url: String,
 
-    /// The quality of service to use when publishing messages. Defaults to at_most_once.
-    /// Could be at_most_once, at_least_once or exactly_once
+    /// The quality of service to use when publishing messages. Defaults to `at_most_once`.
+    /// Could be `at_most_once`, `at_least_once` or `exactly_once`
     #[serde_as(as = "Option<DisplayFromStr>")]
     pub qos: Option<QualityOfService>,
 
@@ -103,8 +104,8 @@ impl EnforceSecret for MqttCommon {
 impl MqttCommon {
     pub(crate) fn build_client(
         &self,
-        actor_id: u32,
-        id: u64,
+        actor_id: ActorId,
+        id: u32,
     ) -> ConnectorResult<(AsyncClient, EventLoop)> {
         let client_id = format!(
             "{}_{}_{}",

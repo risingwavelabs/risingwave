@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -278,14 +278,15 @@ impl<'a> AvroParseOptionsInner<'a> {
             })
             .into(),
             // ---- List -----
-            (DataType::List(item_type), Value::Array(array)) => ListValue::new({
+            (DataType::List(list_type), Value::Array(array)) => ListValue::new({
                 let Schema::Array(element_schema) = self.lookup_ref(unresolved_schema) else {
                     return Err(create_error());
                 };
                 let schema = element_schema;
-                let mut builder = item_type.create_array_builder(array.len());
+                let elem_type = list_type.elem();
+                let mut builder = elem_type.create_array_builder(array.len());
                 for v in array {
-                    let value = self.convert_to_datum(schema, v, item_type)?;
+                    let value = self.convert_to_datum(schema, v, elem_type)?;
                     builder.append(value);
                 }
                 builder.finish()

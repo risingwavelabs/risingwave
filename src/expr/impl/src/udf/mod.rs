@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -22,14 +22,14 @@ use risingwave_expr::sig::{
     CreateFunctionOutput, CreateOptions, UDF_IMPLS, UdfImpl, UdfImplDescriptor,
 };
 
-#[cfg(feature = "external-udf")]
+#[cfg(feature = "udf")]
 #[cfg(not(madsim))]
 mod external;
-#[cfg(feature = "python-udf")]
+#[cfg(feature = "udf")]
 mod python;
-#[cfg(feature = "js-udf")]
+#[cfg(feature = "udf")]
 mod quickjs;
-#[cfg(feature = "wasm-udf")]
+#[cfg(feature = "udf")]
 mod wasm;
 
 /// Download wasm binary from a link.

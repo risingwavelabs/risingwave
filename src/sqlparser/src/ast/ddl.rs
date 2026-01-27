@@ -13,29 +13,23 @@
 //! AST types specific to CREATE/ALTER variants of [`crate::ast::Statement`]
 //! (commonly referred to as Data Definition Language, or DDL)
 
-#[cfg(not(feature = "std"))]
-use alloc::{boxed::Box, string::ToString, vec::Vec};
-use core::fmt;
+use std::fmt;
 
-#[cfg(feature = "serde")]
-use serde::{Deserialize, Serialize};
-
-use super::FormatEncodeOptions;
+use super::{ConfigParam, FormatEncodeOptions, SqlOption};
 use crate::ast::{
-    DataType, Expr, Ident, ObjectName, SecretRefValue, SetVariableValue, Value,
+    DataType, Expr, Ident, ObjectName, Query, SecretRefValue, SetVariableValue, Value,
     display_comma_separated, display_separated,
 };
 use crate::tokenizer::Token;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum AlterDatabaseOperation {
     ChangeOwner { new_owner_name: Ident },
     RenameDatabase { database_name: ObjectName },
+    SetParam(ConfigParam),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum AlterSchemaOperation {
     ChangeOwner { new_owner_name: Ident },
     RenameSchema { schema_name: ObjectName },
@@ -44,7 +38,6 @@ pub enum AlterSchemaOperation {
 
 /// An `ALTER TABLE` (`Statement::AlterTable`) operation
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum AlterTableOperation {
     /// `ADD <table_constraint>`
     AddConstraint(TableConstraint),
@@ -103,6 +96,14 @@ pub enum AlterTableOperation {
         parallelism: SetVariableValue,
         deferred: bool,
     },
+    /// `SET CONFIG (key = value, ...)`
+    SetConfig {
+        entries: Vec<SqlOption>,
+    },
+    /// `RESET CONFIG (key, ...)`
+    ResetConfig {
+        keys: Vec<ObjectName>,
+    },
     RefreshSchema,
     /// `SET SOURCE_RATE_LIMIT TO <rate_limit>`
     SetSourceRateLimit {
@@ -122,10 +123,14 @@ pub enum AlterTableOperation {
     },
     /// `DROP CONNECTOR`
     DropConnector,
+
+    /// `ALTER CONNECTOR WITH (<connector_props>)`
+    AlterConnectorProps {
+        alter_props: Vec<SqlOption>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum AlterIndexOperation {
     RenameIndex {
         index_name: ObjectName,
@@ -135,10 +140,17 @@ pub enum AlterIndexOperation {
         parallelism: SetVariableValue,
         deferred: bool,
     },
+    /// `SET CONFIG (key = value, ...)`
+    SetConfig {
+        entries: Vec<SqlOption>,
+    },
+    /// `RESET CONFIG (key, ...)`
+    ResetConfig {
+        keys: Vec<ObjectName>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum AlterViewOperation {
     RenameView {
         view_name: ObjectName,
@@ -168,10 +180,24 @@ pub enum AlterViewOperation {
     SwapRenameView {
         target_view: ObjectName,
     },
+    SetStreamingEnableUnalignedJoin {
+        enable: bool,
+    },
+    /// `AS <query>`
+    AsQuery {
+        query: Box<Query>,
+    },
+    /// `SET CONFIG ( streaming.some_config_key = <some_config_value>, .. )`
+    SetConfig {
+        entries: Vec<SqlOption>,
+    },
+    /// `RESET CONFIG ( streaming.some_config_key, .. )`
+    ResetConfig {
+        keys: Vec<ObjectName>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum AlterSinkOperation {
     RenameSink {
         sink_name: ObjectName,
@@ -187,6 +213,14 @@ pub enum AlterSinkOperation {
         parallelism: SetVariableValue,
         deferred: bool,
     },
+    /// `SET CONFIG (key = value, ...)`
+    SetConfig {
+        entries: Vec<SqlOption>,
+    },
+    /// `RESET CONFIG (key, ...)`
+    ResetConfig {
+        keys: Vec<ObjectName>,
+    },
     /// `SWAP WITH <sink_name>`
     SwapRenameSink {
         target_sink: ObjectName,
@@ -194,10 +228,18 @@ pub enum AlterSinkOperation {
     SetSinkRateLimit {
         rate_limit: i32,
     },
+    SetBackfillRateLimit {
+        rate_limit: i32,
+    },
+    AlterConnectorProps {
+        alter_props: Vec<SqlOption>,
+    },
+    SetStreamingEnableUnalignedJoin {
+        enable: bool,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum AlterSubscriptionOperation {
     RenameSubscription { subscription_name: ObjectName },
     ChangeOwner { new_owner_name: Ident },
@@ -206,7 +248,6 @@ pub enum AlterSubscriptionOperation {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum AlterSourceOperation {
     RenameSource {
         source_name: ObjectName,
@@ -235,31 +276,49 @@ pub enum AlterSourceOperation {
         parallelism: SetVariableValue,
         deferred: bool,
     },
+    /// `SET CONFIG (key = value, ...)`
+    SetConfig {
+        entries: Vec<SqlOption>,
+    },
+    /// `RESET CONFIG (key, ...)`
+    ResetConfig {
+        keys: Vec<ObjectName>,
+    },
+    /// `RESET` - Reset CDC source offset to latest
+    ResetSource,
+    AlterConnectorProps {
+        alter_props: Vec<SqlOption>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum AlterFunctionOperation {
-    SetSchema { new_schema_name: ObjectName },
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub enum AlterConnectionOperation {
     SetSchema { new_schema_name: ObjectName },
     ChangeOwner { new_owner_name: Ident },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub enum AlterSecretOperation {
-    ChangeCredential { new_credential: Value },
+pub enum AlterConnectionOperation {
+    SetSchema { new_schema_name: ObjectName },
+    ChangeOwner { new_owner_name: Ident },
+    AlterConnectorProps { alter_props: Vec<SqlOption> },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum AlterSecretOperation {
+    ChangeCredential {
+        with_options: Vec<SqlOption>,
+        new_credential: Value,
+    },
+    ChangeOwner {
+        new_owner_name: Ident,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum AlterFragmentOperation {
     AlterBackfillRateLimit { rate_limit: i32 },
+    SetParallelism { parallelism: SetVariableValue },
 }
 
 impl fmt::Display for AlterDatabaseOperation {
@@ -270,6 +329,9 @@ impl fmt::Display for AlterDatabaseOperation {
             }
             AlterDatabaseOperation::RenameDatabase { database_name } => {
                 write!(f, "RENAME TO {}", database_name)
+            }
+            AlterDatabaseOperation::SetParam(ConfigParam { param, value }) => {
+                write!(f, "SET {} TO {}", param, value)
             }
         }
     }
@@ -357,6 +419,12 @@ impl fmt::Display for AlterTableOperation {
                     if *deferred { " DEFERRED" } else { "" }
                 )
             }
+            AlterTableOperation::SetConfig { entries } => {
+                write!(f, "SET CONFIG ({})", display_comma_separated(entries))
+            }
+            AlterTableOperation::ResetConfig { keys } => {
+                write!(f, "RESET CONFIG ({})", display_comma_separated(keys))
+            }
             AlterTableOperation::RefreshSchema => {
                 write!(f, "REFRESH SCHEMA")
             }
@@ -374,6 +442,13 @@ impl fmt::Display for AlterTableOperation {
             }
             AlterTableOperation::DropConnector => {
                 write!(f, "DROP CONNECTOR")
+            }
+            AlterTableOperation::AlterConnectorProps { alter_props } => {
+                write!(
+                    f,
+                    "CONNECTOR WITH ({})",
+                    display_comma_separated(alter_props)
+                )
             }
         }
     }
@@ -395,6 +470,12 @@ impl fmt::Display for AlterIndexOperation {
                     parallelism,
                     if *deferred { " DEFERRED" } else { "" }
                 )
+            }
+            AlterIndexOperation::SetConfig { entries } => {
+                write!(f, "SET CONFIG ({})", display_comma_separated(entries))
+            }
+            AlterIndexOperation::ResetConfig { keys } => {
+                write!(f, "RESET CONFIG ({})", display_comma_separated(keys))
             }
         }
     }
@@ -441,6 +522,18 @@ impl fmt::Display for AlterViewOperation {
                     write!(f, "RESET RESOURCE_GROUP {}", deferred)
                 }
             }
+            AlterViewOperation::SetStreamingEnableUnalignedJoin { enable } => {
+                write!(f, "SET STREAMING_ENABLE_UNALIGNED_JOIN TO {}", enable)
+            }
+            AlterViewOperation::AsQuery { query } => {
+                write!(f, "AS {}", query)
+            }
+            AlterViewOperation::SetConfig { entries } => {
+                write!(f, "SET CONFIG ({})", display_comma_separated(entries))
+            }
+            AlterViewOperation::ResetConfig { keys } => {
+                write!(f, "RESET CONFIG ({})", display_comma_separated(keys))
+            }
         }
     }
 }
@@ -468,11 +561,32 @@ impl fmt::Display for AlterSinkOperation {
                     if *deferred { " DEFERRED" } else { "" }
                 )
             }
+            AlterSinkOperation::SetConfig { entries } => {
+                write!(f, "SET CONFIG ({})", display_comma_separated(entries))
+            }
+            AlterSinkOperation::ResetConfig { keys } => {
+                write!(f, "RESET CONFIG ({})", display_comma_separated(keys))
+            }
             AlterSinkOperation::SwapRenameSink { target_sink } => {
                 write!(f, "SWAP WITH {}", target_sink)
             }
             AlterSinkOperation::SetSinkRateLimit { rate_limit } => {
                 write!(f, "SET SINK_RATE_LIMIT TO {}", rate_limit)
+            }
+            AlterSinkOperation::SetBackfillRateLimit { rate_limit } => {
+                write!(f, "SET BACKFILL_RATE_LIMIT TO {}", rate_limit)
+            }
+            AlterSinkOperation::AlterConnectorProps {
+                alter_props: changed_props,
+            } => {
+                write!(
+                    f,
+                    "CONNECTOR WITH ({})",
+                    display_comma_separated(changed_props)
+                )
+            }
+            AlterSinkOperation::SetStreamingEnableUnalignedJoin { enable } => {
+                write!(f, "SET STREAMING_ENABLE_UNALIGNED_JOIN TO {}", enable)
             }
         }
     }
@@ -537,6 +651,22 @@ impl fmt::Display for AlterSourceOperation {
                     if *deferred { " DEFERRED" } else { "" }
                 )
             }
+            AlterSourceOperation::SetConfig { entries } => {
+                write!(f, "SET CONFIG ({})", display_comma_separated(entries))
+            }
+            AlterSourceOperation::ResetConfig { keys } => {
+                write!(f, "RESET CONFIG ({})", display_comma_separated(keys))
+            }
+            AlterSourceOperation::ResetSource => {
+                write!(f, "RESET")
+            }
+            AlterSourceOperation::AlterConnectorProps { alter_props } => {
+                write!(
+                    f,
+                    "CONNECTOR WITH ({})",
+                    display_comma_separated(alter_props)
+                )
+            }
         }
     }
 }
@@ -546,6 +676,9 @@ impl fmt::Display for AlterFunctionOperation {
         match self {
             AlterFunctionOperation::SetSchema { new_schema_name } => {
                 write!(f, "SET SCHEMA {new_schema_name}")
+            }
+            AlterFunctionOperation::ChangeOwner { new_owner_name } => {
+                write!(f, "OWNER TO {new_owner_name}")
             }
         }
     }
@@ -560,6 +693,13 @@ impl fmt::Display for AlterConnectionOperation {
             AlterConnectionOperation::ChangeOwner { new_owner_name } => {
                 write!(f, "OWNER TO {new_owner_name}")
             }
+            AlterConnectionOperation::AlterConnectorProps { alter_props } => {
+                write!(
+                    f,
+                    "CONNECTOR WITH ({})",
+                    display_comma_separated(alter_props)
+                )
+            }
         }
     }
 }
@@ -567,8 +707,19 @@ impl fmt::Display for AlterConnectionOperation {
 impl fmt::Display for AlterSecretOperation {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            AlterSecretOperation::ChangeCredential { new_credential } => {
-                write!(f, "AS {new_credential}")
+            AlterSecretOperation::ChangeCredential {
+                new_credential,
+                with_options,
+            } => {
+                write!(
+                    f,
+                    "WITH ({}) AS {}",
+                    display_comma_separated(with_options),
+                    new_credential
+                )
+            }
+            AlterSecretOperation::ChangeOwner { new_owner_name } => {
+                write!(f, "OWNER TO {new_owner_name}")
             }
         }
     }
@@ -576,7 +727,6 @@ impl fmt::Display for AlterSecretOperation {
 
 /// An `ALTER COLUMN` (`Statement::AlterTable`) operation
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum AlterColumnOperation {
     /// `SET NOT NULL`
     SetNotNull,
@@ -622,6 +772,9 @@ impl fmt::Display for AlterFragmentOperation {
             AlterFragmentOperation::AlterBackfillRateLimit { rate_limit } => {
                 write!(f, "SET BACKFILL_RATE_LIMIT TO {}", rate_limit)
             }
+            AlterFragmentOperation::SetParallelism { parallelism } => {
+                write!(f, "SET PARALLELISM TO {}", parallelism)
+            }
         }
     }
 }
@@ -629,22 +782,26 @@ impl fmt::Display for AlterFragmentOperation {
 /// The watermark on source.
 /// `WATERMARK FOR <column> AS (<expr>)`
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct SourceWatermark {
     pub column: Ident,
     pub expr: Expr,
+    /// Whether `WITH TTL` is specified.
+    pub with_ttl: bool,
 }
 
 impl fmt::Display for SourceWatermark {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "WATERMARK FOR {} AS {}", self.column, self.expr,)
+        write!(f, "WATERMARK FOR {} AS {}", self.column, self.expr,)?;
+        if self.with_ttl {
+            write!(f, " WITH TTL")?;
+        }
+        Ok(())
     }
 }
 
 /// A table-level constraint, specified in a `CREATE TABLE` or an
 /// `ALTER TABLE ADD <constraint>` statement.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum TableConstraint {
     /// `[ CONSTRAINT <name> ] { PRIMARY KEY | UNIQUE } (<columns>)`
     Unique {
@@ -720,7 +877,6 @@ impl fmt::Display for TableConstraint {
 
 /// SQL column definition
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct ColumnDef {
     pub name: Ident,
     pub data_type: Option<DataType>,
@@ -786,7 +942,6 @@ impl fmt::Display for ColumnDef {
 /// non-constraint options, lumping them all together under the umbrella of
 /// "column options," and we allow any column option to be named.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct ColumnOptionDef {
     pub name: Option<Ident>,
     pub option: ColumnOption,
@@ -801,7 +956,6 @@ impl fmt::Display for ColumnOptionDef {
 /// `ColumnOption`s are modifiers that follow a column definition in a `CREATE
 /// TABLE` statement.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum ColumnOption {
     /// `NULL`
     Null,
@@ -902,7 +1056,6 @@ fn display_constraint_name(name: &'_ Option<Ident>) -> impl fmt::Display + '_ {
 ///
 /// Used in foreign key constraints in `ON UPDATE` and `ON DELETE` options.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum ReferentialAction {
     Restrict,
     Cascade,
@@ -925,9 +1078,9 @@ impl fmt::Display for ReferentialAction {
 
 /// secure secret definition for webhook source
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct WebhookSourceInfo {
     pub secret_ref: Option<SecretRefValue>,
-    pub signature_expr: Expr,
+    pub signature_expr: Option<Expr>,
     pub wait_for_persistence: bool,
+    pub is_batched: bool,
 }

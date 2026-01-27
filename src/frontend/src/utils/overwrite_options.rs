@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,6 +14,8 @@
 
 use crate::handler::HandlerArgs;
 
+/// Some options can be configured both in `WITH` clause and session variables.
+/// The config in `WITH` clause has higher priority.
 #[derive(Debug, Clone, Default)]
 pub struct OverwriteOptions {
     pub source_rate_limit: Option<u32>,

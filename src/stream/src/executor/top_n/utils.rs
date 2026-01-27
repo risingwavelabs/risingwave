@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -179,8 +179,7 @@ pub fn create_cache_key_serde(
 }
 
 use risingwave_common::row;
+pub use row::Row as GroupKey;
 
 use crate::common::table::state_table::StateTablePostCommit;
-
-pub trait GroupKey = row::Row + Send + Sync;
 pub const NO_GROUP_KEY: Option<row::Empty> = None;

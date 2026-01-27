@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -36,11 +36,19 @@ pub enum AccessError {
     #[error("Unsupported data type `{ty}`")]
     UnsupportedType { ty: String },
 
+    /// CDC auto schema change specific error that may include table context
+    #[error("CDC auto schema change error: unsupported data type `{ty}` in table `{table_name}`")]
+    CdcAutoSchemaChangeError { ty: String, table_name: String },
+
     #[error("Unsupported additional column `{name}`")]
     UnsupportedAdditionalColumn { name: String },
 
     #[error("Fail to convert protobuf Any into jsonb: {0}")]
     ProtobufAnyToJson(#[source] serde_json::Error),
+
+    /// Parquet parser specific errors
+    #[error("Parquet parser error: {message}")]
+    ParquetParser { message: String },
 
     /// Errors that are not categorized into variants above.
     #[error("{message}")]

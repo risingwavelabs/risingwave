@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,6 +13,9 @@
 // limitations under the License.
 
 use serde::{Deserialize, Serialize};
+
+use crate::code::PostgresErrorCode;
+use crate::error_request_copy;
 
 /// The score of the error.
 ///
@@ -52,7 +55,8 @@ impl<E: std::error::Error> std::error::Error for ScoredError<E> {
 /// - To add a new field, also update the `provide` method.
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub(super) struct Extra {
-    pub score: Option<Score>,
+    score: Option<Score>,
+    code: Option<PostgresErrorCode>,
 }
 
 impl Extra {
@@ -62,7 +66,8 @@ impl Extra {
         T: ?Sized + std::error::Error,
     {
         Self {
-            score: std::error::request_value(error),
+            score: error_request_copy(error),
+            code: error_request_copy(error),
         }
     }
 
@@ -70,6 +75,9 @@ impl Extra {
     pub fn provide<'a>(&'a self, request: &mut std::error::Request<'a>) {
         if let Some(score) = self.score {
             request.provide_value(score);
+        }
+        if let Some(code) = self.code {
+            request.provide_value(code);
         }
     }
 }

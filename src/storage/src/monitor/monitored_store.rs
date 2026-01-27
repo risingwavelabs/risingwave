@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,7 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashSet;
+use std::cell::RefCell;
+use std::collections::{HashMap, HashSet};
 use std::marker::PhantomData;
 use std::sync::Arc;
 
@@ -23,6 +24,8 @@ use futures::{Future, FutureExt, TryFutureExt};
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VirtualNode;
+use risingwave_common::metrics::LabelGuardedHistogram;
+use risingwave_common::types::VectorRef;
 use risingwave_hummock_sdk::key::{TableKey, TableKeyRange};
 use risingwave_hummock_sdk::{HummockEpoch, HummockReadEpoch, SyncResult};
 use thiserror_ext::AsReport;
@@ -32,7 +35,7 @@ use tracing::{Instrument, error};
 use super::{MonitoredStateStoreGetStats, MonitoredStateStoreIterStats, MonitoredStorageMetrics};
 use crate::error::StorageResult;
 use crate::hummock::sstable_store::SstableStoreRef;
-use crate::hummock::{HummockStorage, SstableObjectIdManagerRef};
+use crate::hummock::{HummockStorage, ObjectIdManagerRef};
 use crate::monitor::monitored_storage_metrics::StateStoreIterStats;
 use crate::monitor::{StateStoreIterLogStats, StateStoreIterStatsTrait};
 use crate::store::*;
@@ -103,8 +106,8 @@ impl<S, E> MonitoredStateStore<S, E> {
         let monitored = MonitoredStateStoreIter {
             inner: iter_stream,
             stats: MonitoredStateStoreIterStats {
-                inner: Stat::new(table_id.table_id, &self.storage_metrics, iter_init_duration),
-                table_id: table_id.table_id,
+                inner: Stat::new(table_id, &self.storage_metrics, iter_init_duration),
+                table_id,
                 metrics: self.storage_metrics.clone(),
             },
             _phantom: PhantomData,
@@ -118,8 +121,7 @@ impl<S, E> MonitoredStateStore<S, E> {
         table_id: TableId,
         key_len: usize,
     ) -> StorageResult<Option<O>> {
-        let mut stats =
-            MonitoredStateStoreGetStats::new(table_id.table_id, self.storage_metrics.clone());
+        let mut stats = MonitoredStateStoreGetStats::new(table_id, self.storage_metrics.clone());
 
         let value = on_key_value_future
             .instrument_await("store_on_key_value".verbose())
@@ -139,12 +141,12 @@ impl<S, E> MonitoredStateStore<S, E> {
 }
 
 impl<S: StateStoreGet> StateStoreGet for MonitoredTableStateStore<S> {
-    fn on_key_value<O: Send + 'static>(
-        &self,
+    fn on_key_value<'a, O: Send + 'a>(
+        &'a self,
         key: TableKey<Bytes>,
         read_options: ReadOptions,
-        on_key_value_fn: impl KeyValueFn<O>,
-    ) -> impl StorageFuture<'_, Option<O>> {
+        on_key_value_fn: impl KeyValueFn<'a, O>,
+    ) -> impl StorageFuture<'a, Option<O>> {
         let table_id = self.table_id();
         let key_len = key.len();
         self.monitored_on_key_value(
@@ -206,6 +208,37 @@ impl<S: StateStoreReadLog> StateStoreReadLog for MonitoredStateStore<S> {
     }
 }
 
+impl<S: StateStoreReadVector> StateStoreReadVector for MonitoredTableStateStore<S> {
+    fn nearest<'a, O: Send + 'a>(
+        &'a self,
+        vec: VectorRef<'a>,
+        options: VectorNearestOptions,
+        on_nearest_item_fn: impl OnNearestItemFn<'a, O>,
+    ) -> impl StorageFuture<'a, Vec<O>> {
+        thread_local! {
+            static THREAD_HISTOGRAM_VEC: RefCell<HashMap<(TableId, usize, usize), LabelGuardedHistogram>> = RefCell::new(HashMap::new());
+        }
+        let start_time = Instant::now();
+        let metric_key = (self.table_id(), options.top_n, options.hnsw_ef_search);
+
+        self.inner
+            .nearest(vec, options, on_nearest_item_fn)
+            .inspect_ok(move |_| {
+                THREAD_HISTOGRAM_VEC.with_borrow_mut(|map| {
+                    map.entry(metric_key)
+                        .or_insert_with(|| {
+                            let (table_id, top_n, ef) = metric_key;
+                            let labels = [table_id.to_string(), top_n.to_string(), ef.to_string()];
+                            self.storage_metrics
+                                .vector_nearest_duration
+                                .with_guarded_label_values(&labels.each_ref().map(|s| s.as_str()))
+                        })
+                        .observe(start_time.elapsed().as_secs_f64());
+                });
+            })
+    }
+}
+
 impl<S: LocalStateStore> LocalStateStore for MonitoredTableStateStore<S> {
     type FlushedSnapshotReader = MonitoredTableStateStore<S::FlushedSnapshotReader>;
 
@@ -249,6 +282,24 @@ impl<S: LocalStateStore> LocalStateStore for MonitoredTableStateStore<S> {
         self.inner.delete(key, old_val)
     }
 
+    fn get_table_watermark(&self, vnode: VirtualNode) -> Option<Bytes> {
+        self.inner.get_table_watermark(vnode)
+    }
+
+    fn new_flushed_snapshot_reader(&self) -> Self::FlushedSnapshotReader {
+        MonitoredTableStateStore::new(
+            self.inner.new_flushed_snapshot_reader(),
+            self.storage_metrics.clone(),
+            self.table_id(),
+        )
+    }
+
+    async fn update_vnode_bitmap(&mut self, vnodes: Arc<Bitmap>) -> StorageResult<Arc<Bitmap>> {
+        self.inner.update_vnode_bitmap(vnodes).await
+    }
+}
+
+impl<S: StateStoreWriteEpochControl> StateStoreWriteEpochControl for MonitoredTableStateStore<S> {
     fn flush(&mut self) -> impl Future<Output = StorageResult<usize>> + Send + '_ {
         self.inner.flush().instrument_await("store_flush".verbose())
     }
@@ -267,27 +318,19 @@ impl<S: LocalStateStore> LocalStateStore for MonitoredTableStateStore<S> {
             .try_flush()
             .instrument_await("store_try_flush".verbose())
     }
+}
 
-    async fn update_vnode_bitmap(&mut self, vnodes: Arc<Bitmap>) -> StorageResult<Arc<Bitmap>> {
-        self.inner.update_vnode_bitmap(vnodes).await
-    }
-
-    fn get_table_watermark(&self, vnode: VirtualNode) -> Option<Bytes> {
-        self.inner.get_table_watermark(vnode)
-    }
-
-    fn new_flushed_snapshot_reader(&self) -> Self::FlushedSnapshotReader {
-        MonitoredTableStateStore::new(
-            self.inner.new_flushed_snapshot_reader(),
-            self.storage_metrics.clone(),
-            self.table_id(),
-        )
+impl<S: StateStoreWriteVector> StateStoreWriteVector for MonitoredTableStateStore<S> {
+    fn insert(&mut self, vec: VectorRef<'_>, info: Bytes) -> StorageResult<()> {
+        // TODO: monitor
+        self.inner.insert(vec, info)
     }
 }
 
 impl<S: StateStore> StateStore for MonitoredStateStore<S> {
     type Local = MonitoredTableStateStore<S::Local>;
     type ReadSnapshot = MonitoredTableStateStore<S::ReadSnapshot>;
+    type VectorWriter = MonitoredTableStateStore<S::VectorWriter>;
 
     fn try_wait_epoch(
         &self,
@@ -330,6 +373,15 @@ impl<S: StateStore> StateStore for MonitoredStateStore<S> {
             options.table_id,
         ))
     }
+
+    async fn new_vector_writer(&self, options: NewVectorWriterOptions) -> Self::VectorWriter {
+        let table_id = options.table_id;
+        MonitoredTableStateStore::new(
+            self.inner.new_vector_writer(options).await,
+            self.storage_metrics.clone(),
+            table_id,
+        )
+    }
 }
 
 impl MonitoredStateStore<HummockStorage> {
@@ -337,8 +389,8 @@ impl MonitoredStateStore<HummockStorage> {
         self.inner.sstable_store()
     }
 
-    pub fn sstable_object_id_manager(&self) -> SstableObjectIdManagerRef {
-        self.inner.sstable_object_id_manager().clone()
+    pub fn object_id_manager(&self) -> ObjectIdManagerRef {
+        self.inner.object_id_manager().clone()
     }
 }
 

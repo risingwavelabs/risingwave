@@ -21,3 +21,11 @@
     explain create sink s into t1 as select b from t2;
   expected_outputs:
     - explain_output
+- id: create decoupled sink into table
+  sql: |
+    create table t1 (a int primary key, b int);
+    create table t2 (a int, b int primary key);
+    set sink_decouple = true;
+    explain create sink s into t1 from t2;
+  expected_outputs:
+    - explain_output

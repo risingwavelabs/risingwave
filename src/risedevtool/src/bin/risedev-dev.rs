@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -30,9 +30,10 @@ use risedev::util::{begin_spin, complete_spin, fail_spin};
 use risedev::{
     CompactorService, ComputeNodeService, ConfigExpander, ConfigureTmuxTask, DummyService,
     EnsureStopService, ExecuteContext, FrontendService, GrafanaService, KafkaService,
-    MetaNodeService, MinioService, MySqlService, PostgresService, PrometheusService, PubsubService,
-    RISEDEV_NAME, RedisService, SchemaRegistryService, ServiceConfig, SqlServerService,
-    SqliteConfig, Task, TaskGroup, TempoService, generate_risedev_env, preflight_check,
+    LakekeeperService, MetaNodeService, MinioService, MoatService, MySqlService, PostgresService,
+    PrometheusService, PubsubService, PulsarService, RISEDEV_NAME, RedisService,
+    SchemaRegistryService, ServiceConfig, SqlServerService, SqliteConfig, Task, TaskGroup,
+    TempoService, generate_risedev_env, preflight_check,
 };
 use sqlx::mysql::MySqlConnectOptions;
 use sqlx::postgres::PgConnectOptions;
@@ -141,7 +142,7 @@ fn task_main(
                     let mut service = MinioService::new(c.clone())?;
                     service.execute(&mut ctx)?;
 
-                    let mut task = risedev::ConfigureMinioTask::new(c.clone())?;
+                    let mut task = risedev::ConfigureMinioTask::new(c)?;
                     task.execute(&mut ctx)?;
                 }
                 ServiceConfig::Sqlite(c) => {
@@ -164,7 +165,7 @@ fn task_main(
                     std::fs::create_dir_all(&file_dir)?;
                     let file_path = file_dir.join(&c.file);
 
-                    ctx.service(&SqliteService(c.clone()));
+                    ctx.service(&SqliteService(c));
                     ctx.complete_spin();
                     ctx.pb
                         .set_message(format!("using local sqlite: {:?}", file_path));
@@ -281,8 +282,16 @@ fn task_main(
                     ctx.pb
                         .set_message(format!("pubsub {}:{}", c.address, c.port));
                 }
-                ServiceConfig::RedPanda(_) => {
-                    return Err(anyhow!("redpanda is only supported in RiseDev compose."));
+                ServiceConfig::Pulsar(c) => {
+                    PulsarService::new(c.clone()).execute(&mut ctx)?;
+                    let mut task = risedev::TcpReadyCheckTask::new(
+                        c.address.clone(),
+                        c.broker_port,
+                        c.user_managed,
+                    )?;
+                    task.execute(&mut ctx)?;
+                    ctx.pb
+                        .set_message(format!("pulsar {}:{}", c.address, c.broker_port));
                 }
                 ServiceConfig::Redis(c) => {
                     let mut service = RedisService::new(c.clone())?;
@@ -337,6 +346,34 @@ fn task_main(
                     }
                     ctx.pb
                         .set_message(format!("sqlserver {}:{}", c.address, c.port));
+                }
+                ServiceConfig::Lakekeeper(c) => {
+                    let mut service = LakekeeperService::new(c.clone())?;
+                    service.execute(&mut ctx)?;
+                    if c.user_managed {
+                        let mut task = risedev::TcpReadyCheckTask::new(
+                            c.address.clone(),
+                            c.port,
+                            c.user_managed,
+                        )?;
+                        task.execute(&mut ctx)?;
+                    } else {
+                        let mut task =
+                            risedev::TcpReadyCheckTask::new(c.address.clone(), c.port, false)?;
+                        task.execute(&mut ctx)?;
+                    }
+                    ctx.pb
+                        .set_message(format!("lakekeeper http://{}:{}/", c.address, c.port));
+                }
+                ServiceConfig::Moat(c) => {
+                    let mut service = MoatService::new(c.clone())?;
+                    service.execute(&mut ctx)?;
+
+                    let mut task =
+                        risedev::TcpReadyCheckTask::new(c.address.clone(), c.port, false)?;
+                    task.execute(&mut ctx)?;
+                    ctx.pb
+                        .set_message(format!("moat http://{}:{}/", c.address, c.port));
                 }
             }
 

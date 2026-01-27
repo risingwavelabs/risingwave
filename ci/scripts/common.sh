@@ -1,10 +1,14 @@
+# Get the repository root directory from the script's location
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+
 export CARGO_TERM_COLOR=always
 export PROTOC_NO_VENDOR=true
-export CARGO_HOME=/risingwave/.cargo
+export CARGO_HOME="${REPO_ROOT}/.cargo"
 export RISINGWAVE_CI=true
 export RUST_BACKTRACE=1
 export ENABLE_TELEMETRY=false
 export RUSTC_WRAPPER=sccache
+export RUSTC_WORKSPACE_WRAPPER="${REPO_ROOT}/ci/scripts/rustc-workspace-wrapper.sh"
 export SCCACHE_BUCKET=rw-ci-sccache-bucket
 export SCCACHE_REGION=us-east-2
 export SCCACHE_IDLE_TIMEOUT=0
@@ -18,22 +22,65 @@ export RW_TELEMETRY_TYPE=test
 export RW_SECRET_STORE_PRIVATE_KEY_HEX="0123456789abcdef0123456789abcdef"
 export SLT_FAIL_FAST=true
 export SLT_KEEP_DB_ON_FAILURE=true
+export SLT_SHUTDOWN_TIMEOUT=10
+export CARGO_LLVM_COV=1
+export CARGO_LLVM_COV_SHOW_ENV=1
+export CARGO_LLVM_COV_TARGET_DIR="${REPO_ROOT}/target" # used to locate object files, should be same as `CARGO_TARGET_DIR`
+export LLVM_PROFILE_FILE="${CARGO_LLVM_COV_TARGET_DIR}/risingwave-%p.profraw" # used both by executables generating profraw files and `cargo llvm-cov` to find them
 
 unset LANG
 
-function dump_diagnose_info() {
+function generate_and_upload_coverage_report() {
+  echo "--- Generate coverage report"
+
+  # Generate unique coverage filename with job id.
+  coverage_filename="coverage-${BUILDKITE_JOB_ID}.lcov"
+
+  # Only generate coverage if we have profraw files.
+  if [ -n "$(find target -name '*.profraw' 2>/dev/null | head -1)" ]; then
+    len=$(find target -name '*.profraw' 2>/dev/null | wc -l)
+    echo "Found ${len} profraw files. Generating coverage report."
+
+    local -a profile_args=()
+    # In most steps, we extract the executables to `target/debug` no matter what profile it is built with.
+    # Thus, it's okay to not specify profile and use `debug`.
+    # For exceptions, specify `RW_COVERAGE_CARGO_PROFILE` in the script.
+    if [[ -n "${RW_COVERAGE_CARGO_PROFILE:-}" ]]; then
+      profile_args+=(--profile "${RW_COVERAGE_CARGO_PROFILE}")
+    fi
+
+    cargo llvm-cov report "${profile_args[@]}" --lcov --output-path "$coverage_filename" || {
+      echo "Warning: Failed to generate coverage report"
+    }
+
+    if [ -f "$coverage_filename" ]; then
+      buildkite-agent artifact upload "$coverage_filename" || {
+        echo "Warning: Failed to upload coverage report"
+      }
+    fi
+  else
+    echo "No profraw files found. Skipping coverage generation."
+  fi
+}
+
+
+function exit_hook() {
   ret=$?
+
+  # Generate and upload coverage report on successful completion
   if [ $ret -eq 0 ]; then
+    generate_and_upload_coverage_report
     exit 0
   fi
 
-  echo "^^^ +++"
-  echo "--- Failed to run command! Dumping diagnose info..."
+  # Otherwise, print diagnose info
   if [ -f .risingwave/config/risedev-env ]; then
+    echo "^^^ +++"
+    echo "--- Failed to run command! Dumping diagnose info..."
     ./risedev diagnose || true
   fi
 }
-trap dump_diagnose_info EXIT
+trap exit_hook EXIT
 
 if [ -n "${BUILDKITE_COMMIT:-}" ]; then
   export GIT_SHA=$BUILDKITE_COMMIT
@@ -73,8 +120,8 @@ function download_and_prepare_rw() {
     echo "download_and_prepare_rw: missing argument env"
     exit 1
   fi
-  # env is either common or source
-  if [ "$2" != "common" ] && [ "$2" != "source" ]; then
+  # env is either common, source, iceberg, or monitoring
+  if [ "$2" != "common" ] && [ "$2" != "source" ] && [ "$2" != "iceberg" ] && [ "$2" != "monitoring" ]; then
     echo "download_and_prepare_rw: invalid argument env"
     exit 1
   fi
@@ -100,6 +147,10 @@ function download_and_prepare_rw() {
     cp ci/risedev-components.ci.env risedev-components.user.env
   elif [ "$env" = "source" ]; then
     cp ci/risedev-components.ci.source.env risedev-components.user.env
+  elif [ "$env" = "iceberg" ]; then
+    cp ci/risedev-components.ci.iceberg.env risedev-components.user.env
+  elif [ "$env" = "monitoring" ]; then
+    cp ci/risedev-components.ci.monitoring.env risedev-components.user.env
   fi
 
   echo -e "\033[33mPrepare RiseDev dev cluster\033[0m"

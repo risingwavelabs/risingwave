@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,7 +17,7 @@ use risingwave_common::util::sort_util::ColumnOrder;
 use crate::binder::BoundSetExpr;
 use crate::error::Result;
 use crate::expr::ExprImpl;
-use crate::optimizer::plan_node::PlanRef;
+use crate::optimizer::plan_node::LogicalPlanRef as PlanRef;
 use crate::planner::Planner;
 
 impl Planner {

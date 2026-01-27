@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -11,6 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+
 use std::sync::Arc;
 
 use prometheus::core::Atomic;
@@ -18,6 +19,7 @@ use risingwave_common::catalog::SysCatalogReaderRef;
 use risingwave_common::config::BatchConfig;
 use risingwave_common::memory::MemoryContext;
 use risingwave_common::metrics::TrAdderAtomic;
+use risingwave_common::metrics_reader::MetricsReader;
 use risingwave_common::util::addr::{HostAddr, is_local_address};
 use risingwave_connector::source::monitor::SourceMetrics;
 use risingwave_dml::dml_manager::DmlManagerRef;
@@ -66,6 +68,9 @@ pub trait BatchTaskContext: Send + Sync + 'static {
     fn create_executor_mem_context(&self, executor_id: &str) -> MemoryContext;
 
     fn worker_node_manager(&self) -> Option<WorkerNodeManagerRef>;
+
+    /// Get metrics reader for reading channel delta stats and other metrics.
+    fn metrics_reader(&self) -> Arc<dyn MetricsReader>;
 }
 
 /// Batch task context on compute node.
@@ -128,6 +133,10 @@ impl BatchTaskContext for ComputeNodeContext {
 
     fn worker_node_manager(&self) -> Option<WorkerNodeManagerRef> {
         None
+    }
+
+    fn metrics_reader(&self) -> Arc<dyn MetricsReader> {
+        unimplemented!("metrics_reader not supported in compute node context")
     }
 }
 

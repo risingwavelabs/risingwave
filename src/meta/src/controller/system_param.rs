@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,7 +19,7 @@ use anyhow::anyhow;
 use risingwave_common::system_param::common::CommonHandler;
 use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_common::system_param::{
-    check_missing_params, derive_missing_fields, set_system_param,
+    check_missing_params, derive_missing_fields, set_system_param, validate_init_system_params,
 };
 use risingwave_common::{for_all_params, key_of};
 use risingwave_meta_model::prelude::SystemParameter;
@@ -27,7 +27,7 @@ use risingwave_meta_model::system_parameter;
 use risingwave_pb::meta::PbSystemParams;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use sea_orm::ActiveValue::Set;
-use sea_orm::{ActiveModelTrait, DatabaseConnection, EntityTrait, TransactionTrait};
+use sea_orm::{DatabaseConnection, EntityTrait, TransactionTrait};
 use tokio::sync::RwLock;
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
@@ -143,6 +143,7 @@ impl SystemParamsController {
         let params = merge_params(system_params_from_db(params)?, init_params);
         tracing::info!(initial_params = ?SystemParamsReader::new(&params), "initialize system parameters");
         check_missing_params(&params).map_err(|e| anyhow!(e))?;
+        validate_init_system_params(&params).map_err(|e| anyhow!(e))?;
         let ctl = Self {
             db,
             notification_manager,
@@ -197,7 +198,7 @@ impl SystemParamsController {
         };
 
         param.value = Set(new_value);
-        param.update(&self.db).await?;
+        SystemParameter::update(param).exec(&self.db).await?;
         *params_guard = params.clone();
 
         // Run common handler.
@@ -207,8 +208,7 @@ impl SystemParamsController {
 
         // Sync params to other managers on the meta node only once, since it's infallible.
         self.notification_manager
-            .notify_local_subscribers(LocalNotification::SystemParamsChange(params.clone().into()))
-            .await;
+            .notify_local_subscribers(LocalNotification::SystemParamsChange(params.clone().into()));
 
         // Sync params to worker nodes.
         self.notify_workers(&params);
@@ -291,7 +291,10 @@ mod tests {
             is_mutable: Set(true),
             description: Set(None),
         };
-        deprecated_param.insert(&system_param_ctl.db).await.unwrap();
+        SystemParameter::insert(deprecated_param)
+            .exec(&system_param_ctl.db)
+            .await
+            .unwrap();
 
         // init system parameter controller as not first launch.
         let system_param_ctl = SystemParamsController::new(

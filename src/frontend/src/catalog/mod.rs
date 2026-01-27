@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -21,7 +21,9 @@
 use risingwave_common::catalog::{
     ROW_ID_COLUMN_NAME, RW_RESERVED_COLUMN_NAME_PREFIX, is_system_schema,
 };
+use risingwave_common::error::code::PostgresErrorCode;
 use risingwave_connector::sink::catalog::SinkCatalog;
+use risingwave_pb::user::grant_privilege::Object as PbGrantObject;
 use thiserror::Error;
 
 use crate::error::{ErrorCode, Result, RwError};
@@ -48,16 +50,16 @@ pub use table_catalog::TableCatalog;
 
 use crate::user::UserId;
 
-pub(crate) type ConnectionId = u32;
-pub(crate) type SourceId = u32;
-pub(crate) type SinkId = u32;
-pub(crate) type SubscriptionId = u32;
-pub(crate) type ViewId = u32;
-pub(crate) type DatabaseId = u32;
-pub(crate) type SchemaId = u32;
+pub(crate) type ConnectionId = risingwave_common::id::ConnectionId;
+pub(crate) type SourceId = risingwave_common::id::SourceId;
+pub(crate) type SinkId = risingwave_common::id::SinkId;
+pub(crate) type SubscriptionId = risingwave_common::id::SubscriptionId;
+pub(crate) type ViewId = risingwave_common::id::ViewId;
+pub(crate) type DatabaseId = risingwave_common::catalog::DatabaseId;
+pub(crate) type SchemaId = risingwave_common::catalog::SchemaId;
 pub(crate) type TableId = risingwave_common::catalog::TableId;
 pub(crate) type ColumnId = risingwave_common::catalog::ColumnId;
-pub(crate) type FragmentId = u32;
+pub(crate) type FragmentId = risingwave_common::id::FragmentId;
 pub(crate) type SecretId = risingwave_common::catalog::SecretId;
 
 /// Check if the column name does not conflict with the internally reserved column name.
@@ -102,24 +104,88 @@ pub fn check_schema_writable(schema: &str) -> Result<()> {
 
 pub type CatalogResult<T> = std::result::Result<T, CatalogError>;
 
-#[derive(Error, Debug)]
-pub enum CatalogError {
-    #[error("{0} not found: {1}")]
-    NotFound(&'static str, String),
+// TODO(error-handling): provide more concrete error code for different object types.
+#[derive(Error, Debug, thiserror_ext::Box)]
+#[thiserror_ext(newtype(name = CatalogError, extra_provide = Self::provide_postgres_error_code))]
+pub enum CatalogErrorInner {
+    #[error("{object_type} not found: {name}")]
+    NotFound {
+        object_type: &'static str,
+        name: String,
+    },
+
     #[error(
-        "{0} with name {1} exists{under_creation}", under_creation = (.2).then_some(" but under creation").unwrap_or("")
+        "{object_type} with name {name} exists{}",
+        if *.under_creation { " but under creation" } else { "" },
     )]
-    Duplicated(
-        &'static str,
-        String,
-        // whether the object is under creation
-        bool,
-    ),
+    Duplicated {
+        object_type: &'static str,
+        name: String,
+        under_creation: bool, // only used for StreamingJob type and Subscription for now
+    },
 }
 
 impl CatalogError {
-    pub fn duplicated(object_type: &'static str, name: String) -> Self {
-        Self::Duplicated(object_type, name, false)
+    /// Provide the Postgres error code for the error.
+    fn provide_postgres_error_code(&self, request: &mut std::error::Request<'_>) {
+        match self.inner() {
+            CatalogErrorInner::NotFound { object_type, .. } => {
+                // `database` not found should map to SQLSTATE 3D000 (Invalid Catalog Name),
+                // which is used by Postgres for non-existing database in startup.
+                if *object_type == "database" {
+                    request.provide_value(PostgresErrorCode::InvalidCatalogName);
+                } else {
+                    request.provide_value(PostgresErrorCode::UndefinedObject);
+                }
+            }
+            CatalogErrorInner::Duplicated { .. } => {
+                request.provide_value(PostgresErrorCode::DuplicateObject);
+            }
+        };
+    }
+
+    /// Construct a `not found` error.
+    pub fn not_found(object_type: &'static str, name: impl Into<String>) -> Self {
+        CatalogErrorInner::NotFound {
+            object_type,
+            name: name.into(),
+        }
+        .into()
+    }
+
+    /// Construct a `duplicated` error.
+    pub fn duplicated(object_type: &'static str, name: impl Into<String>) -> Self {
+        Self::duplicated_under_creation(object_type, name, false)
+    }
+
+    /// Construct a `duplicated` error with `under_creation` flag.
+    pub fn duplicated_under_creation(
+        object_type: &'static str,
+        name: impl Into<String>,
+        under_creation: bool,
+    ) -> Self {
+        CatalogErrorInner::Duplicated {
+            object_type,
+            name: name.into(),
+            under_creation,
+        }
+        .into()
+    }
+
+    /// Whether the error is a `duplicated` error for the given object type.
+    pub fn is_duplicated(&self, object_type: &'static str) -> bool {
+        matches!(
+            self.inner(),
+            CatalogErrorInner::Duplicated { object_type: t, .. } if *t == object_type
+        )
+    }
+
+    /// Whether the error is a `not found` error for the given object type.
+    pub fn is_not_found(&self, object_type: &'static str) -> bool {
+        matches!(
+            self.inner(),
+            CatalogErrorInner::NotFound { object_type: t, .. } if *t == object_type
+        )
     }
 }
 
@@ -142,4 +208,9 @@ impl OwnedByUserCatalog for SinkCatalog {
     fn owner(&self) -> UserId {
         self.owner.user_id
     }
+}
+
+pub struct OwnedGrantObject {
+    pub owner: UserId,
+    pub object: PbGrantObject,
 }

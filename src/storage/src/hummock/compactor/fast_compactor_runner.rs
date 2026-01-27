@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -23,6 +23,7 @@ use await_tree::{InstrumentAwait, SpanExt};
 use bytes::Bytes;
 use fail::fail_point;
 use itertools::Itertools;
+use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::compact_task::CompactTask;
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::key_range::KeyRange;
@@ -34,10 +35,12 @@ use crate::compaction_catalog_manager::CompactionCatalogAgentRef;
 use crate::hummock::block_stream::BlockDataStream;
 use crate::hummock::compactor::task_progress::TaskProgress;
 use crate::hummock::compactor::{
-    CompactionStatistics, Compactor, CompactorContext, RemoteBuilderFactory, TaskConfig,
+    CompactionFilter, CompactionStatistics, Compactor, CompactorContext, MultiCompactionFilter,
+    RemoteBuilderFactory, TaskConfig,
 };
 use crate::hummock::iterator::{
     NonPkPrefixSkipWatermarkState, PkPrefixSkipWatermarkState, SkipWatermarkState,
+    ValueSkipWatermarkState,
 };
 use crate::hummock::multi_builder::{CapacitySplitTableBuilder, TableBuilderFactory};
 use crate::hummock::sstable_store::SstableStoreRef;
@@ -346,24 +349,26 @@ impl ConcatSstableIterator {
     }
 }
 
-pub struct CompactorRunner {
+pub struct CompactorRunner<C: CompactionFilter = MultiCompactionFilter> {
     left: Box<ConcatSstableIterator>,
     right: Box<ConcatSstableIterator>,
     task_id: u64,
     executor: CompactTaskExecutor<
         RemoteBuilderFactory<UnifiedSstableWriterFactory, BlockedXor16FilterBuilder>,
+        C,
     >,
     compression_algorithm: CompressionAlgorithm,
     metrics: Arc<CompactorMetrics>,
 }
 
-impl CompactorRunner {
+impl<C: CompactionFilter> CompactorRunner<C> {
     pub fn new(
         context: CompactorContext,
         task: CompactTask,
         compaction_catalog_agent_ref: CompactionCatalogAgentRef,
-        object_id_getter: Box<dyn GetObjectId>,
+        object_id_getter: Arc<dyn GetObjectId>,
         task_progress: Arc<TaskProgress>,
+        compaction_filter: C,
     ) -> Self {
         let mut options: SstableBuilderOptions = context.storage_opts.as_ref().into();
         let compression_algorithm: CompressionAlgorithm = task.compression_algorithm.into();
@@ -429,11 +434,15 @@ impl CompactorRunner {
         ));
 
         // Can not consume the watermarks because the watermarks may be used by `check_compact_result`.
-        let state = PkPrefixSkipWatermarkState::from_safe_epoch_watermarks(
+        let pk_prefix_state = PkPrefixSkipWatermarkState::from_safe_epoch_watermarks(
             task.pk_prefix_table_watermarks.clone(),
         );
         let non_pk_prefix_state = NonPkPrefixSkipWatermarkState::from_safe_epoch_watermarks(
             task.non_pk_prefix_table_watermarks.clone(),
+            compaction_catalog_agent_ref.clone(),
+        );
+        let value_skip_watermark_state = ValueSkipWatermarkState::from_safe_epoch_watermarks(
+            task.value_table_watermarks.clone(),
             compaction_catalog_agent_ref,
         );
 
@@ -442,13 +451,15 @@ impl CompactorRunner {
                 sst_builder,
                 task_config,
                 task_progress,
-                state,
+                pk_prefix_state,
                 non_pk_prefix_state,
+                value_skip_watermark_state,
+                compaction_filter,
             ),
             left,
             right,
             task_id: task.task_id,
-            metrics: context.compactor_metrics.clone(),
+            metrics: context.compactor_metrics,
             compression_algorithm,
         }
     }
@@ -627,27 +638,31 @@ impl CompactorRunner {
     }
 }
 
-pub struct CompactTaskExecutor<F: TableBuilderFactory> {
+pub struct CompactTaskExecutor<F: TableBuilderFactory, C: CompactionFilter> {
     last_key: FullKey<Vec<u8>>,
     compaction_statistics: CompactionStatistics,
-    last_table_id: Option<u32>,
+    last_table_id: Option<TableId>,
     last_table_stats: TableStats,
     builder: CapacitySplitTableBuilder<F>,
     task_config: TaskConfig,
     task_progress: Arc<TaskProgress>,
-    skip_watermark_state: PkPrefixSkipWatermarkState,
+    pk_prefix_skip_watermark_state: PkPrefixSkipWatermarkState,
     last_key_is_delete: bool,
     progress_key_num: u32,
     non_pk_prefix_skip_watermark_state: NonPkPrefixSkipWatermarkState,
+    value_skip_watermark_state: ValueSkipWatermarkState,
+    compaction_filter: C,
 }
 
-impl<F: TableBuilderFactory> CompactTaskExecutor<F> {
+impl<F: TableBuilderFactory, C: CompactionFilter> CompactTaskExecutor<F, C> {
     pub fn new(
         builder: CapacitySplitTableBuilder<F>,
         task_config: TaskConfig,
         task_progress: Arc<TaskProgress>,
-        skip_watermark_state: PkPrefixSkipWatermarkState,
+        pk_prefix_skip_watermark_state: PkPrefixSkipWatermarkState,
         non_pk_prefix_skip_watermark_state: NonPkPrefixSkipWatermarkState,
+        value_skip_watermark_state: ValueSkipWatermarkState,
+        compaction_filter: C,
     ) -> Self {
         Self {
             builder,
@@ -658,9 +673,11 @@ impl<F: TableBuilderFactory> CompactTaskExecutor<F> {
             last_table_id: None,
             last_table_stats: TableStats::default(),
             task_progress,
-            skip_watermark_state,
+            pk_prefix_skip_watermark_state,
             progress_key_num: 0,
             non_pk_prefix_skip_watermark_state,
+            value_skip_watermark_state,
+            compaction_filter,
         }
     }
 
@@ -696,7 +713,7 @@ impl<F: TableBuilderFactory> CompactTaskExecutor<F> {
         iter: &mut BlockIterator,
         target_key: FullKey<&[u8]>,
     ) -> HummockResult<()> {
-        self.skip_watermark_state.reset_watermark();
+        self.pk_prefix_skip_watermark_state.reset_watermark();
         self.non_pk_prefix_skip_watermark_state.reset_watermark();
 
         while iter.is_valid() && iter.key().le(&target_key) {
@@ -724,18 +741,22 @@ impl<F: TableBuilderFactory> CompactTaskExecutor<F> {
                 drop = true;
             }
 
-            if self.watermark_should_delete(&iter.key()) {
+            if !drop && self.compaction_filter.should_delete(iter.key()) {
+                drop = true;
+            }
+
+            if !drop && self.watermark_should_delete(&iter.key(), value) {
                 drop = true;
                 self.last_key_is_delete = true;
             }
 
-            if self.last_table_id != Some(self.last_key.user_key.table_id.table_id) {
+            if self.last_table_id != Some(self.last_key.user_key.table_id) {
                 if let Some(last_table_id) = self.last_table_id.take() {
                     self.compaction_statistics
                         .delta_drop_stat
                         .insert(last_table_id, std::mem::take(&mut self.last_table_stats));
                 }
-                self.last_table_id = Some(self.last_key.user_key.table_id.table_id);
+                self.last_table_id = Some(self.last_key.user_key.table_id);
             }
 
             if drop {
@@ -743,7 +764,7 @@ impl<F: TableBuilderFactory> CompactTaskExecutor<F> {
 
                 let should_count = match self.task_config.stats_target_table_ids.as_ref() {
                     Some(target_table_ids) => {
-                        target_table_ids.contains(&self.last_key.user_key.table_id.table_id)
+                        target_table_ids.contains(&self.last_key.user_key.table_id)
                     }
                     None => true,
                 };
@@ -770,16 +791,55 @@ impl<F: TableBuilderFactory> CompactTaskExecutor<F> {
             return false;
         }
 
-        if self.watermark_should_delete(smallest_key) {
+        if self.watermark_may_delete(smallest_key) {
+            return false;
+        }
+
+        // Check compaction filter
+        if self.compaction_filter.should_delete(*smallest_key) {
             return false;
         }
 
         true
     }
 
-    fn watermark_should_delete(&mut self, key: &FullKey<&[u8]>) -> bool {
-        (self.skip_watermark_state.has_watermark() && self.skip_watermark_state.should_delete(key))
+    fn watermark_may_delete(&mut self, key: &FullKey<&[u8]>) -> bool {
+        // Correctness requires the assumption that these PkPrefixSkipWatermarkState and NonPkPrefixSkipWatermarkState never use the `unused_put`.
+        let pk_prefix_has_watermark = self.pk_prefix_skip_watermark_state.has_watermark();
+        let non_pk_prefix_has_watermark = self.non_pk_prefix_skip_watermark_state.has_watermark();
+        if pk_prefix_has_watermark || non_pk_prefix_has_watermark {
+            let unused = vec![];
+            let unused_put = HummockValue::Put(unused.as_slice());
+            if (pk_prefix_has_watermark
+                && self
+                    .pk_prefix_skip_watermark_state
+                    .should_delete(key, unused_put))
+                || (non_pk_prefix_has_watermark
+                    && self
+                        .non_pk_prefix_skip_watermark_state
+                        .should_delete(key, unused_put))
+            {
+                return true;
+            }
+        }
+        self.value_skip_watermark_state.has_watermark()
+            && self.value_skip_watermark_state.may_delete(key)
+    }
+
+    fn watermark_should_delete(
+        &mut self,
+        key: &FullKey<&[u8]>,
+        value: HummockValue<&[u8]>,
+    ) -> bool {
+        (self.pk_prefix_skip_watermark_state.has_watermark()
+            && self
+                .pk_prefix_skip_watermark_state
+                .should_delete(key, value))
             || (self.non_pk_prefix_skip_watermark_state.has_watermark()
-                && self.non_pk_prefix_skip_watermark_state.should_delete(key))
+                && self
+                    .non_pk_prefix_skip_watermark_state
+                    .should_delete(key, value))
+            || (self.value_skip_watermark_state.has_watermark()
+                && self.value_skip_watermark_state.should_delete(key, value))
     }
 }

@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -35,6 +35,7 @@ pub mod prelude {
     pub type PosixFsSplitEnumerator =
         OpendalEnumerator<crate::source::filesystem::opendal_source::OpendalPosixFs>;
     pub use crate::source::cdc::enumerator::DebeziumSplitEnumerator;
+    pub use crate::source::filesystem::opendal_source::BatchPosixFsEnumerator as BatchPosixFsSplitEnumerator;
     pub type CitusCdcSplitEnumerator = DebeziumSplitEnumerator<crate::source::cdc::Citus>;
     pub type MongodbCdcSplitEnumerator = DebeziumSplitEnumerator<crate::source::cdc::Mongodb>;
     pub type PostgresCdcSplitEnumerator = DebeziumSplitEnumerator<crate::source::cdc::Postgres>;
@@ -43,6 +44,7 @@ pub mod prelude {
 }
 
 pub mod base;
+pub mod batch;
 pub mod cdc;
 pub mod data_gen_util;
 pub mod datagen;
@@ -55,11 +57,13 @@ pub mod mqtt;
 pub mod nats;
 pub mod nexmark;
 pub mod pulsar;
-mod util;
+pub mod utils;
 
+mod util;
 use std::future::IntoFuture;
 
 pub use base::{UPSTREAM_SOURCE_KEY, WEBHOOK_CONNECTOR, *};
+pub use batch::BatchSourceSplitImpl;
 pub(crate) use common::*;
 use google_cloud_pubsub::subscription::Subscription;
 pub use google_pubsub::GOOGLE_PUBSUB_CONNECTOR;
@@ -67,25 +71,33 @@ pub use kafka::KAFKA_CONNECTOR;
 pub use kinesis::KINESIS_CONNECTOR;
 pub use mqtt::MQTT_CONNECTOR;
 pub use nats::NATS_CONNECTOR;
+use utils::feature_gated_source_mod;
+
+pub use self::adbc_snowflake::ADBC_SNOWFLAKE_CONNECTOR;
 mod common;
 pub mod iceberg;
 mod manager;
 pub mod reader;
 pub mod test_source;
+feature_gated_source_mod!(adbc_snowflake, "adbc_snowflake");
 
 use async_nats::jetstream::consumer::AckPolicy as JetStreamAckPolicy;
 use async_nats::jetstream::context::Context as JetStreamContext;
 pub use manager::{SourceColumnDesc, SourceColumnType};
 use risingwave_common::array::{Array, ArrayRef};
+use risingwave_common::row::OwnedRow;
+use risingwave_pb::id::SourceId;
 use thiserror_ext::AsReport;
 pub use util::fill_adaptive_split;
 
 pub use crate::source::filesystem::LEGACY_S3_CONNECTOR;
 pub use crate::source::filesystem::opendal_source::{
-    AZBLOB_CONNECTOR, GCS_CONNECTOR, OPENDAL_S3_CONNECTOR, POSIX_FS_CONNECTOR,
+    AZBLOB_CONNECTOR, BATCH_POSIX_FS_CONNECTOR, GCS_CONNECTOR, OPENDAL_S3_CONNECTOR,
+    POSIX_FS_CONNECTOR,
 };
 pub use crate::source::nexmark::NEXMARK_CONNECTOR;
 pub use crate::source::pulsar::PULSAR_CONNECTOR;
+use crate::source::pulsar::source::reader::PULSAR_ACK_CHANNEL;
 
 pub fn should_copy_to_format_encode_options(key: &str, connector: &str) -> bool {
     const PREFIXES: &[&str] = &[
@@ -114,10 +126,21 @@ pub enum WaitCheckpointTask {
     CommitCdcOffset(Option<(SplitId, String)>),
     AckPubsubMessage(Subscription, Vec<ArrayRef>),
     AckNatsJetStream(JetStreamContext, Vec<ArrayRef>, JetStreamAckPolicy),
+    AckPulsarMessage(Vec<(String, ArrayRef)>),
 }
 
 impl WaitCheckpointTask {
     pub async fn run(self) {
+        self.run_with_on_commit_success(|_source_id, _offset| {
+            // Default implementation: no action on commit success
+        })
+        .await;
+    }
+
+    pub async fn run_with_on_commit_success<F>(self, mut on_commit_success: F)
+    where
+        F: FnMut(u64, &str),
+    {
         use std::str::FromStr;
         match self {
             WaitCheckpointTask::CommitCdcOffset(updated_offset) => {
@@ -125,13 +148,30 @@ impl WaitCheckpointTask {
                     let source_id: u64 = u64::from_str(split_id.as_ref()).unwrap();
                     // notify cdc connector to commit offset
                     match cdc::jni_source::commit_cdc_offset(source_id, offset.clone()) {
-                        Ok(()) => {}
+                        Ok(()) => {
+                            // Execute callback after successful commit
+                            on_commit_success(source_id, &offset);
+                        }
                         Err(e) => {
                             tracing::error!(
                                 error = %e.as_report(),
                                 "source#{source_id}: failed to commit cdc offset: {offset}.",
                             )
                         }
+                    }
+                }
+            }
+            WaitCheckpointTask::AckPulsarMessage(ack_array) => {
+                if let Some((ack_channel_id, to_cumulative_ack)) = ack_array.last() {
+                    let encode_message_id_data = to_cumulative_ack
+                        .as_bytea()
+                        .iter()
+                        .last()
+                        .flatten()
+                        .map(|x| x.to_owned())
+                        .unwrap();
+                    if let Some(ack_tx) = PULSAR_ACK_CHANNEL.get(ack_channel_id).await {
+                        let _ = ack_tx.send(encode_message_id_data);
                     }
                 }
             }
@@ -206,4 +246,19 @@ impl WaitCheckpointTask {
             }
         }
     }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct CdcTableSnapshotSplitCommon<T: Clone> {
+    pub split_id: i64,
+    pub left_bound_inclusive: T,
+    pub right_bound_exclusive: T,
+}
+
+pub type CdcTableSnapshotSplit = CdcTableSnapshotSplitCommon<OwnedRow>;
+pub type CdcTableSnapshotSplitRaw = CdcTableSnapshotSplitCommon<Vec<u8>>;
+
+#[inline]
+pub fn build_pulsar_ack_channel_id(source_id: SourceId, split_id: &SplitId) -> String {
+    format!("{}-{}", source_id, split_id)
 }

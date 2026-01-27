@@ -1,0 +1,139 @@
+control substitution on
+
+# Test DROP CONNECTION CASCADE functionality
+
+# for non-shared source
+statement ok
+set streaming_use_shared_source to false;
+
+# Create secret for connection
+statement ok
+create secret sec_cascade with (backend = 'meta') as '${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}';
+
+# Create connection that will have dependencies
+statement ok
+create connection conn_cascade with (type = 'kafka', properties.bootstrap.server = secret sec_cascade, properties.security.protocol = 'plaintext');
+
+# Create Kafka topic for testing
+system ok
+rpk topic create connection_cascade_test -p 1
+
+# Create table that depends on the connection
+statement ok
+create table t_cascade (a int, b varchar) with (
+  connector = 'kafka',
+  connection = conn_cascade,
+  topic = 'connection_cascade_test')
+format plain encode json;
+
+# Create data table for sink
+statement ok
+create table data_cascade (a int, b varchar);
+
+statement ok
+insert into data_cascade values (10, 'cascade_test'), (20, 'test_data');
+
+statement ok
+flush;
+
+# Create sink that depends on the connection
+statement ok
+create sink sink_cascade from data_cascade with (
+  connector = 'kafka',
+  connection = conn_cascade,
+  topic = 'connection_cascade_test'
+) format plain encode json (
+  force_append_only='true'
+);
+
+# Wait for sink to be created and data to flow
+sleep 3s
+
+# Verify that normal DROP CONNECTION fails when objects depend on it
+statement error Permission denied: PermissionDenied: connection used by 2 other objects.
+drop connection conn_cascade;
+
+# Test that restrict mode also fails explicitly
+statement error Permission denied: PermissionDenied: connection used by 2 other objects.
+drop connection conn_cascade restrict;
+
+# Test DROP CONNECTION CASCADE - should succeed and drop dependent objects
+statement ok
+drop connection conn_cascade cascade;
+
+# Verify that the dependent table was dropped
+statement error
+select * from t_cascade;
+----
+db error: ERROR: Failed to run the query
+
+Caused by these errors (recent errors listed first):
+  1: Catalog error
+  2: table or source not found: t_cascade
+
+
+# Verify that the dependent sink was dropped
+query T
+select count(*) from rw_sinks where name = 'sink_cascade';
+----
+0
+
+
+# Verify connection is actually dropped
+query T
+select count(*) from rw_connections where name = 'conn_cascade';
+----
+0
+
+
+# Clean up remaining objects
+statement ok
+drop table data_cascade;
+
+statement ok
+drop secret sec_cascade;
+
+# Test DROP CONNECTION IF EXISTS CASCADE with existing connection
+statement ok
+create connection conn_if_exists with (type = 'kafka', properties.bootstrap.server = '${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}', properties.security.protocol = 'plaintext');
+
+statement ok
+drop connection if exists conn_if_exists cascade;
+
+# Verify connection was dropped
+query T
+select count(*) from rw_connections where name = 'conn_if_exists';
+----
+0
+
+# Test dropping non-existent connection with CASCADE - should not error with IF EXISTS
+statement ok
+drop connection if exists non_existent_conn cascade;
+
+# Test DROP CONNECTION CASCADE without IF EXISTS on non-existent connection - should error
+statement error
+drop connection non_existent_conn2 cascade;
+----
+db error: ERROR: Failed to run the query
+
+Caused by these errors (recent errors listed first):
+  1: Catalog error
+  2: connection not found: non_existent_conn2
+
+
+# Test CASCADE with connection that has no dependencies
+statement ok
+create connection conn_no_deps with (type = 'kafka', properties.bootstrap.server = '${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}', properties.security.protocol = 'plaintext');
+
+statement ok
+drop connection conn_no_deps cascade;
+
+# Verify it was dropped
+query T
+select count(*) from rw_connections where name = 'conn_no_deps';
+----
+0
+
+
+statement ok
+set streaming_use_shared_source to true;

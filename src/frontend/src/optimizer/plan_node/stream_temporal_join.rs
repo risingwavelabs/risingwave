@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -22,7 +22,7 @@ use risingwave_sqlparser::ast::AsOf;
 
 use super::stream::prelude::*;
 use super::utils::{Distill, childless_record, watermark_pretty};
-use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeBinary, generic};
+use super::{ExprRewritable, PlanBase, PlanTreeNodeBinary, StreamPlanRef as PlanRef, generic};
 use crate::TableCatalog;
 use crate::expr::{Expr, ExprRewriter, ExprVisitor};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
@@ -40,19 +40,19 @@ use crate::utils::ColIndexMappingRewriteExt;
 pub struct StreamTemporalJoin {
     pub base: PlanBase<Stream>,
     core: generic::Join<PlanRef>,
-    eq_join_predicate: EqJoinPredicate,
     append_only: bool,
     is_nested_loop: bool,
 }
 
 impl StreamTemporalJoin {
-    pub fn new(
-        core: generic::Join<PlanRef>,
-        eq_join_predicate: EqJoinPredicate,
-        is_nested_loop: bool,
-    ) -> Self {
+    pub fn new(core: generic::Join<PlanRef>, is_nested_loop: bool) -> Result<Self> {
+        core.on
+            .as_eq_predicate_ref()
+            .expect("StreamTemporalJoin requires JoinOn::EqPredicate in core");
         assert!(core.join_type == JoinType::Inner || core.join_type == JoinType::LeftOuter);
-        let append_only = core.left.append_only();
+        // TODO(kind): theoretically, the impl can handle upsert stream.
+        let stream_kind = reject_upsert_input!(core.left);
+        let append_only = stream_kind.is_append_only();
         assert!(!is_nested_loop || append_only);
 
         let right = core.right.clone();
@@ -93,19 +93,18 @@ impl StreamTemporalJoin {
         let base = PlanBase::new_stream_with_core(
             &core,
             dist,
-            append_only,
+            stream_kind,
             false, // TODO(rc): derive EOWC property from input
             watermark_columns,
             columns_monotonicity,
         );
 
-        Self {
+        Ok(Self {
             base,
             core,
-            eq_join_predicate,
             append_only,
             is_nested_loop,
-        }
+        })
     }
 
     /// Get join type
@@ -114,7 +113,10 @@ impl StreamTemporalJoin {
     }
 
     pub fn eq_join_predicate(&self) -> &EqJoinPredicate {
-        &self.eq_join_predicate
+        self.core
+            .on
+            .as_eq_predicate_ref()
+            .expect("StreamTemporalJoin should store predicate as EqJoinPredicate")
     }
 
     pub fn append_only(&self) -> bool {
@@ -122,7 +124,7 @@ impl StreamTemporalJoin {
     }
 
     pub fn is_nested_loop(&self) -> bool {
-        self.eq_join_predicate().has_eq()
+        self.is_nested_loop
     }
 
     /// Return memo-table catalog and its `pk_indices`.
@@ -134,7 +136,7 @@ impl StreamTemporalJoin {
     /// Read pattern:
     ///   for each left input row (with delete op), construct pk prefix (`join_key` + `left_pk`) to fetch rows and delete them from the memo table.
     pub fn infer_memo_table_catalog(&self, right_scan: &StreamTableScan) -> TableCatalog {
-        let left_eq_indexes = self.eq_join_predicate.left_eq_indexes();
+        let left_eq_indexes = self.eq_join_predicate().left_eq_indexes();
         let read_prefix_len_hint = left_eq_indexes.len() + self.left().stream_key().unwrap().len();
 
         // Build internal table
@@ -205,7 +207,7 @@ impl Distill for StreamTemporalJoin {
     }
 }
 
-impl PlanTreeNodeBinary for StreamTemporalJoin {
+impl PlanTreeNodeBinary<Stream> for StreamTemporalJoin {
     fn left(&self) -> PlanRef {
         self.core.left.clone()
     }
@@ -218,23 +220,23 @@ impl PlanTreeNodeBinary for StreamTemporalJoin {
         let mut core = self.core.clone();
         core.left = left;
         core.right = right;
-        Self::new(core, self.eq_join_predicate.clone(), self.is_nested_loop)
+        Self::new(core, self.is_nested_loop).unwrap()
     }
 }
 
-impl_plan_tree_node_for_binary! { StreamTemporalJoin }
+impl_plan_tree_node_for_binary! { Stream, StreamTemporalJoin }
 
 impl TryToStreamPb for StreamTemporalJoin {
     fn try_to_stream_prost_body(
         &self,
         state: &mut BuildFragmentGraphState,
     ) -> SchedulerResult<NodeBody> {
-        let left_jk_indices = self.eq_join_predicate.left_eq_indexes();
-        let right_jk_indices = self.eq_join_predicate.right_eq_indexes();
+        let left_jk_indices = self.eq_join_predicate().left_eq_indexes();
+        let right_jk_indices = self.eq_join_predicate().right_eq_indexes();
         let left_jk_indices_prost = left_jk_indices.iter().map(|idx| *idx as i32).collect_vec();
         let right_jk_indices_prost = right_jk_indices.iter().map(|idx| *idx as i32).collect_vec();
 
-        let null_safe_prost = self.eq_join_predicate.null_safes().into_iter().collect();
+        let null_safe_prost = self.eq_join_predicate().null_safes().into_iter().collect();
 
         let right = self.right();
         let exchange: &StreamExchange = right
@@ -252,12 +254,19 @@ impl TryToStreamPb for StreamTemporalJoin {
             right_key: right_jk_indices_prost,
             null_safe: null_safe_prost,
             condition: self
-                .eq_join_predicate
+                .eq_join_predicate()
                 .other_cond()
                 .as_expr_unless_true()
-                .map(|x| x.to_expr_proto()),
+                .map(|expr| {
+                    expr.to_expr_proto_checked_pure(
+                        self.left().stream_kind().is_retract()
+                            || self.right().stream_kind().is_retract(),
+                        "JOIN condition",
+                    )
+                })
+                .transpose()?,
             output_indices: self.core.output_indices.iter().map(|&x| x as u32).collect(),
-            table_desc: Some(scan.core().table_desc.try_to_protobuf()?),
+            table_desc: Some(scan.core().table_catalog.table_desc().try_to_protobuf()?),
             table_output_indices: scan.core().output_col_idx.iter().map(|&i| i as _).collect(),
             memo_table: if self.append_only {
                 None
@@ -271,7 +280,7 @@ impl TryToStreamPb for StreamTemporalJoin {
     }
 }
 
-impl ExprRewritable for StreamTemporalJoin {
+impl ExprRewritable<Stream> for StreamTemporalJoin {
     fn has_rewritable_expr(&self) -> bool {
         true
     }
@@ -279,18 +288,12 @@ impl ExprRewritable for StreamTemporalJoin {
     fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
         let mut core = self.core.clone();
         core.rewrite_exprs(r);
-        Self::new(
-            core,
-            self.eq_join_predicate.rewrite_exprs(r),
-            self.is_nested_loop,
-        )
-        .into()
+        Self::new(core, self.is_nested_loop).unwrap().into()
     }
 }
 
 impl ExprVisitable for StreamTemporalJoin {
     fn visit_exprs(&self, v: &mut dyn ExprVisitor) {
         self.core.visit_exprs(v);
-        self.eq_join_predicate.visit_exprs(v);
     }
 }

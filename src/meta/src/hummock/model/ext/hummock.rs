@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,9 +20,9 @@ use risingwave_meta_model::compaction_task::CompactionTask;
 use risingwave_meta_model::hummock_version_delta::FullVersionDelta;
 use risingwave_meta_model::hummock_version_stats::TableStats;
 use risingwave_meta_model::{
-    CompactionGroupId, CompactionTaskId, HummockVersionId, WorkerId, compaction_config,
-    compaction_status, compaction_task, hummock_pinned_snapshot, hummock_pinned_version,
-    hummock_version_delta, hummock_version_stats,
+    CompactionGroupId, CompactionTaskId, HummockVersionId, compaction_config, compaction_status,
+    compaction_task, hummock_pinned_snapshot, hummock_pinned_version, hummock_version_delta,
+    hummock_version_stats,
 };
 use risingwave_pb::hummock::{
     CompactTaskAssignment, HummockPinnedSnapshot, HummockPinnedVersion, HummockVersionStats,
@@ -34,13 +34,13 @@ use sea_orm::sea_query::OnConflict;
 use crate::hummock::compaction::CompactStatus;
 use crate::hummock::model::CompactionGroup;
 use crate::model::{MetadataModelError, MetadataModelResult, Transactional};
-use crate::storage::MetaStoreError;
 
 pub type Transaction = sea_orm::DatabaseTransaction;
 
 impl From<sea_orm::DbErr> for MetadataModelError {
     fn from(err: sea_orm::DbErr) -> Self {
-        MetadataModelError::MetaStoreError(MetaStoreError::Internal(err.into()))
+        // TODO: a separate error variant
+        MetadataModelError::InternalError(err.into())
     }
 }
 
@@ -107,10 +107,10 @@ impl Transactional<Transaction> for CompactStatus {
 #[async_trait::async_trait]
 impl Transactional<Transaction> for CompactTaskAssignment {
     async fn upsert_in_transaction(&self, trx: &mut Transaction) -> MetadataModelResult<()> {
-        let task = self.compact_task.to_owned().unwrap();
+        let task = self.compact_task.clone().unwrap();
         let m = compaction_task::ActiveModel {
             id: Set(task.task_id.try_into().unwrap()),
-            context_id: Set(self.context_id.try_into().unwrap()),
+            context_id: Set(self.context_id),
             task: Set(CompactionTask::from(&task)),
         };
         compaction_task::Entity::insert(m)
@@ -141,7 +141,7 @@ impl Transactional<Transaction> for CompactTaskAssignment {
 impl Transactional<Transaction> for HummockPinnedVersion {
     async fn upsert_in_transaction(&self, trx: &mut Transaction) -> MetadataModelResult<()> {
         let m = hummock_pinned_version::ActiveModel {
-            context_id: Set(self.context_id.try_into().unwrap()),
+            context_id: Set(self.context_id),
             min_pinned_id: Set(self.min_pinned_id.try_into().unwrap()),
         };
         hummock_pinned_version::Entity::insert(m)
@@ -156,7 +156,7 @@ impl Transactional<Transaction> for HummockPinnedVersion {
     }
 
     async fn delete_in_transaction(&self, trx: &mut Transaction) -> MetadataModelResult<()> {
-        hummock_pinned_version::Entity::delete_by_id(WorkerId::try_from(self.context_id).unwrap())
+        hummock_pinned_version::Entity::delete_by_id(self.context_id)
             .exec(trx)
             .await?;
         Ok(())
@@ -167,7 +167,7 @@ impl Transactional<Transaction> for HummockPinnedVersion {
 impl Transactional<Transaction> for HummockPinnedSnapshot {
     async fn upsert_in_transaction(&self, trx: &mut Transaction) -> MetadataModelResult<()> {
         let m = hummock_pinned_snapshot::ActiveModel {
-            context_id: Set(self.context_id.try_into().unwrap()),
+            context_id: Set(self.context_id),
             min_pinned_snapshot: Set(self.minimal_pinned_snapshot.try_into().unwrap()),
         };
         hummock_pinned_snapshot::Entity::insert(m)
@@ -182,7 +182,7 @@ impl Transactional<Transaction> for HummockPinnedSnapshot {
     }
 
     async fn delete_in_transaction(&self, trx: &mut Transaction) -> MetadataModelResult<()> {
-        hummock_pinned_snapshot::Entity::delete_by_id(WorkerId::try_from(self.context_id).unwrap())
+        hummock_pinned_snapshot::Entity::delete_by_id(self.context_id)
             .exec(trx)
             .await?;
         Ok(())

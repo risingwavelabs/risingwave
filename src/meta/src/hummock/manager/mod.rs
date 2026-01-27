@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -71,6 +71,7 @@ mod utils;
 mod worker;
 
 pub use commit_epoch::{CommitEpochInfo, NewTableFragmentInfo};
+pub use compaction::compaction_event_loop::*;
 use compaction::*;
 pub use compaction::{GroupState, GroupStateValidator};
 pub(crate) use utils::*;
@@ -125,6 +126,7 @@ pub struct HummockManager {
     pub metrics: Arc<MetaMetrics>,
 
     pub compactor_manager: CompactorManagerRef,
+    pub iceberg_compactor_manager: Arc<IcebergCompactorManager>,
     event_sender: HummockManagerEventSender,
     object_store: ObjectStoreRef,
     version_checkpoint_path: String,
@@ -137,7 +139,8 @@ pub struct HummockManager {
     // for compactor
     // `compactor_streams_change_tx` is used to pass the mapping from `context_id` to event_stream
     // and is maintained in memory. All event_streams are consumed through a separate event loop
-    compactor_streams_change_tx: UnboundedSender<(u32, Streaming<SubscribeCompactionEventRequest>)>,
+    compactor_streams_change_tx:
+        UnboundedSender<(HummockContextId, Streaming<SubscribeCompactionEventRequest>)>,
 
     // `compaction_state` will record the types of compact tasks that can be triggered in `hummock`
     // and suggest types with a certain priority.
@@ -147,7 +150,7 @@ pub struct HummockManager {
     inflight_time_travel_query: Semaphore,
     gc_manager: GcManager,
 
-    table_id_to_table_option: parking_lot::RwLock<HashMap<u32, TableOption>>,
+    table_id_to_table_option: parking_lot::RwLock<HashMap<TableId, TableOption>>,
 }
 
 pub type HummockManagerRef = Arc<HummockManager>;
@@ -166,6 +169,7 @@ macro_rules! start_measure_real_process_timer {
 }
 pub(crate) use start_measure_real_process_timer;
 
+use super::IcebergCompactorManager;
 use crate::controller::SqlMetaStore;
 use crate::hummock::manager::compaction_group_manager::CompactionGroupManager;
 use crate::hummock::manager::worker::HummockManagerEventSender;
@@ -177,7 +181,7 @@ impl HummockManager {
         metrics: Arc<MetaMetrics>,
         compactor_manager: CompactorManagerRef,
         compactor_streams_change_tx: UnboundedSender<(
-            u32,
+            HummockContextId,
             Streaming<SubscribeCompactionEventRequest>,
         )>,
     ) -> Result<HummockManagerRef> {
@@ -202,7 +206,7 @@ impl HummockManager {
         compactor_manager: CompactorManagerRef,
         config: risingwave_pb::hummock::CompactionConfig,
         compactor_streams_change_tx: UnboundedSender<(
-            u32,
+            HummockContextId,
             Streaming<SubscribeCompactionEventRequest>,
         )>,
     ) -> HummockManagerRef {
@@ -229,12 +233,13 @@ impl HummockManager {
         compactor_manager: CompactorManagerRef,
         compaction_group_manager: CompactionGroupManager,
         compactor_streams_change_tx: UnboundedSender<(
-            u32,
+            HummockContextId,
             Streaming<SubscribeCompactionEventRequest>,
         )>,
     ) -> Result<HummockManagerRef> {
         let sys_params = env.system_params_reader().await;
         let state_store_url = sys_params.state_store();
+
         let state_store_dir: &str = sys_params.data_directory();
         let use_new_object_prefix_strategy: bool = sys_params.use_new_object_prefix_strategy();
         let deterministic_mode = env.opts.compaction_deterministic_test;
@@ -290,6 +295,8 @@ impl HummockManager {
             env.opts.table_stat_throuput_window_seconds_for_merge,
         ) as i64;
 
+        let iceberg_compactor_manager = Arc::new(IcebergCompactorManager::new());
+
         let instance = HummockManager {
             env,
             versioning: MonitoredRwLock::new(
@@ -314,8 +321,8 @@ impl HummockManager {
             ),
             metrics,
             metadata_manager,
-            // compaction_request_channel: parking_lot::RwLock::new(None),
             compactor_manager,
+            iceberg_compactor_manager,
             event_sender: tx,
             object_store,
             version_checkpoint_path,
@@ -339,7 +346,7 @@ impl HummockManager {
         };
         let instance = Arc::new(instance);
         instance.init_time_travel_state().await?;
-        instance.start_worker(rx).await;
+        instance.start_worker(rx);
         instance.load_meta_store_state().await?;
         instance.release_invalid_contexts().await?;
         // Release snapshots pinned by meta on restarting.
@@ -532,7 +539,7 @@ impl HummockManager {
 
     pub fn update_table_id_to_table_option(
         &self,
-        new_table_id_to_table_option: HashMap<u32, TableOption>,
+        new_table_id_to_table_option: HashMap<TableId, TableOption>,
     ) {
         *self.table_id_to_table_option.write() = new_table_id_to_table_option;
     }

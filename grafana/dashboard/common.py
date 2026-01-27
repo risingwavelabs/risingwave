@@ -140,10 +140,9 @@ class Panels:
         )
 
     def target_hidden(self, expr, legendFormat):
-        return Target(expr=expr,
-                      legendFormat=legendFormat,
-                      datasource=self.datasource,
-                      hide=True)
+        return Target(
+            expr=expr, legendFormat=legendFormat, datasource=self.datasource, hide=True
+        )
 
     def table_target(self, expr, hide=False):
         return Target(
@@ -213,6 +212,19 @@ class Panels:
             targets=targets,
             gridPos=gridPos,
             unit="ms",
+            legendCalcs=legendCols,
+            **self.common_options,
+        )
+
+    def timeseries_latency_ns(self, title, description, targets, legendCols=["mean"]):
+        gridPos = self.layout.next_one_third_width_graph()
+        return TimeSeries(
+            title=title,
+            dataSource=self.datasource,
+            description=description,
+            targets=targets,
+            gridPos=gridPos,
+            unit="ns",
             legendCalcs=legendCols,
             **self.common_options,
         )
@@ -467,11 +479,24 @@ class Panels:
             **self.common_options,
         )
 
-    def table_info(self, title, description, targets, columns, excludeByName=dict.fromkeys(["Time", "Value"], True)):
+    def table_info(
+        self,
+        title,
+        description,
+        targets,
+        columns,
+        excludeByName=dict.fromkeys(["Time", "Value"], True),
+    ):
         gridPos = self.layout.next_one_third_width_graph()
         column_indices = {column: index for index, column in enumerate(columns)}
         transformations = [
-            {"id": "organize", "options": {"indexByName": column_indices, "excludeByName": excludeByName}}
+            {
+                "id": "organize",
+                "options": {
+                    "indexByName": column_indices,
+                    "excludeByName": excludeByName,
+                },
+            }
         ]
         return Table(
             title=title,
@@ -486,7 +511,10 @@ class Panels:
 
     def subheader(self, title="", content="", height=1):
         gridPos = self.layout.next_row()
+        # Keep layout state consistent with the actual panel height, otherwise the next panel may overlap
+        # when callers use a custom `height`.
         gridPos.h = height
+        self.layout.h = height
         return Text(
             title=title,
             gridPos=gridPos,
@@ -501,6 +529,7 @@ class Panels:
 def metric(name, filter=None, node_filter_enabled=True, table_id_filter_enabled=False):
     filters = [filter] if filter else []
     if namespace_filter_enabled:
+        filters.append('cluster=~"$cluster"')
         filters.append('namespace=~"$namespace"')
     if risingwave_name_filter_enabled:
         filters.append('risingwave_name=~"$instance"')

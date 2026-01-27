@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,16 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use pretty_xmlish::XmlNode;
 use risingwave_common::types::DataType;
 use risingwave_pb::stream_plan::FilterNode;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
 use super::stream::prelude::*;
-use super::utils::impl_distill_by_unit;
-use super::{ExprRewritable, PlanRef, PlanTreeNodeUnary, StreamNode, generic};
+use super::{ExprRewritable, PlanTreeNodeUnary, StreamPlanRef as PlanRef, generic};
 use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprType, ExprVisitor, FunctionCall, InputRef};
-use crate::optimizer::plan_node::PlanBase;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
+use crate::optimizer::plan_node::generic::DistillUnit as _;
+use crate::optimizer::plan_node::utils::{Distill, plan_node_name};
+use crate::optimizer::plan_node::{PlanBase, TryToStreamPb};
+use crate::scheduler::SchedulerResult;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::utils::Condition;
 
@@ -40,7 +43,7 @@ impl StreamFilter {
         let base = PlanBase::new_stream_with_core(
             &core,
             dist,
-            input.append_only(),
+            input.stream_kind(),
             input.emit_on_window_close(),
             input.watermark_columns().clone(),
             input.columns_monotonicity().clone(),
@@ -69,7 +72,7 @@ impl StreamFilter {
     }
 }
 
-impl PlanTreeNodeUnary for StreamFilter {
+impl PlanTreeNodeUnary<Stream> for StreamFilter {
     fn input(&self) -> PlanRef {
         self.core.input.clone()
     }
@@ -81,18 +84,33 @@ impl PlanTreeNodeUnary for StreamFilter {
     }
 }
 
-impl_plan_tree_node_for_unary! { StreamFilter }
-impl_distill_by_unit!(StreamFilter, core, "StreamFilter");
+impl_plan_tree_node_for_unary! { Stream, StreamFilter }
 
-impl StreamNode for StreamFilter {
-    fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> PbNodeBody {
-        PbNodeBody::Filter(Box::new(FilterNode {
-            search_condition: Some(ExprImpl::from(self.predicate().clone()).to_expr_proto()),
-        }))
+impl Distill for StreamFilter {
+    fn distill<'a>(&self) -> XmlNode<'a> {
+        self.core.distill_with_name(plan_node_name!("StreamFilter",
+            { "upsert", self.input().stream_kind().is_upsert() }
+        ))
     }
 }
 
-impl ExprRewritable for StreamFilter {
+impl TryToStreamPb for StreamFilter {
+    fn try_to_stream_prost_body(
+        &self,
+        _state: &mut BuildFragmentGraphState,
+    ) -> SchedulerResult<PbNodeBody> {
+        Ok(PbNodeBody::Filter(Box::new(FilterNode {
+            search_condition: Some(
+                ExprImpl::from(self.predicate().clone()).to_expr_proto_checked_pure(
+                    self.stream_kind().is_retract(),
+                    "WHERE or HAVING condition",
+                )?,
+            ),
+        })))
+    }
+}
+
+impl ExprRewritable<Stream> for StreamFilter {
     fn has_rewritable_expr(&self) -> bool {
         true
     }

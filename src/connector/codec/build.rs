@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -24,6 +24,7 @@ fn main() {
         .collect();
     prost_build::Config::new()
         .out_dir("./tests/integration_tests/protobuf")
+        .type_attribute("ComplexRecursiveMessage", "#[allow(dead_code)]")
         .compile_protos(&protos, &Vec::<String>::new())
         .unwrap();
 }

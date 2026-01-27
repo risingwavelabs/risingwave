@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -149,7 +149,7 @@ pub(super) fn generate_captured_function(
         orig_user_fn.sig.output = ReturnType::Type(
             syn::token::RArrow::default(),
             Box::new(
-                syn::parse_quote!(impl std::future::Future<Output = #output_type> + Send + 'static),
+                syn::parse_quote!(impl std::future::Future<Output = #output_type> + Send + 'static + use<>),
             ),
         );
         orig_user_fn.sig.asyncness = None;
@@ -160,13 +160,13 @@ pub(super) fn generate_captured_function(
             .inputs
             .iter()
             .map(|arg| {
-                if let FnArg::Typed(PatType { pat, .. }) = arg {
-                    if let Pat::Ident(ident) = pat.as_ref() {
-                        let ident_name = &ident.ident;
-                        return quote! {
-                            let #ident_name = #ident_name.clone();
-                        };
-                    }
+                if let FnArg::Typed(PatType { pat, .. }) = arg
+                    && let Pat::Ident(ident) = pat.as_ref()
+                {
+                    let ident_name = &ident.ident;
+                    return quote! {
+                        let #ident_name = #ident_name.clone();
+                    };
                 }
                 quote! {}
             })

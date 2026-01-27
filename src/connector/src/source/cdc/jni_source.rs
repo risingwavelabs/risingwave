@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,11 +13,12 @@
 // limitations under the License.
 
 use anyhow::Context;
-use risingwave_jni_core::jvm_runtime::{JVM, execute_with_jni_env};
+use risingwave_common::global_jvm::Jvm;
+use risingwave_jni_core::jvm_runtime::execute_with_jni_env;
 use risingwave_jni_core::{call_method, call_static_method};
 
 pub fn commit_cdc_offset(source_id: u64, encoded_offset: String) -> anyhow::Result<()> {
-    let jvm = JVM.get_or_init()?;
+    let jvm = Jvm::get_or_init()?;
     execute_with_jni_env(jvm, |env| {
         // get source handler by source id
         let handler = call_static_method!(

@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -23,10 +23,10 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering as AtomicOrdering};
 use std::time::{Duration, Instant};
 
 use bytes::Bytes;
-use foyer::CacheHint;
+use foyer::Hint;
 use futures::{Stream, StreamExt, pin_mut};
 use parking_lot::Mutex;
-use risingwave_common::catalog::{TableId, TableOption};
+use risingwave_common::catalog::TableId;
 use risingwave_common::config::StorageMemoryConfig;
 use risingwave_expr::codegen::try_stream;
 use risingwave_hummock_sdk::can_concat;
@@ -83,21 +83,24 @@ where
     R: RangeBounds<TableKey<B>>,
     B: AsRef<[u8]> + EmptySliceRef,
 {
+    debug_assert!(info.table_ids.is_sorted());
     let table_range = &info.key_range;
     let table_start = FullKey::decode(table_range.left.as_ref()).user_key;
     let table_end = FullKey::decode(table_range.right.as_ref()).user_key;
     let (left, right) = bound_table_key_range(table_id, table_key_range);
     let left: Bound<UserKey<&[u8]>> = left.as_ref().map(|key| key.as_ref());
     let right: Bound<UserKey<&[u8]>> = right.as_ref().map(|key| key.as_ref());
-    range_overlap(
-        &(left, right),
-        &table_start,
-        if table_range.right_exclusive {
-            Bound::Excluded(&table_end)
-        } else {
-            Bound::Included(&table_end)
-        },
-    ) && info.table_ids.binary_search(&table_id.table_id()).is_ok()
+
+    info.table_ids.binary_search(&table_id).is_ok()
+        && range_overlap(
+            &(left, right),
+            &table_start,
+            if table_range.right_exclusive {
+                Bound::Excluded(&table_end)
+            } else {
+                Bound::Included(&table_end)
+            },
+        )
 }
 
 /// Search the SST containing the specified key within a level, using binary search.
@@ -394,24 +397,24 @@ async fn get_from_state_store(
 
 /// Make sure the key to insert should not exist in storage.
 pub(crate) async fn do_insert_sanity_check(
+    table_id: TableId,
     key: &TableKey<Bytes>,
     value: &Bytes,
     inner: &impl StateStoreRead,
-    table_option: TableOption,
     op_consistency_level: &OpConsistencyLevel,
 ) -> StorageResult<()> {
     if let OpConsistencyLevel::Inconsistent = op_consistency_level {
         return Ok(());
     }
     let read_options = ReadOptions {
-        retention_seconds: table_option.retention_seconds,
-        cache_policy: CachePolicy::Fill(CacheHint::Normal),
+        cache_policy: CachePolicy::Fill(Hint::Normal),
         ..Default::default()
     };
     let stored_value = get_from_state_store(inner, key.clone(), read_options).await?;
 
     if let Some(stored_value) = stored_value {
         return Err(Box::new(MemTableError::InconsistentOperation {
+            table_id,
             key: key.clone(),
             prev: KeyOp::Insert(stored_value),
             new: KeyOp::Insert(value.clone()),
@@ -423,10 +426,10 @@ pub(crate) async fn do_insert_sanity_check(
 
 /// Make sure that the key to delete should exist in storage and the value should be matched.
 pub(crate) async fn do_delete_sanity_check(
+    table_id: TableId,
     key: &TableKey<Bytes>,
     old_value: &Bytes,
     inner: &impl StateStoreRead,
-    table_option: TableOption,
     op_consistency_level: &OpConsistencyLevel,
 ) -> StorageResult<()> {
     let OpConsistencyLevel::ConsistentOldValue {
@@ -437,12 +440,12 @@ pub(crate) async fn do_delete_sanity_check(
         return Ok(());
     };
     let read_options = ReadOptions {
-        retention_seconds: table_option.retention_seconds,
-        cache_policy: CachePolicy::Fill(CacheHint::Normal),
+        cache_policy: CachePolicy::Fill(Hint::Normal),
         ..Default::default()
     };
     match get_from_state_store(inner, key.clone(), read_options).await? {
         None => Err(Box::new(MemTableError::InconsistentOperation {
+            table_id,
             key: key.clone(),
             prev: KeyOp::Delete(Bytes::default()),
             new: KeyOp::Delete(old_value.clone()),
@@ -451,6 +454,7 @@ pub(crate) async fn do_delete_sanity_check(
         Some(stored_value) => {
             if !old_value_checker(&stored_value, old_value) {
                 Err(Box::new(MemTableError::InconsistentOperation {
+                    table_id,
                     key: key.clone(),
                     prev: KeyOp::Insert(stored_value),
                     new: KeyOp::Delete(old_value.clone()),
@@ -465,11 +469,11 @@ pub(crate) async fn do_delete_sanity_check(
 
 /// Make sure that the key to update should exist in storage and the value should be matched
 pub(crate) async fn do_update_sanity_check(
+    table_id: TableId,
     key: &TableKey<Bytes>,
     old_value: &Bytes,
     new_value: &Bytes,
     inner: &impl StateStoreRead,
-    table_option: TableOption,
     op_consistency_level: &OpConsistencyLevel,
 ) -> StorageResult<()> {
     let OpConsistencyLevel::ConsistentOldValue {
@@ -480,13 +484,13 @@ pub(crate) async fn do_update_sanity_check(
         return Ok(());
     };
     let read_options = ReadOptions {
-        retention_seconds: table_option.retention_seconds,
-        cache_policy: CachePolicy::Fill(CacheHint::Normal),
+        cache_policy: CachePolicy::Fill(Hint::Normal),
         ..Default::default()
     };
 
     match get_from_state_store(inner, key.clone(), read_options).await? {
         None => Err(Box::new(MemTableError::InconsistentOperation {
+            table_id,
             key: key.clone(),
             prev: KeyOp::Delete(Bytes::default()),
             new: KeyOp::Update((old_value.clone(), new_value.clone())),
@@ -495,6 +499,7 @@ pub(crate) async fn do_update_sanity_check(
         Some(stored_value) => {
             if !old_value_checker(&stored_value, old_value) {
                 Err(Box::new(MemTableError::InconsistentOperation {
+                    table_id,
                     key: key.clone(),
                     prev: KeyOp::Insert(stored_value),
                     new: KeyOp::Update((old_value.clone(), new_value.clone())),
@@ -595,10 +600,10 @@ pub(crate) async fn wait_for_epoch(
     notifier: &tokio::sync::watch::Sender<PinnedVersion>,
     wait_epoch: u64,
     table_id: TableId,
-) -> StorageResult<()> {
+) -> StorageResult<PinnedVersion> {
     let mut prev_committed_epoch = None;
     let prev_committed_epoch = &mut prev_committed_epoch;
-    wait_for_update(
+    let version = wait_for_update(
         notifier,
         |version| {
             let committed_epoch = version.table_committed_epoch(table_id);
@@ -627,17 +632,20 @@ pub(crate) async fn wait_for_epoch(
         },
     )
     .await?;
-    Ok(())
+    Ok(version)
 }
 
 pub(crate) async fn wait_for_update(
     notifier: &tokio::sync::watch::Sender<PinnedVersion>,
     mut inspect_fn: impl FnMut(&PinnedVersion) -> HummockResult<bool>,
     mut periodic_debug_info: impl FnMut() -> String,
-) -> HummockResult<()> {
+) -> HummockResult<PinnedVersion> {
     let mut receiver = notifier.subscribe();
-    if inspect_fn(&receiver.borrow_and_update())? {
-        return Ok(());
+    {
+        let version = receiver.borrow_and_update();
+        if inspect_fn(&version)? {
+            return Ok(version.clone());
+        }
     }
     let start_time = Instant::now();
     loop {
@@ -669,8 +677,9 @@ pub(crate) async fn wait_for_update(
                 return Err(HummockError::wait_epoch("tx dropped"));
             }
             Ok(Ok(_)) => {
-                if inspect_fn(&receiver.borrow_and_update())? {
-                    return Ok(());
+                let version = receiver.borrow_and_update();
+                if inspect_fn(&version)? {
+                    return Ok(version.clone());
                 }
             }
         }
@@ -706,6 +715,14 @@ impl MemoryCollector for HummockMemoryCollector {
         self.sstable_store.block_cache().memory().usage() as _
     }
 
+    fn get_vector_meta_memory_usage(&self) -> u64 {
+        self.sstable_store.vector_meta_cache.usage() as _
+    }
+
+    fn get_vector_data_memory_usage(&self) -> u64 {
+        self.sstable_store.vector_block_cache.usage() as _
+    }
+
     fn get_uploading_memory_usage(&self) -> u64 {
         self.limiter.get_memory_usage()
     }
@@ -722,6 +739,16 @@ impl MemoryCollector for HummockMemoryCollector {
     fn get_block_cache_memory_usage_ratio(&self) -> f64 {
         self.sstable_store.block_cache().memory().usage() as f64
             / self.sstable_store.block_cache().memory().capacity() as f64
+    }
+
+    fn get_vector_meta_cache_memory_usage_ratio(&self) -> f64 {
+        self.sstable_store.vector_meta_cache.usage() as f64
+            / self.sstable_store.vector_meta_cache.capacity() as f64
+    }
+
+    fn get_vector_data_cache_memory_usage_ratio(&self) -> f64 {
+        self.sstable_store.vector_block_cache.usage() as f64
+            / self.sstable_store.vector_block_cache.capacity() as f64
     }
 
     fn get_shared_buffer_usage_ratio(&self) -> f64 {

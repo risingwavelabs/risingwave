@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,9 +15,8 @@
 use risingwave_common::types::DataType;
 
 use crate::expr::{ExprImpl, ExprType, FunctionCall};
-use crate::optimizer::PlanRef;
 use crate::optimizer::plan_node::{LogicalFilter, LogicalShare, LogicalUnion, PlanTreeNodeUnary};
-use crate::optimizer::rule::{BoxedRule, Rule};
+use crate::optimizer::rule::prelude::{PlanRef, *};
 
 /// Convert `LogicalFilter` with now or others predicates to a `UNION ALL`
 ///
@@ -42,7 +41,7 @@ use crate::optimizer::rule::{BoxedRule, Rule};
 ///             Input
 /// ```text
 pub struct SplitNowOrRule {}
-impl Rule for SplitNowOrRule {
+impl Rule<Logical> for SplitNowOrRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let filter: &LogicalFilter = plan.as_logical_filter()?;
         let input = filter.input();
@@ -77,7 +76,7 @@ impl Rule for SplitNowOrRule {
 
         let share = LogicalShare::create(input);
         let filter1 = LogicalFilter::create_with_expr(share.clone(), arm1);
-        let filter2 = LogicalFilter::create_with_expr(share.clone(), arm2);
+        let filter2 = LogicalFilter::create_with_expr(share, arm2);
         let union_all = LogicalUnion::create(true, vec![filter1, filter2]);
         Some(union_all)
     }

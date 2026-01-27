@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,20 +18,24 @@ use std::time::Duration;
 use anyhow::anyhow;
 use either::Either;
 use itertools::Itertools;
+use prometheus::core::{AtomicU64, GenericCounter};
 use risingwave_common::array::ArrayRef;
 use risingwave_common::catalog::{ColumnId, TableId};
-use risingwave_common::metrics::{GLOBAL_ERROR_METRICS, LabelGuardedIntCounter};
+use risingwave_common::metrics::{GLOBAL_ERROR_METRICS, LabelGuardedMetric};
 use risingwave_common::system_param::local_manager::SystemParamsReaderRef;
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::util::epoch::{Epoch, EpochPair};
 use risingwave_connector::parser::schema_change::SchemaChangeEnvelope;
+use risingwave_connector::source::cdc::split::extract_postgres_lsn_from_offset_str;
 use risingwave_connector::source::reader::desc::{SourceDesc, SourceDescBuilder};
 use risingwave_connector::source::reader::reader::SourceReader;
 use risingwave_connector::source::{
     ConnectorState, SourceContext, SourceCtrlOpts, SplitId, SplitImpl, SplitMetaData,
-    StreamChunkWithState, WaitCheckpointTask,
+    StreamChunkWithState, WaitCheckpointTask, build_pulsar_ack_channel_id,
 };
 use risingwave_hummock_sdk::HummockReadEpoch;
+use risingwave_pb::common::ThrottleType;
+use risingwave_pb::id::SourceId;
 use risingwave_storage::store::TryWaitEpochOptions;
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
@@ -45,6 +49,7 @@ use crate::executor::UpdateMutation;
 use crate::executor::prelude::*;
 use crate::executor::source::reader_stream::StreamReaderBuilder;
 use crate::executor::stream_reader::StreamReaderWithPause;
+use crate::task::LocalBarrierManager;
 
 /// A constant to multiply when calculating the maximum time to wait for a barrier. This is due to
 /// some latencies in network and cost in meta.
@@ -54,7 +59,7 @@ pub struct SourceExecutor<S: StateStore> {
     actor_ctx: ActorContextRef,
 
     /// Streaming source for external
-    stream_source_core: Option<StreamSourceCore<S>>,
+    stream_source_core: StreamSourceCore<S>,
 
     /// Metrics for monitor.
     metrics: Arc<StreamingMetrics>,
@@ -69,17 +74,22 @@ pub struct SourceExecutor<S: StateStore> {
     rate_limit_rps: Option<u32>,
 
     is_shared_non_cdc: bool,
+
+    /// Local barrier manager for reporting source load finished events
+    barrier_manager: LocalBarrierManager,
 }
 
 impl<S: StateStore> SourceExecutor<S> {
+    #[expect(clippy::too_many_arguments)]
     pub fn new(
         actor_ctx: ActorContextRef,
-        stream_source_core: Option<StreamSourceCore<S>>,
+        stream_source_core: StreamSourceCore<S>,
         metrics: Arc<StreamingMetrics>,
         barrier_receiver: UnboundedReceiver<Barrier>,
         system_params: SystemParamsReaderRef,
         rate_limit_rps: Option<u32>,
         is_shared_non_cdc: bool,
+        barrier_manager: LocalBarrierManager,
     ) -> Self {
         Self {
             actor_ctx,
@@ -89,6 +99,7 @@ impl<S: StateStore> SourceExecutor<S> {
             system_params,
             rate_limit_rps,
             is_shared_non_cdc,
+            barrier_manager,
         }
     }
 
@@ -96,13 +107,8 @@ impl<S: StateStore> SourceExecutor<S> {
         StreamReaderBuilder {
             source_desc,
             rate_limit: self.rate_limit_rps,
-            source_id: self.stream_source_core.as_ref().unwrap().source_id,
-            source_name: self
-                .stream_source_core
-                .as_ref()
-                .unwrap()
-                .source_name
-                .clone(),
+            source_id: self.stream_source_core.source_id,
+            source_name: self.stream_source_core.source_name.clone(),
             is_auto_schema_change_enable: self.is_auto_schema_change_enable(),
             actor_ctx: self.actor_ctx.clone(),
             reader_stream: None,
@@ -112,6 +118,7 @@ impl<S: StateStore> SourceExecutor<S> {
     async fn spawn_wait_checkpoint_worker(
         core: &StreamSourceCore<S>,
         source_reader: SourceReader,
+        metrics: Arc<StreamingMetrics>,
     ) -> StreamExecutorResult<Option<WaitCheckpointTaskBuilder>> {
         let Some(initial_task) = source_reader.create_wait_checkpoint_task().await? else {
             return Ok(None);
@@ -120,7 +127,8 @@ impl<S: StateStore> SourceExecutor<S> {
         let wait_checkpoint_worker = WaitCheckpointWorker {
             wait_checkpoint_rx,
             state_store: core.split_state_store.state_table().state_store().clone(),
-            table_id: core.split_state_store.state_table().table_id().into(),
+            table_id: core.split_state_store.state_table().table_id(),
+            metrics,
         };
         tokio::spawn(wait_checkpoint_worker.run());
         Ok(Some(WaitCheckpointTaskBuilder {
@@ -179,16 +187,11 @@ impl<S: StateStore> SourceExecutor<S> {
             info!("auto schema change is disabled in config");
             None
         };
-
         let source_ctx = SourceContext::new(
             self.actor_ctx.id,
-            self.stream_source_core.as_ref().unwrap().source_id,
+            self.stream_source_core.source_id,
             self.actor_ctx.fragment_id,
-            self.stream_source_core
-                .as_ref()
-                .unwrap()
-                .source_name
-                .clone(),
+            self.stream_source_core.source_name.clone(),
             source_desc.metrics.clone(),
             SourceCtrlOpts {
                 chunk_size: limited_chunk_size(self.rate_limit_rps),
@@ -202,26 +205,15 @@ impl<S: StateStore> SourceExecutor<S> {
     }
 
     fn is_auto_schema_change_enable(&self) -> bool {
-        self.actor_ctx
-            .streaming_config
-            .developer
-            .enable_auto_schema_change
+        self.actor_ctx.config.developer.enable_auto_schema_change
     }
 
     /// `source_id | source_name | actor_id | fragment_id`
     #[inline]
     fn get_metric_labels(&self) -> [String; 4] {
         [
-            self.stream_source_core
-                .as_ref()
-                .unwrap()
-                .source_id
-                .to_string(),
-            self.stream_source_core
-                .as_ref()
-                .unwrap()
-                .source_name
-                .clone(),
+            self.stream_source_core.source_id.to_string(),
+            self.stream_source_core.source_name.clone(),
             self.actor_ctx.id.to_string(),
             self.actor_ctx.fragment_id.to_string(),
         ]
@@ -240,16 +232,30 @@ impl<S: StateStore> SourceExecutor<S> {
         barrier_epoch: EpochPair,
         source_desc: &SourceDesc,
         stream: &mut StreamReaderWithPause<BIASED, StreamChunkWithState>,
-        target_splits: Vec<SplitImpl>,
-        should_trim_state: bool,
-        source_split_change_count_metrics: &LabelGuardedIntCounter,
+        apply_mutation: ApplyMutationAfterBarrier<'_>,
     ) -> StreamExecutorResult<()> {
         {
-            source_split_change_count_metrics.inc();
-            if self
-                .update_state_if_changed(barrier_epoch, target_splits, should_trim_state)
-                .await?
-            {
+            let mut should_rebuild_stream = false;
+            match apply_mutation {
+                ApplyMutationAfterBarrier::SplitChange {
+                    target_splits,
+                    should_trim_state,
+                    split_change_count,
+                } => {
+                    split_change_count.inc();
+                    if self
+                        .update_state_if_changed(barrier_epoch, target_splits, should_trim_state)
+                        .await?
+                    {
+                        should_rebuild_stream = true;
+                    }
+                }
+                ApplyMutationAfterBarrier::ConnectorPropsChange => {
+                    should_rebuild_stream = true;
+                }
+            }
+
+            if should_rebuild_stream {
                 self.rebuild_stream_reader(source_desc, stream)?;
             }
         }
@@ -264,7 +270,7 @@ impl<S: StateStore> SourceExecutor<S> {
         target_splits: Vec<SplitImpl>,
         should_trim_state: bool,
     ) -> StreamExecutorResult<bool> {
-        let core = self.stream_source_core.as_mut().unwrap();
+        let core = &mut self.stream_source_core;
 
         let target_splits: HashMap<_, _> = target_splits
             .into_iter()
@@ -318,7 +324,7 @@ impl<S: StateStore> SourceExecutor<S> {
 
         if split_changed {
             tracing::info!(
-                actor_id = self.actor_ctx.id,
+                actor_id = %self.actor_ctx.id,
                 state = ?target_state,
                 "apply split change"
             );
@@ -350,17 +356,17 @@ impl<S: StateStore> SourceExecutor<S> {
         stream: &mut StreamReaderWithPause<BIASED, StreamChunkWithState>,
         e: StreamExecutorError,
     ) -> StreamExecutorResult<()> {
-        let core = self.stream_source_core.as_mut().unwrap();
-        tracing::warn!(
+        let core = &mut self.stream_source_core;
+        tracing::error!(
             error = ?e.as_report(),
-            actor_id = self.actor_ctx.id,
+            actor_id = %self.actor_ctx.id,
             source_id = %core.source_id,
             "stream source reader error",
         );
         GLOBAL_ERROR_METRICS.user_source_error.report([
             e.variant_name().to_owned(),
             core.source_id.to_string(),
-            core.source_name.to_owned(),
+            core.source_name.clone(),
             self.actor_ctx.fragment_id.to_string(),
         ]);
 
@@ -372,7 +378,7 @@ impl<S: StateStore> SourceExecutor<S> {
         source_desc: &SourceDesc,
         stream: &mut StreamReaderWithPause<BIASED, StreamChunkWithState>,
     ) -> StreamExecutorResult<()> {
-        let core = self.stream_source_core.as_mut().unwrap();
+        let core = &mut self.stream_source_core;
         let target_state: Vec<SplitImpl> = core.latest_split_info.values().cloned().collect();
 
         tracing::info!(
@@ -383,8 +389,7 @@ impl<S: StateStore> SourceExecutor<S> {
 
         // Replace the source reader with a new one of the new state.
         let reader_stream_builder = self.stream_reader_builder(source_desc.clone());
-        let reader_stream =
-            reader_stream_builder.into_retry_stream(Some(target_state.clone()), false);
+        let reader_stream = reader_stream_builder.into_retry_stream(Some(target_state), false);
 
         stream.replace_data_stream(reader_stream);
 
@@ -395,7 +400,7 @@ impl<S: StateStore> SourceExecutor<S> {
         &mut self,
         epoch: EpochPair,
     ) -> StreamExecutorResult<HashMap<SplitId, SplitImpl>> {
-        let core = self.stream_source_core.as_mut().unwrap();
+        let core = &mut self.stream_source_core;
 
         let cache = core
             .updated_splits_in_epoch
@@ -405,6 +410,37 @@ impl<S: StateStore> SourceExecutor<S> {
 
         if !cache.is_empty() {
             tracing::debug!(state = ?cache, "take snapshot");
+
+            // Record metrics for CDC sources before moving cache
+            let source_id = core.source_id.to_string();
+            for split_impl in &cache {
+                // Extract and record CDC-specific metrics based on split type
+                match split_impl {
+                    SplitImpl::PostgresCdc(pg_split) => {
+                        if let Some(lsn_value) = pg_split.pg_lsn() {
+                            self.metrics
+                                .pg_cdc_state_table_lsn
+                                .with_guarded_label_values(&[&source_id])
+                                .set(lsn_value as i64);
+                        }
+                    }
+                    SplitImpl::MysqlCdc(mysql_split) => {
+                        if let Some((file_seq, position)) = mysql_split.mysql_binlog_offset() {
+                            self.metrics
+                                .mysql_cdc_state_binlog_file_seq
+                                .with_guarded_label_values(&[&source_id])
+                                .set(file_seq as i64);
+
+                            self.metrics
+                                .mysql_cdc_state_binlog_position
+                                .with_guarded_label_values(&[&source_id])
+                                .set(position as i64);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+
             core.split_state_store.set_states(cache).await?;
         }
 
@@ -420,10 +456,43 @@ impl<S: StateStore> SourceExecutor<S> {
 
     /// try mem table spill
     async fn try_flush_data(&mut self) -> StreamExecutorResult<()> {
-        let core = self.stream_source_core.as_mut().unwrap();
+        let core = &mut self.stream_source_core;
         core.split_state_store.try_flush().await?;
 
         Ok(())
+    }
+
+    /// Report CDC source offset updated only the first time.
+    fn maybe_report_cdc_source_offset(
+        &self,
+        updated_splits: &HashMap<SplitId, SplitImpl>,
+        epoch: EpochPair,
+        source_id: SourceId,
+        must_report_cdc_offset_once: &mut bool,
+        must_wait_cdc_offset_before_report: bool,
+    ) {
+        // Report CDC source offset updated only the first time
+        if *must_report_cdc_offset_once
+            && (!must_wait_cdc_offset_before_report
+                || updated_splits
+                    .values()
+                    .any(|split| split.is_cdc_split() && !split.get_cdc_split_offset().is_empty()))
+        {
+            // Report only once, then ignore all subsequent offset updates
+            self.barrier_manager.report_cdc_source_offset_updated(
+                epoch,
+                self.actor_ctx.id,
+                source_id,
+            );
+            tracing::info!(
+                actor_id = %self.actor_ctx.id,
+                source_id = %source_id,
+                epoch = ?epoch,
+                "Reported CDC source offset updated to meta (first time only)"
+            );
+            // Mark as reported to prevent any future reports, even if offset changes
+            *must_report_cdc_offset_once = false;
+        }
     }
 
     /// A source executor with a stream source receives:
@@ -431,7 +500,7 @@ impl<S: StateStore> SourceExecutor<S> {
     /// 2. Data from external source
     /// and acts accordingly.
     #[try_stream(ok = Message, error = StreamExecutorError)]
-    async fn execute_with_stream_source(mut self) {
+    async fn execute_inner(mut self) {
         let mut barrier_receiver = self.barrier_receiver.take().unwrap();
         let first_barrier = barrier_receiver
             .recv()
@@ -441,34 +510,54 @@ impl<S: StateStore> SourceExecutor<S> {
                 anyhow!(
                     "failed to receive the first barrier, actor_id: {:?}, source_id: {:?}",
                     self.actor_ctx.id,
-                    self.stream_source_core.as_ref().unwrap().source_id
+                    self.stream_source_core.source_id
                 )
             })?;
         let first_epoch = first_barrier.epoch;
-        let mut boot_state =
+        // must_report_cdc_offset is true if and only if the source is a CDC source.
+        // must_wait_cdc_offset_before_report is true if and only if the source is a MySQL or SQL Server CDC source.
+        let (mut boot_state, mut must_report_cdc_offset_once, must_wait_cdc_offset_before_report) =
             if let Some(splits) = first_barrier.initial_split_assignment(self.actor_ctx.id) {
+                // CDC source must reach this branch.
                 tracing::debug!(?splits, "boot with splits");
-                splits.to_vec()
+                // Skip report for non-CDC.
+                let must_report_cdc_offset_once = splits.iter().any(|split| split.is_cdc_split());
+                // Only for MySQL and SQL Server CDC, we need to wait for the offset to be non-empty before reporting.
+                let must_wait_cdc_offset_before_report = must_report_cdc_offset_once
+                    && splits.iter().any(|split| {
+                        matches!(split, SplitImpl::MysqlCdc(_) | SplitImpl::SqlServerCdc(_))
+                    });
+                (
+                    splits.to_vec(),
+                    must_report_cdc_offset_once,
+                    must_wait_cdc_offset_before_report,
+                )
             } else {
-                Vec::default()
+                (Vec::default(), true, true)
             };
         let is_pause_on_startup = first_barrier.is_pause_on_startup();
         let mut is_uninitialized = first_barrier.is_newly_added(self.actor_ctx.id);
 
         yield Message::Barrier(first_barrier);
 
-        let mut core = self.stream_source_core.unwrap();
+        let mut core = self.stream_source_core;
+        let source_id = core.source_id;
 
         // Build source description from the builder.
         let source_desc_builder: SourceDescBuilder = core.source_desc_builder.take().unwrap();
-        let source_desc = source_desc_builder
+        let mut source_desc = source_desc_builder
             .build()
             .map_err(StreamExecutorError::connector_error)?;
 
-        let mut wait_checkpoint_task_builder =
-            Self::spawn_wait_checkpoint_worker(&core, source_desc.source.clone()).await?;
+        let mut wait_checkpoint_task_builder = Self::spawn_wait_checkpoint_worker(
+            &core,
+            source_desc.source.clone(),
+            self.metrics.clone(),
+        )
+        .await?;
 
-        let (Some(split_idx), Some(offset_idx)) = get_split_offset_col_idx(&source_desc.columns)
+        let (Some(split_idx), Some(offset_idx), pulsar_message_id_idx) =
+            get_split_offset_col_idx(&source_desc.columns)
         else {
             unreachable!("Partition and offset columns must be set.");
         };
@@ -499,7 +588,7 @@ impl<S: StateStore> SourceExecutor<S> {
         core.init_split_state(boot_state.clone());
 
         // Return the ownership of `stream_source_core` to the source executor.
-        self.stream_source_core = Some(core);
+        self.stream_source_core = core;
 
         let recover_state: ConnectorState = (!boot_state.is_empty()).then_some(boot_state);
         tracing::debug!(state = ?recover_state, "start with state");
@@ -519,8 +608,6 @@ impl<S: StateStore> SourceExecutor<S> {
             // make sure it is written to state table later.
             // Then even it receives no messages, we can observe it in state table.
             self.stream_source_core
-                .as_mut()
-                .unwrap()
                 .updated_splits_in_epoch
                 .extend(latest_splits.into_iter().map(|s| (s.id(), s)));
         }
@@ -578,7 +665,6 @@ impl<S: StateStore> SourceExecutor<S> {
                     }
 
                     let epoch = barrier.epoch;
-
                     let mut split_change = None;
 
                     if let Some(mutation) = barrier.mutation.as_deref() {
@@ -593,7 +679,7 @@ impl<S: StateStore> SourceExecutor<S> {
                             }
                             Mutation::SourceChangeSplit(actor_splits) => {
                                 tracing::info!(
-                                    actor_id = self.actor_ctx.id,
+                                    actor_id = %self.actor_ctx.id,
                                     actor_splits = ?actor_splits,
                                     "source change split received"
                                 );
@@ -603,12 +689,33 @@ impl<S: StateStore> SourceExecutor<S> {
                                         (
                                             &source_desc,
                                             &mut stream,
-                                            target_splits,
-                                            true,
-                                            &source_split_change_count,
+                                            ApplyMutationAfterBarrier::SplitChange {
+                                                target_splits,
+                                                should_trim_state: true,
+                                                split_change_count: &source_split_change_count,
+                                            },
                                         )
                                     },
                                 );
+                            }
+
+                            Mutation::ConnectorPropsChange(maybe_mutation) => {
+                                if let Some(new_props) = maybe_mutation.get(&source_id.as_raw_id())
+                                {
+                                    // rebuild the stream reader with new props
+                                    tracing::info!(
+                                        actor_id = %self.actor_ctx.id,
+                                        source_id = %source_id,
+                                        "updating source connector properties",
+                                    );
+                                    source_desc.update_reader(new_props.clone())?;
+                                    // suppose the connector props change will not involve state change
+                                    split_change = Some((
+                                        &source_desc,
+                                        &mut stream,
+                                        ApplyMutationAfterBarrier::ConnectorPropsChange,
+                                    ));
+                                }
                             }
 
                             Mutation::Update(UpdateMutation { actor_splits, .. }) => {
@@ -617,25 +724,152 @@ impl<S: StateStore> SourceExecutor<S> {
                                         (
                                             &source_desc,
                                             &mut stream,
-                                            target_splits,
-                                            false,
-                                            &source_split_change_count,
+                                            ApplyMutationAfterBarrier::SplitChange {
+                                                target_splits,
+                                                should_trim_state: false,
+                                                split_change_count: &source_split_change_count,
+                                            },
                                         )
                                     },
                                 );
                             }
-                            Mutation::Throttle(actor_to_apply) => {
-                                if let Some(new_rate_limit) = actor_to_apply.get(&self.actor_ctx.id)
-                                    && *new_rate_limit != self.rate_limit_rps
+                            Mutation::Throttle(fragment_to_apply) => {
+                                if let Some(entry) =
+                                    fragment_to_apply.get(&self.actor_ctx.fragment_id)
+                                    && entry.throttle_type() == ThrottleType::Source
+                                    && entry.rate_limit != self.rate_limit_rps
                                 {
                                     tracing::info!(
                                         "updating rate limit from {:?} to {:?}",
                                         self.rate_limit_rps,
-                                        *new_rate_limit
+                                        entry.rate_limit
                                     );
-                                    self.rate_limit_rps = *new_rate_limit;
+                                    self.rate_limit_rps = entry.rate_limit;
                                     // recreate from latest_split_info
                                     self.rebuild_stream_reader(&source_desc, &mut stream)?;
+                                }
+                            }
+                            Mutation::ResetSource { source_id } => {
+                                // Note: RESET SOURCE only clears the offset, does NOT pause the source.
+                                // When offset is None, after recovery/restart, Debezium will automatically
+                                // enter recovery mode and fetch the latest offset from upstream.
+                                if *source_id == self.stream_source_core.source_id {
+                                    tracing::info!(
+                                        actor_id = %self.actor_ctx.id,
+                                        source_id = source_id.as_raw_id(),
+                                        "Resetting CDC source: clearing offset (set to None)"
+                                    );
+
+                                    // Step 1: Collect all current splits and clear their offsets
+                                    let splits_with_cleared_offset: Vec<SplitImpl> = self.stream_source_core
+                                        .latest_split_info
+                                        .values()
+                                        .map(|split| {
+                                            // Clone the split and clear its offset
+                                            let mut new_split = split.clone();
+                                            match &mut new_split {
+                                                SplitImpl::MysqlCdc(debezium_split) => {
+                                                    if let Some(mysql_split) = debezium_split.mysql_split.as_mut() {
+                                                        tracing::info!(
+                                                            split_id = ?mysql_split.inner.split_id,
+                                                            old_offset = ?mysql_split.inner.start_offset,
+                                                            "Clearing MySQL CDC offset"
+                                                        );
+                                                        mysql_split.inner.start_offset = None;
+                                                    }
+                                                }
+                                                SplitImpl::PostgresCdc(debezium_split) => {
+                                                    if let Some(pg_split) = debezium_split.postgres_split.as_mut() {
+                                                        tracing::info!(
+                                                            split_id = ?pg_split.inner.split_id,
+                                                            old_offset = ?pg_split.inner.start_offset,
+                                                            "Clearing PostgreSQL CDC offset"
+                                                        );
+                                                        pg_split.inner.start_offset = None;
+                                                    }
+                                                }
+                                                SplitImpl::MongodbCdc(debezium_split) => {
+                                                    if let Some(mongo_split) = debezium_split.mongodb_split.as_mut() {
+                                                        tracing::info!(
+                                                            split_id = ?mongo_split.inner.split_id,
+                                                            old_offset = ?mongo_split.inner.start_offset,
+                                                            "Clearing MongoDB CDC offset"
+                                                        );
+                                                        mongo_split.inner.start_offset = None;
+                                                    }
+                                                }
+                                                SplitImpl::CitusCdc(debezium_split) => {
+                                                    if let Some(citus_split) = debezium_split.citus_split.as_mut() {
+                                                        tracing::info!(
+                                                            split_id = ?citus_split.inner.split_id,
+                                                            old_offset = ?citus_split.inner.start_offset,
+                                                            "Clearing Citus CDC offset"
+                                                        );
+                                                        citus_split.inner.start_offset = None;
+                                                    }
+                                                }
+                                                SplitImpl::SqlServerCdc(debezium_split) => {
+                                                    if let Some(sqlserver_split) = debezium_split.sql_server_split.as_mut() {
+                                                        tracing::info!(
+                                                            split_id = ?sqlserver_split.inner.split_id,
+                                                            old_offset = ?sqlserver_split.inner.start_offset,
+                                                            "Clearing SQL Server CDC offset"
+                                                        );
+                                                        sqlserver_split.inner.start_offset = None;
+                                                    }
+                                                }
+                                                _ => {
+                                                    tracing::warn!(
+                                                        "RESET SOURCE called on non-CDC split type"
+                                                    );
+                                                }
+                                            }
+                                            new_split
+                                        })
+                                        .collect();
+
+                                    if !splits_with_cleared_offset.is_empty() {
+                                        tracing::info!(
+                                            actor_id = %self.actor_ctx.id,
+                                            split_count = splits_with_cleared_offset.len(),
+                                            "Updating state table with cleared offsets"
+                                        );
+
+                                        // Step 2: Write splits back to state table with offset = None
+                                        self.stream_source_core
+                                            .split_state_store
+                                            .set_states(splits_with_cleared_offset.clone())
+                                            .await?;
+
+                                        // Step 3: Update in-memory split info with cleared offsets
+                                        for split in splits_with_cleared_offset {
+                                            self.stream_source_core
+                                                .latest_split_info
+                                                .insert(split.id(), split.clone());
+                                            self.stream_source_core
+                                                .updated_splits_in_epoch
+                                                .insert(split.id(), split);
+                                        }
+
+                                        tracing::info!(
+                                            actor_id = %self.actor_ctx.id,
+                                            source_id = source_id.as_raw_id(),
+                                            "RESET SOURCE completed: offset cleared (set to None). \
+                                             Trigger recovery/restart to fetch latest offset from upstream."
+                                        );
+                                    } else {
+                                        tracing::warn!(
+                                            actor_id = %self.actor_ctx.id,
+                                            "No splits found to reset - source may not be initialized yet"
+                                        );
+                                    }
+                                } else {
+                                    tracing::debug!(
+                                        actor_id = %self.actor_ctx.id,
+                                        target_source_id = source_id.as_raw_id(),
+                                        current_source_id = self.stream_source_core.source_id.as_raw_id(),
+                                        "ResetSource mutation for different source, ignoring"
+                                    );
                                 }
                             }
                             _ => {}
@@ -643,6 +877,14 @@ impl<S: StateStore> SourceExecutor<S> {
                     }
 
                     let updated_splits = self.persist_state_and_clear_cache(epoch).await?;
+
+                    self.maybe_report_cdc_source_offset(
+                        &updated_splits,
+                        epoch,
+                        source_id,
+                        &mut must_report_cdc_offset_once,
+                        must_wait_cdc_offset_before_report,
+                    );
 
                     // when handle a checkpoint barrier, spawn a task to wait for epoch commit notification
                     if barrier.kind.is_checkpoint()
@@ -657,21 +899,12 @@ impl<S: StateStore> SourceExecutor<S> {
                     let barrier_epoch = barrier.epoch;
                     yield Message::Barrier(barrier);
 
-                    if let Some((
-                        source_desc,
-                        stream,
-                        target_splits,
-                        should_trim_state,
-                        source_split_change_count,
-                    )) = split_change
-                    {
+                    if let Some((source_desc, stream, to_apply_mutation)) = split_change {
                         self.apply_split_change_after_yield_barrier(
                             barrier_epoch,
                             source_desc,
                             stream,
-                            target_splits,
-                            should_trim_state,
-                            source_split_change_count,
+                            to_apply_mutation,
                         )
                         .await?;
                     }
@@ -684,8 +917,21 @@ impl<S: StateStore> SourceExecutor<S> {
 
                 Either::Right((chunk, latest_state)) => {
                     if let Some(task_builder) = &mut wait_checkpoint_task_builder {
-                        let offset_col = chunk.column_at(offset_idx);
-                        task_builder.update_task_on_chunk(offset_col.clone());
+                        if let Some(pulsar_message_id_idx) = pulsar_message_id_idx {
+                            let pulsar_message_id_col = chunk.column_at(pulsar_message_id_idx);
+                            task_builder.update_task_on_chunk(
+                                source_id,
+                                &latest_state,
+                                pulsar_message_id_col.clone(),
+                            );
+                        } else {
+                            let offset_col = chunk.column_at(offset_idx);
+                            task_builder.update_task_on_chunk(
+                                source_id,
+                                &latest_state,
+                                offset_col.clone(),
+                            );
+                        }
                     }
                     if last_barrier_time.elapsed().as_millis() > max_wait_barrier_time_ms {
                         // Exceeds the max wait barrier time, the source will be paused.
@@ -709,26 +955,30 @@ impl<S: StateStore> SourceExecutor<S> {
                     }
 
                     latest_state.iter().for_each(|(split_id, new_split_impl)| {
-                        if let Some(split_impl) = self
-                            .stream_source_core
-                            .as_mut()
-                            .unwrap()
-                            .latest_split_info
-                            .get_mut(split_id)
+                        if let Some(split_impl) =
+                            self.stream_source_core.latest_split_info.get_mut(split_id)
                         {
                             *split_impl = new_split_impl.clone();
                         }
                     });
 
                     self.stream_source_core
-                        .as_mut()
-                        .unwrap()
                         .updated_splits_in_epoch
                         .extend(latest_state);
 
-                    source_output_row_count.inc_by(chunk.cardinality() as u64);
+                    let card = chunk.cardinality();
+                    if card == 0 {
+                        continue;
+                    }
+                    source_output_row_count.inc_by(card as u64);
+                    let to_remove_col_indices =
+                        if let Some(pulsar_message_id_idx) = pulsar_message_id_idx {
+                            vec![split_idx, offset_idx, pulsar_message_id_idx]
+                        } else {
+                            vec![split_idx, offset_idx]
+                        };
                     let chunk =
-                        prune_additional_cols(&chunk, split_idx, offset_idx, &source_desc.columns);
+                        prune_additional_cols(&chunk, &to_remove_col_indices, &source_desc.columns);
                     yield Message::Chunk(chunk);
                     self.try_flush_data().await?;
                 }
@@ -737,54 +987,34 @@ impl<S: StateStore> SourceExecutor<S> {
 
         // The source executor should only be stopped by the actor when finding a `Stop` mutation.
         tracing::error!(
-            actor_id = self.actor_ctx.id,
+            actor_id = %self.actor_ctx.id,
             "source executor exited unexpectedly"
         )
     }
+}
 
-    /// A source executor without stream source only receives barrier messages and sends them to
-    /// the downstream executor.
-    #[try_stream(ok = Message, error = StreamExecutorError)]
-    async fn execute_without_stream_source(mut self) {
-        let mut barrier_receiver = self.barrier_receiver.take().unwrap();
-        let barrier = barrier_receiver
-            .recv()
-            .instrument_await("source_recv_first_barrier")
-            .await
-            .ok_or_else(|| {
-                anyhow!(
-                    "failed to receive the first barrier, actor_id: {:?} with no stream source",
-                    self.actor_ctx.id
-                )
-            })?;
-        yield Message::Barrier(barrier);
-
-        while let Some(barrier) = barrier_receiver.recv().await {
-            yield Message::Barrier(barrier);
-        }
-    }
+#[derive(Debug, Clone)]
+enum ApplyMutationAfterBarrier<'a> {
+    SplitChange {
+        target_splits: Vec<SplitImpl>,
+        should_trim_state: bool,
+        split_change_count: &'a LabelGuardedMetric<GenericCounter<AtomicU64>>,
+    },
+    ConnectorPropsChange,
 }
 
 impl<S: StateStore> Execute for SourceExecutor<S> {
     fn execute(self: Box<Self>) -> BoxedMessageStream {
-        if self.stream_source_core.is_some() {
-            self.execute_with_stream_source().boxed()
-        } else {
-            self.execute_without_stream_source().boxed()
-        }
+        self.execute_inner().boxed()
     }
 }
 
 impl<S: StateStore> Debug for SourceExecutor<S> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        if let Some(core) = &self.stream_source_core {
-            f.debug_struct("SourceExecutor")
-                .field("source_id", &core.source_id)
-                .field("column_ids", &core.column_ids)
-                .finish()
-        } else {
-            f.debug_struct("SourceExecutor").finish()
-        }
+        f.debug_struct("SourceExecutor")
+            .field("source_id", &self.stream_source_core.source_id)
+            .field("column_ids", &self.stream_source_core.column_ids)
+            .finish()
     }
 }
 
@@ -795,13 +1025,24 @@ struct WaitCheckpointTaskBuilder {
 }
 
 impl WaitCheckpointTaskBuilder {
-    fn update_task_on_chunk(&mut self, offset_col: ArrayRef) {
+    fn update_task_on_chunk(
+        &mut self,
+        source_id: SourceId,
+        latest_state: &HashMap<SplitId, SplitImpl>,
+        offset_col: ArrayRef,
+    ) {
         match &mut self.building_task {
             WaitCheckpointTask::AckPubsubMessage(_, arrays) => {
                 arrays.push(offset_col);
             }
             WaitCheckpointTask::AckNatsJetStream(_, arrays, _) => {
                 arrays.push(offset_col);
+            }
+            WaitCheckpointTask::AckPulsarMessage(arrays) => {
+                // each pulsar chunk will only contain one split
+                let split_id = latest_state.keys().next().unwrap();
+                let pulsar_ack_channel_id = build_pulsar_ack_channel_id(source_id, split_id);
+                arrays.push((pulsar_ack_channel_id, offset_col));
             }
             WaitCheckpointTask::CommitCdcOffset(_) => {}
         }
@@ -870,6 +1111,7 @@ struct WaitCheckpointWorker<S: StateStore> {
     wait_checkpoint_rx: UnboundedReceiver<(Epoch, WaitCheckpointTask)>,
     state_store: S,
     table_id: TableId,
+    metrics: Arc<StreamingMetrics>,
 }
 
 impl<S: StateStore> WaitCheckpointWorker<S> {
@@ -893,7 +1135,19 @@ impl<S: StateStore> WaitCheckpointWorker<S> {
                     match ret {
                         Ok(()) => {
                             tracing::debug!(epoch = epoch.0, "wait epoch success");
-                            task.run().await;
+
+                            // Run task with callback to record LSN after successful commit
+                            task.run_with_on_commit_success(|source_id: u64, offset| {
+                                if let Some(lsn_value) =
+                                    extract_postgres_lsn_from_offset_str(offset)
+                                {
+                                    self.metrics
+                                        .pg_cdc_jni_commit_offset_lsn
+                                        .with_guarded_label_values(&[&source_id.to_string()])
+                                        .set(lsn_value as i64);
+                                }
+                            })
+                            .await;
                         }
                         Err(e) => {
                             tracing::error!(
@@ -914,10 +1168,9 @@ impl<S: StateStore> WaitCheckpointWorker<S> {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashSet;
-
     use maplit::{btreemap, convert_args, hashmap};
-    use risingwave_common::catalog::{ColumnId, Field, TableId};
+    use risingwave_common::catalog::{ColumnId, Field};
+    use risingwave_common::id::SourceId;
     use risingwave_common::system_param::local_manager::LocalSystemParamsManager;
     use risingwave_common::test_prelude::StreamChunkTestExt;
     use risingwave_common::util::epoch::{EpochExt, test_epoch};
@@ -932,12 +1185,13 @@ mod tests {
     use super::*;
     use crate::executor::AddMutation;
     use crate::executor::source::{SourceStateTableHandler, default_source_internal_table};
+    use crate::task::LocalBarrierManager;
 
     const MOCK_SOURCE_NAME: &str = "mock_source";
 
     #[tokio::test]
     async fn test_source_executor() {
-        let table_id = TableId::default();
+        let source_id = 0.into();
         let schema = Schema {
             fields: vec![Field::with_name(DataType::Int32, "sequence_int")],
         };
@@ -965,7 +1219,7 @@ mod tests {
         )
         .await;
         let core = StreamSourceCore::<MemoryStateStore> {
-            source_id: table_id,
+            source_id,
             column_ids,
             source_desc_builder: Some(source_desc_builder),
             latest_split_info: HashMap::new(),
@@ -978,19 +1232,18 @@ mod tests {
 
         let executor = SourceExecutor::new(
             ActorContext::for_test(0),
-            Some(core),
+            core,
             Arc::new(StreamingMetrics::unused()),
             barrier_rx,
             system_params_manager.get_params(),
             None,
             false,
+            LocalBarrierManager::for_test(),
         );
         let mut executor = executor.boxed().execute();
 
         let init_barrier =
             Barrier::new_test_barrier(test_epoch(1)).with_mutation(Mutation::Add(AddMutation {
-                adds: HashMap::new(),
-                added_actors: HashSet::new(),
                 splits: hashmap! {
                     ActorId::default() => vec![
                         SplitImpl::Datagen(DatagenSplit {
@@ -1000,8 +1253,7 @@ mod tests {
                         }),
                     ],
                 },
-                pause: false,
-                subscriptions_to_add: vec![],
+                ..Default::default()
             }));
         barrier_tx.send(init_barrier).unwrap();
 
@@ -1026,7 +1278,7 @@ mod tests {
     #[traced_test]
     #[tokio::test]
     async fn test_split_change_mutation() {
-        let table_id = TableId::default();
+        let source_id = SourceId::new(0);
         let schema = Schema {
             fields: vec![Field::with_name(DataType::Int32, "v1")],
         };
@@ -1055,7 +1307,7 @@ mod tests {
         .await;
 
         let core = StreamSourceCore::<MemoryStateStore> {
-            source_id: table_id,
+            source_id,
             column_ids: column_ids.clone(),
             source_desc_builder: Some(source_desc_builder),
             latest_split_info: HashMap::new(),
@@ -1068,20 +1320,19 @@ mod tests {
 
         let executor = SourceExecutor::new(
             ActorContext::for_test(0),
-            Some(core),
+            core,
             Arc::new(StreamingMetrics::unused()),
             barrier_rx,
             system_params_manager.get_params(),
             None,
             false,
+            LocalBarrierManager::for_test(),
         );
         let mut handler = executor.boxed().execute();
 
         let mut epoch = test_epoch(1);
         let init_barrier =
             Barrier::new_test_barrier(epoch).with_mutation(Mutation::Add(AddMutation {
-                adds: HashMap::new(),
-                added_actors: HashSet::new(),
                 splits: hashmap! {
                     ActorId::default() => vec![
                         SplitImpl::Datagen(DatagenSplit {
@@ -1091,8 +1342,7 @@ mod tests {
                         }),
                     ],
                 },
-                pause: false,
-                subscriptions_to_add: vec![],
+                ..Default::default()
             }));
         barrier_tx.send(init_barrier).unwrap();
 

@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use itertools::Itertools;
 use risingwave_common::bail_not_implemented;
 use risingwave_common::types::{
     DataType, DateTimeField, Decimal, Interval, MapType, ScalarImpl, StructType,
@@ -25,12 +24,12 @@ use crate::error::{ErrorCode, Result};
 use crate::expr::{Expr as _, ExprImpl, ExprType, FunctionCall, Literal, align_types};
 
 impl Binder {
-    pub fn bind_value(&mut self, value: Value) -> Result<Literal> {
+    pub fn bind_value(&mut self, value: &Value) -> Result<Literal> {
         match value {
-            Value::Number(s) => self.bind_number(s),
+            Value::Number(s) => self.bind_number(s.clone()),
             Value::SingleQuotedString(s) => self.bind_string(s),
-            Value::CstyleEscapedString(s) => self.bind_string(s.value),
-            Value::Boolean(b) => self.bind_bool(b),
+            Value::CstyleEscapedString(s) => self.bind_string(&s.value),
+            Value::Boolean(b) => self.bind_bool(*b),
             // Both null and string literal will be treated as `unknown` during type inference.
             // See [`ExprImpl::is_unknown`].
             Value::Null => Ok(Literal::new_untyped(None)),
@@ -41,13 +40,13 @@ impl Binder {
                 leading_precision: None,
                 last_field: None,
                 fractional_seconds_precision: None,
-            } => self.bind_interval(value, leading_field),
+            } => self.bind_interval(value, *leading_field),
             _ => bail_not_implemented!("value: {:?}", value),
         }
     }
 
-    pub(super) fn bind_string(&mut self, s: String) -> Result<Literal> {
-        Ok(Literal::new_untyped(Some(s)))
+    pub(super) fn bind_string(&mut self, s: &str) -> Result<Literal> {
+        Ok(Literal::new_untyped(Some(s.to_owned())))
     }
 
     fn bind_bool(&mut self, b: bool) -> Result<Literal> {
@@ -90,11 +89,11 @@ impl Binder {
 
     fn bind_interval(
         &mut self,
-        s: String,
+        s: &str,
         leading_field: Option<AstDateTimeField>,
     ) -> Result<Literal> {
         let interval =
-            Interval::parse_with_fields(&s, leading_field.map(Self::bind_date_time_field))
+            Interval::parse_with_fields(s, leading_field.map(Self::bind_date_time_field))
                 .map_err(|e| ErrorCode::BindError(e.to_report_string()))?;
         let datum = Some(ScalarImpl::Interval(interval));
         let literal = Literal::new(datum, DataType::Interval);
@@ -116,25 +115,22 @@ impl Binder {
     }
 
     /// `ARRAY[...]` is represented as an function call at the binder stage.
-    pub(super) fn bind_array(&mut self, exprs: Vec<Expr>) -> Result<ExprImpl> {
+    pub(super) fn bind_array(&mut self, exprs: &[Expr]) -> Result<ExprImpl> {
         if exprs.is_empty() {
             return Err(ErrorCode::BindError("cannot determine type of empty array\nHINT:  Explicitly cast to the desired type, for example ARRAY[]::integer[].".into()).into());
         }
         let mut exprs = exprs
-            .into_iter()
+            .iter()
             .map(|e| self.bind_expr_inner(e))
             .collect::<Result<Vec<ExprImpl>>>()?;
         let element_type = align_types(exprs.iter_mut())?;
-        let expr: ExprImpl = FunctionCall::new_unchecked(
-            ExprType::Array,
-            exprs,
-            DataType::List(Box::new(element_type)),
-        )
-        .into();
+        let expr: ExprImpl =
+            FunctionCall::new_unchecked(ExprType::Array, exprs, DataType::list(element_type))
+                .into();
         Ok(expr)
     }
 
-    pub(super) fn bind_map(&mut self, entries: Vec<(Expr, Expr)>) -> Result<ExprImpl> {
+    pub(super) fn bind_map(&mut self, entries: &[(Expr, Expr)]) -> Result<ExprImpl> {
         if entries.is_empty() {
             return Err(ErrorCode::BindError("cannot determine type of empty map\nHINT:  Explicitly cast to the desired type, for example MAP{}::map(int,int).".into()).into());
         }
@@ -147,16 +143,13 @@ impl Binder {
         let key_type = align_types(keys.iter_mut())?;
         let value_type = align_types(values.iter_mut())?;
 
-        let keys: ExprImpl = FunctionCall::new_unchecked(
-            ExprType::Array,
-            keys,
-            DataType::List(Box::new(key_type.clone())),
-        )
-        .into();
+        let keys: ExprImpl =
+            FunctionCall::new_unchecked(ExprType::Array, keys, DataType::list(key_type.clone()))
+                .into();
         let values: ExprImpl = FunctionCall::new_unchecked(
             ExprType::Array,
             values,
-            DataType::List(Box::new(value_type.clone())),
+            DataType::list(value_type.clone()),
         )
         .into();
 
@@ -171,61 +164,64 @@ impl Binder {
 
     pub(super) fn bind_array_cast(
         &mut self,
-        exprs: Vec<Expr>,
-        element_type: Box<DataType>,
+        exprs: &[Expr],
+        element_type: &DataType,
     ) -> Result<ExprImpl> {
         let exprs = exprs
-            .into_iter()
-            .map(|e| self.bind_cast_inner(e, *element_type.clone()))
+            .iter()
+            .map(|e| self.bind_cast_inner(e, element_type))
             .collect::<Result<Vec<ExprImpl>>>()?;
 
-        let expr: ExprImpl =
-            FunctionCall::new_unchecked(ExprType::Array, exprs, DataType::List(element_type))
-                .into();
+        let expr: ExprImpl = FunctionCall::new_unchecked(
+            ExprType::Array,
+            exprs,
+            DataType::list(element_type.clone()),
+        )
+        .into();
         Ok(expr)
     }
 
     pub(super) fn bind_map_cast(
         &mut self,
-        entries: Vec<(Expr, Expr)>,
-        map_type: MapType,
+        entries: &[(Expr, Expr)],
+        map_type: &MapType,
     ) -> Result<ExprImpl> {
         let mut keys = Vec::with_capacity(entries.len());
         let mut values = Vec::with_capacity(entries.len());
         for (k, v) in entries {
-            keys.push(self.bind_cast_inner(k, map_type.key().clone())?);
-            values.push(self.bind_cast_inner(v, map_type.value().clone())?);
+            keys.push(self.bind_cast_inner(k, map_type.key())?);
+            values.push(self.bind_cast_inner(v, map_type.value())?);
         }
 
         let keys: ExprImpl = FunctionCall::new_unchecked(
             ExprType::Array,
             keys,
-            DataType::List(Box::new(map_type.key().clone())),
+            DataType::list(map_type.key().clone()),
         )
         .into();
         let values: ExprImpl = FunctionCall::new_unchecked(
             ExprType::Array,
             values,
-            DataType::List(Box::new(map_type.value().clone())),
+            DataType::list(map_type.value().clone()),
         )
         .into();
 
         let expr: ExprImpl = FunctionCall::new_unchecked(
             ExprType::MapFromKeyValues,
             vec![keys, values],
-            DataType::Map(map_type),
+            DataType::Map(map_type.clone()),
         )
         .into();
         Ok(expr)
     }
 
-    pub(super) fn bind_index(&mut self, obj: Expr, index: Expr) -> Result<ExprImpl> {
+    pub(super) fn bind_index(&mut self, obj: &Expr, index: &Expr) -> Result<ExprImpl> {
         let obj = self.bind_expr_inner(obj)?;
         match obj.return_type() {
-            DataType::List(return_type) => Ok(FunctionCall::new_unchecked(
+            DataType::List(l) => Ok(FunctionCall::new_unchecked(
                 ExprType::ArrayAccess,
                 vec![obj, self.bind_expr_inner(index)?],
-                *return_type,
+                l.into_elem(),
             )
             .into()),
             DataType::Map(m) => Ok(FunctionCall::new_unchecked(
@@ -244,30 +240,30 @@ impl Binder {
 
     pub(super) fn bind_array_range_index(
         &mut self,
-        obj: Expr,
-        start: Option<Box<Expr>>,
-        end: Option<Box<Expr>>,
+        obj: &Expr,
+        start: Option<&Expr>,
+        end: Option<&Expr>,
     ) -> Result<ExprImpl> {
         let obj = self.bind_expr_inner(obj)?;
         let start = match start {
             None => ExprImpl::literal_int(1),
             Some(expr) => self
-                .bind_expr_inner(*expr)?
-                .cast_implicit(DataType::Int32)?,
+                .bind_expr_inner(expr)?
+                .cast_implicit(&DataType::Int32)?,
         };
         // Don't worry, the backend implementation will stop iterating once it encounters the end
         // of the array.
         let end = match end {
             None => ExprImpl::literal_int(i32::MAX),
             Some(expr) => self
-                .bind_expr_inner(*expr)?
-                .cast_implicit(DataType::Int32)?,
+                .bind_expr_inner(expr)?
+                .cast_implicit(&DataType::Int32)?,
         };
         match obj.return_type() {
-            DataType::List(return_type) => Ok(FunctionCall::new_unchecked(
+            t @ DataType::List(_) => Ok(FunctionCall::new_unchecked(
                 ExprType::ArrayRangeAccess,
                 vec![obj, start, end],
-                DataType::List(return_type),
+                t,
             )
             .into()),
             data_type => Err(ErrorCode::BindError(format!(
@@ -279,13 +275,12 @@ impl Binder {
     }
 
     /// `Row(...)` is represented as an function call at the binder stage.
-    pub(super) fn bind_row(&mut self, exprs: Vec<Expr>) -> Result<ExprImpl> {
+    pub(super) fn bind_row(&mut self, exprs: &[Expr]) -> Result<ExprImpl> {
         let exprs = exprs
-            .into_iter()
+            .iter()
             .map(|e| self.bind_expr_inner(e))
             .collect::<Result<Vec<ExprImpl>>>()?;
-        let data_type =
-            StructType::unnamed(exprs.iter().map(|e| e.return_type()).collect_vec()).into();
+        let data_type = StructType::row_expr_type(exprs.iter().map(|e| e.return_type())).into();
         let expr: ExprImpl = FunctionCall::new_unchecked(ExprType::Row, exprs, data_type).into();
         Ok(expr)
     }
@@ -337,7 +332,7 @@ mod tests {
 
         for i in 0..values.len() {
             let value = Value::Number(String::from(values[i]));
-            let res = binder.bind_value(value).unwrap();
+            let res = binder.bind_value(&value).unwrap();
             let ans = Literal::new(data[i].clone(), data_type[i].clone());
             assert_eq!(res, ans);
         }
@@ -399,7 +394,7 @@ mod tests {
         ];
 
         for i in 0..values.len() {
-            let res = binder.bind_value(Number(values[i].to_owned())).unwrap();
+            let res = binder.bind_value(&Number(values[i].to_owned())).unwrap();
             let ans = Literal::new(data[i].clone(), data_type[i].clone());
             assert_eq!(res, ans);
         }
@@ -410,14 +405,14 @@ mod tests {
         let expr: ExprImpl = FunctionCall::new_unchecked(
             ExprType::Array,
             vec![ExprImpl::literal_int(11)],
-            DataType::List(Box::new(DataType::Int32)),
+            DataType::Int32.list(),
         )
         .into();
         let expr_pb = expr.to_expr_proto();
         let expr = build_from_prost(&expr_pb).unwrap();
         match expr.return_type() {
-            DataType::List(datatype) => {
-                assert_eq!(datatype, Box::new(DataType::Int32));
+            DataType::List(list) => {
+                assert_eq!(list.into_elem(), DataType::Int32);
             }
             _ => panic!("unexpected type"),
         };
@@ -428,7 +423,7 @@ mod tests {
         let array_expr = FunctionCall::new_unchecked(
             ExprType::Array,
             vec![ExprImpl::literal_int(11), ExprImpl::literal_int(22)],
-            DataType::List(Box::new(DataType::Int32)),
+            DataType::Int32.list(),
         )
         .into();
 
@@ -455,7 +450,7 @@ mod tests {
             "2 minutes",
             "1 month",
         ];
-        let data = vec![
+        let data = [
             Literal::new(
                 Some(ScalarImpl::Interval(Interval::from_minutes(60))),
                 DataType::Interval,
@@ -490,7 +485,7 @@ mod tests {
                 last_field: None,
                 fractional_seconds_precision: None,
             };
-            assert_eq!(binder.bind_value(value).unwrap(), data[i]);
+            assert_eq!(binder.bind_value(&value).unwrap(), data[i]);
         }
     }
 }

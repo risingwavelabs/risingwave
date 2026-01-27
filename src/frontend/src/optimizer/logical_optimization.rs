@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,7 +16,7 @@ use itertools::Itertools;
 use risingwave_common::bail;
 use thiserror_ext::AsReport as _;
 
-use super::plan_node::RewriteExprsRecursive;
+use super::plan_node::{ConventionMarker, Logical, LogicalPlanRef};
 use super::plan_visitor::has_logical_max_one_row;
 use crate::error::Result;
 use crate::expr::NowProcTimeFinder;
@@ -35,12 +35,12 @@ use crate::optimizer::rule::*;
 use crate::utils::Condition;
 use crate::{Explain, OptimizerContextRef};
 
-impl PlanRef {
+impl<C: ConventionMarker> PlanRef<C> {
     fn optimize_by_rules_inner(
         self,
-        heuristic_optimizer: &mut HeuristicOptimizer<'_>,
+        heuristic_optimizer: &mut HeuristicOptimizer<'_, C>,
         stage_name: &str,
-    ) -> Result<PlanRef> {
+    ) -> Result<PlanRef<C>> {
         let ctx = self.ctx();
 
         let result = heuristic_optimizer.optimize(self);
@@ -65,8 +65,8 @@ impl PlanRef {
             stage_name,
             rules,
             apply_order,
-        }: &OptimizationStage,
-    ) -> Result<PlanRef> {
+        }: &OptimizationStage<C>,
+    ) -> Result<PlanRef<C>> {
         self.optimize_by_rules_inner(&mut HeuristicOptimizer::new(apply_order, rules), stage_name)
     }
 
@@ -76,8 +76,8 @@ impl PlanRef {
             stage_name,
             rules,
             apply_order,
-        }: &OptimizationStage,
-    ) -> Result<PlanRef> {
+        }: &OptimizationStage<C>,
+    ) -> Result<PlanRef<C>> {
         loop {
             let mut heuristic_optimizer = HeuristicOptimizer::new(apply_order, rules);
             self = self.optimize_by_rules_inner(&mut heuristic_optimizer, stage_name)?;
@@ -88,14 +88,14 @@ impl PlanRef {
     }
 }
 
-pub struct OptimizationStage {
+pub struct OptimizationStage<C: ConventionMarker = Logical> {
     stage_name: String,
-    rules: Vec<BoxedRule>,
+    rules: Vec<BoxedRule<C>>,
     apply_order: ApplyOrder,
 }
 
-impl OptimizationStage {
-    pub fn new<S>(name: S, rules: Vec<BoxedRule>, apply_order: ApplyOrder) -> Self
+impl<C: ConventionMarker> OptimizationStage<C> {
+    pub fn new<S>(name: S, rules: Vec<BoxedRule<C>>, apply_order: ApplyOrder) -> Self
     where
         S: Into<String>,
     {
@@ -109,7 +109,7 @@ impl OptimizationStage {
 
 use std::sync::LazyLock;
 
-use risingwave_sqlparser::ast::ExplainFormat;
+use crate::optimizer::plan_node::generic::GenericPlanRef;
 
 pub struct LogicalOptimizer {}
 
@@ -135,6 +135,12 @@ static TABLE_FUNCTION_CONVERT: LazyLock<OptimizationStage> = LazyLock::new(|| {
         vec![
             // Apply file scan rule first
             TableFunctionToFileScanRule::create(),
+            // Apply internal backfill progress rule first
+            TableFunctionToInternalBackfillProgressRule::create(),
+            // Apply internal source backfill progress rule next
+            TableFunctionToInternalSourceBackfillProgressRule::create(),
+            // Apply internal get channel delta stats rule next
+            TableFunctionToInternalGetChannelDeltaStatsRule::create(),
             // Apply postgres query rule next
             TableFunctionToPostgresQueryRule::create(),
             // Apply mysql query rule next
@@ -170,6 +176,33 @@ static TABLE_FUNCTION_TO_MYSQL_QUERY: LazyLock<OptimizationStage> = LazyLock::ne
     )
 });
 
+static TABLE_FUNCTION_TO_INTERNAL_BACKFILL_PROGRESS: LazyLock<OptimizationStage> =
+    LazyLock::new(|| {
+        OptimizationStage::new(
+            "Table Function To Internal Backfill Progress",
+            vec![TableFunctionToInternalBackfillProgressRule::create()],
+            ApplyOrder::TopDown,
+        )
+    });
+
+static TABLE_FUNCTION_TO_INTERNAL_SOURCE_BACKFILL_PROGRESS: LazyLock<OptimizationStage> =
+    LazyLock::new(|| {
+        OptimizationStage::new(
+            "Table Function To Internal Source Backfill Progress",
+            vec![TableFunctionToInternalSourceBackfillProgressRule::create()],
+            ApplyOrder::TopDown,
+        )
+    });
+
+static TABLE_FUNCTION_TO_INTERNAL_GET_CHANNEL_DELTA_STATS: LazyLock<OptimizationStage> =
+    LazyLock::new(|| {
+        OptimizationStage::new(
+            "Table Function To Internal Get Channel Delta Stats",
+            vec![TableFunctionToInternalGetChannelDeltaStatsRule::create()],
+            ApplyOrder::TopDown,
+        )
+    });
+
 static VALUES_EXTRACT_PROJECT: LazyLock<OptimizationStage> = LazyLock::new(|| {
     OptimizationStage::new(
         "Values Extract Project",
@@ -182,13 +215,17 @@ static SIMPLE_UNNESTING: LazyLock<OptimizationStage> = LazyLock::new(|| {
     OptimizationStage::new(
         "Simple Unnesting",
         vec![
-            // Eliminate max one row
-            MaxOneRowEliminateRule::create(),
-            // Convert apply to join.
-            ApplyToJoinRule::create(),
             // Pull correlated predicates up the algebra tree to unnest simple subquery.
             PullUpCorrelatedPredicateRule::create(),
+            // Pull correlated project expressions with values to inline scalar subqueries.
+            PullUpCorrelatedProjectValueRule::create(),
             PullUpCorrelatedPredicateAggRule::create(),
+            // Eliminate max one row
+            MaxOneRowEliminateRule::create(),
+            // Eliminate lateral table-function apply into a unary ProjectSet.
+            ApplyTableFunctionToProjectSetRule::create(),
+            // Convert apply to join.
+            ApplyToJoinRule::create(),
         ],
         ApplyOrder::BottomUp,
     )
@@ -314,7 +351,11 @@ static CONVERT_DISTINCT_AGG_FOR_BATCH: LazyLock<OptimizationStage> = LazyLock::n
 static SIMPLIFY_AGG: LazyLock<OptimizationStage> = LazyLock::new(|| {
     OptimizationStage::new(
         "Simplify Aggregation",
-        vec![AggGroupBySimplifyRule::create(), AggCallMergeRule::create()],
+        vec![
+            AggGroupBySimplifyRule::create(),
+            AggCallMergeRule::create(),
+            UnifyFirstLastValueRule::create(),
+        ],
         ApplyOrder::TopDown,
     )
 });
@@ -323,6 +364,14 @@ static JOIN_COMMUTE: LazyLock<OptimizationStage> = LazyLock::new(|| {
     OptimizationStage::new(
         "Join Commute".to_owned(),
         vec![JoinCommuteRule::create()],
+        ApplyOrder::TopDown,
+    )
+});
+
+static CONSTANT_OUTPUT_REMOVE: LazyLock<OptimizationStage> = LazyLock::new(|| {
+    OptimizationStage::new(
+        "Constant Output Operator Remove",
+        vec![EmptyAggRemoveRule::create()],
         ApplyOrder::TopDown,
     )
 });
@@ -372,6 +421,21 @@ static CONVERT_OVER_WINDOW: LazyLock<OptimizationStage> = LazyLock::new(|| {
     )
 });
 
+// DataFusion cannot apply `OverWindowToTopNRule`
+static CONVERT_OVER_WINDOW_FOR_BATCH: LazyLock<OptimizationStage> = LazyLock::new(|| {
+    OptimizationStage::new(
+        "Convert Over Window",
+        vec![
+            ProjectMergeRule::create(),
+            ProjectEliminateRule::create(),
+            TrivialProjectToValuesRule::create(),
+            UnionInputValuesMergeRule::create(),
+            OverWindowToAggAndJoinRule::create(),
+        ],
+        ApplyOrder::TopDown,
+    )
+});
+
 static MERGE_OVER_WINDOW: LazyLock<OptimizationStage> = LazyLock::new(|| {
     OptimizationStage::new(
         "Merge Over Window",
@@ -391,7 +455,19 @@ static REWRITE_LIKE_EXPR: LazyLock<OptimizationStage> = LazyLock::new(|| {
 static TOP_N_AGG_ON_INDEX: LazyLock<OptimizationStage> = LazyLock::new(|| {
     OptimizationStage::new(
         "TopN/SimpleAgg on Index",
-        vec![TopNOnIndexRule::create(), MinMaxOnIndexRule::create()],
+        vec![
+            TopNProjectTransposeRule::create(),
+            TopNOnIndexRule::create(),
+            MinMaxOnIndexRule::create(),
+        ],
+        ApplyOrder::TopDown,
+    )
+});
+
+static PROJECT_TOP_N_TRANSPOSE: LazyLock<OptimizationStage> = LazyLock::new(|| {
+    OptimizationStage::new(
+        "Project TopN Transpose",
+        vec![ProjectTopNTransposeRule::create()],
         ApplyOrder::TopDown,
     )
 });
@@ -463,18 +539,62 @@ static REWRITE_SOURCE_FOR_BATCH: LazyLock<OptimizationStage> = LazyLock::new(|| 
         "Rewrite Source For Batch",
         vec![
             SourceToKafkaScanRule::create(),
-            SourceToIcebergScanRule::create(),
+            // For Iceberg, we use the intermediate scan to defer metadata reading
+            // until after predicate pushdown and column pruning
+            SourceToIcebergIntermediateScanRule::create(),
         ],
         ApplyOrder::TopDown,
     )
 });
 
+static MATERIALIZE_ICEBERG_SCAN: LazyLock<OptimizationStage> = LazyLock::new(|| {
+    OptimizationStage::new(
+        "Materialize Iceberg Scan",
+        vec![IcebergIntermediateScanRule::create()],
+        ApplyOrder::TopDown,
+    )
+});
+
+static ICEBERG_COUNT_STAR: LazyLock<OptimizationStage> = LazyLock::new(|| {
+    OptimizationStage::new(
+        "Iceberg Count Star Optimization",
+        vec![IcebergCountStarRule::create()],
+        ApplyOrder::BottomUp,
+    )
+});
+
+static TOP_N_TO_VECTOR_SEARCH: LazyLock<OptimizationStage> = LazyLock::new(|| {
+    OptimizationStage::new(
+        "TopN to Vector Search",
+        vec![TopNToVectorSearchRule::create()],
+        ApplyOrder::BottomUp,
+    )
+});
+
+static CORRELATED_TOP_N_TO_VECTOR_SEARCH_FOR_BATCH: LazyLock<OptimizationStage> =
+    LazyLock::new(|| {
+        OptimizationStage::new(
+            "Correlated TopN to Vector Search",
+            vec![CorrelatedTopNToVectorSearchRule::create(true)],
+            ApplyOrder::BottomUp,
+        )
+    });
+
+static CORRELATED_TOP_N_TO_VECTOR_SEARCH_FOR_STREAM: LazyLock<OptimizationStage> =
+    LazyLock::new(|| {
+        OptimizationStage::new(
+            "Correlated TopN to Vector Search",
+            vec![CorrelatedTopNToVectorSearchRule::create(false)],
+            ApplyOrder::BottomUp,
+        )
+    });
+
 impl LogicalOptimizer {
     pub fn predicate_pushdown(
-        plan: PlanRef,
+        plan: LogicalPlanRef,
         explain_trace: bool,
         ctx: &OptimizerContextRef,
-    ) -> PlanRef {
+    ) -> LogicalPlanRef {
         let plan = plan.predicate_pushdown(
             Condition::true_cond(),
             &mut PredicatePushdownContext::new(plan.clone()),
@@ -487,11 +607,11 @@ impl LogicalOptimizer {
     }
 
     pub fn subquery_unnesting(
-        mut plan: PlanRef,
+        mut plan: LogicalPlanRef,
         enable_share_plan: bool,
         explain_trace: bool,
         ctx: &OptimizerContextRef,
-    ) -> Result<PlanRef> {
+    ) -> Result<LogicalPlanRef> {
         // Bail our if no apply operators.
         if !has_logical_apply(plan.clone()) {
             return Ok(plan);
@@ -521,10 +641,10 @@ impl LogicalOptimizer {
     }
 
     pub fn column_pruning(
-        mut plan: PlanRef,
+        mut plan: LogicalPlanRef,
         explain_trace: bool,
         ctx: &OptimizerContextRef,
-    ) -> PlanRef {
+    ) -> LogicalPlanRef {
         let required_cols = (0..plan.schema().len()).collect_vec();
         let mut column_pruning_ctx = ColumnPruningContext::new(plan.clone());
         plan = plan.prune_col(&required_cols, &mut column_pruning_ctx);
@@ -546,7 +666,7 @@ impl LogicalOptimizer {
         plan
     }
 
-    pub fn inline_now_proc_time(plan: PlanRef, ctx: &OptimizerContextRef) -> PlanRef {
+    pub fn inline_now_proc_time(plan: LogicalPlanRef, ctx: &OptimizerContextRef) -> LogicalPlanRef {
         // If now() and proctime() are not found, bail out.
         let mut v = NowProcTimeFinder::default();
         plan.visit_exprs_recursive(&mut v);
@@ -565,7 +685,9 @@ impl LogicalOptimizer {
         plan
     }
 
-    pub fn gen_optimized_logical_plan_for_stream(mut plan: PlanRef) -> Result<PlanRef> {
+    pub fn gen_optimized_logical_plan_for_stream(
+        mut plan: LogicalPlanRef,
+    ) -> Result<LogicalPlanRef> {
         let ctx = plan.ctx();
         let explain_trace = ctx.is_explain_trace();
 
@@ -576,6 +698,8 @@ impl LogicalOptimizer {
 
         // Convert grouping sets at first because other agg rule can't handle grouping sets.
         plan = plan.optimize_by_rules(&GROUPING_SETS)?;
+        // Remove nodes with constant output.
+        plan = plan.optimize_by_rules(&CONSTANT_OUTPUT_REMOVE)?;
         // Remove project to make common sub-plan sharing easier.
         plan = plan.optimize_by_rules(&PROJECT_REMOVE)?;
 
@@ -610,6 +734,8 @@ impl LogicalOptimizer {
         plan = plan.optimize_by_rules(&STREAM_GENERATE_SERIES_WITH_NOW)?;
         // In order to unnest a table function, we need to convert it into a `project_set` first.
         plan = plan.optimize_by_rules(&TABLE_FUNCTION_CONVERT)?;
+
+        plan = plan.optimize_by_rules(&CORRELATED_TOP_N_TO_VECTOR_SEARCH_FOR_STREAM)?;
 
         plan = Self::subquery_unnesting(plan, enable_share_plan, explain_trace, &ctx)?;
         if has_logical_max_one_row(plan.clone()) {
@@ -679,6 +805,7 @@ impl LogicalOptimizer {
         plan = Self::column_pruning(plan, explain_trace, &ctx);
         plan = Self::predicate_pushdown(plan, explain_trace, &ctx);
 
+        plan = plan.optimize_by_rules(&CONSTANT_OUTPUT_REMOVE)?;
         plan = plan.optimize_by_rules(&PROJECT_REMOVE)?;
 
         plan = plan.optimize_by_rules(&COMMON_SUB_EXPR_EXTRACT)?;
@@ -686,30 +813,14 @@ impl LogicalOptimizer {
         #[cfg(debug_assertions)]
         InputRefValidator.validate(plan.clone());
 
-        if ctx.is_explain_logical() {
-            match ctx.explain_format() {
-                ExplainFormat::Text => {
-                    ctx.store_logical(plan.explain_to_string());
-                }
-                ExplainFormat::Json => {
-                    ctx.store_logical(plan.explain_to_json());
-                }
-                ExplainFormat::Xml => {
-                    ctx.store_logical(plan.explain_to_xml());
-                }
-                ExplainFormat::Yaml => {
-                    ctx.store_logical(plan.explain_to_yaml());
-                }
-                ExplainFormat::Dot => {
-                    ctx.store_logical(plan.explain_to_dot());
-                }
-            }
-        }
+        ctx.may_store_explain_logical(&plan);
 
         Ok(plan)
     }
 
-    pub fn gen_optimized_logical_plan_for_batch(mut plan: PlanRef) -> Result<PlanRef> {
+    pub fn gen_optimized_logical_plan_for_batch(
+        mut plan: LogicalPlanRef,
+    ) -> Result<LogicalPlanRef> {
         let ctx = plan.ctx();
         let explain_trace = ctx.is_explain_trace();
 
@@ -734,8 +845,13 @@ impl LogicalOptimizer {
         plan = plan.optimize_by_rules(&TABLE_FUNCTION_TO_FILE_SCAN)?;
         plan = plan.optimize_by_rules(&TABLE_FUNCTION_TO_POSTGRES_QUERY)?;
         plan = plan.optimize_by_rules(&TABLE_FUNCTION_TO_MYSQL_QUERY)?;
+        plan = plan.optimize_by_rules(&TABLE_FUNCTION_TO_INTERNAL_BACKFILL_PROGRESS)?;
+        plan = plan.optimize_by_rules(&TABLE_FUNCTION_TO_INTERNAL_GET_CHANNEL_DELTA_STATS)?;
+        plan = plan.optimize_by_rules(&TABLE_FUNCTION_TO_INTERNAL_SOURCE_BACKFILL_PROGRESS)?;
         // In order to unnest a table function, we need to convert it into a `project_set` first.
         plan = plan.optimize_by_rules(&TABLE_FUNCTION_CONVERT)?;
+
+        plan = plan.optimize_by_rules(&CORRELATED_TOP_N_TO_VECTOR_SEARCH_FOR_BATCH)?;
 
         plan = Self::subquery_unnesting(plan, false, explain_trace, &ctx)?;
 
@@ -775,7 +891,7 @@ impl LogicalOptimizer {
             last_total_rule_applied_before_predicate_pushdown = ctx.total_rule_applied();
             plan = Self::predicate_pushdown(plan, explain_trace, &ctx);
         }
-        plan = plan.optimize_by_rules(&CONVERT_OVER_WINDOW)?;
+        plan = plan.optimize_by_rules(&CONVERT_OVER_WINDOW_FOR_BATCH)?;
         plan = plan.optimize_by_rules(&MERGE_OVER_WINDOW)?;
 
         // Convert distinct aggregates.
@@ -785,6 +901,8 @@ impl LogicalOptimizer {
 
         plan = plan.optimize_by_rules(&JOIN_COMMUTE)?;
 
+        plan = plan.optimize_by_rules(&TOP_N_TO_VECTOR_SEARCH)?;
+
         // Do a final column pruning and predicate pushing down to clean up the plan.
         plan = Self::column_pruning(plan, explain_trace, &ctx);
         if last_total_rule_applied_before_predicate_pushdown != ctx.total_rule_applied() {
@@ -793,13 +911,24 @@ impl LogicalOptimizer {
             plan = Self::predicate_pushdown(plan, explain_trace, &ctx);
         }
 
+        // Materialize Iceberg intermediate scans after predicate pushdown and column pruning.
+        // This converts LogicalIcebergIntermediateScan to LogicalIcebergScan with anti-joins
+        // for delete files.
+        plan = plan.optimize_by_rules(&MATERIALIZE_ICEBERG_SCAN)?;
+
+        plan = plan.optimize_by_rules(&CONSTANT_OUTPUT_REMOVE)?;
         plan = plan.optimize_by_rules(&PROJECT_REMOVE)?;
 
         plan = plan.optimize_by_rules(&COMMON_SUB_EXPR_EXTRACT)?;
 
+        // This need to be apply after PROJECT_REMOVE to ensure there is no projection between agg and iceberg scan.
+        plan = plan.optimize_by_rules(&ICEBERG_COUNT_STAR)?;
+
         plan = plan.optimize_by_rules(&PULL_UP_HOP)?;
 
         plan = plan.optimize_by_rules(&TOP_N_AGG_ON_INDEX)?;
+
+        plan = plan.optimize_by_rules(&PROJECT_TOP_N_TRANSPOSE)?;
 
         plan = plan.optimize_by_rules(&LIMIT_PUSH_DOWN)?;
 
@@ -808,25 +937,7 @@ impl LogicalOptimizer {
         #[cfg(debug_assertions)]
         InputRefValidator.validate(plan.clone());
 
-        if ctx.is_explain_logical() {
-            match ctx.explain_format() {
-                ExplainFormat::Text => {
-                    ctx.store_logical(plan.explain_to_string());
-                }
-                ExplainFormat::Json => {
-                    ctx.store_logical(plan.explain_to_json());
-                }
-                ExplainFormat::Xml => {
-                    ctx.store_logical(plan.explain_to_xml());
-                }
-                ExplainFormat::Yaml => {
-                    ctx.store_logical(plan.explain_to_yaml());
-                }
-                ExplainFormat::Dot => {
-                    ctx.store_logical(plan.explain_to_dot());
-                }
-            }
-        }
+        ctx.may_store_explain_logical(&plan);
 
         Ok(plan)
     }

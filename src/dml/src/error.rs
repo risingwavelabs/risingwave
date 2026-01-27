@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,7 +18,9 @@ pub enum DmlError {
     #[error("table schema has changed, please try again later")]
     SchemaChanged,
 
-    #[error("no available table reader in streaming executors")]
+    #[error(
+        "DML is not permitted during cluster recovery (no available table reader in streaming executors)"
+    )]
     NoReader,
 
     #[error("table reader closed")]

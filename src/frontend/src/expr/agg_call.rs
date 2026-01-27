@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -131,13 +131,13 @@ impl Expr for AggCall {
         self.return_type.clone()
     }
 
-    fn to_expr_proto(&self) -> risingwave_pb::expr::ExprNode {
+    fn try_to_expr_proto(&self) -> std::result::Result<risingwave_pb::expr::ExprNode, String> {
         // This function is always called on the physical planning step, where
         // `ExprImpl::AggCall` must have been rewritten to aggregate operators.
 
-        unreachable!(
+        Err(format!(
             "AggCall {:?} has not been rewritten to physical aggregate operators",
             self
-        )
+        ))
     }
 }

@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,24 +12,29 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use anyhow::anyhow;
 use parking_lot::lock_api::ArcRwLockReadGuard;
 use parking_lot::{RawRwLock, RwLock};
-use risingwave_common::catalog::{CatalogVersion, FunctionId, IndexId, ObjectId};
-use risingwave_common::util::column_index_mapping::ColIndexMapping;
+use risingwave_common::catalog::{
+    AlterDatabaseParam, CatalogVersion, FunctionId, IndexId, ObjectId,
+};
+use risingwave_common::id::{ConnectionId, JobId, SchemaId, SourceId, ViewId};
 use risingwave_hummock_sdk::HummockVersionId;
 use risingwave_pb::catalog::{
     PbComment, PbCreateType, PbDatabase, PbFunction, PbIndex, PbSchema, PbSink, PbSource,
     PbSubscription, PbTable, PbView,
 };
-use risingwave_pb::ddl_service::replace_job_plan::{ReplaceJob, ReplaceSource, ReplaceTable};
+use risingwave_pb::ddl_service::create_iceberg_table_request::{PbSinkJobInfo, PbTableJobInfo};
+use risingwave_pb::ddl_service::replace_job_plan::{
+    ReplaceJob, ReplaceMaterializedView, ReplaceSource, ReplaceTable,
+};
 use risingwave_pb::ddl_service::{
-    PbReplaceJobPlan, PbTableJobType, ReplaceJobPlan, TableJobType, WaitVersion,
-    alter_name_request, alter_owner_request, alter_set_schema_request, alter_swap_rename_request,
-    create_connection_request,
+    PbTableJobType, TableJobType, WaitVersion, alter_name_request, alter_owner_request,
+    alter_set_schema_request, alter_swap_rename_request, create_connection_request,
+    streaming_job_resource_type,
 };
 use risingwave_pb::meta::PbTableParallelism;
 use risingwave_pb::stream_plan::StreamFragmentGraph;
@@ -37,9 +42,10 @@ use risingwave_rpc_client::MetaClient;
 use tokio::sync::watch::Receiver;
 
 use super::root_catalog::Catalog;
-use super::{DatabaseId, SecretId, TableId};
+use super::{DatabaseId, SecretId, SinkId, SubscriptionId, TableId};
 use crate::error::Result;
 use crate::scheduler::HummockSnapshotManagerRef;
+use crate::session::current::notice_to_user;
 use crate::user::UserId;
 
 pub type CatalogReadGuard = ArcRwLockReadGuard<RawRwLock, Catalog>;
@@ -70,6 +76,8 @@ pub trait CatalogWriter: Send + Sync {
         db_name: &str,
         owner: UserId,
         resource_group: &str,
+        barrier_interval_ms: Option<u32>,
+        checkpoint_frequency: Option<u64>,
     ) -> Result<()>;
 
     async fn create_schema(
@@ -79,14 +87,21 @@ pub trait CatalogWriter: Send + Sync {
         owner: UserId,
     ) -> Result<()>;
 
-    async fn create_view(&self, view: PbView) -> Result<()>;
+    async fn create_view(&self, view: PbView, dependencies: HashSet<ObjectId>) -> Result<()>;
 
     async fn create_materialized_view(
         &self,
         table: PbTable,
         graph: StreamFragmentGraph,
         dependencies: HashSet<ObjectId>,
-        specific_resource_group: Option<String>,
+        resource_type: streaming_job_resource_type::ResourceType,
+        if_not_exists: bool,
+    ) -> Result<()>;
+
+    async fn replace_materialized_view(
+        &self,
+        table: PbTable,
+        graph: StreamFragmentGraph,
     ) -> Result<()>;
 
     async fn create_table(
@@ -95,6 +110,8 @@ pub trait CatalogWriter: Send + Sync {
         table: PbTable,
         graph: StreamFragmentGraph,
         job_type: PbTableJobType,
+        if_not_exists: bool,
+        dependencies: HashSet<ObjectId>,
     ) -> Result<()>;
 
     async fn replace_table(
@@ -102,36 +119,32 @@ pub trait CatalogWriter: Send + Sync {
         source: Option<PbSource>,
         table: PbTable,
         graph: StreamFragmentGraph,
-        mapping: ColIndexMapping,
         job_type: TableJobType,
     ) -> Result<()>;
 
-    async fn replace_source(
-        &self,
-        source: PbSource,
-        graph: StreamFragmentGraph,
-        mapping: ColIndexMapping,
-    ) -> Result<()>;
+    async fn replace_source(&self, source: PbSource, graph: StreamFragmentGraph) -> Result<()>;
 
     async fn create_index(
         &self,
         index: PbIndex,
         table: PbTable,
         graph: StreamFragmentGraph,
+        if_not_exists: bool,
     ) -> Result<()>;
 
     async fn create_source(
         &self,
         source: PbSource,
         graph: Option<StreamFragmentGraph>,
+        if_not_exists: bool,
     ) -> Result<()>;
 
     async fn create_sink(
         &self,
         sink: PbSink,
         graph: StreamFragmentGraph,
-        affected_table_change: Option<PbReplaceJobPlan>,
         dependencies: HashSet<ObjectId>,
+        if_not_exists: bool,
     ) -> Result<()>;
 
     async fn create_subscription(&self, subscription: PbSubscription) -> Result<()>;
@@ -141,8 +154,8 @@ pub trait CatalogWriter: Send + Sync {
     async fn create_connection(
         &self,
         connection_name: String,
-        database_id: u32,
-        schema_id: u32,
+        database_id: DatabaseId,
+        schema_id: SchemaId,
         owner_id: u32,
         connection: create_connection_request::Payload,
     ) -> Result<()>;
@@ -150,8 +163,8 @@ pub trait CatalogWriter: Send + Sync {
     async fn create_secret(
         &self,
         secret_name: String,
-        database_id: u32,
-        schema_id: u32,
+        database_id: DatabaseId,
+        schema_id: SchemaId,
         owner_id: u32,
         payload: Vec<u8>,
     ) -> Result<()>;
@@ -167,37 +180,35 @@ pub trait CatalogWriter: Send + Sync {
 
     async fn drop_materialized_view(&self, table_id: TableId, cascade: bool) -> Result<()>;
 
-    async fn drop_view(&self, view_id: u32, cascade: bool) -> Result<()>;
+    async fn drop_view(&self, view_id: ViewId, cascade: bool) -> Result<()>;
 
-    async fn drop_source(&self, source_id: u32, cascade: bool) -> Result<()>;
+    async fn drop_source(&self, source_id: SourceId, cascade: bool) -> Result<()>;
 
-    async fn drop_sink(
-        &self,
-        sink_id: u32,
-        cascade: bool,
-        affected_table_change: Option<PbReplaceJobPlan>,
-    ) -> Result<()>;
+    async fn reset_source(&self, source_id: SourceId) -> Result<()>;
 
-    async fn drop_subscription(&self, subscription_id: u32, cascade: bool) -> Result<()>;
+    async fn drop_sink(&self, sink_id: SinkId, cascade: bool) -> Result<()>;
 
-    async fn drop_database(&self, database_id: u32) -> Result<()>;
+    async fn drop_subscription(&self, subscription_id: SubscriptionId, cascade: bool)
+    -> Result<()>;
 
-    async fn drop_schema(&self, schema_id: u32, cascade: bool) -> Result<()>;
+    async fn drop_database(&self, database_id: DatabaseId) -> Result<()>;
+
+    async fn drop_schema(&self, schema_id: SchemaId, cascade: bool) -> Result<()>;
 
     async fn drop_index(&self, index_id: IndexId, cascade: bool) -> Result<()>;
 
-    async fn drop_function(&self, function_id: FunctionId) -> Result<()>;
+    async fn drop_function(&self, function_id: FunctionId, cascade: bool) -> Result<()>;
 
-    async fn drop_connection(&self, connection_id: u32) -> Result<()>;
+    async fn drop_connection(&self, connection_id: ConnectionId, cascade: bool) -> Result<()>;
 
     async fn drop_secret(&self, secret_id: SecretId) -> Result<()>;
 
     async fn alter_secret(
         &self,
-        secret_id: u32,
+        secret_id: SecretId,
         secret_name: String,
-        database_id: u32,
-        schema_id: u32,
+        database_id: DatabaseId,
+        schema_id: SchemaId,
         owner_id: u32,
         payload: Vec<u8>,
     ) -> Result<()>;
@@ -215,14 +226,21 @@ pub trait CatalogWriter: Send + Sync {
 
     async fn alter_parallelism(
         &self,
-        job_id: u32,
+        job_id: JobId,
         parallelism: PbTableParallelism,
         deferred: bool,
     ) -> Result<()>;
 
+    async fn alter_config(
+        &self,
+        job_id: JobId,
+        entries_to_add: HashMap<String, String>,
+        keys_to_remove: Vec<String>,
+    ) -> Result<()>;
+
     async fn alter_resource_group(
         &self,
-        table_id: u32,
+        table_id: TableId,
         resource_group: Option<String>,
         deferred: bool,
     ) -> Result<()>;
@@ -230,10 +248,24 @@ pub trait CatalogWriter: Send + Sync {
     async fn alter_set_schema(
         &self,
         object: alter_set_schema_request::Object,
-        new_schema_id: u32,
+        new_schema_id: SchemaId,
     ) -> Result<()>;
 
     async fn alter_swap_rename(&self, object: alter_swap_rename_request::Object) -> Result<()>;
+
+    async fn alter_database_param(
+        &self,
+        database_id: DatabaseId,
+        param: AlterDatabaseParam,
+    ) -> Result<()>;
+
+    async fn create_iceberg_table(
+        &self,
+        table_job_info: PbTableJobInfo,
+        sink_job_info: PbSinkJobInfo,
+        iceberg_source: PbSource,
+        if_not_exists: bool,
+    ) -> Result<()>;
 }
 
 #[derive(Clone)]
@@ -250,14 +282,18 @@ impl CatalogWriter for CatalogWriterImpl {
         db_name: &str,
         owner: UserId,
         resource_group: &str,
+        barrier_interval_ms: Option<u32>,
+        checkpoint_frequency: Option<u64>,
     ) -> Result<()> {
         let version = self
             .meta_client
             .create_database(PbDatabase {
                 name: db_name.to_owned(),
-                id: 0,
+                id: 0.into(),
                 owner,
                 resource_group: resource_group.to_owned(),
+                barrier_interval_ms,
+                checkpoint_frequency,
             })
             .await?;
         self.wait_version(version).await
@@ -272,7 +308,7 @@ impl CatalogWriter for CatalogWriterImpl {
         let version = self
             .meta_client
             .create_schema(PbSchema {
-                id: 0,
+                id: 0.into(),
                 name: schema_name.to_owned(),
                 database_id: db_id,
                 owner,
@@ -287,12 +323,13 @@ impl CatalogWriter for CatalogWriterImpl {
         table: PbTable,
         graph: StreamFragmentGraph,
         dependencies: HashSet<ObjectId>,
-        specific_resource_group: Option<String>,
+        resource_type: streaming_job_resource_type::ResourceType,
+        if_not_exists: bool,
     ) -> Result<()> {
         let create_type = table.get_create_type().unwrap_or(PbCreateType::Foreground);
         let version = self
             .meta_client
-            .create_materialized_view(table, graph, dependencies, specific_resource_group)
+            .create_materialized_view(table, graph, dependencies, resource_type, if_not_exists)
             .await?;
         if matches!(create_type, PbCreateType::Foreground) {
             self.wait_version(version).await?
@@ -300,8 +337,28 @@ impl CatalogWriter for CatalogWriterImpl {
         Ok(())
     }
 
-    async fn create_view(&self, view: PbView) -> Result<()> {
-        let version = self.meta_client.create_view(view).await?;
+    async fn replace_materialized_view(
+        &self,
+        table: PbTable,
+        graph: StreamFragmentGraph,
+    ) -> Result<()> {
+        // TODO: this is a dummy implementation for debugging only.
+        notice_to_user(format!("table: {table:#?}"));
+        notice_to_user(format!("graph: {graph:#?}"));
+
+        let version = self
+            .meta_client
+            .replace_job(
+                graph,
+                ReplaceJob::ReplaceMaterializedView(ReplaceMaterializedView { table: Some(table) }),
+            )
+            .await?;
+
+        self.wait_version(version).await
+    }
+
+    async fn create_view(&self, view: PbView, dependencies: HashSet<ObjectId>) -> Result<()> {
+        let version = self.meta_client.create_view(view, dependencies).await?;
         self.wait_version(version).await
     }
 
@@ -310,8 +367,12 @@ impl CatalogWriter for CatalogWriterImpl {
         index: PbIndex,
         table: PbTable,
         graph: StreamFragmentGraph,
+        if_not_exists: bool,
     ) -> Result<()> {
-        let version = self.meta_client.create_index(index, table, graph).await?;
+        let version = self
+            .meta_client
+            .create_index(index, table, graph, if_not_exists)
+            .await?;
         self.wait_version(version).await
     }
 
@@ -321,10 +382,12 @@ impl CatalogWriter for CatalogWriterImpl {
         table: PbTable,
         graph: StreamFragmentGraph,
         job_type: PbTableJobType,
+        if_not_exists: bool,
+        dependencies: HashSet<ObjectId>,
     ) -> Result<()> {
         let version = self
             .meta_client
-            .create_table(source, table, graph, job_type)
+            .create_table(source, table, graph, job_type, if_not_exists, dependencies)
             .await?;
         self.wait_version(version).await
     }
@@ -334,14 +397,12 @@ impl CatalogWriter for CatalogWriterImpl {
         source: Option<PbSource>,
         table: PbTable,
         graph: StreamFragmentGraph,
-        mapping: ColIndexMapping,
         job_type: TableJobType,
     ) -> Result<()> {
         let version = self
             .meta_client
             .replace_job(
                 graph,
-                mapping,
                 ReplaceJob::ReplaceTable(ReplaceTable {
                     source,
                     table: Some(table),
@@ -352,17 +413,11 @@ impl CatalogWriter for CatalogWriterImpl {
         self.wait_version(version).await
     }
 
-    async fn replace_source(
-        &self,
-        source: PbSource,
-        graph: StreamFragmentGraph,
-        mapping: ColIndexMapping,
-    ) -> Result<()> {
+    async fn replace_source(&self, source: PbSource, graph: StreamFragmentGraph) -> Result<()> {
         let version = self
             .meta_client
             .replace_job(
                 graph,
-                mapping,
                 ReplaceJob::ReplaceSource(ReplaceSource {
                     source: Some(source),
                 }),
@@ -375,8 +430,12 @@ impl CatalogWriter for CatalogWriterImpl {
         &self,
         source: PbSource,
         graph: Option<StreamFragmentGraph>,
+        if_not_exists: bool,
     ) -> Result<()> {
-        let version = self.meta_client.create_source(source, graph).await?;
+        let version = self
+            .meta_client
+            .create_source(source, graph, if_not_exists)
+            .await?;
         self.wait_version(version).await
     }
 
@@ -384,12 +443,12 @@ impl CatalogWriter for CatalogWriterImpl {
         &self,
         sink: PbSink,
         graph: StreamFragmentGraph,
-        affected_table_change: Option<ReplaceJobPlan>,
         dependencies: HashSet<ObjectId>,
+        if_not_exists: bool,
     ) -> Result<()> {
         let version = self
             .meta_client
-            .create_sink(sink, graph, affected_table_change, dependencies)
+            .create_sink(sink, graph, dependencies, if_not_exists)
             .await?;
         self.wait_version(version).await
     }
@@ -407,8 +466,8 @@ impl CatalogWriter for CatalogWriterImpl {
     async fn create_connection(
         &self,
         connection_name: String,
-        database_id: u32,
-        schema_id: u32,
+        database_id: DatabaseId,
+        schema_id: SchemaId,
         owner_id: u32,
         connection: create_connection_request::Payload,
     ) -> Result<()> {
@@ -428,8 +487,8 @@ impl CatalogWriter for CatalogWriterImpl {
     async fn create_secret(
         &self,
         secret_name: String,
-        database_id: u32,
-        schema_id: u32,
+        database_id: DatabaseId,
+        schema_id: SchemaId,
         owner_id: u32,
         payload: Vec<u8>,
     ) -> Result<()> {
@@ -466,30 +525,31 @@ impl CatalogWriter for CatalogWriterImpl {
         self.wait_version(version).await
     }
 
-    async fn drop_view(&self, view_id: u32, cascade: bool) -> Result<()> {
+    async fn drop_view(&self, view_id: ViewId, cascade: bool) -> Result<()> {
         let version = self.meta_client.drop_view(view_id, cascade).await?;
         self.wait_version(version).await
     }
 
-    async fn drop_source(&self, source_id: u32, cascade: bool) -> Result<()> {
+    async fn drop_source(&self, source_id: SourceId, cascade: bool) -> Result<()> {
         let version = self.meta_client.drop_source(source_id, cascade).await?;
         self.wait_version(version).await
     }
 
-    async fn drop_sink(
-        &self,
-        sink_id: u32,
-        cascade: bool,
-        affected_table_change: Option<ReplaceJobPlan>,
-    ) -> Result<()> {
-        let version = self
-            .meta_client
-            .drop_sink(sink_id, cascade, affected_table_change)
-            .await?;
+    async fn reset_source(&self, source_id: SourceId) -> Result<()> {
+        let version = self.meta_client.reset_source(source_id).await?;
         self.wait_version(version).await
     }
 
-    async fn drop_subscription(&self, subscription_id: u32, cascade: bool) -> Result<()> {
+    async fn drop_sink(&self, sink_id: SinkId, cascade: bool) -> Result<()> {
+        let version = self.meta_client.drop_sink(sink_id, cascade).await?;
+        self.wait_version(version).await
+    }
+
+    async fn drop_subscription(
+        &self,
+        subscription_id: SubscriptionId,
+        cascade: bool,
+    ) -> Result<()> {
         let version = self
             .meta_client
             .drop_subscription(subscription_id, cascade)
@@ -502,23 +562,26 @@ impl CatalogWriter for CatalogWriterImpl {
         self.wait_version(version).await
     }
 
-    async fn drop_function(&self, function_id: FunctionId) -> Result<()> {
-        let version = self.meta_client.drop_function(function_id).await?;
+    async fn drop_function(&self, function_id: FunctionId, cascade: bool) -> Result<()> {
+        let version = self.meta_client.drop_function(function_id, cascade).await?;
         self.wait_version(version).await
     }
 
-    async fn drop_schema(&self, schema_id: u32, cascade: bool) -> Result<()> {
+    async fn drop_schema(&self, schema_id: SchemaId, cascade: bool) -> Result<()> {
         let version = self.meta_client.drop_schema(schema_id, cascade).await?;
         self.wait_version(version).await
     }
 
-    async fn drop_database(&self, database_id: u32) -> Result<()> {
+    async fn drop_database(&self, database_id: DatabaseId) -> Result<()> {
         let version = self.meta_client.drop_database(database_id).await?;
         self.wait_version(version).await
     }
 
-    async fn drop_connection(&self, connection_id: u32) -> Result<()> {
-        let version = self.meta_client.drop_connection(connection_id).await?;
+    async fn drop_connection(&self, connection_id: ConnectionId, cascade: bool) -> Result<()> {
+        let version = self
+            .meta_client
+            .drop_connection(connection_id, cascade)
+            .await?;
         self.wait_version(version).await
     }
 
@@ -544,7 +607,7 @@ impl CatalogWriter for CatalogWriterImpl {
     async fn alter_set_schema(
         &self,
         object: alter_set_schema_request::Object,
-        new_schema_id: u32,
+        new_schema_id: SchemaId,
     ) -> Result<()> {
         let version = self
             .meta_client
@@ -560,15 +623,25 @@ impl CatalogWriter for CatalogWriterImpl {
 
     async fn alter_parallelism(
         &self,
-        job_id: u32,
+        job_id: JobId,
         parallelism: PbTableParallelism,
         deferred: bool,
     ) -> Result<()> {
         self.meta_client
             .alter_parallelism(job_id, parallelism, deferred)
-            .await
-            .map_err(|e| anyhow!(e))?;
+            .await?;
+        Ok(())
+    }
 
+    async fn alter_config(
+        &self,
+        job_id: JobId,
+        entries_to_add: HashMap<String, String>,
+        keys_to_remove: Vec<String>,
+    ) -> Result<()> {
+        self.meta_client
+            .alter_streaming_job_config(job_id, entries_to_add, keys_to_remove)
+            .await?;
         Ok(())
     }
 
@@ -579,10 +652,10 @@ impl CatalogWriter for CatalogWriterImpl {
 
     async fn alter_secret(
         &self,
-        secret_id: u32,
+        secret_id: SecretId,
         secret_name: String,
-        database_id: u32,
-        schema_id: u32,
+        database_id: DatabaseId,
+        schema_id: SchemaId,
         owner_id: u32,
         payload: Vec<u8>,
     ) -> Result<()> {
@@ -602,7 +675,7 @@ impl CatalogWriter for CatalogWriterImpl {
 
     async fn alter_resource_group(
         &self,
-        table_id: u32,
+        table_id: TableId,
         resource_group: Option<String>,
         deferred: bool,
     ) -> Result<()> {
@@ -612,6 +685,33 @@ impl CatalogWriter for CatalogWriterImpl {
             .map_err(|e| anyhow!(e))?;
 
         Ok(())
+    }
+
+    async fn alter_database_param(
+        &self,
+        database_id: DatabaseId,
+        param: AlterDatabaseParam,
+    ) -> Result<()> {
+        let version = self
+            .meta_client
+            .alter_database_param(database_id, param)
+            .await
+            .map_err(|e| anyhow!(e))?;
+        self.wait_version(version).await
+    }
+
+    async fn create_iceberg_table(
+        &self,
+        table_job_info: PbTableJobInfo,
+        sink_job_info: PbSinkJobInfo,
+        iceberg_source: PbSource,
+        if_not_exists: bool,
+    ) -> Result<()> {
+        let version = self
+            .meta_client
+            .create_iceberg_table(table_job_info, sink_job_info, iceberg_source, if_not_exists)
+            .await?;
+        self.wait_version(version).await
     }
 }
 

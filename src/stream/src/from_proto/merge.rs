@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,6 +14,7 @@
 
 use std::sync::Arc;
 
+use futures::future::try_join_all;
 use risingwave_pb::stream_plan::{DispatcherType, MergeNode};
 
 use super::*;
@@ -25,7 +26,7 @@ use crate::task::LocalBarrierManager;
 pub struct MergeExecutorBuilder;
 
 impl MergeExecutorBuilder {
-    pub(crate) fn new_input(
+    pub(crate) async fn new_input(
         local_barrier_manager: LocalBarrierManager,
         executor_stats: Arc<StreamingMetrics>,
         actor_context: ActorContextRef,
@@ -35,23 +36,26 @@ impl MergeExecutorBuilder {
     ) -> StreamResult<MergeExecutorInput> {
         let upstream_fragment_id = node.get_upstream_fragment_id();
 
-        let inputs: Vec<_> = actor_context
-            .initial_upstream_actors
-            .get(&node.upstream_fragment_id)
-            .map(|actors| actors.actors.iter())
-            .into_iter()
-            .flatten()
-            .map(|upstream_actor| {
-                new_input(
-                    &local_barrier_manager,
-                    executor_stats.clone(),
-                    actor_context.id,
-                    actor_context.fragment_id,
-                    upstream_actor,
-                    upstream_fragment_id,
-                )
-            })
-            .try_collect()?;
+        let inputs: Vec<_> = try_join_all(
+            actor_context
+                .initial_upstream_actors
+                .get(&node.upstream_fragment_id)
+                .map(|actors| actors.actors.iter())
+                .into_iter()
+                .flatten()
+                .map(|upstream_actor| {
+                    new_input(
+                        &local_barrier_manager,
+                        executor_stats.clone(),
+                        actor_context.id,
+                        actor_context.fragment_id,
+                        upstream_actor,
+                        upstream_fragment_id,
+                        actor_context.config.clone(),
+                    )
+                }),
+        )
+        .await?;
 
         // If there's always only one upstream, we can use `ReceiverExecutor`. Note that it can't
         // scale to multiple upstreams.
@@ -67,12 +71,15 @@ impl MergeExecutorBuilder {
         let upstreams = if always_single_input {
             MergeExecutorUpstream::Singleton(inputs.into_iter().exactly_one().unwrap())
         } else {
-            MergeExecutorUpstream::Merge(MergeExecutor::new_select_receiver(
+            MergeExecutorUpstream::Merge(MergeExecutor::new_merge_upstream(
                 inputs,
                 &executor_stats,
                 &actor_context,
+                chunk_size,
+                info.schema.clone(),
             ))
         };
+
         Ok(MergeExecutorInput::new(
             upstreams,
             actor_context,
@@ -80,7 +87,6 @@ impl MergeExecutorBuilder {
             local_barrier_manager,
             executor_stats,
             info,
-            chunk_size,
         ))
     }
 }
@@ -102,8 +108,9 @@ impl ExecutorBuilder for MergeExecutorBuilder {
             params.actor_context,
             params.info,
             node,
-            params.env.config().developer.chunk_size,
-        )?
+            params.config.developer.chunk_size,
+        )
+        .await?
         .into_executor(barrier_rx))
     }
 }

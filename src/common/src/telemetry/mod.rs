@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -178,10 +178,10 @@ pub async fn report_to_scarf() {
     // keep trying every 1h until success
     loop {
         let res = reqwest::get(&request_url).await;
-        if let Ok(res) = res {
-            if res.status().is_success() {
-                break;
-            }
+        if let Ok(res) = res
+            && res.status().is_success()
+        {
+            break;
         }
         tokio::time::sleep(tokio::time::Duration::from_secs(3600)).await;
     }

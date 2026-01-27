@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -205,7 +205,7 @@ mod tests {
                 state_table_info: HashMap::from_iter(table_committed_epoch.into_iter().map(
                     |(table_id, committed_epoch)| {
                         (
-                            table_id.table_id,
+                            table_id,
                             StateTableInfo {
                                 committed_epoch,
                                 compaction_group_id: 0,

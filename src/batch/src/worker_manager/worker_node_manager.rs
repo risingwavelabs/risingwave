@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,26 +18,24 @@ use std::time::Duration;
 
 use rand::seq::IndexedRandom;
 use risingwave_common::bail;
-use risingwave_common::catalog::OBJECT_ID_PLACEHOLDER;
 use risingwave_common::hash::{WorkerSlotId, WorkerSlotMapping};
+use risingwave_common::id::{FragmentId, WorkerId};
 use risingwave_common::vnode_mapping::vnode_placement::place_vnode;
 use risingwave_pb::common::{WorkerNode, WorkerType};
 
 use crate::error::{BatchError, Result};
 
-pub(crate) type FragmentId = u32;
-
 /// `WorkerNodeManager` manages live worker nodes and table vnode mapping information.
 pub struct WorkerNodeManager {
     inner: RwLock<WorkerNodeManagerInner>,
     /// Temporarily make worker invisible from serving cluster.
-    worker_node_mask: Arc<RwLock<HashSet<u32>>>,
+    worker_node_mask: Arc<RwLock<HashSet<WorkerId>>>,
 }
 
 struct WorkerNodeManagerInner {
-    worker_nodes: Vec<WorkerNode>,
+    worker_nodes: HashMap<WorkerId, WorkerNode>,
     /// fragment vnode mapping info for streaming
-    streaming_fragment_vnode_mapping: HashMap<FragmentId, WorkerSlotMapping>,
+    streaming_fragment_vnode_mapping: Option<HashMap<FragmentId, WorkerSlotMapping>>,
     /// fragment vnode mapping info for serving
     serving_fragment_vnode_mapping: HashMap<FragmentId, WorkerSlotMapping>,
 }
@@ -55,7 +53,7 @@ impl WorkerNodeManager {
         Self {
             inner: RwLock::new(WorkerNodeManagerInner {
                 worker_nodes: Default::default(),
-                streaming_fragment_vnode_mapping: Default::default(),
+                streaming_fragment_vnode_mapping: None,
                 serving_fragment_vnode_mapping: Default::default(),
             }),
             worker_node_mask: Arc::new(Default::default()),
@@ -64,9 +62,10 @@ impl WorkerNodeManager {
 
     /// Used in tests.
     pub fn mock(worker_nodes: Vec<WorkerNode>) -> Self {
+        let worker_nodes = worker_nodes.into_iter().map(|w| (w.id, w)).collect();
         let inner = RwLock::new(WorkerNodeManagerInner {
             worker_nodes,
-            streaming_fragment_vnode_mapping: HashMap::new(),
+            streaming_fragment_vnode_mapping: None,
             serving_fragment_vnode_mapping: HashMap::new(),
         });
         Self {
@@ -75,26 +74,37 @@ impl WorkerNodeManager {
         }
     }
 
-    pub fn list_worker_nodes(&self) -> Vec<WorkerNode> {
+    pub fn list_compute_nodes(&self) -> Vec<WorkerNode> {
         self.inner
             .read()
             .unwrap()
             .worker_nodes
-            .iter()
+            .values()
             .filter(|w| w.r#type() == WorkerType::ComputeNode)
             .cloned()
             .collect()
     }
 
+    pub fn list_frontend_nodes(&self) -> Vec<WorkerNode> {
+        self.inner
+            .read()
+            .unwrap()
+            .worker_nodes
+            .values()
+            .filter(|w| w.r#type() == WorkerType::Frontend)
+            .cloned()
+            .collect()
+    }
+
     fn list_serving_worker_nodes(&self) -> Vec<WorkerNode> {
-        self.list_worker_nodes()
+        self.list_compute_nodes()
             .into_iter()
             .filter(|w| w.property.as_ref().is_some_and(|p| p.is_serving))
             .collect()
     }
 
     fn list_streaming_worker_nodes(&self) -> Vec<WorkerNode> {
-        self.list_worker_nodes()
+        self.list_compute_nodes()
             .into_iter()
             .filter(|w| w.property.as_ref().is_some_and(|p| p.is_streaming))
             .collect()
@@ -102,25 +112,12 @@ impl WorkerNodeManager {
 
     pub fn add_worker_node(&self, node: WorkerNode) {
         let mut write_guard = self.inner.write().unwrap();
-        match write_guard
-            .worker_nodes
-            .iter_mut()
-            .find(|w| w.id == node.id)
-        {
-            None => {
-                // insert
-                write_guard.worker_nodes.push(node);
-            }
-            Some(w) => {
-                // update
-                *w = node;
-            }
-        }
+        write_guard.worker_nodes.insert(node.id, node);
     }
 
     pub fn remove_worker_node(&self, node: WorkerNode) {
         let mut write_guard = self.inner.write().unwrap();
-        write_guard.worker_nodes.retain(|x| x.id != node.id);
+        write_guard.worker_nodes.remove(&node.id);
     }
 
     pub fn refresh(
@@ -139,8 +136,8 @@ impl WorkerNodeManager {
             "Refresh serving vnode mapping for fragments {:?}.",
             serving_mapping.keys()
         );
-        write_guard.worker_nodes = nodes;
-        write_guard.streaming_fragment_vnode_mapping = streaming_mapping;
+        write_guard.worker_nodes = nodes.into_iter().map(|w| (w.id, w)).collect();
+        write_guard.streaming_fragment_vnode_mapping = Some(streaming_mapping);
         write_guard.serving_fragment_vnode_mapping = serving_mapping;
     }
 
@@ -154,15 +151,10 @@ impl WorkerNodeManager {
         if worker_slot_ids.is_empty() {
             return Err(BatchError::EmptyWorkerNodes);
         }
-
         let guard = self.inner.read().unwrap();
-
-        let worker_index: HashMap<_, _> = guard.worker_nodes.iter().map(|w| (w.id, w)).collect();
-
         let mut workers = Vec::with_capacity(worker_slot_ids.len());
-
         for worker_slot_id in worker_slot_ids {
-            match worker_index.get(&worker_slot_id.worker_id()) {
+            match guard.worker_nodes.get(&worker_slot_id.worker_id()) {
                 Some(worker) => workers.push((*worker).clone()),
                 None => bail!(
                     "No worker node found for worker slot id: {}",
@@ -178,10 +170,13 @@ impl WorkerNodeManager {
         &self,
         fragment_id: &FragmentId,
     ) -> Result<WorkerSlotMapping> {
-        self.inner
-            .read()
-            .unwrap()
-            .streaming_fragment_vnode_mapping
+        let guard = self.inner.read().unwrap();
+
+        let Some(streaming_mapping) = guard.streaming_fragment_vnode_mapping.as_ref() else {
+            return Err(BatchError::StreamingVnodeMappingNotInitialized);
+        };
+
+        streaming_mapping
             .get(fragment_id)
             .cloned()
             .ok_or_else(|| BatchError::StreamingVnodeMappingNotFound(*fragment_id))
@@ -192,14 +187,11 @@ impl WorkerNodeManager {
         fragment_id: FragmentId,
         vnode_mapping: WorkerSlotMapping,
     ) {
-        if self
-            .inner
-            .write()
-            .unwrap()
+        let mut guard = self.inner.write().unwrap();
+        let mapping = guard
             .streaming_fragment_vnode_mapping
-            .try_insert(fragment_id, vnode_mapping)
-            .is_err()
-        {
+            .get_or_insert_with(HashMap::new);
+        if mapping.try_insert(fragment_id, vnode_mapping).is_err() {
             tracing::info!(
                 "Previous batch vnode mapping not found for fragment {fragment_id}, maybe offline scaling with background ddl"
             );
@@ -212,11 +204,10 @@ impl WorkerNodeManager {
         vnode_mapping: WorkerSlotMapping,
     ) {
         let mut guard = self.inner.write().unwrap();
-        if guard
+        let mapping = guard
             .streaming_fragment_vnode_mapping
-            .insert(fragment_id, vnode_mapping)
-            .is_none()
-        {
+            .get_or_insert_with(HashMap::new);
+        if mapping.insert(fragment_id, vnode_mapping).is_none() {
             tracing::info!(
                 "Previous vnode mapping not found for fragment {fragment_id}, maybe offline scaling with background ddl"
             );
@@ -226,14 +217,17 @@ impl WorkerNodeManager {
     pub fn remove_streaming_fragment_mapping(&self, fragment_id: &FragmentId) {
         let mut guard = self.inner.write().unwrap();
 
-        let res = guard.streaming_fragment_vnode_mapping.remove(fragment_id);
+        let res = guard
+            .streaming_fragment_vnode_mapping
+            .as_mut()
+            .and_then(|mapping| mapping.remove(fragment_id));
         match &res {
             Some(_) => {}
-            None if OBJECT_ID_PLACEHOLDER == *fragment_id => {
+            None if fragment_id.is_placeholder() => {
                 // Do nothing for placeholder fragment.
             }
             None => {
-                tracing::warn!(fragment_id, "Streaming vnode mapping not found");
+                tracing::warn!(%fragment_id, "Streaming vnode mapping not found");
             }
         };
     }
@@ -283,11 +277,11 @@ impl WorkerNodeManager {
         }
     }
 
-    fn worker_node_mask(&self) -> RwLockReadGuard<'_, HashSet<u32>> {
+    fn worker_node_mask(&self) -> RwLockReadGuard<'_, HashSet<WorkerId>> {
         self.worker_node_mask.read().unwrap()
     }
 
-    pub fn mask_worker_node(&self, worker_node_id: u32, duration: Duration) {
+    pub fn mask_worker_node(&self, worker_node_id: WorkerId, duration: Duration) {
         tracing::info!(
             "Mask worker node {} for {:?} temporarily",
             worker_node_id,
@@ -307,6 +301,10 @@ impl WorkerNodeManager {
                 .remove(&worker_node_id);
         });
     }
+
+    pub fn worker_node(&self, worker_id: WorkerId) -> Option<WorkerNode> {
+        self.inner.read().unwrap().worker_node(worker_id)
+    }
 }
 
 impl WorkerNodeManagerInner {
@@ -314,6 +312,10 @@ impl WorkerNodeManagerInner {
         self.serving_fragment_vnode_mapping
             .get(&fragment_id)
             .cloned()
+    }
+
+    fn worker_node(&self, worker_id: WorkerId) -> Option<WorkerNode> {
+        self.worker_nodes.get(&worker_id).cloned()
     }
 }
 
@@ -359,7 +361,7 @@ impl WorkerNodeSelector {
         } else {
             let mapping = (self.manager.serving_fragment_mapping(fragment_id)).or_else(|_| {
                 tracing::warn!(
-                    fragment_id,
+                    %fragment_id,
                     "Serving fragment mapping not found, fall back to streaming one."
                 );
                 self.manager.get_streaming_fragment_mapping(&fragment_id)
@@ -372,6 +374,7 @@ impl WorkerNodeSelector {
                 let workers = self.apply_worker_node_mask(self.manager.list_serving_worker_nodes());
                 // If it's a singleton, set max_parallelism=1 for place_vnode.
                 let max_parallelism = mapping.to_single().map(|_| 1);
+                // TODO: use runtime parameter batch_parallelism
                 let masked_mapping =
                     place_vnode(Some(&mapping), &workers, max_parallelism, mapping.len())
                         .ok_or_else(|| BatchError::EmptyWorkerNodes)?;
@@ -406,7 +409,7 @@ impl WorkerNodeSelector {
 
 #[cfg(test)]
 mod tests {
-
+    use itertools::Itertools;
     use risingwave_common::util::addr::HostAddr;
     use risingwave_pb::common::worker_node;
     use risingwave_pb::common::worker_node::Property;
@@ -418,11 +421,11 @@ mod tests {
         let manager = WorkerNodeManager::mock(vec![]);
         assert_eq!(manager.list_serving_worker_nodes().len(), 0);
         assert_eq!(manager.list_streaming_worker_nodes().len(), 0);
-        assert_eq!(manager.list_worker_nodes(), vec![]);
+        assert_eq!(manager.list_compute_nodes(), vec![]);
 
         let worker_nodes = vec![
             WorkerNode {
-                id: 1,
+                id: 1.into(),
                 r#type: WorkerType::ComputeNode as i32,
                 host: Some(HostAddr::try_from("127.0.0.1:1234").unwrap().to_protobuf()),
                 state: worker_node::State::Running as i32,
@@ -436,7 +439,7 @@ mod tests {
                 ..Default::default()
             },
             WorkerNode {
-                id: 2,
+                id: 2.into(),
                 r#type: WorkerType::ComputeNode as i32,
                 host: Some(HostAddr::try_from("127.0.0.1:1235").unwrap().to_protobuf()),
                 state: worker_node::State::Running as i32,
@@ -455,13 +458,24 @@ mod tests {
             .for_each(|w| manager.add_worker_node(w.clone()));
         assert_eq!(manager.list_serving_worker_nodes().len(), 2);
         assert_eq!(manager.list_streaming_worker_nodes().len(), 1);
-        assert_eq!(manager.list_worker_nodes(), worker_nodes);
+        assert_eq!(
+            manager
+                .list_compute_nodes()
+                .into_iter()
+                .sorted_by_key(|w| w.id)
+                .collect_vec(),
+            worker_nodes
+        );
 
         manager.remove_worker_node(worker_nodes[0].clone());
         assert_eq!(manager.list_serving_worker_nodes().len(), 1);
         assert_eq!(manager.list_streaming_worker_nodes().len(), 0);
         assert_eq!(
-            manager.list_worker_nodes(),
+            manager
+                .list_compute_nodes()
+                .into_iter()
+                .sorted_by_key(|w| w.id)
+                .collect_vec(),
             worker_nodes.as_slice()[1..].to_vec()
         );
     }

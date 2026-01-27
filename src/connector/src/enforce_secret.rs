@@ -19,7 +19,7 @@ use crate::error::ConnectorResult as Result;
 #[derive(Debug, thiserror::Error)]
 #[error("{key} is enforced to be a SECRET on RisingWave Cloud, please use `CREATE SECRET` first")]
 pub struct EnforceSecretError {
-    key: String,
+    pub key: String,
 }
 
 pub trait EnforceSecret {

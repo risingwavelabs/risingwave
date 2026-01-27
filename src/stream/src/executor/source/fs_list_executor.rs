@@ -30,7 +30,7 @@ pub struct FsListExecutor<S: StateStore> {
     actor_ctx: ActorContextRef,
 
     /// Streaming source for external
-    stream_source_core: Option<StreamSourceCore<S>>,
+    stream_source_core: StreamSourceCore<S>,
 
     /// Metrics for monitor.
     #[expect(dead_code)]
@@ -51,7 +51,7 @@ pub struct FsListExecutor<S: StateStore> {
 impl<S: StateStore> FsListExecutor<S> {
     pub fn new(
         actor_ctx: ActorContextRef,
-        stream_source_core: Option<StreamSourceCore<S>>,
+        stream_source_core: StreamSourceCore<S>,
         metrics: Arc<StreamingMetrics>,
         barrier_receiver: UnboundedReceiver<Barrier>,
         system_params: SystemParamsReaderRef,
@@ -112,11 +112,11 @@ impl<S: StateStore> FsListExecutor<S> {
                 anyhow!(
                     "failed to receive the first barrier, actor_id: {:?}, source_id: {:?}",
                     self.actor_ctx.id,
-                    self.stream_source_core.as_ref().unwrap().source_id
+                    self.stream_source_core.source_id
                 )
             })?;
 
-        let mut core = self.stream_source_core.unwrap();
+        let mut core = self.stream_source_core;
 
         // Build source description from the builder.
         let source_desc_builder: SourceDescBuilder = core.source_desc_builder.take().unwrap();
@@ -125,7 +125,7 @@ impl<S: StateStore> FsListExecutor<S> {
             .map_err(StreamExecutorError::connector_error)?;
 
         // Return the ownership of `stream_source_core` to the source executor.
-        self.stream_source_core = Some(core);
+        self.stream_source_core = core;
 
         let chunked_paginate_stream = self.build_chunked_paginate_stream(&source_desc)?;
 
@@ -181,13 +181,9 @@ impl<S: StateStore> Execute for FsListExecutor<S> {
 
 impl<S: StateStore> Debug for FsListExecutor<S> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        if let Some(core) = &self.stream_source_core {
-            f.debug_struct("FsListExecutor")
-                .field("source_id", &core.source_id)
-                .field("column_ids", &core.column_ids)
-                .finish()
-        } else {
-            f.debug_struct("FsListExecutor").finish()
-        }
+        f.debug_struct("FsListExecutor")
+            .field("source_id", &self.stream_source_core.source_id)
+            .field("column_ids", &self.stream_source_core.column_ids)
+            .finish()
     }
 }

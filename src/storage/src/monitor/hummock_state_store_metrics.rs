@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,18 +16,20 @@ use std::sync::{Arc, OnceLock};
 
 use prometheus::core::{AtomicU64, Collector, Desc, GenericCounter};
 use prometheus::{
-    Gauge, Histogram, HistogramVec, IntGauge, Opts, Registry, exponential_buckets, histogram_opts,
-    proto, register_histogram_vec_with_registry, register_histogram_with_registry,
-    register_int_counter_vec_with_registry, register_int_gauge_with_registry,
+    Gauge, Histogram, HistogramVec, IntGauge, IntGaugeVec, Opts, Registry, exponential_buckets,
+    histogram_opts, proto, register_histogram_vec_with_registry, register_histogram_with_registry,
+    register_int_counter_vec_with_registry, register_int_gauge_vec_with_registry,
+    register_int_gauge_with_registry,
 };
 use risingwave_common::config::MetricLevel;
 use risingwave_common::metrics::{
     RelabeledCounterVec, RelabeledGuardedHistogramVec, RelabeledGuardedIntCounterVec,
-    RelabeledHistogramVec, RelabeledMetricVec, UintGauge,
+    RelabeledGuardedIntGaugeVec, RelabeledHistogramVec, RelabeledMetricVec, UintGauge,
 };
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 use risingwave_common::{
     register_guarded_histogram_vec_with_registry, register_guarded_int_counter_vec_with_registry,
+    register_guarded_int_gauge_vec_with_registry,
 };
 use thiserror_ext::AsReport;
 use tracing::warn;
@@ -50,27 +52,24 @@ pub struct HummockStateStoreMetrics {
     pub iter_fetch_meta_cache_unhits: IntGauge,
     pub iter_slow_fetch_meta_cache_unhits: IntGauge,
 
+    pub vector_object_request_counts: RelabeledGuardedIntCounterVec,
+    pub vector_request_stats: RelabeledGuardedHistogramVec,
+    pub vector_hnsw_graph_level_node_count: RelabeledGuardedIntGaugeVec,
+    pub vector_index_file_count: RelabeledGuardedIntGaugeVec,
+    pub vector_index_file_size: RelabeledGuardedIntGaugeVec,
+
     pub read_req_bloom_filter_positive_counts: RelabeledGuardedIntCounterVec,
     pub read_req_positive_but_non_exist_counts: RelabeledGuardedIntCounterVec,
     pub read_req_check_bloom_filter_counts: RelabeledGuardedIntCounterVec,
 
-    pub write_batch_tuple_counts: RelabeledCounterVec,
-    pub write_batch_duration: RelabeledHistogramVec,
-    pub write_batch_size: RelabeledHistogramVec,
-
-    // finished task counts
-    pub merge_imm_task_counts: RelabeledCounterVec,
-    // merge imm ops
-    pub merge_imm_batch_memory_sz: RelabeledCounterVec,
+    pub write_batch_tuple_counts: RelabeledGuardedIntCounterVec,
+    pub write_batch_duration: RelabeledGuardedHistogramVec,
+    pub write_batch_size: RelabeledGuardedHistogramVec,
 
     // spill task counts from unsealed
     pub spill_task_counts_from_unsealed: GenericCounter<AtomicU64>,
     // spill task size from unsealed
     pub spill_task_size_from_unsealed: GenericCounter<AtomicU64>,
-    // spill task counts from sealed
-    pub spill_task_counts_from_sealed: GenericCounter<AtomicU64>,
-    // spill task size from sealed
-    pub spill_task_size_from_sealed: GenericCounter<AtomicU64>,
 
     // uploading task
     pub uploader_uploading_task_size: UintGauge,
@@ -79,15 +78,19 @@ pub struct HummockStateStoreMetrics {
     pub uploader_upload_task_latency: Histogram,
     pub uploader_syncing_epoch_count: IntGauge,
     pub uploader_wait_poll_latency: Histogram,
+    pub uploader_per_table_imm_size: RelabeledGuardedIntGaugeVec,
+    pub uploader_per_table_imm_count: RelabeledGuardedIntGaugeVec,
 
     // memory
-    pub mem_table_spill_counts: RelabeledCounterVec,
-    pub old_value_size: IntGauge,
+    pub per_table_imm_size: RelabeledGuardedIntGaugeVec,
+    pub per_table_imm_count: RelabeledGuardedIntGaugeVec,
+    pub mem_table_spill_counts: RelabeledGuardedIntCounterVec,
+    pub old_value_size: RelabeledGuardedIntGaugeVec,
 
     // block statistics
     pub block_efficiency_histogram: Histogram,
 
-    pub event_handler_pending_event: IntGauge,
+    pub event_handler_pending_event: IntGaugeVec,
     pub event_handler_latency: HistogramVec,
 
     pub safe_version_hit: GenericCounter<AtomicU64>,
@@ -206,7 +209,7 @@ impl HummockStateStoreMetrics {
         let opts = histogram_opts!(
             "state_store_iter_fetch_meta_duration",
             "Histogram of iterator fetch SST meta time that have been issued to state store",
-            state_store_read_time_buckets.clone(),
+            state_store_read_time_buckets,
         );
         let iter_fetch_meta_duration =
             register_guarded_histogram_vec_with_registry!(opts, &["table_id"], registry).unwrap();
@@ -230,15 +233,86 @@ impl HummockStateStoreMetrics {
         )
         .unwrap();
 
+        // ----- vector -----
+        let vector_object_request_counts = register_guarded_int_counter_vec_with_registry!(
+            "state_store_vector_object_request_counts",
+            "Metrics about vector object requests that have been issued",
+            &["table_id", "type", "mode"],
+            registry
+        )
+        .unwrap();
+        let vector_object_request_counts = RelabeledGuardedIntCounterVec::with_metric_level(
+            MetricLevel::Critical,
+            vector_object_request_counts,
+            metric_level,
+        );
+
+        let opts = histogram_opts!(
+            "state_store_vector_request_stats",
+            "Metrics about vector requests",
+            exponential_buckets(100.0, 10.0, 5).unwrap(),
+        );
+
+        let vector_request_stats = register_guarded_histogram_vec_with_registry!(
+            opts,
+            &["table_id", "type", "mode", "top_n", "ef"],
+            registry
+        )
+        .unwrap();
+        let vector_request_stats = RelabeledGuardedHistogramVec::with_metric_level(
+            MetricLevel::Critical,
+            vector_request_stats,
+            metric_level,
+        );
+
+        let vector_hnsw_graph_level_node_count = register_guarded_int_gauge_vec_with_registry!(
+            "state_store_vector_hnsw_graph_level_node_count",
+            "Number of nodes in each level of hnsw graph",
+            &["table_id", "level"],
+            registry
+        )
+        .unwrap();
+        let vector_hnsw_graph_level_node_count = RelabeledGuardedIntGaugeVec::with_metric_level(
+            MetricLevel::Critical,
+            vector_hnsw_graph_level_node_count,
+            metric_level,
+        );
+
+        let vector_index_file_count = register_guarded_int_gauge_vec_with_registry!(
+            "state_store_vector_index_file_count",
+            "Number of vector file",
+            &["table_id"],
+            registry
+        )
+        .unwrap();
+        let vector_index_file_count = RelabeledGuardedIntGaugeVec::with_metric_level(
+            MetricLevel::Critical,
+            vector_index_file_count,
+            metric_level,
+        );
+
+        let vector_index_file_size = register_guarded_int_gauge_vec_with_registry!(
+            "state_store_vector_index_file_size",
+            "total size of vector index file",
+            &["table_id", "type"],
+            registry
+        )
+        .unwrap();
+        let vector_index_file_size = RelabeledGuardedIntGaugeVec::with_metric_level(
+            MetricLevel::Critical,
+            vector_index_file_size,
+            metric_level,
+        );
+
         // ----- write_batch -----
-        let write_batch_tuple_counts = register_int_counter_vec_with_registry!(
+        let write_batch_tuple_counts = register_guarded_int_counter_vec_with_registry!(
             "state_store_write_batch_tuple_counts",
             "Total number of batched write kv pairs requests that have been issued to state store",
             &["table_id"],
             registry
         )
         .unwrap();
-        let write_batch_tuple_counts = RelabeledCounterVec::with_metric_level(
+        let write_batch_tuple_counts = RelabeledGuardedIntCounterVec::with_metric_level(
             MetricLevel::Debug,
             write_batch_tuple_counts,
             metric_level,
@@ -250,8 +324,8 @@ impl HummockStateStoreMetrics {
             time_buckets.clone()
         );
         let write_batch_duration =
-            register_histogram_vec_with_registry!(opts, &["table_id"], registry).unwrap();
-        let write_batch_duration = RelabeledHistogramVec::with_metric_level(
+            register_guarded_histogram_vec_with_registry!(opts, &["table_id"], registry).unwrap();
+        let write_batch_duration = RelabeledGuardedHistogramVec::with_metric_level(
             MetricLevel::Debug,
             write_batch_duration,
             metric_level,
@@ -263,36 +337,10 @@ impl HummockStateStoreMetrics {
             exponential_buckets(256.0, 16.0, 7).unwrap() // min 256B ~ max 4GB
         );
         let write_batch_size =
-            register_histogram_vec_with_registry!(opts, &["table_id"], registry).unwrap();
-        let write_batch_size = RelabeledHistogramVec::with_metric_level(
+            register_guarded_histogram_vec_with_registry!(opts, &["table_id"], registry).unwrap();
+        let write_batch_size = RelabeledGuardedHistogramVec::with_metric_level(
             MetricLevel::Debug,
             write_batch_size,
-            metric_level,
-        );
-
-        let merge_imm_task_counts = register_int_counter_vec_with_registry!(
-            "state_store_merge_imm_task_counts",
-            "Total number of merge imm task that have been finished",
-            &["table_id"],
-            registry
-        )
-        .unwrap();
-        let merge_imm_task_counts = RelabeledCounterVec::with_metric_level(
-            MetricLevel::Debug,
-            merge_imm_task_counts,
-            metric_level,
-        );
-
-        let merge_imm_batch_memory_sz = register_int_counter_vec_with_registry!(
-            "state_store_merge_imm_memory_sz",
-            "Number of imm batches that have been merged by a merge task",
-            &["table_id"],
-            registry
-        )
-        .unwrap();
-        let merge_imm_batch_memory_sz = RelabeledCounterVec::with_metric_level(
-            MetricLevel::Debug,
-            merge_imm_batch_memory_sz,
             metric_level,
         );
 
@@ -361,6 +409,62 @@ impl HummockStateStoreMetrics {
         )
         .unwrap();
 
+        let uploader_per_table_imm_size = register_guarded_int_gauge_vec_with_registry!(
+            "state_store_uploader_per_table_imm_size",
+            "Total uploader-tracked imm size per table",
+            &["table_id"],
+            registry
+        )
+        .unwrap();
+
+        let uploader_per_table_imm_size = RelabeledGuardedIntGaugeVec::with_metric_level(
+            MetricLevel::Debug,
+            uploader_per_table_imm_size,
+            metric_level,
+        );
+
+        let uploader_per_table_imm_count = register_guarded_int_gauge_vec_with_registry!(
+            "state_store_uploader_per_table_imm_count",
+            "Total uploader-tracked imm count per table",
+            &["table_id"],
+            registry
+        )
+        .unwrap();
+
+        let uploader_per_table_imm_count = RelabeledGuardedIntGaugeVec::with_metric_level(
+            MetricLevel::Debug,
+            uploader_per_table_imm_count,
+            metric_level,
+        );
+
+        let per_table_imm_size = register_guarded_int_gauge_vec_with_registry!(
+            "state_store_per_table_imm_size",
+            "Total imm size per table",
+            &["table_id"],
+            registry
+        )
+        .unwrap();
+
+        let per_table_imm_size = RelabeledGuardedIntGaugeVec::with_metric_level(
+            MetricLevel::Debug,
+            per_table_imm_size,
+            metric_level,
+        );
+
+        let per_table_imm_count = register_guarded_int_gauge_vec_with_registry!(
+            "state_store_per_table_imm_count",
+            "Total imm count per table",
+            &["table_id"],
+            registry
+        )
+        .unwrap();
+
+        let per_table_imm_count = RelabeledGuardedIntGaugeVec::with_metric_level(
+            MetricLevel::Debug,
+            per_table_imm_count,
+            metric_level,
+        );
+
         let read_req_bloom_filter_positive_counts = register_guarded_int_counter_vec_with_registry!(
             "state_store_read_req_bloom_filter_positive_counts",
             "Total number of read request with at least one SST bloom filter check returns positive",
@@ -404,7 +508,7 @@ impl HummockStateStoreMetrics {
             metric_level,
         );
 
-        let mem_table_spill_counts = register_int_counter_vec_with_registry!(
+        let mem_table_spill_counts = register_guarded_int_counter_vec_with_registry!(
             "state_store_mem_table_spill_counts",
             "Total number of mem table spill occurs for one table",
             &["table_id"],
@@ -412,18 +516,25 @@ impl HummockStateStoreMetrics {
         )
         .unwrap();
 
-        let mem_table_spill_counts = RelabeledCounterVec::with_metric_level(
+        let mem_table_spill_counts = RelabeledGuardedIntCounterVec::with_metric_level(
             MetricLevel::Info,
             mem_table_spill_counts,
             metric_level,
         );
 
-        let old_value_size = register_int_gauge_with_registry!(
+        let old_value_size = register_guarded_int_gauge_vec_with_registry!(
             "state_store_old_value_size",
             "The size of old value",
+            &["table_id"],
             registry
         )
         .unwrap();
+
+        let old_value_size = RelabeledGuardedIntGaugeVec::with_metric_level(
+            MetricLevel::Info,
+            old_value_size,
+            metric_level,
+        );
 
         let opts = histogram_opts!(
             "block_efficiency_histogram",
@@ -432,9 +543,10 @@ impl HummockStateStoreMetrics {
         );
         let block_efficiency_histogram = register_histogram_with_registry!(opts, registry).unwrap();
 
-        let event_handler_pending_event = register_int_gauge_with_registry!(
+        let event_handler_pending_event = register_int_gauge_vec_with_registry!(
             "state_store_event_handler_pending_event",
             "The number of sent but unhandled events",
+            &["event_type"],
             registry,
         )
         .unwrap();
@@ -477,17 +589,18 @@ impl HummockStateStoreMetrics {
             iter_fetch_meta_duration,
             iter_fetch_meta_cache_unhits,
             iter_slow_fetch_meta_cache_unhits,
+            vector_object_request_counts,
+            vector_request_stats,
+            vector_hnsw_graph_level_node_count,
+            vector_index_file_count,
+            vector_index_file_size,
             read_req_bloom_filter_positive_counts,
             read_req_positive_but_non_exist_counts,
             read_req_check_bloom_filter_counts,
             write_batch_tuple_counts,
             write_batch_duration,
             write_batch_size,
-            merge_imm_task_counts,
-            merge_imm_batch_memory_sz,
-            spill_task_counts_from_sealed: spill_task_counts.with_label_values(&["sealed"]),
             spill_task_counts_from_unsealed: spill_task_counts.with_label_values(&["unsealed"]),
-            spill_task_size_from_sealed: spill_task_size.with_label_values(&["sealed"]),
             spill_task_size_from_unsealed: spill_task_size.with_label_values(&["unsealed"]),
             uploader_uploading_task_size,
             uploader_uploading_task_count,
@@ -495,6 +608,10 @@ impl HummockStateStoreMetrics {
             uploader_upload_task_latency,
             uploader_syncing_epoch_count,
             uploader_wait_poll_latency,
+            uploader_per_table_imm_size,
+            uploader_per_table_imm_count,
+            per_table_imm_size,
+            per_table_imm_count,
             mem_table_spill_counts,
             old_value_size,
 
@@ -514,89 +631,129 @@ impl HummockStateStoreMetrics {
 pub trait MemoryCollector: Sync + Send {
     fn get_meta_memory_usage(&self) -> u64;
     fn get_data_memory_usage(&self) -> u64;
+    fn get_vector_meta_memory_usage(&self) -> u64;
+    fn get_vector_data_memory_usage(&self) -> u64;
     fn get_uploading_memory_usage(&self) -> u64;
     fn get_prefetch_memory_usage(&self) -> usize;
     fn get_meta_cache_memory_usage_ratio(&self) -> f64;
     fn get_block_cache_memory_usage_ratio(&self) -> f64;
+    fn get_vector_meta_cache_memory_usage_ratio(&self) -> f64;
+    fn get_vector_data_cache_memory_usage_ratio(&self) -> f64;
     fn get_shared_buffer_usage_ratio(&self) -> f64;
 }
 
 #[derive(Clone)]
 struct StateStoreCollector {
     memory_collector: Arc<dyn MemoryCollector>,
-    descs: Vec<Desc>,
+    collectors: Vec<Arc<dyn Collector>>,
     block_cache_size: IntGauge,
     meta_cache_size: IntGauge,
+    vector_data_cache_size: IntGauge,
+    vector_meta_cache_size: IntGauge,
     uploading_memory_size: IntGauge,
     prefetch_memory_size: IntGauge,
     meta_cache_usage_ratio: Gauge,
     block_cache_usage_ratio: Gauge,
+    vector_data_cache_usage_ratio: Gauge,
+    vector_meta_cache_usage_ratio: Gauge,
     uploading_memory_usage_ratio: Gauge,
 }
 
 impl StateStoreCollector {
     pub fn new(memory_collector: Arc<dyn MemoryCollector>) -> Self {
-        let mut descs = Vec::new();
+        let mut collectors = Vec::new();
 
         let block_cache_size = IntGauge::with_opts(Opts::new(
             "state_store_block_cache_size",
             "the size of cache for data block cache",
         ))
         .unwrap();
-        descs.extend(block_cache_size.desc().into_iter().cloned());
+        collectors.push(Arc::new(block_cache_size.clone()) as _);
 
         let block_cache_usage_ratio = Gauge::with_opts(Opts::new(
             "state_store_block_cache_usage_ratio",
             "the ratio of block cache to it's pre-allocated memory",
         ))
         .unwrap();
-        descs.extend(block_cache_usage_ratio.desc().into_iter().cloned());
+        collectors.push(Arc::new(block_cache_usage_ratio.clone()) as _);
 
         let meta_cache_size = IntGauge::with_opts(Opts::new(
             "state_store_meta_cache_size",
             "the size of cache for meta file cache",
         ))
         .unwrap();
-        descs.extend(meta_cache_size.desc().into_iter().cloned());
+        collectors.push(Arc::new(meta_cache_size.clone()) as _);
 
         let meta_cache_usage_ratio = Gauge::with_opts(Opts::new(
             "state_store_meta_cache_usage_ratio",
             "the ratio of meta cache to it's pre-allocated memory",
         ))
         .unwrap();
-        descs.extend(meta_cache_usage_ratio.desc().into_iter().cloned());
+        collectors.push(Arc::new(meta_cache_usage_ratio.clone()) as _);
+
+        let vector_data_cache_size = IntGauge::with_opts(Opts::new(
+            "state_store_vector_data_cache_size",
+            "the size of cache for vector data file cache",
+        ))
+        .unwrap();
+        collectors.push(Arc::new(vector_data_cache_size.clone()) as _);
+
+        let vector_data_cache_usage_ratio = Gauge::with_opts(Opts::new(
+            "state_store_vector_data_cache_usage_ratio",
+            "the ratio of vector data cache to it's pre-allocated memory",
+        ))
+        .unwrap();
+        collectors.push(Arc::new(vector_data_cache_usage_ratio.clone()) as _);
+
+        let vector_meta_cache_size = IntGauge::with_opts(Opts::new(
+            "state_store_vector_meta_cache_size",
+            "the size of cache for vector meta file cache",
+        ))
+        .unwrap();
+        collectors.push(Arc::new(vector_meta_cache_size.clone()) as _);
+
+        let vector_meta_cache_usage_ratio = Gauge::with_opts(Opts::new(
+            "state_store_vector_meta_cache_usage_ratio",
+            "the ratio of vector meta cache to it's pre-allocated memory",
+        ))
+        .unwrap();
+        collectors.push(Arc::new(vector_meta_cache_usage_ratio.clone()) as _);
 
         let uploading_memory_size = IntGauge::with_opts(Opts::new(
             "uploading_memory_size",
             "the size of uploading SSTs memory usage",
         ))
         .unwrap();
-        descs.extend(uploading_memory_size.desc().into_iter().cloned());
+        collectors.push(Arc::new(uploading_memory_size.clone()) as _);
 
         let uploading_memory_usage_ratio = Gauge::with_opts(Opts::new(
             "state_store_uploading_memory_usage_ratio",
             "the ratio of uploading SSTs memory usage to it's pre-allocated memory",
         ))
         .unwrap();
-        descs.extend(uploading_memory_usage_ratio.desc().into_iter().cloned());
+        collectors.push(Arc::new(uploading_memory_usage_ratio.clone()) as _);
 
         let prefetch_memory_size = IntGauge::with_opts(Opts::new(
             "state_store_prefetch_memory_size",
             "the size of prefetch memory usage",
         ))
         .unwrap();
-        descs.extend(prefetch_memory_size.desc().into_iter().cloned());
+        collectors.push(Arc::new(prefetch_memory_size.clone()) as _);
 
         Self {
             memory_collector,
-            descs,
+            collectors,
             block_cache_size,
             meta_cache_size,
+            vector_data_cache_size,
+            vector_meta_cache_size,
             uploading_memory_size,
             prefetch_memory_size,
             meta_cache_usage_ratio,
             block_cache_usage_ratio,
 
+            vector_data_cache_usage_ratio,
+            vector_meta_cache_usage_ratio,
             uploading_memory_usage_ratio,
         }
     }
@@ -604,7 +761,7 @@ impl StateStoreCollector {
 
 impl Collector for StateStoreCollector {
     fn desc(&self) -> Vec<&Desc> {
-        self.descs.iter().collect()
+        self.collectors.iter().flat_map(|c| c.desc()).collect()
     }
 
     fn collect(&self) -> Vec<proto::MetricFamily> {
@@ -612,6 +769,10 @@ impl Collector for StateStoreCollector {
             .set(self.memory_collector.get_data_memory_usage() as i64);
         self.meta_cache_size
             .set(self.memory_collector.get_meta_memory_usage() as i64);
+        self.vector_data_cache_size
+            .set(self.memory_collector.get_vector_data_memory_usage() as _);
+        self.vector_meta_cache_size
+            .set(self.memory_collector.get_vector_meta_memory_usage() as _);
         self.uploading_memory_size
             .set(self.memory_collector.get_uploading_memory_usage() as i64);
         self.prefetch_memory_size
@@ -620,14 +781,18 @@ impl Collector for StateStoreCollector {
             .set(self.memory_collector.get_meta_cache_memory_usage_ratio());
         self.block_cache_usage_ratio
             .set(self.memory_collector.get_block_cache_memory_usage_ratio());
+        self.vector_meta_cache_usage_ratio.set(
+            self.memory_collector
+                .get_vector_meta_cache_memory_usage_ratio(),
+        );
+        self.vector_data_cache_usage_ratio.set(
+            self.memory_collector
+                .get_vector_data_cache_memory_usage_ratio(),
+        );
         self.uploading_memory_usage_ratio
             .set(self.memory_collector.get_shared_buffer_usage_ratio());
         // collect MetricFamilies.
-        let mut mfs = Vec::with_capacity(3);
-        mfs.extend(self.block_cache_size.collect());
-        mfs.extend(self.meta_cache_size.collect());
-        mfs.extend(self.uploading_memory_size.collect());
-        mfs
+        self.collectors.iter().flat_map(|c| c.collect()).collect()
     }
 }
 

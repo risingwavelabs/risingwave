@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -720,11 +720,10 @@ where
 
                         timeout_ticker.reset();
 
-                        if is_leader {
-                            if let Err(e) = self.driver.trim_candidates(META_ELECTION_KEY, ttl * 2).await {
+                        if is_leader
+                            && let Err(e) = self.driver.trim_candidates(META_ELECTION_KEY, ttl * 2).await {
                                 tracing::warn!(error = %e.as_report(), "trim candidates failed");
                             }
-                        }
                     }
                 _ = timeout_ticker.tick() => {
                     tracing::error!("member {} election timeout", self.id);

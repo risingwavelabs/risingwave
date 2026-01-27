@@ -21,7 +21,7 @@ while getopts 'p:' opt; do
 done
 shift $((OPTIND -1))
 
-download_and_prepare_rw "$profile" source
+download_and_prepare_rw "$profile" iceberg
 
 echo "--- Download connector node package"
 buildkite-agent artifact download risingwave-connector.tar.gz ./
@@ -30,7 +30,7 @@ tar xf ./risingwave-connector.tar.gz -C ./connector-node
 export CONNECTOR_LIBS_PATH="./connector-node/libs"
 
 echo "--- starting risingwave cluster"
-PGPASSWORD=postgres psql -h db -p 5432 -U postgres -c "DROP DATABASE IF EXISTS metadata;" -c "CREATE DATABASE metadata;"
+PGPASSWORD='post\tgres' psql -h db -p 5432 -U postgres -c "DROP DATABASE IF EXISTS metadata;" -c "CREATE DATABASE metadata;"
 risedev ci-start ci-iceberg-test
 
 
@@ -47,3 +47,9 @@ risedev slt './e2e_test/iceberg/test_case/pure_slt/*.slt'
 # Run benchmarks separately (not parallelized)
 echo "--- Running benchmarks"
 poetry run python main.py -t ./benches/predicate_pushdown.toml
+
+# Go back to repo root for CDC test
+cd ../..
+
+echo "--- Running PostgreSQL CDC with Iceberg sink schema change test"
+bash ci/scripts/e2e-iceberg-sink-cdc-test.sh

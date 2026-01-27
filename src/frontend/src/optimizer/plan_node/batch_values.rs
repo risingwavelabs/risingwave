@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,7 +20,7 @@ use risingwave_pb::batch_plan::values_node::ExprTuple;
 use super::batch::prelude::*;
 use super::utils::{Distill, childless_record};
 use super::{
-    ExprRewritable, LogicalValues, PlanBase, PlanRef, PlanTreeNodeLeaf, ToBatchPb,
+    BatchPlanRef as PlanRef, ExprRewritable, LogicalValues, PlanBase, PlanTreeNodeLeaf, ToBatchPb,
     ToDistributedBatch,
 };
 use crate::error::Result;
@@ -36,7 +36,7 @@ pub struct BatchValues {
 }
 
 impl PlanTreeNodeLeaf for BatchValues {}
-impl_plan_tree_node_for_leaf!(BatchValues);
+impl_plan_tree_node_for_leaf! { Batch, BatchValues }
 
 impl BatchValues {
     pub fn new(logical: LogicalValues) -> Self {
@@ -44,7 +44,7 @@ impl BatchValues {
     }
 
     pub fn with_dist(logical: LogicalValues, dist: Distribution) -> Self {
-        let ctx = logical.base.ctx().clone();
+        let ctx = logical.base.ctx();
         let base = PlanBase::new_batch(ctx, logical.schema().clone(), dist, Order::any());
         BatchValues { base, logical }
     }
@@ -100,7 +100,7 @@ impl ToLocalBatch for BatchValues {
     }
 }
 
-impl ExprRewritable for BatchValues {
+impl ExprRewritable<Batch> for BatchValues {
     fn has_rewritable_expr(&self) -> bool {
         true
     }

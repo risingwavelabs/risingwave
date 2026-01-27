@@ -21,7 +21,6 @@ while getopts 'p:' opt; do
 done
 shift $((OPTIND -1))
 
-sudo apt install sqlite3 -y
 download_and_prepare_rw "$profile" common
 
 echo "--- starting risingwave cluster"

@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -26,14 +26,19 @@ use risingwave_connector::source::kafka::private_link::{
 use risingwave_connector::{Get, GetKeyIter, WithPropertiesExt};
 use risingwave_pb::catalog::connection::Info as ConnectionInfo;
 use risingwave_pb::catalog::connection_params::PbConnectionType;
+use risingwave_pb::plan_common::SourceRefreshMode;
+use risingwave_pb::plan_common::source_refresh_mode::{
+    RefreshMode, SourceRefreshModeFullReload, SourceRefreshModeStreaming,
+};
 use risingwave_pb::secret::PbSecretRef;
 use risingwave_pb::secret::secret_ref::PbRefAsType;
 use risingwave_pb::telemetry::{PbTelemetryEventStage, TelemetryDatabaseObject};
 use risingwave_sqlparser::ast::{
-    ConnectionRefValue, CreateConnectionStatement, CreateSinkStatement, CreateSourceStatement,
-    CreateSubscriptionStatement, SecretRefAsType, SecretRefValue, SqlOption, SqlOptionValue,
-    Statement, Value,
+    BackfillOrderStrategy, ConnectionRefValue, CreateConnectionStatement, CreateSinkStatement,
+    CreateSourceStatement, CreateSubscriptionStatement, SecretRefAsType, SecretRefValue, SqlOption,
+    SqlOptionValue, Statement, Value,
 };
+use thiserror_ext::AsReport;
 
 use super::OverwriteOptions;
 use crate::Binder;
@@ -46,12 +51,16 @@ pub mod options {
     pub const RETENTION_SECONDS: &str = "retention_seconds";
 }
 
+pub const SOURCE_REFRESH_MODE_KEY: &str = "refresh_mode";
+pub const SOURCE_REFRESH_INTERVAL_SEC_KEY: &str = "refresh_interval_sec";
+
 /// Options or properties extracted from the `WITH` clause of DDLs.
 #[derive(Default, Clone, Debug, PartialEq, Eq, Hash)]
 pub struct WithOptions {
     inner: BTreeMap<String, String>,
     secret_ref: BTreeMap<String, SecretRefValue>,
     connection_ref: BTreeMap<String, ConnectionRefValue>,
+    backfill_order_strategy: BackfillOrderStrategy,
 }
 
 impl GetKeyIter for WithOptions {
@@ -87,6 +96,7 @@ impl WithOptions {
             inner,
             secret_ref: Default::default(),
             connection_ref: Default::default(),
+            backfill_order_strategy: Default::default(),
         }
     }
 
@@ -100,6 +110,7 @@ impl WithOptions {
             inner,
             secret_ref,
             connection_ref,
+            backfill_order_strategy: Default::default(),
         }
     }
 
@@ -132,6 +143,7 @@ impl WithOptions {
             inner,
             secret_ref: self.secret_ref,
             connection_ref: self.connection_ref,
+            backfill_order_strategy: self.backfill_order_strategy,
         }
     }
 
@@ -157,14 +169,15 @@ impl WithOptions {
             inner,
             secret_ref: self.secret_ref.clone(),
             connection_ref: self.connection_ref.clone(),
+            backfill_order_strategy: self.backfill_order_strategy.clone(),
         }
     }
 
     pub fn value_eq_ignore_case(&self, key: &str, val: &str) -> bool {
-        if let Some(inner_val) = self.inner.get(key) {
-            if inner_val.eq_ignore_ascii_case(val) {
-                return true;
-            }
+        if let Some(inner_val) = self.inner.get(key)
+            && inner_val.eq_ignore_ascii_case(val)
+        {
+            return true;
         }
         false
     }
@@ -202,16 +215,48 @@ impl WithOptions {
         self.inner.contains_key(UPSTREAM_SOURCE_KEY)
             && self.inner.get(UPSTREAM_SOURCE_KEY).unwrap() != WEBHOOK_CONNECTOR
     }
+
+    pub fn backfill_order_strategy(&self) -> BackfillOrderStrategy {
+        self.backfill_order_strategy.clone()
+    }
 }
 
+/// Resolves connection references and secret references in `WithOptions`.
+///
+/// This function takes `WithOptions` (typically from a CREATE/ALTER statement),
+/// resolves any CONNECTION and SECRET references, and merges their properties
+/// with the directly specified options.
+///
+/// # Arguments
+/// * `with_options` - The original `WithOptions` containing user-specified options and references
+/// * `session` - The current user session, used to access catalogs and verify permissions
+/// * `object` - Optional telemetry information about the database object being created/altered
+///
+/// # Returns
+/// A tuple containing:
+/// * `WithOptionsSecResolved` - `WithOptions` with all references resolved and merged
+/// * `PbConnectionType` - The type of the referenced connection (if any)
+/// * `Option<u32>` - The ID of the referenced connection (if any)
+///
+/// # Workflow
+/// 1. Extract connector name, options, secret refs, and connection refs from `with_options`
+/// 2. Resolve any CONNECTION references by looking them up in the catalog
+/// 3. Resolve any SECRET references by looking them up in the catalog
+/// 4. Merge properties from CONNECTION with directly specified options
+/// 5. Perform validation to ensure no conflicts between options
+/// 6. Return the merged options, connection type, and connection ID
 pub(crate) fn resolve_connection_ref_and_secret_ref(
     with_options: WithOptions,
     session: &SessionImpl,
-    object: TelemetryDatabaseObject,
-) -> RwResult<(WithOptionsSecResolved, PbConnectionType, Option<u32>)> {
+    object: Option<TelemetryDatabaseObject>,
+) -> RwResult<(
+    WithOptionsSecResolved,
+    PbConnectionType,
+    Option<ConnectionId>,
+)> {
     let connector_name = with_options.get_connector();
     let db_name: &str = &session.database();
-    let (mut options, secret_refs, connection_refs) = with_options.clone().into_parts();
+    let (mut options, secret_refs, connection_refs) = with_options.into_parts();
 
     let mut connection_id = None;
     let mut connection_params = None;
@@ -219,10 +264,8 @@ pub(crate) fn resolve_connection_ref_and_secret_ref(
         // at most one connection ref in the map
         connection_params = {
             // get connection params from catalog
-            let (schema_name, connection_name) = Binder::resolve_schema_qualified_name(
-                db_name,
-                connection_ref.connection_name.clone(),
-            )?;
+            let (schema_name, connection_name) =
+                Binder::resolve_schema_qualified_name(db_name, &connection_ref.connection_name)?;
             let connection_catalog =
                 session.get_connection_by_name(schema_name, &connection_name)?;
             if let ConnectionInfo::ConnectionParams(params) = &connection_catalog.info {
@@ -235,45 +278,33 @@ pub(crate) fn resolve_connection_ref_and_secret_ref(
             }
         };
 
-        // report to telemetry
-        report_event(
-            PbTelemetryEventStage::CreateStreamJob,
-            "connection_ref",
-            0,
-            connector_name.clone(),
-            Some(object),
-            {
-                connection_params.as_ref().map(|cp| {
-                    jsonbb::json!({
-                        "connection_type": cp.connection_type().as_str_name().to_owned()
+        // Report telemetry event for connection reference if an object is provided
+        if let Some(object) = object {
+            // report to telemetry
+            report_event(
+                PbTelemetryEventStage::CreateStreamJob,
+                "connection_ref",
+                0,
+                connector_name.clone(),
+                Some(object),
+                {
+                    connection_params.as_ref().map(|cp| {
+                        jsonbb::json!({
+                            "connection_type": cp.connection_type().as_str_name().to_owned()
+                        })
                     })
-                })
-            },
-        );
+                },
+            );
+        }
     }
 
-    let mut inner_secret_refs = {
-        let mut resolved_secret_refs = BTreeMap::new();
-        for (key, secret_ref) in secret_refs {
-            let (schema_name, secret_name) =
-                Binder::resolve_schema_qualified_name(db_name, secret_ref.secret_name.clone())?;
-            let secret_catalog = session.get_secret_by_name(schema_name, &secret_name)?;
-            let ref_as = match secret_ref.ref_as {
-                SecretRefAsType::Text => PbRefAsType::Text,
-                SecretRefAsType::File => PbRefAsType::File,
-            };
-            let pb_secret_ref = PbSecretRef {
-                secret_id: secret_catalog.id.secret_id(),
-                ref_as: ref_as.into(),
-            };
-            resolved_secret_refs.insert(key.clone(), pb_secret_ref);
-        }
-        resolved_secret_refs
-    };
+    let mut inner_secret_refs = resolve_secret_refs_inner(secret_refs, session)?;
 
+    // Initialize connection_type to Unspecified (will be updated if connection is used)
     let mut connection_type = PbConnectionType::Unspecified;
     let connection_params_is_none_flag = connection_params.is_none();
 
+    // If we have a connection, merge its properties with directly specified options
     if let Some(connection_params) = connection_params {
         // Do key checks on `PRIVATE_LINK_BROKER_REWRITE_MAP_KEY`, `PRIVATE_LINK_TARGETS_KEY` and `PRIVATELINK_ENDPOINT_KEY`
         // `PRIVATE_LINK_BROKER_REWRITE_MAP_KEY` is generated from `private_link_targets` and `private_link_endpoint`, instead of given by users.
@@ -285,17 +316,16 @@ pub(crate) fn resolve_connection_ref_and_secret_ref(
         if let Some(broker_rewrite_map) = connection_params
             .get_properties()
             .get(PRIVATE_LINK_BROKER_REWRITE_MAP_KEY)
+            && (options.contains_key(PRIVATE_LINK_TARGETS_KEY)
+                || options.contains_key(PRIVATELINK_ENDPOINT_KEY))
         {
-            if options.contains_key(PRIVATE_LINK_TARGETS_KEY)
-                || options.contains_key(PRIVATELINK_ENDPOINT_KEY)
-            {
-                return Err(RwError::from(ErrorCode::InvalidParameterValue(format!(
-                    "PrivateLink related options already defined in Connection (rewrite map: {}), please remove {} and {} from WITH clause",
-                    broker_rewrite_map, PRIVATE_LINK_TARGETS_KEY, PRIVATELINK_ENDPOINT_KEY
-                ))));
-            }
+            return Err(RwError::from(ErrorCode::InvalidParameterValue(format!(
+                "PrivateLink related options already defined in Connection (rewrite map: {}), please remove {} and {} from WITH clause",
+                broker_rewrite_map, PRIVATE_LINK_TARGETS_KEY, PRIVATELINK_ENDPOINT_KEY
+            ))));
         }
 
+        // Extract connection type and merge properties
         connection_type = connection_params.connection_type();
         for (k, v) in connection_params.properties {
             if options.insert(k.clone(), v).is_some() {
@@ -306,6 +336,7 @@ pub(crate) fn resolve_connection_ref_and_secret_ref(
             }
         }
 
+        // Merge secret references from connection
         for (k, v) in connection_params.secret_refs {
             if inner_secret_refs.insert(k.clone(), v).is_some() {
                 return Err(RwError::from(ErrorCode::InvalidParameterValue(format!(
@@ -315,10 +346,10 @@ pub(crate) fn resolve_connection_ref_and_secret_ref(
             }
         }
 
+        // Schema Registry specific validation
         {
-            // check if not mess up with schema registry connection and glue connection
             if connection_type == PbConnectionType::SchemaRegistry {
-                // Check no AWS related options when using schema registry connection
+                // Ensure no AWS/Glue options are provided when using schema registry connection
                 if options
                     .keys()
                     .chain(inner_secret_refs.keys())
@@ -349,23 +380,106 @@ pub(crate) fn resolve_secret_ref_in_with_options(
     session: &SessionImpl,
 ) -> RwResult<WithOptionsSecResolved> {
     let (options, secret_refs, _) = with_options.into_parts();
-    let mut resolved_secret_refs = BTreeMap::new();
+    let resolved_secret_refs = resolve_secret_refs_inner(secret_refs, session)?;
+    Ok(WithOptionsSecResolved::new(options, resolved_secret_refs))
+}
+
+fn resolve_secret_refs_inner(
+    secret_refs: BTreeMap<String, SecretRefValue>,
+    session: &SessionImpl,
+) -> RwResult<BTreeMap<String, PbSecretRef>> {
     let db_name: &str = &session.database();
+    let mut resolved_secret_refs = BTreeMap::new();
     for (key, secret_ref) in secret_refs {
         let (schema_name, secret_name) =
-            Binder::resolve_schema_qualified_name(db_name, secret_ref.secret_name.clone())?;
+            Binder::resolve_schema_qualified_name(db_name, &secret_ref.secret_name)?;
         let secret_catalog = session.get_secret_by_name(schema_name, &secret_name)?;
         let ref_as = match secret_ref.ref_as {
             SecretRefAsType::Text => PbRefAsType::Text,
             SecretRefAsType::File => PbRefAsType::File,
         };
         let pb_secret_ref = PbSecretRef {
-            secret_id: secret_catalog.id.secret_id(),
+            secret_id: secret_catalog.id,
             ref_as: ref_as.into(),
         };
         resolved_secret_refs.insert(key.clone(), pb_secret_ref);
     }
-    Ok(WithOptionsSecResolved::new(options, resolved_secret_refs))
+    Ok(resolved_secret_refs)
+}
+
+pub(crate) fn resolve_source_refresh_mode_in_with_option(
+    with_options: &mut WithOptions,
+) -> RwResult<Option<SourceRefreshMode>> {
+    let source_refresh_interval_sec =
+        {
+            if let Some(maybe_int) = with_options.remove(SOURCE_REFRESH_INTERVAL_SEC_KEY) {
+                let some_int = maybe_int.parse::<i64>().map_err(|e| {
+                RwError::from(ErrorCode::InvalidParameterValue(format!(
+                    "`{}` must be a positive integer and larger than 0, but got: {} (error: {})",
+                    SOURCE_REFRESH_INTERVAL_SEC_KEY, maybe_int, e.as_report()
+                )))
+            })?;
+                if some_int <= 0 {
+                    return Err(RwError::from(ErrorCode::InvalidParameterValue(format!(
+                        "`{}` must be larger than 0, but got: {}",
+                        SOURCE_REFRESH_INTERVAL_SEC_KEY, some_int
+                    ))));
+                }
+                Some(some_int)
+            } else {
+                None
+            }
+        };
+
+    let mut is_full_reload = false;
+    let source_refresh_mode_str = with_options.remove(SOURCE_REFRESH_MODE_KEY);
+    let source_refresh_mode = if let Some(source_refresh_mode_str) = &source_refresh_mode_str {
+        Some(match source_refresh_mode_str.to_uppercase().as_str() {
+            "STREAMING" => {
+                if source_refresh_interval_sec.is_some() {
+                    return Err(RwError::from(ErrorCode::InvalidParameterValue(format!(
+                        "`{}` is not allowed when `{}` is 'STREAMING'",
+                        SOURCE_REFRESH_INTERVAL_SEC_KEY, SOURCE_REFRESH_MODE_KEY
+                    ))));
+                }
+                SourceRefreshMode {
+                    refresh_mode: Some(RefreshMode::Streaming(SourceRefreshModeStreaming {})),
+                }
+            }
+            "FULL_RELOAD" => {
+                is_full_reload = true;
+                SourceRefreshMode {
+                    refresh_mode: Some(RefreshMode::FullReload(SourceRefreshModeFullReload {
+                        refresh_interval_sec: source_refresh_interval_sec,
+                    })),
+                }
+            }
+            _ => {
+                return Err(RwError::from(ErrorCode::InvalidParameterValue(format!(
+                    "Invalid key `{}`: {}, accepted values are 'STREAMING' and 'FULL_RELOAD'",
+                    SOURCE_REFRESH_MODE_KEY, source_refresh_mode_str
+                ))));
+            }
+        })
+    } else {
+        // also check the `refresh_interval_sec` is not provided when `refresh_mode` is not provided
+        if source_refresh_interval_sec.is_some() {
+            return Err(RwError::from(ErrorCode::InvalidParameterValue(format!(
+                "`{}` is not allowed when `{}` is not 'FULL_RELOAD'",
+                SOURCE_REFRESH_INTERVAL_SEC_KEY, SOURCE_REFRESH_MODE_KEY
+            ))));
+        }
+        None
+    };
+
+    // Batch connectors require FULL_RELOAD mode.
+    if with_options.is_batch_connector() && !is_full_reload {
+        return Err(RwError::from(ErrorCode::InvalidParameterValue(format!(
+            "Refreshable source {} must be refreshed with 'FULL_RELOAD' refresh mode. Please set `refresh_mode` to 'FULL_RELOAD'.",
+            with_options.get_connector().unwrap(),
+        ))));
+    }
+    Ok(source_refresh_mode)
 }
 
 pub(crate) fn resolve_privatelink_in_with_option(
@@ -394,6 +508,7 @@ impl TryFrom<&[SqlOption]> for WithOptions {
         let mut inner: BTreeMap<String, String> = BTreeMap::new();
         let mut secret_ref: BTreeMap<String, SecretRefValue> = BTreeMap::new();
         let mut connection_ref: BTreeMap<String, ConnectionRefValue> = BTreeMap::new();
+        let mut backfill_order_strategy = BackfillOrderStrategy::Default;
         for option in options {
             let key = option.name.real_value();
             match &option.value {
@@ -417,6 +532,10 @@ impl TryFrom<&[SqlOption]> for WithOptions {
                             key
                         ))));
                     }
+                    continue;
+                }
+                SqlOptionValue::BackfillOrder(b) => {
+                    backfill_order_strategy = b.clone();
                     continue;
                 }
                 _ => {}
@@ -445,6 +564,7 @@ impl TryFrom<&[SqlOption]> for WithOptions {
             inner,
             secret_ref,
             connection_ref,
+            backfill_order_strategy,
         })
     }
 }
@@ -473,20 +593,23 @@ impl TryFrom<&Statement> for WithOptions {
                     CreateConnectionStatement {
                         with_properties, ..
                     },
-            } => Self::try_from(with_properties.0.as_slice()),
-            Statement::CreateSource {
+            }
+            | Statement::CreateSource {
                 stmt:
                     CreateSourceStatement {
                         with_properties, ..
                     },
                 ..
-            } => Self::try_from(with_properties.0.as_slice()),
-            Statement::CreateSubscription {
+            }
+            | Statement::CreateSubscription {
                 stmt:
                     CreateSubscriptionStatement {
                         with_properties, ..
                     },
                 ..
+            }
+            | Statement::CreateIndex {
+                with_properties, ..
             } => Self::try_from(with_properties.0.as_slice()),
             Statement::CreateTable { with_options, .. } => Self::try_from(with_options.as_slice()),
 

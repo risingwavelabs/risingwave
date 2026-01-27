@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -55,7 +55,8 @@ impl std::fmt::Debug for Literal {
                     | DataType::Jsonb
                     | DataType::Int256
                     | DataType::Struct(_)
-                    | DataType::Map(_) => write!(
+                    | DataType::Map(_)
+                    | DataType::Vector(_) => write!(
                         f,
                         "'{}'",
                         v.as_scalar_ref_impl().to_text_with_type(&data_type)
@@ -117,13 +118,14 @@ impl Expr for Literal {
         self.data_type.clone().unwrap_or(DataType::Varchar)
     }
 
-    fn to_expr_proto(&self) -> risingwave_pb::expr::ExprNode {
+    fn try_to_expr_proto(&self) -> Result<risingwave_pb::expr::ExprNode, String> {
         use risingwave_pb::expr::*;
-        ExprNode {
+
+        Ok(ExprNode {
             function_type: ExprType::Unspecified as i32,
             return_type: Some(self.return_type().to_protobuf()),
             rex_node: Some(literal_to_value_encoding(self.get_data())),
-        }
+        })
     }
 }
 
@@ -185,7 +187,7 @@ mod tests {
         let data = Some(ScalarImpl::List(value.clone()));
         let node = literal_to_value_encoding(&data);
         if let RexNode::Constant(prost) = node {
-            let data2 = Datum::from_protobuf(&prost, &DataType::List(Box::new(DataType::Varchar)))
+            let data2 = Datum::from_protobuf(&prost, &DataType::Varchar.list())
                 .unwrap()
                 .unwrap();
             assert_eq!(ScalarImpl::List(value), data2);

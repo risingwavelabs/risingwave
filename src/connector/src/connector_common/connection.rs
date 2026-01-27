@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,23 +17,26 @@ use std::time::Duration;
 
 use anyhow::Context;
 use opendal::Operator;
-use opendal::services::{Gcs, S3};
+use opendal::services::{Azblob, Gcs, S3};
 use phf::{Set, phf_set};
 use rdkafka::ClientConfig;
+use rdkafka::config::RDKafkaLogLevel;
 use rdkafka::consumer::{BaseConsumer, Consumer};
 use risingwave_common::bail;
 use risingwave_common::secret::LocalSecretManager;
+use risingwave_common::util::env_var::env_var_is_true;
 use risingwave_pb::catalog::PbConnection;
-use serde_derive::Deserialize;
+use serde::Deserialize;
 use serde_with::serde_as;
 use tonic::async_trait;
 use url::Url;
 use with_options::WithOptions;
 
+use crate::connector_common::common::DISABLE_DEFAULT_CREDENTIAL;
 use crate::connector_common::{
-    AwsAuthProps, IcebergCommon, KafkaConnectionProps, KafkaPrivateLinkCommon,
+    AwsAuthProps, IcebergCommon, IcebergTableIdentifier, KafkaConnectionProps,
+    KafkaPrivateLinkCommon,
 };
-use crate::deserialize_optional_bool_from_string;
 use crate::enforce_secret::EnforceSecret;
 use crate::error::ConnectorResult;
 use crate::schema::schema_registry::Client as ConfluentSchemaRegistryClient;
@@ -98,6 +101,21 @@ impl Connection for KafkaConnection {
     }
 }
 
+pub fn read_kafka_log_level() -> Option<RDKafkaLogLevel> {
+    let log_level = std::env::var("RISINGWAVE_KAFKA_LOG_LEVEL").ok()?;
+    match log_level.to_uppercase().as_str() {
+        "DEBUG" => Some(RDKafkaLogLevel::Debug),
+        "INFO" => Some(RDKafkaLogLevel::Info),
+        "WARN" => Some(RDKafkaLogLevel::Warning),
+        "ERROR" => Some(RDKafkaLogLevel::Error),
+        "CRITICAL" => Some(RDKafkaLogLevel::Critical),
+        "EMERG" => Some(RDKafkaLogLevel::Emerg),
+        "ALERT" => Some(RDKafkaLogLevel::Alert),
+        "NOTICE" => Some(RDKafkaLogLevel::Notice),
+        _ => None,
+    }
+}
+
 impl KafkaConnection {
     async fn build_client(&self) -> ConnectorResult<BaseConsumer<RwConsumerContext>> {
         let mut config = ClientConfig::new();
@@ -116,6 +134,10 @@ impl KafkaConnection {
         )
         .await?;
         let client_ctx = RwConsumerContext::new(ctx_common);
+
+        if let Some(log_level) = read_kafka_log_level() {
+            config.set_log_level(log_level);
+        }
         let client: BaseConsumer<RwConsumerContext> =
             config.create_with_context(client_ctx).await?;
         if self.inner.is_aws_msk_iam() {
@@ -132,86 +154,14 @@ impl KafkaConnection {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, WithOptions)]
 #[serde(deny_unknown_fields)]
 pub struct IcebergConnection {
-    #[serde(rename = "catalog.type")]
-    pub catalog_type: Option<String>,
-    #[serde(rename = "s3.region")]
-    pub region: Option<String>,
-    #[serde(rename = "s3.endpoint")]
-    pub endpoint: Option<String>,
-    #[serde(rename = "s3.access.key")]
-    pub access_key: Option<String>,
-    #[serde(rename = "s3.secret.key")]
-    pub secret_key: Option<String>,
-
-    #[serde(rename = "gcs.credential")]
-    pub gcs_credential: Option<String>,
-
-    /// Path of iceberg warehouse.
-    #[serde(rename = "warehouse.path")]
-    pub warehouse_path: Option<String>,
-    /// Catalog id, can be omitted for storage catalog or when
-    /// caller's AWS account ID matches glue id
-    #[serde(rename = "glue.id")]
-    pub glue_id: Option<String>,
-    /// Catalog name, default value is risingwave.
-    #[serde(rename = "catalog.name")]
-    pub catalog_name: Option<String>,
-    /// URI of iceberg catalog, only applicable in rest catalog.
-    #[serde(rename = "catalog.uri")]
-    pub catalog_uri: Option<String>,
-    /// Credential for accessing iceberg catalog, only applicable in rest catalog.
-    /// A credential to exchange for a token in the OAuth2 client credentials flow.
-    #[serde(rename = "catalog.credential")]
-    pub credential: Option<String>,
-    /// token for accessing iceberg catalog, only applicable in rest catalog.
-    /// A Bearer token which will be used for interaction with the server.
-    #[serde(rename = "catalog.token")]
-    pub token: Option<String>,
-    /// `oauth2_server_uri` for accessing iceberg catalog, only applicable in rest catalog.
-    /// Token endpoint URI to fetch token from if the Rest Catalog is not the authorization server.
-    #[serde(rename = "catalog.oauth2_server_uri")]
-    pub oauth2_server_uri: Option<String>,
-    /// scope for accessing iceberg catalog, only applicable in rest catalog.
-    /// Additional scope for OAuth2.
-    #[serde(rename = "catalog.scope")]
-    pub scope: Option<String>,
-
-    /// The signing region to use when signing requests to the REST catalog.
-    #[serde(rename = "catalog.rest.signing_region")]
-    pub rest_signing_region: Option<String>,
-
-    /// The signing name to use when signing requests to the REST catalog.
-    #[serde(rename = "catalog.rest.signing_name")]
-    pub rest_signing_name: Option<String>,
-
-    /// Whether to use SigV4 for signing requests to the REST catalog.
-    #[serde(
-        rename = "catalog.rest.sigv4_enabled",
-        default,
-        deserialize_with = "deserialize_optional_bool_from_string"
-    )]
-    pub rest_sigv4_enabled: Option<bool>,
-
-    #[serde(
-        rename = "s3.path.style.access",
-        default,
-        deserialize_with = "deserialize_optional_bool_from_string"
-    )]
-    pub path_style_access: Option<bool>,
+    #[serde(flatten)]
+    pub common: IcebergCommon,
 
     #[serde(rename = "catalog.jdbc.user")]
     pub jdbc_user: Option<String>,
 
     #[serde(rename = "catalog.jdbc.password")]
     pub jdbc_password: Option<String>,
-
-    /// This is only used by iceberg engine to enable the hosted catalog.
-    #[serde(
-        rename = "hosted_catalog",
-        default,
-        deserialize_with = "deserialize_optional_bool_from_string"
-    )]
-    pub hosted_catalog: Option<bool>,
 }
 
 impl EnforceSecret for IcebergConnection {
@@ -226,12 +176,14 @@ impl EnforceSecret for IcebergConnection {
 #[async_trait]
 impl Connection for IcebergConnection {
     async fn validate_connection(&self) -> ConnectorResult<()> {
-        let info = match &self.warehouse_path {
+        let common = &self.common;
+
+        let info = match &common.warehouse_path {
             Some(warehouse_path) => {
                 let is_s3_tables = warehouse_path.starts_with("arn:aws:s3tables");
                 let url = Url::parse(warehouse_path);
                 if (url.is_err() || is_s3_tables)
-                    && matches!(self.catalog_type.as_deref(), Some("rest" | "rest_rust"))
+                    && matches!(common.catalog_type(), "rest" | "rest_rust")
                 {
                     // If the warehouse path is not a valid URL, it could be a warehouse name in rest catalog,
                     // Or it could be a s3tables path, which is not a valid URL but a valid warehouse path,
@@ -251,7 +203,7 @@ impl Connection for IcebergConnection {
                 }
             }
             None => {
-                if matches!(self.catalog_type.as_deref(), Some("rest" | "rest_rust")) {
+                if matches!(common.catalog_type(), "rest" | "rest_rust") {
                     None
                 } else {
                     bail!("`warehouse.path` must be set");
@@ -264,16 +216,16 @@ impl Connection for IcebergConnection {
             match scheme.as_str() {
                 "s3" | "s3a" => {
                     let mut builder = S3::default();
-                    if let Some(region) = &self.region {
+                    if let Some(region) = &common.s3_region {
                         builder = builder.region(region);
                     }
-                    if let Some(endpoint) = &self.endpoint {
+                    if let Some(endpoint) = &common.s3_endpoint {
                         builder = builder.endpoint(endpoint);
                     }
-                    if let Some(access_key) = &self.access_key {
+                    if let Some(access_key) = &common.s3_access_key {
                         builder = builder.access_key_id(access_key);
                     }
-                    if let Some(secret_key) = &self.secret_key {
+                    if let Some(secret_key) = &common.s3_secret_key {
                         builder = builder.secret_access_key(secret_key);
                     }
                     builder = builder.root(root.as_str()).bucket(bucket.as_str());
@@ -282,10 +234,25 @@ impl Connection for IcebergConnection {
                 }
                 "gs" | "gcs" => {
                     let mut builder = Gcs::default();
-                    if let Some(credential) = &self.gcs_credential {
+                    if let Some(credential) = &common.gcs_credential {
                         builder = builder.credential(credential);
                     }
                     builder = builder.root(root.as_str()).bucket(bucket.as_str());
+                    let op = Operator::new(builder)?.finish();
+                    op.check().await?;
+                }
+                "azblob" => {
+                    let mut builder = Azblob::default();
+                    if let Some(account_name) = &common.azblob_account_name {
+                        builder = builder.account_name(account_name);
+                    }
+                    if let Some(azblob_account_key) = &common.azblob_account_key {
+                        builder = builder.account_key(azblob_account_key);
+                    }
+                    if let Some(azblob_endpoint_url) = &common.azblob_endpoint_url {
+                        builder = builder.endpoint(azblob_endpoint_url);
+                    }
+                    builder = builder.root(root.as_str()).container(bucket.as_str());
                     let op = Operator::new(builder)?.finish();
                     op.check().await?;
                 }
@@ -295,15 +262,21 @@ impl Connection for IcebergConnection {
             }
         }
 
-        if self.hosted_catalog.unwrap_or(false) {
+        if env_var_is_true(DISABLE_DEFAULT_CREDENTIAL)
+            && matches!(common.enable_config_load, Some(true))
+        {
+            bail!("`enable_config_load` can't be enabled in this environment");
+        }
+
+        if common.hosted_catalog.unwrap_or(false) {
             // If `hosted_catalog` is set, we don't need to test the catalog, but just ensure no catalog fields are set.
-            if self.catalog_type.is_some() {
+            if common.catalog_type.is_some() {
                 bail!("`catalog.type` must not be set when `hosted_catalog` is set");
             }
-            if self.catalog_uri.is_some() {
+            if common.catalog_uri.is_some() {
                 bail!("`catalog.uri` must not be set when `hosted_catalog` is set");
             }
-            if self.catalog_name.is_some() {
+            if common.catalog_name.is_some() {
                 bail!("`catalog.name` must not be set when `hosted_catalog` is set");
             }
             if self.jdbc_user.is_some() {
@@ -315,35 +288,12 @@ impl Connection for IcebergConnection {
             return Ok(());
         }
 
-        if self.catalog_type.is_none() {
+        if common.catalog_type.is_none() {
             bail!("`catalog.type` must be set");
         }
 
         // Test catalog
-        let iceberg_common = IcebergCommon {
-            catalog_type: self.catalog_type.clone(),
-            region: self.region.clone(),
-            endpoint: self.endpoint.clone(),
-            access_key: self.access_key.clone(),
-            secret_key: self.secret_key.clone(),
-            gcs_credential: self.gcs_credential.clone(),
-            warehouse_path: self.warehouse_path.clone(),
-            glue_id: self.glue_id.clone(),
-            catalog_name: self.catalog_name.clone(),
-            catalog_uri: self.catalog_uri.clone(),
-            credential: self.credential.clone(),
-            token: self.token.clone(),
-            oauth2_server_uri: self.oauth2_server_uri.clone(),
-            scope: self.scope.clone(),
-            rest_signing_region: self.rest_signing_region.clone(),
-            rest_signing_name: self.rest_signing_name.clone(),
-            rest_sigv4_enabled: self.rest_sigv4_enabled,
-            path_style_access: self.path_style_access,
-            database_name: Some("test_database".to_owned()),
-            table_name: "test_table".to_owned(),
-            enable_config_load: Some(false),
-            hosted_catalog: self.hosted_catalog,
-        };
+        let iceberg_common = common.clone();
 
         let mut java_map = HashMap::new();
         if let Some(jdbc_user) = &self.jdbc_user {
@@ -354,9 +304,12 @@ impl Connection for IcebergConnection {
         }
         let catalog = iceberg_common.create_catalog(&java_map).await?;
         // test catalog by `table_exists` api
-        catalog
-            .table_exists(&iceberg_common.full_table_name()?)
-            .await?;
+        let test_table_ident = IcebergTableIdentifier {
+            database_name: Some("test_database".to_owned()),
+            table_name: "test_table".to_owned(),
+        }
+        .to_table_ident()?;
+        catalog.table_exists(&test_table_ident).await?;
         Ok(())
     }
 }

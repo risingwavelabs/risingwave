@@ -24,6 +24,7 @@ use std::time::{Duration, Instant};
 use arc_swap::ArcSwap;
 use parking_lot::Mutex;
 use pin_project_lite::pin_project;
+use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::TableId;
 use risingwave_common::metrics::LabelGuardedUintGaugeVec;
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
@@ -221,6 +222,10 @@ impl RateLimiter {
                 }
             }
         }
+    }
+
+    pub async fn wait_chunk(&self, chunk: &DataChunk) {
+        self.wait(chunk.rate_limit_permits()).await
     }
 }
 

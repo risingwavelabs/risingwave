@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -71,6 +71,7 @@ impl DataType {
                     )*
                     DataType::Serial => 8,
                     DataType::Int256 => -1,
+                    DataType::Vector(_) => -1,
                     DataType::List(_) | DataType::Struct(_) | DataType::Map(_) => -1,
                 }
             }
@@ -92,11 +93,11 @@ impl DataType {
                     $oid => Ok(DataType::$enum),
                     )*
                     $(
-                    $oid_array => Ok(DataType::List(Box::new(DataType::$enum))),
+                    $oid_array => Ok(DataType::list(DataType::$enum)),
                     )*
                     // workaround to support text in extended mode.
                     25 => Ok(DataType::Varchar),
-                    1009 => Ok(DataType::List(Box::new(DataType::Varchar))),
+                    1009 => Ok(DataType::Varchar.list()),
                     _ => Err(UnsupportedOid(oid)),
                 }
             }
@@ -112,15 +113,16 @@ impl DataType {
                     $(
                     DataType::$enum => $oid,
                     )*
-                    DataType::List(inner) => match inner.unnest_list() {
+                    DataType::List(list) => match list.elem().unnest_list() {
                         $(
-                        DataType::$enum => $oid_array,
+                            DataType::$enum => $oid_array,
                         )*
                         DataType::Int256 => 1302,
                         DataType::Serial => 1016,
                         DataType::Struct(_) => 2287, // pseudo-type of array[struct] (see `pg_type.dat`)
                         DataType::List { .. } => unreachable!("Never reach here!"),
                         DataType::Map(_) => 1304,
+                        DataType::Vector(_) => 1306,
                     }
                     DataType::Serial => 20,
                     // XXX: what does the oid mean here? Why we don't have from_oid for them?
@@ -128,6 +130,7 @@ impl DataType {
                     DataType::Map(_) => 1303,
                     // TODO: Support to give a new oid for custom struct type. #9434
                     DataType::Struct(_) => 2249,  // pseudo-type of struct (see `pg_type.dat`)
+                    DataType::Vector(_) => 1305,
                 }
             }
         }
@@ -146,6 +149,7 @@ impl DataType {
                     DataType::Serial => "serial",
                     DataType::Int256 => "rw_int256",
                     DataType::Map(_) => "map",
+                    DataType::Vector(_) => "vector",
                 }
             }
         }

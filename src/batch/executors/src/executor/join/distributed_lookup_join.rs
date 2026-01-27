@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,6 +15,7 @@
 use std::marker::PhantomData;
 use std::mem::swap;
 
+use anyhow::anyhow;
 use futures::pin_mut;
 use itertools::Itertools;
 use risingwave_batch::task::ShutdownToken;
@@ -39,8 +40,8 @@ use super::AsOfDesc;
 use crate::error::Result;
 use crate::executor::join::JoinType;
 use crate::executor::{
-    AsOf, BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, BufferChunkExecutor, Executor,
-    ExecutorBuilder, LookupExecutorBuilder, LookupJoinBase, unix_timestamp_sec_to_epoch,
+    BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, BufferChunkExecutor, Executor,
+    ExecutorBuilder, LookupExecutorBuilder, LookupJoinBase,
 };
 
 /// Distributed Lookup Join Executor.
@@ -52,12 +53,11 @@ use crate::executor::{
 ///
 /// Distributed lookup join already scheduled to its inner side corresponding compute node, so that
 /// it can just lookup the compute node locally without sending RPCs to other compute nodes.
-pub struct DistributedLookupJoinExecutor<K> {
-    base: LookupJoinBase<K>,
-    _phantom: PhantomData<K>,
+pub struct DistributedLookupJoinExecutor<K, S: StateStore> {
+    base: LookupJoinBase<K, InnerSideExecutorBuilder<S>>,
 }
 
-impl<K: HashKey> Executor for DistributedLookupJoinExecutor<K> {
+impl<K: HashKey, S: StateStore> Executor for DistributedLookupJoinExecutor<K, S> {
     fn schema(&self) -> &Schema {
         &self.base.schema
     }
@@ -71,12 +71,9 @@ impl<K: HashKey> Executor for DistributedLookupJoinExecutor<K> {
     }
 }
 
-impl<K> DistributedLookupJoinExecutor<K> {
-    pub fn new(base: LookupJoinBase<K>) -> Self {
-        Self {
-            base,
-            _phantom: PhantomData,
-        }
+impl<K, S: StateStore> DistributedLookupJoinExecutor<K, S> {
+    fn new(base: LookupJoinBase<K, InnerSideExecutorBuilder<S>>) -> Self {
+        Self { base }
     }
 }
 
@@ -93,24 +90,6 @@ impl BoxedExecutorBuilder for DistributedLookupJoinExecutorBuilder {
             source.plan_node().get_node_body().unwrap(),
             NodeBody::DistributedLookupJoin
         )?;
-
-        // as_of takes precedence
-        let as_of = distributed_lookup_join_node
-            .as_of
-            .as_ref()
-            .map(AsOf::try_from)
-            .transpose()?;
-        let query_epoch = as_of
-            .map(|a| {
-                let epoch = unix_timestamp_sec_to_epoch(a.timestamp).0;
-                tracing::debug!(epoch, "time travel");
-                risingwave_pb::common::BatchQueryEpoch {
-                    epoch: Some(risingwave_pb::common::batch_query_epoch::Epoch::TimeTravel(
-                        epoch,
-                    )),
-                }
-            })
-            .unwrap_or_else(|| source.epoch());
 
         let join_type = JoinType::from_prost(distributed_lookup_join_node.get_join_type()?);
         let condition = match distributed_lookup_join_node.get_condition() {
@@ -129,7 +108,7 @@ impl BoxedExecutorBuilder for DistributedLookupJoinExecutorBuilder {
         let table_desc = distributed_lookup_join_node.get_inner_side_table_desc()?;
         let inner_side_column_ids = distributed_lookup_join_node
             .get_inner_side_column_ids()
-            .to_vec();
+            .clone();
 
         let inner_side_schema = Schema {
             fields: inner_side_column_ids
@@ -184,7 +163,7 @@ impl BoxedExecutorBuilder for DistributedLookupJoinExecutorBuilder {
             .map(|&i| inner_side_schema.fields[i].data_type.clone())
             .collect_vec();
 
-        let null_safe = distributed_lookup_join_node.get_null_safe().to_vec();
+        let null_safe = distributed_lookup_join_node.get_null_safe().clone();
 
         let chunk_size = source.context().get_config().developer.chunk_size;
 
@@ -208,7 +187,9 @@ impl BoxedExecutorBuilder for DistributedLookupJoinExecutorBuilder {
                 outer_side_key_types,
                 inner_side_key_types.clone(),
                 lookup_prefix_len,
-                query_epoch,
+                distributed_lookup_join_node
+                    .query_epoch
+                    .ok_or_else(|| anyhow!("query_epoch not set in distributed lookup join"))?,
                 vec![],
                 table,
                 chunk_size,
@@ -222,7 +203,7 @@ impl BoxedExecutorBuilder for DistributedLookupJoinExecutorBuilder {
                 outer_side_input,
                 outer_side_data_types,
                 outer_side_key_idxs,
-                inner_side_builder: Box::new(inner_side_builder),
+                inner_side_builder,
                 inner_side_key_types,
                 inner_side_key_idxs,
                 null_safe,
@@ -241,13 +222,13 @@ impl BoxedExecutorBuilder for DistributedLookupJoinExecutorBuilder {
     }
 }
 
-struct DistributedLookupJoinExecutorArgs {
+struct DistributedLookupJoinExecutorArgs<S: StateStore> {
     join_type: JoinType,
     condition: Option<BoxedExpression>,
     outer_side_input: BoxedExecutor,
     outer_side_data_types: Vec<DataType>,
     outer_side_key_idxs: Vec<usize>,
-    inner_side_builder: Box<dyn LookupExecutorBuilder>,
+    inner_side_builder: InnerSideExecutorBuilder<S>,
     inner_side_key_types: Vec<DataType>,
     inner_side_key_idxs: Vec<usize>,
     null_safe: Vec<bool>,
@@ -262,33 +243,31 @@ struct DistributedLookupJoinExecutorArgs {
     mem_ctx: MemoryContext,
 }
 
-impl HashKeyDispatcher for DistributedLookupJoinExecutorArgs {
+impl<S: StateStore> HashKeyDispatcher for DistributedLookupJoinExecutorArgs<S> {
     type Output = BoxedExecutor;
 
     fn dispatch_impl<K: HashKey>(self) -> Self::Output {
-        Box::new(DistributedLookupJoinExecutor::<K>::new(
-            LookupJoinBase::<K> {
-                join_type: self.join_type,
-                condition: self.condition,
-                outer_side_input: self.outer_side_input,
-                outer_side_data_types: self.outer_side_data_types,
-                outer_side_key_idxs: self.outer_side_key_idxs,
-                inner_side_builder: self.inner_side_builder,
-                inner_side_key_types: self.inner_side_key_types,
-                inner_side_key_idxs: self.inner_side_key_idxs,
-                null_safe: self.null_safe,
-                lookup_prefix_len: self.lookup_prefix_len,
-                chunk_builder: self.chunk_builder,
-                schema: self.schema,
-                output_indices: self.output_indices,
-                chunk_size: self.chunk_size,
-                asof_desc: self.asof_desc,
-                identity: self.identity,
-                shutdown_rx: self.shutdown_rx,
-                mem_ctx: self.mem_ctx,
-                _phantom: PhantomData,
-            },
-        ))
+        Box::new(DistributedLookupJoinExecutor::<K, S>::new(LookupJoinBase {
+            join_type: self.join_type,
+            condition: self.condition,
+            outer_side_input: self.outer_side_input,
+            outer_side_data_types: self.outer_side_data_types,
+            outer_side_key_idxs: self.outer_side_key_idxs,
+            inner_side_builder: self.inner_side_builder,
+            inner_side_key_types: self.inner_side_key_types,
+            inner_side_key_idxs: self.inner_side_key_idxs,
+            null_safe: self.null_safe,
+            lookup_prefix_len: self.lookup_prefix_len,
+            chunk_builder: self.chunk_builder,
+            schema: self.schema,
+            output_indices: self.output_indices,
+            chunk_size: self.chunk_size,
+            asof_desc: self.asof_desc,
+            identity: self.identity,
+            shutdown_rx: self.shutdown_rx,
+            mem_ctx: self.mem_ctx,
+            _phantom: PhantomData,
+        }))
     }
 
     fn data_types(&self) -> &[DataType] {
@@ -329,7 +308,6 @@ impl<S: StateStore> InnerSideExecutorBuilder<S> {
     }
 }
 
-#[async_trait::async_trait]
 impl<S: StateStore> LookupExecutorBuilder for InnerSideExecutorBuilder<S> {
     fn reset(&mut self) {
         // PASS

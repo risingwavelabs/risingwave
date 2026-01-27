@@ -11,6 +11,8 @@ fi
 SCRIPT_DIR="$(dirname "$0")"
 cd "$SCRIPT_DIR"
 
+source "${SCRIPT_DIR}/../commands/common.sh"
+
 # check java version, only 8/11/17 are supported
 if type -p java; then
     JAVA_VER=$(java -version 2>&1 | awk -F '"' '/version/ {print $2}' | cut -d'.' -f1)
@@ -23,23 +25,20 @@ else
     exit 1
 fi
 
-# https://iceberg.apache.org/releases/
-# https://spark.apache.org/downloads.html
-ICEBERG_VERSION=1.8.1
-SPARK_VERSION=3.5.5
-
-PACKAGES="org.apache.iceberg:iceberg-spark-runtime-3.5_2.12:$ICEBERG_VERSION,org.apache.hadoop:hadoop-aws:3.3.2"
-PACKAGES="$PACKAGES,org.apache.spark:spark-connect_2.12:$SPARK_VERSION"
 
 SPARK_FILE="spark-${SPARK_VERSION}-bin-hadoop3.tgz"
-
 if [ ! -d "spark-${SPARK_VERSION}-bin-hadoop3" ];then
-    wget --no-verbose https://dlcdn.apache.org/spark/spark-${SPARK_VERSION}/$SPARK_FILE
+    echo "Downloading Spark ${SPARK_VERSION}..."
+    START_TIME=$(date +%s)
+    wget --no-verbose https://rw-ci-deps-dist.s3.amazonaws.com/spark-3.5.5-bin-hadoop3.tgz
+    END_TIME=$(date +%s)
+    ELAPSED_TIME=$((END_TIME - START_TIME))
+    echo "Download ${SPARK_FILE} took ${ELAPSED_TIME} seconds"
     tar -xzf $SPARK_FILE --no-same-owner
 fi
 
 # start new server
-./spark-${SPARK_VERSION}-bin-hadoop3/sbin/start-connect-server.sh --packages $PACKAGES \
+./spark-${SPARK_VERSION}-bin-hadoop3/sbin/start-connect-server.sh --packages $SPARK_PACKAGES \
   --master local[3] \
   --conf spark.driver.bindAddress=0.0.0.0 \
   --conf spark.sql.extensions=org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions \

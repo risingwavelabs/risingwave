@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,16 +14,17 @@
 
 use risingwave_common::catalog::OBJECT_ID_PLACEHOLDER;
 use risingwave_common::hash::VnodeCountCompat;
-use risingwave_pb::catalog::table::{OptionalAssociatedSourceId, PbEngine, PbTableType};
-use risingwave_pb::catalog::{PbHandleConflictBehavior, PbTable};
+use risingwave_common::id::JobId;
+use risingwave_pb::catalog::table::{CdcTableType as PbCdcTableType, PbEngine, PbTableType};
+use risingwave_pb::catalog::{PbHandleConflictBehavior, PbTable, PbVectorIndexInfo};
 use sea_orm::ActiveValue::Set;
 use sea_orm::NotSet;
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    Cardinality, ColumnCatalogArray, ColumnOrderArray, FragmentId, I32Array, ObjectId, SourceId,
-    TableId, TableVersion, WebhookSourceInfo,
+    Cardinality, ColumnCatalogArray, ColumnOrderArray, FragmentId, I32Array, SourceId, TableId,
+    TableVersion, WebhookSourceInfo,
 };
 
 #[derive(
@@ -39,6 +40,8 @@ pub enum TableType {
     Index,
     #[sea_orm(string_value = "INTERNAL")]
     Internal,
+    #[sea_orm(string_value = "VECTOR_INDEX")]
+    VectorIndex,
 }
 
 impl From<TableType> for PbTableType {
@@ -48,6 +51,7 @@ impl From<TableType> for PbTableType {
             TableType::MaterializedView => Self::MaterializedView,
             TableType::Index => Self::Index,
             TableType::Internal => Self::Internal,
+            TableType::VectorIndex => Self::VectorIndex,
         }
     }
 }
@@ -59,6 +63,7 @@ impl From<PbTableType> for TableType {
             PbTableType::MaterializedView => Self::MaterializedView,
             PbTableType::Index => Self::Index,
             PbTableType::Internal => Self::Internal,
+            PbTableType::VectorIndex => Self::VectorIndex,
             PbTableType::Unspecified => unreachable!("Unspecified table type"),
         }
     }
@@ -130,6 +135,51 @@ impl From<PbEngine> for Engine {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Hash, EnumIter, DeriveActiveEnum, Serialize, Deserialize)]
+#[sea_orm(rs_type = "String", db_type = "string(None)")]
+pub enum CdcTableType {
+    #[sea_orm(string_value = "UNSPECIFIED")]
+    Unspecified,
+    #[sea_orm(string_value = "POSTGRES")]
+    Postgres,
+    #[sea_orm(string_value = "MYSQL")]
+    Mysql,
+    #[sea_orm(string_value = "SQLSERVER")]
+    Sqlserver,
+    #[sea_orm(string_value = "MONGO")]
+    Mongo,
+    #[sea_orm(string_value = "CITUS")]
+    Citus,
+}
+
+impl From<CdcTableType> for PbCdcTableType {
+    fn from(cdc_table_type: CdcTableType) -> Self {
+        match cdc_table_type {
+            CdcTableType::Postgres => Self::Postgres,
+            CdcTableType::Mysql => Self::Mysql,
+            CdcTableType::Sqlserver => Self::Sqlserver,
+            CdcTableType::Mongo => Self::Mongo,
+            CdcTableType::Citus => Self::Citus,
+            CdcTableType::Unspecified => Self::Unspecified,
+        }
+    }
+}
+
+impl From<PbCdcTableType> for CdcTableType {
+    fn from(cdc_table_type: PbCdcTableType) -> Self {
+        match cdc_table_type {
+            PbCdcTableType::Postgres => Self::Postgres,
+            PbCdcTableType::Mysql => Self::Mysql,
+            PbCdcTableType::Sqlserver => Self::Sqlserver,
+            PbCdcTableType::Mongo => Self::Mongo,
+            PbCdcTableType::Citus => Self::Citus,
+            PbCdcTableType::Unspecified => Self::Unspecified,
+        }
+    }
+}
+
+crate::derive_from_blob!(VectorIndexInfo, PbVectorIndexInfo);
+
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq, Serialize, Deserialize)]
 #[sea_orm(table_name = "table")]
 pub struct Model {
@@ -138,7 +188,7 @@ pub struct Model {
     pub name: String,
     pub optional_associated_source_id: Option<SourceId>,
     pub table_type: TableType,
-    pub belongs_to_job_id: Option<ObjectId>,
+    pub belongs_to_job_id: Option<JobId>,
     pub columns: ColumnCatalogArray,
     pub pk: ColumnOrderArray,
     pub distribution_key: I32Array,
@@ -150,7 +200,7 @@ pub struct Model {
     pub value_indices: I32Array,
     pub definition: String,
     pub handle_pk_conflict_behavior: HandleConflictBehavior,
-    pub version_column_index: Option<i32>,
+    pub version_column_indices: Option<I32Array>,
     pub read_prefix_len_hint: i32,
     pub watermark_indices: I32Array,
     pub dist_key_in_pk: I32Array,
@@ -160,12 +210,15 @@ pub struct Model {
     pub description: Option<String>,
     pub version: Option<TableVersion>,
     pub retention_seconds: Option<i32>,
-    pub incoming_sinks: I32Array,
     pub cdc_table_id: Option<String>,
     pub vnode_count: i32,
     pub webhook_info: Option<WebhookSourceInfo>,
     pub engine: Option<Engine>,
     pub clean_watermark_index_in_pk: Option<i32>,
+    pub clean_watermark_indices: Option<I32Array>,
+    pub refreshable: bool,
+    pub vector_index_info: Option<VectorIndexInfo>,
+    pub cdc_table_type: Option<CdcTableType>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
@@ -236,6 +289,13 @@ impl Related<super::source::Entity> for Entity {
 
 impl ActiveModelBehavior for ActiveModel {}
 
+impl Model {
+    pub fn job_id(&self) -> JobId {
+        self.belongs_to_job_id
+            .unwrap_or_else(|| self.table_id.as_job_id())
+    }
+}
+
 impl From<PbTable> for ActiveModel {
     fn from(pb_table: PbTable) -> Self {
         let table_type = pb_table.table_type();
@@ -252,27 +312,25 @@ impl From<PbTable> for ActiveModel {
         let fragment_id = if pb_table.fragment_id == OBJECT_ID_PLACEHOLDER {
             NotSet
         } else {
-            Set(Some(pb_table.fragment_id as FragmentId))
+            Set(Some(pb_table.fragment_id))
         };
         let dml_fragment_id = pb_table
             .dml_fragment_id
-            .map(|x| Set(Some(x as FragmentId)))
+            .map(|x| Set(Some(x)))
             .unwrap_or_default();
         let optional_associated_source_id =
-            if let Some(OptionalAssociatedSourceId::AssociatedSourceId(src_id)) =
-                pb_table.optional_associated_source_id
-            {
-                Set(Some(src_id as SourceId))
+            if let Some(src_id) = pb_table.optional_associated_source_id {
+                Set(Some(src_id.into()))
             } else {
                 NotSet
             };
 
         Self {
-            table_id: Set(pb_table.id as _),
+            table_id: Set(pb_table.id),
             name: Set(pb_table.name),
             optional_associated_source_id,
             table_type: Set(table_type.into()),
-            belongs_to_job_id: Set(pb_table.job_id.map(|x| x as _)),
+            belongs_to_job_id: Set(pb_table.job_id),
             columns: Set(pb_table.columns.into()),
             pk: Set(pb_table.pk.into()),
             distribution_key: Set(pb_table.distribution_key.into()),
@@ -284,24 +342,59 @@ impl From<PbTable> for ActiveModel {
             value_indices: Set(pb_table.value_indices.into()),
             definition: Set(pb_table.definition),
             handle_pk_conflict_behavior: Set(handle_pk_conflict_behavior.into()),
-            version_column_index: Set(pb_table.version_column_index.map(|x| x as i32)),
+            version_column_indices: Set(Some(
+                pb_table
+                    .version_column_indices
+                    .iter()
+                    .map(|x| *x as i32)
+                    .collect::<Vec<_>>()
+                    .into(),
+            )),
             read_prefix_len_hint: Set(pb_table.read_prefix_len_hint as _),
             watermark_indices: Set(pb_table.watermark_indices.into()),
             dist_key_in_pk: Set(pb_table.dist_key_in_pk.into()),
             dml_fragment_id,
             cardinality: Set(pb_table.cardinality.as_ref().map(|x| x.into())),
+            #[expect(deprecated)]
             cleaned_by_watermark: Set(pb_table.cleaned_by_watermark),
             description: Set(pb_table.description),
             version: Set(pb_table.version.as_ref().map(|v| v.into())),
             retention_seconds: Set(pb_table.retention_seconds.map(|i| i as _)),
-            incoming_sinks: Set(pb_table.incoming_sinks.into()),
             cdc_table_id: Set(pb_table.cdc_table_id),
             vnode_count,
             webhook_info: Set(pb_table.webhook_info.as_ref().map(WebhookSourceInfo::from)),
             engine: Set(pb_table
                 .engine
                 .map(|engine| Engine::from(PbEngine::try_from(engine).expect("Invalid engine")))),
+            #[expect(deprecated)]
             clean_watermark_index_in_pk: Set(pb_table.clean_watermark_index_in_pk),
+            clean_watermark_indices: Set(if pb_table.clean_watermark_indices.is_empty() {
+                None
+            } else {
+                Some(
+                    pb_table
+                        .clean_watermark_indices
+                        .iter()
+                        .map(|x| *x as i32)
+                        .collect::<Vec<_>>()
+                        .into(),
+                )
+            }),
+            refreshable: Set(pb_table.refreshable),
+            vector_index_info: Set(pb_table
+                .vector_index_info
+                .as_ref()
+                .map(VectorIndexInfo::from)),
+            cdc_table_type: Set(pb_table.cdc_table_type.map(|cdc_table_type| {
+                match cdc_table_type {
+                    0 => CdcTableType::Postgres, // Map Unspecified to Postgres as default
+                    1 => CdcTableType::Postgres,
+                    2 => CdcTableType::Mysql,
+                    3 => CdcTableType::Sqlserver,
+                    4 => CdcTableType::Mongo,
+                    _ => panic!("Invalid CDC table type: {cdc_table_type}"),
+                }
+            })),
         }
     }
 }

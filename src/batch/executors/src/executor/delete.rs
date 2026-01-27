@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -11,6 +11,8 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+
+use std::collections::HashSet;
 
 use futures_async_stream::try_stream;
 use itertools::Itertools;
@@ -36,33 +38,37 @@ pub struct DeleteExecutor {
     /// Target table id.
     table_id: TableId,
     table_version_id: TableVersionId,
+    pk_indices: Vec<usize>,
     dml_manager: DmlManagerRef,
     child: BoxedExecutor,
-    #[expect(dead_code)]
     chunk_size: usize,
     schema: Schema,
     identity: String,
     returning: bool,
     txn_id: TxnId,
     session_id: u32,
+    upsert: bool,
 }
 
 impl DeleteExecutor {
     pub fn new(
         table_id: TableId,
         table_version_id: TableVersionId,
+        pk_indices: Vec<usize>,
         dml_manager: DmlManagerRef,
         child: BoxedExecutor,
         chunk_size: usize,
         identity: String,
         returning: bool,
         session_id: u32,
+        upsert: bool,
     ) -> Self {
         let table_schema = child.schema().clone();
         let txn_id = dml_manager.gen_txn_id();
         Self {
             table_id,
             table_version_id,
+            pk_indices,
             dml_manager,
             child,
             chunk_size,
@@ -77,6 +83,7 @@ impl DeleteExecutor {
             returning,
             txn_id,
             session_id,
+            upsert,
         }
     }
 }
@@ -98,8 +105,9 @@ impl Executor for DeleteExecutor {
 impl DeleteExecutor {
     #[try_stream(boxed, ok = DataChunk, error = BatchError)]
     async fn do_execute(self: Box<Self>) {
+        let pk_indices: HashSet<_> = self.pk_indices.into_iter().collect();
         let data_types = self.child.schema().data_types();
-        let mut builder = DataChunkBuilder::new(data_types, 1024);
+        let mut builder = DataChunkBuilder::new(data_types, self.chunk_size);
 
         let table_dml_handle = self
             .dml_manager
@@ -135,9 +143,25 @@ impl DeleteExecutor {
 
         #[for_await]
         for data_chunk in self.child.execute() {
-            let data_chunk = data_chunk?;
+            let mut data_chunk = data_chunk?;
             if self.returning {
                 yield data_chunk.clone();
+            }
+            if self.upsert {
+                let (cols, vis) = data_chunk.into_parts();
+                let cap = vis.len();
+                let mut new_cols = Vec::with_capacity(cols.len());
+                // Only keep the primary key columns, pad the rest with null.
+                for (i, col) in cols.into_iter().enumerate() {
+                    if pk_indices.contains(&i) {
+                        new_cols.push(col);
+                    } else {
+                        let mut builder = col.create_builder(cap);
+                        builder.append_n_null(cap);
+                        new_cols.push(builder.finish().into());
+                    }
+                }
+                data_chunk = DataChunk::new(new_cols, vis);
             }
             for chunk in builder.append_chunk(data_chunk) {
                 rows_deleted += write_txn_data(chunk).await?;
@@ -174,17 +198,23 @@ impl BoxedExecutorBuilder for DeleteExecutor {
             NodeBody::Delete
         )?;
 
-        let table_id = TableId::new(delete_node.table_id);
+        let table_id = delete_node.table_id;
 
         Ok(Box::new(Self::new(
             table_id,
             delete_node.table_version_id,
+            delete_node
+                .pk_indices
+                .iter()
+                .map(|&idx| idx as usize)
+                .collect(),
             source.context().dml_manager(),
             child,
             source.context().get_config().developer.chunk_size,
             source.plan_node().get_identity().clone(),
             delete_node.returning,
             delete_node.session_id,
+            delete_node.upsert,
         )))
     }
 }
@@ -243,12 +273,14 @@ mod tests {
         let delete_executor = Box::new(DeleteExecutor::new(
             table_id,
             INITIAL_TABLE_VERSION_ID,
+            vec![0],
             dml_manager,
             Box::new(mock_executor),
             1024,
             "DeleteExecutor".to_owned(),
             false,
             0,
+            false,
         ));
 
         let handle = tokio::spawn(async move {

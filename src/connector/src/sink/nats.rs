@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -11,9 +11,11 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+
 use core::fmt::Debug;
 use core::future::IntoFuture;
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
 use anyhow::{Context as _, anyhow};
 use async_nats::jetstream::context::Context;
@@ -21,18 +23,19 @@ use futures::FutureExt;
 use futures::prelude::TryFuture;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
-use serde_derive::Deserialize;
+use serde::Deserialize;
 use serde_with::serde_as;
 use tokio_retry::Retry;
 use tokio_retry::strategy::{ExponentialBackoff, jitter};
 use with_options::WithOptions;
 
+use super::SinkWriterParam;
 use super::encoder::{
     DateHandlingMode, JsonbHandlingMode, TimeHandlingMode, TimestamptzHandlingMode,
 };
 use super::utils::chunk_to_json;
-use super::{DummySinkCommitCoordinator, SinkWriterParam};
 use crate::connector_common::NatsCommon;
+use crate::enforce_secret::EnforceSecret;
 use crate::sink::encoder::{JsonEncoder, TimestampHandlingMode};
 use crate::sink::log_store::DeliveryFutureManagerAddFuture;
 use crate::sink::writer::{
@@ -59,10 +62,25 @@ pub struct NatsSink {
     is_append_only: bool,
 }
 
+impl EnforceSecret for NatsSink {
+    fn enforce_secret<'a>(
+        prop_iter: impl Iterator<Item = &'a str>,
+    ) -> crate::error::ConnectorResult<()> {
+        for prop in prop_iter {
+            NatsCommon::enforce_one(prop)?;
+        }
+        Ok(())
+    }
+}
+
 // sink write
 pub struct NatsSinkWriter {
     pub config: NatsConfig,
     context: Context,
+    /// Hold the client Arc to keep it alive. This allows the shared client cache to reuse
+    /// the connection while we're still using it.
+    #[expect(dead_code)]
+    client: Arc<async_nats::Client>,
     #[expect(dead_code)]
     schema: Schema,
     json_encoder: JsonEncoder,
@@ -100,7 +118,6 @@ impl TryFrom<SinkParam> for NatsSink {
 }
 
 impl Sink for NatsSink {
-    type Coordinator = DummySinkCommitCoordinator;
     type LogSinker = AsyncTruncateLogSinkerOf<NatsSinkWriter>;
 
     const SINK_NAME: &'static str = NATS_SINK;
@@ -128,14 +145,16 @@ impl Sink for NatsSink {
 
 impl NatsSinkWriter {
     pub async fn new(config: NatsConfig, schema: Schema) -> Result<Self> {
-        let context = config
+        let client = config
             .common
-            .build_context()
+            .build_client()
             .await
             .map_err(|e| SinkError::Nats(anyhow!(e)))?;
+        let context = NatsCommon::build_context_from_client(&client);
         Ok::<_, SinkError>(Self {
             config: config.clone(),
             context,
+            client,
             schema: schema.clone(),
             json_encoder: JsonEncoder::new(
                 schema,
@@ -153,6 +172,7 @@ impl NatsSinkWriter {
 impl AsyncTruncateSinkWriter for NatsSinkWriter {
     type DeliveryFuture = NatsSinkDeliveryFuture;
 
+    #[define_opaque(NatsSinkDeliveryFuture)]
     async fn write_chunk<'a>(
         &'a mut self,
         chunk: StreamChunk,

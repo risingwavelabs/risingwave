@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,6 +14,7 @@
 
 pub mod hummock_storage;
 pub mod local_hummock_storage;
+mod vector_writer;
 pub mod version;
 
 pub use hummock_storage::*;

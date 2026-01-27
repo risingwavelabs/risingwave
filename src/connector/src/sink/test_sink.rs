@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,24 +17,30 @@ use std::sync::{Arc, OnceLock};
 use anyhow::anyhow;
 use futures::future::BoxFuture;
 use parking_lot::Mutex;
-use sea_orm::DatabaseConnection;
+use tokio::sync::mpsc::UnboundedSender;
 
-use crate::sink::boxed::{BoxCoordinator, BoxLogSinker};
-use crate::sink::{Sink, SinkError, SinkParam, SinkWriterParam};
+use crate::connector_common::IcebergSinkCompactionUpdate;
+use crate::enforce_secret::EnforceSecret;
+use crate::sink::boxed::BoxLogSinker;
+use crate::sink::{Sink, SinkCommitCoordinator, SinkError, SinkParam, SinkWriterParam};
 
 pub trait BuildBoxLogSinkerTrait = FnMut(SinkParam, SinkWriterParam) -> BoxFuture<'static, crate::sink::Result<BoxLogSinker>>
     + Send
     + 'static;
-pub trait BuildBoxCoordinatorTrait = FnMut(DatabaseConnection) -> BoxCoordinator + Send + 'static;
+pub trait BuildSinkCoordinatorTrait = FnMut(SinkParam, Option<UnboundedSender<IcebergSinkCompactionUpdate>>) -> SinkCommitCoordinator
+    + Send
+    + 'static;
 
 type BuildBoxLogSinker = Box<dyn BuildBoxLogSinkerTrait>;
-type BuildBoxCoordinator = Box<dyn BuildBoxCoordinatorTrait>;
+type BuildSinkCoordinator = Box<dyn BuildSinkCoordinatorTrait>;
 pub const TEST_SINK_NAME: &str = "test";
 
 #[derive(Debug)]
 pub struct TestSink {
     param: SinkParam,
 }
+
+impl EnforceSecret for TestSink {}
 
 impl TryFrom<SinkParam> for TestSink {
     type Error = SinkError;
@@ -49,7 +55,6 @@ impl TryFrom<SinkParam> for TestSink {
 }
 
 impl Sink for TestSink {
-    type Coordinator = BoxCoordinator;
     type LogSinker = BoxLogSinker;
 
     const SINK_NAME: &'static str = "test";
@@ -67,14 +72,17 @@ impl Sink for TestSink {
 
     async fn new_coordinator(
         &self,
-        db: DatabaseConnection,
-    ) -> crate::sink::Result<Self::Coordinator> {
-        Ok(build_box_coordinator(db))
+        iceberg_compact_stat_sender: Option<UnboundedSender<IcebergSinkCompactionUpdate>>,
+    ) -> crate::sink::Result<SinkCommitCoordinator> {
+        Ok(build_sink_coordinator(
+            self.param.clone(),
+            iceberg_compact_stat_sender,
+        ))
     }
 }
 
 struct TestSinkRegistry {
-    build_box_sink: Arc<Mutex<Option<(BuildBoxLogSinker, BuildBoxCoordinator)>>>,
+    build_box_sink: Arc<Mutex<Option<(BuildBoxLogSinker, BuildSinkCoordinator)>>>,
 }
 
 impl TestSinkRegistry {
@@ -100,7 +108,7 @@ impl Drop for TestSinkRegistryGuard {
 
 fn register_build_sink_inner(
     build_box_log_sinker: impl BuildBoxLogSinkerTrait,
-    build_box_coordinator: impl BuildBoxCoordinatorTrait,
+    build_box_coordinator: impl BuildSinkCoordinatorTrait,
 ) -> TestSinkRegistryGuard {
     assert!(
         get_registry()
@@ -117,7 +125,7 @@ fn register_build_sink_inner(
 
 pub fn register_build_coordinated_sink(
     build_box_log_sinker: impl BuildBoxLogSinkerTrait,
-    build_box_coordinator: impl BuildBoxCoordinatorTrait,
+    build_box_coordinator: impl BuildSinkCoordinatorTrait,
 ) -> TestSinkRegistryGuard {
     register_build_sink_inner(build_box_log_sinker, build_box_coordinator)
 }
@@ -125,18 +133,21 @@ pub fn register_build_coordinated_sink(
 pub fn register_build_sink(
     build_box_log_sinker: impl BuildBoxLogSinkerTrait,
 ) -> TestSinkRegistryGuard {
-    register_build_sink_inner(build_box_log_sinker, |_| {
+    register_build_sink_inner(build_box_log_sinker, |_, _| {
         unreachable!("no coordinator registered")
     })
 }
 
-fn build_box_coordinator(db: DatabaseConnection) -> BoxCoordinator {
+fn build_sink_coordinator(
+    sink_param: SinkParam,
+    iceberg_compact_stat_sender: Option<UnboundedSender<IcebergSinkCompactionUpdate>>,
+) -> SinkCommitCoordinator {
     (get_registry()
         .build_box_sink
         .lock()
         .as_mut()
         .expect("should not be empty")
-        .1)(db)
+        .1)(sink_param, iceberg_compact_stat_sender)
 }
 
 async fn build_box_log_sinker(

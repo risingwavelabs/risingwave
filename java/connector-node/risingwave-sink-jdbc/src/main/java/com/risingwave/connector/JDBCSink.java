@@ -1,16 +1,18 @@
-// Copyright 2025 RisingWave Labs
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+/*
+ * Copyright 2023 RisingWave Labs
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 
 package com.risingwave.connector;
 
@@ -42,6 +44,9 @@ public class JDBCSink implements SinkWriter {
     public static final String JDBC_DATA_TYPE_KEY = "DATA_TYPE";
     public static final String JDBC_TYPE_NAME_KEY = "TYPE_NAME";
 
+    // batchInsertRows is only applicable to BatchAppendOnlyJDBCSink
+    private static final int DUMMY_BATCH_INSERT_ROWS = 0;
+
     private boolean updateFlag = false;
 
     private static final Logger LOG = LoggerFactory.getLogger(JDBCSink.class);
@@ -52,13 +57,9 @@ public class JDBCSink implements SinkWriter {
         var jdbcUrl = config.getJdbcUrl().toLowerCase();
         var factory = JdbcUtils.getDialectFactory(jdbcUrl);
         this.config = config;
+
         try {
-            conn =
-                    JdbcUtils.getConnection(
-                            config.getJdbcUrl(),
-                            config.getUser(),
-                            config.getPassword(),
-                            config.isAutoCommit());
+            conn = config.getConnection();
             // Table schema has been validated before, so we get the PK from it directly
             this.pkColumnNames = tableSchema.getPrimaryKeys();
             // column name -> java.sql.Types
@@ -190,12 +191,7 @@ public class JDBCSink implements SinkWriter {
                         conn.close();
 
                         // create a new connection if the current connection is invalid
-                        conn =
-                                JdbcUtils.getConnection(
-                                        config.getJdbcUrl(),
-                                        config.getUser(),
-                                        config.getPassword(),
-                                        config.isAutoCommit());
+                        conn = config.getConnection();
                         // reset the flag since we will retry to prepare the batch again
                         updateFlag = false;
                         jdbcStatements = new JdbcStatements(conn, config.getQueryTimeout());
@@ -247,10 +243,7 @@ public class JDBCSink implements SinkWriter {
 
             if (config.isUpsertSink()) {
                 var upsertSql =
-                        jdbcDialect.getUpsertStatement(
-                                schemaTableName,
-                                List.of(tableSchema.getColumnNames()),
-                                pkColumnNames);
+                        jdbcDialect.getUpsertStatement(schemaTableName, tableSchema, pkColumnNames);
                 // MySQL and Postgres have upsert SQL
                 if (upsertSql.isEmpty()) {
                     throw Status.FAILED_PRECONDITION
@@ -259,17 +252,17 @@ public class JDBCSink implements SinkWriter {
                 }
 
                 this.upsertStatement =
-                        conn.prepareStatement(upsertSql.get(), Statement.RETURN_GENERATED_KEYS);
+                        conn.prepareStatement(upsertSql.get(), Statement.NO_GENERATED_KEYS);
                 // upsert sink will handle DELETE events
                 var deleteSql = jdbcDialect.getDeleteStatement(schemaTableName, pkColumnNames);
                 this.deleteStatement =
-                        conn.prepareStatement(deleteSql, Statement.RETURN_GENERATED_KEYS);
+                        conn.prepareStatement(deleteSql, Statement.NO_GENERATED_KEYS);
             } else {
                 var insertSql =
                         jdbcDialect.getInsertIntoStatement(
                                 schemaTableName, List.of(tableSchema.getColumnNames()));
                 this.insertStatement =
-                        conn.prepareStatement(insertSql, Statement.RETURN_GENERATED_KEYS);
+                        conn.prepareStatement(insertSql, Statement.NO_GENERATED_KEYS);
             }
         }
 

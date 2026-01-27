@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,7 +14,6 @@
 
 use risingwave_common::acl::AclMode;
 use risingwave_common::catalog::{Schema, TableVersionId};
-use risingwave_pb::user::grant_privilege::PbObject;
 use risingwave_sqlparser::ast::{Expr, ObjectName, SelectItem};
 
 use super::statement::RewriteExprsRecursive;
@@ -22,6 +21,7 @@ use super::{Binder, BoundBaseTable};
 use crate::catalog::TableId;
 use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::ExprImpl;
+use crate::handler::privilege::ObjectCheckItem;
 use crate::user::UserId;
 
 #[derive(Debug, Clone)]
@@ -71,17 +71,20 @@ impl Binder {
         selection: Option<Expr>,
         returning_items: Vec<SelectItem>,
     ) -> Result<BoundDelete> {
-        let (schema_name, table_name) = Self::resolve_schema_qualified_name(&self.db_name, name)?;
+        let (schema_name, table_name) = Self::resolve_schema_qualified_name(&self.db_name, &name)?;
         let schema_name = schema_name.as_deref();
         let table = self.bind_table(schema_name, &table_name)?;
 
         let table_catalog = &table.table_catalog;
         Self::check_for_dml(table_catalog, false)?;
         self.check_privilege(
-            PbObject::TableId(table_catalog.id.table_id),
+            ObjectCheckItem::new(
+                table_catalog.owner,
+                AclMode::Delete,
+                table_name.clone(),
+                table_catalog.id,
+            ),
             table_catalog.database_id,
-            AclMode::Delete,
-            table_catalog.owner,
         )?;
 
         if !returning_items.is_empty() && table_catalog.has_generated_column() {
@@ -102,7 +105,7 @@ impl Binder {
             owner,
             table,
             selection: selection
-                .map(|expr| self.bind_expr(expr)?.enforce_bool_clause("WHERE"))
+                .map(|expr| self.bind_expr(&expr)?.enforce_bool_clause("WHERE"))
                 .transpose()?,
             returning_list,
             returning_schema: if returning {

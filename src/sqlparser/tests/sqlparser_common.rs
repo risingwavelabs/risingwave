@@ -858,7 +858,7 @@ fn parse_string_concat() {
     assert_eq!(
         SelectItem::UnnamedExpr(Expr::BinaryOp {
             left: Box::new(Expr::Identifier(Ident::new_unchecked("a"))),
-            op: BinaryOperator::Concat,
+            op: BinaryOperator::Custom("||".to_owned()),
             right: Box::new(Expr::Identifier(Ident::new_unchecked("b"))),
         }),
         select.projection[0]
@@ -868,9 +868,8 @@ fn parse_string_concat() {
 #[test]
 fn parse_bitwise_ops() {
     let bitwise_ops = &[
-        ("^", BinaryOperator::BitwiseXor),
-        ("|", BinaryOperator::BitwiseOr),
-        ("&", BinaryOperator::BitwiseAnd),
+        ("|", BinaryOperator::Custom("|".to_owned())),
+        ("&", BinaryOperator::Custom("&".to_owned())),
     ];
 
     for (str_op, op) in bitwise_ops {
@@ -1372,7 +1371,7 @@ fn parse_create_table() {
                         ],
                     ),
                     ColumnDef::new(
-                        "ref".into(),
+                        Ident::new_unchecked("ref"),
                         DataType::Int,
                         None,
                         vec![ColumnOptionDef {
@@ -1875,6 +1874,7 @@ fn parse_explain_analyze_with_simple_select() {
             verbose: true,
             explain_type: ExplainType::DistSql,
             explain_format: ExplainFormat::Text,
+            ..Default::default()
         },
     );
     run_explain_analyze(
@@ -1885,6 +1885,7 @@ fn parse_explain_analyze_with_simple_select() {
             verbose: true,
             explain_type: ExplainType::DistSql,
             explain_format: ExplainFormat::Text,
+            ..Default::default()
         },
     );
     run_explain_analyze(
@@ -1895,6 +1896,7 @@ fn parse_explain_analyze_with_simple_select() {
             verbose: true,
             explain_type: ExplainType::DistSql,
             explain_format: ExplainFormat::Text,
+            ..Default::default()
         },
     );
     run_explain_analyze(
@@ -1905,6 +1907,7 @@ fn parse_explain_analyze_with_simple_select() {
             verbose: false,
             explain_type: ExplainType::Logical,
             explain_format: ExplainFormat::Json,
+            ..Default::default()
         },
     );
 }
@@ -1922,7 +1925,7 @@ fn parse_explain_with_invalid_options() {
 
     let res = parse_sql_statements("EXPLAIN (VERBOSE, ) SELECT sqrt(id) FROM foo");
 
-    let expected = "sql parser error: expected one of VERBOSE or TRACE or TYPE or LOGICAL or PHYSICAL or DISTSQL or FORMAT or DURATION_SECS, found: )";
+    let expected = "sql parser error: expected identifier, found: )";
     let actual = res.unwrap_err().to_string();
     assert!(
         actual.contains(expected),
@@ -1986,11 +1989,14 @@ fn parse_window_functions() {
             GROUPS BETWEEN 1 PRECEDING AND 1 FOLLOWING\
         ), \
         AGGREGATE:my_func(abc) OVER (), \
-        rank(foo IGNORE NULLS) FILTER (WHERE bar > 0) OVER (ORDER BY a) \
-    FROM foo\
+        rank(foo IGNORE NULLS) FILTER (WHERE bar > 0) OVER (ORDER BY a), \
+        min(foo) OVER w1, \
+        min(foo) OVER w2 \
+    FROM foo \
+    WINDOW w1 AS (PARTITION BY a ORDER BY b), w2 AS (PARTITION BY c ORDER BY d)\
     ";
     let select = verified_only_select(sql);
-    assert_eq!(7, select.projection.len());
+    assert_eq!(9, select.projection.len());
     assert_eq!(
         &Expr::Function(Function {
             scalar_as_agg: false,
@@ -1998,7 +2004,7 @@ fn parse_window_functions() {
             arg_list: FunctionArgList::empty(),
             within_group: None,
             filter: None,
-            over: Some(WindowSpec {
+            over: Some(Window::Spec(WindowSpec {
                 partition_by: vec![],
                 order_by: vec![OrderByExpr {
                     expr: Expr::Identifier(Ident::new_unchecked("dt")),
@@ -2006,7 +2012,7 @@ fn parse_window_functions() {
                     nulls_first: None,
                 }],
                 window_frame: None,
-            }),
+            })),
         }),
         expr_from_projection(&select.projection[0])
     );
@@ -2025,11 +2031,11 @@ fn parse_window_functions() {
             },
             within_group: None,
             filter: None,
-            over: Some(WindowSpec {
+            over: Some(Window::Spec(WindowSpec {
                 partition_by: vec![],
                 order_by: vec![],
                 window_frame: None,
-            }),
+            })),
         }),
         expr_from_projection(&select.projection[5])
     );
@@ -2052,7 +2058,7 @@ fn parse_window_functions() {
                 op: BinaryOperator::Gt,
                 right: Box::new(Expr::Value(Value::Number("0".to_owned()))),
             })),
-            over: Some(WindowSpec {
+            over: Some(Window::Spec(WindowSpec {
                 partition_by: vec![],
                 order_by: vec![OrderByExpr {
                     expr: Expr::Identifier(Ident::new_unchecked("a")),
@@ -2060,9 +2066,22 @@ fn parse_window_functions() {
                     nulls_first: None,
                 }],
                 window_frame: None,
-            }),
+            })),
         }),
         expr_from_projection(&select.projection[6])
+    );
+    assert_eq!(
+        &Expr::Function(Function {
+            scalar_as_agg: false,
+            name: ObjectName(vec![Ident::new_unchecked("min")]),
+            arg_list: FunctionArgList::args_only(vec![FunctionArg::Unnamed(
+                FunctionArgExpr::Expr(Expr::Identifier(Ident::new_unchecked("foo")))
+            )]),
+            within_group: None,
+            filter: None,
+            over: Some(Window::Name(Ident::new_unchecked("w1"))),
+        }),
+        expr_from_projection(&select.projection[7])
     );
 }
 
@@ -2605,6 +2624,9 @@ fn parse_temporal_join() {
         },
         only(only(select.from).joins),
     );
+
+    let sql = "SELECT * FROM t1 JOIN t2 FOR SYSTEM_TIME AS OF NOW() - '1' SECOND ON c1 = c2";
+    verified_only_select(sql);
 }
 
 #[test]
@@ -3377,12 +3399,12 @@ fn parse_create_table_on_conflict_with_version_column() {
         Statement::CreateTable {
             name,
             on_conflict,
-            with_version_column,
+            with_version_columns,
             ..
         } => {
             assert_eq!("t", name.to_string());
             assert_eq!(on_conflict, Some(OnConflict::UpdateFull));
-            assert_eq!(with_version_column.unwrap().real_value(), "v2");
+            assert_eq!(with_version_columns, vec![Ident::new_unchecked("v2")]);
         }
         _ => unreachable!(),
     }
@@ -3841,7 +3863,7 @@ fn parse_rollback() {
 
 #[test]
 fn parse_create_index() {
-    let sql = "CREATE UNIQUE INDEX IF NOT EXISTS idx_name ON test(name, age DESC) INCLUDE(other) DISTRIBUTED BY(name)";
+    let sql = "CREATE UNIQUE INDEX IF NOT EXISTS idx_name ON test USING hnsw (name, age DESC) INCLUDE(other) DISTRIBUTED BY(name) WITH (m = 16)";
     let indexed_columns = vec![
         OrderByExpr {
             expr: Expr::Identifier(Ident::new_unchecked("name")),
@@ -3862,21 +3884,37 @@ fn parse_create_index() {
             name,
             table_name,
             columns,
+            method,
             include,
             distributed_by,
             unique,
             if_not_exists,
+            with_properties,
         } => {
             assert_eq!("idx_name", name.to_string());
             assert_eq!("test", table_name.to_string());
             assert_eq!(indexed_columns, columns);
+            assert_eq!(method, Some(Ident::new_unchecked("hnsw")));
             assert_eq!(include_columns, include);
             assert_eq!(distributed_columns, distributed_by);
             assert!(unique);
-            assert!(if_not_exists)
+            assert!(if_not_exists);
+            assert_eq!(
+                with_properties.0,
+                vec![SqlOption {
+                    name: ObjectName::from_test_str("m"),
+                    value: SqlOptionValue::Value(Value::Number("16".to_owned())),
+                }]
+            )
         }
         _ => unreachable!(),
     }
+    verified_stmt(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_name ON test(name, age DESC) INCLUDE(other) DISTRIBUTED BY(name)",
+    );
+    verified_stmt(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_name ON test(name, age DESC) INCLUDE(other) DISTRIBUTED BY(name) WITH (m = 16)",
+    );
 }
 
 #[test]
@@ -4079,4 +4117,84 @@ fn all_keywords_sorted() {
     let mut copy = Vec::from(ALL_KEYWORDS);
     copy.sort_unstable();
     assert_eq!(copy, ALL_KEYWORDS)
+}
+
+#[test]
+fn parse_window_clause() {
+    // Test that WINDOW clause can be parsed
+    let sql = "SELECT sum(foo) OVER w FROM t WINDOW w AS (PARTITION BY col)";
+    let ast = parse_sql_statements(sql).unwrap();
+    // For now just verify it parses without errors
+    assert_eq!(ast.len(), 1);
+
+    // Test multiple named windows
+    let sql = "SELECT sum(foo) OVER w1, avg(bar) OVER w2 FROM t WINDOW w1 AS (PARTITION BY col1), w2 AS (ORDER BY col2)";
+    let ast = parse_sql_statements(sql).unwrap();
+    assert_eq!(ast.len(), 1);
+
+    // Test inline window specification (should still work)
+    let sql = "SELECT sum(foo) OVER (PARTITION BY col) FROM t";
+    let ast = parse_sql_statements(sql).unwrap();
+    assert_eq!(ast.len(), 1);
+}
+
+#[test]
+fn parse_alter_fragment_set_parallelism() {
+    match verified_stmt("ALTER FRAGMENT 1 SET PARALLELISM TO 4") {
+        Statement::AlterFragment {
+            fragment_ids,
+            operation,
+        } => {
+            assert_eq!(fragment_ids, vec![1]);
+            match operation {
+                AlterFragmentOperation::SetParallelism { parallelism } => {
+                    assert_eq!(
+                        parallelism,
+                        SetVariableValue::Single(SetVariableValueSingle::Literal(Value::Number(
+                            "4".into()
+                        )))
+                    );
+                }
+                _ => panic!("unexpected alter fragment operation"),
+            }
+        }
+        _ => panic!("unexpected statement kind"),
+    }
+
+    match verified_stmt("ALTER FRAGMENT 2 SET PARALLELISM TO DEFAULT") {
+        Statement::AlterFragment {
+            fragment_ids,
+            operation,
+        } => {
+            assert_eq!(fragment_ids, vec![2]);
+            match operation {
+                AlterFragmentOperation::SetParallelism { parallelism } => {
+                    assert_eq!(parallelism, SetVariableValue::Default);
+                }
+                _ => panic!("unexpected alter fragment operation"),
+            }
+        }
+        _ => panic!("unexpected statement kind"),
+    }
+
+    match verified_stmt("ALTER FRAGMENT 1, 2, 3 SET PARALLELISM TO 8") {
+        Statement::AlterFragment {
+            fragment_ids,
+            operation,
+        } => {
+            assert_eq!(fragment_ids, vec![1, 2, 3]);
+            match operation {
+                AlterFragmentOperation::SetParallelism { parallelism } => {
+                    assert_eq!(
+                        parallelism,
+                        SetVariableValue::Single(SetVariableValueSingle::Literal(Value::Number(
+                            "8".into()
+                        )))
+                    );
+                }
+                _ => panic!("unexpected alter fragment operation"),
+            }
+        }
+        _ => panic!("unexpected statement kind"),
+    }
 }

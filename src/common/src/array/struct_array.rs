@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -244,13 +244,7 @@ impl StructArray {
             .iter()
             .map(|child| Ok(Arc::new(ArrayImpl::from_protobuf(child, cardinality)?)))
             .collect::<ArrayResult<Vec<ArrayRef>>>()?;
-        let type_ = StructType::unnamed(
-            array_data
-                .children_type
-                .iter()
-                .map(DataType::from)
-                .collect(),
-        );
+        let type_ = StructType::unnamed(array_data.children_type.iter().map(DataType::from));
         Ok(Self::new(type_, children, bitmap).into())
     }
 
@@ -293,7 +287,7 @@ impl EstimateSize for StructArray {
 impl From<DataChunk> for StructArray {
     fn from(chunk: DataChunk) -> Self {
         Self::new(
-            StructType::unnamed(chunk.columns().iter().map(|c| c.data_type()).collect()),
+            StructType::unnamed(chunk.columns().iter().map(|c| c.data_type())),
             chunk.columns().to_vec(),
             chunk.visibility().clone(),
         )
@@ -332,6 +326,11 @@ impl StructValue {
         Self {
             fields: fields.into_boxed_slice(),
         }
+    }
+
+    /// Returns an empty struct.
+    pub fn empty() -> Self {
+        Self::new(vec![])
     }
 
     pub fn fields(&self) -> &[Datum] {
@@ -832,7 +831,7 @@ mod tests {
 
             let mut builder = StructArrayBuilder::with_type(
                 0,
-                DataType::Struct(StructType::unnamed(fields.to_vec())),
+                DataType::Struct(StructType::unnamed(fields.clone())),
             );
             builder.append(Some(StructRef::ValueRef { val: &lhs }));
             builder.append(Some(StructRef::ValueRef { val: &rhs }));

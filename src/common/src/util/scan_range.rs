@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -737,7 +737,7 @@ mod tests {
             &order_types
         ));
 
-        // (Included, Included) vs (Excluded, Encluded)
+        // (Included, Included) vs (Excluded, Included)
         assert!(!ScanRange::range_overlap_check(
             (
                 Bound::Included(vec![Some(ScalarImpl::Int32(1))]),
@@ -750,7 +750,7 @@ mod tests {
             &order_types
         ));
 
-        // (Included, Included) vs (Included, Encluded)
+        // (Included, Included) vs (Included, Included)
         assert!(ScanRange::range_overlap_check(
             (
                 Bound::Included(vec![Some(ScalarImpl::Int32(1))]),

@@ -1,10 +1,12 @@
 services:
   # TODO: Rename this to `postgres`
   db:
-    image: postgres:15-alpine
+    image: postgis/postgis:15-3.5-alpine
     environment:
       - POSTGRES_USER=postgres
-      - POSTGRES_PASSWORD=postgres
+      # Test with a password containing special characters #21943, for example 0x5c.
+      # Note that 0x5c 0x74 are TWO characters. It is NOT 0x09.
+      - POSTGRES_PASSWORD=post\tgres
       - POSTGRES_INITDB_ARGS=--encoding=UTF-8 --lc-collate=C --lc-ctype=C
     ports:
       - 5432
@@ -13,8 +15,12 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+    volumes:
+      - ./postgres-conf/00-setup-ssl-user.sh:/docker-entrypoint-initdb.d/00-setup-ssl-user.sh
+      - ./postgres-conf/entrypoint-wrapper.sh:/entrypoint-wrapper.sh
+    entrypoint: ["/bin/sh", "/entrypoint-wrapper.sh"]
     command:
-      ["postgres", "-c", "wal_level=logical", "-c", "max_replication_slots=50", "-c", "max_wal_senders=20"]
+      ["postgres", "-c", "wal_level=logical", "-c", "max_replication_slots=50", "-c", "max_wal_senders=20", "-c", "ssl=on", "-c", "ssl_cert_file=/etc/postgresql/server.crt", "-c", "ssl_key_file=/etc/postgresql/server.key"]
 
   mysql:
     image: mysql:8.0
@@ -78,15 +84,97 @@ services:
       # Don't use Redpanda's schema registry, use the separated service instead
       # - "8081:8081"
     environment: {}
-    container_name: message_queue
     healthcheck:
       test: curl -f localhost:9644/v1/status/ready
       interval: 1s
       timeout: 5s
       retries: 5
 
+  message_queue_sasl_1:
+    image: redpandadata/redpanda:latest
+    ports:
+      - "19092:19092"
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        rpk redpanda start --mode dev-container --node-id 0 \
+          --smp 1 --memory 1G \
+          --set redpanda.kafka_api[0].name=SASL_PLAINTEXT \
+          --set redpanda.kafka_api[0].address=0.0.0.0 \
+          --set redpanda.kafka_api[0].port=19092 \
+          --set redpanda.kafka_api[0].authentication_method=sasl \
+          --set redpanda.advertised_kafka_api[0].name=SASL_PLAINTEXT \
+          --set redpanda.advertised_kafka_api[0].address=message_queue_sasl_1 \
+          --set redpanda.advertised_kafka_api[0].port=19092 \
+          --set redpanda.enable_sasl=true \
+          --set redpanda.sasl_mechanisms='["SCRAM","PLAIN"]' \
+          --set redpanda.superusers='["dev"]' &
+        # Wait for the cluster to be ready
+        until rpk cluster health --watch --exit-when-healthy; do sleep 1; done
+        # Create the user
+        rpk acl user create dev -p rw
+        # Wait for the redpanda process
+        wait
+    healthcheck:
+      test: curl -f localhost:9644/v1/status/ready
+      interval: 1s
+      timeout: 5s
+      retries: 5
+
+  message_queue_sasl_2:
+    image: redpandadata/redpanda:latest
+    ports:
+      - "19093:19093"
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        rpk redpanda start --mode dev-container --node-id 0 \
+          --smp 1 --memory 1G \
+          --set redpanda.kafka_api[0].name=SASL_PLAINTEXT \
+          --set redpanda.kafka_api[0].address=0.0.0.0 \
+          --set redpanda.kafka_api[0].port=19093 \
+          --set redpanda.kafka_api[0].authentication_method=sasl \
+          --set redpanda.advertised_kafka_api[0].name=SASL_PLAINTEXT \
+          --set redpanda.advertised_kafka_api[0].address=message_queue_sasl_2 \
+          --set redpanda.advertised_kafka_api[0].port=19093 \
+          --set redpanda.enable_sasl=true \
+          --set redpanda.sasl_mechanisms='["SCRAM","PLAIN"]' \
+          --set redpanda.superusers='["dev1"]' &
+        # Wait for the cluster to be ready
+        until rpk cluster health --watch --exit-when-healthy; do sleep 1; done
+        # Create the user
+        rpk acl user create dev1 -p rw
+        # Wait for the redpanda process
+        wait
+    healthcheck:
+      test: curl -f localhost:9644/v1/status/ready
+      interval: 1s
+      timeout: 5s
+      retries: 5
+
+  rabbitmq-server:
+    image: rabbitmq:3-management
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+      - "1883:1883"
+    environment:
+      - RABBITMQ_DEFAULT_USER=guest
+      - RABBITMQ_DEFAULT_PASS=guest
+    volumes:
+      - ./rabbitmq-conf/rabbitmq.conf:/etc/rabbitmq/rabbitmq.conf:ro
+      - ./rabbitmq-conf/enabled_plugins:/etc/rabbitmq/enabled_plugins:ro
+      - ./rabbitmq-conf/advanced.config:/etc/rabbitmq/advanced.config:ro
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "check_port_connectivity"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   source-test-env:
-    image: public.ecr.aws/w1p7b4n3/rw-build-env:v20250326
+    image: public.ecr.aws/w1p7b4n3/rw-build-env:${BUILD_ENV_VERSION:?}
     depends_on:
       - mysql
       - mysql-meta
@@ -94,15 +182,36 @@ services:
       - db
       - message_queue
       - schemaregistry
+      - pulsar-server
       - mongodb
       - mongodb-setup
-      - mongo_data_generator
       - nats-server
+      - vault-server
+      - message_queue_sasl_1
+      - message_queue_sasl_2
+      - rabbitmq-server
     volumes:
       - ..:/risingwave
+    stop_grace_period: 30s
+
+  backward-compatibility-test-env:
+    image: public.ecr.aws/w1p7b4n3/rw-build-env:${BUILD_ENV_VERSION:?}
+    depends_on:
+      - mysql
+      - mysql-meta
+      - sqlserver-server
+      - db
+      - message_queue
+      - schemaregistry
+      - pulsar-server
+      - mongodb
+      - mongodb-setup
+    volumes:
+      - ..:/risingwave
+    stop_grace_period: 30s
 
   sink-test-env:
-    image: public.ecr.aws/w1p7b4n3/rw-build-env:v20250326
+    image: public.ecr.aws/w1p7b4n3/rw-build-env:${BUILD_ENV_VERSION:?}
     depends_on:
       - mysql
       - mysql-meta
@@ -123,9 +232,10 @@ services:
       - sqlserver-server
     volumes:
       - ..:/risingwave
+    stop_grace_period: 30s
 
   iceberg-test-env:
-    image: public.ecr.aws/w1p7b4n3/rw-build-env:v20250326
+    image: public.ecr.aws/w1p7b4n3/rw-build-env:${BUILD_ENV_VERSION:?}
     depends_on:
       - mysql
       - db
@@ -133,29 +243,43 @@ services:
       - schemaregistry
     volumes:
       - ..:/risingwave
-  rw-build-env:
-    image: public.ecr.aws/w1p7b4n3/rw-build-env:v20250326
+    stop_grace_period: 30s
+
+  ldap-test-env:
+    image: public.ecr.aws/w1p7b4n3/rw-build-env:${BUILD_ENV_VERSION:?}
+    depends_on:
+      ldap-server:
+        condition: service_healthy
     volumes:
       - ..:/risingwave
+    stop_grace_period: 30s
+
+  rw-build-env:
+    image: public.ecr.aws/w1p7b4n3/rw-build-env:${BUILD_ENV_VERSION:?}
+    volumes:
+      - ..:/risingwave
+    stop_grace_period: 30s
 
   # Standard environment for CI, including MySQL and Postgres for metadata.
   ci-standard-env:
-    image: public.ecr.aws/w1p7b4n3/rw-build-env:v20250326
+    image: public.ecr.aws/w1p7b4n3/rw-build-env:${BUILD_ENV_VERSION:?}
     depends_on:
       - mysql-meta
       - db
     volumes:
       - ..:/risingwave
+    stop_grace_period: 30s
 
   iceberg-engine-env:
-    image: public.ecr.aws/w1p7b4n3/rw-build-env:v20250326
+    image: public.ecr.aws/w1p7b4n3/rw-build-env:${BUILD_ENV_VERSION:?}
     depends_on:
       - db
     volumes:
       - ..:/risingwave
+    stop_grace_period: 30s
 
   ci-flamegraph-env:
-    image: public.ecr.aws/w1p7b4n3/rw-build-env:v20250326
+    image: public.ecr.aws/w1p7b4n3/rw-build-env:${BUILD_ENV_VERSION:?}
     # NOTE(kwannoel): This is used in order to permit
     # syscalls for `nperf` (perf_event_open),
     # so it can do CPU profiling.
@@ -166,7 +290,7 @@ services:
       - ..:/risingwave
 
   regress-test-env:
-    image: public.ecr.aws/w1p7b4n3/rw-build-env:v20250326
+    image: public.ecr.aws/w1p7b4n3/rw-build-env:${BUILD_ENV_VERSION:?}
     depends_on:
       db:
         condition: service_healthy
@@ -196,7 +320,6 @@ services:
       - ..:/mnt
 
   elasticsearch:
-    container_name: elasticsearch
     image: docker.elastic.co/elasticsearch/elasticsearch:7.11.0
     environment:
       - xpack.security.enabled=true
@@ -206,18 +329,18 @@ services:
       - 9200:9200
 
   clickhouse-server:
-    image: clickhouse/clickhouse-server:23.3.8.21-alpine
-    container_name: clickhouse-server-1
-    hostname: clickhouse-server-1
+    image: clickhouse/clickhouse-server:25.5
     ports:
       - "8123:8123"
       - "9000:9000"
       - "9004:9004"
     expose:
       - 9009
+    environment:
+      CLICKHOUSE_USER: "default"
+      CLICKHOUSE_PASSWORD: "default"
 
   redis-server:
-    container_name: redis-server
     image: "redis:latest"
     expose:
       - 6379
@@ -230,7 +353,6 @@ services:
       retries: 50
 
   cassandra-server:
-    container_name: cassandra-server
     image: cassandra:4.0
     ports:
       - 9042:9042
@@ -238,7 +360,6 @@ services:
       - CASSANDRA_CLUSTER_NAME=cloudinfra
 
   doris-server:
-    container_name: doris-server
     image: apache/doris:doris-all-in-one-2.1.0
     ports:
       - 8030:8030
@@ -250,9 +371,7 @@ services:
       retries: 30
 
   sqlserver-server:
-    container_name: sqlserver-server
     image: mcr.microsoft.com/mssql/server:2022-latest
-    hostname: sqlserver-server
     ports:
       - 1433:1433
     environment:
@@ -261,9 +380,7 @@ services:
       MSSQL_AGENT_ENABLED: "true"
 
   starrocks-fe-server:
-    container_name: starrocks-fe-server
     image: starrocks/fe-ubuntu:3.1.7
-    hostname: starrocks-fe-server
     command: /opt/starrocks/fe/bin/start_fe.sh
     ports:
       - 28030:8030
@@ -286,8 +403,6 @@ services:
     ports:
       - 28040:8040
       - 29050:9050
-    hostname: starrocks-be-server
-    container_name: starrocks-be-server
     depends_on:
       - starrocks-fe-server
 
@@ -296,8 +411,6 @@ services:
   # # Related tracking issue:
   # # https://github.com/redpanda-data/redpanda/issues/1878
   schemaregistry:
-    container_name: schemaregistry
-    hostname: schemaregistry
     image: confluentinc/cp-schema-registry:latest
     depends_on:
       - message_queue
@@ -309,7 +422,6 @@ services:
       SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS: message_queue:29092
 
   pulsar-server:
-    container_name: pulsar-server
     image: apachepulsar/pulsar:latest
     command: bin/pulsar standalone
     ports:
@@ -325,43 +437,31 @@ services:
       retries: 5
 
   mongodb:
-    image: mongo:4.4
+    image: mongo:8
     ports:
       - "27017"
     command: --replSet rs0 --oplogSize 128
     restart: always
     healthcheck:
-      test: "echo 'db.runCommand({ping: 1})' | mongo"
+      test: "echo 'db.runCommand({ping: 1})' | mongosh"
       interval: 5s
       timeout: 10s
       retries: 3
 
   mongodb-setup:
-    image: mongo:4.4
-    container_name: mongodb-setup
+    image: mongo:8
     depends_on:
       - mongodb
     entrypoint:
       [
         "bash",
         "-c",
-        "sleep 10 && mongo --host mongodb:27017 /config-replica.js && sleep 10",
+        "sleep 10 && mongosh --host mongodb:27017 /config-replica.js && sleep 10",
       ]
     restart: "no"
     volumes:
       - ./mongodb/config-replica.js:/config-replica.js
 
-  mongo_data_generator:
-    build:
-      context: .
-      dockerfile: ./mongodb/Dockerfile.generator
-    container_name: mongo_data_generator
-    depends_on:
-      - mongodb
-    environment:
-      MONGO_HOST: mongodb
-      MONGO_PORT: 27017
-      MONGO_DB_NAME: random_data
   mqtt-server:
     image: eclipse-mosquitto
     command:
@@ -390,3 +490,73 @@ services:
       interval: 10s
       timeout: 5s
       retries: 3
+
+  vault-server:
+    image: hashicorp/vault:1.20
+    ports:
+      - "8200:8200"
+    environment:
+      - VAULT_DEV_ROOT_TOKEN_ID=root-token
+      - VAULT_DEV_LISTEN_ADDRESS=0.0.0.0:8200
+      - VAULT_ADDR=http://0.0.0.0:8200
+    cap_add:
+      - IPC_LOCK
+    command: vault server -dev -dev-listen-address=0.0.0.0:8200
+    healthcheck:
+      test: ["CMD", "vault", "status"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  ldap-server:
+    image: osixia/openldap:1.5.0
+    hostname: ldap-server
+    environment:
+      LDAP_DISABLE_CHOWN: "true"
+      LDAP_ORGANISATION: "Example Corp"
+      LDAP_DOMAIN: "example.com"
+      LDAP_BASE_DN: "dc=example,dc=com"
+      LDAP_ADMIN_PASSWORD: "admin123"
+      LDAP_CONFIG_PASSWORD: "config123"
+      LDAP_READONLY_USER: "false"
+      LDAP_RFC2307BIS_SCHEMA: "false"
+      LDAP_BACKEND: "mdb"
+      LDAP_REMOVE_CONFIG_AFTER_SETUP: "false"
+      LDAP_TLS: "true"
+      LDAP_TLS_CRT_FILENAME: "server.crt"
+      LDAP_TLS_KEY_FILENAME: "server.key"
+      LDAP_TLS_CA_CRT_FILENAME: "ca.crt"
+      LDAP_TLS_DH_PARAM_FILENAME: "dhparam.pem"
+      LDAP_TLS_ENFORCE: "false"
+      LDAP_TLS_VERIFY_CLIENT: "try"
+      LDAP_TLS_PROTOCOL_MIN: "3.1"
+      LDAP_TLS_CIPHER_SUITE: "SECURE256:+SECURE128:-VERS-TLS-ALL:+VERS-TLS1.2:-RSA:-DHE-DSS:-CAMELLIA-128-CBC:-CAMELLIA-256-CBC"
+    ports:
+      - "389:389"
+      - "636:636"
+    volumes:
+      - ./ldap-test/ldif:/workspace/ldif
+      - ./ldap-test/certs:/container/service/slapd/assets/certs
+      - ./ldap-test/setup-ldap-certs.sh:/workspace/setup-ldap-certs.sh
+    entrypoint:
+      - /bin/bash
+      - -c
+      - |
+        set -euo pipefail
+
+        echo "=== Generating certificates ==="
+        export CERT_DIR=/container/service/slapd/assets/certs
+        bash /workspace/setup-ldap-certs.sh
+
+        echo "=== Importing LDIF files ==="
+        mkdir -p /container/service/slapd/assets/config/bootstrap/ldif/custom
+        cp -r /workspace/ldif/* /container/service/slapd/assets/config/bootstrap/ldif/custom/
+
+        echo "=== Certificates ready, starting OpenLDAP ==="
+        exec /container/tool/run --loglevel debug
+    healthcheck:
+      test: ["CMD-SHELL", "ldapsearch -x -H ldap://localhost:389 -b 'dc=example,dc=com' -D 'cn=admin,dc=example,dc=com' -w 'admin123' >/dev/null 2>&1"]
+      interval: 5s
+      timeout: 10s
+      retries: 10
+      start_period: 10s

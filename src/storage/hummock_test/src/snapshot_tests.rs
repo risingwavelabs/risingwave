@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,7 +17,7 @@ use std::ops::Bound;
 use std::sync::Arc;
 
 use bytes::Bytes;
-use foyer::CacheHint;
+use foyer::Hint;
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::util::epoch::{EpochExt, test_epoch};
 use risingwave_hummock_sdk::HummockReadEpoch;
@@ -28,9 +28,7 @@ use risingwave_storage::StateStore;
 use risingwave_storage::hummock::test_utils::{ReadOptions, *};
 use risingwave_storage::hummock::{CachePolicy, HummockStorage};
 use risingwave_storage::storage_value::StorageValue;
-use risingwave_storage::store::{
-    LocalStateStore, NewLocalOptions, PrefetchOptions, SealCurrentEpochOptions, TryWaitEpochOptions,
-};
+use risingwave_storage::store::*;
 
 use crate::local_state_store_test_utils::LocalStateStoreTestExt;
 use crate::test_utils::{TestIngestBatch, gen_key_from_bytes, with_hummock_storage};
@@ -60,47 +58,13 @@ macro_rules! assert_count_range_scan {
                 $epoch,
                 ReadOptions {
                     prefetch_options: PrefetchOptions::prefetch_for_large_range_scan(),
-                    cache_policy: CachePolicy::Fill(CacheHint::Normal),
+                    cache_policy: CachePolicy::Fill(Hint::Normal),
                     read_committed: $read_committed,
                     ..Default::default()
                 },
             )
             .await
             .unwrap();
-        let mut count = 0;
-        loop {
-            match it.try_next().await.unwrap() {
-                Some(_) => count += 1,
-                None => break,
-            }
-        }
-        assert_eq!(count, $expect_count);
-    }};
-}
-
-#[allow(unused_macros)]
-macro_rules! assert_count_backward_range_scan {
-    ($storage:expr, $range:expr, $expect_count:expr, $epoch:expr) => {{
-        use std::ops::RangeBounds;
-        let range = $range;
-        let bounds: (Bound<Vec<u8>>, Bound<Vec<u8>>) = (
-            range.start_bound().map(|x: &Bytes| x.to_vec()),
-            range.end_bound().map(|x: &Bytes| x.to_vec()),
-        );
-        let it = $storage
-            .backward_iter(
-                bounds,
-                ReadOptions {
-                    ignore_range_tombstone: false,
-                    epoch: $epoch,
-                    table_id: Default::default(),
-                    retention_seconds: None,
-                    read_version_from_backup: false,
-                },
-            )
-            .await
-            .unwrap();
-        futures::pin_mut!(it);
         let mut count = 0;
         loop {
             match it.try_next().await.unwrap() {

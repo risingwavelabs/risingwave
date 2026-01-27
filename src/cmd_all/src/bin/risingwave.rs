@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,7 +13,7 @@
 // limitations under the License.
 
 #![feature(assert_matches)]
-#![cfg_attr(coverage, feature(coverage_attribute))]
+#![feature(coverage_attribute)]
 
 use std::env;
 use std::ffi::OsString;
@@ -215,7 +215,6 @@ where
     Ok((component, matches))
 }
 
-#[cfg_attr(coverage, coverage(off))]
 fn main() {
     let (component, matches) = parse_args(std::env::args_os())
         .map_err(|e| e.exit())

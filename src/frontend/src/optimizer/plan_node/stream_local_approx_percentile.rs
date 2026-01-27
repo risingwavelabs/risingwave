@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,16 +18,20 @@ use risingwave_common::types::DataType;
 use risingwave_pb::stream_plan::LocalApproxPercentileNode;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
-use crate::PlanRef;
+use super::StreamPlanRef as PlanRef;
+use crate::error::Result;
 use crate::expr::{ExprRewriter, ExprVisitor, InputRef, InputRefDisplay, Literal};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
-use crate::optimizer::plan_node::generic::{GenericPlanRef, PhysicalPlanRef};
-use crate::optimizer::plan_node::stream::StreamPlanRef;
+use crate::optimizer::plan_node::generic::GenericPlanRef;
+use crate::optimizer::plan_node::stream::StreamPlanNodeMetadata;
 use crate::optimizer::plan_node::utils::{Distill, childless_record, watermark_pretty};
 use crate::optimizer::plan_node::{
     ExprRewritable, PlanAggCall, PlanBase, PlanTreeNodeUnary, Stream, StreamNode,
 };
-use crate::optimizer::property::{FunctionalDependencySet, WatermarkColumns};
+use crate::optimizer::property::{
+    Distribution, FunctionalDependencySet, MonotonicityMap, StreamKind, WatermarkColumns,
+    reject_upsert_input,
+};
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
 // Does not contain `core` because no other plan nodes share
@@ -42,33 +46,33 @@ pub struct StreamLocalApproxPercentile {
 }
 
 impl StreamLocalApproxPercentile {
-    pub fn new(input: PlanRef, approx_percentile_agg_call: &PlanAggCall) -> Self {
+    pub fn new(input: PlanRef, approx_percentile_agg_call: &PlanAggCall) -> Result<Self> {
+        reject_upsert_input!(input);
+
         let schema = Schema::new(vec![
             Field::with_name(DataType::Int16, "sign"),
             Field::with_name(DataType::Int32, "bucket_id"),
             Field::with_name(DataType::Int32, "count"),
         ]);
-        // TODO(kwannoel): derive watermark columns?
-        let watermark_columns = WatermarkColumns::new();
-        let functional_dependency = FunctionalDependencySet::with_key(3, &[]);
         let base = PlanBase::new_stream(
             input.ctx(),
             schema,
-            input.stream_key().map(|k| k.to_vec()),
-            functional_dependency,
-            input.distribution().clone(),
-            input.append_only(),
+            Some(vec![]),
+            FunctionalDependencySet::new(3),
+            Distribution::SomeShard,
+            // Local phase outputs the delta as `Insert` rows to the global phase.
+            StreamKind::AppendOnly,
             input.emit_on_window_close(),
-            watermark_columns,
-            input.columns_monotonicity().clone(),
+            WatermarkColumns::new(),
+            MonotonicityMap::new(),
         );
-        Self {
+        Ok(Self {
             base,
             input,
             quantile: approx_percentile_agg_call.direct_args[0].clone(),
             relative_error: approx_percentile_agg_call.direct_args[1].clone(),
             percentile_col: approx_percentile_agg_call.inputs[0].clone(),
-        }
+        })
     }
 }
 
@@ -91,7 +95,7 @@ impl Distill for StreamLocalApproxPercentile {
     }
 }
 
-impl PlanTreeNodeUnary for StreamLocalApproxPercentile {
+impl PlanTreeNodeUnary<Stream> for StreamLocalApproxPercentile {
     fn input(&self) -> PlanRef {
         self.input.clone()
     }
@@ -107,7 +111,7 @@ impl PlanTreeNodeUnary for StreamLocalApproxPercentile {
     }
 }
 
-impl_plan_tree_node_for_unary! {StreamLocalApproxPercentile}
+impl_plan_tree_node_for_unary! { Stream, StreamLocalApproxPercentile}
 
 impl StreamNode for StreamLocalApproxPercentile {
     fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> PbNodeBody {
@@ -123,7 +127,7 @@ impl StreamNode for StreamLocalApproxPercentile {
     }
 }
 
-impl ExprRewritable for StreamLocalApproxPercentile {
+impl ExprRewritable<Stream> for StreamLocalApproxPercentile {
     fn has_rewritable_expr(&self) -> bool {
         false
     }

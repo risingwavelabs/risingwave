@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -36,13 +36,12 @@ async fn read_rw_rate_limit(reader: &SysCatalogReaderImpl) -> Result<Vec<RwRateL
     Ok(rate_limits
         .into_iter()
         .map(|info| RwRateLimit {
-            fragment_id: info.fragment_id as i32,
+            fragment_id: info.fragment_id.as_i32_id(),
             fragment_type: extract_fragment_type_flag(info.fragment_type_mask)
                 .into_iter()
-                .flat_map(|t| t.as_str_name().strip_prefix("FRAGMENT_TYPE_FLAG_"))
-                .map(|s| s.into())
+                .map(|t| t.as_str_name().to_owned())
                 .collect(),
-            table_id: info.job_id as i32,
+            table_id: info.job_id.as_i32_id(),
             rate_limit: info.rate_limit as i32,
             node_name: info.node_name,
         })

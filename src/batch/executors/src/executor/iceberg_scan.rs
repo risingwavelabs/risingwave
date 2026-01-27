@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,25 +19,22 @@ use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{
     Field, ICEBERG_FILE_PATH_COLUMN_NAME, ICEBERG_SEQUENCE_NUM_COLUMN_NAME, Schema,
 };
-use risingwave_common::types::{DataType, ScalarImpl};
+use risingwave_common::types::DataType;
 use risingwave_connector::WithOptionsSecResolved;
 use risingwave_connector::source::iceberg::{
-    IcebergFileScanTask, IcebergProperties, IcebergScanOpts, IcebergSplit, scan_task_to_chunk,
+    IcebergFileScanTask, IcebergProperties, IcebergScanOpts, IcebergSplit,
+    scan_task_to_chunk_with_deletes,
 };
 use risingwave_connector::source::{ConnectorProperties, SplitImpl, SplitMetaData};
-use risingwave_expr::expr::LiteralExpression;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 
 use super::{BoxedExecutor, BoxedExecutorBuilder, ExecutorBuilder};
-use crate::ValuesExecutor;
 use crate::error::BatchError;
 use crate::executor::Executor;
 use crate::monitor::BatchMetrics;
 
 pub struct IcebergScanExecutor {
     iceberg_config: IcebergProperties,
-    #[allow(dead_code)]
-    snapshot_id: Option<i64>,
     file_scan_tasks: Option<IcebergFileScanTask>,
     chunk_size: usize,
     schema: Schema,
@@ -64,7 +61,6 @@ impl Executor for IcebergScanExecutor {
 impl IcebergScanExecutor {
     pub fn new(
         iceberg_config: IcebergProperties,
-        snapshot_id: Option<i64>,
         file_scan_tasks: IcebergFileScanTask,
         chunk_size: usize,
         schema: Schema,
@@ -75,7 +71,6 @@ impl IcebergScanExecutor {
     ) -> Self {
         Self {
             iceberg_config,
-            snapshot_id,
             chunk_size,
             schema,
             file_scan_tasks: Some(file_scan_tasks),
@@ -99,9 +94,6 @@ impl IcebergScanExecutor {
             Some(IcebergFileScanTask::PositionDelete(position_delete_file_scan_tasks)) => {
                 position_delete_file_scan_tasks
             }
-            Some(IcebergFileScanTask::CountStar(_)) => {
-                bail!("iceberg scan executor does not support count star")
-            }
             None => {
                 bail!("file_scan_tasks must be Some")
             }
@@ -109,13 +101,14 @@ impl IcebergScanExecutor {
 
         for data_file_scan_task in data_file_scan_tasks {
             #[for_await]
-            for chunk in scan_task_to_chunk(
+            for chunk in scan_task_to_chunk_with_deletes(
                 table.clone(),
                 data_file_scan_task,
                 IcebergScanOpts {
                     chunk_size: self.chunk_size,
                     need_seq_num: self.need_seq_num,
                     need_file_path_and_pos: self.need_file_path_and_pos,
+                    handle_delete_files: false,
                 },
                 self.metrics.as_ref().map(|m| m.iceberg_scan_metrics()),
             ) {
@@ -148,7 +141,7 @@ impl BoxedExecutorBuilder for IcebergScanExecutorBuilder {
             source_node.with_properties.clone(),
             source_node.secret_refs.clone(),
         );
-        let config = ConnectorProperties::extract(options_with_secret.clone(), false)?;
+        let config = ConnectorProperties::extract(options_with_secret, false)?;
 
         let split_list = source_node
             .split
@@ -168,22 +161,11 @@ impl BoxedExecutorBuilder for IcebergScanExecutorBuilder {
             })
             .collect();
         let schema = Schema::new(fields);
-        let metrics = source.context().batch_metrics().clone();
+        let metrics = source.context().batch_metrics();
 
         if let ConnectorProperties::Iceberg(iceberg_properties) = config
             && let SplitImpl::Iceberg(split) = &split_list[0]
         {
-            if let IcebergFileScanTask::CountStar(count) = split.task {
-                return Ok(Box::new(ValuesExecutor::new(
-                    vec![vec![Box::new(LiteralExpression::new(
-                        DataType::Int64,
-                        Some(ScalarImpl::Int64(count as i64)),
-                    ))]],
-                    schema,
-                    source.plan_node().get_identity().clone(),
-                    source.context().get_config().developer.chunk_size,
-                )));
-            }
             let iceberg_properties: IcebergProperties = *iceberg_properties;
             let split: IcebergSplit = split.clone();
             let need_seq_num = schema
@@ -198,7 +180,6 @@ impl BoxedExecutorBuilder for IcebergScanExecutorBuilder {
 
             Ok(Box::new(IcebergScanExecutor::new(
                 iceberg_properties,
-                Some(split.snapshot_id),
                 split.task,
                 source.context().get_config().developer.chunk_size,
                 schema,

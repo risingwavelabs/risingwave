@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -47,6 +47,18 @@ pub fn handle_set(
     // Strip double and single quotes
     let string_val = set_var_to_param_str(&value);
 
+    // Check connection existence for iceberg_engine_connection
+    let param_name = name.real_value().to_lowercase();
+    if param_name.eq_ignore_ascii_case("iceberg_engine_connection")
+        && let Some(val) = string_val.as_deref()
+        && !val.is_empty()
+        && let Some((schema_name, connection_name)) = val.split_once('.')
+    {
+        handler_args
+            .session
+            .get_connection_by_name(Some(schema_name.to_owned()), connection_name)?;
+    }
+
     let mut status = ParameterStatus::default();
 
     struct Reporter<'a> {
@@ -65,7 +77,7 @@ pub fn handle_set(
     // In future we can add converter/parser to make the API more robust.
     // We remark that the name of session parameter is always case-insensitive.
     handler_args.session.set_config_report(
-        &name.real_value().to_lowercase(),
+        &param_name,
         string_val,
         Reporter {
             status: &mut status,
@@ -97,16 +109,13 @@ pub(super) fn handle_set_time_zone(
     Ok(PgResponse::empty_result(StatementType::SET_VARIABLE))
 }
 
-pub(super) async fn handle_show(
-    handler_args: HandlerArgs,
-    variable: Vec<Ident>,
-) -> Result<RwPgResponse> {
+pub(super) fn handle_show(handler_args: HandlerArgs, variable: Vec<Ident>) -> Result<RwPgResponse> {
     // TODO: Verify that the name used in `show` command is indeed always case-insensitive.
     let name = variable.iter().map(|e| e.real_value()).join(" ");
     if name.eq_ignore_ascii_case("PARAMETERS") {
-        handle_show_system_params(handler_args).await
+        handle_show_system_params(handler_args)
     } else if name.eq_ignore_ascii_case("ALL") {
-        handle_show_all(handler_args.clone())
+        handle_show_all(handler_args)
     } else {
         let config_reader = handler_args.session.config();
         Ok(PgResponse::builder(StatementType::SHOW_VARIABLE)
@@ -132,13 +141,13 @@ fn handle_show_all(handler_args: HandlerArgs) -> Result<RwPgResponse> {
         .into())
 }
 
-async fn handle_show_system_params(handler_args: HandlerArgs) -> Result<RwPgResponse> {
+fn handle_show_system_params(handler_args: HandlerArgs) -> Result<RwPgResponse> {
     let params = handler_args
         .session
         .env()
-        .meta_client()
-        .get_system_params()
-        .await?;
+        .system_params_manager()
+        .get_params()
+        .load();
     let rows = params
         .get_all()
         .into_iter()

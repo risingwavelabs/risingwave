@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,9 +15,8 @@
 use itertools::Itertools;
 use risingwave_pb::plan_common::JoinType;
 
-use super::{BoxedRule, Rule};
+use super::prelude::{PlanRef, *};
 use crate::expr::{Expr, ExprImpl, ExprRewriter, InputRef};
-use crate::optimizer::PlanRef;
 use crate::optimizer::plan_node::LogicalJoin;
 
 /// Convert right join type to left join type:
@@ -28,7 +27,7 @@ use crate::optimizer::plan_node::LogicalJoin;
 ///
 /// `RightAnti` => `LeftAnti`
 pub struct JoinCommuteRule {}
-impl Rule for JoinCommuteRule {
+impl Rule<Logical> for JoinCommuteRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let join: &LogicalJoin = plan.as_logical_join()?;
         let join_type = join.join_type();

@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,64 +12,99 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::num::NonZeroUsize;
 
 use anyhow::anyhow;
+use indexmap::IndexMap;
 use itertools::Itertools;
+use risingwave_common::catalog::{FragmentTypeFlag, FragmentTypeMask, ICEBERG_SINK_PREFIX};
 use risingwave_common::config::DefaultParallelism;
 use risingwave_common::hash::VnodeCountCompat;
-use risingwave_common::util::column_index_mapping::ColIndexMapping;
-use risingwave_common::util::stream_graph_visitor::{visit_stream_node, visit_stream_node_mut};
+use risingwave_common::id::JobId;
+use risingwave_common::secret::LocalSecretManager;
+use risingwave_common::util::iter_util::ZipEqDebug;
+use risingwave_common::util::stream_graph_visitor::{
+    visit_stream_node_body, visit_stream_node_mut,
+};
 use risingwave_common::{bail, current_cluster_version};
-use risingwave_connector::WithPropertiesExt;
-use risingwave_meta_model::actor::ActorStatus;
+use risingwave_connector::allow_alter_on_fly_fields::check_sink_allow_alter_on_fly_fields;
+use risingwave_connector::connector_common::validate_connection;
+use risingwave_connector::error::ConnectorError;
+use risingwave_connector::sink::file_sink::fs::FsSink;
+use risingwave_connector::sink::{CONNECTOR_TYPE_KEY, SinkError};
+use risingwave_connector::source::{ConnectorProperties, pb_connection_type_to_connection_type};
+use risingwave_connector::{WithOptionsSecResolved, WithPropertiesExt, match_sink_name_str};
 use risingwave_meta_model::object::ObjectType;
 use risingwave_meta_model::prelude::{StreamingJob as StreamingJobModel, *};
+use risingwave_meta_model::refresh_job::RefreshState;
+use risingwave_meta_model::streaming_job::BackfillOrders;
 use risingwave_meta_model::table::TableType;
+use risingwave_meta_model::user_privilege::Action;
 use risingwave_meta_model::*;
-use risingwave_pb::catalog::source::PbOptionalAssociatedTableId;
-use risingwave_pb::catalog::table::PbOptionalAssociatedSourceId;
-use risingwave_pb::catalog::{PbCreateType, PbTable};
+use risingwave_pb::catalog::{PbConnection, PbCreateType, PbTable};
+use risingwave_pb::ddl_service::streaming_job_resource_type;
+use risingwave_pb::meta::alter_connector_props_request::AlterIcebergTableIds;
 use risingwave_pb::meta::list_rate_limits_response::RateLimitInfo;
 use risingwave_pb::meta::object::PbObjectInfo;
 use risingwave_pb::meta::subscribe_response::{
     Info as NotificationInfo, Info, Operation as NotificationOperation, Operation,
 };
-use risingwave_pb::meta::{PbFragmentWorkerSlotMapping, PbObject, PbObjectGroup};
-use risingwave_pb::source::{PbConnectorSplit, PbConnectorSplits};
+use risingwave_pb::meta::{PbObject, PbObjectGroup};
+use risingwave_pb::plan_common::PbColumnCatalog;
+use risingwave_pb::plan_common::source_refresh_mode::{
+    RefreshMode, SourceRefreshModeFullReload, SourceRefreshModeStreaming,
+};
+use risingwave_pb::secret::PbSecretRef;
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
-use risingwave_pb::stream_plan::{PbFragmentTypeFlag, PbStreamNode};
+use risingwave_pb::stream_plan::{PbSinkLogStoreType, PbStreamNode};
 use risingwave_pb::user::PbUserInfo;
+use risingwave_sqlparser::ast::{Engine, SqlOption, Statement};
+use risingwave_sqlparser::parser::{Parser, ParserError};
 use sea_orm::ActiveValue::Set;
-use sea_orm::sea_query::{BinOper, Expr, Query, SimpleExpr};
+use sea_orm::sea_query::{Expr, Query, SimpleExpr};
 use sea_orm::{
-    ActiveEnum, ActiveModelTrait, ColumnTrait, DatabaseTransaction, EntityTrait, IntoActiveModel,
-    IntoSimpleExpr, JoinType, ModelTrait, NotSet, PaginatorTrait, QueryFilter, QuerySelect,
-    RelationTrait, TransactionTrait,
+    ActiveModelTrait, ColumnTrait, DatabaseTransaction, EntityTrait, IntoActiveModel, JoinType,
+    NotSet, PaginatorTrait, QueryFilter, QuerySelect, RelationTrait, TransactionTrait,
 };
 use thiserror_ext::AsReport;
 
-use crate::barrier::{ReplaceStreamJobPlan, Reschedule};
+use super::rename::IndexItemRewriter;
+use crate::barrier::Command;
 use crate::controller::ObjectModel;
 use crate::controller::catalog::{CatalogController, DropTableConnectorContext};
-use crate::controller::rename::ReplaceTableExprRewriter;
+use crate::controller::fragment::FragmentTypeMaskExt;
 use crate::controller::utils::{
-    PartialObject, build_object_group_for_delete, check_relation_name_duplicate,
-    check_sink_into_table_cycle, ensure_object_id, ensure_user_id, get_fragment_actor_ids,
-    get_fragment_mappings, get_internal_tables_by_id, insert_fragment_relations,
-    rebuild_fragment_mapping_from_actors,
+    PartialObject, build_object_group_for_delete, check_if_belongs_to_iceberg_table,
+    check_relation_name_duplicate, check_sink_into_table_cycle, ensure_job_not_canceled,
+    ensure_object_id, ensure_user_id, fetch_target_fragments, get_internal_tables_by_id,
+    get_table_columns, grant_default_privileges_automatically, insert_fragment_relations,
+    list_user_info_by_ids, try_get_iceberg_table_by_downstream_sink,
 };
+use crate::error::MetaErrorInner;
 use crate::manager::{NotificationVersion, StreamingJob, StreamingJobType};
 use crate::model::{
-    FragmentDownstreamRelation, FragmentReplaceUpstream, StreamActor, StreamContext,
-    StreamJobFragmentsToCreate, TableParallelism,
+    FragmentDownstreamRelation, FragmentReplaceUpstream, StreamContext, StreamJobFragments,
+    StreamJobFragmentsToCreate,
 };
-use crate::stream::{JobReschedulePostUpdates, SplitAssignment};
+use crate::stream::SplitAssignment;
 use crate::{MetaError, MetaResult};
 
+/// A planned fragment update for dependent sources when a connection's properties change.
+///
+/// We keep it as a named struct (instead of a tuple) for readability and to avoid clippy
+/// `type_complexity` warnings.
+#[derive(Debug)]
+struct DependentSourceFragmentUpdate {
+    job_ids: Vec<JobId>,
+    with_properties: BTreeMap<String, String>,
+    secret_refs: BTreeMap<String, PbSecretRef>,
+    is_shared_source: bool,
+}
+
 impl CatalogController {
+    #[allow(clippy::too_many_arguments)]
     pub async fn create_streaming_job_obj(
         txn: &DatabaseTransaction,
         obj_type: ObjectType,
@@ -77,24 +112,35 @@ impl CatalogController {
         database_id: Option<DatabaseId>,
         schema_id: Option<SchemaId>,
         create_type: PbCreateType,
-        ctx: &StreamContext,
+        ctx: StreamContext,
         streaming_parallelism: StreamingParallelism,
         max_parallelism: usize,
-        specific_resource_group: Option<String>, // todo: can we move it to StreamContext?
-    ) -> MetaResult<ObjectId> {
+        resource_type: streaming_job_resource_type::ResourceType,
+        backfill_parallelism: Option<StreamingParallelism>,
+    ) -> MetaResult<JobId> {
         let obj = Self::create_object(txn, obj_type, owner_id, database_id, schema_id).await?;
+        let job_id = obj.oid.as_job_id();
+        let specific_resource_group = resource_type.resource_group();
+        let is_serverless_backfill = matches!(
+            &resource_type,
+            streaming_job_resource_type::ResourceType::ServerlessBackfillResourceGroup(_)
+        );
         let job = streaming_job::ActiveModel {
-            job_id: Set(obj.oid),
+            job_id: Set(job_id),
             job_status: Set(JobStatus::Initial),
             create_type: Set(create_type.into()),
-            timezone: Set(ctx.timezone.clone()),
+            timezone: Set(ctx.timezone),
+            config_override: Set(Some(ctx.config_override.to_string())),
             parallelism: Set(streaming_parallelism),
+            backfill_parallelism: Set(backfill_parallelism),
+            backfill_orders: Set(None),
             max_parallelism: Set(max_parallelism as _),
             specific_resource_group: Set(specific_resource_group),
+            is_serverless_backfill: Set(is_serverless_backfill),
         };
-        job.insert(txn).await?;
+        StreamingJobModel::insert(job).exec(txn).await?;
 
-        Ok(obj.oid)
+        Ok(job_id)
     }
 
     /// Create catalogs for the streaming job, then notify frontend about them if the job is a
@@ -102,6 +148,7 @@ impl CatalogController {
     ///
     /// Some of the fields in the given streaming job are placeholders, which will
     /// be updated later in `prepare_streaming_job` and notify again in `finish_streaming_job`.
+    #[await_tree::instrument]
     pub async fn create_job_catalog(
         &self,
         streaming_job: &mut StreamingJob,
@@ -109,7 +156,8 @@ impl CatalogController {
         parallelism: &Option<Parallelism>,
         max_parallelism: usize,
         mut dependencies: HashSet<ObjectId>,
-        specific_resource_group: Option<String>,
+        resource_type: streaming_job_resource_type::ResourceType,
+        backfill_parallelism: &Option<Parallelism>,
     ) -> MetaResult<()> {
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
@@ -120,25 +168,20 @@ impl CatalogController {
             (None, DefaultParallelism::Default(n)) => StreamingParallelism::Fixed(n.get()),
             (Some(n), _) => StreamingParallelism::Fixed(n.parallelism as _),
         };
+        let backfill_parallelism = backfill_parallelism
+            .as_ref()
+            .map(|p| StreamingParallelism::Fixed(p.parallelism as _));
 
         ensure_user_id(streaming_job.owner() as _, &txn).await?;
-        ensure_object_id(ObjectType::Database, streaming_job.database_id() as _, &txn).await?;
-        ensure_object_id(ObjectType::Schema, streaming_job.schema_id() as _, &txn).await?;
+        ensure_object_id(ObjectType::Database, streaming_job.database_id(), &txn).await?;
+        ensure_object_id(ObjectType::Schema, streaming_job.schema_id(), &txn).await?;
         check_relation_name_duplicate(
             &streaming_job.name(),
-            streaming_job.database_id() as _,
-            streaming_job.schema_id() as _,
+            streaming_job.database_id(),
+            streaming_job.schema_id(),
             &txn,
         )
         .await?;
-
-        // TODO(rc): pass all dependencies uniformly, deprecate `dependent_relations` and `dependent_secret_ids`.
-        dependencies.extend(
-            streaming_job
-                .dependent_relations()
-                .into_iter()
-                .map(|id| id as ObjectId),
-        );
 
         // check if any dependency is in altering status.
         if !dependencies.is_empty() {
@@ -178,46 +221,47 @@ impl CatalogController {
                     &txn,
                     ObjectType::Table,
                     table.owner as _,
-                    Some(table.database_id as _),
-                    Some(table.schema_id as _),
+                    Some(table.database_id),
+                    Some(table.schema_id),
                     create_type,
-                    ctx,
+                    ctx.clone(),
                     streaming_parallelism,
                     max_parallelism,
-                    specific_resource_group,
+                    resource_type,
+                    backfill_parallelism.clone(),
                 )
                 .await?;
-                table.id = job_id as _;
+                table.id = job_id.as_mv_table_id();
                 let table_model: table::ActiveModel = table.clone().into();
                 Table::insert(table_model).exec(&txn).await?;
             }
-            StreamingJob::Sink(sink, _) => {
-                if let Some(target_table_id) = sink.target_table {
-                    if check_sink_into_table_cycle(
-                        target_table_id as ObjectId,
+            StreamingJob::Sink(sink) => {
+                if let Some(target_table_id) = sink.target_table
+                    && check_sink_into_table_cycle(
+                        target_table_id.into(),
                         dependencies.iter().cloned().collect(),
                         &txn,
                     )
                     .await?
-                    {
-                        bail!("Creating such a sink will result in circular dependency.");
-                    }
+                {
+                    bail!("Creating such a sink will result in circular dependency.");
                 }
 
                 let job_id = Self::create_streaming_job_obj(
                     &txn,
                     ObjectType::Sink,
                     sink.owner as _,
-                    Some(sink.database_id as _),
-                    Some(sink.schema_id as _),
+                    Some(sink.database_id),
+                    Some(sink.schema_id),
                     create_type,
-                    ctx,
+                    ctx.clone(),
                     streaming_parallelism,
                     max_parallelism,
-                    specific_resource_group,
+                    resource_type,
+                    backfill_parallelism.clone(),
                 )
                 .await?;
-                sink.id = job_id as _;
+                sink.id = job_id.as_sink_id();
                 let sink_model: sink::ActiveModel = sink.clone().into();
                 Sink::insert(sink_model).exec(&txn).await?;
             }
@@ -226,60 +270,84 @@ impl CatalogController {
                     &txn,
                     ObjectType::Table,
                     table.owner as _,
-                    Some(table.database_id as _),
-                    Some(table.schema_id as _),
+                    Some(table.database_id),
+                    Some(table.schema_id),
                     create_type,
-                    ctx,
+                    ctx.clone(),
                     streaming_parallelism,
                     max_parallelism,
-                    specific_resource_group,
+                    resource_type,
+                    backfill_parallelism.clone(),
                 )
                 .await?;
-                table.id = job_id as _;
+                table.id = job_id.as_mv_table_id();
                 if let Some(src) = src {
                     let src_obj = Self::create_object(
                         &txn,
                         ObjectType::Source,
                         src.owner as _,
-                        Some(src.database_id as _),
-                        Some(src.schema_id as _),
+                        Some(src.database_id),
+                        Some(src.schema_id),
                     )
                     .await?;
-                    src.id = src_obj.oid as _;
-                    src.optional_associated_table_id =
-                        Some(PbOptionalAssociatedTableId::AssociatedTableId(job_id as _));
-                    table.optional_associated_source_id = Some(
-                        PbOptionalAssociatedSourceId::AssociatedSourceId(src_obj.oid as _),
-                    );
+                    src.id = src_obj.oid.as_source_id();
+                    src.optional_associated_table_id = Some(job_id.as_mv_table_id().into());
+                    table.optional_associated_source_id = Some(src_obj.oid.as_source_id().into());
                     let source: source::ActiveModel = src.clone().into();
                     Source::insert(source).exec(&txn).await?;
                 }
                 let table_model: table::ActiveModel = table.clone().into();
                 Table::insert(table_model).exec(&txn).await?;
+
+                if table.refreshable {
+                    let trigger_interval_secs = src
+                        .as_ref()
+                        .and_then(|source_catalog| source_catalog.refresh_mode)
+                        .and_then(
+                            |source_refresh_mode| match source_refresh_mode.refresh_mode {
+                                Some(RefreshMode::FullReload(SourceRefreshModeFullReload {
+                                    refresh_interval_sec,
+                                })) => refresh_interval_sec,
+                                Some(RefreshMode::Streaming(SourceRefreshModeStreaming {})) => None,
+                                None => None,
+                            },
+                        );
+
+                    RefreshJob::insert(refresh_job::ActiveModel {
+                        table_id: Set(table.id),
+                        last_trigger_time: Set(None),
+                        trigger_interval_secs: Set(trigger_interval_secs),
+                        current_status: Set(RefreshState::Idle),
+                        last_success_time: Set(None),
+                    })
+                    .exec(&txn)
+                    .await?;
+                }
             }
             StreamingJob::Index(index, table) => {
-                ensure_object_id(ObjectType::Table, index.primary_table_id as _, &txn).await?;
+                ensure_object_id(ObjectType::Table, index.primary_table_id, &txn).await?;
                 let job_id = Self::create_streaming_job_obj(
                     &txn,
                     ObjectType::Index,
                     index.owner as _,
-                    Some(index.database_id as _),
-                    Some(index.schema_id as _),
+                    Some(index.database_id),
+                    Some(index.schema_id),
                     create_type,
-                    ctx,
+                    ctx.clone(),
                     streaming_parallelism,
                     max_parallelism,
-                    specific_resource_group,
+                    resource_type,
+                    backfill_parallelism.clone(),
                 )
                 .await?;
                 // to be compatible with old implementation.
-                index.id = job_id as _;
-                index.index_table_id = job_id as _;
-                table.id = job_id as _;
+                index.id = job_id.as_index_id();
+                index.index_table_id = job_id.as_mv_table_id();
+                table.id = job_id.as_mv_table_id();
 
                 ObjectDependency::insert(object_dependency::ActiveModel {
-                    oid: Set(index.primary_table_id as _),
-                    used_by: Set(table.id as _),
+                    oid: Set(index.primary_table_id.into()),
+                    used_by: Set(table.id.into()),
                     ..Default::default()
                 })
                 .exec(&txn)
@@ -295,16 +363,17 @@ impl CatalogController {
                     &txn,
                     ObjectType::Source,
                     src.owner as _,
-                    Some(src.database_id as _),
-                    Some(src.schema_id as _),
+                    Some(src.database_id),
+                    Some(src.schema_id),
                     create_type,
-                    ctx,
+                    ctx.clone(),
                     streaming_parallelism,
                     max_parallelism,
-                    specific_resource_group,
+                    resource_type,
+                    backfill_parallelism.clone(),
                 )
                 .await?;
-                src.id = job_id as _;
+                src.id = job_id.as_shared_source_id();
                 let source_model: source::ActiveModel = src.clone().into();
                 Source::insert(source_model).exec(&txn).await?;
             }
@@ -315,14 +384,14 @@ impl CatalogController {
             streaming_job
                 .dependent_secret_ids()?
                 .into_iter()
-                .map(|secret_id| secret_id as ObjectId),
+                .map(|id| id.as_object_id()),
         );
         // collect dependent connection
         dependencies.extend(
             streaming_job
                 .dependent_connection_ids()?
                 .into_iter()
-                .map(|conn_id| conn_id as ObjectId),
+                .map(|id| id.as_object_id()),
         );
 
         // record object dependency.
@@ -330,7 +399,7 @@ impl CatalogController {
             ObjectDependency::insert_many(dependencies.into_iter().map(|oid| {
                 object_dependency::ActiveModel {
                     oid: Set(oid),
-                    used_by: Set(streaming_job.id() as _),
+                    used_by: Set(streaming_job.id().as_object_id()),
                     ..Default::default()
                 }
             }))
@@ -354,27 +423,32 @@ impl CatalogController {
         &self,
         job: &StreamingJob,
         mut incomplete_internal_tables: Vec<PbTable>,
-    ) -> MetaResult<HashMap<u32, u32>> {
-        let job_id = job.id() as ObjectId;
+    ) -> MetaResult<HashMap<TableId, TableId>> {
+        let job_id = job.id();
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
+
+        // Ensure the job exists.
+        ensure_job_not_canceled(job_id, &txn).await?;
+
         let mut table_id_map = HashMap::new();
         for table in &mut incomplete_internal_tables {
             let table_id = Self::create_object(
                 &txn,
                 ObjectType::Table,
                 table.owner as _,
-                Some(table.database_id as _),
-                Some(table.schema_id as _),
+                Some(table.database_id),
+                Some(table.schema_id),
             )
             .await?
-            .oid;
-            table_id_map.insert(table.id, table_id as u32);
-            table.id = table_id as _;
-            table.job_id = Some(job_id as _);
+            .oid
+            .as_table_id();
+            table_id_map.insert(table.id, table_id);
+            table.id = table_id;
+            table.job_id = Some(job_id);
 
             let table_model = table::ActiveModel {
-                table_id: Set(table_id as _),
+                table_id: Set(table_id),
                 belongs_to_job_id: Set(Some(job_id)),
                 fragment_id: NotSet,
                 ..table.clone().into()
@@ -386,83 +460,142 @@ impl CatalogController {
         Ok(table_id_map)
     }
 
-    // TODO: In this function, we also update the `Table` model in the meta store.
-    // Given that we've ensured the tables inside `TableFragments` are complete, shall we consider
-    // making them the source of truth and performing a full replacement for those in the meta store?
-    /// Insert fragments and actors to meta store. Used both for creating new jobs and replacing jobs.
-    pub async fn prepare_streaming_job(
+    pub async fn prepare_stream_job_fragments(
         &self,
         stream_job_fragments: &StreamJobFragmentsToCreate,
         streaming_job: &StreamingJob,
         for_replace: bool,
+        backfill_orders: Option<BackfillOrders>,
     ) -> MetaResult<()> {
-        let is_materialized_view = streaming_job.is_materialized_view();
-        let fragment_actors =
-            Self::extract_fragment_and_actors_from_fragments(stream_job_fragments)?;
-        let mut all_tables = stream_job_fragments.all_tables();
+        self.prepare_streaming_job(
+            stream_job_fragments.stream_job_id(),
+            || stream_job_fragments.fragments.values(),
+            &stream_job_fragments.downstreams,
+            for_replace,
+            Some(streaming_job),
+            backfill_orders,
+        )
+        .await
+    }
+
+    // TODO: In this function, we also update the `Table` model in the meta store.
+    // Given that we've ensured the tables inside `TableFragments` are complete, shall we consider
+    // making them the source of truth and performing a full replacement for those in the meta store?
+    /// Insert fragments and actors to meta store. Used both for creating new jobs and replacing jobs.
+    #[await_tree::instrument("prepare_streaming_job_for_{}", if for_replace { "replace" } else { "create" }
+    )]
+    pub async fn prepare_streaming_job<'a, I: Iterator<Item = &'a crate::model::Fragment> + 'a>(
+        &self,
+        job_id: JobId,
+        get_fragments: impl Fn() -> I + 'a,
+        downstreams: &FragmentDownstreamRelation,
+        for_replace: bool,
+        creating_streaming_job: Option<&'a StreamingJob>,
+        backfill_orders: Option<BackfillOrders>,
+    ) -> MetaResult<()> {
+        let fragments = Self::prepare_fragment_models_from_fragments(job_id, get_fragments())?;
+
         let inner = self.inner.write().await;
 
-        let mut objects = vec![];
+        let need_notify = creating_streaming_job
+            .map(|job| job.should_notify_creating())
+            .unwrap_or(false);
+        let definition = creating_streaming_job.map(|job| job.definition());
+
+        let mut objects_to_notify = vec![];
         let txn = inner.db.begin().await?;
 
-        // Add fragments.
-        let (fragments, actors): (Vec<_>, Vec<_>) = fragment_actors.into_iter().unzip();
-        for fragment in fragments {
-            let fragment_id = fragment.fragment_id;
-            let state_table_ids = fragment.state_table_ids.inner_ref().clone();
+        // Ensure the job exists.
+        ensure_job_not_canceled(job_id, &txn).await?;
 
-            let fragment = fragment.into_active_model();
-            Fragment::insert(fragment).exec(&txn).await?;
+        if let Some(backfill_orders) = backfill_orders {
+            let job = streaming_job::ActiveModel {
+                job_id: Set(job_id),
+                backfill_orders: Set(Some(backfill_orders)),
+                ..Default::default()
+            };
+            StreamingJobModel::update(job).exec(&txn).await?;
+        }
 
-            // Fields including `fragment_id` and `vnode_count` were placeholder values before.
-            // After table fragments are created, update them for all tables.
-            if !for_replace {
-                for state_table_id in state_table_ids {
-                    // Table's vnode count is not always the fragment's vnode count, so we have to
-                    // look up the table from `TableFragments`.
-                    // See `ActorGraphBuilder::new`.
-                    let table = all_tables
-                        .get_mut(&(state_table_id as u32))
-                        .unwrap_or_else(|| panic!("table {} not found", state_table_id));
-                    assert_eq!(table.id, state_table_id as u32);
-                    assert_eq!(table.fragment_id, fragment_id as u32);
-                    table.job_id = Some(streaming_job.id());
-                    let vnode_count = table.vnode_count();
+        let state_table_ids = fragments
+            .iter()
+            .flat_map(|fragment| fragment.state_table_ids.inner_ref().clone())
+            .collect_vec();
 
-                    table::ActiveModel {
-                        table_id: Set(state_table_id as _),
-                        fragment_id: Set(Some(fragment_id)),
-                        vnode_count: Set(vnode_count as _),
-                        ..Default::default()
+        if !fragments.is_empty() {
+            let fragment_models = fragments
+                .into_iter()
+                .map(|fragment| fragment.into_active_model())
+                .collect_vec();
+            Fragment::insert_many(fragment_models).exec(&txn).await?;
+        }
+
+        // Fields including `fragment_id` and `vnode_count` were placeholder values before.
+        // After table fragments are created, update them for all tables.
+        if !for_replace {
+            let all_tables = StreamJobFragments::collect_tables(get_fragments());
+            for state_table_id in state_table_ids {
+                // Table's vnode count is not always the fragment's vnode count, so we have to
+                // look up the table from `TableFragments`.
+                // See `ActorGraphBuilder::new`.
+                let table = all_tables
+                    .get(&state_table_id)
+                    .unwrap_or_else(|| panic!("table {} not found", state_table_id));
+                assert_eq!(table.id, state_table_id);
+                let vnode_count = table.vnode_count();
+
+                Table::update(table::ActiveModel {
+                    table_id: Set(state_table_id as _),
+                    fragment_id: Set(Some(table.fragment_id)),
+                    vnode_count: Set(vnode_count as _),
+                    ..Default::default()
+                })
+                .exec(&txn)
+                .await?;
+
+                if need_notify {
+                    let mut table = table.clone();
+                    // In production, definition was replaced but still needed for notification.
+                    if cfg!(not(debug_assertions)) && table.id == job_id.as_raw_id() {
+                        table.definition = definition.clone().unwrap();
                     }
-                    .update(&txn)
-                    .await?;
-
-                    if is_materialized_view {
-                        objects.push(PbObject {
-                            object_info: Some(PbObjectInfo::Table(table.clone())),
-                        });
-                    }
+                    objects_to_notify.push(PbObject {
+                        object_info: Some(PbObjectInfo::Table(table)),
+                    });
                 }
             }
         }
 
-        insert_fragment_relations(&txn, &stream_job_fragments.downstreams).await?;
-
-        // Add actors and actor dispatchers.
-        for actors in actors {
-            for actor in actors {
-                let actor = actor.into_active_model();
-                Actor::insert(actor).exec(&txn).await?;
+        // Add streaming job objects to notification
+        if need_notify {
+            match creating_streaming_job.unwrap() {
+                StreamingJob::Table(Some(source), ..) => {
+                    objects_to_notify.push(PbObject {
+                        object_info: Some(PbObjectInfo::Source(source.clone())),
+                    });
+                }
+                StreamingJob::Sink(sink) => {
+                    objects_to_notify.push(PbObject {
+                        object_info: Some(PbObjectInfo::Sink(sink.clone())),
+                    });
+                }
+                StreamingJob::Index(index, _) => {
+                    objects_to_notify.push(PbObject {
+                        object_info: Some(PbObjectInfo::Index(index.clone())),
+                    });
+                }
+                _ => {}
             }
         }
 
+        insert_fragment_relations(&txn, downstreams).await?;
+
         if !for_replace {
             // Update dml fragment id.
-            if let StreamingJob::Table(_, table, ..) = streaming_job {
+            if let Some(StreamingJob::Table(_, table, _)) = creating_streaming_job {
                 Table::update(table::ActiveModel {
-                    table_id: Set(table.id as _),
-                    dml_fragment_id: Set(table.dml_fragment_id.map(|id| id as _)),
+                    table_id: Set(table.id),
+                    dml_fragment_id: Set(table.dml_fragment_id),
                     ..Default::default()
                 })
                 .exec(&txn)
@@ -472,21 +605,66 @@ impl CatalogController {
 
         txn.commit().await?;
 
-        if !objects.is_empty() {
-            assert!(is_materialized_view);
-            self.notify_frontend(Operation::Add, Info::ObjectGroup(PbObjectGroup { objects }))
-                .await;
+        // FIXME: there's a gap between the catalog creation and notification, which may lead to
+        // frontend receiving duplicate notifications if the frontend restarts right in this gap. We
+        // need to either forward the notification or filter catalogs without any fragments in the metastore.
+        if !objects_to_notify.is_empty() {
+            self.notify_frontend(
+                Operation::Add,
+                Info::ObjectGroup(PbObjectGroup {
+                    objects: objects_to_notify,
+                }),
+            )
+            .await;
         }
 
         Ok(())
     }
 
+    /// Builds a cancel command for the streaming job. If the sink (with target table) needs to be dropped, additional
+    /// information is required to build barrier mutation.
+    pub async fn build_cancel_command(
+        &self,
+        table_fragments: &StreamJobFragments,
+    ) -> MetaResult<Command> {
+        let inner = self.inner.read().await;
+        let txn = inner.db.begin().await?;
+
+        let dropped_sink_fragment_with_target =
+            if let Some(sink_fragment) = table_fragments.sink_fragment() {
+                let sink_fragment_id = sink_fragment.fragment_id as FragmentId;
+                let sink_target_fragment = fetch_target_fragments(&txn, [sink_fragment_id]).await?;
+                sink_target_fragment
+                    .get(&sink_fragment_id)
+                    .map(|target_fragments| {
+                        let target_fragment_id = *target_fragments
+                            .first()
+                            .expect("sink should have at least one downstream fragment");
+                        (sink_fragment_id, target_fragment_id)
+                    })
+            } else {
+                None
+            };
+
+        Ok(Command::DropStreamingJobs {
+            streaming_job_ids: HashSet::from_iter([table_fragments.stream_job_id()]),
+            actors: table_fragments.actor_ids().collect(),
+            unregistered_state_table_ids: table_fragments.all_table_ids().collect(),
+            unregistered_fragment_ids: table_fragments.fragment_ids().collect(),
+            dropped_sink_fragment_by_targets: dropped_sink_fragment_with_target
+                .into_iter()
+                .map(|(sink, target)| (target as _, vec![sink as _]))
+                .collect(),
+        })
+    }
+
     /// `try_abort_creating_streaming_job` is used to abort the job that is under initial status or in `FOREGROUND` mode.
     /// It returns (true, _) if the job is not found or aborted.
     /// It returns (_, Some(`database_id`)) is the `database_id` of the `job_id` exists
+    #[await_tree::instrument]
     pub async fn try_abort_creating_streaming_job(
         &self,
-        job_id: ObjectId,
+        mut job_id: JobId,
         is_cancelled: bool,
     ) -> MetaResult<(bool, Option<DatabaseId>)> {
         let mut inner = self.inner.write().await;
@@ -495,25 +673,29 @@ impl CatalogController {
         let obj = Object::find_by_id(job_id).one(&txn).await?;
         let Some(obj) = obj else {
             tracing::warn!(
-                id = job_id,
-                "streaming job not found when aborting creating, might be cleaned by recovery"
+                id = %job_id,
+                "streaming job not found when aborting creating, might be cancelled already or cleaned by recovery"
             );
             return Ok((true, None));
         };
         let database_id = obj
             .database_id
             .ok_or_else(|| anyhow!("obj has no database id: {:?}", obj))?;
+        let streaming_job = streaming_job::Entity::find_by_id(job_id).one(&txn).await?;
 
-        if !is_cancelled {
-            let streaming_job = streaming_job::Entity::find_by_id(job_id).one(&txn).await?;
-            if let Some(streaming_job) = streaming_job {
-                assert_ne!(streaming_job.job_status, JobStatus::Created);
-                if streaming_job.create_type == CreateType::Background
-                    && streaming_job.job_status == JobStatus::Creating
+        if !is_cancelled && let Some(streaming_job) = &streaming_job {
+            assert_ne!(streaming_job.job_status, JobStatus::Created);
+            if streaming_job.create_type == CreateType::Background
+                && streaming_job.job_status == JobStatus::Creating
+            {
+                if (obj.obj_type == ObjectType::Table || obj.obj_type == ObjectType::Sink)
+                    && check_if_belongs_to_iceberg_table(&txn, job_id).await?
                 {
-                    // If the job is created in background and still in creating status, we should not abort it and let recovery to handle it.
+                    // If the job belongs to an iceberg table, we still need to clean it.
+                } else {
+                    // If the job is created in background and still in creating status, we should not abort it and let recovery handle it.
                     tracing::warn!(
-                        id = job_id,
+                        id = %job_id,
                         "streaming job is created in background and still in creating status"
                     );
                     return Ok((false, Some(database_id)));
@@ -521,14 +703,83 @@ impl CatalogController {
             }
         }
 
+        // Record original job info before any potential job id rewrite (e.g. iceberg sink).
+        let original_job_id = job_id;
+        let original_obj_type = obj.obj_type;
+
+        let iceberg_table_id =
+            try_get_iceberg_table_by_downstream_sink(&txn, job_id.as_sink_id()).await?;
+        if let Some(iceberg_table_id) = iceberg_table_id {
+            // If the job is iceberg sink, we need to clean the iceberg table as well.
+            // Here we will drop the sink objects directly.
+            let internal_tables = get_internal_tables_by_id(job_id, &txn).await?;
+            Object::delete_many()
+                .filter(
+                    object::Column::Oid
+                        .eq(job_id)
+                        .or(object::Column::Oid.is_in(internal_tables)),
+                )
+                .exec(&txn)
+                .await?;
+            job_id = iceberg_table_id.as_job_id();
+        };
+
         let internal_table_ids = get_internal_tables_by_id(job_id, &txn).await?;
 
-        // Get the notification info if the job is a materialized view.
-        let table_obj = Table::find_by_id(job_id).one(&txn).await?;
+        // Get the notification info if the job is a materialized view or created in the background.
         let mut objs = vec![];
-        if let Some(table) = &table_obj
-            && table.table_type == TableType::MaterializedView
-        {
+        let table_obj = Table::find_by_id(job_id.as_mv_table_id()).one(&txn).await?;
+
+        let mut need_notify =
+            streaming_job.is_some_and(|job| job.create_type == CreateType::Background);
+        if !need_notify {
+            if let Some(table) = &table_obj {
+                need_notify = table.table_type == TableType::MaterializedView;
+            } else if original_obj_type == ObjectType::Sink {
+                need_notify = true;
+            }
+        }
+
+        if is_cancelled {
+            let dropped_tables = Table::find()
+                .find_also_related(Object)
+                .filter(
+                    table::Column::TableId.is_in(
+                        internal_table_ids
+                            .iter()
+                            .cloned()
+                            .chain(table_obj.iter().map(|t| t.table_id as _)),
+                    ),
+                )
+                .all(&txn)
+                .await?
+                .into_iter()
+                .map(|(table, obj)| PbTable::from(ObjectModel(table, obj.unwrap(), None)));
+            inner
+                .dropped_tables
+                .extend(dropped_tables.map(|t| (t.id, t)));
+        }
+
+        if need_notify {
+            // Special handling for iceberg sinks: the `job_id` may have been rewritten to the table id.
+            // Ensure we still notify the frontend to delete the original sink object.
+            if original_obj_type == ObjectType::Sink && original_job_id != job_id {
+                let orig_obj: Option<PartialObject> = Object::find_by_id(original_job_id)
+                    .select_only()
+                    .columns([
+                        object::Column::Oid,
+                        object::Column::ObjType,
+                        object::Column::SchemaId,
+                        object::Column::DatabaseId,
+                    ])
+                    .into_partial_model()
+                    .one(&txn)
+                    .await?;
+                if let Some(orig_obj) = orig_obj {
+                    objs.push(orig_obj);
+                }
+            }
+
             let obj: Option<PartialObject> = Object::find_by_id(job_id)
                 .select_only()
                 .columns([
@@ -559,6 +810,42 @@ impl CatalogController {
             objs.extend(internal_table_objs);
         }
 
+        // Check if the job is creating sink into table.
+        if table_obj.is_none()
+            && let Some(Some(target_table_id)) = Sink::find_by_id(job_id.as_sink_id())
+                .select_only()
+                .column(sink::Column::TargetTable)
+                .into_tuple::<Option<TableId>>()
+                .one(&txn)
+                .await?
+        {
+            let tmp_id: Option<ObjectId> = ObjectDependency::find()
+                .select_only()
+                .column(object_dependency::Column::UsedBy)
+                .join(
+                    JoinType::InnerJoin,
+                    object_dependency::Relation::Object1.def(),
+                )
+                .join(JoinType::InnerJoin, object::Relation::StreamingJob.def())
+                .filter(
+                    object_dependency::Column::Oid
+                        .eq(target_table_id)
+                        .and(object::Column::ObjType.eq(ObjectType::Table))
+                        .and(streaming_job::Column::JobStatus.ne(JobStatus::Created)),
+                )
+                .into_tuple()
+                .one(&txn)
+                .await?;
+            if let Some(tmp_id) = tmp_id {
+                tracing::warn!(
+                    id = %tmp_id,
+                    "aborting temp streaming job for sink into table"
+                );
+
+                Object::delete_by_id(tmp_id).exec(&txn).await?;
+            }
+        }
+
         Object::delete_by_id(job_id).exec(&txn).await?;
         if !internal_table_ids.is_empty() {
             Object::delete_many()
@@ -577,7 +864,7 @@ impl CatalogController {
         } else {
             MetaError::catalog_id_not_found("stream job", format!("streaming job {job_id} failed"))
         };
-        let abort_reason = format!("streaing job aborted {}", err.as_report());
+        let abort_reason = format!("streaming job aborted {}", err.as_report());
         for tx in inner
             .creating_table_finish_notifier
             .get_mut(&database_id)
@@ -599,80 +886,47 @@ impl CatalogController {
         Ok((true, Some(database_id)))
     }
 
+    #[await_tree::instrument]
     pub async fn post_collect_job_fragments(
         &self,
-        job_id: ObjectId,
-        actor_ids: Vec<crate::model::ActorId>,
+        job_id: JobId,
         upstream_fragment_new_downstreams: &FragmentDownstreamRelation,
-        split_assignment: &SplitAssignment,
-    ) -> MetaResult<()> {
-        self.post_collect_job_fragments_inner(
-            job_id,
-            actor_ids,
-            upstream_fragment_new_downstreams,
-            split_assignment,
-            false,
-        )
-        .await
-    }
-
-    pub async fn post_collect_job_fragments_inner(
-        &self,
-        job_id: ObjectId,
-        actor_ids: Vec<crate::model::ActorId>,
-        upstream_fragment_new_downstreams: &FragmentDownstreamRelation,
-        split_assignment: &SplitAssignment,
-        is_mv: bool,
+        new_sink_downstream: Option<FragmentDownstreamRelation>,
+        split_assignment: Option<&SplitAssignment>,
     ) -> MetaResult<()> {
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
 
-        Actor::update_many()
-            .col_expr(
-                actor::Column::Status,
-                SimpleExpr::from(ActorStatus::Running.into_value()),
-            )
-            .filter(
-                actor::Column::ActorId
-                    .is_in(actor_ids.into_iter().map(|id| id as ActorId).collect_vec()),
-            )
-            .exec(&txn)
-            .await?;
-
-        for splits in split_assignment.values() {
-            for (actor_id, splits) in splits {
-                let splits = splits.iter().map(PbConnectorSplit::from).collect_vec();
-                let connector_splits = &PbConnectorSplits { splits };
-                actor::ActiveModel {
-                    actor_id: Set(*actor_id as _),
-                    splits: Set(Some(connector_splits.into())),
-                    ..Default::default()
-                }
-                .update(&txn)
-                .await?;
-            }
-        }
-
         insert_fragment_relations(&txn, upstream_fragment_new_downstreams).await?;
 
+        if let Some(new_downstream) = new_sink_downstream {
+            insert_fragment_relations(&txn, &new_downstream).await?;
+        }
+
         // Mark job as CREATING.
-        streaming_job::ActiveModel {
+        StreamingJobModel::update(streaming_job::ActiveModel {
             job_id: Set(job_id),
             job_status: Set(JobStatus::Creating),
             ..Default::default()
-        }
-        .update(&txn)
+        })
+        .exec(&txn)
         .await?;
 
-        let fragment_mapping = if is_mv {
-            get_fragment_mappings(&txn, job_id as _).await?
-        } else {
-            vec![]
-        };
+        if let Some(split_assignment) = split_assignment {
+            let fragment_splits = split_assignment
+                .iter()
+                .map(|(fragment_id, splits)| {
+                    (
+                        *fragment_id as _,
+                        splits.values().flatten().cloned().collect_vec(),
+                    )
+                })
+                .collect();
+
+            self.update_fragment_splits(&txn, &fragment_splits).await?;
+        }
 
         txn.commit().await?;
-        self.notify_fragment_mapping(NotificationOperation::Add, fragment_mapping)
-            .await;
 
         Ok(())
     }
@@ -680,10 +934,10 @@ impl CatalogController {
     pub async fn create_job_catalog_for_replace(
         &self,
         streaming_job: &StreamingJob,
-        ctx: &StreamContext,
-        specified_parallelism: &Option<NonZeroUsize>,
-        max_parallelism: usize,
-    ) -> MetaResult<ObjectId> {
+        ctx: Option<&StreamContext>,
+        specified_parallelism: Option<&NonZeroUsize>,
+        expected_original_max_parallelism: Option<usize>,
+    ) -> MetaResult<JobId> {
         let id = streaming_job.id();
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
@@ -699,7 +953,7 @@ impl CatalogController {
             .join(JoinType::InnerJoin, object::Relation::StreamingJob.def())
             .filter(
                 object_dependency::Column::Oid
-                    .eq(id as ObjectId)
+                    .eq(id)
                     .and(object::Column::ObjType.eq(ObjectType::Table))
                     .and(streaming_job::Column::JobStatus.ne(JobStatus::Created)),
             )
@@ -712,15 +966,23 @@ impl CatalogController {
         }
 
         // 3. check parallelism.
-        let original_max_parallelism: i32 = StreamingJobModel::find_by_id(id as ObjectId)
+        let (original_max_parallelism, original_timezone, original_config_override): (
+            i32,
+            Option<String>,
+            Option<String>,
+        ) = StreamingJobModel::find_by_id(id)
             .select_only()
             .column(streaming_job::Column::MaxParallelism)
+            .column(streaming_job::Column::Timezone)
+            .column(streaming_job::Column::ConfigOverride)
             .into_tuple()
             .one(&txn)
             .await?
             .ok_or_else(|| MetaError::catalog_id_not_found(streaming_job.job_type_str(), id))?;
 
-        if original_max_parallelism != max_parallelism as i32 {
+        if let Some(max_parallelism) = expected_original_max_parallelism
+            && original_max_parallelism != max_parallelism as i32
+        {
             // We already override the max parallelism in `StreamFragmentGraph` before entering this function.
             // This should not happen in normal cases.
             bail!(
@@ -737,6 +999,15 @@ impl CatalogController {
             Some(n) => StreamingParallelism::Fixed(n.get() as _),
         };
 
+        let ctx = StreamContext {
+            timezone: ctx
+                .map(|ctx| ctx.timezone.clone())
+                .unwrap_or(original_timezone),
+            // We don't expect replacing a job with a different config override.
+            // Thus always use the original config override.
+            config_override: original_config_override.unwrap_or_default().into(),
+        };
+
         // 4. create streaming object for new replace table.
         let new_obj_id = Self::create_streaming_job_obj(
             &txn,
@@ -747,15 +1018,16 @@ impl CatalogController {
             streaming_job.create_type(),
             ctx,
             parallelism,
-            max_parallelism,
+            original_max_parallelism as _,
+            streaming_job_resource_type::ResourceType::Regular(true),
             None,
         )
         .await?;
 
         // 5. record dependency for new replace table.
         ObjectDependency::insert(object_dependency::ActiveModel {
-            oid: Set(id as _),
-            used_by: Set(new_obj_id as _),
+            oid: Set(id.as_object_id()),
+            used_by: Set(new_obj_id.as_object_id()),
             ..Default::default()
         })
         .exec(&txn)
@@ -767,171 +1039,23 @@ impl CatalogController {
     }
 
     /// `finish_streaming_job` marks job related objects as `Created` and notify frontend.
-    pub async fn finish_streaming_job(
-        &self,
-        job_id: ObjectId,
-        replace_stream_job_info: Option<ReplaceStreamJobPlan>,
-    ) -> MetaResult<()> {
+    pub async fn finish_streaming_job(&self, job_id: JobId) -> MetaResult<()> {
         let mut inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
 
-        let job_type = Object::find_by_id(job_id)
-            .select_only()
-            .column(object::Column::ObjType)
-            .into_tuple()
-            .one(&txn)
-            .await?
-            .ok_or_else(|| MetaError::catalog_id_not_found("streaming job", job_id))?;
-
-        // update `created_at` as now() and `created_at_cluster_version` as current cluster version.
-        let res = Object::update_many()
-            .col_expr(object::Column::CreatedAt, Expr::current_timestamp().into())
-            .col_expr(
-                object::Column::CreatedAtClusterVersion,
-                current_cluster_version().into(),
-            )
-            .filter(object::Column::Oid.eq(job_id))
-            .exec(&txn)
-            .await?;
-        if res.rows_affected == 0 {
-            return Err(MetaError::catalog_id_not_found("streaming job", job_id));
+        // Check if the job belongs to iceberg table.
+        if check_if_belongs_to_iceberg_table(&txn, job_id).await? {
+            tracing::info!(
+                "streaming job {} is for iceberg table, wait for manual finish operation",
+                job_id
+            );
+            return Ok(());
         }
 
-        // mark the target stream job as `Created`.
-        let job = streaming_job::ActiveModel {
-            job_id: Set(job_id),
-            job_status: Set(JobStatus::Created),
-            ..Default::default()
-        };
-        job.update(&txn).await?;
-
-        // notify frontend: job, internal tables.
-        let internal_table_objs = Table::find()
-            .find_also_related(Object)
-            .filter(table::Column::BelongsToJobId.eq(job_id))
-            .all(&txn)
-            .await?;
-        let mut objects = internal_table_objs
-            .iter()
-            .map(|(table, obj)| PbObject {
-                object_info: Some(PbObjectInfo::Table(
-                    ObjectModel(table.clone(), obj.clone().unwrap()).into(),
-                )),
-            })
-            .collect_vec();
-        let mut notification_op = NotificationOperation::Add;
-
-        match job_type {
-            ObjectType::Table => {
-                let (table, obj) = Table::find_by_id(job_id)
-                    .find_also_related(Object)
-                    .one(&txn)
-                    .await?
-                    .ok_or_else(|| MetaError::catalog_id_not_found("table", job_id))?;
-                if table.table_type == TableType::MaterializedView {
-                    notification_op = NotificationOperation::Update;
-                }
-
-                if let Some(source_id) = table.optional_associated_source_id {
-                    let (src, obj) = Source::find_by_id(source_id)
-                        .find_also_related(Object)
-                        .one(&txn)
-                        .await?
-                        .ok_or_else(|| MetaError::catalog_id_not_found("source", source_id))?;
-                    objects.push(PbObject {
-                        object_info: Some(PbObjectInfo::Source(
-                            ObjectModel(src, obj.unwrap()).into(),
-                        )),
-                    });
-                }
-                objects.push(PbObject {
-                    object_info: Some(PbObjectInfo::Table(ObjectModel(table, obj.unwrap()).into())),
-                });
-            }
-            ObjectType::Sink => {
-                let (sink, obj) = Sink::find_by_id(job_id)
-                    .find_also_related(Object)
-                    .one(&txn)
-                    .await?
-                    .ok_or_else(|| MetaError::catalog_id_not_found("sink", job_id))?;
-                objects.push(PbObject {
-                    object_info: Some(PbObjectInfo::Sink(ObjectModel(sink, obj.unwrap()).into())),
-                });
-            }
-            ObjectType::Index => {
-                let (index, obj) = Index::find_by_id(job_id)
-                    .find_also_related(Object)
-                    .one(&txn)
-                    .await?
-                    .ok_or_else(|| MetaError::catalog_id_not_found("index", job_id))?;
-                {
-                    let (table, obj) = Table::find_by_id(index.index_table_id)
-                        .find_also_related(Object)
-                        .one(&txn)
-                        .await?
-                        .ok_or_else(|| {
-                            MetaError::catalog_id_not_found("table", index.index_table_id)
-                        })?;
-                    objects.push(PbObject {
-                        object_info: Some(PbObjectInfo::Table(
-                            ObjectModel(table, obj.unwrap()).into(),
-                        )),
-                    });
-                }
-                objects.push(PbObject {
-                    object_info: Some(PbObjectInfo::Index(ObjectModel(index, obj.unwrap()).into())),
-                });
-            }
-            ObjectType::Source => {
-                let (source, obj) = Source::find_by_id(job_id)
-                    .find_also_related(Object)
-                    .one(&txn)
-                    .await?
-                    .ok_or_else(|| MetaError::catalog_id_not_found("source", job_id))?;
-                objects.push(PbObject {
-                    object_info: Some(PbObjectInfo::Source(
-                        ObjectModel(source, obj.unwrap()).into(),
-                    )),
-                });
-            }
-            _ => unreachable!("invalid job type: {:?}", job_type),
-        }
-
-        let fragment_mapping = get_fragment_mappings(&txn, job_id).await?;
-
-        let replace_table_mapping_update = match replace_stream_job_info {
-            Some(ReplaceStreamJobPlan {
-                streaming_job,
-                replace_upstream,
-                tmp_id,
-                ..
-            }) => {
-                let incoming_sink_id = job_id;
-
-                let (relations, fragment_mapping, _) = Self::finish_replace_streaming_job_inner(
-                    tmp_id as ObjectId,
-                    replace_upstream,
-                    None,
-                    SinkIntoTableContext {
-                        creating_sink_id: Some(incoming_sink_id as _),
-                        dropping_sink_id: None,
-                        updated_sink_catalogs: vec![],
-                    },
-                    &txn,
-                    streaming_job,
-                    None, // will not drop table connector when creating a streaming job
-                )
-                .await?;
-
-                Some((relations, fragment_mapping))
-            }
-            None => None,
-        };
+        let (notification_op, objects, updated_user_info) =
+            Self::finish_streaming_job_inner(&txn, job_id).await?;
 
         txn.commit().await?;
-
-        self.notify_fragment_mapping(NotificationOperation::Add, fragment_mapping)
-            .await;
 
         let mut version = self
             .notify_frontend(
@@ -940,16 +1064,11 @@ impl CatalogController {
             )
             .await;
 
-        if let Some((objects, fragment_mapping)) = replace_table_mapping_update {
-            self.notify_fragment_mapping(NotificationOperation::Add, fragment_mapping)
-                .await;
-            version = self
-                .notify_frontend(
-                    NotificationOperation::Update,
-                    NotificationInfo::ObjectGroup(PbObjectGroup { objects }),
-                )
-                .await;
+        // notify users about the default privileges
+        if !updated_user_info.is_empty() {
+            version = self.notify_users_update(updated_user_info).await;
         }
+
         inner
             .creating_table_finish_notifier
             .values_mut()
@@ -964,39 +1083,238 @@ impl CatalogController {
         Ok(())
     }
 
+    /// `finish_streaming_job` marks job related objects as `Created` and notify frontend.
+    pub async fn finish_streaming_job_inner(
+        txn: &DatabaseTransaction,
+        job_id: JobId,
+    ) -> MetaResult<(Operation, Vec<risingwave_pb::meta::Object>, Vec<PbUserInfo>)> {
+        let job_type = Object::find_by_id(job_id)
+            .select_only()
+            .column(object::Column::ObjType)
+            .into_tuple()
+            .one(txn)
+            .await?
+            .ok_or_else(|| MetaError::catalog_id_not_found("streaming job", job_id))?;
+
+        let create_type: CreateType = StreamingJobModel::find_by_id(job_id)
+            .select_only()
+            .column(streaming_job::Column::CreateType)
+            .into_tuple()
+            .one(txn)
+            .await?
+            .ok_or_else(|| MetaError::catalog_id_not_found("streaming job", job_id))?;
+
+        // update `created_at` as now() and `created_at_cluster_version` as current cluster version.
+        let res = Object::update_many()
+            .col_expr(object::Column::CreatedAt, Expr::current_timestamp().into())
+            .col_expr(
+                object::Column::CreatedAtClusterVersion,
+                current_cluster_version().into(),
+            )
+            .filter(object::Column::Oid.eq(job_id))
+            .exec(txn)
+            .await?;
+        if res.rows_affected == 0 {
+            return Err(MetaError::catalog_id_not_found("streaming job", job_id));
+        }
+
+        // mark the target stream job as `Created`.
+        let job = streaming_job::ActiveModel {
+            job_id: Set(job_id),
+            job_status: Set(JobStatus::Created),
+            ..Default::default()
+        };
+        let streaming_job = Some(job.update(txn).await?);
+
+        // notify frontend: job, internal tables.
+        let internal_table_objs = Table::find()
+            .find_also_related(Object)
+            .filter(table::Column::BelongsToJobId.eq(job_id))
+            .all(txn)
+            .await?;
+        let mut objects = internal_table_objs
+            .iter()
+            .map(|(table, obj)| PbObject {
+                object_info: Some(PbObjectInfo::Table(
+                    ObjectModel(table.clone(), obj.clone().unwrap(), streaming_job.clone()).into(),
+                )),
+            })
+            .collect_vec();
+        let mut notification_op = if create_type == CreateType::Background {
+            NotificationOperation::Update
+        } else {
+            NotificationOperation::Add
+        };
+        let mut updated_user_info = vec![];
+        let mut need_grant_default_privileges = true;
+
+        match job_type {
+            ObjectType::Table => {
+                let (table, obj) = Table::find_by_id(job_id.as_mv_table_id())
+                    .find_also_related(Object)
+                    .one(txn)
+                    .await?
+                    .ok_or_else(|| MetaError::catalog_id_not_found("table", job_id))?;
+                if table.table_type == TableType::MaterializedView {
+                    notification_op = NotificationOperation::Update;
+                }
+
+                if let Some(source_id) = table.optional_associated_source_id {
+                    let (src, obj) = Source::find_by_id(source_id)
+                        .find_also_related(Object)
+                        .one(txn)
+                        .await?
+                        .ok_or_else(|| MetaError::catalog_id_not_found("source", source_id))?;
+                    objects.push(PbObject {
+                        object_info: Some(PbObjectInfo::Source(
+                            ObjectModel(src, obj.unwrap(), None).into(),
+                        )),
+                    });
+                }
+                objects.push(PbObject {
+                    object_info: Some(PbObjectInfo::Table(
+                        ObjectModel(table, obj.unwrap(), streaming_job).into(),
+                    )),
+                });
+            }
+            ObjectType::Sink => {
+                let (sink, obj) = Sink::find_by_id(job_id.as_sink_id())
+                    .find_also_related(Object)
+                    .one(txn)
+                    .await?
+                    .ok_or_else(|| MetaError::catalog_id_not_found("sink", job_id))?;
+                if sink.name.starts_with(ICEBERG_SINK_PREFIX) {
+                    need_grant_default_privileges = false;
+                }
+                // If sinks were pre-notified during CREATING, we should use Update at finish
+                // to avoid duplicate Add notifications (align with MV behavior).
+                notification_op = NotificationOperation::Update;
+                objects.push(PbObject {
+                    object_info: Some(PbObjectInfo::Sink(
+                        ObjectModel(sink, obj.unwrap(), streaming_job).into(),
+                    )),
+                });
+            }
+            ObjectType::Index => {
+                need_grant_default_privileges = false;
+                let (index, obj) = Index::find_by_id(job_id.as_index_id())
+                    .find_also_related(Object)
+                    .one(txn)
+                    .await?
+                    .ok_or_else(|| MetaError::catalog_id_not_found("index", job_id))?;
+                {
+                    let (table, obj) = Table::find_by_id(index.index_table_id)
+                        .find_also_related(Object)
+                        .one(txn)
+                        .await?
+                        .ok_or_else(|| {
+                            MetaError::catalog_id_not_found("table", index.index_table_id)
+                        })?;
+                    objects.push(PbObject {
+                        object_info: Some(PbObjectInfo::Table(
+                            ObjectModel(table, obj.unwrap(), streaming_job.clone()).into(),
+                        )),
+                    });
+                }
+
+                // If the index is created on a table with privileges, we should also
+                // grant the privileges for the index and its state tables.
+                let primary_table_privileges = UserPrivilege::find()
+                    .filter(
+                        user_privilege::Column::Oid
+                            .eq(index.primary_table_id)
+                            .and(user_privilege::Column::Action.eq(Action::Select)),
+                    )
+                    .all(txn)
+                    .await?;
+                if !primary_table_privileges.is_empty() {
+                    let index_state_table_ids: Vec<TableId> = Table::find()
+                        .select_only()
+                        .column(table::Column::TableId)
+                        .filter(
+                            table::Column::BelongsToJobId
+                                .eq(job_id)
+                                .or(table::Column::TableId.eq(index.index_table_id)),
+                        )
+                        .into_tuple()
+                        .all(txn)
+                        .await?;
+                    let mut new_privileges = vec![];
+                    for privilege in &primary_table_privileges {
+                        for state_table_id in &index_state_table_ids {
+                            new_privileges.push(user_privilege::ActiveModel {
+                                id: Default::default(),
+                                oid: Set(state_table_id.as_object_id()),
+                                user_id: Set(privilege.user_id),
+                                action: Set(Action::Select),
+                                dependent_id: Set(privilege.dependent_id),
+                                granted_by: Set(privilege.granted_by),
+                                with_grant_option: Set(privilege.with_grant_option),
+                            });
+                        }
+                    }
+                    UserPrivilege::insert_many(new_privileges).exec(txn).await?;
+
+                    updated_user_info = list_user_info_by_ids(
+                        primary_table_privileges.into_iter().map(|p| p.user_id),
+                        txn,
+                    )
+                    .await?;
+                }
+
+                objects.push(PbObject {
+                    object_info: Some(PbObjectInfo::Index(
+                        ObjectModel(index, obj.unwrap(), streaming_job).into(),
+                    )),
+                });
+            }
+            ObjectType::Source => {
+                let (source, obj) = Source::find_by_id(job_id.as_shared_source_id())
+                    .find_also_related(Object)
+                    .one(txn)
+                    .await?
+                    .ok_or_else(|| MetaError::catalog_id_not_found("source", job_id))?;
+                objects.push(PbObject {
+                    object_info: Some(PbObjectInfo::Source(
+                        ObjectModel(source, obj.unwrap(), None).into(),
+                    )),
+                });
+            }
+            _ => unreachable!("invalid job type: {:?}", job_type),
+        }
+
+        if need_grant_default_privileges {
+            updated_user_info = grant_default_privileges_automatically(txn, job_id).await?;
+        }
+
+        Ok((notification_op, objects, updated_user_info))
+    }
+
     pub async fn finish_replace_streaming_job(
         &self,
-        tmp_id: ObjectId,
+        tmp_id: JobId,
         streaming_job: StreamingJob,
         replace_upstream: FragmentReplaceUpstream,
-        col_index_mapping: Option<ColIndexMapping>,
         sink_into_table_context: SinkIntoTableContext,
         drop_table_connector_ctx: Option<&DropTableConnectorContext>,
+        auto_refresh_schema_sinks: Option<Vec<FinishAutoRefreshSchemaSinkContext>>,
     ) -> MetaResult<NotificationVersion> {
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
 
-        let (objects, fragment_mapping, delete_notification_objs) =
-            Self::finish_replace_streaming_job_inner(
-                tmp_id,
-                replace_upstream,
-                col_index_mapping,
-                sink_into_table_context,
-                &txn,
-                streaming_job,
-                drop_table_connector_ctx,
-            )
-            .await?;
+        let (objects, delete_notification_objs) = Self::finish_replace_streaming_job_inner(
+            tmp_id,
+            replace_upstream,
+            sink_into_table_context,
+            &txn,
+            streaming_job,
+            drop_table_connector_ctx,
+            auto_refresh_schema_sinks,
+        )
+        .await?;
 
         txn.commit().await?;
 
-        // FIXME: Do not notify frontend currently, because frontend nodes might refer to old table
-        // catalog and need to access the old fragment. Let frontend nodes delete the old fragment
-        // when they receive table catalog change.
-        // self.notify_fragment_mapping(NotificationOperation::Delete, old_fragment_mappings)
-        //     .await;
-        self.notify_fragment_mapping(NotificationOperation::Add, fragment_mapping)
-            .await;
         let mut version = self
             .notify_frontend(
                 NotificationOperation::Update,
@@ -1018,55 +1336,59 @@ impl CatalogController {
     }
 
     pub async fn finish_replace_streaming_job_inner(
-        tmp_id: ObjectId,
+        tmp_id: JobId,
         replace_upstream: FragmentReplaceUpstream,
-        col_index_mapping: Option<ColIndexMapping>,
         SinkIntoTableContext {
-            creating_sink_id,
-            dropping_sink_id,
             updated_sink_catalogs,
         }: SinkIntoTableContext,
         txn: &DatabaseTransaction,
         streaming_job: StreamingJob,
         drop_table_connector_ctx: Option<&DropTableConnectorContext>,
-    ) -> MetaResult<(
-        Vec<PbObject>,
-        Vec<PbFragmentWorkerSlotMapping>,
-        Option<(Vec<PbUserInfo>, Vec<PartialObject>)>,
-    )> {
-        let original_job_id = streaming_job.id() as ObjectId;
+        auto_refresh_schema_sinks: Option<Vec<FinishAutoRefreshSchemaSinkContext>>,
+    ) -> MetaResult<(Vec<PbObject>, Option<(Vec<PbUserInfo>, Vec<PartialObject>)>)> {
+        let original_job_id = streaming_job.id();
         let job_type = streaming_job.job_type();
+
+        let mut index_item_rewriter = None;
 
         // Update catalog
         match streaming_job {
             StreamingJob::Table(_source, table, _table_job_type) => {
                 // The source catalog should remain unchanged
 
-                let original_table_catalogs = Table::find_by_id(original_job_id)
-                    .select_only()
-                    .columns([table::Column::Columns])
-                    .into_tuple::<ColumnCatalogArray>()
-                    .one(txn)
-                    .await?
-                    .ok_or_else(|| MetaError::catalog_id_not_found("table", original_job_id))?;
+                let original_column_catalogs =
+                    get_table_columns(txn, original_job_id.as_mv_table_id()).await?;
+
+                index_item_rewriter = Some({
+                    let original_columns = original_column_catalogs
+                        .to_protobuf()
+                        .into_iter()
+                        .map(|c| c.column_desc.unwrap())
+                        .collect_vec();
+                    let new_columns = table
+                        .columns
+                        .iter()
+                        .map(|c| c.column_desc.clone().unwrap())
+                        .collect_vec();
+
+                    IndexItemRewriter {
+                        original_columns,
+                        new_columns,
+                    }
+                });
 
                 // For sinks created in earlier versions, we need to set the original_target_columns.
                 for sink_id in updated_sink_catalogs {
-                    sink::ActiveModel {
+                    Sink::update(sink::ActiveModel {
                         sink_id: Set(sink_id as _),
-                        original_target_columns: Set(Some(original_table_catalogs.clone())),
+                        original_target_columns: Set(Some(original_column_catalogs.clone())),
                         ..Default::default()
-                    }
-                    .update(txn)
+                    })
+                    .exec(txn)
                     .await?;
                 }
                 // Update the table catalog with the new one. (column catalog is also updated here)
                 let mut table = table::ActiveModel::from(table);
-                let mut incoming_sinks = table.incoming_sinks.as_ref().inner_ref().clone();
-                if let Some(sink_id) = creating_sink_id {
-                    debug_assert!(!incoming_sinks.contains(&{ sink_id }));
-                    incoming_sinks.push(sink_id as _);
-                }
                 if let Some(drop_table_connector_ctx) = drop_table_connector_ctx
                     && drop_table_connector_ctx.to_change_streaming_job_id == original_job_id
                 {
@@ -1074,20 +1396,17 @@ impl CatalogController {
                     table.optional_associated_source_id = Set(None);
                 }
 
-                if let Some(sink_id) = dropping_sink_id {
-                    let drained = incoming_sinks
-                        .extract_if(.., |id| *id == sink_id)
-                        .collect_vec();
-                    debug_assert_eq!(drained, vec![sink_id]);
-                }
-
-                table.incoming_sinks = Set(incoming_sinks.into());
-                table.update(txn).await?;
+                Table::update(table).exec(txn).await?;
             }
             StreamingJob::Source(source) => {
                 // Update the source catalog with the new one.
                 let source = source::ActiveModel::from(source);
-                source.update(txn).await?;
+                Source::update(source).exec(txn).await?;
+            }
+            StreamingJob::MaterializedView(table) => {
+                // Update the table catalog with the new one.
+                let table = table::ActiveModel::from(table);
+                Table::update(table).exec(txn).await?;
             }
             _ => unreachable!(
                 "invalid streaming job type: {:?}",
@@ -1095,108 +1414,125 @@ impl CatalogController {
             ),
         }
 
-        // 0. update internal tables
-        // Fields including `fragment_id` were placeholder values before.
-        // After table fragments are created, update them for all internal tables.
-        let fragment_info: Vec<(FragmentId, I32Array)> = Fragment::find()
-            .select_only()
-            .columns([
-                fragment::Column::FragmentId,
-                fragment::Column::StateTableIds,
-            ])
-            .filter(fragment::Column::JobId.eq(tmp_id))
-            .into_tuple()
-            .all(txn)
-            .await?;
-        for (fragment_id, state_table_ids) in fragment_info {
-            for state_table_id in state_table_ids.into_inner() {
-                table::ActiveModel {
-                    table_id: Set(state_table_id as _),
-                    fragment_id: Set(Some(fragment_id)),
-                    // No need to update `vnode_count` because it must remain the same.
-                    ..Default::default()
+        async fn finish_fragments(
+            txn: &DatabaseTransaction,
+            tmp_id: JobId,
+            original_job_id: JobId,
+            replace_upstream: FragmentReplaceUpstream,
+        ) -> MetaResult<()> {
+            // 0. update internal tables
+            // Fields including `fragment_id` were placeholder values before.
+            // After table fragments are created, update them for all internal tables.
+            let fragment_info: Vec<(FragmentId, I32Array)> = Fragment::find()
+                .select_only()
+                .columns([
+                    fragment::Column::FragmentId,
+                    fragment::Column::StateTableIds,
+                ])
+                .filter(fragment::Column::JobId.eq(tmp_id))
+                .into_tuple()
+                .all(txn)
+                .await?;
+            for (fragment_id, state_table_ids) in fragment_info {
+                for state_table_id in state_table_ids.into_inner() {
+                    let state_table_id = TableId::new(state_table_id as _);
+                    Table::update(table::ActiveModel {
+                        table_id: Set(state_table_id),
+                        fragment_id: Set(Some(fragment_id)),
+                        // No need to update `vnode_count` because it must remain the same.
+                        ..Default::default()
+                    })
+                    .exec(txn)
+                    .await?;
                 }
-                .update(txn)
+            }
+
+            // 1. replace old fragments/actors with new ones.
+            Fragment::delete_many()
+                .filter(fragment::Column::JobId.eq(original_job_id))
+                .exec(txn)
+                .await?;
+            Fragment::update_many()
+                .col_expr(fragment::Column::JobId, SimpleExpr::from(original_job_id))
+                .filter(fragment::Column::JobId.eq(tmp_id))
+                .exec(txn)
+                .await?;
+
+            // 2. update merges.
+            // update downstream fragment's Merge node, and upstream_fragment_id
+            for (fragment_id, fragment_replace_map) in replace_upstream {
+                let (fragment_id, mut stream_node) =
+                    Fragment::find_by_id(fragment_id as FragmentId)
+                        .select_only()
+                        .columns([fragment::Column::FragmentId, fragment::Column::StreamNode])
+                        .into_tuple::<(FragmentId, StreamNode)>()
+                        .one(txn)
+                        .await?
+                        .map(|(id, node)| (id, node.to_protobuf()))
+                        .ok_or_else(|| MetaError::catalog_id_not_found("fragment", fragment_id))?;
+
+                visit_stream_node_mut(&mut stream_node, |body| {
+                    if let PbNodeBody::Merge(m) = body
+                        && let Some(new_fragment_id) =
+                            fragment_replace_map.get(&m.upstream_fragment_id)
+                    {
+                        m.upstream_fragment_id = *new_fragment_id;
+                    }
+                });
+                Fragment::update(fragment::ActiveModel {
+                    fragment_id: Set(fragment_id),
+                    stream_node: Set(StreamNode::from(&stream_node)),
+                    ..Default::default()
+                })
+                .exec(txn)
                 .await?;
             }
+
+            // 3. remove dummy object.
+            Object::delete_by_id(tmp_id).exec(txn).await?;
+
+            Ok(())
         }
 
-        // 1. replace old fragments/actors with new ones.
-        Fragment::delete_many()
-            .filter(fragment::Column::JobId.eq(original_job_id))
-            .exec(txn)
-            .await?;
-        Fragment::update_many()
-            .col_expr(fragment::Column::JobId, SimpleExpr::from(original_job_id))
-            .filter(fragment::Column::JobId.eq(tmp_id))
-            .exec(txn)
-            .await?;
-
-        // 2. update merges.
-        // update downstream fragment's Merge node, and upstream_fragment_id
-        for (fragment_id, fragment_replace_map) in replace_upstream {
-            let (fragment_id, mut stream_node) = Fragment::find_by_id(fragment_id as FragmentId)
-                .select_only()
-                .columns([fragment::Column::FragmentId, fragment::Column::StreamNode])
-                .into_tuple::<(FragmentId, StreamNode)>()
-                .one(txn)
-                .await?
-                .map(|(id, node)| (id, node.to_protobuf()))
-                .ok_or_else(|| MetaError::catalog_id_not_found("fragment", fragment_id))?;
-
-            visit_stream_node_mut(&mut stream_node, |body| {
-                if let PbNodeBody::Merge(m) = body
-                    && let Some(new_fragment_id) = fragment_replace_map.get(&m.upstream_fragment_id)
-                {
-                    m.upstream_fragment_id = *new_fragment_id;
-                }
-            });
-            fragment::ActiveModel {
-                fragment_id: Set(fragment_id),
-                stream_node: Set(StreamNode::from(&stream_node)),
-                ..Default::default()
-            }
-            .update(txn)
-            .await?;
-        }
-
-        // 3. remove dummy object.
-        Object::delete_by_id(tmp_id).exec(txn).await?;
+        finish_fragments(txn, tmp_id, original_job_id, replace_upstream).await?;
 
         // 4. update catalogs and notify.
         let mut objects = vec![];
         match job_type {
-            StreamingJobType::Table(_) => {
-                let (table, table_obj) = Table::find_by_id(original_job_id)
+            StreamingJobType::Table(_) | StreamingJobType::MaterializedView => {
+                let (table, table_obj) = Table::find_by_id(original_job_id.as_mv_table_id())
                     .find_also_related(Object)
                     .one(txn)
                     .await?
                     .ok_or_else(|| MetaError::catalog_id_not_found("object", original_job_id))?;
+                let streaming_job = streaming_job::Entity::find_by_id(table.job_id())
+                    .one(txn)
+                    .await?;
                 objects.push(PbObject {
                     object_info: Some(PbObjectInfo::Table(
-                        ObjectModel(table, table_obj.unwrap()).into(),
+                        ObjectModel(table, table_obj.unwrap(), streaming_job).into(),
                     )),
                 })
             }
             StreamingJobType::Source => {
-                let (source, source_obj) = Source::find_by_id(original_job_id)
-                    .find_also_related(Object)
-                    .one(txn)
-                    .await?
-                    .ok_or_else(|| MetaError::catalog_id_not_found("object", original_job_id))?;
+                let (source, source_obj) =
+                    Source::find_by_id(original_job_id.as_shared_source_id())
+                        .find_also_related(Object)
+                        .one(txn)
+                        .await?
+                        .ok_or_else(|| {
+                            MetaError::catalog_id_not_found("object", original_job_id)
+                        })?;
                 objects.push(PbObject {
                     object_info: Some(PbObjectInfo::Source(
-                        ObjectModel(source, source_obj.unwrap()).into(),
+                        ObjectModel(source, source_obj.unwrap(), None).into(),
                     )),
                 })
             }
             _ => unreachable!("invalid streaming job type for replace: {:?}", job_type),
         }
-        if let Some(table_col_index_mapping) = col_index_mapping {
-            let expr_rewriter = ReplaceTableExprRewriter {
-                table_col_index_mapping,
-            };
 
+        if let Some(expr_rewriter) = index_item_rewriter {
             let index_items: Vec<(IndexId, ExprNodeArray)> = Index::find()
                 .select_only()
                 .columns([index::Column::IndexId, index::Column::IndexItems])
@@ -1216,18 +1552,78 @@ impl CatalogController {
                 }
                 .update(txn)
                 .await?;
-                let index_obj = index
-                    .find_related(Object)
+                let (index_obj, streaming_job) = Object::find_by_id(index.index_id)
+                    .find_also_related(streaming_job::Entity)
                     .one(txn)
                     .await?
                     .ok_or_else(|| MetaError::catalog_id_not_found("object", index.index_id))?;
                 objects.push(PbObject {
-                    object_info: Some(PbObjectInfo::Index(ObjectModel(index, index_obj).into())),
+                    object_info: Some(PbObjectInfo::Index(
+                        ObjectModel(index, index_obj, streaming_job).into(),
+                    )),
                 });
             }
         }
 
-        let fragment_mapping: Vec<_> = get_fragment_mappings(txn, original_job_id as _).await?;
+        if let Some(sinks) = auto_refresh_schema_sinks {
+            for finish_sink_context in sinks {
+                finish_fragments(
+                    txn,
+                    finish_sink_context.tmp_sink_id.as_job_id(),
+                    finish_sink_context.original_sink_id.as_job_id(),
+                    Default::default(),
+                )
+                .await?;
+                let (mut sink, sink_obj) = Sink::find_by_id(finish_sink_context.original_sink_id)
+                    .find_also_related(Object)
+                    .one(txn)
+                    .await?
+                    .ok_or_else(|| MetaError::catalog_id_not_found("sink", original_job_id))?;
+                let sink_streaming_job =
+                    streaming_job::Entity::find_by_id(sink.sink_id.as_job_id())
+                        .one(txn)
+                        .await?;
+                let columns = ColumnCatalogArray::from(finish_sink_context.columns);
+                Sink::update(sink::ActiveModel {
+                    sink_id: Set(finish_sink_context.original_sink_id),
+                    columns: Set(columns.clone()),
+                    ..Default::default()
+                })
+                .exec(txn)
+                .await?;
+                sink.columns = columns;
+                objects.push(PbObject {
+                    object_info: Some(PbObjectInfo::Sink(
+                        ObjectModel(sink, sink_obj.unwrap(), sink_streaming_job.clone()).into(),
+                    )),
+                });
+                if let Some((log_store_table_id, new_log_store_table_columns)) =
+                    finish_sink_context.new_log_store_table
+                {
+                    let new_log_store_table_columns: ColumnCatalogArray =
+                        new_log_store_table_columns.into();
+                    let (mut table, table_obj) = Table::find_by_id(log_store_table_id)
+                        .find_also_related(Object)
+                        .one(txn)
+                        .await?
+                        .ok_or_else(|| MetaError::catalog_id_not_found("table", original_job_id))?;
+                    Table::update(table::ActiveModel {
+                        table_id: Set(log_store_table_id),
+                        columns: Set(new_log_store_table_columns.clone()),
+                        ..Default::default()
+                    })
+                    .exec(txn)
+                    .await?;
+                    table.columns = new_log_store_table_columns;
+                    objects.push(PbObject {
+                        object_info: Some(PbObjectInfo::Table(
+                            ObjectModel(table, table_obj.unwrap(), sink_streaming_job.clone())
+                                .into(),
+                        )),
+                    });
+                }
+            }
+        }
 
         let mut notification_objs: Option<(Vec<PbUserInfo>, Vec<PartialObject>)> = None;
         if let Some(drop_table_connector_ctx) = drop_table_connector_ctx {
@@ -1235,13 +1631,24 @@ impl CatalogController {
                 Some(Self::drop_table_associated_source(txn, drop_table_connector_ctx).await?);
         }
 
-        Ok((objects, fragment_mapping, notification_objs))
+        Ok((objects, notification_objs))
     }
 
     /// Abort the replacing streaming job by deleting the temporary job object.
-    pub async fn try_abort_replacing_streaming_job(&self, tmp_job_id: ObjectId) -> MetaResult<()> {
+    pub async fn try_abort_replacing_streaming_job(
+        &self,
+        tmp_job_id: JobId,
+        tmp_sink_ids: Option<Vec<ObjectId>>,
+    ) -> MetaResult<()> {
         let inner = self.inner.write().await;
-        Object::delete_by_id(tmp_job_id).exec(&inner.db).await?;
+        let txn = inner.db.begin().await?;
+        Object::delete_by_id(tmp_job_id).exec(&txn).await?;
+        if let Some(tmp_sink_ids) = tmp_sink_ids {
+            for tmp_sink_id in tmp_sink_ids {
+                Object::delete_by_id(tmp_sink_id).exec(&txn).await?;
+            }
+        }
+        txn.commit().await?;
         Ok(())
     }
 
@@ -1251,7 +1658,7 @@ impl CatalogController {
         &self,
         source_id: SourceId,
         rate_limit: Option<u32>,
-    ) -> MetaResult<HashMap<FragmentId, Vec<ActorId>>> {
+    ) -> MetaResult<(HashSet<JobId>, HashSet<FragmentId>)> {
         let inner = self.inner.read().await;
         let txn = inner.db.begin().await?;
 
@@ -1261,7 +1668,7 @@ impl CatalogController {
                 rate_limit: Set(rate_limit.map(|v| v as i32)),
                 ..Default::default()
             };
-            active_source.update(&txn).await?;
+            Source::update(active_source).exec(&txn).await?;
         }
 
         let (source, obj) = Source::find_by_id(source_id)
@@ -1273,13 +1680,13 @@ impl CatalogController {
             })?;
 
         let is_fs_source = source.with_properties.inner_ref().is_new_fs_connector();
-        let streaming_job_ids: Vec<ObjectId> =
+        let streaming_job_ids: Vec<JobId> =
             if let Some(table_id) = source.optional_associated_table_id {
-                vec![table_id]
+                vec![table_id.as_job_id()]
             } else if let Some(source_info) = &source.source_info
                 && source_info.to_protobuf().is_shared()
             {
-                vec![source_id]
+                vec![source_id.as_share_source_job_id()]
             } else {
                 ObjectDependency::find()
                     .select_only()
@@ -1296,10 +1703,11 @@ impl CatalogController {
             )));
         }
 
-        let fragments: Vec<(FragmentId, i32, StreamNode)> = Fragment::find()
+        let fragments: Vec<(FragmentId, JobId, i32, StreamNode)> = Fragment::find()
             .select_only()
             .columns([
                 fragment::Column::FragmentId,
+                fragment::Column::JobId,
                 fragment::Column::FragmentTypeMask,
                 fragment::Column::StreamNode,
             ])
@@ -1309,20 +1717,26 @@ impl CatalogController {
             .await?;
         let mut fragments = fragments
             .into_iter()
-            .map(|(id, mask, stream_node)| (id, mask, stream_node.to_protobuf()))
+            .map(|(id, job_id, mask, stream_node)| {
+                (
+                    id,
+                    job_id,
+                    FragmentTypeMask::from(mask as u32),
+                    stream_node.to_protobuf(),
+                )
+            })
             .collect_vec();
 
-        fragments.retain_mut(|(_, fragment_type_mask, stream_node)| {
+        fragments.retain_mut(|(_, _, fragment_type_mask, stream_node)| {
             let mut found = false;
-            if *fragment_type_mask & PbFragmentTypeFlag::Source as i32 != 0 {
+            if fragment_type_mask.contains(FragmentTypeFlag::Source) {
                 visit_stream_node_mut(stream_node, |node| {
-                    if let PbNodeBody::Source(node) = node {
-                        if let Some(node_inner) = &mut node.source_inner
-                            && node_inner.source_id == source_id as u32
-                        {
-                            node_inner.rate_limit = rate_limit;
-                            found = true;
-                        }
+                    if let PbNodeBody::Source(node) = node
+                        && let Some(node_inner) = &mut node.source_inner
+                        && node_inner.source_id == source_id
+                    {
+                        node_inner.rate_limit = rate_limit;
+                        found = true;
                     }
                 });
             }
@@ -1331,9 +1745,9 @@ impl CatalogController {
                 // so we just scan all fragments for StreamFsFetch node if using fs connector
                 visit_stream_node_mut(stream_node, |node| {
                     if let PbNodeBody::StreamFsFetch(node) = node {
-                        *fragment_type_mask |= PbFragmentTypeFlag::FsFetch as i32;
+                        fragment_type_mask.add(FragmentTypeFlag::FsFetch);
                         if let Some(node_inner) = &mut node.node_inner
-                            && node_inner.source_id == source_id as u32
+                            && node_inner.source_id == source_id
                         {
                             node_inner.rate_limit = rate_limit;
                             found = true;
@@ -1348,22 +1762,26 @@ impl CatalogController {
             !fragments.is_empty(),
             "source id should be used by at least one fragment"
         );
-        let fragment_ids = fragments.iter().map(|(id, _, _)| *id).collect_vec();
-        for (id, fragment_type_mask, stream_node) in fragments {
-            fragment::ActiveModel {
-                fragment_id: Set(id),
-                fragment_type_mask: Set(fragment_type_mask),
+
+        let (fragment_ids, job_ids) = fragments
+            .iter()
+            .map(|(framgnet_id, job_id, _, _)| (framgnet_id, job_id))
+            .unzip();
+
+        for (fragment_id, _, fragment_type_mask, stream_node) in fragments {
+            Fragment::update(fragment::ActiveModel {
+                fragment_id: Set(fragment_id),
+                fragment_type_mask: Set(fragment_type_mask.into()),
                 stream_node: Set(StreamNode::from(&stream_node)),
                 ..Default::default()
-            }
-            .update(&txn)
+            })
+            .exec(&txn)
             .await?;
         }
-        let fragment_actors = get_fragment_actor_ids(&txn, fragment_ids).await?;
 
         txn.commit().await?;
 
-        let relation_info = PbObjectInfo::Source(ObjectModel(source, obj.unwrap()).into());
+        let relation_info = PbObjectInfo::Source(ObjectModel(source, obj.unwrap(), None).into());
         let _version = self
             .notify_frontend(
                 NotificationOperation::Update,
@@ -1375,19 +1793,19 @@ impl CatalogController {
             )
             .await;
 
-        Ok(fragment_actors)
+        Ok((job_ids, fragment_ids))
     }
 
     // edit the content of fragments in given `table_id`
     // return the actor_ids to be applied
-    async fn mutate_fragments_by_job_id(
+    pub async fn mutate_fragments_by_job_id(
         &self,
-        job_id: ObjectId,
+        job_id: JobId,
         // returns true if the mutation is applied
-        mut fragments_mutation_fn: impl FnMut(&mut i32, &mut PbStreamNode) -> bool,
+        mut fragments_mutation_fn: impl FnMut(FragmentTypeMask, &mut PbStreamNode) -> MetaResult<bool>,
         // error message when no relevant fragments is found
         err_msg: &'static str,
-    ) -> MetaResult<HashMap<FragmentId, Vec<ActorId>>> {
+    ) -> MetaResult<HashSet<FragmentId>> {
         let inner = self.inner.read().await;
         let txn = inner.db.begin().await?;
 
@@ -1404,12 +1822,22 @@ impl CatalogController {
             .await?;
         let mut fragments = fragments
             .into_iter()
-            .map(|(id, mask, stream_node)| (id, mask, stream_node.to_protobuf()))
+            .map(|(id, mask, stream_node)| {
+                (id, FragmentTypeMask::from(mask), stream_node.to_protobuf())
+            })
             .collect_vec();
 
-        fragments.retain_mut(|(_, fragment_type_mask, stream_node)| {
-            fragments_mutation_fn(fragment_type_mask, stream_node)
-        });
+        let fragments = fragments
+            .iter_mut()
+            .map(|(_, fragment_type_mask, stream_node)| {
+                fragments_mutation_fn(*fragment_type_mask, stream_node)
+            })
+            .collect::<MetaResult<Vec<bool>>>()?
+            .into_iter()
+            .zip_eq_debug(std::mem::take(&mut fragments))
+            .filter_map(|(keep, fragment)| if keep { Some(fragment) } else { None })
+            .collect::<Vec<_>>();
+
         if fragments.is_empty() {
             return Err(MetaError::invalid_parameter(format!(
                 "job id {job_id}: {}",
@@ -1417,33 +1845,32 @@ impl CatalogController {
             )));
         }
 
-        let fragment_ids = fragments.iter().map(|(id, _, _)| *id).collect_vec();
+        let fragment_ids: HashSet<FragmentId> = fragments.iter().map(|(id, _, _)| *id).collect();
         for (id, _, stream_node) in fragments {
-            fragment::ActiveModel {
+            Fragment::update(fragment::ActiveModel {
                 fragment_id: Set(id),
                 stream_node: Set(StreamNode::from(&stream_node)),
                 ..Default::default()
-            }
-            .update(&txn)
+            })
+            .exec(&txn)
             .await?;
         }
-        let fragment_actors = get_fragment_actor_ids(&txn, fragment_ids).await?;
 
         txn.commit().await?;
 
-        Ok(fragment_actors)
+        Ok(fragment_ids)
     }
 
     async fn mutate_fragment_by_fragment_id(
         &self,
         fragment_id: FragmentId,
-        mut fragment_mutation_fn: impl FnMut(&mut i32, &mut PbStreamNode) -> bool,
+        mut fragment_mutation_fn: impl FnMut(FragmentTypeMask, &mut PbStreamNode) -> bool,
         err_msg: &'static str,
-    ) -> MetaResult<HashMap<FragmentId, Vec<ActorId>>> {
+    ) -> MetaResult<()> {
         let inner = self.inner.read().await;
         let txn = inner.db.begin().await?;
 
-        let (mut fragment_type_mask, stream_node): (i32, StreamNode) =
+        let (fragment_type_mask, stream_node): (i32, StreamNode) =
             Fragment::find_by_id(fragment_id)
                 .select_only()
                 .columns([
@@ -1455,40 +1882,41 @@ impl CatalogController {
                 .await?
                 .ok_or_else(|| MetaError::catalog_id_not_found("fragment", fragment_id))?;
         let mut pb_stream_node = stream_node.to_protobuf();
+        let fragment_type_mask = FragmentTypeMask::from(fragment_type_mask);
 
-        if !fragment_mutation_fn(&mut fragment_type_mask, &mut pb_stream_node) {
+        if !fragment_mutation_fn(fragment_type_mask, &mut pb_stream_node) {
             return Err(MetaError::invalid_parameter(format!(
                 "fragment id {fragment_id}: {}",
                 err_msg
             )));
         }
 
-        fragment::ActiveModel {
+        Fragment::update(fragment::ActiveModel {
             fragment_id: Set(fragment_id),
             stream_node: Set(stream_node),
             ..Default::default()
-        }
-        .update(&txn)
+        })
+        .exec(&txn)
         .await?;
-
-        let fragment_actors = get_fragment_actor_ids(&txn, vec![fragment_id]).await?;
 
         txn.commit().await?;
 
-        Ok(fragment_actors)
+        Ok(())
     }
 
     // edit the `rate_limit` of the `Chain` node in given `table_id`'s fragments
     // return the actor_ids to be applied
     pub async fn update_backfill_rate_limit_by_job_id(
         &self,
-        job_id: ObjectId,
+        job_id: JobId,
         rate_limit: Option<u32>,
-    ) -> MetaResult<HashMap<FragmentId, Vec<ActorId>>> {
+    ) -> MetaResult<HashSet<FragmentId>> {
         let update_backfill_rate_limit =
-            |fragment_type_mask: &mut i32, stream_node: &mut PbStreamNode| {
+            |fragment_type_mask: FragmentTypeMask, stream_node: &mut PbStreamNode| {
                 let mut found = false;
-                if *fragment_type_mask & PbFragmentTypeFlag::backfill_rate_limit_fragments() != 0 {
+                if fragment_type_mask
+                    .contains_any(FragmentTypeFlag::backfill_rate_limit_fragments())
+                {
                     visit_stream_node_mut(stream_node, |node| match node {
                         PbNodeBody::StreamCdcScan(node) => {
                             node.rate_limit = rate_limit;
@@ -1502,14 +1930,10 @@ impl CatalogController {
                             node.rate_limit = rate_limit;
                             found = true;
                         }
-                        PbNodeBody::Sink(node) => {
-                            node.rate_limit = rate_limit;
-                            found = true;
-                        }
                         _ => {}
                     });
                 }
-                found
+                Ok(found)
             };
 
         self.mutate_fragments_by_job_id(
@@ -1524,36 +1948,46 @@ impl CatalogController {
     // return the actor_ids to be applied
     pub async fn update_sink_rate_limit_by_job_id(
         &self,
-        job_id: ObjectId,
+        sink_id: SinkId,
         rate_limit: Option<u32>,
-    ) -> MetaResult<HashMap<FragmentId, Vec<ActorId>>> {
+    ) -> MetaResult<HashSet<FragmentId>> {
         let update_sink_rate_limit =
-            |fragment_type_mask: &mut i32, stream_node: &mut PbStreamNode| {
-                let mut found = false;
-                if *fragment_type_mask & PbFragmentTypeFlag::sink_rate_limit_fragments() != 0 {
+            |fragment_type_mask: FragmentTypeMask, stream_node: &mut PbStreamNode| {
+                let mut found = Ok(false);
+                if fragment_type_mask.contains_any(FragmentTypeFlag::sink_rate_limit_fragments()) {
                     visit_stream_node_mut(stream_node, |node| {
                         if let PbNodeBody::Sink(node) = node {
+                            if node.log_store_type != PbSinkLogStoreType::KvLogStore as i32 {
+                                found = Err(MetaError::invalid_parameter(
+                                    "sink rate limit is only supported for kv log store, please SET sink_decouple = TRUE before CREATE SINK",
+                                ));
+                                return;
+                            }
                             node.rate_limit = rate_limit;
-                            found = true;
+                            found = Ok(true);
                         }
                     });
                 }
                 found
             };
 
-        self.mutate_fragments_by_job_id(job_id, update_sink_rate_limit, "sink node not found")
-            .await
+        self.mutate_fragments_by_job_id(
+            sink_id.as_job_id(),
+            update_sink_rate_limit,
+            "sink node not found",
+        )
+        .await
     }
 
     pub async fn update_dml_rate_limit_by_job_id(
         &self,
-        job_id: ObjectId,
+        job_id: JobId,
         rate_limit: Option<u32>,
-    ) -> MetaResult<HashMap<FragmentId, Vec<ActorId>>> {
+    ) -> MetaResult<HashSet<FragmentId>> {
         let update_dml_rate_limit =
-            |fragment_type_mask: &mut i32, stream_node: &mut PbStreamNode| {
+            |fragment_type_mask: FragmentTypeMask, stream_node: &mut PbStreamNode| {
                 let mut found = false;
-                if *fragment_type_mask & PbFragmentTypeFlag::dml_rate_limit_fragments() != 0 {
+                if fragment_type_mask.contains_any(FragmentTypeFlag::dml_rate_limit_fragments()) {
                     visit_stream_node_mut(stream_node, |node| {
                         if let PbNodeBody::Dml(node) = node {
                             node.rate_limit = rate_limit;
@@ -1561,25 +1995,895 @@ impl CatalogController {
                         }
                     });
                 }
-                found
+                Ok(found)
             };
 
         self.mutate_fragments_by_job_id(job_id, update_dml_rate_limit, "dml node not found")
             .await
     }
 
+    pub async fn update_source_props_by_source_id(
+        &self,
+        source_id: SourceId,
+        alter_props: BTreeMap<String, String>,
+        alter_secret_refs: BTreeMap<String, PbSecretRef>,
+    ) -> MetaResult<WithOptionsSecResolved> {
+        let inner = self.inner.read().await;
+        let txn = inner.db.begin().await?;
+
+        let (source, _obj) = Source::find_by_id(source_id)
+            .find_also_related(Object)
+            .one(&txn)
+            .await?
+            .ok_or_else(|| {
+                MetaError::catalog_id_not_found(ObjectType::Source.as_str(), source_id)
+            })?;
+        let connector = source.with_properties.0.get_connector().unwrap();
+        let is_shared_source = source.is_shared();
+
+        let mut dep_source_job_ids: Vec<JobId> = Vec::new();
+        if !is_shared_source {
+            // mv using non-shared source holds a copy of source in their fragments
+            dep_source_job_ids = ObjectDependency::find()
+                .select_only()
+                .column(object_dependency::Column::UsedBy)
+                .filter(object_dependency::Column::Oid.eq(source_id))
+                .into_tuple()
+                .all(&txn)
+                .await?;
+        }
+
+        // Use check_source_allow_alter_on_fly_fields to validate allowed properties
+        let prop_keys: Vec<String> = alter_props
+            .keys()
+            .chain(alter_secret_refs.keys())
+            .cloned()
+            .collect();
+        risingwave_connector::allow_alter_on_fly_fields::check_source_allow_alter_on_fly_fields(
+            &connector, &prop_keys,
+        )?;
+
+        let mut options_with_secret = WithOptionsSecResolved::new(
+            source.with_properties.0.clone(),
+            source
+                .secret_ref
+                .map(|secret_ref| secret_ref.to_protobuf())
+                .unwrap_or_default(),
+        );
+        let (to_add_secret_dep, to_remove_secret_dep) =
+            options_with_secret.handle_update(alter_props, alter_secret_refs)?;
+
+        tracing::info!(
+            "applying new properties to source: source_id={}, options_with_secret={:?}",
+            source_id,
+            options_with_secret
+        );
+        // check if the alter-ed props are valid for each Connector
+        let _ = ConnectorProperties::extract(options_with_secret.clone(), true)?;
+        // todo: validate via source manager
+
+        let mut associate_table_id = None;
+
+        // can be source_id or table_id
+        // if updating an associated source, the preferred_id is the table_id
+        // otherwise, it is the source_id
+        let mut preferred_id = source_id.as_object_id();
+        let rewrite_sql = {
+            let definition = source.definition.clone();
+
+            let [mut stmt]: [_; 1] = Parser::parse_sql(&definition)
+                .map_err(|e| {
+                    MetaError::from(MetaErrorInner::Connector(ConnectorError::from(
+                        anyhow!(e).context("Failed to parse source definition SQL"),
+                    )))
+                })?
+                .try_into()
+                .unwrap();
+
+            /// Formats SQL options with secret values properly resolved
+            ///
+            /// This function processes configuration options that may contain sensitive data:
+            /// - Plaintext options are directly converted to `SqlOption`
+            /// - Secret options are retrieved from the database and formatted as "SECRET {name}"
+            ///   without exposing the actual secret value
+            ///
+            /// # Arguments
+            /// * `txn` - Database transaction for retrieving secrets
+            /// * `options_with_secret` - Container of options with both plaintext and secret values
+            ///
+            /// # Returns
+            /// * `MetaResult<Vec<SqlOption>>` - List of formatted SQL options or error
+            async fn format_with_option_secret_resolved(
+                txn: &DatabaseTransaction,
+                options_with_secret: &WithOptionsSecResolved,
+            ) -> MetaResult<Vec<SqlOption>> {
+                let mut options = Vec::new();
+                for (k, v) in options_with_secret.as_plaintext() {
+                    let sql_option = SqlOption::try_from((k, &format!("'{}'", v)))
+                        .map_err(|e| MetaError::invalid_parameter(e.to_report_string()))?;
+                    options.push(sql_option);
+                }
+                for (k, v) in options_with_secret.as_secret() {
+                    if let Some(secret_model) = Secret::find_by_id(v.secret_id).one(txn).await? {
+                        let sql_option =
+                            SqlOption::try_from((k, &format!("SECRET {}", secret_model.name)))
+                                .map_err(|e| MetaError::invalid_parameter(e.to_report_string()))?;
+                        options.push(sql_option);
+                    } else {
+                        return Err(MetaError::catalog_id_not_found("secret", v.secret_id));
+                    }
+                }
+                Ok(options)
+            }
+
+            match &mut stmt {
+                Statement::CreateSource { stmt } => {
+                    stmt.with_properties.0 =
+                        format_with_option_secret_resolved(&txn, &options_with_secret).await?;
+                }
+                Statement::CreateTable { with_options, .. } => {
+                    *with_options =
+                        format_with_option_secret_resolved(&txn, &options_with_secret).await?;
+                    associate_table_id = source.optional_associated_table_id;
+                    preferred_id = associate_table_id.unwrap().as_object_id();
+                }
+                _ => unreachable!(),
+            }
+
+            stmt.to_string()
+        };
+
+        {
+            // update secret dependencies
+            if !to_add_secret_dep.is_empty() {
+                ObjectDependency::insert_many(to_add_secret_dep.into_iter().map(|secret_id| {
+                    object_dependency::ActiveModel {
+                        oid: Set(secret_id.into()),
+                        used_by: Set(preferred_id),
+                        ..Default::default()
+                    }
+                }))
+                .exec(&txn)
+                .await?;
+            }
+            if !to_remove_secret_dep.is_empty() {
+                // todo: fix the filter logic
+                let _ = ObjectDependency::delete_many()
+                    .filter(
+                        object_dependency::Column::Oid
+                            .is_in(to_remove_secret_dep)
+                            .and(object_dependency::Column::UsedBy.eq(preferred_id)),
+                    )
+                    .exec(&txn)
+                    .await?;
+            }
+        }
+
+        let active_source_model = source::ActiveModel {
+            source_id: Set(source_id),
+            definition: Set(rewrite_sql.clone()),
+            with_properties: Set(options_with_secret.as_plaintext().clone().into()),
+            secret_ref: Set((!options_with_secret.as_secret().is_empty())
+                .then(|| SecretRef::from(options_with_secret.as_secret().clone()))),
+            ..Default::default()
+        };
+        Source::update(active_source_model).exec(&txn).await?;
+
+        if let Some(associate_table_id) = associate_table_id {
+            // update the associated table statement accordly
+            let active_table_model = table::ActiveModel {
+                table_id: Set(associate_table_id),
+                definition: Set(rewrite_sql),
+                ..Default::default()
+            };
+            Table::update(active_table_model).exec(&txn).await?;
+        }
+
+        let to_check_job_ids = vec![if let Some(associate_table_id) = associate_table_id {
+            // if updating table with connector, the fragment_id is table id
+            associate_table_id.as_job_id()
+        } else {
+            source_id.as_share_source_job_id()
+        }]
+        .into_iter()
+        .chain(dep_source_job_ids.into_iter())
+        .collect_vec();
+
+        // update fragments
+        update_connector_props_fragments(
+            &txn,
+            to_check_job_ids,
+            FragmentTypeFlag::Source,
+            |node, found| {
+                if let PbNodeBody::Source(node) = node
+                    && let Some(source_inner) = &mut node.source_inner
+                {
+                    source_inner.with_properties = options_with_secret.as_plaintext().clone();
+                    source_inner.secret_refs = options_with_secret.as_secret().clone();
+                    *found = true;
+                }
+            },
+            is_shared_source,
+        )
+        .await?;
+
+        let mut to_update_objs = Vec::with_capacity(2);
+        let (source, obj) = Source::find_by_id(source_id)
+            .find_also_related(Object)
+            .one(&txn)
+            .await?
+            .ok_or_else(|| {
+                MetaError::catalog_id_not_found(ObjectType::Source.as_str(), source_id)
+            })?;
+        to_update_objs.push(PbObject {
+            object_info: Some(PbObjectInfo::Source(
+                ObjectModel(source, obj.unwrap(), None).into(),
+            )),
+        });
+
+        if let Some(associate_table_id) = associate_table_id {
+            let (table, obj) = Table::find_by_id(associate_table_id)
+                .find_also_related(Object)
+                .one(&txn)
+                .await?
+                .ok_or_else(|| MetaError::catalog_id_not_found("table", associate_table_id))?;
+            let streaming_job = streaming_job::Entity::find_by_id(table.job_id())
+                .one(&txn)
+                .await?;
+            to_update_objs.push(PbObject {
+                object_info: Some(PbObjectInfo::Table(
+                    ObjectModel(table, obj.unwrap(), streaming_job).into(),
+                )),
+            });
+        }
+
+        txn.commit().await?;
+
+        self.notify_frontend(
+            NotificationOperation::Update,
+            NotificationInfo::ObjectGroup(PbObjectGroup {
+                objects: to_update_objs,
+            }),
+        )
+        .await;
+
+        Ok(options_with_secret)
+    }
+
+    pub async fn update_sink_props_by_sink_id(
+        &self,
+        sink_id: SinkId,
+        props: BTreeMap<String, String>,
+    ) -> MetaResult<HashMap<String, String>> {
+        let inner = self.inner.read().await;
+        let txn = inner.db.begin().await?;
+
+        let (sink, _obj) = Sink::find_by_id(sink_id)
+            .find_also_related(Object)
+            .one(&txn)
+            .await?
+            .ok_or_else(|| MetaError::catalog_id_not_found(ObjectType::Sink.as_str(), sink_id))?;
+        validate_sink_props(&sink, &props)?;
+        let definition = sink.definition.clone();
+        let [mut stmt]: [_; 1] = Parser::parse_sql(&definition)
+            .map_err(|e| SinkError::Config(anyhow!(e)))?
+            .try_into()
+            .unwrap();
+        if let Statement::CreateSink { stmt } = &mut stmt {
+            update_stmt_with_props(&mut stmt.with_properties.0, &props)?;
+        } else {
+            panic!("definition is not a create sink statement")
+        }
+        let mut new_config = sink.properties.clone().into_inner();
+        new_config.extend(props.clone());
+
+        let definition = stmt.to_string();
+        let active_sink = sink::ActiveModel {
+            sink_id: Set(sink_id),
+            properties: Set(risingwave_meta_model::Property(new_config.clone())),
+            definition: Set(definition),
+            ..Default::default()
+        };
+        Sink::update(active_sink).exec(&txn).await?;
+
+        update_sink_fragment_props(&txn, sink_id, new_config).await?;
+        let (sink, obj) = Sink::find_by_id(sink_id)
+            .find_also_related(Object)
+            .one(&txn)
+            .await?
+            .ok_or_else(|| MetaError::catalog_id_not_found(ObjectType::Sink.as_str(), sink_id))?;
+        let streaming_job = streaming_job::Entity::find_by_id(sink.sink_id.as_job_id())
+            .one(&txn)
+            .await?;
+        txn.commit().await?;
+        let relation_infos = vec![PbObject {
+            object_info: Some(PbObjectInfo::Sink(
+                ObjectModel(sink, obj.unwrap(), streaming_job).into(),
+            )),
+        }];
+
+        let _version = self
+            .notify_frontend(
+                NotificationOperation::Update,
+                NotificationInfo::ObjectGroup(PbObjectGroup {
+                    objects: relation_infos,
+                }),
+            )
+            .await;
+
+        Ok(props.into_iter().collect())
+    }
+
+    pub async fn update_iceberg_table_props_by_table_id(
+        &self,
+        table_id: TableId,
+        props: BTreeMap<String, String>,
+        alter_iceberg_table_props: Option<
+            risingwave_pb::meta::alter_connector_props_request::PbExtraOptions,
+        >,
+    ) -> MetaResult<(HashMap<String, String>, SinkId)> {
+        let risingwave_pb::meta::alter_connector_props_request::PbExtraOptions::AlterIcebergTableIds(AlterIcebergTableIds { sink_id, source_id }) = alter_iceberg_table_props.
+            ok_or_else(|| MetaError::invalid_parameter("alter_iceberg_table_props is required"))?;
+        let inner = self.inner.read().await;
+        let txn = inner.db.begin().await?;
+
+        let (sink, _obj) = Sink::find_by_id(sink_id)
+            .find_also_related(Object)
+            .one(&txn)
+            .await?
+            .ok_or_else(|| MetaError::catalog_id_not_found(ObjectType::Sink.as_str(), sink_id))?;
+        validate_sink_props(&sink, &props)?;
+
+        let definition = sink.definition.clone();
+        let [mut stmt]: [_; 1] = Parser::parse_sql(&definition)
+            .map_err(|e| SinkError::Config(anyhow!(e)))?
+            .try_into()
+            .unwrap();
+        if let Statement::CreateTable {
+            with_options,
+            engine,
+            ..
+        } = &mut stmt
+        {
+            if !matches!(engine, Engine::Iceberg) {
+                return Err(SinkError::Config(anyhow!(
+                    "only iceberg table can be altered as sink"
+                ))
+                .into());
+            }
+            update_stmt_with_props(with_options, &props)?;
+        } else {
+            panic!("definition is not a create iceberg table statement")
+        }
+        let mut new_config = sink.properties.clone().into_inner();
+        new_config.extend(props.clone());
+
+        let definition = stmt.to_string();
+        let active_sink = sink::ActiveModel {
+            sink_id: Set(sink_id),
+            properties: Set(risingwave_meta_model::Property(new_config.clone())),
+            definition: Set(definition.clone()),
+            ..Default::default()
+        };
+        let active_source = source::ActiveModel {
+            source_id: Set(source_id),
+            definition: Set(definition.clone()),
+            ..Default::default()
+        };
+        let active_table = table::ActiveModel {
+            table_id: Set(table_id),
+            definition: Set(definition),
+            ..Default::default()
+        };
+        Sink::update(active_sink).exec(&txn).await?;
+        Source::update(active_source).exec(&txn).await?;
+        Table::update(active_table).exec(&txn).await?;
+
+        update_sink_fragment_props(&txn, sink_id, new_config).await?;
+
+        let (sink, sink_obj) = Sink::find_by_id(sink_id)
+            .find_also_related(Object)
+            .one(&txn)
+            .await?
+            .ok_or_else(|| MetaError::catalog_id_not_found(ObjectType::Sink.as_str(), sink_id))?;
+        let sink_streaming_job = streaming_job::Entity::find_by_id(sink.sink_id.as_job_id())
+            .one(&txn)
+            .await?;
+        let (source, source_obj) = Source::find_by_id(source_id)
+            .find_also_related(Object)
+            .one(&txn)
+            .await?
+            .ok_or_else(|| {
+                MetaError::catalog_id_not_found(ObjectType::Source.as_str(), source_id)
+            })?;
+        let (table, table_obj) = Table::find_by_id(table_id)
+            .find_also_related(Object)
+            .one(&txn)
+            .await?
+            .ok_or_else(|| MetaError::catalog_id_not_found(ObjectType::Table.as_str(), table_id))?;
+        let table_streaming_job = streaming_job::Entity::find_by_id(table.job_id())
+            .one(&txn)
+            .await?;
+        txn.commit().await?;
+        let relation_infos = vec![
+            PbObject {
+                object_info: Some(PbObjectInfo::Sink(
+                    ObjectModel(sink, sink_obj.unwrap(), sink_streaming_job).into(),
+                )),
+            },
+            PbObject {
+                object_info: Some(PbObjectInfo::Source(
+                    ObjectModel(source, source_obj.unwrap(), None).into(),
+                )),
+            },
+            PbObject {
+                object_info: Some(PbObjectInfo::Table(
+                    ObjectModel(table, table_obj.unwrap(), table_streaming_job).into(),
+                )),
+            },
+        ];
+        let _version = self
+            .notify_frontend(
+                NotificationOperation::Update,
+                NotificationInfo::ObjectGroup(PbObjectGroup {
+                    objects: relation_infos,
+                }),
+            )
+            .await;
+
+        Ok((props.into_iter().collect(), sink_id))
+    }
+
+    /// Update connection properties and all dependent sources/sinks in a single transaction
+    pub async fn update_connection_and_dependent_objects_props(
+        &self,
+        connection_id: ConnectionId,
+        alter_props: BTreeMap<String, String>,
+        alter_secret_refs: BTreeMap<String, PbSecretRef>,
+    ) -> MetaResult<(
+        WithOptionsSecResolved,                   // Connection's new properties
+        Vec<(SourceId, HashMap<String, String>)>, // Source ID and their complete properties
+        Vec<(SinkId, HashMap<String, String>)>,   // Sink ID and their complete properties
+    )> {
+        let inner = self.inner.read().await;
+        let txn = inner.db.begin().await?;
+
+        // Find all dependent sources and sinks first
+        let dependent_sources: Vec<SourceId> = Source::find()
+            .select_only()
+            .column(source::Column::SourceId)
+            .filter(source::Column::ConnectionId.eq(connection_id))
+            .into_tuple()
+            .all(&txn)
+            .await?;
+
+        let dependent_sinks: Vec<SinkId> = Sink::find()
+            .select_only()
+            .column(sink::Column::SinkId)
+            .filter(sink::Column::ConnectionId.eq(connection_id))
+            .into_tuple()
+            .all(&txn)
+            .await?;
+
+        let (connection_catalog, _obj) = Connection::find_by_id(connection_id)
+            .find_also_related(Object)
+            .one(&txn)
+            .await?
+            .ok_or_else(|| {
+                MetaError::catalog_id_not_found(ObjectType::Connection.as_str(), connection_id)
+            })?;
+
+        // Validate that props can be altered
+        let prop_keys: Vec<String> = alter_props
+            .keys()
+            .chain(alter_secret_refs.keys())
+            .cloned()
+            .collect();
+
+        // Map the connection type enum to the string name expected by the validation function
+        let connection_type_str = pb_connection_type_to_connection_type(
+            &connection_catalog.params.to_protobuf().connection_type(),
+        )
+        .ok_or_else(|| MetaError::invalid_parameter("Unspecified connection type"))?;
+
+        risingwave_connector::allow_alter_on_fly_fields::check_connection_allow_alter_on_fly_fields(
+            connection_type_str, &prop_keys,
+        )?;
+
+        let connection_pb = connection_catalog.params.to_protobuf();
+        let mut connection_options_with_secret = WithOptionsSecResolved::new(
+            connection_pb.properties.into_iter().collect(),
+            connection_pb.secret_refs.into_iter().collect(),
+        );
+
+        let (to_add_secret_dep, to_remove_secret_dep) = connection_options_with_secret
+            .handle_update(alter_props.clone(), alter_secret_refs.clone())?;
+
+        tracing::debug!(
+            "applying new properties to connection and dependents: connection_id={}, sources={:?}, sinks={:?}",
+            connection_id,
+            dependent_sources,
+            dependent_sinks
+        );
+
+        // Validate connection
+        {
+            let conn_params_pb = risingwave_pb::catalog::ConnectionParams {
+                connection_type: connection_pb.connection_type,
+                properties: connection_options_with_secret
+                    .as_plaintext()
+                    .clone()
+                    .into_iter()
+                    .collect(),
+                secret_refs: connection_options_with_secret
+                    .as_secret()
+                    .clone()
+                    .into_iter()
+                    .collect(),
+            };
+            let connection = PbConnection {
+                id: connection_id as _,
+                info: Some(risingwave_pb::catalog::connection::Info::ConnectionParams(
+                    conn_params_pb,
+                )),
+                ..Default::default()
+            };
+            validate_connection(&connection).await?;
+        }
+
+        // Update connection secret dependencies
+        if !to_add_secret_dep.is_empty() {
+            ObjectDependency::insert_many(to_add_secret_dep.into_iter().map(|secret_id| {
+                object_dependency::ActiveModel {
+                    oid: Set(secret_id.into()),
+                    used_by: Set(connection_id.as_object_id()),
+                    ..Default::default()
+                }
+            }))
+            .exec(&txn)
+            .await?;
+        }
+        if !to_remove_secret_dep.is_empty() {
+            let _ = ObjectDependency::delete_many()
+                .filter(
+                    object_dependency::Column::Oid
+                        .is_in(to_remove_secret_dep)
+                        .and(object_dependency::Column::UsedBy.eq(connection_id.as_object_id())),
+                )
+                .exec(&txn)
+                .await?;
+        }
+
+        // Update the connection with new properties
+        let updated_connection_params = risingwave_pb::catalog::ConnectionParams {
+            connection_type: connection_pb.connection_type,
+            properties: connection_options_with_secret
+                .as_plaintext()
+                .clone()
+                .into_iter()
+                .collect(),
+            secret_refs: connection_options_with_secret
+                .as_secret()
+                .clone()
+                .into_iter()
+                .collect(),
+        };
+        let active_connection_model = connection::ActiveModel {
+            connection_id: Set(connection_id),
+            params: Set(ConnectionParams::from(&updated_connection_params)),
+            ..Default::default()
+        };
+        Connection::update(active_connection_model)
+            .exec(&txn)
+            .await?;
+
+        // Batch update dependent sources and collect their complete properties
+        let mut updated_sources_with_props: Vec<(SourceId, HashMap<String, String>)> = Vec::new();
+
+        if !dependent_sources.is_empty() {
+            // Batch fetch all dependent sources
+            let sources_with_objs = Source::find()
+                .find_also_related(Object)
+                .filter(source::Column::SourceId.is_in(dependent_sources.iter().cloned()))
+                .all(&txn)
+                .await?;
+
+            // Prepare batch updates
+            let mut source_updates = Vec::new();
+            let mut fragment_updates: Vec<DependentSourceFragmentUpdate> = Vec::new();
+
+            for (source, _obj) in sources_with_objs {
+                let source_id = source.source_id;
+
+                let mut source_options_with_secret = WithOptionsSecResolved::new(
+                    source.with_properties.0.clone(),
+                    source
+                        .secret_ref
+                        .clone()
+                        .map(|secret_ref| secret_ref.to_protobuf())
+                        .unwrap_or_default(),
+                );
+                let (_source_to_add_secret_dep, _source_to_remove_secret_dep) =
+                    source_options_with_secret
+                        .handle_update(alter_props.clone(), alter_secret_refs.clone())?;
+
+                // Validate the updated source properties
+                let _ = ConnectorProperties::extract(source_options_with_secret.clone(), true)?;
+
+                // Prepare source update
+                let active_source = source::ActiveModel {
+                    source_id: Set(source_id),
+                    with_properties: Set(Property(
+                        source_options_with_secret.as_plaintext().clone(),
+                    )),
+                    secret_ref: Set((!source_options_with_secret.as_secret().is_empty()).then(
+                        || {
+                            risingwave_meta_model::SecretRef::from(
+                                source_options_with_secret.as_secret().clone(),
+                            )
+                        },
+                    )),
+                    ..Default::default()
+                };
+                source_updates.push(active_source);
+
+                // Prepare fragment update:
+                // - If the source is a table-associated source, update fragments for the table job.
+                // - Otherwise update the shared source job.
+                // - For non-shared sources, also update any dependent streaming jobs that embed a copy.
+                let is_shared_source = source.is_shared();
+                let mut dep_source_job_ids: Vec<JobId> = Vec::new();
+                if !is_shared_source {
+                    dep_source_job_ids = ObjectDependency::find()
+                        .select_only()
+                        .column(object_dependency::Column::UsedBy)
+                        .filter(object_dependency::Column::Oid.eq(source_id))
+                        .into_tuple()
+                        .all(&txn)
+                        .await?;
+                }
+
+                let base_job_id =
+                    if let Some(associate_table_id) = source.optional_associated_table_id {
+                        associate_table_id.as_job_id()
+                    } else {
+                        source_id.as_share_source_job_id()
+                    };
+                let job_ids = vec![base_job_id]
+                    .into_iter()
+                    .chain(dep_source_job_ids.into_iter())
+                    .collect_vec();
+
+                fragment_updates.push(DependentSourceFragmentUpdate {
+                    job_ids,
+                    with_properties: source_options_with_secret.as_plaintext().clone(),
+                    secret_refs: source_options_with_secret.as_secret().clone(),
+                    is_shared_source,
+                });
+
+                // Collect the complete properties for runtime broadcast
+                let complete_source_props = LocalSecretManager::global()
+                    .fill_secrets(
+                        source_options_with_secret.as_plaintext().clone(),
+                        source_options_with_secret.as_secret().clone(),
+                    )
+                    .map_err(MetaError::from)?
+                    .into_iter()
+                    .collect::<HashMap<String, String>>();
+                updated_sources_with_props.push((source_id, complete_source_props));
+            }
+
+            for source_update in source_updates {
+                Source::update(source_update).exec(&txn).await?;
+            }
+
+            // Batch execute fragment updates
+            for DependentSourceFragmentUpdate {
+                job_ids,
+                with_properties,
+                secret_refs,
+                is_shared_source,
+            } in fragment_updates
+            {
+                update_connector_props_fragments(
+                    &txn,
+                    job_ids,
+                    FragmentTypeFlag::Source,
+                    |node, found| {
+                        if let PbNodeBody::Source(node) = node
+                            && let Some(source_inner) = &mut node.source_inner
+                        {
+                            source_inner.with_properties = with_properties.clone();
+                            source_inner.secret_refs = secret_refs.clone();
+                            *found = true;
+                        }
+                    },
+                    is_shared_source,
+                )
+                .await?;
+            }
+        }
+
+        // Batch update dependent sinks and collect their complete properties
+        let mut updated_sinks_with_props: Vec<(SinkId, HashMap<String, String>)> = Vec::new();
+
+        if !dependent_sinks.is_empty() {
+            // Batch fetch all dependent sinks
+            let sinks_with_objs = Sink::find()
+                .find_also_related(Object)
+                .filter(sink::Column::SinkId.is_in(dependent_sinks.iter().cloned()))
+                .all(&txn)
+                .await?;
+
+            // Prepare batch updates
+            let mut sink_updates = Vec::new();
+            let mut sink_fragment_updates = Vec::new();
+
+            for (sink, _obj) in sinks_with_objs {
+                let sink_id = sink.sink_id;
+
+                // Validate that sink props can be altered
+                match sink.properties.inner_ref().get(CONNECTOR_TYPE_KEY) {
+                    Some(connector) => {
+                        let connector_type = connector.to_lowercase();
+                        check_sink_allow_alter_on_fly_fields(&connector_type, &prop_keys)
+                            .map_err(|e| SinkError::Config(anyhow!(e)))?;
+
+                        match_sink_name_str!(
+                            connector_type.as_str(),
+                            SinkType,
+                            {
+                                let mut new_sink_props = sink.properties.0.clone();
+                                new_sink_props.extend(alter_props.clone());
+                                SinkType::validate_alter_config(&new_sink_props)
+                            },
+                            |sink: &str| Err(SinkError::Config(anyhow!(
+                                "unsupported sink type {}",
+                                sink
+                            )))
+                        )?
+                    }
+                    None => {
+                        return Err(SinkError::Config(anyhow!(
+                            "connector not specified when alter sink"
+                        ))
+                        .into());
+                    }
+                };
+
+                let mut new_sink_props = sink.properties.0.clone();
+                new_sink_props.extend(alter_props.clone());
+
+                // Prepare sink update
+                let active_sink = sink::ActiveModel {
+                    sink_id: Set(sink_id),
+                    properties: Set(risingwave_meta_model::Property(new_sink_props.clone())),
+                    ..Default::default()
+                };
+                sink_updates.push(active_sink);
+
+                // Prepare fragment updates for this sink
+                sink_fragment_updates.push((sink_id, new_sink_props.clone()));
+
+                // Collect the complete properties for runtime broadcast
+                let complete_sink_props: HashMap<String, String> =
+                    new_sink_props.into_iter().collect();
+                updated_sinks_with_props.push((sink_id, complete_sink_props));
+            }
+
+            // Batch execute sink updates
+            for sink_update in sink_updates {
+                Sink::update(sink_update).exec(&txn).await?;
+            }
+
+            // Batch execute sink fragment updates using the reusable function
+            for (sink_id, new_sink_props) in sink_fragment_updates {
+                update_connector_props_fragments(
+                    &txn,
+                    vec![sink_id.as_job_id()],
+                    FragmentTypeFlag::Sink,
+                    |node, found| {
+                        if let PbNodeBody::Sink(node) = node
+                            && let Some(sink_desc) = &mut node.sink_desc
+                            && sink_desc.id == sink_id.as_raw_id()
+                        {
+                            sink_desc.properties = new_sink_props.clone();
+                            *found = true;
+                        }
+                    },
+                    true,
+                )
+                .await?;
+            }
+        }
+
+        // Collect all updated objects for frontend notification
+        let mut updated_objects = Vec::new();
+
+        // Add connection
+        let (connection, obj) = Connection::find_by_id(connection_id)
+            .find_also_related(Object)
+            .one(&txn)
+            .await?
+            .ok_or_else(|| {
+                MetaError::catalog_id_not_found(ObjectType::Connection.as_str(), connection_id)
+            })?;
+        updated_objects.push(PbObject {
+            object_info: Some(PbObjectInfo::Connection(
+                ObjectModel(connection, obj.unwrap(), None).into(),
+            )),
+        });
+
+        // Add sources
+        for source_id in &dependent_sources {
+            let (source, obj) = Source::find_by_id(*source_id)
+                .find_also_related(Object)
+                .one(&txn)
+                .await?
+                .ok_or_else(|| {
+                    MetaError::catalog_id_not_found(ObjectType::Source.as_str(), *source_id)
+                })?;
+            updated_objects.push(PbObject {
+                object_info: Some(PbObjectInfo::Source(
+                    ObjectModel(source, obj.unwrap(), None).into(),
+                )),
+            });
+        }
+
+        // Add sinks
+        for sink_id in &dependent_sinks {
+            let (sink, obj) = Sink::find_by_id(*sink_id)
+                .find_also_related(Object)
+                .one(&txn)
+                .await?
+                .ok_or_else(|| {
+                    MetaError::catalog_id_not_found(ObjectType::Sink.as_str(), *sink_id)
+                })?;
+            let streaming_job = streaming_job::Entity::find_by_id(sink.sink_id.as_job_id())
+                .one(&txn)
+                .await?;
+            updated_objects.push(PbObject {
+                object_info: Some(PbObjectInfo::Sink(
+                    ObjectModel(sink, obj.unwrap(), streaming_job).into(),
+                )),
+            });
+        }
+
+        // Commit the transaction
+        txn.commit().await?;
+
+        // Notify frontend about all updated objects
+        if !updated_objects.is_empty() {
+            self.notify_frontend(
+                NotificationOperation::Update,
+                NotificationInfo::ObjectGroup(PbObjectGroup {
+                    objects: updated_objects,
+                }),
+            )
+            .await;
+        }
+
+        Ok((
+            connection_options_with_secret,
+            updated_sources_with_props,
+            updated_sinks_with_props,
+        ))
+    }
+
     pub async fn update_fragment_rate_limit_by_fragment_id(
         &self,
         fragment_id: FragmentId,
         rate_limit: Option<u32>,
-    ) -> MetaResult<HashMap<FragmentId, Vec<ActorId>>> {
-        let update_rate_limit = |fragment_type_mask: &mut i32, stream_node: &mut PbStreamNode| {
+    ) -> MetaResult<()> {
+        let update_rate_limit = |fragment_type_mask: FragmentTypeMask,
+                                 stream_node: &mut PbStreamNode| {
             let mut found = false;
-            if *fragment_type_mask & PbFragmentTypeFlag::dml_rate_limit_fragments() != 0
-                || *fragment_type_mask & PbFragmentTypeFlag::sink_rate_limit_fragments() != 0
-                || *fragment_type_mask & PbFragmentTypeFlag::backfill_rate_limit_fragments() != 0
-                || *fragment_type_mask & PbFragmentTypeFlag::source_rate_limit_fragments() != 0
-            {
+            if fragment_type_mask.contains_any(
+                FragmentTypeFlag::dml_rate_limit_fragments()
+                    .chain(FragmentTypeFlag::sink_rate_limit_fragments())
+                    .chain(FragmentTypeFlag::backfill_rate_limit_fragments())
+                    .chain(FragmentTypeFlag::source_rate_limit_fragments()),
+            ) {
                 visit_stream_node_mut(stream_node, |node| {
                     if let PbNodeBody::Dml(node) = node {
                         node.rate_limit = rate_limit;
@@ -1609,179 +2913,13 @@ impl CatalogController {
             .await
     }
 
-    pub async fn post_apply_reschedules(
-        &self,
-        reschedules: HashMap<FragmentId, Reschedule>,
-        post_updates: &JobReschedulePostUpdates,
-    ) -> MetaResult<()> {
-        let new_created_actors: HashSet<_> = reschedules
-            .values()
-            .flat_map(|reschedule| {
-                reschedule
-                    .added_actors
-                    .values()
-                    .flatten()
-                    .map(|actor_id| *actor_id as ActorId)
-            })
-            .collect();
-
-        let inner = self.inner.write().await;
-
-        let txn = inner.db.begin().await?;
-
-        let mut fragment_mapping_to_notify = vec![];
-
-        for (
-            fragment_id,
-            Reschedule {
-                removed_actors,
-                vnode_bitmap_updates,
-                actor_splits,
-                newly_created_actors,
-                ..
-            },
-        ) in reschedules
-        {
-            // drop removed actors
-            Actor::delete_many()
-                .filter(
-                    actor::Column::ActorId
-                        .is_in(removed_actors.iter().map(|id| *id as ActorId).collect_vec()),
-                )
-                .exec(&txn)
-                .await?;
-
-            // add new actors
-            for (
-                (
-                    StreamActor {
-                        actor_id,
-                        fragment_id,
-                        vnode_bitmap,
-                        expr_context,
-                        ..
-                    },
-                    _,
-                ),
-                worker_id,
-            ) in newly_created_actors.into_values()
-            {
-                let splits = actor_splits
-                    .get(&actor_id)
-                    .map(|splits| splits.iter().map(PbConnectorSplit::from).collect_vec());
-
-                Actor::insert(actor::ActiveModel {
-                    actor_id: Set(actor_id as _),
-                    fragment_id: Set(fragment_id as _),
-                    status: Set(ActorStatus::Running),
-                    splits: Set(splits.map(|splits| (&PbConnectorSplits { splits }).into())),
-                    worker_id: Set(worker_id),
-                    upstream_actor_ids: Set(Default::default()),
-                    vnode_bitmap: Set(vnode_bitmap
-                        .as_ref()
-                        .map(|bitmap| (&bitmap.to_protobuf()).into())),
-                    expr_context: Set(expr_context.as_ref().unwrap().into()),
-                })
-                .exec(&txn)
-                .await?;
-            }
-
-            // actor update
-            for (actor_id, bitmap) in vnode_bitmap_updates {
-                let actor = Actor::find_by_id(actor_id as ActorId)
-                    .one(&txn)
-                    .await?
-                    .ok_or_else(|| MetaError::catalog_id_not_found("actor", actor_id))?;
-
-                let mut actor = actor.into_active_model();
-                actor.vnode_bitmap = Set(Some((&bitmap.to_protobuf()).into()));
-                actor.update(&txn).await?;
-            }
-
-            // Update actor_splits for existing actors
-            for (actor_id, splits) in actor_splits {
-                if new_created_actors.contains(&(actor_id as ActorId)) {
-                    continue;
-                }
-
-                let actor = Actor::find_by_id(actor_id as ActorId)
-                    .one(&txn)
-                    .await?
-                    .ok_or_else(|| MetaError::catalog_id_not_found("actor", actor_id))?;
-
-                let mut actor = actor.into_active_model();
-                let splits = splits.iter().map(PbConnectorSplit::from).collect_vec();
-                actor.splits = Set(Some((&PbConnectorSplits { splits }).into()));
-                actor.update(&txn).await?;
-            }
-
-            // fragment update
-            let fragment = Fragment::find_by_id(fragment_id)
-                .one(&txn)
-                .await?
-                .ok_or_else(|| MetaError::catalog_id_not_found("fragment", fragment_id))?;
-
-            let job_actors = fragment
-                .find_related(Actor)
-                .all(&txn)
-                .await?
-                .into_iter()
-                .map(|actor| {
-                    (
-                        fragment_id,
-                        fragment.distribution_type,
-                        actor.actor_id,
-                        actor.vnode_bitmap,
-                        actor.worker_id,
-                        actor.status,
-                    )
-                })
-                .collect_vec();
-
-            fragment_mapping_to_notify.extend(rebuild_fragment_mapping_from_actors(job_actors));
-        }
-
-        let JobReschedulePostUpdates {
-            parallelism_updates,
-            resource_group_updates,
-        } = post_updates;
-
-        for (table_id, parallelism) in parallelism_updates {
-            let mut streaming_job = StreamingJobModel::find_by_id(table_id.table_id() as ObjectId)
-                .one(&txn)
-                .await?
-                .ok_or_else(|| MetaError::catalog_id_not_found("table", table_id))?
-                .into_active_model();
-
-            streaming_job.parallelism = Set(match parallelism {
-                TableParallelism::Adaptive => StreamingParallelism::Adaptive,
-                TableParallelism::Fixed(n) => StreamingParallelism::Fixed(*n as _),
-                TableParallelism::Custom => StreamingParallelism::Custom,
-            });
-
-            if let Some(resource_group) =
-                resource_group_updates.get(&(table_id.table_id() as ObjectId))
-            {
-                streaming_job.specific_resource_group = Set(resource_group.to_owned());
-            }
-
-            streaming_job.update(&txn).await?;
-        }
-
-        txn.commit().await?;
-        self.notify_fragment_mapping(Operation::Update, fragment_mapping_to_notify)
-            .await;
-
-        Ok(())
-    }
-
     /// Note: `FsFetch` created in old versions are not included.
     /// Since this is only used for debugging, it should be fine.
     pub async fn list_rate_limits(&self) -> MetaResult<Vec<RateLimitInfo>> {
         let inner = self.inner.read().await;
         let txn = inner.db.begin().await?;
 
-        let fragments: Vec<(FragmentId, ObjectId, i32, StreamNode)> = Fragment::find()
+        let fragments: Vec<(FragmentId, JobId, i32, StreamNode)> = Fragment::find()
             .select_only()
             .columns([
                 fragment::Column::FragmentId,
@@ -1789,8 +2927,8 @@ impl CatalogController {
                 fragment::Column::FragmentTypeMask,
                 fragment::Column::StreamNode,
             ])
-            .filter(fragment_type_mask_intersects(
-                PbFragmentTypeFlag::rate_limit_fragments(),
+            .filter(FragmentTypeMask::intersects_any(
+                FragmentTypeFlag::rate_limit_fragments(),
             ))
             .into_tuple()
             .all(&txn)
@@ -1799,100 +2937,229 @@ impl CatalogController {
         let mut rate_limits = Vec::new();
         for (fragment_id, job_id, fragment_type_mask, stream_node) in fragments {
             let stream_node = stream_node.to_protobuf();
-            let mut rate_limit = None;
-            let mut node_name = None;
+            visit_stream_node_body(&stream_node, |node| {
+                let mut rate_limit = None;
+                let mut node_name = None;
 
-            visit_stream_node(&stream_node, |node| {
                 match node {
                     // source rate limit
                     PbNodeBody::Source(node) => {
                         if let Some(node_inner) = &node.source_inner {
-                            debug_assert!(
-                                rate_limit.is_none(),
-                                "one fragment should only have 1 rate limit node"
-                            );
                             rate_limit = node_inner.rate_limit;
                             node_name = Some("SOURCE");
                         }
                     }
                     PbNodeBody::StreamFsFetch(node) => {
                         if let Some(node_inner) = &node.node_inner {
-                            debug_assert!(
-                                rate_limit.is_none(),
-                                "one fragment should only have 1 rate limit node"
-                            );
                             rate_limit = node_inner.rate_limit;
                             node_name = Some("FS_FETCH");
                         }
                     }
                     // backfill rate limit
                     PbNodeBody::SourceBackfill(node) => {
-                        debug_assert!(
-                            rate_limit.is_none(),
-                            "one fragment should only have 1 rate limit node"
-                        );
                         rate_limit = node.rate_limit;
                         node_name = Some("SOURCE_BACKFILL");
                     }
                     PbNodeBody::StreamScan(node) => {
-                        debug_assert!(
-                            rate_limit.is_none(),
-                            "one fragment should only have 1 rate limit node"
-                        );
                         rate_limit = node.rate_limit;
                         node_name = Some("STREAM_SCAN");
                     }
                     PbNodeBody::StreamCdcScan(node) => {
-                        debug_assert!(
-                            rate_limit.is_none(),
-                            "one fragment should only have 1 rate limit node"
-                        );
                         rate_limit = node.rate_limit;
                         node_name = Some("STREAM_CDC_SCAN");
                     }
                     PbNodeBody::Sink(node) => {
-                        debug_assert!(
-                            rate_limit.is_none(),
-                            "one fragment should only have 1 rate limit node"
-                        );
                         rate_limit = node.rate_limit;
                         node_name = Some("SINK");
                     }
                     _ => {}
                 }
-            });
 
-            if let Some(rate_limit) = rate_limit {
-                rate_limits.push(RateLimitInfo {
-                    fragment_id: fragment_id as u32,
-                    job_id: job_id as u32,
-                    fragment_type_mask: fragment_type_mask as u32,
-                    rate_limit,
-                    node_name: node_name.unwrap().to_owned(),
-                });
-            }
+                if let Some(rate_limit) = rate_limit {
+                    rate_limits.push(RateLimitInfo {
+                        fragment_id,
+                        job_id,
+                        fragment_type_mask: fragment_type_mask as u32,
+                        rate_limit,
+                        node_name: node_name.unwrap().to_owned(),
+                    });
+                }
+            });
         }
 
         Ok(rate_limits)
     }
 }
 
-fn bitflag_intersects(column: SimpleExpr, value: i32) -> SimpleExpr {
-    column
-        .binary(BinOper::Custom("&"), value)
-        .binary(BinOper::NotEqual, 0)
+fn validate_sink_props(sink: &sink::Model, props: &BTreeMap<String, String>) -> MetaResult<()> {
+    // Validate that props can be altered
+    match sink.properties.inner_ref().get(CONNECTOR_TYPE_KEY) {
+        Some(connector) => {
+            let connector_type = connector.to_lowercase();
+            let field_names: Vec<String> = props.keys().cloned().collect();
+            check_sink_allow_alter_on_fly_fields(&connector_type, &field_names)
+                .map_err(|e| SinkError::Config(anyhow!(e)))?;
+
+            match_sink_name_str!(
+                connector_type.as_str(),
+                SinkType,
+                {
+                    let mut new_props = sink.properties.0.clone();
+                    new_props.extend(props.clone());
+                    SinkType::validate_alter_config(&new_props)
+                },
+                |sink: &str| Err(SinkError::Config(anyhow!("unsupported sink type {}", sink)))
+            )?
+        }
+        None => {
+            return Err(
+                SinkError::Config(anyhow!("connector not specified when alter sink")).into(),
+            );
+        }
+    };
+    Ok(())
 }
 
-fn fragment_type_mask_intersects(value: i32) -> SimpleExpr {
-    bitflag_intersects(fragment::Column::FragmentTypeMask.into_simple_expr(), value)
+fn update_stmt_with_props(
+    with_properties: &mut Vec<SqlOption>,
+    props: &BTreeMap<String, String>,
+) -> MetaResult<()> {
+    let mut new_sql_options = with_properties
+        .iter()
+        .map(|sql_option| (&sql_option.name, sql_option))
+        .collect::<IndexMap<_, _>>();
+    let add_sql_options = props
+        .iter()
+        .map(|(k, v)| SqlOption::try_from((k, v)))
+        .collect::<Result<Vec<SqlOption>, ParserError>>()
+        .map_err(|e| SinkError::Config(anyhow!(e)))?;
+    new_sql_options.extend(
+        add_sql_options
+            .iter()
+            .map(|sql_option| (&sql_option.name, sql_option)),
+    );
+    *with_properties = new_sql_options.into_values().cloned().collect();
+    Ok(())
+}
+
+async fn update_sink_fragment_props(
+    txn: &DatabaseTransaction,
+    sink_id: SinkId,
+    props: BTreeMap<String, String>,
+) -> MetaResult<()> {
+    let fragments: Vec<(FragmentId, i32, StreamNode)> = Fragment::find()
+        .select_only()
+        .columns([
+            fragment::Column::FragmentId,
+            fragment::Column::FragmentTypeMask,
+            fragment::Column::StreamNode,
+        ])
+        .filter(fragment::Column::JobId.eq(sink_id))
+        .into_tuple()
+        .all(txn)
+        .await?;
+    let fragments = fragments
+        .into_iter()
+        .filter(|(_, fragment_type_mask, _)| {
+            *fragment_type_mask & FragmentTypeFlag::Sink as i32 != 0
+        })
+        .filter_map(|(id, _, stream_node)| {
+            let mut stream_node = stream_node.to_protobuf();
+            let mut found = false;
+            visit_stream_node_mut(&mut stream_node, |node| {
+                if let PbNodeBody::Sink(node) = node
+                    && let Some(sink_desc) = &mut node.sink_desc
+                    && sink_desc.id == sink_id
+                {
+                    sink_desc.properties.extend(props.clone());
+                    found = true;
+                }
+            });
+            if found { Some((id, stream_node)) } else { None }
+        })
+        .collect_vec();
+    assert!(
+        !fragments.is_empty(),
+        "sink id should be used by at least one fragment"
+    );
+    for (id, stream_node) in fragments {
+        Fragment::update(fragment::ActiveModel {
+            fragment_id: Set(id),
+            stream_node: Set(StreamNode::from(&stream_node)),
+            ..Default::default()
+        })
+        .exec(txn)
+        .await?;
+    }
+    Ok(())
 }
 
 pub struct SinkIntoTableContext {
-    /// For creating sink into table, this is `Some`, otherwise `None`.
-    pub creating_sink_id: Option<SinkId>,
-    /// For dropping sink into table, this is `Some`, otherwise `None`.
-    pub dropping_sink_id: Option<SinkId>,
     /// For alter table (e.g., add column), this is the list of existing sink ids
     /// otherwise empty.
     pub updated_sink_catalogs: Vec<SinkId>,
+}
+
+pub struct FinishAutoRefreshSchemaSinkContext {
+    pub tmp_sink_id: SinkId,
+    pub original_sink_id: SinkId,
+    pub columns: Vec<PbColumnCatalog>,
+    pub new_log_store_table: Option<(TableId, Vec<PbColumnCatalog>)>,
+}
+
+async fn update_connector_props_fragments<F>(
+    txn: &DatabaseTransaction,
+    job_ids: Vec<JobId>,
+    expect_flag: FragmentTypeFlag,
+    mut alter_stream_node_fn: F,
+    is_shared_source: bool,
+) -> MetaResult<()>
+where
+    F: FnMut(&mut PbNodeBody, &mut bool),
+{
+    let fragments: Vec<(FragmentId, StreamNode)> = Fragment::find()
+        .select_only()
+        .columns([fragment::Column::FragmentId, fragment::Column::StreamNode])
+        .filter(
+            fragment::Column::JobId
+                .is_in(job_ids.clone())
+                .and(FragmentTypeMask::intersects(expect_flag)),
+        )
+        .into_tuple()
+        .all(txn)
+        .await?;
+    let fragments = fragments
+        .into_iter()
+        .filter_map(|(id, stream_node)| {
+            let mut stream_node = stream_node.to_protobuf();
+            let mut found = false;
+            visit_stream_node_mut(&mut stream_node, |node| {
+                alter_stream_node_fn(node, &mut found);
+            });
+            if found { Some((id, stream_node)) } else { None }
+        })
+        .collect_vec();
+    if is_shared_source || job_ids.len() > 1 {
+        // the first element is the source_id or associated table_id
+        // if the source is non-shared, there is no updated fragments
+        // job_ids.len() > 1 means the source is used by other streaming jobs, so there should be at least one fragment updated
+        assert!(
+            !fragments.is_empty(),
+            "job ids {:?} (type: {:?}) should be used by at least one fragment",
+            job_ids,
+            expect_flag
+        );
+    }
+
+    for (id, stream_node) in fragments {
+        Fragment::update(fragment::ActiveModel {
+            fragment_id: Set(id),
+            stream_node: Set(StreamNode::from(&stream_node)),
+            ..Default::default()
+        })
+        .exec(txn)
+        .await?;
+    }
+
+    Ok(())
 }

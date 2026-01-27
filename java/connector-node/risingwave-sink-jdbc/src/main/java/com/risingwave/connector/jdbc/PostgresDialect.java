@@ -1,16 +1,18 @@
-// Copyright 2025 RisingWave Labs
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+/*
+ * Copyright 2023 RisingWave Labs
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 
 package com.risingwave.connector.jdbc;
 
@@ -37,7 +39,7 @@ public class PostgresDialect implements JdbcDialect {
         this.pkIndices = pkIndices.stream().mapToInt(i -> i).toArray();
     }
 
-    private static final HashMap<TypeName, String> RW_TYPE_TO_JDBC_TYPE_NAME;
+    static final HashMap<TypeName, String> RW_TYPE_TO_JDBC_TYPE_NAME;
 
     static {
         RW_TYPE_TO_JDBC_TYPE_NAME = new HashMap<TypeName, String>();
@@ -82,8 +84,9 @@ public class PostgresDialect implements JdbcDialect {
     @Override
     public Optional<String> getUpsertStatement(
             SchemaTableName schemaTableName,
-            List<String> fieldNames,
+            TableSchema tableSchema,
             List<String> primaryKeyFields) {
+        List<String> fieldNames = List.of(tableSchema.getColumnNames());
         String pkColumns =
                 primaryKeyFields.stream()
                         .map(this::quoteIdentifier)
@@ -125,10 +128,7 @@ public class PostgresDialect implements JdbcDialect {
                     break;
                 case JSONB:
                     // reference: https://github.com/pgjdbc/pgjdbc/issues/265
-                    var pgObj = new PGobject();
-                    pgObj.setType("jsonb");
-                    pgObj.setValue((String) row.get(columnIdx));
-                    stmt.setObject(placeholderIdx++, pgObj);
+                    this.set_jsonb(placeholderIdx++, columnIdx, stmt, row);
                     break;
                 case BYTEA:
                     stmt.setBytes(placeholderIdx++, (byte[]) row.get(columnIdx));
@@ -155,6 +155,14 @@ public class PostgresDialect implements JdbcDialect {
                     break;
             }
         }
+    }
+
+    public void set_jsonb(int placeholderIdx, int columnIdx, PreparedStatement stmt, SinkRow row)
+            throws SQLException {
+        var pgObj = new PGobject();
+        pgObj.setType("jsonb");
+        pgObj.setValue((String) row.get(columnIdx));
+        stmt.setObject(placeholderIdx, pgObj);
     }
 
     @Override

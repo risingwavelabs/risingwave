@@ -60,9 +60,8 @@ primary key id NULL NULL
 distribution key id NULL NULL
 table description rw_test_schema_change NULL NULL
 
-sleep 2s
 
-query TTTTTTTTTTTTT
+query TTTTTTTTTTTTT retry 4 backoff 1s
 SELECT * from rw_test_schema_change order by id;
 ----
 1 name1 20 1.1 2.2 3.3 f 2020-01-01 12:34:56 2020-01-01 12:34:56 2020-01-01 12:34:56+00:00 1 day {}
@@ -80,10 +79,9 @@ psql -c "
     INSERT INTO test_schema_change (id,name,age) values (11,'aaa', 11);
 "
 
-sleep 3s
 
 # Name, Type, Is Hidden, Description
-query TTTT
+query TTTT retry 4 backoff 1s
 describe rw_test_schema_change;
 ----
 id integer false NULL
@@ -107,7 +105,7 @@ distribution key id NULL NULL
 table description rw_test_schema_change NULL NULL
 
 
-query TTTTTTTTTTTTTTT
+query TTTTTTTTTTTTTTT retry 4 backoff 1s
 SELECT * from rw_test_schema_change order by id;
 ----
 1 name1 20 1.1 2.2 3.3 f 2020-01-01 12:34:56 2020-01-01 12:34:56 2020-01-01 12:34:56+00:00 1 day {} hello 1.2345
@@ -127,11 +125,10 @@ psql -c "
     INSERT INTO test_schema_change (id,name,age) values (12,'bbb', 12);
 "
 
-sleep 3s
 
 
 # Name, Type, Is Hidden, Description
-query TTTT
+query TTTT retry 4 backoff 1s
 describe rw_test_schema_change;
 ----
 id integer false NULL
@@ -153,7 +150,7 @@ distribution key id NULL NULL
 table description rw_test_schema_change NULL NULL
 
 
-query TTTTTTTTTTTTTTT
+query TTTTTTTTTTTTTTT retry 4 backoff 1s
 SELECT * from rw_test_schema_change order by id;
 ----
 1 name1 20 3.3 f 2020-01-01 12:34:56 2020-01-01 12:34:56 2020-01-01 12:34:56+00:00 1 day {} hello 1.2345
@@ -165,3 +162,59 @@ SELECT * from rw_test_schema_change order by id;
 
 statement ok
 drop source pg_source cascade;
+
+# Test INCLUDE timestamp with auto schema change
+system ok
+psql -c "
+    DROP TABLE IF EXISTS test_include_ts;
+    CREATE TABLE IF NOT EXISTS test_include_ts(
+        id int PRIMARY KEY,
+        name varchar(255),
+        description text
+    );
+    INSERT INTO test_include_ts(id, name, description) VALUES (1, 'name1', 'name1');
+    "
+
+statement ok
+create source pg_source_ts WITH (
+ connector = 'postgres-cdc',
+ hostname = '${PGHOST:localhost}',
+ port = '${PGPORT:5432}',
+ username = '${PGUSER:$USER}',
+ password = '${PGPASSWORD:}',
+ database.name = '${PGDATABASE:postgres}',
+ slot.name = 'pg_slot_ts',
+ auto.schema.change = 'true'
+);
+
+statement ok
+create table rw_test_include_ts (*)
+INCLUDE TIMESTAMP as cdc_timestamp
+from pg_source_ts table 'public.test_include_ts';
+
+
+# Verify initial data has timestamp
+query I retry 4 backoff 1s
+SELECT count(*) from rw_test_include_ts WHERE cdc_timestamp IS NOT NULL;
+----
+1
+
+# Add column and insert new data
+system ok
+psql -c "
+    ALTER TABLE test_include_ts ADD COLUMN new_col varchar DEFAULT 'new_column_default_value';
+    INSERT INTO test_include_ts (id, name, description, new_col) values (2, 'name2', 'name2', 'after_change');
+    SELECT pg_switch_wal();
+    CHECKPOINT;
+"
+
+# Verify both rows exist with correct data including new column
+query ITTT retry 11 backoff 1s
+SELECT id, name, description, new_col from rw_test_include_ts order by id;
+----
+1 name1 name1 new_column_default_value
+2 name2 name2 after_change
+
+
+statement ok
+drop source pg_source_ts cascade;

@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,16 +18,21 @@ use std::time::Duration;
 use compact_task::PbTaskStatus;
 use futures::StreamExt;
 use itertools::Itertools;
-use risingwave_common::catalog::{SYS_CATALOG_START_ID, TableId};
+use risingwave_common::catalog::SYS_CATALOG_START_ID;
 use risingwave_hummock_sdk::HummockVersionId;
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::version::HummockVersionDelta;
 use risingwave_meta::backup_restore::BackupManagerRef;
 use risingwave_meta::manager::MetadataManager;
+use risingwave_meta::manager::iceberg_compaction::IcebergCompactionManagerRef;
 use risingwave_pb::hummock::get_compaction_score_response::PickerInfo;
 use risingwave_pb::hummock::hummock_manager_service_server::HummockManagerService;
 use risingwave_pb::hummock::subscribe_compaction_event_request::Event as RequestEvent;
 use risingwave_pb::hummock::*;
+use risingwave_pb::iceberg_compaction::subscribe_iceberg_compaction_event_request::Event as IcebergRequestEvent;
+use risingwave_pb::iceberg_compaction::{
+    SubscribeIcebergCompactionEventRequest, SubscribeIcebergCompactionEventResponse,
+};
 use tonic::{Request, Response, Status, Streaming};
 
 use crate::RwReceiverStream;
@@ -38,6 +43,7 @@ pub struct HummockServiceImpl {
     hummock_manager: HummockManagerRef,
     metadata_manager: MetadataManager,
     backup_manager: BackupManagerRef,
+    iceberg_compaction_manager: IcebergCompactionManagerRef,
 }
 
 impl HummockServiceImpl {
@@ -45,11 +51,13 @@ impl HummockServiceImpl {
         hummock_manager: HummockManagerRef,
         metadata_manager: MetadataManager,
         backup_manager: BackupManagerRef,
+        iceberg_compaction_manager: IcebergCompactionManagerRef,
     ) -> Self {
         HummockServiceImpl {
             hummock_manager,
             metadata_manager,
             backup_manager,
+            iceberg_compaction_manager,
         }
     }
 }
@@ -69,6 +77,8 @@ macro_rules! fields_to_kvs {
 #[async_trait::async_trait]
 impl HummockManagerService for HummockServiceImpl {
     type SubscribeCompactionEventStream = RwReceiverStream<SubscribeCompactionEventResponse>;
+    type SubscribeIcebergCompactionEventStream =
+        RwReceiverStream<SubscribeIcebergCompactionEventResponse>;
 
     async fn unpin_version_before(
         &self,
@@ -159,18 +169,18 @@ impl HummockManagerService for HummockServiceImpl {
         Ok(Response::new(resp))
     }
 
-    async fn get_new_sst_ids(
+    async fn get_new_object_ids(
         &self,
-        request: Request<GetNewSstIdsRequest>,
-    ) -> Result<Response<GetNewSstIdsResponse>, Status> {
-        let sst_id_range = self
+        request: Request<GetNewObjectIdsRequest>,
+    ) -> Result<Response<GetNewObjectIdsResponse>, Status> {
+        let object_id_range = self
             .hummock_manager
-            .get_new_sst_ids(request.into_inner().number)
+            .get_new_object_ids(request.into_inner().number)
             .await?;
-        Ok(Response::new(GetNewSstIdsResponse {
+        Ok(Response::new(GetNewObjectIdsResponse {
             status: None,
-            start_id: sst_id_range.start_id,
-            end_id: sst_id_range.end_id,
+            start_id: object_id_range.start_id.inner(),
+            end_id: object_id_range.end_id.inner(),
         }))
     }
 
@@ -182,7 +192,7 @@ impl HummockManagerService for HummockServiceImpl {
         let compaction_group_id = request.compaction_group_id;
         let mut option = ManualCompactionOption {
             level: request.level as usize,
-            sst_ids: request.sst_ids,
+            sst_ids: request.sst_ids.into_iter().map(|id| id.into()).collect(),
             ..Default::default()
         };
 
@@ -202,13 +212,10 @@ impl HummockManagerService for HummockServiceImpl {
         }
 
         // get internal_table_id by metadata_manger
-        if request.table_id < SYS_CATALOG_START_ID as u32 {
+        if request.table_id.as_raw_id() < SYS_CATALOG_START_ID as u32 {
             // We need to make sure to use the correct table_id to filter sst
-            let table_id = TableId::new(request.table_id);
-            if let Ok(table_fragment) = self
-                .metadata_manager
-                .get_job_fragments_by_id(&table_id)
-                .await
+            let job_id = request.table_id;
+            if let Ok(table_fragment) = self.metadata_manager.get_job_fragments_by_id(job_id).await
             {
                 option.internal_table_id = HashSet::from_iter(table_fragment.all_table_ids());
             }
@@ -218,7 +225,7 @@ impl HummockManagerService for HummockServiceImpl {
             option
                 .internal_table_id
                 .iter()
-                .all(|table_id| *table_id < SYS_CATALOG_START_ID as u32),
+                .all(|table_id| table_id.as_raw_id() < SYS_CATALOG_START_ID as u32),
         );
 
         tracing::info!(
@@ -453,6 +460,53 @@ impl HummockManagerService for HummockServiceImpl {
         Ok(Response::new(RwReceiverStream::new(rx)))
     }
 
+    async fn subscribe_iceberg_compaction_event(
+        &self,
+        request: Request<Streaming<SubscribeIcebergCompactionEventRequest>>,
+    ) -> Result<Response<Self::SubscribeIcebergCompactionEventStream>, tonic::Status> {
+        let mut request_stream: Streaming<SubscribeIcebergCompactionEventRequest> =
+            request.into_inner();
+        let register_req = {
+            let req = request_stream.next().await.ok_or_else(|| {
+                Status::invalid_argument("subscribe_compaction_event request is empty")
+            })??;
+
+            match req.event {
+                Some(IcebergRequestEvent::Register(register)) => register,
+                _ => {
+                    return Err(Status::invalid_argument(
+                        "the first message must be `Register`",
+                    ));
+                }
+            }
+        };
+
+        let context_id = register_req.context_id;
+
+        // check_context and add_compactor as a whole is not atomic, but compactor_manager will
+        // remove invalid compactor eventually.
+        if !self.hummock_manager.check_context(context_id).await? {
+            return Err(Status::new(
+                tonic::Code::Internal,
+                format!("invalid hummock context {}", context_id),
+            ));
+        }
+
+        let rx: tokio::sync::mpsc::UnboundedReceiver<
+            Result<SubscribeIcebergCompactionEventResponse, crate::MetaError>,
+        > = self
+            .iceberg_compaction_manager
+            .iceberg_compactor_manager
+            .add_compactor(context_id);
+
+        self.iceberg_compaction_manager
+            .add_compactor_stream(context_id, request_stream);
+
+        // TODO: Trigger iceberg compaction
+
+        Ok(Response::new(RwReceiverStream::new(rx)))
+    }
+
     async fn report_compaction_task(
         &self,
         _request: Request<ReportCompactionTaskRequest>,
@@ -471,9 +525,9 @@ impl HummockManagerService for HummockServiceImpl {
             .into_iter()
             .flat_map(|(object_id, v)| {
                 v.into_iter()
-                    .map(move |(compaction_group_id, sst_id)| BranchedObject {
-                        object_id,
-                        sst_id,
+                    .map(move |(compaction_group_id, sst_ids)| BranchedObject {
+                        object_id: object_id.inner(),
+                        sst_id: sst_ids.into_iter().map(|id| id.inner()).collect(),
                         compaction_group_id,
                     })
             })

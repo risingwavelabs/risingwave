@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -95,7 +95,7 @@ struct ExecutorInner<S: StateStore> {
 
     schema: Schema,
     calls: Vec<WindowFuncCall>,
-    input_pk_indices: Vec<usize>,
+    input_stream_key: Vec<usize>,
     partition_key_indices: Vec<usize>,
     order_key_index: usize, // no `OrderType` here, cuz we expect the input is ascending
     state_table: StateTable<S>,
@@ -137,7 +137,7 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
                 actor_ctx: args.actor_ctx,
                 schema: args.schema,
                 calls: args.calls,
-                input_pk_indices: input_info.pk_indices,
+                input_stream_key: input_info.stream_key,
                 partition_key_indices: args.partition_key_indices,
                 order_key_index: args.order_key_index,
                 state_table: args.state_table,
@@ -180,7 +180,7 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
                 )),
                 &[OrderType::ascending()],
             )?;
-            let pk = (&row).project(&this.input_pk_indices).into_owned_row();
+            let pk = (&row).project(&this.input_stream_key).into_owned_row();
             let key = StateKey {
                 order_key: order_key_enc,
                 pk: pk.into(),
@@ -254,7 +254,7 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
                 )),
                 &[OrderType::ascending()],
             )?;
-            let pk = input_row.project(&this.input_pk_indices).into_owned_row();
+            let pk = input_row.project(&this.input_stream_key).into_owned_row();
             let key = StateKey {
                 order_key: order_key_enc,
                 pk: pk.into(),
@@ -374,10 +374,9 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
 
                     if let Some((_, cache_may_stale)) =
                         post_commit.post_yield_barrier(update_vnode_bitmap).await?
+                        && cache_may_stale
                     {
-                        if cache_may_stale {
-                            vars.partitions.clear();
-                        }
+                        vars.partitions.clear();
                     }
                 }
             }

@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,10 +16,11 @@ use std::collections::HashMap;
 use std::collections::hash_map::Entry;
 
 use risingwave_common::acl::{AclMode, AclModeSet};
-use risingwave_pb::user::grant_privilege::{Action, Object as GrantObject, Object};
-use risingwave_pb::user::{PbAuthInfo, PbGrantPrivilege, PbUserInfo};
+use risingwave_common::id::ObjectId;
+use risingwave_pb::user::grant_privilege::Object as GrantObject;
+use risingwave_pb::user::{PbAction, PbAuthInfo, PbGrantPrivilege, PbUserInfo};
 
-use crate::catalog::{DatabaseId, SchemaId};
+use crate::catalog::SchemaId;
 use crate::user::UserId;
 
 /// `UserCatalog` is responsible for managing user's information.
@@ -31,13 +32,14 @@ pub struct UserCatalog {
     pub can_create_db: bool,
     pub can_create_user: bool,
     pub can_login: bool,
+    pub is_admin: bool,
     pub auth_info: Option<PbAuthInfo>,
     pub grant_privileges: Vec<PbGrantPrivilege>,
 
     // User owned acl mode set, group by object id.
     // TODO: merge it after we fully migrate to sql-backend.
-    pub database_acls: HashMap<DatabaseId, AclModeSet>,
-    pub schema_acls: HashMap<SchemaId, AclModeSet>,
+    pub database_acls: HashMap<u32, AclModeSet>,
+    pub schema_acls: HashMap<u32, AclModeSet>,
     pub object_acls: HashMap<u32, AclModeSet>,
 }
 
@@ -50,6 +52,7 @@ impl From<PbUserInfo> for UserCatalog {
             can_create_db: user.can_create_db,
             can_create_user: user.can_create_user,
             can_login: user.can_login,
+            is_admin: user.is_admin,
             auth_info: user.auth_info,
             grant_privileges: user.grant_privileges,
             database_acls: Default::default(),
@@ -71,6 +74,7 @@ impl UserCatalog {
             can_create_db: self.can_create_db,
             can_create_user: self.can_create_user,
             can_login: self.can_login,
+            is_admin: self.is_admin,
             auth_info: self.auth_info.clone(),
             grant_privileges: self.grant_privileges.clone(),
         }
@@ -78,31 +82,31 @@ impl UserCatalog {
 
     fn get_acl_entry(&mut self, object: GrantObject) -> Entry<'_, u32, AclModeSet> {
         match object {
-            Object::DatabaseId(id) => self.database_acls.entry(id),
-            Object::SchemaId(id) => self.schema_acls.entry(id),
-            Object::TableId(id)
-            | Object::SourceId(id)
-            | Object::SinkId(id)
-            | Object::ViewId(id)
-            | Object::FunctionId(id)
-            | Object::SubscriptionId(id)
-            | Object::ConnectionId(id)
-            | Object::SecretId(id) => self.object_acls.entry(id),
+            GrantObject::DatabaseId(id) => self.database_acls.entry(id),
+            GrantObject::SchemaId(id) => self.schema_acls.entry(id),
+            GrantObject::TableId(id)
+            | GrantObject::SourceId(id)
+            | GrantObject::SinkId(id)
+            | GrantObject::ViewId(id)
+            | GrantObject::FunctionId(id)
+            | GrantObject::SubscriptionId(id)
+            | GrantObject::ConnectionId(id)
+            | GrantObject::SecretId(id) => self.object_acls.entry(id),
         }
     }
 
-    fn get_acl(&self, object: &GrantObject) -> Option<&AclModeSet> {
+    fn get_acl(&self, object: GrantObject) -> Option<&AclModeSet> {
         match object {
-            Object::DatabaseId(id) => self.database_acls.get(id),
-            Object::SchemaId(id) => self.schema_acls.get(id),
-            Object::TableId(id)
-            | Object::SourceId(id)
-            | Object::SinkId(id)
-            | Object::ViewId(id)
-            | Object::FunctionId(id)
-            | Object::SubscriptionId(id)
-            | Object::ConnectionId(id)
-            | Object::SecretId(id) => self.object_acls.get(id),
+            GrantObject::DatabaseId(id) => self.database_acls.get(&id),
+            GrantObject::SchemaId(id) => self.schema_acls.get(&id),
+            GrantObject::TableId(id)
+            | GrantObject::SourceId(id)
+            | GrantObject::SinkId(id)
+            | GrantObject::ViewId(id)
+            | GrantObject::FunctionId(id)
+            | GrantObject::SubscriptionId(id)
+            | GrantObject::ConnectionId(id)
+            | GrantObject::SecretId(id) => self.object_acls.get(&id),
         }
     }
 
@@ -164,15 +168,19 @@ impl UserCatalog {
         self.refresh_acl_modes();
     }
 
-    pub fn has_privilege(&self, object: &GrantObject, mode: AclMode) -> bool {
-        self.get_acl(object)
+    pub fn has_privilege(&self, object: impl Into<GrantObject>, mode: AclMode) -> bool {
+        self.get_acl(object.into())
             .is_some_and(|acl_set| acl_set.has_mode(mode))
+    }
+
+    pub fn has_schema_usage_privilege(&self, schema_id: SchemaId) -> bool {
+        self.has_privilege(schema_id, AclMode::Usage)
     }
 
     pub fn check_privilege_with_grant_option(
         &self,
         object: &GrantObject,
-        actions: &Vec<(Action, bool)>,
+        actions: &Vec<(PbAction, bool)>,
     ) -> bool {
         if self.is_super {
             return true;
@@ -198,15 +206,20 @@ impl UserCatalog {
         action_map.values().all(|&found| found)
     }
 
-    pub fn check_object_visibility(&self, obj_id: u32) -> bool {
+    pub fn check_object_visibility(&self, obj_id: ObjectId) -> bool {
         if self.is_super {
             return true;
         }
 
         // `Select` and `Execute` are the minimum required privileges for object visibility.
         // `Execute` is required for functions.
-        self.object_acls.get(&obj_id).is_some_and(|acl_set| {
-            acl_set.has_mode(AclMode::Select) || acl_set.has_mode(AclMode::Execute)
-        })
+        // `Usage` is required for connections and secrets.
+        self.object_acls
+            .get(&obj_id.as_raw_id())
+            .is_some_and(|acl_set| {
+                acl_set.has_mode(AclMode::Select)
+                    || acl_set.has_mode(AclMode::Execute)
+                    || acl_set.has_mode(AclMode::Usage)
+            })
     }
 }

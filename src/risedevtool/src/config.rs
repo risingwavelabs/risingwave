@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -206,15 +206,17 @@ impl ConfigExpander {
                     "opendal" => ServiceConfig::Opendal(serde_yaml::from_str(&out_str)?),
                     "aws-s3" => ServiceConfig::AwsS3(serde_yaml::from_str(&out_str)?),
                     "kafka" => ServiceConfig::Kafka(serde_yaml::from_str(&out_str)?),
+                    "lakekeeper" => ServiceConfig::Lakekeeper(serde_yaml::from_str(&out_str)?),
                     "pubsub" => ServiceConfig::Pubsub(serde_yaml::from_str(&out_str)?),
+                    "pulsar" => ServiceConfig::Pulsar(serde_yaml::from_str(&out_str)?),
                     "redis" => ServiceConfig::Redis(serde_yaml::from_str(&out_str)?),
-                    "redpanda" => ServiceConfig::RedPanda(serde_yaml::from_str(&out_str)?),
                     "mysql" => ServiceConfig::MySql(serde_yaml::from_str(&out_str)?),
                     "postgres" => ServiceConfig::Postgres(serde_yaml::from_str(&out_str)?),
                     "sqlserver" => ServiceConfig::SqlServer(serde_yaml::from_str(&out_str)?),
                     "schema-registry" => {
                         ServiceConfig::SchemaRegistry(serde_yaml::from_str(&out_str)?)
                     }
+                    "moat" => ServiceConfig::Moat(serde_yaml::from_str(&out_str)?),
                     other => return Err(anyhow!("unsupported use type: {}", other)),
                 };
                 Ok(result)

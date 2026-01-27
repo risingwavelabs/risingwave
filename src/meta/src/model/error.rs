@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,19 +17,10 @@ use risingwave_pb::PbFieldNotFound;
 use risingwave_rpc_client::error::ToTonicStatus;
 use thiserror::Error;
 
-use crate::storage::MetaStoreError;
-
 pub type MetadataModelResult<T> = std::result::Result<T, MetadataModelError>;
 
 #[derive(Error, Debug)]
 pub enum MetadataModelError {
-    #[error("Meta store error: {0}")]
-    MetaStoreError(
-        #[from]
-        #[backtrace]
-        MetaStoreError,
-    ),
-
     #[error("Pb decode error: {0}")]
     PbDecode(#[from] prost::DecodeError),
 

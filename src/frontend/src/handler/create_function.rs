@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -121,8 +121,7 @@ pub async fn handle_create_function(
     // resolve database and schema id
     let session = &handler_args.session;
     let db_name = &session.database();
-    let (schema_name, function_name) =
-        Binder::resolve_schema_qualified_name(db_name, name.clone())?;
+    let (schema_name, function_name) = Binder::resolve_schema_qualified_name(db_name, &name)?;
     let (database_id, schema_id) = session.get_database_and_schema_id_for_create(schema_name)?;
 
     // check if the function exists in the catalog
@@ -168,7 +167,7 @@ pub async fn handle_create_function(
     })?;
 
     let function = PbFunction {
-        id: FunctionId::placeholder().0,
+        id: FunctionId::placeholder(),
         schema_id,
         database_id,
         name: function_name,
@@ -188,6 +187,8 @@ pub async fn handle_create_function(
             .unwrap_or_default(),
         is_async: with_options.r#async,
         is_batched: with_options.batch,
+        created_at_epoch: None,
+        created_at_cluster_version: None,
     };
 
     let catalog_writer = session.catalog_writer()?;

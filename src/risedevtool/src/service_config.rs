@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -35,6 +35,7 @@ pub struct ComputeNodeConfig {
     pub provide_compute_node: Option<Vec<ComputeNodeConfig>>,
     pub provide_opendal: Option<Vec<OpendalConfig>>,
     pub provide_aws_s3: Option<Vec<AwsS3Config>>,
+    pub provide_moat: Option<Vec<MoatConfig>>,
     pub provide_tempo: Option<Vec<TempoConfig>>,
     pub user_managed: bool,
     pub resource_group: String,
@@ -86,6 +87,7 @@ pub struct MetaNodeConfig {
     pub provide_aws_s3: Option<Vec<AwsS3Config>>,
     pub provide_minio: Option<Vec<MinioConfig>>,
     pub provide_opendal: Option<Vec<OpendalConfig>>,
+    pub provide_moat: Option<Vec<MoatConfig>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -105,6 +107,7 @@ pub struct FrontendConfig {
 
     pub provide_meta_node: Option<Vec<MetaNodeConfig>>,
     pub provide_tempo: Option<Vec<TempoConfig>>,
+    pub provide_prometheus: Option<Vec<PrometheusConfig>>,
 
     pub user_managed: bool,
 }
@@ -130,6 +133,8 @@ pub struct CompactorConfig {
 
     pub user_managed: bool,
     pub compaction_worker_threads_number: Option<usize>,
+
+    pub compactor_mode: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -194,7 +199,6 @@ pub struct PrometheusConfig {
     pub provide_meta_node: Option<Vec<MetaNodeConfig>>,
     pub provide_minio: Option<Vec<MinioConfig>>,
     pub provide_compactor: Option<Vec<CompactorConfig>>,
-    pub provide_redpanda: Option<Vec<RedPandaConfig>>,
     pub provide_frontend: Option<Vec<FrontendConfig>>,
 }
 
@@ -315,15 +319,18 @@ pub struct PubsubConfig {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 #[serde(deny_unknown_fields)]
-pub struct RedPandaConfig {
+pub struct PulsarConfig {
     #[serde(rename = "use")]
     phantom_use: Option<String>,
     pub id: String,
-    pub internal_port: u16,
-    pub outside_port: u16,
+
     pub address: String,
-    pub cpus: usize,
-    pub memory: String,
+    pub broker_port: u16,
+    pub http_port: u16,
+
+    pub user_managed: bool,
+    pub image: String,
+    pub persist_data: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -386,6 +393,9 @@ pub struct PostgresConfig {
     pub image: String,
     pub user_managed: bool,
     pub persist_data: bool,
+
+    // Inject latency into any network calls to the postgres service.
+    pub latency_ms: u32,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -408,6 +418,40 @@ pub struct SqlServerConfig {
     pub persist_data: bool,
 }
 
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+#[serde(deny_unknown_fields)]
+pub struct LakekeeperConfig {
+    #[serde(rename = "use")]
+    phantom_use: Option<String>,
+    pub id: String,
+
+    pub port: u16,
+    pub address: String,
+
+    pub user_managed: bool,
+    pub persist_data: bool,
+
+    pub catalog_backend: String,
+    pub encryption_key: String,
+    pub provide_postgres_backend: Option<Vec<PostgresConfig>>,
+    pub provide_minio: Option<Vec<MinioConfig>>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+#[serde(deny_unknown_fields)]
+pub struct MoatConfig {
+    #[serde(rename = "use")]
+    phantom_use: Option<String>,
+    pub id: String,
+
+    pub address: String,
+    pub port: u16,
+
+    pub provide_minio: Option<Vec<MinioConfig>>,
+}
+
 /// All service configuration
 #[derive(Clone, Debug, PartialEq)]
 pub enum ServiceConfig {
@@ -425,11 +469,13 @@ pub enum ServiceConfig {
     Kafka(KafkaConfig),
     SchemaRegistry(SchemaRegistryConfig),
     Pubsub(PubsubConfig),
+    Pulsar(PulsarConfig),
     Redis(RedisConfig),
-    RedPanda(RedPandaConfig),
     MySql(MySqlConfig),
     Postgres(PostgresConfig),
     SqlServer(SqlServerConfig),
+    Lakekeeper(LakekeeperConfig),
+    Moat(MoatConfig),
 }
 
 #[derive(PartialEq, Eq, Hash, Debug)]
@@ -438,10 +484,13 @@ pub enum TaskGroup {
     Observability,
     Kafka,
     Pubsub,
+    Pulsar,
     MySql,
     Postgres,
     SqlServer,
     Redis,
+    Lakekeeper,
+    Moat,
 }
 
 impl ServiceConfig {
@@ -459,13 +508,15 @@ impl ServiceConfig {
             Self::AwsS3(c) => &c.id,
             Self::Kafka(c) => &c.id,
             Self::Pubsub(c) => &c.id,
+            Self::Pulsar(c) => &c.id,
             Self::Redis(c) => &c.id,
-            Self::RedPanda(c) => &c.id,
             Self::Opendal(c) => &c.id,
             Self::MySql(c) => &c.id,
             Self::Postgres(c) => &c.id,
             Self::SqlServer(c) => &c.id,
             Self::SchemaRegistry(c) => &c.id,
+            Self::Lakekeeper(c) => &c.id,
+            Self::Moat(c) => &c.id,
         }
     }
 
@@ -484,13 +535,15 @@ impl ServiceConfig {
             Self::AwsS3(_) => None,
             Self::Kafka(c) => Some(c.port),
             Self::Pubsub(c) => Some(c.port),
+            Self::Pulsar(c) => Some(c.http_port),
             Self::Redis(c) => Some(c.port),
-            Self::RedPanda(_c) => None,
             Self::Opendal(_) => None,
             Self::MySql(c) => Some(c.port),
             Self::Postgres(c) => Some(c.port),
             Self::SqlServer(c) => Some(c.port),
             Self::SchemaRegistry(c) => Some(c.port),
+            Self::Lakekeeper(c) => Some(c.port),
+            Self::Moat(c) => Some(c.port),
         }
     }
 
@@ -508,13 +561,15 @@ impl ServiceConfig {
             Self::AwsS3(_c) => false,
             Self::Kafka(c) => c.user_managed,
             Self::Pubsub(_c) => false,
+            Self::Pulsar(c) => c.user_managed,
             Self::Redis(_c) => false,
-            Self::RedPanda(_c) => false,
             Self::Opendal(_c) => false,
             Self::MySql(c) => c.user_managed,
             Self::Postgres(c) => c.user_managed,
             Self::SqlServer(c) => c.user_managed,
             Self::SchemaRegistry(c) => c.user_managed,
+            Self::Lakekeeper(c) => c.user_managed,
+            Self::Moat(_c) => false,
         }
     }
 
@@ -531,10 +586,9 @@ impl ServiceConfig {
                 Observability
             }
             ServiceConfig::Opendal(_) | ServiceConfig::AwsS3(_) => RisingWave,
-            ServiceConfig::Kafka(_)
-            | ServiceConfig::SchemaRegistry(_)
-            | ServiceConfig::RedPanda(_) => Kafka,
+            ServiceConfig::Kafka(_) | ServiceConfig::SchemaRegistry(_) => Kafka,
             ServiceConfig::Pubsub(_) => Pubsub,
+            ServiceConfig::Pulsar(_) => Pulsar,
             ServiceConfig::Redis(_) => Redis,
             ServiceConfig::MySql(my_sql_config) => {
                 if matches!(my_sql_config.application, Application::Metastore) {
@@ -551,6 +605,8 @@ impl ServiceConfig {
                 }
             }
             ServiceConfig::SqlServer(_) => SqlServer,
+            ServiceConfig::Lakekeeper(_) => Lakekeeper,
+            ServiceConfig::Moat(_) => Moat,
         }
     }
 }

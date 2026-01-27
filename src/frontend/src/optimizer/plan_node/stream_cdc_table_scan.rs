@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,11 +18,11 @@ use risingwave_common::catalog::{ColumnCatalog, Field};
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::stream_plan::PbStreamNode;
-use risingwave_pb::stream_plan::stream_node::PbNodeBody;
+use risingwave_pb::stream_plan::stream_node::{PbNodeBody, PbStreamKind};
 
 use super::stream::prelude::*;
 use super::utils::{Distill, childless_record};
-use super::{ExprRewritable, PlanBase, PlanRef, StreamNode, generic};
+use super::{ExprRewritable, PlanBase, StreamNode, StreamPlanRef as PlanRef, generic};
 use crate::catalog::ColumnId;
 use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprType, ExprVisitor, FunctionCall, InputRef};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
@@ -46,7 +46,7 @@ impl StreamCdcTableScan {
         let base = PlanBase::new_stream_with_core(
             &core,
             distribution,
-            core.append_only(),
+            StreamKind::Retract,
             false,
             core.watermark_columns(),
             core.columns_monotonicity(),
@@ -62,43 +62,64 @@ impl StreamCdcTableScan {
         &self.core
     }
 
-    /// Build catalog for cdc backfill state
+    /// Build catalog for cdc backfill state.
+    ///
+    /// For non-parallelized cdc backfill:
     /// Right now we only persist whether the backfill is finished and the corresponding cdc offset
     /// schema: | `split_id` | `pk...` | `backfill_finished` | `row_count` | `cdc_offset` |
+    ///
+    /// For parallelized cdc backfill:
+    /// schema: | `split_id` | `pk...` | `backfill_finished` | `row_count` | `cdc_offset_low` | `cdc_offset_high` |
     pub fn build_backfill_state_catalog(
         &self,
         state: &mut BuildFragmentGraphState,
+        is_parallelized_backfill: bool,
     ) -> TableCatalog {
-        let mut catalog_builder = TableCatalogBuilder::default();
-        let upstream_schema = &self.core.get_table_columns();
+        if is_parallelized_backfill {
+            let mut catalog_builder = TableCatalogBuilder::default();
+            // Use `split_id` as primary key in state table.
+            catalog_builder.add_column(&Field::with_name(DataType::Int64, "split_id"));
+            catalog_builder.add_order_column(0, OrderType::ascending());
+            catalog_builder.add_column(&Field::with_name(DataType::Boolean, "backfill_finished"));
+            // `row_count` column, the number of rows read from snapshot
+            catalog_builder.add_column(&Field::with_name(DataType::Int64, "row_count"));
+            catalog_builder.add_column(&Field::with_name(DataType::Jsonb, "cdc_offset_low"));
+            catalog_builder.add_column(&Field::with_name(DataType::Jsonb, "cdc_offset_high"));
+            catalog_builder
+                .build(vec![], 1)
+                .with_id(state.gen_table_id_wrapped())
+        } else {
+            let mut catalog_builder = TableCatalogBuilder::default();
+            let upstream_schema = &self.core.get_table_columns();
 
-        // Use `split_id` as primary key in state table.
-        // Currently we only support single split for cdc backfill.
-        catalog_builder.add_column(&Field::with_name(DataType::Varchar, "split_id"));
-        catalog_builder.add_order_column(0, OrderType::ascending());
+            // Use `split_id` as primary key in state table.
+            // Currently we only support single split for cdc backfill.
+            catalog_builder.add_column(&Field::with_name(DataType::Varchar, "split_id"));
+            catalog_builder.add_order_column(0, OrderType::ascending());
 
-        // pk columns
-        for col_order in self.core.primary_key() {
-            let col = &upstream_schema[col_order.column_index];
-            catalog_builder.add_column(&Field::from(col));
+            // pk columns
+            for col_order in self.core.primary_key() {
+                let col = &upstream_schema[col_order.column_index];
+                catalog_builder.add_column(&Field::from(col));
+            }
+
+            catalog_builder.add_column(&Field::with_name(DataType::Boolean, "backfill_finished"));
+
+            // `row_count` column, the number of rows read from snapshot
+            catalog_builder.add_column(&Field::with_name(DataType::Int64, "row_count"));
+
+            // The offset is only for observability, not for recovery right now
+            catalog_builder.add_column(&Field::with_name(DataType::Jsonb, "cdc_offset"));
+
+            // leave dist key empty, since the cdc backfill executor is singleton
+            catalog_builder
+                .build(vec![], 1)
+                .with_id(state.gen_table_id_wrapped())
         }
-
-        catalog_builder.add_column(&Field::with_name(DataType::Boolean, "backfill_finished"));
-
-        // `row_count` column, the number of rows read from snapshot
-        catalog_builder.add_column(&Field::with_name(DataType::Int64, "row_count"));
-
-        // The offset is only for observability, not for recovery right now
-        catalog_builder.add_column(&Field::with_name(DataType::Jsonb, "cdc_offset"));
-
-        // leave dist key empty, since the cdc backfill executor is singleton
-        catalog_builder
-            .build(vec![], 1)
-            .with_id(state.gen_table_id_wrapped())
     }
 }
 
-impl_plan_tree_node_for_leaf! { StreamCdcTableScan }
+impl_plan_tree_node_for_leaf! { Stream, StreamCdcTableScan }
 
 impl Distill for StreamCdcTableScan {
     fn distill<'a>(&self) -> XmlNode<'a> {
@@ -159,11 +180,11 @@ impl StreamCdcTableScan {
             .collect_vec();
 
         let catalog = self
-            .build_backfill_state_catalog(state)
+            .build_backfill_state_catalog(state, self.core.options.is_parallelized_backfill())
             .to_internal_table_prost();
 
         // We need to pass the id of upstream source job here
-        let upstream_source_id = self.core.cdc_table_desc.source_id.table_id;
+        let upstream_source_id = self.core.cdc_table_desc.source_id;
 
         // filter upstream source chunk by the value of `_rw_table_name` column
         let filter_expr =
@@ -172,7 +193,7 @@ impl StreamCdcTableScan {
         let filter_operator_id = self.core.ctx.next_plan_node_id();
         // The filter node receive chunks in `(payload, _rw_offset, _rw_table_name)` schema
         let filter_stream_node = StreamNode {
-            operator_id: filter_operator_id.0 as _,
+            operator_id: filter_operator_id.to_stream_node_operator_id(),
             input: vec![
                 // The merge node body will be filled by the `ActorBuilder` on the meta service.
                 PbStreamNode {
@@ -184,7 +205,7 @@ impl StreamCdcTableScan {
                 },
             ],
             stream_key: vec![], // not used
-            append_only: true,
+            stream_kind: PbStreamKind::AppendOnly as _,
             identity: "StreamCdcFilter".to_owned(),
             fields: cdc_source_schema.clone(),
             node_body: Some(PbNodeBody::CdcFilter(Box::new(CdcFilterNode {
@@ -194,20 +215,29 @@ impl StreamCdcTableScan {
         };
 
         let exchange_operator_id = self.core.ctx.next_plan_node_id();
+        let strategy = if self.core.options.is_parallelized_backfill() {
+            DispatchStrategy {
+                r#type: DispatcherType::Broadcast as _,
+                dist_key_indices: vec![],
+                output_mapping: PbDispatchOutputMapping::identical(cdc_source_schema.len()).into(),
+            }
+        } else {
+            DispatchStrategy {
+                r#type: DispatcherType::Simple as _,
+                dist_key_indices: vec![], // simple exchange doesn't need dist key
+                output_mapping: PbDispatchOutputMapping::identical(cdc_source_schema.len()).into(),
+            }
+        };
         // Add a simple exchange node between filter and stream scan
         let exchange_stream_node = StreamNode {
-            operator_id: exchange_operator_id.0 as _,
+            operator_id: exchange_operator_id.to_stream_node_operator_id(),
             input: vec![filter_stream_node],
             stream_key: vec![], // not used
-            append_only: true,
+            stream_kind: PbStreamKind::AppendOnly as _,
             identity: "Exchange".to_owned(),
-            fields: cdc_source_schema.clone(),
+            fields: cdc_source_schema,
             node_body: Some(PbNodeBody::Exchange(Box::new(ExchangeNode {
-                strategy: Some(DispatchStrategy {
-                    r#type: DispatcherType::Simple as _,
-                    dist_key_indices: vec![], // simple exchange doesn't need dist key
-                    output_indices: (0..cdc_source_schema.len() as u32).collect(),
-                }),
+                strategy: Some(strategy),
             }))),
         };
 
@@ -240,7 +270,7 @@ impl StreamCdcTableScan {
 
         let options = self.core.options.to_proto();
         let stream_scan_body = PbNodeBody::StreamCdcScan(Box::new(StreamCdcScanNode {
-            table_id: upstream_source_id,
+            table_id: upstream_source_id.as_cdc_table_id(),
             upstream_column_ids,
             output_indices,
             // The table desc used by backfill executor
@@ -257,9 +287,9 @@ impl StreamCdcTableScan {
             input: vec![exchange_stream_node],
             node_body: Some(stream_scan_body),
             stream_key,
-            operator_id: self.base.id().0 as u64,
+            operator_id: self.base.id().to_stream_node_operator_id(),
             identity: self.distill_to_string(),
-            append_only: self.append_only(),
+            stream_kind: self.stream_kind().to_protobuf() as i32,
         })
     }
 
@@ -278,7 +308,7 @@ impl StreamCdcTableScan {
     }
 }
 
-impl ExprRewritable for StreamCdcTableScan {
+impl ExprRewritable<Stream> for StreamCdcTableScan {
     fn has_rewritable_expr(&self) -> bool {
         true
     }

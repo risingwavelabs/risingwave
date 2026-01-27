@@ -1,0 +1,185 @@
+statement ok
+create table items (id int primary key, text string, embedding vector(3)) append only;
+
+statement ok
+insert into items values (3, 'third', get_embedding('third'));
+
+statement ok
+flush;
+
+statement ok
+create table events (event_id int primary key, time timestamp, embedding vector(3));
+
+statement error LogicalVectorSearchLookupJoin should use proper vector index in streaming job
+create materialized view mv as select
+  event_id, array(
+    select row(text) from items order by events.embedding <-> items.embedding limit 3
+  ) as related_info,
+  time
+from events;
+
+statement ok
+create index raw_column_index on items using flat (embedding) with (distance_type = 'l2');
+
+statement error StreamVectorIndexLookupJoin only support append only input
+create materialized view mv as select
+  event_id, array(
+    select row(text) from items FOR SYSTEM_TIME AS OF PROCTIME() order by events.embedding <-> items.embedding limit 3
+  ) as related_info,
+  time
+from events;
+
+statement ok
+drop table events;
+
+statement ok
+create table events (event_id int primary key, time timestamp, embedding vector(3)) append only;
+
+statement error streaming vector index lookup join must be proctime temporal join
+create materialized view mv as select
+  event_id, array(
+    select row(text) from items order by events.embedding <-> items.embedding limit 3
+  ) as related_info,
+  time
+from events;
+
+statement ok
+create materialized view vector_index_lookup_raw_mv as select
+  event_id, array(
+    select row(text) from items FOR SYSTEM_TIME AS OF PROCTIME() order by events.embedding <-> items.embedding limit 3
+  ) as related_info,
+  time
+from events;
+
+statement ok
+create index expression_column_index on items using flat (get_embedding(text)) with (distance_type = 'l2');
+
+statement ok
+create materialized view vector_index_lookup_expression_mv as select
+  event_id, array(
+    select row(text) from items FOR SYSTEM_TIME AS OF PROCTIME() order by events.embedding <-> get_embedding(items.text) limit 3
+  ) as related_info,
+  time
+from events;
+
+statement ok
+create table vector_index_lookup_raw_result_table(event_id int, related_info struct<text string>[], time timestamp);
+
+statement ok
+create sink vector_index_lookup_raw_sink into vector_index_lookup_raw_result_table as select
+    event_id, array(
+      select row(text) from items FOR SYSTEM_TIME AS OF PROCTIME() order by events.embedding <-> items.embedding limit 3
+    ) as related_info,
+    time
+from events;
+
+# test with 1 row in items
+statement ok
+insert into events values(1, '2025-10-21 01:01:01+00:00', get_embedding('query'));
+
+statement ok
+flush;
+
+query TTT
+select * from vector_index_lookup_raw_mv order by event_id;
+----
+1 {(third)} 2025-10-21 01:01:01
+
+query TTT
+select * from vector_index_lookup_expression_mv order by event_id;
+----
+1 {(third)} 2025-10-21 01:01:01
+
+query TTT
+select * from vector_index_lookup_raw_result_table order by event_id;
+----
+1 {(third)} 2025-10-21 01:01:01
+
+statement ok
+insert into items values (2, 'second', get_embedding('second'));
+
+statement ok
+flush;
+
+# test with 2 row in items
+statement ok
+insert into events values(2, '2025-10-21 01:01:02+00:00', get_embedding('query'));
+
+statement ok
+flush;
+
+query TTT
+select * from vector_index_lookup_raw_mv order by event_id;
+----
+1 {(third)} 2025-10-21 01:01:01
+2 {(second),(third)} 2025-10-21 01:01:02
+
+query TTT
+select * from vector_index_lookup_expression_mv order by event_id;
+----
+1 {(third)} 2025-10-21 01:01:01
+2 {(second),(third)} 2025-10-21 01:01:02
+
+query TTT
+select * from vector_index_lookup_raw_result_table order by event_id;
+----
+1 {(third)} 2025-10-21 01:01:01
+2 {(second),(third)} 2025-10-21 01:01:02
+
+statement ok
+insert into items values (1, 'first', get_embedding('first'));
+
+statement ok
+flush;
+
+# test with 3 row in items
+statement ok
+insert into events values(3, '2025-10-21 01:01:03+00:00', get_embedding('query'));
+
+statement ok
+flush;
+
+query TTT
+select * from vector_index_lookup_raw_mv order by event_id;
+----
+1 {(third)} 2025-10-21 01:01:01
+2 {(second),(third)} 2025-10-21 01:01:02
+3 {(first),(second),(third)} 2025-10-21 01:01:03
+
+query TTT
+select * from vector_index_lookup_expression_mv order by event_id;
+----
+1 {(third)} 2025-10-21 01:01:01
+2 {(second),(third)} 2025-10-21 01:01:02
+3 {(first),(second),(third)} 2025-10-21 01:01:03
+
+query TTT
+select * from vector_index_lookup_raw_result_table order by event_id;
+----
+1 {(third)} 2025-10-21 01:01:01
+2 {(second),(third)} 2025-10-21 01:01:02
+3 {(first),(second),(third)} 2025-10-21 01:01:03
+
+statement ok
+drop sink vector_index_lookup_raw_sink;
+
+statement ok
+drop table vector_index_lookup_raw_result_table;
+
+statement ok
+drop materialized view vector_index_lookup_expression_mv;
+
+statement ok
+drop index expression_column_index;
+
+statement ok
+drop materialized view vector_index_lookup_raw_mv;
+
+statement ok
+drop index raw_column_index;
+
+statement ok
+drop table events;
+
+statement ok
+drop table items;

@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -147,8 +147,7 @@ impl<'a, R: Rng + 'a> SqlGenerator<'a, R> {
             .iter()
             .copied()
             .map(|i| {
-                let name = table.columns[i].name.as_str();
-                let id = vec![name.into()];
+                let id = vec![table.columns[i].base_name()];
                 let value = AssignmentValue::Expr(row[i].clone());
                 Assignment { id, value }
             })
@@ -169,7 +168,7 @@ impl<'a, R: Rng + 'a> SqlGenerator<'a, R> {
             .copied()
             .map(|i| {
                 let match_val = row[i].clone();
-                let match_col = Expr::Identifier(table.columns[i].name.as_str().into());
+                let match_col = table.columns[i].name_expr();
 
                 Expr::BinaryOp {
                     left: Box::new(match_col),

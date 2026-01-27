@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -48,6 +48,13 @@ impl Field {
         PbField {
             data_type: Some(self.data_type.to_protobuf()),
             name: self.name.clone(),
+        }
+    }
+
+    pub fn from_prost(pb: &PbField) -> Self {
+        Field {
+            data_type: DataType::from(pb.data_type.as_ref().unwrap()),
+            name: pb.name.clone(),
         }
     }
 }
@@ -191,7 +198,7 @@ impl Schema {
         }
 
         for (a, b) in self.fields.iter().zip_eq_fast(other.fields.iter()) {
-            if a.data_type != b.data_type {
+            if !a.data_type.equals_datatype(&b.data_type) {
                 return false;
             }
         }

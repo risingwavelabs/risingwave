@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -50,7 +50,7 @@ use core::ops::{
 };
 use core::str::FromStr;
 use std::error::Error;
-use std::fmt::Debug;
+use std::fmt::{Debug, Formatter};
 
 use bytes::BytesMut;
 pub use num_traits::Float;
@@ -96,15 +96,28 @@ const CANONICAL_ZERO_BITS: u64 = 0x0u64;
 /// s.insert(OrderedFloat(NAN));
 /// assert!(s.contains(&OrderedFloat(NAN)));
 /// ```
-#[derive(Debug, Default, Clone, Copy, Serialize)]
+#[derive(Default, Clone, Copy, Serialize)]
 #[repr(transparent)]
 pub struct OrderedFloat<T>(pub T);
+
+impl<T: Debug> Debug for OrderedFloat<T> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        T::fmt(&self.0, f)
+    }
+}
 
 impl<T: Float> OrderedFloat<T> {
     /// Get the value out.
     #[inline]
     pub fn into_inner(self) -> T {
         self.0
+    }
+
+    pub fn inner_slice(slice: &[Self]) -> &[T] {
+        let ptr = slice.as_ptr() as *const T;
+
+        // Safety: OrderedFloat is #[repr(transparent)] and has no invalid values.
+        unsafe { std::slice::from_raw_parts(ptr, slice.len()) }
     }
 }
 
@@ -562,6 +575,17 @@ impl<T: One> One for OrderedFloat<T> {
     #[inline]
     fn one() -> Self {
         OrderedFloat(T::one())
+    }
+}
+
+impl OrderedFloat<f64> {
+    pub fn gamma(self) -> Self {
+        OrderedFloat(self.0.gamma())
+    }
+
+    pub fn ln_gamma(self) -> (Self, i32) {
+        let (result, sign) = self.0.ln_gamma();
+        (OrderedFloat(result), sign)
     }
 }
 
@@ -1111,5 +1135,17 @@ mod tests {
     fn test_ordered_float_estimate_size() {
         let ordered_float = OrderedFloat::<f64>::from(5_i64);
         assert_eq!(ordered_float.estimated_size(), 8);
+    }
+
+    #[test]
+    fn test_inner_slice() {
+        use crate::types::F32;
+
+        assert_eq!(std::mem::size_of::<F32>(), std::mem::size_of::<f32>());
+        assert_eq!(std::mem::align_of::<F32>(), std::mem::align_of::<f32>());
+
+        let slice = &[F32::from(1.0), 2.0.into(), 3.0.into()];
+        let inner = F32::inner_slice(slice);
+        assert_eq!(inner, &[1.0f32, 2.0, 3.0]);
     }
 }

@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use pgwire::pg_response::StatementType;
-use risingwave_pb::ddl_service::alter_set_schema_request::Object;
 use risingwave_sqlparser::ast::{ObjectName, OperateFunctionArg};
 
 use super::{HandlerArgs, RwPgResponse};
@@ -36,8 +35,7 @@ pub async fn handle_alter_set_schema(
 ) -> Result<RwPgResponse> {
     let session = handler_args.session;
     let db_name = &session.database();
-    let (schema_name, real_obj_name) =
-        Binder::resolve_schema_qualified_name(db_name, obj_name.clone())?;
+    let (schema_name, real_obj_name) = Binder::resolve_schema_qualified_name(db_name, &obj_name)?;
     let search_path = session.config().search_path();
     let user_name = &session.user_name();
     let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
@@ -62,7 +60,7 @@ pub async fn handle_alter_set_schema(
                     &new_schema_name,
                     table.name(),
                 )?;
-                Object::TableId(table.id.table_id)
+                table.id.into()
             }
             StatementType::ALTER_VIEW => {
                 let (view, old_schema_name) =
@@ -76,7 +74,7 @@ pub async fn handle_alter_set_schema(
                     &new_schema_name,
                     view.name(),
                 )?;
-                Object::ViewId(view.id)
+                view.id.into()
             }
             StatementType::ALTER_SOURCE => {
                 let (source, old_schema_name) =
@@ -90,11 +88,14 @@ pub async fn handle_alter_set_schema(
                     &new_schema_name,
                     &source.name,
                 )?;
-                Object::SourceId(source.id)
+                source.id.into()
             }
             StatementType::ALTER_SINK => {
-                let (sink, old_schema_name) =
-                    catalog_reader.get_sink_by_name(db_name, schema_path, &real_obj_name)?;
+                let (sink, old_schema_name) = catalog_reader.get_created_sink_by_name(
+                    db_name,
+                    schema_path,
+                    &real_obj_name,
+                )?;
                 if old_schema_name == new_schema_name {
                     return Ok(RwPgResponse::empty_result(stmt_type));
                 }
@@ -104,7 +105,7 @@ pub async fn handle_alter_set_schema(
                     &new_schema_name,
                     &sink.name,
                 )?;
-                Object::SinkId(sink.id.sink_id)
+                sink.id.into()
             }
             StatementType::ALTER_SUBSCRIPTION => {
                 let (subscription, old_schema_name) = catalog_reader.get_subscription_by_name(
@@ -121,7 +122,7 @@ pub async fn handle_alter_set_schema(
                     &new_schema_name,
                     &subscription.name,
                 )?;
-                Object::SubscriptionId(subscription.id.subscription_id)
+                subscription.id.into()
             }
             StatementType::ALTER_CONNECTION => {
                 let (connection, old_schema_name) =
@@ -135,7 +136,7 @@ pub async fn handle_alter_set_schema(
                     &new_schema_name,
                     &connection.name,
                 )?;
-                Object::ConnectionId(connection.id)
+                connection.id.into()
             }
             StatementType::ALTER_FUNCTION => {
                 let (function, old_schema_name) = if let Some(args) = func_args {
@@ -173,7 +174,7 @@ pub async fn handle_alter_set_schema(
                     &function.name,
                     &function.arg_types,
                 )?;
-                Object::FunctionId(function.id.function_id())
+                function.id.into()
             }
             _ => unreachable!(),
         }

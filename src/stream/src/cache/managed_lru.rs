@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -39,7 +39,7 @@ where
     inner: LruCache<K, V, S, A>,
 
     /// The entry with sequence less than `watermark_sequence` should be evicted.
-    /// `watermark_sequence` should only be updatd by `MemoryManager`.
+    /// `watermark_sequence` should only be updated by `MemoryManager`.
     watermark_sequence: Arc<AtomicSequence>,
 
     // Metrics info
@@ -102,9 +102,13 @@ where
         old_val
     }
 
-    // TODO(MrCroxx): REMOVE ME!!!
-    pub fn push(&mut self, k: K, v: V) -> Option<V> {
-        self.put(k, v)
+    pub fn remove(&mut self, k: &K) -> Option<V> {
+        let key_size = k.estimated_size();
+        let old_val = self.inner.remove(k);
+        if let Some(old_val) = &old_val {
+            self.reporter.dec(key_size + old_val.estimated_size());
+        }
+        old_val
     }
 
     pub fn get_mut(&mut self, k: &K) -> Option<MutGuard<'_, V>> {

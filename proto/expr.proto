@@ -56,6 +56,7 @@ message ExprNode {
     MAKE_DATE = 113;
     MAKE_TIME = 114;
     MAKE_TIMESTAMP = 115;
+    DATE_BIN = 116;
     // From f64 to timestamp.
     // e.g. `select to_timestamp(1672044740.0)`
     SEC_TO_TIMESTAMPTZ = 104;
@@ -107,6 +108,7 @@ message ExprNode {
     CHAR_LENGTH = 225;
     REPEAT = 226;
     CONCAT_OP = 227;
+    BYTEA_CONCAT_OP = 290;
     CONCAT = 286;
     CONCAT_VARIADIC = 287;
     // BOOL_OUT is different from CAST-bool-to-varchar in PostgreSQL.
@@ -165,6 +167,8 @@ message ExprNode {
     SCALE = 276;
     MIN_SCALE = 277;
     TRIM_SCALE = 278;
+    GAMMA = 288;
+    LGAMMA = 289;
 
     // Boolean comparison
     IS_TRUE = 301;
@@ -200,6 +204,11 @@ message ExprNode {
     QUOTE_NULLABLE = 331;
     HMAC = 332;
     SECURE_COMPARE = 333;
+    GET_BIT = 334;
+    GET_BYTE = 335;
+    SET_BIT = 336;
+    SET_BYTE = 337;
+    BIT_COUNT = 338;
 
     // Constraints Check
     CHECK_NOT_NULL = 350;
@@ -236,6 +245,8 @@ message ExprNode {
     ARRAY_SORT = 549;
     ARRAY_CONTAINS = 550;
     ARRAY_CONTAINED = 551;
+    ARRAY_FLATTEN = 552;
+    ARRAY_REVERSE = 553;
 
     // Int256 functions
     HEX_TO_INT256 = 560;
@@ -289,6 +300,7 @@ message ExprNode {
     JSONB_TO_RECORD = 630;
     JSONB_SET = 631;
     JSONB_POPULATE_MAP = 632;
+    JSONB_TO_ARRAY = 633;
 
     // Map functions
     MAP_FROM_ENTRIES = 700;
@@ -302,12 +314,26 @@ message ExprNode {
     MAP_CAT = 708;
     MAP_INSERT = 709;
     MAP_DELETE = 710;
+    MAP_FILTER = 711;
+
+    // Vector functions
+    L2_DISTANCE = 750;
+    COSINE_DISTANCE = 751;
+    L1_DISTANCE = 752;
+    INNER_PRODUCT = 753;
+    VEC_CONCAT = 754;
+    L2_NORM = 755;
+    L2_NORMALIZE = 756;
+    SUBVECTOR = 757;
+
+    // Internal function for schema change
+    COMPOSITE_CAST = 800;
 
     // Non-pure functions below (> 1000)
     // ------------------------
     // Internal functions
     VNODE = 1101;
-    TEST_PAID_TIER = 1102;
+    TEST_FEATURE = 1102;
     VNODE_USER = 1103;
     LICENSE = 1104;
     // Non-deterministic functions
@@ -315,6 +341,7 @@ message ExprNode {
     PG_SLEEP = 2024;
     PG_SLEEP_FOR = 2025;
     PG_SLEEP_UNTIL = 2026;
+    RANDOM = 2027;
 
     // System administration functions
     CAST_REGCLASS = 2100;
@@ -335,9 +362,16 @@ message ExprNode {
     RW_EPOCH_TO_TS = 2413;
     PG_TABLE_IS_VISIBLE = 2414;
     HAS_FUNCTION_PRIVILEGE = 2415;
+    HAS_DATABASE_PRIVILEGE = 2416;
+    RW_CLUSTER_ID = 2417;
+    RW_FRAGMENT_VNODES = 2418;
+    RW_ACTOR_VNODES = 2419;
 
     // EXTERNAL
     ICEBERG_TRANSFORM = 2201;
+
+    // AI model functions
+    OPENAI_EMBEDDING = 2501;
   }
   // Only use this field for function call. For other types of expression, it should be UNSPECIFIED.
   Type function_type = 1;
@@ -377,6 +411,12 @@ message TableFunction {
     POSTGRES_QUERY = 20;
     // mysql query
     MYSQL_QUERY = 21;
+    // Internal backfill table function
+    INTERNAL_BACKFILL_PROGRESS = 30;
+    // Internal source backfill table function
+    INTERNAL_SOURCE_BACKFILL_PROGRESS = 31;
+    // Internal channel delta stats table function
+    INTERNAL_GET_CHANNEL_DELTA_STATS = 32;
     // User defined table function
     USER_DEFINED = 100;
   }
@@ -467,7 +507,8 @@ message AggCall {
     GROUPING = 26;
     INTERNAL_LAST_SEEN_VALUE = 27;
     APPROX_PERCENTILE = 28;
-
+    ARG_MIN = 29;
+    ARG_MAX = 30;
     // user defined aggregate function
     USER_DEFINED = 100;
     // wraps a scalar function that takes a list as input as an aggregate function.
@@ -650,6 +691,9 @@ message UserDefinedFunctionMetadata {
   optional string runtime = 11;
   reserved 12;
   reserved "function_type";
+  // additional options for javascript functions
+  optional bool is_async = 14;
+  optional bool is_batched = 15;
 
   UdfExprVersion version = 1000;
 }

@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -261,7 +261,7 @@ impl TopNExecutor {
 
         #[for_await]
         for chunk in self.child.execute() {
-            let chunk = Arc::new(chunk?.compact());
+            let chunk = Arc::new(chunk?.compact_vis());
             for (row_id, encoded_row) in encode_chunk(&chunk, &self.column_orders)?
                 .into_iter()
                 .enumerate()

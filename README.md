@@ -9,7 +9,7 @@
 
 <div align="center">
 
-### 🌊 Ride the Wave of Streaming Data.
+### 🌊 Ride the wave of event streaming
 
 </div>
 <p align="center">
@@ -19,6 +19,12 @@
 <p align="center">
 
 <div align="center">
+  <a
+    href="https://github.com/risingwavelabs/risingwave/releases/latest"
+    target="_blank"
+  >
+    <img alt="Release" src="https://img.shields.io/github/v/release/risingwavelabs/risingwave.svg?sort=semver" />
+  </a>
   <a
     href="https://go.risingwave.com/slack"
     target="_blank"
@@ -39,11 +45,11 @@
   </a>
 </div>
 
-RisingWave is the world's most advanced event stream processing platform engineered to provide the <i><b>simplest</b></i> and <i><b>most cost-efficient</b></i> approach for <b>processing</b>, <b>analyzing</b>, and <b>managing</b> real-time event streaming data. It provides both a Postgres-compatible [SQL interface](https://docs.risingwave.com/sql/overview) and a DataFrame-style [Python interface](https://docs.risingwave.com/python-sdk/intro).
+RisingWave is an enterprise-grade event streaming platform designed to offer the <i><b>simplest</b></i> and <i><b>most cost-effective</b></i> way to <b>ingest</b>, <b>process</b>, and <b>manage</b> real-time event data — with built-in support for the [Apache Iceberg™](https://iceberg.apache.org/) open table format. It provides both a Postgres-compatible [SQL interface](https://docs.risingwave.com/sql/overview) and a DataFrame-style [Python interface](https://docs.risingwave.com/python-sdk/intro).
 
-RisingWave can <b>ingest</b> millions of events per second, continuously <b>join and analyze</b> live data streams with historical tables, <b>serve</b> ad-hoc queries at low latency, and <b>deliver</b> fresh, consistent results wherever needed.
+RisingWave can <b>ingest</b> millions of events per second, continuously <b>join and analyze</b> live streams with historical data, <b>serve</b> ad-hoc queries at low latency, and <b>manage</b> data reliably in Apache Iceberg™ tables.
 
-![RisingWave](./docs/dev/src/images/architecture_20250127.png)
+![RisingWave](./docs/dev/src/images/architecture_20250609.jpg)
 
 ## Try it out in 60 seconds
 
@@ -52,22 +58,21 @@ Install RisingWave standalone mode:
 curl -L https://risingwave.com/sh | sh
 ```
 
-To learn about other installation options, such as using a Docker image, see [Quick Start](https://docs.risingwave.com/docs/current/get-started/).
+To learn about other installation options, such as using a Docker image, see the [quick start guide](https://docs.risingwave.com/get-started/quickstart).
 
-## Not just a stream processor!
+## Unified platform for streaming data
 
-RisingWave simplifies **end-to-end** development of real-time data pipelines and applications - going beyond traditional stream processors.
+RisingWave delivers a unified streaming data platform that combines **ultra-low-latency stream processing** and **Iceberg-native data management**.
 
-Like other stream processors, RisingWave supports:
+### Low-latency streaming ingestion and processing
+RisingWave integrates real-time streaming ingestion, stream processing and low-latency serving in a single system. It continuously ingests data from streaming and batch sources, performs incremental computations across streams and tables with end-to-end freshness under 100 ms. Materialized views can be served directly within RisingWave with 10–20 ms p99 query latency, or delivered to downstream systems.
 
-* **Ingestion:** Ingest millions of events per second from streaming and batch sources.
-* **Stream processing:** Perform real-time incremental processing to join and analyze live data with historical tables.
-* **Delivery:** Deliver fresh, consistent results to data lakes (e.g., Apache Iceberg) or any destination.
+### Iceberg lakehouse ingestion, transformation, and management
+RisingWave treats Apache Iceberg™ as a first-class citizen. It directly hosts and manages the Iceberg REST catalog, allowing users to create and operate Iceberg tables through a PostgreSQL-compatible interface. RisingWave supports two write modes: Merge-on-Read (MoR) and Copy-on-Write (CoW), to suit different ingestion and query patterns. It also provides built-in table maintenance capabilities, including compaction, small-file optimization, vacuum, and snapshot cleanup, ensuring efficient and consistent data management without external tools or pipelines.
 
-But RisingWave does more. It provides both **online and offline storage**:
+_Plug: [Nimtable](https://github.com/nimtable/nimtable) is an observability tool developed by RisingWave for easily exploring and managing Iceberg tables._
 
-* **Online serving:** Row-based storage for ad-hoc point/range queries with single-digit millisecond latency.
-* **Offline persistence:** Apache Iceberg-based storage that persists streaming data at low cost, enabling open access by other query engines.
+
 
 ## Key design decisions
 
@@ -86,25 +91,27 @@ RisingWave stores tables, materialized views, and internal states of stream proc
 - **Fast recovery:** Restores from system failures within seconds.
 - **[Dynamic scaling](https://docs.risingwave.com/deploy/k8s-cluster-scaling):** Instantly adjusts resources to handle workload spikes.
 
-### Elastic disk cache
-
 Beyond caching hot data in memory, RisingWave supports [**elastic disk cache**](https://docs.risingwave.com/get-started/disk-cache), a powerful performance optimization that uses local disks or EBS for efficient data caching. This minimizes access to S3, lowering processing latency and cutting S3 access costs.
+
+### Apache Iceberg™ native support
+RisingWave [**natively integrates with Apache Iceberg™**](https://docs.risingwave.com/iceberg/overview), enabling continuous ingestion of streaming data into Iceberg tables. It can also read directly from Iceberg, perform automatic compaction, and maintain table health over time. Since Iceberg is an open table format, results are accessible by other query engines — making storage not only cost-efficient, but interoperable by design.
 
 ## In what use cases does RisingWave excel?
 RisingWave is particularly effective for the following use cases:
 
-* **Streaming analytics**: Achieve sub-second data freshness in live dashboards, ideal for high-stakes scenarios like stock trading, sports betting, and IoT monitoring.
-* **Event-driven applications**: Develop sophisticated monitoring and alerting systems for critical applications such as fraud and anomaly detection.
+* **Live dashboards**: Achieve sub-second data freshness in live dashboards, ideal for high-stakes scenarios like stock trading, sports betting, and IoT monitoring.
+* **Monitoring and alerting**: Develop sophisticated monitoring and alerting systems for critical applications such as fraud and anomaly detection.
 * **Real-time data enrichment**: Continuously ingest data from diverse sources, conduct real-time data enrichment, and efficiently deliver the results to downstream systems.
 * **Feature engineering**: Transform batch and streaming data into features in your machine learning models using a unified codebase, ensuring seamless integration and consistency.
+* **Iceberg-based lakehouses**: Power real-time lakehouse architectures where streaming data is continuously written to Apache Iceberg™ tables for unified analytics, governance, and long-term retention in open formats.
 
 ## Production deployments
 
 [**RisingWave Cloud**](https://cloud.risingwave.com) offers the easiest way to run RisingWave in production.
 
-For **Docker deployment**, please refer to [Docker Compose](https://docs.risingwave.com/docs/current/risingwave-docker-compose/).
+For **Docker deployment**, please refer to [Docker Compose](https://docs.risingwave.com/deploy/risingwave-docker-compose/).
 
-For **Kubernetes deployment**, please refer to [Kubernetes with Helm](https://docs.risingwave.com/docs/current/risingwave-k8s-helm/) or [Kubernetes with Operator](https://docs.risingwave.com/docs/current/risingwave-kubernetes/).
+For **Kubernetes deployment**, please refer to [Kubernetes with Helm](https://docs.risingwave.com/deploy/risingwave-k8s-helm/) or [Kubernetes with Operator](https://docs.risingwave.com/deploy/risingwave-kubernetes/).
 
 ## Community
 
@@ -115,7 +122,7 @@ Looking for help, discussions, collaboration opportunities, or a casual afternoo
 
 RisingWave uses [Scarf](https://scarf.sh/) to collect anonymized installation analytics. These analytics help support us understand and improve the distribution of our package. The privacy policy of Scarf is available at [https://about.scarf.sh/privacy-policy](https://about.scarf.sh/privacy-policy).
 
-RisingWave also collects anonymous usage statistics to better understand how the community is using RisingWave. The sole intention of this exercise is to help improve the product. Users may opt out easily at any time. Please refer to the [user documentation](https://docs.risingwave.com/docs/current/telemetry/) for more details.
+RisingWave also collects anonymous usage statistics to better understand how the community is using RisingWave. The sole intention of this exercise is to help improve the product. Users may opt out easily at any time. Please refer to the [user documentation](https://docs.risingwave.com/operate/telemetry/) for more details.
 
 ## License
 

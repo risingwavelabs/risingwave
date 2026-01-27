@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,13 +17,14 @@ use std::fmt::Debug;
 
 use anyhow::anyhow;
 use itertools::Itertools;
+use risingwave_pb::id::{FragmentId, TableId};
 
 pub const RW_INTERNAL_TABLE_FUNCTION_NAME: &str = "rw_table";
 
 pub fn generate_internal_table_name_with_type(
     job_name: &str,
-    fragment_id: u32,
-    table_id: u32,
+    fragment_id: FragmentId,
+    table_id: TableId,
     table_type: &str,
 ) -> String {
     format!(
@@ -33,6 +34,18 @@ pub fn generate_internal_table_name_with_type(
         table_type.to_lowercase(),
         table_id
     )
+}
+
+pub fn is_backfill_table(table_name: &str) -> bool {
+    let parts: Vec<&str> = table_name.split('_').collect();
+    let parts_len = parts.len();
+    parts_len >= 2 && parts[parts_len - 2] == "streamscan"
+}
+
+pub fn is_source_backfill_table(table_name: &str) -> bool {
+    let parts: Vec<&str> = table_name.split('_').collect();
+    let parts_len = parts.len();
+    parts_len >= 2 && parts[parts_len - 2] == "sourcebackfill"
 }
 
 pub fn get_dist_key_in_pk_indices<I: Eq + Copy + Debug, O: TryFrom<usize>>(

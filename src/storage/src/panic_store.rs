@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,6 +16,7 @@ use std::marker::PhantomData;
 use std::sync::Arc;
 
 use bytes::Bytes;
+use risingwave_common::array::VectorRef;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::hash::VirtualNode;
 use risingwave_hummock_sdk::HummockReadEpoch;
@@ -30,12 +31,12 @@ use crate::store::*;
 pub struct PanicStateStore;
 
 impl StateStoreGet for PanicStateStore {
-    fn on_key_value<O: Send + 'static>(
-        &self,
+    fn on_key_value<'a, O: Send + 'a>(
+        &'a self,
         _key: TableKey<Bytes>,
         _read_options: ReadOptions,
-        _on_key_value_fn: impl KeyValueFn<O>,
-    ) -> impl StorageFuture<'_, Option<O>> {
+        _on_key_value_fn: impl KeyValueFn<'a, O>,
+    ) -> impl StorageFuture<'a, Option<O>> {
         async { panic!("should not read from PanicStateStore") }
     }
 }
@@ -114,6 +115,20 @@ impl LocalStateStore for PanicStateStore {
         panic!("should not operate on the panic state store!");
     }
 
+    fn get_table_watermark(&self, _vnode: VirtualNode) -> Option<Bytes> {
+        panic!("should not operate on the panic state store!");
+    }
+
+    fn new_flushed_snapshot_reader(&self) -> Self::FlushedSnapshotReader {
+        panic!()
+    }
+
+    async fn update_vnode_bitmap(&mut self, _vnodes: Arc<Bitmap>) -> StorageResult<Arc<Bitmap>> {
+        panic!("should not operate on the panic state store!");
+    }
+}
+
+impl StateStoreWriteEpochControl for PanicStateStore {
     async fn flush(&mut self) -> StorageResult<usize> {
         panic!("should not operate on the panic state store!");
     }
@@ -129,16 +144,21 @@ impl LocalStateStore for PanicStateStore {
     async fn try_flush(&mut self) -> StorageResult<()> {
         panic!("should not operate on the panic state store!");
     }
+}
 
-    async fn update_vnode_bitmap(&mut self, _vnodes: Arc<Bitmap>) -> StorageResult<Arc<Bitmap>> {
-        panic!("should not operate on the panic state store!");
+impl StateStoreWriteVector for PanicStateStore {
+    fn insert(&mut self, _vec: VectorRef<'_>, _info: Bytes) -> StorageResult<()> {
+        panic!()
     }
+}
 
-    fn get_table_watermark(&self, _vnode: VirtualNode) -> Option<Bytes> {
-        panic!("should not operate on the panic state store!");
-    }
-
-    fn new_flushed_snapshot_reader(&self) -> Self::FlushedSnapshotReader {
+impl StateStoreReadVector for PanicStateStore {
+    async fn nearest<'a, O: Send + 'a>(
+        &'a self,
+        _vec: VectorRef<'a>,
+        _options: VectorNearestOptions,
+        _on_nearest_item_fn: impl OnNearestItemFn<'a, O>,
+    ) -> StorageResult<Vec<O>> {
         panic!()
     }
 }
@@ -146,6 +166,7 @@ impl LocalStateStore for PanicStateStore {
 impl StateStore for PanicStateStore {
     type Local = Self;
     type ReadSnapshot = Self;
+    type VectorWriter = PanicStateStore;
 
     async fn try_wait_epoch(
         &self,
@@ -164,6 +185,10 @@ impl StateStore for PanicStateStore {
         _epoch: HummockReadEpoch,
         _options: NewReadSnapshotOptions,
     ) -> StorageResult<Self::ReadSnapshot> {
+        panic!()
+    }
+
+    async fn new_vector_writer(&self, _options: NewVectorWriterOptions) -> Self::VectorWriter {
         panic!()
     }
 }

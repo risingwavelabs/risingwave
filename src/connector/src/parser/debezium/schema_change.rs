@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -65,10 +65,10 @@ impl From<&str> for TableChangeType {
 
 #[derive(Debug)]
 pub struct TableSchemaChange {
-    pub(crate) cdc_table_id: String,
+    pub cdc_table_id: String,
     pub(crate) columns: Vec<ColumnCatalog>,
     pub(crate) change_type: TableChangeType,
-    pub(crate) upstream_ddl: String,
+    pub upstream_ddl: String,
 }
 
 impl SchemaChangeEnvelope {

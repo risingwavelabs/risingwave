@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,7 +17,7 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use criterion::{Criterion, criterion_group, criterion_main};
-use foyer::CacheHint;
+use foyer::Hint;
 use futures::pin_mut;
 use risingwave_common::util::epoch::test_epoch;
 use risingwave_hummock_sdk::HummockEpoch;
@@ -103,7 +103,7 @@ fn criterion_benchmark(c: &mut Criterion) {
                     epoch,
                     ReadOptions {
                         prefetch_options: PrefetchOptions::default(),
-                        cache_policy: CachePolicy::Fill(CacheHint::Normal),
+                        cache_policy: CachePolicy::Fill(Hint::Normal),
                         ..Default::default()
                     },
                 ))

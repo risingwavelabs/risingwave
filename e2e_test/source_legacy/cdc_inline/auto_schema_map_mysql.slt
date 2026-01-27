@@ -70,16 +70,8 @@ create source mysql_source with (
  server.id = '5601'
 );
 
-statement error
-create table rw_customers (*) from mysql_source table 'mytest.customers';
-----
-db error: ERROR: Failed to run the query
-
-Caused by:
-  Not supported: feature CdcTableSchemaMap is only available for tier Paid and above, while the current tier is Free
-
-Hint: You may want to set a license key with `ALTER SYSTEM SET license_key = '...';` command.
-HINT: Please define the schema manually
+statement ok
+create table rw_customers_free_tier (*) from mysql_source table 'mytest.customers';
 
 
 
@@ -89,9 +81,8 @@ ALTER SYSTEM SET license_key TO DEFAULT;
 statement ok
 create table test_default (*) from mysql_source table 'mytest.test_default';
 
-sleep 3s
 
-query TTTTTTTTTTTTT
+query TTTTTTTTTTTTT retry 4 backoff 1s
 SELECT count(*) FROM test_default;
 ----
 2
@@ -128,10 +119,9 @@ table description rw_customers NULL NULL
 statement ok
 create table rw_mysql_types_test (*) from mysql_source table 'mytest.mysql_types_test';
 
-sleep 3s
 
 # Name, Type, Is Hidden, Description
-query TTTT
+query TTTT retry 4 backoff 1s
 describe rw_mysql_types_test;
 ----
 c_boolean smallint false NULL
@@ -159,7 +149,7 @@ primary key c_boolean, c_bigint, c_date NULL NULL
 distribution key c_boolean, c_bigint, c_date NULL NULL
 table description rw_mysql_types_test NULL NULL
 
-query TTTTTTTTTTTTT
+query TTTTTTTTTTTTT retry 4 backoff 1s
 SELECT
     c_boolean,
     c_bit,
@@ -179,7 +169,7 @@ FROM rw_mysql_types_test order by c_boolean;
 0 f NULL NULL -8388608 -2147483647 9223372036854775806 -10 -10000 -10000 c d \x000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 1 t -128 -32767 -8388608 -2147483647 -9223372036854775807 -10 -10000 -10000 a b \x000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 
-query TTTTTTTT
+query TTTTTTTT retry 4 backoff 1s
 SELECT
     c_varbinary_10000,
     c_date,

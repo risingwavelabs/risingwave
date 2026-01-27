@@ -72,3 +72,95 @@ query T
 select btrim('abcxyzabc', 'bca');
 ----
 xyz
+
+query T
+select trim(both from '\x1234567890'::bytea, '\x9012'::bytea);
+----
+\x345678
+
+query T
+select trim(leading '\x9012'::bytea from '\x1234567890'::bytea);
+----
+\x34567890
+
+query T
+select trim(trailing '\x9012'::bytea from '\x1234567890'::bytea);
+----
+\x12345678
+
+query T
+select trim('\x9012'::bytea from '\x1234567890'::bytea);
+----
+\x345678
+
+query T
+select trim(both from '\x1234567890'::bytea, '\x9012'::bytea);
+----
+\x345678
+
+query T
+select trim(leading from '\x1234567890'::bytea, '\x9012'::bytea);
+----
+\x34567890
+
+query T
+select trim(trailing from '\x1234567890'::bytea, '\x9012'::bytea);
+----
+\x12345678
+
+query T
+select trim(from '\x1234567890'::bytea, '\x9012'::bytea);
+----
+\x345678
+
+query T
+select btrim('\x1234567890'::bytea, '\x9012'::bytea);
+----
+\x345678
+
+query T
+select ltrim('\x1234567890'::bytea, '\x9012'::bytea);
+----
+\x34567890
+
+query T
+select rtrim('\x1234567890'::bytea, '\x9012'::bytea);
+----
+\x12345678
+
+query T
+SELECT btrim(NULL::bytea, E'\\001');
+----
+NULL
+
+query T
+SELECT btrim('1'::bytea, '1'::bytea);
+----
+\x
+
+query T
+SELECT ltrim('1'::bytea, '1'::bytea);
+----
+\x
+
+query T
+SELECT rtrim('1'::bytea, '1'::bytea);
+----
+\x
+
+
+query T
+SELECT btrim(''::bytea, '1'::bytea);
+----
+\x
+
+query T
+SELECT ltrim(''::bytea, '1'::bytea);
+----
+\x
+
+
+query T
+SELECT rtrim(''::bytea, '1'::bytea);
+----
+\x

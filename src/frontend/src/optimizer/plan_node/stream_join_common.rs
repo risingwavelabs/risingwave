@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,7 +17,7 @@ use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_pb::plan_common::JoinType;
 
 use super::{EqJoinPredicate, generic};
-use crate::PlanRef;
+use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::property::Distribution;
 use crate::utils::ColIndexMappingRewriteExt;
 
@@ -48,7 +48,7 @@ impl StreamJoinCommon {
     pub(super) fn derive_dist(
         left: &Distribution,
         right: &Distribution,
-        logical: &generic::Join<PlanRef>,
+        logical: &generic::Join<impl GenericPlanRef>,
     ) -> Distribution {
         match (left, right) {
             (Distribution::Single, Distribution::Single) => Distribution::Single,

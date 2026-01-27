@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -23,7 +23,7 @@ use std::time::Duration;
 use anyhow::anyhow;
 use await_tree::InstrumentAwait;
 use bytes::Bytes;
-use foyer::CacheHint;
+use foyer::Hint;
 use futures::future::{BoxFuture, try_join_all};
 use futures::{FutureExt, TryFutureExt};
 use risingwave_common::array::StreamChunk;
@@ -53,7 +53,7 @@ use crate::common::log_store_impl::kv_log_store::serde::{
 };
 use crate::common::log_store_impl::kv_log_store::state::LogStoreReadState;
 use crate::common::log_store_impl::kv_log_store::{
-    KvLogStoreMetrics, KvLogStoreReadMetrics, SeqId,
+    Epoch, KvLogStoreMetrics, KvLogStoreReadMetrics, SeqId,
 };
 
 pub(crate) const REWIND_BASE_DELAY: Duration = Duration::from_secs(1);
@@ -68,6 +68,8 @@ mod rewind_backoff_policy {
     };
 
     pub(super) type RewindBackoffPolicy = impl Iterator<Item = Duration>;
+
+    #[define_opaque(RewindBackoffPolicy)]
     pub(super) fn initial_rewind_backoff_policy() -> RewindBackoffPolicy {
         tokio_retry::strategy::ExponentialBackoff::from_millis(REWIND_BASE_DELAY.as_millis() as _)
             .factor(REWIND_BACKOFF_FACTOR)
@@ -123,10 +125,10 @@ impl RewindDelay {
 }
 
 enum KvLogStoreReaderFutureState<S: StateStoreRead> {
-    /// `Some` means consuming historical log data
+    /// consuming historical log data
     ReadStateStoreStream(Pin<Box<LogStoreItemMergeStream<TimeoutAutoRebuildIter<S>>>>),
     ReadFlushedChunk(BoxFuture<'static, LogStoreResult<(ChunkId, StreamChunk, u64)>>),
-    Reset(Option<LogStoreReadStateStreamRangeStart>),
+    Reset,
     Empty,
 }
 
@@ -264,6 +266,7 @@ pub(crate) mod timeout_auto_rebuild {
     pub(crate) type TimeoutAutoRebuildIter<S: StateStoreRead> =
         AutoRebuildStateStoreReadIter<S, impl FnMut() -> bool + Send>;
 
+    #[define_opaque(TimeoutAutoRebuildIter)]
     pub(super) async fn iter_with_timeout_rebuild<S: StateStoreRead>(
         state_store: Arc<S>,
         range: TableKeyRange,
@@ -292,7 +295,7 @@ pub(crate) mod timeout_auto_rebuild {
                         curr_iter_item_count.0 = 0;
                         start_time = Instant::now();
                         info!(
-                            table_id = table_id.table_id,
+                            %table_id,
                             iter_exist_time_secs = initial_start_time.elapsed().as_secs(),
                             prev_iter_item_count,
                             total_iter_item_count = total_count.0,
@@ -375,23 +378,19 @@ impl<S: StateStoreRead> KvLogStoreReader<S> {
 impl<S: StateStoreRead> LogReader for KvLogStoreReader<S> {
     async fn start_from(&mut self, start_offset: Option<u64>) -> LogStoreResult<()> {
         // init or rewind must be executed before start_from.
-        let aligned_range_start =
-            if let KvLogStoreReaderFutureState::Reset(aligned_range_start) = &self.future_state {
-                aligned_range_start
-            } else {
-                panic!("future state is not Reset");
-            };
+        let KvLogStoreReaderFutureState::Reset = &self.future_state else {
+            panic!("future state is not Reset");
+        };
 
         // Construct the log reader's read stream based on start_offset, aligned_range_start or persisted_epoch.
-        let range_start = match (start_offset, aligned_range_start) {
-            (Some(rewind_start_offset), _) => {
+        let range_start = match start_offset {
+            Some(rewind_start_offset) => {
                 tracing::info!(
                     "Sink error occurred. Rebuild the log reader stream from the rewind start offset returned by the coordinator."
                 );
                 LogStoreReadStateStreamRangeStart::LastPersistedEpoch(rewind_start_offset)
             }
-            (None, Some(aligned_range_start)) => aligned_range_start.clone(),
-            (None, None) => {
+            None => {
                 // still consuming persisted state store data
                 let persisted_epoch =
                     self.truncate_offset
@@ -408,9 +407,17 @@ impl<S: StateStoreRead> LogReader for KvLogStoreReader<S> {
                 }
             }
         };
-        self.future_state = KvLogStoreReaderFutureState::ReadStateStoreStream(
-            self.read_persisted_log_store(range_start).await?,
-        );
+        self.future_state =
+            if let LogStoreReadStateStreamRangeStart::LastPersistedEpoch(persisted_epoch) =
+                range_start
+                && persisted_epoch >= self.first_write_epoch.unwrap()
+            {
+                KvLogStoreReaderFutureState::Empty
+            } else {
+                KvLogStoreReaderFutureState::ReadStateStoreStream(
+                    self.read_persisted_log_store(range_start).await?,
+                )
+            };
         self.rx.rewind(start_offset);
         Ok(())
     }
@@ -437,7 +444,7 @@ impl<S: StateStoreRead> LogReader for KvLogStoreReader<S> {
             self.first_write_epoch = Some(write_epoch);
         };
 
-        self.future_state = KvLogStoreReaderFutureState::Reset(None);
+        self.future_state = KvLogStoreReaderFutureState::Reset;
         self.latest_offset = None;
         self.truncate_offset = None;
         self.rewind_delay = RewindDelay::new(&self.metrics);
@@ -466,7 +473,7 @@ impl<S: StateStoreRead> LogReader for KvLogStoreReader<S> {
                             latest_offset.check_next_item_epoch(epoch)?;
                         }
                         let item = match item {
-                            KvLogStoreItem::StreamChunk(chunk) => {
+                            KvLogStoreItem::StreamChunk { chunk, .. } => {
                                 let chunk_id = if let Some(latest_offset) = self.latest_offset {
                                     latest_offset.next_chunk_id()
                                 } else {
@@ -482,6 +489,7 @@ impl<S: StateStoreRead> LogReader for KvLogStoreReader<S> {
                                     is_checkpoint,
                                     new_vnode_bitmap: None,
                                     is_stop: false,
+                                    schema_change: None,
                                 }
                             }
                         };
@@ -509,7 +517,7 @@ impl<S: StateStoreRead> LogReader for KvLogStoreReader<S> {
                 ));
             }
             KvLogStoreReaderFutureState::Empty => {}
-            KvLogStoreReaderFutureState::Reset(_) => {
+            KvLogStoreReaderFutureState::Reset => {
                 unreachable!("Must call log_reader.start_from() for a Reset reader.")
             }
         }
@@ -583,6 +591,8 @@ impl<S: StateStoreRead> LogReader for KvLogStoreReader<S> {
             LogStoreBufferItem::Barrier {
                 is_checkpoint,
                 next_epoch,
+                schema_change,
+                is_stop,
             } => {
                 assert!(
                     item_epoch < next_epoch,
@@ -596,7 +606,8 @@ impl<S: StateStoreRead> LogReader for KvLogStoreReader<S> {
                     LogStoreReadItem::Barrier {
                         is_checkpoint,
                         new_vnode_bitmap: None,
-                        is_stop: false,
+                        is_stop,
+                        schema_change,
                     },
                 )
             }
@@ -612,28 +623,28 @@ impl<S: StateStoreRead> LogReader for KvLogStoreReader<S> {
             ));
         }
         if offset.epoch() >= self.first_write_epoch.expect("should have init") {
-            if let Some(truncate_offset) = &self.truncate_offset {
-                if offset <= *truncate_offset {
-                    return Err(anyhow!(
-                        "truncate offset {:?} earlier than prev truncate offset {:?}",
-                        offset,
-                        truncate_offset
-                    ));
-                }
+            if let Some(truncate_offset) = &self.truncate_offset
+                && offset <= *truncate_offset
+            {
+                return Err(anyhow!(
+                    "truncate offset {:?} earlier than prev truncate offset {:?}",
+                    offset,
+                    truncate_offset
+                ));
             }
             self.rx.truncate_buffer(offset);
             self.truncate_offset = Some(offset);
         } else {
             // For historical data, no need to truncate at seq id level. Only truncate at barrier.
             if let TruncateOffset::Barrier { epoch } = &offset {
-                if let Some(truncate_offset) = &self.truncate_offset {
-                    if offset <= *truncate_offset {
-                        return Err(anyhow!(
-                            "truncate offset {:?} earlier than prev truncate offset {:?}",
-                            offset,
-                            truncate_offset
-                        ));
-                    }
+                if let Some(truncate_offset) = &self.truncate_offset
+                    && offset <= *truncate_offset
+                {
+                    return Err(anyhow!(
+                        "truncate offset {:?} earlier than prev truncate offset {:?}",
+                        offset,
+                        truncate_offset
+                    ));
                 }
                 self.rx.truncate_historical(*epoch);
                 self.truncate_offset = Some(offset);
@@ -645,7 +656,7 @@ impl<S: StateStoreRead> LogReader for KvLogStoreReader<S> {
     async fn rewind(&mut self) -> LogStoreResult<()> {
         self.rewind_delay.rewind_delay(self.truncate_offset).await;
         self.latest_offset = None;
-        self.future_state = KvLogStoreReaderFutureState::Reset(None);
+        self.future_state = KvLogStoreReaderFutureState::Reset;
         Ok(())
     }
 }
@@ -659,7 +670,7 @@ impl<S: StateStoreRead> LogStoreReadState<S> {
         end_seq_id: SeqId,
         item_epoch: u64,
         read_metrics: KvLogStoreReadMetrics,
-    ) -> impl Future<Output = LogStoreResult<(ChunkId, StreamChunk, u64)>> + 'static {
+    ) -> impl Future<Output = LogStoreResult<(ChunkId, StreamChunk, Epoch)>> + 'static {
         let state_store = self.state_store.clone();
         let serde = self.serde.clone();
         async move {
@@ -684,7 +695,7 @@ impl<S: StateStoreRead> LogStoreReadState<S> {
                             (Included(range_start), Included(range_end)),
                             ReadOptions {
                                 prefetch_options: PrefetchOptions::prefetch_for_large_range_scan(),
-                                cache_policy: CachePolicy::Fill(CacheHint::Low),
+                                cache_policy: CachePolicy::Fill(Hint::Low),
                                 ..Default::default()
                             },
                         )
@@ -755,7 +766,7 @@ impl<S: StateStoreRead> LogStoreReadState<S> {
                     ReadOptions {
                         // This stream lives too long, the connection of prefetch object may break. So use a short connection prefetch.
                         prefetch_options: PrefetchOptions::prefetch_for_small_range_scan(),
-                        cache_policy: CachePolicy::Fill(CacheHint::Low),
+                        cache_policy: CachePolicy::Fill(Hint::Low),
                         ..Default::default()
                     },
                     Duration::from_secs(10 * 60),
@@ -765,12 +776,13 @@ impl<S: StateStoreRead> LogStoreReadState<S> {
             }
         }));
 
+        let chunk_size = self.chunk_size;
         streams_future.map_err(Into::into).map_ok(move |streams| {
             // TODO: set chunk size by config
             Box::pin(merge_log_store_item_stream(
                 streams,
                 serde,
-                1024,
+                chunk_size,
                 read_metrics,
             ))
         })
@@ -784,6 +796,7 @@ mod tests {
 
     use bytes::Bytes;
     use itertools::Itertools;
+    use risingwave_common::catalog::TableOption;
     use risingwave_common::hash::VirtualNode;
     use risingwave_common::util::epoch::{EpochExt, test_epoch};
     use risingwave_hummock_sdk::HummockReadEpoch;
@@ -793,10 +806,7 @@ mod tests {
     use risingwave_storage::hummock::iterator::test_utils::{
         iterator_test_table_key_of, iterator_test_value_of,
     };
-    use risingwave_storage::store::{
-        LocalStateStore, NewLocalOptions, NewReadSnapshotOptions, ReadOptions,
-        SealCurrentEpochOptions, StateStoreRead,
-    };
+    use risingwave_storage::store::*;
     use risingwave_storage::{StateStore, StateStoreIter};
 
     use crate::common::log_store_impl::kv_log_store::reader::AutoRebuildStateStoreReadIter;
@@ -862,6 +872,7 @@ mod tests {
                 HummockReadEpoch::NoWait(epoch),
                 NewReadSnapshotOptions {
                     table_id: TEST_TABLE_ID,
+                    table_option: TableOption::default(),
                 },
             )
             .await

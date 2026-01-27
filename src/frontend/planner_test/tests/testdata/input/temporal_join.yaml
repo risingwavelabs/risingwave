@@ -88,6 +88,19 @@
     join version2 FOR SYSTEM_TIME AS OF PROCTIME() on stream.id2 = version2.id2 where a1 < 10;
   expected_outputs:
   - stream_plan
+- name: multi-way temporal join with different keys
+  sql: |
+    create table stream(id1 int, id2 int, a1 int, b1 int);
+    create table version1(id1 int, x1 int, y2 int, primary key (id1));
+    create table version2(id2 int, x2 int, y2 int, primary key (id2));
+    create table version3(id3 int, x3 int, y3 int, primary key (id3));
+    select stream.id1, x1, stream.id2, x2, a1, b1, x3
+    from stream
+    join version1 FOR SYSTEM_TIME AS OF PROCTIME() on stream.id1 = version1.id1
+    join version2 FOR SYSTEM_TIME AS OF PROCTIME() on stream.id2 = version2.id2
+    join version3 FOR SYSTEM_TIME AS OF PROCTIME() on stream.id1 = version3.id3 where a1 < 10;
+  expected_outputs:
+    - stream_plan
 - name: temporal join with an index (distribution key size = 1)
   sql: |
     create table stream(id1 int, a1 int, b1 int);
@@ -162,3 +175,11 @@
     with version as (select * from version) select id1, a1, id2, a2 from stream left join version FOR SYSTEM_TIME AS OF PROCTIME() on id1= id2;
   expected_outputs:
     - binder_error
+- name: forbid temporal join with snapshot backfill
+  sql: |
+    set streaming_use_snapshot_backfill = true;
+    create table stream(id1 int, a1 int, b1 int, v1 timestamp with time zone, watermark for v1 as v1 - INTERVAL '10' SECOND) APPEND ONLY;
+    create table version(id2 int, a2 int, b2 int, primary key (id2));
+    select id1, a1, id2, v1 from stream left join version FOR SYSTEM_TIME AS OF PROCTIME() on id1 = id2;
+  expected_outputs:
+    - stream_plan

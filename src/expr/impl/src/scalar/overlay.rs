@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt::Write;
-
 use risingwave_expr::{ExprError, Result, function};
 
 /// Replaces a substring of the given string with a new substring.
@@ -25,7 +23,12 @@ use risingwave_expr::{ExprError, Result, function};
 /// αβ💯δεζ
 /// ```
 #[function("overlay(varchar, varchar, int4) -> varchar")]
-pub fn overlay(s: &str, new_sub_str: &str, start: i32, writer: &mut impl Write) -> Result<()> {
+pub fn overlay(
+    s: &str,
+    new_sub_str: &str,
+    start: i32,
+    writer: &mut impl std::fmt::Write,
+) -> Result<()> {
     let sub_len = new_sub_str
         .chars()
         .count()
@@ -86,7 +89,7 @@ pub fn overlay_for(
     new_sub_str: &str,
     start: i32,
     count: i32,
-    writer: &mut impl Write,
+    writer: &mut impl std::fmt::Write,
 ) -> Result<()> {
     if start <= 0 {
         return Err(ExprError::InvalidParam {
@@ -123,6 +126,120 @@ pub fn overlay_for(
     Ok(())
 }
 
+/// Replaces a subsequence of the given bytea with a new bytea value.
+///
+/// # Example
+///
+/// ```slt
+/// query T
+/// select overlay('\x616263646566'::bytea placing '\x9999'::bytea from 3);
+/// ----
+/// \x616299996566
+/// ```
+#[function("overlay(bytea, bytea, int4) -> bytea")]
+pub fn overlay_bytea(
+    s: &[u8],
+    new_sub_str: &[u8],
+    start: i32,
+    writer: &mut impl std::io::Write,
+) -> Result<()> {
+    let count = new_sub_str
+        .len()
+        .try_into()
+        .map_err(|_| ExprError::NumericOutOfRange)?;
+    overlay_for_bytea(s, new_sub_str, start, count, writer)
+}
+
+/// Replaces a range of bytes in a bytea value with another bytea.
+///
+/// ```slt
+/// statement error not positive
+/// select overlay('\x616263'::bytea placing '\x313233'::bytea from 0);
+///
+/// query T
+/// select overlay('\x616263'::bytea placing '\x313233'::bytea from 10);
+/// ----
+/// \x616263313233
+///
+/// query T
+/// select overlay('\x616263646566'::bytea placing '\x313233'::bytea from 4 for 2);
+/// ----
+/// \x61626331323366
+///
+/// query T
+/// select overlay('\x616263646566'::bytea placing '\x313233'::bytea from 4);
+/// ----
+/// \x616263313233
+///
+/// query T
+/// select overlay('\x616263646566'::bytea placing '\x313233'::bytea from 2 for 4);
+/// ----
+/// \x6131323366
+///
+/// query T
+/// select overlay('\x616263646566'::bytea placing '\x313233'::bytea from 2 for 7);
+/// ----
+/// \x61313233
+///
+/// query T
+/// select overlay('\x616263646566'::bytea placing '\x313233'::bytea from 4 for 0);
+/// ----
+/// \x616263313233646566
+///
+/// query T
+/// select overlay('\x616263646566'::bytea placing '\x313233'::bytea from 4 for -2);
+/// ----
+/// \x6162633132336263646566
+///
+/// query T
+/// select overlay('\x616263646566'::bytea placing '\x313233'::bytea from 4 for -1000);
+/// ----
+/// \x616263313233616263646566
+/// ```
+#[function("overlay(bytea, bytea, int4, int4) -> bytea")]
+pub fn overlay_for_bytea(
+    s: &[u8],
+    new_sub_str: &[u8],
+    start: i32,
+    count: i32,
+    writer: &mut impl std::io::Write,
+) -> Result<()> {
+    if start <= 0 {
+        return Err(ExprError::InvalidParam {
+            name: "start",
+            reason: format!("{start} is not positive").into(),
+        });
+    }
+
+    // write the substring_bytea before the overlay.
+    let start_idx = (start - 1) as usize;
+    if start_idx >= s.len() {
+        writer.write_all(s).unwrap();
+    } else {
+        writer.write_all(&s[..start_idx]).unwrap();
+    }
+
+    // write the new substring_bytea.
+    writer.write_all(new_sub_str).unwrap();
+
+    if count < 0 {
+        // For negative `count`, which is rare in practice, we hand over to `substr_bytea`
+        let start_right = start
+            .checked_add(count)
+            .ok_or(ExprError::NumericOutOfRange)?;
+        super::substr::substr_start_bytea(s, start_right, writer);
+        return Ok(());
+    };
+
+    // write the substring_bytea after the overlay.
+    let count = count as usize;
+    let skip_end = start_idx.saturating_add(count);
+    if skip_end <= s.len() {
+        writer.write_all(&s[skip_end..]).unwrap();
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -156,6 +273,100 @@ mod tests {
             }
             .unwrap();
             assert_eq!(writer, expected);
+        }
+    }
+
+    #[test]
+    fn test_overlay_bytea() {
+        // (input, replace, start, count, expected)
+        case(
+            b"\x61\x61\x61\x5f\x5f\x61\x61\x61",
+            b"\x58\x59",
+            4,
+            None,
+            b"\x61\x61\x61\x58\x59\x61\x61\x61",
+        );
+        // Place at end
+        case(
+            b"\x61\x61\x61",
+            b"\x58\x59",
+            4,
+            None,
+            b"\x61\x61\x61\x58\x59",
+        );
+        // Place at start
+        case(
+            b"\x61\x61\x61",
+            b"\x58\x59",
+            1,
+            Some(0),
+            b"\x58\x59\x61\x61\x61",
+        );
+        // Replace shorter string
+        case(
+            b"\x61\x61\x61\x5f\x61\x61\x61",
+            b"\x58\x59\x5A",
+            4,
+            Some(1),
+            b"\x61\x61\x61\x58\x59\x5A\x61\x61\x61",
+        );
+        case(
+            b"\x61\x61\x61\x61\x61\x61",
+            b"\x58\x59\x5A",
+            4,
+            Some(0),
+            b"\x61\x61\x61\x58\x59\x5A\x61\x61\x61",
+        );
+        // Replace longer string
+        case(
+            b"\x61\x61\x61\x5f\x5f\x5f\x61\x61\x61",
+            b"\x58",
+            4,
+            Some(3),
+            b"\x61\x61\x61\x58\x61\x61\x61",
+        );
+        // start too large
+        case(
+            b"\x61\x61\x61",
+            b"\x58\x59",
+            123,
+            None,
+            b"\x61\x61\x61\x58\x59",
+        );
+        // count too small or large
+        case(
+            b"\x61\x61\x61",
+            b"\x58",
+            4,
+            Some(-123),
+            b"\x61\x61\x61\x58\x61\x61\x61",
+        );
+        case(
+            b"\x61\x61\x61\x5f",
+            b"\x58",
+            4,
+            Some(123),
+            b"\x61\x61\x61\x58",
+        );
+        // very large start and count
+        case(
+            b"\x61\x61\x61",
+            b"\x58",
+            i32::MAX,
+            Some(i32::MAX),
+            b"\x61\x61\x61\x58",
+        );
+
+        #[track_caller]
+        fn case(s: &[u8], new_sub_str: &[u8], start: i32, count: Option<i32>, expected: &[u8]) {
+            let mut result = Vec::new();
+            match count {
+                None => overlay_bytea(s, new_sub_str, start, &mut result).unwrap(),
+                Some(count) => {
+                    overlay_for_bytea(s, new_sub_str, start, count, &mut result).unwrap()
+                }
+            }
+            assert_eq!(&result, expected);
         }
     }
 }

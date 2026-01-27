@@ -4,14 +4,10 @@ set -e
 
 # assume this runs in e2e_test/iceberg
 commands_dir="$(dirname "$0")"
+source "${commands_dir}/common.sh"
 iceberg_dir="${commands_dir}/../iceberg"
 cd "${iceberg_dir}"
 
-ICEBERG_VERSION=1.4.3
-SPARK_VERSION=3.4.4
-
-PACKAGES="org.apache.iceberg:iceberg-spark-runtime-3.4_2.12:$ICEBERG_VERSION,org.apache.hadoop:hadoop-aws:3.3.2"
-PACKAGES="$PACKAGES,org.apache.spark:spark-connect_2.12:$SPARK_VERSION"
 
 SPARK_FILE="spark-${SPARK_VERSION}-bin-hadoop3.tgz"
 
@@ -22,8 +18,7 @@ fi
 
 # TODO: avoid hardcoded config
 # TODO: maybe pyspark is more handy for scripting
-DEPENDENCIES=org.apache.iceberg:iceberg-spark-runtime-3.4_2.12:1.4.3,org.apache.hadoop:hadoop-aws:3.3.2
-./spark-${SPARK_VERSION}-bin-hadoop3/bin/spark-sql --packages $DEPENDENCIES \
+./spark-${SPARK_VERSION}-bin-hadoop3/bin/spark-sql --packages $SPARK_PACKAGES \
     --conf spark.sql.catalog.demo=org.apache.iceberg.spark.SparkCatalog \
     --conf spark.sql.catalog.demo.type=hadoop \
     --conf spark.sql.catalog.demo.warehouse=s3a://icebergdata/ \

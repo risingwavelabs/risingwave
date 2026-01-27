@@ -12,19 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use pretty_xmlish::{Pretty, XmlNode};
+use pretty_xmlish::XmlNode;
 use risingwave_pb::stream_plan::SyncLogStoreNode;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 
-use crate::PlanRef;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::generic::PhysicalPlanRef;
-use crate::optimizer::plan_node::stream::StreamPlanRef;
+use crate::optimizer::plan_node::stream::StreamPlanNodeMetadata;
 use crate::optimizer::plan_node::utils::{
     Distill, childless_record, infer_synced_kv_log_store_table_catalog_inner,
 };
 use crate::optimizer::plan_node::{
-    ExprRewritable, PlanBase, PlanTreeNodeUnary, Stream, StreamNode,
+    ExprRewritable, PlanBase, PlanTreeNodeUnary, Stream, StreamNode, StreamPlanRef as PlanRef,
 };
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
@@ -32,56 +31,33 @@ use crate::stream_fragmenter::BuildFragmentGraphState;
 pub struct StreamSyncLogStore {
     pub base: PlanBase<Stream>,
     pub input: PlanRef,
-    pub buffer_size: usize,
-    pub pause_duration_ms: usize,
 }
 
 impl StreamSyncLogStore {
     pub fn new(input: PlanRef) -> Self {
         let base = PlanBase::new_stream(
-            input.ctx().clone(),
+            input.ctx(),
             input.schema().clone(),
             input.stream_key().map(|keys| keys.to_vec()),
             input.functional_dependency().clone(),
             input.distribution().clone(),
-            input.append_only(),
+            input.stream_kind(),
             input.emit_on_window_close(),
             input.watermark_columns().clone(),
             input.columns_monotonicity().clone(),
         );
-        let pause_duration_ms = input
-            .ctx()
-            .session_ctx()
-            .config()
-            .streaming_sync_log_store_pause_duration_ms();
-        let buffer_size = input
-            .ctx()
-            .session_ctx()
-            .config()
-            .streaming_sync_log_store_buffer_size();
-        Self {
-            base,
-            input,
-            buffer_size,
-            pause_duration_ms,
-        }
+
+        Self { base, input }
     }
 }
 
 impl Distill for StreamSyncLogStore {
     fn distill<'a>(&self) -> XmlNode<'a> {
-        let fields = vec![
-            ("buffer_size", Pretty::display(&self.buffer_size)),
-            (
-                "pause_duration_ms",
-                Pretty::display(&self.pause_duration_ms),
-            ),
-        ];
-        childless_record("StreamSyncLogStore", fields)
+        childless_record("StreamSyncLogStore", vec![])
     }
 }
 
-impl PlanTreeNodeUnary for StreamSyncLogStore {
+impl PlanTreeNodeUnary<Stream> for StreamSyncLogStore {
     fn input(&self) -> PlanRef {
         self.input.clone()
     }
@@ -91,7 +67,7 @@ impl PlanTreeNodeUnary for StreamSyncLogStore {
     }
 }
 
-impl_plan_tree_node_for_unary! { StreamSyncLogStore }
+impl_plan_tree_node_for_unary! { Stream, StreamSyncLogStore }
 
 impl StreamNode for StreamSyncLogStore {
     fn to_stream_prost_body(&self, state: &mut BuildFragmentGraphState) -> NodeBody {
@@ -102,12 +78,17 @@ impl StreamNode for StreamSyncLogStore {
             .into();
         NodeBody::SyncLogStore(Box::new(SyncLogStoreNode {
             log_store_table,
-            pause_duration_ms: self.pause_duration_ms as _,
-            buffer_size: self.buffer_size as _,
+            aligned: false,
+
+            // The following fields should now be read from per-job config override.
+            #[allow(deprecated)]
+            pause_duration_ms: None,
+            #[allow(deprecated)]
+            buffer_size: None,
         }))
     }
 }
 
-impl ExprRewritable for StreamSyncLogStore {}
+impl ExprRewritable<Stream> for StreamSyncLogStore {}
 
 impl ExprVisitable for StreamSyncLogStore {}

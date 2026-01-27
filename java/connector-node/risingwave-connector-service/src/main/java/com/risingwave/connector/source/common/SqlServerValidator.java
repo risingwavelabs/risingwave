@@ -1,16 +1,18 @@
-// Copyright 2025 RisingWave Labs
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+/*
+ * Copyright 2024 RisingWave Labs
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 
 package com.risingwave.connector.source.common;
 
@@ -304,6 +306,8 @@ public class SqlServerValidator extends DatabaseValidator implements AutoCloseab
                         && val <= Data.DataType.TypeName.INT64_VALUE;
             case "bigint":
                 return val == Data.DataType.TypeName.INT64_VALUE;
+            case "money":
+                return val == Data.DataType.TypeName.DECIMAL_VALUE;
             case "float":
             case "real":
                 return val == Data.DataType.TypeName.FLOAT_VALUE
@@ -322,6 +326,7 @@ public class SqlServerValidator extends DatabaseValidator implements AutoCloseab
             case "nvarchar":
             case "text":
             case "ntext":
+            case "xml":
             case "uniqueidentifier":
                 return val == Data.DataType.TypeName.VARCHAR_VALUE;
             case "binary":
@@ -338,7 +343,7 @@ public class SqlServerValidator extends DatabaseValidator implements AutoCloseab
             case "datetimeoffset":
                 return val == Data.DataType.TypeName.TIMESTAMPTZ_VALUE;
             default:
-                return true; // true for other uncovered types
+                return false; // false for other uncovered types
         }
     }
 }

@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,21 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashSet;
 use std::sync::Arc;
 
 use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::catalog::ColumnCatalog;
 use risingwave_common::hash::VnodeCount;
-use risingwave_common::types::DataType;
-use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::{bail, bail_not_implemented};
-use risingwave_connector::sink::catalog::SinkCatalog;
-use risingwave_pb::catalog::{Source, Table};
 use risingwave_pb::ddl_service::TableJobType;
-use risingwave_pb::stream_plan::stream_node::PbNodeBody;
-use risingwave_pb::stream_plan::{ProjectNode, StreamFragmentGraph};
+use risingwave_pb::stream_plan::StreamFragmentGraph;
 use risingwave_sqlparser::ast::{
     AlterColumnOperation, AlterTableOperation, ColumnOption, ObjectName, Statement,
 };
@@ -36,22 +30,18 @@ use super::create_table::{ColumnIdGenerator, generate_stream_graph_for_replace_t
 use super::{HandlerArgs, RwPgResponse};
 use crate::catalog::purify::try_purify_table_source_create_sql_ast;
 use crate::catalog::root_catalog::SchemaPath;
+use crate::catalog::source_catalog::SourceCatalog;
 use crate::catalog::table_catalog::TableType;
 use crate::error::{ErrorCode, Result, RwError};
-use crate::expr::{Expr, ExprImpl, InputRef, Literal};
-use crate::handler::create_sink::{fetch_incoming_sinks, insert_merger_to_union_with_project};
+use crate::expr::ExprImpl;
 use crate::session::SessionImpl;
-use crate::session::current::notice_to_user;
 use crate::{Binder, TableCatalog};
 
 /// Used in auto schema change process
 pub async fn get_new_table_definition_for_cdc_table(
-    session: &Arc<SessionImpl>,
-    table_name: ObjectName,
+    original_catalog: Arc<TableCatalog>,
     new_columns: &[ColumnCatalog],
-) -> Result<(Statement, Arc<TableCatalog>)> {
-    let original_catalog = fetch_table_catalog_for_alter(session.as_ref(), &table_name)?;
-
+) -> Result<Statement> {
     assert_eq!(
         original_catalog.row_id_index, None,
         "primary key of cdc table must be user defined"
@@ -85,7 +75,7 @@ pub async fn get_new_table_definition_for_cdc_table(
         &original_catalog.pk_column_names(),
     )?;
 
-    Ok((new_definition, original_catalog))
+    Ok(new_definition)
 }
 
 pub async fn get_replace_table_plan(
@@ -95,17 +85,16 @@ pub async fn get_replace_table_plan(
     old_catalog: &Arc<TableCatalog>,
     sql_column_strategy: SqlColumnStrategy,
 ) -> Result<(
-    Option<Source>,
-    Table,
+    Option<SourceCatalog>,
+    TableCatalog,
     StreamFragmentGraph,
-    ColIndexMapping,
     TableJobType,
 )> {
     // Create handler args as if we're creating a new table with the altered definition.
     let handler_args = HandlerArgs::new(session.clone(), &new_definition, Arc::from(""))?;
     let col_id_gen = ColumnIdGenerator::new_alter(old_catalog);
 
-    let (mut graph, table, source, job_type) = generate_stream_graph_for_replace_table(
+    let (graph, table, source, job_type) = generate_stream_graph_for_replace_table(
         session,
         table_name,
         old_catalog,
@@ -116,123 +105,11 @@ pub async fn get_replace_table_plan(
     )
     .await?;
 
-    // Calculate the mapping from the original columns to the new columns.
-    // This will be used to map the output of the table in the dispatcher to make
-    // existing downstream jobs work correctly.
-    let col_index_mapping = ColIndexMapping::new(
-        old_catalog
-            .columns()
-            .iter()
-            .map(|old_c| {
-                table.columns.iter().position(|new_c| {
-                    let new_c = new_c.get_column_desc().unwrap();
-
-                    // We consider both the column ID and the data type.
-                    // If either of them does not match, we will treat it as a new column.
-                    //
-                    // TODO: Since we've succeeded in assigning column IDs in the step above,
-                    //       the new data type is actually _compatible_ with the old one.
-                    //       Theoretically, it's also possible to do some sort of mapping for
-                    //       the downstream job to work correctly. However, the current impl
-                    //       only supports simple column projection, which we may improve in
-                    //       future works.
-                    //       However, by treating it as a new column, we can at least reject
-                    //       the case where the column with type change is referenced by any
-                    //       downstream jobs (because the original column is considered dropped).
-                    let id_matches = || new_c.column_id == old_c.column_id().get_id();
-                    let type_matches = || {
-                        let original_data_type = old_c.data_type();
-                        let new_data_type = DataType::from(new_c.column_type.as_ref().unwrap());
-                        let matches = original_data_type == &new_data_type;
-                        if !matches {
-                            notice_to_user(format!("the data type of column \"{}\" has changed, treating as a new column", old_c.name()));
-                        }
-                        matches
-                    };
-
-                    id_matches() && type_matches()
-                })
-            })
-            .collect(),
-        table.columns.len(),
-    );
-
-    let incoming_sink_ids: HashSet<_> = old_catalog.incoming_sinks.iter().copied().collect();
-
-    let target_columns = table
-        .columns
-        .iter()
-        .map(|col| ColumnCatalog::from(col.clone()))
-        .filter(|col| !col.is_rw_timestamp_column())
-        .collect_vec();
-
-    for sink in fetch_incoming_sinks(session, &incoming_sink_ids)? {
-        hijack_merger_for_target_table(
-            &mut graph,
-            &target_columns,
-            &sink,
-            Some(&sink.unique_identity()),
-        )?;
-    }
-
     // Set some fields ourselves so that the meta service does not need to maintain them.
     let mut table = table;
-    table.incoming_sinks = incoming_sink_ids.iter().copied().collect();
-    table.maybe_vnode_count = VnodeCount::set(old_catalog.vnode_count()).to_protobuf();
+    table.vnode_count = VnodeCount::set(old_catalog.vnode_count());
 
-    Ok((source, table, graph, col_index_mapping, job_type))
-}
-
-pub(crate) fn hijack_merger_for_target_table(
-    graph: &mut StreamFragmentGraph,
-    target_columns: &[ColumnCatalog],
-    sink: &SinkCatalog,
-    uniq_identify: Option<&str>,
-) -> Result<()> {
-    let mut sink_columns = sink.original_target_columns.clone();
-    if sink_columns.is_empty() {
-        // This is due to the fact that the value did not exist in earlier versions,
-        // which means no schema changes such as `ADD/DROP COLUMN` have been made to the table.
-        // Therefore the columns of the table at this point are `original_target_columns`.
-        // This value of sink will be filled on the meta.
-        sink_columns = target_columns.to_vec();
-    }
-
-    let mut i = 0;
-    let mut j = 0;
-    let mut exprs = Vec::new();
-
-    while j < target_columns.len() {
-        if i < sink_columns.len() && sink_columns[i].data_type() == target_columns[j].data_type() {
-            exprs.push(ExprImpl::InputRef(Box::new(InputRef {
-                data_type: sink_columns[i].data_type().clone(),
-                index: i,
-            })));
-
-            i += 1;
-            j += 1;
-        } else {
-            exprs.push(ExprImpl::Literal(Box::new(Literal::new(
-                None,
-                target_columns[j].data_type().clone(),
-            ))));
-
-            j += 1;
-        }
-    }
-
-    let pb_project = PbNodeBody::Project(Box::new(ProjectNode {
-        select_list: exprs.iter().map(|expr| expr.to_expr_proto()).collect(),
-        ..Default::default()
-    }));
-
-    for fragment in graph.fragments.values_mut() {
-        if let Some(node) = &mut fragment.node {
-            insert_merger_to_union_with_project(node, &pb_project, uniq_identify);
-        }
-    }
-
-    Ok(())
+    Ok((source, table, graph, job_type))
 }
 
 /// Handle `ALTER TABLE [ADD|DROP] COLUMN` statements. The `operation` must be either `AddColumn` or
@@ -243,14 +120,8 @@ pub async fn handle_alter_table_column(
     operation: AlterTableOperation,
 ) -> Result<RwPgResponse> {
     let session = handler_args.session;
-    let original_catalog = fetch_table_catalog_for_alter(session.as_ref(), &table_name)?;
-
-    if !original_catalog.incoming_sinks.is_empty() && original_catalog.has_generated_column() {
-        return Err(RwError::from(ErrorCode::BindError(
-            "Alter a table with incoming sink and generated column has not been implemented."
-                .to_owned(),
-        )));
-    }
+    let (original_catalog, has_incoming_sinks) =
+        fetch_table_catalog_for_alter(session.as_ref(), &table_name)?;
 
     if original_catalog.webhook_info.is_some() {
         return Err(RwError::from(ErrorCode::BindError(
@@ -264,9 +135,7 @@ pub async fn handle_alter_table_column(
         panic!("unexpected statement: {:?}", definition);
     };
 
-    if !original_catalog.incoming_sinks.is_empty()
-        && matches!(operation, AlterTableOperation::DropColumn { .. })
-    {
+    if has_incoming_sinks && matches!(operation, AlterTableOperation::DropColumn { .. }) {
         return Err(ErrorCode::InvalidInputSyntax(
             "dropping columns in target table of sinks is not supported".to_owned(),
         ))?;
@@ -417,7 +286,7 @@ pub async fn handle_alter_table_column(
 
         _ => unreachable!(),
     };
-    let (source, table, graph, col_index_mapping, job_type) = get_replace_table_plan(
+    let (source, table, graph, job_type) = get_replace_table_plan(
         &session,
         table_name,
         definition,
@@ -429,7 +298,12 @@ pub async fn handle_alter_table_column(
     let catalog_writer = session.catalog_writer()?;
 
     catalog_writer
-        .replace_table(source, table, graph, col_index_mapping, job_type)
+        .replace_table(
+            source.map(|x| x.to_prost()),
+            table.to_prost(),
+            graph,
+            job_type,
+        )
         .await?;
     Ok(PgResponse::empty_result(StatementType::ALTER_TABLE))
 }
@@ -437,16 +311,16 @@ pub async fn handle_alter_table_column(
 pub fn fetch_table_catalog_for_alter(
     session: &SessionImpl,
     table_name: &ObjectName,
-) -> Result<Arc<TableCatalog>> {
+) -> Result<(Arc<TableCatalog>, bool)> {
     let db_name = &session.database();
     let (schema_name, real_table_name) =
-        Binder::resolve_schema_qualified_name(db_name, table_name.clone())?;
+        Binder::resolve_schema_qualified_name(db_name, table_name)?;
     let search_path = session.config().search_path();
     let user_name = &session.user_name();
 
     let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
 
-    let original_catalog = {
+    {
         let reader = session.env().catalog_reader().read_guard();
         let (table, schema_name) =
             reader.get_created_table_by_name(db_name, schema_path, &real_table_name)?;
@@ -461,10 +335,14 @@ pub fn fetch_table_catalog_for_alter(
 
         session.check_privilege_for_drop_alter(schema_name, &**table)?;
 
-        table.clone()
-    };
+        let has_incoming_sinks = reader
+            .get_schema_by_id(table.database_id, table.schema_id)?
+            .table_incoming_sinks(table.id)
+            .map(|sinks| !sinks.is_empty())
+            .unwrap_or(false);
 
-    Ok(original_catalog)
+        Ok((table.clone(), has_incoming_sinks))
+    }
 }
 
 #[cfg(test)]

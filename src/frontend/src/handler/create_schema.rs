@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,7 +15,6 @@
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::acl::AclMode;
 use risingwave_common::catalog::RESERVED_PG_SCHEMA_PREFIX;
-use risingwave_pb::user::grant_privilege::Object;
 use risingwave_sqlparser::ast::ObjectName;
 
 use super::RwPgResponse;
@@ -43,7 +42,7 @@ pub async fn handle_create_schema(
         .into());
     }
 
-    let (db_id, db_owner) = {
+    let (db_id, db_name, db_owner) = {
         let catalog_reader = session.env().catalog_reader();
         let reader = catalog_reader.read_guard();
         if reader
@@ -60,7 +59,7 @@ pub async fn handle_create_schema(
             };
         }
         let db = reader.get_database_by_name(database_name)?;
-        (db.id(), db.owner())
+        (db.id(), db.name.clone(), db.owner())
     };
 
     let schema_owner = if let Some(owner) = owner {
@@ -71,7 +70,7 @@ pub async fn handle_create_schema(
             .read_guard()
             .get_user_by_name(&owner)
             .map(|u| u.id)
-            .ok_or_else(|| CatalogError::NotFound("user", owner.clone()))?
+            .ok_or_else(|| CatalogError::not_found("user", &owner))?
     } else {
         session.user_id()
     };
@@ -79,7 +78,8 @@ pub async fn handle_create_schema(
     session.check_privileges(&[ObjectCheckItem::new(
         db_owner,
         AclMode::Create,
-        Object::DatabaseId(db_id),
+        db_name,
+        db_id,
     )])?;
 
     let catalog_writer = session.catalog_writer()?;

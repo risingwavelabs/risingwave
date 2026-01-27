@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -70,7 +70,7 @@ pub fn align_types<'a>(
     let ret_type = ret_type.unwrap_or(DataType::Varchar);
     for e in exprs {
         // unwrap: cast to least_restrictive type always succeeds
-        e.cast_implicit_mut(ret_type.clone()).unwrap();
+        e.cast_implicit_mut(&ret_type).unwrap();
     }
     Ok(ret_type)
 }
@@ -93,7 +93,7 @@ pub fn align_array_and_element(
         true => ExprImpl::from(Literal::new_untyped(None)),
         false => {
             let array_element_type = match inputs[array_idx].return_type() {
-                DataType::List(t) => *t,
+                DataType::List(t) => t.into_elem(),
                 t => return Err(ErrorCode::BindError(format!("expects array but got {t}"))),
             };
             // use InputRef rather than literal_null so it is always typed, even for varchar
@@ -109,10 +109,10 @@ pub fn align_array_and_element(
             .filter_map(|(i, e)| element_indices.contains(&i).then_some(e))
             .chain(std::iter::once(&mut dummy_element)),
     )?;
-    let array_type = DataType::List(Box::new(common_element_type));
+    let array_type = DataType::list(common_element_type);
 
     // elements are already casted by `align_types`, we cast the array argument here
-    inputs[array_idx].cast_implicit_mut(array_type.clone())?;
+    inputs[array_idx].cast_implicit_mut(&array_type)?;
     tracing::trace!(?inputs, "align_array_and_element done");
     Ok(array_type)
 }
@@ -184,6 +184,11 @@ pub fn cast_ok(source: &DataType, target: &DataType, allows: CastContext) -> boo
 /// Both `source` and `target` must be base types, i.e. not struct or array.
 pub fn cast_ok_base(source: &DataType, target: &DataType, allows: CastContext) -> bool {
     matches!(CAST_TABLE.get(&(source.into(), target.into())), Some(context) if *context <= allows)
+    // TODO(VECTOR_PLACEHOLDER): not in CAST_TABLE because
+    // * `DataType::try_from(DataTypeName::Vector).unwrap().to_oid()` panics
+    // * `DataTypeName::Vector.to_oid()` is better but `to_oid` does not work for `DataTypeName::List`
+    || matches!((source, target), (DataType::Varchar, DataType::Vector(_)) if CastContext::Explicit <= allows)
+    || matches!((source, target), (DataType::Vector(_), DataType::Varchar) if CastContext::Assign <= allows)
 }
 
 fn cast_struct(source: &DataType, target: &DataType, allows: CastContext) -> CastResult {
@@ -224,14 +229,24 @@ fn cast_struct(source: &DataType, target: &DataType, allows: CastContext) -> Cas
 
 fn cast_array(source: &DataType, target: &DataType, allows: CastContext) -> CastResult {
     match (source, target) {
-        (DataType::List(source_elem), DataType::List(target_elem)) => {
-            cast(source_elem, target_elem, allows)
+        (DataType::List(source), DataType::List(target)) => {
+            cast(source.elem(), target.elem(), allows)
         }
         // The automatic casts to string types are treated as assignment casts, while the automatic
         // casts from string types are explicit-only.
         // https://www.postgresql.org/docs/14/sql-createcast.html#id-1.9.3.58.7.4
         (DataType::Varchar, DataType::List(_)) => canbo(CastContext::Explicit <= allows),
         (DataType::List(_), DataType::Varchar) => canbo(CastContext::Assign <= allows),
+        // https://github.com/pgvector/pgvector/blob/v0.8.0/sql/vector.sql#L157-L170
+        (DataType::Vector(_), DataType::List(list)) => {
+            canbo(list.elem() == &DataType::Float32 && CastContext::Implicit <= allows)
+        }
+        (DataType::List(list), DataType::Vector(_)) => canbo(
+            matches!(
+                list.elem(),
+                DataType::Int32 | DataType::Decimal | DataType::Float32 | DataType::Float64
+            ) && CastContext::Assign <= allows,
+        ),
         _ => cannot(),
     }
 }
@@ -298,9 +313,12 @@ pub static CAST_TABLE: LazyLock<CastTable> = LazyLock::new(|| {
     // 4. int32 <-> bool is explicit
     // 5. timestamp/timestamptz -> time is assign
     // 6. int2/int4/int8 -> int256 is implicit and int256 -> float8 is explicit
+    //
+    // Remember to update test cases including `pg_cast.slt.part` and `test_func_sig_map` when
+    // changing this table.
     use DataTypeName::*;
     const CAST_TABLE: &[(&str, DataTypeName)] = &[
-        // 123456789ABCDEF
+        // 123456789ABCDEFG
         (". e            a ", Boolean),     // 0
         (" .iiiiii       a ", Int16),       // 1
         ("ea.iiiii       a ", Int32),       // 2
@@ -317,7 +335,7 @@ pub static CAST_TABLE: LazyLock<CastTable> = LazyLock::new(|| {
         ("eeeeeee      . a ", Jsonb),       // D
         ("              .a ", Bytea),       // E
         ("eeeeeeeeeeeeeee. ", Varchar),     // F
-        ("   e            .", Serial),
+        ("   e      e     .", Serial),      // G
     ];
     let mut map = BTreeMap::new();
     for (row, source) in CAST_TABLE {

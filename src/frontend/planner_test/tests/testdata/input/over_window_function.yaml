@@ -50,7 +50,7 @@
   expected_outputs:
     - logical_plan
     - stream_error
-    - batch_error
+    - batch_plan
 - id: lead with offset argument and empty over clause
   sql: |
     create table t(x int);
@@ -58,7 +58,7 @@
   expected_outputs:
     - logical_plan
     - stream_error
-    - batch_error
+    - batch_plan
 - id: lead with non-const offset argument and empty over clause
   sql: |
     create table t(x int);
@@ -209,6 +209,16 @@
     select * from
       (select *, row_number() over(PARTITION BY x ORDER BY x) rank from t)
     where rank < 3;
+  expected_outputs:
+    - logical_plan
+    - stream_plan
+    - batch_plan
+- id: TopN by row_number with rank output and offset
+  sql: |
+    create table t(x int, y int);
+    select x, y, rank from
+      (select *, row_number() over(PARTITION BY x ORDER BY y) rank from t)
+    where rank = 2;
   expected_outputs:
     - logical_plan
     - stream_plan
@@ -392,6 +402,68 @@
     - optimized_logical_plan_for_stream
     - stream_plan
     - batch_plan
+
+# TopN with arithmetic on row_number/rank function
+- name: test ibis window function optimization
+  sql: |
+    CREATE TABLE t (a INT, b INT, c INT);
+    SELECT a, b, c
+    FROM (
+      SELECT
+        a, b, c,
+        ROW_NUMBER() OVER (PARTITION BY a ORDER BY b) - 1 AS rn
+      FROM t
+    )
+    WHERE rn < 10;
+  expected_outputs:
+    - logical_plan
+    - optimized_logical_plan_for_batch
+    - optimized_logical_plan_for_stream
+- name: test arithmetic with addition
+  sql: |
+    CREATE TABLE t (a INT, b INT, c INT);
+    SELECT a, b, c
+    FROM (
+      SELECT
+        a, b, c,
+        ROW_NUMBER() OVER (PARTITION BY a ORDER BY b) + 5 AS rn_plus_five
+      FROM t
+    )
+    WHERE rn_plus_five = 6;
+  expected_outputs:
+    - logical_plan
+    - optimized_logical_plan_for_batch
+    - optimized_logical_plan_for_stream
+- name: test optimization when rn column is kept
+  sql: |
+    CREATE TABLE t (a INT, b INT, c INT);
+    SELECT a, b, c, rn_plus_one
+    FROM (
+      SELECT
+        a, b, c,
+        ROW_NUMBER() OVER (PARTITION BY a ORDER BY b) + 1 AS rn_plus_one
+      FROM t
+    )
+    WHERE rn_plus_one = 2;
+  expected_outputs:
+    - logical_plan
+    - optimized_logical_plan_for_batch
+    - optimized_logical_plan_for_stream
+- name: test complex arithmetic not optimized
+  sql: |
+    CREATE TABLE t (a INT, b INT, c INT);
+    SELECT a, b, c, rn
+    FROM (
+      SELECT
+        a, b, c,
+        ROW_NUMBER() OVER (PARTITION BY a ORDER BY b) * 2 + 1 AS rn
+      FROM t
+    )
+    WHERE rn = 3;
+  expected_outputs:
+    - logical_plan
+    - optimized_logical_plan_for_batch
+    - optimized_logical_plan_for_stream
 
 # TopN on nexmark schema
 - id: create_bid

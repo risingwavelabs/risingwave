@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -100,13 +100,13 @@ impl MetaSnapshotV2Builder {
                 }
                 max_log_id = Some(version_delta.id);
             }
-            if let Some(max_log_id) = max_log_id {
-                if max_log_id != redo_state.id {
-                    return Err(BackupError::Other(anyhow::anyhow!(format!(
-                        "inconsistent hummock version: expected {}, actual {}",
-                        max_log_id, redo_state.id
-                    ))));
-                }
+            if let Some(max_log_id) = max_log_id
+                && max_log_id != redo_state.id
+            {
+                return Err(BackupError::Other(anyhow::anyhow!(format!(
+                    "inconsistent hummock version: expected {}, actual {}",
+                    max_log_id, redo_state.id
+                ))));
             }
             redo_state
         };

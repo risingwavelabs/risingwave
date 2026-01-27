@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,12 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use super::{BoxedRule, Rule};
-use crate::optimizer::PlanRef;
+use super::prelude::{PlanRef, *};
 use crate::optimizer::plan_node::{LogicalKafkaScan, LogicalSource};
 
 pub struct SourceToKafkaScanRule {}
-impl Rule for SourceToKafkaScanRule {
+impl Rule<Logical> for SourceToKafkaScanRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let source: &LogicalSource = plan.as_logical_source()?;
         if source.core.is_kafka_connector() {

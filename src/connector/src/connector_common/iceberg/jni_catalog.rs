@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,6 +14,11 @@
 
 //! This module provide jni catalog.
 
+#![expect(
+    clippy::disallowed_types,
+    reason = "construct iceberg::Error to implement the trait"
+)]
+
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::sync::Arc;
@@ -28,11 +33,11 @@ use iceberg::{
     TableUpdate,
 };
 use itertools::Itertools;
-use jni::JavaVM;
 use jni::objects::{GlobalRef, JObject};
 use risingwave_common::bail;
+use risingwave_common::global_jvm::Jvm;
 use risingwave_jni_core::call_method;
-use risingwave_jni_core::jvm_runtime::{JVM, execute_with_jni_env, jobj_to_str};
+use risingwave_jni_core::jvm_runtime::{execute_with_jni_env, jobj_to_str};
 use serde::{Deserialize, Serialize};
 use thiserror_ext::AsReport;
 
@@ -107,7 +112,7 @@ impl From<&TableCreation> for CreateTableRequest {
 #[derive(Debug)]
 pub struct JniCatalog {
     java_catalog: GlobalRef,
-    jvm: &'static JavaVM,
+    jvm: Jvm,
     file_io_props: HashMap<String, String>,
 }
 
@@ -358,28 +363,53 @@ impl Catalog for JniCatalog {
 
     /// Drop a table from the catalog.
     async fn drop_table(&self, table: &TableIdent) -> iceberg::Result<()> {
-        execute_with_jni_env(self.jvm, |env| {
-            let table_name_str = format!(
-                "{}.{}",
-                table.namespace().clone().inner().into_iter().join("."),
-                table.name()
-            );
+        let jvm = self.jvm;
+        let table = table.to_owned();
+        let java_catalog = self.java_catalog.clone();
+        // spawn blocking the drop table task, since dropping a table by default would purge the data which may take a long time.
+        tokio::task::spawn_blocking(move || -> iceberg::Result<()> {
+            execute_with_jni_env(jvm, |env| {
+                let table_name_str = format!(
+                    "{}.{}",
+                    table.namespace().clone().inner().into_iter().join("."),
+                    table.name()
+                );
 
-            let table_name_jstr = env.new_string(&table_name_str).unwrap();
+                let table_name_jstr = env.new_string(&table_name_str).unwrap();
 
-            call_method!(env, self.java_catalog.as_obj(), {boolean dropTable(String)},
-            &table_name_jstr)
-            .with_context(|| format!("Failed to drop iceberg table: {table_name_str}"))?;
+                call_method!(env, java_catalog.as_obj(), {boolean dropTable(String)},
+                &table_name_jstr)
+                .with_context(|| format!("Failed to drop iceberg table: {table_name_str}"))?;
 
-            Ok(())
+                Ok(())
+            })
+            .map_err(|e| {
+                iceberg::Error::new(
+                    iceberg::ErrorKind::Unexpected,
+                    "Failed to drop iceberg table.",
+                )
+                .with_source(e)
+            })
         })
+        .await
         .map_err(|e| {
             iceberg::Error::new(
                 iceberg::ErrorKind::Unexpected,
                 "Failed to drop iceberg table.",
             )
             .with_source(e)
-        })
+        })?
+    }
+
+    async fn register_table(
+        &self,
+        _table_ident: &TableIdent,
+        _metadata_location: String,
+    ) -> iceberg::Result<Table> {
+        Err(iceberg::Error::new(
+            iceberg::ErrorKind::Unexpected,
+            "register_table is not supported by JniCatalog",
+        ))
     }
 
     /// Check if a table exists in the catalog.
@@ -491,7 +521,7 @@ impl JniCatalog {
         catalog_impl: impl ToString,
         java_catalog_props: HashMap<String, String>,
     ) -> ConnectorResult<Self> {
-        let jvm = JVM.get_or_init()?;
+        let jvm = Jvm::get_or_init()?;
 
         execute_with_jni_env(jvm, |env| {
             // Convert props to string array

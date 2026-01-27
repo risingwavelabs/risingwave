@@ -6,7 +6,12 @@ homepage = { workspace = true }
 keywords = { workspace = true }
 license = { workspace = true }
 repository = { workspace = true }
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[features]
+dhat-heap = ["dhat"]
+test = []
+all-sources = ["source-adbc_snowflake"]
+source-adbc_snowflake = ["risingwave_connector/source-adbc_snowflake"]
 
 [dependencies]
 anyhow = "1"
@@ -26,18 +31,19 @@ fail = "0.5"
 foyer = { workspace = true }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = { workspace = true }
+glob = "0.3"
 hytra = "0.1.2"
 iceberg = { workspace = true }
+indexmap = "2"
 itertools = { workspace = true }
 jsonbb = { workspace = true }
-local_stats_alloc = { path = "../utils/local_stats_alloc" }
-lru = { workspace = true }
 maplit = "1.0.2"
 memcomparable = "0.2"
+moka = { version = "0.12.0", features = ["sync"] }
 multimap = "0.10"
 parking_lot = { workspace = true }
+paste = "1"
 pin-project = "1"
-prehash = "1"
 prometheus = { version = "0.14", features = ["process"] }
 prost = { workspace = true }
 rand = { workspace = true }
@@ -52,12 +58,12 @@ risingwave_pb = { workspace = true }
 risingwave_rpc_client = { workspace = true }
 risingwave_storage = { workspace = true }
 rw_futures_util = { workspace = true }
-serde = { version = "1.0", features = ["derive"] }
+serde = { workspace = true }
 serde_json = "1"
-smallvec = "1"
+smallvec = { workspace = true }
 static_assertions = "1"
 strum_macros = "0.27"
-thiserror = "1"
+thiserror = { workspace = true }
 thiserror-ext = { workspace = true }
 tokio = { version = "0.2", package = "madsim-tokio", features = [
   "rt",
@@ -88,12 +94,10 @@ risingwave_hummock_sdk = { workspace = true }
 risingwave_hummock_test = { path = "../storage/hummock_test", features = [
   "test",
 ] }
+risingwave_stream = { workspace = true, features = ["test"] }
 serde_yaml = "0.9"
-tracing-subscriber = "0.3.17"
+tracing-subscriber = "0.3.20"
 tracing-test = "0.2"
-
-[features]
-dhat-heap = ["dhat"]
 
 [[bench]]
 name = "stream_hash_agg"

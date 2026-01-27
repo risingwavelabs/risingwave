@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -22,7 +22,7 @@ use itertools::Itertools;
 use sqlx::{ConnectOptions, Database};
 use url::Url;
 
-use super::{ExecuteContext, Task, risingwave_cmd};
+use super::{ExecuteContext, Task};
 use crate::util::{get_program_args, get_program_env_cmd, get_program_name, is_env_set};
 use crate::{
     Application, HummockInMemoryStrategy, MetaBackend, MetaNodeConfig, add_hummock_backend,
@@ -195,6 +195,7 @@ impl MetaNodeService {
         let provide_minio = config.provide_minio.as_ref().unwrap();
         let provide_opendal = config.provide_opendal.as_ref().unwrap();
         let provide_aws_s3 = config.provide_aws_s3.as_ref().unwrap();
+        let provide_moat = config.provide_moat.as_ref().unwrap();
 
         let provide_compute_node = config.provide_compute_node.as_ref().unwrap();
         let provide_compactor = config.provide_compactor.as_ref().unwrap();
@@ -204,6 +205,7 @@ impl MetaNodeService {
             provide_opendal,
             provide_minio,
             provide_aws_s3,
+            provide_moat,
             hummock_in_memory_strategy,
             cmd,
         )?;
@@ -240,7 +242,7 @@ impl Task for MetaNodeService {
         ctx.service(self);
         ctx.pb.set_message("starting...");
 
-        let mut cmd = risingwave_cmd("meta-node")?;
+        let mut cmd = ctx.risingwave_cmd("meta-node")?;
 
         if crate::util::is_env_set("RISEDEV_ENABLE_PROFILE") {
             cmd.env(
@@ -256,13 +258,13 @@ impl Task for MetaNodeService {
             cmd.env("MALLOC_CONF", conf); // unprefixed for linux
         }
 
-        Self::apply_command_args(&mut cmd, &self.config, HummockInMemoryStrategy::Isolated)?;
+        Self::apply_command_args(&mut cmd, &self.config, HummockInMemoryStrategy::Allowed)?;
 
-        if let MetaBackend::Env = self.config.meta_backend {
-            if is_env_set("RISEDEV_CLEAN_START") {
-                ctx.pb.set_message("initializing meta store from env...");
-                initialize_meta_store()?;
-            }
+        if let MetaBackend::Env = self.config.meta_backend
+            && is_env_set("RISEDEV_CLEAN_START")
+        {
+            ctx.pb.set_message("initializing meta store from env...");
+            initialize_meta_store()?;
         }
 
         if !self.config.user_managed {

@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -69,7 +69,7 @@ pub type StreamClientPoolRef = Arc<StreamClientPool>;
 macro_rules! for_all_stream_rpc {
     ($macro:ident) => {
         $macro! {
-            { 0, get_min_uncommitted_sst_id, GetMinUncommittedSstIdRequest, GetMinUncommittedSstIdResponse }
+            { 0, get_min_uncommitted_object_id, GetMinUncommittedObjectIdRequest, GetMinUncommittedObjectIdResponse }
         }
     };
 }
@@ -91,7 +91,7 @@ impl StreamClient {
                 init_request,
             )),
         };
-        let mut client = self.0.to_owned();
+        let mut client = self.0.clone();
         let (handle, first_rsp) =
             UnboundedBidiStreamHandle::initialize(first_request, |rx| async move {
                 client

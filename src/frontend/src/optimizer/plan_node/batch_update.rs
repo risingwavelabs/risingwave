@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,7 +19,8 @@ use risingwave_pb::batch_plan::plan_node::NodeBody;
 use super::batch::prelude::*;
 use super::utils::impl_distill_by_unit;
 use super::{
-    ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchPb, ToDistributedBatch, generic,
+    BatchPlanRef as PlanRef, ExprRewritable, PlanBase, PlanTreeNodeUnary, ToBatchPb,
+    ToDistributedBatch, generic,
 };
 use crate::error::Result;
 use crate::expr::{Expr, ExprRewriter, ExprVisitor};
@@ -44,7 +45,7 @@ impl BatchUpdate {
     }
 }
 
-impl PlanTreeNodeUnary for BatchUpdate {
+impl PlanTreeNodeUnary<Batch> for BatchUpdate {
     fn input(&self) -> PlanRef {
         self.core.input.clone()
     }
@@ -56,7 +57,7 @@ impl PlanTreeNodeUnary for BatchUpdate {
     }
 }
 
-impl_plan_tree_node_for_unary! { BatchUpdate }
+impl_plan_tree_node_for_unary! { Batch, BatchUpdate }
 impl_distill_by_unit!(BatchUpdate, core, "BatchUpdate");
 
 impl ToDistributedBatch for BatchUpdate {
@@ -66,8 +67,8 @@ impl ToDistributedBatch for BatchUpdate {
             let new_input = RequiredDist::PhysicalDist(Distribution::HashShard(
                 (0..self.input().schema().len()).collect(),
             ))
-            .enforce_if_not_satisfies(self.input().to_distributed()?, &Order::any())?;
-            let new_update: PlanRef = self.clone_with_input(new_input).into();
+            .batch_enforce_if_not_satisfies(self.input().to_distributed()?, &Order::any())?;
+            let new_update = self.clone_with_input(new_input).into();
             if self.core.returning {
                 Ok(new_update)
             } else {
@@ -75,7 +76,7 @@ impl ToDistributedBatch for BatchUpdate {
             }
         } else {
             let new_input = RequiredDist::single()
-                .enforce_if_not_satisfies(self.input().to_distributed()?, &Order::any())?;
+                .batch_enforce_if_not_satisfies(self.input().to_distributed()?, &Order::any())?;
             Ok(self.clone_with_input(new_input).into())
         }
     }
@@ -93,11 +94,12 @@ impl ToBatchPb for BatchUpdate {
             .collect();
 
         NodeBody::Update(UpdateNode {
-            table_id: self.core.table_id.table_id(),
+            table_id: self.core.table_id,
             table_version_id: self.core.table_version_id,
             returning: self.core.returning,
             old_exprs,
             new_exprs,
+            upsert: self.base.ctx().session_ctx().config().upsert_dml(),
             session_id: self.base.ctx().session_ctx().session_id().0 as u32,
         })
     }
@@ -106,12 +108,12 @@ impl ToBatchPb for BatchUpdate {
 impl ToLocalBatch for BatchUpdate {
     fn to_local(&self) -> Result<PlanRef> {
         let new_input = RequiredDist::single()
-            .enforce_if_not_satisfies(self.input().to_local()?, &Order::any())?;
+            .batch_enforce_if_not_satisfies(self.input().to_local()?, &Order::any())?;
         Ok(self.clone_with_input(new_input).into())
     }
 }
 
-impl ExprRewritable for BatchUpdate {
+impl ExprRewritable<Batch> for BatchUpdate {
     fn has_rewritable_expr(&self) -> bool {
         true
     }

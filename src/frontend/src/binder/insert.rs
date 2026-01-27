@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -21,7 +21,6 @@ use risingwave_common::catalog::{ColumnCatalog, Schema, TableVersionId};
 use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_pb::expr::expr_node::Type as ExprType;
-use risingwave_pb::user::grant_privilege::PbObject;
 use risingwave_sqlparser::ast::{Ident, ObjectName, Query, SelectItem};
 
 use super::BoundQuery;
@@ -30,6 +29,7 @@ use crate::binder::{Binder, Clause};
 use crate::catalog::TableId;
 use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{Expr, ExprImpl, FunctionCall, InputRef};
+use crate::handler::privilege::ObjectCheckItem;
 use crate::user::UserId;
 use crate::utils::ordinal;
 
@@ -106,17 +106,20 @@ impl Binder {
         source: Query,
         returning_items: Vec<SelectItem>,
     ) -> Result<BoundInsert> {
-        let (schema_name, table_name) = Self::resolve_schema_qualified_name(&self.db_name, name)?;
+        let (schema_name, table_name) = Self::resolve_schema_qualified_name(&self.db_name, &name)?;
         // bind insert table
         self.context.clause = Some(Clause::Insert);
         let bound_table = self.bind_table(schema_name.as_deref(), &table_name)?;
         let table_catalog = &bound_table.table_catalog;
         Self::check_for_dml(table_catalog, true)?;
         self.check_privilege(
-            PbObject::TableId(table_catalog.id.table_id),
+            ObjectCheckItem::new(
+                table_catalog.owner,
+                AclMode::Insert,
+                table_name.clone(),
+                table_catalog.id,
+            ),
             table_catalog.database_id,
-            AclMode::Insert,
-            table_catalog.owner,
         )?;
 
         let default_columns_from_catalog =
@@ -222,7 +225,7 @@ impl Binder {
 
         let bound_column_nums = match source.as_simple_values() {
             None => {
-                bound_query = self.bind_query(source)?;
+                bound_query = self.bind_query(&source)?;
                 let actual_types = bound_query.data_types();
                 let type_match = expected_types == actual_types;
                 cast_exprs = if all_nullable && type_match {
@@ -250,7 +253,7 @@ impl Binder {
                     .first()
                     .expect("values list should not be empty")
                     .len();
-                let mut values = self.bind_values(values.clone(), Some(expected_types))?;
+                let mut values = self.bind_values(values, Some(&expected_types))?;
                 // let mut bound_values = values.clone();
 
                 if !all_nullable {
@@ -308,15 +311,28 @@ impl Binder {
         let default_columns = default_column_indices
             .into_iter()
             .map(|i| {
-                (
-                    i,
-                    default_columns_from_catalog
-                        .get(&i)
-                        .cloned()
-                        .unwrap_or_else(|| {
-                            ExprImpl::literal_null(cols_to_insert_in_table[i].data_type().clone())
-                        }),
-                )
+                let column = &cols_to_insert_in_table[i];
+                let expr = default_columns_from_catalog
+                    .get(&i)
+                    .cloned()
+                    .unwrap_or_else(|| ExprImpl::literal_null(column.data_type().clone()));
+
+                let expr = if column.nullable() {
+                    expr
+                } else {
+                    FunctionCall::new_unchecked(
+                        ExprType::CheckNotNull,
+                        vec![
+                            expr,
+                            ExprImpl::literal_varchar(column.name().to_owned()),
+                            ExprImpl::literal_varchar(table_name.clone()),
+                        ],
+                        column.data_type().clone(),
+                    )
+                    .into()
+                };
+
+                (i, expr)
             })
             .collect_vec();
 
@@ -344,7 +360,7 @@ impl Binder {
     /// Cast a list of `exprs` to corresponding `expected_types` IN ASSIGNMENT CONTEXT. Make sure
     /// you understand the difference of implicit, assignment and explicit cast before reusing it.
     pub(super) fn cast_on_insert(
-        expected_types: &Vec<DataType>,
+        expected_types: &[DataType],
         exprs: Vec<ExprImpl>,
     ) -> Result<Vec<ExprImpl>> {
         let msg = match expected_types.len().cmp(&exprs.len()) {
@@ -356,7 +372,7 @@ impl Binder {
                     .zip_eq_fast(expected_types.iter().take(expr_len))
                     .enumerate()
                     .map(|(i, (e, t))| {
-                        let res = e.cast_assign(t.clone());
+                        let res = e.cast_assign(t);
                         if expr_len > 1 {
                             res.with_context(|| {
                                 format!("failed to cast the {} column", ordinal(i + 1))

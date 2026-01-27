@@ -7,14 +7,11 @@ create sink s1 from t with (connector = 'blackhole');
 statement ok
 create sink s2 as select avg(v1), v2 from t group by v2 with (connector = 'blackhole');
 
-statement error The sink cannot be append-only
+statement error cannot be append-only
 create sink s3 from t with (connector = 'blackhole', type = 'append-only');
 
 statement ok
 create sink s3 from t with (connector = 'blackhole', type = 'append-only', force_append_only = 'true');
-
-statement error The force_append_only can be only used for type = 'append-only'
-create sink s4 from t with (connector = 'blackhole', type = 'upsert', force_append_only = 'true');
 
 statement error
 create sink invalid_sink_type from t with (connector = 'blackhole', type = 'invalid');
@@ -44,10 +41,9 @@ WITH
 ----
 db error: ERROR: Failed to run the query
 
-Caused by these errors (recent errors listed first):
-  1: Sink error
-  2: config error
-  3: File sink can only be created with sink_decouple enabled. Please run `set sink_decouple = true` first.
+Caused by:
+  Not supported: File sink can only be created with sink_decouple enabled.
+HINT: Please run `set sink_decouple = true` first.
 
 
 statement ok

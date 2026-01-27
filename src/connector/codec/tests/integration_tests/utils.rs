@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -39,7 +39,8 @@ impl std::fmt::Debug for DataTypeTestDisplay<'_> {
                 f.finish()?;
                 Ok(())
             }
-            DataType::List(t) => {
+            DataType::List(l) => {
+                let t = l.elem();
                 if t.is_struct() {
                     f.debug_tuple("List")
                         .field(&DataTypeTestDisplay(t))

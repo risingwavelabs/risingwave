@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -99,11 +99,12 @@ pub async fn fetch_from_registry(
             );
         }
     };
+    let message_descriptor = vpb
+        .parent_pool()
+        .get_message_by_name(message_name)
+        .ok_or_else(|| invalid_option_error!("message {message_name} not defined in proto"))?;
 
-    Ok((
-        vpb.parent_pool().get_message_by_name(message_name).unwrap(),
-        vid,
-    ))
+    Ok((message_descriptor, vid))
 }
 
 impl LoadedSchema for FileDescriptor {
@@ -130,13 +131,10 @@ fn compile_pb_subject(
     dependency_subjects: Vec<Subject>,
 ) -> Result<FileDescriptorSet, SchemaFetchError> {
     compile_pb(
-        (
-            primary_subject.name.clone(),
-            primary_subject.schema.content.clone(),
-        ),
+        (primary_subject.name.clone(), primary_subject.schema.content),
         dependency_subjects
             .into_iter()
-            .map(|s| (s.name.clone(), s.schema.content.clone())),
+            .map(|s| (s.name.clone(), s.schema.content)),
     )
     .map_err(|e| SchemaFetchError::SchemaCompile(e.into()))
 }

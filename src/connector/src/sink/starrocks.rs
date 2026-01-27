@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -24,12 +24,12 @@ use mysql_async::prelude::Queryable;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::catalog::Schema;
 use risingwave_common::types::DataType;
-use serde::Deserialize;
-use serde_derive::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use serde_with::{DisplayFromStr, serde_as};
 use thiserror_ext::AsReport;
 use url::form_urlencoded;
+use uuid::Uuid;
 use with_options::WithOptions;
 
 use super::decouple_checkpoint_log_sink::DEFAULT_COMMIT_CHECKPOINT_INTERVAL_WITH_SINK_DECOUPLE;
@@ -39,21 +39,28 @@ use super::doris_starrocks_connector::{
 };
 use super::encoder::{JsonEncoder, RowEncoder};
 use super::{
-    DummySinkCommitCoordinator, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT,
-    SinkError, SinkParam, SinkWriterMetrics,
+    SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT, SinkError, SinkParam,
+    SinkWriterMetrics,
 };
+use crate::enforce_secret::EnforceSecret;
 use crate::sink::decouple_checkpoint_log_sink::DecoupleCheckpointLogSinkerOf;
-use crate::sink::{Result, Sink, SinkWriter, SinkWriterParam};
+use crate::sink::writer::SinkWriter;
+use crate::sink::{Result, Sink, SinkWriterParam};
 
 pub const STARROCKS_SINK: &str = "starrocks";
 const STARROCK_MYSQL_PREFER_SOCKET: &str = "false";
 const STARROCK_MYSQL_MAX_ALLOWED_PACKET: usize = 1024;
 const STARROCK_MYSQL_WAIT_TIMEOUT: usize = 28800;
 
-const fn _default_stream_load_http_timeout_ms() -> u64 {
+pub const fn _default_stream_load_http_timeout_ms() -> u64 {
     30 * 1000
 }
 
+const fn default_use_https() -> bool {
+    false
+}
+
+#[serde_as]
 #[derive(Deserialize, Debug, Clone, WithOptions)]
 pub struct StarrocksCommon {
     /// The `StarRocks` host address.
@@ -77,6 +84,18 @@ pub struct StarrocksCommon {
     /// The `StarRocks` table you want to sink data to.
     #[serde(rename = "starrocks.table")]
     pub table: String,
+
+    /// Whether to use https to connect to the `StarRocks` server.
+    #[serde(rename = "starrocks.use_https")]
+    #[serde(default = "default_use_https")]
+    #[serde_as(as = "DisplayFromStr")]
+    pub use_https: bool,
+}
+
+impl EnforceSecret for StarrocksCommon {
+    const ENFORCE_SECRET_PROPERTIES: phf::Set<&'static str> = phf::phf_set! {
+        "starrocks.password", "starrocks.user"
+    };
 }
 
 #[serde_as]
@@ -91,15 +110,17 @@ pub struct StarrocksConfig {
         default = "_default_stream_load_http_timeout_ms"
     )]
     #[serde_as(as = "DisplayFromStr")]
+    #[with_option(allow_alter_on_fly)]
     pub stream_load_http_timeout_ms: u64,
 
     /// Set this option to a positive integer n, RisingWave will try to commit data
     /// to Starrocks at every n checkpoints by leveraging the
     /// [StreamLoad Transaction API](https://docs.starrocks.io/docs/loading/Stream_Load_transaction_interface/),
     /// also, in this time, the `sink_decouple` option should be enabled as well.
-    /// Defaults to 10 if commit_checkpoint_interval <= 0
+    /// Defaults to 10 if `commit_checkpoint_interval` <= 0
     #[serde(default = "default_commit_checkpoint_interval")]
     #[serde_as(as = "DisplayFromStr")]
+    #[with_option(allow_alter_on_fly)]
     pub commit_checkpoint_interval: u64,
 
     /// Enable partial update
@@ -107,6 +128,12 @@ pub struct StarrocksConfig {
     pub partial_update: Option<String>,
 
     pub r#type: String, // accept "append-only" or "upsert"
+}
+
+impl EnforceSecret for StarrocksConfig {
+    fn enforce_one(prop: &str) -> crate::error::ConnectorResult<()> {
+        StarrocksCommon::enforce_one(prop)
+    }
 }
 
 fn default_commit_checkpoint_interval() -> u64 {
@@ -143,9 +170,20 @@ pub struct StarrocksSink {
     is_append_only: bool,
 }
 
+impl EnforceSecret for StarrocksSink {
+    fn enforce_secret<'a>(
+        prop_iter: impl Iterator<Item = &'a str>,
+    ) -> crate::error::ConnectorResult<()> {
+        for prop in prop_iter {
+            StarrocksConfig::enforce_one(prop)?;
+        }
+        Ok(())
+    }
+}
+
 impl StarrocksSink {
     pub fn new(param: SinkParam, config: StarrocksConfig, schema: Schema) -> Result<Self> {
-        let pk_indices = param.downstream_pk.clone();
+        let pk_indices = param.downstream_pk_or_empty();
         let is_append_only = param.sink_type.is_append_only();
         Ok(Self {
             config,
@@ -229,7 +267,7 @@ impl StarrocksSink {
                 if starrocks_data_type.contains("unknown") {
                     return Ok(true);
                 }
-                let check_result = Self::check_and_correct_column_type(list.as_ref(), starrocks_data_type)?;
+                let check_result = Self::check_and_correct_column_type(list.elem(), starrocks_data_type)?;
                 Ok(check_result && starrocks_data_type.contains("array"))
             }
             risingwave_common::types::DataType::Bytea => Err(SinkError::Starrocks(
@@ -245,12 +283,14 @@ impl StarrocksSink {
             risingwave_common::types::DataType::Map(_) => Err(SinkError::Starrocks(
                 "MAP is not supported for Starrocks sink.".to_owned(),
             )),
+            DataType::Vector(_) => Err(SinkError::Starrocks(
+                "VECTOR is not supported for Starrocks sink.".to_owned(),
+            )),
         }
     }
 }
 
 impl Sink for StarrocksSink {
-    type Coordinator = DummySinkCommitCoordinator;
     type LogSinker = DecoupleCheckpointLogSinkerOf<StarrocksSinkWriter>;
 
     const SINK_NAME: &'static str = STARROCKS_SINK;
@@ -294,6 +334,11 @@ impl Sink for StarrocksSink {
         Ok(())
     }
 
+    fn validate_alter_config(config: &BTreeMap<String, String>) -> Result<()> {
+        StarrocksConfig::from_btreemap(config.clone())?;
+        Ok(())
+    }
+
     async fn new_log_sinker(&self, writer_param: SinkWriterParam) -> Result<Self::LogSinker> {
         let commit_checkpoint_interval =
             NonZeroU64::new(self.config.commit_checkpoint_interval).expect(
@@ -305,7 +350,6 @@ impl Sink for StarrocksSink {
             self.schema.clone(),
             self.pk_indices.clone(),
             self.is_append_only,
-            writer_param.executor_id,
         )?;
 
         let metrics = SinkWriterMetrics::new(&writer_param);
@@ -328,7 +372,6 @@ pub struct StarrocksSinkWriter {
     client: Option<StarrocksClient>,
     txn_client: Arc<StarrocksTxnClient>,
     row_encoder: JsonEncoder,
-    executor_id: u64,
     curr_txn_label: Option<String>,
 }
 
@@ -348,7 +391,6 @@ impl StarrocksSinkWriter {
         schema: Schema,
         pk_indices: Vec<usize>,
         is_append_only: bool,
-        executor_id: u64,
     ) -> Result<Self> {
         let mut field_names = schema.names_str();
         if !is_append_only {
@@ -375,11 +417,13 @@ impl StarrocksSinkWriter {
             .set_table(config.common.table.clone())
             .build();
 
-        let txn_request_builder = StarrocksTxnRequestBuilder::new(
-            format!("http://{}:{}", config.common.host, config.common.http_port),
-            header,
-            config.stream_load_http_timeout_ms,
-        )?;
+        let url = if config.common.use_https {
+            format!("https://{}:{}", config.common.host, config.common.http_port)
+        } else {
+            format!("http://{}:{}", config.common.host, config.common.http_port)
+        };
+        let txn_request_builder =
+            StarrocksTxnRequestBuilder::new(url, header, config.stream_load_http_timeout_ms)?;
 
         Ok(Self {
             config,
@@ -389,7 +433,6 @@ impl StarrocksSinkWriter {
             client: None,
             txn_client: Arc::new(StarrocksTxnClient::new(txn_request_builder)),
             row_encoder: JsonEncoder::new_with_starrocks(schema, None),
-            executor_id,
             curr_txn_label: None,
         })
     }
@@ -474,7 +517,7 @@ impl StarrocksSinkWriter {
     fn new_txn_label(&self) -> String {
         format!(
             "rw-txn-{}-{}",
-            self.executor_id,
+            Uuid::new_v4(),
             chrono::Utc::now().timestamp_micros()
         )
     }
@@ -562,20 +605,21 @@ impl SinkWriter for StarrocksSinkWriter {
             client.finish().await?;
         }
 
-        if is_checkpoint && let Some(txn_label) = self.curr_txn_label.take() {
-            if let Err(err) = self.prepare_and_commit(txn_label.clone()).await {
-                match self.txn_client.rollback(txn_label.clone()).await {
-                    Ok(_) => tracing::warn!(
-                        ?txn_label,
-                        "transaction is successfully rolled back due to commit failure"
-                    ),
-                    Err(err) => {
-                        tracing::warn!(?txn_label, error = ?err.as_report(), "Couldn't roll back transaction after commit failed")
-                    }
+        if is_checkpoint
+            && let Some(txn_label) = self.curr_txn_label.take()
+            && let Err(err) = self.prepare_and_commit(txn_label.clone()).await
+        {
+            match self.txn_client.rollback(txn_label.clone()).await {
+                Ok(_) => tracing::warn!(
+                    ?txn_label,
+                    "transaction is successfully rolled back due to commit failure"
+                ),
+                Err(err) => {
+                    tracing::warn!(?txn_label, error = ?err.as_report(), "Couldn't roll back transaction after commit failed")
                 }
-
-                return Err(err);
             }
+
+            return Err(err);
         }
         Ok(())
     }

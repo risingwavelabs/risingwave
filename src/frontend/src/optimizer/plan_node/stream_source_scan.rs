@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -46,14 +46,17 @@ pub struct StreamSourceScan {
     core: generic::Source,
 }
 
-impl_plan_tree_node_for_leaf! { StreamSourceScan }
+impl_plan_tree_node_for_leaf! { Stream, StreamSourceScan }
 
 impl StreamSourceScan {
+    pub const BACKFILL_PROGRESS_COLUMN_NAME: &str = "backfill_progress";
+    pub const PARTITION_ID_COLUMN_NAME: &str = "partition_id";
+
     pub fn new(core: generic::Source) -> Self {
         let base = PlanBase::new_stream_with_core(
             &core,
             Distribution::SomeShard,
-            core.catalog.as_ref().is_none_or(|s| s.append_only),
+            core.stream_kind(),
             false,
             WatermarkColumns::new(),
             MonotonicityMap::new(),
@@ -84,11 +87,11 @@ impl StreamSourceScan {
 
         let key = Field {
             data_type: DataType::Varchar,
-            name: "partition_id".to_owned(),
+            name: Self::PARTITION_ID_COLUMN_NAME.to_owned(),
         };
         let value = Field {
             data_type: DataType::Jsonb,
-            name: "backfill_progress".to_owned(),
+            name: Self::BACKFILL_PROGRESS_COLUMN_NAME.to_owned(),
         };
 
         let ordered_col_idx = builder.add_column(&key);
@@ -155,9 +158,9 @@ impl StreamSourceScan {
             ],
             node_body: Some(PbNodeBody::SourceBackfill(Box::new(backfill))),
             stream_key,
-            operator_id: self.base.id().0 as u64,
+            operator_id: self.base.id().to_stream_node_operator_id(),
             identity: self.distill_to_string(),
-            append_only: self.append_only(),
+            stream_kind: self.stream_kind().to_protobuf() as i32,
         })
     }
 }
@@ -174,7 +177,7 @@ impl Distill for StreamSourceScan {
     }
 }
 
-impl ExprRewritable for StreamSourceScan {}
+impl ExprRewritable<Stream> for StreamSourceScan {}
 
 impl ExprVisitable for StreamSourceScan {}
 

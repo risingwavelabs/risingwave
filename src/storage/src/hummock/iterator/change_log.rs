@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -586,7 +586,7 @@ mod tests {
         let mem_tables = kvs
             .iter()
             .map(|(key, value)| {
-                let mut t = MemTable::new(OpConsistencyLevel::Inconsistent);
+                let mut t = MemTable::new(233.into(), OpConsistencyLevel::Inconsistent);
                 t.insert(key.clone(), value.clone()).unwrap();
                 t
             })
@@ -634,8 +634,8 @@ mod tests {
                 )
             })
             .collect_vec();
-        let mut new_value_memtable = MemTable::new(OpConsistencyLevel::Inconsistent);
-        let mut old_value_memtable = MemTable::new(OpConsistencyLevel::Inconsistent);
+        let mut new_value_memtable = MemTable::new(233.into(), OpConsistencyLevel::Inconsistent);
+        let mut old_value_memtable = MemTable::new(233.into(), OpConsistencyLevel::Inconsistent);
         for (key, value) in &kvs {
             new_value_memtable
                 .delete(key.clone(), Bytes::new())
@@ -704,6 +704,7 @@ mod tests {
                 table_option: Default::default(),
                 is_replicated: false,
                 vnodes: Bitmap::ones(VirtualNode::COUNT_FOR_TEST).into(),
+                upload_on_flush: true,
             })
             .await;
         let logs = gen_test_data(epoch_count, 10000, 0.05, 0.2);

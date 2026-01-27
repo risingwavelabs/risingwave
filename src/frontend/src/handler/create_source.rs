@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -35,7 +35,6 @@ use risingwave_common::secret::LocalSecretManager;
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_connector::WithPropertiesExt;
 use risingwave_connector::parser::additional_columns::{
     build_additional_column_desc, get_supported_additional_columns,
     source_add_partition_offset_cols,
@@ -52,25 +51,29 @@ use risingwave_connector::schema::schema_registry::{
     SCHEMA_REGISTRY_USERNAME, SchemaRegistryConfig, name_strategy_from_str,
 };
 use risingwave_connector::source::cdc::{
-    CDC_AUTO_SCHEMA_CHANGE_KEY, CDC_MONGODB_STRONG_SCHEMA_KEY, CDC_SHARING_MODE_KEY,
-    CDC_SNAPSHOT_BACKFILL, CDC_SNAPSHOT_MODE_KEY, CDC_TRANSACTIONAL_KEY,
-    CDC_WAIT_FOR_STREAMING_START_TIMEOUT, CITUS_CDC_CONNECTOR, MONGODB_CDC_CONNECTOR,
-    MYSQL_CDC_CONNECTOR, POSTGRES_CDC_CONNECTOR, SQL_SERVER_CDC_CONNECTOR,
+    CDC_MONGODB_STRONG_SCHEMA_KEY, CDC_SHARING_MODE_KEY, CDC_SNAPSHOT_BACKFILL,
+    CDC_SNAPSHOT_MODE_KEY, CDC_TRANSACTIONAL_KEY, CDC_WAIT_FOR_STREAMING_START_TIMEOUT,
+    CITUS_CDC_CONNECTOR, MONGODB_CDC_CONNECTOR, MYSQL_CDC_CONNECTOR, POSTGRES_CDC_CONNECTOR,
+    SQL_SERVER_CDC_CONNECTOR,
 };
 use risingwave_connector::source::datagen::DATAGEN_CONNECTOR;
 use risingwave_connector::source::iceberg::ICEBERG_CONNECTOR;
 use risingwave_connector::source::nexmark::source::{EventType, get_event_data_types_with_names};
 use risingwave_connector::source::test_source::TEST_CONNECTOR;
+pub use risingwave_connector::source::{
+    ADBC_SNOWFLAKE_CONNECTOR, UPSTREAM_SOURCE_KEY, WEBHOOK_CONNECTOR,
+};
 use risingwave_connector::source::{
     AZBLOB_CONNECTOR, ConnectorProperties, GCS_CONNECTOR, GOOGLE_PUBSUB_CONNECTOR, KAFKA_CONNECTOR,
     KINESIS_CONNECTOR, LEGACY_S3_CONNECTOR, MQTT_CONNECTOR, NATS_CONNECTOR, NEXMARK_CONNECTOR,
     OPENDAL_S3_CONNECTOR, POSIX_FS_CONNECTOR, PULSAR_CONNECTOR,
 };
-pub use risingwave_connector::source::{UPSTREAM_SOURCE_KEY, WEBHOOK_CONNECTOR};
+use risingwave_connector::{AUTO_SCHEMA_CHANGE_KEY, WithPropertiesExt};
 use risingwave_pb::catalog::connection_params::PbConnectionType;
 use risingwave_pb::catalog::{PbSchemaRegistryNameStrategy, StreamSourceInfo, WatermarkDesc};
 use risingwave_pb::plan_common::additional_column::ColumnType as AdditionalColumnType;
-use risingwave_pb::plan_common::{EncodeType, FormatType};
+use risingwave_pb::plan_common::source_refresh_mode::{RefreshMode, SourceRefreshModeStreaming};
+use risingwave_pb::plan_common::{EncodeType, FormatType, SourceRefreshMode};
 use risingwave_pb::stream_plan::PbStreamFragmentGraph;
 use risingwave_pb::telemetry::TelemetryDatabaseObject;
 use risingwave_sqlparser::ast::{
@@ -101,7 +104,7 @@ use crate::session::SessionImpl;
 use crate::session::current::notice_to_user;
 use crate::utils::{
     OverwriteOptions, resolve_connection_ref_and_secret_ref, resolve_privatelink_in_with_option,
-    resolve_secret_ref_in_with_options,
+    resolve_secret_ref_in_with_options, resolve_source_refresh_mode_in_with_option,
 };
 use crate::{OptimizerContext, WithOptions, WithOptionsSecResolved, bind_data_type, build_graph};
 
@@ -115,6 +118,8 @@ use validate::{SOURCE_ALLOWED_CONNECTION_CONNECTOR, SOURCE_ALLOWED_CONNECTION_SC
 mod additional_column;
 use additional_column::check_and_add_timestamp_column;
 pub use additional_column::handle_addition_columns;
+use risingwave_common::catalog::ICEBERG_SOURCE_PREFIX;
+use risingwave_common::id::SourceId;
 
 use crate::stream_fragmenter::GraphJobType;
 
@@ -428,7 +433,7 @@ pub(crate) fn bind_all_columns(
                 )?;
                 match key_data_type {
                     DataType::Jsonb | DataType::Varchar | DataType::Int32 | DataType::Int64 => {
-                        columns[0].column_desc.data_type = key_data_type.clone();
+                        columns[0].column_desc.data_type = key_data_type;
                     }
                     _ => {
                         return Err(RwError::from(ProtocolError(
@@ -682,7 +687,7 @@ pub(super) fn bind_source_watermark(
             let col_name = source_watermark.column.real_value();
             let watermark_idx = binder.get_column_binding_index(name.clone(), &col_name)?;
 
-            let expr = binder.bind_expr(source_watermark.expr)?;
+            let expr = binder.bind_expr(&source_watermark.expr)?;
             let watermark_col_type = column_catalogs[watermark_idx].data_type();
             let watermark_expr_type = &expr.return_type();
             if watermark_col_type != watermark_expr_type {
@@ -694,6 +699,7 @@ pub(super) fn bind_source_watermark(
                 Ok::<_, RwError>(WatermarkDesc {
                     watermark_idx: watermark_idx as u32,
                     expr: Some(expr_proto),
+                    with_ttl: source_watermark.with_ttl,
                 })
             }
         })
@@ -726,9 +732,22 @@ pub fn bind_connector_props(
     handler_args: &HandlerArgs,
     format_encode: &FormatEncodeOptions,
     is_create_source: bool,
-) -> Result<WithOptions> {
+) -> Result<(WithOptions, SourceRefreshMode)> {
     let mut with_properties = handler_args.with_options.clone().into_connector_props();
     validate_compatibility(format_encode, &mut with_properties)?;
+    let refresh_mode = {
+        let refresh_mode = resolve_source_refresh_mode_in_with_option(&mut with_properties)?;
+        if is_create_source && refresh_mode.is_some() {
+            return Err(RwError::from(ProtocolError(
+                "`refresh_mode` only supported for CREATE TABLE".to_owned(),
+            )));
+        }
+
+        refresh_mode.unwrap_or(SourceRefreshMode {
+            refresh_mode: Some(RefreshMode::Streaming(SourceRefreshModeStreaming {})),
+        })
+    };
+
     let create_cdc_source_job = with_properties.is_shareable_cdc_connector();
 
     if !is_create_source && with_properties.is_shareable_only_cdc_connector() {
@@ -738,14 +757,15 @@ pub fn bind_connector_props(
         ))));
     }
     if is_create_source && create_cdc_source_job {
-        if let Some(value) = with_properties.get(CDC_AUTO_SCHEMA_CHANGE_KEY)
-            && value
-                .parse::<bool>()
-                .map_err(|_| anyhow!("invalid value of '{}' option", CDC_AUTO_SCHEMA_CHANGE_KEY))?
+        if let Some(value) = with_properties.get(AUTO_SCHEMA_CHANGE_KEY)
+            && value.parse::<bool>().map_err(|_| {
+                ErrorCode::InvalidInputSyntax(format!(
+                    "invalid value of '{}' option",
+                    AUTO_SCHEMA_CHANGE_KEY
+                ))
+            })?
         {
-            Feature::CdcAutoSchemaChange
-                .check_available()
-                .map_err(|e| anyhow::anyhow!(e))?;
+            Feature::CdcAutoSchemaChange.check_available()?;
         }
 
         // set connector to backfill mode
@@ -756,14 +776,17 @@ pub fn bind_connector_props(
         if with_properties.enable_transaction_metadata() {
             with_properties.insert(CDC_TRANSACTIONAL_KEY.into(), "true".into());
         }
-        with_properties.insert(
-            CDC_WAIT_FOR_STREAMING_START_TIMEOUT.into(),
-            handler_args
-                .session
-                .config()
-                .cdc_source_wait_streaming_start_timeout()
-                .to_string(),
-        );
+        // Only set CDC_WAIT_FOR_STREAMING_START_TIMEOUT if not already specified by user.
+        if !with_properties.contains_key(CDC_WAIT_FOR_STREAMING_START_TIMEOUT) {
+            with_properties.insert(
+                CDC_WAIT_FOR_STREAMING_START_TIMEOUT.into(),
+                handler_args
+                    .session
+                    .config()
+                    .cdc_source_wait_streaming_start_timeout()
+                    .to_string(),
+            );
+        }
     }
     if with_properties.is_mysql_cdc_connector() {
         // Generate a random server id for mysql cdc source if needed
@@ -773,7 +796,7 @@ pub fn bind_connector_props(
             .entry("server.id".to_owned())
             .or_insert(rand::rng().random_range(1..u32::MAX).to_string());
     }
-    Ok(with_properties)
+    Ok((with_properties, refresh_mode))
 }
 
 /// When the schema can be inferred from external system (like schema registry),
@@ -800,6 +823,8 @@ pub enum SqlColumnStrategy {
     Ignore,
 }
 
+/// Entrypoint for binding source connector.
+/// Common logic shared by `CREATE SOURCE` and `CREATE TABLE`.
 #[allow(clippy::too_many_arguments)]
 pub async fn bind_create_source_or_table_with_connector(
     handler_args: HandlerArgs,
@@ -817,29 +842,29 @@ pub async fn bind_create_source_or_table_with_connector(
     create_source_type: CreateSourceType,
     source_rate_limit: Option<u32>,
     sql_column_strategy: SqlColumnStrategy,
+    refresh_mode: SourceRefreshMode,
 ) -> Result<SourceCatalog> {
     let session = &handler_args.session;
     let db_name: &str = &session.database();
-    let (schema_name, source_name) = Binder::resolve_schema_qualified_name(db_name, full_name)?;
+    let (schema_name, source_name) = Binder::resolve_schema_qualified_name(db_name, &full_name)?;
     let (database_id, schema_id) =
         session.get_database_and_schema_id_for_create(schema_name.clone())?;
 
     let is_create_source = create_source_type != CreateSourceType::Table;
-    if !is_create_source && with_properties.is_iceberg_connector() {
-        return Err(ErrorCode::BindError(
-            "can't CREATE TABLE with iceberg connector\n\nHint: use CREATE SOURCE instead"
+
+    if is_create_source {
+        // reject refreshable batch source
+        if with_properties.is_batch_connector() {
+            return Err(ErrorCode::BindError(
+            "can't CREATE SOURCE with refreshable batch connector\n\nHint: use CREATE TABLE instead"
                 .to_owned(),
         )
         .into());
-    }
+        }
 
-    if is_create_source {
         match format_encode.format {
-            Format::Upsert
-            | Format::Debezium
-            | Format::DebeziumMongo
-            | Format::Maxwell
-            | Format::Canal => {
+            // reject unsupported formats for CREATE SOURCE
+            Format::Debezium | Format::DebeziumMongo | Format::Maxwell | Format::Canal => {
                 return Err(ErrorCode::BindError(format!(
                     "can't CREATE SOURCE with FORMAT {}.\n\nHint: use CREATE TABLE instead\n\n{}",
                     format_encode.format,
@@ -847,14 +872,43 @@ pub async fn bind_create_source_or_table_with_connector(
                 ))
                 .into());
             }
-            _ => {
-                // TODO: enhance error message for other formats
+            // hint limitations for some other formats
+            Format::Upsert => {
+                notice_to_user(format!(
+                    "Streaming queries on sources with `FORMAT {}` may have limitations. If your query isn't supported, consider using `CREATE TABLE` instead.",
+                    format_encode.format
+                ));
             }
+            _ => {}
         }
     }
 
     let sql_pk_names = bind_sql_pk_names(sql_columns_defs, bind_table_constraints(&constraints)?)?;
 
+    // FIXME: ideally we can support it, but current way of handling iceberg additional columns are problematic.
+    // They are treated as normal user columns, so they will be lost if we allow user to specify columns.
+    // See `extract_iceberg_columns`
+    if with_properties.is_iceberg_connector() && !sql_columns_defs.is_empty() {
+        return Err(RwError::from(InvalidInputSyntax(
+            r#"Schema is automatically inferred for iceberg source and should not be specified
+
+HINT: use `CREATE SOURCE <name> WITH (...)` instead of `CREATE SOURCE <name> (<columns>) WITH (...)`."#.to_owned(),
+        )));
+    }
+
+    // Same for ADBC Snowflake connector - schema is automatically inferred
+    if with_properties.is_batch_connector()
+        && with_properties
+            .get(UPSTREAM_SOURCE_KEY)
+            .is_some_and(|s| s.eq_ignore_ascii_case(ADBC_SNOWFLAKE_CONNECTOR))
+        && !sql_columns_defs.is_empty()
+    {
+        return Err(RwError::from(InvalidInputSyntax(
+            r#"Schema is automatically inferred for ADBC Snowflake source and should not be specified
+
+HINT: use `CREATE TABLE <name> WITH (...)` instead of `CREATE TABLE <name> (<columns>) WITH (...)`."#.to_owned(),
+        )));
+    }
     let columns_from_sql = bind_sql_columns(sql_columns_defs, false)?;
 
     let mut columns = bind_all_columns(
@@ -906,30 +960,35 @@ pub async fn bind_create_source_or_table_with_connector(
     let mut with_properties = with_properties;
     resolve_privatelink_in_with_option(&mut with_properties)?;
 
-    // check the system parameter `enforce_secret_on_cloud`
+    // check the system parameter `enforce_secret`
     if session
         .env()
         .system_params_manager()
         .get_params()
         .load()
-        .enforce_secret_on_cloud()
+        .enforce_secret()
         && Feature::SecretManagement.check_available().is_ok()
     {
         // check enforce using secret for some props on cloud
-        ConnectorProperties::enforce_secret_on_cloud(&with_properties)?;
+        ConnectorProperties::enforce_secret_source(&with_properties)?;
     }
 
     let (with_properties, connection_type, connector_conn_ref) =
         resolve_connection_ref_and_secret_ref(
             with_properties,
             session,
-            TelemetryDatabaseObject::Source,
+            Some(TelemetryDatabaseObject::Source),
         )?;
     ensure_connection_type_allowed(connection_type, &SOURCE_ALLOWED_CONNECTION_CONNECTOR)?;
 
     // if not using connection, we don't need to check connector match connection type
     if !matches!(connection_type, PbConnectionType::Unspecified) {
-        let connector = with_properties.get_connector().unwrap();
+        let Some(connector) = with_properties.get_connector() else {
+            return Err(RwError::from(ProtocolError(format!(
+                "missing field '{}' in WITH clause",
+                UPSTREAM_SOURCE_KEY
+            ))));
+        };
         check_connector_match_connection_type(connector.as_str(), &connection_type)?;
     }
 
@@ -941,14 +1000,6 @@ pub async fn bind_create_source_or_table_with_connector(
         &with_properties,
     )
     .await?;
-
-    if is_create_source && !pk_names.is_empty() {
-        return Err(ErrorCode::InvalidInputSyntax(
-            "Source does not support PRIMARY KEY constraint, please use \"CREATE TABLE\" instead"
-                .to_owned(),
-        )
-        .into());
-    }
 
     // User may specify a generated or additional column with the same name as one from the external schema.
     // Ensure duplicated column names are handled here.
@@ -980,13 +1031,30 @@ pub async fn bind_create_source_or_table_with_connector(
         bind_source_watermark(session, source_name.clone(), source_watermarks, &columns)?;
     // TODO(yuhao): allow multiple watermark on source.
     assert!(watermark_descs.len() <= 1);
+    if is_create_source && watermark_descs.iter().any(|d| d.with_ttl) {
+        return Err(ErrorCode::NotSupported(
+            "WITH TTL is not supported in WATERMARK clause for CREATE SOURCE.".to_owned(),
+            "Use `CREATE TABLE ... WATERMARK ... WITH TTL` instead.".to_owned(),
+        )
+        .into());
+    }
+
+    let append_only = row_id_index.is_some();
+    if is_create_source && !append_only && !watermark_descs.is_empty() {
+        return Err(ErrorCode::NotSupported(
+            "Defining watermarks on source requires the source connector to be append only."
+                .to_owned(),
+            "Use the key words `FORMAT PLAIN`".to_owned(),
+        )
+        .into());
+    }
 
     bind_sql_column_constraints(
         session,
         source_name.clone(),
         &mut columns,
         // TODO(st1page): pass the ref
-        sql_columns_defs.to_vec(),
+        sql_columns_defs,
         &pk_col_ids,
     )?;
     check_format_encode(&with_properties, row_id_index, &columns)?;
@@ -999,13 +1067,13 @@ pub async fn bind_create_source_or_table_with_connector(
         Some(TableId::placeholder())
     };
     let source = SourceCatalog {
-        id: TableId::placeholder().table_id,
+        id: SourceId::placeholder(),
         name: source_name,
         schema_id,
         database_id,
         columns,
         pk_col_ids,
-        append_only: row_id_index.is_some(),
+        append_only,
         owner: session.user_id(),
         info: source_info,
         row_id_index,
@@ -1020,6 +1088,7 @@ pub async fn bind_create_source_or_table_with_connector(
         created_at_cluster_version: None,
         initialized_at_cluster_version: None,
         rate_limit: source_rate_limit,
+        refresh_mode: Some(refresh_mode),
     };
     Ok(source)
 }
@@ -1039,6 +1108,17 @@ pub async fn handle_create_source(
         return Ok(resp);
     }
 
+    if stmt
+        .source_name
+        .base_name()
+        .starts_with(ICEBERG_SOURCE_PREFIX)
+    {
+        return Err(RwError::from(InvalidInputSyntax(format!(
+            "Source name cannot start with reserved prefix '{}'",
+            ICEBERG_SOURCE_PREFIX
+        ))));
+    }
+
     if handler_args.with_options.is_empty() {
         return Err(RwError::from(InvalidInputSyntax(
             "missing WITH clause".to_owned(),
@@ -1046,7 +1126,8 @@ pub async fn handle_create_source(
     }
 
     let format_encode = stmt.format_encode.into_v2_with_warning();
-    let with_properties = bind_connector_props(&handler_args, &format_encode, true)?;
+    let (with_properties, refresh_mode) =
+        bind_connector_props(&handler_args, &format_encode, true)?;
 
     let create_source_type = CreateSourceType::for_newly_created(&session, &*with_properties);
     let (columns_from_resolve_source, source_info) = bind_columns_from_source(
@@ -1084,6 +1165,7 @@ pub async fn handle_create_source(
         create_source_type,
         overwrite_options.source_rate_limit,
         SqlColumnStrategy::FollowChecked,
+        refresh_mode,
     )
     .await?;
 
@@ -1102,10 +1184,14 @@ pub async fn handle_create_source(
 
     if create_source_type.is_shared() {
         let graph = generate_stream_graph_for_source(handler_args, source_catalog)?;
-        catalog_writer.create_source(source, Some(graph)).await?;
+        catalog_writer
+            .create_source(source, Some(graph), stmt.if_not_exists)
+            .await?;
     } else {
         // For other sources we don't create a streaming job
-        catalog_writer.create_source(source, None).await?;
+        catalog_writer
+            .create_source(source, None, stmt.if_not_exists)
+            .await?;
     }
 
     Ok(PgResponse::empty_result(StatementType::CREATE_SOURCE))

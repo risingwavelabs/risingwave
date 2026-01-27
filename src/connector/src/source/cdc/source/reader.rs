@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,9 +20,10 @@ use futures_async_stream::try_stream;
 use itertools::Itertools;
 use prost::Message;
 use risingwave_common::bail;
+use risingwave_common::global_jvm::Jvm;
 use risingwave_common::metrics::GLOBAL_ERROR_METRICS;
 use risingwave_common::util::addr::HostAddr;
-use risingwave_jni_core::jvm_runtime::{JVM, execute_with_jni_env};
+use risingwave_jni_core::jvm_runtime::execute_with_jni_env;
 use risingwave_jni_core::{JniReceiverType, OwnedPointer, call_static_method};
 use risingwave_pb::connector_service::{GetEventStreamRequest, GetEventStreamResponse};
 use thiserror_ext::AsReport;
@@ -100,7 +101,7 @@ impl<T: CdcSourceTypeTrait> SplitReader for CdcSplitReader<T> {
         let source_type = conn_props.get_source_type_pb();
         let (tx, mut rx) = mpsc::channel(DEFAULT_CHANNEL_SIZE);
 
-        let jvm = JVM.get_or_init()?;
+        let jvm = Jvm::get_or_init()?;
         let get_event_stream_request = GetEventStreamRequest {
             source_id,
             source_type: source_type as _,
@@ -166,7 +167,10 @@ impl<T: CdcSourceTypeTrait> SplitReader for CdcSplitReader<T> {
             };
             if !inited {
                 bail!(
-                    "failed to start cdc connector.\nHINT: increase `cdc_source_wait_streaming_start_timeout` session variable to a large value and retry."
+                    "failed to start cdc connector due to timeout (default 60s).\n\
+                    HINT: You can increase the timeout by:\n\
+                    - Alter the running source: ALTER SOURCE <source_name> CONNECTOR WITH (cdc.source.wait.streaming.start.timeout = '<larger_value>');\n\
+                    - Set session variable and recreate the source: SET cdc_source_wait_streaming_start_timeout = <larger_value>;"
                 );
             }
         }

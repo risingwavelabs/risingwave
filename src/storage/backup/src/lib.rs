@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,10 +17,8 @@
 #![feature(type_alias_impl_trait)]
 #![feature(custom_test_frameworks)]
 #![feature(map_try_insert)]
-#![feature(btree_extract_if)]
-#![feature(let_chains)]
 #![feature(error_generic_member_access)]
-#![cfg_attr(coverage, feature(coverage_attribute))]
+#![feature(coverage_attribute)]
 
 pub mod error;
 pub mod meta_snapshot;
@@ -34,8 +32,9 @@ use itertools::Itertools;
 use risingwave_common::RW_VERSION;
 use risingwave_hummock_sdk::state_table_info::StateTableInfo;
 use risingwave_hummock_sdk::version::HummockVersion;
-use risingwave_hummock_sdk::{HummockSstableObjectId, HummockVersionId};
+use risingwave_hummock_sdk::{HummockRawObjectId, HummockVersionId};
 use risingwave_pb::backup_service::{PbMetaSnapshotManifest, PbMetaSnapshotMetadata};
+use risingwave_pb::id::TableId;
 use serde::{Deserialize, Serialize};
 
 use crate::error::{BackupError, BackupResult};
@@ -48,12 +47,14 @@ pub type MetaBackupJobId = u64;
 pub struct MetaSnapshotMetadata {
     pub id: MetaSnapshotId,
     pub hummock_version_id: HummockVersionId,
-    pub ssts: HashSet<HummockSstableObjectId>,
+    // rename to `ssts` for backward compatibility
+    #[serde(rename = "ssts")]
+    pub objects: HashSet<HummockRawObjectId>,
     #[serde(default)]
     pub format_version: u32,
     pub remarks: Option<String>,
     #[serde(default)]
-    pub state_table_info: HashMap<u32, StateTableInfo>,
+    pub state_table_info: HashMap<TableId, StateTableInfo>,
     pub rw_version: Option<String>,
 }
 
@@ -67,14 +68,17 @@ impl MetaSnapshotMetadata {
         Self {
             id,
             hummock_version_id: v.id,
-            ssts: v.get_object_ids(false),
+            objects: v
+                .get_object_ids(false)
+                .map(|object_id| object_id.as_raw())
+                .collect(),
             format_version,
             remarks,
             state_table_info: v
                 .state_table_info
                 .info()
                 .iter()
-                .map(|(id, info)| (id.table_id, info.into()))
+                .map(|(id, info)| (*id, info.into()))
                 .collect(),
             rw_version: Some(RW_VERSION.to_owned()),
         }
@@ -113,7 +117,7 @@ impl From<&MetaSnapshotMetadata> for PbMetaSnapshotMetadata {
             state_table_info: m
                 .state_table_info
                 .iter()
-                .map(|(t, i)| (*t, i.into()))
+                .map(|(t, i)| ((*t), i.into()))
                 .collect(),
             rw_version: m.rw_version.clone(),
         }

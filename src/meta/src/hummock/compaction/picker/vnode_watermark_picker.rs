@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -134,8 +134,8 @@ mod tests {
         };
 
         let sst_info = SstableInfoInner {
-            object_id: 1,
-            sst_id: 1,
+            object_id: 1.into(),
+            sst_id: 1.into(),
             key_range: KeyRange {
                 left: FullKey::new(2.into(), table_key(16, "some_watermark_key_1"), 0)
                     .encode()
@@ -145,7 +145,7 @@ mod tests {
                     .into(),
                 right_exclusive: true,
             },
-            table_ids: vec![2],
+            table_ids: vec![2.into()],
             ..Default::default()
         }
         .into();
@@ -155,8 +155,8 @@ mod tests {
         );
 
         let sst_info = SstableInfoInner {
-            object_id: 1,
-            sst_id: 1,
+            object_id: 1.into(),
+            sst_id: 1.into(),
             key_range: KeyRange {
                 left: FullKey::new(1.into(), table_key(13, "some_watermark_key_1"), 0)
                     .encode()
@@ -166,7 +166,7 @@ mod tests {
                     .into(),
                 right_exclusive: true,
             },
-            table_ids: vec![1],
+            table_ids: vec![1.into()],
             ..Default::default()
         }
         .into();
@@ -176,8 +176,8 @@ mod tests {
         );
 
         let sst_info = SstableInfoInner {
-            object_id: 1,
-            sst_id: 1,
+            object_id: 1.into(),
+            sst_id: 1.into(),
             key_range: KeyRange {
                 left: FullKey::new(1.into(), table_key(16, "some_watermark_key_1"), 0)
                     .encode()
@@ -187,7 +187,7 @@ mod tests {
                     .into(),
                 right_exclusive: true,
             },
-            table_ids: vec![1],
+            table_ids: vec![1.into()],
             ..Default::default()
         }
         .into();
@@ -197,8 +197,8 @@ mod tests {
         );
 
         let sst_info = SstableInfoInner {
-            object_id: 1,
-            sst_id: 1,
+            object_id: 1.into(),
+            sst_id: 1.into(),
             key_range: KeyRange {
                 left: FullKey::new(1.into(), table_key(16, "some_watermark_key_1"), 0)
                     .encode()
@@ -208,7 +208,7 @@ mod tests {
                     .into(),
                 right_exclusive: true,
             },
-            table_ids: vec![1],
+            table_ids: vec![1.into()],
             ..Default::default()
         }
         .into();
@@ -218,8 +218,8 @@ mod tests {
         );
 
         let sst_info = SstableInfoInner {
-            object_id: 1,
-            sst_id: 1,
+            object_id: 1.into(),
+            sst_id: 1.into(),
             key_range: KeyRange {
                 left: FullKey::new(1.into(), table_key(16, "some_watermark_key_1"), 0)
                     .encode()
@@ -229,7 +229,7 @@ mod tests {
                     .into(),
                 right_exclusive: true,
             },
-            table_ids: vec![1],
+            table_ids: vec![1.into()],
             ..Default::default()
         }
         .into();

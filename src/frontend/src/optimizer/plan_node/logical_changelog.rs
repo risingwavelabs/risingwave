@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,20 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use itertools::Itertools;
-
 use super::expr_visitable::ExprVisitable;
 use super::generic::{_CHANGELOG_ROW_ID, CHANGELOG_OP, GenericPlanRef};
 use super::utils::impl_distill_by_unit;
 use super::{
-    ColPrunable, ColumnPruningContext, ExprRewritable, Logical, LogicalProject, PlanBase,
-    PlanTreeNodeUnary, PredicatePushdown, RewriteStreamContext, StreamChangeLog, StreamRowIdGen,
-    ToBatch, ToStream, ToStreamContext, gen_filter_and_pushdown, generic,
+    BatchPlanRef, ColPrunable, ColumnPruningContext, ExprRewritable, Logical,
+    LogicalPlanRef as PlanRef, PlanBase, PlanTreeNodeUnary, PredicatePushdown,
+    RewriteStreamContext, StreamChangeLog, StreamPlanRef, ToBatch, ToStream, ToStreamContext,
+    gen_filter_and_pushdown, generic,
 };
-use crate::PlanRef;
 use crate::error::ErrorCode::BindError;
 use crate::error::Result;
-use crate::expr::{ExprImpl, InputRef};
+use crate::optimizer::plan_node::generic::PhysicalPlanRef;
 use crate::optimizer::property::Distribution;
 use crate::utils::{ColIndexMapping, Condition};
 
@@ -51,7 +49,7 @@ impl LogicalChangeLog {
     }
 }
 
-impl PlanTreeNodeUnary for LogicalChangeLog {
+impl PlanTreeNodeUnary<Logical> for LogicalChangeLog {
     fn input(&self) -> PlanRef {
         self.core.input.clone()
     }
@@ -87,10 +85,10 @@ impl PlanTreeNodeUnary for LogicalChangeLog {
     }
 }
 
-impl_plan_tree_node_for_unary! {LogicalChangeLog}
+impl_plan_tree_node_for_unary! { Logical, LogicalChangeLog}
 impl_distill_by_unit!(LogicalChangeLog, core, "LogicalChangeLog");
 
-impl ExprRewritable for LogicalChangeLog {}
+impl ExprRewritable<Logical> for LogicalChangeLog {}
 
 impl ExprVisitable for LogicalChangeLog {}
 
@@ -134,23 +132,35 @@ impl ColPrunable for LogicalChangeLog {
 }
 
 impl ToBatch for LogicalChangeLog {
-    fn to_batch(&self) -> Result<PlanRef> {
+    fn to_batch(&self) -> Result<BatchPlanRef> {
         Err(BindError("With changelog cte only support with create mv/sink".to_owned()).into())
     }
 }
 
 impl ToStream for LogicalChangeLog {
-    fn to_stream(&self, ctx: &mut ToStreamContext) -> Result<PlanRef> {
-        let new_input = self.input().to_stream(ctx)?;
-
-        let mut new_logical = self.core.clone();
-        new_logical.input = new_input;
-        let plan = StreamChangeLog::new(new_logical).into();
+    fn to_stream(&self, ctx: &mut ToStreamContext) -> Result<StreamPlanRef> {
+        let input = self.input().to_stream(ctx)?;
+        let dist = input.distribution();
+        let distribution_keys = match dist {
+            Distribution::HashShard(distribution_keys)
+            | Distribution::UpstreamHashShard(distribution_keys, _) => distribution_keys.clone(),
+            Distribution::Single => {
+                vec![]
+            }
+            _ => {
+                return Err(BindError(format!(
+                    "ChangeLog requires input to be hash distributed, single, but got {:?}",
+                    dist
+                ))
+                .into());
+            }
+        };
+        let core = self.core.clone_with_input(input);
         let row_id_index = self.schema().fields().len() - 1;
-        let plan = StreamRowIdGen::new_with_dist(
-            plan,
-            row_id_index,
+        let plan = StreamChangeLog::new_with_dist(
+            core,
             Distribution::HashShard(vec![row_id_index]),
+            distribution_keys.into_iter().map(|k| k as u32).collect(),
         )
         .into();
 
@@ -161,22 +171,8 @@ impl ToStream for LogicalChangeLog {
         &self,
         ctx: &mut RewriteStreamContext,
     ) -> Result<(PlanRef, ColIndexMapping)> {
-        let original_schema = self.input().schema().clone();
         let (input, input_col_change) = self.input().logical_rewrite_for_stream(ctx)?;
-        let exprs = (0..original_schema.len())
-            .map(|x| {
-                ExprImpl::InputRef(
-                    InputRef::new(
-                        input_col_change.map(x),
-                        original_schema.fields[x].data_type.clone(),
-                    )
-                    .into(),
-                )
-            })
-            .collect_vec();
-        let project = LogicalProject::new(input.clone(), exprs);
-        let (project, out_col_change) = project.rewrite_with_input(input, input_col_change);
-        let (changelog, out_col_change) = self.rewrite_with_input(project.into(), out_col_change);
+        let (changelog, out_col_change) = self.rewrite_with_input(input, input_col_change);
         Ok((changelog.into(), out_col_change))
     }
 }

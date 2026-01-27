@@ -1,0 +1,205 @@
+statement ok
+set enable_datafusion_engine = true;
+
+statement ok
+create secret my_secret with (
+  backend = 'meta'
+) as 'hummockadmin';
+
+statement ok
+create connection my_conn
+with (
+    type = 'iceberg',
+    warehouse.path = 's3://hummock001/iceberg_connection',
+    s3.access.key = secret my_secret,
+    s3.secret.key = secret my_secret,
+    s3.endpoint = 'http://127.0.0.1:9301',
+    s3.region = 'us-west-2',
+    catalog.type = 'storage',
+);
+
+statement ok
+set iceberg_engine_connection = 'public.my_conn';
+
+statement ok
+CREATE TABLE t (
+    id INT,
+    name VARCHAR,
+    score FLOAT,
+    status BOOLEAN,
+) WITH (commit_checkpoint_interval = 1) ENGINE = iceberg;
+
+statement ok
+INSERT INTO t VALUES
+    (1, 'Alice', 85.5, true),
+    (2, 'Bob', 92.0, true),
+    (3, 'Charlie', 78.5, false),
+    (4, 'Diana', 91.0, true),
+    (5, 'Eve', 88.0, false),
+    (6, 'Frank', NULL, true);
+
+statement ok
+FLUSH;
+
+sleep 5s
+
+# Test: Basic ORDER BY with single column ascending
+query ????
+SELECT id, name, score, status FROM t ORDER BY id;
+----
+1 Alice 85.5 t
+2 Bob 92 t
+3 Charlie 78.5 f
+4 Diana 91 t
+5 Eve 88 f
+6 Frank NULL t
+
+# Test: Basic ORDER BY with single column descending
+query ????
+SELECT id, name, score, status FROM t ORDER BY id DESC;
+----
+6 Frank NULL t
+5 Eve 88 f
+4 Diana 91 t
+3 Charlie 78.5 f
+2 Bob 92 t
+1 Alice 85.5 t
+
+# Test: ORDER BY string column ascending
+query ????
+SELECT id, name, score, status FROM t ORDER BY name;
+----
+1 Alice 85.5 t
+2 Bob 92 t
+3 Charlie 78.5 f
+4 Diana 91 t
+5 Eve 88 f
+6 Frank NULL t
+
+# Test: ORDER BY string column descending
+query ????
+SELECT id, name, score, status FROM t ORDER BY name DESC;
+----
+6 Frank NULL t
+5 Eve 88 f
+4 Diana 91 t
+3 Charlie 78.5 f
+2 Bob 92 t
+1 Alice 85.5 t
+
+# Test: ORDER BY float column with NULLs
+query ????
+SELECT id, name, score, status FROM t ORDER BY score;
+----
+3 Charlie 78.5 f
+1 Alice 85.5 t
+5 Eve 88 f
+4 Diana 91 t
+2 Bob 92 t
+6 Frank NULL t
+
+# Test: ORDER BY float column descending with NULLs
+query ????
+SELECT id, name, score, status FROM t ORDER BY score DESC;
+----
+6 Frank NULL t
+2 Bob 92 t
+4 Diana 91 t
+5 Eve 88 f
+1 Alice 85.5 t
+3 Charlie 78.5 f
+
+# Test: ORDER BY multiple columns with mixed ASC/DESC
+query ????
+SELECT id, name, score, status FROM t ORDER BY status DESC, score ASC;
+----
+1 Alice 85.5 t
+4 Diana 91 t
+2 Bob 92 t
+6 Frank NULL t
+3 Charlie 78.5 f
+5 Eve 88 f
+
+# Test: ORDER BY with LIMIT
+query ????
+SELECT id, name, score, status FROM t ORDER BY score DESC LIMIT 3;
+----
+6 Frank NULL t
+2 Bob 92 t
+4 Diana 91 t
+
+# Test: ORDER BY with LIMIT and OFFSET
+query ????
+SELECT id, name, score, status FROM t ORDER BY id ASC LIMIT 3 OFFSET 2;
+----
+3 Charlie 78.5 f
+4 Diana 91 t
+5 Eve 88 f
+
+# Test: ORDER BY with expression
+query ??
+SELECT id, score * 2 AS doubled_score FROM t ORDER BY score * 2 DESC LIMIT 4;
+----
+6 NULL
+2 184
+4 182
+5 176
+
+# Test: ORDER BY with WHERE clause
+query ????
+SELECT id, name, score, status FROM t WHERE score > 80 ORDER BY score DESC;
+----
+2 Bob 92 t
+4 Diana 91 t
+5 Eve 88 f
+1 Alice 85.5 t
+
+# Test: ORDER BY with NULL handling - NULLS FIRST
+query ????
+SELECT id, name, score, status FROM t ORDER BY score NULLS FIRST;
+----
+6 Frank NULL t
+3 Charlie 78.5 f
+1 Alice 85.5 t
+5 Eve 88 f
+4 Diana 91 t
+2 Bob 92 t
+
+# Test: ORDER BY with NULL handling - NULLS LAST
+query ????
+SELECT id, name, score, status FROM t ORDER BY score DESC NULLS LAST;
+----
+2 Bob 92 t
+4 Diana 91 t
+5 Eve 88 f
+1 Alice 85.5 t
+3 Charlie 78.5 f
+6 Frank NULL t
+
+# Test: ORDER BY on computed column using CASE
+query ???
+SELECT id, name, CASE WHEN score >= 90 THEN 'A' WHEN score >= 80 THEN 'B' ELSE 'C' END AS grade FROM t ORDER BY grade, name;
+----
+2 Bob A
+4 Diana A
+1 Alice B
+5 Eve B
+3 Charlie C
+6 Frank C
+
+# Test: ORDER BY without SELECT all columns
+query ?
+SELECT id FROM t ORDER BY score DESC LIMIT 3;
+----
+6
+2
+4
+
+statement ok
+DROP TABLE t;
+
+statement ok
+DROP CONNECTION my_conn;
+
+statement ok
+DROP SECRET my_secret;

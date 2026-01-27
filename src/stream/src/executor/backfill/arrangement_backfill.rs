@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -23,6 +23,7 @@ use risingwave_common::bail;
 use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common_rate_limit::{MonitoredRateLimiter, RateLimit, RateLimiter};
+use risingwave_pb::common::ThrottleType;
 use risingwave_storage::row_serde::value_serde::ValueRowSerde;
 use risingwave_storage::store::PrefetchOptions;
 
@@ -35,7 +36,7 @@ use crate::executor::backfill::utils::{
     persist_state_per_vnode, update_pos_by_vnode,
 };
 use crate::executor::prelude::*;
-use crate::task::CreateMviewProgressReporter;
+use crate::task::{CreateMviewProgressReporter, FragmentId};
 
 type Builders = HashMap<VirtualNode, DataChunkBuilder>;
 
@@ -66,6 +67,9 @@ pub struct ArrangementBackfillExecutor<S: StateStore, SD: ValueRowSerde> {
     chunk_size: usize,
 
     rate_limiter: MonitoredRateLimiter,
+
+    /// Fragment id of the fragment this backfill node belongs to.
+    fragment_id: FragmentId,
 }
 
 impl<S, SD> ArrangementBackfillExecutor<S, SD>
@@ -84,6 +88,7 @@ where
         metrics: Arc<StreamingMetrics>,
         chunk_size: usize,
         rate_limit: RateLimit,
+        fragment_id: FragmentId,
     ) -> Self {
         let rate_limiter = RateLimiter::new(rate_limit).monitored(upstream_table.table_id());
         Self {
@@ -96,6 +101,7 @@ where
             metrics,
             chunk_size,
             rate_limiter,
+            fragment_id,
         }
     }
 
@@ -139,7 +145,8 @@ where
 
         // Poll the upstream to get the first barrier.
         let first_barrier = expect_first_barrier(&mut upstream).await?;
-        let mut paused = first_barrier.is_pause_on_startup();
+        let mut global_pause = first_barrier.is_pause_on_startup();
+        let mut backfill_paused = first_barrier.is_backfill_pause_on_startup(self.fragment_id);
         let first_epoch = first_barrier.epoch;
         let is_newly_added = first_barrier.is_newly_added(self.actor_id);
         // The first barrier message should be propagated.
@@ -228,8 +235,9 @@ where
                     let left_upstream = upstream.by_ref().map(Either::Left);
 
                     // Check if stream paused
-                    let paused =
-                        paused || matches!(self.rate_limiter.rate_limit(), RateLimit::Pause);
+                    let paused = global_pause
+                        || backfill_paused
+                        || matches!(self.rate_limiter.rate_limit(), RateLimit::Pause);
                     // Create the snapshot stream
                     let right_snapshot = pin!(
                         Self::make_snapshot_stream(
@@ -266,7 +274,7 @@ where
                                     }
                                     Message::Chunk(chunk) => {
                                         // Buffer the upstream chunk.
-                                        upstream_chunk_buffer.push(chunk.compact());
+                                        upstream_chunk_buffer.push(chunk.compact_vis());
                                     }
                                     Message::Watermark(_) => {
                                         // Ignore watermark during backfill.
@@ -281,7 +289,7 @@ where
                                         // Consume remaining rows in the builder.
                                         for (vnode, builder) in &mut builders {
                                             if let Some(data_chunk) = builder.consume_all() {
-                                                yield Message::Chunk(Self::handle_snapshot_chunk(
+                                                let chunk = Self::handle_snapshot_chunk(
                                                     data_chunk,
                                                     *vnode,
                                                     &pk_in_output_indices,
@@ -289,7 +297,16 @@ where
                                                     &mut cur_barrier_snapshot_processed_rows,
                                                     &mut total_snapshot_processed_rows,
                                                     &self.output_indices,
-                                                )?);
+                                                )?;
+                                                tracing::trace!(
+                                                    source = "snapshot",
+                                                    state = "finish_backfill_stream",
+                                                    action = "drain_snapshot_buffers",
+                                                    ?vnode,
+                                                    "{:#?}",
+                                                    chunk,
+                                                );
+                                                yield Message::Chunk(chunk);
                                             }
                                         }
 
@@ -303,10 +320,15 @@ where
                                             let chunk_cardinality = chunk.cardinality() as u64;
                                             cur_barrier_upstream_processed_rows +=
                                                 chunk_cardinality;
-                                            yield Message::Chunk(mapping_chunk(
+                                            let chunk = mapping_chunk(chunk, &self.output_indices);
+                                            tracing::trace!(
+                                                source = "upstream",
+                                                state = "finish_backfill_stream",
+                                                action = "drain_upstream_buffer",
+                                                "{:#?}",
                                                 chunk,
-                                                &self.output_indices,
-                                            ));
+                                            );
+                                            yield Message::Chunk(chunk);
                                         }
                                         metrics
                                             .backfill_snapshot_read_row_count
@@ -319,7 +341,7 @@ where
                                     Some((vnode, row)) => {
                                         let builder = builders.get_mut(&vnode).unwrap();
                                         if let Some(chunk) = builder.append_one_row(row) {
-                                            yield Message::Chunk(Self::handle_snapshot_chunk(
+                                            let chunk = Self::handle_snapshot_chunk(
                                                 chunk,
                                                 vnode,
                                                 &pk_in_output_indices,
@@ -327,7 +349,15 @@ where
                                                 &mut cur_barrier_snapshot_processed_rows,
                                                 &mut total_snapshot_processed_rows,
                                                 &self.output_indices,
-                                            )?);
+                                            )?;
+                                            tracing::trace!(
+                                                source = "snapshot",
+                                                state = "process_backfill_stream",
+                                                action = "drain_full_snapshot_buffer",
+                                                "{:#?}",
+                                                chunk,
+                                            );
+                                            yield Message::Chunk(chunk);
                                         }
                                     }
                                 }
@@ -364,7 +394,7 @@ where
                                 Some((vnode, row)) => {
                                     let builder = builders.get_mut(&vnode).unwrap();
                                     if let Some(chunk) = builder.append_one_row(row) {
-                                        yield Message::Chunk(Self::handle_snapshot_chunk(
+                                        let chunk = Self::handle_snapshot_chunk(
                                             chunk,
                                             vnode,
                                             &pk_in_output_indices,
@@ -372,7 +402,15 @@ where
                                             &mut cur_barrier_snapshot_processed_rows,
                                             &mut total_snapshot_processed_rows,
                                             &self.output_indices,
-                                        )?);
+                                        )?;
+                                        tracing::trace!(
+                                            source = "snapshot",
+                                            state = "process_backfill_stream",
+                                            action = "snapshot_read_at_least_one",
+                                            "{:#?}",
+                                            chunk,
+                                        );
+                                        yield Message::Chunk(chunk);
                                     }
 
                                     break;
@@ -422,7 +460,15 @@ where
 
                         cur_barrier_snapshot_processed_rows += chunk_cardinality;
                         total_snapshot_processed_rows += chunk_cardinality;
-                        yield Message::Chunk(mapping_chunk(chunk, &self.output_indices));
+                        let chunk = mapping_chunk(chunk, &self.output_indices);
+                        tracing::trace!(
+                            source = "snapshot",
+                            state = "process_barrier",
+                            action = "consume_remaining_snapshot",
+                            "{:#?}",
+                            chunk,
+                        );
+                        yield Message::Chunk(chunk);
                     }
                 }
 
@@ -434,7 +480,7 @@ where
                     // If no current_pos, means no snapshot processed yet.
                     // Also means we don't need propagate any updates <= current_pos.
                     if backfill_state.has_progress() {
-                        yield Message::Chunk(mapping_chunk(
+                        let chunk = mapping_chunk(
                             mark_chunk_ref_by_vnode(
                                 &chunk,
                                 &backfill_state,
@@ -443,7 +489,15 @@ where
                                 &pk_order,
                             )?,
                             &self.output_indices,
-                        ));
+                        );
+                        tracing::trace!(
+                            source = "upstream",
+                            state = "process_barrier",
+                            action = "consume_remaining_upstream",
+                            "{:#?}",
+                            chunk,
+                        );
+                        yield Message::Chunk(chunk);
                     }
 
                     // Replicate
@@ -494,22 +548,28 @@ where
                     use crate::executor::Mutation;
                     match mutation {
                         Mutation::Pause => {
-                            paused = true;
+                            global_pause = true;
                         }
                         Mutation::Resume => {
-                            paused = false;
+                            global_pause = false;
                         }
-                        Mutation::Throttle(actor_to_apply) => {
-                            let new_rate_limit_entry = actor_to_apply.get(&self.actor_id);
-                            if let Some(new_rate_limit) = new_rate_limit_entry {
-                                let new_rate_limit = (*new_rate_limit).into();
+                        Mutation::StartFragmentBackfill { fragment_ids } if backfill_paused => {
+                            if fragment_ids.contains(&self.fragment_id) {
+                                backfill_paused = false;
+                            }
+                        }
+                        Mutation::Throttle(fragment_to_apply) => {
+                            if let Some(entry) = fragment_to_apply.get(&self.fragment_id)
+                                && entry.throttle_type() == ThrottleType::Backfill
+                            {
+                                let new_rate_limit = entry.rate_limit.into();
                                 let old_rate_limit = self.rate_limiter.update(new_rate_limit);
                                 if old_rate_limit != new_rate_limit {
                                     tracing::info!(
                                         old_rate_limit = ?old_rate_limit,
                                         new_rate_limit = ?new_rate_limit,
-                                        upstream_table_id = upstream_table_id,
-                                        actor_id = self.actor_id,
+                                        %upstream_table_id,
+                                        actor_id = %self.actor_id,
                                         "backfill rate limit changed",
                                     );
                                     builders = upstream_table

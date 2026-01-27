@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -21,7 +21,8 @@ use either::Either;
 use futures::stream::{PollNext, select_with_strategy};
 use itertools::Itertools;
 use risingwave_common::bitmap::BitmapBuilder;
-use risingwave_common::catalog::{ColumnId, TableId};
+use risingwave_common::catalog::ColumnId;
+use risingwave_common::id::SourceId;
 use risingwave_common::metrics::{GLOBAL_ERROR_METRICS, LabelGuardedIntCounter};
 use risingwave_common::system_param::local_manager::SystemParamsReaderRef;
 use risingwave_common::system_param::reader::SystemParamsRead;
@@ -33,6 +34,7 @@ use risingwave_connector::source::{
     SplitMetaData,
 };
 use risingwave_hummock_sdk::HummockReadEpoch;
+use risingwave_pb::common::ThrottleType;
 use risingwave_storage::store::TryWaitEpochOptions;
 use serde::{Deserialize, Serialize};
 use thiserror_ext::AsReport;
@@ -90,7 +92,7 @@ pub struct SourceBackfillExecutorInner<S: StateStore> {
     info: ExecutorInfo,
 
     /// Streaming source for external
-    source_id: TableId,
+    source_id: SourceId,
     source_name: String,
     column_ids: Vec<ColumnId>,
     source_desc_builder: Option<SourceDescBuilder>,
@@ -125,6 +127,14 @@ struct BackfillStage {
     splits: Vec<SplitImpl>,
 }
 
+enum ApplyMutationAfterBarrier {
+    SourceChangeSplit {
+        target_splits: Vec<SplitImpl>,
+        should_trim_state: bool,
+    },
+    ConnectorPropsChange,
+}
+
 impl BackfillStage {
     fn total_backfilled_rows(&self) -> u64 {
         self.states.values().map(|s| s.num_consumed_rows).sum()
@@ -132,8 +142,7 @@ impl BackfillStage {
 
     fn debug_assert_consistent(&self) {
         if cfg!(debug_assertions) {
-            let all_splits: HashSet<_> =
-                self.splits.iter().map(|split| split.id().clone()).collect();
+            let all_splits: HashSet<_> = self.splits.iter().map(|split| split.id()).collect();
             assert_eq!(
                 self.states.keys().cloned().collect::<HashSet<_>>(),
                 all_splits
@@ -337,14 +346,23 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
             .initial_split_assignment(self.actor_ctx.id)
             .unwrap_or(&[])
             .to_vec();
-        let is_pause_on_startup = barrier.is_pause_on_startup();
+
+        let mut pause_control = PauseControl::new();
+        if barrier.is_backfill_pause_on_startup(self.actor_ctx.fragment_id) {
+            pause_control.backfill_pause();
+        }
+        if barrier.is_pause_on_startup() {
+            pause_control.command_pause();
+        }
         yield Message::Barrier(barrier);
 
         let source_desc_builder: SourceDescBuilder = self.source_desc_builder.take().unwrap();
-        let source_desc = source_desc_builder
+        let mut source_desc = source_desc_builder
             .build()
             .map_err(StreamExecutorError::connector_error)?;
-        let (Some(split_idx), Some(offset_idx)) = get_split_offset_col_idx(&source_desc.columns)
+
+        // source backfill only applies to kafka, so we don't need to get pulsar's `message_id_data_idx`.
+        let (Some(split_idx), Some(offset_idx), _) = get_split_offset_col_idx(&source_desc.columns)
         else {
             unreachable!("Partition and offset columns must be set.");
         };
@@ -414,24 +432,39 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
 
         type PausedReader = Option<impl Stream>;
         let mut paused_reader: PausedReader = None;
-        let mut command_paused = false;
 
         macro_rules! pause_reader {
             () => {
-                let (left, right) = backfill_stream.into_inner();
-                backfill_stream = select_with_strategy(
-                    left,
-                    futures::stream::pending().boxed().map(Either::Right),
-                    select_strategy,
-                );
-                // XXX: do we have to store the original reader? Can we simply rebuild the reader later?
-                paused_reader = Some(right);
+                if !pause_control.reader_paused {
+                    let (left, right) = backfill_stream.into_inner();
+                    backfill_stream = select_with_strategy(
+                        left,
+                        futures::stream::pending().boxed().map(Either::Right),
+                        select_strategy,
+                    );
+                    // XXX: do we have to store the original reader? Can we simply rebuild the reader later?
+                    paused_reader = Some(right);
+                    pause_control.reader_paused = true;
+                }
             };
         }
 
-        // If the first barrier requires us to pause on startup, pause the stream.
-        if is_pause_on_startup {
-            command_paused = true;
+        macro_rules! resume_reader {
+            () => {
+                if pause_control.reader_paused {
+                    backfill_stream = select_with_strategy(
+                        input.by_ref().map(Either::Left),
+                        paused_reader
+                            .take()
+                            .expect("should have paused reader to resume"),
+                        select_strategy,
+                    );
+                    pause_control.reader_paused = false;
+                }
+            };
+        }
+
+        if pause_control.is_paused() {
             pause_reader!();
         }
 
@@ -440,7 +473,7 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
             .state_store()
             .state_store()
             .clone();
-        let table_id = self.backfill_state_store.state_store().table_id().into();
+        let table_id = self.backfill_state_store.state_store().table_id();
         let mut state_table_initialized = false;
         {
             let source_backfill_row_count = self
@@ -459,7 +492,6 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                 as u128
                 * WAIT_BARRIER_MULTIPLE_TIMES;
             let mut last_barrier_time = Instant::now();
-            let mut self_paused = false;
 
             // The main logic of the loop is in handle_upstream_row and handle_backfill_row.
             'backfill_loop: while let Some(either) = backfill_stream.next().await {
@@ -468,7 +500,7 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                     Either::Left(msg) => {
                         let Ok(msg) = msg else {
                             let e = msg.unwrap_err();
-                            tracing::warn!(
+                            tracing::error!(
                                 error = ?e.as_report(),
                                 source_id = %self.source_id,
                                 "stream source reader error",
@@ -476,7 +508,7 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                             GLOBAL_ERROR_METRICS.user_source_error.report([
                                 "SourceReaderError".to_owned(),
                                 self.source_id.to_string(),
-                                self.source_name.to_owned(),
+                                self.source_name.clone(),
                                 self.actor_ctx.fragment_id.to_string(),
                             ]);
 
@@ -498,45 +530,29 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                             Message::Barrier(barrier) => {
                                 last_barrier_time = Instant::now();
 
-                                if self_paused {
-                                    // command_paused has a higher priority.
-                                    if !command_paused {
-                                        backfill_stream = select_with_strategy(
-                                            input.by_ref().map(Either::Left),
-                                            paused_reader
-                                                .take()
-                                                .expect("no paused reader to resume"),
-                                            select_strategy,
-                                        );
-                                    }
-                                    self_paused = false;
+                                if pause_control.self_resume() {
+                                    resume_reader!();
                                 }
 
-                                let mut split_changed = None;
+                                let mut maybe_muatation = None;
                                 if let Some(ref mutation) = barrier.mutation.as_deref() {
                                     match mutation {
                                         Mutation::Pause => {
                                             // pause_reader should not be invoked consecutively more than once.
-                                            if !command_paused {
-                                                pause_reader!();
-                                                command_paused = true;
-                                            } else {
-                                                tracing::warn!(command_paused, "unexpected pause");
-                                            }
+                                            pause_control.command_pause();
+                                            pause_reader!();
                                         }
                                         Mutation::Resume => {
                                             // pause_reader.take should not be invoked consecutively more than once.
-                                            if command_paused {
-                                                backfill_stream = select_with_strategy(
-                                                    input.by_ref().map(Either::Left),
-                                                    paused_reader
-                                                        .take()
-                                                        .expect("no paused reader to resume"),
-                                                    select_strategy,
-                                                );
-                                                command_paused = false;
-                                            } else {
-                                                tracing::warn!(command_paused, "unexpected resume");
+                                            if pause_control.command_resume() {
+                                                resume_reader!();
+                                            }
+                                        }
+                                        Mutation::StartFragmentBackfill { fragment_ids } => {
+                                            if fragment_ids.contains(&self.actor_ctx.fragment_id)
+                                                && pause_control.backfill_resume()
+                                            {
+                                                resume_reader!();
                                             }
                                         }
                                         Mutation::SourceChangeSplit(actor_splits) => {
@@ -544,30 +560,53 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                                                 actor_splits = ?actor_splits,
                                                 "source change split received"
                                             );
-                                            split_changed = actor_splits
+                                            maybe_muatation = actor_splits
                                                 .get(&self.actor_ctx.id)
                                                 .cloned()
-                                                .map(|target_splits| (target_splits, true));
+                                                .map(|target_splits| {
+                                                    ApplyMutationAfterBarrier::SourceChangeSplit {
+                                                        target_splits,
+                                                        should_trim_state: true,
+                                                    }
+                                                });
                                         }
                                         Mutation::Update(UpdateMutation {
                                             actor_splits, ..
                                         }) => {
-                                            split_changed = actor_splits
+                                            maybe_muatation = actor_splits
                                                 .get(&self.actor_ctx.id)
                                                 .cloned()
-                                                .map(|target_splits| (target_splits, false));
+                                                .map(|target_splits| {
+                                                    ApplyMutationAfterBarrier::SourceChangeSplit {
+                                                        target_splits,
+                                                        should_trim_state: false,
+                                                    }
+                                                });
                                         }
-                                        Mutation::Throttle(actor_to_apply) => {
-                                            if let Some(new_rate_limit) =
-                                                actor_to_apply.get(&self.actor_ctx.id)
-                                                && *new_rate_limit != self.rate_limit_rps
+                                        Mutation::ConnectorPropsChange(maybe_mutation) => {
+                                            if let Some(props_plaintext) =
+                                                maybe_mutation.get(&self.source_id.as_raw_id())
+                                            {
+                                                source_desc
+                                                    .update_reader(props_plaintext.clone())?;
+
+                                                maybe_muatation = Some(
+                                                    ApplyMutationAfterBarrier::ConnectorPropsChange,
+                                                );
+                                            }
+                                        }
+                                        Mutation::Throttle(fragment_to_apply) => {
+                                            if let Some(entry) =
+                                                fragment_to_apply.get(&self.actor_ctx.fragment_id)
+                                                && entry.throttle_type() == ThrottleType::Backfill
+                                                && entry.rate_limit != self.rate_limit_rps
                                             {
                                                 tracing::info!(
                                                     "updating rate limit from {:?} to {:?}",
                                                     self.rate_limit_rps,
-                                                    *new_rate_limit
+                                                    entry.rate_limit
                                                 );
-                                                self.rate_limit_rps = *new_rate_limit;
+                                                self.rate_limit_rps = entry.rate_limit;
                                                 // rebuild reader
                                                 let (reader, _backfill_info) = self
                                                     .build_stream_source_reader(
@@ -638,13 +677,11 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                                     // yield barrier after reporting progress
                                     yield Message::Barrier(barrier);
 
-                                    if let Some((target_splits, should_trim_state)) = split_changed
-                                    {
+                                    if let Some(to_apply_mutation) = maybe_muatation {
                                         self.apply_split_change_after_yield_barrier(
                                             barrier_epoch,
-                                            target_splits,
                                             &mut backfill_stage,
-                                            should_trim_state,
+                                            to_apply_mutation,
                                         )
                                         .await?;
                                     }
@@ -686,30 +723,27 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                                     // yield barrier after reporting progress
                                     yield Message::Barrier(barrier);
 
-                                    if let Some((target_splits, should_trim_state)) = split_changed
-                                    {
-                                        if self
+                                    if let Some(to_apply_mutation) = maybe_muatation
+                                        && self
                                             .apply_split_change_after_yield_barrier(
                                                 barrier_epoch,
-                                                target_splits,
                                                 &mut backfill_stage,
-                                                should_trim_state,
+                                                to_apply_mutation,
                                             )
                                             .await?
-                                        {
-                                            let reader = rebuild_reader_on_split_changed(
-                                                &self,
-                                                &backfill_stage,
-                                                &source_desc,
-                                            )
-                                            .await?;
+                                    {
+                                        let reader = rebuild_reader_on_split_changed(
+                                            &self,
+                                            &backfill_stage,
+                                            &source_desc,
+                                        )
+                                        .await?;
 
-                                            backfill_stream = select_with_strategy(
-                                                input.by_ref().map(Either::Left),
-                                                reader.map(Either::Right),
-                                                select_strategy,
-                                            );
-                                        }
+                                        backfill_stream = select_with_strategy(
+                                            input.by_ref().map(Either::Left),
+                                            reader.map(Either::Right),
+                                            select_strategy,
+                                        );
                                     }
                                 }
                             }
@@ -741,18 +775,14 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                         let chunk = msg?;
 
                         if last_barrier_time.elapsed().as_millis() > max_wait_barrier_time_ms {
-                            assert!(!command_paused, "command_paused should be false");
-                            // pause_reader should not be invoked consecutively more than once.
-                            if !self_paused {
-                                pause_reader!();
-                            } else {
-                                tracing::warn!(self_paused, "unexpected self pause");
-                            }
+                            // Pause to let barrier catch up via backpressure of snapshot stream.
+                            pause_control.self_pause();
+                            pause_reader!();
+
                             // Exceeds the max wait barrier time, the source will be paused.
                             // Currently we can guarantee the
                             // source is not paused since it received stream
                             // chunks.
-                            self_paused = true;
                             tracing::warn!(
                                 "source {} paused, wait barrier for {:?}",
                                 self.info.identity,
@@ -892,22 +922,34 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
     async fn apply_split_change_after_yield_barrier(
         &mut self,
         barrier_epoch: EpochPair,
-        target_splits: Vec<SplitImpl>,
         stage: &mut BackfillStage,
-        should_trim_state: bool,
+        to_apply_mutation: ApplyMutationAfterBarrier,
     ) -> StreamExecutorResult<bool> {
-        self.source_split_change_count.inc();
-        {
-            if self
-                .update_state_if_changed(barrier_epoch, target_splits, stage, should_trim_state)
-                .await?
-            {
-                // Note: we don't rebuild backfill_stream here, due to some complex lifetime issues.
-                return Ok(true);
+        match to_apply_mutation {
+            ApplyMutationAfterBarrier::SourceChangeSplit {
+                target_splits,
+                should_trim_state,
+            } => {
+                self.source_split_change_count.inc();
+                {
+                    if self
+                        .update_state_if_changed(
+                            barrier_epoch,
+                            target_splits,
+                            stage,
+                            should_trim_state,
+                        )
+                        .await?
+                    {
+                        // Note: we don't rebuild backfill_stream here, due to some complex lifetime issues.
+                        Ok(true)
+                    } else {
+                        Ok(false)
+                    }
+                }
             }
+            ApplyMutationAfterBarrier::ConnectorPropsChange => Ok(true),
         }
-
-        Ok(false)
     }
 
     /// Returns `true` if split changed. Otherwise `false`.
@@ -1020,10 +1062,8 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
         states: &mut BackfillStates,
         should_trim_state: bool,
     ) -> StreamExecutorResult<()> {
-        let target_splits: HashSet<SplitId> = target_splits
-            .into_iter()
-            .map(|split| (split.id()))
-            .collect();
+        let target_splits: HashSet<SplitId> =
+            target_splits.into_iter().map(|split| split.id()).collect();
 
         let mut split_changed = false;
         let mut newly_added_splits = vec![];
@@ -1136,7 +1176,92 @@ impl<S: StateStore> Debug for SourceBackfillExecutorInner<S> {
         f.debug_struct("SourceBackfillExecutor")
             .field("source_id", &self.source_id)
             .field("column_ids", &self.column_ids)
-            .field("pk_indices", &self.info.pk_indices)
+            .field("stream_key", &self.info.stream_key)
             .finish()
+    }
+}
+
+struct PauseControl {
+    // Paused due to backfill order control
+    backfill_paused: bool,
+    // Paused due to self-pause, e.g. let barrier catch up
+    self_paused: bool,
+    // Paused due to Pause command from meta, pause_on_next_bootstrap
+    command_paused: bool,
+    // reader paused
+    reader_paused: bool,
+}
+
+impl PauseControl {
+    fn new() -> Self {
+        Self {
+            backfill_paused: false,
+            self_paused: false,
+            command_paused: false,
+            reader_paused: false,
+        }
+    }
+
+    fn is_paused(&self) -> bool {
+        self.backfill_paused || self.command_paused || self.self_paused
+    }
+
+    /// returns whether we need to pause the reader.
+    fn backfill_pause(&mut self) {
+        if self.backfill_paused {
+            tracing::warn!("backfill_pause invoked twice");
+        }
+        self.backfill_paused = true;
+    }
+
+    /// returns whether we need to resume the reader.
+    /// same precedence as command.
+    fn backfill_resume(&mut self) -> bool {
+        if !self.backfill_paused {
+            tracing::warn!("backfill_resume invoked twice");
+        }
+        !self.command_paused
+    }
+
+    /// returns whether we need to pause the reader.
+    fn self_pause(&mut self) {
+        assert!(
+            !self.backfill_paused,
+            "backfill stream should not be read when backfill_pause is set"
+        );
+        assert!(
+            !self.command_paused,
+            "backfill stream should not be read when command_pause is set"
+        );
+        if self.self_paused {
+            tracing::warn!("self_pause invoked twice");
+        }
+        self.self_paused = true;
+    }
+
+    /// returns whether we need to resume the reader.
+    /// `self_resume` has the lowest precedence,
+    /// it can only resume if we are not paused due to `backfill_paused` or `command_paused`.
+    fn self_resume(&mut self) -> bool {
+        self.self_paused = false;
+        !(self.backfill_paused || self.command_paused)
+    }
+
+    /// returns whether we need to pause the reader.
+    fn command_pause(&mut self) {
+        if self.command_paused {
+            tracing::warn!("command_pause invoked twice");
+        }
+        self.command_paused = true;
+    }
+
+    /// returns whether we need to resume the reader.
+    /// same precedence as backfill.
+    fn command_resume(&mut self) -> bool {
+        if !self.command_paused {
+            tracing::warn!("command_resume invoked twice");
+        }
+        self.command_paused = false;
+        !self.backfill_paused
     }
 }

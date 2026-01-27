@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,14 +20,20 @@ use std::sync::Arc;
 use anyhow::Context;
 use futures::future::try_join_all;
 use prometheus::HistogramTimer;
-use risingwave_common::catalog::{DatabaseId, TableId};
+use risingwave_common::catalog::DatabaseId;
+use risingwave_common::id::JobId;
 use risingwave_common::must_match;
+use risingwave_common::util::deployment::Deployment;
 use risingwave_pb::hummock::HummockVersionStats;
+use risingwave_pb::stream_service::barrier_complete_response::{
+    PbListFinishedSource, PbLoadFinishedSource,
+};
 use tokio::task::JoinHandle;
 
 use crate::barrier::checkpoint::CheckpointControl;
 use crate::barrier::command::CommandContext;
-use crate::barrier::context::GlobalBarrierWorkerContext;
+use crate::barrier::context::{CreateSnapshotBackfillJobCommandInfo, GlobalBarrierWorkerContext};
+use crate::barrier::info::BarrierInfo;
 use crate::barrier::notifier::Notifier;
 use crate::barrier::progress::TrackingJob;
 use crate::barrier::rpc::ControlStreamManager;
@@ -42,7 +48,7 @@ pub(super) enum CompletingTask {
     Completing {
         #[expect(clippy::type_complexity)]
         /// `database_id` -> (`Some(database_graph_committed_epoch)`, [(`creating_job_id`, `creating_job_committed_epoch`)])
-        epochs_to_ack: HashMap<DatabaseId, (Option<u64>, Vec<(TableId, u64)>)>,
+        epochs_to_ack: HashMap<DatabaseId, (Option<u64>, Vec<(JobId, u64)>)>,
 
         // The join handle of a spawned task that completes the barrier.
         // The return value indicate whether there is some create streaming job command
@@ -53,25 +59,33 @@ pub(super) enum CompletingTask {
     Err(MetaError),
 }
 
+/// Only for checkpoint barrier. For normal barrier, there won't be a task.
 #[derive(Default)]
 pub(super) struct CompleteBarrierTask {
     pub(super) commit_info: CommitEpochInfo,
     pub(super) finished_jobs: Vec<TrackingJob>,
+    pub(super) finished_cdc_table_backfill: Vec<JobId>,
     pub(super) notifiers: Vec<Notifier>,
-    /// `database_id` -> (Some((`command_ctx`, `enqueue_time`)), vec!((`creating_job_id`, `epoch`)))
+    /// `database_id` -> (Some((`command_ctx`, `enqueue_time`)), vec!((`creating_job_id`, `epoch`, `create_snapshot_backfill_info`)))
     #[expect(clippy::type_complexity)]
     pub(super) epoch_infos: HashMap<
         DatabaseId,
         (
             Option<(CommandContext, HistogramTimer)>,
-            Vec<(TableId, u64)>,
+            Vec<(JobId, u64, Option<CreateSnapshotBackfillJobCommandInfo>)>,
         ),
     >,
+    /// Source listing completion events that need `ListFinish` commands
+    pub(super) list_finished_source_ids: Vec<PbListFinishedSource>,
+    /// Source load completion events that need `LoadFinish` commands
+    pub(super) load_finished_source_ids: Vec<PbLoadFinishedSource>,
+    /// Table IDs that have finished materialize refresh and need completion signaling
+    pub(super) refresh_finished_table_job_ids: Vec<JobId>,
 }
 
 impl CompleteBarrierTask {
     #[expect(clippy::type_complexity)]
-    pub(super) fn epochs_to_ack(&self) -> HashMap<DatabaseId, (Option<u64>, Vec<(TableId, u64)>)> {
+    pub(super) fn epochs_to_ack(&self) -> HashMap<DatabaseId, (Option<u64>, Vec<(JobId, u64)>)> {
         self.epoch_infos
             .iter()
             .map(|(database_id, (command_context, creating_job_epochs))| {
@@ -80,8 +94,11 @@ impl CompleteBarrierTask {
                     (
                         command_context
                             .as_ref()
-                            .map(|(command, _)| command.barrier_info.prev_epoch.value().0),
-                        creating_job_epochs.clone(),
+                            .map(|(command, _)| command.barrier_info.prev_epoch()),
+                        creating_job_epochs
+                            .iter()
+                            .map(|(job_id, epoch, _)| (*job_id, *epoch))
+                            .collect(),
                     ),
                 )
             })
@@ -100,12 +117,57 @@ impl CompleteBarrierTask {
                 .barrier_wait_commit_latency
                 .start_timer();
             let version_stats = context.commit_epoch(self.commit_info).await?;
-            for command_ctx in self
-                .epoch_infos
-                .values()
-                .flat_map(|(command, _)| command.as_ref().map(|(command, _)| command))
-            {
-                context.post_collect_command(command_ctx).await?;
+
+            // Handle list finished source IDs for refreshable batch sources
+            // Spawn this asynchronously to avoid deadlock during barrier collection
+            //
+            // This step is for fs-like refreshable-batch sources, which need to list the data first finishing loading. It guarantees finishing listing before loading.
+            // The other sources can skip this step.
+
+            if !self.list_finished_source_ids.is_empty() {
+                context
+                    .handle_list_finished_source_ids(self.list_finished_source_ids.clone())
+                    .await?;
+            }
+
+            // Handle load finished source IDs for refreshable batch sources
+            // Spawn this asynchronously to avoid deadlock during barrier collection
+            if !self.load_finished_source_ids.is_empty() {
+                context
+                    .handle_load_finished_source_ids(self.load_finished_source_ids.clone())
+                    .await?;
+            }
+
+            // Handle refresh finished table IDs for materialized view refresh completion
+            if !self.refresh_finished_table_job_ids.is_empty() {
+                context
+                    .handle_refresh_finished_table_ids(self.refresh_finished_table_job_ids.clone())
+                    .await?;
+            }
+
+            for (database_id, (command_ctx, creating_jobs)) in self.epoch_infos {
+                if let Some((command_ctx, enqueue_time)) = command_ctx {
+                    let command_name = command_ctx.command.command_name().to_owned();
+                    context.post_collect_command(command_ctx.command).await?;
+                    let duration_sec = enqueue_time.stop_and_record();
+                    Self::report_complete_event(
+                        &env,
+                        duration_sec,
+                        &command_ctx.barrier_info,
+                        command_name,
+                    );
+                    GLOBAL_META_METRICS
+                        .last_committed_barrier_time
+                        .with_label_values(&[database_id.to_string().as_str()])
+                        .set(command_ctx.barrier_info.curr_epoch.value().as_unix_secs() as i64);
+                }
+                for (_, _, create_info) in creating_jobs {
+                    if let Some(create_info) = create_info {
+                        context
+                            .post_collect_command(create_info.into_post_collect())
+                            .await?;
+                    }
+                }
             }
 
             wait_commit_timer.observe_duration();
@@ -131,16 +193,12 @@ impl CompleteBarrierTask {
                     .map(|finished_job| context.finish_creating_job(finished_job)),
             )
             .await?;
-            for (database_id, (command, _)) in self.epoch_infos {
-                if let Some((command_ctx, enqueue_time)) = command {
-                    let duration_sec = enqueue_time.stop_and_record();
-                    Self::report_complete_event(&env, duration_sec, &command_ctx);
-                    GLOBAL_META_METRICS
-                        .last_committed_barrier_time
-                        .with_label_values(&[database_id.database_id.to_string().as_str()])
-                        .set(command_ctx.barrier_info.curr_epoch.value().as_unix_secs() as i64);
-                }
-            }
+            try_join_all(
+                self.finished_cdc_table_backfill
+                    .into_iter()
+                    .map(|job_id| context.finish_cdc_table_backfill(job_id)),
+            )
+            .await?;
             version_stats
         };
 
@@ -149,20 +207,27 @@ impl CompleteBarrierTask {
 }
 
 impl CompleteBarrierTask {
-    fn report_complete_event(env: &MetaSrvEnv, duration_sec: f64, command_ctx: &CommandContext) {
+    fn report_complete_event(
+        env: &MetaSrvEnv,
+        duration_sec: f64,
+        barrier_info: &BarrierInfo,
+        command: String,
+    ) {
         // Record barrier latency in event log.
         use risingwave_pb::meta::event_log;
         let event = event_log::EventBarrierComplete {
-            prev_epoch: command_ctx.barrier_info.prev_epoch(),
-            cur_epoch: command_ctx.barrier_info.curr_epoch.value().0,
+            prev_epoch: barrier_info.prev_epoch(),
+            cur_epoch: barrier_info.curr_epoch(),
             duration_sec,
-            command: command_ctx
-                .command
-                .as_ref()
-                .map(|command| command.to_string())
-                .unwrap_or_else(|| "barrier".to_owned()),
-            barrier_kind: command_ctx.barrier_info.kind.as_str_name().to_owned(),
+            command,
+            barrier_kind: barrier_info.kind.as_str_name().to_owned(),
         };
+        if cfg!(debug_assertions) || Deployment::current().is_ci() {
+            // Add a warning log so that debug mode / CI can observe it
+            if duration_sec > 5.0 {
+                tracing::warn!(event = ?event,"high barrier latency observed!")
+            }
+        }
         env.event_log_manager_ref()
             .add_event_logs(vec![event_log::Event::BarrierComplete(event)]);
     }
@@ -171,7 +236,7 @@ impl CompleteBarrierTask {
 pub(super) struct BarrierCompleteOutput {
     #[expect(clippy::type_complexity)]
     /// `database_id` -> (`Some(database_graph_committed_epoch)`, [(`creating_job_id`, `creating_job_committed_epoch`)])
-    pub epochs_to_ack: HashMap<DatabaseId, (Option<u64>, Vec<(TableId, u64)>)>,
+    pub epochs_to_ack: HashMap<DatabaseId, (Option<u64>, Vec<(JobId, u64)>)>,
     pub hummock_version_stats: HummockVersionStats,
 }
 
@@ -186,21 +251,26 @@ impl CompletingTask {
     ) -> impl Future<Output = MetaResult<BarrierCompleteOutput>> + 'a {
         // If there is no completing barrier, try to start completing the earliest barrier if
         // it has been collected.
-        if let CompletingTask::None = self {
-            if let Some(task) = checkpoint_control
+        if let CompletingTask::None = self
+            && let Some(task) = checkpoint_control
                 .next_complete_barrier_task(Some((periodic_barriers, control_stream_manager)))
+        {
             {
-                {
-                    let epochs_to_ack = task.epochs_to_ack();
-                    let context = context.clone();
-                    let env = env.clone();
-                    let join_handle =
-                        tokio::spawn(async move { task.complete_barrier(&*context, env).await });
-                    *self = CompletingTask::Completing {
-                        epochs_to_ack,
-                        join_handle,
-                    };
-                }
+                let epochs_to_ack = task.epochs_to_ack();
+                let context = context.clone();
+                let await_tree_reg = env.await_tree_reg().clone();
+                let env = env.clone();
+
+                let fut = async move { task.complete_barrier(&*context, env).await };
+                let fut = await_tree_reg
+                    .register_derived_root("Barrier Completion Task")
+                    .instrument(fut);
+                let join_handle = tokio::spawn(fut);
+
+                *self = CompletingTask::Completing {
+                    epochs_to_ack,
+                    join_handle,
+                };
             }
         }
 
@@ -212,6 +282,7 @@ impl CompletingTask {
         }
     }
 
+    #[await_tree::instrument]
     pub(super) async fn wait_completing_task(
         &mut self,
     ) -> MetaResult<Option<BarrierCompleteOutput>> {

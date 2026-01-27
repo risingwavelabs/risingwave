@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,7 +19,6 @@
 #![feature(proc_macro_hygiene, stmt_expr_attributes)]
 #![feature(trait_alias)]
 #![feature(if_let_guard)]
-#![feature(let_chains)]
 #![feature(assert_matches)]
 #![feature(box_patterns)]
 #![feature(macro_metavar_expr)]
@@ -27,12 +26,11 @@
 #![feature(extend_one)]
 #![feature(type_alias_impl_trait)]
 #![feature(impl_trait_in_assoc_type)]
-#![feature(result_flattening)]
 #![feature(error_generic_member_access)]
 #![feature(iterator_try_collect)]
 #![feature(used_with_arg)]
 #![feature(try_trait_v2)]
-#![feature(cell_update)]
+#![feature(never_type)]
 #![recursion_limit = "256"]
 
 #[cfg(test)]
@@ -70,6 +68,12 @@ mod utils;
 pub use utils::{WithOptions, WithOptionsSecResolved, explain_stream_graph};
 pub(crate) mod error;
 mod meta_client;
+pub mod metrics_reader;
+pub use metrics_reader::MetricsReaderImpl;
+
+#[cfg(feature = "datafusion")]
+pub mod datafusion;
+
 pub mod test_utils;
 mod user;
 pub mod webhook;
@@ -130,7 +134,7 @@ pub struct FrontendOpts {
         long,
         alias = "health-check-listener-addr",
         env = "RW_HEALTH_CHECK_LISTENER_ADDR",
-        default_value = "127.0.0.1:6786"
+        default_value = "0.0.0.0:6786"
     )]
     pub frontend_rpc_listener_addr: String,
 
@@ -184,6 +188,17 @@ pub struct FrontendOpts {
     /// Feature disabled by default.
     #[clap(long, env = "RW_SBC_ADDR", default_value = "")]
     pub serverless_backfill_controller_addr: String,
+
+    /// Prometheus endpoint URL for querying metrics.
+    /// Optional, used for querying Prometheus metrics from the frontend.
+    #[clap(long, env = "RW_PROMETHEUS_ENDPOINT")]
+    pub prometheus_endpoint: Option<String>,
+
+    /// The additional selector used when querying Prometheus.
+    ///
+    /// The format is same as `PromQL`. Example: `instance="foo",namespace="bar"`
+    #[clap(long, env = "RW_PROMETHEUS_SELECTOR")]
+    pub prometheus_selector: Option<String>,
 }
 
 impl risingwave_common::opts::Opts for FrontendOpts {

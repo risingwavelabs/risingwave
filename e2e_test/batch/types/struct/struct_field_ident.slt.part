@@ -1,0 +1,19 @@
+statement ok
+create table t (v struct<"A" int, "b B" varchar, C bool>);
+
+query TTT
+select (v)."A", (v)."b B", (v).c from t;
+----
+
+query TT
+show create table t;
+----
+public.t CREATE TABLE t (v STRUCT<"A" INT, "b B" CHARACTER VARYING, C BOOLEAN>)
+
+query TT
+select column_name, data_type from information_schema.columns where table_name = 't';
+----
+v struct<"A" integer, "b B" character varying, c boolean>
+
+statement ok
+drop table t;

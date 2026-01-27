@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -42,6 +42,13 @@ impl<PlanRef: GenericPlanRef> DistillUnit for Filter<PlanRef> {
 impl<PlanRef: GenericPlanRef> Filter<PlanRef> {
     pub fn new(predicate: Condition, input: PlanRef) -> Self {
         Filter { predicate, input }
+    }
+
+    pub fn clone_with_input<OtherPlanRef>(&self, input: OtherPlanRef) -> Filter<OtherPlanRef> {
+        Filter {
+            predicate: self.predicate.clone(),
+            input,
+        }
     }
 }
 impl<PlanRef: GenericPlanRef> GenericPlanNode for Filter<PlanRef> {

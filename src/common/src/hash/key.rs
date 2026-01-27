@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -33,7 +33,7 @@ use risingwave_common_estimate_size::EstimateSize;
 use smallbitset::Set64;
 use static_assertions::const_assert_eq;
 
-use crate::array::{ListValue, MapValue, StructValue};
+use crate::array::{ListValue, MapValue, StructValue, VectorVal};
 use crate::types::{
     DataType, Date, Decimal, F32, F64, Int256, Int256Ref, JsonbVal, Scalar, ScalarRef,
     ScalarRefImpl, Serial, Time, Timestamp, Timestamptz,
@@ -80,7 +80,7 @@ const_assert_eq!(
 
 const_assert_eq!(
     std::mem::size_of::<HeapNullBitmap>(),
-    std::mem::size_of::<usize>() * 4,
+    std::mem::size_of::<usize>() * 3,
 );
 
 /// We use a trait for `NullBitmap` so we can parameterize structs on it.
@@ -627,6 +627,7 @@ impl_value_encoding_hash_key_serde!(JsonbVal);
 // use the memcmp encoding for safety.
 impl_memcmp_encoding_hash_key_serde!(StructValue);
 impl_memcmp_encoding_hash_key_serde!(ListValue);
+impl_memcmp_encoding_hash_key_serde!(VectorVal);
 impl_memcmp_encoding_hash_key_serde!(MapValue);
 
 #[cfg(test)]

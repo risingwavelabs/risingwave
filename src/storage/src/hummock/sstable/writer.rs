@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,6 +16,7 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use fail::fail_point;
+use foyer::HybridCacheProperties;
 use risingwave_hummock_sdk::HummockSstableObjectId;
 use risingwave_object_store::object::ObjectStreamingUploader;
 use tokio::task::JoinHandle;
@@ -25,8 +26,8 @@ use super::multi_builder::UploadJoinHandle;
 use super::{Block, BlockMeta};
 use crate::hummock::utils::MemoryTracker;
 use crate::hummock::{
-    CachePolicy, HummockResult, SstableBlockIndex, SstableBuilderOptions, SstableMeta,
-    SstableStore, SstableStoreRef,
+    CachePolicy, HummockResult, RecentFilterTrait, SstableBlockIndex, SstableBuilderOptions,
+    SstableMeta, SstableStore, SstableStoreRef,
 };
 
 /// A consumer of SST data.
@@ -111,7 +112,7 @@ pub trait SstableWriterFactory: Send {
 
     async fn create_sst_writer(
         &mut self,
-        object_id: HummockSstableObjectId,
+        object_id: impl Into<HummockSstableObjectId> + Send,
         options: SstableWriterOptions,
     ) -> HummockResult<Self::Writer>;
 }
@@ -132,7 +133,7 @@ impl SstableWriterFactory for BatchSstableWriterFactory {
 
     async fn create_sst_writer(
         &mut self,
-        object_id: HummockSstableObjectId,
+        object_id: impl Into<HummockSstableObjectId> + Send,
         options: SstableWriterOptions,
     ) -> HummockResult<Self::Writer> {
         Ok(BatchUploadWriter::new(
@@ -156,12 +157,12 @@ pub struct BatchUploadWriter {
 
 impl BatchUploadWriter {
     pub fn new(
-        object_id: HummockSstableObjectId,
+        object_id: impl Into<HummockSstableObjectId>,
         sstable_store: Arc<SstableStore>,
         options: SstableWriterOptions,
     ) -> Self {
         Self {
-            object_id,
+            object_id: object_id.into(),
             sstable_store,
             policy: options.policy,
             buf: Vec::with_capacity(options.capacity_hint.unwrap_or(0)),
@@ -216,22 +217,22 @@ impl SstableWriter for BatchUploadWriter {
             self.sstable_store.insert_meta_cache(self.object_id, meta);
 
             // Only update recent filter with sst obj id is okay here, for l0 is only filter by sst obj id with recent filter.
-            if let Some(filter) = self.sstable_store.recent_filter() {
-                filter.insert((self.object_id, usize::MAX));
-            }
+            self.sstable_store
+                .recent_filter()
+                .insert((self.object_id, usize::MAX));
 
             // Add block cache.
-            if let CachePolicy::Fill(fill_cache_priority) = self.policy {
+            if let CachePolicy::Fill(hint) = self.policy {
                 // The `block_info` may be empty when there is only range-tombstones, because we
                 //  store them in meta-block.
                 for (block_idx, block) in self.block_info.into_iter().enumerate() {
-                    self.sstable_store.block_cache().insert_with_hint(
+                    self.sstable_store.block_cache().insert_with_properties(
                         SstableBlockIndex {
                             sst_id: self.object_id,
                             block_idx: block_idx as _,
                         },
                         Box::new(block),
-                        fill_cache_priority,
+                        HybridCacheProperties::default().with_hint(hint),
                     );
                 }
             }
@@ -332,17 +333,17 @@ impl SstableWriter for StreamingUploadWriter {
             self.sstable_store.insert_meta_cache(self.object_id, meta);
 
             // Add block cache.
-            if let CachePolicy::Fill(fill_high_priority_cache) = self.policy
+            if let CachePolicy::Fill(hint) = self.policy
                 && !self.blocks.is_empty()
             {
                 for (block_idx, block) in self.blocks.into_iter().enumerate() {
-                    self.sstable_store.block_cache().insert_with_hint(
+                    self.sstable_store.block_cache().insert_with_properties(
                         SstableBlockIndex {
                             sst_id: self.object_id,
                             block_idx: block_idx as _,
                         },
                         Box::new(block),
-                        fill_high_priority_cache,
+                        HybridCacheProperties::default().with_hint(hint),
                     );
                 }
             }
@@ -381,9 +382,10 @@ impl SstableWriterFactory for UnifiedSstableWriterFactory {
 
     async fn create_sst_writer(
         &mut self,
-        object_id: HummockSstableObjectId,
+        object_id: impl Into<HummockSstableObjectId> + Send,
         options: SstableWriterOptions,
     ) -> HummockResult<Self::Writer> {
+        let object_id = object_id.into();
         if self.sstable_store.store().support_streaming_upload() {
             let path = self.sstable_store.get_sst_data_path(object_id);
             let uploader = self.sstable_store.create_streaming_uploader(&path).await?;
@@ -413,9 +415,10 @@ impl SstableWriterFactory for StreamingSstableWriterFactory {
 
     async fn create_sst_writer(
         &mut self,
-        object_id: HummockSstableObjectId,
+        object_id: impl Into<HummockSstableObjectId> + Send,
         options: SstableWriterOptions,
     ) -> HummockResult<Self::Writer> {
+        let object_id = object_id.into();
         let path = self.sstable_store.get_sst_data_path(object_id);
         let uploader = self.sstable_store.create_streaming_uploader(&path).await?;
         Ok(StreamingUploadWriter::new(

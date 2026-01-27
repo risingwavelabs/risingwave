@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,4 +17,3 @@ mod background_ddl;
 mod cursor;
 mod event_log;
 mod nexmark_recovery;
-mod pause_on_bootstrap;

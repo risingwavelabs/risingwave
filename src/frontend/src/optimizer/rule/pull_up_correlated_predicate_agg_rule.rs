@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,11 +18,11 @@ use risingwave_common::types::DataType;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_expr::aggregate::{AggType, PbAggKind};
 
-use super::super::plan_node::*;
-use super::{BoxedRule, Rule};
+use super::prelude::{PlanRef, *};
 use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprType, FunctionCall, InputRef};
 use crate::optimizer::plan_expr_visitor::Strong;
 use crate::optimizer::plan_node::generic::{Agg, GenericPlanNode, GenericPlanRef};
+use crate::optimizer::plan_node::*;
 use crate::optimizer::plan_visitor::{PlanCorrelatedIdFinder, PlanVisitor};
 use crate::utils::{Condition, IndexSet};
 
@@ -60,12 +60,12 @@ use crate::utils::{Condition, IndexSet};
 ///               Filter
 /// ```
 pub struct PullUpCorrelatedPredicateAggRule {}
-impl Rule for PullUpCorrelatedPredicateAggRule {
+impl Rule<Logical> for PullUpCorrelatedPredicateAggRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let top_filter = if let Some(top_filter) = plan.as_logical_filter() {
             top_filter.clone()
         } else {
-            LogicalFilter::new(plan.clone(), Condition::true_cond())
+            LogicalFilter::new(plan, Condition::true_cond())
         };
         let top_filter_input = top_filter.input();
         let apply = top_filter_input.as_logical_apply()?;

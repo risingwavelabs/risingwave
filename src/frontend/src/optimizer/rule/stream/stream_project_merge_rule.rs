@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,16 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::expr::{ExprImpl, ExprRewriter, ExprVisitor};
+use super::prelude::*;
+use crate::expr::{ExprImpl, ExprVisitor};
 use crate::optimizer::plan_expr_visitor::InputRefCounter;
-use crate::optimizer::plan_node::{PlanTreeNodeUnary, StreamProject, generic};
-use crate::optimizer::rule::Rule;
-use crate::optimizer::{BoxedRule, PlanRef};
+use crate::optimizer::plan_node::{PlanTreeNodeUnary, StreamProject};
 use crate::utils::Substitute;
 
 /// Merge contiguous [`StreamProject`] nodes.
 pub struct StreamProjectMergeRule {}
-impl Rule for StreamProjectMergeRule {
+impl Rule<Stream> for StreamProjectMergeRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let outer_project = plan.as_stream_project()?;
         let input = outer_project.input();
@@ -38,22 +37,17 @@ impl Rule for StreamProjectMergeRule {
             }
         }
 
-        let mut subst = Substitute {
+        let mut core = outer_project.core().clone();
+        core.rewrite_exprs(&mut Substitute {
             mapping: inner_project.exprs().clone(),
-        };
-        let exprs = outer_project
-            .exprs()
-            .iter()
-            .cloned()
-            .map(|expr| subst.rewrite_expr(expr))
-            .collect();
-        let logical_project = generic::Project::new(exprs, inner_project.input());
+        });
+        core.input = inner_project.input();
 
         // If either of the projects has the hint, we should keep it.
         let noop_update_hint = outer_project.noop_update_hint() || inner_project.noop_update_hint();
 
         Some(
-            StreamProject::new(logical_project)
+            StreamProject::new(core)
                 .with_noop_update_hint(noop_update_hint)
                 .into(),
         )

@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -64,6 +64,11 @@ pub trait ToText {
         let mut s = String::new();
         self.write(&mut s).unwrap();
         s
+    }
+
+    /// Returns an displayable wrapper implemented with `ToText::write`.
+    fn text_display(&self) -> impl std::fmt::Display + '_ {
+        std::fmt::from_fn(|f| self.write(f))
     }
 }
 

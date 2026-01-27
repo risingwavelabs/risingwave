@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,7 +20,10 @@ use risingwave_common::config::{MAX_CONNECTION_WINDOW_SIZE, RpcClientConfig};
 use risingwave_common::monitor::{EndpointExt, TcpConfig};
 use risingwave_common::util::addr::HostAddr;
 use risingwave_pb::frontend_service::frontend_service_client::FrontendServiceClient;
-use risingwave_pb::frontend_service::{GetTableReplacePlanRequest, GetTableReplacePlanResponse};
+use risingwave_pb::frontend_service::{
+    CancelRunningSqlRequest, CancelRunningSqlResponse, GetRunningSqlsRequest,
+    GetRunningSqlsResponse, GetTableReplacePlanRequest, GetTableReplacePlanResponse,
+};
 use tokio_retry::strategy::{ExponentialBackoff, jitter};
 use tonic::Response;
 use tonic::transport::Endpoint;
@@ -106,7 +109,7 @@ impl FrontendRetryClient {
             Self::get_retry_strategy(),
             || async {
                 self.client
-                    .to_owned()
+                    .clone()
                     .0
                     .get_table_replace_plan(request.clone())
                     .await
@@ -114,5 +117,19 @@ impl FrontendRetryClient {
             Self::should_retry,
         )
         .await
+    }
+
+    pub async fn get_running_sqls(
+        &self,
+        request: GetRunningSqlsRequest,
+    ) -> std::result::Result<Response<GetRunningSqlsResponse>, tonic::Status> {
+        self.client.0.clone().get_running_sqls(request).await
+    }
+
+    pub async fn cancel_running_sql(
+        &self,
+        request: CancelRunningSqlRequest,
+    ) -> std::result::Result<Response<CancelRunningSqlResponse>, tonic::Status> {
+        self.client.0.clone().cancel_running_sql(request).await
     }
 }

@@ -12,15 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use anyhow::Context;
 use risingwave_connector::WithPropertiesExt;
 #[cfg(not(debug_assertions))]
 use risingwave_connector::error::ConnectorError;
 use risingwave_connector::source::AnySplitEnumerator;
+use risingwave_connector::source::base::ConnectorProperties;
 
 use super::*;
 
 const MAX_FAIL_CNT: u32 = 10;
-const DEFAULT_SOURCE_TICK_TIMEOUT: Duration = Duration::from_secs(10);
 
 // The key used to load `SplitImpl` directly from source properties.
 // When this key is present, the enumerator will only return the given ones
@@ -179,7 +180,7 @@ pub fn create_source_worker_async(
     });
 
     managed_sources.insert(
-        source_id as SourceId,
+        source_id,
         ConnectorSourceWorkerHandle {
             handle,
             command_tx,
@@ -202,7 +203,7 @@ impl ConnectorSourceWorker {
             .create_split_enumerator(Arc::new(SourceEnumeratorContext {
                 metrics: self.metrics.source_enumerator_metrics.clone(),
                 info: SourceEnumeratorInfo {
-                    source_id: self.source_id as u32,
+                    source_id: self.source_id,
                 },
             }))
             .await
@@ -238,7 +239,7 @@ impl ConnectorSourceWorker {
             .with_guarded_label_values(&[source.id.to_string().as_str(), &source.name]);
 
         Ok(Self {
-            source_id: source.id as SourceId,
+            source_id: source.id,
             source_name: source.name.clone(),
             current_splits: splits,
             enumerator,
@@ -306,6 +307,13 @@ impl ConnectorSourceWorker {
                                     tracing::warn!(error = %e.as_report(), "error happened when finish backfill");
                                 }
                             }
+                            SourceWorkerCommand::UpdateProps(new_props) => {
+                                self.connector_properties = new_props;
+                                if let Err(e) = self.refresh().await {
+                                    tracing::error!(error = %e.as_report(), "error happened when refresh from connector source worker");
+                                }
+                                tracing::debug!("source {} worker properties updated", self.source_name);
+                            }
                             SourceWorkerCommand::Terminate => {
                                 return;
                             }
@@ -313,11 +321,10 @@ impl ConnectorSourceWorker {
                     }
                 }
                 _ = interval.tick() => {
-                    if self.fail_cnt > MAX_FAIL_CNT {
-                        if let Err(e) = self.refresh().await {
+                    if self.fail_cnt > MAX_FAIL_CNT
+                        && let Err(e) = self.refresh().await {
                             tracing::error!(error = %e.as_report(), "error happened when refresh from connector source worker");
                         }
-                    }
                     if let Err(e) = self.tick().await {
                         tracing::error!(error = %e.as_report(), "error happened when tick from connector source worker");
                     }
@@ -352,6 +359,14 @@ impl ConnectorSourceWorker {
                 .map(|split| (split.id(), split))
                 .collect(),
         );
+        // Call enumerator's `on_tick` method for monitoring tasks
+        if let Err(e) = self.enumerator.on_tick().await {
+            tracing::error!(
+                "Failed to execute enumerator `on_tick` for source {}: {}",
+                self.source_id,
+                e.as_report()
+            );
+        }
 
         Ok(())
     }
@@ -385,7 +400,7 @@ impl ConnectorSourceWorkerHandle {
     pub async fn discovered_splits(
         &self,
         source_id: SourceId,
-        actors: &HashSet<ActorId>,
+        actor_count: usize,
     ) -> MetaResult<BTreeMap<Arc<str>, SplitImpl>> {
         // XXX: when is this None? Can we remove the Option?
         let Some(mut discovered_splits) = self.splits.lock().await.splits.clone() else {
@@ -407,7 +422,7 @@ impl ConnectorSourceWorkerHandle {
             debug_assert!(self.enable_drop_split);
             debug_assert!(discovered_splits.len() == 1);
             discovered_splits =
-                fill_adaptive_split(discovered_splits.values().next().unwrap(), actors)?;
+                fill_adaptive_split(discovered_splits.values().next().unwrap(), actor_count)?;
         }
 
         Ok(discovered_splits)
@@ -447,6 +462,13 @@ impl ConnectorSourceWorkerHandle {
         }
     }
 
+    pub fn update_props(&self, new_props: ConnectorProperties) {
+        if let Err(e) = self.send_command(SourceWorkerCommand::UpdateProps(new_props)) {
+            // ignore update props error, just log it
+            tracing::warn!(error = %e.as_report(), "failed to update source worker properties");
+        }
+    }
+
     pub fn terminate(&self, dropped_fragments: Option<BTreeSet<FragmentId>>) {
         tracing::debug!("terminate: {:?}", dropped_fragments);
         if let Some(dropped_fragments) = dropped_fragments {
@@ -470,4 +492,6 @@ pub enum SourceWorkerCommand {
     FinishBackfill(Vec<FragmentId>),
     /// Terminate the worker task.
     Terminate,
+    /// Update the properties of the source worker.
+    UpdateProps(ConnectorProperties),
 }

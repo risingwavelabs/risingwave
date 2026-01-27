@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -22,7 +22,7 @@ use risingwave_pb::plan_common::{JoinType as JoinTypeProto, StorageTableDesc};
 use risingwave_storage::table::batch_table::BatchTable;
 
 use super::*;
-use crate::common::table::state_table::StateTable;
+use crate::common::table::state_table::{StateTable, StateTableBuilder};
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{
     ActorContextRef, JoinType, NestedLoopTemporalJoinExecutor, TemporalJoinExecutor,
@@ -80,7 +80,7 @@ impl ExecutorBuilder for TemporalJoinExecutorBuilder {
                 right_table,
                 condition,
                 output_indices,
-                chunk_size: params.env.config().developer.chunk_size,
+                chunk_size: params.config.developer.chunk_size,
                 metrics: params.executor_stats,
                 join_type_proto: node.get_join_type()?,
             };
@@ -119,7 +119,7 @@ impl ExecutorBuilder for TemporalJoinExecutorBuilder {
                 .map(|key| *key as usize)
                 .collect_vec();
 
-            let null_safe = node.get_null_safe().to_vec();
+            let null_safe = node.get_null_safe().clone();
 
             let join_key_data_types = left_join_keys
                 .iter()
@@ -135,12 +135,10 @@ impl ExecutorBuilder for TemporalJoinExecutorBuilder {
                             .expect("vnodes not set for temporal join"),
                     );
                     Some(
-                        StateTable::from_table_catalog(
-                            memo_table,
-                            store.clone(),
-                            Some(vnodes.clone()),
-                        )
-                        .await,
+                        StateTableBuilder::new(memo_table, store.clone(), Some(vnodes.clone()))
+                            .enable_preload_all_rows_by_config(&params.config)
+                            .build()
+                            .await,
                     )
                 }
                 Err(_) => None,
@@ -161,7 +159,7 @@ impl ExecutorBuilder for TemporalJoinExecutorBuilder {
                 table_output_indices,
                 table_stream_key_indices,
                 watermark_epoch: params.watermark_epoch,
-                chunk_size: params.env.config().developer.chunk_size,
+                chunk_size: params.config.developer.chunk_size,
                 metrics: params.executor_stats,
                 join_type_proto: node.get_join_type()?,
                 join_key_data_types,

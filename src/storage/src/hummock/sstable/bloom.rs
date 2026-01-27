@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -137,7 +137,7 @@ impl BloomFilterBuilder {
 
 /// Gets Bloom filter bits per key from entries count and FPR
 pub fn bloom_bits_per_key(entries: usize, false_positive_rate: f64) -> usize {
-    let size = -1.0 * (entries as f64) * false_positive_rate.ln() / f64::consts::LN_2.powi(2);
+    let size = -(entries as f64) * false_positive_rate.ln() / f64::consts::LN_2.powi(2);
     let locs = (size / (entries as f64)).ceil();
     locs as usize
 }

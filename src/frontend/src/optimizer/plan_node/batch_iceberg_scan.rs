@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,10 +15,8 @@
 use std::hash::{Hash, Hasher};
 use std::rc::Rc;
 
-use iceberg::expr::Predicate as IcebergPredicate;
 use pretty_xmlish::{Pretty, XmlNode};
-use risingwave_common::catalog::{ColumnCatalog, ColumnDesc, ColumnId};
-use risingwave_common::types::DataType;
+use risingwave_connector::source::iceberg::IcebergFileScanTask;
 use risingwave_pb::batch_plan::IcebergScanNode;
 use risingwave_pb::batch_plan::iceberg_scan_node::IcebergScanType;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
@@ -27,48 +25,33 @@ use risingwave_sqlparser::ast::AsOf;
 use super::batch::prelude::*;
 use super::utils::{Distill, childless_record, column_names_pretty};
 use super::{
-    ExprRewritable, PlanBase, PlanRef, ToBatchPb, ToDistributedBatch, ToLocalBatch, generic,
+    BatchPlanRef as PlanRef, ExprRewritable, PlanBase, ToBatchPb, ToDistributedBatch, ToLocalBatch,
+    generic,
 };
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::error::Result;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::property::{Distribution, Order};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct BatchIcebergScan {
     pub base: PlanBase<Batch>,
     pub core: generic::Source,
-    iceberg_scan_type: IcebergScanType,
-    pub predicate: IcebergPredicate,
-}
-
-impl PartialEq for BatchIcebergScan {
-    fn eq(&self, other: &Self) -> bool {
-        if self.predicate == IcebergPredicate::AlwaysTrue
-            && other.predicate == IcebergPredicate::AlwaysTrue
-        {
-            self.base == other.base && self.core == other.core
-        } else {
-            panic!("BatchIcebergScan::eq: comparing non-AlwaysTrue predicates is not supported")
-        }
-    }
+    pub task: IcebergFileScanTask,
 }
 
 impl Eq for BatchIcebergScan {}
 
 impl Hash for BatchIcebergScan {
     fn hash<H: Hasher>(&self, state: &mut H) {
-        if self.predicate != IcebergPredicate::AlwaysTrue {
-            panic!("BatchIcebergScan::hash: hashing non-AlwaysTrue predicates is not supported")
-        } else {
-            self.base.hash(state);
-            self.core.hash(state);
-        }
+        self.base.hash(state);
+        self.core.hash(state);
+        self.iceberg_scan_type().hash(state);
     }
 }
 
 impl BatchIcebergScan {
-    pub fn new(core: generic::Source, iceberg_scan_type: IcebergScanType) -> Self {
+    pub fn new(core: generic::Source, task: IcebergFileScanTask) -> Self {
         let base = PlanBase::new_batch_with_core(
             &core,
             // Use `Single` by default, will be updated later with `clone_with_dist`.
@@ -76,36 +59,20 @@ impl BatchIcebergScan {
             Order::any(),
         );
 
-        Self {
-            base,
-            core,
-            iceberg_scan_type,
-            predicate: IcebergPredicate::AlwaysTrue,
-        }
-    }
-
-    pub fn new_count_star_with_batch_iceberg_scan(batch_iceberg_scan: &BatchIcebergScan) -> Self {
-        let mut core = batch_iceberg_scan.core.clone();
-        core.column_catalog = vec![ColumnCatalog::visible(ColumnDesc::named(
-            "count",
-            ColumnId::first_user_column(),
-            DataType::Int64,
-        ))];
-        let base = PlanBase::new_batch_with_core(
-            &core,
-            batch_iceberg_scan.base.distribution().clone(),
-            batch_iceberg_scan.base.order().clone(),
-        );
-        Self {
-            base,
-            core,
-            iceberg_scan_type: IcebergScanType::CountStar,
-            predicate: IcebergPredicate::AlwaysTrue,
-        }
+        Self { base, core, task }
     }
 
     pub fn iceberg_scan_type(&self) -> IcebergScanType {
-        self.iceberg_scan_type
+        match &self.task {
+            IcebergFileScanTask::Data(_) => IcebergScanType::DataScan,
+            IcebergFileScanTask::EqualityDelete(_) => IcebergScanType::EqualityDeleteScan,
+            IcebergFileScanTask::PositionDelete(_) => IcebergScanType::PositionDeleteScan,
+        }
+    }
+
+    pub fn predicate(&self) -> Option<String> {
+        let predicate = self.task.predicate()?;
+        Some(predicate.to_string())
     }
 
     pub fn column_names(&self) -> Vec<&str> {
@@ -123,17 +90,7 @@ impl BatchIcebergScan {
         Self {
             base,
             core: self.core.clone(),
-            iceberg_scan_type: self.iceberg_scan_type,
-            predicate: self.predicate.clone(),
-        }
-    }
-
-    pub fn clone_with_predicate(&self, predicate: IcebergPredicate) -> Self {
-        Self {
-            base: self.base.clone(),
-            core: self.core.clone(),
-            iceberg_scan_type: self.iceberg_scan_type,
-            predicate,
+            task: self.task.clone(),
         }
     }
 
@@ -142,17 +99,22 @@ impl BatchIcebergScan {
     }
 }
 
-impl_plan_tree_node_for_leaf! { BatchIcebergScan }
+impl_plan_tree_node_for_leaf! { Batch, BatchIcebergScan }
 
 impl Distill for BatchIcebergScan {
     fn distill<'a>(&self) -> XmlNode<'a> {
         let src = Pretty::from(self.source_catalog().unwrap().name.clone());
-        let fields = vec![
+        let mut fields = vec![
             ("source", src),
             ("columns", column_names_pretty(self.schema())),
-            ("iceberg_scan_type", Pretty::debug(&self.iceberg_scan_type)),
-            ("predicate", Pretty::from(self.predicate.to_string())),
+            (
+                "iceberg_scan_type",
+                Pretty::from(format!("{:?}", self.iceberg_scan_type())),
+            ),
         ];
+        if let Some(predicate) = self.predicate() {
+            fields.push(("predicate", Pretty::from(predicate)));
+        }
         childless_record("BatchIcebergScan", fields)
     }
 }
@@ -183,11 +145,11 @@ impl ToBatchPb for BatchIcebergScan {
             with_properties,
             split: vec![],
             secret_refs,
-            iceberg_scan_type: self.iceberg_scan_type as i32,
+            iceberg_scan_type: self.iceberg_scan_type() as i32,
         })
     }
 }
 
-impl ExprRewritable for BatchIcebergScan {}
+impl ExprRewritable<Batch> for BatchIcebergScan {}
 
 impl ExprVisitable for BatchIcebergScan {}

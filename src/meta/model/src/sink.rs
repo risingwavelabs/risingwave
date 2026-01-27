@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -27,18 +27,18 @@ use crate::{
 pub enum SinkType {
     #[sea_orm(string_value = "APPEND_ONLY")]
     AppendOnly,
-    #[sea_orm(string_value = "FORCE_APPEND_ONLY")]
-    ForceAppendOnly,
     #[sea_orm(string_value = "UPSERT")]
     Upsert,
+    #[sea_orm(string_value = "RETRACT")]
+    Retract,
 }
 
 impl From<SinkType> for PbSinkType {
     fn from(sink_type: SinkType) -> Self {
         match sink_type {
             SinkType::AppendOnly => Self::AppendOnly,
-            SinkType::ForceAppendOnly => Self::ForceAppendOnly,
             SinkType::Upsert => Self::Upsert,
+            SinkType::Retract => Self::Retract,
         }
     }
 }
@@ -46,9 +46,10 @@ impl From<SinkType> for PbSinkType {
 impl From<PbSinkType> for SinkType {
     fn from(sink_type: PbSinkType) -> Self {
         match sink_type {
-            PbSinkType::AppendOnly => Self::AppendOnly,
-            PbSinkType::ForceAppendOnly => Self::ForceAppendOnly,
+            // `ForceAppendOnly` is now denoted by `AppendOnly` + `ignore_delete`.
+            PbSinkType::AppendOnly | PbSinkType::ForceAppendOnly => Self::AppendOnly,
             PbSinkType::Upsert => Self::Upsert,
+            PbSinkType::Retract => Self::Retract,
             PbSinkType::Unspecified => unreachable!("Unspecified sink type"),
         }
     }
@@ -65,6 +66,7 @@ pub struct Model {
     pub distribution_key: I32Array,
     pub downstream_pk: I32Array,
     pub sink_type: SinkType,
+    pub ignore_delete: bool,
     pub properties: Property,
     pub definition: String,
     pub connection_id: Option<ConnectionId>,
@@ -75,6 +77,7 @@ pub struct Model {
     // `secret_ref` stores the mapping info mapping from property name to secret id and type.
     pub secret_ref: Option<SecretRef>,
     pub original_target_columns: Option<ColumnCatalogArray>,
+    pub auto_refresh_schema_from_table: Option<TableId>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
@@ -114,24 +117,27 @@ impl ActiveModelBehavior for ActiveModel {}
 impl From<PbSink> for ActiveModel {
     fn from(pb_sink: PbSink) -> Self {
         let sink_type = pb_sink.sink_type();
+        let ignore_delete = pb_sink.ignore_delete();
 
         Self {
-            sink_id: Set(pb_sink.id as _),
+            sink_id: Set(pb_sink.id),
             name: Set(pb_sink.name),
             columns: Set(pb_sink.columns.into()),
             plan_pk: Set(pb_sink.plan_pk.into()),
             distribution_key: Set(pb_sink.distribution_key.into()),
             downstream_pk: Set(pb_sink.downstream_pk.into()),
             sink_type: Set(sink_type.into()),
+            ignore_delete: Set(ignore_delete),
             properties: Set(pb_sink.properties.into()),
             definition: Set(pb_sink.definition),
-            connection_id: Set(pb_sink.connection_id.map(|x| x as _)),
+            connection_id: Set(pb_sink.connection_id),
             db_name: Set(pb_sink.db_name),
             sink_from_name: Set(pb_sink.sink_from_name),
             sink_format_desc: Set(pb_sink.format_desc.as_ref().map(|x| x.into())),
-            target_table: Set(pb_sink.target_table.map(|x| x as _)),
+            target_table: Set(pb_sink.target_table),
             secret_ref: Set(Some(SecretRef::from(pb_sink.secret_refs))),
             original_target_columns: Set(Some(pb_sink.original_target_columns.into())),
+            auto_refresh_schema_from_table: Set(pb_sink.auto_refresh_schema_from_table),
         }
     }
 }

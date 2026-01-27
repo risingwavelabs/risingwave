@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -33,7 +33,7 @@ impl ExecutorBuilder for LocalApproxPercentileExecutorBuilder {
             input,
             node.base,
             node.percentile_index as usize,
-            params.env.config().developer.chunk_size,
+            params.config.developer.chunk_size,
         )
         .boxed();
         Ok(Executor::new(params.info, exec))

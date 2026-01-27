@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -36,11 +36,11 @@ pub struct BoundWatermark {
 impl RewriteExprsRecursive for BoundWatermark {
     fn rewrite_exprs_recursive(&mut self, rewriter: &mut impl crate::expr::ExprRewriter) {
         self.input.rewrite_exprs_recursive(rewriter);
-        let new_agrs = std::mem::take(&mut self.args)
+        let new_args = std::mem::take(&mut self.args)
             .into_iter()
             .map(|expr| rewriter.rewrite_expr(expr))
             .collect::<Vec<_>>();
-        self.args = new_agrs;
+        self.args = new_args;
     }
 }
 
@@ -51,10 +51,10 @@ pub(super) fn is_watermark_func(func_name: &str) -> bool {
 impl Binder {
     pub(super) fn bind_watermark(
         &mut self,
-        alias: Option<TableAlias>,
-        args: Vec<FunctionArg>,
+        alias: Option<&TableAlias>,
+        args: &[FunctionArg],
     ) -> Result<BoundWatermark> {
-        let mut args = args.into_iter();
+        let mut args = args.iter();
 
         self.push_context();
 
@@ -75,7 +75,7 @@ impl Binder {
             .map(|c| (c.is_hidden, c.field))
             .collect_vec();
 
-        let (_, table_name) = Self::resolve_schema_qualified_name(&self.db_name, table_name)?;
+        let (_, table_name) = Self::resolve_schema_qualified_name(&self.db_name, &table_name)?;
         self.bind_table_to_context(columns, table_name, alias)?;
 
         // Other arguments are validated in `plan_watermark`

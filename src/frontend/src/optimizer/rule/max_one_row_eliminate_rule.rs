@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,10 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use super::{BoxedRule, Rule};
-use crate::optimizer::PlanRef;
-use crate::optimizer::plan_node::{LogicalApply, LogicalMaxOneRow};
-use crate::optimizer::plan_visitor::LogicalCardinalityExt;
+use super::prelude::{PlanRef, *};
+use crate::optimizer::plan_node::{LogicalApply, LogicalLimit, LogicalMaxOneRow};
+use crate::optimizer::plan_visitor::{LogicalCardinalityExt, SoleSysTableVisitor};
 
 /// Eliminate max one row restriction from `LogicalApply`.
 ///
@@ -26,7 +25,7 @@ use crate::optimizer::plan_visitor::LogicalCardinalityExt;
 /// As a result, the `max_one_row` flag of `LogicalApply` will always be `false`
 /// after applying this rule.
 pub struct MaxOneRowEliminateRule {}
-impl Rule for MaxOneRowEliminateRule {
+impl Rule<Logical> for MaxOneRowEliminateRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let apply: &LogicalApply = plan.as_logical_apply()?;
         let (left, mut right, on, join_type, correlated_id, correlated_indices, max_one_row) =
@@ -37,7 +36,14 @@ impl Rule for MaxOneRowEliminateRule {
         }
 
         if !right.max_one_row() {
-            right = LogicalMaxOneRow::create(right);
+            right = if SoleSysTableVisitor::sys_table_only(right.clone()) {
+                // If the right side is just a `SysScan` (with `Values`), we add a `Limit 1` to enforce the max one row restriction.
+                // This is a workaround for the case where `SysScan` cannot be guaranteed to return at most one row in compile time,
+                // but to make the system queries work compatible with PostgreSQL, we need to enforce the max one row restriction at runtime.
+                LogicalLimit::create(right, 1, 0)
+            } else {
+                LogicalMaxOneRow::create(right)
+            };
             debug_assert!(right.max_one_row());
         }
 

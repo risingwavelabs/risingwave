@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use bincode::{Decode, Encode};
-use foyer::CacheHint;
+use foyer::Hint;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::cache::CachePriority;
 use risingwave_common::catalog::{TableId, TableOption};
@@ -60,16 +60,16 @@ impl From<TracedCachePriority> for CachePriority {
     }
 }
 
-impl From<CacheHint> for TracedCachePriority {
-    fn from(value: CacheHint) -> Self {
+impl From<Hint> for TracedCachePriority {
+    fn from(value: Hint) -> Self {
         match value {
-            CacheHint::Normal => Self::High,
-            CacheHint::Low => Self::Low,
+            Hint::Normal => Self::High,
+            Hint::Low => Self::Low,
         }
     }
 }
 
-impl From<TracedCachePriority> for CacheHint {
+impl From<TracedCachePriority> for Hint {
     fn from(value: TracedCachePriority) -> Self {
         match value {
             TracedCachePriority::High => Self::Normal,
@@ -86,16 +86,14 @@ pub struct TracedTableId {
 impl From<TableId> for TracedTableId {
     fn from(value: TableId) -> Self {
         Self {
-            table_id: value.table_id,
+            table_id: value.as_raw_id(),
         }
     }
 }
 
 impl From<TracedTableId> for TableId {
     fn from(value: TracedTableId) -> Self {
-        Self {
-            table_id: value.table_id,
-        }
+        Self::new(value.table_id)
     }
 }
 
@@ -162,6 +160,7 @@ pub struct TracedNewLocalOptions {
     pub table_option: TracedTableOption,
     pub is_replicated: bool,
     pub vnodes: TracedBitmap,
+    pub upload_on_flush: bool,
 }
 
 #[derive(Encode, Decode, PartialEq, Debug, Clone)]
@@ -182,6 +181,7 @@ impl TracedNewLocalOptions {
             },
             is_replicated: false,
             vnodes: TracedBitmap::from(Bitmap::ones(VirtualNode::COUNT_FOR_TEST)),
+            upload_on_flush: true,
         }
     }
 }
@@ -257,7 +257,7 @@ pub struct TracedInitOptions {
 #[derive(Debug, Clone, PartialEq, Eq, Decode, Encode)]
 pub struct TracedSealCurrentEpochOptions {
     // The watermark is serialized into protobuf
-    pub table_watermarks: Option<(bool, Vec<Vec<u8>>, bool)>,
+    pub table_watermarks: Option<(bool, Vec<Vec<u8>>, i32)>,
     pub switch_op_consistency_level: Option<bool>,
 }
 

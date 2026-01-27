@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,7 +16,7 @@ use std::collections::HashMap;
 use std::marker::PhantomData;
 use std::sync::Arc;
 
-use anyhow::Context;
+use anyhow::{Context, anyhow};
 use itertools::Itertools;
 use risingwave_common::bitmap::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::{ColumnDesc, Field, Schema};
@@ -45,8 +45,8 @@ use risingwave_pb::plan_common::StorageTableDesc;
 use super::AsOfDesc;
 use crate::error::Result;
 use crate::executor::{
-    AsOf, BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, DummyExecutor, Executor,
-    ExecutorBuilder, JoinType, LookupJoinBase, unix_timestamp_sec_to_epoch,
+    BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, DummyExecutor, Executor,
+    ExecutorBuilder, JoinType, LookupJoinBase,
 };
 use crate::task::{BatchTaskContext, ShutdownToken, TaskId};
 
@@ -62,27 +62,26 @@ struct InnerSideExecutorBuilder {
     lookup_prefix_len: usize,
     context: Arc<dyn BatchTaskContext>,
     task_id: TaskId,
-    epoch: BatchQueryEpoch,
+    query_epoch: BatchQueryEpoch,
     worker_slot_mapping: HashMap<WorkerSlotId, WorkerNode>,
     worker_slot_to_scan_range_mapping: HashMap<WorkerSlotId, Vec<(ScanRange, VirtualNode)>>,
     #[expect(dead_code)]
     chunk_size: usize,
     shutdown_rx: ShutdownToken,
     next_stage_id: usize,
-    as_of: Option<AsOf>,
 }
 
 /// Used to build the executor for the inner side
-#[async_trait::async_trait]
-pub trait LookupExecutorBuilder: Send {
+pub trait LookupExecutorBuilder: Send + 'static {
     fn reset(&mut self);
 
-    async fn add_scan_range(&mut self, key_datums: Vec<Datum>) -> Result<()>;
+    fn add_scan_range(
+        &mut self,
+        key_datums: Vec<Datum>,
+    ) -> impl Future<Output = Result<()>> + Send + '_;
 
-    async fn build_executor(&mut self) -> Result<BoxedExecutor>;
+    fn build_executor(&mut self) -> impl Future<Output = Result<BoxedExecutor>> + Send + '_;
 }
-
-pub type BoxedLookupExecutorBuilder = Box<dyn LookupExecutorBuilder>;
 
 impl InnerSideExecutorBuilder {
     /// Gets the virtual node based on the given `scan_range`
@@ -112,7 +111,7 @@ impl InnerSideExecutorBuilder {
             ordered: false,
             vnode_bitmap: Some(vnode_bitmap.finish().to_protobuf()),
             limit: None,
-            as_of: self.as_of.as_ref().map(Into::into),
+            query_epoch: Some(self.query_epoch),
         });
 
         Ok(row_seq_scan_node)
@@ -137,7 +136,6 @@ impl InnerSideExecutorBuilder {
                     ..Default::default()
                 }),
             }),
-            epoch: Some(self.epoch),
             tracing_context: TracingContext::from_current_span().to_protobuf(),
         };
 
@@ -162,7 +160,6 @@ impl InnerSideExecutorBuilder {
     }
 }
 
-#[async_trait::async_trait]
 impl LookupExecutorBuilder for InnerSideExecutorBuilder {
     fn reset(&mut self) {
         self.worker_slot_to_scan_range_mapping = HashMap::new();
@@ -240,7 +237,6 @@ impl LookupExecutorBuilder for InnerSideExecutorBuilder {
             &plan_node,
             &task_id,
             self.context.clone(),
-            self.epoch,
             self.shutdown_rx.clone(),
         );
 
@@ -259,12 +255,11 @@ impl LookupExecutorBuilder for InnerSideExecutorBuilder {
 /// `ExchangeExecutors`. This is done by grouping rows with the same key datums together, and also
 /// by grouping together scan ranges that point to the same partition (and can thus be easily
 /// scanned by the same worker node).
-pub struct LocalLookupJoinExecutor<K> {
-    base: LookupJoinBase<K>,
-    _phantom: PhantomData<K>,
+pub struct LocalLookupJoinExecutor<K, B: LookupExecutorBuilder> {
+    base: LookupJoinBase<K, B>,
 }
 
-impl<K: HashKey> Executor for LocalLookupJoinExecutor<K> {
+impl<K: HashKey, B: LookupExecutorBuilder> Executor for LocalLookupJoinExecutor<K, B> {
     fn schema(&self) -> &Schema {
         &self.base.schema
     }
@@ -278,12 +273,9 @@ impl<K: HashKey> Executor for LocalLookupJoinExecutor<K> {
     }
 }
 
-impl<K> LocalLookupJoinExecutor<K> {
-    pub fn new(base: LookupJoinBase<K>) -> Self {
-        Self {
-            base,
-            _phantom: PhantomData,
-        }
+impl<K, B: LookupExecutorBuilder> LocalLookupJoinExecutor<K, B> {
+    pub fn new(base: LookupJoinBase<K, B>) -> Self {
+        Self { base }
     }
 }
 
@@ -300,24 +292,6 @@ impl BoxedExecutorBuilder for LocalLookupJoinExecutorBuilder {
             source.plan_node().get_node_body().unwrap(),
             NodeBody::LocalLookupJoin
         )?;
-        // as_of takes precedence
-        let as_of = lookup_join_node
-            .as_of
-            .as_ref()
-            .map(AsOf::try_from)
-            .transpose()?;
-        let query_epoch = as_of
-            .as_ref()
-            .map(|a| {
-                let epoch = unix_timestamp_sec_to_epoch(a.timestamp).0;
-                tracing::debug!(epoch, "time travel");
-                risingwave_pb::common::BatchQueryEpoch {
-                    epoch: Some(risingwave_pb::common::batch_query_epoch::Epoch::TimeTravel(
-                        epoch,
-                    )),
-                }
-            })
-            .unwrap_or_else(|| source.epoch());
 
         let join_type = JoinType::from_prost(lookup_join_node.get_join_type()?);
         let condition = match lookup_join_node.get_condition() {
@@ -334,7 +308,7 @@ impl BoxedExecutorBuilder for LocalLookupJoinExecutorBuilder {
         let outer_side_data_types = outer_side_input.schema().data_types();
 
         let table_desc = lookup_join_node.get_inner_side_table_desc()?;
-        let inner_side_column_ids = lookup_join_node.get_inner_side_column_ids().to_vec();
+        let inner_side_column_ids = lookup_join_node.get_inner_side_column_ids().clone();
 
         let inner_side_schema = Schema {
             fields: inner_side_column_ids
@@ -388,7 +362,7 @@ impl BoxedExecutorBuilder for LocalLookupJoinExecutorBuilder {
             .map(|&i| inner_side_schema.fields[i].data_type.clone())
             .collect_vec();
 
-        let null_safe = lookup_join_node.get_null_safe().to_vec();
+        let null_safe = lookup_join_node.get_null_safe().clone();
 
         let vnode_mapping = lookup_join_node
             .get_inner_side_vnode_mapping()
@@ -428,13 +402,14 @@ impl BoxedExecutorBuilder for LocalLookupJoinExecutorBuilder {
             lookup_prefix_len,
             context: source.context().clone(),
             task_id: source.task_id.clone(),
-            epoch: query_epoch,
+            query_epoch: lookup_join_node
+                .query_epoch
+                .ok_or_else(|| anyhow!("query_epoch not set in local lookup join"))?,
             worker_slot_to_scan_range_mapping: HashMap::new(),
             chunk_size,
             shutdown_rx: source.shutdown_rx().clone(),
             next_stage_id: 0,
             worker_slot_mapping,
-            as_of,
         };
 
         let identity = source.plan_node().get_identity().clone();
@@ -444,7 +419,7 @@ impl BoxedExecutorBuilder for LocalLookupJoinExecutorBuilder {
             outer_side_input,
             outer_side_data_types,
             outer_side_key_idxs,
-            inner_side_builder: Box::new(inner_side_builder),
+            inner_side_builder,
             inner_side_key_types,
             inner_side_key_idxs,
             null_safe,
@@ -462,13 +437,13 @@ impl BoxedExecutorBuilder for LocalLookupJoinExecutorBuilder {
     }
 }
 
-struct LocalLookupJoinExecutorArgs {
+struct LocalLookupJoinExecutorArgs<B: LookupExecutorBuilder> {
     join_type: JoinType,
     condition: Option<BoxedExpression>,
     outer_side_input: BoxedExecutor,
     outer_side_data_types: Vec<DataType>,
     outer_side_key_idxs: Vec<usize>,
-    inner_side_builder: Box<dyn LookupExecutorBuilder>,
+    inner_side_builder: B,
     inner_side_key_types: Vec<DataType>,
     inner_side_key_idxs: Vec<usize>,
     null_safe: Vec<bool>,
@@ -483,11 +458,11 @@ struct LocalLookupJoinExecutorArgs {
     mem_ctx: MemoryContext,
 }
 
-impl HashKeyDispatcher for LocalLookupJoinExecutorArgs {
+impl<B: LookupExecutorBuilder> HashKeyDispatcher for LocalLookupJoinExecutorArgs<B> {
     type Output = BoxedExecutor;
 
     fn dispatch_impl<K: HashKey>(self) -> Self::Output {
-        Box::new(LocalLookupJoinExecutor::<K>::new(LookupJoinBase::<K> {
+        Box::new(LocalLookupJoinExecutor::<K, B>::new(LookupJoinBase {
             join_type: self.join_type,
             condition: self.condition,
             outer_side_input: self.outer_side_input,
@@ -528,12 +503,12 @@ mod tests {
     use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
     use risingwave_expr::expr::{BoxedExpression, build_from_pretty};
 
-    use super::LocalLookupJoinExecutorArgs;
     use crate::executor::join::JoinType;
     use crate::executor::test_utils::{
         FakeInnerSideExecutorBuilder, MockExecutor, diff_executor_output,
     };
     use crate::executor::{BoxedExecutor, SortExecutor};
+    use crate::local_lookup_join::LocalLookupJoinExecutorArgs;
     use crate::monitor::BatchSpillMetrics;
     use crate::task::ShutdownToken;
 
@@ -597,7 +572,7 @@ mod tests {
             outer_side_input,
             outer_side_data_types,
             outer_side_key_idxs: vec![0],
-            inner_side_builder: Box::new(FakeInnerSideExecutorBuilder::new(inner_side_schema)),
+            inner_side_builder: FakeInnerSideExecutorBuilder::new(inner_side_schema),
             inner_side_key_types: vec![inner_side_data_types[0].clone()],
             inner_side_key_idxs: vec![0],
             null_safe: vec![null_safe],

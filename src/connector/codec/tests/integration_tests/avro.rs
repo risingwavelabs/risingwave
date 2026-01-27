@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -214,8 +214,8 @@ fn test_simple() {
             Owned(Int32(32))
             Owned(Int64(64))
             Borrowed(Utf8("str_value"))
-            Owned(Float32(OrderedFloat(32.0)))
-            Owned(Float64(OrderedFloat(64.0)))
+            Owned(Float32(32.0))
+            Owned(Float64(64.0))
             Owned(Bool(true))
             Owned(Date(Date(1970-01-01)))
             Owned(Timestamptz(Timestamptz(0)))
@@ -543,7 +543,7 @@ fn test_1() {
             Owned(null)
             Owned(null)
             Owned(null)
-            Owned(Float64(OrderedFloat(NaN)))"#]],
+            Owned(Float64(NaN))"#]],
     );
 }
 

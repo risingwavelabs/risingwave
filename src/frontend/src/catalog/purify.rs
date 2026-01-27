@@ -21,6 +21,7 @@ use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
 use risingwave_sqlparser::ast::*;
 
 use crate::error::Result;
+use crate::session::current;
 use crate::utils::data_type::DataTypeToAst as _;
 
 mod pk_column {
@@ -55,10 +56,20 @@ pub fn try_purify_table_source_create_sql_ast(
     row_id_index: Option<usize>,
     pk_column_ids: &[impl PkColumn],
 ) -> Result<Statement> {
+    if let Some(config) = current::config()
+        && config.read().disable_purify_definition()
+    {
+        current::notice_to_user(
+            "purifying definition is disabled via session config, results may be inaccurate",
+        );
+        return Ok(base);
+    }
+
     let (Statement::CreateTable {
         columns: column_defs,
         constraints,
         wildcard_idx,
+        include_column_options,
         ..
     }
     | Statement::CreateSource {
@@ -67,6 +78,7 @@ pub fn try_purify_table_source_create_sql_ast(
                 columns: column_defs,
                 constraints,
                 wildcard_idx,
+                include_column_options,
                 ..
             },
     }) = &mut base
@@ -78,7 +90,7 @@ pub fn try_purify_table_source_create_sql_ast(
     *wildcard_idx = None;
 
     // Filter out columns that are not defined by users in SQL.
-    let defined_columns = columns.iter().filter(|c| c.is_user_defined());
+    let defined_columns = columns.iter().filter(|c| c.is_defined_in_columns_clause());
 
     // Derive `ColumnDef` from `ColumnCatalog`.
     let mut purified_column_defs = Vec::new();
@@ -97,7 +109,7 @@ pub fn try_purify_table_source_create_sql_ast(
 
             // Generate a new `ColumnDef` from the catalog.
             ColumnDef {
-                name: column.name().into(),
+                name: Ident::from_real_value(column.name()),
                 data_type: Some(column.data_type().to_ast()),
                 collation: None,
                 options: Vec::new(), // pk will be specified with table constraints
@@ -153,13 +165,32 @@ pub fn try_purify_table_source_create_sql_ast(
                 .iter()
                 .find(|c| id.is(c))
                 .context("primary key column not found")?;
-            if !column.is_user_defined() {
+            // Primary key must refer to a column that is defined in the columns or `INCLUDE` clause.
+            if !(column.is_defined_in_columns_clause() || column.is_connector_additional_column()) {
                 bail /* unlikely */ !(
                     "primary key column \"{}\" is not user-defined",
                     column.name()
                 );
             }
-            pk_columns.push(column.name().into());
+
+            // Find the name in `Ident` form from `column_defs` to preserve quote style best.
+            let name_ident = if let Some(col) = column_defs
+                .iter()
+                .find(|c| c.name.real_value() == column.name())
+            {
+                col.name.clone()
+            } else if let Some(alias) = include_column_options
+                .iter()
+                .filter_map(|c| c.column_alias.as_ref())
+                .find(|c| c.real_value() == column.name())
+            {
+                alias.clone()
+            } else {
+                // Fallback to generate a quoted name.
+                Ident::from_real_value(column.name())
+            };
+
+            pk_columns.push(name_ident);
         }
 
         let pk_constraint = TableConstraint::Unique {

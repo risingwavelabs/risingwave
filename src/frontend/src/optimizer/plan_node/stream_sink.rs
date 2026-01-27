@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,18 +13,14 @@
 // limitations under the License.
 
 use std::assert_matches::assert_matches;
-use std::io::{Error, ErrorKind};
 use std::sync::Arc;
 
-use anyhow::anyhow;
-use fixedbitset::FixedBitSet;
 use iceberg::spec::Transform;
 use itertools::Itertools;
 use pretty_xmlish::{Pretty, XmlNode};
-use risingwave_common::catalog::{ColumnCatalog, CreateType};
+use risingwave_common::catalog::{ColumnCatalog, CreateType, FieldLike};
 use risingwave_common::types::{DataType, StructType};
 use risingwave_common::util::iter_util::ZipEqDebug;
-use risingwave_connector::match_sink_name_str;
 use risingwave_connector::sink::catalog::desc::SinkDesc;
 use risingwave_connector::sink::catalog::{SinkFormat, SinkFormatDesc, SinkId, SinkType};
 use risingwave_connector::sink::file_sink::fs::FsSink;
@@ -32,8 +28,10 @@ use risingwave_connector::sink::iceberg::ICEBERG_SINK;
 use risingwave_connector::sink::trivial::TABLE_SINK;
 use risingwave_connector::sink::{
     CONNECTOR_TYPE_KEY, SINK_TYPE_APPEND_ONLY, SINK_TYPE_DEBEZIUM, SINK_TYPE_OPTION,
-    SINK_TYPE_UPSERT, SINK_USER_FORCE_APPEND_ONLY_OPTION, SinkError,
+    SINK_TYPE_RETRACT, SINK_TYPE_UPSERT, SINK_USER_FORCE_APPEND_ONLY_OPTION,
+    SINK_USER_IGNORE_DELETE_OPTION,
 };
+use risingwave_connector::{WithPropertiesExt, match_sink_name_str};
 use risingwave_pb::expr::expr_node::Type;
 use risingwave_pb::stream_plan::SinkLogStoreType;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
@@ -43,18 +41,23 @@ use super::stream::prelude::*;
 use super::utils::{
     Distill, IndicesDisplay, childless_record, infer_kv_log_store_table_catalog_inner,
 };
-use super::{ExprRewritable, PlanBase, PlanRef, StreamNode, StreamProject, generic};
+use super::{
+    ExprRewritable, PlanBase, StreamExchange, StreamNode, StreamPlanRef as PlanRef, StreamProject,
+    StreamSyncLogStore, generic,
+};
 use crate::TableCatalog;
-use crate::error::{ErrorCode, Result, RwError};
+use crate::error::{ErrorCode, Result, RwError, bail_bind_error, bail_invalid_input_syntax};
 use crate::expr::{ExprImpl, FunctionCall, InputRef};
+use crate::optimizer::StreamOptimizedLogicalPlanRoot;
 use crate::optimizer::plan_node::PlanTreeNodeUnary;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::utils::plan_can_use_background_ddl;
-use crate::optimizer::property::{Distribution, Order, RequiredDist};
+use crate::optimizer::property::{Distribution, RequiredDist};
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::utils::WithOptionsSecResolved;
 
 const DOWNSTREAM_PK_KEY: &str = "primary_key";
+const CREATE_TABLE_IF_NOT_EXISTS: &str = "create_table_if_not_exists";
 
 /// ## Why we need `PartitionComputeInfo`?
 ///
@@ -97,15 +100,12 @@ impl IcebergPartitionInfo {
         match transform {
             Transform::Identity => {
                 if columns[col_id].column_desc.data_type != result_type {
-                    return Err(ErrorCode::SinkError(Box::new(Error::new(
-                        ErrorKind::InvalidInput,
-                        format!(
-                            "The partition field {} has type {}, but the partition field is {}",
-                            columns[col_id].column_desc.name,
-                            columns[col_id].column_desc.data_type,
-                            result_type
-                        ),
-                    )))
+                    return Err(ErrorCode::InvalidInputSyntax(format!(
+                        "The partition field {} has type {}, but the partition field is {}",
+                        columns[col_id].column_desc.name,
+                        columns[col_id].column_desc.data_type,
+                        result_type
+                    ))
                     .into());
                 }
                 Ok(ExprImpl::InputRef(
@@ -158,10 +158,7 @@ fn find_column_idx_by_name(columns: &[ColumnCatalog], col_name: &str) -> Result<
         .iter()
         .position(|col| col.column_desc.name == col_name)
         .ok_or_else(|| {
-            ErrorCode::SinkError(Box::new(Error::new(
-                ErrorKind::InvalidInput,
-                format!("Sink primary key column not found: {}. Please use ',' as the delimiter for different primary key columns.", col_name),
-            )))
+            ErrorCode::InvalidInputSyntax(format!("Sink primary key column not found: {}. Please use ',' as the delimiter for different primary key columns.", col_name))
                 .into()
         })
 }
@@ -178,11 +175,50 @@ pub struct StreamSink {
 impl StreamSink {
     #[must_use]
     pub fn new(input: PlanRef, sink_desc: SinkDesc, log_store_type: SinkLogStoreType) -> Self {
-        let base = input
-            .plan_base()
-            .into_stream()
-            .expect("input should be stream plan")
-            .clone_with_new_plan_id();
+        // The sink executor will transform the chunk into desired format based on the sink type
+        // before writing to the sink or emitting to the downstream. Thus, we need to derive the
+        // stream kind based on the sink type.
+        // We assert here because checks should already be done in `derive_sink_type`.
+        let input_kind = input.stream_kind();
+        let kind = match sink_desc.sink_type {
+            SinkType::AppendOnly => {
+                if !sink_desc.ignore_delete {
+                    assert_eq!(
+                        input_kind,
+                        StreamKind::AppendOnly,
+                        "{input_kind} stream cannot be used as input of append-only sink",
+                    );
+                }
+                StreamKind::AppendOnly
+            }
+            SinkType::Upsert => StreamKind::Upsert,
+            SinkType::Retract => {
+                assert_ne!(
+                    input_kind,
+                    StreamKind::Upsert,
+                    "upsert stream cannot be used as input of retract sink",
+                );
+                StreamKind::Retract
+            }
+        };
+
+        let base = PlanBase::new_stream(
+            input.ctx(),
+            input.schema().clone(),
+            // FIXME: We may reconstruct the chunk based on user-specified downstream pk, so
+            // we should also use `downstream_pk` as the stream key of the output. Though this
+            // is unlikely to result in correctness issues:
+            // - for sink-into-table, the `Materialize` node in the downstream table will always
+            //   enforce the pk consistency
+            // - for other sinks, the output of `Sink` node is not used
+            input.stream_key().map(|v| v.to_vec()),
+            input.functional_dependency().clone(),
+            input.distribution().clone(),
+            kind,
+            input.emit_on_window_close(),
+            input.watermark_columns().clone(),
+            input.columns_monotonicity().clone(),
+        );
 
         Self {
             base,
@@ -231,33 +267,47 @@ impl StreamSink {
 
     #[allow(clippy::too_many_arguments)]
     pub fn create(
-        mut input: PlanRef,
+        StreamOptimizedLogicalPlanRoot {
+            plan: mut input,
+            required_dist: user_distributed_by,
+            required_order: user_order_by,
+            out_fields: user_cols,
+            out_names,
+            ..
+        }: StreamOptimizedLogicalPlanRoot,
         name: String,
         db_name: String,
         sink_from_table_name: String,
         target_table: Option<Arc<TableCatalog>>,
         target_table_mapping: Option<Vec<Option<usize>>>,
-        user_distributed_by: RequiredDist,
-        user_order_by: Order,
-        user_cols: FixedBitSet,
-        out_names: Vec<String>,
         definition: String,
         properties: WithOptionsSecResolved,
         format_desc: Option<SinkFormatDesc>,
         partition_info: Option<PartitionComputeInfo>,
+        auto_refresh_schema_from_table: Option<Arc<TableCatalog>>,
     ) -> Result<Self> {
-        let sink_type =
-            Self::derive_sink_type(input.append_only(), &properties, format_desc.as_ref())?;
+        let (sink_type, ignore_delete) =
+            Self::derive_sink_type(input.stream_kind(), &properties, format_desc.as_ref())?;
 
         let columns = derive_columns(input.schema(), out_names, &user_cols)?;
-        let (pk, _) = derive_pk(input.clone(), user_order_by, &columns);
-        let mut downstream_pk = {
-            let from_properties =
-                Self::parse_downstream_pk(&columns, properties.get(DOWNSTREAM_PK_KEY))?;
+        let (pk, _) = derive_pk(
+            input.clone(),
+            user_distributed_by.clone(),
+            user_order_by,
+            &columns,
+        );
+        let derived_pk = pk.iter().map(|k| k.column_index).collect_vec();
+
+        // Get downstream pk from user input, override and perform some checks if applicable.
+        let downstream_pk = {
+            let downstream_pk = properties
+                .get(DOWNSTREAM_PK_KEY)
+                .map(|v| Self::parse_downstream_pk(v, &columns))
+                .transpose()?;
+
             if let Some(t) = &target_table {
                 let user_defined_primary_key_table = t.row_id_index.is_none();
-                let sink_is_append_only =
-                    sink_type == SinkType::AppendOnly || sink_type == SinkType::ForceAppendOnly;
+                let sink_is_append_only = sink_type.is_append_only();
 
                 if !user_defined_primary_key_table && !sink_is_append_only {
                     return Err(RwError::from(ErrorCode::BindError(
@@ -271,24 +321,80 @@ impl StreamSink {
                     )));
                 }
 
-                if sink_type != SinkType::Upsert {
-                    vec![]
+                if sink_is_append_only {
+                    None
                 } else {
                     let target_table_mapping = target_table_mapping.unwrap();
-
-                    t.pk()
-                    .iter()
-                    .map(|c| {
-                        target_table_mapping[c.column_index].ok_or(
-                            ErrorCode::SinkError(Box::new(Error::new(ErrorKind::InvalidInput,
-                                "When using non append only sink into table, the primary key of the table must be included in the sink result.".to_owned()
-                        ))).into())})
-                    .try_collect::<_, _, RwError>()?
+                    Some(t.pk()
+                        .iter()
+                        .map(|c| {
+                            target_table_mapping[c.column_index].ok_or_else(
+                                || ErrorCode::InvalidInputSyntax("When using non append only sink into table, the primary key of the table must be included in the sink result.".to_owned()).into())
+                        })
+                        .try_collect::<_, _, RwError>()?)
                 }
+            } else if properties.get(CREATE_TABLE_IF_NOT_EXISTS) == Some(&"true".to_owned())
+                && sink_type == SinkType::Upsert
+                && downstream_pk.is_none()
+            {
+                Some(derived_pk.clone())
+            } else if properties.is_iceberg_connector()
+                && sink_type == SinkType::Upsert
+                && downstream_pk.is_none()
+            {
+                // If user doesn't specify the downstream primary key, we use the stream key as the pk.
+                Some(derived_pk.clone())
             } else {
-                from_properties
+                downstream_pk
             }
         };
+
+        // Since we've already rejected empty pk in `parse_downstream_pk`, if we still get an empty pk here,
+        // it's likely that the derived stream key is used and it's empty, which is possible in cases of
+        // operators outputting at most one row (like `SimpleAgg`). This is legitimate. However, currently
+        // the sink implementation may confuse empty pk with not specifying pk, so we still reject this case
+        // for correctness.
+        if let Some(pk) = &downstream_pk
+            && pk.is_empty()
+        {
+            bail_invalid_input_syntax!(
+                "Empty primary key is not supported. \
+                 Please specify the primary key in WITH options."
+            )
+        }
+
+        // The "upsert" property is defined based on a specific stream key: columns other than the stream key
+        // might not be valid. We should reject the cases referencing such columns in primary key.
+        if let StreamKind::Upsert = input.stream_kind()
+            && let Some(downstream_pk) = &downstream_pk
+            && !downstream_pk.iter().all(|i| derived_pk.contains(i))
+        {
+            bail_bind_error!(
+                "When sinking from an upsert stream, \
+                 the downstream primary key must be the same as or a subset of the one derived from the stream."
+            )
+        }
+
+        if let Some(upstream_table) = &auto_refresh_schema_from_table
+            && let Some(downstream_pk) = &downstream_pk
+        {
+            let upstream_table_pk_col_names = upstream_table
+                .pk
+                .iter()
+                .map(|order| {
+                    upstream_table.columns[order.column_index]
+                        .column_desc
+                        .name()
+                })
+                .collect_vec();
+            let sink_pk_col_names = downstream_pk
+                .iter()
+                .map(|&column_index| columns[column_index].name())
+                .collect_vec();
+            if upstream_table_pk_col_names != sink_pk_col_names {
+                return Err(ErrorCode::InvalidInputSyntax(format!("sink with auto schema change should have same pk as upstream table {:?}, but got {:?}", upstream_table_pk_col_names, sink_pk_col_names)).into());
+            }
+        }
         let mut extra_partition_col_idx = None;
 
         let required_dist = match input.distribution() {
@@ -296,25 +402,17 @@ impl StreamSink {
             _ => {
                 match properties.get("connector") {
                     Some(s) if s == "jdbc" && sink_type == SinkType::Upsert => {
-                        if sink_type == SinkType::Upsert && downstream_pk.is_empty() {
-                            return Err(ErrorCode::SinkError(Box::new(Error::new(
-                                ErrorKind::InvalidInput,
-                                format!(
-                                    "Primary key must be defined for upsert JDBC sink. Please specify the \"{key}='pk1,pk2,...'\" in WITH options.",
-                                    key = DOWNSTREAM_PK_KEY
-                                ),
-                            )))
-                                .into());
-                        }
+                        let Some(downstream_pk) = &downstream_pk else {
+                            return Err(ErrorCode::InvalidInputSyntax(format!(
+                                "Primary key must be defined for upsert JDBC sink. Please specify the \"{key}='pk1,pk2,...'\" in WITH options.",
+                                key = DOWNSTREAM_PK_KEY
+                            )).into());
+                        };
                         // for upsert jdbc sink we align distribution to downstream to avoid
                         // lock contentions
-                        RequiredDist::hash_shard(downstream_pk.as_slice())
+                        RequiredDist::hash_shard(downstream_pk)
                     }
                     Some(s) if s == ICEBERG_SINK => {
-                        // If user doesn't specify the downstream primary key, we use the stream key as the pk.
-                        if sink_type.is_upsert() && downstream_pk.is_empty() {
-                            downstream_pk = pk.iter().map(|k| k.column_index).collect_vec();
-                        }
                         let (required_dist, new_input, partition_col_idx) =
                             Self::derive_iceberg_sink_distribution(
                                 input,
@@ -327,24 +425,29 @@ impl StreamSink {
                     }
                     _ => {
                         assert_matches!(user_distributed_by, RequiredDist::Any);
-                        if downstream_pk.is_empty() {
+                        if let Some(downstream_pk) = &downstream_pk {
+                            // force the same primary key be written into the same sink shard to make sure the sink pk mismatch compaction effective
+                            // https://github.com/risingwavelabs/risingwave/blob/6d88344c286f250ea8a7e7ef6b9d74dea838269e/src/stream/src/executor/sink.rs#L169-L198
+                            RequiredDist::shard_by_key(input.schema().len(), downstream_pk)
+                        } else {
                             RequiredDist::shard_by_key(
                                 input.schema().len(),
                                 input.expect_stream_key(),
-                            )
-                        } else {
-                            // force the same primary key be written into the same sink shard to make sure the sink pk mismatch compaction effective
-                            // https://github.com/risingwavelabs/risingwave/blob/6d88344c286f250ea8a7e7ef6b9d74dea838269e/src/stream/src/executor/sink.rs#L169-L198
-                            RequiredDist::shard_by_key(
-                                input.schema().len(),
-                                downstream_pk.as_slice(),
                             )
                         }
                     }
                 }
             }
         };
-        let input = required_dist.enforce_if_not_satisfies(input, &Order::any())?;
+        let input = required_dist.streaming_enforce_if_not_satisfies(input)?;
+        let input = if input.ctx().session_ctx().config().streaming_separate_sink()
+            && input.as_stream_exchange().is_none()
+        {
+            StreamExchange::new_no_shuffle(input).into()
+        } else {
+            input
+        };
+
         let distribution_key = input.distribution().dist_column_indices().to_vec();
         let create_type = if input.ctx().session_ctx().config().background_ddl()
             && plan_can_use_background_ddl(&input)
@@ -356,7 +459,8 @@ impl StreamSink {
         let (properties, secret_refs) = properties.into_parts();
         let is_exactly_once = properties
             .get("is_exactly_once")
-            .is_some_and(|v| v.to_lowercase() == "true");
+            .map(|v| v.to_lowercase() == "true");
+
         let mut sink_desc = SinkDesc {
             id: SinkId::placeholder(),
             name,
@@ -370,15 +474,20 @@ impl StreamSink {
             properties,
             secret_refs,
             sink_type,
+            ignore_delete,
             format_desc,
             target_table: target_table.as_ref().map(|catalog| catalog.id()),
             extra_partition_col_idx,
             create_type,
             is_exactly_once,
+            auto_refresh_schema_from_table: auto_refresh_schema_from_table
+                .as_ref()
+                .map(|table| table.id),
         };
 
-        let unsupported_sink =
-            |sink: &str| Err(SinkError::Config(anyhow!("unsupported sink type {}", sink)));
+        let unsupported_sink = |sink: &str| -> Result<_> {
+            Err(ErrorCode::InvalidInputSyntax(format!("unsupported sink type {}", sink)).into())
+        };
 
         // check and ensure that the sink connector is specified and supported
         let sink_decouple = match sink_desc.properties.get(CONNECTOR_TYPE_KEY) {
@@ -396,30 +505,54 @@ impl StreamSink {
                                 &mut sink_desc,
                                 &input.ctx().session_ctx().config().sink_decouple(),
                             )?;
+                            let support_schema_change = SinkType::support_schema_change();
+                            if !support_schema_change && auto_refresh_schema_from_table.is_some() {
+                                return Err(ErrorCode::InvalidInputSyntax(format!(
+                                    "{} sink does not support schema change",
+                                    connector_type
+                                ))
+                                .into());
+                            }
                             SinkType::is_sink_decouple(
                                 &input.ctx().session_ctx().config().sink_decouple(),
                             )
+                            .map_err(Into::into)
                         }
                     },
                     |other: &str| unsupported_sink(other)
                 )?
             }
             None => {
-                return Err(
-                    SinkError::Config(anyhow!("connector not specified when create sink")).into(),
-                );
+                return Err(ErrorCode::InvalidInputSyntax(
+                    "connector not specified when create sink".to_owned(),
+                )
+                .into());
             }
         };
-        // For file sink, it must have sink_decouple turned on.
-        if !sink_decouple && sink_desc.is_file_sink() {
-            return Err(
-                SinkError::Config(anyhow!("File sink can only be created with sink_decouple enabled. Please run `set sink_decouple = true` first.")).into(),
-            );
-        }
-        if !sink_decouple && sink_desc.is_exactly_once {
-            return Err(
-                SinkError::Config(anyhow!("Exactly once sink can only be created with sink_decouple enabled. Please run `set sink_decouple = true` first.")).into(),
-            );
+        let hint_string =
+            |expected: bool| format!("Please run `set sink_decouple = {}` first.", expected);
+        if !sink_decouple {
+            // For file sink, it must have sink_decouple turned on.
+            if sink_desc.is_file_sink() {
+                return Err(ErrorCode::NotSupported(
+                    "File sink can only be created with sink_decouple enabled.".to_owned(),
+                    hint_string(true),
+                )
+                .into());
+            }
+
+            if sink_desc.is_exactly_once.is_none()
+                && let Some(connector) = sink_desc.properties.get(CONNECTOR_TYPE_KEY)
+            {
+                let connector_type = connector.to_lowercase();
+                if connector_type == ICEBERG_SINK {
+                    // iceberg sink defaults to exactly once
+                    // However, when sink_decouple is disabled, we enforce it to false.
+                    sink_desc
+                        .properties
+                        .insert("is_exactly_once".to_owned(), "false".to_owned());
+                }
+            }
         }
         let log_store_type = if sink_decouple {
             SinkLogStoreType::KvLogStore
@@ -427,163 +560,177 @@ impl StreamSink {
             SinkLogStoreType::InMemoryLogStore
         };
 
+        // sink into table should have logstore for sink_decouple
+        let input = if sink_decouple && target_table.is_some() {
+            StreamSyncLogStore::new(input).into()
+        } else {
+            input
+        };
+
         Ok(Self::new(input, sink_desc, log_store_type))
     }
 
     fn sink_type_in_prop(properties: &WithOptionsSecResolved) -> Result<Option<SinkType>> {
         if let Some(sink_type) = properties.get(SINK_TYPE_OPTION) {
-            if sink_type == SINK_TYPE_APPEND_ONLY {
-                return Ok(Some(SinkType::AppendOnly));
-            } else if sink_type == SINK_TYPE_DEBEZIUM || sink_type == SINK_TYPE_UPSERT {
-                return Ok(Some(SinkType::Upsert));
-            } else {
-                return Err(ErrorCode::SinkError(Box::new(Error::new(
-                    ErrorKind::InvalidInput,
-                    format!(
-                        "`{}` must be {}, {}, or {}",
+            let sink_type = match sink_type.as_str() {
+                SINK_TYPE_APPEND_ONLY => SinkType::AppendOnly,
+                SINK_TYPE_UPSERT => {
+                    if properties.is_iceberg_connector() {
+                        // Iceberg sink must use retract to represent deletes
+                        SinkType::Retract
+                    } else {
+                        SinkType::Upsert
+                    }
+                }
+                SINK_TYPE_RETRACT | SINK_TYPE_DEBEZIUM => SinkType::Retract,
+                _ => {
+                    return Err(ErrorCode::InvalidInputSyntax(format!(
+                        "`{}` must be {}, {}, {}, or {}",
                         SINK_TYPE_OPTION,
                         SINK_TYPE_APPEND_ONLY,
+                        SINK_TYPE_RETRACT,
+                        SINK_TYPE_UPSERT,
                         SINK_TYPE_DEBEZIUM,
-                        SINK_TYPE_UPSERT
-                    ),
-                )))
-                .into());
-            }
+                    ))
+                    .into());
+                }
+            };
+            return Ok(Some(sink_type));
         }
         Ok(None)
     }
 
-    fn is_user_force_append_only(properties: &WithOptionsSecResolved) -> Result<bool> {
-        if properties.contains_key(SINK_USER_FORCE_APPEND_ONLY_OPTION)
-            && !properties.value_eq_ignore_case(SINK_USER_FORCE_APPEND_ONLY_OPTION, "true")
-            && !properties.value_eq_ignore_case(SINK_USER_FORCE_APPEND_ONLY_OPTION, "false")
-        {
-            return Err(ErrorCode::SinkError(Box::new(Error::new(
-                ErrorKind::InvalidInput,
-                format!(
-                    "`{}` must be true or false",
-                    SINK_USER_FORCE_APPEND_ONLY_OPTION
-                ),
-            )))
+    /// `ignore_delete` option, with backward-compatible alias `force_append_only`.
+    fn is_user_ignore_delete(properties: &WithOptionsSecResolved) -> Result<bool> {
+        let has_ignore_delete = properties.contains_key(SINK_USER_IGNORE_DELETE_OPTION);
+        let has_force_append_only = properties.contains_key(SINK_USER_FORCE_APPEND_ONLY_OPTION);
+
+        if has_ignore_delete && has_force_append_only {
+            return Err(ErrorCode::InvalidInputSyntax(format!(
+                "`{}` is an alias of `{}`, only one of them can be specified.",
+                SINK_USER_FORCE_APPEND_ONLY_OPTION, SINK_USER_IGNORE_DELETE_OPTION
+            ))
             .into());
         }
-        Ok(properties.value_eq_ignore_case(SINK_USER_FORCE_APPEND_ONLY_OPTION, "true"))
+
+        let key = if has_ignore_delete {
+            SINK_USER_IGNORE_DELETE_OPTION
+        } else if has_force_append_only {
+            SINK_USER_FORCE_APPEND_ONLY_OPTION
+        } else {
+            return Ok(false);
+        };
+
+        if properties.value_eq_ignore_case(key, "true") {
+            Ok(true)
+        } else if properties.value_eq_ignore_case(key, "false") {
+            Ok(false)
+        } else {
+            Err(ErrorCode::InvalidInputSyntax(format!("`{key}` must be true or false")).into())
+        }
     }
 
+    /// Derive the sink type based on...
+    ///
+    /// - the derived stream kind of the plan, from the optimizer
+    /// - sink format required by [`SinkFormatDesc`], if any
+    /// - user-specified sink type in WITH options, if any
+    /// - user-specified `ignore_delete` (`force_append_only`) in WITH options, if any
+    ///
+    /// Returns the `sink_type` and `ignore_delete`.
     fn derive_sink_type(
-        input_append_only: bool,
+        derived_stream_kind: StreamKind,
         properties: &WithOptionsSecResolved,
         format_desc: Option<&SinkFormatDesc>,
-    ) -> Result<SinkType> {
-        let frontend_derived_append_only = input_append_only;
-        let (user_defined_sink_type, user_force_append_only, syntax_legacy) = match format_desc {
+    ) -> Result<(SinkType, bool)> {
+        let (user_defined_sink_type, user_ignore_delete, syntax_legacy) = match format_desc {
             Some(f) => (
                 Some(match f.format {
                     SinkFormat::AppendOnly => SinkType::AppendOnly,
-                    SinkFormat::Upsert | SinkFormat::Debezium => SinkType::Upsert,
+                    SinkFormat::Upsert => SinkType::Upsert,
+                    SinkFormat::Debezium => SinkType::Retract,
                 }),
-                Self::is_user_force_append_only(&WithOptionsSecResolved::without_secrets(
+                Self::is_user_ignore_delete(&WithOptionsSecResolved::without_secrets(
                     f.options.clone(),
                 ))?,
                 false,
             ),
             None => (
                 Self::sink_type_in_prop(properties)?,
-                Self::is_user_force_append_only(properties)?,
+                Self::is_user_ignore_delete(properties)?,
                 true,
             ),
         };
 
-        if user_force_append_only
-            && user_defined_sink_type.is_some()
-            && user_defined_sink_type != Some(SinkType::AppendOnly)
-        {
-            return Err(ErrorCode::SinkError(Box::new(Error::new(
-                ErrorKind::InvalidInput,
-                "The force_append_only can be only used for type = \'append-only\'".to_owned(),
-            )))
-            .into());
-        }
-
-        let user_force_append_only = if user_force_append_only && frontend_derived_append_only {
-            false
-        } else {
-            user_force_append_only
-        };
-
-        if user_force_append_only && user_defined_sink_type != Some(SinkType::AppendOnly) {
-            return Err(ErrorCode::SinkError(Box::new(Error::new(
-                ErrorKind::InvalidInput,
-                format!(
-                    "Cannot force the sink to be append-only without \"{}\".",
-                    if syntax_legacy {
-                        "type='append-only'"
-                    } else {
-                        "FORMAT PLAIN"
-                    }
-                ),
-            )))
-            .into());
-        }
-
         if let Some(user_defined_sink_type) = user_defined_sink_type {
-            if user_defined_sink_type == SinkType::AppendOnly {
-                if user_force_append_only {
-                    return Ok(SinkType::ForceAppendOnly);
+            match user_defined_sink_type {
+                SinkType::AppendOnly => {
+                    if derived_stream_kind != StreamKind::AppendOnly && !user_ignore_delete {
+                        return Err(ErrorCode::InvalidInputSyntax(format!(
+                            "The sink of {} stream cannot be append-only. Please add \"force_append_only='true'\" in {} options to force the sink to be append-only. \
+                             Notice that this will cause the sink executor to drop DELETE messages and convert UPDATE messages to INSERT.",
+                            derived_stream_kind,
+                            if syntax_legacy { "WITH" } else { "FORMAT ENCODE" }
+                    ))
+                        .into());
+                    }
                 }
-                if !frontend_derived_append_only {
-                    return Err(ErrorCode::SinkError(Box::new(Error::new(
-                            ErrorKind::InvalidInput,
-                            format!(
-                                "The sink cannot be append-only. Please add \"force_append_only='true'\" in {} options to force the sink to be append-only. \
-                                Notice that this will cause the sink executor to drop DELETE messages and convert UPDATE messages to INSERT.",
-                                if syntax_legacy { "WITH" } else { "FORMAT ENCODE" }
-                            ),
-                        )))
-                            .into());
-                } else {
-                    return Ok(SinkType::AppendOnly);
+                SinkType::Upsert => { /* always qualified */ }
+                SinkType::Retract => {
+                    if user_ignore_delete {
+                        bail_invalid_input_syntax!(
+                            "Retract sink type does not support `ignore_delete`. \
+                             Please use `type = 'append-only'` or `type = 'upsert'` instead.",
+                        );
+                    }
+                    if derived_stream_kind == StreamKind::Upsert {
+                        bail_invalid_input_syntax!(
+                            "The sink of upsert stream cannot be retract. \
+                             Please create a materialized view or sink-into-table with this query before sinking it.",
+                        );
+                    }
                 }
             }
-
-            Ok(user_defined_sink_type)
+            Ok((user_defined_sink_type, user_ignore_delete))
         } else {
-            match frontend_derived_append_only {
-                true => Ok(SinkType::AppendOnly),
-                false => Ok(SinkType::Upsert),
-            }
+            // No specification at all, follow the optimizer's derivation.
+            // This is also the case for sink-into-table.
+            let sink_type = match derived_stream_kind {
+                // We downgrade `Retract` to `Upsert` unless explicitly specified the type in options,
+                // as it is well supported by most sinks and reduces the amount of data written.
+                StreamKind::Retract | StreamKind::Upsert => SinkType::Upsert,
+                StreamKind::AppendOnly => SinkType::AppendOnly,
+            };
+            Ok((sink_type, user_ignore_delete))
         }
     }
 
     /// Extract user-defined downstream pk columns from with options. Return the indices of the pk
-    /// columns.
+    /// columns. An empty list of columns is not allowed.
     ///
     /// The format of `downstream_pk_str` should be 'col1,col2,...' (delimited by `,`) in order to
     /// get parsed.
     fn parse_downstream_pk(
+        downstream_pk_str: &str,
         columns: &[ColumnCatalog],
-        downstream_pk_str: Option<&String>,
     ) -> Result<Vec<usize>> {
-        match downstream_pk_str {
-            Some(downstream_pk_str) => {
-                // If the user defines the downstream primary key, we find out their indices.
-                let downstream_pk = downstream_pk_str.split(',').collect_vec();
-                let mut downstream_pk_indices = Vec::with_capacity(downstream_pk.len());
-                for key in downstream_pk {
-                    let trimmed_key = key.trim();
-                    if trimmed_key.is_empty() {
-                        continue;
-                    }
-                    downstream_pk_indices.push(find_column_idx_by_name(columns, trimmed_key)?);
-                }
-                Ok(downstream_pk_indices)
+        // If the user defines the downstream primary key, we find out their indices.
+        let downstream_pk = downstream_pk_str.split(',').collect_vec();
+        let mut downstream_pk_indices = Vec::with_capacity(downstream_pk.len());
+        for key in downstream_pk {
+            let trimmed_key = key.trim();
+            if trimmed_key.is_empty() {
+                continue;
             }
-            None => {
-                // The user doesn't define the downstream primary key and we simply return an empty
-                // vector.
-                Ok(Vec::new())
-            }
+            downstream_pk_indices.push(find_column_idx_by_name(columns, trimmed_key)?);
         }
+        if downstream_pk_indices.is_empty() {
+            bail_invalid_input_syntax!(
+                "Specified primary key should not be empty. \
+                To use derived primary key, remove {DOWNSTREAM_PK_KEY} from WITH options instead."
+            );
+        }
+        Ok(downstream_pk_indices)
     }
 
     /// The table schema is: | epoch | seq id | row op | sink columns |
@@ -593,7 +740,7 @@ impl StreamSink {
     }
 }
 
-impl PlanTreeNodeUnary for StreamSink {
+impl PlanTreeNodeUnary<Stream> for StreamSink {
     fn input(&self) -> PlanRef {
         self.input.clone()
     }
@@ -604,7 +751,7 @@ impl PlanTreeNodeUnary for StreamSink {
     }
 }
 
-impl_plan_tree_node_for_unary! { StreamSink }
+impl_plan_tree_node_for_unary! { Stream, StreamSink }
 
 impl Distill for StreamSink {
     fn distill<'a>(&self) -> XmlNode<'a> {
@@ -624,9 +771,9 @@ impl Distill for StreamSink {
         let mut vec = Vec::with_capacity(3);
         vec.push(("type", Pretty::from(sink_type)));
         vec.push(("columns", column_names));
-        if self.sink_desc.sink_type.is_upsert() {
+        if let Some(pk) = &self.sink_desc.downstream_pk {
             let sink_pk = IndicesDisplay {
-                indices: &self.sink_desc.downstream_pk.clone(),
+                indices: pk,
                 schema: self.base.schema(),
             };
             vec.push(("downstream_pk", sink_pk.distill()));
@@ -653,7 +800,7 @@ impl StreamNode for StreamSink {
     }
 }
 
-impl ExprRewritable for StreamSink {}
+impl ExprRewritable<Stream> for StreamSink {}
 
 impl ExprVisitable for StreamSink {}
 

@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -117,10 +117,6 @@ impl<T: AsRef<[u8]>, R> KeyedRow<T, R> {
 
     pub fn into_owned_row(self) -> R {
         self.row
-    }
-
-    pub fn into_owned_row_key(self) -> (TableKey<T>, R) {
-        (self.vnode_prefixed_key, self.row)
     }
 
     pub fn vnode(&self) -> VirtualNode {

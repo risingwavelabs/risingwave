@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,14 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use super::{BoxedRule, Rule};
-use crate::optimizer::PlanRef;
+use super::prelude::{PlanRef, *};
 use crate::optimizer::plan_node::generic::{Agg, GenericPlanRef};
 use crate::optimizer::plan_node::{LogicalUnion, PlanTreeNode};
 
 /// Convert union to distinct + union all
 pub struct UnionToDistinctRule {}
-impl Rule for UnionToDistinctRule {
+impl Rule<Logical> for UnionToDistinctRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let union: &LogicalUnion = plan.as_logical_union()?;
         if !union.all() {

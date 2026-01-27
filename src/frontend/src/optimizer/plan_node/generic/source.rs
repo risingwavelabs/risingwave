@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -26,7 +26,7 @@ use super::GenericPlanNode;
 use crate::TableCatalog;
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::optimizer::optimizer_context::OptimizerContextRef;
-use crate::optimizer::property::FunctionalDependencySet;
+use crate::optimizer::property::{FunctionalDependencySet, StreamKind};
 
 /// In which scnario the source node is created
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -79,7 +79,21 @@ impl GenericPlanNode for Source {
     fn stream_key(&self) -> Option<Vec<usize>> {
         // FIXME: output col idx is not set. But iceberg source can prune cols.
         // XXX: there's a RISINGWAVE_ICEBERG_ROW_ID. Should we use it?
-        self.row_id_index.map(|idx| vec![idx])
+        if let Some(idx) = self.row_id_index {
+            Some(vec![idx])
+        } else if let Some(catalog) = &self.catalog {
+            catalog
+                .pk_col_ids
+                .iter()
+                .map(|id| {
+                    self.column_catalog
+                        .iter()
+                        .position(|c| c.column_id() == *id)
+                })
+                .collect::<Option<Vec<_>>>()
+        } else {
+            None
+        }
     }
 
     fn ctx(&self) -> OptimizerContextRef {
@@ -103,6 +117,21 @@ impl GenericPlanNode for Source {
 }
 
 impl Source {
+    pub fn stream_kind(&self) -> StreamKind {
+        if let Some(catalog) = &self.catalog {
+            if catalog.append_only {
+                StreamKind::AppendOnly
+            } else {
+                // Always treat source as upsert, as we either don't parse the old record for `Update`, or we don't
+                // trust the old record from external source.
+                StreamKind::Upsert
+            }
+        } else {
+            // `Source` acts only as a barrier receiver. There's no data at all.
+            StreamKind::AppendOnly
+        }
+    }
+
     /// The output is [`risingwave_connector::source::filesystem::FsPageItem`] / [`iceberg::scan::FileScanTask`]
     pub fn file_list_node(core: Self) -> Self {
         let column_catalog = if core.is_iceberg_connector() {
@@ -121,6 +150,29 @@ impl Source {
                     column_desc: ColumnDesc::from_field_with_column_id(
                         &Field {
                             name: "file_scan_task".to_owned(),
+                            data_type: DataType::Jsonb,
+                        },
+                        1,
+                    ),
+                    is_hidden: false,
+                },
+            ]
+        } else if core.is_batch_connector() {
+            vec![
+                ColumnCatalog {
+                    column_desc: ColumnDesc::from_field_with_column_id(
+                        &Field {
+                            name: "batch_task_id".to_owned(),
+                            data_type: DataType::Varchar,
+                        },
+                        0,
+                    ),
+                    is_hidden: false,
+                },
+                ColumnCatalog {
+                    column_desc: ColumnDesc::from_field_with_column_id(
+                        &Field {
+                            name: "batch_task_info".to_owned(),
                             data_type: DataType::Jsonb,
                         },
                         1,
@@ -188,6 +240,16 @@ impl Source {
         self.catalog
             .as_ref()
             .is_some_and(|catalog| catalog.with_properties.is_kafka_connector())
+    }
+
+    pub fn is_batch_connector(&self) -> bool {
+        self.catalog
+            .as_ref()
+            .is_some_and(|catalog| catalog.with_properties.is_batch_connector())
+    }
+
+    pub fn requires_singleton(&self) -> bool {
+        self.is_iceberg_connector() || self.is_batch_connector()
     }
 
     /// Currently, only iceberg source supports time travel.
@@ -285,5 +347,17 @@ impl Source {
             },
             1,
         )
+    }
+
+    pub fn clone_with_column_catalog(&self, column_catalog: Vec<ColumnCatalog>) -> Self {
+        let row_id_index = column_catalog.iter().position(|c| c.is_row_id_column());
+        Self {
+            catalog: self.catalog.clone(),
+            column_catalog,
+            row_id_index,
+            kind: self.kind.clone(),
+            ctx: self.ctx.clone(),
+            as_of: self.as_of.clone(),
+        }
     }
 }

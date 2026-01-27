@@ -45,7 +45,7 @@ struct Inner {
 
     /// Whether there are likely no-op updates in the output chunks, so that eliminating them with
     /// `StreamChunk::eliminate_adjacent_noop_update` could be beneficial.
-    noop_update_hint: bool,
+    eliminate_noop_updates: bool,
 }
 
 impl ProjectExecutor {
@@ -58,6 +58,8 @@ impl ProjectExecutor {
         noop_update_hint: bool,
     ) -> Self {
         let n_nondecreasing_exprs = nondecreasing_expr_indices.len();
+        let eliminate_noop_updates =
+            noop_update_hint || ctx.config.developer.aggressive_noop_update_elimination;
         Self {
             input,
             inner: Inner {
@@ -67,7 +69,7 @@ impl ProjectExecutor {
                 nondecreasing_expr_indices,
                 last_nondec_expr_values: vec![None; n_nondecreasing_exprs],
                 is_paused: false,
-                noop_update_hint,
+                eliminate_noop_updates,
             },
         }
     }
@@ -87,22 +89,31 @@ impl Execute for ProjectExecutor {
     }
 }
 
+pub async fn apply_project_exprs(
+    exprs: &[NonStrictExpression],
+    chunk: StreamChunk,
+) -> StreamExecutorResult<StreamChunk> {
+    let (data_chunk, ops) = chunk.into_parts();
+    let mut projected_columns = Vec::new();
+
+    for expr in exprs {
+        let evaluated_expr = expr.eval_infallible(&data_chunk).await;
+        projected_columns.push(evaluated_expr);
+    }
+    let (_, vis) = data_chunk.into_parts();
+
+    let new_chunk = StreamChunk::with_visibility(ops, projected_columns, vis);
+
+    Ok(new_chunk)
+}
+
 impl Inner {
     async fn map_filter_chunk(
         &self,
         chunk: StreamChunk,
     ) -> StreamExecutorResult<Option<StreamChunk>> {
-        let (data_chunk, ops) = chunk.into_parts();
-        let mut projected_columns = Vec::new();
-
-        for expr in &self.exprs {
-            let evaluated_expr = expr.eval_infallible(&data_chunk).await;
-            projected_columns.push(evaluated_expr);
-        }
-        let (_, vis) = data_chunk.into_parts();
-
-        let mut new_chunk = StreamChunk::with_visibility(ops, projected_columns, vis);
-        if self.noop_update_hint {
+        let mut new_chunk = apply_project_exprs(&self.exprs, chunk).await?;
+        if self.eliminate_noop_updates {
             new_chunk = new_chunk.eliminate_adjacent_noop_update();
         }
         Ok(Some(new_chunk))
@@ -151,20 +162,20 @@ impl Inner {
                 }
                 Message::Chunk(chunk) => match self.map_filter_chunk(chunk).await? {
                     Some(new_chunk) => {
-                        if !self.nondecreasing_expr_indices.is_empty() {
-                            if let Some((_, first_visible_row)) = new_chunk.rows().next() {
-                                // it's ok to use the first row here, just one chunk delay
-                                first_visible_row
-                                    .project(&self.nondecreasing_expr_indices)
-                                    .iter()
-                                    .enumerate()
-                                    .for_each(|(idx, value)| {
-                                        self.last_nondec_expr_values[idx] =
-                                            Some(value.to_owned_datum().expect(
-                                                "non-decreasing expression should never be NULL",
-                                            ));
-                                    });
-                            }
+                        if !self.nondecreasing_expr_indices.is_empty()
+                            && let Some((_, first_visible_row)) = new_chunk.rows().next()
+                        {
+                            // it's ok to use the first row here, just one chunk delay
+                            first_visible_row
+                                .project(&self.nondecreasing_expr_indices)
+                                .iter()
+                                .enumerate()
+                                .for_each(|(idx, value)| {
+                                    self.last_nondec_expr_values[idx] =
+                                        Some(value.to_owned_datum().expect(
+                                            "non-decreasing expression should never be NULL",
+                                        ));
+                                });
                         }
                         yield Message::Chunk(new_chunk)
                     }
@@ -240,9 +251,9 @@ mod tests {
                 Field::unnamed(DataType::Int64),
             ],
         };
-        let pk_indices = vec![0];
+        let stream_key = vec![0];
         let (mut tx, source) = MockSource::channel();
-        let source = source.into_executor(schema, pk_indices);
+        let source = source.into_executor(schema, stream_key);
 
         let test_expr = build_from_pretty("(add:int8 $0:int8 $1:int8)");
 
@@ -322,7 +333,7 @@ mod tests {
             ],
         };
         let (mut tx, source) = MockSource::channel();
-        let source = source.into_executor(schema, PkIndices::new());
+        let source = source.into_executor(schema, StreamKey::new());
 
         let a_expr = build_from_pretty("(add:int8 $0:int8 1:int8)");
         let b_expr = build_from_pretty("(subtract:int8 $0:int8 1:int8)");

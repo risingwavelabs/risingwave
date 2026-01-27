@@ -1,16 +1,18 @@
-// Copyright 2025 RisingWave Labs
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+/*
+ * Copyright 2024 RisingWave Labs
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 
 package com.risingwave.connector.source;
 
@@ -64,6 +66,12 @@ public class MySQLSourceTest {
 
     @BeforeClass
     public static void init() {
+        // Initialize object store for OpendalSchemaHistory (required for integration tests)
+        // Use memory-based object store to avoid needing a real RisingWave instance
+        com.risingwave.java.binding.Binding.initObjectStoreForTest(
+                "hummock+memory", "integration-test-data");
+        LOG.info("Initialized object store for OpendalSchemaHistory: hummock+memory");
+
         // generate orders.tbl test data
         SourceTestClient.genOrdersTable(10000);
         // start connector server and mysql...

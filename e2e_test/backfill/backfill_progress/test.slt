@@ -1,0 +1,63 @@
+statement ok
+drop materialized view if exists mv1;
+
+statement ok
+drop table if exists t;
+
+statement ok
+drop table if exists t2;
+
+statement ok
+drop table if exists t3;
+
+statement count 0
+select job_id from rw_catalog.rw_fragment_backfill_progress;
+
+statement ok
+create table t(v1 int, v2 int);
+
+statement ok
+create table t2(v1 int, v2 int);
+
+statement ok
+create table t3(v1 int, v2 int);
+
+statement ok
+insert into t select id as v1, id as v2 from generate_series(1, 1000) gen(id);
+
+statement ok
+insert into t2 select id as v1, id as v2 from generate_series(1, 1000) gen(id);
+
+statement ok
+insert into t3 select id as v1, id as v2 from generate_series(1, 1000) gen(id);
+
+statement ok
+flush;
+
+statement ok
+set background_ddl=true;
+
+statement ok
+set streaming_parallelism=1;
+
+statement ok
+set streaming_use_snapshot_backfill=true;
+
+include ./create_materialized_view_snapshot.slt
+
+statement ok
+set background_ddl=true;
+
+statement ok
+set streaming_use_snapshot_backfill=false;
+
+include ./create_materialized_view.slt
+
+statement ok
+set backfill_rate_limit=default
+
+statement ok
+set background_ddl=false;
+
+statement ok
+set streaming_parallelism=default;

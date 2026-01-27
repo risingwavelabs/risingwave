@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,14 +18,13 @@ use std::ops::Range;
 use std::pin::Pin;
 use std::sync::Arc;
 
-use anyhow::anyhow;
+use anyhow::{Context, bail};
 use bytes::Bytes;
 use futures::future::BoxFuture;
 use futures::{FutureExt, Stream, TryFutureExt};
 use iceberg::io::{
     FileIOBuilder, FileMetadata, FileRead, S3_ACCESS_KEY_ID, S3_REGION, S3_SECRET_ACCESS_KEY,
 };
-use iceberg::{Error, ErrorKind};
 use itertools::Itertools;
 use opendal::Operator;
 use opendal::layers::{LoggingLayer, RetryLayer};
@@ -57,7 +56,7 @@ impl<R: FileRead> ParquetFileReader<R> {
 }
 
 impl<R: FileRead> AsyncFileReader for ParquetFileReader<R> {
-    fn get_bytes(&mut self, range: Range<usize>) -> BoxFuture<'_, parquet::errors::Result<Bytes>> {
+    fn get_bytes(&mut self, range: Range<u64>) -> BoxFuture<'_, parquet::errors::Result<Bytes>> {
         Box::pin(
             self.r
                 .read(range.start as _..range.end as _)
@@ -65,10 +64,13 @@ impl<R: FileRead> AsyncFileReader for ParquetFileReader<R> {
         )
     }
 
-    fn get_metadata(&mut self) -> BoxFuture<'_, parquet::errors::Result<Arc<ParquetMetaData>>> {
+    fn get_metadata(
+        &mut self,
+        _options: Option<&parquet::arrow::arrow_reader::ArrowReaderOptions>,
+    ) -> BoxFuture<'_, parquet::errors::Result<Arc<ParquetMetaData>>> {
         async move {
             let reader = ParquetMetaDataReader::new();
-            let size = self.meta.size as usize;
+            let size = self.meta.size;
             let meta = reader.load_and_finish(self, size).await?;
 
             Ok(Arc::new(meta))
@@ -89,19 +91,16 @@ pub async fn create_parquet_stream_builder(
     props.insert(S3_SECRET_ACCESS_KEY, s3_secret_key.clone());
 
     let file_io_builder = FileIOBuilder::new("s3");
-    let file_io = file_io_builder
-        .with_props(props.into_iter())
-        .build()
-        .map_err(|e| anyhow!(e))?;
-    let parquet_file = file_io.new_input(&location).map_err(|e| anyhow!(e))?;
+    let file_io = file_io_builder.with_props(props.into_iter()).build()?;
+    let parquet_file = file_io.new_input(&location)?;
 
-    let parquet_metadata = parquet_file.metadata().await.map_err(|e| anyhow!(e))?;
-    let parquet_reader = parquet_file.reader().await.map_err(|e| anyhow!(e))?;
+    let parquet_metadata = parquet_file.metadata().await?;
+    let parquet_reader = parquet_file.reader().await?;
     let parquet_file_reader = ParquetFileReader::new(parquet_metadata, parquet_reader);
 
     ParquetRecordBatchStreamBuilder::new(parquet_file_reader)
         .await
-        .map_err(|e| anyhow!(e))
+        .map_err(Into::into)
 }
 
 pub fn new_s3_operator(
@@ -173,12 +172,7 @@ pub fn extract_bucket_and_file_name(
     let url = Url::parse(location)?;
     let bucket = url
         .host_str()
-        .ok_or_else(|| {
-            Error::new(
-                ErrorKind::DataInvalid,
-                format!("Invalid url: {}, missing bucket", location),
-            )
-        })?
+        .with_context(|| format!("Invalid url: {}, missing bucket", location))?
         .to_owned();
     let prefix = match file_scan_backend {
         FileScanBackend::S3 => format!("s3://{}/", bucket),
@@ -201,19 +195,13 @@ pub async fn list_data_directory(
         FileScanBackend::Azblob => format!("azblob://{}/", bucket),
     };
     if dir.starts_with(&prefix) {
-        op.list(&file_name)
-            .await
-            .map_err(|e| anyhow!(e))
-            .map(|list| {
-                list.into_iter()
-                    .map(|entry| prefix.clone() + entry.path())
-                    .collect()
-            })
+        op.list(&file_name).await.map_err(Into::into).map(|list| {
+            list.into_iter()
+                .map(|entry| prefix.clone() + entry.path())
+                .collect()
+        })
     } else {
-        Err(Error::new(
-            ErrorKind::DataInvalid,
-            format!("Invalid url: {}, should start with {}", dir, prefix),
-        ))?
+        bail!("Invalid url: {}, should start with {}", dir, prefix)
     }
 }
 
@@ -257,9 +245,14 @@ pub fn get_project_mask(
                         .iter()
                         .position(|&name| name == column.name)
                         .and_then(|pos| {
-                            let arrow_data_type: &risingwave_common::array::arrow::arrow_schema_iceberg::DataType = converted_arrow_schema.field_with_name(&column.name).ok()?.data_type();
-                            let rw_data_type: &risingwave_common::types::DataType = &column.data_type;
-                            if is_parquet_schema_match_source_schema(arrow_data_type, rw_data_type) {
+                            let arrow_data_type = converted_arrow_schema
+                                .field_with_name(&column.name)
+                                .ok()?
+                                .data_type();
+                            let rw_data_type: &risingwave_common::types::DataType =
+                                &column.data_type;
+                            if is_parquet_schema_match_source_schema(arrow_data_type, rw_data_type)
+                            {
                                 Some(pos)
                             } else {
                                 None
@@ -301,9 +294,43 @@ pub async fn read_parquet_file(
         .into_futures_async_read(..)
         .await?
         .compat();
-    let parquet_metadata = reader.get_metadata().await.map_err(anyhow::Error::from)?;
+    let parquet_metadata = reader
+        .get_metadata(None)
+        .await
+        .map_err(anyhow::Error::from)?;
 
     let file_metadata = parquet_metadata.file_metadata();
+    {
+        // Log parquet file-level metadata
+        tracing::info!(
+            "Reading parquet file: {}, from offset {}, num_row_groups={}, total_rows={}, kv_len={}",
+            file_name,
+            offset,
+            parquet_metadata.row_groups().len(),
+            file_metadata.num_rows(),
+            file_metadata
+                .key_value_metadata()
+                .map(|m| m.len())
+                .unwrap_or(0)
+        );
+        // Log each leaf column's path and types
+        let schema_descr = file_metadata.schema_descr();
+        for col in schema_descr.columns() {
+            let path = col.path().string();
+            let physical = col.physical_type();
+            let logical = col.logical_type();
+            tracing::debug!(
+                file = %file_name,
+                column_path = path,
+                physical_type = ?physical,
+                logical_type = ?logical,
+                type_length = ?col.type_length(),
+                max_def_level = col.max_def_level(),
+                max_rep_level = col.max_rep_level(),
+                "Parquet file column schema: "
+            );
+        }
+    }
     let projection_mask = get_project_mask(rw_columns, file_metadata)?;
 
     // For the Parquet format, we directly convert from a record batch to a stream chunk.
@@ -317,8 +344,7 @@ pub async fn read_parquet_file(
     let converted_arrow_schema = parquet_to_arrow_schema(
         file_metadata.schema_descr(),
         file_metadata.key_value_metadata(),
-    )
-    .map_err(anyhow::Error::from)?;
+    )?;
     let columns = match parser_columns {
         Some(columns) => columns,
         None => converted_arrow_schema
@@ -358,14 +384,13 @@ pub async fn get_parquet_fields(
         .into_futures_async_read(..)
         .await?
         .compat();
-    let parquet_metadata = reader.get_metadata().await.map_err(anyhow::Error::from)?;
+    let parquet_metadata = reader.get_metadata(None).await?;
 
     let file_metadata = parquet_metadata.file_metadata();
     let converted_arrow_schema = parquet_to_arrow_schema(
         file_metadata.schema_descr(),
         file_metadata.key_value_metadata(),
-    )
-    .map_err(anyhow::Error::from)?;
+    )?;
     let fields: risingwave_common::array::arrow::arrow_schema_iceberg::Fields =
         converted_arrow_schema.fields;
     Ok(fields)

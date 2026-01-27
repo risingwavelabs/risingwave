@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,7 +15,6 @@
 mod prometheus;
 
 use std::net::SocketAddr;
-use std::path::Path as FilePath;
 use std::sync::Arc;
 
 use anyhow::{Context as _, Result, anyhow};
@@ -24,25 +23,29 @@ use axum::extract::{Extension, Path};
 use axum::http::{Method, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
-use risingwave_common::util::StackTraceResponseExt;
-use risingwave_rpc_client::ComputeClientPool;
+use risingwave_common_service::ProfileServiceImpl;
+use risingwave_rpc_client::MonitorClientPool;
 use tokio::net::TcpListener;
 use tower::ServiceBuilder;
 use tower_http::add_extension::AddExtensionLayer;
 use tower_http::compression::CompressionLayer;
 use tower_http::cors::{self, CorsLayer};
 
+use crate::hummock::HummockManagerRef;
 use crate::manager::MetadataManager;
 use crate::manager::diagnose::DiagnoseCommandRef;
 
 #[derive(Clone)]
 pub struct DashboardService {
+    pub await_tree_reg: await_tree::Registry,
     pub dashboard_addr: SocketAddr,
     pub prometheus_client: Option<prometheus_http_query::Client>,
     pub prometheus_selector: String,
     pub metadata_manager: MetadataManager,
-    pub compute_clients: ComputeClientPool,
+    pub hummock_manager: HummockManagerRef,
+    pub monitor_clients: MonitorClientPool,
     pub diagnose_command: DiagnoseCommandRef,
+    pub profile_service: ProfileServiceImpl,
     pub trace_state: otlp_embedded::StateRef,
 }
 
@@ -57,29 +60,67 @@ pub(super) mod handlers {
     use axum::extract::Query;
     use futures::future::join_all;
     use itertools::Itertools;
-    use risingwave_common::catalog::TableId;
-    use risingwave_common_heap_profiling::COLLAPSED_SUFFIX;
+    use risingwave_common::id::JobId;
     use risingwave_meta_model::WorkerId;
     use risingwave_pb::catalog::table::TableType;
-    use risingwave_pb::catalog::{PbDatabase, PbSchema, Sink, Source, Subscription, Table, View};
+    use risingwave_pb::catalog::{
+        Index, PbDatabase, PbFunction, PbSchema, Sink, Source, Subscription, Table, View,
+    };
     use risingwave_pb::common::{WorkerNode, WorkerType};
+    use risingwave_pb::hummock::TableStats;
     use risingwave_pb::meta::list_object_dependencies_response::PbObjectDependencies;
     use risingwave_pb::meta::{
         ActorIds, FragmentIdToActorIdMap, FragmentToRelationMap, PbTableFragments, RelationIdInfos,
     };
     use risingwave_pb::monitor_service::stack_trace_request::ActorTracesFormat;
     use risingwave_pb::monitor_service::{
-        GetStreamingStatsResponse, HeapProfilingResponse, ListHeapProfilingResponse,
-        StackTraceRequest, StackTraceResponse,
+        AnalyzeHeapRequest, ChannelDeltaStats, GetStreamingPrometheusStatsResponse,
+        GetStreamingStatsResponse, HeapProfilingRequest, HeapProfilingResponse,
+        ListHeapProfilingRequest, ListHeapProfilingResponse, StackTraceResponse,
     };
-    use risingwave_pb::stream_plan::FragmentTypeFlag;
     use risingwave_pb::user::PbUserInfo;
-    use serde::Deserialize;
+    use serde::{Deserialize, Serialize};
     use serde_json::json;
     use thiserror_ext::AsReport;
+    use tonic::Request;
 
     use super::*;
     use crate::controller::fragment::StreamingJobInfo;
+    use crate::rpc::await_tree::{dump_cluster_await_tree, dump_worker_node_await_tree};
+
+    #[derive(Serialize)]
+    pub struct TableWithStats {
+        #[serde(flatten)]
+        pub table: Table,
+        pub total_size_bytes: i64,
+        pub total_key_count: i64,
+        pub total_key_size: i64,
+        pub total_value_size: i64,
+        pub compressed_size: u64,
+    }
+
+    impl TableWithStats {
+        pub fn from_table_and_stats(table: Table, stats: Option<&TableStats>) -> Self {
+            match stats {
+                Some(stats) => Self {
+                    total_size_bytes: stats.total_key_size + stats.total_value_size,
+                    total_key_count: stats.total_key_count,
+                    total_key_size: stats.total_key_size,
+                    total_value_size: stats.total_value_size,
+                    compressed_size: stats.total_compressed_size,
+                    table,
+                },
+                None => Self {
+                    total_size_bytes: 0,
+                    total_key_count: 0,
+                    total_key_size: 0,
+                    total_value_size: 0,
+                    compressed_size: 0,
+                    table,
+                },
+            }
+        }
+    }
 
     pub struct DashboardError(anyhow::Error);
     pub type Result<T> = std::result::Result<T, DashboardError>;
@@ -123,29 +164,71 @@ pub(super) mod handlers {
 
     async fn list_table_catalogs_inner(
         metadata_manager: &MetadataManager,
+        hummock_manager: &HummockManagerRef,
         table_type: TableType,
-    ) -> Result<Json<Vec<Table>>> {
+    ) -> Result<Json<Vec<TableWithStats>>> {
         let tables = metadata_manager
             .catalog_controller
             .list_tables_by_type(table_type.into())
             .await
             .map_err(err)?;
 
-        Ok(Json(tables))
+        // Get table statistics from hummock manager
+        let version_stats = hummock_manager.get_version_stats().await;
+
+        let tables_with_stats = tables
+            .into_iter()
+            .map(|table| {
+                let stats = version_stats.table_stats.get(&table.id);
+                TableWithStats::from_table_and_stats(table, stats)
+            })
+            .collect();
+
+        Ok(Json(tables_with_stats))
     }
 
     pub async fn list_materialized_views(
         Extension(srv): Extension<Service>,
-    ) -> Result<Json<Vec<Table>>> {
-        list_table_catalogs_inner(&srv.metadata_manager, TableType::MaterializedView).await
+    ) -> Result<Json<Vec<TableWithStats>>> {
+        list_table_catalogs_inner(
+            &srv.metadata_manager,
+            &srv.hummock_manager,
+            TableType::MaterializedView,
+        )
+        .await
     }
 
-    pub async fn list_tables(Extension(srv): Extension<Service>) -> Result<Json<Vec<Table>>> {
-        list_table_catalogs_inner(&srv.metadata_manager, TableType::Table).await
+    pub async fn list_tables(
+        Extension(srv): Extension<Service>,
+    ) -> Result<Json<Vec<TableWithStats>>> {
+        list_table_catalogs_inner(
+            &srv.metadata_manager,
+            &srv.hummock_manager,
+            TableType::Table,
+        )
+        .await
     }
 
-    pub async fn list_indexes(Extension(srv): Extension<Service>) -> Result<Json<Vec<Table>>> {
-        list_table_catalogs_inner(&srv.metadata_manager, TableType::Index).await
+    pub async fn list_index_tables(
+        Extension(srv): Extension<Service>,
+    ) -> Result<Json<Vec<TableWithStats>>> {
+        list_table_catalogs_inner(
+            &srv.metadata_manager,
+            &srv.hummock_manager,
+            TableType::Index,
+        )
+        .await
+    }
+
+    pub async fn list_indexes(Extension(srv): Extension<Service>) -> Result<Json<Vec<Index>>> {
+        let indexes = srv
+            .metadata_manager
+            .catalog_controller
+            .list_indexes()
+            .await
+            .map_err(err)?;
+
+        Ok(Json(indexes))
     }
 
     pub async fn list_subscription(
@@ -163,8 +246,13 @@ pub(super) mod handlers {
 
     pub async fn list_internal_tables(
         Extension(srv): Extension<Service>,
-    ) -> Result<Json<Vec<Table>>> {
-        list_table_catalogs_inner(&srv.metadata_manager, TableType::Internal).await
+    ) -> Result<Json<Vec<TableWithStats>>> {
+        list_table_catalogs_inner(
+            &srv.metadata_manager,
+            &srv.hummock_manager,
+            TableType::Internal,
+        )
+        .await
     }
 
     pub async fn list_sources(Extension(srv): Extension<Service>) -> Result<Json<Vec<Source>>> {
@@ -193,6 +281,19 @@ pub(super) mod handlers {
             .map_err(err)?;
 
         Ok(Json(views))
+    }
+
+    pub async fn list_functions(
+        Extension(srv): Extension<Service>,
+    ) -> Result<Json<Vec<PbFunction>>> {
+        let functions = srv
+            .metadata_manager
+            .catalog_controller
+            .list_functions()
+            .await
+            .map_err(err)?;
+
+        Ok(Json(functions))
     }
 
     pub async fn list_streaming_jobs(
@@ -224,19 +325,15 @@ pub(super) mod handlers {
             .table_fragments()
             .await
             .map_err(err)?;
-        let mut in_map = HashMap::new();
-        let mut out_map = HashMap::new();
+        let mut fragment_to_relation_map = HashMap::new();
         for (relation_id, tf) in table_fragments {
-            for (fragment_id, fragment) in &tf.fragments {
-                if (fragment.fragment_type_mask & FragmentTypeFlag::StreamScan as u32) != 0 {
-                    in_map.insert(*fragment_id, relation_id as u32);
-                }
-                if (fragment.fragment_type_mask & FragmentTypeFlag::Mview as u32) != 0 {
-                    out_map.insert(*fragment_id, relation_id as u32);
-                }
+            for fragment_id in tf.fragments.keys() {
+                fragment_to_relation_map.insert(*fragment_id, relation_id.as_raw_id());
             }
         }
-        let map = FragmentToRelationMap { in_map, out_map };
+        let map = FragmentToRelationMap {
+            fragment_to_relation_map,
+        };
         Ok(Json(map))
     }
 
@@ -258,7 +355,7 @@ pub(super) mod handlers {
                 fragment_id_to_actor_ids.insert(*fragment_id, ActorIds { ids: actor_ids });
             }
             map.insert(
-                id as u32,
+                id.as_raw_id(),
                 FragmentIdToActorIdMap {
                     map: fragment_id_to_actor_ids,
                 },
@@ -273,10 +370,10 @@ pub(super) mod handlers {
         Extension(srv): Extension<Service>,
         Path(job_id): Path<u32>,
     ) -> Result<Json<PbTableFragments>> {
-        let table_id = TableId::new(job_id);
+        let job_id = JobId::new(job_id);
         let table_fragments = srv
             .metadata_manager
-            .get_job_fragments_by_id(&table_id)
+            .get_job_fragments_by_id(job_id)
             .await
             .map_err(err)?;
         let upstream_fragments = srv
@@ -346,40 +443,26 @@ pub(super) mod handlers {
         Ok(Json(object_dependencies))
     }
 
-    async fn dump_await_tree_inner(
-        worker_nodes: impl IntoIterator<Item = &WorkerNode>,
-        compute_clients: &ComputeClientPool,
-        params: AwaitTreeDumpParams,
-    ) -> Result<Json<StackTraceResponse>> {
-        let mut all = StackTraceResponse::default();
-
-        let req = StackTraceRequest {
-            actor_traces_format: match params.format.as_str() {
-                "text" => ActorTracesFormat::Text as i32,
-                "json" => ActorTracesFormat::Json as i32,
-                _ => {
-                    return Err(err(anyhow!(
-                        "Unsupported format `{}`, only `text` and `json` are supported for now",
-                        params.format
-                    )));
-                }
-            },
-        };
-
-        for worker_node in worker_nodes {
-            let client = compute_clients.get(worker_node).await.map_err(err)?;
-            let result = client.stack_trace(req).await.map_err(err)?;
-
-            all.merge_other(result);
-        }
-
-        Ok(all.into())
-    }
-
     #[derive(Debug, Deserialize)]
     pub struct AwaitTreeDumpParams {
         #[serde(default = "await_tree_default_format")]
         format: String,
+    }
+
+    impl AwaitTreeDumpParams {
+        /// Parse the `format` parameter to [`ActorTracesFormat`].
+        pub fn actor_traces_format(&self) -> Result<ActorTracesFormat> {
+            Ok(match self.format.as_str() {
+                "text" => ActorTracesFormat::Text,
+                "json" => ActorTracesFormat::Json,
+                _ => {
+                    return Err(err(anyhow!(
+                        "Unsupported format `{}`, only `text` and `json` are supported for now",
+                        self.format
+                    )));
+                }
+            })
+        }
     }
 
     fn await_tree_default_format() -> String {
@@ -391,13 +474,17 @@ pub(super) mod handlers {
         Query(params): Query<AwaitTreeDumpParams>,
         Extension(srv): Extension<Service>,
     ) -> Result<Json<StackTraceResponse>> {
-        let worker_nodes = srv
-            .metadata_manager
-            .list_worker_node(Some(WorkerType::ComputeNode), None)
-            .await
-            .map_err(err)?;
+        let actor_traces_format = params.actor_traces_format()?;
 
-        dump_await_tree_inner(&worker_nodes, &srv.compute_clients, params).await
+        let res = dump_cluster_await_tree(
+            &srv.metadata_manager,
+            &srv.await_tree_reg,
+            actor_traces_format,
+        )
+        .await
+        .map_err(err)?;
+
+        Ok(res.into())
     }
 
     pub async fn dump_await_tree(
@@ -405,6 +492,8 @@ pub(super) mod handlers {
         Query(params): Query<AwaitTreeDumpParams>,
         Extension(srv): Extension<Service>,
     ) -> Result<Json<StackTraceResponse>> {
+        let actor_traces_format = params.actor_traces_format()?;
+
         let worker_node = srv
             .metadata_manager
             .get_worker_by_id(worker_id)
@@ -413,13 +502,27 @@ pub(super) mod handlers {
             .context("worker node not found")
             .map_err(err)?;
 
-        dump_await_tree_inner(std::iter::once(&worker_node), &srv.compute_clients, params).await
+        let res = dump_worker_node_await_tree(std::iter::once(&worker_node), actor_traces_format)
+            .await
+            .map_err(err)?;
+
+        Ok(res.into())
     }
 
     pub async fn heap_profile(
         Path(worker_id): Path<WorkerId>,
         Extension(srv): Extension<Service>,
     ) -> Result<Json<HeapProfilingResponse>> {
+        if worker_id == crate::manager::META_NODE_ID {
+            let result = srv
+                .profile_service
+                .heap_profiling(Request::new(HeapProfilingRequest { dir: "".to_owned() }))
+                .await
+                .map_err(err)?
+                .into_inner();
+            return Ok(result.into());
+        }
+
         let worker_node = srv
             .metadata_manager
             .get_worker_by_id(worker_id)
@@ -428,7 +531,7 @@ pub(super) mod handlers {
             .context("worker node not found")
             .map_err(err)?;
 
-        let client = srv.compute_clients.get(&worker_node).await.map_err(err)?;
+        let client = srv.monitor_clients.get(&worker_node).await.map_err(err)?;
 
         let result = client.heap_profile("".to_owned()).await.map_err(err)?;
 
@@ -439,6 +542,16 @@ pub(super) mod handlers {
         Path(worker_id): Path<WorkerId>,
         Extension(srv): Extension<Service>,
     ) -> Result<Json<ListHeapProfilingResponse>> {
+        if worker_id == crate::manager::META_NODE_ID {
+            let result = srv
+                .profile_service
+                .list_heap_profiling(Request::new(ListHeapProfilingRequest {}))
+                .await
+                .map_err(err)?
+                .into_inner();
+            return Ok(result.into());
+        }
+
         let worker_node = srv
             .metadata_manager
             .get_worker_by_id(worker_id)
@@ -447,7 +560,7 @@ pub(super) mod handlers {
             .context("worker node not found")
             .map_err(err)?;
 
-        let client = srv.compute_clients.get(&worker_node).await.map_err(err)?;
+        let client = srv.monitor_clients.get(&worker_node).await.map_err(err)?;
 
         let result = client.list_heap_profile().await.map_err(err)?;
         Ok(result.into())
@@ -460,34 +573,35 @@ pub(super) mod handlers {
         let file_path =
             String::from_utf8(base64_url::decode(&file_path).map_err(err)?).map_err(err)?;
 
-        let file_name = FilePath::new(&file_path)
-            .file_name()
-            .unwrap()
-            .to_string_lossy()
-            .to_string();
+        let collapsed_bin = if worker_id == crate::manager::META_NODE_ID {
+            srv.profile_service
+                .analyze_heap(Request::new(AnalyzeHeapRequest {
+                    path: file_path.clone(),
+                }))
+                .await
+                .map_err(err)?
+                .into_inner()
+                .result
+        } else {
+            let worker_node = srv
+                .metadata_manager
+                .get_worker_by_id(worker_id)
+                .await
+                .map_err(err)?
+                .context("worker node not found")
+                .map_err(err)?;
 
-        let collapsed_file_name = format!("{}.{}", file_name, COLLAPSED_SUFFIX);
-
-        let worker_node = srv
-            .metadata_manager
-            .get_worker_by_id(worker_id)
-            .await
-            .map_err(err)?
-            .context("worker node not found")
-            .map_err(err)?;
-
-        let client = srv.compute_clients.get(&worker_node).await.map_err(err)?;
-
-        let collapsed_bin = client
-            .analyze_heap(file_path.clone())
-            .await
-            .map_err(err)?
-            .result;
+            let client = srv.monitor_clients.get(&worker_node).await.map_err(err)?;
+            client
+                .analyze_heap(file_path.clone())
+                .await
+                .map_err(err)?
+                .result
+        };
         let collapsed_str = String::from_utf8_lossy(&collapsed_bin).to_string();
 
         let response = Response::builder()
             .header("Content-Type", "application/octet-stream")
-            .header("Content-Disposition", collapsed_file_name)
             .body(collapsed_str.into());
 
         response.map_err(err)
@@ -533,7 +647,7 @@ pub(super) mod handlers {
         let mut futures = Vec::new();
 
         for worker_node in worker_nodes {
-            let client = srv.compute_clients.get(&worker_node).await.map_err(err)?;
+            let client = srv.monitor_clients.get(&worker_node).await.map_err(err)?;
             let client = Arc::new(client);
             let fut = async move {
                 let result = client.get_streaming_stats().await.map_err(err)?;
@@ -586,6 +700,216 @@ pub(super) mod handlers {
         Ok(all.into())
     }
 
+    #[derive(Debug, Deserialize)]
+    pub struct StreamingStatsPrometheusParams {
+        /// Unix timestamp in seconds for the evaluation time. If not set, defaults to current Prometheus server time.
+        #[serde(default)]
+        at: Option<i64>,
+        /// Time offset for throughput and backpressure rate calculation in seconds. If not set, defaults to 60s.
+        #[serde(default = "streaming_stats_default_time_offset")]
+        time_offset: i64,
+    }
+
+    fn streaming_stats_default_time_offset() -> i64 {
+        60
+    }
+
+    pub async fn get_streaming_stats_from_prometheus(
+        Query(params): Query<StreamingStatsPrometheusParams>,
+        Extension(srv): Extension<Service>,
+    ) -> Result<Json<GetStreamingPrometheusStatsResponse>> {
+        let mut all = GetStreamingPrometheusStatsResponse::default();
+
+        // Get fragment and relation stats from workers
+        let worker_nodes = srv
+            .metadata_manager
+            .list_active_streaming_compute_nodes()
+            .await
+            .map_err(err)?;
+
+        let mut futures = Vec::new();
+
+        for worker_node in worker_nodes {
+            let client = srv.monitor_clients.get(&worker_node).await.map_err(err)?;
+            let client = Arc::new(client);
+            let fut = async move {
+                let result = client.get_streaming_stats().await.map_err(err)?;
+                Ok::<_, DashboardError>(result)
+            };
+            futures.push(fut);
+        }
+        let results = join_all(futures).await;
+
+        for result in results {
+            let result = result
+                .map_err(|_| anyhow!("Failed to get streaming stats from worker"))
+                .map_err(err)?;
+
+            // Aggregate fragment_stats
+            for (fragment_id, fragment_stats) in result.fragment_stats {
+                if let Some(s) = all.fragment_stats.get_mut(&fragment_id) {
+                    s.actor_count += fragment_stats.actor_count;
+                    s.current_epoch = min(s.current_epoch, fragment_stats.current_epoch);
+                } else {
+                    all.fragment_stats.insert(fragment_id, fragment_stats);
+                }
+            }
+
+            // Aggregate relation_stats
+            for (relation_id, relation_stats) in result.relation_stats {
+                if let Some(s) = all.relation_stats.get_mut(&relation_id) {
+                    s.actor_count += relation_stats.actor_count;
+                    s.current_epoch = min(s.current_epoch, relation_stats.current_epoch);
+                } else {
+                    all.relation_stats.insert(relation_id, relation_stats);
+                }
+            }
+        }
+
+        // Get channel delta stats from Prometheus
+        if let Some(ref client) = srv.prometheus_client {
+            // Query channel delta stats: throughput and backpressure rate
+            let channel_input_throughput_query = format!(
+                "sum(rate(stream_actor_in_record_cnt{{{}}}[{}s])) by (fragment_id, upstream_fragment_id)",
+                srv.prometheus_selector, params.time_offset
+            );
+            let channel_output_throughput_query = format!(
+                "sum(rate(stream_actor_out_record_cnt{{{}}}[{}s])) by (fragment_id, upstream_fragment_id)",
+                srv.prometheus_selector, params.time_offset
+            );
+            let channel_backpressure_query = format!(
+                "sum(rate(stream_actor_output_buffer_blocking_duration_ns{{{}}}[{}s])) by (fragment_id, downstream_fragment_id) \
+                 / ignoring (downstream_fragment_id) group_left sum(stream_actor_count) by (fragment_id)",
+                srv.prometheus_selector, params.time_offset
+            );
+
+            // Execute all queries concurrently with optional time parameter
+            let (
+                channel_input_throughput_result,
+                channel_output_throughput_result,
+                channel_backpressure_result,
+            ) = {
+                let mut input_query = client.query(channel_input_throughput_query);
+                let mut output_query = client.query(channel_output_throughput_query);
+                let mut backpressure_query = client.query(channel_backpressure_query);
+
+                // Set the evaluation time if provided
+                if let Some(at_time) = params.at {
+                    input_query = input_query.at(at_time);
+                    output_query = output_query.at(at_time);
+                    backpressure_query = backpressure_query.at(at_time);
+                }
+
+                tokio::try_join!(
+                    input_query.get(),
+                    output_query.get(),
+                    backpressure_query.get(),
+                )
+                .map_err(err)?
+            };
+
+            // Process channel delta stats
+            let mut channel_data = HashMap::new();
+
+            // Collect input throughput
+            if let Some(channel_input_throughput_data) =
+                channel_input_throughput_result.data().as_vector()
+            {
+                for sample in channel_input_throughput_data {
+                    if let Some(fragment_id_str) = sample.metric().get("fragment_id")
+                        && let Some(upstream_fragment_id_str) =
+                            sample.metric().get("upstream_fragment_id")
+                        && let (Ok(fragment_id), Ok(upstream_fragment_id)) = (
+                            fragment_id_str.parse::<u32>(),
+                            upstream_fragment_id_str.parse::<u32>(),
+                        )
+                    {
+                        let key = format!("{}_{}", upstream_fragment_id, fragment_id);
+                        channel_data
+                            .entry(key)
+                            .or_insert_with(|| ChannelDeltaStats {
+                                actor_count: 0,
+                                backpressure_rate: 0.0,
+                                recv_throughput: 0.0,
+                                send_throughput: 0.0,
+                            })
+                            .recv_throughput = sample.sample().value();
+                    }
+                }
+            }
+
+            // Collect output throughput
+            if let Some(channel_output_throughput_data) =
+                channel_output_throughput_result.data().as_vector()
+            {
+                for sample in channel_output_throughput_data {
+                    if let Some(fragment_id_str) = sample.metric().get("fragment_id")
+                        && let Some(upstream_fragment_id_str) =
+                            sample.metric().get("upstream_fragment_id")
+                        && let (Ok(fragment_id), Ok(upstream_fragment_id)) = (
+                            fragment_id_str.parse::<u32>(),
+                            upstream_fragment_id_str.parse::<u32>(),
+                        )
+                    {
+                        let key = format!("{}_{}", upstream_fragment_id, fragment_id);
+                        channel_data
+                            .entry(key)
+                            .or_insert_with(|| ChannelDeltaStats {
+                                actor_count: 0,
+                                backpressure_rate: 0.0,
+                                recv_throughput: 0.0,
+                                send_throughput: 0.0,
+                            })
+                            .send_throughput = sample.sample().value();
+                    }
+                }
+            }
+
+            // Collect backpressure rate
+            if let Some(channel_backpressure_data) = channel_backpressure_result.data().as_vector()
+            {
+                for sample in channel_backpressure_data {
+                    if let Some(fragment_id_str) = sample.metric().get("fragment_id")
+                        && let Some(downstream_fragment_id_str) =
+                            sample.metric().get("downstream_fragment_id")
+                        && let (Ok(fragment_id), Ok(downstream_fragment_id)) = (
+                            fragment_id_str.parse::<u32>(),
+                            downstream_fragment_id_str.parse::<u32>(),
+                        )
+                    {
+                        let key = format!("{}_{}", fragment_id, downstream_fragment_id);
+                        channel_data
+                            .entry(key)
+                            .or_insert_with(|| ChannelDeltaStats {
+                                actor_count: 0,
+                                backpressure_rate: 0.0,
+                                recv_throughput: 0.0,
+                                send_throughput: 0.0,
+                            })
+                            .backpressure_rate = sample.sample().value() / 1_000_000_000.0; // Convert ns to seconds
+                    }
+                }
+            }
+
+            // Set actor count for channels (using fragment actor count as approximation)
+            for (key, channel_stats) in &mut channel_data {
+                let parts: Vec<&str> = key.split('_').collect();
+                if parts.len() == 2
+                    && let Ok(fragment_id) = parts[1].parse::<u32>()
+                    && let Some(fragment_stats) = all.fragment_stats.get(&fragment_id)
+                {
+                    channel_stats.actor_count = fragment_stats.actor_count;
+                }
+            }
+
+            all.channel_stats = channel_data;
+
+            Ok(Json(all))
+        } else {
+            Err(err(anyhow!("Prometheus endpoint is not set")))
+        }
+    }
+
     pub async fn get_version(Extension(_srv): Extension<Service>) -> Result<Json<String>> {
         Ok(Json(risingwave_common::current_cluster_version()))
     }
@@ -611,9 +935,11 @@ impl DashboardService {
                 get(get_fragment_to_relation_map),
             )
             .route("/views", get(list_views))
+            .route("/functions", get(list_functions))
             .route("/materialized_views", get(list_materialized_views))
             .route("/tables", get(list_tables))
-            .route("/indexes", get(list_indexes))
+            .route("/indexes", get(list_index_tables))
+            .route("/index_items", get(list_indexes))
             .route("/subscriptions", get(list_subscription))
             .route("/internal_tables", get(list_internal_tables))
             .route("/sources", get(list_sources))
@@ -624,6 +950,10 @@ impl DashboardService {
             .route("/object_dependencies", get(list_object_dependencies))
             .route("/metrics/cluster", get(prometheus::list_prometheus_cluster))
             .route("/metrics/streaming_stats", get(get_streaming_stats))
+            .route(
+                "/metrics/streaming_stats_prometheus",
+                get(get_streaming_stats_from_prometheus),
+            )
             // /monitor/await_tree/{worker_id}/?format={text or json}
             .route("/monitor/await_tree/:worker_id", get(dump_await_tree))
             // /monitor/await_tree/?format={text or json}

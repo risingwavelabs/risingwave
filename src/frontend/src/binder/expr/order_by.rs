@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -32,9 +32,9 @@ impl Binder {
             expr,
             asc,
             nulls_first,
-        }: OrderByExpr,
+        }: &OrderByExpr,
     ) -> Result<BoundOrderByExpr> {
-        let order_type = OrderType::from_bools(asc, nulls_first);
+        let order_type = OrderType::from_bools(*asc, *nulls_first);
         let expr = self.bind_expr_inner(expr)?;
         Ok(BoundOrderByExpr { expr, order_type })
     }

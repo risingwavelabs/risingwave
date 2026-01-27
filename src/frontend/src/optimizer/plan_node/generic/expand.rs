@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -46,6 +46,13 @@ impl<PlanRef: GenericPlanRef> Expand<PlanRef> {
 
     fn flag_index(&self) -> usize {
         self.output_len() - 1
+    }
+
+    pub fn clone_with_input<OtherPlanRef>(&self, input: OtherPlanRef) -> Expand<OtherPlanRef> {
+        Expand {
+            column_subsets: self.column_subsets.clone(),
+            input,
+        }
     }
 }
 

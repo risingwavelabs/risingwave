@@ -24,9 +24,9 @@ insert into t values
 query iiii
 select first, first_non_null, first_non_null_2, last, last_non_null, last_non_null_2 from v order by ts;
 ----
-3    3    3    3    3    3
+3    3    3    3    3    2
 3    3    3    2    2    2
-3    3    3    null 2    2
+3    3    2    NULL 2    2
 
 statement ok
 insert into t values
@@ -38,8 +38,8 @@ select first, first_non_null, first_non_null_2, last, last_non_null, last_non_nu
 ----
 3    3    3    3    3    2
 3    3    3    2    2    2
-3    3    2    null 2    2
-3    3    7    null 2    7
+3    3    2    NULL 2    2
+3    3    7    NULL 2    7
 3    3    7    7    7    7
 
 statement ok

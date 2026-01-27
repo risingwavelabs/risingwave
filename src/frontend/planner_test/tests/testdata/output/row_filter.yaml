@@ -39,4 +39,4 @@
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
     └─BatchFilter { predicate: (Row(mv1.v1, mv1.v2, mv1.v3) > '(1,3,1)':Struct(StructType { fields: [("f1", Int32), ("f2", Int32), ("f3", Int32)] })) }
-      └─BatchScan { table: mv1, columns: [mv1.v1, mv1.v2, mv1.v3], scan_ranges: [(mv1.v1, mv1.v2) >= (Int32(1), Int32(3))], distribution: UpstreamHashShard(mv1.v1, mv1.v2, mv1.v3) }
+      └─BatchScan { table: mv1, columns: [mv1.v1, mv1.v2, mv1.v3], scan_ranges: [(mv1.v1, mv1.v2) >= (Int32(1), Int32(3))], distribution: SomeShard }

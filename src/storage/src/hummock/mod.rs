@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -54,7 +54,11 @@ pub use recent_filter::*;
 pub mod block_stream;
 mod time_travel_version_cache;
 
+pub(crate) mod vector;
+
+mod object_id_manager;
 pub use error::*;
+pub use object_id_manager::*;
 pub use risingwave_common::cache::{CacheableEntry, LookupResult, LruCache};
 pub use validator::*;
 use value::*;

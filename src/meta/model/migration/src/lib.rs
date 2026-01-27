@@ -37,6 +37,35 @@ mod m20250121_085800_change_wasm_udf_identifier;
 mod m20250210_170743_function_options;
 mod m20250319_062702_mysql_utf8mb4;
 mod m20250325_061743_exactly_once_iceberg_sink_metadata;
+mod m20250509_102041_remove_dispatcher;
+mod m20250514_114514_dispatcher_type_mapping;
+mod m20250522_074525_iceberg_tables;
+mod m20250522_074947_iceberg_namespace_properties;
+mod m20250528_064717_barrier_interval_per_database;
+mod m20250603_084830_default_privilege;
+mod m20250702_062029_cdc_table_snapshot_splits;
+mod m20250710_065220_sink_auto_refresh_schema;
+mod m20250722_155040_table_refreshable;
+mod m20250729_174630_add_vector_index_info;
+mod m20250810_000000_add_user_admin_field;
+mod m20250819_014448_add_version_column_indices_to_table;
+mod m20250820_120000_add_cdc_table_type;
+mod m20250821_081110_cdc_table_snapshot_splits_add_column;
+mod m20250905_144810_deprecate_table_incoming_sinks;
+mod m20250916_120000_add_refresh_fields;
+mod m20251005_000000_fragment_splits;
+mod m20251016_220528_fragment_parallelism;
+mod m20251022_294610_source_refresh_mode;
+mod m20251030_120000_refresh_jobs;
+mod m20251112_114514_streaming_job_config_override;
+mod m20251124_195858_pending_sink_state;
+mod m20251126_093529_add_is_iceberg_compactor;
+mod m20251130_120000_streaming_job_backfill_parallelism;
+mod m20251208_134652_clean_watermark_indices;
+mod m20251224_142321_sink_schema_change;
+mod m20251231_000000_sink_ignore_delete;
+mod m20260119_153927_streaming_job_is_serverless_backfill;
+mod m20260120_120000_streaming_job_backfill_orders;
 mod utils;
 
 pub struct Migrator;
@@ -112,6 +141,35 @@ impl MigratorTrait for Migrator {
             Box::new(m20250210_170743_function_options::Migration),
             Box::new(m20250319_062702_mysql_utf8mb4::Migration),
             Box::new(m20250325_061743_exactly_once_iceberg_sink_metadata::Migration),
+            Box::new(m20250509_102041_remove_dispatcher::Migration),
+            Box::new(m20250514_114514_dispatcher_type_mapping::Migration),
+            Box::new(m20250522_074525_iceberg_tables::Migration),
+            Box::new(m20250522_074947_iceberg_namespace_properties::Migration),
+            Box::new(m20250528_064717_barrier_interval_per_database::Migration),
+            Box::new(m20250603_084830_default_privilege::Migration),
+            Box::new(m20250702_062029_cdc_table_snapshot_splits::Migration),
+            Box::new(m20250710_065220_sink_auto_refresh_schema::Migration),
+            Box::new(m20250722_155040_table_refreshable::Migration),
+            Box::new(m20250729_174630_add_vector_index_info::Migration),
+            Box::new(m20250810_000000_add_user_admin_field::Migration),
+            Box::new(m20250819_014448_add_version_column_indices_to_table::Migration),
+            Box::new(m20250820_120000_add_cdc_table_type::Migration),
+            Box::new(m20250821_081110_cdc_table_snapshot_splits_add_column::Migration),
+            Box::new(m20250905_144810_deprecate_table_incoming_sinks::Migration),
+            Box::new(m20250916_120000_add_refresh_fields::Migration),
+            Box::new(m20251005_000000_fragment_splits::Migration),
+            Box::new(m20251016_220528_fragment_parallelism::Migration),
+            Box::new(m20251022_294610_source_refresh_mode::Migration),
+            Box::new(m20251030_120000_refresh_jobs::Migration),
+            Box::new(m20251112_114514_streaming_job_config_override::Migration),
+            Box::new(m20251126_093529_add_is_iceberg_compactor::Migration),
+            Box::new(m20251124_195858_pending_sink_state::Migration),
+            Box::new(m20251130_120000_streaming_job_backfill_parallelism::Migration),
+            Box::new(m20251208_134652_clean_watermark_indices::Migration),
+            Box::new(m20251224_142321_sink_schema_change::Migration),
+            Box::new(m20251231_000000_sink_ignore_delete::Migration),
+            Box::new(m20260119_153927_streaming_job_is_serverless_backfill::Migration),
+            Box::new(m20260120_120000_streaming_job_backfill_orders::Migration),
         ]
     }
 }

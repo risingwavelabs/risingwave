@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,7 +20,9 @@ use std::sync::Arc;
 use arc_swap::ArcSwap;
 use bytes::Bytes;
 use itertools::Itertools;
-use risingwave_common::catalog::TableId;
+use risingwave_common::array::VectorRef;
+use risingwave_common::catalog::{TableId, TableOption};
+use risingwave_common::dispatch_distance_measurement;
 use risingwave_common::util::epoch::is_max_epoch;
 use risingwave_common_service::{NotificationClient, ObserverManager};
 use risingwave_hummock_sdk::key::{
@@ -29,7 +31,7 @@ use risingwave_hummock_sdk::key::{
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::table_watermark::TableWatermarksIndex;
 use risingwave_hummock_sdk::version::{HummockVersion, LocalHummockVersion};
-use risingwave_hummock_sdk::{HummockReadEpoch, HummockSstableObjectId, SyncResult};
+use risingwave_hummock_sdk::{HummockRawObjectId, HummockReadEpoch, SyncResult};
 use risingwave_rpc_client::HummockMetaClient;
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc::{UnboundedSender, unbounded_channel};
@@ -53,12 +55,13 @@ use crate::hummock::iterator::change_log::ChangeLogIterator;
 use crate::hummock::local_version::pinned_version::{PinnedVersion, start_pinned_version_worker};
 use crate::hummock::local_version::recent_versions::RecentVersions;
 use crate::hummock::observer_manager::HummockObserverNode;
+use crate::hummock::store::vector_writer::HummockVectorWriter;
 use crate::hummock::time_travel_version_cache::SimpleTimeTravelVersionCache;
 use crate::hummock::utils::{wait_for_epoch, wait_for_update};
 use crate::hummock::write_limiter::{WriteLimiter, WriteLimiterRef};
 use crate::hummock::{
     HummockEpoch, HummockError, HummockResult, HummockStorageIterator, HummockStorageRevIterator,
-    MemoryLimiter, SstableObjectIdManager, SstableObjectIdManagerRef, SstableStoreRef,
+    MemoryLimiter, ObjectIdManager, ObjectIdManagerRef, SstableStoreRef,
 };
 use crate::mem_table::ImmutableMemtable;
 use crate::monitor::{CompactorMetrics, HummockStateStoreMetrics};
@@ -93,7 +96,7 @@ pub struct HummockStorage {
 
     compaction_catalog_manager_ref: CompactionCatalogManagerRef,
 
-    sstable_object_id_manager: SstableObjectIdManagerRef,
+    object_id_manager: ObjectIdManagerRef,
 
     buffer_tracker: BufferTracker,
 
@@ -135,6 +138,7 @@ pub fn get_committed_read_version_tuple(
                 .get(&table_id)
                 .expect("should exist when having table watermark")
                 .committed_epoch,
+            table_watermarks.watermark_type,
         )
         .rewrite_range_with_table_watermark(epoch, &mut key_range)
     }
@@ -154,7 +158,7 @@ impl HummockStorage {
         compactor_metrics: Arc<CompactorMetrics>,
         await_tree_config: Option<await_tree::Config>,
     ) -> HummockResult<Self> {
-        let sstable_object_id_manager = Arc::new(SstableObjectIdManager::new(
+        let object_id_manager = Arc::new(ObjectIdManager::new(
             hummock_meta_client.clone(),
             options.sstable_id_remote_fetch_number,
         ));
@@ -209,7 +213,7 @@ impl HummockStorage {
             pinned_version,
             compactor_context.clone(),
             compaction_catalog_manager_ref.clone(),
-            sstable_object_id_manager.clone(),
+            object_id_manager.clone(),
             state_store_metrics.clone(),
         );
 
@@ -218,7 +222,7 @@ impl HummockStorage {
         let instance = Self {
             context: compactor_context,
             compaction_catalog_manager_ref: compaction_catalog_manager_ref.clone(),
-            sstable_object_id_manager,
+            object_id_manager,
             buffer_tracker: hummock_event_handler.buffer_tracker().clone(),
             version_update_notifier_tx: hummock_event_handler.version_update_notifier_tx(),
             hummock_event_sender: event_tx.clone(),
@@ -256,11 +260,11 @@ impl HummockStorageReadSnapshot {
     /// If `Ok(Some())` is returned, the key is found. If `Ok(None)` is returned,
     /// the key is not found. If `Err()` is returned, the searching for the key
     /// failed due to other non-EOF errors.
-    async fn get_inner<O>(
-        &self,
+    async fn get_inner<'a, O>(
+        &'a self,
         key: TableKey<Bytes>,
         read_options: ReadOptions,
-        on_key_value_fn: impl KeyValueFn<O>,
+        on_key_value_fn: impl KeyValueFn<'a, O>,
     ) -> StorageResult<Option<O>> {
         let key_range = (Bound::Included(key.clone()), Bound::Included(key.clone()));
 
@@ -276,6 +280,7 @@ impl HummockStorageReadSnapshot {
                 key,
                 self.epoch.get_epoch(),
                 self.table_id,
+                self.table_option,
                 read_options,
                 read_version_tuple,
                 on_key_value_fn,
@@ -296,6 +301,7 @@ impl HummockStorageReadSnapshot {
                 key_range,
                 self.epoch.get_epoch(),
                 self.table_id,
+                self.table_option,
                 read_options,
                 read_version_tuple,
             )
@@ -315,6 +321,7 @@ impl HummockStorageReadSnapshot {
                 key_range,
                 self.epoch.get_epoch(),
                 self.table_id,
+                self.table_option,
                 read_options,
                 read_version_tuple,
                 None,
@@ -330,7 +337,7 @@ impl HummockStorageReadSnapshot {
         let meta_client = self.hummock_meta_client.clone();
         let fetch = async move {
             let pb_version = meta_client
-                .get_version_by_epoch(epoch, table_id.table_id())
+                .get_version_by_epoch(epoch, table_id)
                 .await
                 .inspect_err(|e| tracing::error!("{}", e.to_report_string()))
                 .map_err(|e| HummockError::meta_error(e.to_report_string()))?;
@@ -340,7 +347,7 @@ impl HummockStorageReadSnapshot {
         };
         let version = self
             .simple_time_travel_version_cache
-            .get_or_insert(table_id.table_id, epoch, fetch)
+            .get_or_insert(table_id, epoch, fetch)
             .await?;
         Ok(version)
     }
@@ -363,6 +370,7 @@ impl HummockStorageReadSnapshot {
             }
             HummockReadEpoch::NoWait(epoch) => {
                 self.build_read_version_tuple_from_all(epoch, self.table_id, key_range)
+                    .await
             }
         }
     }
@@ -393,26 +401,34 @@ impl HummockStorageReadSnapshot {
         }
     }
 
+    async fn get_epoch_hummock_version(
+        &self,
+        epoch: u64,
+        table_id: TableId,
+    ) -> StorageResult<PinnedVersion> {
+        match self
+            .recent_versions
+            .load()
+            .get_safe_version(table_id, epoch)
+        {
+            Some(version) => Ok(version),
+            None => self.get_time_travel_version(epoch, table_id).await,
+        }
+    }
+
     async fn build_read_version_tuple_from_committed(
         &self,
         epoch: u64,
         table_id: TableId,
         key_range: TableKeyRange,
     ) -> StorageResult<(TableKeyRange, ReadVersionTuple)> {
-        let version = match self
-            .recent_versions
-            .load()
-            .get_safe_version(table_id, epoch)
-        {
-            Some(version) => version,
-            None => self.get_time_travel_version(epoch, table_id).await?,
-        };
+        let version = self.get_epoch_hummock_version(epoch, table_id).await?;
         Ok(get_committed_read_version_tuple(
             version, table_id, key_range, epoch,
         ))
     }
 
-    fn build_read_version_tuple_from_all(
+    async fn build_read_version_tuple_from_all(
         &self,
         epoch: u64,
         table_id: TableId,
@@ -425,11 +441,11 @@ impl HummockStorageReadSnapshot {
         let ret = if let Some(info) = info
             && epoch <= info.committed_epoch
         {
-            if epoch < info.committed_epoch {
-                return Err(
-                    HummockError::expired_epoch(table_id, info.committed_epoch, epoch).into(),
-                );
-            }
+            let pinned_version = if epoch < info.committed_epoch {
+                pinned_version
+            } else {
+                self.get_epoch_hummock_version(epoch, table_id).await?
+            };
             // read committed_version directly without build snapshot
             get_committed_read_version_tuple(pinned_version, table_id, key_range, epoch)
         } else {
@@ -443,7 +459,7 @@ impl HummockStorageReadSnapshot {
                         v.values()
                             .filter(|v| {
                                 let read_version = v.read();
-                                if read_version.contains(vnode) {
+                                if read_version.is_initialized() && read_version.contains(vnode) {
                                     if read_version.is_replicated() {
                                         matched_replicated_read_version_cnt += 1;
                                         false
@@ -566,8 +582,8 @@ impl HummockStorage {
         self.context.sstable_store.clone()
     }
 
-    pub fn sstable_object_id_manager(&self) -> &SstableObjectIdManagerRef {
-        &self.sstable_object_id_manager
+    pub fn object_id_manager(&self) -> &ObjectIdManagerRef {
+        &self.object_id_manager
     }
 
     pub fn compaction_catalog_manager_ref(&self) -> CompactionCatalogManagerRef {
@@ -590,10 +606,10 @@ impl HummockStorage {
         self.compact_await_tree_reg.as_ref()
     }
 
-    pub async fn min_uncommitted_sst_id(&self) -> Option<HummockSstableObjectId> {
+    pub async fn min_uncommitted_object_id(&self) -> Option<HummockRawObjectId> {
         let (tx, rx) = oneshot::channel();
         self.hummock_event_sender
-            .send(HummockEvent::GetMinUncommittedSstId { result_tx: tx })
+            .send(HummockEvent::GetMinUncommittedObjectId { result_tx: tx })
             .expect("should send success");
         rx.await.expect("should await success")
     }
@@ -618,6 +634,7 @@ impl HummockStorage {
 pub struct HummockStorageReadSnapshot {
     epoch: HummockReadEpoch,
     table_id: TableId,
+    table_option: TableOption,
     recent_versions: Arc<ArcSwap<RecentVersions>>,
     hummock_version_reader: HummockVersionReader,
     read_version_mapping: ReadOnlyReadVersionMapping,
@@ -627,12 +644,12 @@ pub struct HummockStorageReadSnapshot {
 }
 
 impl StateStoreGet for HummockStorageReadSnapshot {
-    fn on_key_value<O: Send + 'static>(
-        &self,
+    fn on_key_value<'a, O: Send + 'a>(
+        &'a self,
         key: TableKey<Bytes>,
         read_options: ReadOptions,
-        on_key_value_fn: impl KeyValueFn<O>,
-    ) -> impl StorageFuture<'_, Option<O>> {
+        on_key_value_fn: impl KeyValueFn<'a, O>,
+    ) -> impl StorageFuture<'a, Option<O>> {
         self.get_inner(key, read_options, on_key_value_fn)
     }
 }
@@ -671,6 +688,50 @@ impl StateStoreRead for HummockStorageReadSnapshot {
             self.table_id
         );
         self.rev_iter_inner(key_range, read_options)
+    }
+}
+
+impl StateStoreReadVector for HummockStorageReadSnapshot {
+    async fn nearest<'a, O: Send + 'a>(
+        &'a self,
+        vec: VectorRef<'a>,
+        options: VectorNearestOptions,
+        on_nearest_item_fn: impl OnNearestItemFn<'a, O>,
+    ) -> StorageResult<Vec<O>> {
+        let version = match self.epoch {
+            HummockReadEpoch::Committed(epoch)
+            | HummockReadEpoch::BatchQueryCommitted(epoch, _)
+            | HummockReadEpoch::TimeTravel(epoch) => {
+                self.get_epoch_hummock_version(epoch, self.table_id).await?
+            }
+            HummockReadEpoch::Backup(epoch) => self
+                .backup_reader
+                .try_get_hummock_version(self.table_id, epoch)
+                .await?
+                .ok_or_else(|| {
+                    HummockError::read_backup_error(format!(
+                        "backup include epoch {} not found",
+                        epoch
+                    ))
+                })?,
+            HummockReadEpoch::NoWait(_) => {
+                return Err(
+                    HummockError::other("nearest query does not support NoWait epoch").into(),
+                );
+            }
+        };
+        dispatch_distance_measurement!(options.measure, MeasurementType, {
+            Ok(self
+                .hummock_version_reader
+                .nearest::<MeasurementType, O>(
+                    version,
+                    self.table_id,
+                    vec,
+                    options,
+                    on_nearest_item_fn,
+                )
+                .await?)
+        })
     }
 }
 
@@ -743,6 +804,11 @@ impl HummockStorage {
         wait_epoch: HummockReadEpoch,
         table_id: TableId,
     ) -> StorageResult<()> {
+        tracing::debug!(
+            "try_wait_epoch: epoch: {:?}, table_id: {}",
+            wait_epoch,
+            table_id
+        );
         match wait_epoch {
             HummockReadEpoch::Committed(wait_epoch) => {
                 assert!(!is_max_epoch(wait_epoch), "epoch should not be MAX EPOCH");
@@ -798,6 +864,7 @@ impl HummockStorage {
 impl StateStore for HummockStorage {
     type Local = LocalHummockStorage;
     type ReadSnapshot = HummockStorageReadSnapshot;
+    type VectorWriter = HummockVectorWriter;
 
     /// Waits until the local hummock version contains the epoch. If `wait_epoch` is `Current`,
     /// we will only check whether it is le `sealed_epoch` and won't wait.
@@ -822,6 +889,7 @@ impl StateStore for HummockStorage {
         Ok(HummockStorageReadSnapshot {
             epoch,
             table_id: options.table_id,
+            table_option: options.table_option,
             recent_versions: self.recent_versions.clone(),
             hummock_version_reader: self.hummock_version_reader.clone(),
             read_version_mapping: self.read_version_mapping.clone(),
@@ -829,6 +897,18 @@ impl StateStore for HummockStorage {
             hummock_meta_client: self.hummock_meta_client.clone(),
             simple_time_travel_version_cache: self.simple_time_travel_version_cache.clone(),
         })
+    }
+
+    async fn new_vector_writer(&self, options: NewVectorWriterOptions) -> Self::VectorWriter {
+        HummockVectorWriter::new(
+            options.table_id,
+            self.version_update_notifier_tx.clone(),
+            self.context.sstable_store.clone(),
+            self.object_id_manager.clone(),
+            self.hummock_event_sender.clone(),
+            self.hummock_version_reader.stats().clone(),
+            self.context.storage_opts.clone(),
+        )
     }
 }
 
@@ -867,10 +947,6 @@ impl HummockStorage {
 
             yield_now().await
         }
-    }
-
-    pub fn get_shared_buffer_size(&self) -> usize {
-        self.buffer_tracker.get_buffer_size()
     }
 
     /// Creates a [`HummockStorage`] with default stats. Should only be used by tests.
@@ -917,5 +993,14 @@ impl HummockStorage {
             }
             yield_now().await;
         }
+    }
+
+    #[cfg(any(test, feature = "test"))]
+    pub async fn flush_events_for_test(&self) {
+        let (tx, rx) = oneshot::channel();
+        self.hummock_event_sender
+            .send(HummockEvent::FlushEvent(tx))
+            .expect("flush event should succeed");
+        rx.await.expect("flush event receiver dropped");
     }
 }

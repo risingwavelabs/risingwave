@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -181,6 +181,7 @@ fn bench_table_watermarks(c: &mut Criterion) {
         gen_committed_table_watermarks(safe_epoch_idx, committed_epoch_idx, vnode_part_count)
             .into(),
         test_epoch(committed_epoch_idx as u64),
+        WatermarkSerdeType::PkPrefix,
     );
     for i in 0..staging_epoch_count {
         let (epoch, watermarks) =

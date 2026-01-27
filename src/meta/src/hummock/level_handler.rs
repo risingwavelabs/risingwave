@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -93,7 +93,7 @@ impl LevelHandler {
         for sst in ssts {
             self.compacting_files.insert(sst.sst_id, task_id);
             total_file_size += sst.sst_size;
-            table_ids.push(sst.sst_id);
+            table_ids.push(sst.sst_id.inner());
         }
 
         self.pending_tasks.push(RunningCompactTask {
@@ -160,7 +160,7 @@ impl From<&risingwave_pb::hummock::LevelHandler> for LevelHandler {
         for task in &lh.tasks {
             pending_tasks.push(task.clone());
             for s in &task.ssts {
-                compacting_files.insert(*s, task.task_id);
+                compacting_files.insert((*s).into(), task.task_id);
             }
         }
         Self {

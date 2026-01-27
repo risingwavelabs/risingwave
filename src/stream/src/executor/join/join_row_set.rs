@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -60,7 +60,7 @@ impl<K: Ord, V> JoinRowSet<K, V> {
             && inner.len() >= MAX_VEC_SIZE
         {
             let btree = BTreeMap::from_iter(inner.drain(..));
-            mem::swap(self, &mut Self::BTree(btree));
+            *self = Self::BTree(btree);
         }
 
         match self {
@@ -100,7 +100,7 @@ impl<K: Ord, V> JoinRowSet<K, V> {
         {
             let btree = mem::take(inner);
             let vec = Vec::from_iter(btree);
-            mem::swap(self, &mut Self::Vec(vec));
+            *self = Self::Vec(vec);
         }
         ret
     }

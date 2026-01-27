@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use iceberg::Result;
-use iceberg::spec::DataFile;
+use iceberg::spec::{DataFile, PartitionKey};
 use iceberg::writer::base_writer::sort_position_delete_writer::{
     PositionDeleteInput, SortPositionDeleteWriter, SortPositionDeleteWriterBuilder,
 };
@@ -45,8 +45,8 @@ impl<B: FileWriterBuilder> IcebergWriterBuilder<PositionDeleteInput>
 {
     type R = MonitoredPositionDeleteWriter<B>;
 
-    async fn build(self) -> Result<Self::R> {
-        let writer = self.inner.build().await?;
+    async fn build(self, partition_key: Option<PartitionKey>) -> Result<Self::R> {
+        let writer = self.inner.build(partition_key).await?;
         Ok(MonitoredPositionDeleteWriter {
             writer,
             cache_row_metrics: self.cache_row_metrics,

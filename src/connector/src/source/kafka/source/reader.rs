@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -21,13 +21,13 @@ use anyhow::Context;
 use async_trait::async_trait;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
-use rdkafka::config::RDKafkaLogLevel;
 use rdkafka::consumer::{Consumer, StreamConsumer};
 use rdkafka::error::KafkaError;
 use rdkafka::{ClientConfig, Message, Offset, TopicPartitionList};
 use risingwave_common::metrics::LabelGuardedIntGauge;
 use risingwave_pb::plan_common::additional_column::ColumnType as AdditionalColumnType;
 
+use crate::connector_common::read_kafka_log_level;
 use crate::error::ConnectorResult as Result;
 use crate::parser::ParserConfig;
 use crate::source::base::SourceMessage;
@@ -94,8 +94,11 @@ impl SplitReader for KafkaSplitReader {
         .await?;
 
         let client_ctx = RwConsumerContext::new(ctx_common);
+
+        if let Some(log_level) = read_kafka_log_level() {
+            config.set_log_level(log_level);
+        }
         let consumer: StreamConsumer<RwConsumerContext> = config
-            .set_log_level(RDKafkaLogLevel::Info)
             .create_with_context(client_ctx)
             .await
             .context("failed to create kafka consumer")?;
@@ -141,9 +144,9 @@ impl SplitReader for KafkaSplitReader {
         tracing::info!(
             topic = properties.common.topic,
             source_name = source_ctx.source_name,
-            fragment_id = source_ctx.fragment_id,
-            source_id = source_ctx.source_id.table_id,
-            actor_id = source_ctx.actor_id,
+            fragment_id = %source_ctx.fragment_id,
+            source_id = %source_ctx.source_id,
+            actor_id = %source_ctx.actor_id,
             "backfill_info: {:?}",
             backfill_info
         );

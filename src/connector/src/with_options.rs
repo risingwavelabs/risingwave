@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,15 +16,18 @@ use std::collections::{BTreeMap, HashMap};
 use std::marker::PhantomData;
 use std::time::Duration;
 
+use risingwave_pb::id::SecretId;
 use risingwave_pb::secret::PbSecretRef;
 
+use crate::error::ConnectorResult;
 use crate::sink::catalog::SinkFormatDesc;
 use crate::source::cdc::MYSQL_CDC_CONNECTOR;
-use crate::source::cdc::external::CdcTableType;
+use crate::source::cdc::external::ExternalCdcTableType;
 use crate::source::iceberg::ICEBERG_CONNECTOR;
 use crate::source::{
-    AZBLOB_CONNECTOR, GCS_CONNECTOR, KAFKA_CONNECTOR, LEGACY_S3_CONNECTOR, OPENDAL_S3_CONNECTOR,
-    POSIX_FS_CONNECTOR, UPSTREAM_SOURCE_KEY,
+    ADBC_SNOWFLAKE_CONNECTOR, AZBLOB_CONNECTOR, BATCH_POSIX_FS_CONNECTOR, GCS_CONNECTOR,
+    KAFKA_CONNECTOR, LEGACY_S3_CONNECTOR, OPENDAL_S3_CONNECTOR, POSIX_FS_CONNECTOR,
+    PULSAR_CONNECTOR, UPSTREAM_SOURCE_KEY,
 };
 
 /// Marker trait for `WITH` options. Only for `#[derive(WithOptions)]`, should not be used manually.
@@ -125,6 +128,14 @@ pub trait WithPropertiesExt: Get + GetKeyIter + Sized {
     }
 
     #[inline(always)]
+    fn is_pulsar_connector(&self) -> bool {
+        let Some(connector) = self.get_connector() else {
+            return false;
+        };
+        connector == PULSAR_CONNECTOR
+    }
+
+    #[inline(always)]
     fn is_mysql_cdc_connector(&self) -> bool {
         let Some(connector) = self.get_connector() else {
             return false;
@@ -150,17 +161,17 @@ pub trait WithPropertiesExt: Get + GetKeyIter + Sized {
 
     /// It is shared when `CREATE SOURCE`, and not shared when `CREATE TABLE`. So called "shareable".
     fn is_shareable_cdc_connector(&self) -> bool {
-        self.is_cdc_connector() && CdcTableType::from_properties(self).can_backfill()
+        self.is_cdc_connector() && ExternalCdcTableType::from_properties(self).can_backfill()
     }
 
     /// Tables with MySQL and PostgreSQL connectors are maintained for backward compatibility.
     /// The newly added SQL Server CDC connector is only supported when created as shared.
     fn is_shareable_only_cdc_connector(&self) -> bool {
-        self.is_cdc_connector() && CdcTableType::from_properties(self).shareable_only()
+        self.is_cdc_connector() && ExternalCdcTableType::from_properties(self).shareable_only()
     }
 
     fn enable_transaction_metadata(&self) -> bool {
-        CdcTableType::from_properties(self).enable_transaction_metadata()
+        ExternalCdcTableType::from_properties(self).enable_transaction_metadata()
     }
 
     fn is_shareable_non_cdc_connector(&self) -> bool {
@@ -200,6 +211,19 @@ pub trait WithPropertiesExt: Get + GetKeyIter + Sized {
             })
             .unwrap_or(false)
     }
+
+    fn is_batch_connector(&self) -> bool {
+        self.get(UPSTREAM_SOURCE_KEY)
+            .map(|s| {
+                s.eq_ignore_ascii_case(BATCH_POSIX_FS_CONNECTOR)
+                    || s.eq_ignore_ascii_case(ADBC_SNOWFLAKE_CONNECTOR)
+            })
+            .unwrap_or(false)
+    }
+
+    fn requires_singleton(&self) -> bool {
+        self.is_new_fs_connector() || self.is_iceberg_connector() || self.is_batch_connector()
+    }
 }
 
 impl<T: Get + GetKeyIter> WithPropertiesExt for T {}
@@ -231,6 +255,60 @@ impl WithOptionsSecResolved {
         Self { inner, secret_ref }
     }
 
+    pub fn as_plaintext(&self) -> &BTreeMap<String, String> {
+        &self.inner
+    }
+
+    pub fn as_secret(&self) -> &BTreeMap<String, PbSecretRef> {
+        &self.secret_ref
+    }
+
+    pub fn handle_update(
+        &mut self,
+        update_alter_props: BTreeMap<String, String>,
+        update_alter_secret_refs: BTreeMap<String, PbSecretRef>,
+    ) -> ConnectorResult<(Vec<SecretId>, Vec<SecretId>)> {
+        let to_add_secret_dep = update_alter_secret_refs
+            .values()
+            .map(|new_rely_secret| new_rely_secret.secret_id)
+            .collect();
+        let mut to_remove_secret_dep: Vec<SecretId> = vec![];
+
+        // make sure the key in update_alter_props and update_alter_secret_refs not collide
+        for key in update_alter_props.keys() {
+            if update_alter_secret_refs.contains_key(key) {
+                return Err(
+                    anyhow::anyhow!("the key {} is set both in plaintext and secret", key).into(),
+                );
+            }
+        }
+
+        // remove legacy key if it's set in both plaintext and secret
+        for k in update_alter_props.keys() {
+            if let Some(removed_secret) = self.secret_ref.remove(k) {
+                to_remove_secret_dep.push(removed_secret.secret_id);
+            }
+        }
+        for (k, v) in &update_alter_secret_refs {
+            self.inner.remove(k);
+
+            if let Some(old_secret_ref) = self.secret_ref.get(k) {
+                // no need to remove, do extend later
+                if old_secret_ref.secret_id != v.secret_id {
+                    to_remove_secret_dep.push(old_secret_ref.secret_id);
+                } else {
+                    // If the secret ref is the same, we don't need to update it.
+                    continue;
+                }
+            }
+        }
+
+        self.inner.extend(update_alter_props);
+        self.secret_ref.extend(update_alter_secret_refs);
+
+        Ok((to_add_secret_dep, to_remove_secret_dep))
+    }
+
     /// Create a new [`WithOptions`] from a [`BTreeMap`].
     pub fn without_secrets(inner: BTreeMap<String, String>) -> Self {
         Self {
@@ -245,10 +323,10 @@ impl WithOptionsSecResolved {
     }
 
     pub fn value_eq_ignore_case(&self, key: &str, val: &str) -> bool {
-        if let Some(inner_val) = self.inner.get(key) {
-            if inner_val.eq_ignore_ascii_case(val) {
-                return true;
-            }
+        if let Some(inner_val) = self.inner.get(key)
+            && inner_val.eq_ignore_ascii_case(val)
+        {
+            return true;
         }
         false
     }

@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,9 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![feature(let_chains)]
 #![feature(impl_trait_in_assoc_type)]
-#![cfg_attr(coverage, feature(coverage_attribute))]
+#![feature(coverage_attribute)]
 
 use risingwave_meta::*;
 
@@ -26,8 +25,10 @@ pub mod ddl_service;
 pub mod event_log_service;
 pub mod health_service;
 pub mod heartbeat_service;
+pub mod hosted_iceberg_catalog_service;
 pub mod hummock_service;
 pub mod meta_member_service;
+pub mod monitor_service;
 pub mod notification_service;
 pub mod scale_service;
 pub mod serving_service;
@@ -49,17 +50,17 @@ use crate::MetaError;
 /// `RwReceiverStream` is a wrapper around `tokio::sync::mpsc::UnboundedReceiver` that implements
 /// Stream. `RwReceiverStream` is similar to `tokio_stream::wrappers::ReceiverStream`, but it
 /// maps Result<S, `MetaError`> to Result<S, `tonic::Status`>.
-pub struct RwReceiverStream<S> {
+pub struct RwReceiverStream<S: Send + Sync + 'static> {
     inner: UnboundedReceiver<Result<S, MetaError>>,
 }
 
-impl<S> RwReceiverStream<S> {
+impl<S: Send + Sync + 'static> RwReceiverStream<S> {
     pub fn new(inner: UnboundedReceiver<Result<S, MetaError>>) -> Self {
         Self { inner }
     }
 }
 
-impl<S> Stream for RwReceiverStream<S> {
+impl<S: Send + Sync + 'static> Stream for RwReceiverStream<S> {
     type Item = Result<S, tonic::Status>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {

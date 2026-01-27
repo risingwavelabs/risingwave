@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -25,6 +25,7 @@ use risingwave_pb::connector_service::{
     CoordinateRequest, CoordinateResponse, PbSinkParam, SinkMetadata, coordinate_request,
     coordinate_response,
 };
+use risingwave_pb::stream_plan::PbSinkSchemaChange;
 use tokio::sync::mpsc::Receiver;
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Response, Status};
@@ -92,11 +93,17 @@ impl CoordinatorStreamHandle {
         }
     }
 
-    pub async fn commit(&mut self, epoch: u64, metadata: SinkMetadata) -> anyhow::Result<()> {
+    pub async fn commit(
+        &mut self,
+        epoch: u64,
+        metadata: SinkMetadata,
+        schema_change: Option<PbSinkSchemaChange>,
+    ) -> anyhow::Result<()> {
         self.send_request(CoordinateRequest {
             msg: Some(coordinate_request::Msg::CommitRequest(CommitRequest {
                 epoch,
                 metadata: Some(metadata),
+                schema_change,
             })),
         })
         .await?;

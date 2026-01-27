@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -11,6 +11,8 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+
+use risingwave_connector::source::{ADBC_SNOWFLAKE_CONNECTOR, BATCH_POSIX_FS_CONNECTOR};
 
 use super::*;
 
@@ -81,6 +83,9 @@ static CONNECTORS_COMPATIBLE_FORMATS: LazyLock<HashMap<String, HashMap<Format, V
                     Format::Plain => vec![Encode::Csv, Encode::Json, Encode::Parquet],
                 ),
                 POSIX_FS_CONNECTOR => hashmap!(
+                    Format::Plain => vec![Encode::Csv, Encode::Json, Encode::Parquet],
+                ),
+                BATCH_POSIX_FS_CONNECTOR => hashmap!(
                     Format::Plain => vec![Encode::Csv],
                 ),
                 MYSQL_CDC_CONNECTOR => hashmap!(
@@ -111,6 +116,9 @@ static CONNECTORS_COMPATIBLE_FORMATS: LazyLock<HashMap<String, HashMap<Format, V
                 ICEBERG_CONNECTOR => hashmap!(
                     Format::None => vec![Encode::None],
                 ),
+                ADBC_SNOWFLAKE_CONNECTOR => hashmap!(
+                    Format::None => vec![Encode::None],
+                ),
                 SQL_SERVER_CDC_CONNECTOR => hashmap!(
                     Format::Debezium => vec![Encode::Json],
                     // support source stream job
@@ -121,9 +129,7 @@ static CONNECTORS_COMPATIBLE_FORMATS: LazyLock<HashMap<String, HashMap<Format, V
 
 fn validate_license(connector: &str) -> Result<()> {
     if connector == SQL_SERVER_CDC_CONNECTOR {
-        Feature::SqlServerCdcSource
-            .check_available()
-            .map_err(|e| anyhow::anyhow!(e))?;
+        Feature::SqlServerCdcSource.check_available()?;
     }
     Ok(())
 }
@@ -225,8 +231,13 @@ pub fn validate_compatibility(
             props.insert("schema.name".into(), "public".into());
         }
         if !props.contains_key("publication.name") {
-            // Default publication name is "rw_publication"
-            props.insert("publication.name".into(), "rw_publication".into());
+            // Build a random publication name with UUID to avoid conflicts between sources
+            // e.g. "rw_publication_f9a3567e6dd54bf5900444c8b1c03815"
+            let uuid = uuid::Uuid::new_v4();
+            props.insert(
+                "publication.name".into(),
+                format!("rw_publication_{}", uuid.simple()),
+            );
         }
         if !props.contains_key("publication.create.enable") {
             // Default auto create publication if doesn't exist
@@ -237,6 +248,38 @@ pub fn validate_compatibility(
     if connector == SQL_SERVER_CDC_CONNECTOR && !props.contains_key("schema.name") {
         // Default schema name is "dbo"
         props.insert("schema.name".into(), "dbo".into());
+    }
+
+    // Validate cdc.source.wait.streaming.start.timeout for all CDC connectors
+    if (connector == MYSQL_CDC_CONNECTOR
+        || connector == POSTGRES_CDC_CONNECTOR
+        || connector == CITUS_CDC_CONNECTOR
+        || connector == MONGODB_CDC_CONNECTOR
+        || connector == SQL_SERVER_CDC_CONNECTOR)
+        && let Some(timeout_value) = props.get("cdc.source.wait.streaming.start.timeout")
+        && timeout_value.parse::<u32>().is_err()
+    {
+        return Err(ErrorCode::InvalidConfigValue {
+            config_entry: "cdc.source.wait.streaming.start.timeout".to_owned(),
+            config_value: timeout_value.to_owned(),
+        }
+        .into());
+    }
+
+    // Validate debezium.max.queue.size for all CDC connectors
+    if (connector == MYSQL_CDC_CONNECTOR
+        || connector == POSTGRES_CDC_CONNECTOR
+        || connector == CITUS_CDC_CONNECTOR
+        || connector == MONGODB_CDC_CONNECTOR
+        || connector == SQL_SERVER_CDC_CONNECTOR)
+        && let Some(queue_size_value) = props.get("debezium.max.queue.size")
+        && queue_size_value.parse::<u32>().is_err()
+    {
+        return Err(ErrorCode::InvalidConfigValue {
+            config_entry: "debezium.max.queue.size".to_owned(),
+            config_value: queue_size_value.to_owned(),
+        }
+        .into());
     }
 
     Ok(())

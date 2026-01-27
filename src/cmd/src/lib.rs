@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -25,7 +25,6 @@ macro_rules! main {
     ($component:ident) => {
         risingwave_common::enable_jemalloc!();
 
-        #[cfg_attr(coverage, coverage(off))]
         fn main() {
             let opts = clap::Parser::parse();
             $crate::$component(opts);

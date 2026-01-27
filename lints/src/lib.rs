@@ -13,7 +13,7 @@
 // limitations under the License.
 
 #![feature(rustc_private)]
-#![feature(let_chains)]
+
 #![warn(unused_extern_crates)]
 
 extern crate rustc_ast;
@@ -30,7 +30,7 @@ mod utils;
 dylint_linting::dylint_library!();
 
 #[allow(clippy::no_mangle_with_rust_abi)]
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub fn register_lints(_sess: &rustc_session::Session, lint_store: &mut rustc_lint::LintStore) {
     // -- Begin lint registration --
 

@@ -1,4 +1,0 @@
-query I
-select count(*) from rw_catalog.rw_ddl_progress;
-----
-1

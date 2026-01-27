@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,7 +20,7 @@ pub mod split;
 use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
 
-use serde_derive::Deserialize;
+use serde::Deserialize;
 use serde_with::{DisplayFromStr, serde_as};
 use thiserror::Error;
 use with_options::WithOptions;
@@ -51,8 +51,8 @@ pub struct MqttProperties {
     /// The topic name to subscribe or publish to. When subscribing, it can be a wildcard topic. e.g /topic/#
     pub topic: String,
 
-    /// The quality of service to use when publishing messages. Defaults to at_most_once.
-    /// Could be at_most_once, at_least_once or exactly_once
+    /// The quality of service to use when publishing messages. Defaults to `at_most_once`.
+    /// Could be `at_most_once`, `at_least_once` or `exactly_once`
     #[serde_as(as = "Option<DisplayFromStr>")]
     pub qos: Option<MqttQualityOfService>,
 

@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,17 +13,13 @@
 // limitations under the License.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::ffi::CString;
-use std::fs;
-use std::path::Path;
 use std::time::Duration;
 
 use foyer::{HybridCache, TracingOptions};
-use itertools::Itertools;
 use prometheus::core::Collector;
 use prometheus::proto::Metric;
 use risingwave_common::config::{MetricLevel, ServerConfig};
-use risingwave_common_heap_profiling::{AUTO_DUMP_SUFFIX, COLLAPSED_SUFFIX, MANUALLY_DUMP_SUFFIX};
+use risingwave_common_service::ProfileServiceImpl;
 use risingwave_hummock_sdk::HummockSstableObjectId;
 use risingwave_jni_core::jvm_runtime::dump_jvm_stack_traces;
 use risingwave_pb::monitor_service::monitor_service_server::MonitorService;
@@ -35,14 +31,13 @@ use risingwave_pb::monitor_service::{
     ListHeapProfilingResponse, ProfilingRequest, ProfilingResponse, RelationStats,
     StackTraceRequest, StackTraceResponse, TieredCacheTracingRequest, TieredCacheTracingResponse,
 };
-use risingwave_rpc_client::error::ToTonicStatus;
 use risingwave_storage::hummock::compactor::await_tree_key::Compaction;
 use risingwave_storage::hummock::{Block, Sstable, SstableBlockIndex};
 use risingwave_stream::executor::monitor::global_streaming_metrics;
 use risingwave_stream::task::LocalStreamManager;
 use risingwave_stream::task::await_tree_key::{Actor, BarrierAwait};
 use thiserror_ext::AsReport;
-use tonic::{Code, Request, Response, Status};
+use tonic::{Request, Response, Status};
 
 type MetaCache = HybridCache<HummockSstableObjectId, Box<Sstable>>;
 type BlockCache = HybridCache<SstableBlockIndex, Box<Block>>;
@@ -50,7 +45,7 @@ type BlockCache = HybridCache<SstableBlockIndex, Box<Block>>;
 #[derive(Clone)]
 pub struct MonitorServiceImpl {
     stream_mgr: LocalStreamManager,
-    server_config: ServerConfig,
+    profile_service: ProfileServiceImpl,
     meta_cache: Option<MetaCache>,
     block_cache: Option<BlockCache>,
 }
@@ -64,7 +59,7 @@ impl MonitorServiceImpl {
     ) -> Self {
         Self {
             stream_mgr,
-            server_config,
+            profile_service: ProfileServiceImpl::new(server_config),
             meta_cache,
             block_cache,
         }
@@ -73,7 +68,6 @@ impl MonitorServiceImpl {
 
 #[async_trait::async_trait]
 impl MonitorService for MonitorServiceImpl {
-    #[cfg_attr(coverage, coverage(off))]
     async fn stack_trace(
         &self,
         request: Request<StackTraceRequest>,
@@ -85,7 +79,7 @@ impl MonitorService for MonitorServiceImpl {
                 .into_iter()
                 .map(|(k, v)| {
                     (
-                        k.0,
+                        k.0.as_raw_id(),
                         if req.actor_traces_format == ActorTracesFormat::Text as i32 {
                             v.to_string()
                         } else {
@@ -151,151 +145,37 @@ impl MonitorService for MonitorServiceImpl {
                 }
                 None => BTreeMap::new(),
             },
+            meta_traces: Default::default(),
+            node_errors: Default::default(),
         }))
     }
 
-    #[cfg_attr(coverage, coverage(off))]
     async fn profiling(
         &self,
         request: Request<ProfilingRequest>,
     ) -> Result<Response<ProfilingResponse>, Status> {
-        if std::env::var("RW_PROFILE_PATH").is_ok() {
-            return Err(Status::internal(
-                "Profiling is already running by setting RW_PROFILE_PATH",
-            ));
-        }
-        let time = request.into_inner().get_sleep_s();
-        let guard = pprof::ProfilerGuardBuilder::default()
-            .blocklist(&["libc", "libgcc", "pthread", "vdso"])
-            .build()
-            .unwrap();
-        tokio::time::sleep(Duration::from_secs(time)).await;
-        let mut buf = vec![];
-        match guard.report().build() {
-            Ok(report) => {
-                report.flamegraph(&mut buf).unwrap();
-                tracing::info!("succeed to generate flamegraph");
-                Ok(Response::new(ProfilingResponse { result: buf }))
-            }
-            Err(err) => {
-                tracing::warn!(error = %err.as_report(), "failed to generate flamegraph");
-                Err(err.to_status(Code::Internal, "monitor"))
-            }
-        }
+        self.profile_service.profiling(request).await
     }
 
-    #[cfg_attr(coverage, coverage(off))]
     async fn heap_profiling(
         &self,
         request: Request<HeapProfilingRequest>,
     ) -> Result<Response<HeapProfilingResponse>, Status> {
-        use std::fs::create_dir_all;
-        use std::path::PathBuf;
-
-        use tikv_jemalloc_ctl;
-
-        if !cfg!(target_os = "linux") {
-            return Err(Status::unimplemented(
-                "heap profiling is only implemented on Linux",
-            ));
-        }
-
-        if !tikv_jemalloc_ctl::opt::prof::read().unwrap() {
-            return Err(Status::failed_precondition(
-                "Jemalloc profiling is not enabled on the node. Try start the node with `MALLOC_CONF=prof:true`",
-            ));
-        }
-
-        let time_prefix = chrono::Local::now().format("%Y-%m-%d-%H-%M-%S");
-        let file_name = format!("{}.{}", time_prefix, MANUALLY_DUMP_SUFFIX);
-        let arg_dir = request.into_inner().dir;
-        let dir = PathBuf::from(if arg_dir.is_empty() {
-            &self.server_config.heap_profiling.dir
-        } else {
-            &arg_dir
-        });
-        create_dir_all(&dir)?;
-
-        let file_path_buf = dir.join(file_name);
-        let file_path = file_path_buf
-            .to_str()
-            .ok_or_else(|| Status::internal("The file dir is not a UTF-8 String"))?;
-        let file_path_c =
-            CString::new(file_path).map_err(|_| Status::internal("0 byte in file path"))?;
-
-        // FIXME(yuhao): `unsafe` here because `jemalloc_dump_mib.write` requires static lifetime
-        if let Err(e) =
-            tikv_jemalloc_ctl::prof::dump::write(unsafe { &*(file_path_c.as_c_str() as *const _) })
-        {
-            tracing::warn!("Manually Jemalloc dump heap file failed! {:?}", e);
-            Err(Status::internal(e.to_string()))
-        } else {
-            tracing::info!("Manually Jemalloc dump heap file created: {}", file_path);
-            Ok(Response::new(HeapProfilingResponse {}))
-        }
+        self.profile_service.heap_profiling(request).await
     }
 
-    #[cfg_attr(coverage, coverage(off))]
     async fn list_heap_profiling(
         &self,
         _request: Request<ListHeapProfilingRequest>,
     ) -> Result<Response<ListHeapProfilingResponse>, Status> {
-        let dump_dir = self.server_config.heap_profiling.dir.clone();
-        let auto_dump_files_name: Vec<_> = fs::read_dir(dump_dir.clone())?
-            .map(|entry| {
-                let entry = entry?;
-                Ok::<_, Status>(entry.file_name().to_string_lossy().to_string())
-            })
-            .filter(|name| {
-                if let Ok(name) = name {
-                    name.contains(AUTO_DUMP_SUFFIX) && !name.ends_with(COLLAPSED_SUFFIX)
-                } else {
-                    true
-                }
-            })
-            .try_collect()?;
-        let manually_dump_files_name: Vec<_> = fs::read_dir(dump_dir.clone())?
-            .map(|entry| {
-                let entry = entry?;
-                Ok::<_, Status>(entry.file_name().to_string_lossy().to_string())
-            })
-            .filter(|name| {
-                if let Ok(name) = name {
-                    name.contains(MANUALLY_DUMP_SUFFIX) && !name.ends_with(COLLAPSED_SUFFIX)
-                } else {
-                    true
-                }
-            })
-            .try_collect()?;
-
-        Ok(Response::new(ListHeapProfilingResponse {
-            dir: dump_dir,
-            name_auto: auto_dump_files_name,
-            name_manually: manually_dump_files_name,
-        }))
+        self.profile_service.list_heap_profiling(_request).await
     }
 
-    #[cfg_attr(coverage, coverage(off))]
     async fn analyze_heap(
         &self,
         request: Request<AnalyzeHeapRequest>,
     ) -> Result<Response<AnalyzeHeapResponse>, Status> {
-        let dumped_path_str = request.into_inner().get_path().clone();
-        let collapsed_path_str = format!("{}.{}", dumped_path_str, COLLAPSED_SUFFIX);
-        let collapsed_path = Path::new(&collapsed_path_str);
-
-        // run jeprof if the target was not analyzed before
-        if !collapsed_path.exists() {
-            risingwave_common_heap_profiling::jeprof::run(
-                dumped_path_str,
-                collapsed_path_str.clone(),
-            )
-            .await
-            .map_err(|e| e.to_status(Code::Internal, "monitor"))?;
-        }
-
-        let file = fs::read(Path::new(&collapsed_path_str))?;
-        Ok(Response::new(AnalyzeHeapResponse { result: file }))
+        self.profile_service.analyze_heap(request).await
     }
 
     async fn get_profile_stats(
@@ -305,7 +185,7 @@ impl MonitorService for MonitorServiceImpl {
         let metrics = global_streaming_metrics(MetricLevel::Info);
         let inner = request.into_inner();
         let executor_ids = &inner.executor_ids;
-        let fragment_ids = HashSet::from_iter(inner.dispatcher_fragment_ids.into_iter());
+        let fragment_ids = HashSet::from_iter(inner.dispatcher_fragment_ids);
         let stream_node_output_row_count = metrics
             .mem_stream_node_output_row_count
             .collect(executor_ids);
@@ -316,8 +196,8 @@ impl MonitorService for MonitorServiceImpl {
         // Collect count metrics by fragment_ids
         fn collect_by_fragment_ids<T: Collector>(
             m: &T,
-            fragment_ids: &HashSet<u32>,
-        ) -> HashMap<u32, u64> {
+            fragment_ids: &HashSet<FragmentId>,
+        ) -> HashMap<FragmentId, u64> {
             let mut metrics = HashMap::new();
             for mut metric_family in m.collect() {
                 for metric in metric_family.take_metric() {
@@ -345,7 +225,6 @@ impl MonitorService for MonitorServiceImpl {
         }))
     }
 
-    #[cfg_attr(coverage, coverage(off))]
     async fn get_streaming_stats(
         &self,
         _request: Request<GetStreamingStatsRequest>,
@@ -478,7 +357,6 @@ impl MonitorService for MonitorServiceImpl {
         }))
     }
 
-    #[cfg_attr(coverage, coverage(off))]
     async fn tiered_cache_tracing(
         &self,
         request: Request<TieredCacheTracingRequest>,
@@ -502,17 +380,14 @@ impl MonitorService for MonitorServiceImpl {
                 options =
                     options.with_record_hybrid_get_threshold(Duration::from_millis(threshold as _));
             }
-            if let Some(threshold) = req.record_hybrid_obtain_threshold_ms {
-                options = options
-                    .with_record_hybrid_obtain_threshold(Duration::from_millis(threshold as _));
-            }
             if let Some(threshold) = req.record_hybrid_remove_threshold_ms {
                 options = options
                     .with_record_hybrid_remove_threshold(Duration::from_millis(threshold as _));
             }
             if let Some(threshold) = req.record_hybrid_fetch_threshold_ms {
-                options = options
-                    .with_record_hybrid_fetch_threshold(Duration::from_millis(threshold as _));
+                options = options.with_record_hybrid_get_or_fetch_threshold(Duration::from_millis(
+                    threshold as _,
+                ));
             }
             cache.update_tracing_options(options);
         }
@@ -532,17 +407,14 @@ impl MonitorService for MonitorServiceImpl {
                 options =
                     options.with_record_hybrid_get_threshold(Duration::from_millis(threshold as _));
             }
-            if let Some(threshold) = req.record_hybrid_obtain_threshold_ms {
-                options = options
-                    .with_record_hybrid_obtain_threshold(Duration::from_millis(threshold as _));
-            }
             if let Some(threshold) = req.record_hybrid_remove_threshold_ms {
                 options = options
                     .with_record_hybrid_remove_threshold(Duration::from_millis(threshold as _));
             }
             if let Some(threshold) = req.record_hybrid_fetch_threshold_ms {
-                options = options
-                    .with_record_hybrid_fetch_threshold(Duration::from_millis(threshold as _));
+                options = options.with_record_hybrid_get_or_fetch_threshold(Duration::from_millis(
+                    threshold as _,
+                ));
             }
             cache.update_tracing_options(options);
         }
@@ -553,6 +425,7 @@ impl MonitorService for MonitorServiceImpl {
 
 pub use grpc_middleware::*;
 use risingwave_common::metrics::get_label_infallible;
+use risingwave_pb::id::FragmentId;
 
 pub mod grpc_middleware {
     use std::sync::Arc;

@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,9 +14,8 @@
 
 use risingwave_common::catalog::{RW_TIMESTAMP_COLUMN_ID, RW_TIMESTAMP_COLUMN_NAME};
 
-use super::{DefaultBehavior, Merge};
-use crate::PlanRef;
-use crate::optimizer::plan_node::StreamTableScan;
+use super::{DefaultBehavior, Merge, StreamPlanVisitor};
+use crate::optimizer::plan_node::{StreamPlanRef as PlanRef, StreamTableScan};
 use crate::optimizer::plan_visitor::PlanVisitor;
 
 #[derive(Debug, Clone, Default)]
@@ -28,7 +27,7 @@ impl RwTimestampValidator {
     }
 }
 
-impl PlanVisitor for RwTimestampValidator {
+impl StreamPlanVisitor for RwTimestampValidator {
     type Result = bool;
 
     type DefaultBehavior = impl DefaultBehavior<Self::Result>;

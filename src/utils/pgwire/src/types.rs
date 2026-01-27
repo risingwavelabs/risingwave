@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -82,6 +82,13 @@ impl Format {
             _ => Err(PsqlError::Uncategorized(
                 format!("Unknown format code: {}", format_code).into(),
             )),
+        }
+    }
+
+    pub fn to_i8(self) -> i8 {
+        match self {
+            Format::Binary => 1,
+            Format::Text => 0,
         }
     }
 }

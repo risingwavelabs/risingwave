@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::catalog::TableId;
 use risingwave_object_store::object::ObjectError;
 use thiserror::Error;
 use thiserror_ext::AsReport;
@@ -50,12 +49,6 @@ pub enum HummockErrorInner {
     NextEpoch(String),
     #[error("Barrier read is unavailable for now. Likely the cluster is recovering")]
     ReadCurrentEpoch,
-    #[error("Expired Epoch: watermark {safe_epoch}, epoch {epoch}")]
-    ExpiredEpoch {
-        table_id: u32,
-        safe_epoch: u64,
-        epoch: u64,
-    },
     #[error("CompactionExecutor error: {0}")]
     CompactionExecutor(String),
     #[error("FileCache error: {0}")]
@@ -69,7 +62,7 @@ pub enum HummockErrorInner {
     #[error("Read backup error: {0}")]
     ReadBackupError(String),
     #[error("Foyer error: {0}")]
-    FoyerError(anyhow::Error),
+    FoyerError(#[from] foyer::Error),
     #[error("Other error: {0}")]
     Other(String),
 }
@@ -119,19 +112,6 @@ impl HummockError {
         HummockErrorInner::ReadCurrentEpoch.into()
     }
 
-    pub fn expired_epoch(table_id: TableId, safe_epoch: u64, epoch: u64) -> HummockError {
-        HummockErrorInner::ExpiredEpoch {
-            table_id: table_id.table_id,
-            safe_epoch,
-            epoch,
-        }
-        .into()
-    }
-
-    pub fn is_expired_epoch(&self) -> bool {
-        matches!(self.inner(), HummockErrorInner::ExpiredEpoch { .. })
-    }
-
     pub fn is_meta_error(&self) -> bool {
         matches!(self.inner(), HummockErrorInner::MetaError(..))
     }
@@ -164,7 +144,7 @@ impl HummockError {
         HummockErrorInner::ReadBackupError(error.to_string()).into()
     }
 
-    pub fn foyer_error(error: anyhow::Error) -> HummockError {
+    pub fn foyer_error(error: foyer::Error) -> HummockError {
         HummockErrorInner::FoyerError(error).into()
     }
 

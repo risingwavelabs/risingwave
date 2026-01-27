@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,7 +17,7 @@ pub use managed_lru::*;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::util::iter_util::ZipEqFast;
 
-/// Returns whether we're unsure about the fressness of the cache after the scaling from the
+/// Returns whether we're unsure about the fressness of the keyed cache after the scaling from the
 /// previous partition to the current one, denoted by vnode bitmaps. If the value is `true`, we must
 /// evict the cache entries that does not belong to the previous partition before further
 /// processing.
@@ -33,7 +33,7 @@ use risingwave_common::util::iter_util::ZipEqFast;
 /// executors will likely shrink and becomes a subset of the previous one (to ensure the best
 /// locality). In this case, this function will return `false` and the cache entries that're not in
 /// the current partition anymore are still kept. This achieves the best performance as we won't
-/// touch and valiate the cache at all when scaling-out, which is the common case and the critical
+/// touch and validate the cache at all when scaling-out, which is the common case and the critical
 /// path.
 ///
 /// This brings a problem when scaling in after a while. Some partitions may be reassigned back to
@@ -41,7 +41,7 @@ use risingwave_common::util::iter_util::ZipEqFast;
 /// possible that these entries have been updated by other executors on other workers, and
 /// the content is now stale! The executor must evict these entries which are not in the
 /// **previous** partition before further processing.
-pub(super) fn cache_may_stale(
+pub(super) fn keyed_cache_may_stale(
     previous_vnode_bitmap: &Bitmap,
     current_vnode_bitmap: &Bitmap,
 ) -> bool {
@@ -63,9 +63,9 @@ mod tests {
         let p1234 = Bitmap::from_bytes(&[0b_0000_1111]);
         let p1245 = Bitmap::from_bytes(&[0b_0001_1011]);
 
-        assert_eq!(cache_may_stale(&p123, &p123), false); // unchanged
-        assert_eq!(cache_may_stale(&p1234, &p123), false); // scale-out
-        assert_eq!(cache_may_stale(&p123, &p1234), true); // scale-in
-        assert_eq!(cache_may_stale(&p123, &p1245), true); // scale-in
+        assert_eq!(keyed_cache_may_stale(&p123, &p123), false); // unchanged
+        assert_eq!(keyed_cache_may_stale(&p1234, &p123), false); // scale-out
+        assert_eq!(keyed_cache_may_stale(&p123, &p1234), true); // scale-in
+        assert_eq!(keyed_cache_may_stale(&p123, &p1245), true); // scale-in
     }
 }

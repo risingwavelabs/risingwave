@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,7 +20,7 @@ use crate::catalog::system_catalog::SysCatalogReaderImpl;
 use crate::expr::CAST_TABLE;
 
 /// The catalog `pg_cast` stores data type conversion paths.
-/// Ref: [`https://www.postgresql.org/docs/current/catalog-pg-cast.html`]
+/// Ref: `https://www.postgresql.org/docs/current/catalog-pg-cast.html`
 #[derive(Fields)]
 struct PgCast {
     #[primary_key]

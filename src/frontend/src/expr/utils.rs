@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -267,10 +267,10 @@ impl ExprRewriter for BooleanConstantFolding {
 /// If `expr` is not a [`ExprImpl::Literal`], or the Literal is not a boolean, this function will
 /// return None. Otherwise it will return the boolean value.
 pub fn try_get_bool_constant(expr: &ExprImpl) -> Option<bool> {
-    if let ExprImpl::Literal(l) = expr {
-        if let Some(ScalarImpl::Bool(v)) = l.get_data() {
-            return Some(*v);
-        }
+    if let ExprImpl::Literal(l) = expr
+        && let Some(ScalarImpl::Bool(v)) = l.get_data()
+    {
+        return Some(*v);
     }
     None
 }

@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -78,6 +78,7 @@ pub enum StatementType {
     DROP_CONNECTION,
     DROP_SECRET,
     ALTER_DATABASE,
+    ALTER_DEFAULT_PRIVILEGES,
     ALTER_SCHEMA,
     ALTER_INDEX,
     ALTER_VIEW,
@@ -90,6 +91,7 @@ pub enum StatementType {
     ALTER_CONNECTION,
     ALTER_SYSTEM,
     ALTER_SECRET,
+    ALTER_FRAGMENT,
     REVOKE_PRIVILEGE,
     // Introduce ORDER_BY statement type cuz Calcite unvalidated AST has SqlKind.ORDER_BY. Note
     // that Statement Type is not designed to be one to one mapping with SqlKind.
@@ -101,6 +103,7 @@ pub enum StatementType {
     UPDATE_USER,
     ABORT,
     FLUSH,
+    REFRESH_TABLE,
     OTHER,
     // EMPTY is used when query statement is empty (e.g. ";").
     EMPTY,
@@ -114,6 +117,9 @@ pub enum StatementType {
     KILL,
     RECOVER,
     USE,
+    PREPARE,
+    DEALLOCATE,
+    VACUUM,
 }
 
 impl std::fmt::Display for StatementType {
@@ -128,6 +134,8 @@ pub type BoxedCallback = Pin<Box<dyn Callback>>;
 
 pub struct PgResponse<VS> {
     stmt_type: StatementType,
+    is_copy_query_to_stdout: bool,
+
     // row count of affected row. Used for INSERT, UPDATE, DELETE, COPY, and other statements that
     // don't return rows.
     row_cnt: Option<i32>,
@@ -158,6 +166,7 @@ impl<VS> From<PgResponseBuilder<VS>> for PgResponse<VS> {
     fn from(builder: PgResponseBuilder<VS>) -> Self {
         Self {
             stmt_type: builder.stmt_type,
+            is_copy_query_to_stdout: false, // set a false from builder, alter later
             row_cnt: builder.row_cnt,
             row_cnt_format: builder.row_cnt_format,
             notices: builder.notices,
@@ -282,6 +291,7 @@ impl StatementType {
             }
             Statement::AlterTable { .. } => Ok(StatementType::ALTER_TABLE),
             Statement::AlterSystem { .. } => Ok(StatementType::ALTER_SYSTEM),
+            Statement::AlterFragment { .. } => Ok(StatementType::ALTER_FRAGMENT),
             Statement::DropFunction { .. } => Ok(StatementType::DROP_FUNCTION),
             Statement::Discard(..) => Ok(StatementType::DISCARD),
             Statement::SetVariable { .. } => Ok(StatementType::SET_VARIABLE),
@@ -324,6 +334,7 @@ impl StatementType {
             Statement::Flush => Ok(StatementType::FLUSH),
             Statement::Wait => Ok(StatementType::WAIT),
             Statement::Use { .. } => Ok(StatementType::USE),
+            Statement::Vacuum { .. } => Ok(StatementType::VACUUM),
             _ => Err("unsupported statement type".to_owned()),
         }
     }
@@ -394,6 +405,12 @@ where
         PgResponseBuilder::empty(stmt_type).into()
     }
 
+    pub fn into_copy_query_to_stdout(mut self) -> Self {
+        self.is_copy_query_to_stdout = true;
+        self.stmt_type = StatementType::COPY;
+        self
+    }
+
     pub fn stmt_type(&self) -> StatementType {
         self.stmt_type
     }
@@ -422,8 +439,12 @@ where
         self.stmt_type == StatementType::EMPTY
     }
 
-    pub fn row_desc(&self) -> Vec<PgFieldDescriptor> {
-        self.row_desc.clone()
+    pub fn is_copy_query_to_stdout(&self) -> bool {
+        self.is_copy_query_to_stdout
+    }
+
+    pub fn row_desc(&self) -> &[PgFieldDescriptor] {
+        &self.row_desc
     }
 
     pub fn values_stream(&mut self) -> &mut VS {

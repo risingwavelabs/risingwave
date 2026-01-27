@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -47,7 +47,7 @@ pub struct LogRowSeqScanExecutor<S: StateStore> {
     schema: Schema,
 
     /// Batch metrics.
-    /// None: Local mode don't record mertics.
+    /// None: Local mode don't record metrics.
     metrics: Option<BatchMetrics>,
 
     table: BatchTable<S>,

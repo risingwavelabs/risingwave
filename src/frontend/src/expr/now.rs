@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -35,12 +35,12 @@ impl Expr for Now {
         DataType::Timestamptz
     }
 
-    fn to_expr_proto(&self) -> ExprNode {
-        ExprNode {
+    fn try_to_expr_proto(&self) -> Result<ExprNode, String> {
+        Ok(ExprNode {
             function_type: expr_node::Type::Unspecified.into(),
             return_type: Some(self.return_type().into()),
             rex_node: Some(expr_node::RexNode::Now(NowRexNode {})),
-        }
+        })
     }
 }
 

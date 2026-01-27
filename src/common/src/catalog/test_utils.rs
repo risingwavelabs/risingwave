@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -30,7 +30,7 @@ impl ColumnDescTestExt for ColumnDesc {
             name: name.to_owned(),
             additional_column: Some(AdditionalColumn { column_type: None }),
             version: ColumnDescVersion::LATEST as _,
-            nullable: true,
+            nullable: Some(true),
             ..Default::default()
         }
     }

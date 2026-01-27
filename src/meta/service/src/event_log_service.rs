@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -52,6 +52,9 @@ impl EventLogService for EventLogServiceImpl {
             }
             risingwave_pb::meta::add_event_log_request::Event::SinkFail(e) => {
                 risingwave_pb::meta::event_log::Event::SinkFail(e)
+            }
+            risingwave_pb::meta::add_event_log_request::Event::AutoSchemaChangeFail(e) => {
+                risingwave_pb::meta::event_log::Event::AutoSchemaChangeFail(e)
             }
         };
         self.event_log_manager.add_event_logs(vec![e]);

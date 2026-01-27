@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -1045,21 +1045,20 @@ impl<K: HashKey> HashJoinExecutor<K> {
             {
                 shutdown_rx.check()?;
                 if !ANTI_JOIN {
-                    if hash_map.contains_key(probe_key) {
-                        if let Some(spilled) = Self::append_one_probe_row(
+                    if hash_map.contains_key(probe_key)
+                        && let Some(spilled) = Self::append_one_probe_row(
                             &mut chunk_builder,
                             &probe_chunk,
                             probe_row_id,
-                        ) {
-                            yield spilled
-                        }
-                    }
-                } else if hash_map.get(probe_key).is_none() {
-                    if let Some(spilled) =
-                        Self::append_one_probe_row(&mut chunk_builder, &probe_chunk, probe_row_id)
+                        )
                     {
                         yield spilled
                     }
+                } else if hash_map.get(probe_key).is_none()
+                    && let Some(spilled) =
+                        Self::append_one_probe_row(&mut chunk_builder, &probe_chunk, probe_row_id)
+                {
+                    yield spilled
                 }
             }
         }
@@ -1069,12 +1068,12 @@ impl<K: HashKey> HashJoinExecutor<K> {
     }
 
     /// High-level idea:
-    /// 1. For each probe_row, append candidate rows to buffer.
-    ///    Candidate rows: Those satisfying equi_predicate (==).
+    /// 1. For each `probe_row`, append candidate rows to buffer.
+    ///    Candidate rows: Those satisfying `equi_predicate` (==).
     /// 2. If buffer becomes full, process it.
-    ///    Apply non_equi_join predicates e.g. `>=`, `<=` to filter rows.
-    ///    Track if probe_row is matched to avoid duplicates.
-    /// 3. If we matched probe_row in spilled chunk,
+    ///    Apply `non_equi_join` predicates e.g. `>=`, `<=` to filter rows.
+    ///    Track if `probe_row` is matched to avoid duplicates.
+    /// 3. If we matched `probe_row` in spilled chunk,
     ///    stop appending its candidate rows,
     ///    to avoid matching it again in next spilled chunk.
     #[try_stream(boxed, ok = DataChunk, error = BatchError)]
@@ -2573,8 +2572,8 @@ mod tests {
 
     /// Sort each row in the data chunk and compare with the rows in the data chunk.
     fn compare_data_chunk_with_rowsort(left: &DataChunk, right: &DataChunk) -> bool {
-        assert!(left.is_compacted());
-        assert!(right.is_compacted());
+        assert!(left.is_vis_compacted());
+        assert!(right.is_vis_compacted());
 
         if left.cardinality() != right.cardinality() {
             return false;
@@ -2858,7 +2857,7 @@ mod tests {
 
                 while let Some(data_chunk) = stream.next().await {
                     let data_chunk = data_chunk.unwrap();
-                    let data_chunk = data_chunk.compact();
+                    let data_chunk = data_chunk.compact_vis();
                     data_chunk_merger.append(&data_chunk).unwrap();
                 }
 
@@ -3267,8 +3266,8 @@ mod tests {
     }
 
     /// Tests handling of edge case:
-    /// Match is found for a probe_row,
-    /// but there are still candidate rows in the iterator for that probe_row.
+    /// Match is found for a `probe_row`,
+    /// but there are still candidate rows in the iterator for that `probe_row`.
     /// These should not be buffered or we will have duplicate rows in output.
     #[tokio::test]
     async fn test_left_semi_join_with_non_equi_condition_duplicates() {
@@ -3447,7 +3446,7 @@ mod tests {
             )
             .await
             .unwrap()
-            .compact(),
+            .compact_vis(),
             &expect
         ));
         assert_eq!(state.first_output_row_id, Vec::<usize>::new());
@@ -3477,7 +3476,7 @@ mod tests {
             )
             .await
             .unwrap()
-            .compact(),
+            .compact_vis(),
             &expect
         ));
         assert_eq!(state.first_output_row_id, Vec::<usize>::new());
@@ -3507,7 +3506,7 @@ mod tests {
             )
             .await
             .unwrap()
-            .compact(),
+            .compact_vis(),
             &expect
         ));
         assert_eq!(state.first_output_row_id, Vec::<usize>::new());
@@ -3547,7 +3546,7 @@ mod tests {
             )
             .await
             .unwrap()
-            .compact(),
+            .compact_vis(),
             &expect
         ));
         assert_eq!(state.first_output_row_id, Vec::<usize>::new());
@@ -3574,7 +3573,7 @@ mod tests {
             )
             .await
             .unwrap()
-            .compact(),
+            .compact_vis(),
             &expect
         ));
         assert_eq!(state.first_output_row_id, Vec::<usize>::new());
@@ -3601,7 +3600,7 @@ mod tests {
             )
             .await
             .unwrap()
-            .compact(),
+            .compact_vis(),
             &expect
         ));
         assert_eq!(state.first_output_row_id, Vec::<usize>::new());
@@ -3642,7 +3641,7 @@ mod tests {
             )
             .await
             .unwrap()
-            .compact(),
+            .compact_vis(),
             &expect
         ));
         assert_eq!(state.first_output_row_id, Vec::<usize>::new());
@@ -3671,7 +3670,7 @@ mod tests {
             )
             .await
             .unwrap()
-            .compact(),
+            .compact_vis(),
             &expect
         ));
         assert_eq!(state.first_output_row_id, Vec::<usize>::new());
@@ -3700,7 +3699,7 @@ mod tests {
             )
             .await
             .unwrap()
-            .compact(),
+            .compact_vis(),
             &expect
         ));
         assert_eq!(state.first_output_row_id, Vec::<usize>::new());
@@ -3763,7 +3762,7 @@ mod tests {
             )
             .await
             .unwrap()
-            .compact(),
+            .compact_vis(),
             &expect
         ));
         assert_eq!(state.build_row_ids, Vec::new());
@@ -3804,7 +3803,7 @@ mod tests {
             )
             .await
             .unwrap()
-            .compact(),
+            .compact_vis(),
             &expect
         ));
         assert_eq!(state.build_row_ids, Vec::new());
@@ -3954,7 +3953,7 @@ mod tests {
             )
             .await
             .unwrap()
-            .compact(),
+            .compact_vis(),
             &expect
         ));
         assert_eq!(left_state.first_output_row_id, Vec::<usize>::new());
@@ -4002,7 +4001,7 @@ mod tests {
             )
             .await
             .unwrap()
-            .compact(),
+            .compact_vis(),
             &expect
         ));
         assert_eq!(left_state.first_output_row_id, Vec::<usize>::new());

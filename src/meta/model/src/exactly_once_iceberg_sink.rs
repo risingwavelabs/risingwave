@@ -14,9 +14,10 @@
 
 use sea_orm::entity::prelude::*;
 use sea_orm::{DeriveEntityModel, DeriveRelation, EnumIter};
+use serde::{Deserialize, Serialize};
 
 use crate::{Epoch, SinkId};
-#[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq, Default)]
+#[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq, Default, Serialize, Deserialize)]
 #[sea_orm(table_name = "exactly_once_iceberg_sink_metadata")]
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]

@@ -1,0 +1,62 @@
+statement ok
+create database mydb;
+
+statement ok
+set database to mydb;
+
+statement ok
+create schema myschema;
+
+statement ok
+create table myschema.mytable as select 1::int as id;
+
+statement ok
+flush;
+
+# Under current database. Qualifying with db name is okay.
+query I
+select * from mydb.myschema.mytable;
+----
+1
+
+query I
+select * from myschema.mytable;
+----
+1
+
+control substitution on
+
+# Switch back to original database.
+statement ok
+set database to $__DATABASE__;
+
+control substitution off
+
+# Test cross DB query.
+query I
+select * from mydb.myschema.mytable;
+----
+1
+
+statement ok
+drop database mydb;
+
+# Test error reporting.
+statement error
+select * from a.b.c
+----
+    db error: ERROR: Failed to run the query
+
+Caused by these errors (recent errors listed first):
+  1: Catalog error
+  2: database not found: a
+
+
+statement error
+select * FROM database_name.information_schema.tables;
+----
+    db error: ERROR: Failed to run the query
+
+Caused by these errors (recent errors listed first):
+  1: Catalog error
+  2: database not found: database_name

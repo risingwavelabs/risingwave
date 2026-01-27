@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,7 +14,7 @@
 
 use crate::binder::BoundValues;
 use crate::error::Result;
-use crate::optimizer::plan_node::{LogicalValues, PlanRef};
+use crate::optimizer::plan_node::{LogicalPlanRef as PlanRef, LogicalValues};
 use crate::planner::Planner;
 
 impl Planner {

@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,8 +16,8 @@ use std::fmt::Debug;
 use std::sync::Arc;
 
 use reqwest::Method;
+use serde::Deserialize;
 use serde::de::DeserializeOwned;
-use serde_derive::Deserialize;
 use url::{ParseError, Url};
 
 use crate::schema::{InvalidOptionError, bail_invalid_option_error};
@@ -104,7 +104,6 @@ where
 {
     url.path_segments_mut()
         .expect("constructor validated URL can be a base")
-        .clear()
         .extend(&ctx.path);
     tracing::debug!("request to url: {}, method {}", &url, &method);
     let mut request_builder = ctx.client.request(method, url);

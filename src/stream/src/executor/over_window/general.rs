@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,10 +18,9 @@ use std::ops::RangeInclusive;
 
 use delta_btree_map::Change;
 use itertools::Itertools;
-use risingwave_common::array::Op;
 use risingwave_common::array::stream_record::Record;
+use risingwave_common::config::streaming::OverWindowCachePolicy as CachePolicy;
 use risingwave_common::row::RowExt;
-use risingwave_common::session_config::OverWindowCachePolicy as CachePolicy;
 use risingwave_common::types::DefaultOrdered;
 use risingwave_common::util::memcmp_encoding::{self, MemcmpEncoded};
 use risingwave_common::util::sort_util::OrderType;
@@ -30,11 +29,10 @@ use risingwave_expr::window_function::{
 };
 
 use super::frame_finder::merge_rows_frames;
-use super::over_partition::{
-    CacheKey, OverPartition, PartitionCache, PartitionDelta, new_empty_partition_cache,
-    shrink_partition_cache,
-};
+use super::over_partition::{OverPartition, PartitionDelta};
+use super::range_cache::{CacheKey, PartitionCache};
 use crate::cache::ManagedLruCache;
+use crate::common::change_buffer::ChangeBuffer;
 use crate::common::metrics::MetricsInfo;
 use crate::consistency::consistency_panic;
 use crate::executor::monitor::OverWindowMetrics;
@@ -59,7 +57,7 @@ struct ExecutorInner<S: StateStore> {
     order_key_indices: Vec<usize>,
     order_key_data_types: Vec<DataType>,
     order_key_order_types: Vec<OrderType>,
-    input_pk_indices: Vec<usize>,
+    input_stream_key: Vec<usize>,
     state_key_to_table_sub_pk_proj: Vec<usize>,
 
     state_table: StateTable<S>,
@@ -100,7 +98,7 @@ impl<S: StateStore> ExecutorInner<S> {
     }
 
     fn get_input_pk(&self, full_row: impl Row) -> OwnedRow {
-        full_row.project(&self.input_pk_indices).into_owned_row()
+        full_row.project(&self.input_stream_key).into_owned_row()
     }
 
     /// `full_row` can be an input row or state table row.
@@ -234,7 +232,7 @@ impl<S: StateStore> OverWindowExecutor<S> {
         let state_key_to_table_sub_pk_proj = RowConverter::calc_state_key_to_table_sub_pk_proj(
             &args.partition_key_indices,
             &args.order_key_indices,
-            &input_info.pk_indices,
+            &input_info.stream_key,
         );
 
         let deduped_part_key_indices = {
@@ -256,7 +254,7 @@ impl<S: StateStore> OverWindowExecutor<S> {
                 order_key_indices: args.order_key_indices,
                 order_key_data_types,
                 order_key_order_types: args.order_key_order_types,
-                input_pk_indices: input_info.pk_indices,
+                input_stream_key: input_info.stream_key,
                 state_key_to_table_sub_pk_proj,
                 state_table: args.state_table,
                 watermark_sequence: args.watermark_epoch,
@@ -276,67 +274,11 @@ impl<S: StateStore> OverWindowExecutor<S> {
         this: &'_ ExecutorInner<S>,
         chunk: &'a StreamChunk,
     ) -> impl Iterator<Item = Record<RowRef<'a>>> {
-        let mut changes_merged = BTreeMap::new();
-        for (op, row) in chunk.rows() {
-            let pk = DefaultOrdered(this.get_input_pk(row));
-            match op {
-                Op::Insert | Op::UpdateInsert => {
-                    if let Some(prev_change) = changes_merged.get_mut(&pk) {
-                        match prev_change {
-                            Record::Delete { old_row } => {
-                                *prev_change = Record::Update {
-                                    old_row: *old_row,
-                                    new_row: row,
-                                };
-                            }
-                            _ => {
-                                consistency_panic!(
-                                    ?pk,
-                                    "inconsistent changes in input chunk, double-inserting"
-                                );
-                                if let Record::Update { old_row, .. } = prev_change {
-                                    *prev_change = Record::Update {
-                                        old_row: *old_row,
-                                        new_row: row,
-                                    };
-                                } else {
-                                    *prev_change = Record::Insert { new_row: row };
-                                }
-                            }
-                        }
-                    } else {
-                        changes_merged.insert(pk, Record::Insert { new_row: row });
-                    }
-                }
-                Op::Delete | Op::UpdateDelete => {
-                    if let Some(prev_change) = changes_merged.get_mut(&pk) {
-                        match prev_change {
-                            Record::Insert { .. } => {
-                                changes_merged.remove(&pk);
-                            }
-                            Record::Update {
-                                old_row: real_old_row,
-                                ..
-                            } => {
-                                *prev_change = Record::Delete {
-                                    old_row: *real_old_row,
-                                };
-                            }
-                            _ => {
-                                consistency_panic!(
-                                    ?pk,
-                                    "inconsistent changes in input chunk, double-deleting"
-                                );
-                                *prev_change = Record::Delete { old_row: row };
-                            }
-                        }
-                    } else {
-                        changes_merged.insert(pk, Record::Delete { old_row: row });
-                    }
-                }
-            }
+        let mut cb = ChangeBuffer::with_capacity(chunk.cardinality());
+        for record in chunk.records() {
+            cb.apply_record(record, |row| this.get_input_pk(row));
         }
-        changes_merged.into_values()
+        cb.into_records()
     }
 
     #[try_stream(ok = StreamChunk, error = StreamExecutorError)]
@@ -421,7 +363,7 @@ impl<S: StateStore> OverWindowExecutor<S> {
             if !vars.cached_partitions.contains(&part_key.0) {
                 vars.stats.cache_miss += 1;
                 vars.cached_partitions
-                    .put(part_key.0.clone(), new_empty_partition_cache());
+                    .put(part_key.0.clone(), PartitionCache::new());
             }
             let mut cache = vars.cached_partitions.get_mut(&part_key).unwrap();
 
@@ -482,7 +424,7 @@ impl<S: StateStore> OverWindowExecutor<S> {
                     order_key_indices: &this.order_key_indices,
                     order_key_data_types: &this.order_key_data_types,
                     order_key_order_types: &this.order_key_order_types,
-                    input_pk_indices: &this.input_pk_indices,
+                    input_stream_key_indices: &this.input_stream_key,
                 },
             );
 
@@ -674,11 +616,10 @@ impl<S: StateStore> OverWindowExecutor<S> {
 
                     if let Some((_, cache_may_stale)) =
                         post_commit.post_yield_barrier(update_vnode_bitmap).await?
+                        && cache_may_stale
                     {
-                        if cache_may_stale {
-                            vars.cached_partitions.clear();
-                            vars.recently_accessed_ranges.clear();
-                        }
+                        vars.cached_partitions.clear();
+                        vars.recently_accessed_ranges.clear();
                     }
 
                     if !this.cache_policy.is_full() {
@@ -688,9 +629,8 @@ impl<S: StateStore> OverWindowExecutor<S> {
                             if let Some(mut range_cache) =
                                 vars.cached_partitions.get_mut(&part_key.0)
                             {
-                                shrink_partition_cache(
+                                range_cache.shrink(
                                     &part_key.0,
-                                    &mut range_cache,
                                     this.cache_policy,
                                     recently_accessed_range,
                                 );
@@ -721,7 +661,7 @@ pub(super) struct RowConverter<'a> {
     order_key_indices: &'a [usize],
     order_key_data_types: &'a [DataType],
     order_key_order_types: &'a [OrderType],
-    input_pk_indices: &'a [usize],
+    input_stream_key_indices: &'a [usize],
 }
 
 impl<'a> RowConverter<'a> {
@@ -731,14 +671,15 @@ impl<'a> RowConverter<'a> {
     pub(super) fn calc_state_key_to_table_sub_pk_proj(
         partition_key_indices: &[usize],
         order_key_indices: &[usize],
-        input_pk_indices: &'a [usize],
+        input_stream_key_indices: &'a [usize],
     ) -> Vec<usize> {
         // This process is corresponding to `StreamOverWindow::infer_state_table`.
-        let mut projection = Vec::with_capacity(order_key_indices.len() + input_pk_indices.len());
+        let mut projection =
+            Vec::with_capacity(order_key_indices.len() + input_stream_key_indices.len());
         let mut col_dedup: HashSet<usize> = partition_key_indices.iter().copied().collect();
         for (proj_idx, key_idx) in order_key_indices
             .iter()
-            .chain(input_pk_indices.iter())
+            .chain(input_stream_key_indices.iter())
             .enumerate()
         {
             if col_dedup.insert(*key_idx) {
@@ -775,7 +716,7 @@ impl<'a> RowConverter<'a> {
                 self.order_key_order_types,
             )?,
             pk: full_row
-                .project(self.input_pk_indices)
+                .project(self.input_stream_key_indices)
                 .into_owned_row()
                 .into(),
         })

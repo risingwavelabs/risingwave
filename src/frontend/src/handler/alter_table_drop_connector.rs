@@ -43,7 +43,7 @@ fn fetch_schema_info(
 ) -> Result<(Arc<TableCatalog>, Arc<SourceCatalog>)> {
     let db_name = session.database();
     let (schema_name, real_table_name) =
-        Binder::resolve_schema_qualified_name(db_name.as_str(), table_name.clone())?;
+        Binder::resolve_schema_qualified_name(db_name.as_str(), &table_name)?;
     let search_path = session.config().search_path();
     let user_name = &session.auth_context().user_name;
 
@@ -61,8 +61,7 @@ fn fetch_schema_info(
         ))
         .into());
     };
-    let (source_def, _) =
-        reader.get_source_by_id(db_name.as_str(), schema_path, &source_id.table_id())?;
+    let (source_def, _) = reader.get_source_by_id(db_name.as_str(), schema_path, source_id)?;
     Ok((table_def.clone(), source_def.clone()))
 }
 
@@ -83,7 +82,7 @@ fn rewrite_table_definition(
         mut with_options,
         append_only,
         on_conflict,
-        with_version_column,
+        with_version_columns,
         query,
         engine,
         ..
@@ -128,10 +127,10 @@ fn rewrite_table_definition(
         or_replace,
         temporary,
         if_not_exists,
-        name: name.clone(),
+        name,
         columns: columns.clone(),
         wildcard_idx,
-        constraints: constraints.clone(),
+        constraints,
         with_options: {
             with_options.retain(|item| {
                 TABLE_PROPS.contains(item.name.real_value().to_lowercase().as_str())
@@ -142,7 +141,7 @@ fn rewrite_table_definition(
         source_watermarks: vec![], // no source, no watermark
         append_only,
         on_conflict,
-        with_version_column,
+        with_version_columns,
         query,
         cdc_table_info: None,
         include_column_options: vec![],
@@ -161,7 +160,7 @@ pub async fn handle_alter_table_drop_connector(
     let original_definition = table_def.create_sql_ast_purified()?;
 
     let new_statement = rewrite_table_definition(&table_def, &source_def, original_definition)?;
-    let (_, table, graph, col_index_mapping, _) = get_replace_table_plan(
+    let (_, table, graph, _) = get_replace_table_plan(
         &session,
         table_name,
         new_statement,
@@ -172,13 +171,7 @@ pub async fn handle_alter_table_drop_connector(
 
     let catalog_writer = session.catalog_writer()?;
     catalog_writer
-        .replace_table(
-            None,
-            table,
-            graph,
-            col_index_mapping,
-            TableJobType::General as _,
-        )
+        .replace_table(None, table.to_prost(), graph, TableJobType::General as _)
         .await?;
 
     Ok(PgResponse::empty_result(StatementType::ALTER_TABLE))

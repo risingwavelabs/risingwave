@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -25,8 +25,6 @@
 #![warn(clippy::no_effect_underscore_binding)]
 #![warn(clippy::await_holding_lock)]
 #![deny(rustdoc::broken_intra_doc_links)]
-#![feature(path_file_prefix)]
-#![feature(let_chains)]
 #![feature(register_tool)]
 #![register_tool(rw)]
 #![allow(rw::format_error)]

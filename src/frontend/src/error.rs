@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,6 +15,7 @@
 use risingwave_batch::error::BatchError;
 use risingwave_common::array::ArrayError;
 use risingwave_common::error::{BoxedError, NoFunction, NotImplemented};
+use risingwave_common::license::FeatureNotAvailable;
 use risingwave_common::secret::SecretError;
 use risingwave_common::session_config::SessionConfigError;
 use risingwave_common::util::value_encoding::error::ValueEncodingError;
@@ -22,8 +23,9 @@ use risingwave_connector::error::ConnectorError;
 use risingwave_connector::sink::SinkError;
 use risingwave_expr::ExprError;
 use risingwave_pb::PbFieldNotFound;
-use risingwave_rpc_client::error::{RpcError, TonicStatusWrapper};
+use risingwave_rpc_client::error::{RpcError, ToTonicStatus, TonicStatusWrapper};
 use thiserror::Error;
+use thiserror_ext::AsReport;
 use tokio::task::JoinError;
 
 use crate::expr::CastError;
@@ -89,6 +91,13 @@ pub enum ErrorCode {
         #[backtrace]
         ArrayError,
     ),
+    #[cfg(feature = "datafusion")]
+    #[error("DataFusion error: {0}")]
+    DataFusionError(
+        #[from]
+        #[backtrace]
+        datafusion_common::DataFusionError,
+    ),
     #[error("Stream error: {0}")]
     StreamError(
         #[backtrace]
@@ -126,10 +135,11 @@ pub enum ErrorCode {
     CatalogError(
         #[source]
         #[backtrace]
+        #[message]
         BoxedError,
     ),
     #[error("Protocol error: {0}")]
-    ProtocolError(String),
+    ProtocolError(#[message] String),
     #[error("Scheduler error: {0}")]
     SchedulerError(
         #[source]
@@ -143,7 +153,7 @@ pub enum ErrorCode {
     #[error("Item not found: {0}")]
     ItemNotFound(String),
     #[error("Invalid input syntax: {0}")]
-    InvalidInputSyntax(String),
+    InvalidInputSyntax(#[message] String),
     #[error("Can not compare in memory: {0}")]
     MemComparableError(#[from] memcomparable::Error),
     #[error("Error while de/se values: {0}")]
@@ -166,7 +176,7 @@ pub enum ErrorCode {
         BoxedError,
     ),
     #[error("Permission denied: {0}")]
-    PermissionDenied(String),
+    PermissionDenied(#[message] String),
     #[error("Failed to get/set session config: {0}")]
     SessionConfig(
         #[from]
@@ -181,6 +191,12 @@ pub enum ErrorCode {
     ),
     #[error("{0} has been deprecated, please use {1} instead.")]
     Deprecated(String, String),
+    #[error(transparent)]
+    FeatureNotAvailable(
+        #[from]
+        #[backtrace]
+        FeatureNotAvailable,
+    ),
 }
 
 /// The result type for the frontend crate.
@@ -260,5 +276,17 @@ impl From<BoxedError> for RwError {
         // This is essentially expanded from `anyhow::anyhow!(e)`.
         let e = anyhow::__private::kind::BoxedKind::anyhow_kind(&e).new(e);
         ErrorCode::Uncategorized(e).into()
+    }
+}
+
+impl From<risingwave_sqlparser::parser::ParserError> for ErrorCode {
+    fn from(e: risingwave_sqlparser::parser::ParserError) -> Self {
+        ErrorCode::InvalidInputSyntax(e.to_report_string())
+    }
+}
+
+impl From<RwError> for tonic::Status {
+    fn from(err: RwError) -> Self {
+        err.to_status(tonic::Code::Internal, "RwError")
     }
 }

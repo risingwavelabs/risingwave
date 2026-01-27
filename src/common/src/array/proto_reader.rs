@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -44,6 +44,7 @@ impl ArrayImpl {
             PbArrayType::Bytea => read_string_array::<BytesValueReader>(array, cardinality)?,
             PbArrayType::Int256 => Int256Array::from_protobuf(array, cardinality)?,
             PbArrayType::Map => MapArray::from_protobuf(array)?,
+            PbArrayType::Vector => VectorArray::from_protobuf(array)?,
         };
         Ok(array)
     }

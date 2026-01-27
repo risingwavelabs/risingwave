@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,16 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![allow(clippy::disallowed_types, clippy::disallowed_methods)]
-
 use std::sync::Arc;
 
 pub use anyhow::anyhow;
-use iceberg::Error as IcebergError;
 use mysql_async::Error as MySqlError;
 use parquet::errors::ParquetError;
 use risingwave_common::array::ArrayError;
-use risingwave_common::error::{BoxedError, def_anyhow_newtype, def_anyhow_variant};
+use risingwave_common::error::{BoxedError, IcebergError, def_anyhow_newtype, def_anyhow_variant};
+use risingwave_common::id::FragmentId;
 use risingwave_common::util::value_encoding::error::ValueEncodingError;
 use risingwave_connector::error::ConnectorError;
 use risingwave_dml::error::DmlError;
@@ -33,8 +31,6 @@ use thiserror::Error;
 use thiserror_ext::Construct;
 use tokio_postgres::Error as PostgresError;
 use tonic::Status;
-
-use crate::worker_manager::worker_node_manager::FragmentId;
 
 pub type Result<T> = std::result::Result<T, BatchError>;
 /// Batch result with shared error.
@@ -138,6 +134,9 @@ pub enum BatchError {
     #[error("Serving vnode mapping not found for fragment {0}")]
     ServingVnodeMappingNotFound(FragmentId),
 
+    #[error("Streaming vnode mapping has not been initialized")]
+    StreamingVnodeMappingNotInitialized,
+
     #[error("Streaming vnode mapping not found for fragment {0}")]
     StreamingVnodeMappingNotFound(FragmentId),
 
@@ -198,4 +197,11 @@ def_anyhow_variant! {
     IcebergError => "Iceberg error",
     ParquetError => "Parquet error",
     MySqlError => "MySQL error",
+}
+
+#[expect(clippy::disallowed_types)]
+impl From<iceberg::Error> for BatchExternalSystemError {
+    fn from(value: iceberg::Error) -> Self {
+        risingwave_common::error::IcebergError::from(value).into()
+    }
 }

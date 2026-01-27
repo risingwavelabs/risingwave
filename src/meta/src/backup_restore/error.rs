@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,17 +16,10 @@ use risingwave_backup::error::BackupError;
 
 use crate::MetaError;
 use crate::model::MetadataModelError;
-use crate::storage::MetaStoreError;
 
 impl From<BackupError> for MetaError {
     fn from(e: BackupError) -> Self {
         anyhow::anyhow!(e).into()
-    }
-}
-
-impl From<MetaStoreError> for BackupError {
-    fn from(e: MetaStoreError) -> Self {
-        BackupError::MetaStorage(e.into())
     }
 }
 

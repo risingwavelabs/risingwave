@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -250,9 +250,15 @@ impl<S: StateStore> GlobalApproxPercentileState<S> {
 impl<S: StateStore> GlobalApproxPercentileState<S> {
     pub fn get_output(&mut self) -> StreamChunk {
         let last_output = mem::take(&mut self.last_output);
-        let new_output = if !self.output_changed {
-            tracing::debug!("last_output: {:#?}", last_output);
-            last_output.clone().flatten()
+        let new_output = if let Some(last_output) = &last_output
+            && !self.output_changed
+        {
+            debug_assert_eq!(
+                *last_output,
+                self.cache
+                    .get_output(self.row_count, self.quantile, self.base)
+            );
+            last_output.clone()
         } else {
             self.cache
                 .get_output(self.row_count, self.quantile, self.base)
@@ -260,17 +266,10 @@ impl<S: StateStore> GlobalApproxPercentileState<S> {
         self.last_output = Some(new_output.clone());
         let output_chunk = match last_output {
             None => StreamChunk::from_rows(&[(Op::Insert, &[new_output])], &[DataType::Float64]),
-            Some(last_output) if !self.output_changed => StreamChunk::from_rows(
-                &[
-                    (Op::UpdateDelete, &[last_output.clone()]),
-                    (Op::UpdateInsert, &[last_output]),
-                ],
-                &[DataType::Float64],
-            ),
             Some(last_output) => StreamChunk::from_rows(
                 &[
-                    (Op::UpdateDelete, &[last_output.clone()]),
-                    (Op::UpdateInsert, &[new_output.clone()]),
+                    (Op::UpdateDelete, std::slice::from_ref(&last_output)),
+                    (Op::UpdateInsert, std::slice::from_ref(&new_output)),
                 ],
                 &[DataType::Float64],
             ),

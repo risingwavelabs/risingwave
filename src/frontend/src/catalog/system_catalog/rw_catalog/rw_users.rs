@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -27,6 +27,7 @@ struct RwUser {
     create_db: bool,
     create_user: bool,
     can_login: bool,
+    is_admin: bool,
 }
 
 #[system_catalog(table, "rw_catalog.rw_users")]
@@ -43,6 +44,7 @@ fn read_rw_user_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwUser>> {
             create_db: user.can_create_db,
             create_user: user.can_create_user,
             can_login: user.can_login,
+            is_admin: user.is_admin,
         })
         .collect())
 }

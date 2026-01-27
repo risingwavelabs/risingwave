@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -86,27 +86,32 @@ pub(super) mod handlers {
             signature_expr,
             secret_ref,
             wait_for_persistence: _,
+            is_batched,
         } = webhook_source_info;
 
-        let secret_string = if let Some(secret_ref) = secret_ref {
-            LocalSecretManager::global()
-                .fill_secret(secret_ref)
-                .map_err(|e| err(e, StatusCode::NOT_FOUND))?
+        let is_valid = if let Some(signature_expr) = signature_expr {
+            let secret_string = if let Some(secret_ref) = secret_ref {
+                LocalSecretManager::global()
+                    .fill_secret(secret_ref)
+                    .map_err(|e| err(e, StatusCode::NOT_FOUND))?
+            } else {
+                String::new()
+            };
+
+            // Once limitation here is that the key is no longer case-insensitive, users must user the lowercase key when defining the webhook source table.
+            let headers_jsonb = header_map_to_json(&headers);
+
+            // verify the signature
+            verify_signature(
+                headers_jsonb,
+                secret_string.as_str(),
+                body.as_ref(),
+                signature_expr,
+            )
+            .await?
         } else {
-            String::new()
+            true
         };
-
-        // Once limitation here is that the key is no longer case-insensitive, users must user the lowercase key when defining the webhook source table.
-        let headers_jsonb = header_map_to_json(&headers);
-
-        // verify the signature
-        let is_valid = verify_signature(
-            headers_jsonb,
-            secret_string.as_str(),
-            body.as_ref(),
-            signature_expr.unwrap(),
-        )
-        .await?;
 
         if !is_valid {
             return Err(err(
@@ -115,17 +120,7 @@ pub(super) mod handlers {
             ));
         }
 
-        // Use builder to obtain a single column & single row DataChunk
-        let mut builder = JsonbArrayBuilder::with_type(1, DataType::Jsonb);
-        let json_value = Value::from_text(&body).map_err(|e| {
-            err(
-                anyhow!(e).context("Failed to parse body"),
-                StatusCode::UNPROCESSABLE_ENTITY,
-            )
-        })?;
-        let jsonb_val = JsonbVal::from(json_value);
-        builder.append(Some(jsonb_val.as_scalar_ref()));
-        let data_chunk = DataChunk::new(vec![builder.finish().into_ref()], 1);
+        let data_chunk = generate_data_chunk(is_batched, &body)?;
 
         // fill the data_chunk
         fast_insert_request.data_chunk = Some(data_chunk.to_protobuf());
@@ -138,6 +133,44 @@ pub(super) mod handlers {
             Err(err(
                 anyhow!("Failed to fast insert: {}", res.error_message),
                 StatusCode::INTERNAL_SERVER_ERROR,
+            ))
+        }
+    }
+
+    fn generate_data_chunk(is_batched: bool, body: &Bytes) -> Result<DataChunk> {
+        let mut builder = JsonbArrayBuilder::with_type(1, DataType::Jsonb);
+
+        if !is_batched {
+            // Use builder to obtain a single column & single row DataChunk
+            let json_value = Value::from_text(body).map_err(|e| {
+                err(
+                    anyhow!(e).context("Failed to parse body"),
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                )
+            })?;
+
+            let jsonb_val = JsonbVal::from(json_value);
+            builder.append(Some(jsonb_val.as_scalar_ref()));
+
+            Ok(DataChunk::new(vec![builder.finish().into_ref()], 1))
+        } else {
+            let rows: Vec<_> = body.split(|&b| b == b'\n').collect();
+
+            for row in &rows {
+                let json_value = Value::from_text(row).map_err(|e| {
+                    err(
+                        anyhow!(e).context("Failed to parse body"),
+                        StatusCode::UNPROCESSABLE_ENTITY,
+                    )
+                })?;
+                let jsonb_val = JsonbVal::from(json_value);
+
+                builder.append(Some(jsonb_val.as_scalar_ref()));
+            }
+
+            Ok(DataChunk::new(
+                vec![builder.finish().into_ref()],
+                rows.len(),
             ))
         }
     }
@@ -182,7 +215,7 @@ pub(super) mod handlers {
         };
 
         let fast_insert_request = FastInsertRequest {
-            table_id: table_id.table_id,
+            table_id,
             table_version_id: version_id,
             column_indices: vec![0],
             // leave the data_chunk empty for now
@@ -192,7 +225,7 @@ pub(super) mod handlers {
             wait_for_persistence: webhook_source_info.wait_for_persistence,
         };
 
-        let compute_client = choose_fast_insert_client(&table_id, frontend_env, request_id)
+        let compute_client = choose_fast_insert_client(table_id, frontend_env, request_id)
             .await
             .unwrap();
 

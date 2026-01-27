@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,9 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::hint::black_box;
 use std::sync::Arc;
 
-use criterion::{Criterion, black_box, criterion_group, criterion_main};
+use criterion::{Criterion, criterion_group, criterion_main};
 use rand::{Rng, SeedableRng};
 use risingwave_common::catalog::ColumnId;
 use risingwave_common::row::OwnedRow;
@@ -76,14 +77,30 @@ fn bench_column_aware_encoding_16_columns(c: &mut Criterion) {
         });
     });
 
-    let serializer = Serializer::new(&column_ids[..], data_types.iter().cloned());
-    let encoded = serializer.serialize(&row);
+    c.bench_function("value_encoding_16_columns_encode", |b| {
+        let serializer = BasicSerializer;
+        b.iter(|| {
+            black_box(serializer.serialize(&row));
+        });
+    });
 
     c.bench_function("column_aware_row_encoding_16_columns_decode", |b| {
+        let serializer = Serializer::new(&column_ids[..], data_types.iter().cloned());
+        let encoded = serializer.serialize(&row);
         let deserializer =
             Deserializer::new(&column_ids[..], data_types.clone(), std::iter::empty());
         b.iter(|| {
             let result = deserializer.deserialize(&encoded).unwrap();
+            black_box(result);
+        });
+    });
+
+    c.bench_function("value_encoding_16_columns_decode", |b| {
+        let serializer = BasicSerializer;
+        let encoded = serializer.serialize(&row);
+        let deserializer = BasicDeserializer::new(data_types.as_slice());
+        b.iter(|| {
+            let result = deserializer.deserialize(encoded.as_slice()).unwrap();
             black_box(result);
         });
     });
@@ -157,7 +174,7 @@ fn bench_column_aware_encoding_struct(c: &mut Criterion) {
             [outer_struct].into(),
             std::iter::empty(),
         );
-        let row = OwnedRow::new(vec![Some(Struct(outer_struct_value.clone()))]);
+        let row = OwnedRow::new(vec![Some(Struct(outer_struct_value))]);
 
         (serializer, deserializer, row)
     };
@@ -198,7 +215,7 @@ fn bench_column_aware_encoding_composite(c: &mut Criterion) {
             inner_struct = inner_struct.with_ids([ColumnId::new(11), ColumnId::new(12)]);
         }
         let inner_struct: DataType = inner_struct.into();
-        let list = DataType::List(Box::new(inner_struct.clone()));
+        let list = DataType::list(inner_struct.clone());
         let map = MapType::from_kv(DataType::Varchar, list.clone()).into();
         let mut outer_struct = StructType::new([("f1", DataType::Int32), ("map", map)]);
         if alterable {
@@ -222,7 +239,7 @@ fn bench_column_aware_encoding_composite(c: &mut Criterion) {
             [outer_struct].into(),
             std::iter::empty(),
         );
-        let row = OwnedRow::new(vec![Some(Struct(outer_struct_value.clone()))]);
+        let row = OwnedRow::new(vec![Some(Struct(outer_struct_value))]);
 
         (serializer, deserializer, row)
     };

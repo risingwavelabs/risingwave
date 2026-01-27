@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,7 +15,7 @@
 use risingwave_common::types::Fields;
 use risingwave_frontend_macro::system_catalog;
 
-use crate::catalog::system_catalog::SysCatalogReaderImpl;
+use crate::catalog::system_catalog::{SysCatalogReaderImpl, get_acl_items};
 use crate::error::Result;
 use crate::handler::create_connection::print_connection_params;
 
@@ -36,19 +36,25 @@ struct RwConnection {
 fn read_rw_connections(reader: &SysCatalogReaderImpl) -> Result<Vec<RwConnection>> {
     let catalog_reader = reader.catalog_reader.read_guard();
     let schemas = catalog_reader.iter_schemas(&reader.auth_context.database)?;
+    let user_reader = reader.user_info_reader.read_guard();
+    let users = user_reader.get_all_users();
+    let current_user = user_reader
+        .get_user_by_name(&reader.auth_context.user_name)
+        .expect("user not found");
+    let username_map = user_reader.get_user_name_map();
 
     // todo: redesign the internal table for connection params
     Ok(schemas
         .flat_map(|schema| {
-            schema.iter_connections().map(|conn| {
+            schema.iter_connections_with_acl(current_user).map(|conn| {
                 let mut rw_connection = RwConnection {
-                    id: conn.id as i32,
+                    id: conn.id.as_i32_id(),
                     name: conn.name.clone(),
-                    schema_id: schema.id() as i32,
+                    schema_id: schema.id().as_i32_id(),
                     owner: conn.owner as i32,
                     type_: conn.connection_type().into(),
                     provider: "".to_owned(),
-                    acl: vec![],
+                    acl: get_acl_items(conn.id, false, &users, username_map),
                     connection_params: "".to_owned(),
                 };
                 match &conn.info {
@@ -56,7 +62,11 @@ fn read_rw_connections(reader: &SysCatalogReaderImpl) -> Result<Vec<RwConnection
                         rw_connection.provider = conn.provider().into();
                     }
                     risingwave_pb::catalog::connection::Info::ConnectionParams(params) => {
-                        rw_connection.connection_params = print_connection_params(params, schema);
+                        rw_connection.connection_params = print_connection_params(
+                            &reader.auth_context.database,
+                            params,
+                            &catalog_reader,
+                        );
                     }
                 };
 

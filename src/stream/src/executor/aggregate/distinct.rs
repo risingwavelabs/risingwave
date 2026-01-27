@@ -178,6 +178,7 @@ impl<S: StateStore> ColumnDeduplicater<S> {
                 {
                     // if new counts all dropped to 0, we need to delete the row from the dedup table
                     dedup_table.delete(old_row);
+                    self.cache.remove(&cache_key);
                 } else {
                     dedup_table.update(old_row, row_prefix.chain(new_counts));
                 }

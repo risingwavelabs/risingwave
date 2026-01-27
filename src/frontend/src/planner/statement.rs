@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,11 +14,11 @@
 
 use crate::binder::BoundStatement;
 use crate::error::Result;
-use crate::optimizer::PlanRoot;
+use crate::optimizer::LogicalPlanRoot;
 use crate::planner::Planner;
 
 impl Planner {
-    pub(super) fn plan_statement(&mut self, stmt: BoundStatement) -> Result<PlanRoot> {
+    pub(super) fn plan_statement(&mut self, stmt: BoundStatement) -> Result<LogicalPlanRoot> {
         match stmt {
             BoundStatement::Insert(i) => self.plan_insert(*i),
             BoundStatement::Delete(d) => self.plan_delete(*d),

@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,31 +17,80 @@ use std::collections::HashMap;
 use anyhow::{Context, anyhow};
 use chrono::{DateTime, NaiveDateTime};
 use futures::stream::BoxStream;
-use futures::{StreamExt, pin_mut};
+use futures::{StreamExt, pin_mut, stream};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use mysql_async::prelude::*;
 use mysql_common::params::Params;
 use mysql_common::value::Value;
 use risingwave_common::bail;
-use risingwave_common::catalog::{CDC_OFFSET_COLUMN_NAME, ColumnDesc, ColumnId, Schema};
+use risingwave_common::catalog::{CDC_OFFSET_COLUMN_NAME, ColumnDesc, ColumnId, Field, Schema};
 use risingwave_common::row::OwnedRow;
-use risingwave_common::types::{DataType, Decimal, F32, ScalarImpl};
+use risingwave_common::types::{DataType, Datum, Decimal, F32, ScalarImpl};
 use risingwave_common::util::iter_util::ZipEqFast;
 use sea_schema::mysql::def::{ColumnDefault, ColumnKey, ColumnType};
 use sea_schema::mysql::discovery::SchemaDiscovery;
 use sea_schema::mysql::query::SchemaQueryBuilder;
 use sea_schema::sea_query::{Alias, IntoIden};
-use serde_derive::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize};
 use sqlx::MySqlPool;
 use sqlx::mysql::MySqlConnectOptions;
 use thiserror_ext::AsReport;
 
+use crate::connector_common::SslMode;
+// Re-export SslMode for convenience
+pub use crate::connector_common::SslMode as MySqlSslMode;
 use crate::error::{ConnectorError, ConnectorResult};
+use crate::source::CdcTableSnapshotSplit;
 use crate::source::cdc::external::{
-    CdcOffset, CdcOffsetParseFunc, DebeziumOffset, ExternalTableConfig, ExternalTableReader,
-    SchemaTableName, SslMode, mysql_row_to_owned_row,
+    CdcOffset, CdcOffsetParseFunc, CdcTableSnapshotSplitOption, DebeziumOffset,
+    ExternalTableConfig, ExternalTableReader, SchemaTableName, mysql_row_to_owned_row,
 };
+
+/// Build MySQL connection pool with proper SSL configuration.
+///
+/// This helper function creates a `mysql_async::Pool` with all necessary configurations
+/// including SSL settings. Use this function to ensure consistent MySQL connection setup
+/// across the codebase.
+///
+/// # Arguments
+/// * `host` - MySQL server hostname or IP address
+/// * `port` - MySQL server port
+/// * `username` - MySQL username
+/// * `password` - MySQL password
+/// * `database` - Database name
+/// * `ssl_mode` - SSL mode configuration (disabled, preferred, required, verify-ca, verify-full)
+///
+/// # Returns
+/// Returns a configured `mysql_async::Pool` ready for use
+pub fn build_mysql_connection_pool(
+    host: &str,
+    port: u16,
+    username: &str,
+    password: &str,
+    database: &str,
+    ssl_mode: SslMode,
+) -> mysql_async::Pool {
+    let mut opts_builder = mysql_async::OptsBuilder::default()
+        .user(Some(username))
+        .pass(Some(password))
+        .ip_or_hostname(host)
+        .tcp_port(port)
+        .db_name(Some(database));
+
+    opts_builder = match ssl_mode {
+        SslMode::Disabled | SslMode::Preferred => opts_builder.ssl_opts(None),
+        // verify-ca and verify-full are same as required for mysql now
+        SslMode::Required | SslMode::VerifyCa | SslMode::VerifyFull => {
+            let ssl_without_verify = mysql_async::SslOpts::default()
+                .with_danger_accept_invalid_certs(true)
+                .with_danger_skip_domain_validation(true);
+            opts_builder.ssl_opts(Some(ssl_without_verify))
+        }
+    };
+
+    mysql_async::Pool::new(opts_builder)
+}
 
 #[derive(Debug, Clone, Default, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub struct MySqlOffset {
@@ -88,7 +137,8 @@ impl MySqlExternalTable {
             .port(config.port.parse::<u16>().unwrap())
             .database(&config.database)
             .ssl_mode(match config.ssl_mode {
-                SslMode::Disabled | SslMode::Preferred => sqlx::mysql::MySqlSslMode::Disabled,
+                SslMode::Disabled => sqlx::mysql::MySqlSslMode::Disabled,
+                SslMode::Preferred => sqlx::mysql::MySqlSslMode::Preferred,
                 SslMode::Required => sqlx::mysql::MySqlSslMode::Required,
                 _ => {
                     return Err(anyhow!("unsupported SSL mode").into());
@@ -101,13 +151,11 @@ impl MySqlExternalTable {
         // discover system version first
         let system_info = schema_discovery.discover_system().await?;
         schema_discovery.query = SchemaQueryBuilder::new(system_info.clone());
-
         let schema = Alias::new(config.database.as_str()).into_iden();
         let table = Alias::new(config.table.as_str()).into_iden();
         let columns = schema_discovery
             .discover_columns(schema, table, &system_info)
             .await?;
-
         let mut column_descs = vec![];
         let mut pk_names = vec![];
         for col in columns {
@@ -115,65 +163,17 @@ impl MySqlExternalTable {
             // column name in mysql is case-insensitive, convert to lowercase
             let col_name = col.name.to_lowercase();
             let column_desc = if let Some(default) = col.default {
-                let snapshot_value = match default {
-                    ColumnDefault::Null => None,
-                    ColumnDefault::Int(val) => match data_type {
-                        DataType::Int16 => Some(ScalarImpl::Int16(val as _)),
-                        DataType::Int32 => Some(ScalarImpl::Int32(val as _)),
-                        DataType::Int64 => Some(ScalarImpl::Int64(val)),
-                        DataType::Varchar => {
-                            // should be the Enum type which is mapped to Varchar
-                            Some(ScalarImpl::from(val.to_string()))
-                        }
-                        _ => {
-                            tracing::error!(
-                                column = col_name,
-                                ?data_type,
-                                default_val = val,
-                                "unexpected default value type for column, set default to null"
-                            );
-                            None
-                        }
-                    },
-                    ColumnDefault::Real(val) => match data_type {
-                        DataType::Float32 => Some(ScalarImpl::Float32(F32::from(val as f32))),
-                        DataType::Float64 => Some(ScalarImpl::Float64(val.into())),
-                        DataType::Decimal => Some(ScalarImpl::Decimal(
-                            Decimal::try_from(val).map_err(|err| {
-                                anyhow!("failed to convert default value to decimal").context(err)
-                            })?,
-                        )),
-                        _ => {
-                            tracing::error!(
-                                column = col_name,
-                                ?data_type,
-                                default_val = val,
-                                "unexpected default value type for column, set default to null"
-                            );
-                            None
-                        }
-                    },
-                    ColumnDefault::String(mut val) => {
-                        // mysql timestamp is mapped to timestamptz, we use UTC timezone to
-                        // interpret its value
-                        if data_type == DataType::Timestamptz {
-                            val = timestamp_val_to_timestamptz(val.as_str())?;
-                        }
-                        match ScalarImpl::from_text(val.as_str(), &data_type) {
-                            Ok(scalar) => Some(scalar),
-                            Err(err) => {
-                                tracing::warn!(error=%err.as_report(), "failed to parse mysql default value expression, only constant is supported");
-                                None
-                            }
-                        }
-                    }
-                    ColumnDefault::CurrentTimestamp | ColumnDefault::CustomExpr(_) => {
+                let snapshot_value = derive_default_value(default.clone(), &data_type)
+                    .unwrap_or_else(|e| {
                         tracing::warn!(
-                            "MySQL CURRENT_TIMESTAMP and custom expression default value not supported"
+                            column = col_name,
+                            ?default,
+                            %data_type,
+                            error = %e.as_report(),
+                            "failed to derive column default value, fallback to `NULL`",
                         );
                         None
-                    }
-                };
+                    });
 
                 ColumnDesc::named_with_default_value(
                     col_name.clone(),
@@ -194,7 +194,6 @@ impl MySqlExternalTable {
         if pk_names.is_empty() {
             return Err(anyhow!("MySQL table doesn't define the primary key").into());
         }
-
         Ok(Self {
             column_descs,
             pk_names,
@@ -208,6 +207,44 @@ impl MySqlExternalTable {
     pub fn pk_names(&self) -> &Vec<String> {
         &self.pk_names
     }
+}
+
+fn derive_default_value(default: ColumnDefault, data_type: &DataType) -> ConnectorResult<Datum> {
+    let datum = match default {
+        ColumnDefault::Null => None,
+        ColumnDefault::Int(val) => match data_type {
+            DataType::Int16 => Some(ScalarImpl::Int16(val as _)),
+            DataType::Int32 => Some(ScalarImpl::Int32(val as _)),
+            DataType::Int64 => Some(ScalarImpl::Int64(val)),
+            DataType::Varchar => {
+                // should be the Enum type which is mapped to Varchar
+                Some(ScalarImpl::from(val.to_string()))
+            }
+            _ => bail!("unexpected default value type for integer"),
+        },
+        ColumnDefault::Real(val) => match data_type {
+            DataType::Float32 => Some(ScalarImpl::Float32(F32::from(val as f32))),
+            DataType::Float64 => Some(ScalarImpl::Float64(val.into())),
+            DataType::Decimal => Some(ScalarImpl::Decimal(
+                Decimal::try_from(val).context("failed to convert default value to decimal")?,
+            )),
+            _ => bail!("unexpected default value type for real"),
+        },
+        ColumnDefault::String(mut val) => {
+            // mysql timestamp is mapped to timestamptz, we use UTC timezone to
+            // interpret its value
+            if data_type == &DataType::Timestamptz {
+                val = timestamp_val_to_timestamptz(val.as_str())?;
+            }
+            Some(ScalarImpl::from_text(val.as_str(), data_type).map_err(|e| anyhow!(e)).context(
+                "failed to parse mysql default value expression, only constant is supported",
+            )?)
+        }
+        ColumnDefault::CurrentTimestamp | ColumnDefault::CustomExpr(_) => {
+            bail!("MySQL CURRENT_TIMESTAMP and custom expression default value not supported")
+        }
+    };
+    Ok(datum)
 }
 
 pub fn timestamp_val_to_timestamptz(value_text: &str) -> ConnectorResult<String> {
@@ -354,22 +391,35 @@ pub fn mysql_type_to_rw_type(col_type: &ColumnType) -> ConnectorResult<DataType>
 pub struct MySqlExternalTableReader {
     rw_schema: Schema,
     field_names: String,
-    // use mutex to provide shared mutable access to the connection
-    conn: tokio::sync::Mutex<mysql_async::Conn>,
+    pool: mysql_async::Pool,
+    upstream_mysql_pk_infos: Vec<(String, String)>, // (column_name, column_type)
+    mysql_version: (u8, u8),
 }
 
 impl ExternalTableReader for MySqlExternalTableReader {
     async fn current_cdc_offset(&self) -> ConnectorResult<CdcOffset> {
-        let mut conn = self.conn.lock().await;
+        let mut conn = self.pool.get_conn().await?;
 
-        let sql = "SHOW MASTER STATUS".to_owned();
+        // Choose SQL command based on MySQL version
+        let sql = if self.is_mysql_8_4_or_later() {
+            "SHOW BINARY LOG STATUS"
+        } else {
+            "SHOW MASTER STATUS"
+        };
+
+        tracing::debug!(
+            "Using SQL command: {} for MySQL version {}.{}",
+            sql,
+            self.mysql_version.0,
+            self.mysql_version.1
+        );
         let mut rs = conn.query::<mysql_async::Row, _>(sql).await?;
         let row = rs
             .iter_mut()
             .exactly_one()
             .ok()
             .context("expect exactly one row when reading binlog offset")?;
-
+        drop(conn);
         Ok(CdcOffset::MySql(MySqlOffset {
             filename: row.take("File").unwrap(),
             position: row.take("Position").unwrap(),
@@ -385,29 +435,68 @@ impl ExternalTableReader for MySqlExternalTableReader {
     ) -> BoxStream<'_, ConnectorResult<OwnedRow>> {
         self.snapshot_read_inner(table_name, start_pk, primary_keys, limit)
     }
+
+    async fn disconnect(self) -> ConnectorResult<()> {
+        self.pool.disconnect().await.map_err(|e| e.into())
+    }
+
+    fn get_parallel_cdc_splits(
+        &self,
+        _options: CdcTableSnapshotSplitOption,
+    ) -> BoxStream<'_, ConnectorResult<CdcTableSnapshotSplit>> {
+        // TODO(zw): feat: impl
+        stream::empty::<ConnectorResult<CdcTableSnapshotSplit>>().boxed()
+    }
+
+    fn split_snapshot_read(
+        &self,
+        _table_name: SchemaTableName,
+        _left: OwnedRow,
+        _right: OwnedRow,
+        _split_columns: Vec<Field>,
+    ) -> BoxStream<'_, ConnectorResult<OwnedRow>> {
+        todo!("implement MySQL CDC parallelized backfill")
+    }
 }
 
 impl MySqlExternalTableReader {
-    pub async fn new(config: ExternalTableConfig, rw_schema: Schema) -> ConnectorResult<Self> {
-        let mut opts_builder = mysql_async::OptsBuilder::default()
-            .user(Some(config.username))
-            .pass(Some(config.password))
-            .ip_or_hostname(config.host)
-            .tcp_port(config.port.parse::<u16>().unwrap())
-            .db_name(Some(config.database));
+    /// Get MySQL version from the connection
+    async fn get_mysql_version(pool: &mysql_async::Pool) -> ConnectorResult<(u8, u8)> {
+        let mut conn = pool.get_conn().await?;
+        let result: Option<String> = conn.query_first("SELECT VERSION()").await?;
 
-        opts_builder = match config.ssl_mode {
-            SslMode::Disabled | SslMode::Preferred => opts_builder.ssl_opts(None),
-            // verify-ca and verify-full are same as required for mysql now
-            SslMode::Required | SslMode::VerifyCa | SslMode::VerifyFull => {
-                let ssl_without_verify = mysql_async::SslOpts::default()
-                    .with_danger_accept_invalid_certs(true)
-                    .with_danger_skip_domain_validation(true);
-                opts_builder.ssl_opts(Some(ssl_without_verify))
+        if let Some(version_str) = result {
+            let parts: Vec<&str> = version_str.split('.').collect();
+            if parts.len() >= 2 {
+                let major_version = parts[0]
+                    .parse::<u8>()
+                    .context("Failed to parse major version")?;
+                let minor_version = parts[1]
+                    .parse::<u8>()
+                    .context("Failed to parse minor version")?;
+                return Ok((major_version, minor_version));
             }
-        };
+        }
+        Err(anyhow!("Failed to get MySQL version").into())
+    }
 
-        let conn = mysql_async::Conn::new(mysql_async::Opts::from(opts_builder)).await?;
+    /// Check if MySQL version is 8.4 or later
+    fn is_mysql_8_4_or_later(&self) -> bool {
+        let (major, minor) = self.mysql_version;
+        major > 8 || (major == 8 && minor >= 4)
+    }
+
+    pub async fn new(config: ExternalTableConfig, rw_schema: Schema) -> ConnectorResult<Self> {
+        let database = config.database.clone();
+        let table = config.table.clone();
+        let pool = build_mysql_connection_pool(
+            &config.host,
+            config.port.parse::<u16>().unwrap(),
+            &config.username,
+            &config.password,
+            &config.database,
+            config.ssl_mode,
+        );
 
         let field_names = rw_schema
             .fields
@@ -416,10 +505,23 @@ impl MySqlExternalTableReader {
             .map(|f| Self::quote_column(f.name.as_str()))
             .join(",");
 
+        // Query MySQL primary key infos for type casting.
+        let upstream_mysql_pk_infos =
+            Self::query_upstream_pk_infos(&pool, &database, &table).await?;
+        // Get MySQL version
+        let mysql_version = Self::get_mysql_version(&pool).await?;
+        tracing::info!(
+            "MySQL version detected: {}.{}",
+            mysql_version.0,
+            mysql_version.1
+        );
+
         Ok(Self {
             rw_schema,
             field_names,
-            conn: tokio::sync::Mutex::new(conn),
+            pool,
+            upstream_mysql_pk_infos,
+            mysql_version,
         })
     }
 
@@ -434,6 +536,53 @@ impl MySqlExternalTableReader {
                 offset,
             )?))
         })
+    }
+
+    /// Query upstream primary key data types, used for generating filter conditions with proper type casting.
+    async fn query_upstream_pk_infos(
+        pool: &mysql_async::Pool,
+        database: &str,
+        table: &str,
+    ) -> ConnectorResult<Vec<(String, String)>> {
+        let mut conn = pool.get_conn().await?;
+
+        // Query primary key columns and their data types
+        let sql = format!(
+            "SELECT COLUMN_NAME, COLUMN_TYPE
+            FROM INFORMATION_SCHEMA.COLUMNS
+            WHERE TABLE_SCHEMA = '{}'
+            AND TABLE_NAME = '{}'
+            AND COLUMN_KEY = 'PRI'
+            ORDER BY ORDINAL_POSITION",
+            database, table
+        );
+
+        let rs = conn.query::<mysql_async::Row, _>(sql).await?;
+
+        let mut column_infos = Vec::new();
+        for row in &rs {
+            let column_name: String = row.get(0).unwrap();
+            let column_type: String = row.get(1).unwrap();
+            column_infos.push((column_name, column_type));
+        }
+
+        drop(conn);
+
+        Ok(column_infos)
+    }
+
+    /// Check if a column is unsigned type
+    fn is_unsigned_type(&self, column_name: &str) -> bool {
+        self.upstream_mysql_pk_infos
+            .iter()
+            .find(|(col_name, _)| col_name == column_name)
+            .map(|(_, col_type)| col_type.to_lowercase().contains("unsigned"))
+            .unwrap_or(false)
+    }
+
+    /// Convert negative i64 to unsigned u64 based on column type
+    fn convert_negative_to_unsigned(&self, negative_val: i64) -> u64 {
+        negative_val as u64
     }
 
     #[try_stream(boxed, ok = OwnedRow, error = ConnectorError)]
@@ -465,27 +614,11 @@ impl MySqlExternalTableReader {
                 order_key,
             )
         };
-
-        let mut conn = self.conn.lock().await;
-
+        let mut conn = self.pool.get_conn().await?;
         // Set session timezone to UTC
         conn.exec_drop("SET time_zone = \"+00:00\"", ()).await?;
 
-        if start_pk_row.is_none() {
-            let rs_stream = sql.stream::<mysql_async::Row, _>(&mut *conn).await?;
-            let row_stream = rs_stream.map(|row| {
-                // convert mysql row into OwnedRow
-                let mut row = row?;
-                Ok::<_, ConnectorError>(mysql_row_to_owned_row(&mut row, &self.rw_schema))
-            });
-
-            pin_mut!(row_stream);
-            #[for_await]
-            for row in row_stream {
-                let row = row?;
-                yield row;
-            }
-        } else {
+        if let Some(start_pk_row) = start_pk_row {
             let field_map = self
                 .rw_schema
                 .fields
@@ -496,7 +629,7 @@ impl MySqlExternalTableReader {
             // fill in start primary key params
             let params: Vec<_> = primary_keys
                 .iter()
-                .zip_eq_fast(start_pk_row.unwrap().into_iter())
+                .zip_eq_fast(start_pk_row.into_iter())
                 .map(|(pk, datum)| {
                     if let Some(value) = datum {
                         let ty = field_map.get(pk.as_str()).unwrap();
@@ -504,13 +637,29 @@ impl MySqlExternalTableReader {
                             DataType::Boolean => Value::from(value.into_bool()),
                             DataType::Int16 => Value::from(value.into_int16()),
                             DataType::Int32 => Value::from(value.into_int32()),
-                            DataType::Int64 => Value::from(value.into_int64()),
+                            DataType::Int64 => {
+                                let int64_val = value.into_int64();
+                                if int64_val < 0 && self.is_unsigned_type(pk.as_str()) {
+                                    Value::from(self.convert_negative_to_unsigned(int64_val))
+                                } else {
+                                    Value::from(int64_val)
+                                }
+                            }
                             DataType::Float32 => Value::from(value.into_float32().into_inner()),
                             DataType::Float64 => Value::from(value.into_float64().into_inner()),
                             DataType::Varchar => Value::from(String::from(value.into_utf8())),
                             DataType::Date => Value::from(value.into_date().0),
                             DataType::Time => Value::from(value.into_time().0),
                             DataType::Timestamp => Value::from(value.into_timestamp().0),
+                            DataType::Decimal => Value::from(value.into_decimal().to_string()),
+                            DataType::Timestamptz => {
+                                // Convert timestamptz to NaiveDateTime for MySQL TIMESTAMP comparison
+                                // MySQL expects NaiveDateTime for TIMESTAMP parameters
+                                let ts = value.into_timestamptz();
+                                let datetime_utc = ts.to_datetime_utc();
+                                let naive_datetime = datetime_utc.naive_utc();
+                                Value::from(naive_datetime)
+                            }
                             _ => bail!("unsupported primary key data type: {}", ty),
                         };
                         ConnectorResult::Ok((pk.to_lowercase(), val))
@@ -523,7 +672,7 @@ impl MySqlExternalTableReader {
             tracing::debug!("snapshot read params: {:?}", &params);
             let rs_stream = sql
                 .with(Params::from(params))
-                .stream::<mysql_async::Row, _>(&mut *conn)
+                .stream::<mysql_async::Row, _>(&mut conn)
                 .await?;
 
             let row_stream = rs_stream.map(|row| {
@@ -531,14 +680,27 @@ impl MySqlExternalTableReader {
                 let mut row = row?;
                 Ok::<_, ConnectorError>(mysql_row_to_owned_row(&mut row, &self.rw_schema))
             });
-
             pin_mut!(row_stream);
             #[for_await]
             for row in row_stream {
                 let row = row?;
                 yield row;
             }
-        };
+        } else {
+            let rs_stream = sql.stream::<mysql_async::Row, _>(&mut conn).await?;
+            let row_stream = rs_stream.map(|row| {
+                // convert mysql row into OwnedRow
+                let mut row = row?;
+                Ok::<_, ConnectorError>(mysql_row_to_owned_row(&mut row, &self.rw_schema))
+            });
+            pin_mut!(row_stream);
+            #[for_await]
+            for row in row_stream {
+                let row = row?;
+                yield row;
+            }
+        }
+        drop(conn);
     }
 
     // mysql cannot leverage the given key to narrow down the range of scan,
@@ -666,7 +828,7 @@ mod tests {
     #[ignore]
     #[tokio::test]
     async fn test_mysql_table_reader() {
-        let columns = vec![
+        let columns = [
             ColumnDesc::named("v1", ColumnId::new(1), DataType::Int32),
             ColumnDesc::named("v2", ColumnId::new(2), DataType::Decimal),
             ColumnDesc::named("v3", ColumnId::new(3), DataType::Varchar),

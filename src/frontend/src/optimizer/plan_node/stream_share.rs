@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,9 +20,13 @@ use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
 use super::stream::prelude::*;
 use super::utils::Distill;
-use super::{ExprRewritable, PlanRef, PlanTreeNodeUnary, StreamExchange, StreamNode, generic};
+use super::{
+    ExprRewritable, PlanTreeNodeUnary, ShareNode, StreamExchange, StreamNode,
+    StreamPlanRef as PlanRef, generic,
+};
 use crate::Explain;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
+use crate::optimizer::plan_node::generic::Share;
 use crate::optimizer::plan_node::{LogicalShare, PlanBase, PlanTreeNode};
 use crate::scheduler::SchedulerResult;
 use crate::stream_fragmenter::BuildFragmentGraphState;
@@ -43,7 +47,7 @@ impl StreamShare {
             PlanBase::new_stream_with_core(
                 &core,
                 dist,
-                input.append_only(),
+                input.stream_kind(),
                 input.emit_on_window_close(),
                 input.watermark_columns().clone(),
                 input.columns_monotonicity().clone(),
@@ -67,25 +71,27 @@ impl Distill for StreamShare {
     }
 }
 
-impl PlanTreeNodeUnary for StreamShare {
+impl PlanTreeNodeUnary<Stream> for StreamShare {
     fn input(&self) -> PlanRef {
         self.core.input.borrow().clone()
     }
 
-    fn clone_with_input(&self, input: PlanRef) -> Self {
-        let core = self.core.clone();
-        core.replace_input(input);
-        Self::new(core)
+    fn clone_with_input(&self, _input: PlanRef) -> Self {
+        unreachable!("shared node should be handled specially in PlanRef::clone_with_input")
     }
 }
 
-impl StreamShare {
-    pub fn replace_input(&self, plan: PlanRef) {
+impl ShareNode<Stream> for StreamShare {
+    fn new_share(core: Share<PlanRef>) -> PlanRef {
+        Self::new(core).into()
+    }
+
+    fn replace_input(&self, plan: PlanRef) {
         self.core.replace_input(plan);
     }
 }
 
-impl_plan_tree_node_for_unary! { StreamShare }
+impl_plan_tree_node_for_unary! { Stream, StreamShare }
 
 impl StreamNode for StreamShare {
     fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> PbNodeBody {
@@ -100,7 +106,7 @@ impl StreamShare {
         &self,
         state: &mut BuildFragmentGraphState,
     ) -> SchedulerResult<PbStreamNode> {
-        let operator_id = self.base.id().0 as u32;
+        let operator_id = self.base.id().to_stream_node_operator_id();
 
         match state.get_share_stream_node(operator_id) {
             None => {
@@ -117,7 +123,7 @@ impl StreamShare {
                     input,
                     identity: self.distill_to_string(),
                     node_body: Some(node_body),
-                    operator_id: self.id().0 as _,
+                    operator_id: self.id().to_stream_node_operator_id(),
                     stream_key: self
                         .stream_key()
                         .unwrap_or_else(|| panic!("should always have a stream key in the stream plan but not, sub plan: {}",
@@ -126,7 +132,7 @@ impl StreamShare {
                         .map(|x| *x as u32)
                         .collect(),
                     fields: self.schema().to_prost(),
-                    append_only: self.append_only(),
+                    stream_kind: self.stream_kind().to_protobuf() as i32,
                 };
 
                 state.add_share_stream_node(operator_id, stream_node.clone());
@@ -138,6 +144,6 @@ impl StreamShare {
     }
 }
 
-impl ExprRewritable for StreamShare {}
+impl ExprRewritable<Stream> for StreamShare {}
 
 impl ExprVisitable for StreamShare {}

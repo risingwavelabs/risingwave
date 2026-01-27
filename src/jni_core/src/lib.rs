@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,9 +16,11 @@
 #![feature(once_cell_try)]
 #![feature(type_alias_impl_trait)]
 #![feature(try_blocks)]
+#![feature(used_with_arg)]
 
 pub mod jvm_runtime;
 mod macros;
+mod opendal_schema_history;
 mod tracing_slf4j;
 
 use std::backtrace::Backtrace;
@@ -30,7 +32,7 @@ use std::sync::{LazyLock, OnceLock};
 use anyhow::anyhow;
 use bytes::Bytes;
 use cfg_or_panic::cfg_or_panic;
-use chrono::{Datelike, NaiveDateTime, Timelike};
+use chrono::{DateTime, Datelike, Timelike};
 use futures::TryStreamExt;
 use futures::stream::BoxStream;
 use jni::JNIEnv;
@@ -60,6 +62,16 @@ use thiserror_ext::AsReport;
 use tokio::runtime::Runtime;
 use tokio::sync::mpsc::{Receiver, Sender};
 use tracing_slf4j::*;
+
+/// Enable JVM and Java libraries.
+///
+/// This macro forces this crate to be linked, which registers the JVM builder.
+#[macro_export]
+macro_rules! enable {
+    () => {
+        use risingwave_jni_core as _;
+    };
+}
 
 pub static JAVA_BINDING_ASYNC_RUNTIME: LazyLock<Runtime> =
     LazyLock::new(|| tokio::runtime::Runtime::new().unwrap());
@@ -263,6 +275,7 @@ mod opaque_type {
     pub type StreamChunkRowIterator<'a> = impl Iterator<Item = (Op, OwnedRow)> + 'a;
 
     impl<'a> JavaBindingIteratorInner<'a> {
+        #[define_opaque(StreamChunkRowIterator)]
         pub(super) fn from_chunk(chunk: &'a StreamChunk) -> JavaBindingIteratorInner<'a> {
             JavaBindingIteratorInner::StreamChunk(
                 chunk
@@ -823,7 +836,7 @@ extern "system" fn Java_com_risingwave_java_binding_Binding_iteratorGetDateValue
 ) -> JObject<'a> {
     execute_and_catch(env, move |env: &mut EnvParam<'_>| {
         let value = pointer.as_ref().datum_at(idx as usize).unwrap().into_date();
-        let epoch_days = (value.0 - NaiveDateTime::UNIX_EPOCH.date()).num_days();
+        let epoch_days = (value.0 - DateTime::UNIX_EPOCH.date_naive()).num_days();
 
         let sig = gen_jni_sig!(java.time.LocalDate ofEpochDay(long));
 
@@ -1102,11 +1115,12 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_recvSinkWriterRe
             let obj = match msg {
                 JniSinkWriterStreamRequest::PbRequest(request) => {
                     let bytes = env.byte_array_from_slice(&Message::encode_to_vec(&request))?;
+                    let jobj = JObject::from(bytes);
                     call_static_method!(
                         env,
                         {com.risingwave.java.binding.JniSinkWriterStreamRequest},
                         {com.risingwave.java.binding.JniSinkWriterStreamRequest fromSerializedPayload(byte[] payload)},
-                        &JObject::from(bytes)
+                        &jobj
                     )?
                 }
                 JniSinkWriterStreamRequest::Chunk {

@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -27,21 +27,38 @@ use risingwave_pb::stream_plan::{DispatcherType, StreamFragmentGraph, StreamNode
 
 use super::PrettySerde;
 use crate::TableCatalog;
+use crate::catalog::TableId;
 
 /// ice: in the future, we may allow configurable width, boundaries, etc.
-pub fn explain_stream_graph(graph: &StreamFragmentGraph, is_verbose: bool) -> String {
+pub fn explain_stream_graph(
+    graph: &StreamFragmentGraph,
+    table: Option<Table>,
+    is_verbose: bool,
+) -> String {
     let mut output = String::with_capacity(2048);
     let mut config = PrettyConfig {
         need_boundaries: false,
         width: 80,
         ..Default::default()
     };
-    StreamGraphFormatter::new(is_verbose).explain_graph(graph, &mut config, &mut output);
+    let mut fmt = StreamGraphFormatter::new(is_verbose);
+    if let Some(tb) = table {
+        fmt.add_table(&tb);
+    }
+    fmt.explain_graph(graph, &mut config, &mut output);
     output
 }
 
-pub fn explain_stream_graph_as_dot(sg: &StreamFragmentGraph, is_verbose: bool) -> String {
-    let graph = StreamGraphFormatter::new(is_verbose).explain_graph_as_dot(sg);
+pub fn explain_stream_graph_as_dot(
+    sg: &StreamFragmentGraph,
+    table: Option<Table>,
+    is_verbose: bool,
+) -> String {
+    let mut fmt = StreamGraphFormatter::new(is_verbose);
+    if let Some(tb) = table {
+        fmt.add_table(&tb);
+    }
+    let graph = fmt.explain_graph_as_dot(sg);
     let dot = Dot::new(&graph);
     dot.to_string()
 }
@@ -52,7 +69,7 @@ struct StreamGraphFormatter {
     /// exchange's `operator_id` -> edge
     edges: HashMap<u64, StreamFragmentEdge>,
     verbose: bool,
-    tables: BTreeMap<u32, Table>,
+    tables: BTreeMap<TableId, Table>,
 }
 
 impl StreamGraphFormatter {
@@ -65,7 +82,7 @@ impl StreamGraphFormatter {
     }
 
     /// collect the table catalog and return the table id
-    fn add_table(&mut self, tb: &Table) -> u32 {
+    fn add_table(&mut self, tb: &Table) -> TableId {
         self.tables.insert(tb.id, tb.clone());
         tb.id
     }
@@ -169,7 +186,7 @@ impl StreamGraphFormatter {
     fn explain_node<'a>(&mut self, node: &StreamNode) -> Pretty<'a> {
         let one_line_explain = match node.get_node_body().unwrap() {
             stream_node::NodeBody::Exchange(_) => {
-                let edge = self.edges.get(&node.operator_id).unwrap();
+                let edge = self.edges.get(&node.operator_id.as_raw_id()).unwrap();
                 let upstream_fragment_id = edge.upstream_id;
                 let dist = edge.dispatch_strategy.as_ref().unwrap();
                 format!(
@@ -187,12 +204,12 @@ impl StreamGraphFormatter {
             _ => node.identity.clone(),
         };
 
-        let mut tables: Vec<(String, u32)> = Vec::with_capacity(7);
+        let mut tables: Vec<(String, TableId)> = Vec::with_capacity(7);
         let mut node_copy = node.clone();
 
         stream_graph_visitor::visit_stream_node_tables_inner(
             &mut node_copy,
-            false,
+            true,
             false,
             |table, table_name| {
                 tables.push((table_name.to_owned(), self.add_table(table)));
@@ -267,10 +284,10 @@ pub fn build_graph_from_pretty(
             .entry(label.clone())
             .or_insert_with(|| graph.add_node(label.clone()));
 
-        if let Some(parent_label) = parent_label {
-            if let Some(&parent_node) = nodes.get(parent_label) {
-                graph.add_edge(parent_node, current_node, "".to_owned());
-            }
+        if let Some(parent_label) = parent_label
+            && let Some(&parent_node) = nodes.get(parent_label)
+        {
+            graph.add_edge(parent_node, current_node, "".to_owned());
         }
 
         for child in &r.children {

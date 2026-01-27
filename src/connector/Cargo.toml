@@ -7,12 +7,42 @@ keywords = { workspace = true }
 license = { workspace = true }
 repository = { workspace = true }
 
+[package.metadata.cargo-machete]
+ignored = ["adbc_core"]
+
+[features]
+default = []
+all-sinks = [
+    "sink-bigquery",
+    "sink-deltalake",
+    "sink-google_pubsub",
+    "sink-clickhouse",
+    "sink-doris",
+    "sink-starrocks",
+]
+all-sources = ["source-adbc_snowflake"]
+source-adbc_snowflake = ["dep:adbc_core", "dep:adbc_snowflake"]
+sink-bigquery = [
+    "dep:gcp-bigquery-client",
+    "dep:google-cloud-bigquery",
+    "dep:google-cloud-googleapis",
+]
+sink-deltalake = ["dep:deltalake"]
+# TODO: pubsub source is not feature-gated, thus `google-cloud-pubsub` cannot be optional.
+sink-google_pubsub = ["dep:google-cloud-googleapis"]
+sink-clickhouse = ["dep:clickhouse"]
+sink-doris = []
+sink-starrocks = []
+
 [dependencies]
+# Rust ADBC crates (e.g., adbc_core 0.21) are built against the ADBC C/C++ core driver library version 0.19
+adbc_core = { workspace = true, optional = true }
+adbc_snowflake = { workspace = true, optional = true, default-features = false }
 anyhow = "1"
 apache-avro = { workspace = true }
 assert_matches = "1"
 async-compression = { version = "0.4.5", features = ["gzip", "tokio"] }
-async-nats = "0.40"
+async-nats = { version = "0.46", features = ["websockets"] }
 async-trait = "0.1"
 auto_enums = { workspace = true }
 auto_impl = "1"
@@ -21,7 +51,6 @@ aws-config = { workspace = true }
 aws-credential-types = { workspace = true }
 aws-msk-iam-sasl-signer = "1.0.0"
 aws-sdk-dynamodb = "1"
-aws-sdk-emrserverless = "1.53.0"
 aws-sdk-glue = { workspace = true }
 aws-sdk-kinesis = { workspace = true }
 aws-sdk-s3 = { workspace = true }
@@ -32,40 +61,44 @@ aws-types = { workspace = true }
 base64 = "0.22"
 byteorder = "1"
 bytes = { version = "1", features = ["serde"] }
+cfg-if = "1"
 cfg-or-panic = "0.2"
-chrono = { version = "0.4", default-features = false, features = [
-    "clock",
-    "std",
-] }
-clickhouse = { git = "https://github.com/risingwavelabs/clickhouse.rs", rev = "d38c8b6391af098b724c114e5a4746aedab6ab8e", features = [
+chrono = { workspace = true, features = ["clock", "std"] }
+clickhouse = { git = "https://github.com/risingwavelabs/clickhouse.rs", rev = "f05029d2cb65164d61fa8699dd955f808375a618", features = [
     "time",
-] }
-csv = "1.3"
-deltalake = { workspace = true }
-duration-str = "0.17.0"
+    "rustls-tls",
+], optional = true }
+csv = "1.4"
+deltalake = { workspace = true, optional = true }
+duration-str = "0.18.0"
 easy-ext = "1"
 either = "1"
 elasticsearch = { version = "8.17.0-alpha.1", features = ["rustls-tls"] }
 enum-as-inner = "0.6"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = { workspace = true }
-gcp-bigquery-client = "0.18.0"
+gcp-bigquery-client = { version = "0.18.0", optional = true }
 glob = "0.3"
-google-cloud-bigquery = { version = "0.15.0", features = ["auth"] }
-google-cloud-gax = "0.19.2"
-google-cloud-googleapis = { version = "0.16", features = ["pubsub", "bigquery"] }
-google-cloud-pubsub = "0.30"
+google-cloud-bigquery = { package = "gcloud-bigquery", version = "1.4", features = [
+    "auth",
+], optional = true }
+google-cloud-gax = { package = "gcloud-gax", version = "1" }
+google-cloud-googleapis = { package = "gcloud-googleapis", version = "1", features = [
+    "pubsub",
+    "bigquery",
+], optional = true }
+google-cloud-pubsub = { package = "gcloud-pubsub", version = "1.5" }
 iceberg = { workspace = true }
 iceberg-catalog-glue = { workspace = true }
 iceberg-catalog-rest = { workspace = true }
-indexmap = { version = "2.9.0", features = ["serde"] }
+indexmap = { workspace = true }
 itertools = { workspace = true }
-jni = { version = "0.21.1", features = ["invocation"] }
+jni = { workspace = true }
 maplit = "1.0.2"
 moka = { version = "0.12.10", features = ["future"] }
-mongodb = "3.2.3"
+mongodb = "3.2.5"
 mysql_async = { workspace = true }
-mysql_common = { version = "0.32", default-features = false, features = [
+mysql_common = { version = "0.35", default-features = false, features = [
     "chrono",
 ] }
 nexmark = { version = "0.2", features = ["serde"] }
@@ -80,17 +113,20 @@ opendal = { workspace = true, features = [
     "services-webhdfs",
 ] }
 opensearch = { version = "2.3.0", features = ["rustls-tls"] }
-openssl = "0.10"
+openssl = "0.10.72"
 parking_lot = { workspace = true }
 parquet = { workspace = true }
 paste = "1"
 pg_bigdecimal = { git = "https://github.com/risingwavelabs/rust-pg_bigdecimal", rev = "0b7893d88894ca082b4525f94f812da034486f7c" }
-phf = { version = "0.11", features = ["macros"] }
+phf = { version = "0.13", features = ["macros"] }
 postgres-openssl = "0.5.0"
 prometheus = { version = "0.14", features = ["process"] }
 prost = { workspace = true, features = ["no-recursion-limit"] }
+prost-011 = { package = "prost", version = "0.11" }
+prost-014 = { package = "prost", version = "0.14" }
 prost-reflect = { version = "0.15", features = ["serde"] }
 prost-types = "0.13"
+prost-types-014 = { package = "prost-types", version = "0.14" }
 pulsar = { version = "6.3", default-features = false, features = [
     "tokio-runtime",
     "telemetry",
@@ -104,18 +140,25 @@ rdkafka = { workspace = true, features = [
     "gssapi",
     "zstd",
 ] }
-redis = { workspace = true, features = ["aio", "tokio-comp", "async-std-comp","cluster-async","geospatial"] }
-regex = "1.4"
-reqwest = { version = "0.12.2", features = ["json", "stream"] }
+redis = { workspace = true, features = [
+    "aio",
+    "tokio-comp",
+    "tls-rustls",
+    "tokio-rustls-comp",
+    "cluster-async",
+    "geospatial",
+    "streams",
+] }
+regex = { workspace = true }
+reqwest = { workspace = true }
 risingwave_common = { workspace = true }
 risingwave_common_estimate_size = { workspace = true }
 risingwave_common_rate_limit = { workspace = true }
 risingwave_connector_codec = { workspace = true }
 risingwave_jni_core = { workspace = true }
-risingwave_meta_model = { workspace = true }
 risingwave_pb = { workspace = true }
 risingwave_rpc_client = { workspace = true }
-rumqttc = { version = "0.24.0", features = ["url"] }
+rumqttc = { version = "0.25.0", features = ["url"] }
 rust_decimal = "1"
 rustls-native-certs = "0.8"
 rustls-pemfile = "2"
@@ -128,21 +171,20 @@ sea-schema = { version = "0.16", default-features = false, features = [
     "sqlx-postgres",
     "sqlx-mysql",
 ] }
-serde = { version = "1", features = ["derive", "rc"] }
-serde_derive = "1"
+serde = { workspace = true, features = ["rc"] }
 serde_json = "1"
 serde_with = { version = "3", features = ["json"] }
-simd-json = { version = "0.15.0", features = ["hints"] }
-smallvec = "1"
+simd-json = { version = "0.17.0", features = ["hints"] }
+smallvec = { workspace = true }
 sqlx = { workspace = true }
 strum = "0.27"
 strum_macros = "0.27"
 tempfile = "3"
-thiserror = "1"
+thiserror = { workspace = true }
 thiserror-ext = { workspace = true }
 # To easiy get the type_name and impl IntoSql for rust_decimal, we fork the crate.
 # Another reason is that we are planning to refactor their IntoSql trait to allow specifying the type to convert.
-tiberius = { git = "https://github.com/risingwavelabs/tiberius.git", rev = "f834f2deeb9e2fb08afaf73865f330cf31a3876a", default-features = false, features = [
+tiberius = { git = "https://github.com/risingwavelabs/tiberius.git", rev = "59350b92775a61611cf1fc3a5d0ff38bf264e6ac", default-features = false, features = [
     "chrono",
     "sql-browser-tokio",
     "rustls",
@@ -167,10 +209,10 @@ tokio-stream = { workspace = true }
 tokio-util = { workspace = true, features = ["codec", "io"] }
 tonic = { workspace = true }
 tracing = "0.1"
-typed-builder = "^0.21"
+typed-builder = "^0.23"
 url = "2"
 urlencoding = "2"
-uuid = { version = "1", features = ["v4", "fast-rng"] }
+uuid = { version = "1", features = ["v4", "v7", "fast-rng"] }
 with_options = { path = "./with_options" }
 yup-oauth2 = "8.3"
 
@@ -188,13 +230,18 @@ pretty_assertions = "1"
 proc-macro2 = "1.0"
 quote = "1"
 rand = { workspace = true }
-serde = { version = "1", features = ["derive"] }
+serde = { workspace = true }
 serde_yaml = "0.9"
 syn = { version = "2", features = ["full"] }
 tempfile = "3"
 tracing-subscriber = "0.3"
 tracing-test = "0.2"
 walkdir = "2"
+
+[build-dependencies]
+# Workaround for datafusion. Feel free to remove it if you can.
+# https://gist.github.com/xiangjinwu/65c310adf84c381c17d99cb4439e1908
+chrono-tz = { version = "0.10", features = ["case-insensitive"] }
 
 [[bench]]
 name = "debezium_json_parser"
@@ -210,6 +257,10 @@ harness = false
 
 [[bench]]
 name = "json_vs_plain_parser"
+harness = false
+
+[[bench]]
+name = "protobuf_bench"
 harness = false
 
 [lints]

@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,10 +13,11 @@
 // limitations under the License.
 
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_sqlparser::ast::{DropMode, ObjectName};
+use risingwave_sqlparser::ast::ObjectName;
 
 use super::RwPgResponse;
 use crate::binder::Binder;
+use crate::catalog::OwnedByUserCatalog;
 use crate::error::{ErrorCode, Result};
 use crate::handler::HandlerArgs;
 
@@ -24,7 +25,6 @@ pub async fn handle_drop_database(
     handler_args: HandlerArgs,
     database_name: ObjectName,
     if_exists: bool,
-    mode: Option<DropMode>,
 ) -> Result<RwPgResponse> {
     let session = handler_args.session;
     let catalog_reader = session.env().catalog_reader();
@@ -34,9 +34,6 @@ pub async fn handle_drop_database(
             "cannot drop the currently open database".to_owned(),
         )
         .into());
-    }
-    if mode.is_some() {
-        return Err(ErrorCode::BindError("Drop database not support drop mode".to_owned()).into());
     }
     let database = {
         let reader = catalog_reader.read_guard();
@@ -58,6 +55,25 @@ pub async fn handle_drop_database(
             }
         }
     };
+
+    // Check if database was created by an admin user, if so, require admin privilege to drop
+    {
+        let user_reader = session.env().user_info_reader().read_guard();
+        let current_user = user_reader
+            .get_user_by_name(&session.user_name())
+            .ok_or_else(|| ErrorCode::PermissionDenied("Session user is invalid".to_owned()))?;
+
+        // If the database owner was an admin, only admin users can delete it
+        if let Some(database_owner) = user_reader.get_user_by_id(&database.owner())
+            && database_owner.is_admin
+            && !current_user.is_admin
+        {
+            return Err(ErrorCode::PermissionDenied(
+                "only admin users can drop databases created by admin users".to_owned(),
+            )
+            .into());
+        }
+    }
 
     session.check_privilege_for_drop_alter_db_schema(&database)?;
 

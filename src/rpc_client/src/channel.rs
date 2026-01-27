@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -59,12 +59,12 @@ impl Service<http::Request<BoxBody>> for WrappedChannel {
 
             let mut response = inner.call(req).await;
 
-            if let Ok(response) = &mut response {
-                if let Ok(path) = HeaderValue::from_str(&path) {
-                    response
-                        .headers_mut()
-                        .insert(risingwave_error::tonic::CALL_KEY, path);
-                }
+            if let Ok(response) = &mut response
+                && let Ok(path) = HeaderValue::from_str(&path)
+            {
+                response
+                    .headers_mut()
+                    .insert(risingwave_error::tonic::CALL_KEY, path);
             }
 
             response

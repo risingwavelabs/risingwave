@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -81,10 +81,10 @@ pub fn is_env_set(var: &str) -> bool {
     if let Ok(val) = std::env::var(var) {
         if let Ok(true) = val.parse() {
             return true;
-        } else if let Ok(x) = val.parse::<usize>() {
-            if x != 0 {
-                return true;
-            }
+        } else if let Ok(x) = val.parse::<usize>()
+            && x != 0
+        {
+            return true;
         }
     }
     false

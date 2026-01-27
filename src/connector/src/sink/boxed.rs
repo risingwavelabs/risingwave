@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,12 +19,15 @@ use async_trait::async_trait;
 use futures::FutureExt;
 use futures::future::BoxFuture;
 use risingwave_pb::connector_service::SinkMetadata;
+use risingwave_pb::stream_plan::PbSinkSchemaChange;
 
-use super::SinkCommittedEpochSubscriber;
 use crate::sink::log_store::{LogStoreReadItem, LogStoreResult, TruncateOffset};
-use crate::sink::{LogSinker, SinkCommitCoordinator, SinkLogReader};
+use crate::sink::{
+    LogSinker, SinglePhaseCommitCoordinator, SinkLogReader, TwoPhaseCommitCoordinator,
+};
 
-pub type BoxCoordinator = Box<dyn SinkCommitCoordinator + Send + 'static>;
+pub type BoxSinglePhaseCoordinator = Box<dyn SinglePhaseCommitCoordinator + Send + 'static>;
+pub type BoxTwoPhaseCoordinator = Box<dyn TwoPhaseCommitCoordinator + Send + 'static>;
 
 pub type BoxLogSinker = Box<
     dyn for<'a> FnOnce(&'a mut dyn DynLogReader) -> BoxFuture<'a, crate::sink::Result<!>>
@@ -99,15 +102,66 @@ impl LogSinker for BoxLogSinker {
 }
 
 #[async_trait]
-impl SinkCommitCoordinator for BoxCoordinator {
-    async fn init(
-        &mut self,
-        subscriber: SinkCommittedEpochSubscriber,
-    ) -> crate::sink::Result<Option<u64>> {
-        self.deref_mut().init(subscriber).await
+impl SinglePhaseCommitCoordinator for BoxSinglePhaseCoordinator {
+    async fn init(&mut self) -> crate::sink::Result<()> {
+        self.deref_mut().init().await
     }
 
-    async fn commit(&mut self, epoch: u64, metadata: Vec<SinkMetadata>) -> crate::sink::Result<()> {
-        self.deref_mut().commit(epoch, metadata).await
+    async fn commit_data(
+        &mut self,
+        epoch: u64,
+        metadata: Vec<SinkMetadata>,
+    ) -> crate::sink::Result<()> {
+        self.deref_mut().commit_data(epoch, metadata).await
+    }
+
+    async fn commit_schema_change(
+        &mut self,
+        epoch: u64,
+        schema_change: PbSinkSchemaChange,
+    ) -> crate::sink::Result<()> {
+        self.deref_mut()
+            .commit_schema_change(epoch, schema_change)
+            .await
+    }
+}
+
+#[async_trait]
+impl TwoPhaseCommitCoordinator for BoxTwoPhaseCoordinator {
+    async fn init(&mut self) -> crate::sink::Result<()> {
+        self.deref_mut().init().await
+    }
+
+    async fn pre_commit(
+        &mut self,
+        epoch: u64,
+        metadata: Vec<SinkMetadata>,
+        schema_change: Option<PbSinkSchemaChange>,
+    ) -> crate::sink::Result<Option<Vec<u8>>> {
+        self.deref_mut()
+            .pre_commit(epoch, metadata, schema_change)
+            .await
+    }
+
+    async fn commit_data(
+        &mut self,
+        epoch: u64,
+        commit_metadata: Vec<u8>,
+    ) -> crate::sink::Result<()> {
+        self.deref_mut().commit_data(epoch, commit_metadata).await
+    }
+
+    async fn commit_schema_change(
+        &mut self,
+        epoch: u64,
+        schema_change: PbSinkSchemaChange,
+    ) -> crate::sink::Result<()> {
+        self.deref_mut()
+            .commit_schema_change(epoch, schema_change)
+            .await
+    }
+
+    async fn abort(&mut self, epoch: u64, commit_metadata: Vec<u8>) {
+        self.deref_mut().abort(epoch, commit_metadata).await;
     }
 }

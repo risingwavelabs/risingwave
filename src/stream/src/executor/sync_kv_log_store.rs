@@ -93,7 +93,7 @@ use crate::common::log_store_impl::kv_log_store::state::{
     LogStoreWriteState, new_log_store_state,
 };
 use crate::common::log_store_impl::kv_log_store::{
-    FIRST_SEQ_ID, FlushInfo, ReaderTruncationOffsetType, SeqId,
+    Epoch, FIRST_SEQ_ID, FlushInfo, LogStoreVnodeProgress, SeqId,
 };
 use crate::executor::prelude::*;
 use crate::executor::sync_kv_log_store::metrics::SyncedKvLogStoreMetrics;
@@ -102,6 +102,7 @@ use crate::executor::{
 };
 
 pub mod metrics {
+    use risingwave_common::id::FragmentId;
     use risingwave_common::metrics::{LabelGuardedIntCounter, LabelGuardedIntGauge};
 
     use crate::common::log_store_impl::kv_log_store::KvLogStoreReadMetrics;
@@ -145,26 +146,26 @@ pub mod metrics {
         pub(crate) fn new(
             metrics: &StreamingMetrics,
             actor_id: ActorId,
-            id: u32,
+            fragment_id: FragmentId,
             name: &str,
             target: &'static str,
         ) -> Self {
             let actor_id_str = actor_id.to_string();
-            let id_str = id.to_string();
-            let labels = &[&actor_id_str, target, &id_str, name];
+            let fragment_id_str = fragment_id.to_string();
+            let labels = &[&actor_id_str, target, &fragment_id_str, name];
 
             let unclean_state = metrics.sync_kv_log_store_state.with_guarded_label_values(&[
                 "dirty",
                 &actor_id_str,
                 target,
-                &id_str,
+                &fragment_id_str,
                 name,
             ]);
             let clean_state = metrics.sync_kv_log_store_state.with_guarded_label_values(&[
                 "clean",
                 &actor_id_str,
                 target,
-                &id_str,
+                &fragment_id_str,
                 name,
             ]);
             let wait_next_poll_ns = metrics
@@ -195,19 +196,43 @@ pub mod metrics {
                 .with_guarded_label_values(labels);
             let buffer_read_count = metrics
                 .sync_kv_log_store_read_count
-                .with_guarded_label_values(&["buffer", &actor_id_str, target, &id_str, name]);
+                .with_guarded_label_values(&[
+                    "buffer",
+                    &actor_id_str,
+                    target,
+                    &fragment_id_str,
+                    name,
+                ]);
 
             let buffer_read_size = metrics
                 .sync_kv_log_store_read_size
-                .with_guarded_label_values(&["buffer", &actor_id_str, target, &id_str, name]);
+                .with_guarded_label_values(&[
+                    "buffer",
+                    &actor_id_str,
+                    target,
+                    &fragment_id_str,
+                    name,
+                ]);
 
             let total_read_count = metrics
                 .sync_kv_log_store_read_count
-                .with_guarded_label_values(&["total", &actor_id_str, target, &id_str, name]);
+                .with_guarded_label_values(&[
+                    "total",
+                    &actor_id_str,
+                    target,
+                    &fragment_id_str,
+                    name,
+                ]);
 
             let total_read_size = metrics
                 .sync_kv_log_store_read_size
-                .with_guarded_label_values(&["total", &actor_id_str, target, &id_str, name]);
+                .with_guarded_label_values(&[
+                    "total",
+                    &actor_id_str,
+                    target,
+                    &fragment_id_str,
+                    name,
+                ]);
 
             const READ_PERSISTENT_LOG: &str = "persistent_log";
             const READ_FLUSHED_BUFFER: &str = "flushed_buffer";
@@ -218,7 +243,7 @@ pub mod metrics {
                     READ_PERSISTENT_LOG,
                     &actor_id_str,
                     target,
-                    &id_str,
+                    &fragment_id_str,
                     name,
                 ]);
 
@@ -228,7 +253,7 @@ pub mod metrics {
                     READ_PERSISTENT_LOG,
                     &actor_id_str,
                     target,
-                    &id_str,
+                    &fragment_id_str,
                     name,
                 ]);
 
@@ -238,7 +263,7 @@ pub mod metrics {
                     READ_FLUSHED_BUFFER,
                     &actor_id_str,
                     target,
-                    &id_str,
+                    &fragment_id_str,
                     name,
                 ]);
 
@@ -248,7 +273,7 @@ pub mod metrics {
                     READ_FLUSHED_BUFFER,
                     &actor_id_str,
                     target,
-                    &id_str,
+                    &fragment_id_str,
                     name,
                 ]);
 
@@ -302,7 +327,7 @@ pub mod metrics {
     }
 }
 
-type ReadFlushedChunkFuture = BoxFuture<'static, LogStoreResult<(ChunkId, StreamChunk, u64)>>;
+type ReadFlushedChunkFuture = BoxFuture<'static, LogStoreResult<(ChunkId, StreamChunk, Epoch)>>;
 
 pub struct SyncedKvLogStoreExecutor<S: StateStore> {
     actor_context: ActorContextRef,
@@ -318,27 +343,30 @@ pub struct SyncedKvLogStoreExecutor<S: StateStore> {
     max_buffer_size: usize,
 
     // Max chunk size when reading from logstore / buffer
-    chunk_size: u32,
+    chunk_size: usize,
 
     pause_duration_ms: Duration,
+
+    aligned: bool,
 }
 // Stream interface
 impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
     #[expect(clippy::too_many_arguments)]
     pub(crate) fn new(
         actor_context: ActorContextRef,
-        table_id: u32,
+        table_id: TableId,
         metrics: SyncedKvLogStoreMetrics,
         serde: LogStoreRowSerde,
         state_store: S,
         buffer_size: usize,
-        chunk_size: u32,
+        chunk_size: usize,
         upstream: Executor,
         pause_duration_ms: Duration,
+        aligned: bool,
     ) -> Self {
         Self {
             actor_context,
-            table_id: TableId::new(table_id),
+            table_id,
             metrics,
             serde,
             state_store,
@@ -346,6 +374,7 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
             max_buffer_size: buffer_size,
             chunk_size,
             pause_duration_ms,
+            aligned,
         }
     }
 }
@@ -536,22 +565,90 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
                 },
                 is_replicated: false,
                 vnodes: self.serde.vnodes().clone(),
+                upload_on_flush: false,
             })
             .await;
 
-        let (mut read_state, mut initial_write_state) =
-            new_log_store_state(self.table_id, local_state_store, self.serde);
+        let (mut read_state, mut initial_write_state) = new_log_store_state(
+            self.table_id,
+            local_state_store,
+            self.serde,
+            self.chunk_size,
+        );
         initial_write_state.init(first_write_epoch).await?;
 
         let mut pause_stream = first_barrier.is_pause_on_startup();
         let mut initial_write_epoch = first_write_epoch;
+
+        if self.aligned {
+            tracing::info!("aligned mode");
+            // We want to realign the buffer and the stream.
+            // We just block the upstream input stream,
+            // and wait until the persisted logstore is empty.
+            // Then after that we can consume the input stream.
+            let log_store_stream = read_state
+                .read_persisted_log_store(
+                    self.metrics.persistent_log_read_metrics.clone(),
+                    initial_write_epoch.curr,
+                    LogStoreReadStateStreamRangeStart::Unbounded,
+                )
+                .await?;
+
+            #[for_await]
+            for message in log_store_stream {
+                let (_epoch, message) = message?;
+                match message {
+                    KvLogStoreItem::Barrier { .. } => {
+                        continue;
+                    }
+                    KvLogStoreItem::StreamChunk { chunk, .. } => {
+                        yield Message::Chunk(chunk);
+                    }
+                }
+            }
+
+            let mut realigned_logstore = false;
+
+            #[for_await]
+            for message in input {
+                match message? {
+                    Message::Barrier(barrier) => {
+                        let is_checkpoint = barrier.is_checkpoint();
+                        let mut progress = LogStoreVnodeProgress::None;
+                        progress.apply_aligned(
+                            read_state.vnodes().clone(),
+                            barrier.epoch.prev,
+                            None,
+                        );
+                        // Truncate the logstore
+                        let post_seal = initial_write_state
+                            .seal_current_epoch(barrier.epoch.curr, progress.take());
+                        let update_vnode_bitmap =
+                            barrier.as_update_vnode_bitmap(self.actor_context.id);
+                        yield Message::Barrier(barrier);
+                        post_seal.post_yield_barrier(update_vnode_bitmap).await?;
+                        if !realigned_logstore && is_checkpoint {
+                            realigned_logstore = true;
+                            tracing::info!("realigned logstore");
+                        }
+                    }
+                    Message::Chunk(chunk) => {
+                        yield Message::Chunk(chunk);
+                    }
+                    Message::Watermark(watermark) => {
+                        yield Message::Watermark(watermark);
+                    }
+                }
+            }
+
+            return Ok(());
+        }
 
         // We only recreate the consume stream when:
         // 1. On bootstrap
         // 2. On vnode update
         'recreate_consume_stream: loop {
             let mut seq_id = FIRST_SEQ_ID;
-            let mut truncation_offset = None;
             let mut buffer = SyncedLogStoreBuffer {
                 buffer: VecDeque::new(),
                 current_size: 0,
@@ -565,18 +662,21 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
             let log_store_stream = read_state
                 .read_persisted_log_store(
                     self.metrics.persistent_log_read_metrics.clone(),
-                    initial_write_epoch.prev,
+                    initial_write_epoch.curr,
                     LogStoreReadStateStreamRangeStart::Unbounded,
                 )
                 .await?;
 
             let mut log_store_stream = tokio_stream::StreamExt::peekable(log_store_stream);
             let mut clean_state = log_store_stream.peek().await.is_none();
+            tracing::trace!(?clean_state);
 
             let mut read_future_state = ReadFuture::ReadingPersistedStream(log_store_stream);
 
             let mut write_future_state =
                 WriteFuture::receive_from_upstream(input, initial_write_state);
+
+            let mut progress = LogStoreVnodeProgress::None;
 
             loop {
                 let select_result = {
@@ -585,7 +685,7 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
                             pending().await
                         } else {
                             read_future_state
-                                .next_chunk(&read_state, &mut buffer, &self.metrics)
+                                .next_chunk(&mut progress, &read_state, &mut buffer, &self.metrics)
                                 .await
                         }
                     };
@@ -630,10 +730,11 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
                                             }
                                             let write_state_post_write_barrier =
                                                 Self::write_barrier(
+                                                    self.actor_context.id,
                                                     &mut write_state,
                                                     barrier.clone(),
                                                     &self.metrics,
-                                                    truncation_offset,
+                                                    progress.take(),
                                                     &mut buffer,
                                                 )
                                                 .await?;
@@ -641,6 +742,11 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
                                             let update_vnode_bitmap = barrier
                                                 .as_update_vnode_bitmap(self.actor_context.id);
                                             let barrier_epoch = barrier.epoch;
+                                            tracing::trace!(
+                                                ?update_vnode_bitmap,
+                                                actor_id = %self.actor_context.id,
+                                                "update vnode bitmap"
+                                            );
 
                                             yield Message::Barrier(barrier);
 
@@ -748,10 +854,7 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
                                 *sleep_future = None;
                             }
                         }
-                        let (chunk, new_truncate_offset) = result?;
-                        if let Some(new_truncate_offset) = new_truncate_offset {
-                            truncation_offset = Some(new_truncate_offset);
-                        }
+                        let chunk = result?;
                         self.metrics
                             .total_read_count
                             .inc_by(chunk.cardinality() as _);
@@ -764,35 +867,43 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
     }
 }
 
+type PersistedStream<S> = Peekable<Pin<Box<LogStoreItemMergeStream<TimeoutAutoRebuildIter<S>>>>>;
+
 enum ReadFuture<S: StateStoreRead> {
-    ReadingPersistedStream(Peekable<Pin<Box<LogStoreItemMergeStream<TimeoutAutoRebuildIter<S>>>>>),
+    ReadingPersistedStream(PersistedStream<S>),
     ReadingFlushedChunk {
         future: ReadFlushedChunkFuture,
-        truncate_offset: ReaderTruncationOffsetType,
+        end_seq_id: SeqId,
     },
     Idle,
 }
 
 // Read methods
 impl<S: StateStoreRead> ReadFuture<S> {
-    // TODO: should change to always return a truncate offset to ensure that each stream chunk has a truncate offset
     async fn next_chunk(
         &mut self,
+        progress: &mut LogStoreVnodeProgress,
         read_state: &LogStoreReadState<S>,
         buffer: &mut SyncedLogStoreBuffer,
         metrics: &SyncedKvLogStoreMetrics,
-    ) -> StreamExecutorResult<(StreamChunk, Option<ReaderTruncationOffsetType>)> {
+    ) -> StreamExecutorResult<StreamChunk> {
         match self {
             ReadFuture::ReadingPersistedStream(stream) => {
-                while let Some((_, item)) = stream.try_next().await? {
+                while let Some((epoch, item)) = stream.try_next().await? {
                     match item {
-                        KvLogStoreItem::Barrier { .. } => {
+                        KvLogStoreItem::Barrier { vnodes, .. } => {
+                            tracing::trace!(epoch, "read logstore barrier");
+                            // update the progress
+                            progress.apply_aligned(vnodes, epoch, None);
                             continue;
                         }
-                        KvLogStoreItem::StreamChunk(chunk) => {
-                            // TODO: should have truncate offset when consuming historical data
+                        KvLogStoreItem::StreamChunk {
+                            chunk,
+                            progress: chunk_progress,
+                        } => {
                             tracing::trace!("read logstore chunk of size: {}", chunk.cardinality());
-                            return Ok((chunk, None));
+                            progress.apply_per_vnode(epoch, chunk_progress);
+                            return Ok(chunk);
                         }
                     }
                 }
@@ -825,7 +936,12 @@ impl<S: StateStoreRead> ReadFuture<S> {
                             cardinality = chunk.cardinality(),
                             "read buffered chunk of size"
                         );
-                        return Ok((chunk, Some((item_epoch, Some(end_seq_id)))));
+                        progress.apply_aligned(
+                            read_state.vnodes().clone(),
+                            item_epoch,
+                            Some(end_seq_id),
+                        );
+                        return Ok(chunk);
                     }
                     LogStoreBufferItem::Flushed {
                         vnode_bitmap,
@@ -834,7 +950,6 @@ impl<S: StateStoreRead> ReadFuture<S> {
                         chunk_id,
                     } => {
                         tracing::trace!(start_seq_id, end_seq_id, chunk_id, "read flushed chunk");
-                        let truncate_offset = (item_epoch, Some(end_seq_id));
                         let read_metrics = metrics.flushed_buffer_read_metrics.clone();
                         let future = read_state
                             .read_flushed_chunk(
@@ -846,45 +961,48 @@ impl<S: StateStoreRead> ReadFuture<S> {
                                 read_metrics,
                             )
                             .boxed();
-                        *self = ReadFuture::ReadingFlushedChunk {
-                            future,
-                            truncate_offset,
-                        };
+                        *self = ReadFuture::ReadingFlushedChunk { future, end_seq_id };
                         break;
                     }
                     LogStoreBufferItem::Barrier { .. } => {
+                        tracing::trace!(item_epoch, "read buffer barrier");
+                        progress.apply_aligned(read_state.vnodes().clone(), item_epoch, None);
                         continue;
                     }
                 }
             },
         }
 
-        let (future, truncate_offset) = match self {
+        let (future, end_seq_id) = match self {
             ReadFuture::ReadingPersistedStream(_) | ReadFuture::Idle => {
                 unreachable!("should be at ReadingFlushedChunk")
             }
-            ReadFuture::ReadingFlushedChunk {
-                future,
-                truncate_offset,
-            } => (future, *truncate_offset),
+            ReadFuture::ReadingFlushedChunk { future, end_seq_id } => (future, *end_seq_id),
         };
 
-        let (_, chunk, _) = future.await?;
-        tracing::trace!("read flushed chunk of size: {}", chunk.cardinality());
+        let (_, chunk, epoch) = future.await?;
+        progress.apply_aligned(read_state.vnodes().clone(), epoch, Some(end_seq_id));
+        tracing::trace!(
+            end_seq_id,
+            "read flushed chunk of size: {}",
+            chunk.cardinality()
+        );
         *self = ReadFuture::Idle;
-        Ok((chunk, Some(truncate_offset)))
+        Ok(chunk)
     }
 }
 
 // Write methods
 impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
     async fn write_barrier<'a>(
+        actor_id: ActorId,
         write_state: &'a mut LogStoreWriteState<S::Local>,
         barrier: Barrier,
         metrics: &SyncedKvLogStoreMetrics,
-        truncation_offset: Option<ReaderTruncationOffsetType>,
+        progress: LogStoreVnodeProgress,
         buffer: &mut SyncedLogStoreBuffer,
     ) -> StreamExecutorResult<LogStorePostSealCurrentEpoch<'a, S::Local>> {
+        tracing::trace!(%actor_id, ?progress, "applying truncation");
         // TODO(kwannoel): As an optimization we can also change flushed chunks to be flushed items
         // to reduce memory consumption of logstore.
 
@@ -922,7 +1040,7 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
         metrics
             .storage_write_size
             .inc_by(flush_info.flush_size as _);
-        let post_seal = write_state.seal_current_epoch(barrier.epoch.curr, truncation_offset);
+        let post_seal = write_state.seal_current_epoch(barrier.epoch.curr, progress);
 
         // Add to buffer
         buffer.buffer.push_back((
@@ -930,6 +1048,8 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
             LogStoreBufferItem::Barrier {
                 is_checkpoint: barrier.is_checkpoint(),
                 next_epoch: barrier.epoch.curr,
+                schema_change: None,
+                is_stop: false,
             },
         ));
         buffer.next_chunk_id = 0;
@@ -943,7 +1063,7 @@ struct SyncedLogStoreBuffer {
     buffer: VecDeque<(u64, LogStoreBufferItem)>,
     current_size: usize,
     max_size: usize,
-    max_chunk_size: u32,
+    max_chunk_size: usize,
     next_chunk_id: ChunkId,
     metrics: SyncedKvLogStoreMetrics,
     flushed_count: usize,
@@ -990,7 +1110,7 @@ impl SyncedLogStoreBuffer {
         new_vnode_bitmap: Bitmap,
         epoch: u64,
     ) {
-        let new_chunk_size = end_seq_id - start_seq_id + 1;
+        let new_chunk_size = (end_seq_id - start_seq_id + 1) as usize;
 
         if let Some((
             item_epoch,
@@ -1001,9 +1121,9 @@ impl SyncedLogStoreBuffer {
                 ..
             },
         )) = self.buffer.back_mut()
-            && let flushed_chunk_size = *prev_end_seq_id - *prev_start_seq_id + 1
+            && let flushed_chunk_size = (*prev_end_seq_id - *prev_start_seq_id + 1) as usize
             && let projected_flushed_chunk_size = flushed_chunk_size + new_chunk_size
-            && projected_flushed_chunk_size as u32 <= self.max_chunk_size
+            && projected_flushed_chunk_size <= self.max_chunk_size
         {
             assert!(
                 *prev_end_seq_id < start_seq_id,
@@ -1154,12 +1274,12 @@ mod tests {
         let column_descs = test_payload_schema(pk_info);
         let fields = column_descs
             .into_iter()
-            .map(|desc| Field::new(desc.name.clone(), desc.data_type.clone()))
+            .map(|desc| Field::new(desc.name.clone(), desc.data_type))
             .collect_vec();
         let schema = Schema { fields };
-        let pk_indices = vec![0];
+        let stream_key = vec![0];
         let (mut tx, source) = MockSource::channel();
-        let source = source.into_executor(schema.clone(), pk_indices.clone());
+        let source = source.into_executor(schema.clone(), stream_key.clone());
 
         let vnodes = Some(Arc::new(Bitmap::ones(VirtualNode::COUNT_FOR_TEST)));
 
@@ -1175,6 +1295,7 @@ mod tests {
             256,
             source,
             Duration::from_millis(256),
+            false,
         )
         .boxed();
 
@@ -1248,12 +1369,12 @@ mod tests {
         let column_descs = test_payload_schema(pk_info);
         let fields = column_descs
             .into_iter()
-            .map(|desc| Field::new(desc.name.clone(), desc.data_type.clone()))
+            .map(|desc| Field::new(desc.name.clone(), desc.data_type))
             .collect_vec();
         let schema = Schema { fields };
-        let pk_indices = vec![0];
+        let stream_key = vec![0];
         let (mut tx, source) = MockSource::channel();
-        let source = source.into_executor(schema.clone(), pk_indices.clone());
+        let source = source.into_executor(schema.clone(), stream_key.clone());
 
         let vnodes = Some(Arc::new(Bitmap::ones(VirtualNode::COUNT_FOR_TEST)));
 
@@ -1269,6 +1390,7 @@ mod tests {
             256,
             source,
             Duration::from_millis(256),
+            false,
         )
         .boxed();
 
@@ -1339,12 +1461,12 @@ mod tests {
         let column_descs = test_payload_schema(pk_info);
         let fields = column_descs
             .into_iter()
-            .map(|desc| Field::new(desc.name.clone(), desc.data_type.clone()))
+            .map(|desc| Field::new(desc.name.clone(), desc.data_type))
             .collect_vec();
         let schema = Schema { fields };
-        let pk_indices = vec![0];
+        let stream_key = vec![0];
         let (mut tx, source) = MockSource::channel();
-        let source = source.into_executor(schema.clone(), pk_indices.clone());
+        let source = source.into_executor(schema.clone(), stream_key.clone());
 
         let vnodes = Some(Arc::new(Bitmap::ones(VirtualNode::COUNT_FOR_TEST)));
 
@@ -1360,6 +1482,7 @@ mod tests {
             256,
             source,
             Duration::from_millis(256),
+            false,
         )
         .boxed();
 

@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,7 +18,7 @@ use rand::seq::IndexedRandom;
 use risingwave_common::types::{DataType, DataTypeName, StructType};
 use risingwave_expr::sig::FUNCTION_REGISTRY;
 use risingwave_frontend::expr::cast_sigs;
-use risingwave_sqlparser::ast::{Expr, Ident, OrderByExpr, Value};
+use risingwave_sqlparser::ast::{Expr, OrderByExpr, Value};
 
 use crate::sql_gen::types::data_type_to_ast_data_type;
 use crate::sql_gen::{SqlGenerator, SqlGeneratorContext};
@@ -159,8 +159,8 @@ impl<R: Rng> SqlGenerator<'_, R> {
         }
     }
 
-    fn gen_list_data_type(&mut self, depth: usize) -> DataType {
-        DataType::List(Box::new(self.gen_data_type_inner(depth)))
+    pub(crate) fn gen_list_data_type(&mut self, depth: usize) -> DataType {
+        DataType::list(self.gen_data_type_inner(depth))
     }
 
     fn gen_struct_data_type(&mut self, depth: usize) -> DataType {
@@ -203,7 +203,7 @@ impl<R: Rng> SqlGenerator<'_, R> {
             self.gen_simple_scalar(typ)
         } else {
             let col_def = matched_cols.choose(&mut self.rng).unwrap();
-            Expr::Identifier(Ident::new_unchecked(&col_def.name))
+            col_def.name_expr()
         }
     }
 
@@ -239,7 +239,7 @@ impl<R: Rng> SqlGenerator<'_, R> {
         while self.flip_coin() {
             let column = self.bound_columns.choose(&mut self.rng).unwrap();
             order_by.push(OrderByExpr {
-                expr: Expr::Identifier(Ident::new_unchecked(&column.name)),
+                expr: column.name_expr(),
                 asc: if self.rng.random_bool(0.3) {
                     None
                 } else {

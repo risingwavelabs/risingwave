@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -105,7 +105,7 @@ pub fn place_vnode(
     // Now to maintain affinity, if a hint has been provided via `hint_worker_slot_mapping`, follow
     // that mapping to adjust balances.
     let mut temp_slot = Balance {
-        slot: WorkerSlotId::new(0u32, usize::MAX), /* This id doesn't matter for `temp_slot`. It's distinguishable via `is_temp`. */
+        slot: WorkerSlotId::new(0u32.into(), usize::MAX), /* This id doesn't matter for `temp_slot`. It's distinguishable via `is_temp`. */
         balance: 0,
         builder: BitmapBuilder::zeroed(vnode_count),
         is_temp: true,
@@ -251,24 +251,24 @@ mod tests {
         let mut property = serving_property.clone();
         property.parallelism = 1;
         let worker_1 = WorkerNode {
-            id: 1,
+            id: 1.into(),
             r#type: WorkerType::ComputeNode.into(),
             property: Some(property),
             ..Default::default()
         };
 
         assert!(
-            place_vnode(None, &[worker_1.clone()], Some(0)).is_none(),
+            place_vnode(None, std::slice::from_ref(&worker_1), Some(0)).is_none(),
             "max_parallelism should >= 0"
         );
 
-        let re_worker_mapping_2 = place_vnode(None, &[worker_1.clone()], None).unwrap();
+        let re_worker_mapping_2 = place_vnode(None, std::slice::from_ref(&worker_1), None).unwrap();
         assert_eq!(re_worker_mapping_2.iter_unique().count(), 1);
 
         let mut property = serving_property.clone();
         property.parallelism = 50;
         let worker_2 = WorkerNode {
-            id: 2,
+            id: 2.into(),
             property: Some(property),
             r#type: WorkerType::ComputeNode.into(),
             ..Default::default()
@@ -286,10 +286,10 @@ mod tests {
         let score = count_same_vnode_mapping(&re_worker_mapping_2, &re_worker_mapping);
         assert!(score >= 5);
 
-        let mut property = serving_property.clone();
+        let mut property = serving_property;
         property.parallelism = 60;
         let worker_3 = WorkerNode {
-            id: 3,
+            id: 3.into(),
             r#type: WorkerType::ComputeNode.into(),
             property: Some(property),
             ..Default::default()

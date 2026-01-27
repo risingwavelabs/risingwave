@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -24,10 +24,11 @@ use super::utils::{
 };
 use super::{ExprRewritable, generic};
 use crate::expr::Expr;
-use crate::optimizer::PlanRef;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
-use crate::optimizer::plan_node::{PlanBase, PlanTreeNodeBinary, StreamNode};
-use crate::optimizer::property::{MonotonicityMap, WatermarkColumns};
+use crate::optimizer::plan_node::{
+    PlanBase, PlanTreeNodeBinary, StreamNode, StreamPlanRef as PlanRef,
+};
+use crate::optimizer::property::{MonotonicityMap, StreamKind, WatermarkColumns};
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -38,7 +39,7 @@ pub struct StreamDynamicFilter {
 }
 
 impl StreamDynamicFilter {
-    pub fn new(core: DynamicFilter<PlanRef>) -> Self {
+    pub fn new(core: DynamicFilter<PlanRef>) -> Result<Self> {
         let right_non_decreasing = core.right().columns_monotonicity()[0].is_non_decreasing();
         let condition_always_relax = right_non_decreasing
             && matches!(
@@ -46,26 +47,29 @@ impl StreamDynamicFilter {
                 ExprType::LessThan | ExprType::LessThanOrEqual
             );
 
-        let out_append_only = if condition_always_relax {
-            core.left().append_only()
-        } else {
-            false
+        // TODO(kind): theoretically, the impl can handle upsert stream.
+        let left_kind = reject_upsert_input!(core.left());
+        let out_kind = match left_kind {
+            StreamKind::AppendOnly if condition_always_relax => StreamKind::AppendOnly,
+            StreamKind::AppendOnly | StreamKind::Retract => StreamKind::Retract,
+            StreamKind::Upsert => unreachable!(),
         };
 
         let base = PlanBase::new_stream_with_core(
             &core,
             core.left().distribution().clone(),
-            out_append_only,
+            out_kind,
             false, // TODO(rc): decide EOWC property
             Self::derive_watermark_columns(&core),
             MonotonicityMap::new(), // TODO: derive monotonicity
         );
         let cleaned_by_watermark = Self::cleaned_by_watermark(&core);
-        Self {
+
+        Ok(Self {
             base,
             core,
             cleaned_by_watermark,
-        }
+        })
     }
 
     fn derive_watermark_columns(core: &DynamicFilter<PlanRef>) -> WatermarkColumns {
@@ -139,7 +143,7 @@ impl Distill for StreamDynamicFilter {
     }
 }
 
-impl PlanTreeNodeBinary for StreamDynamicFilter {
+impl PlanTreeNodeBinary<Stream> for StreamDynamicFilter {
     fn left(&self) -> PlanRef {
         self.core.left().clone()
     }
@@ -149,11 +153,11 @@ impl PlanTreeNodeBinary for StreamDynamicFilter {
     }
 
     fn clone_with_left_right(&self, left: PlanRef, right: PlanRef) -> Self {
-        Self::new(self.core.clone_with_left_right(left, right))
+        Self::new(self.core.clone_with_left_right(left, right)).unwrap()
     }
 }
 
-impl_plan_tree_node_for_binary! { StreamDynamicFilter }
+impl_plan_tree_node_for_binary! { Stream, StreamDynamicFilter }
 
 impl StreamNode for StreamDynamicFilter {
     fn to_stream_prost_body(&self, state: &mut BuildFragmentGraphState) -> NodeBody {
@@ -163,11 +167,12 @@ impl StreamNode for StreamDynamicFilter {
             .core
             .predicate()
             .as_expr_unless_true()
+            // No need to call `to_expr_proto_checked_pure` since the condition of dynamic filter is
+            // always `InputRef <comparator> InputRef`.
             .map(|x| x.to_expr_proto());
         let left_index = self.core.left_index();
         let left_table = infer_left_internal_table_catalog(&self.base, left_index)
-            .with_id(state.gen_table_id_wrapped())
-            .with_cleaned_by_watermark(cleaned_by_watermark);
+            .with_id(state.gen_table_id_wrapped());
         let right = self.right();
         let right_table = infer_right_internal_table_catalog(right.plan_base())
             .with_id(state.gen_table_id_wrapped());
@@ -178,10 +183,11 @@ impl StreamNode for StreamDynamicFilter {
             left_table: Some(left_table.to_internal_table_prost()),
             right_table: Some(right_table.to_internal_table_prost()),
             condition_always_relax: false, // deprecated
+            cleaned_by_watermark,
         }))
     }
 }
 
-impl ExprRewritable for StreamDynamicFilter {}
+impl ExprRewritable<Stream> for StreamDynamicFilter {}
 
 impl ExprVisitable for StreamDynamicFilter {}

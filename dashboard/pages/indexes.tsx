@@ -16,15 +16,25 @@
  */
 
 import {
+  Column,
   Relations,
   streamingJobColumns,
   tableColumns,
 } from "../components/Relations"
 import { getIndexes } from "../lib/api/streaming"
+import { Index } from "../proto/gen/catalog"
 
 export default function Indexes() {
-  return Relations("Indexes", getIndexes, [
-    ...streamingJobColumns,
-    ...tableColumns,
-  ])
+  const indexItemsCountColumn: Column<Index> = {
+    name: "Index Len",
+    width: 3,
+    content: (s) => s.indexColumnsLen,
+  }
+
+  return Relations(
+    "Indexes",
+    getIndexes,
+    [indexItemsCountColumn, ...streamingJobColumns, ...tableColumns],
+    { withStreamingJobs: true }
+  )
 }

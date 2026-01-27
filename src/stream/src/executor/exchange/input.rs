@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,29 +15,27 @@
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
-use anyhow::anyhow;
 use either::Either;
 use local_input::LocalInputStreamInner;
 use pin_project::pin_project;
+use risingwave_common::config::StreamingConfig;
 use risingwave_common::util::addr::{HostAddr, is_local_address};
-use risingwave_rpc_client::ComputeClientPool;
-use tokio::sync::mpsc;
 
 use super::permit::Receiver;
 use crate::executor::prelude::*;
 use crate::executor::{
-    BarrierInner, DispatcherBarrier, DispatcherMessage, DispatcherMessageBatch,
-    DispatcherMessageStream, DispatcherMessageStreamItem,
+    BarrierInner, DispatcherMessage, DispatcherMessageBatch, DispatcherMessageStreamItem,
 };
 use crate::task::{FragmentId, LocalBarrierManager, UpDownActorIds, UpDownFragmentIds};
 
-/// `Input` provides an interface for [`MergeExecutor`](crate::executor::MergeExecutor) and
-/// [`ReceiverExecutor`](crate::executor::ReceiverExecutor) to receive data from upstream actors.
-pub trait Input: DispatcherMessageStream {
-    /// The upstream actor id.
-    fn actor_id(&self) -> ActorId;
+/// `Input` is a more abstract upstream input type, used for `DynamicReceivers` type
+/// handling of multiple upstream inputs
+pub trait Input: Stream + Send {
+    type InputId;
+    /// The upstream input id.
+    fn id(&self) -> Self::InputId;
 
-    fn boxed_input(self) -> BoxedInput
+    fn boxed_input(self) -> BoxedInput<Self::InputId, Self::Item>
     where
         Self: Sized + 'static,
     {
@@ -45,12 +43,19 @@ pub trait Input: DispatcherMessageStream {
     }
 }
 
-pub type BoxedInput = Pin<Box<dyn Input>>;
+pub type BoxedInput<InputId, Item> = Pin<Box<dyn Input<InputId = InputId, Item = Item>>>;
 
-impl std::fmt::Debug for dyn Input {
+/// `ActorInput` provides an interface for [`MergeExecutor`](crate::executor::MergeExecutor) and
+/// [`ReceiverExecutor`](crate::executor::ReceiverExecutor) to receive data from upstream actors.
+/// Only used for actor inputs.
+pub trait ActorInput = Input<Item = DispatcherMessageStreamItem, InputId = ActorId>;
+
+pub type BoxedActorInput = Pin<Box<dyn ActorInput>>;
+
+impl std::fmt::Debug for dyn ActorInput {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Input")
-            .field("actor_id", &self.actor_id())
+            .field("actor_id", &self.id())
             .finish_non_exhaustive()
     }
 }
@@ -70,35 +75,6 @@ pub(crate) fn assert_equal_dispatcher_barrier<M1, M2>(
 ) {
     assert_eq!(first.epoch, second.epoch);
     assert_eq!(first.kind, second.kind);
-}
-
-pub(crate) fn apply_dispatcher_barrier(
-    recv_barrier: &mut Barrier,
-    dispatcher_barrier: DispatcherBarrier,
-) {
-    assert_equal_dispatcher_barrier(recv_barrier, &dispatcher_barrier);
-    recv_barrier
-        .passed_actors
-        .extend(dispatcher_barrier.passed_actors);
-}
-
-pub(crate) async fn process_dispatcher_msg(
-    dispatcher_msg: DispatcherMessage,
-    barrier_rx: &mut mpsc::UnboundedReceiver<Barrier>,
-) -> StreamExecutorResult<Message> {
-    let msg = match dispatcher_msg {
-        DispatcherMessage::Chunk(chunk) => Message::Chunk(chunk),
-        DispatcherMessage::Barrier(barrier) => {
-            let mut recv_barrier = barrier_rx
-                .recv()
-                .await
-                .ok_or_else(|| anyhow!("end of barrier recv"))?;
-            apply_dispatcher_barrier(&mut recv_barrier, barrier);
-            Message::Barrier(recv_barrier)
-        }
-        DispatcherMessage::Watermark(watermark) => Message::Watermark(watermark),
-    };
-    Ok(msg)
 }
 
 impl LocalInput {
@@ -122,6 +98,7 @@ mod local_input {
 
     pub(super) type LocalInputStreamInner = impl crate::executor::DispatcherMessageStream;
 
+    #[define_opaque(LocalInputStreamInner)]
     pub(super) fn run(channel: Receiver, upstream_actor_id: ActorId) -> LocalInputStreamInner {
         run_inner(channel, upstream_actor_id)
     }
@@ -157,7 +134,9 @@ impl Stream for LocalInput {
 }
 
 impl Input for LocalInput {
-    fn actor_id(&self) -> ActorId {
+    type InputId = ActorId;
+
+    fn id(&self) -> Self::InputId {
         self.actor_id
     }
 }
@@ -172,38 +151,50 @@ pub struct RemoteInput {
 }
 
 use remote_input::RemoteInputStreamInner;
-use risingwave_common::catalog::DatabaseId;
 use risingwave_pb::common::ActorInfo;
+use risingwave_pb::id::PartialGraphId;
 
 impl RemoteInput {
     /// Create a remote input from compute client and related info. Should provide the corresponding
     /// compute client of where the actor is placed.
-    #[expect(clippy::too_many_arguments)]
-    pub fn new(
-        client_pool: ComputeClientPool,
+    pub async fn new(
+        local_barrier_manager: &LocalBarrierManager,
         upstream_addr: HostAddr,
+        upstream_partial_graph_id: PartialGraphId,
         up_down_ids: UpDownActorIds,
         up_down_frag: UpDownFragmentIds,
-        database_id: DatabaseId,
         metrics: Arc<StreamingMetrics>,
-        batched_permits: usize,
-        term_id: String,
-    ) -> Self {
+        actor_config: Arc<StreamingConfig>,
+    ) -> StreamExecutorResult<Self> {
         let actor_id = up_down_ids.0;
 
-        Self {
+        let client = local_barrier_manager
+            .env
+            .client_pool()
+            .get_by_addr(upstream_addr)
+            .await?;
+        let (stream, permits_tx) = client
+            .get_stream(
+                up_down_ids.0,
+                up_down_ids.1,
+                up_down_frag.0,
+                up_down_frag.1,
+                upstream_partial_graph_id,
+                local_barrier_manager.term_id.clone(),
+            )
+            .await?;
+
+        Ok(Self {
             actor_id,
             inner: remote_input::run(
-                client_pool,
-                upstream_addr,
+                stream,
+                permits_tx,
                 up_down_ids,
                 up_down_frag,
-                database_id,
                 metrics,
-                batched_permits,
-                term_id,
+                actor_config.developer.exchange_batched_permits,
             ),
-        }
+        })
     }
 }
 
@@ -213,10 +204,9 @@ mod remote_input {
     use anyhow::Context;
     use await_tree::InstrumentAwait;
     use either::Either;
-    use risingwave_common::catalog::DatabaseId;
-    use risingwave_common::util::addr::HostAddr;
     use risingwave_pb::task_service::{GetStreamResponse, permits};
-    use risingwave_rpc_client::ComputeClientPool;
+    use tokio::sync::mpsc;
+    use tonic::Streaming;
 
     use crate::executor::exchange::error::ExchangeChannelClosed;
     use crate::executor::monitor::StreamingMetrics;
@@ -226,53 +216,34 @@ mod remote_input {
 
     pub(super) type RemoteInputStreamInner = impl crate::executor::DispatcherMessageStream;
 
-    #[expect(clippy::too_many_arguments)]
+    #[define_opaque(RemoteInputStreamInner)]
     pub(super) fn run(
-        client_pool: ComputeClientPool,
-        upstream_addr: HostAddr,
+        stream: Streaming<GetStreamResponse>,
+        permits_tx: mpsc::UnboundedSender<permits::Value>,
         up_down_ids: UpDownActorIds,
         up_down_frag: UpDownFragmentIds,
-        database_id: DatabaseId,
         metrics: Arc<StreamingMetrics>,
         batched_permits_limit: usize,
-        term_id: String,
     ) -> RemoteInputStreamInner {
         run_inner(
-            client_pool,
-            upstream_addr,
+            stream,
+            permits_tx,
             up_down_ids,
             up_down_frag,
-            database_id,
             metrics,
             batched_permits_limit,
-            term_id,
         )
     }
 
-    #[expect(clippy::too_many_arguments)]
     #[try_stream(ok = DispatcherMessage, error = StreamExecutorError)]
     async fn run_inner(
-        client_pool: ComputeClientPool,
-        upstream_addr: HostAddr,
+        stream: Streaming<GetStreamResponse>,
+        permits_tx: mpsc::UnboundedSender<permits::Value>,
         up_down_ids: UpDownActorIds,
         up_down_frag: UpDownFragmentIds,
-        database_id: DatabaseId,
         metrics: Arc<StreamingMetrics>,
         batched_permits_limit: usize,
-        term_id: String,
     ) {
-        let client = client_pool.get_by_addr(upstream_addr).await?;
-        let (stream, permits_tx) = client
-            .get_stream(
-                up_down_ids.0,
-                up_down_ids.1,
-                up_down_frag.0,
-                up_down_frag.1,
-                database_id,
-                term_id,
-            )
-            .await?;
-
         let up_actor_id = up_down_ids.0.to_string();
         let up_fragment_id = up_down_frag.0.to_string();
         let down_fragment_id = up_down_frag.1.to_string();
@@ -348,42 +319,48 @@ impl Stream for RemoteInput {
 }
 
 impl Input for RemoteInput {
-    fn actor_id(&self) -> ActorId {
+    type InputId = ActorId;
+
+    fn id(&self) -> Self::InputId {
         self.actor_id
     }
 }
 
 /// Create a [`LocalInput`] or [`RemoteInput`] instance with given info. Used by merge executors and
 /// receiver executors.
-pub(crate) fn new_input(
+pub(crate) async fn new_input(
     local_barrier_manager: &LocalBarrierManager,
     metrics: Arc<StreamingMetrics>,
     actor_id: ActorId,
     fragment_id: FragmentId,
     upstream_actor_info: &ActorInfo,
     upstream_fragment_id: FragmentId,
-) -> StreamResult<BoxedInput> {
-    let context = &local_barrier_manager.shared_context;
+    actor_config: Arc<StreamingConfig>,
+) -> StreamExecutorResult<BoxedActorInput> {
     let upstream_actor_id = upstream_actor_info.actor_id;
     let upstream_addr = upstream_actor_info.get_host()?.into();
 
-    let input = if is_local_address(&context.addr, &upstream_addr) {
+    let input = if is_local_address(local_barrier_manager.env.server_address(), &upstream_addr) {
         LocalInput::new(
-            context.take_receiver((upstream_actor_id, actor_id))?,
+            local_barrier_manager.register_local_upstream_output(
+                actor_id,
+                upstream_actor_id,
+                upstream_actor_info.partial_graph_id,
+            ),
             upstream_actor_id,
         )
         .boxed_input()
     } else {
         RemoteInput::new(
-            context.compute_client_pool.as_ref().to_owned(),
+            local_barrier_manager,
             upstream_addr,
+            upstream_actor_info.partial_graph_id,
             (upstream_actor_id, actor_id),
             (upstream_fragment_id, fragment_id),
-            context.database_id,
             metrics,
-            context.config.developer.exchange_batched_permits,
-            context.term_id(),
+            actor_config,
         )
+        .await?
         .boxed_input()
     };
 

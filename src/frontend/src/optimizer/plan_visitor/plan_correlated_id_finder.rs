@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,12 +14,11 @@
 
 use std::collections::HashSet;
 
-use super::{DefaultBehavior, DefaultValue};
-use crate::PlanRef;
+use super::{DefaultBehavior, DefaultValue, LogicalPlanVisitor};
 use crate::expr::{CorrelatedId, CorrelatedInputRef, ExprVisitor};
 use crate::optimizer::plan_node::{
-    LogicalAgg, LogicalFilter, LogicalJoin, LogicalProject, LogicalProjectSet,
-    LogicalTableFunction, PlanTreeNode,
+    LogicalAgg, LogicalFilter, LogicalJoin, LogicalPlanRef as PlanRef, LogicalProject,
+    LogicalProjectSet, LogicalTableFunction, PlanTreeNode,
 };
 use crate::optimizer::plan_visitor::PlanVisitor;
 
@@ -40,7 +39,7 @@ impl PlanCorrelatedIdFinder {
     }
 }
 
-impl PlanVisitor for PlanCorrelatedIdFinder {
+impl LogicalPlanVisitor for PlanCorrelatedIdFinder {
     /// `correlated_input_ref` can only appear in `LogicalProject`, `LogicalFilter`,
     /// `LogicalJoin` or the `filter` clause of `PlanAggCall` of `LogicalAgg` now.
     type Result = ();

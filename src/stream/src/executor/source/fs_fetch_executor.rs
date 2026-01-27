@@ -19,8 +19,10 @@ use either::Either;
 use futures::TryStreamExt;
 use futures::stream::{self, StreamExt};
 use futures_async_stream::try_stream;
-use risingwave_common::catalog::{ColumnId, TableId};
+use risingwave_common::catalog::ColumnId;
 use risingwave_common::hash::VnodeBitmapExt;
+use risingwave_common::id::SourceId;
+use risingwave_common::metrics::GLOBAL_ERROR_METRICS;
 use risingwave_common::types::ScalarRef;
 use risingwave_connector::source::filesystem::OpendalFsSplit;
 use risingwave_connector::source::filesystem::opendal_source::{
@@ -30,6 +32,7 @@ use risingwave_connector::source::reader::desc::SourceDesc;
 use risingwave_connector::source::{
     BoxStreamingFileSourceChunkStream, SourceContext, SourceCtrlOpts, SplitImpl, SplitMetaData,
 };
+use risingwave_pb::common::ThrottleType;
 use risingwave_storage::store::PrefetchOptions;
 use thiserror_ext::AsReport;
 
@@ -194,7 +197,7 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
     fn build_source_ctx(
         &self,
         source_desc: &SourceDesc,
-        source_id: TableId,
+        source_id: SourceId,
         source_name: &str,
     ) -> SourceContext {
         SourceContext::new(
@@ -230,7 +233,8 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
             .build()
             .map_err(StreamExecutorError::connector_error)?;
 
-        let (Some(split_idx), Some(offset_idx)) = get_split_offset_col_idx(&source_desc.columns)
+        // pulsar's `message_id_data_idx` is not used in this executor, so we don't need to get it.
+        let (Some(split_idx), Some(offset_idx), _) = get_split_offset_col_idx(&source_desc.columns)
         else {
             unreachable!("Partition and offset columns must be set.");
         };
@@ -264,8 +268,21 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
         while let Some(msg) = stream.next().await {
             match msg {
                 Err(e) => {
-                    tracing::error!(error = %e.as_report(), "Fetch Error");
+                    tracing::error!(
+                        source_id = %core.source_id,
+                        source_name = %core.source_name,
+                        fragment_id = %self.actor_ctx.fragment_id,
+                        error = %e.as_report(),
+                        "Fetch Error"
+                    );
+                    GLOBAL_ERROR_METRICS.user_source_error.report([
+                        "File source fetch error".to_owned(),
+                        core.source_id.to_string(),
+                        core.source_name.clone(),
+                        self.actor_ctx.fragment_id.to_string(),
+                    ]);
                     splits_on_fetch = 0;
+                    reading_file = None;
                 }
                 Ok(msg) => {
                     match msg {
@@ -277,18 +294,20 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                                         match mutation {
                                             Mutation::Pause => stream.pause_stream(),
                                             Mutation::Resume => stream.resume_stream(),
-                                            Mutation::Throttle(actor_to_apply) => {
-                                                if let Some(new_rate_limit) =
-                                                    actor_to_apply.get(&self.actor_ctx.id)
-                                                    && *new_rate_limit != self.rate_limit_rps
+                                            Mutation::Throttle(fragment_to_apply) => {
+                                                if let Some(entry) = fragment_to_apply
+                                                    .get(&self.actor_ctx.fragment_id)
+                                                    && entry.throttle_type() == ThrottleType::Source
+                                                    && entry.rate_limit != self.rate_limit_rps
                                                 {
                                                     tracing::info!(
                                                         "updating rate limit from {:?} to {:?}",
                                                         self.rate_limit_rps,
-                                                        *new_rate_limit
+                                                        entry.rate_limit
                                                     );
-                                                    self.rate_limit_rps = *new_rate_limit;
+                                                    self.rate_limit_rps = entry.rate_limit;
                                                     splits_on_fetch = 0;
+                                                    reading_file = None;
                                                 }
                                             }
                                             _ => (),
@@ -304,13 +323,16 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                                     // Propagate the barrier.
                                     yield Message::Barrier(barrier);
 
-                                    if let Some((_, cache_may_stale)) =
-                                        post_commit.post_yield_barrier(update_vnode_bitmap).await?
+                                    if post_commit
+                                        .post_yield_barrier(update_vnode_bitmap)
+                                        .await?
+                                        .is_some()
                                     {
-                                        // if cache_may_stale, we must rebuild the stream to adjust vnode mappings
-                                        if cache_may_stale {
-                                            splits_on_fetch = 0;
-                                        }
+                                        // Vnode bitmap update changes which file assignments this executor
+                                        // should read. Rebuild the reader to avoid reading splits that no
+                                        // longer belong to this actor (e.g., during scale-out).
+                                        splits_on_fetch = 0;
+                                        reading_file = None;
                                     }
 
                                     if splits_on_fetch == 0 {
@@ -337,15 +359,19 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                                     let file_assignment = chunk
                                         .data_chunk()
                                         .rows()
-                                        .map(|row| {
+                                        .filter_map(|row| {
                                             let filename = row.datum_at(0).unwrap().into_utf8();
-                                            reading_file = Some(filename.into());
                                             let size = row.datum_at(2).unwrap().into_int64();
-                                            OpendalFsSplit::<Src>::new(
-                                                filename.to_owned(),
-                                                0,
-                                                size as usize,
-                                            )
+
+                                            if size > 0 {
+                                                Some(OpendalFsSplit::<Src>::new(
+                                                    filename.to_owned(),
+                                                    0,
+                                                    size as usize,
+                                                ))
+                                            } else {
+                                                None
+                                            }
                                         })
                                         .collect();
                                     state_store_handler.set_states(file_assignment).await?;
@@ -380,14 +406,14 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                                 )
                                 .unwrap();
                                 debug_assert_eq!(mapping.len(), 1);
-                                if let Some((split_id, _offset)) = mapping.into_iter().next() {
+                                if let Some((split_id, offset)) = mapping.into_iter().next() {
                                     reading_file = Some(split_id.clone());
                                     let row = state_store_handler.get(&split_id).await?
                                         .unwrap_or_else(|| {
                                             panic!("The fs_split (file_name) {:?} should be in the state table.",
                                         split_id)
                                         });
-                                    let fs_split = match row.datum_at(1) {
+                                    let mut fs_split = match row.datum_at(1) {
                                         Some(ScalarRefImpl::Jsonb(jsonb_ref)) => {
                                             OpendalFsSplit::<Src>::restore_from_json(
                                                 jsonb_ref.to_owned_scalar(),
@@ -395,6 +421,7 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                                         }
                                         _ => unreachable!(),
                                     };
+                                    fs_split.update_offset(offset)?;
 
                                     state_store_handler
                                         .set(&split_id, fs_split.encode_to_json())
@@ -402,13 +429,13 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                                 }
                                 let chunk = prune_additional_cols(
                                     &chunk,
-                                    split_idx,
-                                    offset_idx,
+                                    &[split_idx, offset_idx],
                                     &source_desc.columns,
                                 );
                                 yield Message::Chunk(chunk);
                             }
                             None => {
+                                tracing::debug!("Deleting file: {:?}", reading_file);
                                 if let Some(ref delete_file_name) = reading_file {
                                     splits_on_fetch -= 1;
                                     state_store_handler.delete(delete_file_name).await?;

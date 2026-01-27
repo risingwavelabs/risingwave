@@ -1,0 +1,29 @@
+- name: should not unify first_value/last_value since their order by clauses are different
+  sql: |
+    create table t(a int, b int, c int, d int);
+    select first_value(b order by b) first_a, first_value(a order by a) first_b from t group by c;
+  expected_outputs:
+    - batch_plan
+    - stream_plan
+- name: unify first_value and last_value calls, mixed with count
+  sql: |
+    create table t(a int, b int, c int, d int, e int, f int);
+    select
+    first_value(a order by d) first_a, last_value(a order by d desc) last_a,
+    first_value(b order by d) first_b, last_value(b order by d desc) last_b,
+    first_value(c order by d) first_c, last_value(c order by d desc) last_c,
+    count(a) count_a, count(b) count_b, count(c) count_c
+    from t group by e, f;
+  expected_outputs:
+    - batch_plan
+    - stream_plan
+- name: unify first_value calls with different filters
+  sql: |
+    create table t(a int, b int, c int);
+    select
+    first_value(a order by a) filter (where c > 0) first_a, first_value(b order by a) filter (where c > 0) first_b,
+    first_value(c order by a) filter (where c = 1) first_c
+    from t;
+  expected_outputs:
+    - batch_plan
+    - stream_plan

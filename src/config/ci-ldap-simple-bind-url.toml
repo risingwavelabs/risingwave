@@ -1,0 +1,46 @@
+[meta]
+disable_recovery = false
+max_heartbeat_interval_secs = 60
+
+# "local" is for Unix domain socket connections only
+[[frontend.hba_config.entries]]
+connection_type = "Local"
+databases = ["all"]
+users = ["all"]
+auth_method = "trust"
+
+# "host" is for TCP/IP connections, with standard auth for admin users
+[[frontend.hba_config.entries]]
+connection_type = "Host"
+databases = ["all"]
+users = ["root", "postgres", "rwadmin"]
+addresses = ["0.0.0.0/0"]
+auth_method = "password"
+
+# "host" is for TCP/IP connections, with LDAP simple bind auth using URL format
+[[frontend.hba_config.entries]]
+connection_type = "Host"
+databases = ["all"]
+users = ["testuser1"]
+addresses = ["all"]
+auth_method = "ldap"
+
+[frontend.hba_config.entries.auth_options]
+# Simple bind using URL format (RFC 4516)
+# Format: ldap[s]://host:port/
+# Note: ldaptls parameter can be used with ldap:// scheme for STARTTLS
+ldapurl = "ldap://ldap-server:389/"
+ldaptls = "true"
+ldapprefix = "uid="
+ldapsuffix = ",ou=people,dc=example,dc=com"
+
+[streaming]
+in_flight_barrier_nums = 10
+
+[storage]
+imm_merge_threshold = 2
+
+[system]
+barrier_interval_ms = 250
+checkpoint_frequency = 5
+max_concurrent_creating_streaming_jobs = 0

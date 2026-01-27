@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,7 +14,6 @@
 
 use risingwave_common::types::Fields;
 use risingwave_frontend_macro::system_catalog;
-use risingwave_pb::user::grant_privilege::Object;
 
 use crate::catalog::OwnedByUserCatalog;
 use crate::catalog::system_catalog::{SysCatalogReaderImpl, get_acl_items};
@@ -28,6 +27,8 @@ struct RwDatabases {
     owner: i32,
     acl: Vec<String>,
     resource_group: String,
+    barrier_interval_ms: Option<i32>,
+    checkpoint_frequency: Option<i64>,
 }
 
 #[system_catalog(table, "rw_catalog.rw_databases")]
@@ -40,11 +41,13 @@ fn read(reader: &SysCatalogReaderImpl) -> Result<Vec<RwDatabases>> {
     Ok(catalog_reader
         .iter_databases()
         .map(|db| RwDatabases {
-            id: db.id() as i32,
+            id: db.id().as_i32_id(),
             name: db.name().into(),
             owner: db.owner() as i32,
-            acl: get_acl_items(&Object::DatabaseId(db.id()), false, &users, username_map),
+            acl: get_acl_items(db.id(), false, &users, username_map),
             resource_group: db.resource_group.clone(),
+            barrier_interval_ms: db.barrier_interval_ms.map(|v| v as i32),
+            checkpoint_frequency: db.checkpoint_frequency.map(|v| v as i64),
         })
         .collect())
 }

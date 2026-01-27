@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,6 +15,7 @@
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_sqlparser::ast::ObjectName;
 
+use super::util::{LongRunningNotificationAction, execute_with_long_running_notification};
 use super::{HandlerArgs, RwPgResponse};
 use crate::Binder;
 use crate::catalog::root_catalog::SchemaPath;
@@ -29,7 +30,7 @@ pub async fn handle_drop_subscription(
     let session = handler_args.session;
     let db_name = &session.database();
     let (schema_name, subscription_name) =
-        Binder::resolve_schema_qualified_name(db_name, subscription_name)?;
+        Binder::resolve_schema_qualified_name(db_name, &subscription_name)?;
     let search_path = session.config().search_path();
     let user_name = &session.user_name();
     let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
@@ -62,9 +63,13 @@ pub async fn handle_drop_subscription(
     let subscription_id = subscription.id;
 
     let catalog_writer = session.catalog_writer()?;
-    catalog_writer
-        .drop_subscription(subscription_id.subscription_id, cascade)
-        .await?;
+    execute_with_long_running_notification(
+        catalog_writer.drop_subscription(subscription_id, cascade),
+        &session,
+        "DROP SUBSCRIPTION",
+        LongRunningNotificationAction::SuggestRecover,
+    )
+    .await?;
 
     Ok(PgResponse::empty_result(StatementType::DROP_SUBSCRIPTION))
 }

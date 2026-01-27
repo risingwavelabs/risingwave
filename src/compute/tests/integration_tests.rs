@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -33,7 +33,6 @@ use risingwave_common::catalog::{
     ColumnDesc, ColumnId, ConflictBehavior, Field, INITIAL_TABLE_VERSION_ID, Schema, TableId,
 };
 use risingwave_common::row::OwnedRow;
-use risingwave_common::system_param::local_manager::LocalSystemParamsManager;
 use risingwave_common::test_prelude::DataChunkTestExt;
 use risingwave_common::types::{DataType, IntoOrdered};
 use risingwave_common::util::epoch::{EpochExt, EpochPair, test_epoch};
@@ -46,17 +45,15 @@ use risingwave_hummock_sdk::test_batch_query_epoch;
 use risingwave_pb::catalog::StreamSourceInfo;
 use risingwave_pb::plan_common::PbRowFormatType;
 use risingwave_storage::memory::MemoryStateStore;
-use risingwave_storage::panic_store::PanicStateStore;
 use risingwave_storage::table::batch_table::BatchTable;
 use risingwave_stream::common::table::state_table::StateTable;
 use risingwave_stream::common::table::test_utils::gen_pbtable;
 use risingwave_stream::error::StreamResult;
 use risingwave_stream::executor::dml::DmlExecutor;
-use risingwave_stream::executor::monitor::StreamingMetrics;
 use risingwave_stream::executor::row_id_gen::RowIdGenExecutor;
-use risingwave_stream::executor::source::SourceExecutor;
+use risingwave_stream::executor::source::DummySourceExecutor;
 use risingwave_stream::executor::{
-    ActorContext, Barrier, Execute, Executor, ExecutorInfo, MaterializeExecutor, Message, PkIndices,
+    ActorContext, Barrier, Execute, Executor, ExecutorInfo, MaterializeExecutor, Message, StreamKey,
 };
 use tokio::sync::mpsc::unbounded_channel;
 
@@ -148,7 +145,7 @@ async fn test_table_materialize() -> StreamResult<()> {
 
     let all_column_ids = vec![ColumnId::from(0), ColumnId::from(1)];
     let all_schema = get_schema(&all_column_ids);
-    let pk_indices = PkIndices::from([0]);
+    let stream_key = StreamKey::from([0]);
     let column_descs = all_column_ids
         .iter()
         .zip_eq_fast(all_schema.fields.iter().cloned())
@@ -159,33 +156,23 @@ async fn test_table_materialize() -> StreamResult<()> {
     let vnodes = Bitmap::from_bytes(&[0b11111111]);
 
     let actor_ctx = ActorContext::for_test(0x3f3f3f);
-    let system_params_manager = LocalSystemParamsManager::for_test();
 
     // Create a `SourceExecutor` to read the changes.
     let source_executor = Executor::new(
-        ExecutorInfo::new(
+        ExecutorInfo::for_test(
             all_schema.clone(),
-            pk_indices.clone(),
+            stream_key.clone(),
             "SourceExecutor".to_owned(),
             1,
         ),
-        SourceExecutor::<PanicStateStore>::new(
-            actor_ctx.clone(),
-            None, // There is no external stream source.
-            Arc::new(StreamingMetrics::unused()),
-            barrier_rx,
-            system_params_manager.get_params(),
-            None,
-            false,
-        )
-        .boxed(),
+        DummySourceExecutor::new(actor_ctx.clone(), barrier_rx).boxed(),
     );
 
     // Create a `DmlExecutor` to accept data change from users.
     let dml_executor = Executor::new(
-        ExecutorInfo::new(
+        ExecutorInfo::for_test(
             all_schema.clone(),
-            pk_indices.clone(),
+            stream_key.clone(),
             "DmlExecutor".to_owned(),
             2,
         ),
@@ -203,9 +190,9 @@ async fn test_table_materialize() -> StreamResult<()> {
     );
 
     let row_id_gen_executor = Executor::new(
-        ExecutorInfo::new(
+        ExecutorInfo::for_test(
             all_schema.clone(),
-            pk_indices.clone(),
+            stream_key.clone(),
             "RowIdGenExecutor".to_owned(),
             3,
         ),
@@ -272,7 +259,6 @@ async fn test_table_materialize() -> StreamResult<()> {
         test_batch_query_epoch(),
         1024,
         "RowSeqExecutor2".to_owned(),
-        None,
         None,
         None,
     ));
@@ -345,7 +331,6 @@ async fn test_table_materialize() -> StreamResult<()> {
         "RowSeqScanExecutor2".to_owned(),
         None,
         None,
-        None,
     ));
 
     let mut stream = scan.execute();
@@ -370,12 +355,14 @@ async fn test_table_materialize() -> StreamResult<()> {
     let delete = Box::new(DeleteExecutor::new(
         table_id,
         INITIAL_TABLE_VERSION_ID,
+        vec![0],
         dml_manager.clone(),
         delete_inner,
         1024,
         "DeleteExecutor".to_owned(),
         false,
         0,
+        false,
     ));
 
     curr_epoch.inc_epoch();
@@ -423,7 +410,6 @@ async fn test_table_materialize() -> StreamResult<()> {
         test_batch_query_epoch(),
         1024,
         "RowSeqScanExecutor2".to_owned(),
-        None,
         None,
         None,
     ));
@@ -502,7 +488,6 @@ async fn test_row_seq_scan() -> StreamResult<()> {
         test_batch_query_epoch(),
         1,
         "RowSeqScanExecutor2".to_owned(),
-        None,
         None,
         None,
     ));

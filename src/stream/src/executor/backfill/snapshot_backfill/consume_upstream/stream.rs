@@ -33,6 +33,8 @@ mod upstream_table_ext {
         VnodeStream<impl ChangeLogRowStream>;
     pub(super) type UpstreamTableSnapshotStreamFuture<'a, T> =
         BoxFuture<'a, StreamExecutorResult<UpstreamTableSnapshotStream<T>>>;
+
+    #[define_opaque(UpstreamTableSnapshotStream)]
     pub(super) fn create_upstream_table_snapshot_stream<T: UpstreamTable>(
         upstream_table: &T,
         snapshot_epoch: u64,
@@ -64,6 +66,7 @@ mod upstream_table_ext {
     pub(super) type UpstreamTableChangeLogStreamFuture<'a, T> =
         BoxFuture<'a, StreamExecutorResult<UpstreamTableChangeLogStream<T>>>;
 
+    #[define_opaque(UpstreamTableChangeLogStreamFuture)]
     pub(super) fn create_upstream_table_change_log_stream<T: UpstreamTable>(
         upstream_table: &T,
         epoch: u64,

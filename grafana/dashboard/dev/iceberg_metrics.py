@@ -9,8 +9,9 @@ def _(outer_panels: Panels):
         outer_panels.row_collapsed(
             "Iceberg Metrics",
             [
+                panels.subheader("Writer"),
                 panels.timeseries_ops(
-                    "Write Qps Of Iceberg Writer",
+                    "Write QPS of Iceberg Writer",
                     "iceberg write qps",
                     [
                         panels.target(
@@ -20,7 +21,7 @@ def _(outer_panels: Panels):
                     ],
                 ),
                 panels.timeseries_latency(
-                    "Write Latency Of Iceberg Writer",
+                    "Write Latency of Iceberg Writer",
                     "",
                     [
                         *quantile(
@@ -36,8 +37,9 @@ def _(outer_panels: Panels):
                         ),
                     ],
                 ),
+                panels.subheader("Writer State"),
                 panels.timeseries_count(
-                    "Iceberg rolling unfushed data file",
+                    "Iceberg Rolling Unflushed Data Files",
                     "",
                     [
                         panels.target(
@@ -47,7 +49,7 @@ def _(outer_panels: Panels):
                     ],
                 ),
                 panels.timeseries_count(
-                    "Iceberg position delete cache num",
+                    "Iceberg Position Delete Cache Count",
                     "",
                     [
                         panels.target(
@@ -57,7 +59,7 @@ def _(outer_panels: Panels):
                     ],
                 ),
                 panels.timeseries_count(
-                    "Iceberg partition num",
+                    "Iceberg Partition Count",
                     "",
                     [
                         panels.target(
@@ -66,6 +68,7 @@ def _(outer_panels: Panels):
                         ),
                     ],
                 ),
+                panels.subheader("Read/Write Size"),
                 panels.timeseries_bytes(
                     "Iceberg Write Size",
                     "",
@@ -91,6 +94,17 @@ def _(outer_panels: Panels):
                         panels.target(
                             f"sum({metric('iceberg_read_bytes')})",
                             "total read",
+                        ),
+                    ],
+                ),
+                panels.subheader("Snapshots"),
+                panels.timeseries_count(
+                    "Iceberg Snapshot Number",
+                    "",
+                    [
+                        panels.target(
+                            f"{metric('iceberg_snapshot_num')}",
+                            "{{sink_name}} @ {{catalog_name}} {{table_name}}",
                         ),
                     ],
                 ),

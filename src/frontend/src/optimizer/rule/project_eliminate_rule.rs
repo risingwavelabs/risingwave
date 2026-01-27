@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,12 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use super::super::plan_node::*;
-use super::{BoxedRule, Rule};
+use super::prelude::{PlanRef, *};
+use crate::optimizer::plan_node::*;
 
 /// Eliminate useless (identity) [`LogicalProject`] nodes.
 pub struct ProjectEliminateRule {}
-impl Rule for ProjectEliminateRule {
+impl Rule<Logical> for ProjectEliminateRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let project = plan.as_logical_project()?;
         if project.is_identity() {

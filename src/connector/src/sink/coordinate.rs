@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -25,11 +25,10 @@ use risingwave_pb::connector_service::SinkMetadata;
 use tracing::{info, warn};
 
 use super::{
-    LogSinker, SinkCoordinationRpcClientEnum, SinkError, SinkLogReader, SinkWriterMetrics,
-    SinkWriterParam,
+    LogSinker, SinkCoordinationRpcClientEnum, SinkLogReader, SinkWriterMetrics, SinkWriterParam,
 };
 use crate::sink::writer::SinkWriter;
-use crate::sink::{LogStoreReadItem, Result, SinkParam, TruncateOffset};
+use crate::sink::{LogStoreReadItem, Result, SinkError, SinkParam, TruncateOffset};
 
 pub struct CoordinatedLogSinker<W: SinkWriter<CommitMetadata = Option<SinkMetadata>>> {
     writer: W,
@@ -99,7 +98,7 @@ impl<W: SinkWriter<CommitMetadata = Option<SinkMetadata>>> LogSinker for Coordin
                 warn!(
                     initial_epoch,
                     aligned_initial_epoch,
-                    sink_id = self.param.sink_id.sink_id,
+                    sink_id = %self.param.sink_id,
                     "initial epoch not matched aligned initial epoch"
                 );
                 let mut peeked_first = Some(first_item);
@@ -194,6 +193,7 @@ impl<W: SinkWriter<CommitMetadata = Option<SinkMetadata>>> LogSinker for Coordin
                     is_checkpoint,
                     new_vnode_bitmap,
                     is_stop,
+                    schema_change,
                 } => {
                     let prev_epoch = match state {
                         LogConsumerState::EpochBegun { curr_epoch } => curr_epoch,
@@ -204,6 +204,7 @@ impl<W: SinkWriter<CommitMetadata = Option<SinkMetadata>>> LogSinker for Coordin
                         if current_checkpoint >= commit_checkpoint_interval.get()
                             || new_vnode_bitmap.is_some()
                             || is_stop
+                            || schema_change.is_some()
                         {
                             let start_time = Instant::now();
                             let metadata = sink_writer.barrier(true).await?;
@@ -212,7 +213,21 @@ impl<W: SinkWriter<CommitMetadata = Option<SinkMetadata>>> LogSinker for Coordin
                                     "should get metadata on checkpoint barrier"
                                 ))
                             })?;
-                            coordinator_stream_handle.commit(epoch, metadata).await?;
+                            if schema_change.is_some() {
+                                tracing::info!(
+                                    sink_id = %self.param.sink_id,
+                                    ?schema_change,
+                                    "schema change received for coordinated log sinker"
+                                );
+                                assert!(
+                                    is_stop,
+                                    "schema change should stop current sink for sink {}",
+                                    self.param.sink_id
+                                );
+                            }
+                            coordinator_stream_handle
+                                .commit(epoch, metadata, schema_change)
+                                .await?;
                             sink_writer_metrics
                                 .sink_commit_duration
                                 .observe(start_time.elapsed().as_millis() as f64);
@@ -233,7 +248,7 @@ impl<W: SinkWriter<CommitMetadata = Option<SinkMetadata>>> LogSinker for Coordin
                             if is_stop {
                                 coordinator_stream_handle.stop().await?;
                                 info!(
-                                    sink_id = self.param.sink_id.sink_id,
+                                    sink_id = %self.param.sink_id,
                                     "coordinated log sinker stops"
                                 );
                                 log_reader.truncate(TruncateOffset::Barrier { epoch })?;

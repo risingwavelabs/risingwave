@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -315,6 +315,7 @@ pub(crate) fn field_to_json(field: &Field) -> Value {
         risingwave_common::types::DataType::Struct(_) => ("string", ""),
         risingwave_common::types::DataType::List { .. } => ("string", ""),
         risingwave_common::types::DataType::Map(_) => ("string", ""),
+        risingwave_common::types::DataType::Vector(_) => ("string", ""),
     };
 
     if name.is_empty() {

@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,42 +15,92 @@
 use std::env;
 use std::path::Path;
 use std::process::Command;
+use std::sync::Once;
 
 use anyhow::{Result, anyhow};
 use itertools::Itertools;
 
+use super::ExecuteContext;
 use crate::util::is_env_set;
-use crate::{AwsS3Config, MetaNodeConfig, MinioConfig, OpendalConfig, TempoConfig};
+use crate::{AwsS3Config, MetaNodeConfig, MinioConfig, MoatConfig, OpendalConfig, TempoConfig};
 
-/// Get the command for starting the given component of RisingWave.
-pub fn risingwave_cmd(component: &str) -> Result<Command> {
-    let mut cmd = if is_env_set("USE_SYSTEM_RISINGWAVE") {
-        let mut cmd = Command::new("risingwave");
-        cmd.arg(component);
-        cmd
-    } else {
-        let prefix_bin = std::env::var("PREFIX_BIN")?;
-        let path = Path::new(&prefix_bin).join("risingwave").join(component);
-        Command::new(path)
-    };
+impl<W> ExecuteContext<W>
+where
+    W: std::io::Write,
+{
+    /// Get the command for starting the given component of RisingWave.
+    pub fn risingwave_cmd(&mut self, component: &str) -> Result<Command> {
+        let mut cmd = if let Ok(tag) = env::var("USE_SYSTEM_RISINGWAVE")
+            && let Some(tag) = tag.strip_prefix("docker:")
+        {
+            let image = format!("risingwavelabs/risingwave:{}", tag);
 
-    if crate::util::is_enable_backtrace() {
-        cmd.env("RUST_BACKTRACE", "1");
+            // Before returning the command, pull the image first.
+            self.pb
+                .set_message(format!("pulling docker image \"{image}\"..."));
+            static DOCKER_PULL: Once = Once::new();
+            DOCKER_PULL.call_once(|| {
+                let mut pull_cmd = Command::new("docker");
+                pull_cmd.arg("pull").arg(&image);
+                let output = pull_cmd.output().expect("Failed to pull docker image");
+                output.status.exit_ok().unwrap_or_else(|_| {
+                    panic!(
+                        "Failed to pull docker image: {}",
+                        String::from_utf8_lossy(&output.stderr)
+                    )
+                })
+            });
+
+            let wd = env::var("PREFIX")?; // passthrough the working directory
+            let name = format!("risedev-{}", self.id.as_ref().unwrap());
+
+            let mut cmd = Command::new("docker");
+            cmd.arg("run")
+                .arg("-it")
+                .arg("--rm")
+                .arg("--name")
+                .arg(&name)
+                .arg("--network")
+                .arg("host")
+                // Release build has a premium license working with <= 4 RWUs, i.e.,
+                // 4 CPUs and 16 GiB of memory.
+                .arg("--cpus")
+                .arg("4")
+                .arg("--memory")
+                .arg("16g")
+                .arg("-v")
+                .arg(format!("{wd}:{wd}"))
+                .arg(&image)
+                .arg(component);
+            cmd
+        } else if is_env_set("USE_SYSTEM_RISINGWAVE") {
+            let mut cmd = Command::new("risingwave");
+            cmd.arg(component);
+            cmd
+        } else {
+            let prefix_bin = std::env::var("PREFIX_BIN")?;
+            let path = Path::new(&prefix_bin).join("risingwave").join(component);
+            Command::new(path)
+        };
+
+        if crate::util::is_enable_backtrace() {
+            cmd.env("RUST_BACKTRACE", "1");
+        }
+
+        if crate::util::is_env_set("ENABLE_BUILD_RW_CONNECTOR") {
+            let prefix_bin = env::var("PREFIX_BIN")?;
+            cmd.env(
+                "CONNECTOR_LIBS_PATH",
+                Path::new(&prefix_bin).join("connector-node/libs/"),
+            );
+        }
+
+        let prefix_config = env::var("PREFIX_CONFIG")?;
+        cmd.arg("--config-path")
+            .arg(Path::new(&prefix_config).join("risingwave.toml"));
+
+        Ok(cmd)
     }
-
-    if crate::util::is_env_set("ENABLE_BUILD_RW_CONNECTOR") {
-        let prefix_bin = env::var("PREFIX_BIN")?;
-        cmd.env(
-            "CONNECTOR_LIBS_PATH",
-            Path::new(&prefix_bin).join("connector-node/libs/"),
-        );
-    }
-
-    let prefix_config = env::var("PREFIX_CONFIG")?;
-    cmd.arg("--config-path")
-        .arg(Path::new(&prefix_config).join("risingwave.toml"));
-
-    Ok(cmd)
 }
 
 /// Add a meta node to the parameters.
@@ -96,13 +146,9 @@ pub fn add_tempo_endpoint(provide_tempo: &[TempoConfig], cmd: &mut Command) -> R
 }
 
 /// Strategy for whether to enable in-memory hummock if no minio and s3 is provided.
-// TODO: dead, remove this.
 pub enum HummockInMemoryStrategy {
-    /// Enable isolated in-memory hummock. Used by single-node configuration.
-    Isolated,
-    /// Enable in-memory hummock shared in a single process. Used by risedev playground and
-    /// deterministic end-to-end tests.
-    Shared,
+    /// Enable in-memory hummock. Used by single-node configuration.
+    Allowed,
     /// Disallow in-memory hummock. Always requires minio or s3.
     Disallowed,
 }
@@ -113,6 +159,7 @@ pub fn add_hummock_backend(
     provide_opendal: &[OpendalConfig],
     provide_minio: &[MinioConfig],
     provide_aws_s3: &[AwsS3Config],
+    provide_moat: &[MoatConfig],
     hummock_in_memory_strategy: HummockInMemoryStrategy,
     cmd: &mut Command,
 ) -> Result<(bool, bool)> {
@@ -120,15 +167,12 @@ pub fn add_hummock_backend(
         provide_minio,
         provide_aws_s3,
         provide_opendal,
+        provide_moat,
     ) {
-        ([], [], []) => match hummock_in_memory_strategy {
-            HummockInMemoryStrategy::Isolated => {
+        ([], [], [], []) => match hummock_in_memory_strategy {
+            HummockInMemoryStrategy::Allowed => {
                 cmd.arg("--state-store").arg("hummock+memory");
                 (false, false)
-            }
-            HummockInMemoryStrategy::Shared => {
-                cmd.arg("--state-store").arg("hummock+memory-shared");
-                (true, false)
             }
             HummockInMemoryStrategy::Disallowed => {
                 return Err(anyhow!(
@@ -137,7 +181,7 @@ pub fn add_hummock_backend(
                 ));
             }
         },
-        ([minio], [], []) => {
+        ([minio], [], [], []) => {
             cmd.arg("--state-store").arg(format!(
                 "hummock+minio://{hummock_user}:{hummock_password}@{minio_addr}:{minio_port}/{hummock_bucket}",
                 hummock_user = minio.root_user,
@@ -148,12 +192,12 @@ pub fn add_hummock_backend(
             ));
             (true, true)
         }
-        ([], [aws_s3], []) => {
+        ([], [aws_s3], [], []) => {
             cmd.arg("--state-store")
                 .arg(format!("hummock+s3://{}", aws_s3.bucket));
             (true, true)
         }
-        ([], [], [opendal]) => {
+        ([], [], [opendal], []) => {
             if opendal.engine == "hdfs" {
                 cmd.arg("--state-store")
                     .arg(format!("hummock+hdfs://{}", opendal.namenode));
@@ -181,8 +225,18 @@ pub fn add_hummock_backend(
             }
             (true, true)
         }
-
-        (other_minio, other_s3, _) => {
+        ([minio], _, _, [moat]) => {
+            cmd.arg("--state-store").arg(format!(
+                "hummock+minio://{hummock_user}:{hummock_password}@{moat_addr}:{moat_port}/{hummock_bucket}",
+                hummock_user = minio.root_user,
+                hummock_password = minio.root_password,
+                hummock_bucket = minio.hummock_bucket,
+                moat_addr = moat.address,
+                moat_port = moat.port,
+            ));
+            (true, true)
+        }
+        (other_minio, other_s3, _, _) => {
             return Err(anyhow!(
                 "{} minio and {} s3 instance found in config, but only 1 is needed",
                 other_minio.len(),

@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -180,11 +180,10 @@ mod tests {
                 }
                 tokio::time::sleep(Duration::from_millis(10 * (n - i) as u64)).await;
                 if is_fence {
-                    let all_later_unpolled =
-                        polled_flags2[(i + 1)..n].iter().cloned().all(|flag| {
-                            let flag = flag.lock().unwrap();
-                            !*flag
-                        });
+                    let all_later_unpolled = polled_flags2[(i + 1)..n].iter().all(|flag| {
+                        let flag = flag.lock().unwrap();
+                        !*flag
+                    });
                     assert!(all_later_unpolled);
                 }
                 tokio::time::sleep(Duration::from_millis(10 * (n - i) as u64)).await;

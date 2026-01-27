@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,13 +13,14 @@
 // limitations under the License.
 
 use pretty_xmlish::{Pretty, Str, XmlNode};
-use risingwave_common::catalog::{Field, Schema};
+use risingwave_common::catalog::{Field, PROJECTED_ROW_ID_COLUMN_NAME, Schema};
 use risingwave_common::types::DataType;
 
 use super::{DistillUnit, GenericPlanNode, GenericPlanRef};
 use crate::expr::{Expr, ExprDisplay, ExprImpl, ExprRewriter, ExprVisitor};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
-use crate::optimizer::plan_node::batch::BatchPlanRef;
+use crate::optimizer::plan_node::BatchPlanRef;
+use crate::optimizer::plan_node::batch::BatchPlanNodeMetadata;
 use crate::optimizer::plan_node::utils::childless_record;
 use crate::optimizer::property::{FunctionalDependencySet, Order};
 use crate::utils::{ColIndexMapping, ColIndexMappingRewriteExt};
@@ -39,6 +40,16 @@ pub struct ProjectSet<PlanRef> {
 }
 
 impl<PlanRef> ProjectSet<PlanRef> {
+    pub(crate) fn clone_with_input<OtherPlanRef>(
+        &self,
+        input: OtherPlanRef,
+    ) -> ProjectSet<OtherPlanRef> {
+        ProjectSet {
+            select_list: self.select_list.clone(),
+            input,
+        }
+    }
+
     pub(crate) fn rewrite_exprs(&mut self, r: &mut dyn ExprRewriter) {
         self.select_list = self
             .select_list
@@ -67,7 +78,10 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for ProjectSet<PlanRef> {
     fn schema(&self) -> Schema {
         let input_schema = self.input.schema();
         let o2i = self.o2i_col_mapping();
-        let mut fields = vec![Field::with_name(DataType::Int64, "projected_row_id")];
+        let mut fields = vec![Field::with_name(
+            DataType::Int64,
+            PROJECTED_ROW_ID_COLUMN_NAME,
+        )];
         fields.extend(self.select_list.iter().enumerate().map(|(idx, expr)| {
             let idx = idx + 1;
             // Get field info from o2i.
@@ -132,7 +146,7 @@ impl<PlanRef: GenericPlanRef> ProjectSet<PlanRef> {
     }
 }
 
-impl<PlanRef: BatchPlanRef> ProjectSet<PlanRef> {
+impl ProjectSet<BatchPlanRef> {
     /// Map the order of the input to use the updated indices
     pub fn get_out_column_index_order(&self) -> Order {
         self.i2o_col_mapping()

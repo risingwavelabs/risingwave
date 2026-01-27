@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -42,6 +42,7 @@ impl Execute for SubtaskRxExecutor {
 /// Used when there're multiple stateful executors in an actor. These subtasks can be concurrently
 /// executed to improve the I/O performance, while the computing resource can be still bounded to a
 /// single thread.
+#[define_opaque(SubtaskHandle)]
 pub fn wrap(input: Executor, actor_id: ActorId) -> (SubtaskHandle, SubtaskRxExecutor) {
     let (tx, rx) = mpsc::channel(1);
     let rx_executor = SubtaskRxExecutor { rx };

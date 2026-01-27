@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,8 +19,8 @@ use risingwave_common::catalog::Schema;
 use super::generic::GenericPlanRef;
 use super::utils::{Distill, childless_record};
 use super::{
-    BatchPostgresQuery, ColPrunable, ExprRewritable, Logical, LogicalProject, PlanBase, PlanRef,
-    PredicatePushdown, ToBatch, ToStream, generic,
+    BatchPostgresQuery, ColPrunable, ExprRewritable, Logical, LogicalPlanRef as PlanRef,
+    LogicalProject, PlanBase, PredicatePushdown, ToBatch, ToStream, generic,
 };
 use crate::OptimizerContextRef;
 use crate::error::Result;
@@ -48,6 +48,8 @@ impl LogicalPostgresQuery {
         password: String,
         database: String,
         query: String,
+        ssl_mode: Option<String>,
+        ssl_root_cert: Option<String>,
     ) -> Self {
         let core = generic::PostgresQuery {
             schema,
@@ -57,6 +59,8 @@ impl LogicalPostgresQuery {
             password,
             database,
             query,
+            ssl_mode,
+            ssl_root_cert,
             ctx,
         };
 
@@ -66,7 +70,7 @@ impl LogicalPostgresQuery {
     }
 }
 
-impl_plan_tree_node_for_leaf! {LogicalPostgresQuery}
+impl_plan_tree_node_for_leaf! { Logical, LogicalPostgresQuery}
 impl Distill for LogicalPostgresQuery {
     fn distill<'a>(&self) -> XmlNode<'a> {
         let fields = vec![("columns", column_names_pretty(self.schema()))];
@@ -80,7 +84,7 @@ impl ColPrunable for LogicalPostgresQuery {
     }
 }
 
-impl ExprRewritable for LogicalPostgresQuery {}
+impl ExprRewritable<Logical> for LogicalPostgresQuery {}
 
 impl ExprVisitable for LogicalPostgresQuery {}
 
@@ -96,13 +100,16 @@ impl PredicatePushdown for LogicalPostgresQuery {
 }
 
 impl ToBatch for LogicalPostgresQuery {
-    fn to_batch(&self) -> Result<PlanRef> {
+    fn to_batch(&self) -> Result<crate::optimizer::plan_node::BatchPlanRef> {
         Ok(BatchPostgresQuery::new(self.core.clone()).into())
     }
 }
 
 impl ToStream for LogicalPostgresQuery {
-    fn to_stream(&self, _ctx: &mut ToStreamContext) -> Result<PlanRef> {
+    fn to_stream(
+        &self,
+        _ctx: &mut ToStreamContext,
+    ) -> Result<crate::optimizer::plan_node::StreamPlanRef> {
         bail!("postgres_query function is not supported in streaming mode")
     }
 
