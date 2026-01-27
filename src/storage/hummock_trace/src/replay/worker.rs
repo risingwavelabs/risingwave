@@ -485,13 +485,15 @@ mod tests {
         let (res_tx, mut res_rx) = unbounded_channel();
         let get_table_id = 12;
         let iter_table_id = 14654;
+        let get_fragment_id = 1;
+        
         let read_options = TracedReadOptions::for_test(get_table_id);
         let iter_read_options = TracedReadOptions::for_test(iter_table_id);
         let op = Operation::get(Bytes::from(vec![123]), Some(123), read_options);
 
-        let new_local_opts = TracedNewLocalOptions::for_test(get_table_id);
+        let new_local_opts = TracedNewLocalOptions::for_test(get_table_id, get_fragment_id);
 
-        let iter_local_opts = TracedNewLocalOptions::for_test(iter_table_id);
+        let iter_local_opts = TracedNewLocalOptions::for_test(iter_table_id, get_fragment_id);
         let mut should_exit = false;
         let get_storage_type = StorageType::Local(0, 0);
         let record = Record::new(get_storage_type, 1, op);

@@ -92,9 +92,9 @@ mod tests {
         let get_result = TracedBytes::from(vec![54, 32, 198, 236, 24]);
         let sync_id = 4561245432;
 
-        let opts1 = TracedNewLocalOptions::for_test(1);
-        let opts2 = TracedNewLocalOptions::for_test(2);
-        let opts3 = TracedNewLocalOptions::for_test(3);
+        let opts1 = TracedNewLocalOptions::for_test(1, 1);
+        let opts2 = TracedNewLocalOptions::for_test(2, 2);
+        let opts3 = TracedNewLocalOptions::for_test(3, 3);
 
         let storage_type1 = StorageType::Local(0, 1);
         let storage_type2 = StorageType::Local(1, 2);
