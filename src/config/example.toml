@@ -222,6 +222,7 @@ max_barrier_batch_size = 1024
 hash_join_entry_state_max_rows = 30000
 now_progress_ratio = ""
 enable_explain_analyze_stats = true
+snapshot_iter_rebuild_interval_secs = 600
 iceberg_list_interval_sec = 10
 iceberg_fetch_batch_size = 1024
 iceberg_sink_positional_delete_cache_size = 1024
