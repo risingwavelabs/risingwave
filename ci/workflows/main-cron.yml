@@ -1121,7 +1121,7 @@ steps:
     continue_on_failure: true
     allow_dependency_failure: true
 
-  # Upload coverage reports regardless of test results.
+  # Upload coverage reports regardless of test results, as the main-cron is currently not that stable.
   - label: "upload coverage reports"
     command: "ci/scripts/upload-coverage.sh"
     plugins:
