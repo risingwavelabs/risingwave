@@ -468,12 +468,12 @@
         │ └─StreamTableScan { table: t, columns: [t.x, t.y, t.k], stream_scan_type: ArrangementBackfill, stream_key: [t.k], pk: [k], dist: UpstreamHashShard(t.k) }
         └─StreamProject { exprs: [t.x, sum(Unnest($0))] }
           └─StreamHashAgg { group_key: [t.x], aggs: [sum(Unnest($0)), count] }
-            └─StreamHashJoin { type: LeftOuter, predicate: t.x IS NOT DISTINCT FROM t.x, output: [t.x, Unnest($0), t.x, projected_row_id] }
+            └─StreamHashJoin { type: LeftOuter, predicate: t.x IS NOT DISTINCT FROM t.x, output: [t.x, Unnest($0), t.x, _rw_projected_row_id] }
               ├─StreamProject { exprs: [t.x], noop_update_hint: true }
               │ └─StreamHashAgg { group_key: [t.x], aggs: [count] }
               │   └─StreamExchange { dist: HashShard(t.x) }
               │     └─StreamTableScan { table: t, columns: [t.x, t.k], stream_scan_type: ArrangementBackfill, stream_key: [t.k], pk: [k], dist: UpstreamHashShard(t.k) }
-              └─StreamProject { exprs: [t.x, Unnest($0), projected_row_id] }
+              └─StreamProject { exprs: [t.x, Unnest($0), _rw_projected_row_id] }
                 └─StreamProjectSet { select_list: [$0, Unnest($0)] }
                   └─StreamProject { exprs: [t.x], noop_update_hint: true }
                     └─StreamHashAgg { group_key: [t.x], aggs: [count] }

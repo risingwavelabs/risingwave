@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::catalog::PROJECTED_ROW_ID_COLUMN_NAME;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 
 use crate::binder::{BoundSetExpr, BoundSetOperation};
@@ -29,7 +30,7 @@ impl Planner {
     fn strip_projected_row_id(plan: PlanRef) -> PlanRef {
         let schema = plan.schema();
         if let Some(field) = schema.fields.first()
-            && field.name == "projected_row_id"
+            && field.name == PROJECTED_ROW_ID_COLUMN_NAME
         {
             let len = schema.len();
             LogicalProject::with_out_col_idx(plan, 1..len).into()
