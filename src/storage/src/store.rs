@@ -26,6 +26,7 @@ use risingwave_common::array::{Op, VectorRef};
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_common::hash::VirtualNode;
+use risingwave_common::id::FragmentId;
 use risingwave_common::util::epoch::{Epoch, EpochPair, MAX_EPOCH};
 use risingwave_common::vector::distance::DistanceMeasurement;
 use risingwave_hummock_sdk::HummockReadEpoch;
@@ -634,6 +635,7 @@ impl OpConsistencyLevel {
 #[derive(Clone)]
 pub struct NewLocalOptions {
     pub table_id: TableId,
+    pub fragment_id: FragmentId,
     /// Whether the operation is consistent. The term `consistent` requires the following:
     ///
     /// 1. A key cannot be inserted or deleted for more than once, i.e. inserting to an existing
@@ -658,6 +660,7 @@ impl From<TracedNewLocalOptions> for NewLocalOptions {
     fn from(value: TracedNewLocalOptions) -> Self {
         Self {
             table_id: value.table_id.into(),
+            fragment_id: value.fragment_id.into(),
             op_consistency_level: match value.op_consistency_level {
                 TracedOpConsistencyLevel::Inconsistent => OpConsistencyLevel::Inconsistent,
                 TracedOpConsistencyLevel::ConsistentOldValue => {
@@ -680,6 +683,7 @@ impl From<NewLocalOptions> for TracedNewLocalOptions {
     fn from(value: NewLocalOptions) -> Self {
         Self {
             table_id: value.table_id.into(),
+            fragment_id: value.fragment_id.into(),
             op_consistency_level: match value.op_consistency_level {
                 OpConsistencyLevel::Inconsistent => TracedOpConsistencyLevel::Inconsistent,
                 OpConsistencyLevel::ConsistentOldValue { .. } => {
@@ -697,6 +701,7 @@ impl From<NewLocalOptions> for TracedNewLocalOptions {
 impl NewLocalOptions {
     pub fn new(
         table_id: TableId,
+        fragment_id: FragmentId,
         op_consistency_level: OpConsistencyLevel,
         table_option: TableOption,
         vnodes: Arc<Bitmap>,
@@ -704,6 +709,7 @@ impl NewLocalOptions {
     ) -> Self {
         NewLocalOptions {
             table_id,
+            fragment_id,
             op_consistency_level,
             table_option,
             is_replicated: false,
@@ -714,12 +720,14 @@ impl NewLocalOptions {
 
     pub fn new_replicated(
         table_id: TableId,
+        fragment_id: FragmentId,
         op_consistency_level: OpConsistencyLevel,
         table_option: TableOption,
         vnodes: Arc<Bitmap>,
     ) -> Self {
         NewLocalOptions {
             table_id,
+            fragment_id,
             op_consistency_level,
             table_option,
             is_replicated: true,
@@ -731,6 +739,7 @@ impl NewLocalOptions {
     pub fn for_test(table_id: TableId) -> Self {
         Self {
             table_id,
+            fragment_id: FragmentId::default(),
             op_consistency_level: OpConsistencyLevel::Inconsistent,
             table_option: TableOption {
                 retention_seconds: None,
