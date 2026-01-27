@@ -208,12 +208,3 @@
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
     └─BatchScan { table: mv, columns: [mv.count], distribution: Single }
-- sql: |
-    create table t1 (a int, b int);
-    create materialized view mv as select * from t1 where a > 10;
-    set enable_mv_selection = true;
-    select * from t1 where a > 10 and b > 20;
-  batch_plan: |-
-    BatchExchange { order: [], dist: Single }
-    └─BatchFilter { predicate: (t1.a > 10:Int32) AND (t1.b > 20:Int32) }
-      └─BatchScan { table: t1, columns: [t1.a, t1.b], distribution: SomeShard }

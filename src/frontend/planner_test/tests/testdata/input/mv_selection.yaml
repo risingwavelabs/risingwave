@@ -53,8 +53,8 @@
     o_comment VARCHAR,
     PRIMARY KEY (o_orderkey)
     );
-    
-    
+
+
     CREATE TABLE lineitem (
     l_orderkey BIGINT,
     l_partkey INTEGER,
@@ -103,7 +103,7 @@
         and l_shipdate < date '1993-01-01' + interval '3' month
       group by
         l_suppkey;
-    
+
     with revenue0 (supplier_no, total_revenue) as (
       select
         l_suppkey,
@@ -164,7 +164,7 @@
     order by
     l_returnflag,
     l_linestatus;
-    
+
     select
       l_returnflag,
       l_linestatus,
