@@ -232,7 +232,13 @@ impl MonitorService for MonitorServiceImpl {
         let metrics = global_streaming_metrics(MetricLevel::Info);
 
         fn collect<T: Collector>(m: &T) -> Vec<Metric> {
-            m.collect().into_iter().next().unwrap().take_metric()
+            // `Collector::collect` is not guaranteed to return a non-empty list.
+            // Stats RPC should never panic even if metrics are momentarily inconsistent.
+            m.collect()
+                .into_iter()
+                .next()
+                .map(|mut mf| mf.take_metric())
+                .unwrap_or_default()
         }
 
         let actor_output_buffer_blocking_duration_ns =
@@ -307,6 +313,25 @@ impl MonitorService for MonitorServiceImpl {
             let downstream_fragment_id: u32 =
                 get_label_infallible(&metric, "downstream_fragment_id");
 
+            let actor_count_to_add =
+                if get_label_infallible::<String>(&metric, "actor_id").is_empty() {
+                    match actor_count.get(&fragment_id) {
+                        Some(&count) => count,
+                        None => {
+                            // Metrics can be momentarily inconsistent (or stale) across families.
+                            // Skip this channel instead of crashing the compute node.
+                            warn!(
+                                fragment_id = fragment_id,
+                                downstream_fragment_id = downstream_fragment_id,
+                                "Miss corresponding actor count metrics"
+                            );
+                            continue;
+                        }
+                    }
+                } else {
+                    1
+                };
+
             let key = format!("{}_{}", fragment_id, downstream_fragment_id);
             let channel_stat = channel_stats.entry(key).or_insert_with(|| ChannelStats {
                 actor_count: 0,
@@ -317,12 +342,7 @@ impl MonitorService for MonitorServiceImpl {
 
             // When metrics level is Debug, `actor_id` will be removed to reduce metrics.
             // See `src/common/metrics/src/relabeled_metric.rs`
-            channel_stat.actor_count +=
-                if get_label_infallible::<String>(&metric, "actor_id").is_empty() {
-                    actor_count[&fragment_id]
-                } else {
-                    1
-                };
+            channel_stat.actor_count += actor_count_to_add;
             channel_stat.output_blocking_duration += metric.get_counter().value();
         }
 
