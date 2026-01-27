@@ -458,6 +458,11 @@ impl Agg<StreamPlanRef> {
         self.agg_calls
             .iter()
             .map(|agg_call| match agg_call.agg_type {
+                AggType::Builtin(PbAggKind::FirstValue | PbAggKind::LastValue)
+                    if in_append_only && !agg_call.distinct =>
+                {
+                    AggCallState::Value
+                }
                 agg_types::single_value_state_iff_in_append_only!() if in_append_only => {
                     AggCallState::Value
                 }
@@ -578,6 +583,18 @@ impl Agg<StreamPlanRef> {
             .iter()
             .zip_eq_fast(&mut out_fields[self.group_key.len()..])
         {
+            if in_append_only
+                && !agg_call.distinct
+                && matches!(
+                    agg_call.agg_type,
+                    AggType::Builtin(PbAggKind::FirstValue | PbAggKind::LastValue)
+                )
+            {
+                // For append-only `first_value`/`last_value` value-state, we encode state in BYTEA.
+                field.data_type = DataType::Bytea;
+                continue;
+            }
+
             let agg_kind = match agg_call.agg_type {
                 AggType::UserDefined(_) => {
                     // for user defined aggregate, the state type is always BYTEA
