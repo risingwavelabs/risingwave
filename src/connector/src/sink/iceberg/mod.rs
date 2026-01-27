@@ -189,6 +189,8 @@ pub const TARGET_FILE_SIZE_MB: &str = "target_file_size_mb";
 pub const WRITE_PARQUET_COMPRESSION: &str = "write_parquet_compression";
 pub const WRITE_PARQUET_MAX_ROW_GROUP_ROWS: &str = "write_parquet_max_row_group_rows";
 
+const PARQUET_CREATED_BY: &str = concat!("risingwave version ", env!("CARGO_PKG_VERSION"));
+
 fn default_commit_retry_num() -> u32 {
     8
 }
@@ -560,6 +562,11 @@ impl IcebergConfig {
         self.sink_target_file_size_mb.unwrap_or(512)
     }
 
+    /// Get the target file size in bytes for sink writes
+    pub fn sink_target_file_size_bytes(&self) -> usize {
+        (self.sink_target_file_size_mb() * 1024 * 1024) as usize
+    }
+
     /// Get the parquet compression codec
     /// Default is "snappy"
     pub fn write_parquet_compression(&self) -> &str {
@@ -592,7 +599,7 @@ fn parse_parquet_compression(codec: &str) -> Compression {
         "lz4" => Compression::LZ4,
         "zstd" => Compression::ZSTD(Default::default()),
         _ => {
-            warn!(
+            tracing::warn!(
                 "Unknown compression codec '{}', falling back to SNAPPY",
                 codec
             );
@@ -1203,15 +1210,14 @@ impl IcebergSinkWriterInner {
         let parquet_writer_properties = WriterProperties::builder()
             .set_compression(config.get_parquet_compression())
             .set_max_row_group_size(config.write_parquet_max_row_group_rows())
-            .set_created_by(concat!("risingwave version ", env!("CARGO_PKG_VERSION")).to_owned())
+            .set_created_by(PARQUET_CREATED_BY.to_owned())
             .build();
 
         let parquet_writer_builder =
             ParquetWriterBuilder::new(parquet_writer_properties, schema.clone());
-        let target_file_size_bytes = config.sink_target_file_size_mb() * 1024 * 1024;
         let rolling_builder = RollingFileWriterBuilder::new(
             parquet_writer_builder,
-            target_file_size_bytes as usize,
+            config.sink_target_file_size_bytes(),
             table.file_io().clone(),
             DefaultLocationGenerator::new(table.metadata().clone())
                 .map_err(|err| SinkError::Iceberg(anyhow!(err)))?,
@@ -1312,16 +1318,15 @@ impl IcebergSinkWriterInner {
         let parquet_writer_properties = WriterProperties::builder()
             .set_compression(config.get_parquet_compression())
             .set_max_row_group_size(config.write_parquet_max_row_group_rows())
-            .set_created_by(concat!("risingwave version ", env!("CARGO_PKG_VERSION")).to_owned())
+            .set_created_by(PARQUET_CREATED_BY.to_owned())
             .build();
 
-        let target_file_size_bytes = config.sink_target_file_size_mb() * 1024 * 1024;
         let data_file_builder = {
             let parquet_writer_builder =
                 ParquetWriterBuilder::new(parquet_writer_properties.clone(), schema.clone());
             let rolling_writer_builder = RollingFileWriterBuilder::new(
                 parquet_writer_builder,
-                target_file_size_bytes as usize,
+                config.sink_target_file_size_bytes(),
                 table.file_io().clone(),
                 DefaultLocationGenerator::new(table.metadata().clone())
                     .map_err(|err| SinkError::Iceberg(anyhow!(err)))?,
@@ -1340,7 +1345,7 @@ impl IcebergSinkWriterInner {
             );
             let rolling_writer_builder = RollingFileWriterBuilder::new(
                 parquet_writer_builder,
-                target_file_size_bytes as usize,
+                config.sink_target_file_size_bytes(),
                 table.file_io().clone(),
                 DefaultLocationGenerator::new(table.metadata().clone())
                     .map_err(|err| SinkError::Iceberg(anyhow!(err)))?,
@@ -1353,7 +1358,7 @@ impl IcebergSinkWriterInner {
             PositionDeleteFileWriterBuilder::new(rolling_writer_builder)
         };
         let equality_delete_builder = {
-            let config = EqualityDeleteWriterConfig::new(
+            let eq_del_config = EqualityDeleteWriterConfig::new(
                 unique_column_ids.clone(),
                 table.metadata().current_schema().clone(),
             )
@@ -1361,13 +1366,13 @@ impl IcebergSinkWriterInner {
             let parquet_writer_builder = ParquetWriterBuilder::new(
                 parquet_writer_properties,
                 Arc::new(
-                    arrow_schema_to_schema(config.projected_arrow_schema_ref())
+                    arrow_schema_to_schema(eq_del_config.projected_arrow_schema_ref())
                         .map_err(|err| SinkError::Iceberg(anyhow!(err)))?,
                 ),
             );
             let rolling_writer_builder = RollingFileWriterBuilder::new(
                 parquet_writer_builder,
-                target_file_size_bytes as usize,
+                config.sink_target_file_size_bytes(),
                 table.file_io().clone(),
                 DefaultLocationGenerator::new(table.metadata().clone())
                     .map_err(|err| SinkError::Iceberg(anyhow!(err)))?,
@@ -1378,7 +1383,7 @@ impl IcebergSinkWriterInner {
                 ),
             );
 
-            EqualityDeleteFileWriterBuilder::new(rolling_writer_builder, config)
+            EqualityDeleteFileWriterBuilder::new(rolling_writer_builder, eq_del_config)
         };
         let delta_builder = DeltaWriterBuilder::new(
             data_file_builder,
