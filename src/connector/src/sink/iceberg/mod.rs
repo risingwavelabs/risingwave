@@ -3033,6 +3033,9 @@ mod test {
             trigger_snapshot_count: None,
             target_file_size_mb: None,
             compaction_type: None,
+            sink_target_file_size_mb: None,
+            write_parquet_compression: None,
+            write_parquet_max_row_group_rows: None,
         };
 
         assert_eq!(iceberg_config, expected_iceberg_config);
@@ -3450,5 +3453,122 @@ mod test {
         assert_eq!(iceberg_config.trigger_snapshot_count, Some(10));
         assert_eq!(iceberg_config.target_file_size_mb, Some(256));
         assert_eq!(iceberg_config.compaction_type, Some(CompactionType::Full));
+    }
+
+    /// Test parsing target file size and parquet properties.
+    #[test]
+    fn test_parse_target_file_size_and_parquet_properties() {
+        let values: BTreeMap<String, String> = [
+            ("connector", "iceberg"),
+            ("type", "append-only"),
+            ("force_append_only", "true"),
+            ("catalog.name", "test-catalog"),
+            ("catalog.type", "storage"),
+            ("warehouse.path", "s3://my-bucket/warehouse"),
+            ("database.name", "test_db"),
+            ("table.name", "test_table"),
+            ("target_file_size_mb", "256"),
+            ("write_parquet_compression", "zstd"),
+            ("write_parquet_max_row_group_rows", "50000"),
+        ]
+        .into_iter()
+        .map(|(k, v)| (k.to_owned(), v.to_owned()))
+        .collect();
+
+        let iceberg_config = IcebergConfig::from_btreemap(values).unwrap();
+
+        // Verify sink target file size
+        assert_eq!(iceberg_config.sink_target_file_size_mb, Some(256));
+        assert_eq!(iceberg_config.sink_target_file_size_mb(), 256);
+
+        // Verify parquet compression
+        assert_eq!(
+            iceberg_config.write_parquet_compression.as_deref(),
+            Some("zstd")
+        );
+        assert_eq!(iceberg_config.write_parquet_compression(), "zstd");
+
+        // Verify parquet max row group rows
+        assert_eq!(iceberg_config.write_parquet_max_row_group_rows, Some(50000));
+        assert_eq!(iceberg_config.write_parquet_max_row_group_rows(), 50000);
+    }
+
+    /// Test default values for target file size and parquet properties.
+    #[test]
+    fn test_default_target_file_size_and_parquet_properties() {
+        let values: BTreeMap<String, String> = [
+            ("connector", "iceberg"),
+            ("type", "append-only"),
+            ("force_append_only", "true"),
+            ("catalog.name", "test-catalog"),
+            ("catalog.type", "storage"),
+            ("warehouse.path", "s3://my-bucket/warehouse"),
+            ("database.name", "test_db"),
+            ("table.name", "test_table"),
+        ]
+        .into_iter()
+        .map(|(k, v)| (k.to_owned(), v.to_owned()))
+        .collect();
+
+        let iceberg_config = IcebergConfig::from_btreemap(values).unwrap();
+
+        // Verify default values
+        assert_eq!(iceberg_config.sink_target_file_size_mb, None);
+        assert_eq!(iceberg_config.sink_target_file_size_mb(), 512); // Default is 512 MB
+
+        assert_eq!(iceberg_config.write_parquet_compression, None);
+        assert_eq!(iceberg_config.write_parquet_compression(), "snappy"); // Default is snappy
+
+        assert_eq!(iceberg_config.write_parquet_max_row_group_rows, None);
+        assert_eq!(iceberg_config.write_parquet_max_row_group_rows(), 122880); // Default is 122880
+    }
+
+    /// Test parquet compression parsing.
+    #[test]
+    fn test_parse_parquet_compression() {
+        use super::parse_parquet_compression;
+        use parquet::basic::Compression;
+
+        // Test valid compression types
+        assert!(matches!(
+            parse_parquet_compression("snappy"),
+            Compression::SNAPPY
+        ));
+        assert!(matches!(
+            parse_parquet_compression("gzip"),
+            Compression::GZIP(_)
+        ));
+        assert!(matches!(
+            parse_parquet_compression("zstd"),
+            Compression::ZSTD(_)
+        ));
+        assert!(matches!(
+            parse_parquet_compression("lz4"),
+            Compression::LZ4
+        ));
+        assert!(matches!(
+            parse_parquet_compression("brotli"),
+            Compression::BROTLI(_)
+        ));
+        assert!(matches!(
+            parse_parquet_compression("uncompressed"),
+            Compression::UNCOMPRESSED
+        ));
+
+        // Test case insensitivity
+        assert!(matches!(
+            parse_parquet_compression("SNAPPY"),
+            Compression::SNAPPY
+        ));
+        assert!(matches!(
+            parse_parquet_compression("Zstd"),
+            Compression::ZSTD(_)
+        ));
+
+        // Test invalid compression (should fall back to SNAPPY)
+        assert!(matches!(
+            parse_parquet_compression("invalid"),
+            Compression::SNAPPY
+        ));
     }
 }
