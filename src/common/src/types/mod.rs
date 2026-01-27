@@ -1280,7 +1280,10 @@ impl ScalarImpl {
 
 /// Returns whether the `literal` matches the `data_type`.
 pub fn literal_type_match(data_type: &DataType, literal: Option<&ScalarImpl>) -> bool {
-    literal.map_or(true, |scalar| scalar_ref_type_match(data_type, scalar.as_scalar_ref_impl()))
+    match literal {
+        None => true,
+        Some(scalar) => scalar_ref_type_match(data_type, scalar.as_scalar_ref_impl()),
+    }
 }
 
 /// Returns whether the scalar ref matches the `data_type`.
@@ -1320,7 +1323,10 @@ pub fn scalar_ref_type_match(data_type: &DataType, scalar: ScalarRefImpl<'_>) ->
 /// Returns whether the `datum` matches the `data_type`.
 #[inline(always)]
 pub fn datum_ref_type_match(data_type: &DataType, datum: DatumRef<'_>) -> bool {
-    datum.map_or(true, |scalar| scalar_ref_type_match(data_type, scalar))
+    match datum {
+        None => true,
+        Some(scalar) => scalar_ref_type_match(data_type, scalar),
+    }
 }
 
 fn struct_ref_type_match(expected: &StructType, value: StructRef<'_>) -> bool {
@@ -1336,7 +1342,7 @@ fn struct_ref_type_match(expected: &StructType, value: StructRef<'_>) -> bool {
             }
             expected
                 .types()
-                .zip(fields.iter())
+                .zip_eq_fast(fields.iter())
                 .all(|(ty, datum)| datum_ref_type_match(ty, datum.to_datum_ref()))
         }
     }
