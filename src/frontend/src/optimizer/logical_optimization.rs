@@ -589,6 +589,14 @@ static CORRELATED_TOP_N_TO_VECTOR_SEARCH_FOR_STREAM: LazyLock<OptimizationStage>
         )
     });
 
+static BATCH_MV_SELECTION: LazyLock<OptimizationStage> = LazyLock::new(|| {
+    OptimizationStage::new(
+        "Batch Mv Selection",
+        vec![MvSelectionRule::create()],
+        ApplyOrder::TopDown,
+    )
+});
+
 impl LogicalOptimizer {
     pub fn predicate_pushdown(
         plan: LogicalPlanRef,
@@ -828,6 +836,8 @@ impl LogicalOptimizer {
             ctx.trace("Begin:");
             ctx.trace(plan.explain_to_string());
         }
+
+        plan = plan.optimize_by_rules(&BATCH_MV_SELECTION)?;
 
         // Inline `NOW()` and `PROCTIME()`, only for batch queries.
         plan = Self::inline_now_proc_time(plan, &ctx);
