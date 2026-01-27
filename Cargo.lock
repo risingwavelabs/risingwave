@@ -1935,7 +1935,7 @@ dependencies = [
  "bitflags 2.10.0",
  "cexpr",
  "clang-sys",
- "itertools 0.13.0",
+ "itertools 0.10.5",
  "log",
  "prettyplease 0.2.15",
  "proc-macro2",
@@ -7098,9 +7098,9 @@ dependencies = [
 
 [[package]]
 name = "jsonwebtoken"
-version = "10.2.0"
+version = "10.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c76e1c7d7df3e34443b3621b459b066a7b79644f059fc8b2db7070c825fd417e"
+checksum = "0529410abe238729a60b108898784df8984c87f6054c9c4fcacc47e4803c1ce1"
 dependencies = [
  "aws-lc-rs",
  "base64 0.22.1",
@@ -9321,7 +9321,7 @@ dependencies = [
  "bytes",
  "futures",
  "itertools 0.14.0",
- "jsonwebtoken 10.2.0",
+ "jsonwebtoken 10.3.0",
  "ldap3",
  "madsim-tokio",
  "openssl",
@@ -9994,7 +9994,7 @@ version = "0.13.4"
 source = "git+https://github.com/risingwavelabs/prost.git?rev=4a442caf7c0a43feb4aea64bde6aea4488d9917f#4a442caf7c0a43feb4aea64bde6aea4488d9917f"
 dependencies = [
  "heck 0.5.0",
- "itertools 0.13.0",
+ "itertools 0.10.5",
  "log",
  "multimap 0.10.0",
  "once_cell",
@@ -10026,7 +10026,7 @@ version = "0.13.4"
 source = "git+https://github.com/risingwavelabs/prost.git?rev=4a442caf7c0a43feb4aea64bde6aea4488d9917f#4a442caf7c0a43feb4aea64bde6aea4488d9917f"
 dependencies = [
  "anyhow",
- "itertools 0.13.0",
+ "itertools 0.10.5",
  "proc-macro2",
  "quote",
  "syn 2.0.111",
@@ -12131,7 +12131,7 @@ dependencies = [
  "expect-test",
  "humansize",
  "jsonbb",
- "jsonwebtoken 10.2.0",
+ "jsonwebtoken 10.3.0",
  "risingwave_pb",
  "risingwave_telemetry_event",
  "serde",
