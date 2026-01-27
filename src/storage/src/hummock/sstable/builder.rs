@@ -16,6 +16,7 @@ use std::collections::{BTreeSet, HashMap};
 use std::sync::Arc;
 use std::time::SystemTime;
 
+use await_tree::{InstrumentAwait, SpanExt};
 use bytes::{Bytes, BytesMut};
 use risingwave_common::catalog::TableId;
 use risingwave_common::util::row_serde::OrderedRowSerde;
@@ -226,7 +227,9 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
         if self.last_table_id.is_none() || self.last_table_id.unwrap() != table_id {
             if !self.block_builder.is_empty() {
                 // Try to finish the previous `Block`` when the `table_id` is switched, making sure that the data in the `Block` doesn't span two `table_ids`.
-                self.build_block().await?;
+                self.build_block()
+                    .instrument_await("build_block".verbose())
+                    .await?;
             }
 
             self.table_ids.insert(table_id);
@@ -255,7 +258,9 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
                 return Ok(false);
             }
 
-            self.build_block().await?;
+            self.build_block()
+                .instrument_await("build_block".verbose())
+                .await?;
         }
         self.last_full_key = largest_key;
         assert_eq!(
@@ -270,7 +275,10 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
         self.block_metas.push(meta);
         self.filter_builder.add_raw_data(filter_data);
         let block_meta = self.block_metas.last_mut().unwrap();
-        self.writer.write_block_bytes(buf, block_meta).await?;
+        self.writer
+            .write_block_bytes(buf, block_meta)
+            .instrument_await("write_block_bytes".verbose())
+            .await?;
 
         Ok(true)
     }
@@ -343,10 +351,14 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             self.finalize_last_table_stats();
             self.last_table_id = Some(table_id);
             if !self.block_builder.is_empty() {
-                self.build_block().await?;
+                self.build_block()
+                    .instrument_await("build_block".verbose())
+                    .await?;
             }
         } else if is_block_full && could_switch_block {
-            self.build_block().await?;
+            self.build_block()
+                .instrument_await("build_block".verbose())
+                .await?;
         }
         self.last_table_stats.total_key_count += 1;
         self.epoch_set.insert(full_key.epoch_with_gap.pure_epoch());
@@ -413,7 +425,9 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
         let largest_key = self.last_full_key.clone();
         self.finalize_last_table_stats();
 
-        self.build_block().await?;
+        self.build_block()
+            .instrument_await("build_block".verbose())
+            .await?;
         let right_exclusive = false;
         let meta_offset = self.writer.data_len() as u64;
 
@@ -576,7 +590,11 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             }
         }
 
-        let writer_output = self.writer.finish(meta).await?;
+        let writer_output = self
+            .writer
+            .finish(meta)
+            .instrument_await("writer_finish".verbose())
+            .await?;
         // The timestamp is only used during full GC.
         //
         // Ideally object store object's last_modified should be used.
@@ -626,7 +644,10 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
                 )
             });
         let block = self.block_builder.build();
-        self.writer.write_block(block, block_meta).await?;
+        self.writer
+            .write_block(block, block_meta)
+            .instrument_await("write_block".verbose())
+            .await?;
         self.block_size_vec.push(block.len());
         self.filter_builder
             .switch_block(self.memory_limiter.clone());
