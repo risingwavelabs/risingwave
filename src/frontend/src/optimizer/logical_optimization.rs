@@ -33,7 +33,7 @@ use crate::optimizer::plan_visitor::{
 };
 use crate::optimizer::rule::*;
 use crate::utils::Condition;
-use crate::{Explain, OptimizerContextRef};
+use crate::{Binder, Explain, OptimizerContextRef, Planner};
 
 impl<C: ConventionMarker> PlanRef<C> {
     fn optimize_by_rules_inner(
@@ -109,7 +109,10 @@ impl<C: ConventionMarker> OptimizationStage<C> {
 
 use std::sync::LazyLock;
 
+use risingwave_sqlparser::ast::Statement;
+
 use crate::optimizer::plan_node::generic::GenericPlanRef;
+use crate::session::SessionImpl;
 
 pub struct LogicalOptimizer {}
 
@@ -838,6 +841,7 @@ impl LogicalOptimizer {
         }
 
         if ctx.session_ctx().config().enable_mv_selection() {
+            Self::register_batch_mview_candidates(ctx.session_ctx(), &ctx);
             plan = plan.optimize_by_rules(&BATCH_MV_SELECTION)?;
         }
 
@@ -952,5 +956,42 @@ impl LogicalOptimizer {
         ctx.may_store_explain_logical(&plan);
 
         Ok(plan)
+    }
+
+    fn register_batch_mview_candidates(session: &SessionImpl, context: &OptimizerContextRef) {
+        let catalog_reader = session.env().catalog_reader().read_guard();
+        let user_reader = session.env().user_info_reader().read_guard();
+        let Some(current_user) = user_reader.get_user_by_name(&session.user_name()) else {
+            return;
+        };
+        let db_name = session.database();
+        let Ok(schemas) = catalog_reader.iter_schemas(&db_name) else {
+            return;
+        };
+
+        for schema in schemas {
+            for mv in schema.iter_created_mvs_with_acl(current_user) {
+                let Ok(stmt) = mv.create_sql_ast() else {
+                    continue;
+                };
+                let Statement::CreateView {
+                    materialized: true,
+                    query,
+                    ..
+                } = stmt
+                else {
+                    continue;
+                };
+                let mut binder = Binder::new_for_batch(session);
+                let Ok(bound_query) = binder.bind_query(&query) else {
+                    continue;
+                };
+                let mut planner = Planner::new_for_batch_dql(context.clone());
+                let Ok(plan_root) = planner.plan_query(bound_query) else {
+                    continue;
+                };
+                context.add_batch_mview_candidate(mv.clone(), plan_root.plan.clone());
+            }
+        }
     }
 }

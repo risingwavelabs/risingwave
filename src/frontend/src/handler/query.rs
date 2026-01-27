@@ -325,9 +325,6 @@ fn gen_batch_query_plan(
     };
 
     let logical = planner.plan(bound)?;
-    if context.session_ctx().config().enable_mv_selection() {
-        register_batch_mview_candidates(session, &context);
-    }
     let schema = logical.schema();
     let optimized_logical = logical.gen_optimized_logical_plan_for_batch()?;
 
@@ -394,43 +391,6 @@ fn gen_batch_query_plan(
         dependent_relations: dependent_relations.into_iter().collect_vec(),
     };
     Ok(BatchPlanChoice::Rw(result))
-}
-
-fn register_batch_mview_candidates(session: &SessionImpl, context: &OptimizerContextRef) {
-    let catalog_reader = session.env().catalog_reader().read_guard();
-    let user_reader = session.env().user_info_reader().read_guard();
-    let Some(current_user) = user_reader.get_user_by_name(&session.user_name()) else {
-        return;
-    };
-    let db_name = session.database();
-    let Ok(schemas) = catalog_reader.iter_schemas(&db_name) else {
-        return;
-    };
-
-    for schema in schemas {
-        for mv in schema.iter_created_mvs_with_acl(current_user) {
-            let Ok(stmt) = mv.create_sql_ast() else {
-                continue;
-            };
-            let Statement::CreateView {
-                materialized: true,
-                query,
-                ..
-            } = stmt
-            else {
-                continue;
-            };
-            let mut binder = Binder::new_for_batch(session);
-            let Ok(bound_query) = binder.bind_query(&query) else {
-                continue;
-            };
-            let mut planner = Planner::new_for_batch_dql(context.clone());
-            let Ok(plan_root) = planner.plan_query(bound_query) else {
-                continue;
-            };
-            context.add_batch_mview_candidate(mv.clone(), plan_root.plan.clone());
-        }
-    }
 }
 
 fn must_run_in_distributed_mode(stmt: &Statement) -> Result<bool> {
