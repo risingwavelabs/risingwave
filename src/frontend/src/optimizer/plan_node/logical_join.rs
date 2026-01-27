@@ -1050,15 +1050,9 @@ impl LogicalJoin {
 
     fn should_be_stream_temporal_join<'a>(
         &'a self,
-        ctx: &ToStreamContext,
+        _ctx: &ToStreamContext,
     ) -> Result<Option<TemporalJoinScan<'a>>> {
         Ok(if let Some(scan) = self.temporal_join_on() {
-            if let BackfillType::SnapshotBackfill = ctx.backfill_type() {
-                return Err(RwError::from(ErrorCode::NotSupported(
-                    "Temporal join with snapshot backfill not supported".into(),
-                    "Please use arrangement backfill".into(),
-                )));
-            }
             if scan.cross_database() {
                 return Err(RwError::from(ErrorCode::NotSupported(
                         "Temporal join requires the lookup table to be in the same database as the stream source table".into(),
@@ -1131,6 +1125,7 @@ impl LogicalJoin {
         predicate: EqJoinPredicate,
         output_indices: &[usize],
         left_schema_len: usize,
+        stream_scan_type: StreamScanType,
     ) -> Result<(StreamTableScan, EqJoinPredicate, Condition, Vec<usize>)> {
         // Extract the predicate from logical scan. Only pure scan is supported.
         let (new_scan, scan_predicate, project_expr) = logical_scan.predicate_pull_up();
@@ -1184,7 +1179,7 @@ impl LogicalJoin {
             .collect_vec();
 
         let new_stream_table_scan =
-            StreamTableScan::new_with_stream_scan_type(new_scan, StreamScanType::UpstreamOnly);
+            StreamTableScan::new_with_stream_scan_type(new_scan, stream_scan_type);
         Ok((
             new_stream_table_scan,
             new_predicate,
@@ -1274,12 +1269,19 @@ impl LogicalJoin {
         // Enforce a shuffle for the temporal join LHS to let the scheduler be able to schedule the join fragment together with the RHS with a `no_shuffle` exchange.
         let left = required_dist.stream_enforce(left);
 
+        let stream_scan_type = if matches!(ctx.backfill_type(), BackfillType::SnapshotBackfill) {
+            StreamScanType::SnapshotBackfillNoUpstream
+        } else {
+            StreamScanType::UpstreamOnly
+        };
+
         let (new_stream_table_scan, new_predicate, new_join_on, new_join_output_indices) =
             Self::temporal_join_scan_predicate_pull_up(
                 logical_scan,
                 predicate,
                 self.output_indices(),
                 self.left().schema().len(),
+                stream_scan_type,
             )?;
 
         let right = RequiredDist::no_shuffle(new_stream_table_scan.into());
@@ -1335,12 +1337,19 @@ impl LogicalJoin {
             )));
         }
 
+        let stream_scan_type = if matches!(ctx.backfill_type(), BackfillType::SnapshotBackfill) {
+            StreamScanType::SnapshotBackfillNoUpstream
+        } else {
+            StreamScanType::UpstreamOnly
+        };
+
         let (new_stream_table_scan, new_predicate, new_join_on, new_join_output_indices) =
             Self::temporal_join_scan_predicate_pull_up(
                 logical_scan,
                 predicate,
                 self.output_indices(),
                 self.left().schema().len(),
+                stream_scan_type,
             )?;
 
         let right = RequiredDist::no_shuffle(new_stream_table_scan.into());

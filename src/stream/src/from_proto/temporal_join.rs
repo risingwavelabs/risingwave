@@ -18,6 +18,7 @@ use risingwave_common::catalog::ColumnId;
 use risingwave_common::hash::{HashKey, HashKeyDispatcher};
 use risingwave_common::types::DataType;
 use risingwave_expr::expr::{NonStrictExpression, build_non_strict_from_prost};
+use risingwave_hummock_sdk::HummockEpoch;
 use risingwave_pb::plan_common::{JoinType as JoinTypeProto, StorageTableDesc};
 use risingwave_storage::table::batch_table::BatchTable;
 
@@ -61,6 +62,8 @@ impl ExecutorBuilder for TemporalJoinExecutorBuilder {
             .collect_vec();
         let [source_l, source_r]: [_; 2] = params.input.try_into().unwrap();
 
+        let snapshot_epoch = node.snapshot_backfill_epoch;
+
         if node.get_is_nested_loop() {
             let right_table = BatchTable::new_partial(
                 store.clone(),
@@ -83,6 +86,7 @@ impl ExecutorBuilder for TemporalJoinExecutorBuilder {
                 chunk_size: params.config.developer.chunk_size,
                 metrics: params.executor_stats,
                 join_type_proto: node.get_join_type()?,
+                snapshot_epoch,
             };
             Ok((params.info, dispatcher_args.dispatch()?).into())
         } else {
@@ -165,6 +169,7 @@ impl ExecutorBuilder for TemporalJoinExecutorBuilder {
                 join_key_data_types,
                 memo_table,
                 append_only,
+                snapshot_epoch,
             };
 
             Ok((params.info, dispatcher_args.dispatch()?).into())
@@ -192,6 +197,7 @@ struct TemporalJoinExecutorDispatcherArgs<S: StateStore> {
     join_key_data_types: Vec<DataType>,
     memo_table: Option<StateTable<S>>,
     append_only: bool,
+    snapshot_epoch: Option<HummockEpoch>,
 }
 
 impl<S: StateStore> HashKeyDispatcher for TemporalJoinExecutorDispatcherArgs<S> {
@@ -224,6 +230,7 @@ impl<S: StateStore> HashKeyDispatcher for TemporalJoinExecutorDispatcherArgs<S> 
                     self.chunk_size,
                     self.join_key_data_types,
                     self.memo_table,
+                    self.snapshot_epoch,
                 )))
             };
         }
@@ -262,6 +269,7 @@ struct NestedLoopTemporalJoinExecutorDispatcherArgs<S: StateStore> {
     chunk_size: usize,
     metrics: Arc<StreamingMetrics>,
     join_type_proto: JoinTypeProto,
+    snapshot_epoch: Option<HummockEpoch>,
 }
 
 impl<S: StateStore> NestedLoopTemporalJoinExecutorDispatcherArgs<S> {
@@ -282,6 +290,7 @@ impl<S: StateStore> NestedLoopTemporalJoinExecutorDispatcherArgs<S> {
                     self.output_indices,
                     self.metrics,
                     self.chunk_size,
+                    self.snapshot_epoch,
                 )))
             };
         }

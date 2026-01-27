@@ -506,16 +506,35 @@ impl catalog::StreamSourceInfo {
     }
 }
 
-impl stream_plan::PbStreamScanType {
+impl PbStreamScanType {
     pub fn is_reschedulable(&self) -> bool {
         match self {
-            // todo: should this be true?
-            PbStreamScanType::UpstreamOnly => false,
-            PbStreamScanType::ArrangementBackfill => true,
-            PbStreamScanType::CrossDbSnapshotBackfill => true,
-            PbStreamScanType::SnapshotBackfill => true,
-            _ => false,
+            PbStreamScanType::Unspecified => unreachable!(),
+            PbStreamScanType::UpstreamOnly
+            | PbStreamScanType::ArrangementBackfill
+            | PbStreamScanType::CrossDbSnapshotBackfill
+            | PbStreamScanType::SnapshotBackfill
+            | PbStreamScanType::SnapshotBackfillNoUpstream => true,
+            PbStreamScanType::Chain | PbStreamScanType::Rearrange | PbStreamScanType::Backfill => {
+                false
+            }
         }
+    }
+
+    pub fn is_shuffled_backfill(&self) -> bool {
+        matches!(
+            self,
+            PbStreamScanType::ArrangementBackfill | PbStreamScanType::SnapshotBackfill
+        )
+    }
+
+    pub fn should_fill_snapshot_epoch(&self) -> bool {
+        matches!(
+            self,
+            PbStreamScanType::SnapshotBackfill
+                | PbStreamScanType::CrossDbSnapshotBackfill
+                | PbStreamScanType::SnapshotBackfillNoUpstream
+        )
     }
 }
 

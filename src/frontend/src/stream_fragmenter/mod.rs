@@ -422,7 +422,8 @@ fn build_fragment(
                     .fragment_type_mask
                     .add(FragmentTypeFlag::StreamScan);
                 match node.stream_scan_type() {
-                    StreamScanType::SnapshotBackfill => {
+                    StreamScanType::SnapshotBackfill
+                    | StreamScanType::SnapshotBackfillNoUpstream => {
                         current_fragment
                             .fragment_type_mask
                             .add(FragmentTypeFlag::SnapshotBackfillStreamScan);
