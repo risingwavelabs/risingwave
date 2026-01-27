@@ -1280,21 +1280,65 @@ impl ScalarImpl {
 
 /// Returns whether the `literal` matches the `data_type`.
 pub fn literal_type_match(data_type: &DataType, literal: Option<&ScalarImpl>) -> bool {
-    match literal {
-        Some(scalar) => {
+    literal.map_or(true, |scalar| scalar_ref_type_match(data_type, scalar.as_scalar_ref_impl()))
+}
+
+/// Returns whether the scalar ref matches the `data_type`.
+///
+/// This is a lightweight "shape check" intended for callers that need to avoid panics on
+/// malformed input. For nested types, it checks element/field types recursively.
+pub fn scalar_ref_type_match(data_type: &DataType, scalar: ScalarRefImpl<'_>) -> bool {
+    match (data_type, scalar) {
+        (DataType::List(list_type), ScalarRefImpl::List(v)) => {
+            v.elem_type().equals_datatype(list_type.elem())
+        }
+        (DataType::Map(map_type), ScalarRefImpl::Map(v)) => v
+            .inner()
+            .elem_type()
+            .equals_datatype(&map_type.clone().into_struct()),
+        (DataType::Vector(size), ScalarRefImpl::Vector(v)) => v.dimension() == *size,
+        (DataType::Struct(struct_type), ScalarRefImpl::Struct(v)) => {
+            struct_ref_type_match(struct_type, v)
+        }
+
+        _ => {
             macro_rules! matches {
                 ($( { $data_type:ident, $variant_name:ident, $suffix_name:ident, $scalar:ty, $scalar_ref:ty, $array:ty, $builder:ty }),*) => {
                     match (data_type, scalar) {
                         $(
-                            (DataType::$data_type { .. }, ScalarImpl::$variant_name(_)) => true,
-                            (DataType::$data_type { .. }, _) => false, // so that we won't forget to match a new logical type
+                            (DataType::$data_type { .. }, ScalarRefImpl::$variant_name(_)) => true,
+                            (DataType::$data_type { .. }, _) => false, // keep exhaustive over DataType variants
                         )*
                     }
                 }
             }
             for_all_variants! { matches }
         }
-        None => true,
+    }
+}
+
+/// Returns whether the `datum` matches the `data_type`.
+#[inline(always)]
+pub fn datum_ref_type_match(data_type: &DataType, datum: DatumRef<'_>) -> bool {
+    datum.map_or(true, |scalar| scalar_ref_type_match(data_type, scalar))
+}
+
+fn struct_ref_type_match(expected: &StructType, value: StructRef<'_>) -> bool {
+    match value {
+        StructRef::Indexed { arr, .. } => {
+            // `StructRef::Indexed` comes with a `StructArray`, whose type can be compared directly.
+            crate::array::Array::data_type(arr).equals_datatype(&DataType::Struct(expected.clone()))
+        }
+        StructRef::ValueRef { val } => {
+            let fields = val.fields();
+            if fields.len() != expected.len() {
+                return false;
+            }
+            expected
+                .types()
+                .zip(fields.iter())
+                .all(|(ty, datum)| datum_ref_type_match(ty, datum.to_datum_ref()))
+        }
     }
 }
 
