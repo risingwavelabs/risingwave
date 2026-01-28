@@ -114,7 +114,7 @@ pub(super) fn from_partial_graph_id(
     (database_id.into(), creating_job_id)
 }
 
-fn build_locality_fragment_state_table_mapping(
+pub(super) fn build_locality_fragment_state_table_mapping(
     fragment_infos: &HashMap<FragmentId, InflightFragmentInfo>,
 ) -> HashMap<FragmentId, Vec<TableId>> {
     let mut mapping = HashMap::new();
@@ -1050,6 +1050,7 @@ impl ControlStreamManager {
                     committed_epoch,
                     &barrier_info,
                     info,
+                    backfill_orders.get(&job_id).cloned().unwrap_or_default(),
                     fragment_relations,
                     hummock_version_stats,
                     node_actors,

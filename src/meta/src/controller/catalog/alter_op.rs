@@ -262,7 +262,7 @@ impl CatalogController {
         }
 
         let source: source::ActiveModel = pb_source.clone().into();
-        source.update(&txn).await?;
+        Source::update(source).exec(&txn).await?;
         txn.commit().await?;
 
         let version = self
@@ -594,6 +594,13 @@ impl CatalogController {
                     ObjectModel(function, obj, None).into(),
                 ));
             }
+            ObjectType::Secret => {
+                let secret = Secret::find_by_id(object_id.as_secret_id())
+                    .one(&txn)
+                    .await?
+                    .ok_or_else(|| MetaError::catalog_id_not_found("secret", object_id))?;
+                objects.push(PbObjectInfo::Secret(ObjectModel(secret, obj, None).into()));
+            }
             _ => unreachable!("not supported object type: {:?}", object_type),
         };
 
@@ -859,12 +866,12 @@ impl CatalogController {
                 pb_function.schema_id = new_schema;
                 check_function_signature_duplicate(&pb_function, &txn).await?;
 
-                object::ActiveModel {
+                Object::update(object::ActiveModel {
                     oid: Set(object_id),
                     schema_id: Set(Some(new_schema)),
                     ..Default::default()
-                }
-                .update(&txn)
+                })
+                .exec(&txn)
                 .await?;
 
                 txn.commit().await?;
@@ -886,12 +893,12 @@ impl CatalogController {
                 pb_connection.schema_id = new_schema;
                 check_connection_name_duplicate(&pb_connection, &txn).await?;
 
-                object::ActiveModel {
+                Object::update(object::ActiveModel {
                     oid: Set(object_id),
                     schema_id: Set(Some(new_schema)),
                     ..Default::default()
-                }
-                .update(&txn)
+                })
+                .exec(&txn)
                 .await?;
 
                 txn.commit().await?;
@@ -1116,12 +1123,12 @@ impl CatalogController {
             }
         }
 
-        streaming_job::ActiveModel {
+        StreamingJob::update(streaming_job::ActiveModel {
             job_id: Set(job_id),
             config_override: Set(Some(updated_config_override)),
             ..Default::default()
-        }
-        .update(&txn)
+        })
+        .exec(&txn)
         .await?;
 
         txn.commit().await?;
@@ -1180,7 +1187,7 @@ impl CatalogController {
             },
             ..Default::default()
         };
-        active.update(&inner.db).await?;
+        RefreshJob::update(active).exec(&inner.db).await?;
         Ok(())
     }
 
@@ -1208,7 +1215,7 @@ impl CatalogController {
             trigger_interval_secs: Set(trigger_interval_secs),
             ..Default::default()
         };
-        active.update(&inner.db).await?;
+        RefreshJob::update(active).exec(&inner.db).await?;
         Ok(())
     }
 }

@@ -629,10 +629,10 @@ impl CatalogController {
         Ok(database_objects.into_iter().into_group_map())
     }
 
-    // Output: Vec<(table id, db name, schema name, table name, resource group)>
+    // Output: Vec<(table id, db name, schema name, table name, resource group, table type)>
     pub async fn list_table_objects(
         &self,
-    ) -> MetaResult<Vec<(TableId, String, String, String, String)>> {
+    ) -> MetaResult<Vec<(TableId, String, String, String, String, TableType)>> {
         let inner = self.inner.read().await;
         Ok(Object::find()
             .select_only()
@@ -644,6 +644,7 @@ impl CatalogController {
             .column(schema::Column::Name)
             .column(table::Column::Name)
             .column(database::Column::ResourceGroup)
+            .column(table::Column::TableType)
             .into_tuple()
             .all(&inner.db)
             .await?)

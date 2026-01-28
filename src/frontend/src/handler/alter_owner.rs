@@ -228,6 +228,16 @@ pub async fn handle_alter_owner(
                     check_owned_by_admin(&function.owner)?;
                     function.id.into()
                 }
+                StatementType::ALTER_SECRET => {
+                    let (secret, schema_name) =
+                        catalog_reader.get_secret_by_name(db_name, schema_path, &real_obj_name)?;
+                    session.check_privilege_for_drop_alter(schema_name, &**secret)?;
+                    if secret.owner() == owner_id {
+                        return Ok(RwPgResponse::empty_result(stmt_type));
+                    }
+                    check_owned_by_admin(&secret.owner)?;
+                    secret.id.into()
+                }
                 _ => unreachable!(),
             },
             owner_id,

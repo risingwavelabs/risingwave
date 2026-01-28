@@ -306,21 +306,37 @@ Additionally, a metric on all objects (including dangling ones) is updated with 
                     ],
                 ),
                 panels.timeseries_latency(
-                    "Time Travel Replay Latency",
-                    "The latency of replaying a hummock version for time travel",
-                    quantile(
-                        lambda quantile, legend: panels.target(
-                            f"histogram_quantile({quantile}, sum(rate({metric('storage_time_travel_version_replay_latency_bucket')}[$__rate_interval])) by (le))",
-                            f"time_travel_version_replay_latency_p{legend}",
+                    "Time Travel Operations Latency",
+                    "The latency of time travel operations",
+                    [
+                        *quantile(
+                            lambda quantile, legend: panels.target(
+                                f"histogram_quantile({quantile}, sum(rate({metric('storage_time_travel_version_replay_latency_bucket')}[$__rate_interval])) by (le))",
+                                f"time_travel_version_replay_latency_p{legend}",
+                            ),
+                            [50, 90, "max"],
                         ),
-                        [50, 90, 99, "max"],
-                    )
-                    + [
+                        *quantile(
+                            lambda quantile, legend: panels.target(
+                                f"histogram_quantile({quantile}, sum(irate({metric('storage_time_travel_vacuum_metadata_latency_bucket')}[$__rate_interval])) by (le, {COMPONENT_LABEL}, {NODE_LABEL}))",
+                                f"metadata vacuum latency p{legend}"
+                                + " - {{%s}} @ {{%s}}" % (COMPONENT_LABEL, NODE_LABEL),
+                            ),
+                            [50, 90, "max"],
+                        ),
+                        *quantile(
+                            lambda quantile, legend: panels.target(
+                                f"histogram_quantile({quantile}, sum(irate({metric('storage_time_travel_write_metadata_latency_bucket')}[$__rate_interval])) by (le, {COMPONENT_LABEL}, {NODE_LABEL}))",
+                                f"metadata write latency p{legend}"
+                                + " - {{%s}} @ {{%s}}" % (COMPONENT_LABEL, NODE_LABEL),
+                            ),
+                            [50, 90, "max"],
+                        ),
                         panels.target(
                             f"rate({metric('storage_time_travel_version_replay_latency_sum')}[$__rate_interval]) / rate({metric('storage_time_travel_version_replay_latency_count')}[$__rate_interval]) > 0",
                             "time_travel_version_replay_avg",
                         ),
-                    ],
+                    ]
                 ),
                 panels.timeseries_ops(
                     "Time Travel Replay Ops",

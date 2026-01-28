@@ -38,6 +38,7 @@ pub use storage::{
 };
 pub mod merge;
 pub mod mutate;
+pub mod none_as_empty_string;
 pub mod system;
 pub mod utils;
 
@@ -116,6 +117,7 @@ pub struct RwConfig {
 /// `[batch.developer.batch_compute_client_config]`
 /// `[batch.developer.batch_frontend_client_config]`
 /// `[streaming.developer.stream_compute_client_config]`
+#[serde_with::apply(Option => #[serde(with = "none_as_empty_string")])]
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde, ConfigDoc)]
 pub struct RpcClientConfig {
     #[serde(default = "default::developer::rpc_client_connect_timeout_secs")]
@@ -268,6 +270,11 @@ pub mod default {
         pub fn time_travel_vacuum_interval_sec() -> u64 {
             30
         }
+
+        pub fn time_travel_vacuum_max_version_count() -> Option<u32> {
+            Some(10000)
+        }
+
         pub fn hummock_time_travel_epoch_version_insert_batch_size() -> usize {
             1000
         }

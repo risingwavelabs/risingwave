@@ -383,6 +383,10 @@ pub fn start(
                     .meta
                     .developer
                     .time_travel_vacuum_interval_sec,
+                time_travel_vacuum_max_version_count: config
+                    .meta
+                    .developer
+                    .time_travel_vacuum_max_version_count,
                 vacuum_spin_interval_ms: config.meta.vacuum_spin_interval_ms,
                 iceberg_gc_interval_sec: config.meta.iceberg_gc_interval_sec,
                 hummock_version_checkpoint_interval_sec: config

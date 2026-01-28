@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use fixedbitset::FixedBitSet;
+use risingwave_common::catalog::PROJECTED_ROW_ID_COLUMN_NAME;
 
 use crate::binder::BoundQuery;
 use crate::error::Result;
@@ -66,7 +67,7 @@ impl Planner {
         let mut out_fields = FixedBitSet::with_capacity(plan.schema().len());
         out_fields.insert_range(..plan.schema().len() - extra_order_exprs_len);
         if let Some(field) = plan.schema().fields.first()
-            && field.name == "projected_row_id"
+            && field.name == PROJECTED_ROW_ID_COLUMN_NAME
         {
             // Do not output projected_row_id hidden column.
             out_fields.set(0, false);

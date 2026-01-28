@@ -45,14 +45,13 @@ use risingwave_pb::stream_plan::update_mutation::*;
 use risingwave_pb::stream_plan::{
     AddMutation, ConnectorPropsChangeMutation, Dispatcher, Dispatchers, DropSubscriptionsMutation,
     ListFinishMutation, LoadFinishMutation, PauseMutation, PbSinkAddColumnsOp, PbSinkSchemaChange,
-    PbUpstreamSinkInfo, ResumeMutation, SourceChangeSplitMutation, StopMutation,
-    SubscriptionUpstreamInfo, ThrottleMutation, UpdateMutation,
+    PbUpstreamSinkInfo, ResumeMutation, SourceChangeSplitMutation, StartFragmentBackfillMutation,
+    StopMutation, SubscriptionUpstreamInfo, ThrottleMutation, UpdateMutation,
 };
 use risingwave_pb::stream_service::BarrierCompleteResponse;
 use tracing::warn;
 
 use super::info::{CommandFragmentChanges, InflightDatabaseInfo};
-use crate::MetaResult;
 use crate::barrier::backfill_order_control::get_nodes_with_backfill_dependencies;
 use crate::barrier::cdc_progress::CdcTableBackfillTracker;
 use crate::barrier::edge_builder::FragmentEdgeBuildResult;
@@ -72,6 +71,7 @@ use crate::stream::{
     AutoRefreshSchemaSinkContext, ConnectorPropsChange, FragmentBackfillOrder, SplitAssignment,
     SplitState, UpstreamSinkInfo, build_actor_connector_splits,
 };
+use crate::{MetaError, MetaResult};
 
 /// [`Reschedule`] is for the [`Command::RescheduleFragment`], which is used for rescheduling actors
 /// in some fragment, like scaling or migrating.
@@ -408,6 +408,18 @@ pub enum Command {
         /// Split ID -> offset (JSON-encoded based on connector type)
         split_offsets: HashMap<String, String>,
     },
+
+    /// `ResumeBackfill` command generates a `StartFragmentBackfill` barrier to force backfill
+    /// to resume for troubleshooting.
+    ResumeBackfill {
+        target: ResumeBackfillTarget,
+    },
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum ResumeBackfillTarget {
+    Job(JobId),
+    Fragment(FragmentId),
 }
 
 // For debugging and observability purposes. Can add more details later if needed.
@@ -476,6 +488,14 @@ impl std::fmt::Display for Command {
                 source_id,
                 split_offsets.len()
             ),
+            Command::ResumeBackfill { target } => match target {
+                ResumeBackfillTarget::Job(job_id) => {
+                    write!(f, "ResumeBackfill: job={job_id}")
+                }
+                ResumeBackfillTarget::Fragment(fragment_id) => {
+                    write!(f, "ResumeBackfill: fragment={fragment_id}")
+                }
+            },
         }
     }
 }
@@ -642,6 +662,7 @@ impl Command {
             Command::LoadFinish { .. } => None, // LoadFinish doesn't change fragment structure
             Command::ResetSource { .. } => None, // ResetSource doesn't change fragment structure
             Command::InjectSourceOffsets { .. } => None, /* InjectSourceOffsets doesn't change fragment structure */
+            Command::ResumeBackfill { .. } => None, /* ResumeBackfill doesn't change fragment structure */
         }
     }
 
@@ -674,6 +695,9 @@ pub enum PostCollectCommand {
         subscription_id: SubscriptionId,
     },
     ConnectorPropsChange(ConnectorPropsChange),
+    ResumeBackfill {
+        target: ResumeBackfillTarget,
+    },
 }
 
 impl PostCollectCommand {
@@ -691,6 +715,7 @@ impl PostCollectCommand {
             PostCollectCommand::SourceChangeSplit { .. } => "SourceChangeSplit",
             PostCollectCommand::CreateSubscription { .. } => "CreateSubscription",
             PostCollectCommand::ConnectorPropsChange(_) => "ConnectorPropsChange",
+            PostCollectCommand::ResumeBackfill { .. } => "ResumeBackfill",
         }
     }
 }
@@ -751,6 +776,7 @@ impl Command {
             Command::InjectSourceOffsets { .. } => {
                 PostCollectCommand::Command("InjectSourceOffsets".to_owned())
             }
+            Command::ResumeBackfill { target } => PostCollectCommand::ResumeBackfill { target },
         }
     }
 }
@@ -1419,6 +1445,35 @@ impl Command {
                     split_offsets: split_offsets.clone(),
                 },
             )),
+            Command::ResumeBackfill { target } => {
+                let fragment_ids: HashSet<_> = match target {
+                    ResumeBackfillTarget::Job(job_id) => {
+                        database_info.backfill_fragment_ids_for_job(*job_id)?
+                    }
+                    ResumeBackfillTarget::Fragment(fragment_id) => {
+                        if !database_info.is_backfill_fragment(*fragment_id)? {
+                            return Err(MetaError::invalid_parameter(format!(
+                                "fragment {} is not a backfill node",
+                                fragment_id
+                            )));
+                        }
+                        HashSet::from([*fragment_id])
+                    }
+                };
+                if fragment_ids.is_empty() {
+                    warn!(
+                        ?target,
+                        "resume backfill command ignored because no backfill fragments found"
+                    );
+                    None
+                } else {
+                    Some(Mutation::StartFragmentBackfill(
+                        StartFragmentBackfillMutation {
+                            fragment_ids: fragment_ids.into_iter().collect(),
+                        },
+                    ))
+                }
+            }
         };
         Ok(mutation)
     }

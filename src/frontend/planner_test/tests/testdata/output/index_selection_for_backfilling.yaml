@@ -361,7 +361,7 @@
     └─StreamProject { exprs: [sum(Unnest($1)), $expr1] }
       └─StreamHashAgg { group_key: [$expr1], aggs: [sum(Unnest($1)), count] }
         └─StreamExchange { dist: HashShard($expr1) }
-          └─StreamProject { exprs: [(idx_a.a + 1:Int32) as $expr1, Unnest($1), idx_a.t._row_id, projected_row_id] }
+          └─StreamProject { exprs: [(idx_a.a + 1:Int32) as $expr1, Unnest($1), idx_a.t._row_id, _rw_projected_row_id] }
             └─StreamProjectSet { select_list: [$0, Unnest($1), $2] }
               └─StreamTableScan { table: idx_a, columns: [idx_a.a, idx_a.x, idx_a.t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [idx_a.a, idx_a.t._row_id], pk: [a, t._row_id], dist: UpstreamHashShard(idx_a.a) }
 - name: Ban index selection for indexes with distribution key is not the subset of the group by keys

@@ -467,7 +467,6 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
             .per_vnode
             .values()
             .all(|progress| matches!(progress, LocalityBackfillProgress::NotStarted));
-        let mut buffered_rows: u64 = 0;
         // Initial buffering phase before backfill - wait for StartFragmentBackfill mutation (if needed)
         if need_buffering {
             // Enter buffering phase - buffer data until StartFragmentBackfill is received
@@ -482,7 +481,6 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
                         // Ignore watermarks during initial buffering
                     }
                     Message::Chunk(chunk) => {
-                        buffered_rows += chunk.cardinality() as u64;
                         state_table.write_chunk(chunk);
                         state_table.try_flush().await?;
                     }
@@ -502,13 +500,6 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
                                 start_backfill = true;
                             }
                         }
-
-                        self.progress.update_with_buffered_rows(
-                            barrier.epoch,
-                            barrier.epoch.curr,
-                            0,
-                            buffered_rows,
-                        );
 
                         // Commit state tables
                         let post_commit1 = state_table.commit(epoch).await?;
@@ -726,7 +717,7 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
                     barrier.epoch,
                     barrier.epoch.curr, // Use barrier epoch as snapshot read epoch
                     total_snapshot_processed_rows,
-                    buffered_rows,
+                    0,
                 );
 
                 // Persist backfill progress
@@ -779,11 +770,11 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
                             .sum();
 
                         // Finish progress reporting with any remaining buffered rows
-                        // At completion, buffered_rows is 0 since all rows have been consumed
+                        // At completion, we report `total_snapshot_processed_rows` as buffered rows to make progress accurate.
                         self.progress.finish_with_buffered_rows(
                             barrier.epoch,
                             total_snapshot_processed_rows,
-                            buffered_rows,
+                            total_snapshot_processed_rows,
                         );
 
                         // Persist final state
@@ -821,10 +812,11 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
                         .commit_assert_no_update_vnode_bitmap(barrier.epoch)
                         .await?;
                     if report_finished_on_first_barrier {
+                        // At completion, we report `total_snapshot_rows` as buffered rows to make progress accurate.
                         self.progress.finish_with_buffered_rows(
                             barrier.epoch,
-                            0, // report 0 rows since already finished and the state is purged, we enter this branch only after recovery.
-                            0,
+                            backfill_state.total_snapshot_rows,
+                            backfill_state.total_snapshot_rows,
                         );
                         report_finished_on_first_barrier = false;
                     }

@@ -1484,7 +1484,6 @@ pub enum Statement {
     AlterSecret {
         /// Secret name
         name: ObjectName,
-        with_options: Vec<SqlOption>,
         operation: AlterSecretOperation,
     },
     /// ALTER FRAGMENT
@@ -2222,16 +2221,9 @@ impl Statement {
             Statement::AlterConnection { name, operation } => {
                 write!(f, "ALTER CONNECTION {} {}", name, operation)
             }
-            Statement::AlterSecret {
-                name,
-                with_options,
-                operation,
-            } => {
+            Statement::AlterSecret { name, operation } => {
                 write!(f, "ALTER SECRET {}", name)?;
-                if !with_options.is_empty() {
-                    write!(f, " WITH ({})", display_comma_separated(with_options))?;
-                }
-                write!(f, " {}", operation)
+                write!(f, "{}", operation)
             }
             Statement::Discard(t) => write!(f, "DISCARD {}", t),
             Statement::Drop(stmt) => write!(f, "DROP {}", stmt),
