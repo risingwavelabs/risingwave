@@ -270,6 +270,11 @@ pub mod default {
         pub fn time_travel_vacuum_interval_sec() -> u64 {
             30
         }
+
+        pub fn time_travel_vacuum_max_version_count() -> Option<u32> {
+            Some(10000)
+        }
+
         pub fn hummock_time_travel_epoch_version_insert_batch_size() -> usize {
             1000
         }
