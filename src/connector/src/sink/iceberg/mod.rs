@@ -468,6 +468,12 @@ impl IcebergConfig {
             )));
         }
 
+        // Validate table identifier (e.g., database.name should not contain dots)
+        config
+            .table
+            .validate()
+            .map_err(|e| SinkError::Config(anyhow!(e)))?;
+
         Ok(config)
     }
 

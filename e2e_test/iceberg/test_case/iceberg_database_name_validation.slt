@@ -1,0 +1,90 @@
+# Test cases for iceberg database.name validation
+# This file tests that dots are not allowed in database.name field
+
+statement ok
+DROP TABLE IF EXISTS t_db_validation;
+
+statement ok
+CREATE TABLE t_db_validation (
+    id bigint primary key,
+    data varchar
+);
+
+# Test case 1: Error - database.name with single dot
+statement error Invalid database.name 'a.b': dots are not allowed in database names
+CREATE SINK s_single_dot AS SELECT * FROM t_db_validation WITH (
+    connector = 'iceberg',
+    type = 'append-only',
+    database.name = 'a.b',
+    table.name = 'test_table',
+    catalog.name = 'demo',
+    catalog.type = 'storage',
+    warehouse.path = 's3a://icebergdata/demo',
+    s3.endpoint = 'http://127.0.0.1:9301',
+    s3.region = 'us-east-1',
+    s3.access.key = 'hummockadmin',
+    s3.secret.key = 'hummockadmin',
+    create_table_if_not_exists = 'true'
+);
+
+# Test case 2: Error - database.name with multiple dots
+statement error Invalid database.name 'a.b.c': dots are not allowed in database names
+CREATE SINK s_multiple_dots AS SELECT * FROM t_db_validation WITH (
+    connector = 'iceberg',
+    type = 'upsert',
+    primary_key = 'id',
+    database.name = 'a.b.c',
+    table.name = 'test_table',
+    catalog.name = 'demo',
+    catalog.type = 'storage',
+    warehouse.path = 's3a://icebergdata/demo',
+    s3.endpoint = 'http://127.0.0.1:9301',
+    s3.region = 'us-east-1',
+    s3.access.key = 'hummockadmin',
+    s3.secret.key = 'hummockadmin',
+    create_table_if_not_exists = 'true'
+);
+
+# Test case 3: Success - database.name without dots (valid case)
+statement ok
+CREATE SINK s_valid_name AS SELECT * FROM t_db_validation WITH (
+    connector = 'iceberg',
+    type = 'append-only',
+    database.name = 'valid_db',
+    table.name = 'test_table',
+    catalog.name = 'demo',
+    catalog.type = 'storage',
+    warehouse.path = 's3a://icebergdata/demo',
+    s3.endpoint = 'http://127.0.0.1:9301',
+    s3.region = 'us-east-1',
+    s3.access.key = 'hummockadmin',
+    s3.secret.key = 'hummockadmin',
+    create_table_if_not_exists = 'true'
+);
+
+# Test case 4: Success - database.name with underscores (valid case)
+statement ok
+CREATE SINK s_underscore_name AS SELECT * FROM t_db_validation WITH (
+    connector = 'iceberg',
+    type = 'append-only',
+    database.name = 'valid_db_name',
+    table.name = 'test_table2',
+    catalog.name = 'demo',
+    catalog.type = 'storage',
+    warehouse.path = 's3a://icebergdata/demo',
+    s3.endpoint = 'http://127.0.0.1:9301',
+    s3.region = 'us-east-1',
+    s3.access.key = 'hummockadmin',
+    s3.secret.key = 'hummockadmin',
+    create_table_if_not_exists = 'true'
+);
+
+# Clean up
+statement ok
+DROP SINK s_valid_name;
+
+statement ok
+DROP SINK s_underscore_name;
+
+statement ok
+DROP TABLE t_db_validation;
