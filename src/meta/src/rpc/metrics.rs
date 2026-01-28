@@ -701,7 +701,7 @@ impl MetaMetrics {
 
         let relation_info = register_int_gauge_vec_with_registry!(
             "relation_info",
-            "Information of the database relation (table/source/sink/materialized view/index)",
+            "Information of the database relation (table/source/sink/materialized view/index/internal)",
             &["id", "database", "schema", "name", "resource_group", "type"],
             registry
         )
