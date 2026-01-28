@@ -15,10 +15,12 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 
+use bytes::Bytes;
 use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::catalog::TableId;
 use risingwave_common::config::meta::default::compaction_config;
+use risingwave_common::hash::VnodeCountCompat;
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_hummock_sdk::change_log::ChangeLogDelta;
 use risingwave_hummock_sdk::compaction_group::group_split::split_sst_with_table_ids;
@@ -30,7 +32,7 @@ use risingwave_hummock_sdk::table_watermark::TableWatermarks;
 use risingwave_hummock_sdk::vector_index::VectorIndexDelta;
 use risingwave_hummock_sdk::version::HummockVersionStateTableInfo;
 use risingwave_hummock_sdk::{
-    CompactionGroupId, HummockContextId, HummockSstableObjectId, LocalSstableInfo,
+    CompactionGroupId, HummockContextId, HummockSstableId, HummockSstableObjectId, LocalSstableInfo,
 };
 use risingwave_pb::hummock::{CompactionConfig, compact_task};
 use sea_orm::TransactionTrait;
@@ -38,7 +40,7 @@ use sea_orm::TransactionTrait;
 use crate::hummock::error::{Error, Result};
 use crate::hummock::manager::compaction_group_manager::CompactionGroupManager;
 use crate::hummock::manager::transaction::{
-    HummockVersionStatsTransaction, HummockVersionTransaction,
+    CommitSubLevel, HummockVersionStatsTransaction, HummockVersionTransaction,
 };
 use crate::hummock::manager::versioning::Versioning;
 use crate::hummock::metrics_utils::{
@@ -51,8 +53,20 @@ use crate::hummock::{
     HummockManager, commit_multi_var_with_provided_txn, start_measure_real_process_timer,
 };
 
+mod commit_epoch_vnode_partition;
+
+use commit_epoch_vnode_partition::{
+    build_nonoverlapping_layers, build_vnode_partition_boundary_keys,
+    chunk_nonoverlapping_layer_by_size, count_boundaries_in_key_range,
+    sort_layers_by_max_epoch_asc, split_sst_by_boundary_keys,
+};
+
 pub struct NewTableFragmentInfo {
     pub table_ids: HashSet<TableId>,
+}
+
+struct VnodeEligibility {
+    boundary_keys: Vec<Bytes>,
 }
 
 #[derive(Default)]
@@ -195,8 +209,13 @@ impl HummockManager {
             }
         }
 
-        let group_id_to_sub_levels =
-            rewrite_commit_sstables_to_sub_level(commit_sstables, &group_id_to_config);
+        let group_id_to_sub_levels = self
+            .rewrite_commit_sstables_to_sub_level(
+                commit_sstables,
+                &group_id_to_config,
+                state_table_info,
+            )
+            .await?;
 
         // build group_id to truncate tables
         let mut group_id_to_truncate_tables: HashMap<u64, HashSet<TableId>> = HashMap::new();
@@ -478,6 +497,168 @@ impl HummockManager {
 
         Ok(commit_sstables)
     }
+
+    async fn rewrite_commit_sstables_to_sub_level(
+        &self,
+        commit_sstables: BTreeMap<CompactionGroupId, Vec<SstableInfo>>,
+        group_id_to_config: &HashMap<CompactionGroupId, Arc<CompactionConfig>>,
+        state_table_info: &HummockVersionStateTableInfo,
+    ) -> Result<BTreeMap<CompactionGroupId, Vec<CommitSubLevel>>> {
+        struct VnodeSplitPlan {
+            group_id: CompactionGroupId,
+            boundary_keys: Vec<Bytes>,
+            inserted_ssts: Vec<SstableInfo>,
+            sub_level_size_limit: u64,
+            new_sst_id_needed: u64,
+            vnode_partition_count: u32,
+        }
+
+        let mut result = BTreeMap::new();
+        let mut vnode_plans: Vec<VnodeSplitPlan> = vec![];
+        let mut total_new_sst_id_needed: u64 = 0;
+
+        for (group_id, inserted_ssts) in commit_sstables {
+            let config = group_id_to_config
+                .get(&group_id)
+                .expect("compaction group should exist");
+            let sub_level_size_limit = config
+                .max_overlapping_level_size
+                .unwrap_or(compaction_config::max_overlapping_level_size());
+
+            if inserted_ssts.is_empty() {
+                result.insert(group_id, vec![]);
+                continue;
+            }
+
+            let Some(VnodeEligibility { boundary_keys, .. }) = self
+                .vnode_partition_eligibility(group_id, &inserted_ssts, state_table_info, config)
+                .await
+            else {
+                result.insert(
+                    group_id,
+                    rewrite_commit_sstables_to_sub_level_by_size(
+                        inserted_ssts,
+                        sub_level_size_limit,
+                    ),
+                );
+                continue;
+            };
+
+            let vnode_partition_count = config.split_weight_by_vnode;
+            let mut new_sst_id_needed = 0u64;
+            for sst in &inserted_ssts {
+                new_sst_id_needed +=
+                    count_boundaries_in_key_range(&sst.key_range, &boundary_keys) as u64;
+            }
+
+            total_new_sst_id_needed += new_sst_id_needed;
+            vnode_plans.push(VnodeSplitPlan {
+                group_id,
+                boundary_keys,
+                inserted_ssts,
+                sub_level_size_limit,
+                new_sst_id_needed,
+                vnode_partition_count,
+            });
+        }
+
+        let mut new_sst_id: HummockSstableId = if total_new_sst_id_needed > 0 {
+            next_sstable_id(&self.env, total_new_sst_id_needed).await?
+        } else {
+            0.into()
+        };
+
+        for plan in vnode_plans {
+            let mut fragments: Vec<SstableInfo> =
+                Vec::with_capacity(plan.inserted_ssts.len() + plan.new_sst_id_needed as usize);
+
+            for sst in plan.inserted_ssts {
+                fragments.extend(split_sst_by_boundary_keys(
+                    sst,
+                    &plan.boundary_keys,
+                    &mut new_sst_id,
+                ));
+            }
+
+            let mut layers = build_nonoverlapping_layers(fragments);
+            sort_layers_by_max_epoch_asc(&mut layers);
+
+            let mut sub_levels = vec![];
+            for layer in layers {
+                let chunks = chunk_nonoverlapping_layer_by_size(layer, plan.sub_level_size_limit);
+                sub_levels.extend(chunks.into_iter().map(|ssts| CommitSubLevel {
+                    ssts,
+                    vnode_partition_count: plan.vnode_partition_count,
+                }));
+            }
+
+            result.insert(plan.group_id, sub_levels);
+        }
+
+        Ok(result)
+    }
+
+    async fn vnode_partition_eligibility(
+        &self,
+        group_id: CompactionGroupId,
+        inserted_ssts: &[SstableInfo],
+        state_table_info: &HummockVersionStateTableInfo,
+        config: &CompactionConfig,
+    ) -> Option<VnodeEligibility> {
+        let member_table_ids = state_table_info.compaction_group_member_table_ids(group_id);
+        let partition_count = config.split_weight_by_vnode as usize;
+        let table_id = (member_table_ids.len() == 1)
+            .then(|| *member_table_ids.iter().next().expect("len==1"))?;
+
+        if partition_count <= 1
+            || !inserted_ssts.iter().all(|sst| {
+                sst.table_ids.len() == 1
+                    && sst.table_ids[0] == table_id
+                    && !sst.key_range.inf_key_range()
+                    && !sst.key_range.left.is_empty()
+                    && !sst.key_range.right.is_empty()
+            })
+        {
+            return None;
+        }
+
+        let table = match self
+            .metadata_manager
+            .get_table_catalog_by_ids(&[table_id])
+            .await
+        {
+            Ok(mut tables) => tables.pop(),
+            Err(e) => {
+                tracing::warn!(
+                    error = %e,
+                    group_id,
+                    %table_id,
+                    "failed to get table catalog for vnode split in commit_epoch, fallback to overlapping",
+                );
+                None
+            }
+        }?;
+
+        let vnode_count = table.vnode_count() as usize;
+        if partition_count > vnode_count {
+            tracing::warn!(
+                group_id,
+                %table_id,
+                vnode_count,
+                partition_count,
+                "partition_count > vnode_count in commit_epoch, fallback to overlapping",
+            );
+            return None;
+        }
+
+        Some(VnodeEligibility {
+            boundary_keys: build_vnode_partition_boundary_keys(
+                table_id,
+                vnode_count,
+                partition_count,
+            ),
+        })
+    }
 }
 
 fn on_handle_add_new_table(
@@ -501,47 +682,37 @@ fn on_handle_add_new_table(
     Ok(())
 }
 
-/// Rewrite the commit sstables to sub-levels based on the compaction group config.
-/// The type of `compaction_group_manager_txn` is too complex to be used in the function signature. So we use `HashMap` instead.
-fn rewrite_commit_sstables_to_sub_level(
-    commit_sstables: BTreeMap<CompactionGroupId, Vec<SstableInfo>>,
-    group_id_to_config: &HashMap<CompactionGroupId, Arc<CompactionConfig>>,
-) -> BTreeMap<CompactionGroupId, Vec<Vec<SstableInfo>>> {
-    let mut overlapping_sstables: BTreeMap<u64, Vec<Vec<SstableInfo>>> = BTreeMap::new();
-    for (group_id, inserted_table_infos) in commit_sstables {
-        let config = group_id_to_config
-            .get(&group_id)
-            .expect("compaction group should exist");
+fn rewrite_commit_sstables_to_sub_level_by_size(
+    inserted_ssts: Vec<SstableInfo>,
+    sub_level_size_limit: u64,
+) -> Vec<CommitSubLevel> {
+    let mut accumulated_size = 0;
+    let mut ssts = vec![];
+    let mut sub_levels = vec![];
 
-        let mut accumulated_size = 0;
-        let mut ssts = vec![];
-        let sub_level_size_limit = config
-            .max_overlapping_level_size
-            .unwrap_or(compaction_config::max_overlapping_level_size());
-
-        let level = overlapping_sstables.entry(group_id).or_default();
-
-        for sst in inserted_table_infos {
-            accumulated_size += sst.sst_size;
-            ssts.push(sst);
-            if accumulated_size > sub_level_size_limit {
-                level.push(ssts);
-
-                // reset the accumulated size and ssts
-                accumulated_size = 0;
-                ssts = vec![];
-            }
+    for sst in inserted_ssts {
+        accumulated_size += sst.sst_size;
+        ssts.push(sst);
+        if accumulated_size > sub_level_size_limit {
+            sub_levels.push(ssts);
+            accumulated_size = 0;
+            ssts = vec![];
         }
-
-        if !ssts.is_empty() {
-            level.push(ssts);
-        }
-
-        // The uploader organizes the ssts in decreasing epoch order, so the level needs to be reversed to ensure that the latest epoch is at the top.
-        level.reverse();
     }
 
-    overlapping_sstables
+    if !ssts.is_empty() {
+        sub_levels.push(ssts);
+    }
+
+    // The uploader organizes the ssts in decreasing epoch order, so the level needs to be reversed to ensure that the latest epoch is at the top.
+    sub_levels.reverse();
+    sub_levels
+        .into_iter()
+        .map(|ssts| CommitSubLevel {
+            ssts,
+            vnode_partition_count: 0,
+        })
+        .collect()
 }
 
 fn is_ordered_subset<T: PartialEq>(vec_1: &Vec<T>, vec_2: &Vec<T>) -> bool {
