@@ -274,7 +274,8 @@ impl CheckpointControl {
                     | Command::Refresh { .. }
                     | Command::ListFinish { .. }
                     | Command::LoadFinish { .. }
-                    | Command::ResetSource { .. } => {
+                    | Command::ResetSource { .. }
+                    | Command::ResumeBackfill { .. } => {
                         if cfg!(debug_assertions) {
                             panic!(
                                 "new database graph info can only be created for normal creating streaming job, but get command: {} {:?}",
