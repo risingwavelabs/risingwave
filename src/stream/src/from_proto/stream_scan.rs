@@ -203,7 +203,7 @@ impl ExecutorBuilder for StreamScanExecutorBuilder {
                 )
                 .boxed()
             }
-            StreamScanType::SnapshotBackfill => {
+            StreamScanType::SnapshotBackfill | StreamScanType::SnapshotBackfillNoUpstream => {
                 unreachable!(
                     "SnapshotBackfillExecutor is handled specially when in `StreamActorManager::create_nodes_inner`"
                 )

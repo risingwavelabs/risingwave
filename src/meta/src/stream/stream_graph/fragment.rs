@@ -279,10 +279,9 @@ impl BuildingFragment {
         let has_shuffled_backfill_mut_ref = &mut has_shuffled_backfill;
         visit_stream_node_cont(stream_node, |node| {
             let is_shuffled_backfill = if let Some(node) = &node.node_body
-                && let Some(node) = node.as_stream_scan()
+                && let Some(scan_node) = node.as_stream_scan()
             {
-                node.stream_scan_type == StreamScanType::ArrangementBackfill as i32
-                    || node.stream_scan_type == StreamScanType::SnapshotBackfill as i32
+                scan_node.stream_scan_type().is_shuffled_backfill()
             } else {
                 false
             };
@@ -426,7 +425,7 @@ pub fn check_sink_fragments_support_refresh_schema(
         )
         .into());
     };
-    let stream_scan_type = PbStreamScanType::try_from(scan.stream_scan_type).unwrap();
+    let stream_scan_type = scan.stream_scan_type();
     if stream_scan_type != PbStreamScanType::ArrangementBackfill {
         return Err(anyhow!(
             "unsupported stream_scan_type for auto refresh schema: {:?}",
@@ -579,7 +578,7 @@ pub fn rewrite_refresh_schema_sink_fragment(
         format!("StreamTableScan {{ table: t, columns: [{columns}] }}")
     };
 
-    let stream_scan_type = PbStreamScanType::try_from(scan.stream_scan_type).unwrap();
+    let stream_scan_type = scan.stream_scan_type();
     if stream_scan_type != PbStreamScanType::ArrangementBackfill {
         return Err(anyhow!(
             "unsupported stream_scan_type for auto refresh schema: {:?}",
@@ -867,8 +866,7 @@ impl StreamFragmentGraph {
         for fragment in self.fragments.values_mut() {
             visit_stream_node_cont_mut(fragment.node.as_mut().unwrap(), |node| {
                 if let PbNodeBody::StreamScan(scan) = node.node_body.as_mut().unwrap()
-                    && let StreamScanType::SnapshotBackfill
-                    | StreamScanType::CrossDbSnapshotBackfill = scan.stream_scan_type()
+                    && scan.stream_scan_type().should_fill_snapshot_epoch()
                 {
                     let Some(epoch) = snapshot_backfill_epochs.remove(&node.operator_id) else {
                         panic!("no snapshot epoch found for node {:?}", node)
@@ -961,10 +959,10 @@ impl StreamFragmentGraph {
         for (node, fragment_type_mask) in fragments {
             visit_stream_node_cont(node, |node| {
                 if let Some(NodeBody::StreamScan(stream_scan)) = node.node_body.as_ref() {
-                    let stream_scan_type = StreamScanType::try_from(stream_scan.stream_scan_type)
-                        .expect("invalid stream_scan_type");
+                    let stream_scan_type = stream_scan.stream_scan_type();
                     let is_snapshot_backfill = match stream_scan_type {
-                        StreamScanType::SnapshotBackfill => {
+                        StreamScanType::SnapshotBackfill
+                        | StreamScanType::SnapshotBackfillNoUpstream => {
                             assert!(
                                 fragment_type_mask
                                     .contains(FragmentTypeFlag::SnapshotBackfillStreamScan)
@@ -1301,22 +1299,31 @@ pub fn fill_snapshot_backfill_epoch(
     let mut result = Ok(());
     let mut applied = false;
     visit_stream_node_cont_mut(node, |node| {
-        if let Some(NodeBody::StreamScan(stream_scan)) = node.node_body.as_mut()
-            && (stream_scan.stream_scan_type == StreamScanType::SnapshotBackfill as i32
-                || stream_scan.stream_scan_type == StreamScanType::CrossDbSnapshotBackfill as i32)
-        {
+        if let Some(NodeBody::StreamScan(stream_scan)) = node.node_body.as_mut() {
             result = try {
                 let table_id = stream_scan.table_id;
-                let snapshot_epoch = cross_db_snapshot_backfill_info
+                let backfill_info = match stream_scan.stream_scan_type() {
+                    StreamScanType::Unspecified => {
+                        unreachable!()
+                    }
+                    StreamScanType::Chain |
+                    StreamScanType::Rearrange |
+                    StreamScanType::Backfill |
+                    StreamScanType::UpstreamOnly |
+                    StreamScanType::ArrangementBackfill => {
+                        return true;
+                    }
+                    StreamScanType::SnapshotBackfill
+                    | StreamScanType::SnapshotBackfillNoUpstream => {
+                        snapshot_backfill_info.as_ref().ok_or_else(|| anyhow!("snapshot backfill info not present for snapshot backfill stream scan {:?}", stream_scan.table_id))?
+                    }
+                    StreamScanType::CrossDbSnapshotBackfill => {
+                        &cross_db_snapshot_backfill_info
+                    }
+                };
+                let snapshot_epoch = backfill_info
                     .upstream_mv_table_id_to_backfill_epoch
                     .get(&table_id)
-                    .or_else(|| {
-                        snapshot_backfill_info.and_then(|snapshot_backfill_info| {
-                            snapshot_backfill_info
-                                .upstream_mv_table_id_to_backfill_epoch
-                                .get(&table_id)
-                        })
-                    })
                     .ok_or_else(|| anyhow!("upstream table id not covered: {}", table_id))?
                     .ok_or_else(|| anyhow!("upstream table id not set: {}", table_id))?;
                 if let Some(prev_snapshot_epoch) =
@@ -1330,6 +1337,35 @@ pub fn fill_snapshot_backfill_epoch(
                     ))?;
                 }
                 applied = true;
+            };
+            result.is_ok()
+        } else if let Some(NodeBody::TemporalJoin(temporal_join)) = node.node_body.as_mut()
+            && let Some(join_table) = &temporal_join.table_desc
+        {
+            result = try {
+                let table_id = join_table.table_id;
+                if let Some(snapshot_epoch) = snapshot_backfill_info
+                    .and_then(|snapshot_backfill_info| {
+                        snapshot_backfill_info
+                            .upstream_mv_table_id_to_backfill_epoch
+                            .get(&table_id)
+                            .copied()
+                    })
+                    .and_then(|epoch| epoch)
+                {
+                    if let Some(prev_snapshot_epoch) = temporal_join
+                        .snapshot_backfill_epoch
+                        .replace(snapshot_epoch)
+                    {
+                        Err(anyhow!(
+                            "snapshot backfill epoch set again for temporal join: {} {} {}",
+                            table_id,
+                            prev_snapshot_epoch,
+                            snapshot_epoch
+                        ))?;
+                    }
+                    applied = true;
+                }
             };
             result.is_ok()
         } else {

@@ -219,7 +219,9 @@ impl StreamTableScan {
                     Self::ROW_COUNT_COLUMN_NAME,
                 ));
             }
-            StreamScanType::SnapshotBackfill | StreamScanType::CrossDbSnapshotBackfill => {
+            StreamScanType::SnapshotBackfill
+            | StreamScanType::CrossDbSnapshotBackfill
+            | StreamScanType::SnapshotBackfillNoUpstream => {
                 // `epoch` column
                 catalog_builder
                     .add_column(&Field::with_name(DataType::Int64, Self::EPOCH_COLUMN_NAME));
@@ -325,7 +327,8 @@ impl StreamTableScan {
             StreamScanType::Backfill
             | StreamScanType::ArrangementBackfill
             | StreamScanType::SnapshotBackfill
-            | StreamScanType::CrossDbSnapshotBackfill => self.core.output_and_pk_column_ids(),
+            | StreamScanType::CrossDbSnapshotBackfill
+            | StreamScanType::SnapshotBackfillNoUpstream => self.core.output_and_pk_column_ids(),
             StreamScanType::Chain | StreamScanType::Rearrange | StreamScanType::UpstreamOnly => {
                 self.core.output_column_ids()
             }

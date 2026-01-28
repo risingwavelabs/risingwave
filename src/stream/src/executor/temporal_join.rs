@@ -21,6 +21,7 @@ use futures::stream::{self, PollNext};
 use itertools::Itertools;
 use risingwave_common::array::Op;
 use risingwave_common::bitmap::BitmapBuilder;
+use risingwave_common::ensure;
 use risingwave_common::hash::{HashKey, NullBitmap};
 use risingwave_common::row::RowExt;
 use risingwave_common::util::iter_util::ZipEqDebug;
@@ -58,6 +59,7 @@ pub struct TemporalJoinExecutor<
     chunk_size: usize,
     memo_table: Option<StateTable<S>>,
     metrics: TemporalJoinMetrics,
+    snapshot_epoch: Option<HummockEpoch>,
 }
 
 #[derive(Default)]
@@ -116,7 +118,7 @@ impl<K: HashKey, S: StateStore> TemporalSide<K, S> {
     async fn fetch_or_promote_keys(
         &mut self,
         keys: impl Iterator<Item = &K>,
-        epoch: HummockEpoch,
+        read_epoch: HummockReadEpoch,
         metrics: &TemporalJoinMetrics,
     ) -> StreamExecutorResult<()> {
         let mut futs = Vec::with_capacity(keys.size_hint().1.unwrap_or(0));
@@ -132,7 +134,7 @@ impl<K: HashKey, S: StateStore> TemporalSide<K, S> {
                     let iter = self
                         .source
                         .batch_iter_with_pk_bounds(
-                            HummockReadEpoch::NoWait(epoch),
+                            read_epoch,
                             &pk_prefix,
                             ..,
                             false,
@@ -319,7 +321,7 @@ pub(super) mod phase1 {
     use risingwave_common::row::{self, OwnedRow, Row, RowExt};
     use risingwave_common::types::{DataType, DatumRef};
     use risingwave_common::util::iter_util::ZipEqDebug;
-    use risingwave_hummock_sdk::HummockEpoch;
+    use risingwave_hummock_sdk::HummockReadEpoch;
     use risingwave_storage::StateStore;
 
     use super::{StreamExecutorError, TemporalSide};
@@ -439,7 +441,7 @@ pub(super) mod phase1 {
         chunk_size: usize,
         right_size: usize,
         full_schema: Vec<DataType>,
-        epoch: HummockEpoch,
+        read_epoch: HummockReadEpoch,
         left_join_keys: &'a [usize],
         right_table: &'a mut TemporalSide<K, S>,
         memo_table_lookup_prefix: &'a [usize],
@@ -471,7 +473,7 @@ pub(super) mod phase1 {
                 }
             });
         right_table
-            .fetch_or_promote_keys(to_fetch_keys, epoch, metrics)
+            .fetch_or_promote_keys(to_fetch_keys, read_epoch, metrics)
             .await?;
 
         for (r, key) in chunk.rows_with_holes().zip_eq_debug(keys.into_iter()) {
@@ -609,6 +611,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, const APPEND_ONLY: b
         chunk_size: usize,
         join_key_data_types: Vec<DataType>,
         memo_table: Option<StateTable<S>>,
+        snapshot_epoch: Option<HummockEpoch>,
     ) -> Self {
         let metrics_info =
             MetricsInfo::new(metrics.clone(), table.table_id(), ctx.id, "temporal join");
@@ -637,6 +640,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, const APPEND_ONLY: b
             chunk_size,
             memo_table,
             metrics,
+            snapshot_epoch,
         }
     }
 
@@ -688,6 +692,13 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, const APPEND_ONLY: b
                 }
                 InternalMessage::Chunk(chunk) => {
                     let epoch = prev_epoch.expect("Chunk data should come after some barrier.");
+                    let read_epoch = if let Some(snapshot_epoch) = self.snapshot_epoch
+                        && epoch < snapshot_epoch
+                    {
+                        HummockReadEpoch::Committed(snapshot_epoch)
+                    } else {
+                        HummockReadEpoch::NoWait(epoch)
+                    };
 
                     let full_schema = full_schema.clone();
 
@@ -696,7 +707,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, const APPEND_ONLY: b
                             self.chunk_size,
                             right_size,
                             full_schema,
-                            epoch,
+                            read_epoch,
                             &self.left_join_keys,
                             &mut self.right_table,
                             &memo_table_lookup_prefix,
@@ -729,7 +740,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, const APPEND_ONLY: b
                                 self.chunk_size,
                                 right_size,
                                 full_schema,
-                                epoch,
+                                read_epoch,
                                 &self.left_join_keys,
                                 &mut self.right_table,
                                 &memo_table_lookup_prefix,
@@ -781,7 +792,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, const APPEND_ONLY: b
                             self.chunk_size,
                             right_size,
                             full_schema,
-                            epoch,
+                            read_epoch,
                             &self.left_join_keys,
                             &mut self.right_table,
                             &memo_table_lookup_prefix,
@@ -801,6 +812,15 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, const APPEND_ONLY: b
                 InternalMessage::Barrier(updates, barrier) => {
                     let update_vnode_bitmap = barrier.as_update_vnode_bitmap(self.ctx.id);
                     let barrier_epoch = barrier.epoch;
+                    if let Some(snapshot_epoch) = self.snapshot_epoch
+                        && barrier_epoch.prev <= snapshot_epoch
+                    {
+                        ensure!(
+                            updates.is_empty(),
+                            "temporal join executor expects no temporal-side updates when current epoch ({}) is not greater than snapshot epoch ({snapshot_epoch})",
+                            barrier_epoch.curr
+                        );
+                    }
                     if !APPEND_ONLY {
                         if wait_first_barrier {
                             wait_first_barrier = false;

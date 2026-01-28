@@ -76,6 +76,7 @@ pub struct SnapshotBackfillExecutor<S: StateStore> {
     metrics: Arc<StreamingMetrics>,
 
     snapshot_epoch: Option<u64>,
+    skip_snapshot_read: bool,
 }
 
 impl<S: StateStore> SnapshotBackfillExecutor<S> {
@@ -92,6 +93,7 @@ impl<S: StateStore> SnapshotBackfillExecutor<S> {
         barrier_rx: UnboundedReceiver<Barrier>,
         metrics: Arc<StreamingMetrics>,
         snapshot_epoch: Option<u64>,
+        skip_snapshot_read: bool,
     ) -> Self {
         assert_eq!(&upstream.info.schema, upstream_table.schema());
         if upstream_table.pk_in_output_indices().is_none() {
@@ -120,6 +122,7 @@ impl<S: StateStore> SnapshotBackfillExecutor<S> {
             actor_ctx,
             metrics,
             snapshot_epoch,
+            skip_snapshot_read,
         }
     }
 
@@ -191,6 +194,7 @@ impl<S: StateStore> SnapshotBackfillExecutor<S> {
                         table_id = %self.upstream_table.table_id(),
                         snapshot_epoch,
                         barrier_epoch = ?first_recv_barrier_epoch,
+                        skip_snapshot_read = self.skip_snapshot_read,
                         "start consuming snapshot"
                     );
                     {
@@ -213,6 +217,7 @@ impl<S: StateStore> SnapshotBackfillExecutor<S> {
                             first_recv_barrier_epoch,
                             initial_backfill_paused,
                             &self.actor_ctx,
+                            self.skip_snapshot_read,
                         );
 
                         pin_mut!(snapshot_stream);
@@ -832,134 +837,147 @@ async fn make_consume_snapshot_stream<'a, S: StateStore>(
     first_recv_barrier_epoch: EpochPair,
     initial_backfill_paused: bool,
     actor_ctx: &'a ActorContextRef,
+    skip_snapshot_read: bool,
 ) {
     let mut barrier_epoch = first_recv_barrier_epoch;
-
-    // start consume upstream snapshot
-    let mut snapshot_stream = make_snapshot_stream(
-        upstream_table,
-        snapshot_epoch,
-        &*backfill_state,
-        *rate_limit,
-        chunk_size,
-    )
-    .await?;
-
-    async fn select_barrier_and_snapshot_stream(
-        barrier_rx: &mut UnboundedReceiver<Barrier>,
-        snapshot_stream: &mut (impl Stream<Item = StreamExecutorResult<StreamChunk>> + Unpin),
-        throttle_snapshot_stream: bool,
-        backfill_paused: bool,
-    ) -> StreamExecutorResult<Either<Barrier, Option<StreamChunk>>> {
-        select!(
-            result = receive_next_barrier(barrier_rx) => {
-                Ok(Either::Left(result?))
-            },
-            result = snapshot_stream.try_next(), if !throttle_snapshot_stream && !backfill_paused => {
-                Ok(Either::Right(result?))
-            }
-        )
-    }
-
     let mut count = 0;
-    let mut epoch_row_count = 0;
-    let mut backfill_paused = initial_backfill_paused;
-    loop {
-        let throttle_snapshot_stream = epoch_row_count as u64 > rate_limit.to_u64();
-        match select_barrier_and_snapshot_stream(
-            barrier_rx,
-            &mut snapshot_stream,
-            throttle_snapshot_stream,
-            backfill_paused,
-        )
-        .await?
-        {
-            Either::Left(barrier) => {
-                assert_eq!(barrier.epoch.prev, barrier_epoch.curr);
-                barrier_epoch = barrier.epoch;
 
-                if barrier_epoch.curr >= snapshot_epoch {
-                    return Err(anyhow!("should not receive barrier with epoch {barrier_epoch:?} later than snapshot epoch {snapshot_epoch}").into());
+    let snapshot_stream = if !skip_snapshot_read {
+        // start consume upstream snapshot
+        let mut snapshot_stream = make_snapshot_stream(
+            upstream_table,
+            snapshot_epoch,
+            &*backfill_state,
+            *rate_limit,
+            chunk_size,
+        )
+        .await?;
+
+        async fn select_barrier_and_snapshot_stream(
+            barrier_rx: &mut UnboundedReceiver<Barrier>,
+            snapshot_stream: &mut (impl Stream<Item = StreamExecutorResult<StreamChunk>> + Unpin),
+            throttle_snapshot_stream: bool,
+            backfill_paused: bool,
+        ) -> StreamExecutorResult<Either<Barrier, Option<StreamChunk>>> {
+            select!(
+                result = receive_next_barrier(barrier_rx) => {
+                    Ok(Either::Left(result?))
+                },
+                result = snapshot_stream.try_next(), if !throttle_snapshot_stream && !backfill_paused => {
+                    Ok(Either::Right(result?))
                 }
-                if barrier.should_start_fragment_backfill(actor_ctx.fragment_id) {
-                    if backfill_paused {
-                        backfill_paused = false;
-                    } else {
-                        tracing::error!(
-                            "received start fragment backfill mutation, but backfill is not paused"
-                        );
+            )
+        }
+
+        let mut epoch_row_count = 0;
+        let mut backfill_paused = initial_backfill_paused;
+        loop {
+            let throttle_snapshot_stream = epoch_row_count as u64 > rate_limit.to_u64();
+            match select_barrier_and_snapshot_stream(
+                barrier_rx,
+                &mut snapshot_stream,
+                throttle_snapshot_stream,
+                backfill_paused,
+            )
+            .await?
+            {
+                Either::Left(barrier) => {
+                    assert_eq!(barrier.epoch.prev, barrier_epoch.curr);
+                    barrier_epoch = barrier.epoch;
+
+                    if barrier_epoch.curr >= snapshot_epoch {
+                        return Err(anyhow!("should not receive barrier with epoch {barrier_epoch:?} later than snapshot epoch {snapshot_epoch}").into());
+                    }
+                    if barrier.should_start_fragment_backfill(actor_ctx.fragment_id) {
+                        if backfill_paused {
+                            backfill_paused = false;
+                        } else {
+                            tracing::error!(
+                                "received start fragment backfill mutation, but backfill is not paused"
+                            );
+                        }
+                    }
+                    if let Some(chunk) = snapshot_stream.consume_builder() {
+                        count += chunk.cardinality();
+                        epoch_row_count += chunk.cardinality();
+                        yield Message::Chunk(chunk);
+                    }
+                    snapshot_stream
+                        .for_vnode_pk_progress(|vnode, row_count, pk_progress| {
+                            if let Some(pk) = pk_progress {
+                                backfill_state.update_epoch_progress(
+                                    vnode,
+                                    snapshot_epoch,
+                                    row_count,
+                                    pk,
+                                );
+                            } else {
+                                backfill_state.finish_epoch(vnode, snapshot_epoch, row_count);
+                            }
+                        })
+                        .await?;
+                    let post_commit = backfill_state.commit(barrier.epoch).await?;
+                    trace!(?barrier_epoch, count, epoch_row_count, "update progress");
+                    progress.update(barrier_epoch, barrier_epoch.prev, count as _);
+                    epoch_row_count = 0;
+
+                    let new_rate_limit = barrier.mutation.as_ref().and_then(|m| {
+                        if let Mutation::Throttle(config) = &**m
+                            && let Some(config) = config.get(&actor_ctx.fragment_id)
+                            && config.throttle_type() == PbThrottleType::Backfill
+                        {
+                            Some(config.rate_limit)
+                        } else {
+                            None
+                        }
+                    });
+                    yield Message::Barrier(barrier);
+                    post_commit.post_yield_barrier(None).await?;
+
+                    if let Some(new_rate_limit) = new_rate_limit {
+                        let new_rate_limit = new_rate_limit.into();
+                        *rate_limit = new_rate_limit;
+                        snapshot_stream.update_rate_limiter(new_rate_limit, chunk_size);
                     }
                 }
-                if let Some(chunk) = snapshot_stream.consume_builder() {
+                Either::Right(Some(chunk)) => {
+                    if backfill_paused {
+                        return Err(anyhow!(
+                            "snapshot backfill paused, but received snapshot chunk"
+                        )
+                        .into());
+                    }
                     count += chunk.cardinality();
                     epoch_row_count += chunk.cardinality();
                     yield Message::Chunk(chunk);
                 }
-                snapshot_stream
-                    .for_vnode_pk_progress(|vnode, row_count, pk_progress| {
-                        if let Some(pk) = pk_progress {
-                            backfill_state.update_epoch_progress(
-                                vnode,
-                                snapshot_epoch,
-                                row_count,
-                                pk,
-                            );
-                        } else {
-                            backfill_state.finish_epoch(vnode, snapshot_epoch, row_count);
-                        }
-                    })
-                    .await?;
-                let post_commit = backfill_state.commit(barrier.epoch).await?;
-                trace!(?barrier_epoch, count, epoch_row_count, "update progress");
-                progress.update(barrier_epoch, barrier_epoch.prev, count as _);
-                epoch_row_count = 0;
-
-                let new_rate_limit = barrier.mutation.as_ref().and_then(|m| {
-                    if let Mutation::Throttle(config) = &**m
-                        && let Some(config) = config.get(&actor_ctx.fragment_id)
-                        && config.throttle_type() == PbThrottleType::Backfill
-                    {
-                        Some(config.rate_limit)
-                    } else {
-                        None
-                    }
-                });
-                yield Message::Barrier(barrier);
-                post_commit.post_yield_barrier(None).await?;
-
-                if let Some(new_rate_limit) = new_rate_limit {
-                    let new_rate_limit = new_rate_limit.into();
-                    *rate_limit = new_rate_limit;
-                    snapshot_stream.update_rate_limiter(new_rate_limit, chunk_size);
+                Either::Right(None) => {
+                    break;
                 }
-            }
-            Either::Right(Some(chunk)) => {
-                if backfill_paused {
-                    return Err(
-                        anyhow!("snapshot backfill paused, but received snapshot chunk").into(),
-                    );
-                }
-                count += chunk.cardinality();
-                epoch_row_count += chunk.cardinality();
-                yield Message::Chunk(chunk);
-            }
-            Either::Right(None) => {
-                break;
             }
         }
-    }
+        Some(snapshot_stream)
+    } else {
+        None
+    };
 
     // finish consuming upstream snapshot, report finish
     let barrier_to_report_finish = receive_next_barrier(barrier_rx).await?;
     assert_eq!(barrier_to_report_finish.epoch.prev, barrier_epoch.curr);
     barrier_epoch = barrier_to_report_finish.epoch;
     trace!(?barrier_epoch, count, "report finish");
-    snapshot_stream
-        .for_vnode_pk_progress(|vnode, row_count, pk_progress| {
-            assert_eq!(pk_progress, None);
-            backfill_state.finish_epoch(vnode, snapshot_epoch, row_count);
-        })
-        .await?;
+    if let Some(mut snapshot_stream) = snapshot_stream {
+        snapshot_stream
+            .for_vnode_pk_progress(|vnode, row_count, pk_progress| {
+                assert_eq!(pk_progress, None);
+                backfill_state.finish_epoch(vnode, snapshot_epoch, row_count);
+            })
+            .await?;
+    } else {
+        upstream_table.vnodes().iter_vnodes().for_each(|vnode| {
+            backfill_state.finish_epoch(vnode, snapshot_epoch, 0);
+        });
+    }
     let post_commit = backfill_state.commit(barrier_epoch).await?;
     progress.finish(barrier_epoch, count as _);
     yield Message::Barrier(barrier_to_report_finish);

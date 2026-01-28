@@ -24,8 +24,8 @@ use risingwave_common::id::FragmentId;
 use risingwave_common::util::stream_graph_visitor::visit_stream_node_tables_inner;
 use risingwave_pb::catalog::PbTable;
 use risingwave_pb::id::StreamNodeLocalOperatorId;
+use risingwave_pb::stream_plan::StreamNode;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
-use risingwave_pb::stream_plan::{PbStreamScanType, StreamNode};
 use strum::IntoDiscriminant;
 
 use crate::model::StreamJobFragments;
@@ -289,9 +289,8 @@ impl Matches {
                 let PbNodeBody::StreamScan(vscan) = vn.node_body.as_ref().unwrap() else {
                     unreachable!("checked same discriminant");
                 };
-                if let scan_type @ (PbStreamScanType::SnapshotBackfill
-                | PbStreamScanType::CrossDbSnapshotBackfill) = uscan.stream_scan_type()
-                {
+                if uscan.stream_scan_type().should_fill_snapshot_epoch() {
+                    let scan_type = uscan.stream_scan_type();
                     let Some(snapshot_epoch) = vscan.snapshot_backfill_epoch else {
                         bail_operator!(
                             from = un,

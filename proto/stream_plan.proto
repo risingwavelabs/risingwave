@@ -654,6 +654,8 @@ message TemporalJoinNode {
   optional catalog.Table memo_table = 9;
   // If it is a nested lool temporal join
   bool is_nested_loop = 10;
+  // Snapshot epoch to use when querying the lookup table during snapshot backfill.
+  optional uint64 snapshot_backfill_epoch = 11;
 }
 
 message DynamicFilterNode {
@@ -749,6 +751,9 @@ enum StreamScanType {
 
   // SnapshotBackfillExecutor
   STREAM_SCAN_TYPE_CROSS_DB_SNAPSHOT_BACKFILL = 7;
+
+  // Snapshot backfill that participates in metadata without consuming upstream.
+  STREAM_SCAN_TYPE_SNAPSHOT_BACKFILL_NO_UPSTREAM = 8;
 }
 
 // StreamScanNode reads data from upstream table first, and then pass all events to downstream.

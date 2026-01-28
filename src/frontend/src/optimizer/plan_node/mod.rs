@@ -577,15 +577,6 @@ impl LogicalPlanRef {
                 DefaultValue
             }
 
-            fn visit_logical_join(&mut self, plan: &LogicalJoin) -> Self::Result {
-                self.visit(plan.left());
-                self.visit(plan.right());
-                if self.warning_msg.is_none() && plan.should_be_temporal_join() {
-                    self.warning_msg =
-                        Some("snapshot backfill disabled due to temporal join".to_owned());
-                }
-            }
-
             fn visit_logical_source(&mut self, plan: &LogicalSource) -> Self::Result {
                 if self.warning_msg.is_none() && plan.is_shared_source() {
                     self.warning_msg = Some(format!(
