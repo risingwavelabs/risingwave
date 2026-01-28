@@ -17,3 +17,15 @@ set synchronize_seqscans to f;
 
 statement ok
 set synchronize_seqscans to default;
+
+statement ok
+set statement_timeout = 2;
+
+statement ok
+select pg_sleep(1);
+
+statement error timeout
+select pg_sleep(3);
+
+statement ok
+set statement_timeout = 0;
