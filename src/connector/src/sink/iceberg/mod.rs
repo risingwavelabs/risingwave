@@ -185,9 +185,9 @@ pub const COMPACTION_TARGET_FILE_SIZE_MB: &str = "compaction.target_file_size_mb
 
 pub const COMPACTION_TYPE: &str = "compaction.type";
 
-pub const TARGET_FILE_SIZE_MB: &str = "target_file_size_mb";
-pub const WRITE_PARQUET_COMPRESSION: &str = "write_parquet_compression";
-pub const WRITE_PARQUET_MAX_ROW_GROUP_ROWS: &str = "write_parquet_max_row_group_rows";
+pub const COMPACTION_WRITE_PARQUET_COMPRESSION: &str = "compaction.write_parquet_compression";
+pub const COMPACTION_WRITE_PARQUET_MAX_ROW_GROUP_ROWS: &str =
+    "compaction.write_parquet_max_row_group_rows";
 
 const PARQUET_CREATED_BY: &str = concat!("risingwave version ", env!("CARGO_PKG_VERSION"));
 
@@ -409,22 +409,18 @@ pub struct IcebergConfig {
     #[with_option(allow_alter_on_fly)]
     pub compaction_type: Option<CompactionType>,
 
-    /// Target file size in MB for sink writes
-    /// Default is 512 MB (Iceberg default)
-    #[serde(rename = "target_file_size_mb", default)]
-    #[serde_as(as = "Option<DisplayFromStr>")]
-    pub sink_target_file_size_mb: Option<u64>,
-
     /// Parquet compression codec
     /// Supported values: uncompressed, snappy, gzip, lzo, brotli, lz4, zstd
     /// Default is snappy
-    #[serde(rename = "write_parquet_compression", default)]
+    #[serde(rename = "compaction.write_parquet_compression", default)]
+    #[with_option(allow_alter_on_fly)]
     pub write_parquet_compression: Option<String>,
 
     /// Maximum number of rows in a Parquet row group
     /// Default is 122880 (from developer config)
-    #[serde(rename = "write_parquet_max_row_group_rows", default)]
+    #[serde(rename = "compaction.write_parquet_max_row_group_rows", default)]
     #[serde_as(as = "Option<DisplayFromStr>")]
+    #[with_option(allow_alter_on_fly)]
     pub write_parquet_max_row_group_rows: Option<usize>,
 }
 
@@ -554,17 +550,6 @@ impl IcebergConfig {
     /// This method parses the string and returns the enum value
     pub fn compaction_type(&self) -> CompactionType {
         self.compaction_type.unwrap_or_default()
-    }
-
-    /// Get the target file size in MB for sink writes
-    /// Default is 512 MB (Iceberg default)
-    pub fn sink_target_file_size_mb(&self) -> u64 {
-        self.sink_target_file_size_mb.unwrap_or(512)
-    }
-
-    /// Get the target file size in bytes for sink writes
-    pub fn sink_target_file_size_bytes(&self) -> usize {
-        (self.sink_target_file_size_mb() * 1024 * 1024) as usize
     }
 
     /// Get the parquet compression codec
@@ -953,6 +938,40 @@ impl Sink for IcebergSink {
             );
         }
 
+        // Validate target file size
+        if let Some(target_file_size_mb) = iceberg_config.target_file_size_mb
+            && target_file_size_mb == 0
+        {
+            bail!("`compaction.target_file_size_mb` must be greater than 0");
+        }
+
+        // Validate parquet max row group rows
+        if let Some(max_row_group_rows) = iceberg_config.write_parquet_max_row_group_rows
+            && max_row_group_rows == 0
+        {
+            bail!("`compaction.write_parquet_max_row_group_rows` must be greater than 0");
+        }
+
+        // Validate parquet compression codec
+        if let Some(ref compression) = iceberg_config.write_parquet_compression {
+            let valid_codecs = [
+                "uncompressed",
+                "snappy",
+                "gzip",
+                "lzo",
+                "brotli",
+                "lz4",
+                "zstd",
+            ];
+            if !valid_codecs.contains(&compression.to_lowercase().as_str()) {
+                bail!(
+                    "`compaction.write_parquet_compression` must be one of {:?}, got: {}",
+                    valid_codecs,
+                    compression
+                );
+            }
+        }
+
         Ok(())
     }
 
@@ -1217,7 +1236,7 @@ impl IcebergSinkWriterInner {
             ParquetWriterBuilder::new(parquet_writer_properties, schema.clone());
         let rolling_builder = RollingFileWriterBuilder::new(
             parquet_writer_builder,
-            config.sink_target_file_size_bytes(),
+            (config.target_file_size_mb() * 1024 * 1024) as usize,
             table.file_io().clone(),
             DefaultLocationGenerator::new(table.metadata().clone())
                 .map_err(|err| SinkError::Iceberg(anyhow!(err)))?,
@@ -1326,7 +1345,7 @@ impl IcebergSinkWriterInner {
                 ParquetWriterBuilder::new(parquet_writer_properties.clone(), schema.clone());
             let rolling_writer_builder = RollingFileWriterBuilder::new(
                 parquet_writer_builder,
-                config.sink_target_file_size_bytes(),
+                (config.target_file_size_mb() * 1024 * 1024) as usize,
                 table.file_io().clone(),
                 DefaultLocationGenerator::new(table.metadata().clone())
                     .map_err(|err| SinkError::Iceberg(anyhow!(err)))?,
@@ -1345,7 +1364,7 @@ impl IcebergSinkWriterInner {
             );
             let rolling_writer_builder = RollingFileWriterBuilder::new(
                 parquet_writer_builder,
-                config.sink_target_file_size_bytes(),
+                (config.target_file_size_mb() * 1024 * 1024) as usize,
                 table.file_io().clone(),
                 DefaultLocationGenerator::new(table.metadata().clone())
                     .map_err(|err| SinkError::Iceberg(anyhow!(err)))?,
@@ -1372,7 +1391,7 @@ impl IcebergSinkWriterInner {
             );
             let rolling_writer_builder = RollingFileWriterBuilder::new(
                 parquet_writer_builder,
-                config.sink_target_file_size_bytes(),
+                (config.target_file_size_mb() * 1024 * 1024) as usize,
                 table.file_io().clone(),
                 DefaultLocationGenerator::new(table.metadata().clone())
                     .map_err(|err| SinkError::Iceberg(anyhow!(err)))?,
@@ -1464,7 +1483,9 @@ impl SinkWriter for IcebergSinkWriter {
                 unique_column_ids.clone(),
                 &args.writer_param,
             )?,
-            None => IcebergSinkWriterInner::build_append_only(&args.config, table, &args.writer_param)?,
+            None => {
+                IcebergSinkWriterInner::build_append_only(&args.config, table, &args.writer_param)?
+            }
         };
 
         *self = IcebergSinkWriter::Initialized(inner);
@@ -3038,7 +3059,6 @@ mod test {
             trigger_snapshot_count: None,
             target_file_size_mb: None,
             compaction_type: None,
-            sink_target_file_size_mb: None,
             write_parquet_compression: None,
             write_parquet_max_row_group_rows: None,
         };
@@ -3162,20 +3182,18 @@ mod test {
         test_create_catalog(values).await;
     }
 
-    /// Test parsing Google authentication configuration with custom scopes.
+    /// Test parsing Google/BigLake authentication configuration.
     #[test]
-    fn test_parse_google_auth_with_custom_scopes() {
+    fn test_parse_google_auth_config() {
         let values: BTreeMap<String, String> = [
             ("connector", "iceberg"),
             ("type", "append-only"),
             ("force_append_only", "true"),
             ("catalog.name", "biglake-catalog"),
             ("catalog.type", "rest"),
-            (
-                "catalog.uri",
-                "https://biglake.googleapis.com/iceberg/v1/restcatalog",
-            ),
+            ("catalog.uri", "https://biglake.googleapis.com/iceberg/v1/restcatalog"),
             ("warehouse.path", "bq://projects/my-gcp-project"),
+            ("catalog.header", "x-goog-user-project=my-gcp-project"),
             ("catalog.security", "google"),
             ("gcp.auth.scopes", "https://www.googleapis.com/auth/cloud-platform,https://www.googleapis.com/auth/bigquery"),
             ("database.name", "my_dataset"),
@@ -3185,83 +3203,21 @@ mod test {
         .map(|(k, v)| (k.to_owned(), v.to_owned()))
         .collect();
 
-        let iceberg_config = IcebergConfig::from_btreemap(values).unwrap();
-
-        // Verify catalog type
-        assert_eq!(iceberg_config.catalog_type(), "rest");
-
-        // Verify Google-specific options
+        let config = IcebergConfig::from_btreemap(values).unwrap();
+        assert_eq!(config.catalog_type(), "rest");
+        assert_eq!(config.common.catalog_security.as_deref(), Some("google"));
         assert_eq!(
-            iceberg_config.common.catalog_security.as_deref(),
-            Some("google")
-        );
-        assert_eq!(
-            iceberg_config.common.gcp_auth_scopes.as_deref(),
+            config.common.gcp_auth_scopes.as_deref(),
             Some(
                 "https://www.googleapis.com/auth/cloud-platform,https://www.googleapis.com/auth/bigquery"
             )
         );
-
-        // Verify warehouse path with bq:// prefix
         assert_eq!(
-            iceberg_config.common.warehouse_path.as_deref(),
+            config.common.warehouse_path.as_deref(),
             Some("bq://projects/my-gcp-project")
         );
-    }
-
-    /// Test parsing BigLake/Google Cloud REST catalog configuration.
-    #[test]
-    fn test_parse_biglake_google_auth_config() {
-        let values: BTreeMap<String, String> = [
-            ("connector", "iceberg"),
-            ("type", "append-only"),
-            ("force_append_only", "true"),
-            ("catalog.name", "biglake-catalog"),
-            ("catalog.type", "rest"),
-            (
-                "catalog.uri",
-                "https://biglake.googleapis.com/iceberg/v1/restcatalog",
-            ),
-            ("warehouse.path", "bq://projects/my-gcp-project"),
-            (
-                "catalog.header",
-                "x-goog-user-project=my-gcp-project",
-            ),
-            ("catalog.security", "google"),
-            ("gcp.auth.scopes", "https://www.googleapis.com/auth/cloud-platform,https://www.googleapis.com/auth/bigquery"),
-            ("database.name", "my_dataset"),
-            ("table.name", "my_table"),
-        ]
-        .into_iter()
-        .map(|(k, v)| (k.to_owned(), v.to_owned()))
-        .collect();
-
-        let iceberg_config = IcebergConfig::from_btreemap(values).unwrap();
-
-        // Verify catalog type
-        assert_eq!(iceberg_config.catalog_type(), "rest");
-
-        // Verify Google-specific options
         assert_eq!(
-            iceberg_config.common.catalog_security.as_deref(),
-            Some("google")
-        );
-        assert_eq!(
-            iceberg_config.common.gcp_auth_scopes.as_deref(),
-            Some(
-                "https://www.googleapis.com/auth/cloud-platform,https://www.googleapis.com/auth/bigquery"
-            )
-        );
-
-        // Verify warehouse path with bq:// prefix
-        assert_eq!(
-            iceberg_config.common.warehouse_path.as_deref(),
-            Some("bq://projects/my-gcp-project")
-        );
-
-        // Verify custom header
-        assert_eq!(
-            iceberg_config.common.catalog_header.as_deref(),
+            config.common.catalog_header.as_deref(),
             Some("x-goog-user-project=my-gcp-project")
         );
     }
@@ -3417,10 +3373,11 @@ mod test {
         assert_eq!(COMPACTION_MAX_SNAPSHOTS_NUM, "compaction.max_snapshots_num");
     }
 
+    /// Test parsing all compaction.* prefix configs and their default values.
     #[test]
-    fn test_parse_iceberg_compaction_config() {
-        // Test parsing with new compaction.* prefix config names
-        let values = [
+    fn test_parse_compaction_config() {
+        // Test with all compaction configs specified
+        let values: BTreeMap<String, String> = [
             ("connector", "iceberg"),
             ("type", "upsert"),
             ("primary_key", "id"),
@@ -3440,67 +3397,26 @@ mod test {
             ("compaction.trigger_snapshot_count", "10"),
             ("compaction.target_file_size_mb", "256"),
             ("compaction.type", "full"),
+            ("compaction.write_parquet_compression", "zstd"),
+            ("compaction.write_parquet_max_row_group_rows", "50000"),
         ]
         .into_iter()
         .map(|(k, v)| (k.to_owned(), v.to_owned()))
         .collect();
 
-        let iceberg_config = IcebergConfig::from_btreemap(values).unwrap();
+        let config = IcebergConfig::from_btreemap(values).unwrap();
+        assert!(config.enable_compaction);
+        assert_eq!(config.max_snapshots_num_before_compaction, Some(100));
+        assert_eq!(config.small_files_threshold_mb, Some(512));
+        assert_eq!(config.delete_files_count_threshold, Some(50));
+        assert_eq!(config.trigger_snapshot_count, Some(10));
+        assert_eq!(config.target_file_size_mb, Some(256));
+        assert_eq!(config.compaction_type, Some(CompactionType::Full));
+        assert_eq!(config.target_file_size_mb(), 256);
+        assert_eq!(config.write_parquet_compression(), "zstd");
+        assert_eq!(config.write_parquet_max_row_group_rows(), 50000);
 
-        // Verify all compaction config fields are parsed correctly
-        assert!(iceberg_config.enable_compaction);
-        assert_eq!(
-            iceberg_config.max_snapshots_num_before_compaction,
-            Some(100)
-        );
-        assert_eq!(iceberg_config.small_files_threshold_mb, Some(512));
-        assert_eq!(iceberg_config.delete_files_count_threshold, Some(50));
-        assert_eq!(iceberg_config.trigger_snapshot_count, Some(10));
-        assert_eq!(iceberg_config.target_file_size_mb, Some(256));
-        assert_eq!(iceberg_config.compaction_type, Some(CompactionType::Full));
-    }
-
-    /// Test parsing target file size and parquet properties.
-    #[test]
-    fn test_parse_target_file_size_and_parquet_properties() {
-        let values: BTreeMap<String, String> = [
-            ("connector", "iceberg"),
-            ("type", "append-only"),
-            ("force_append_only", "true"),
-            ("catalog.name", "test-catalog"),
-            ("catalog.type", "storage"),
-            ("warehouse.path", "s3://my-bucket/warehouse"),
-            ("database.name", "test_db"),
-            ("table.name", "test_table"),
-            ("target_file_size_mb", "256"),
-            ("write_parquet_compression", "zstd"),
-            ("write_parquet_max_row_group_rows", "50000"),
-        ]
-        .into_iter()
-        .map(|(k, v)| (k.to_owned(), v.to_owned()))
-        .collect();
-
-        let iceberg_config = IcebergConfig::from_btreemap(values).unwrap();
-
-        // Verify sink target file size
-        assert_eq!(iceberg_config.sink_target_file_size_mb, Some(256));
-        assert_eq!(iceberg_config.sink_target_file_size_mb(), 256);
-
-        // Verify parquet compression
-        assert_eq!(
-            iceberg_config.write_parquet_compression.as_deref(),
-            Some("zstd")
-        );
-        assert_eq!(iceberg_config.write_parquet_compression(), "zstd");
-
-        // Verify parquet max row group rows
-        assert_eq!(iceberg_config.write_parquet_max_row_group_rows, Some(50000));
-        assert_eq!(iceberg_config.write_parquet_max_row_group_rows(), 50000);
-    }
-
-    /// Test default values for target file size and parquet properties.
-    #[test]
-    fn test_default_target_file_size_and_parquet_properties() {
+        // Test default values (no compaction configs specified)
         let values: BTreeMap<String, String> = [
             ("connector", "iceberg"),
             ("type", "append-only"),
@@ -3515,24 +3431,18 @@ mod test {
         .map(|(k, v)| (k.to_owned(), v.to_owned()))
         .collect();
 
-        let iceberg_config = IcebergConfig::from_btreemap(values).unwrap();
-
-        // Verify default values
-        assert_eq!(iceberg_config.sink_target_file_size_mb, None);
-        assert_eq!(iceberg_config.sink_target_file_size_mb(), 512); // Default is 512 MB
-
-        assert_eq!(iceberg_config.write_parquet_compression, None);
-        assert_eq!(iceberg_config.write_parquet_compression(), "snappy"); // Default is snappy
-
-        assert_eq!(iceberg_config.write_parquet_max_row_group_rows, None);
-        assert_eq!(iceberg_config.write_parquet_max_row_group_rows(), 122880); // Default is 122880
+        let config = IcebergConfig::from_btreemap(values).unwrap();
+        assert_eq!(config.target_file_size_mb(), 1024); // Default
+        assert_eq!(config.write_parquet_compression(), "snappy"); // Default
+        assert_eq!(config.write_parquet_max_row_group_rows(), 122880); // Default
     }
 
     /// Test parquet compression parsing.
     #[test]
     fn test_parse_parquet_compression() {
-        use super::parse_parquet_compression;
         use parquet::basic::Compression;
+
+        use super::parse_parquet_compression;
 
         // Test valid compression types
         assert!(matches!(
@@ -3547,10 +3457,7 @@ mod test {
             parse_parquet_compression("zstd"),
             Compression::ZSTD(_)
         ));
-        assert!(matches!(
-            parse_parquet_compression("lz4"),
-            Compression::LZ4
-        ));
+        assert!(matches!(parse_parquet_compression("lz4"), Compression::LZ4));
         assert!(matches!(
             parse_parquet_compression("brotli"),
             Compression::BROTLI(_)
