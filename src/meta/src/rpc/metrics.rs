@@ -37,6 +37,7 @@ use risingwave_common::{
 };
 use risingwave_connector::source::monitor::EnumeratorMetrics as SourceEnumeratorMetrics;
 use risingwave_meta_model::WorkerId;
+use risingwave_meta_model::table::TableType;
 use risingwave_object_store::object::object_metrics::{
     GLOBAL_OBJECT_STORE_METRICS, ObjectStoreMetrics,
 };
@@ -700,7 +701,7 @@ impl MetaMetrics {
 
         let relation_info = register_int_gauge_vec_with_registry!(
             "relation_info",
-            "Information of the database relation (table/source/sink)",
+            "Information of the database relation (table/source/sink/materialized view/index)",
             &["id", "database", "schema", "name", "resource_group", "type"],
             registry
         )
@@ -1203,7 +1204,13 @@ pub async fn refresh_relation_info_metrics(
 
     meta_metrics.relation_info.reset();
 
-    for (id, db, schema, name, resource_group) in table_objects {
+    for (id, db, schema, name, resource_group, table_type) in table_objects {
+        let relation_type = match table_type {
+            TableType::Table => "table",
+            TableType::MaterializedView => "materialized_view",
+            TableType::Index | TableType::VectorIndex => "index",
+            TableType::Internal => "internal",
+        };
         meta_metrics
             .relation_info
             .with_label_values(&[
@@ -1212,7 +1219,7 @@ pub async fn refresh_relation_info_metrics(
                 &schema,
                 &name,
                 &resource_group,
-                &"table".to_owned(),
+                &relation_type.to_owned(),
             ])
             .set(1);
     }
