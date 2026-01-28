@@ -48,10 +48,8 @@ SELECT s.tbl.col FROM s.tbl;
 2
 3
 
-# (TODO)schema name with alias does not work
-# https://github.com/risingwavelabs/risingwave/issues/6744
-# statement error
-# SELECT s.t.col FROM s.tbl t;
+statement error
+SELECT s.t.col FROM s.tbl t;
 
 statement error
 SELECT s.tbl.col FROM s.tbl t;
@@ -232,9 +230,8 @@ SELECT s1.t1.t FROM s1.t1, s2.t1
 
 # test various failures
 
-# TODO: https://github.com/risingwavelabs/risingwave/issues/6774
-# statement error
-# SELECT testX.tbl.col FROM test.tbl;
+statement error
+SELECT testX.tbl.col FROM test.tbl;
 
 statement error
 SELECT test.tblX.col FROM test.tbl;
