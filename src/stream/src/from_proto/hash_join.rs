@@ -12,17 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::cmp::min;
 use std::sync::Arc;
 
 use risingwave_common::config::streaming::JoinEncodingType;
 use risingwave_common::hash::{HashKey, HashKeyDispatcher};
 use risingwave_common::types::DataType;
-use risingwave_expr::expr::{
-    InputRefExpression, NonStrictExpression, build_func_non_strict, build_non_strict_from_prost,
-};
+use risingwave_expr::expr::{NonStrictExpression, build_non_strict_from_prost};
 use risingwave_pb::plan_common::JoinType as JoinTypeProto;
-use risingwave_pb::stream_plan::HashJoinNode;
+use risingwave_pb::stream_plan::{HashJoinNode, InequalityType};
 
 use super::*;
 use crate::common::table::state_table::{StateTable, StateTableBuilder};
@@ -87,36 +84,64 @@ impl ExecutorBuilder for HashJoinExecutorBuilder {
             Err(_) => None,
         };
         trace!("Join non-equi condition: {:?}", condition);
-        let mut inequality_pairs = Vec::with_capacity(node.get_inequality_pairs().len());
-        for inequality_pair in node.get_inequality_pairs() {
-            let key_required_larger = inequality_pair.get_key_required_larger() as usize;
-            let key_required_smaller = inequality_pair.get_key_required_smaller() as usize;
-            inequality_pairs.push((
-                key_required_larger,
-                key_required_smaller,
-                inequality_pair.get_clean_state(),
-                if let Some(delta_expression) = inequality_pair.delta_expression.as_ref() {
-                    let data_type = source_l.schema().fields
-                        [min(key_required_larger, key_required_smaller)]
-                    .data_type();
-                    Some(build_func_non_strict(
-                        delta_expression.delta_type(),
-                        data_type.clone(),
-                        vec![
-                            Box::new(InputRefExpression::new(data_type, 0)),
-                            build_non_strict_from_prost(
-                                delta_expression.delta.as_ref().unwrap(),
-                                params.eval_error_report.clone(),
-                            )?
-                            .into_inner(),
-                        ],
-                        params.eval_error_report.clone(),
-                    )?)
-                } else {
-                    None
-                },
-            ));
-        }
+
+        // Parse inequality pairs - prefer V2 format if available
+        let inequality_pairs: Vec<InequalityPairInfo> =
+            if !node.get_inequality_pairs_v2().is_empty() {
+                // Use new V2 format
+                node.get_inequality_pairs_v2()
+                    .iter()
+                    .map(|pair| InequalityPairInfo {
+                        left_idx: pair.get_left_idx() as usize,
+                        right_idx: pair.get_right_idx() as usize,
+                        clean_left_state: pair.get_clean_left_state(),
+                        clean_right_state: pair.get_clean_right_state(),
+                        op: pair.op(),
+                    })
+                    .collect()
+            } else {
+                // Fall back to old format for backward compatibility
+                node.get_inequality_pairs()
+                    .iter()
+                    .map(|pair| {
+                        let key_required_larger = pair.get_key_required_larger() as usize;
+                        let key_required_smaller = pair.get_key_required_smaller() as usize;
+                        let left_input_len = source_l.schema().len();
+
+                        // Convert old format to new format
+                        // In old format: key_required_larger >= key_required_smaller
+                        // Determine which side is left/right based on column indices
+                        let (left_idx, right_idx, clean_left, clean_right, op) =
+                            if key_required_larger < left_input_len {
+                                // Larger key is on left side
+                                (
+                                    key_required_larger,
+                                    key_required_smaller - left_input_len,
+                                    pair.get_clean_state(),
+                                    false,
+                                    InequalityType::GreaterThanOrEqual,
+                                )
+                            } else {
+                                // Larger key is on right side
+                                (
+                                    key_required_smaller,
+                                    key_required_larger - left_input_len,
+                                    false,
+                                    pair.get_clean_state(),
+                                    InequalityType::LessThanOrEqual,
+                                )
+                            };
+
+                        InequalityPairInfo {
+                            left_idx,
+                            right_idx,
+                            clean_left_state: clean_left,
+                            clean_right_state: clean_right,
+                            op,
+                        }
+                    })
+                    .collect()
+            };
 
         let join_key_data_types = params_l
             .join_key_indices
@@ -191,7 +216,7 @@ struct HashJoinExecutorDispatcherArgs<S: StateStore> {
     null_safe: Vec<bool>,
     output_indices: Vec<usize>,
     cond: Option<NonStrictExpression>,
-    inequality_pairs: Vec<(usize, usize, bool, Option<NonStrictExpression>)>,
+    inequality_pairs: Vec<InequalityPairInfo>,
     state_table_l: StateTable<S>,
     degree_state_table_l: StateTable<S>,
     state_table_r: StateTable<S>,

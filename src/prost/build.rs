@@ -550,6 +550,7 @@ for_all_wrapped_id_fields! (
         StackTraceResponse {
             barrier_worker_state: WorkerId,
             jvm_stack_traces: WorkerId,
+            node_errors: WorkerId,
         }
     }
     plan_common {

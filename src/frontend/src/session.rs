@@ -51,7 +51,7 @@ use risingwave_common::catalog::{
 };
 use risingwave_common::config::{
     AuthMethod, BatchConfig, ConnectionType, FrontendConfig, MetaConfig, MetricLevel,
-    StreamingConfig, UdfConfig, load_config,
+    RpcClientConfig, StreamingConfig, UdfConfig, load_config,
 };
 use risingwave_common::id::WorkerId;
 use risingwave_common::memory::MemoryContext;
@@ -77,9 +77,11 @@ use risingwave_pb::common::WorkerType;
 use risingwave_pb::common::worker_node::Property as AddWorkerNodeProperty;
 use risingwave_pb::frontend_service::frontend_service_server::FrontendServiceServer;
 use risingwave_pb::health::health_server::HealthServer;
+use risingwave_pb::monitor_service::monitor_service_server::MonitorServiceServer;
 use risingwave_pb::user::auth_info::EncryptionType;
 use risingwave_rpc_client::{
     ComputeClientPool, ComputeClientPoolRef, FrontendClientPool, FrontendClientPoolRef, MetaClient,
+    MonitorClientPool, MonitorClientPoolRef,
 };
 use risingwave_sqlparser::ast::{ObjectName, Statement};
 use risingwave_sqlparser::parser::Parser;
@@ -120,7 +122,7 @@ use crate::health_service::HealthServiceImpl;
 use crate::meta_client::{FrontendMetaClient, FrontendMetaClientImpl};
 use crate::monitor::{CursorMetrics, FrontendMetrics, GLOBAL_FRONTEND_METRICS};
 use crate::observer::FrontendObserverNode;
-use crate::rpc::FrontendServiceImpl;
+use crate::rpc::{FrontendServiceImpl, MonitorServiceImpl};
 use crate::scheduler::streaming_manager::{StreamingJobTracker, StreamingJobTrackerRef};
 use crate::scheduler::{
     DistributedQueryMetrics, GLOBAL_DISTRIBUTED_QUERY_METRICS, HummockSnapshotManager,
@@ -156,6 +158,7 @@ pub(crate) struct FrontendEnv {
     server_addr: HostAddr,
     client_pool: ComputeClientPoolRef,
     frontend_client_pool: FrontendClientPoolRef,
+    monitor_client_pool: MonitorClientPoolRef,
 
     /// Each session is identified by (`process_id`,
     /// `secret_key`). When Cancel Request received, find corresponding session and cancel all
@@ -224,6 +227,7 @@ impl FrontendEnv {
         let system_params_manager = Arc::new(LocalSystemParamsManager::for_test());
         let compute_client_pool = Arc::new(ComputeClientPool::for_test());
         let frontend_client_pool = Arc::new(FrontendClientPool::for_test());
+        let monitor_client_pool = Arc::new(MonitorClientPool::for_test());
         let query_manager = QueryManager::new(
             worker_node_manager.clone(),
             compute_client_pool,
@@ -266,6 +270,7 @@ impl FrontendEnv {
             server_addr,
             client_pool,
             frontend_client_pool,
+            monitor_client_pool,
             sessions_map,
             frontend_metrics: Arc::new(FrontendMetrics::for_test()),
             cursor_metrics: Arc::new(CursorMetrics::for_test()),
@@ -358,6 +363,7 @@ impl FrontendEnv {
             1,
             config.batch.developer.frontend_client_config.clone(),
         ));
+        let monitor_client_pool = Arc::new(MonitorClientPool::new(1, RpcClientConfig::default()));
         let query_manager = QueryManager::new(
             worker_node_manager.clone(),
             compute_client_pool.clone(),
@@ -416,6 +422,7 @@ impl FrontendEnv {
 
         let health_srv = HealthServiceImpl::new();
         let frontend_srv = FrontendServiceImpl::new(sessions_map.clone());
+        let monitor_srv = MonitorServiceImpl::new(config.server.clone());
         let frontend_rpc_addr = opts.frontend_rpc_listener_addr.parse().unwrap();
 
         let telemetry_manager = TelemetryManager::new(
@@ -437,6 +444,7 @@ impl FrontendEnv {
             tonic::transport::Server::builder()
                 .add_service(HealthServer::new(health_srv))
                 .add_service(FrontendServiceServer::new(frontend_srv))
+                .add_service(MonitorServiceServer::new(monitor_srv))
                 .serve(frontend_rpc_addr)
                 .await
                 .unwrap();
@@ -543,6 +551,7 @@ impl FrontendEnv {
                 server_addr: frontend_address,
                 client_pool: compute_client_pool,
                 frontend_client_pool,
+                monitor_client_pool,
                 frontend_metrics,
                 cursor_metrics,
                 spill_metrics,
@@ -643,6 +652,10 @@ impl FrontendEnv {
 
     pub fn frontend_client_pool(&self) -> FrontendClientPoolRef {
         self.frontend_client_pool.clone()
+    }
+
+    pub fn monitor_client_pool(&self) -> MonitorClientPoolRef {
+        self.monitor_client_pool.clone()
     }
 
     pub fn batch_config(&self) -> &BatchConfig {

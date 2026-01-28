@@ -1042,7 +1042,6 @@ mod logical_agg;
 mod logical_apply;
 mod logical_cdc_scan;
 mod logical_changelog;
-mod logical_cte_ref;
 mod logical_dedup;
 mod logical_delete;
 mod logical_except;
@@ -1063,7 +1062,6 @@ mod logical_now;
 mod logical_over_window;
 mod logical_project;
 mod logical_project_set;
-mod logical_recursive_union;
 mod logical_scan;
 mod logical_share;
 mod logical_source;
@@ -1123,6 +1121,7 @@ mod batch_postgres_query;
 mod batch_mysql_query;
 mod derive;
 mod logical_file_scan;
+mod logical_iceberg_intermediate_scan;
 mod logical_iceberg_scan;
 mod logical_postgres_query;
 
@@ -1177,7 +1176,6 @@ pub use logical_agg::LogicalAgg;
 pub use logical_apply::LogicalApply;
 pub use logical_cdc_scan::LogicalCdcScan;
 pub use logical_changelog::LogicalChangeLog;
-pub use logical_cte_ref::LogicalCteRef;
 pub use logical_dedup::LogicalDedup;
 pub use logical_delete::LogicalDelete;
 pub use logical_except::LogicalExcept;
@@ -1187,6 +1185,7 @@ pub use logical_filter::LogicalFilter;
 pub use logical_gap_fill::LogicalGapFill;
 pub use logical_get_channel_delta_stats::LogicalGetChannelDeltaStats;
 pub use logical_hop_window::LogicalHopWindow;
+pub use logical_iceberg_intermediate_scan::LogicalIcebergIntermediateScan;
 pub use logical_iceberg_scan::LogicalIcebergScan;
 pub use logical_insert::LogicalInsert;
 pub use logical_intersect::LogicalIntersect;
@@ -1202,7 +1201,6 @@ pub use logical_over_window::LogicalOverWindow;
 pub use logical_postgres_query::LogicalPostgresQuery;
 pub use logical_project::LogicalProject;
 pub use logical_project_set::LogicalProjectSet;
-pub use logical_recursive_union::LogicalRecursiveUnion;
 pub use logical_scan::LogicalScan;
 pub use logical_share::LogicalShare;
 pub use logical_source::LogicalSource;
@@ -1320,8 +1318,7 @@ macro_rules! for_all_plan_nodes {
             , { Logical, MaxOneRow }
             , { Logical, KafkaScan }
             , { Logical, IcebergScan }
-            , { Logical, RecursiveUnion }
-            , { Logical, CteRef }
+            , { Logical, IcebergIntermediateScan }
             , { Logical, ChangeLog }
             , { Logical, FileScan }
             , { Logical, PostgresQuery }

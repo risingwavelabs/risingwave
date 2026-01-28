@@ -140,7 +140,8 @@ pub trait FrontendMetaClient: Send + Sync {
 
     async fn apply_throttle(
         &self,
-        kind: PbThrottleTarget,
+        throttle_target: PbThrottleTarget,
+        throttle_type: risingwave_pb::common::PbThrottleType,
         id: u32,
         rate_limit: Option<u32>,
     ) -> Result<()>;
@@ -405,12 +406,13 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
 
     async fn apply_throttle(
         &self,
-        kind: PbThrottleTarget,
+        throttle_target: PbThrottleTarget,
+        throttle_type: risingwave_pb::common::PbThrottleType,
         id: u32,
         rate_limit: Option<u32>,
     ) -> Result<()> {
         self.0
-            .apply_throttle(kind, id, rate_limit)
+            .apply_throttle(throttle_target, throttle_type, id, rate_limit)
             .await
             .map(|_| ())
     }

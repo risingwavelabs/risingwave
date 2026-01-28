@@ -30,6 +30,7 @@ use risingwave_common::{bail, hash};
 use risingwave_meta_model::fragment::DistributionType;
 use risingwave_meta_model::object::ObjectType;
 use risingwave_meta_model::prelude::*;
+use risingwave_meta_model::streaming_job::BackfillOrders;
 use risingwave_meta_model::table::TableType;
 use risingwave_meta_model::user_privilege::Action;
 use risingwave_meta_model::{
@@ -1087,6 +1088,25 @@ where
     Ok(related_objects)
 }
 
+/// Load streaming jobs by job ids.
+pub(crate) async fn load_streaming_jobs_by_ids<C>(
+    txn: &C,
+    job_ids: impl IntoIterator<Item = JobId>,
+) -> MetaResult<HashMap<JobId, streaming_job::Model>>
+where
+    C: ConnectionTrait,
+{
+    let job_ids: HashSet<JobId> = job_ids.into_iter().collect();
+    if job_ids.is_empty() {
+        return Ok(HashMap::new());
+    }
+    let jobs = streaming_job::Entity::find()
+        .filter(streaming_job::Column::JobId.is_in(job_ids.clone()))
+        .all(txn)
+        .await?;
+    Ok(jobs.into_iter().map(|job| (job.job_id, job)).collect())
+}
+
 #[derive(Clone, DerivePartialModel, FromQueryResult)]
 #[sea_orm(entity = "UserPrivilege")]
 pub struct PartialUserPrivilege {
@@ -1321,31 +1341,35 @@ pub async fn insert_fragment_relations(
     db: &impl ConnectionTrait,
     downstream_fragment_relations: &FragmentDownstreamRelation,
 ) -> MetaResult<()> {
+    let mut relations = vec![];
     for (upstream_fragment_id, downstreams) in downstream_fragment_relations {
         for downstream in downstreams {
-            let relation = fragment_relation::Model {
-                source_fragment_id: *upstream_fragment_id as _,
-                target_fragment_id: downstream.downstream_fragment_id as _,
-                dispatcher_type: downstream.dispatcher_type,
-                dist_key_indices: downstream
-                    .dist_key_indices
-                    .iter()
-                    .map(|idx| *idx as i32)
-                    .collect_vec()
-                    .into(),
-                output_indices: downstream
-                    .output_mapping
-                    .indices
-                    .iter()
-                    .map(|idx| *idx as i32)
-                    .collect_vec()
-                    .into(),
-                output_type_mapping: Some(downstream.output_mapping.types.clone().into()),
-            };
-            FragmentRelation::insert(relation.into_active_model())
-                .exec(db)
-                .await?;
+            relations.push(
+                fragment_relation::Model {
+                    source_fragment_id: *upstream_fragment_id as _,
+                    target_fragment_id: downstream.downstream_fragment_id as _,
+                    dispatcher_type: downstream.dispatcher_type,
+                    dist_key_indices: downstream
+                        .dist_key_indices
+                        .iter()
+                        .map(|idx| *idx as i32)
+                        .collect_vec()
+                        .into(),
+                    output_indices: downstream
+                        .output_mapping
+                        .indices
+                        .iter()
+                        .map(|idx| *idx as i32)
+                        .collect_vec()
+                        .into(),
+                    output_type_mapping: Some(downstream.output_mapping.types.clone().into()),
+                }
+                .into_active_model(),
+            );
         }
+    }
+    if !relations.is_empty() {
+        FragmentRelation::insert_many(relations).exec(db).await?;
     }
     Ok(())
 }
@@ -1794,8 +1818,13 @@ pub async fn rename_relation(
                 ..Default::default()
             };
             active_model.update(txn).await?;
+            let streaming_job = streaming_job::Entity::find_by_id($object_id.as_raw_id())
+                .one(txn)
+                .await?;
             to_update_relations.push(PbObject {
-                object_info: Some(PbObjectInfo::$entity(ObjectModel(relation, obj).into())),
+                object_info: Some(PbObjectInfo::$entity(
+                    ObjectModel(relation, obj, streaming_job).into(),
+                )),
             });
             old_name
         }};
@@ -1834,6 +1863,9 @@ pub async fn rename_relation(
                 .one(txn)
                 .await?
                 .unwrap();
+            let streaming_job = streaming_job::Entity::find_by_id(index.index_id.as_job_id())
+                .one(txn)
+                .await?;
             index.name = object_name.into();
             let index_table_id = index.index_table_id;
             let old_name = rename_relation!(Table, table, table_id, index_table_id);
@@ -1846,7 +1878,9 @@ pub async fn rename_relation(
             };
             active_model.update(txn).await?;
             to_update_relations.push(PbObject {
-                object_info: Some(PbObjectInfo::Index(ObjectModel(index, obj.unwrap()).into())),
+                object_info: Some(PbObjectInfo::Index(
+                    ObjectModel(index, obj.unwrap(), streaming_job).into(),
+                )),
             });
             old_name
         }
@@ -1940,9 +1974,12 @@ pub async fn rename_relation_refer(
                 ..Default::default()
             };
             active_model.update(txn).await?;
+            let streaming_job = streaming_job::Entity::find_by_id($object_id.as_raw_id())
+                .one(txn)
+                .await?;
             to_update_relations.push(PbObject {
                 object_info: Some(PbObjectInfo::$entity(
-                    ObjectModel(relation, obj.unwrap()).into(),
+                    ObjectModel(relation, obj.unwrap(), streaming_job).into(),
                 )),
             });
         }};
@@ -2326,6 +2363,7 @@ pub struct StreamingJobExtraInfo {
     pub timezone: Option<String>,
     pub config_override: Arc<str>,
     pub job_definition: String,
+    pub backfill_orders: Option<BackfillOrders>,
 }
 
 impl StreamingJobExtraInfo {
@@ -2344,12 +2382,19 @@ pub async fn get_streaming_job_extra_info<C>(
 where
     C: ConnectionTrait,
 {
-    let pairs: Vec<(JobId, Option<String>, Option<String>)> = StreamingJob::find()
+    #[expect(clippy::type_complexity)]
+    let pairs: Vec<(
+        JobId,
+        Option<String>,
+        Option<String>,
+        Option<BackfillOrders>,
+    )> = StreamingJob::find()
         .select_only()
         .columns([
             streaming_job::Column::JobId,
             streaming_job::Column::Timezone,
             streaming_job::Column::ConfigOverride,
+            streaming_job::Column::BackfillOrders,
         ])
         .filter(streaming_job::Column::JobId.is_in(job_ids.clone()))
         .into_tuple()
@@ -2362,7 +2407,7 @@ where
 
     let result = pairs
         .into_iter()
-        .map(|(job_id, timezone, config_override)| {
+        .map(|(job_id, timezone, config_override, backfill_orders)| {
             let job_definition = definitions.remove(&job_id).unwrap_or_default();
             (
                 job_id,
@@ -2370,6 +2415,7 @@ where
                     timezone,
                     config_override: config_override.unwrap_or_default().into(),
                     job_definition,
+                    backfill_orders,
                 },
             )
         })

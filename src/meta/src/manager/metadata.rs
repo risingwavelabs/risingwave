@@ -21,7 +21,7 @@ use risingwave_common::catalog::{DatabaseId, TableId, TableOption};
 use risingwave_common::id::JobId;
 use risingwave_meta_model::refresh_job::{self, RefreshState};
 use risingwave_meta_model::{SinkId, SourceId, WorkerId};
-use risingwave_pb::catalog::{PbSink, PbSource, PbTable};
+use risingwave_pb::catalog::{PbSource, PbTable};
 use risingwave_pb::common::worker_node::{PbResource, Property as AddNodeProperty, State};
 use risingwave_pb::common::{HostAddress, PbWorkerNode, PbWorkerType, WorkerNode, WorkerType};
 use risingwave_pb::meta::list_rate_limits_response::RateLimitInfo;
@@ -344,15 +344,10 @@ impl MetadataManager {
         Ok(ret)
     }
 
-    pub async fn list_background_creating_jobs(&self) -> MetaResult<Vec<JobId>> {
-        let jobs = self
-            .catalog_controller
+    pub async fn list_background_creating_jobs(&self) -> MetaResult<HashSet<JobId>> {
+        self.catalog_controller
             .list_background_creating_jobs(false, None)
-            .await?;
-
-        let jobs = jobs.into_iter().map(|(id, _, _)| id).collect();
-
-        Ok(jobs)
+            .await
     }
 
     pub async fn list_sources(&self) -> MetaResult<Vec<PbSource>> {
@@ -421,12 +416,6 @@ impl MetadataManager {
     pub async fn get_table_catalog_by_ids(&self, ids: &[TableId]) -> MetaResult<Vec<PbTable>> {
         self.catalog_controller
             .get_table_by_ids(ids.to_vec(), false)
-            .await
-    }
-
-    pub async fn get_table_incoming_sinks(&self, table_id: TableId) -> MetaResult<Vec<PbSink>> {
-        self.catalog_controller
-            .get_table_incoming_sinks(table_id)
             .await
     }
 
@@ -719,7 +708,7 @@ impl MetadataManager {
 
     pub async fn collect_unreschedulable_backfill_jobs(
         &self,
-        job_ids: &[JobId],
+        job_ids: impl IntoIterator<Item = &JobId>,
     ) -> MetaResult<HashSet<JobId>> {
         let mut unreschedulable = HashSet::new();
 

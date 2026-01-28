@@ -31,6 +31,8 @@ use risingwave_pb::stream_service::barrier_complete_response::{
 use tracing::warn;
 
 use crate::barrier::checkpoint::creating_job::CreatingJobInfo;
+use crate::barrier::checkpoint::recovery::ResetPartialGraphCollector;
+use crate::barrier::notifier::Notifier;
 use crate::barrier::progress::{CreateMviewProgressTracker, TrackingJob};
 use crate::barrier::{BarrierInfo, BarrierKind, TracedEpoch};
 use crate::controller::fragment::InflightFragmentInfo;
@@ -129,6 +131,7 @@ pub(super) enum CreatingStreamingJobStatus {
     /// will be finished when all previously injected barriers have been collected
     /// Store the `prev_epoch` that will finish at.
     Finishing(u64, TrackingJob),
+    Resetting(ResetPartialGraphCollector, Vec<Notifier>),
     PlaceHolder,
 }
 
@@ -198,7 +201,8 @@ impl CreatingStreamingJobStatus {
             } => {
                 log_store_progress_tracker.update(create_mview_progress);
             }
-            CreatingStreamingJobStatus::Finishing(..) => {}
+            CreatingStreamingJobStatus::Finishing(..)
+            | CreatingStreamingJobStatus::Resetting(_, _) => {}
             CreatingStreamingJobStatus::PlaceHolder => {
                 unreachable!()
             }
@@ -229,6 +233,9 @@ impl CreatingStreamingJobStatus {
             CreatingStreamingJobStatus::Finishing { .. } => {
                 unreachable!("should not start consuming upstream for a job again")
             }
+            CreatingStreamingJobStatus::Resetting(_, _) => {
+                unreachable!("unlikely to start consume upstream when resetting")
+            }
             CreatingStreamingJobStatus::PlaceHolder => {
                 unreachable!()
             }
@@ -238,6 +245,7 @@ impl CreatingStreamingJobStatus {
     pub(super) fn on_new_upstream_epoch(
         &mut self,
         barrier_info: &BarrierInfo,
+        mutation: Option<Mutation>, // mutation to be set for the first barrier to inject
     ) -> Vec<(BarrierInfo, Option<Mutation>)> {
         match self {
             CreatingStreamingJobStatus::ConsumingSnapshot {
@@ -247,7 +255,7 @@ impl CreatingStreamingJobStatus {
                 create_mview_tracker,
                 ..
             } => {
-                let mutation = {
+                let mutation = mutation.or_else(|| {
                     let pending_backfill_nodes = create_mview_tracker
                         .take_pending_backfill_nodes()
                         .collect_vec();
@@ -260,7 +268,7 @@ impl CreatingStreamingJobStatus {
                             },
                         ))
                     }
-                };
+                });
                 pending_upstream_barriers.push(barrier_info.clone());
                 vec![(
                     CreatingStreamingJobStatus::new_fake_barrier(
@@ -286,7 +294,8 @@ impl CreatingStreamingJobStatus {
                 .chain([barrier_info.clone()])
                 .map(|barrier_info| (barrier_info, None))
                 .collect(),
-            CreatingStreamingJobStatus::Finishing { .. } => {
+            CreatingStreamingJobStatus::Finishing { .. }
+            | CreatingStreamingJobStatus::Resetting(_, _) => {
                 vec![]
             }
             CreatingStreamingJobStatus::PlaceHolder => {
@@ -336,7 +345,8 @@ impl CreatingStreamingJobStatus {
             | CreatingStreamingJobStatus::ConsumingLogStore { info, .. } => {
                 Some(&info.fragment_infos)
             }
-            CreatingStreamingJobStatus::Finishing(..) => None,
+            CreatingStreamingJobStatus::Finishing(..)
+            | CreatingStreamingJobStatus::Resetting(_, _) => None,
             CreatingStreamingJobStatus::PlaceHolder => {
                 unreachable!()
             }

@@ -38,10 +38,12 @@ use risingwave_connector::{WithOptionsSecResolved, WithPropertiesExt, match_sink
 use risingwave_meta_model::object::ObjectType;
 use risingwave_meta_model::prelude::{StreamingJob as StreamingJobModel, *};
 use risingwave_meta_model::refresh_job::RefreshState;
+use risingwave_meta_model::streaming_job::BackfillOrders;
 use risingwave_meta_model::table::TableType;
 use risingwave_meta_model::user_privilege::Action;
 use risingwave_meta_model::*;
 use risingwave_pb::catalog::{PbConnection, PbCreateType, PbTable};
+use risingwave_pb::ddl_service::streaming_job_resource_type;
 use risingwave_pb::meta::alter_connector_props_request::AlterIcebergTableIds;
 use risingwave_pb::meta::list_rate_limits_response::RateLimitInfo;
 use risingwave_pb::meta::object::PbObjectInfo;
@@ -64,7 +66,7 @@ use sea_orm::ActiveValue::Set;
 use sea_orm::sea_query::{Expr, Query, SimpleExpr};
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, DatabaseTransaction, EntityTrait, IntoActiveModel, JoinType,
-    ModelTrait, NotSet, PaginatorTrait, QueryFilter, QuerySelect, RelationTrait, TransactionTrait,
+    NotSet, PaginatorTrait, QueryFilter, QuerySelect, RelationTrait, TransactionTrait,
 };
 use thiserror_ext::AsReport;
 
@@ -113,11 +115,16 @@ impl CatalogController {
         ctx: StreamContext,
         streaming_parallelism: StreamingParallelism,
         max_parallelism: usize,
-        specific_resource_group: Option<String>, // todo: can we move it to StreamContext?
+        resource_type: streaming_job_resource_type::ResourceType,
         backfill_parallelism: Option<StreamingParallelism>,
     ) -> MetaResult<JobId> {
         let obj = Self::create_object(txn, obj_type, owner_id, database_id, schema_id).await?;
         let job_id = obj.oid.as_job_id();
+        let specific_resource_group = resource_type.resource_group();
+        let is_serverless_backfill = matches!(
+            &resource_type,
+            streaming_job_resource_type::ResourceType::ServerlessBackfillResourceGroup(_)
+        );
         let job = streaming_job::ActiveModel {
             job_id: Set(job_id),
             job_status: Set(JobStatus::Initial),
@@ -126,10 +133,12 @@ impl CatalogController {
             config_override: Set(Some(ctx.config_override.to_string())),
             parallelism: Set(streaming_parallelism),
             backfill_parallelism: Set(backfill_parallelism),
+            backfill_orders: Set(None),
             max_parallelism: Set(max_parallelism as _),
             specific_resource_group: Set(specific_resource_group),
+            is_serverless_backfill: Set(is_serverless_backfill),
         };
-        job.insert(txn).await?;
+        StreamingJobModel::insert(job).exec(txn).await?;
 
         Ok(job_id)
     }
@@ -147,7 +156,7 @@ impl CatalogController {
         parallelism: &Option<Parallelism>,
         max_parallelism: usize,
         mut dependencies: HashSet<ObjectId>,
-        specific_resource_group: Option<String>,
+        resource_type: streaming_job_resource_type::ResourceType,
         backfill_parallelism: &Option<Parallelism>,
     ) -> MetaResult<()> {
         let inner = self.inner.write().await;
@@ -218,7 +227,7 @@ impl CatalogController {
                     ctx.clone(),
                     streaming_parallelism,
                     max_parallelism,
-                    specific_resource_group,
+                    resource_type,
                     backfill_parallelism.clone(),
                 )
                 .await?;
@@ -248,7 +257,7 @@ impl CatalogController {
                     ctx.clone(),
                     streaming_parallelism,
                     max_parallelism,
-                    specific_resource_group,
+                    resource_type,
                     backfill_parallelism.clone(),
                 )
                 .await?;
@@ -267,7 +276,7 @@ impl CatalogController {
                     ctx.clone(),
                     streaming_parallelism,
                     max_parallelism,
-                    specific_resource_group,
+                    resource_type,
                     backfill_parallelism.clone(),
                 )
                 .await?;
@@ -327,7 +336,7 @@ impl CatalogController {
                     ctx.clone(),
                     streaming_parallelism,
                     max_parallelism,
-                    specific_resource_group,
+                    resource_type,
                     backfill_parallelism.clone(),
                 )
                 .await?;
@@ -360,7 +369,7 @@ impl CatalogController {
                     ctx.clone(),
                     streaming_parallelism,
                     max_parallelism,
-                    specific_resource_group,
+                    resource_type,
                     backfill_parallelism.clone(),
                 )
                 .await?;
@@ -456,6 +465,7 @@ impl CatalogController {
         stream_job_fragments: &StreamJobFragmentsToCreate,
         streaming_job: &StreamingJob,
         for_replace: bool,
+        backfill_orders: Option<BackfillOrders>,
     ) -> MetaResult<()> {
         self.prepare_streaming_job(
             stream_job_fragments.stream_job_id(),
@@ -463,6 +473,7 @@ impl CatalogController {
             &stream_job_fragments.downstreams,
             for_replace,
             Some(streaming_job),
+            backfill_orders,
         )
         .await
     }
@@ -480,6 +491,7 @@ impl CatalogController {
         downstreams: &FragmentDownstreamRelation,
         for_replace: bool,
         creating_streaming_job: Option<&'a StreamingJob>,
+        backfill_orders: Option<BackfillOrders>,
     ) -> MetaResult<()> {
         let fragments = Self::prepare_fragment_models_from_fragments(job_id, get_fragments())?;
 
@@ -496,47 +508,60 @@ impl CatalogController {
         // Ensure the job exists.
         ensure_job_not_canceled(job_id, &txn).await?;
 
-        for fragment in fragments {
-            let fragment_id = fragment.fragment_id;
-            let state_table_ids = fragment.state_table_ids.inner_ref().clone();
+        if let Some(backfill_orders) = backfill_orders {
+            let job = streaming_job::ActiveModel {
+                job_id: Set(job_id),
+                backfill_orders: Set(Some(backfill_orders)),
+                ..Default::default()
+            };
+            StreamingJobModel::update(job).exec(&txn).await?;
+        }
 
-            let fragment = fragment.into_active_model();
-            Fragment::insert(fragment).exec(&txn).await?;
+        let state_table_ids = fragments
+            .iter()
+            .flat_map(|fragment| fragment.state_table_ids.inner_ref().clone())
+            .collect_vec();
 
-            // Fields including `fragment_id` and `vnode_count` were placeholder values before.
-            // After table fragments are created, update them for all tables.
-            if !for_replace {
-                let all_tables = StreamJobFragments::collect_tables(get_fragments());
-                for state_table_id in state_table_ids {
-                    // Table's vnode count is not always the fragment's vnode count, so we have to
-                    // look up the table from `TableFragments`.
-                    // See `ActorGraphBuilder::new`.
-                    let table = all_tables
-                        .get(&state_table_id)
-                        .unwrap_or_else(|| panic!("table {} not found", state_table_id));
-                    assert_eq!(table.id, state_table_id);
-                    assert_eq!(table.fragment_id, fragment_id);
-                    let vnode_count = table.vnode_count();
+        if !fragments.is_empty() {
+            let fragment_models = fragments
+                .into_iter()
+                .map(|fragment| fragment.into_active_model())
+                .collect_vec();
+            Fragment::insert_many(fragment_models).exec(&txn).await?;
+        }
 
-                    table::ActiveModel {
-                        table_id: Set(state_table_id as _),
-                        fragment_id: Set(Some(fragment_id)),
-                        vnode_count: Set(vnode_count as _),
-                        ..Default::default()
+        // Fields including `fragment_id` and `vnode_count` were placeholder values before.
+        // After table fragments are created, update them for all tables.
+        if !for_replace {
+            let all_tables = StreamJobFragments::collect_tables(get_fragments());
+            for state_table_id in state_table_ids {
+                // Table's vnode count is not always the fragment's vnode count, so we have to
+                // look up the table from `TableFragments`.
+                // See `ActorGraphBuilder::new`.
+                let table = all_tables
+                    .get(&state_table_id)
+                    .unwrap_or_else(|| panic!("table {} not found", state_table_id));
+                assert_eq!(table.id, state_table_id);
+                let vnode_count = table.vnode_count();
+
+                Table::update(table::ActiveModel {
+                    table_id: Set(state_table_id as _),
+                    fragment_id: Set(Some(table.fragment_id)),
+                    vnode_count: Set(vnode_count as _),
+                    ..Default::default()
+                })
+                .exec(&txn)
+                .await?;
+
+                if need_notify {
+                    let mut table = table.clone();
+                    // In production, definition was replaced but still needed for notification.
+                    if cfg!(not(debug_assertions)) && table.id == job_id.as_raw_id() {
+                        table.definition = definition.clone().unwrap();
                     }
-                    .update(&txn)
-                    .await?;
-
-                    if need_notify {
-                        let mut table = table.clone();
-                        // In production, definition was replaced but still needed for notification.
-                        if cfg!(not(debug_assertions)) && table.id == job_id.as_raw_id() {
-                            table.definition = definition.clone().unwrap();
-                        }
-                        objects_to_notify.push(PbObject {
-                            object_info: Some(PbObjectInfo::Table(table)),
-                        });
-                    }
+                    objects_to_notify.push(PbObject {
+                        object_info: Some(PbObjectInfo::Table(table)),
+                    });
                 }
             }
         }
@@ -729,7 +754,7 @@ impl CatalogController {
                 .all(&txn)
                 .await?
                 .into_iter()
-                .map(|(table, obj)| PbTable::from(ObjectModel(table, obj.unwrap())));
+                .map(|(table, obj)| PbTable::from(ObjectModel(table, obj.unwrap(), None)));
             inner
                 .dropped_tables
                 .extend(dropped_tables.map(|t| (t.id, t)));
@@ -879,12 +904,12 @@ impl CatalogController {
         }
 
         // Mark job as CREATING.
-        streaming_job::ActiveModel {
+        StreamingJobModel::update(streaming_job::ActiveModel {
             job_id: Set(job_id),
             job_status: Set(JobStatus::Creating),
             ..Default::default()
-        }
-        .update(&txn)
+        })
+        .exec(&txn)
         .await?;
 
         if let Some(split_assignment) = split_assignment {
@@ -994,7 +1019,7 @@ impl CatalogController {
             ctx,
             parallelism,
             original_max_parallelism as _,
-            None,
+            streaming_job_resource_type::ResourceType::Regular(true),
             None,
         )
         .await?;
@@ -1099,7 +1124,7 @@ impl CatalogController {
             job_status: Set(JobStatus::Created),
             ..Default::default()
         };
-        job.update(txn).await?;
+        let streaming_job = Some(job.update(txn).await?);
 
         // notify frontend: job, internal tables.
         let internal_table_objs = Table::find()
@@ -1111,7 +1136,7 @@ impl CatalogController {
             .iter()
             .map(|(table, obj)| PbObject {
                 object_info: Some(PbObjectInfo::Table(
-                    ObjectModel(table.clone(), obj.clone().unwrap()).into(),
+                    ObjectModel(table.clone(), obj.clone().unwrap(), streaming_job.clone()).into(),
                 )),
             })
             .collect_vec();
@@ -1142,12 +1167,14 @@ impl CatalogController {
                         .ok_or_else(|| MetaError::catalog_id_not_found("source", source_id))?;
                     objects.push(PbObject {
                         object_info: Some(PbObjectInfo::Source(
-                            ObjectModel(src, obj.unwrap()).into(),
+                            ObjectModel(src, obj.unwrap(), None).into(),
                         )),
                     });
                 }
                 objects.push(PbObject {
-                    object_info: Some(PbObjectInfo::Table(ObjectModel(table, obj.unwrap()).into())),
+                    object_info: Some(PbObjectInfo::Table(
+                        ObjectModel(table, obj.unwrap(), streaming_job).into(),
+                    )),
                 });
             }
             ObjectType::Sink => {
@@ -1163,7 +1190,9 @@ impl CatalogController {
                 // to avoid duplicate Add notifications (align with MV behavior).
                 notification_op = NotificationOperation::Update;
                 objects.push(PbObject {
-                    object_info: Some(PbObjectInfo::Sink(ObjectModel(sink, obj.unwrap()).into())),
+                    object_info: Some(PbObjectInfo::Sink(
+                        ObjectModel(sink, obj.unwrap(), streaming_job).into(),
+                    )),
                 });
             }
             ObjectType::Index => {
@@ -1183,7 +1212,7 @@ impl CatalogController {
                         })?;
                     objects.push(PbObject {
                         object_info: Some(PbObjectInfo::Table(
-                            ObjectModel(table, obj.unwrap()).into(),
+                            ObjectModel(table, obj.unwrap(), streaming_job.clone()).into(),
                         )),
                     });
                 }
@@ -1234,7 +1263,9 @@ impl CatalogController {
                 }
 
                 objects.push(PbObject {
-                    object_info: Some(PbObjectInfo::Index(ObjectModel(index, obj.unwrap()).into())),
+                    object_info: Some(PbObjectInfo::Index(
+                        ObjectModel(index, obj.unwrap(), streaming_job).into(),
+                    )),
                 });
             }
             ObjectType::Source => {
@@ -1245,7 +1276,7 @@ impl CatalogController {
                     .ok_or_else(|| MetaError::catalog_id_not_found("source", job_id))?;
                 objects.push(PbObject {
                     object_info: Some(PbObjectInfo::Source(
-                        ObjectModel(source, obj.unwrap()).into(),
+                        ObjectModel(source, obj.unwrap(), None).into(),
                     )),
                 });
             }
@@ -1348,12 +1379,12 @@ impl CatalogController {
 
                 // For sinks created in earlier versions, we need to set the original_target_columns.
                 for sink_id in updated_sink_catalogs {
-                    sink::ActiveModel {
+                    Sink::update(sink::ActiveModel {
                         sink_id: Set(sink_id as _),
                         original_target_columns: Set(Some(original_column_catalogs.clone())),
                         ..Default::default()
-                    }
-                    .update(txn)
+                    })
+                    .exec(txn)
                     .await?;
                 }
                 // Update the table catalog with the new one. (column catalog is also updated here)
@@ -1365,17 +1396,17 @@ impl CatalogController {
                     table.optional_associated_source_id = Set(None);
                 }
 
-                table.update(txn).await?;
+                Table::update(table).exec(txn).await?;
             }
             StreamingJob::Source(source) => {
                 // Update the source catalog with the new one.
                 let source = source::ActiveModel::from(source);
-                source.update(txn).await?;
+                Source::update(source).exec(txn).await?;
             }
             StreamingJob::MaterializedView(table) => {
                 // Update the table catalog with the new one.
                 let table = table::ActiveModel::from(table);
-                table.update(txn).await?;
+                Table::update(table).exec(txn).await?;
             }
             _ => unreachable!(
                 "invalid streaming job type: {:?}",
@@ -1405,13 +1436,13 @@ impl CatalogController {
             for (fragment_id, state_table_ids) in fragment_info {
                 for state_table_id in state_table_ids.into_inner() {
                     let state_table_id = TableId::new(state_table_id as _);
-                    table::ActiveModel {
+                    Table::update(table::ActiveModel {
                         table_id: Set(state_table_id),
                         fragment_id: Set(Some(fragment_id)),
                         // No need to update `vnode_count` because it must remain the same.
                         ..Default::default()
-                    }
-                    .update(txn)
+                    })
+                    .exec(txn)
                     .await?;
                 }
             }
@@ -1448,12 +1479,12 @@ impl CatalogController {
                         m.upstream_fragment_id = *new_fragment_id;
                     }
                 });
-                fragment::ActiveModel {
+                Fragment::update(fragment::ActiveModel {
                     fragment_id: Set(fragment_id),
                     stream_node: Set(StreamNode::from(&stream_node)),
                     ..Default::default()
-                }
-                .update(txn)
+                })
+                .exec(txn)
                 .await?;
             }
 
@@ -1474,9 +1505,12 @@ impl CatalogController {
                     .one(txn)
                     .await?
                     .ok_or_else(|| MetaError::catalog_id_not_found("object", original_job_id))?;
+                let streaming_job = streaming_job::Entity::find_by_id(table.job_id())
+                    .one(txn)
+                    .await?;
                 objects.push(PbObject {
                     object_info: Some(PbObjectInfo::Table(
-                        ObjectModel(table, table_obj.unwrap()).into(),
+                        ObjectModel(table, table_obj.unwrap(), streaming_job).into(),
                     )),
                 })
             }
@@ -1491,7 +1525,7 @@ impl CatalogController {
                         })?;
                 objects.push(PbObject {
                     object_info: Some(PbObjectInfo::Source(
-                        ObjectModel(source, source_obj.unwrap()).into(),
+                        ObjectModel(source, source_obj.unwrap(), None).into(),
                     )),
                 })
             }
@@ -1518,13 +1552,15 @@ impl CatalogController {
                 }
                 .update(txn)
                 .await?;
-                let index_obj = index
-                    .find_related(Object)
+                let (index_obj, streaming_job) = Object::find_by_id(index.index_id)
+                    .find_also_related(streaming_job::Entity)
                     .one(txn)
                     .await?
                     .ok_or_else(|| MetaError::catalog_id_not_found("object", index.index_id))?;
                 objects.push(PbObject {
-                    object_info: Some(PbObjectInfo::Index(ObjectModel(index, index_obj).into())),
+                    object_info: Some(PbObjectInfo::Index(
+                        ObjectModel(index, index_obj, streaming_job).into(),
+                    )),
                 });
             }
         }
@@ -1543,6 +1579,10 @@ impl CatalogController {
                     .one(txn)
                     .await?
                     .ok_or_else(|| MetaError::catalog_id_not_found("sink", original_job_id))?;
+                let sink_streaming_job =
+                    streaming_job::Entity::find_by_id(sink.sink_id.as_job_id())
+                        .one(txn)
+                        .await?;
                 let columns = ColumnCatalogArray::from(finish_sink_context.columns);
                 Sink::update(sink::ActiveModel {
                     sink_id: Set(finish_sink_context.original_sink_id),
@@ -1554,7 +1594,7 @@ impl CatalogController {
                 sink.columns = columns;
                 objects.push(PbObject {
                     object_info: Some(PbObjectInfo::Sink(
-                        ObjectModel(sink, sink_obj.unwrap()).into(),
+                        ObjectModel(sink, sink_obj.unwrap(), sink_streaming_job.clone()).into(),
                     )),
                 });
                 if let Some((log_store_table_id, new_log_store_table_columns)) =
@@ -1577,7 +1617,8 @@ impl CatalogController {
                     table.columns = new_log_store_table_columns;
                     objects.push(PbObject {
                         object_info: Some(PbObjectInfo::Table(
-                            ObjectModel(table, table_obj.unwrap()).into(),
+                            ObjectModel(table, table_obj.unwrap(), sink_streaming_job.clone())
+                                .into(),
                         )),
                     });
                 }
@@ -1627,7 +1668,7 @@ impl CatalogController {
                 rate_limit: Set(rate_limit.map(|v| v as i32)),
                 ..Default::default()
             };
-            active_source.update(&txn).await?;
+            Source::update(active_source).exec(&txn).await?;
         }
 
         let (source, obj) = Source::find_by_id(source_id)
@@ -1728,19 +1769,19 @@ impl CatalogController {
             .unzip();
 
         for (fragment_id, _, fragment_type_mask, stream_node) in fragments {
-            fragment::ActiveModel {
+            Fragment::update(fragment::ActiveModel {
                 fragment_id: Set(fragment_id),
                 fragment_type_mask: Set(fragment_type_mask.into()),
                 stream_node: Set(StreamNode::from(&stream_node)),
                 ..Default::default()
-            }
-            .update(&txn)
+            })
+            .exec(&txn)
             .await?;
         }
 
         txn.commit().await?;
 
-        let relation_info = PbObjectInfo::Source(ObjectModel(source, obj.unwrap()).into());
+        let relation_info = PbObjectInfo::Source(ObjectModel(source, obj.unwrap(), None).into());
         let _version = self
             .notify_frontend(
                 NotificationOperation::Update,
@@ -1806,12 +1847,12 @@ impl CatalogController {
 
         let fragment_ids: HashSet<FragmentId> = fragments.iter().map(|(id, _, _)| *id).collect();
         for (id, _, stream_node) in fragments {
-            fragment::ActiveModel {
+            Fragment::update(fragment::ActiveModel {
                 fragment_id: Set(id),
                 stream_node: Set(StreamNode::from(&stream_node)),
                 ..Default::default()
-            }
-            .update(&txn)
+            })
+            .exec(&txn)
             .await?;
         }
 
@@ -1850,12 +1891,12 @@ impl CatalogController {
             )));
         }
 
-        fragment::ActiveModel {
+        Fragment::update(fragment::ActiveModel {
             fragment_id: Set(fragment_id),
             stream_node: Set(stream_node),
             ..Default::default()
-        }
-        .update(&txn)
+        })
+        .exec(&txn)
         .await?;
 
         txn.commit().await?;
@@ -1886,10 +1927,6 @@ impl CatalogController {
                             found = true;
                         }
                         PbNodeBody::SourceBackfill(node) => {
-                            node.rate_limit = rate_limit;
-                            found = true;
-                        }
-                        PbNodeBody::Sink(node) => {
                             node.rate_limit = rate_limit;
                             found = true;
                         }
@@ -2130,7 +2167,7 @@ impl CatalogController {
                 .then(|| SecretRef::from(options_with_secret.as_secret().clone()))),
             ..Default::default()
         };
-        active_source_model.update(&txn).await?;
+        Source::update(active_source_model).exec(&txn).await?;
 
         if let Some(associate_table_id) = associate_table_id {
             // update the associated table statement accordly
@@ -2139,7 +2176,7 @@ impl CatalogController {
                 definition: Set(rewrite_sql),
                 ..Default::default()
             };
-            active_table_model.update(&txn).await?;
+            Table::update(active_table_model).exec(&txn).await?;
         }
 
         let to_check_job_ids = vec![if let Some(associate_table_id) = associate_table_id {
@@ -2180,7 +2217,7 @@ impl CatalogController {
             })?;
         to_update_objs.push(PbObject {
             object_info: Some(PbObjectInfo::Source(
-                ObjectModel(source, obj.unwrap()).into(),
+                ObjectModel(source, obj.unwrap(), None).into(),
             )),
         });
 
@@ -2190,8 +2227,13 @@ impl CatalogController {
                 .one(&txn)
                 .await?
                 .ok_or_else(|| MetaError::catalog_id_not_found("table", associate_table_id))?;
+            let streaming_job = streaming_job::Entity::find_by_id(table.job_id())
+                .one(&txn)
+                .await?;
             to_update_objs.push(PbObject {
-                object_info: Some(PbObjectInfo::Table(ObjectModel(table, obj.unwrap()).into())),
+                object_info: Some(PbObjectInfo::Table(
+                    ObjectModel(table, obj.unwrap(), streaming_job).into(),
+                )),
             });
         }
 
@@ -2242,7 +2284,7 @@ impl CatalogController {
             definition: Set(definition),
             ..Default::default()
         };
-        active_sink.update(&txn).await?;
+        Sink::update(active_sink).exec(&txn).await?;
 
         update_sink_fragment_props(&txn, sink_id, new_config).await?;
         let (sink, obj) = Sink::find_by_id(sink_id)
@@ -2250,9 +2292,14 @@ impl CatalogController {
             .one(&txn)
             .await?
             .ok_or_else(|| MetaError::catalog_id_not_found(ObjectType::Sink.as_str(), sink_id))?;
+        let streaming_job = streaming_job::Entity::find_by_id(sink.sink_id.as_job_id())
+            .one(&txn)
+            .await?;
         txn.commit().await?;
         let relation_infos = vec![PbObject {
-            object_info: Some(PbObjectInfo::Sink(ObjectModel(sink, obj.unwrap()).into())),
+            object_info: Some(PbObjectInfo::Sink(
+                ObjectModel(sink, obj.unwrap(), streaming_job).into(),
+            )),
         }];
 
         let _version = self
@@ -2328,9 +2375,9 @@ impl CatalogController {
             definition: Set(definition),
             ..Default::default()
         };
-        active_sink.update(&txn).await?;
-        active_source.update(&txn).await?;
-        active_table.update(&txn).await?;
+        Sink::update(active_sink).exec(&txn).await?;
+        Source::update(active_source).exec(&txn).await?;
+        Table::update(active_table).exec(&txn).await?;
 
         update_sink_fragment_props(&txn, sink_id, new_config).await?;
 
@@ -2339,6 +2386,9 @@ impl CatalogController {
             .one(&txn)
             .await?
             .ok_or_else(|| MetaError::catalog_id_not_found(ObjectType::Sink.as_str(), sink_id))?;
+        let sink_streaming_job = streaming_job::Entity::find_by_id(sink.sink_id.as_job_id())
+            .one(&txn)
+            .await?;
         let (source, source_obj) = Source::find_by_id(source_id)
             .find_also_related(Object)
             .one(&txn)
@@ -2351,21 +2401,24 @@ impl CatalogController {
             .one(&txn)
             .await?
             .ok_or_else(|| MetaError::catalog_id_not_found(ObjectType::Table.as_str(), table_id))?;
+        let table_streaming_job = streaming_job::Entity::find_by_id(table.job_id())
+            .one(&txn)
+            .await?;
         txn.commit().await?;
         let relation_infos = vec![
             PbObject {
                 object_info: Some(PbObjectInfo::Sink(
-                    ObjectModel(sink, sink_obj.unwrap()).into(),
+                    ObjectModel(sink, sink_obj.unwrap(), sink_streaming_job).into(),
                 )),
             },
             PbObject {
                 object_info: Some(PbObjectInfo::Source(
-                    ObjectModel(source, source_obj.unwrap()).into(),
+                    ObjectModel(source, source_obj.unwrap(), None).into(),
                 )),
             },
             PbObject {
                 object_info: Some(PbObjectInfo::Table(
-                    ObjectModel(table, table_obj.unwrap()).into(),
+                    ObjectModel(table, table_obj.unwrap(), table_streaming_job).into(),
                 )),
             },
         ];
@@ -2520,7 +2573,9 @@ impl CatalogController {
             params: Set(ConnectionParams::from(&updated_connection_params)),
             ..Default::default()
         };
-        active_connection_model.update(&txn).await?;
+        Connection::update(active_connection_model)
+            .exec(&txn)
+            .await?;
 
         // Batch update dependent sources and collect their complete properties
         let mut updated_sources_with_props: Vec<(SourceId, HashMap<String, String>)> = Vec::new();
@@ -2619,7 +2674,7 @@ impl CatalogController {
             }
 
             for source_update in source_updates {
-                source_update.update(&txn).await?;
+                Source::update(source_update).exec(&txn).await?;
             }
 
             // Batch execute fragment updates
@@ -2718,7 +2773,7 @@ impl CatalogController {
 
             // Batch execute sink updates
             for sink_update in sink_updates {
-                sink_update.update(&txn).await?;
+                Sink::update(sink_update).exec(&txn).await?;
             }
 
             // Batch execute sink fragment updates using the reusable function
@@ -2755,7 +2810,7 @@ impl CatalogController {
             })?;
         updated_objects.push(PbObject {
             object_info: Some(PbObjectInfo::Connection(
-                ObjectModel(connection, obj.unwrap()).into(),
+                ObjectModel(connection, obj.unwrap(), None).into(),
             )),
         });
 
@@ -2770,7 +2825,7 @@ impl CatalogController {
                 })?;
             updated_objects.push(PbObject {
                 object_info: Some(PbObjectInfo::Source(
-                    ObjectModel(source, obj.unwrap()).into(),
+                    ObjectModel(source, obj.unwrap(), None).into(),
                 )),
             });
         }
@@ -2784,8 +2839,13 @@ impl CatalogController {
                 .ok_or_else(|| {
                     MetaError::catalog_id_not_found(ObjectType::Sink.as_str(), *sink_id)
                 })?;
+            let streaming_job = streaming_job::Entity::find_by_id(sink.sink_id.as_job_id())
+                .one(&txn)
+                .await?;
             updated_objects.push(PbObject {
-                object_info: Some(PbObjectInfo::Sink(ObjectModel(sink, obj.unwrap()).into())),
+                object_info: Some(PbObjectInfo::Sink(
+                    ObjectModel(sink, obj.unwrap(), streaming_job).into(),
+                )),
             });
         }
 
@@ -3023,12 +3083,12 @@ async fn update_sink_fragment_props(
         "sink id should be used by at least one fragment"
     );
     for (id, stream_node) in fragments {
-        fragment::ActiveModel {
+        Fragment::update(fragment::ActiveModel {
             fragment_id: Set(id),
             stream_node: Set(StreamNode::from(&stream_node)),
             ..Default::default()
-        }
-        .update(txn)
+        })
+        .exec(txn)
         .await?;
     }
     Ok(())
@@ -3092,12 +3152,12 @@ where
     }
 
     for (id, stream_node) in fragments {
-        fragment::ActiveModel {
+        Fragment::update(fragment::ActiveModel {
             fragment_id: Set(id),
             stream_node: Set(StreamNode::from(&stream_node)),
             ..Default::default()
-        }
-        .update(txn)
+        })
+        .exec(txn)
         .await?;
     }
 

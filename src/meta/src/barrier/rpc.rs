@@ -30,6 +30,7 @@ use risingwave_common::bail;
 use risingwave_common::catalog::{DatabaseId, FragmentTypeFlag, TableId};
 use risingwave_common::id::JobId;
 use risingwave_common::util::epoch::Epoch;
+use risingwave_common::util::stream_graph_visitor::visit_stream_node_cont;
 use risingwave_common::util::tracing::TracingContext;
 use risingwave_connector::source::SplitImpl;
 use risingwave_meta_model::WorkerId;
@@ -38,6 +39,7 @@ use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::id::PartialGraphId;
 use risingwave_pb::source::{PbCdcTableSnapshotSplits, PbCdcTableSnapshotSplitsWithGeneration};
 use risingwave_pb::stream_plan::barrier_mutation::Mutation;
+use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{AddMutation, Barrier, BarrierMutation};
 use risingwave_pb::stream_service::inject_barrier_request::build_actor_info::UpstreamActors;
 use risingwave_pb::stream_service::inject_barrier_request::{
@@ -59,6 +61,8 @@ use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
 use super::{BarrierKind, TracedEpoch};
+use crate::barrier::BackfillOrderState;
+use crate::barrier::backfill_order_control::get_nodes_with_backfill_dependencies;
 use crate::barrier::cdc_progress::CdcTableBackfillTracker;
 use crate::barrier::checkpoint::{
     BarrierWorkerState, CreatingStreamingJobControl, DatabaseCheckpointControl,
@@ -108,6 +112,36 @@ pub(super) fn from_partial_graph_id(
         Some(JobId::new(raw_creating_job_id))
     };
     (database_id.into(), creating_job_id)
+}
+
+pub(super) fn build_locality_fragment_state_table_mapping(
+    fragment_infos: &HashMap<FragmentId, InflightFragmentInfo>,
+) -> HashMap<FragmentId, Vec<TableId>> {
+    let mut mapping = HashMap::new();
+
+    for (fragment_id, fragment_info) in fragment_infos {
+        let mut state_table_ids = Vec::new();
+        visit_stream_node_cont(&fragment_info.nodes, |stream_node| {
+            if let Some(NodeBody::LocalityProvider(locality_provider)) =
+                stream_node.node_body.as_ref()
+            {
+                let state_table_id = locality_provider
+                    .state_table
+                    .as_ref()
+                    .expect("must have state table")
+                    .id;
+                state_table_ids.push(state_table_id);
+                false
+            } else {
+                true
+            }
+        });
+        if !state_table_ids.is_empty() {
+            mapping.insert(*fragment_id, state_table_ids);
+        }
+    }
+
+    mapping
 }
 
 struct ControlStreamNode {
@@ -615,6 +649,7 @@ impl ControlStreamManager {
         &mut self,
         database_id: DatabaseId,
         jobs: HashMap<JobId, HashMap<FragmentId, InflightFragmentInfo>>,
+        backfill_orders: HashMap<JobId, HashMap<FragmentId, Vec<FragmentId>>>,
         state_table_committed_epochs: &mut HashMap<TableId, u64>,
         state_table_log_epochs: &mut HashMap<TableId, Vec<(Vec<u64>, u64)>>,
         fragment_relations: &FragmentDownstreamRelation,
@@ -645,8 +680,12 @@ impl ControlStreamManager {
         fn build_mutation(
             splits: &HashMap<ActorId, Vec<SplitImpl>>,
             cdc_table_snapshot_split_assignment: HashMap<ActorId, PbCdcTableSnapshotSplits>,
+            backfill_orders: &HashMap<FragmentId, Vec<FragmentId>>,
             is_paused: bool,
         ) -> Mutation {
+            let backfill_nodes_to_pause = get_nodes_with_backfill_dependencies(backfill_orders)
+                .into_iter()
+                .collect();
             Mutation::Add(AddMutation {
                 // Actors built during recovery is not treated as newly added actors.
                 actor_dispatchers: Default::default(),
@@ -657,8 +696,7 @@ impl ControlStreamManager {
                 }),
                 pause: is_paused,
                 subscriptions_to_add: Default::default(),
-                // TODO(kwannoel): recover using backfill order plan
-                backfill_nodes_to_pause: Default::default(),
+                backfill_nodes_to_pause,
                 new_upstream_sinks: Default::default(),
             })
         }
@@ -825,14 +863,22 @@ impl ControlStreamManager {
                 .into_iter()
                 .map(|(job_id, (fragment_infos, is_background_creating))| {
                     let status = if is_background_creating {
+                        let backfill_ordering =
+                            backfill_orders.get(&job_id).cloned().unwrap_or_default();
+                        let locality_fragment_state_table_mapping =
+                            build_locality_fragment_state_table_mapping(&fragment_infos);
+                        let backfill_order_state = BackfillOrderState::recover_from_fragment_infos(
+                            &backfill_ordering,
+                            &fragment_infos,
+                            locality_fragment_state_table_mapping,
+                        );
                         CreateStreamingJobStatus::Creating {
                             tracker: CreateMviewProgressTracker::recover(
                                 job_id,
                                 &fragment_infos,
-                                Default::default(),
+                                backfill_order_state,
                                 hummock_version_stats,
                             ),
-                            is_serverless: false, // serverless backfill not support background ddl yet
                         }
                     } else {
                         CreateStreamingJobStatus::Created
@@ -916,9 +962,23 @@ impl ControlStreamManager {
                 InflightFragmentInfo::actor_ids_to_collect(database_jobs.values().flatten());
             let database_job_source_splits =
                 collect_source_splits(database_jobs.values().flatten(), source_splits);
+            let database_backfill_orders = database_jobs
+                .values()
+                .flat_map(|job| {
+                    if matches!(job.status, CreateStreamingJobStatus::Creating { .. }) {
+                        backfill_orders
+                            .get(&job.job_id)
+                            .cloned()
+                            .unwrap_or_default()
+                    } else {
+                        HashMap::new()
+                    }
+                })
+                .collect();
             let mutation = build_mutation(
                 &database_job_source_splits,
                 cdc_table_snapshot_split_assignment,
+                &database_backfill_orders,
                 is_paused,
             );
 
@@ -968,9 +1028,11 @@ impl ControlStreamManager {
             if is_paused {
                 bail!("should not pause when having snapshot backfill job {job_id}");
             }
+            let job_backfill_orders = backfill_orders.get(&job_id).cloned().unwrap_or_default();
             let mutation = build_mutation(
                 &database_job_source_splits,
                 Default::default(), // no cdc backfill job for
+                &job_backfill_orders,
                 false,
             );
 
@@ -988,10 +1050,11 @@ impl ControlStreamManager {
                     committed_epoch,
                     &barrier_info,
                     info,
+                    backfill_orders.get(&job_id).cloned().unwrap_or_default(),
                     fragment_relations,
                     hummock_version_stats,
                     node_actors,
-                    mutation.clone(),
+                    mutation,
                     self,
                 )?,
             );

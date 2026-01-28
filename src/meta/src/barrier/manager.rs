@@ -24,16 +24,19 @@ use risingwave_meta_model::DatabaseId;
 use risingwave_pb::ddl_service::{DdlProgress, PbBackfillType};
 use risingwave_pb::id::JobId;
 use risingwave_pb::meta::PbRecoveryStatus;
+use thiserror_ext::AsReport;
 use tokio::sync::mpsc::unbounded_channel;
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
 use tracing::warn;
 
 use crate::MetaResult;
+use crate::barrier::BarrierManagerRequest::MayHaveSnapshotBackfillingJob;
 use crate::barrier::cdc_progress::CdcProgress;
 use crate::barrier::worker::GlobalBarrierWorker;
 use crate::barrier::{
-    BackfillProgress, BarrierManagerRequest, BarrierManagerStatus, RecoveryReason, schedule,
+    BackfillProgress, BarrierManagerRequest, BarrierManagerStatus, RecoveryReason,
+    UpdateDatabaseBarrierRequest, schedule,
 };
 use crate::hummock::HummockManagerRef;
 use crate::manager::sink_coordination::SinkCoordinatorManager;
@@ -68,29 +71,35 @@ impl GlobalBarrierManager {
             .await?;
         Ok(job_info
             .into_iter()
-            .map(|(job_id, definition, init_at, create_type)| {
-                let BackfillProgress {
-                    progress,
-                    is_serverless,
-                    backfill_type,
-                } = backfill_progress.remove(&job_id).unwrap_or_else(|| {
-                    warn!(%job_id, "background job has no ddl progress");
-                    BackfillProgress {
-                        progress: "0.0%".into(),
-                        is_serverless: false,
-                        backfill_type: PbBackfillType::NormalBackfill,
+            .map(
+                |(job_id, definition, init_at, create_type, is_serverless_backfill)| {
+                    let BackfillProgress {
+                        progress,
+                        backfill_type,
+                    } = match &mut backfill_progress {
+                        Ok(progress) => progress.remove(&job_id).unwrap_or_else(|| {
+                            warn!(%job_id, "background job has no ddl progress");
+                            BackfillProgress {
+                                progress: "0.0%".into(),
+                                backfill_type: PbBackfillType::NormalBackfill,
+                            }
+                        }),
+                        Err(e) => BackfillProgress {
+                            progress: format!("Err[{}]", e.as_report()),
+                            backfill_type: PbBackfillType::NormalBackfill,
+                        },
+                    };
+                    DdlProgress {
+                        id: job_id.as_raw_id() as u64,
+                        statement: definition,
+                        create_type: create_type.as_str().into(),
+                        initialized_at_time_millis: datetime_to_timestamp_millis(init_at),
+                        progress,
+                        is_serverless_backfill,
+                        backfill_type: backfill_type as _,
                     }
-                });
-                DdlProgress {
-                    id: job_id.as_raw_id() as u64,
-                    statement: definition,
-                    create_type: create_type.as_str().into(),
-                    initialized_at_time_millis: datetime_to_timestamp_millis(init_at),
-                    progress,
-                    is_serverless_backfill: is_serverless,
-                    backfill_type: backfill_type as _,
-                }
-            })
+                },
+            )
             .collect())
     }
 
@@ -99,7 +108,7 @@ impl GlobalBarrierManager {
         self.request_tx
             .send(BarrierManagerRequest::GetCdcProgress(tx))
             .context("failed to send get ddl progress request")?;
-        Ok(rx.await.context("failed to receive get ddl progress")?)
+        rx.await.context("failed to receive get ddl progress")?
     }
 
     pub async fn adhoc_recovery(&self) -> MetaResult<()> {
@@ -119,15 +128,27 @@ impl GlobalBarrierManager {
     ) -> MetaResult<()> {
         let (tx, rx) = oneshot::channel();
         self.request_tx
-            .send(BarrierManagerRequest::UpdateDatabaseBarrier {
-                database_id,
-                barrier_interval_ms,
-                checkpoint_frequency,
-                sender: tx,
-            })
+            .send(BarrierManagerRequest::UpdateDatabaseBarrier(
+                UpdateDatabaseBarrierRequest {
+                    database_id,
+                    barrier_interval_ms,
+                    checkpoint_frequency,
+                    sender: tx,
+                },
+            ))
             .context("failed to send update database barrier request")?;
         rx.await.context("failed to wait update database barrier")?;
         Ok(())
+    }
+
+    pub async fn may_snapshot_backfilling_job(&self) -> MetaResult<bool> {
+        let (tx, rx) = oneshot::channel();
+        self.request_tx
+            .send(MayHaveSnapshotBackfillingJob(tx))
+            .context("failed to send has snapshot backfilling job request")?;
+        Ok(rx
+            .await
+            .context("failed to wait has snapshot backfilling job")?)
     }
 
     pub async fn get_hummock_version_id(&self) -> HummockVersionId {

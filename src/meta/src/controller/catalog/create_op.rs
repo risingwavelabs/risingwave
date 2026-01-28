@@ -80,14 +80,14 @@ impl CatalogController {
                 name: Set(schema_name.into()),
             };
             let schema = schema.insert(&txn).await?;
-            schemas.push(ObjectModel(schema, schema_obj).into());
+            schemas.push(ObjectModel(schema, schema_obj, None).into());
         }
         txn.commit().await?;
 
         let mut version = self
             .notify_frontend(
                 NotificationOperation::Add,
-                NotificationInfo::Database(ObjectModel(db.clone(), db_obj).into()),
+                NotificationInfo::Database(ObjectModel(db.clone(), db_obj, None).into()),
             )
             .await;
         for schema in schemas {
@@ -127,7 +127,7 @@ impl CatalogController {
         let mut version = self
             .notify_frontend(
                 NotificationOperation::Add,
-                NotificationInfo::Schema(ObjectModel(schema, schema_obj).into()),
+                NotificationInfo::Schema(ObjectModel(schema, schema_obj, None).into()),
             )
             .await;
 

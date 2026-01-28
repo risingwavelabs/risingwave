@@ -38,6 +38,7 @@ use risingwave_connector::sink::{
     GLOBAL_SINK_METRICS, LogSinker, SINK_USER_FORCE_COMPACTION, Sink, SinkImpl, SinkParam,
     SinkWriterParam,
 };
+use risingwave_pb::common::ThrottleType;
 use risingwave_pb::id::FragmentId;
 use risingwave_pb::stream_plan::stream_node::StreamKind;
 use thiserror_ext::AsReport;
@@ -333,7 +334,6 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
         let processed_input = Self::process_msg(
             input,
             self.sink_param.sink_type,
-            self.sink_param.ignore_delete,
             stream_key,
             self.chunk_size,
             self.input_data_types,
@@ -343,6 +343,18 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
             metrics.sink_chunk_buffer_size,
             self.sink.is_blackhole(), // skip compact for blackhole for better benchmark results
         );
+
+        let processed_input = if self.sink_param.ignore_delete {
+            // Drop UPDATE/DELETE messages if specified `ignore_delete` (formerly `force_append_only`).
+            processed_input
+                .map_ok(|msg| match msg {
+                    Message::Chunk(chunk) => Message::Chunk(force_append_only(chunk)),
+                    other => other,
+                })
+                .left_stream()
+        } else {
+            processed_input.right_stream()
+        };
 
         if self.sink.is_sink_into_table() {
             // TODO(hzxa21): support rate limit?
@@ -490,15 +502,17 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                                 is_paused = false;
                             }
                             Mutation::Throttle(fragment_to_apply) => {
-                                if let Some(new_rate_limit) = fragment_to_apply.get(&fragment_id) {
+                                if let Some(entry) = fragment_to_apply.get(&fragment_id)
+                                    && entry.throttle_type() == ThrottleType::Sink
+                                {
                                     tracing::info!(
-                                        rate_limit = new_rate_limit,
+                                        rate_limit = entry.rate_limit,
                                         "received sink rate limit on actor {actor_id}"
                                     );
-                                    if let Err(e) = rate_limit_tx.send((*new_rate_limit).into()) {
+                                    if let Err(e) = rate_limit_tx.send(entry.rate_limit.into()) {
                                         error!(
                                             error = %e.as_report(),
-                                            "fail to send sink ate limit update"
+                                            "fail to send sink rate limit update"
                                         );
                                         return Err(StreamExecutorError::from(
                                             e.to_report_string(),
@@ -531,7 +545,6 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
     async fn process_msg(
         input: impl MessageStream,
         sink_type: SinkType,
-        ignore_delete: bool,
         stream_key: StreamKey,
         chunk_size: usize,
         input_data_types: Vec<DataType>,
@@ -654,12 +667,6 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                                     )
                                 });
                             }
-                        }
-                        if ignore_delete {
-                            // Force append-only by dropping UPDATE/DELETE messages. We do this when the
-                            // user forces the sink to be append-only while it is actually not based on
-                            // the frontend derivation result.
-                            chunk = force_append_only(chunk);
                         }
                         yield Message::Chunk(chunk);
                     }

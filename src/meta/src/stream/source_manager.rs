@@ -54,6 +54,7 @@ use crate::rpc::metrics::MetaMetrics;
 pub type SourceManagerRef = Arc<SourceManager>;
 pub type SplitAssignment = HashMap<FragmentId, HashMap<ActorId, Vec<SplitImpl>>>;
 pub type DiscoveredSourceSplits = HashMap<SourceId, Vec<SplitImpl>>;
+
 // ALTER CONNECTOR parameters, specifying the new parameters to be set for each job_id (source_id/sink_id)
 pub type ConnectorPropsChange = HashMap<ObjectId, HashMap<String, String>>;
 
