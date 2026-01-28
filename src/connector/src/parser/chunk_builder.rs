@@ -18,7 +18,9 @@ use risingwave_common::array::stream_record::RecordType;
 use risingwave_common::array::{ArrayBuilderImpl, Op, StreamChunk};
 use risingwave_common::bitmap::BitmapBuilder;
 use risingwave_common::log::LogSuppressor;
-use risingwave_common::types::{Datum, DatumCow, ScalarRefImpl};
+use risingwave_common::types::{
+    Datum, DatumCow, ScalarRefImpl, ToDatumRef, ToText, datum_ref_type_match,
+};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_connector_codec::decoder::{AccessError, AccessResult};
 use risingwave_pb::plan_common::additional_column::ColumnType as AdditionalColumnType;
@@ -273,7 +275,11 @@ impl SourceStreamChunkRowWriter<'_> {
     ) -> AccessResult<()> {
         let mut parse_field = |desc: &SourceColumnDesc| {
             match f(desc) {
-                Ok(output) => Ok(output),
+                Ok(output) => {
+                    // Defensive: validate the datum's shape matches expected column type before appending.
+                    A::type_check(desc, &output)?;
+                    Ok(output)
+                }
 
                 // Throw error for failed access to primary key columns.
                 Err(e) if desc.is_pk => Err(e),
@@ -526,9 +532,32 @@ trait RowWriterAction {
 
     fn output_for<'a>(datum: impl Into<DatumCow<'a>>) -> Self::Output<'a>;
 
+    fn type_check(desc: &SourceColumnDesc, output: &Self::Output<'_>) -> AccessResult<()>;
+
     fn apply(builder: &mut ArrayBuilderImpl, output: Self::Output<'_>);
 
     fn rollback(builder: &mut ArrayBuilderImpl);
+}
+
+#[inline(always)]
+fn check_datum_type(
+    desc: &SourceColumnDesc,
+    datum: risingwave_common::types::DatumRef<'_>,
+) -> AccessResult<()> {
+    if datum_ref_type_match(&desc.data_type, datum) {
+        Ok(())
+    } else {
+        let (got, value) = match datum {
+            None => unreachable!("datum_ref_type_match returned false for NULL"),
+            // Use `to_text` (regardless of type) since we are in the mismatch path.
+            Some(s) => (s.get_ident().to_owned(), s.to_text()),
+        };
+        Err(AccessError::TypeError {
+            expected: desc.data_type.to_string(),
+            got,
+            value,
+        })
+    }
 }
 
 struct InsertAction;
@@ -541,6 +570,11 @@ impl RowWriterAction for InsertAction {
     #[inline(always)]
     fn output_for<'a>(datum: impl Into<DatumCow<'a>>) -> Self::Output<'a> {
         datum.into()
+    }
+
+    #[inline(always)]
+    fn type_check(desc: &SourceColumnDesc, output: &DatumCow<'_>) -> AccessResult<()> {
+        check_datum_type(desc, output.to_datum_ref())
     }
 
     #[inline(always)]
@@ -567,6 +601,11 @@ impl RowWriterAction for DeleteAction {
     }
 
     #[inline(always)]
+    fn type_check(desc: &SourceColumnDesc, output: &DatumCow<'_>) -> AccessResult<()> {
+        check_datum_type(desc, output.to_datum_ref())
+    }
+
+    #[inline(always)]
     fn apply(builder: &mut ArrayBuilderImpl, output: DatumCow<'_>) {
         builder.append(output)
     }
@@ -588,6 +627,15 @@ impl RowWriterAction for UpdateAction {
     fn output_for<'a>(datum: impl Into<DatumCow<'a>>) -> Self::Output<'a> {
         let datum = datum.into();
         (datum.clone(), datum)
+    }
+
+    #[inline(always)]
+    fn type_check(
+        desc: &SourceColumnDesc,
+        output: &(DatumCow<'_>, DatumCow<'_>),
+    ) -> AccessResult<()> {
+        check_datum_type(desc, output.0.to_datum_ref())?;
+        check_datum_type(desc, output.1.to_datum_ref())
     }
 
     #[inline(always)]
