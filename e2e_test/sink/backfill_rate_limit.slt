@@ -1,0 +1,55 @@
+# 1. Setup: Create a table and fill with enough data (e.g., 100k rows)
+statement ok
+CREATE TABLE t1 (v1 int);
+
+statement ok
+INSERT INTO t1 SELECT generate_series FROM generate_series(1, 100000);
+
+statement ok
+FLUSH;
+
+# 2. Configure: Set sink to run in background
+statement ok
+SET sink_decouple = true;
+
+# 3. Execution: Create Sink with specific rate limit (1000 rows/sec)
+# Using blackhole connector to isolate backfill speed from network I/O
+statement ok
+CREATE SINK s1 FROM t1 WITH (connector='blackhole') 
+WITH (backfill_rate_limit=1000);
+
+# 4. Verification Loop
+# Capture initial progress
+query I
+SELECT processed_rows FROM rw_catalog.rw_ddl_progress WHERE name = 's1';
+----
+0
+
+# Sleep for 5 seconds
+sleep 5s
+
+# Check progress again.
+# Expected: ~5000 rows (1000 rows/s * 5s). 
+# If it returns 100000, the limit failed.
+query I
+SELECT processed_rows FROM rw_catalog.rw_ddl_progress WHERE name = 's1';
+----
+5000 
+
+# 5. Dynamic Alter Test
+statement ok
+ALTER SINK s1 SET backfill_rate_limit = 5000;
+
+sleep 2s
+
+# Should have processed ~10000 more rows (5000 * 2)
+query I
+SELECT processed_rows FROM rw_catalog.rw_ddl_progress WHERE name = 's1';
+----
+15000
+
+statement ok
+DROP SINK s1;
+
+statement ok
+DROP TABLE t1;
