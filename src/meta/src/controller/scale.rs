@@ -1648,8 +1648,10 @@ mod tests {
             adaptive_parallelism_strategy: Some("BOUNDED(2)".to_owned()),
             parallelism: StreamingParallelism::Adaptive,
             backfill_parallelism: None,
+            backfill_orders: None,
             max_parallelism: 8,
             specific_resource_group: None,
+            is_serverless_backfill: false,
         };
 
         let database_model = database::Model {
@@ -1762,8 +1764,10 @@ mod tests {
             adaptive_parallelism_strategy: None, // No custom strategy
             parallelism: StreamingParallelism::Adaptive,
             backfill_parallelism: None,
+            backfill_orders: None,
             max_parallelism: 8,
             specific_resource_group: None,
+            is_serverless_backfill: false,
         };
 
         let database_model = database::Model {
@@ -1877,8 +1881,10 @@ mod tests {
             adaptive_parallelism_strategy: Some("BOUNDED(2)".to_owned()),
             parallelism: StreamingParallelism::Fixed(5),
             backfill_parallelism: None,
+            backfill_orders: None,
             max_parallelism: 8,
             specific_resource_group: None,
+            is_serverless_backfill: false,
         };
 
         let database_model = database::Model {
@@ -2004,8 +2010,10 @@ mod tests {
             adaptive_parallelism_strategy: Some("RATIO(0.5)".to_owned()),
             parallelism: StreamingParallelism::Adaptive,
             backfill_parallelism: None,
+            backfill_orders: None,
             max_parallelism: 16,
             specific_resource_group: None,
+            is_serverless_backfill: false,
         };
 
         let database_model = database::Model {
