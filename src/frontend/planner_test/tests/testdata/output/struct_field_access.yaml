@@ -6,7 +6,7 @@
     Failed to bind expression: t.c.x
 
     Caused by:
-      Item not found: Invalid column: x
+      Invalid reference: missing FROM-clause entry for table "c".
 - sql: |
     create table t(c STRUCT<x INTEGER, y INTEGER>);
     select (t.c).x from t

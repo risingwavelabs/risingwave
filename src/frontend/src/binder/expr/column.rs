@@ -34,7 +34,7 @@ impl Binder {
                         .get_schema_by_name(&self.db_name, &schema_name)
                         .map_err(|_| {
                             ErrorCode::InvalidReference(format!(
-                                "missing FROM-clause entry for table \"{}\"\n",
+                                "missing FROM-clause entry for table \"{}\".",
                                 table_name
                             ))
                         })?;
