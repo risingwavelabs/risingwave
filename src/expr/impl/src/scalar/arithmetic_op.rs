@@ -436,6 +436,35 @@ pub fn decimal_trim_scale(d: Decimal) -> Decimal {
     d.normalize()
 }
 
+#[function("gamma(float8) -> float8")]
+pub fn gamma_f64(input: F64) -> Result<F64> {
+    let mut result = input;
+    if input.is_nan() {
+        return Ok(result);
+    } else if input.is_infinite() {
+        if input.is_negative() {
+            return Err(ExprError::NumericOverflow);
+        }
+    } else {
+        result = input.gamma();
+        if result.is_nan() || result.is_infinite() {
+            return Err(ExprError::NumericOverflow);
+        } else if result.is_zero() {
+            return Err(ExprError::NumericUnderflow);
+        }
+    }
+    Ok(result)
+}
+
+#[function("lgamma(float8) -> float8")]
+pub fn lgamma_f64(input: F64) -> Result<F64> {
+    let (result, _sign) = input.ln_gamma();
+    if result.is_infinite() && input.is_finite() {
+        return Err(ExprError::NumericOverflow);
+    }
+    Ok(F64::from(result))
+}
+
 #[cfg(test)]
 mod tests {
     use std::str::FromStr;

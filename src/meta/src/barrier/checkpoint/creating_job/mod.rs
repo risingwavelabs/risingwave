@@ -41,18 +41,19 @@ use crate::MetaResult;
 use crate::barrier::backfill_order_control::get_nodes_with_backfill_dependencies;
 use crate::barrier::checkpoint::creating_job::status::CreateMviewLogStoreProgressTracker;
 use crate::barrier::checkpoint::recovery::ResetPartialGraphCollector;
+use crate::barrier::context::CreateSnapshotBackfillJobCommandInfo;
 use crate::barrier::edge_builder::FragmentEdgeBuildResult;
 use crate::barrier::info::{BarrierInfo, InflightStreamingJobInfo};
 use crate::barrier::notifier::Notifier;
 use crate::barrier::progress::{CreateMviewProgressTracker, TrackingJob};
-use crate::barrier::rpc::{ControlStreamManager, to_partial_graph_id};
-use crate::barrier::{
-    BackfillOrderState, BackfillProgress, BarrierKind, CreateStreamingJobCommandInfo, TracedEpoch,
+use crate::barrier::rpc::{
+    ControlStreamManager, build_locality_fragment_state_table_mapping, to_partial_graph_id,
 };
+use crate::barrier::{BackfillOrderState, BackfillProgress, BarrierKind, TracedEpoch};
 use crate::controller::fragment::InflightFragmentInfo;
 use crate::model::{FragmentDownstreamRelation, StreamActor, StreamJobActorsToCreate};
 use crate::rpc::metrics::GLOBAL_META_METRICS;
-use crate::stream::build_actor_connector_splits;
+use crate::stream::{FragmentBackfillOrder, build_actor_connector_splits};
 
 #[derive(Debug)]
 pub(crate) struct CreatingJobInfo {
@@ -81,13 +82,15 @@ pub(crate) struct CreatingStreamingJobControl {
 
 impl CreatingStreamingJobControl {
     pub(super) fn new(
-        info: &CreateStreamingJobCommandInfo,
+        create_info: CreateSnapshotBackfillJobCommandInfo,
+        notifiers: Vec<Notifier>,
         snapshot_backfill_upstream_tables: HashSet<TableId>,
         snapshot_epoch: u64,
         version_stat: &HummockVersionStats,
         control_stream_manager: &mut ControlStreamManager,
         edges: &mut FragmentEdgeBuildResult,
     ) -> MetaResult<Self> {
+        let info = create_info.info.clone();
         let job_id = info.stream_job_fragments.stream_job_id();
         let database_id = info.streaming_job.database_id();
         debug!(
@@ -130,7 +133,7 @@ impl CreatingStreamingJobControl {
             ));
 
         let mut barrier_control =
-            CreatingStreamingJobBarrierControl::new(job_id, snapshot_epoch, false, None);
+            CreatingStreamingJobBarrierControl::new(job_id, snapshot_epoch, None);
 
         let mut prev_epoch_fake_physical_time = 0;
         let mut pending_non_checkpoint_barriers = vec![];
@@ -181,7 +184,8 @@ impl CreatingStreamingJobControl {
             initial_barrier_info,
             Some(actors_to_create),
             Some(initial_mutation),
-            vec![], /* notifiers of creating snapshot backfill is on the database checkpoint control */
+            notifiers,
+            Some(create_info),
         )?;
 
         assert!(pending_non_checkpoint_barriers.is_empty());
@@ -298,6 +302,7 @@ impl CreatingStreamingJobControl {
         committed_epoch: u64,
         upstream_barrier_info: &BarrierInfo,
         info: CreatingJobInfo,
+        backfill_order_state: BackfillOrderState,
         version_stat: &HummockVersionStats,
     ) -> MetaResult<(CreatingStreamingJobStatus, BarrierInfo)> {
         let mut prev_epoch_fake_physical_time = Epoch(committed_epoch).physical_time();
@@ -305,7 +310,7 @@ impl CreatingStreamingJobControl {
         let create_mview_tracker = CreateMviewProgressTracker::recover(
             job_id,
             &info.fragment_infos,
-            Default::default(),
+            backfill_order_state,
             version_stat,
         );
         let barrier_info = CreatingStreamingJobStatus::new_fake_barrier(
@@ -381,22 +386,19 @@ impl CreatingStreamingJobControl {
         committed_epoch: u64,
         upstream_barrier_info: &BarrierInfo,
         fragment_infos: HashMap<FragmentId, InflightFragmentInfo>,
+        backfill_order: FragmentBackfillOrder,
         fragment_relations: &FragmentDownstreamRelation,
         version_stat: &HummockVersionStats,
         new_actors: StreamJobActorsToCreate,
         initial_mutation: Mutation,
         control_stream_manager: &mut ControlStreamManager,
     ) -> MetaResult<Self> {
-        debug!(
+        info!(
             %job_id,
-            "recovered creating job"
+            "recovered creating snapshot backfill job"
         );
-        let mut barrier_control = CreatingStreamingJobBarrierControl::new(
-            job_id,
-            snapshot_epoch,
-            true,
-            Some(committed_epoch),
-        );
+        let mut barrier_control =
+            CreatingStreamingJobBarrierControl::new(job_id, snapshot_epoch, Some(committed_epoch));
 
         let node_actors = InflightFragmentInfo::actor_ids_to_collect(fragment_infos.values());
         let state_table_ids =
@@ -443,6 +445,13 @@ impl CreatingStreamingJobControl {
         };
 
         let (status, first_barrier_info) = if committed_epoch < snapshot_epoch {
+            let locality_fragment_state_table_mapping =
+                build_locality_fragment_state_table_mapping(&info.fragment_infos);
+            let backfill_order_state = BackfillOrderState::recover_from_fragment_infos(
+                &backfill_order,
+                &info.fragment_infos,
+                locality_fragment_state_table_mapping,
+            );
             Self::recover_consuming_snapshot(
                 job_id,
                 upstream_table_log_epochs,
@@ -450,6 +459,7 @@ impl CreatingStreamingJobControl {
                 committed_epoch,
                 upstream_barrier_info,
                 info,
+                backfill_order_state,
                 version_stat,
             )?
         } else {
@@ -474,6 +484,7 @@ impl CreatingStreamingJobControl {
             Some(new_actors),
             Some(initial_mutation),
             vec![], // no notifiers in recovery
+            None,
         )?;
         Ok(Self {
             database_id,
@@ -551,6 +562,7 @@ impl CreatingStreamingJobControl {
         )
     }
 
+    #[expect(clippy::too_many_arguments)]
     fn inject_barrier(
         database_id: DatabaseId,
         job_id: JobId,
@@ -562,6 +574,7 @@ impl CreatingStreamingJobControl {
         new_actors: Option<StreamJobActorsToCreate>,
         mutation: Option<Mutation>,
         mut notifiers: Vec<Notifier>,
+        first_create_info: Option<CreateSnapshotBackfillJobCommandInfo>,
     ) -> MetaResult<()> {
         let (state_table_ids, nodes_to_sync_table) = if let Some(state_table_ids) = state_table_ids
         {
@@ -585,6 +598,7 @@ impl CreatingStreamingJobControl {
             node_to_collect,
             barrier_info.kind.clone(),
             notifiers,
+            first_create_info,
         );
         Ok(())
     }
@@ -619,6 +633,7 @@ impl CreatingStreamingJobControl {
                 dropped_sink_fragments: vec![], // not related to sink-into-table
             })),
             vec![], // no notifiers when start consuming upstream
+            None,
         )?;
         Ok(info)
     }
@@ -662,6 +677,7 @@ impl CreatingStreamingJobControl {
                     None,
                     mutation,
                     take(&mut notifiers),
+                    None,
                 )?;
             }
             assert!(mutation.is_none(), "must have consumed mutation");
@@ -694,7 +710,7 @@ impl CreatingStreamingJobControl {
 
 pub(super) enum CompleteJobType {
     /// The first barrier
-    First,
+    First(CreateSnapshotBackfillJobCommandInfo),
     Normal,
     /// The last barrier to complete
     Finished,
@@ -704,7 +720,12 @@ impl CreatingStreamingJobControl {
     pub(super) fn start_completing(
         &mut self,
         min_upstream_inflight_epoch: Option<u64>,
+        upstream_committed_epoch: u64,
     ) -> Option<(u64, Vec<BarrierCompleteResponse>, CompleteJobType)> {
+        // do not commit snapshot backfill job until upstream has committed the snapshot epoch
+        if upstream_committed_epoch < self.snapshot_epoch {
+            return None;
+        }
         let (finished_at_epoch, epoch_end_bound) = match &self.status {
             CreatingStreamingJobStatus::Finishing(finish_at_epoch, _) => {
                 let epoch_end_bound = min_upstream_inflight_epoch
@@ -733,9 +754,9 @@ impl CreatingStreamingJobControl {
             }
         };
         self.barrier_control.start_completing(epoch_end_bound).map(
-            |(epoch, resps, is_first_commit)| {
+            |(epoch, resps, create_job_info)| {
                 let status = if let Some(finish_at_epoch) = finished_at_epoch {
-                    assert!(!is_first_commit);
+                    assert!(create_job_info.is_none());
                     if epoch == finish_at_epoch {
                         self.barrier_control.ack_completed(epoch);
                         assert!(self.barrier_control.is_empty());
@@ -743,8 +764,8 @@ impl CreatingStreamingJobControl {
                     } else {
                         CompleteJobType::Normal
                     }
-                } else if is_first_commit {
-                    CompleteJobType::First
+                } else if let Some(info) = create_job_info {
+                    CompleteJobType::First(info)
                 } else {
                     CompleteJobType::Normal
                 };

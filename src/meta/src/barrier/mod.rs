@@ -53,7 +53,7 @@ use risingwave_pb::ddl_service::PbBackfillType;
 
 pub use self::command::{
     BarrierKind, Command, CreateStreamingJobCommandInfo, CreateStreamingJobType,
-    ReplaceStreamJobPlan, Reschedule, SnapshotBackfillInfo,
+    ReplaceStreamJobPlan, Reschedule, ResumeBackfillTarget, SnapshotBackfillInfo,
 };
 pub(crate) use self::info::{SharedActorInfos, SharedFragmentInfo};
 pub use self::manager::{BarrierManagerRef, GlobalBarrierManager};
@@ -109,16 +109,19 @@ pub(crate) struct BackfillProgress {
     pub(crate) backfill_type: PbBackfillType,
 }
 
+pub(crate) struct UpdateDatabaseBarrierRequest {
+    pub database_id: DatabaseId,
+    pub barrier_interval_ms: Option<u32>,
+    pub checkpoint_frequency: Option<u64>,
+    pub sender: Sender<()>,
+}
+
 pub(crate) enum BarrierManagerRequest {
-    GetBackfillProgress(Sender<HashMap<JobId, BackfillProgress>>),
-    GetCdcProgress(Sender<HashMap<JobId, CdcProgress>>),
+    GetBackfillProgress(Sender<MetaResult<HashMap<JobId, BackfillProgress>>>),
+    GetCdcProgress(Sender<MetaResult<HashMap<JobId, CdcProgress>>>),
     AdhocRecovery(Sender<()>),
-    UpdateDatabaseBarrier {
-        database_id: DatabaseId,
-        barrier_interval_ms: Option<u32>,
-        checkpoint_frequency: Option<u64>,
-        sender: Sender<()>,
-    },
+    UpdateDatabaseBarrier(UpdateDatabaseBarrierRequest),
+    MayHaveSnapshotBackfillingJob(Sender<bool>),
 }
 
 #[derive(Debug)]

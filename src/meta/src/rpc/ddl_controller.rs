@@ -1802,12 +1802,20 @@ impl DdlController {
             resource_group.clone(),
         )?;
 
-        let parallelism = self
-            .env
-            .system_params_reader()
-            .await
-            .adaptive_parallelism_strategy()
-            .compute_target_parallelism(parallelism.get());
+        let parallelism = if initial_parallelism.is_some() {
+            parallelism.get()
+        } else {
+            // Prefer job-level override for initial scheduling, fallback to system strategy.
+            let adaptive_strategy = match stream_ctx.adaptive_parallelism_strategy {
+                Some(strategy) => strategy,
+                None => self
+                    .env
+                    .system_params_reader()
+                    .await
+                    .adaptive_parallelism_strategy(),
+            };
+            adaptive_strategy.compute_target_parallelism(parallelism.get())
+        };
 
         let parallelism = NonZeroUsize::new(parallelism).expect("parallelism must be positive");
         let actor_graph_builder = ActorGraphBuilder::new(
@@ -2235,6 +2243,8 @@ impl DdlController {
             Object::DatabaseId(id) => (ObjectType::Database, id),
             Object::SubscriptionId(id) => (ObjectType::Subscription, id),
             Object::ConnectionId(id) => (ObjectType::Connection, id),
+            Object::FunctionId(id) => (ObjectType::Function, id),
+            Object::SecretId(id) => (ObjectType::Secret, id),
         };
         self.metadata_manager
             .catalog_controller

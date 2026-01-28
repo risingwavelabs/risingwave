@@ -796,6 +796,7 @@ mod tests {
 
     use bytes::Bytes;
     use itertools::Itertools;
+    use risingwave_common::catalog::TableOption;
     use risingwave_common::hash::VirtualNode;
     use risingwave_common::util::epoch::{EpochExt, test_epoch};
     use risingwave_hummock_sdk::HummockReadEpoch;
@@ -871,6 +872,7 @@ mod tests {
                 HummockReadEpoch::NoWait(epoch),
                 NewReadSnapshotOptions {
                     table_id: TEST_TABLE_ID,
+                    table_option: TableOption::default(),
                 },
             )
             .await

@@ -27,7 +27,7 @@ use risingwave_common::hash::ActorMapping;
 use risingwave_meta_model::{StreamingParallelism, WorkerId, fragment, fragment_relation};
 use risingwave_pb::common::{PbWorkerNode, WorkerNode, WorkerType};
 use risingwave_pb::stream_plan::{PbDispatchOutputMapping, PbDispatcher};
-use sea_orm::{ActiveModelTrait, ConnectionTrait, QuerySelect};
+use sea_orm::{ConnectionTrait, QuerySelect};
 use thiserror_ext::AsReport;
 use tokio::sync::oneshot::Receiver;
 use tokio::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard, oneshot};
@@ -300,7 +300,7 @@ impl ScaleController {
                 _ => {}
             }
 
-            streaming_job.update(&txn).await?;
+            StreamingJob::update(streaming_job).exec(&txn).await?;
         }
 
         let jobs = policy.keys().copied().collect();
@@ -411,7 +411,7 @@ impl ScaleController {
             for fragment in fragments {
                 let mut fragment = fragment.into_active_model();
                 fragment.parallelism = Set(desired_parallelism.clone());
-                fragment.update(&txn).await?;
+                Fragment::update(fragment).exec(&txn).await?;
             }
 
             target_ensembles.push(ensemble);
