@@ -79,6 +79,36 @@ CREATE SINK s_underscore_name AS SELECT * FROM t_db_validation WITH (
     create_table_if_not_exists = 'true'
 );
 
+# Test case 5: Source validation - Error with single dot in database.name
+statement error Invalid database.name 'a.b': dots are not allowed in database names
+CREATE SOURCE src_single_dot
+WITH (
+    connector = 'iceberg',
+    s3.endpoint = 'http://127.0.0.1:9301',
+    s3.region = 'us-east-1',
+    s3.access.key = 'hummockadmin',
+    s3.secret.key = 'hummockadmin',
+    catalog.type = 'storage',
+    warehouse.path = 's3a://icebergdata/demo',
+    database.name = 'a.b',
+    table.name = 'test_table'
+);
+
+# Test case 6: Source validation - Error with multiple dots in database.name
+statement error Invalid database.name 'x.y.z': dots are not allowed in database names
+CREATE SOURCE src_multiple_dots
+WITH (
+    connector = 'iceberg',
+    s3.endpoint = 'http://127.0.0.1:9301',
+    s3.region = 'us-east-1',
+    s3.access.key = 'hummockadmin',
+    s3.secret.key = 'hummockadmin',
+    catalog.type = 'storage',
+    warehouse.path = 's3a://icebergdata/demo',
+    database.name = 'x.y.z',
+    table.name = 'test_table'
+);
+
 # Clean up
 statement ok
 DROP SINK s_valid_name;
