@@ -19,10 +19,12 @@ use std::ops::Bound::*;
 use std::sync::Arc;
 use std::time::Instant;
 
+use anyhow::anyhow;
 use bytes::Bytes;
 use either::Either;
 use foyer::Hint;
-use futures::future::try_join_all;
+use futures::future::{ready, try_join_all};
+use futures::stream::BoxStream;
 use futures::{Stream, StreamExt, TryStreamExt, pin_mut};
 use itertools::Itertools;
 use risingwave_common::array::stream_record::Record;
@@ -64,8 +66,8 @@ use thiserror_ext::AsReport;
 use tracing::{Instrument, trace};
 
 use crate::cache::keyed_cache_may_stale;
-use crate::executor::StreamExecutorResult;
 use crate::executor::monitor::streaming_stats::StateTableMetrics;
+use crate::executor::{StreamExecutorError, StreamExecutorResult};
 
 /// This macro is used to mark a point where we want to randomly discard the operation and early
 /// return, only in insane mode.
@@ -342,7 +344,6 @@ struct StateTableRowStore<LS: LocalStateStore, SD: ValueRowSerde> {
     all_rows: Option<HashMap<VirtualNode, BTreeMap<Bytes, OwnedRow>>>,
 
     table_id: TableId,
-    table_option: TableOption,
     row_serde: Arc<SD>,
     // should be only used for debugging in panic message of handle_mem_table_error
     pk_serde: OrderedRowSerde,
@@ -372,7 +373,6 @@ impl<LS: LocalStateStore, SD: ValueRowSerde> StateTableRowStore<LS, SD> {
             // Get min key via forward iteration
             let memcomparable_range_with_vnode = prefixed_range_with_vnode::<Bytes>(.., vnode);
             let read_options = ReadOptions {
-                retention_seconds: self.table_option.retention_seconds,
                 cache_policy: CachePolicy::Fill(Hint::Low),
                 ..Default::default()
             };
@@ -422,7 +422,6 @@ impl<LS: LocalStateStore, SD: ValueRowSerde> StateTableRowStore<LS, SD> {
             let start_time = Instant::now();
             *rows = try_join_all(vnode_bitmap.iter_vnodes().map(|vnode| {
                 let state_store = &self.state_store;
-                let retention_seconds = self.table_option.retention_seconds;
                 let row_serde = &self.row_serde;
                 async move {
                     let mut rows = BTreeMap::new();
@@ -437,7 +436,6 @@ impl<LS: LocalStateStore, SD: ValueRowSerde> StateTableRowStore<LS, SD> {
                                     prefix_hint: None,
                                     prefetch_options: Default::default(),
                                     cache_policy: Default::default(),
-                                    retention_seconds,
                                 },
                             )
                             .await?,
@@ -929,16 +927,12 @@ where
         });
 
         // Restore persisted table watermark.
-        //
-        // Note: currently the underlying local state store only exposes persisted watermarks for
-        // `PkPrefix` type (i.e., the first PK column), so we only restore in that case.
         let max_watermark_of_vnodes = distribution
             .vnodes()
             .iter_vnodes()
             .filter_map(|vnode| local_state_store.get_table_watermark(vnode))
             .max();
-        let committed_watermark = if let Some((deser, WatermarkSerdeType::PkPrefix)) =
-            watermark_serde.as_ref()
+        let committed_watermark = if let Some((deser, _)) = watermark_serde.as_ref()
             && let Some(max_watermark) = max_watermark_of_vnodes
         {
             let deserialized = deser.deserialize(&max_watermark).ok().and_then(|row| {
@@ -961,7 +955,6 @@ where
             table_id,
             row_store: StateTableRowStore {
                 all_rows: preload_all_rows.then(HashMap::new),
-                table_option,
                 state_store: local_state_store,
                 row_serde,
                 pk_serde: pk_serde.clone(),
@@ -1155,7 +1148,6 @@ impl<LS: LocalStateStore, SD: ValueRowSerde> StateTableRowStore<LS, SD> {
 
         let read_options = ReadOptions {
             prefix_hint,
-            retention_seconds: self.table_option.retention_seconds,
             cache_policy: CachePolicy::Fill(Hint::Normal),
             ..Default::default()
         };
@@ -1196,7 +1188,6 @@ impl<LS: LocalStateStore, SD: ValueRowSerde> StateTableRowStore<LS, SD> {
 
         let read_options = ReadOptions {
             prefix_hint,
-            retention_seconds: self.table_option.retention_seconds,
             cache_policy: CachePolicy::Fill(Hint::Normal),
             ..Default::default()
         };
@@ -1637,6 +1628,8 @@ impl<'a, S: Stream<Item = StreamExecutorResult<KeyedRow<Bytes>>> + 'a> KeyedRowS
 pub trait PkRowStream<'a, K>: Stream<Item = StreamExecutorResult<(K, OwnedRow)>> + 'a {}
 impl<'a, K, S: Stream<Item = StreamExecutorResult<(K, OwnedRow)>> + 'a> PkRowStream<'a, K> for S {}
 
+pub type BoxedRowStream<'a> = BoxStream<'a, StreamExecutorResult<OwnedRow>>;
+
 pub trait FromVnodeBytes {
     fn from_vnode_bytes(vnode: VirtualNode, bytes: &Bytes) -> Self;
 }
@@ -1747,7 +1740,6 @@ impl<LS: LocalStateStore, SD: ValueRowSerde> StateTableRowStore<LS, SD> {
         }
         let read_options = ReadOptions {
             prefix_hint,
-            retention_seconds: self.table_option.retention_seconds,
             prefetch_options,
             cache_policy: CachePolicy::Fill(Hint::Normal),
         };
@@ -1807,7 +1799,6 @@ impl<LS: LocalStateStore, SD: ValueRowSerde> StateTableRowStore<LS, SD> {
         }
         let read_options = ReadOptions {
             prefix_hint,
-            retention_seconds: self.table_option.retention_seconds,
             prefetch_options,
             cache_policy: CachePolicy::Fill(Hint::Normal),
         };
@@ -1843,6 +1834,77 @@ where
         let stream = self.iter_with_prefix_inner::</* REVERSE */ false, ()>(pk_prefix, sub_range, prefetch_options)
             .await?;
         Ok(stream.map_ok(|(_, row)| row))
+    }
+
+    /// This function scans rows from the relational table with specific `prefix` and `sub_range` under the same
+    /// `vnode`, and filters out rows based on watermarks. It calls `iter_with_prefix` and further filters rows
+    /// based on the table watermark retrieved from the state store.
+    ///
+    /// The caller must ensure that `clean_watermark_index` is set before calling this method, otherwise it will return all rows without filtering.
+    pub async fn iter_with_prefix_respecting_watermark(
+        &self,
+        pk_prefix: impl Row,
+        sub_range: &(Bound<impl Row>, Bound<impl Row>),
+        prefetch_options: PrefetchOptions,
+    ) -> StreamExecutorResult<BoxedRowStream<'_>> {
+        let vnode = self.compute_prefix_vnode(&pk_prefix);
+        let stream = self
+            .iter_with_prefix(pk_prefix, sub_range, prefetch_options)
+            .await?;
+        let Some(clean_watermark_index) = self.clean_watermark_index else {
+            return Ok(stream.boxed());
+        };
+        let Some((watermark_serde, watermark_type)) = &self.watermark_serde else {
+            return Err(StreamExecutorError::from(anyhow!(
+                "Missing watermark serde"
+            )));
+        };
+        // Fast path. TableWatermarksIndex::rewrite_range_with_table_watermark has already filtered the rows.
+        if matches!(watermark_type, WatermarkSerdeType::PkPrefix) {
+            return Ok(stream.boxed());
+        }
+        let watermark_bytes = self.row_store.state_store.get_table_watermark(vnode);
+        let Some(watermark_bytes) = watermark_bytes else {
+            return Ok(stream.boxed());
+        };
+        let watermark_row = watermark_serde.deserialize(&watermark_bytes)?;
+        if watermark_row.len() != 1 {
+            return Err(StreamExecutorError::from(format!(
+                "Watermark row should have exactly 1 column, got {}",
+                watermark_row.len()
+            )));
+        }
+        let watermark_value = watermark_row[0].clone();
+        // StateTableInner::update_watermark should ensure that the watermark is not NULL
+        if watermark_value.is_none() {
+            return Err(StreamExecutorError::from(anyhow!(
+                "Watermark cannot be NULL"
+            )));
+        }
+        let order_type = watermark_serde.get_order_types().get(0).ok_or_else(|| {
+            StreamExecutorError::from(anyhow!(
+                "Watermark serde should have at least one order type"
+            ))
+        })?;
+        let direction = if order_type.is_ascending() {
+            WatermarkDirection::Ascending
+        } else {
+            WatermarkDirection::Descending
+        };
+        let stream = stream.try_filter_map(move |row| {
+            let watermark_col_value = row.datum_at(clean_watermark_index);
+            let should_filter = direction.datum_filter_by_watermark(
+                watermark_col_value,
+                &watermark_value,
+                *order_type,
+            );
+            if should_filter {
+                ready(Ok(None))
+            } else {
+                ready(Ok(Some(row)))
+            }
+        });
+        Ok(stream.boxed())
     }
 
     /// Get the row from a state table with only 1 row.

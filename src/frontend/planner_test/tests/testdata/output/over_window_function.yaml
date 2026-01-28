@@ -470,6 +470,34 @@
       └─StreamGroupTopN { order: [t.x ASC], limit: 2, offset: 0, group_key: [t.x] }
         └─StreamExchange { dist: HashShard(t.x) }
           └─StreamTableScan { table: t, columns: [t.x, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+- id: TopN by row_number with rank output and offset
+  sql: |
+    create table t(x int, y int);
+    select x, y, rank from
+      (select *, row_number() over(PARTITION BY x ORDER BY y) rank from t)
+    where rank = 2;
+  logical_plan: |-
+    LogicalProject { exprs: [t.x, t.y, row_number] }
+    └─LogicalFilter { predicate: (row_number = 2:Int32) }
+      └─LogicalProject { exprs: [t.x, t.y, row_number] }
+        └─LogicalOverWindow { window_functions: [row_number() OVER(PARTITION BY t.x ORDER BY t.y ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
+          └─LogicalProject { exprs: [t.x, t.y, t._row_id, t._rw_timestamp] }
+            └─LogicalScan { table: t, columns: [t.x, t.y, t._row_id, t._rw_timestamp] }
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchFilter { predicate: (row_number = 2:Int32) }
+      └─BatchOverWindow { window_functions: [row_number() OVER(PARTITION BY t.x ORDER BY t.y ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
+        └─BatchExchange { order: [t.x ASC, t.y ASC], dist: HashShard(t.x) }
+          └─BatchSort { order: [t.x ASC, t.y ASC] }
+            └─BatchScan { table: t, columns: [t.x, t.y], distribution: SomeShard }
+  stream_plan: |-
+    StreamMaterialize { columns: [x, y, rank], stream_key: [x], pk_columns: [x], pk_conflict: NoCheck }
+    └─StreamProject { exprs: [t.x, t.y, (row_number + 1:Int64) as $expr1] }
+      └─StreamOverWindow { window_functions: [row_number() OVER(PARTITION BY t.x ORDER BY t.y ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
+        └─StreamProject { exprs: [t.x, t.y] }
+          └─StreamGroupTopN { order: [t.y ASC], limit: 1, offset: 1, group_key: [t.x] }
+            └─StreamExchange { dist: HashShard(t.x) }
+              └─StreamTableScan { table: t, columns: [t.x, t.y, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - id: TopN by row_number without rank output, 1
   sql: |
     create table t(x int, y int);

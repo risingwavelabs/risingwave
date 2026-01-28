@@ -16,6 +16,7 @@ use super::hba::HbaConfig;
 use super::*;
 
 /// The section [`frontend`] in `risingwave.toml`.
+#[serde_with::apply(Option => #[serde(with = "none_as_empty_string")])]
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde, ConfigDoc)]
 pub struct FrontendConfig {
     /// Total memory constraints for running queries.

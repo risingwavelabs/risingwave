@@ -38,7 +38,7 @@ use tokio::task::yield_now;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
 use crate::MetaResult;
-use crate::barrier::command::CommandContext;
+use crate::barrier::command::PostCollectCommand;
 use crate::barrier::context::GlobalBarrierWorkerContext;
 use crate::barrier::progress::TrackingJob;
 use crate::barrier::rpc::from_partial_graph_id;
@@ -88,7 +88,7 @@ impl GlobalBarrierWorkerContext for MockBarrierWorkerContext {
         self.0.send(ContextRequest::MarkReady).unwrap();
     }
 
-    async fn post_collect_command<'a>(&'a self, _command: &'a CommandContext) -> MetaResult<()> {
+    async fn post_collect_command(&self, _command: PostCollectCommand) -> MetaResult<()> {
         unreachable!()
     }
 
@@ -263,6 +263,7 @@ async fn test_barrier_manager_worker_crash_no_early_commit() {
                 ]),
             )]),
         )]),
+        backfill_orders: Default::default(),
         state_table_committed_epochs: HashMap::from_iter([
             (table1, initial_epoch),
             (table2, initial_epoch),

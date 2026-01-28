@@ -75,7 +75,7 @@ public class DebeziumOpenLineageEmitter {
      */
     public static void init(Map<String, String> configuration, String connectorTypeName) {
         if (isOpenLineageDisabled(configuration)) {
-            LOGGER.info("!!!NoOpLineageEmitter");
+            LOGGER.debug("NoOpLineageEmitter");
             return;
         }
 

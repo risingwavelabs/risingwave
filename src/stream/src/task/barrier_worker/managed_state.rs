@@ -30,7 +30,8 @@ use risingwave_common::id::SourceId;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_pb::stream_plan::barrier::BarrierKind;
 use risingwave_pb::stream_service::barrier_complete_response::{
-    PbCdcTableBackfillProgress, PbCreateMviewProgress, PbListFinishedSource, PbLoadFinishedSource,
+    PbCdcSourceOffsetUpdated, PbCdcTableBackfillProgress, PbCreateMviewProgress,
+    PbListFinishedSource, PbLoadFinishedSource,
 };
 use risingwave_storage::StateStoreImpl;
 use tokio::sync::mpsc;
@@ -73,6 +74,7 @@ enum ManagedBarrierStateInner {
         list_finished_source_ids: Vec<PbListFinishedSource>,
         load_finished_source_ids: Vec<PbLoadFinishedSource>,
         cdc_table_backfill_progress: Vec<PbCdcTableBackfillProgress>,
+        cdc_source_offset_updated: Vec<PbCdcSourceOffsetUpdated>,
         truncate_tables: Vec<TableId>,
         refresh_finished_tables: Vec<TableId>,
     },
@@ -315,6 +317,10 @@ pub(crate) struct PartialGraphManagedBarrierState {
 
     pub(crate) cdc_table_backfill_progress: HashMap<u64, HashMap<ActorId, CdcTableBackfillState>>,
 
+    /// Record CDC source offset updated reports for each epoch of concurrent checkpoints.
+    /// Used to track when CDC sources have updated their offset at least once.
+    pub(crate) cdc_source_offset_updated: HashMap<u64, Vec<PbCdcSourceOffsetUpdated>>,
+
     /// Record the tables to truncate for each epoch of concurrent checkpoints.
     pub(crate) truncate_tables: HashMap<u64, HashSet<TableId>>,
     /// Record the tables that have finished refresh for each epoch of concurrent checkpoints.
@@ -342,6 +348,7 @@ impl PartialGraphManagedBarrierState {
             list_finished_source_ids: Default::default(),
             load_finished_source_ids: Default::default(),
             cdc_table_backfill_progress: Default::default(),
+            cdc_source_offset_updated: Default::default(),
             truncate_tables: Default::default(),
             refresh_finished_tables: Default::default(),
             state_store,
@@ -922,6 +929,13 @@ impl PartialGraphState {
                 } => {
                     self.update_cdc_table_backfill_progress(epoch, actor_id, state);
                 }
+                LocalBarrierEvent::ReportCdcSourceOffsetUpdated {
+                    epoch,
+                    actor_id,
+                    source_id,
+                } => {
+                    self.report_cdc_source_offset_updated(epoch, actor_id, source_id);
+                }
             }
         }
 
@@ -1041,6 +1055,32 @@ impl PartialGraphState {
         }
     }
 
+    /// Report that a CDC source has updated its offset at least once
+    pub(super) fn report_cdc_source_offset_updated(
+        &mut self,
+        epoch: EpochPair,
+        actor_id: ActorId,
+        source_id: SourceId,
+    ) {
+        if let Some(actor_state) = self.actor_states.get(&actor_id)
+            && actor_state.inflight_barriers.contains(&epoch.prev)
+        {
+            self.graph_state
+                .cdc_source_offset_updated
+                .entry(epoch.curr)
+                .or_default()
+                .push(PbCdcSourceOffsetUpdated {
+                    reporter_actor_id: actor_id.as_raw_id(),
+                    source_id: source_id.as_raw_id(),
+                });
+        } else {
+            warn!(
+                ?epoch,
+                %actor_id, %source_id, "ignore cdc source offset updated"
+            );
+        }
+    }
+
     /// Report that a table has finished refreshing for a specific epoch
     pub(super) fn report_refresh_finished(
         &mut self,
@@ -1126,6 +1166,11 @@ impl PartialGraphManagedBarrierState {
                 .map(|(actor, state)| state.to_pb(actor, barrier_state.barrier.epoch.curr))
                 .collect();
 
+            let cdc_source_offset_updated = self
+                .cdc_source_offset_updated
+                .remove(&barrier_state.barrier.epoch.curr)
+                .unwrap_or_default();
+
             let truncate_tables = self
                 .truncate_tables
                 .remove(&barrier_state.barrier.epoch.curr)
@@ -1148,6 +1193,7 @@ impl PartialGraphManagedBarrierState {
                     truncate_tables,
                     refresh_finished_tables,
                     cdc_table_backfill_progress,
+                    cdc_source_offset_updated,
                 },
             );
 
@@ -1176,6 +1222,7 @@ impl PartialGraphManagedBarrierState {
             list_finished_source_ids,
             load_finished_source_ids,
             cdc_table_backfill_progress,
+            cdc_source_offset_updated,
             truncate_tables,
             refresh_finished_tables,
         ) = must_match!(barrier_state.inner, ManagedBarrierStateInner::AllCollected {
@@ -1185,8 +1232,9 @@ impl PartialGraphManagedBarrierState {
             truncate_tables,
             refresh_finished_tables,
             cdc_table_backfill_progress,
+            cdc_source_offset_updated,
         } => {
-            (create_mview_progress, list_finished_source_ids, load_finished_source_ids, cdc_table_backfill_progress, truncate_tables, refresh_finished_tables)
+            (create_mview_progress, list_finished_source_ids, load_finished_source_ids, cdc_table_backfill_progress, cdc_source_offset_updated, truncate_tables, refresh_finished_tables)
         });
         BarrierToComplete {
             barrier: barrier_state.barrier,
@@ -1197,6 +1245,7 @@ impl PartialGraphManagedBarrierState {
             truncate_tables,
             refresh_finished_tables,
             cdc_table_backfill_progress,
+            cdc_source_offset_updated,
         }
     }
 }
@@ -1210,6 +1259,7 @@ pub(crate) struct BarrierToComplete {
     pub truncate_tables: Vec<TableId>,
     pub refresh_finished_tables: Vec<TableId>,
     pub cdc_table_backfill_progress: Vec<PbCdcTableBackfillProgress>,
+    pub cdc_source_offset_updated: Vec<PbCdcSourceOffsetUpdated>,
 }
 
 impl PartialGraphManagedBarrierState {

@@ -22,6 +22,7 @@ macro_rules! define_system_config {
             /// The section `[system]` in `risingwave.toml`. All these fields are used to initialize the [system
             /// parameters](crate::system_param) persisted in Meta store. Most fields are for testing purpose only and should not be
             /// documented.
+            #[serde_with::apply(Option => #[serde(with = "none_as_empty_string")])]
             #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde, ConfigDoc)]
             pub struct SystemConfig {
                 $(

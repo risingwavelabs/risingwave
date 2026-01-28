@@ -25,7 +25,6 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::types::DataType;
 use risingwave_pb::connector_service::sink_metadata::SerializedMetadata;
 use risingwave_pb::connector_service::{SinkMetadata, sink_metadata};
-use risingwave_pb::id::ExecutorId;
 use risingwave_pb::stream_plan::PbSinkSchemaChange;
 use serde::Deserialize;
 use serde_json::json;
@@ -87,6 +86,9 @@ pub struct RedShiftConfig {
 
     #[serde(rename = "schema")]
     pub schema: Option<String>,
+
+    #[serde(rename = "intermediate.schema.name")]
+    pub intermediate_schema: Option<String>,
 
     #[serde(rename = "table.name")]
     pub table: String,
@@ -211,12 +213,13 @@ impl Sink for RedshiftSink {
                         "intermediate.table.name is required for append-only sink"
                     ))
                 })?;
-                let build_cdc_table_sql = build_create_table_sql(
-                    self.config.schema.as_deref(),
-                    cdc_table,
-                    &schema,
-                    true,
-                )?;
+                let cdc_schema_for_create = self
+                    .config
+                    .intermediate_schema
+                    .as_deref()
+                    .or(self.config.schema.as_deref());
+                let build_cdc_table_sql =
+                    build_create_table_sql(cdc_schema_for_create, cdc_table, &schema, true)?;
                 client.execute_sql_sync(vec![build_cdc_table_sql]).await?;
             }
         }
@@ -299,14 +302,12 @@ impl RedShiftSinkWriter {
     ) -> Result<Self> {
         let schema = param.schema();
         if config.with_s3 {
-            let executor_id = writer_param.executor_id;
             let s3_writer = SnowflakeRedshiftSinkS3Writer::new(
                 config.s3_inner.ok_or_else(|| {
                     SinkError::Config(anyhow!("S3 configuration is required for S3 sink"))
                 })?,
                 schema,
                 is_append_only,
-                executor_id,
                 config.table,
             )?;
             Ok(Self::S3(s3_writer))
@@ -401,9 +402,13 @@ impl RedshiftSinkCommitter {
                 let task_client = config.build_client()?;
                 let config = config.clone();
                 let (shutdown_sender, shutdown_receiver) = unbounded_channel();
+                let target_schema_name = config.schema.as_deref();
+                let effective_cdc_schema =
+                    config.intermediate_schema.as_deref().or(target_schema_name);
                 let merge_into_sql = if !is_append_only {
                     Some(build_create_merge_into_task_sql(
-                        config.schema.as_deref(),
+                        effective_cdc_schema,
+                        target_schema_name,
                         config.cdc_table.as_ref().ok_or_else(|| {
                             SinkError::Config(anyhow!(
                                 "intermediate.table.name is required for non-append-only sink"
@@ -478,7 +483,6 @@ impl RedshiftSinkCommitter {
 
     async fn write_manifest_to_s3(
         s3_inner: &S3Common,
-        executor_id: ExecutorId,
         paths: Vec<String>,
         table: &str,
     ) -> Result<String> {
@@ -488,8 +492,7 @@ impl RedshiftSinkCommitter {
             .collect();
         let s3_operator = FileSink::<S3Sink>::new_s3_sink(s3_inner)?;
         let (mut writer, manifest_path) =
-            build_opendal_writer_path(s3_inner, executor_id, &s3_operator, Some("manifest"), table)
-                .await?;
+            build_opendal_writer_path(s3_inner, &s3_operator, Some("manifest"), table).await?;
         let manifest_json = json!({ "entries": manifest_entries });
         let mut chunk_buf = BytesMut::new();
         writeln!(chunk_buf, "{}", manifest_json).unwrap();
@@ -648,13 +651,7 @@ impl SinglePhaseCommitCoordinator for RedshiftSinkCommitter {
                 SinkError::Config(anyhow!("S3 configuration is required for S3 sink"))
             })?;
             {
-                Self::write_manifest_to_s3(
-                    s3_inner,
-                    ExecutorId::default(),
-                    paths,
-                    &self.config.table,
-                )
-                .await?;
+                Self::write_manifest_to_s3(s3_inner, paths, &self.config.table).await?;
             }
             tracing::info!(
                 "Manifest file written to S3 for sink id {} at epoch {}",
@@ -741,8 +738,15 @@ impl SinglePhaseCommitCoordinator for RedshiftSinkCommitter {
                 .or_else(check_column_exists)?;
             self.all_column_names
                 .extend(add_columns.fields.iter().map(|f| f.name.clone()));
+            let target_schema_name = self.config.schema.as_deref();
+            let effective_cdc_schema = self
+                .config
+                .intermediate_schema
+                .as_deref()
+                .or(target_schema_name);
             let merge_into_sql = build_create_merge_into_task_sql(
-                self.config.schema.as_deref(),
+                effective_cdc_schema,
+                target_schema_name,
                 self.config.cdc_table.as_ref().ok_or_else(|| {
                     SinkError::Config(anyhow!(
                         "intermediate.table.name is required for non-append-only sink"
@@ -845,14 +849,15 @@ fn convert_redshift_data_type(data_type: &DataType) -> Result<String> {
 }
 
 fn build_create_merge_into_task_sql(
-    schema_name: Option<&str>,
+    cdc_schema_name: Option<&str>,
+    target_schema_name: Option<&str>,
     cdc_table_name: &str,
     target_table_name: &str,
     pk_column_names: &Vec<String>,
     all_column_names: &Vec<String>,
 ) -> Vec<String> {
-    let cdc_table_name = build_full_table_name(schema_name, cdc_table_name);
-    let target_table_name = build_full_table_name(schema_name, target_table_name);
+    let cdc_table_name = build_full_table_name(cdc_schema_name, cdc_table_name);
+    let target_table_name = build_full_table_name(target_schema_name, target_table_name);
     let pk_names_str = pk_column_names.join(", ");
     let pk_names_eq_str = pk_column_names
         .iter()

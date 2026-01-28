@@ -175,7 +175,6 @@ impl Writer<MetadataV2> for WriterModelV2ToMetaStoreV2 {
         new_backup_url: &str,
         new_backup_dir: &str,
     ) -> BackupResult<()> {
-        use sea_orm::ActiveModelTrait;
         let kvs = [
             ("state_store", new_storage_url),
             ("data_directory", new_storage_dir),
@@ -194,7 +193,10 @@ impl Writer<MetadataV2> for WriterModelV2ToMetaStoreV2 {
             };
             let mut kv: risingwave_meta_model::system_parameter::ActiveModel = model.into();
             kv.value = sea_orm::ActiveValue::Set(v.to_owned());
-            kv.update(&self.meta_store.conn).await.map_err(map_db_err)?;
+            risingwave_meta_model::system_parameter::Entity::update(kv)
+                .exec(&self.meta_store.conn)
+                .await
+                .map_err(map_db_err)?;
         }
         Ok(())
     }

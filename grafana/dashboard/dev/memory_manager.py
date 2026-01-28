@@ -7,8 +7,9 @@ def _(outer_panels: Panels):
     panels = outer_panels.sub_panel()
     return [
         outer_panels.row_collapsed(
-            "[Resource] Memory manager",
+            "Memory manager",
             [
+                panels.subheader("LRU manager"),
                 panels.timeseries_count(
                     "LRU manager loop count per sec",
                     "",
@@ -43,6 +44,17 @@ def _(outer_panels: Panels):
                         ),
                     ],
                 ),
+                panels.timeseries_ms(
+                    "LRU manager diff between current watermark and evicted watermark time (ms) for actors",
+                    "",
+                    [
+                        panels.target(
+                            f"{metric('lru_current_watermark_time_ms')} - on() group_right() {metric('lru_evicted_watermark_time_ms')}",
+                            "table {{table_id}} actor {{actor_id}} desc: {{desc}}",
+                        ),
+                    ],
+                ),
+                panels.subheader("Jemalloc"),
                 panels.timeseries_memory(
                     "The allocated memory of jemalloc",
                     "",
@@ -83,6 +95,7 @@ def _(outer_panels: Panels):
                         ),
                     ],
                 ),
+                panels.subheader("JVM"),
                 panels.timeseries_memory(
                     "The allocated memory of jvm",
                     "",
@@ -100,16 +113,6 @@ def _(outer_panels: Panels):
                         panels.target(
                             f"{metric('jvm_active_bytes')}",
                             "",
-                        ),
-                    ],
-                ),
-                panels.timeseries_ms(
-                    "LRU manager diff between current watermark and evicted watermark time (ms) for actors",
-                    "",
-                    [
-                        panels.target(
-                            f"{metric('lru_current_watermark_time_ms')} - on() group_right() {metric('lru_evicted_watermark_time_ms')}",
-                            "table {{table_id}} actor {{actor_id}} desc: {{desc}}",
                         ),
                     ],
                 ),

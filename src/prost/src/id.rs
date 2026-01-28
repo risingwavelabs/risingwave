@@ -454,7 +454,9 @@ impl_into_object!(
     SourceId,
     SubscriptionId,
     ViewId,
-    ConnectionId
+    ConnectionId,
+    FunctionId,
+    SecretId
 );
 
 impl_into_object!(

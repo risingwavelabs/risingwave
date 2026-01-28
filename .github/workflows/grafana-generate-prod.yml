@@ -1,0 +1,42 @@
+name: Grafana Generate Production Dashboard
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - grafana/**
+
+jobs:
+  generate-production-grafana-dashboards:
+    name: Generate production Grafana dashboards
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install grafana dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r grafana/requirements.txt
+      - name: Generate production Grafana dashboards
+        env:
+          DASHBOARD_NAMESPACE_FILTER_ENABLED: "true"
+          DASHBOARD_RISINGWAVE_NAME_FILTER_ENABLED: "true"
+          DASHBOARD_DYNAMIC_SOURCE: "true"
+          DASHBOARD_UID: ${{ vars.RISINGWAVE_PROD_GRAFANA_DASHBOARD_UID }}
+        run: |
+          set -euo pipefail
+          ./grafana/generate.sh
+          mkdir -p grafana/prod-dashboard
+          cp grafana/risingwave-*-dashboard.json grafana/prod-dashboard/
+      - name: Upload production Grafana dashboards
+        uses: actions/upload-artifact@v4
+        with:
+          name: grafana-prod-dashboards
+          path: grafana/prod-dashboard/*.json
+          if-no-files-found: error

@@ -118,6 +118,15 @@ message BarrierCompleteResponse {
     uint32 associated_source_id = 3;
   }
   repeated ListFinishedSource list_finished_sources = 16;
+  // SourceExecutor reports that CDC source has updated offset at least once.
+  // Meta will mark the CDC source as created only after receiving this notification.
+  message CdcSourceOffsetUpdated {
+    // The actor that reported the offset update.
+    uint32 reporter_actor_id = 1;
+    // The source identifier for the CDC source.
+    uint32 source_id = 2;
+  }
+  repeated CdcSourceOffsetUpdated cdc_source_offset_updated = 17;
 }
 
 message StreamingControlStreamRequest {

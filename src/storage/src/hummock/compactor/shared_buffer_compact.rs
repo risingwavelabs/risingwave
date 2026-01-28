@@ -42,7 +42,6 @@ use crate::hummock::shared_buffer::shared_buffer_batch::{
     SharedBufferBatch, SharedBufferBatchInner, SharedBufferBatchOldValues, SharedBufferKeyEntry,
     VersionedSharedBufferValue,
 };
-use crate::hummock::utils::MemoryTracker;
 use crate::hummock::{
     CachePolicy, GetObjectId, HummockError, HummockResult, ObjectIdManagerRef,
     SstableBuilderOptions,
@@ -327,7 +326,6 @@ async fn compact_shared_buffer<const IS_NEW_VALUE: bool>(
 pub async fn merge_imms_in_memory(
     table_id: TableId,
     imms: Vec<ImmutableMemtable>,
-    memory_tracker: Option<MemoryTracker>,
 ) -> ImmutableMemtable {
     let mut epochs = vec![];
     let mut merged_size = 0;
@@ -457,7 +455,6 @@ pub async fn merge_imms_in_memory(
             old_values,
             merged_size,
             max_imm_id,
-            memory_tracker,
         )),
         table_id,
     }

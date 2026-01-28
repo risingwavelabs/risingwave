@@ -22,7 +22,7 @@ use foyer::{
 };
 use futures::TryFutureExt;
 use itertools::Itertools;
-use risingwave_common::catalog::TableId;
+use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_common::config::EvictionConfig;
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::util::epoch::test_epoch;
@@ -520,7 +520,6 @@ impl From<StateStoreTestReadOptions> for crate::store::ReadOptions {
             prefix_hint: val.prefix_hint,
             prefetch_options: val.prefetch_options,
             cache_policy: val.cache_policy,
-            retention_seconds: val.retention_seconds,
         }
     }
 }
@@ -589,6 +588,9 @@ impl<S: StateStore> StateStoreReadTestExt for S {
                 read_options.get_read_epoch(epoch),
                 NewReadSnapshotOptions {
                     table_id: read_options.table_id,
+                    table_option: TableOption {
+                        retention_seconds: read_options.retention_seconds,
+                    },
                 },
             )
             .await?;
@@ -610,6 +612,9 @@ impl<S: StateStore> StateStoreReadTestExt for S {
                 read_options.get_read_epoch(epoch),
                 NewReadSnapshotOptions {
                     table_id: read_options.table_id,
+                    table_option: TableOption {
+                        retention_seconds: read_options.retention_seconds,
+                    },
                 },
             )
             .await?;
@@ -627,6 +632,9 @@ impl<S: StateStore> StateStoreReadTestExt for S {
                 read_options.get_read_epoch(epoch),
                 NewReadSnapshotOptions {
                     table_id: read_options.table_id,
+                    table_option: TableOption {
+                        retention_seconds: read_options.retention_seconds,
+                    },
                 },
             )
             .await?;

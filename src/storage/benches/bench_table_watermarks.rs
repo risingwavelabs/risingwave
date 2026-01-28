@@ -26,8 +26,7 @@ use risingwave_common::util::epoch::test_epoch;
 use risingwave_hummock_sdk::HummockEpoch;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::table_watermark::{
-    PkPrefixTableWatermarksIndex, TableWatermarks, VnodeWatermark, WatermarkDirection,
-    WatermarkSerdeType,
+    TableWatermarks, TableWatermarksIndex, VnodeWatermark, WatermarkDirection, WatermarkSerdeType,
 };
 use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionStateTableInfo};
 use risingwave_pb::hummock::{PbHummockVersion, StateTableInfoDelta};
@@ -178,10 +177,11 @@ fn bench_table_watermarks(c: &mut Criterion) {
     let staging_epoch_count: usize = 500;
     let vnode_part_count = 16;
 
-    let mut table_watermarks = PkPrefixTableWatermarksIndex::new_committed(
+    let mut table_watermarks = TableWatermarksIndex::new_committed(
         gen_committed_table_watermarks(safe_epoch_idx, committed_epoch_idx, vnode_part_count)
             .into(),
         test_epoch(committed_epoch_idx as u64),
+        WatermarkSerdeType::PkPrefix,
     );
     for i in 0..staging_epoch_count {
         let (epoch, watermarks) =

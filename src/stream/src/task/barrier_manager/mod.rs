@@ -76,6 +76,11 @@ pub(super) enum LocalBarrierEvent {
         epoch: EpochPair,
         state: CdcTableBackfillState,
     },
+    ReportCdcSourceOffsetUpdated {
+        epoch: EpochPair,
+        actor_id: ActorId,
+        source_id: SourceId,
+    },
 }
 
 /// Can send [`LocalBarrierEvent`] to [`super::barrier_worker::managed_state::PartialGraphState::poll_next_event`]
@@ -206,6 +211,19 @@ impl LocalBarrierManager {
             actor_id,
             table_id,
             staging_table_id,
+        });
+    }
+
+    pub fn report_cdc_source_offset_updated(
+        &self,
+        epoch: EpochPair,
+        actor_id: ActorId,
+        source_id: SourceId,
+    ) {
+        self.send_event(LocalBarrierEvent::ReportCdcSourceOffsetUpdated {
+            epoch,
+            actor_id,
+            source_id,
         });
     }
 }

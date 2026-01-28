@@ -7,7 +7,7 @@ def _(outer_panels: Panels):
     panels = outer_panels.sub_panel()
     return [
         outer_panels.row_collapsed(
-            "[Metadata] System Parameters",
+            "System Parameters",
             [
                 panels.table_info(
                     "System Parameters",

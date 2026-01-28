@@ -549,7 +549,6 @@ impl SnowflakeSinkWriter {
             SinkError::Config(anyhow!("table.name is required for Snowflake JDBC sink"))
         })?;
         if config.with_s3 {
-            let executor_id = writer_param.executor_id;
             let s3_writer = SnowflakeRedshiftSinkS3Writer::new(
                 config.s3_inner.ok_or_else(|| {
                     SinkError::Config(anyhow!(
@@ -558,7 +557,6 @@ impl SnowflakeSinkWriter {
                 })?,
                 schema,
                 is_append_only,
-                executor_id,
                 table_name,
             )?;
             Ok(Self::S3(s3_writer))

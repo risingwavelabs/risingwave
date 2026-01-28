@@ -43,7 +43,7 @@ use crate::barrier::worker::{
 use crate::rpc::metrics::GLOBAL_META_METRICS;
 use crate::{MetaError, MetaResult};
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub(super) struct ResetPartialGraphCollector {
     pub(super) remaining_workers: HashSet<WorkerId>,
     pub(super) reset_resps: HashMap<WorkerId, ResetPartialGraphResponse>,
@@ -389,12 +389,23 @@ impl DatabaseStatusAction<'_, EnterReset> {
             .expect("should exist");
         match database_status {
             DatabaseCheckpointControlStatus::Running(database) => {
-                let (database_resp_collector, creating_job_collectors) =
+                let mut resetting_job_collectors = HashMap::new();
+                let (database_resp_collector, mut creating_job_collectors) =
                     DatabaseRecoveringState::reset_database_partial_graphs(
                         self.database_id,
-                        database.creating_streaming_job_controls.keys().copied(),
+                        database.creating_streaming_job_controls.drain().filter_map(
+                            |(job_id, job)| {
+                                if let Some(collector) = job.reset() {
+                                    resetting_job_collectors.insert(job_id, collector);
+                                    None
+                                } else {
+                                    Some(job_id)
+                                }
+                            },
+                        ),
                         control_stream_manager,
                     );
+                creating_job_collectors.extend(resetting_job_collectors);
                 let metrics = DatabaseRecoveryMetrics::new(self.database_id);
                 event_log_manager_ref.add_event_logs(vec![Event::Recovery(
                     EventRecovery::database_recovery_start(self.database_id.as_raw_id()),
@@ -507,6 +518,7 @@ impl DatabaseStatusAction<'_, EnterInitializing> {
         };
         let DatabaseRuntimeInfoSnapshot {
             job_infos,
+            backfill_orders,
             mut state_table_committed_epochs,
             mut state_table_log_epochs,
             mut mv_depended_subscriptions,
@@ -521,6 +533,7 @@ impl DatabaseStatusAction<'_, EnterInitializing> {
             control_stream_manager.inject_database_initial_barrier(
                 self.database_id,
                 job_infos,
+                backfill_orders,
                 &mut state_table_committed_epochs,
                 &mut state_table_log_epochs,
                 &fragment_relations,

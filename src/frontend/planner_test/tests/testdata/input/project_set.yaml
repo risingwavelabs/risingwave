@@ -49,7 +49,7 @@
   - batch_plan
 - name: issue-5284
   sql: |
-    -- projected_row_id should be hidden in the output
+    -- _rw_projected_row_id should be hidden in the output
     create table t(x int[]);
     select unnest(x) as unnest from t order by unnest limit 1;
   expected_outputs:
@@ -57,7 +57,7 @@
   - stream_plan
 - name: issue-7812
   sql: |
-    -- projected_row_id should be excluded from distinct
+    -- _rw_projected_row_id should be excluded from distinct
     create table t(x int[]);
     select distinct unnest(x) as unnest from t;
   expected_outputs:

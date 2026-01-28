@@ -123,6 +123,30 @@ public class SourceValidateHandler {
         }
     }
 
+    /** Validate debezium.heartbeat.interval.ms if specified. If present, it must not be 0. */
+    private static void validateHeartbeatInterval(
+            Map<String, String> props, boolean isCdcSourceJob) {
+        String intervalStr = props.get("debezium.heartbeat.interval.ms");
+        if (intervalStr == null) {
+            return; // Not specified, use default
+        }
+
+        long interval;
+        try {
+            interval = Long.parseLong(intervalStr);
+        } catch (NumberFormatException e) {
+            throw ValidatorUtils.invalidArgument(
+                    String.format(
+                            "'debezium.heartbeat.interval.ms' must be a valid number, got: '%s'",
+                            intervalStr));
+        }
+
+        // Validate interval is not 0
+        if (interval == 0) {
+            throw ValidatorUtils.invalidArgument("'debezium.heartbeat.interval.ms' must not be 0");
+        }
+    }
+
     public static void validateSource(ConnectorServiceProto.ValidateSourceRequest request)
             throws Exception {
         var props = request.getPropertiesMap();
@@ -183,6 +207,7 @@ public class SourceValidateHandler {
                 ensureRequiredProps(props, isCdcSourceJob);
                 ensurePropNotBlank(props, DbzConnectorConfig.MYSQL_SERVER_ID);
                 validateQueueMemoryRatio(props);
+                validateHeartbeatInterval(props, isCdcSourceJob);
                 try (var validator =
                         new MySqlValidator(props, tableSchema, isCdcSourceJob, isBackfillTable)) {
                     validator.validateAll();
@@ -200,6 +225,7 @@ public class SourceValidateHandler {
                 ensureRequiredProps(props, isCdcSourceJob);
                 ensurePropNotBlank(props, DbzConnectorConfig.SQL_SERVER_SCHEMA_NAME);
                 validateQueueMemoryRatio(props);
+                validateHeartbeatInterval(props, isCdcSourceJob);
                 try (var sqlServerValidator =
                         new SqlServerValidator(props, tableSchema, isCdcSourceJob)) {
                     sqlServerValidator.validateAll();
