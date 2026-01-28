@@ -4,7 +4,7 @@
 [server]
 heartbeat_interval_ms = 1000
 connection_pool_size = 16
-metrics_level = "Info"
+metrics_level = "info"
 telemetry_enabled = true
 grpc_max_reset_stream = 200
 
@@ -35,11 +35,11 @@ parallelism_control_batch_size = 10
 parallelism_control_trigger_period_sec = 10
 parallelism_control_trigger_first_delay_sec = 30
 meta_leader_lease_secs = 30
-default_parallelism = "Full"
+default_parallelism = "full"
 enable_compaction_deterministic = false
 enable_committed_sst_sanity_check = false
 node_num_monitor_interval_sec = 10
-backend = "Mem"
+backend = "mem"
 periodic_space_reclaim_compaction_interval_sec = 3600
 periodic_ttl_reclaim_compaction_interval_sec = 1800
 periodic_tombstone_reclaim_compaction_interval_sec = 600
@@ -163,13 +163,13 @@ min_single_query_size_bytes = 1048576
 max_single_query_size_bytes = 1073741824
 
 [[frontend.hba_config.entries]]
-connection_type = "Local"
+connection_type = "local"
 databases = ["all"]
 users = ["all"]
 auth_method = "trust"
 
 [[frontend.hba_config.entries]]
-connection_type = "Host"
+connection_type = "host"
 databases = ["all"]
 users = ["all"]
 addresses = ["0.0.0.0/0"]
@@ -177,7 +177,7 @@ auth_method = "password"
 
 [streaming]
 in_flight_barrier_nums = 10000
-async_stack_trace = "ReleaseVerbose"
+async_stack_trace = "verbose"
 unique_user_stream_errors = 10
 unsafe_disable_strict_consistency = false
 
@@ -285,16 +285,16 @@ vector_meta_cache_capacity_mb = 16
 vector_meta_cache_shard_num = 16
 
 [storage.cache.block_cache_eviction]
-algorithm = "Lru"
+algorithm = "lru"
 
 [storage.cache.meta_cache_eviction]
-algorithm = "Lru"
+algorithm = "lru"
 
 [storage.cache.vector_block_cache_eviction_config]
-algorithm = "Lru"
+algorithm = "lru"
 
 [storage.cache.vector_meta_cache_eviction_config]
-algorithm = "Lru"
+algorithm = "lru"
 
 [storage.data_file_cache]
 dir = ""
@@ -412,7 +412,7 @@ pause_on_next_bootstrap = false
 enable_tracing = false
 license_key = ""
 time_travel_retention_ms = 600000
-adaptive_parallelism_strategy = "AUTO"
+adaptive_parallelism_strategy = "auto"
 per_database_isolation = true
 enforce_secret = false
 
