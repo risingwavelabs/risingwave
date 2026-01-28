@@ -13,7 +13,7 @@ ignored = ["rw-tokio"]
 [dependencies]
 await-tree = { workspace = true }
 console = "0.16"
-console-subscriber = "0.4"
+console-subscriber = "0.5"
 either = "1"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 hostname = "0.4"

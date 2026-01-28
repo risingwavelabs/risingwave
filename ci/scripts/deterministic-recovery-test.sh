@@ -69,7 +69,6 @@ echo "--- deterministic simulation e2e, ci-3cn-2fe-1meta, recovery, ddl"
 seq "$TEST_NUM" | parallel --tmpdir .risingwave --ungroup 'set -o pipefail && ((MADSIM_TEST_SEED={} $RW_SIM \
 --kill \
 --kill-rate=${KILL_RATE} \
---background-ddl-rate=${BACKGROUND_DDL_RATE} \
 ${EXTRA_ARGS:-} \
 ./e2e_test/ddl/\*\*/\*.slt 2> $LOGDIR/recovery-ddl-{}.log && rm $LOGDIR/recovery-ddl-{}.log) \
 | awk -W interactive "{print \"(seed = {}): \" \$0; fflush()}")'

@@ -1561,6 +1561,10 @@ async fn test_hummock_version_reader() {
         .new_local(NewLocalOptions::for_test(TEST_TABLE_ID))
         .await;
     let hummock_version_reader = test_env.storage.version_reader();
+    let default_table_option = TableOption::default();
+    let zero_ttl_table_option = TableOption {
+        retention_seconds: Some(0),
+    };
 
     let epoch1 = (31 * 1000) << 16;
     test_env
@@ -1642,6 +1646,7 @@ async fn test_hummock_version_reader() {
                         ),
                         epoch1,
                         TEST_TABLE_ID,
+                        default_table_option,
                         ReadOptions {
                             prefetch_options: PrefetchOptions::default(),
                             cache_policy: CachePolicy::Fill(Hint::Normal),
@@ -1677,6 +1682,7 @@ async fn test_hummock_version_reader() {
                         ),
                         epoch2,
                         TEST_TABLE_ID,
+                        default_table_option,
                         ReadOptions {
                             prefetch_options: PrefetchOptions::default(),
                             cache_policy: CachePolicy::Fill(Hint::Normal),
@@ -1712,8 +1718,8 @@ async fn test_hummock_version_reader() {
                         ),
                         epoch2,
                         TEST_TABLE_ID,
+                        zero_ttl_table_option,
                         ReadOptions {
-                            retention_seconds: Some(0),
                             prefetch_options: PrefetchOptions::default(),
                             cache_policy: CachePolicy::Fill(Hint::Normal),
                             ..Default::default()
@@ -1785,6 +1791,7 @@ async fn test_hummock_version_reader() {
                         ),
                         epoch1,
                         TEST_TABLE_ID,
+                        default_table_option,
                         ReadOptions {
                             prefetch_options: PrefetchOptions::default(),
                             cache_policy: CachePolicy::Fill(Hint::Normal),
@@ -1833,6 +1840,7 @@ async fn test_hummock_version_reader() {
                         ),
                         epoch2,
                         TEST_TABLE_ID,
+                        default_table_option,
                         ReadOptions {
                             prefetch_options: PrefetchOptions::default(),
                             cache_policy: CachePolicy::Fill(Hint::Normal),
@@ -1868,8 +1876,8 @@ async fn test_hummock_version_reader() {
                         ),
                         epoch2,
                         TEST_TABLE_ID,
+                        zero_ttl_table_option,
                         ReadOptions {
-                            retention_seconds: Some(0),
                             prefetch_options: PrefetchOptions::default(),
                             cache_policy: CachePolicy::Fill(Hint::Normal),
                             ..Default::default()
@@ -1904,6 +1912,7 @@ async fn test_hummock_version_reader() {
                         ),
                         epoch3,
                         TEST_TABLE_ID,
+                        default_table_option,
                         ReadOptions {
                             prefetch_options: PrefetchOptions::default(),
                             cache_policy: CachePolicy::Fill(Hint::Normal),
@@ -1942,6 +1951,7 @@ async fn test_hummock_version_reader() {
                             key_range.clone(),
                             epoch2,
                             TEST_TABLE_ID,
+                            default_table_option,
                             ReadOptions {
                                 prefetch_options: PrefetchOptions::default(),
                                 cache_policy: CachePolicy::Fill(Hint::Normal),
@@ -1974,6 +1984,7 @@ async fn test_hummock_version_reader() {
                             key_range.clone(),
                             epoch3,
                             TEST_TABLE_ID,
+                            default_table_option,
                             ReadOptions {
                                 prefetch_options: PrefetchOptions::default(),
                                 cache_policy: CachePolicy::Fill(Hint::Normal),

@@ -599,8 +599,8 @@
     └─BatchProjectSet { select_list: [Range(1:Int32, 2:Int32)] }
       └─BatchValues { rows: [[]] }
   stream_plan: |-
-    StreamMaterialize { columns: [range, _row_id(hidden), projected_row_id(hidden)], stream_key: [_row_id, projected_row_id], pk_columns: [_row_id, projected_row_id], pk_conflict: NoCheck }
-    └─StreamProject { exprs: [Range(1:Int32, 2:Int32), _row_id, projected_row_id] }
+    StreamMaterialize { columns: [range, _row_id(hidden), _rw_projected_row_id(hidden)], stream_key: [_row_id, _rw_projected_row_id], pk_columns: [_row_id, _rw_projected_row_id], pk_conflict: NoCheck }
+    └─StreamProject { exprs: [Range(1:Int32, 2:Int32), _row_id, _rw_projected_row_id] }
       └─StreamProjectSet { select_list: [Range(1:Int32, 2:Int32), $0] }
         └─StreamValues { rows: [[0:Int64]] }
 - sql: |

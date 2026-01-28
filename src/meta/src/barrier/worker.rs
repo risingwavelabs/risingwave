@@ -15,12 +15,13 @@
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
 use std::mem::replace;
+use std::pin::pin;
 use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::anyhow;
 use arc_swap::ArcSwap;
-use futures::TryFutureExt;
+use futures::{TryFutureExt, pin_mut};
 use itertools::Itertools;
 use risingwave_common::system_param::PAUSE_ON_NEXT_BOOTSTRAP_KEY;
 use risingwave_common::system_param::reader::SystemParamsRead;
@@ -28,6 +29,7 @@ use risingwave_pb::meta::Recovery;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::stream_service::streaming_control_stream_response::Response;
 use thiserror_ext::AsReport;
+use tokio::select;
 use tokio::sync::mpsc;
 use tokio::sync::oneshot::{Receiver, Sender};
 use tokio::task::JoinHandle;
@@ -44,7 +46,7 @@ use crate::barrier::rpc::{
 use crate::barrier::schedule::{MarkReadyOptions, PeriodicBarriers};
 use crate::barrier::{
     BarrierManagerRequest, BarrierManagerStatus, BarrierWorkerRuntimeInfoSnapshot, RecoveryReason,
-    schedule,
+    UpdateDatabaseBarrierRequest, schedule,
 };
 use crate::error::MetaErrorInner;
 use crate::hummock::HummockManagerRef;
@@ -282,13 +284,13 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                         match request {
                             BarrierManagerRequest::GetBackfillProgress(result_tx) => {
                                 let progress = self.checkpoint_control.gen_backfill_progress();
-                                if result_tx.send(progress).is_err() {
+                                if result_tx.send(Ok(progress)).is_err() {
                                     error!("failed to send get ddl progress");
                                 }
                             }
                             BarrierManagerRequest::GetCdcProgress(result_tx) => {
                                 let progress = self.checkpoint_control.gen_cdc_progress();
-                                if result_tx.send(progress).is_err() {
+                                if result_tx.send(Ok(progress)).is_err() {
                                     error!("failed to send get ddl progress");
                                 }
                             }
@@ -299,12 +301,12 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                                     warn!("failed to notify finish of adhoc recovery");
                                 }
                             }
-                            BarrierManagerRequest::UpdateDatabaseBarrier {
+                            BarrierManagerRequest::UpdateDatabaseBarrier( UpdateDatabaseBarrierRequest {
                                 database_id,
                                 barrier_interval_ms,
                                 checkpoint_frequency,
                                 sender,
-                            } => {
+                            }) => {
                                 self.periodic_barriers
                                     .update_database_barrier(
                                         database_id,
@@ -313,6 +315,11 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                                     );
                                 if sender.send(()).is_err() {
                                     warn!("failed to notify finish of update database barrier");
+                                }
+                            }
+                            BarrierManagerRequest::MayHaveSnapshotBackfillingJob(tx) => {
+                                if tx.send(self.checkpoint_control.may_have_snapshot_backfilling_jobs()).is_err() {
+                                    warn!("failed to may have snapshot backfill job");
                                 }
                             }
                         }
@@ -761,7 +768,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
 
         let enable_per_database_isolation = self.enable_per_database_isolation();
 
-        let new_state = tokio_retry::Retry::spawn(retry_strategy, || async {
+        let recovery_future = tokio_retry::Retry::spawn(retry_strategy, || async {
             self.env.stream_client_pool().invalidate_all();
             // We need to notify_creating_job_failed in every recovery retry, because in outer create_streaming_job handler,
             // it holds the reschedule_read_lock and wait for creating job to finish, and caused the following scale_actor fail
@@ -955,9 +962,45 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
             )]);
             GLOBAL_META_METRICS.recovery_failure_cnt.with_label_values(&["global"]).inc();
         }))
-            .instrument(tracing::info_span!("recovery_attempt"))
-            .await
-            .expect("Retry until recovery success.");
+        .instrument(tracing::info_span!("recovery_attempt"));
+
+        let mut recover_txs = vec![];
+        let mut update_barrier_requests = vec![];
+        pin_mut!(recovery_future);
+        let mut request_rx_closed = false;
+        let new_state = loop {
+            select! {
+                biased;
+                new_state = &mut recovery_future => {
+                    break new_state.expect("Retry until recovery success.");
+                }
+                request = pin!(self.request_rx.recv()), if !request_rx_closed => {
+                    let Some(request) = request else {
+                        warn!("request rx channel closed during recovery");
+                        request_rx_closed = true;
+                        continue;
+                    };
+                    match request {
+                        BarrierManagerRequest::GetBackfillProgress(tx) => {
+                            let _ = tx.send(Err(anyhow!("cluster under recovery[{}]", recovery_reason).into()));
+                        }
+                        BarrierManagerRequest::GetCdcProgress(tx) => {
+                            let _ = tx.send(Err(anyhow!("cluster under recovery[{}]", recovery_reason).into()));
+                        }
+                        BarrierManagerRequest::AdhocRecovery(tx) => {
+                            recover_txs.push(tx);
+                        }
+                        BarrierManagerRequest::UpdateDatabaseBarrier(request) => {
+                            update_barrier_requests.push(request);
+                        }
+                        BarrierManagerRequest::MayHaveSnapshotBackfillingJob(tx) => {
+                            // may recover snapshot backfill jobs
+                            let _ = tx.send(true);
+                        }
+                    }
+                }
+            }
+        };
 
         let duration = recovery_timer.stop_and_record();
 
@@ -970,6 +1013,25 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
         ) = new_state;
 
         tracing::info!("recovery success");
+
+        for UpdateDatabaseBarrierRequest {
+            database_id,
+            barrier_interval_ms,
+            checkpoint_frequency,
+            sender,
+        } in update_barrier_requests
+        {
+            self.periodic_barriers.update_database_barrier(
+                database_id,
+                barrier_interval_ms,
+                checkpoint_frequency,
+            );
+            let _ = sender.send(());
+        }
+
+        for tx in recover_txs {
+            let _ = tx.send(());
+        }
 
         let recovering_databases = self
             .checkpoint_control

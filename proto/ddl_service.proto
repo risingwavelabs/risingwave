@@ -292,6 +292,8 @@ message AlterOwnerRequest {
     uint32 database_id = 6;
     uint32 subscription_id = 7;
     uint32 connection_id = 8;
+    uint32 secret_id = 9;
+    uint32 function_id = 10;
   }
   uint32 owner_id = 20;
 }
