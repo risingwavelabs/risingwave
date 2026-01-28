@@ -123,8 +123,16 @@ impl ToStream for LogicalLimit {
         ctx: &mut RewriteStreamContext,
     ) -> Result<(PlanRef, ColIndexMapping)> {
         // First, rewrite self into a `LogicalTopN`.
-        // Use the first column as an order to provide determinism for streaming queries.
-        let order = Order::new(vec![ColumnOrder::new(0, OrderType::ascending())]);
+        //
+        // For streaming queries without an explicit `ORDER BY`, SQL does not guarantee which rows
+        // are returned by `LIMIT/OFFSET`. We prefer to use the first visible column as a stable
+        // ordering if it exists; otherwise, fall back to an empty order and rely on the input
+        // stream key (e.g. `_row_id`/PK) as the tie-breaker.
+        let order = if self.input().schema().len() > 0 {
+            Order::new(vec![ColumnOrder::new(0, OrderType::ascending())])
+        } else {
+            Order::any()
+        };
         let top_n = LogicalTopN::new(
             self.input(),
             self.limit(),
