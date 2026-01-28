@@ -179,6 +179,8 @@ impl SystemParamsController {
     pub async fn set_param(&self, name: &str, value: Option<String>) -> MetaResult<PbSystemParams> {
         let mut params_guard = self.params.write().await;
 
+        // System parameter names are case-insensitive.
+        let name = &name.to_ascii_lowercase() as &str;
         let Some(param) = SystemParameter::find_by_id(name.to_owned())
             .one(&self.db)
             .await?
@@ -283,6 +285,21 @@ mod tests {
             .set_param("pause_on_next_bootstrap", Some("true".into()))
             .await
             .unwrap();
+        assert_eq!(new_params.pause_on_next_bootstrap, Some(true));
+
+        // set parameter with uppercase name (case-insensitive).
+        let new_params = system_param_ctl
+            .set_param("PAUSE_ON_NEXT_BOOTSTRAP", Some("false".into()))
+            .await
+            .unwrap();
+        assert_eq!(new_params.pause_on_next_bootstrap, Some(false));
+
+        // set parameter with mixed case name.
+        let new_params = system_param_ctl
+            .set_param("Pause_On_Next_Bootstrap", Some("true".into()))
+            .await
+            .unwrap();
+        assert_eq!(new_params.pause_on_next_bootstrap, Some(true));
 
         // insert deprecated params.
         let deprecated_param = system_parameter::ActiveModel {
