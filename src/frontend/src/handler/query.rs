@@ -317,11 +317,10 @@ fn gen_batch_query_plan(
         ..
     } = bind_result;
 
-    let planner_ctx = context.clone();
     let mut planner = if matches!(bound, BoundStatement::Query(_)) {
-        Planner::new_for_batch_dql(planner_ctx)
+        Planner::new_for_batch_dql(context)
     } else {
-        Planner::new_for_batch(planner_ctx)
+        Planner::new_for_batch(context)
     };
 
     let logical = planner.plan(bound)?;
