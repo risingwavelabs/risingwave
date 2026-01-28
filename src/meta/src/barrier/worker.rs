@@ -288,6 +288,13 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                                     error!("failed to send get ddl progress");
                                 }
                             }
+                            BarrierManagerRequest::GetFragmentBackfillProgress(result_tx) => {
+                                let progress =
+                                    self.checkpoint_control.gen_fragment_backfill_progress();
+                                if result_tx.send(Ok(progress)).is_err() {
+                                    error!("failed to send get fragment backfill progress");
+                                }
+                            }
                             BarrierManagerRequest::GetCdcProgress(result_tx) => {
                                 let progress = self.checkpoint_control.gen_cdc_progress();
                                 if result_tx.send(Ok(progress)).is_err() {
@@ -982,6 +989,9 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                     };
                     match request {
                         BarrierManagerRequest::GetBackfillProgress(tx) => {
+                            let _ = tx.send(Err(anyhow!("cluster under recovery[{}]", recovery_reason).into()));
+                        }
+                        BarrierManagerRequest::GetFragmentBackfillProgress(tx) => {
                             let _ = tx.send(Err(anyhow!("cluster under recovery[{}]", recovery_reason).into()));
                         }
                         BarrierManagerRequest::GetCdcProgress(tx) => {

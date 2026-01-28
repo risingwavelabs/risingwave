@@ -47,40 +47,6 @@ def _(outer_panels: Panels):
                     ["id", "database", "schema", "name", "resource_group", "type"],
                 ),
                 panels.table_info(
-                    "Backfill Fragment Info",
-                    "Information about backfill fragments",
-                    [
-                        panels.table_target(
-                            f"group({metric('backfill_fragment_info')}) by (job_id, fragment_id, backfill_state_table_id, backfill_target_relation_id, backfill_type, backfill_epoch)"
-                        )
-                    ],
-                    [
-                        "job_id",
-                        "fragment_id",
-                        "backfill_state_table_id",
-                        "backfill_target_relation_id",
-                        "backfill_type",
-                        "backfill_epoch",
-                    ],
-                ),
-                panels.table_info(
-                    "Backfill Relation Info",
-                    "Information about backfill target relations",
-                    [
-                        panels.table_target(
-                            f"group({metric('backfill_relation_info')}) by (backfill_target_relation_id, database, schema, name, resource_group, type)"
-                        )
-                    ],
-                    [
-                        "backfill_target_relation_id",
-                        "database",
-                        "schema",
-                        "name",
-                        "resource_group",
-                        "type",
-                    ],
-                ),
-                panels.table_info(
                     "Actor Count (Group By Compute Node)",
                     "Actor count per compute node",
                     [
