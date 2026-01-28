@@ -211,12 +211,9 @@ impl Metadata for MetadataV2 {
         self.hummock_table_change_logs
             .iter()
             .flat_map(|m| {
-                let change_log = to_table_change_log(m);
-                change_log
-                    .new_value
-                    .iter()
-                    .chain(change_log.old_value.iter())
-                    .map(|s| s.object_id.as_raw())
+                to_table_change_log(m)
+                    .change_log_object_ids()
+                    .map(|o| o.as_raw())
                     .collect::<HashSet<_>>()
             })
             .collect()

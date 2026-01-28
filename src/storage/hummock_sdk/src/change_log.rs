@@ -81,6 +81,15 @@ pub struct EpochNewChangeLogCommon<T> {
     pub checkpoint_epoch: u64,
 }
 
+impl EpochNewChangeLog {
+    pub fn change_log_object_ids(&self) -> impl Iterator<Item = HummockObjectId> + '_ {
+        self.new_value
+            .iter()
+            .chain(self.old_value.iter())
+            .map(|t| HummockObjectId::Sstable(t.object_id()))
+    }
+}
+
 pub(crate) fn resolve_pb_log_epochs(epochs: &Vec<u64>) -> (Vec<u64>, u64) {
     (
         Vec::from(&epochs[0..(epochs.len() - 1)]),
