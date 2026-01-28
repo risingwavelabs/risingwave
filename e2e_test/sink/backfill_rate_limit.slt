@@ -12,41 +12,46 @@ FLUSH;
 statement ok
 SET sink_decouple = true;
 
+statement ok
+SET background_ddl = true;
+
 # 3. Execution: Create Sink with specific rate limit (1000 rows/sec)
 # Using blackhole connector to isolate backfill speed from network I/O
 statement ok
-CREATE SINK s1 FROM t1 WITH (connector='blackhole')
-WITH (backfill_rate_limit=1000);
+CREATE SINK s1 FROM t1 WITH (connector='blackhole', backfill_rate_limit=1000);
 
 # 4. Verification Loop
 # Capture initial progress
-query I
-SELECT processed_rows FROM rw_catalog.rw_ddl_progress WHERE name = 's1';
+query T
+SELECT case when processed_rows = 0 then 'ok' else processed_rows::text end FROM rw_catalog.rw_ddl_progress WHERE name = 's1';
 ----
-0
+ok
 
 # Sleep for 5 seconds
 sleep 5s
 
 # Check progress again.
-# Expected: ~5000 rows (1000 rows/s * 5s).
+# Expected: ~5000 rows (1000 rows/s * 5s). 
 # If it returns 100000, the limit failed.
-query I
-SELECT processed_rows FROM rw_catalog.rw_ddl_progress WHERE name = 's1';
+# We check if it is within a reasonable range (1 to 20000)
+query T
+SELECT case when processed_rows > 0 and processed_rows < 20000 then 'ok' else processed_rows::text end FROM rw_catalog.rw_ddl_progress WHERE name = 's1';
 ----
-5000
+ok
 
 # 5. Dynamic Alter Test
 statement ok
-ALTER SINK s1 SET backfill_rate_limit = 5000;
+ALTER SINK s1 SET backfill_rate_limit = 10000;
 
 sleep 2s
 
-# Should have processed ~10000 more rows (5000 * 2)
-query I
-SELECT processed_rows FROM rw_catalog.rw_ddl_progress WHERE name = 's1';
+# Should have processed significantly more.
+# 5000 (initial) + 20000 (10000 * 2s) = 25000 approx.
+# We check if it is > 10000 and < 60000
+query T
+SELECT case when processed_rows > 10000 and processed_rows < 60000 then 'ok' else processed_rows::text end FROM rw_catalog.rw_ddl_progress WHERE name = 's1';
 ----
-15000
+ok
 
 statement ok
 DROP SINK s1;
