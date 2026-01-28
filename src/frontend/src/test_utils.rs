@@ -1197,7 +1197,8 @@ impl FrontendMetaClient for MockFrontendMetaClient {
 
     async fn apply_throttle(
         &self,
-        _kind: PbThrottleTarget,
+        _throttle_target: PbThrottleTarget,
+        _throttle_type: risingwave_pb::common::PbThrottleType,
         _id: u32,
         _rate_limit: Option<u32>,
     ) -> RpcResult<()> {

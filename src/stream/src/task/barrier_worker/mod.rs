@@ -27,8 +27,8 @@ use futures::{FutureExt, StreamExt, TryFutureExt};
 use itertools::Itertools;
 use risingwave_pb::stream_plan::barrier::BarrierKind;
 use risingwave_pb::stream_service::barrier_complete_response::{
-    PbCdcTableBackfillProgress, PbCreateMviewProgress, PbListFinishedSource, PbLoadFinishedSource,
-    PbLocalSstableInfo,
+    PbCdcSourceOffsetUpdated, PbCdcTableBackfillProgress, PbCreateMviewProgress,
+    PbListFinishedSource, PbLoadFinishedSource, PbLocalSstableInfo,
 };
 use risingwave_rpc_client::error::{ToTonicStatus, TonicStatusWrapper};
 use risingwave_storage::store_impl::AsHummock;
@@ -94,6 +94,9 @@ pub struct BarrierCompleteResult {
     pub load_finished_source_ids: Vec<PbLoadFinishedSource>,
 
     pub cdc_table_backfill_progress: Vec<PbCdcTableBackfillProgress>,
+
+    /// CDC sources that have updated their offset at least once.
+    pub cdc_source_offset_updated: Vec<PbCdcSourceOffsetUpdated>,
 
     /// The table IDs that should be truncated.
     pub truncate_tables: Vec<TableId>,
@@ -629,8 +632,8 @@ mod await_epoch_completed_future {
     use risingwave_common::id::TableId;
     use risingwave_hummock_sdk::SyncResult;
     use risingwave_pb::stream_service::barrier_complete_response::{
-        PbCdcTableBackfillProgress, PbCreateMviewProgress, PbListFinishedSource,
-        PbLoadFinishedSource,
+        PbCdcSourceOffsetUpdated, PbCdcTableBackfillProgress, PbCreateMviewProgress,
+        PbListFinishedSource, PbLoadFinishedSource,
     };
 
     use crate::error::StreamResult;
@@ -650,6 +653,7 @@ mod await_epoch_completed_future {
         list_finished_source_ids: Vec<PbListFinishedSource>,
         load_finished_source_ids: Vec<PbLoadFinishedSource>,
         cdc_table_backfill_progress: Vec<PbCdcTableBackfillProgress>,
+        cdc_source_offset_updated: Vec<PbCdcSourceOffsetUpdated>,
         truncate_tables: Vec<TableId>,
         refresh_finished_tables: Vec<TableId>,
     ) -> AwaitEpochCompletedFuture {
@@ -671,6 +675,7 @@ mod await_epoch_completed_future {
                     list_finished_source_ids,
                     load_finished_source_ids,
                     cdc_table_backfill_progress,
+                    cdc_source_offset_updated,
                     truncate_tables,
                     refresh_finished_tables,
                 }),
@@ -746,6 +751,7 @@ impl LocalBarrierWorker {
                 list_finished_source_ids,
                 load_finished_source_ids,
                 cdc_table_backfill_progress,
+                cdc_source_offset_updated,
                 truncate_tables,
                 refresh_finished_tables,
             } = graph_state.pop_barrier_to_complete(prev_epoch);
@@ -781,6 +787,7 @@ impl LocalBarrierWorker {
                         list_finished_source_ids,
                         load_finished_source_ids,
                         cdc_table_backfill_progress,
+                        cdc_source_offset_updated,
                         truncate_tables,
                         refresh_finished_tables,
                     )
@@ -800,6 +807,7 @@ impl LocalBarrierWorker {
             list_finished_source_ids,
             load_finished_source_ids,
             cdc_table_backfill_progress,
+            cdc_source_offset_updated,
             truncate_tables,
             refresh_finished_tables,
         } = result;
@@ -849,6 +857,7 @@ impl LocalBarrierWorker {
                             .collect(),
                         list_finished_sources: list_finished_source_ids,
                         load_finished_sources: load_finished_source_ids,
+                        cdc_source_offset_updated,
                         vector_index_adds: vector_index_adds
                             .into_iter()
                             .map(|(table_id, adds)| {

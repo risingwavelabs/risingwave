@@ -23,7 +23,8 @@ use axum::extract::{Extension, Path};
 use axum::http::{Method, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
-use risingwave_rpc_client::ComputeClientPool;
+use risingwave_common_service::ProfileServiceImpl;
+use risingwave_rpc_client::MonitorClientPool;
 use tokio::net::TcpListener;
 use tower::ServiceBuilder;
 use tower_http::add_extension::AddExtensionLayer;
@@ -42,8 +43,9 @@ pub struct DashboardService {
     pub prometheus_selector: String,
     pub metadata_manager: MetadataManager,
     pub hummock_manager: HummockManagerRef,
-    pub compute_clients: ComputeClientPool,
+    pub monitor_clients: MonitorClientPool,
     pub diagnose_command: DiagnoseCommandRef,
+    pub profile_service: ProfileServiceImpl,
     pub trace_state: otlp_embedded::StateRef,
 }
 
@@ -72,13 +74,15 @@ pub(super) mod handlers {
     };
     use risingwave_pb::monitor_service::stack_trace_request::ActorTracesFormat;
     use risingwave_pb::monitor_service::{
-        ChannelDeltaStats, GetStreamingPrometheusStatsResponse, GetStreamingStatsResponse,
-        HeapProfilingResponse, ListHeapProfilingResponse, StackTraceResponse,
+        AnalyzeHeapRequest, ChannelDeltaStats, GetStreamingPrometheusStatsResponse,
+        GetStreamingStatsResponse, HeapProfilingRequest, HeapProfilingResponse,
+        ListHeapProfilingRequest, ListHeapProfilingResponse, StackTraceResponse,
     };
     use risingwave_pb::user::PbUserInfo;
     use serde::{Deserialize, Serialize};
     use serde_json::json;
     use thiserror_ext::AsReport;
+    use tonic::Request;
 
     use super::*;
     use crate::controller::fragment::StreamingJobInfo;
@@ -509,6 +513,16 @@ pub(super) mod handlers {
         Path(worker_id): Path<WorkerId>,
         Extension(srv): Extension<Service>,
     ) -> Result<Json<HeapProfilingResponse>> {
+        if worker_id == crate::manager::META_NODE_ID {
+            let result = srv
+                .profile_service
+                .heap_profiling(Request::new(HeapProfilingRequest { dir: "".to_owned() }))
+                .await
+                .map_err(err)?
+                .into_inner();
+            return Ok(result.into());
+        }
+
         let worker_node = srv
             .metadata_manager
             .get_worker_by_id(worker_id)
@@ -517,7 +531,7 @@ pub(super) mod handlers {
             .context("worker node not found")
             .map_err(err)?;
 
-        let client = srv.compute_clients.get(&worker_node).await.map_err(err)?;
+        let client = srv.monitor_clients.get(&worker_node).await.map_err(err)?;
 
         let result = client.heap_profile("".to_owned()).await.map_err(err)?;
 
@@ -528,6 +542,16 @@ pub(super) mod handlers {
         Path(worker_id): Path<WorkerId>,
         Extension(srv): Extension<Service>,
     ) -> Result<Json<ListHeapProfilingResponse>> {
+        if worker_id == crate::manager::META_NODE_ID {
+            let result = srv
+                .profile_service
+                .list_heap_profiling(Request::new(ListHeapProfilingRequest {}))
+                .await
+                .map_err(err)?
+                .into_inner();
+            return Ok(result.into());
+        }
+
         let worker_node = srv
             .metadata_manager
             .get_worker_by_id(worker_id)
@@ -536,7 +560,7 @@ pub(super) mod handlers {
             .context("worker node not found")
             .map_err(err)?;
 
-        let client = srv.compute_clients.get(&worker_node).await.map_err(err)?;
+        let client = srv.monitor_clients.get(&worker_node).await.map_err(err)?;
 
         let result = client.list_heap_profile().await.map_err(err)?;
         Ok(result.into())
@@ -549,21 +573,31 @@ pub(super) mod handlers {
         let file_path =
             String::from_utf8(base64_url::decode(&file_path).map_err(err)?).map_err(err)?;
 
-        let worker_node = srv
-            .metadata_manager
-            .get_worker_by_id(worker_id)
-            .await
-            .map_err(err)?
-            .context("worker node not found")
-            .map_err(err)?;
+        let collapsed_bin = if worker_id == crate::manager::META_NODE_ID {
+            srv.profile_service
+                .analyze_heap(Request::new(AnalyzeHeapRequest {
+                    path: file_path.clone(),
+                }))
+                .await
+                .map_err(err)?
+                .into_inner()
+                .result
+        } else {
+            let worker_node = srv
+                .metadata_manager
+                .get_worker_by_id(worker_id)
+                .await
+                .map_err(err)?
+                .context("worker node not found")
+                .map_err(err)?;
 
-        let client = srv.compute_clients.get(&worker_node).await.map_err(err)?;
-
-        let collapsed_bin = client
-            .analyze_heap(file_path.clone())
-            .await
-            .map_err(err)?
-            .result;
+            let client = srv.monitor_clients.get(&worker_node).await.map_err(err)?;
+            client
+                .analyze_heap(file_path.clone())
+                .await
+                .map_err(err)?
+                .result
+        };
         let collapsed_str = String::from_utf8_lossy(&collapsed_bin).to_string();
 
         let response = Response::builder()
@@ -613,7 +647,7 @@ pub(super) mod handlers {
         let mut futures = Vec::new();
 
         for worker_node in worker_nodes {
-            let client = srv.compute_clients.get(&worker_node).await.map_err(err)?;
+            let client = srv.monitor_clients.get(&worker_node).await.map_err(err)?;
             let client = Arc::new(client);
             let fut = async move {
                 let result = client.get_streaming_stats().await.map_err(err)?;
@@ -696,7 +730,7 @@ pub(super) mod handlers {
         let mut futures = Vec::new();
 
         for worker_node in worker_nodes {
-            let client = srv.compute_clients.get(&worker_node).await.map_err(err)?;
+            let client = srv.monitor_clients.get(&worker_node).await.map_err(err)?;
             let client = Arc::new(client);
             let fut = async move {
                 let result = client.get_streaming_stats().await.map_err(err)?;

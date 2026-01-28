@@ -154,6 +154,7 @@ impl CreateType {
 }
 
 /// Defines struct with a single pb field that derives `FromJsonQueryResult`, it will helps to map json value stored in database to Pb struct.
+#[macro_export]
 macro_rules! derive_from_json_struct {
     ($struct_name:ident, $field_type:ty) => {
         #[derive(Clone, Debug, PartialEq, FromJsonQueryResult, Serialize, Deserialize, Default)]

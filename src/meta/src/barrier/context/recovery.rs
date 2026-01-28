@@ -68,6 +68,18 @@ impl LoadedRecoveryContext {
             fragment_relations: FragmentDownstreamRelation::default(),
         }
     }
+
+    fn backfill_orders(&self) -> HashMap<JobId, HashMap<FragmentId, Vec<FragmentId>>> {
+        self.job_extra_info
+            .iter()
+            .map(|(job_id, extra_info)| {
+                (
+                    *job_id,
+                    extra_info.backfill_orders.clone().unwrap_or_default().0,
+                )
+            })
+            .collect()
+    }
 }
 
 /// For normal DDL operations, the `UpstreamSinkUnion` operator is modified dynamically, and does not persist the
@@ -714,6 +726,7 @@ impl GlobalBarrierWorkerContextImpl {
                     let stream_actors =
                         build_stream_actors(&info, &recovery_context.job_extra_info)?;
 
+                    let backfill_orders = recovery_context.backfill_orders();
                     let fragment_relations = recovery_context.fragment_relations;
 
                     // Refresh background job progress for the final snapshot to reflect any catalog changes.
@@ -753,6 +766,7 @@ impl GlobalBarrierWorkerContextImpl {
                     Ok(BarrierWorkerRuntimeInfoSnapshot {
                         active_streaming_nodes,
                         database_job_infos: info,
+                        backfill_orders,
                         state_table_committed_epochs,
                         state_table_log_epochs,
                         mv_depended_subscriptions,
@@ -887,6 +901,7 @@ impl GlobalBarrierWorkerContextImpl {
             .get_mv_depended_subscriptions(Some(database_id))
             .await?;
 
+        let backfill_orders = recovery_context.backfill_orders();
         let fragment_relations = recovery_context.fragment_relations;
 
         // get split assignments for all actors
@@ -906,6 +921,7 @@ impl GlobalBarrierWorkerContextImpl {
 
         Ok(Some(DatabaseRuntimeInfoSnapshot {
             job_infos: info,
+            backfill_orders,
             state_table_committed_epochs,
             state_table_log_epochs,
             mv_depended_subscriptions,
@@ -1049,7 +1065,9 @@ mod tests {
             StreamingJobExtraInfo {
                 timezone: Some("UTC".to_owned()),
                 config_override: "cfg".into(),
+                adaptive_parallelism_strategy: None,
                 job_definition: "definition".to_owned(),
+                backfill_orders: None,
             },
         )]);
 

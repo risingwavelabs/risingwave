@@ -16,6 +16,7 @@ use std::collections::HashMap;
 
 use itertools::Itertools;
 use risingwave_common::bail_not_implemented;
+use risingwave_common::catalog::PROJECTED_ROW_ID_COLUMN_NAME;
 use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::sort_util::ColumnOrder;
@@ -185,7 +186,7 @@ impl Planner {
         if let BoundDistinct::Distinct = distinct {
             let fields = root.schema().fields();
             let group_key = if let Some(field) = fields.first()
-                && field.name == "projected_row_id"
+                && field.name == PROJECTED_ROW_ID_COLUMN_NAME
             {
                 // Do not group by projected_row_id hidden column.
                 (1..fields.len()).collect()

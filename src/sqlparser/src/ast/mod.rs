@@ -1484,7 +1484,6 @@ pub enum Statement {
     AlterSecret {
         /// Secret name
         name: ObjectName,
-        with_options: Vec<SqlOption>,
         operation: AlterSecretOperation,
     },
     /// ALTER FRAGMENT
@@ -2106,13 +2105,15 @@ impl Statement {
                     write!(f, " FROM {}", info.source_name)?;
                     write!(f, " TABLE '{}'", info.external_table_name)?;
                 }
-                if let Some(info) = webhook_info {
+                if let Some(info) = webhook_info
+                    && let Some(signature_expr) = &info.signature_expr
+                {
                     if let Some(secret) = &info.secret_ref {
                         write!(f, " VALIDATE SECRET {}", secret.secret_name)?;
                     } else {
                         write!(f, " VALIDATE")?;
                     }
-                    write!(f, " AS {}", info.signature_expr)?;
+                    write!(f, " AS {}", signature_expr)?;
                 }
                 match engine {
                     Engine::Hummock => {}
@@ -2220,16 +2221,9 @@ impl Statement {
             Statement::AlterConnection { name, operation } => {
                 write!(f, "ALTER CONNECTION {} {}", name, operation)
             }
-            Statement::AlterSecret {
-                name,
-                with_options,
-                operation,
-            } => {
+            Statement::AlterSecret { name, operation } => {
                 write!(f, "ALTER SECRET {}", name)?;
-                if !with_options.is_empty() {
-                    write!(f, " WITH ({})", display_comma_separated(with_options))?;
-                }
-                write!(f, " {}", operation)
+                write!(f, "{}", operation)
             }
             Statement::Discard(t) => write!(f, "DISCARD {}", t),
             Statement::Drop(stmt) => write!(f, "DROP {}", stmt),

@@ -519,7 +519,6 @@ impl SnowflakeSinkWriter {
     ) -> Result<Self> {
         let schema = param.schema();
         if config.with_s3 {
-            let executor_id = writer_param.executor_id;
             let s3_writer = SnowflakeRedshiftSinkS3Writer::new(
                 config.s3_inner.ok_or_else(|| {
                     SinkError::Config(anyhow!(
@@ -528,7 +527,6 @@ impl SnowflakeSinkWriter {
                 })?,
                 schema,
                 is_append_only,
-                executor_id,
                 config.snowflake_target_table_name,
             )?;
             Ok(Self::S3(s3_writer))

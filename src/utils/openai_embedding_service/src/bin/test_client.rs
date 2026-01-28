@@ -14,7 +14,7 @@
 
 use async_openai::Client;
 use async_openai::config::OpenAIConfig;
-use async_openai::types::{CreateEmbeddingRequest, EmbeddingInput};
+use async_openai::types::embeddings::{CreateEmbeddingRequest, EmbeddingInput};
 
 #[tokio::main]
 async fn main() {
