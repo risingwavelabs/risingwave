@@ -1686,7 +1686,7 @@ impl MetaClient {
             start_epoch_inclusive,
             end_epoch_inclusive,
             table_ids: table_ids.map(|iter| PbTableFilter {
-                table_ids: iter.into_iter().map(|t| t.as_raw_id()).collect(),
+                table_ids: iter.into_iter().collect::<Vec<_>>(),
             }),
             exclude_empty,
             limit,

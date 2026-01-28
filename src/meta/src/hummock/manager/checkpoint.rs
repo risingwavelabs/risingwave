@@ -284,9 +284,7 @@ impl HummockManager {
             .values()
             .flat_map(|change_log| {
                 change_log.iter().flat_map(|s| {
-                    s.old_value
-                        .iter()
-                        .chain(s.new_value.iter())
+                    s.change_log_ssts()
                         .map(|s| (HummockObjectId::Sstable(s.object_id), s.file_size))
                 })
             })

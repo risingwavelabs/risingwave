@@ -212,8 +212,8 @@ impl Metadata for MetadataV2 {
             .iter()
             .flat_map(|m| {
                 to_table_change_log(m)
-                    .change_log_object_ids()
-                    .map(|o| o.as_raw())
+                    .change_log_ssts()
+                    .map(|t| t.object_id.as_raw())
                     .collect::<HashSet<_>>()
             })
             .collect()

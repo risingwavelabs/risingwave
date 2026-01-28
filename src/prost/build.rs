@@ -295,6 +295,9 @@ for_all_wrapped_id_fields! (
         CompactionGroupInfo {
             member_table_ids: TableId,
         }
+        GetTableChangeLogsRequest.TableFilter {
+            table_ids: TableId,
+        }
         GetVersionByEpochRequest {
             table_id: TableId,
         }

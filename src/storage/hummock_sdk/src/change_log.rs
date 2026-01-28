@@ -61,13 +61,18 @@ impl<T> TableChangeLogCommon<T> {
         self.0.is_empty()
     }
 
-    pub fn into_iter(self) -> impl Iterator<Item = EpochNewChangeLogCommon<T>> {
-        self.0.into_iter()
-    }
-
     pub fn binary_search_by_epoch(&self, epoch: u64) -> Result<usize, usize> {
         self.0
             .binary_search_by_key(&epoch, |log| log.checkpoint_epoch)
+    }
+}
+
+impl<T> IntoIterator for TableChangeLogCommon<T> {
+    type IntoIter = std::collections::vec_deque::IntoIter<EpochNewChangeLogCommon<T>>;
+    type Item = EpochNewChangeLogCommon<T>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.into_iter()
     }
 }
 
@@ -95,11 +100,8 @@ pub struct EpochNewChangeLogCommon<T> {
 }
 
 impl EpochNewChangeLog {
-    pub fn change_log_object_ids(&self) -> impl Iterator<Item = HummockObjectId> + '_ {
-        self.new_value
-            .iter()
-            .chain(self.old_value.iter())
-            .map(|t| HummockObjectId::Sstable(t.object_id()))
+    pub fn change_log_ssts(&self) -> impl Iterator<Item = &SstableInfo> + '_ {
+        self.new_value.iter().chain(self.old_value.iter())
     }
 }
 

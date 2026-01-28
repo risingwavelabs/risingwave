@@ -25,7 +25,6 @@ use risingwave_hummock_sdk::version::HummockVersionDelta;
 use risingwave_meta::backup_restore::BackupManagerRef;
 use risingwave_meta::manager::MetadataManager;
 use risingwave_meta::manager::iceberg_compaction::IcebergCompactionManagerRef;
-use risingwave_meta_model::TableId;
 use risingwave_pb::hummock::get_compaction_score_response::PickerInfo;
 use risingwave_pb::hummock::hummock_manager_service_server::HummockManagerService;
 use risingwave_pb::hummock::subscribe_compaction_event_request::Event as RequestEvent;
@@ -689,7 +688,7 @@ impl HummockManagerService for HummockServiceImpl {
                 start_epoch_inclusive,
                 end_epoch_inclusive,
                 table_ids
-                    .map(|t| t.table_ids.iter().map(|id| TableId::new(*id)).collect())
+                    .map(|t| t.table_ids.into_iter().collect::<HashSet<_>>())
                     .clone(),
                 exclude_empty,
                 limit,
