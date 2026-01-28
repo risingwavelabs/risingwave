@@ -24,7 +24,7 @@
     StreamMaterialize { columns: [id, value, embedding, t._row_id(hidden)], stream_key: [t._row_id], pk_columns: [t._row_id], pk_conflict: NoCheck }
     └─StreamProject { exprs: [t.id, t.value, $expr1, t._row_id] }
       └─StreamMaterializedExprs { exprs: [OpenaiEmbedding('{"api_key": "sk-test-key", "model": "text-embedding-3-small"}':Jsonb, t.value) as $expr1] }
-        └─StreamTableScan { table: t, columns: [t.id, t.value, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+        └─StreamTableScan { table: t, columns: [t.id, t.value, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - before:
   - create_table
   sql: |
@@ -43,7 +43,7 @@
     StreamMaterialize { columns: [id, value, id_plus_one, embedding, upper_value, t._row_id(hidden)], stream_key: [t._row_id], pk_columns: [t._row_id], pk_conflict: NoCheck }
     └─StreamProject { exprs: [t.id, t.value, (t.id + 1:Int32) as $expr2, $expr1, Upper(t.value) as $expr3, t._row_id] }
       └─StreamMaterializedExprs { exprs: [OpenaiEmbedding('{"api_key": "sk-test-key", "model": "text-embedding-3-small"}':Jsonb, t.value) as $expr1] }
-        └─StreamTableScan { table: t, columns: [t.id, t.value, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+        └─StreamTableScan { table: t, columns: [t.id, t.value, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - name: materialize impure expressions after singleton (top-n)
   sql: |
     create table t (v int);
@@ -57,7 +57,7 @@
             └─StreamExchange { dist: Single }
               └─StreamGroupTopN { order: [t.v ASC], limit: 10, offset: 0, group_key: [_vnode] }
                 └─StreamProject { exprs: [t.v, t._row_id, Vnode(t._row_id) as _vnode] }
-                  └─StreamTableScan { table: t, columns: [t.v, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+                  └─StreamTableScan { table: t, columns: [t.v, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [pg_sleep, t._row_id(hidden)], stream_key: [t._row_id], pk_columns: [t._row_id], pk_conflict: NoCheck }
@@ -70,7 +70,7 @@
     Fragment 1
     StreamGroupTopN { order: [t.v ASC], limit: 10, offset: 0, group_key: [_vnode] } { tables: [ GroupTopN: 2 ] }
     └── StreamProject { exprs: [t.v, t._row_id, Vnode(t._row_id) as _vnode] }
-        └── StreamTableScan { table: t, columns: [t.v, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+        └── StreamTableScan { table: t, columns: [t.v, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
             ├── tables: [ StreamScan: 3 ]
             ├── Upstream
             └── BatchPlanNode
@@ -88,9 +88,9 @@
     └── vnode column idx: 2
 
     Table 3
-    ├── columns: [ vnode, _row_id, backfill_finished, row_count, _rw_timestamp ]
+    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, _row_id, _rw_timestamp ]
     ├── primary key: [ $0 ASC ]
-    ├── value indices: [ 1, 2, 3 ]
+    ├── value indices: [ 1, 2, 3, 4 ]
     ├── distribution key: [ 0 ]
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
@@ -110,9 +110,9 @@
           └─StreamFilter { predicate: (IsNotNull(t1._row_id) OR IsNotNull(t2._row_id)) }
             └─StreamHashJoin { type: FullOuter, predicate: t1.v = t2.v, output: [t1.v, t1._row_id, t2._row_id, t2.v] }
               ├─StreamExchange { dist: HashShard(t1.v) }
-              │ └─StreamTableScan { table: t1, columns: [t1.v, t1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
+              │ └─StreamTableScan { table: t1, columns: [t1.v, t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
               └─StreamExchange { dist: HashShard(t2.v) }
-                └─StreamTableScan { table: t2, columns: [t2.v, t2._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t2._row_id], pk: [_row_id], dist: UpstreamHashShard(t2._row_id) }
+                └─StreamTableScan { table: t2, columns: [t2.v, t2._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t2._row_id], pk: [_row_id], dist: UpstreamHashShard(t2._row_id) }
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [pg_sleep, t1._row_id(hidden), t2._row_id(hidden), t1.v(hidden), t2.v(hidden)], stream_key: [t1._row_id, t2._row_id, t1.v, t2.v], pk_columns: [t1._row_id, t2._row_id, t1.v, t2.v], pk_conflict: NoCheck }
@@ -127,12 +127,12 @@
         └── StreamExchange Hash([0]) from 3
 
     Fragment 2
-    StreamTableScan { table: t1, columns: [t1.v, t1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) } { tables: [ StreamScan: 5 ] }
+    StreamTableScan { table: t1, columns: [t1.v, t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) } { tables: [ StreamScan: 5 ] }
     ├── Upstream
     └── BatchPlanNode
 
     Fragment 3
-    StreamTableScan { table: t2, columns: [t2.v, t2._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t2._row_id], pk: [_row_id], dist: UpstreamHashShard(t2._row_id) } { tables: [ StreamScan: 6 ] }
+    StreamTableScan { table: t2, columns: [t2.v, t2._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t2._row_id], pk: [_row_id], dist: UpstreamHashShard(t2._row_id) } { tables: [ StreamScan: 6 ] }
     ├── Upstream
     └── BatchPlanNode
 
@@ -146,9 +146,9 @@
 
     Table 4 { columns: [ t2_v, t2__row_id, _degree, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 5 { columns: [ vnode, _row_id, backfill_finished, row_count, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
+    Table 5 { columns: [ vnode, epoch, row_count, is_epoch_finished, _row_id, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3, 4 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
 
-    Table 6 { columns: [ vnode, _row_id, backfill_finished, row_count, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
+    Table 6 { columns: [ vnode, epoch, row_count, is_epoch_finished, _row_id, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3, 4 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
 
     Table 4294967294
     ├── columns: [ pg_sleep, t1._row_id, t2._row_id, t1.v, t2.v, _rw_timestamp ]
@@ -172,7 +172,7 @@
   stream_plan: |-
     StreamMaterialize { columns: [id, value, embedding, t._row_id(hidden)], stream_key: [t._row_id], pk_columns: [t._row_id], pk_conflict: NoCheck }
     └─StreamProject { exprs: [t.id, t.value, OpenaiEmbedding('{"api_key": "sk-test-key", "model": "text-embedding-3-small"}':Jsonb, t.value) as $expr1, t._row_id] }
-      └─StreamTableScan { table: t, columns: [t.id, t.value, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+      └─StreamTableScan { table: t, columns: [t.id, t.value, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - before:
   - create_append_only_table
   sql: |
@@ -190,4 +190,4 @@
   stream_plan: |-
     StreamMaterialize { columns: [id, value, id_plus_one, embedding, upper_value, t._row_id(hidden)], stream_key: [t._row_id], pk_columns: [t._row_id], pk_conflict: NoCheck }
     └─StreamProject { exprs: [t.id, t.value, (t.id + 1:Int32) as $expr1, OpenaiEmbedding('{"api_key": "sk-test-key", "model": "text-embedding-3-small"}':Jsonb, t.value) as $expr2, Upper(t.value) as $expr3, t._row_id] }
-      └─StreamTableScan { table: t, columns: [t.id, t.value, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+      └─StreamTableScan { table: t, columns: [t.id, t.value, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }

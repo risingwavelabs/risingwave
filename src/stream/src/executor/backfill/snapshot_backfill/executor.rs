@@ -779,6 +779,7 @@ async fn make_snapshot_stream(
     backfill_state: &BackfillState<impl StateStore>,
     rate_limit: RateLimit,
     chunk_size: usize,
+    snapshot_rebuild_interval: Duration,
 ) -> StreamExecutorResult<VnodeStream<impl super::vnode_stream::ChangeLogRowStream>> {
     let data_types = upstream_table.schema().data_types();
     let vnode_streams = try_join_all(backfill_state.latest_progress().filter_map(
@@ -802,6 +803,7 @@ async fn make_snapshot_stream(
                         start_pk,
                         vnode,
                         PrefetchOptions::prefetch_for_large_range_scan(),
+                        snapshot_rebuild_interval,
                     )
                     .map_ok(move |stream| {
                         let stream = stream.map_ok(ChangeLogRow::Insert).map_err(Into::into);
@@ -842,6 +844,7 @@ async fn make_consume_snapshot_stream<'a, S: StateStore>(
         &*backfill_state,
         *rate_limit,
         chunk_size,
+        actor_ctx.config.developer.snapshot_iter_rebuild_interval(),
     )
     .await?;
 
@@ -865,7 +868,7 @@ async fn make_consume_snapshot_stream<'a, S: StateStore>(
     let mut epoch_row_count = 0;
     let mut backfill_paused = initial_backfill_paused;
     loop {
-        let throttle_snapshot_stream = epoch_row_count as u64 > rate_limit.to_u64();
+        let throttle_snapshot_stream = epoch_row_count as u64 >= rate_limit.to_u64();
         match select_barrier_and_snapshot_stream(
             barrier_rx,
             &mut snapshot_stream,
@@ -882,13 +885,7 @@ async fn make_consume_snapshot_stream<'a, S: StateStore>(
                     return Err(anyhow!("should not receive barrier with epoch {barrier_epoch:?} later than snapshot epoch {snapshot_epoch}").into());
                 }
                 if barrier.should_start_fragment_backfill(actor_ctx.fragment_id) {
-                    if backfill_paused {
-                        backfill_paused = false;
-                    } else {
-                        tracing::error!(
-                            "received start fragment backfill mutation, but backfill is not paused"
-                        );
-                    }
+                    backfill_paused = false;
                 }
                 if let Some(chunk) = snapshot_stream.consume_builder() {
                     count += chunk.cardinality();

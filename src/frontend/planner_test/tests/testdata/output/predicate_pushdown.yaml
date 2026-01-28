@@ -264,12 +264,12 @@
       └─StreamHashJoin { type: Inner, predicate: t1.v1 = t2.v2, output: [t1.v1, t2.v2, t1._row_id, t2._row_id] }
         ├─StreamExchange { dist: HashShard(t1.v1) }
         │ └─StreamDynamicFilter { predicate: (t1.v1 > $expr1), output_watermarks: [[t1.v1]], output: [t1.v1, t1._row_id], cleaned_by_watermark: true }
-        │   ├─StreamTableScan { table: t1, columns: [t1.v1, t1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
+        │   ├─StreamTableScan { table: t1, columns: [t1.v1, t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
         │   └─StreamExchange { dist: Broadcast }
         │     └─StreamProject { exprs: [AddWithTimeZone(now, '01:00:00':Interval, 'UTC':Varchar) as $expr1], output_watermarks: [[$expr1]], noop_update_hint: true }
         │       └─StreamNow { output: [now] }
         └─StreamExchange { dist: HashShard(t2.v2) }
-          └─StreamTableScan { table: t2, columns: [t2.v2, t2._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t2._row_id], pk: [_row_id], dist: UpstreamHashShard(t2._row_id) }
+          └─StreamTableScan { table: t2, columns: [t2.v2, t2._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t2._row_id], pk: [_row_id], dist: UpstreamHashShard(t2._row_id) }
 - name: now() in a complex cmp expr does not get pushed down
   sql: |
     create table t1(v1 timestamp with time zone);
@@ -305,7 +305,7 @@
     StreamMaterialize { columns: [v1, v2, t1._row_id(hidden)], stream_key: [t1._row_id], pk_columns: [t1._row_id], pk_conflict: NoCheck, watermark_columns: [v1] }
     └─StreamDynamicFilter { predicate: (t1.v1 > $expr1), output_watermarks: [[t1.v1]], output: [t1.v1, t1.v2, t1._row_id], cleaned_by_watermark: true }
       ├─StreamFilter { predicate: (t1.v2 > 5:Int32) }
-      │ └─StreamTableScan { table: t1, columns: [t1.v1, t1.v2, t1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
+      │ └─StreamTableScan { table: t1, columns: [t1.v1, t1.v2, t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
       └─StreamExchange { dist: Broadcast }
         └─StreamProject { exprs: [AddWithTimeZone(now, '00:30:00':Interval, 'UTC':Varchar) as $expr1], output_watermarks: [[$expr1]], noop_update_hint: true }
           └─StreamNow { output: [now] }
@@ -352,11 +352,11 @@
       └─StreamHashJoin { type: Inner, predicate: t1.v1 = t2.v2, output: [t1.v1, t2.v2, t1._row_id, t2._row_id] }
         ├─StreamExchange { dist: HashShard(t1.v1) }
         │ └─StreamDynamicFilter { predicate: (t1.v1 > now), output_watermarks: [[t1.v1]], output: [t1.v1, t1._row_id], cleaned_by_watermark: true }
-        │   ├─StreamTableScan { table: t1, columns: [t1.v1, t1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
+        │   ├─StreamTableScan { table: t1, columns: [t1.v1, t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
         │   └─StreamExchange { dist: Broadcast }
         │     └─StreamNow { output: [now] }
         └─StreamExchange { dist: HashShard(t2.v2) }
-          └─StreamTableScan { table: t2, columns: [t2.v2, t2._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t2._row_id], pk: [_row_id], dist: UpstreamHashShard(t2._row_id) }
+          └─StreamTableScan { table: t2, columns: [t2.v2, t2._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t2._row_id], pk: [_row_id], dist: UpstreamHashShard(t2._row_id) }
 - name: eq-predicate derived condition is banned for mismatching types
   sql: |
     create table t1(v1 int, v2 int);
