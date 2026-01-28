@@ -69,3 +69,46 @@ DROP MATERIALIZED VIEW mv;
 statement ok
 DROP TABLE t;
 
+# Regression test: the input columns of LIMIT may be completely pruned away (0-column input) during
+# streaming rewrite. This should not panic and should still produce the correct row count.
+
+statement ok
+DROP MATERIALIZED VIEW IF EXISTS mv_zero_col;
+
+statement ok
+DROP TABLE IF EXISTS t_zero_col;
+
+statement ok
+CREATE TABLE t_zero_col (v INT);
+
+statement ok
+INSERT INTO t_zero_col SELECT generate_series(1, 100);
+
+statement ok
+CREATE MATERIALIZED VIEW mv_zero_col AS
+SELECT 1 c FROM (SELECT v FROM t_zero_col LIMIT 10) s;
+
+statement ok
+flush;
+
+query I
+SELECT count(*) FROM mv_zero_col;
+----
+10
+
+statement ok
+DELETE FROM t_zero_col WHERE v <= 50;
+
+statement ok
+flush;
+
+query I
+SELECT count(*) FROM mv_zero_col;
+----
+10
+
+statement ok
+DROP MATERIALIZED VIEW mv_zero_col;
+
+statement ok
+DROP TABLE t_zero_col;
