@@ -963,10 +963,12 @@ mod tests {
         };
         let result = single_dot.validate();
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("dots are not allowed"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("dots are not allowed")
+        );
 
         let multiple_dots = IcebergTableIdentifier {
             database_name: Some("a.b.c".to_string()),
@@ -974,9 +976,11 @@ mod tests {
         };
         let result = multiple_dots.validate();
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("dots are not allowed"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("dots are not allowed")
+        );
     }
 }
