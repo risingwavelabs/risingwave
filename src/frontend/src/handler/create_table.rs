@@ -97,7 +97,8 @@ use risingwave_connector::sink::SinkParam;
 use risingwave_connector::sink::iceberg::{
     COMPACTION_DELETE_FILES_COUNT_THRESHOLD, COMPACTION_INTERVAL_SEC, COMPACTION_MAX_SNAPSHOTS_NUM,
     COMPACTION_SMALL_FILES_THRESHOLD_MB, COMPACTION_TARGET_FILE_SIZE_MB,
-    COMPACTION_TRIGGER_SNAPSHOT_COUNT, COMPACTION_TYPE, CompactionType, ENABLE_COMPACTION,
+    COMPACTION_TRIGGER_SNAPSHOT_COUNT, COMPACTION_TYPE, COMPACTION_WRITE_PARQUET_COMPRESSION,
+    COMPACTION_WRITE_PARQUET_MAX_ROW_GROUP_ROWS, CompactionType, ENABLE_COMPACTION,
     ENABLE_SNAPSHOT_EXPIRATION, ICEBERG_WRITE_MODE_COPY_ON_WRITE, ICEBERG_WRITE_MODE_MERGE_ON_READ,
     IcebergSink, IcebergWriteMode, SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_FILES,
     SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_META_DATA, SNAPSHOT_EXPIRATION_MAX_AGE_MILLIS,
@@ -2151,6 +2152,50 @@ pub async fn create_iceberg_engine_table(
         source
             .as_mut()
             .map(|x| x.with_properties.remove(COMPACTION_TYPE));
+    }
+
+    if let Some(write_parquet_compression) = handler_args
+        .with_options
+        .get(COMPACTION_WRITE_PARQUET_COMPRESSION)
+    {
+        sink_with.insert(
+            COMPACTION_WRITE_PARQUET_COMPRESSION.to_owned(),
+            write_parquet_compression.to_owned(),
+        );
+        // remove from source options, otherwise it will be considered as an unknown field.
+        source.as_mut().map(|x| {
+            x.with_properties
+                .remove(COMPACTION_WRITE_PARQUET_COMPRESSION)
+        });
+    }
+
+    if let Some(write_parquet_max_row_group_rows) = handler_args
+        .with_options
+        .get(COMPACTION_WRITE_PARQUET_MAX_ROW_GROUP_ROWS)
+    {
+        let write_parquet_max_row_group_rows = write_parquet_max_row_group_rows
+            .parse::<usize>()
+            .map_err(|_| {
+                ErrorCode::InvalidInputSyntax(format!(
+                    "{} must be a positive integer: {}",
+                    COMPACTION_WRITE_PARQUET_MAX_ROW_GROUP_ROWS, write_parquet_max_row_group_rows
+                ))
+            })?;
+        if write_parquet_max_row_group_rows == 0 {
+            bail!(format!(
+                "{} must be greater than 0",
+                COMPACTION_WRITE_PARQUET_MAX_ROW_GROUP_ROWS
+            ));
+        }
+        sink_with.insert(
+            COMPACTION_WRITE_PARQUET_MAX_ROW_GROUP_ROWS.to_owned(),
+            write_parquet_max_row_group_rows.to_string(),
+        );
+        // remove from source options, otherwise it will be considered as an unknown field.
+        source.as_mut().map(|x| {
+            x.with_properties
+                .remove(COMPACTION_WRITE_PARQUET_MAX_ROW_GROUP_ROWS)
+        });
     }
 
     let partition_by = handler_args
