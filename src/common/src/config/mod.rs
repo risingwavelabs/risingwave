@@ -373,6 +373,10 @@ pub mod default {
             None
         }
 
+        pub fn stream_snapshot_iter_rebuild_interval_secs() -> u64 {
+            10 * 60
+        }
+
         pub fn enable_explain_analyze_stats() -> bool {
             true
         }
