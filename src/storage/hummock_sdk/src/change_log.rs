@@ -26,7 +26,7 @@ use crate::version::ObjectIdReader;
 #[derive(Debug, Clone, PartialEq)]
 pub struct TableChangeLogCommon<T>(
     // older log at the front
-    pub VecDeque<EpochNewChangeLogCommon<T>>,
+    VecDeque<EpochNewChangeLogCommon<T>>,
 );
 
 impl<T> TableChangeLogCommon<T> {
@@ -55,6 +55,19 @@ impl<T> TableChangeLogCommon<T> {
         self.0
             .iter()
             .flat_map(|epoch_change_log| epoch_change_log.epochs())
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    pub fn into_iter(self) -> impl Iterator<Item = EpochNewChangeLogCommon<T>> {
+        self.0.into_iter()
+    }
+
+    pub fn binary_search_by_epoch(&self, epoch: u64) -> Result<usize, usize> {
+        self.0
+            .binary_search_by_key(&epoch, |log| log.checkpoint_epoch)
     }
 }
 

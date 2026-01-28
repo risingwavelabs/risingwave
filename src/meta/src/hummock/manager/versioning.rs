@@ -303,14 +303,13 @@ impl HummockManager {
         #[expect(deprecated)]
         let table_change_logs = {
             let table_change_logs = std::mem::take(&mut version.table_change_log);
-            if table_change_logs.values().all(|t| t.0.is_empty()) {
+            if table_change_logs.values().all(|t| t.is_empty()) {
                 return Ok(false);
             }
             table_change_logs
                 .into_iter()
                 .flat_map(|(table_id, change_logs)| {
                     change_logs
-                        .0
                         .into_iter()
                         .map(move |change_log| (table_id, change_log))
                 })

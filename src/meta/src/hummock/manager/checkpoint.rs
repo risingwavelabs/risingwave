@@ -283,7 +283,7 @@ impl HummockManager {
             .table_change_log
             .values()
             .flat_map(|change_log| {
-                change_log.0.iter().flat_map(|s| {
+                change_log.iter().flat_map(|s| {
                     s.old_value
                         .iter()
                         .chain(s.new_value.iter())

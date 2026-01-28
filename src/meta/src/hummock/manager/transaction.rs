@@ -307,10 +307,7 @@ where
                     };
                     // Insert to meta store if no previous change log of this checkpoint epoch found for this table.
                     existing_logs
-                        .0
-                        .binary_search_by_key(&change_log.checkpoint_epoch, |log| {
-                            log.checkpoint_epoch
-                        })
+                        .binary_search_by_epoch(change_log.checkpoint_epoch)
                         .is_err()
                 });
             let change_log_to_delete = self
@@ -326,10 +323,7 @@ where
                     };
                     // Delete from meta store if no change log of this checkpoint epoch found for this table.
                     modified_logs
-                        .0
-                        .binary_search_by_key(&change_log.checkpoint_epoch, |log| {
-                            log.checkpoint_epoch
-                        })
+                        .binary_search_by_epoch(change_log.checkpoint_epoch)
                         .is_err()
                 });
 
