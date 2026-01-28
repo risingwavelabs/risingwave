@@ -227,7 +227,7 @@ impl GooglePubSubSinkWriter {
             auth_config = auth_config.with_audience(apiv1::conn_pool::AUDIENCE);
             auth_config = auth_config.with_scopes(&apiv1::conn_pool::SCOPES);
 
-            let provider = DefaultTokenSourceProvider::new_with_auth_config(auth_config)
+            let provider = DefaultTokenSourceProvider::new(auth_config)
                 .await
                 .map_err(|e| {
                     SinkError::GooglePubSub(
