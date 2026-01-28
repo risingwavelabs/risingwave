@@ -40,7 +40,7 @@ impl Binder {
                         })?;
                     let schema_path = self.bind_schema_path(Some(&schema_name));
                     self.catalog
-                        .get_any_table_by_name(&self.db_name, schema_path, &table_name)
+                        .get_id_by_class_name(&self.db_name, schema_path, &table_name)
                         .map_err(|_| {
                             ErrorCode::InvalidReference(format!(
                                 "FROM-clause entry for table \"{}\"\n\
