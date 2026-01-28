@@ -49,6 +49,16 @@ jobs:
 
           RISINGWAVE_ROOT=${PWD}
 
+          # Workaround for glibc "cannot allocate memory in static TLS block" when loading the
+          # JNI library extracted by JarJniLoader during Maven tests on Ubuntu 24.04 runners.
+          # Preloading libgomp early avoids exhausting the static TLS area.
+          if command -v ldconfig >/dev/null 2>&1; then
+            LIBGOMP="$(ldconfig -p | awk '/libgomp\.so\.1/{print $NF; exit}')"
+            if [ -n "${LIBGOMP:-}" ] && [ -f "${LIBGOMP}" ]; then
+              export LD_PRELOAD="${LIBGOMP}${LD_PRELOAD:+:${LD_PRELOAD}}"
+            fi
+          fi
+
           echo "--- build connector node with Rust native library"
           cd ${RISINGWAVE_ROOT}/java
           # Build with Rust to support OpendalSchemaHistory in MySQL CDC integration tests
