@@ -1935,7 +1935,7 @@ dependencies = [
  "bitflags 2.10.0",
  "cexpr",
  "clang-sys",
- "itertools 0.10.5",
+ "itertools 0.13.0",
  "log",
  "prettyplease 0.2.15",
  "proc-macro2",
@@ -2161,6 +2161,15 @@ name = "btoi"
 version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9dd6407f73a9b8b6162d8a2ef999fe6afd7cc15902ebf42c5cd296addf17e0ad"
+dependencies = [
+ "num-traits",
+]
+
+[[package]]
+name = "btoi"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3b5ab9db53bcda568284df0fd39f6eac24ad6f7ba7ff1168b9e76eba6576b976"
 dependencies = [
  "num-traits",
 ]
@@ -8127,7 +8136,7 @@ dependencies = [
  "futures-util",
  "keyed_priority_queue",
  "lru 0.14.0",
- "mysql_common",
+ "mysql_common 0.35.5",
  "native-tls",
  "pem",
  "percent-encoding",
@@ -8151,10 +8160,9 @@ checksum = "fbb9f371618ce723f095c61fbcdc36e8936956d2b62832f9c7648689b338e052"
 dependencies = [
  "base64 0.22.1",
  "bitflags 2.10.0",
- "btoi",
+ "btoi 0.4.3",
  "byteorder",
  "bytes",
- "chrono",
  "crc32fast",
  "flate2",
  "getrandom 0.3.1",
@@ -8163,6 +8171,33 @@ dependencies = [
  "num-traits",
  "regex",
  "rust_decimal",
+ "saturating",
+ "serde",
+ "serde_json",
+ "sha1",
+ "sha2",
+ "thiserror 2.0.17",
+ "uuid",
+]
+
+[[package]]
+name = "mysql_common"
+version = "0.36.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "20e7f6a15265801679ddf1ddb38fd74b4555a677a78378d4561fbe5f0b1d4d72"
+dependencies = [
+ "base64 0.22.1",
+ "bitflags 2.10.0",
+ "btoi 0.5.0",
+ "byteorder",
+ "bytes",
+ "chrono",
+ "crc32fast",
+ "flate2",
+ "getrandom 0.3.1",
+ "num-bigint",
+ "num-traits",
+ "regex",
  "saturating",
  "serde",
  "serde_json",
@@ -9994,7 +10029,7 @@ version = "0.13.4"
 source = "git+https://github.com/risingwavelabs/prost.git?rev=4a442caf7c0a43feb4aea64bde6aea4488d9917f#4a442caf7c0a43feb4aea64bde6aea4488d9917f"
 dependencies = [
  "heck 0.5.0",
- "itertools 0.10.5",
+ "itertools 0.13.0",
  "log",
  "multimap 0.10.0",
  "once_cell",
@@ -10026,7 +10061,7 @@ version = "0.13.4"
 source = "git+https://github.com/risingwavelabs/prost.git?rev=4a442caf7c0a43feb4aea64bde6aea4488d9917f#4a442caf7c0a43feb4aea64bde6aea4488d9917f"
 dependencies = [
  "anyhow",
- "itertools 0.10.5",
+ "itertools 0.13.0",
  "proc-macro2",
  "quote",
  "syn 2.0.111",
@@ -11592,7 +11627,7 @@ dependencies = [
  "moka",
  "mongodb",
  "mysql_async",
- "mysql_common",
+ "mysql_common 0.36.2",
  "nexmark",
  "num-bigint",
  "opendal 0.53.3",
@@ -11938,7 +11973,7 @@ dependencies = [
  "md-5",
  "memcomparable",
  "mysql_async",
- "mysql_common",
+ "mysql_common 0.36.2",
  "num-integer",
  "parking_lot 0.12.5",
  "parse-display",
