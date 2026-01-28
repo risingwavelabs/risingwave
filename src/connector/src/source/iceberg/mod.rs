@@ -230,6 +230,8 @@ impl SplitEnumerator for IcebergSplitEnumerator {
         properties: Self::Properties,
         context: SourceEnumeratorContextRef,
     ) -> ConnectorResult<Self> {
+        // Validate table identifier (e.g., database.name should not contain dots)
+        properties.table.validate()?;
         Ok(Self::new_inner(properties, context))
     }
 

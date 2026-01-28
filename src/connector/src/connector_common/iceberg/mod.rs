@@ -246,6 +246,18 @@ impl IcebergTableIdentifier {
 
         Ok(ret.context("Failed to create table identifier")?)
     }
+
+    pub fn validate(&self) -> ConnectorResult<()> {
+        if let Some(database_name) = &self.database_name {
+            if database_name.contains('.') {
+                bail!(
+                    "Invalid database.name '{}': dots are not allowed in database names",
+                    database_name
+                );
+            }
+        }
+        Ok(())
+    }
 }
 
 impl IcebergCommon {
