@@ -9329,7 +9329,7 @@ dependencies = [
  "parking_lot 0.12.5",
  "peekable",
  "postgres-types",
- "rand 0.8.5",
+ "rand 0.9.2",
  "reqwest 0.12.25",
  "risingwave_common",
  "risingwave_sqlparser",
