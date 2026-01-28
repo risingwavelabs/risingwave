@@ -221,11 +221,8 @@ pub struct HummockSnapshotManager {
     /// of `committed_epoch`.
     latest_snapshot: watch::Sender<PinnedSnapshotRef>,
 
-    table_change_log_notification_sender: watch::Sender<TableChangeLogNotificationMsg>,
+    version_update_notification_sender: watch::Sender<()>,
 }
-
-#[derive(Default)]
-struct TableChangeLogNotificationMsg {}
 
 pub type HummockSnapshotManagerRef = Arc<HummockSnapshotManager>;
 
@@ -237,12 +234,11 @@ impl HummockSnapshotManager {
 
         let (latest_snapshot, _) = watch::channel(latest_snapshot);
 
-        let (table_change_log_notification_sender, _) =
-            watch::channel(TableChangeLogNotificationMsg::default());
+        let (table_change_log_notification_sender, _) = watch::channel(());
 
         Self {
             latest_snapshot,
-            table_change_log_notification_sender,
+            version_update_notification_sender: table_change_log_notification_sender,
         }
     }
 
@@ -252,9 +248,7 @@ impl HummockSnapshotManager {
     }
 
     pub fn init(&self, version: FrontendHummockVersion) {
-        self.table_change_log_notification_sender
-            .send(TableChangeLogNotificationMsg {})
-            .ok();
+        self.version_update_notification_sender.send(()).ok();
 
         self.update_inner(|_| Some(version));
     }
@@ -273,9 +267,7 @@ impl HummockSnapshotManager {
             }
             Some(snapshot)
         });
-        self.table_change_log_notification_sender
-            .send(TableChangeLogNotificationMsg {})
-            .ok();
+        self.version_update_notification_sender.send(()).ok();
     }
 
     pub fn add_table_for_test(&self, table_id: TableId) {
@@ -331,7 +323,7 @@ impl HummockSnapshotManager {
         table_id: TableId,
         seek_timestamp: u64,
     ) -> Result<(), RwError> {
-        let mut rx = self.table_change_log_notification_sender.subscribe();
+        let mut rx = self.version_update_notification_sender.subscribe();
         loop {
             rx.changed()
                 .await
