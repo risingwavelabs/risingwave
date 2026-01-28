@@ -24,7 +24,7 @@ num-bigint = "0.4"
 prost = { workspace = true, features = ["no-recursion-limit"] }
 prost-reflect = { version = "0.15", features = ["serde"] }
 prost-types = "0.13"
-protox = "0.8"
+protox = "0.9"
 reqwest = { version = "0.12.2", features = ["json"] }
 risingwave_common = { workspace = true }
 risingwave_pb = { workspace = true }
