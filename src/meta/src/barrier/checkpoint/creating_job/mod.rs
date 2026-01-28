@@ -45,11 +45,13 @@ use crate::barrier::context::CreateSnapshotBackfillJobCommandInfo;
 use crate::barrier::edge_builder::FragmentEdgeBuildResult;
 use crate::barrier::info::{BarrierInfo, InflightStreamingJobInfo};
 use crate::barrier::notifier::Notifier;
-use crate::barrier::progress::{CreateMviewProgressTracker, TrackingJob};
+use crate::barrier::progress::{CreateMviewProgressTracker, TrackingJob, collect_done_fragments};
 use crate::barrier::rpc::{
     ControlStreamManager, build_locality_fragment_state_table_mapping, to_partial_graph_id,
 };
-use crate::barrier::{BackfillOrderState, BackfillProgress, BarrierKind, TracedEpoch};
+use crate::barrier::{
+    BackfillOrderState, BackfillProgress, BarrierKind, FragmentBackfillProgress, TracedEpoch,
+};
 use crate::controller::fragment::InflightFragmentInfo;
 use crate::model::{FragmentDownstreamRelation, StreamActor, StreamJobActorsToCreate};
 use crate::rpc::metrics::GLOBAL_META_METRICS;
@@ -230,6 +232,22 @@ impl CreatingStreamingJobControl {
             node_actors,
             state_table_ids,
         })
+    }
+
+    pub(super) fn gen_fragment_backfill_progress(&self) -> Vec<FragmentBackfillProgress> {
+        match &self.status {
+            CreatingStreamingJobStatus::ConsumingSnapshot {
+                create_mview_tracker,
+                info,
+                ..
+            } => create_mview_tracker.collect_fragment_progress(&info.fragment_infos, true),
+            CreatingStreamingJobStatus::ConsumingLogStore { info, .. } => {
+                collect_done_fragments(self.job_id, &info.fragment_infos)
+            }
+            CreatingStreamingJobStatus::Finishing(_, _)
+            | CreatingStreamingJobStatus::Resetting(_, _)
+            | CreatingStreamingJobStatus::PlaceHolder => vec![],
+        }
     }
 
     fn resolve_upstream_log_epochs(

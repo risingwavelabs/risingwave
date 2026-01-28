@@ -665,6 +665,7 @@ pub async fn start_service_as_election_leader(
     sub_tasks.push(start_info_monitor(
         metadata_manager.clone(),
         hummock_manager.clone(),
+        barrier_manager.clone(),
         env.system_params_manager_impl_ref(),
         meta_metrics.clone(),
     ));

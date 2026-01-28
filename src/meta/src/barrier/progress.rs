@@ -15,16 +15,16 @@
 use std::collections::HashMap;
 use std::mem::take;
 
-use risingwave_common::catalog::TableId;
+use risingwave_common::catalog::{FragmentTypeFlag, TableId};
 use risingwave_common::id::JobId;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::stream_service::barrier_complete_response::CreateMviewProgress;
 
 use crate::MetaResult;
-use crate::barrier::CreateStreamingJobCommandInfo;
 use crate::barrier::backfill_order_control::BackfillOrderState;
 use crate::barrier::info::InflightStreamingJobInfo;
+use crate::barrier::{CreateStreamingJobCommandInfo, FragmentBackfillProgress};
 use crate::controller::fragment::InflightFragmentInfo;
 use crate::manager::MetadataManager;
 use crate::model::{ActorId, BackfillUpstreamType, FragmentId, StreamJobFragments};
@@ -32,6 +32,14 @@ use crate::stream::{SourceChange, SourceManagerRef};
 
 type ConsumedRows = u64;
 type BufferedRows = u64;
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct ActorBackfillProgress {
+    pub(crate) actor_id: ActorId,
+    pub(crate) upstream_type: BackfillUpstreamType,
+    pub(crate) consumed_rows: u64,
+    pub(crate) done: bool,
+}
 
 #[derive(Clone, Copy, Debug)]
 enum BackfillState {
@@ -203,6 +211,23 @@ impl Progress {
         }
         self.states.insert(actor, new_state);
         result
+    }
+
+    fn iter_actor_progress(&self) -> impl Iterator<Item = ActorBackfillProgress> + '_ {
+        self.states.iter().filter_map(|(actor_id, state)| {
+            let upstream_type = *self.backfill_upstream_types.get(actor_id)?;
+            let (consumed_rows, done) = match *state {
+                BackfillState::Init => (0, false),
+                BackfillState::ConsumingUpstream(_, consumed_rows, _) => (consumed_rows, false),
+                BackfillState::Done(consumed_rows, _) => (consumed_rows, true),
+            };
+            Some(ActorBackfillProgress {
+                actor_id: *actor_id,
+                upstream_type,
+                consumed_rows,
+                done,
+            })
+        })
     }
 
     /// Returns whether all backfill executors are done.
@@ -491,6 +516,15 @@ impl CreateMviewProgressTracker {
         }
     }
 
+    pub(crate) fn actor_progresses(&self) -> Vec<ActorBackfillProgress> {
+        match &self.status {
+            CreateMviewStatus::Backfilling { progress, .. } => {
+                progress.iter_actor_progress().collect()
+            }
+            CreateMviewStatus::CdcSourceInit | CreateMviewStatus::Finished { .. } => vec![],
+        }
+    }
+
     /// Update the progress of tracked jobs, and add a new job to track if `info` is `Some`.
     /// Return the table ids whose locality provider state tables need to be truncated.
     pub(super) fn apply_progress(
@@ -665,6 +699,25 @@ impl CreateMviewProgressTracker {
         self.tracking_job
     }
 
+    pub(crate) fn job_id(&self) -> JobId {
+        self.tracking_job.job_id
+    }
+
+    pub(crate) fn collect_fragment_progress(
+        &self,
+        fragment_infos: &HashMap<FragmentId, InflightFragmentInfo>,
+        mark_done_when_empty: bool,
+    ) -> Vec<FragmentBackfillProgress> {
+        let actor_progresses = self.actor_progresses();
+        if actor_progresses.is_empty() {
+            if mark_done_when_empty && self.is_finished() {
+                return collect_done_fragments(self.job_id(), fragment_infos);
+            }
+            return vec![];
+        }
+        collect_fragment_progress_from_actors(self.job_id(), fragment_infos, &actor_progresses)
+    }
+
     /// Add a new create-mview DDL command to track.
     ///
     /// If the actors to track are empty, return the given command as it can be finished immediately.
@@ -814,6 +867,73 @@ fn calculate_total_key_count(
                     .map_or(0, |stat| stat.total_key_count as u64)
         })
         .sum()
+}
+
+pub(crate) fn collect_fragment_progress_from_actors(
+    job_id: JobId,
+    fragment_infos: &HashMap<FragmentId, InflightFragmentInfo>,
+    actor_progresses: &[ActorBackfillProgress],
+) -> Vec<FragmentBackfillProgress> {
+    let mut actor_to_fragment = HashMap::new();
+    for (fragment_id, info) in fragment_infos {
+        for actor_id in info.actors.keys() {
+            actor_to_fragment.insert(*actor_id, *fragment_id);
+        }
+    }
+
+    let mut per_fragment: HashMap<FragmentId, (u64, usize, usize, BackfillUpstreamType)> =
+        HashMap::new();
+    for progress in actor_progresses {
+        let Some(fragment_id) = actor_to_fragment.get(&progress.actor_id) else {
+            continue;
+        };
+        let entry = per_fragment
+            .entry(*fragment_id)
+            .or_insert((0, 0, 0, progress.upstream_type));
+        entry.0 = entry.0.saturating_add(progress.consumed_rows);
+        entry.1 += progress.done as usize;
+        entry.2 += 1;
+    }
+
+    per_fragment
+        .into_iter()
+        .map(
+            |(fragment_id, (consumed_rows, done_cnt, total_cnt, upstream_type))| {
+                FragmentBackfillProgress {
+                    job_id,
+                    fragment_id,
+                    consumed_rows,
+                    done: total_cnt > 0 && done_cnt == total_cnt,
+                    upstream_type,
+                }
+            },
+        )
+        .collect()
+}
+
+pub(crate) fn collect_done_fragments(
+    job_id: JobId,
+    fragment_infos: &HashMap<FragmentId, InflightFragmentInfo>,
+) -> Vec<FragmentBackfillProgress> {
+    fragment_infos
+        .iter()
+        .filter(|(_, fragment)| {
+            fragment.fragment_type_mask.contains_any([
+                FragmentTypeFlag::StreamScan,
+                FragmentTypeFlag::SourceScan,
+                FragmentTypeFlag::LocalityProvider,
+            ])
+        })
+        .map(|(fragment_id, fragment)| FragmentBackfillProgress {
+            job_id,
+            fragment_id: *fragment_id,
+            consumed_rows: 0,
+            done: true,
+            upstream_type: BackfillUpstreamType::from_fragment_type_mask(
+                fragment.fragment_type_mask,
+            ),
+        })
+        .collect()
 }
 
 #[cfg(test)]
