@@ -421,7 +421,10 @@ impl EnforceSecret for IcebergConfig {
 impl IcebergConfig {
     /// Validate that append-only sinks use merge-on-read mode
     /// Copy-on-write is strictly worse than merge-on-read for append-only workloads
-    fn validate_append_only_write_mode(sink_type: &str, write_mode: IcebergWriteMode) -> Result<()> {
+    fn validate_append_only_write_mode(
+        sink_type: &str,
+        write_mode: IcebergWriteMode,
+    ) -> Result<()> {
         if sink_type == SINK_TYPE_APPEND_ONLY && write_mode == IcebergWriteMode::CopyOnWrite {
             return Err(SinkError::Config(anyhow!(
                 "'copy-on-write' mode is not supported for append-only iceberg sink. \
@@ -3427,10 +3430,12 @@ mod test {
 
         let result = IcebergConfig::from_btreemap(values);
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("'copy-on-write' mode is not supported for append-only iceberg sink"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("'copy-on-write' mode is not supported for append-only iceberg sink")
+        );
     }
 
     #[test]
