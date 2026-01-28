@@ -182,6 +182,8 @@ pub struct MetaMetrics {
 
     pub compaction_event_consumed_latency: Histogram,
     pub compaction_event_loop_iteration_latency: Histogram,
+    pub time_travel_vacuum_metadata_latency: Histogram,
+    pub time_travel_write_metadata_latency: Histogram,
 
     // ********************************** Object Store ************************************
     // Object store related metrics (for backup/restore and version checkpoint)
@@ -613,6 +615,26 @@ impl MetaMetrics {
             registry
         )
         .unwrap();
+
+        let time_travel_vacuum_metadata_latency = register_histogram_with_registry!(
+            histogram_opts!(
+                "storage_time_travel_vacuum_metadata_latency",
+                "Latency of vacuuming metadata for time travel",
+                exponential_buckets(0.1, 1.5, 20).unwrap()
+            ),
+            registry
+        )
+        .unwrap();
+        let time_travel_write_metadata_latency = register_histogram_with_registry!(
+            histogram_opts!(
+                "storage_time_travel_write_metadata_latency",
+                "Latency of writing metadata for time travel",
+                exponential_buckets(0.1, 1.5, 20).unwrap()
+            ),
+            registry
+        )
+        .unwrap();
+
         let object_store_metric = Arc::new(GLOBAL_OBJECT_STORE_METRICS.clone());
 
         let recovery_failure_cnt = register_int_counter_vec_with_registry!(
@@ -966,6 +988,8 @@ impl MetaMetrics {
             refresh_job_finish_cnt,
             refresh_cron_job_trigger_cnt,
             refresh_cron_job_miss_cnt,
+            time_travel_vacuum_metadata_latency,
+            time_travel_write_metadata_latency,
         }
     }
 

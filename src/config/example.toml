@@ -113,6 +113,7 @@ actor_cnt_per_worker_parallelism_hard_limit = 400
 hummock_time_travel_sst_info_fetch_batch_size = 10000
 hummock_time_travel_sst_info_insert_batch_size = 100
 time_travel_vacuum_interval_sec = 30
+time_travel_vacuum_max_version_count = 10000
 hummock_time_travel_epoch_version_insert_batch_size = 1000
 hummock_gc_history_insert_batch_size = 1000
 hummock_time_travel_filter_out_objects_batch_size = 1000
