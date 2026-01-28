@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2026 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,13 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt::Formatter;
-use std::str::FromStr;
-
 #[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
-pub struct StatementTimeout(pub u32);
+pub struct StatementTimeout(u32);
 
-impl FromStr for StatementTimeout {
+impl std::str::FromStr for StatementTimeout {
     type Err = String;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
@@ -30,19 +27,11 @@ impl FromStr for StatementTimeout {
         let (val_str, unit) = s
             .find(|c: char| !c.is_numeric())
             .map(|i| s.split_at(i))
-            .ok_or_else(|| {
-                format!(
-                    "invalid value for parameter \"statement_timeout\": \"{}\"",
-                    s
-                )
-            })?;
+            .ok_or_else(|| "time unit is required: ms s min h d".to_owned())?;
 
-        let val = val_str.parse::<u64>().map_err(|_| {
-            format!(
-                "invalid value for parameter \"statement_timeout\": \"{}\"",
-                s
-            )
-        })?;
+        let val = val_str
+            .parse::<u32>()
+            .map_err(|_| format!("parsing u32 failed: \"{val_str}\""))?;
 
         let mul = match unit.trim() {
             "ms" => 1,
@@ -50,21 +39,24 @@ impl FromStr for StatementTimeout {
             "min" => 60 * 1000,
             "h" => 60 * 60 * 1000,
             "d" => 24 * 60 * 60 * 1000,
-            _ => {
-                return Err(format!(
-                    "invalid value for parameter \"statement_timeout\": \"{}\"",
-                    s
-                ));
-            }
+            _ => return Err(format!("invalid time unit: \"{unit}\"")),
         };
 
-        Ok(Self((val * mul) as u32))
+        Ok(Self(
+            val.checked_mul(mul).ok_or_else(|| "overflow".to_owned())?,
+        ))
     }
 }
 
 impl std::fmt::Display for StatementTimeout {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}ms", self.0)
+    }
+}
+
+impl StatementTimeout {
+    pub fn millis(&self) -> u32 {
+        self.0
     }
 }
 
