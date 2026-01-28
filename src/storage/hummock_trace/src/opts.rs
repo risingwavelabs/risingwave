@@ -104,7 +104,9 @@ pub struct TracedFragmentId {
 }
 impl From<FragmentId> for TracedFragmentId {
     fn from(value: FragmentId) -> Self {
-        Self { fragment_id: value.as_raw_id() }
+        Self {
+            fragment_id: value.as_raw_id(),
+        }
     }
 }
 impl From<TracedFragmentId> for FragmentId {

@@ -486,7 +486,7 @@ mod tests {
         let get_table_id = 12;
         let iter_table_id = 14654;
         let get_fragment_id = 1;
-        
+
         let read_options = TracedReadOptions::for_test(get_table_id);
         let iter_read_options = TracedReadOptions::for_test(iter_table_id);
         let op = Operation::get(Bytes::from(vec![123]), Some(123), read_options);

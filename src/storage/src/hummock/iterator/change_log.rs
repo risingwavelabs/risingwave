@@ -532,8 +532,8 @@ mod tests {
     use itertools::Itertools;
     use risingwave_common::bitmap::Bitmap;
     use risingwave_common::catalog::TableId;
-    use risingwave_common::id::FragmentId;
     use risingwave_common::hash::VirtualNode;
+    use risingwave_common::id::FragmentId;
     use risingwave_common::util::epoch::test_epoch;
     use risingwave_hummock_sdk::EpochWithGap;
     use risingwave_hummock_sdk::key::{TableKey, UserKey};
