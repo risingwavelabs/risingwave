@@ -58,7 +58,7 @@ use crate::types::Format;
 static RW_QUERY_LOG_TRUNCATE_LEN: LazyLock<usize> =
     LazyLock::new(|| match std::env::var("RW_QUERY_LOG_TRUNCATE_LEN") {
         Ok(len) if len.parse::<usize>().is_ok() => len.parse::<usize>().unwrap(),
-        _ => 65536
+        _ => 65536,
     });
 
 tokio::task_local! {
