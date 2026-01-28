@@ -510,7 +510,7 @@ impl IcebergConfig {
     }
 
     pub fn trigger_snapshot_count(&self) -> usize {
-        self.trigger_snapshot_count.unwrap_or(16)
+        self.trigger_snapshot_count.unwrap_or(usize::MAX)
     }
 
     pub fn small_files_threshold_mb(&self) -> u64 {
