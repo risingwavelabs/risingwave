@@ -10056,15 +10056,25 @@ dependencies = [
 
 [[package]]
 name = "prost-reflect"
-version = "0.15.1"
+version = "0.15.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "134584672a2f89128da60df70d4b9d2eddfeb3ab00ab9c854ee7ee360ea7a7fc"
+checksum = "37587d5a8a1b3dc9863403d084fc2254b91ab75a702207098837950767e2260b"
 dependencies = [
- "base64 0.22.1",
  "logos",
  "miette",
  "prost 0.13.4",
  "prost-types 0.13.4",
+]
+
+[[package]]
+name = "prost-reflect"
+version = "0.16.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b89455ef41ed200cafc47c76c552ee7792370ac420497e551f16123a9135f76e"
+dependencies = [
+ "base64 0.22.1",
+ "prost 0.14.1",
+ "prost-types 0.14.1",
  "serde",
  "serde-value",
 ]
@@ -10124,7 +10134,7 @@ dependencies = [
  "bytes",
  "miette",
  "prost 0.13.4",
- "prost-reflect",
+ "prost-reflect 0.15.3",
  "prost-types 0.13.4",
  "protox-parse",
  "thiserror 2.0.17",
@@ -11610,7 +11620,7 @@ dependencies = [
  "prost 0.11.9",
  "prost 0.13.4",
  "prost 0.14.1",
- "prost-reflect",
+ "prost-reflect 0.16.3",
  "prost-types 0.13.4",
  "prost-types 0.14.1",
  "pulsar",
@@ -11686,7 +11696,7 @@ dependencies = [
  "num-bigint",
  "prost 0.13.4",
  "prost-build 0.13.4",
- "prost-reflect",
+ "prost-reflect 0.16.3",
  "prost-types 0.13.4",
  "protox",
  "reqwest 0.12.25",
@@ -11880,7 +11890,7 @@ dependencies = [
  "sql-json-path",
  "thiserror 2.0.17",
  "thiserror-ext",
- "tonic 0.12.3",
+ "tonic 0.14.2",
  "tracing",
  "workspace-hack",
  "zstd 0.13.3",
