@@ -113,9 +113,9 @@ impl HummockManager {
             )
             .exec(&txn)
             .await?;
-        tracing::debug!(
+        tracing::info!(
             epoch_watermark,
-            "delete {} rows from hummock_epoch_to_version",
+            "Delete {} rows from hummock_epoch_to_version.",
             res.rows_affected
         );
         let latest_valid_version = hummock_time_travel_version::Entity::find()
@@ -268,10 +268,10 @@ impl HummockManager {
             )
             .exec(&txn)
             .await?;
-        tracing::debug!(
-            epoch_watermark_version_id = ?watermark_version_id,
-            ?latest_valid_version_id,
-            "delete {} rows from hummock_time_travel_version",
+        tracing::info!(
+            watermark_version_id,
+            latest_valid_version_id = latest_valid_version_id.to_u64(),
+            "Deleted {} rows from hummock_time_travel_version.",
             res.rows_affected
         );
 
@@ -281,10 +281,10 @@ impl HummockManager {
             )
             .exec(&txn)
             .await?;
-        tracing::debug!(
-            epoch_watermark_version_id = ?watermark_version_id,
-            ?latest_valid_version_id,
-            "delete {} rows from hummock_time_travel_delta",
+        tracing::info!(
+            watermark_version_id,
+            latest_valid_version_id = latest_valid_version_id.to_u64(),
+            "Deleted {} rows from hummock_time_travel_delta.",
             res.rows_affected
         );
 
