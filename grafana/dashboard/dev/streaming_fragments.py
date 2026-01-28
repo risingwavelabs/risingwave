@@ -299,6 +299,17 @@ def _(outer_panels: Panels):
                         ),
                     ],
                 ),
+                panels.subheader("Memory Usage by Fragment"),
+                panels.timeseries_bytes(
+                    "Shared Buffer Memory Usage",
+                    "",
+                    [
+                        panels.target(
+                            f"sum({metric('state_store_per_fragment_imm_size')}) by (fragment_id)",
+                            "fragment {{fragment_id}}",
+                        ),
+                    ],
+                ),
                 panels.subheader("Backpressure by Fragment"),
                 panels.timeseries_percentage(
                     "Actor Output Blocking Rate (Downstream Backpressure)",

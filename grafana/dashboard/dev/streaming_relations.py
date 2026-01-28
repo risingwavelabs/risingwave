@@ -129,7 +129,7 @@ def _(outer_panels: Panels):
                             f"/ 1000000000), "
                             f"'id', '$1', 'materialized_view_id', '(.*)'"
                             f") * on(id) group_left(name, type) {metric('relation_info')}",
-                            "{{type}} {{name}} id {{id}}",
+                            "relation {{name}} (id={{id}} type={{type}})",
                         )
                     ],
                 ),
@@ -220,6 +220,23 @@ def _(outer_panels: Panels):
                         panels.target(
                             f"sum({metric('stream_memory_usage')} * on(table_id) group_left(materialized_view_id) {metric('table_info')}) by (materialized_view_id)",
                             "materialized view {{materialized_view_id}}",
+                        ),
+                    ],
+                ),
+                panels.subheader("Shared Buffer Memory Usage By Relation"),
+                panels.timeseries_bytes(
+                    "Shared Buffer Memory Usage",
+                    "Shared buffer imm size aggregated by relation.",
+                    [
+                        panels.target(
+                            _relation_metric_with_metadata(
+                                relabel_materialized_view_id_as_id(
+                                    _sum_fragment_metric_by_mv(
+                                        metric("state_store_per_fragment_imm_size")
+                                    )
+                                )
+                            ),
+                            "relation {{name}} (id={{id}} type={{type}})",
                         ),
                     ],
                 ),
