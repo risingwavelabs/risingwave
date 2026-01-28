@@ -605,7 +605,7 @@ impl CatalogWriter for MockCatalogWriter {
         unreachable!()
     }
 
-    async fn drop_secret(&self, _secret_id: SecretId) -> Result<()> {
+    async fn drop_secret(&self, _secret_id: SecretId, _cascade: bool) -> Result<()> {
         unreachable!()
     }
 
