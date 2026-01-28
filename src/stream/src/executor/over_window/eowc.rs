@@ -22,14 +22,17 @@ use risingwave_common::row::RowExt;
 use risingwave_common::types::{ToDatumRef, ToOwnedDatum};
 use risingwave_common::util::iter_util::{ZipEqDebug, ZipEqFast};
 use risingwave_common::util::memcmp_encoding::{self, MemcmpEncoded};
+use risingwave_common::util::row_serde::OrderedRowSerde;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_common::{must_match, row};
 use risingwave_common_estimate_size::EstimateSize;
 use risingwave_common_estimate_size::collections::EstimatedVecDeque;
 use risingwave_expr::window_function::{
-    StateEvictHint, StateKey, WindowFuncCall, WindowStates, create_window_state,
+    StateEvictHint, StateKey, WindowFuncCall, WindowStateSnapshot, WindowStates,
+    create_window_state,
 };
 use risingwave_storage::store::PrefetchOptions;
+use tracing::debug;
 
 use crate::cache::ManagedLruCache;
 use crate::common::metrics::MetricsInfo;
@@ -38,6 +41,9 @@ use crate::executor::prelude::*;
 struct Partition {
     states: WindowStates,
     curr_row_buffer: EstimatedVecDeque<OwnedRow>,
+    /// Cached intermediate state row for this partition, used for upsert operations.
+    /// `None` means no prior row exists in the intermediate state table for this partition.
+    intermediate_state_row: Option<OwnedRow>,
 }
 
 impl EstimateSize for Partition {
@@ -46,11 +52,143 @@ impl EstimateSize for Partition {
         for state in self.states.iter() {
             total_size += state.estimated_heap_size();
         }
+        if let Some(row) = &self.intermediate_state_row {
+            total_size += row.estimated_heap_size();
+        }
         total_size
     }
 }
 
 type PartitionCache = ManagedLruCache<MemcmpEncoded, Partition>; // TODO(rc): use `K: HashKey` as key like in hash agg?
+
+/// Snapshot serialization version.
+const SNAPSHOT_VERSION: u8 = 1;
+
+/// Encode a `WindowStateSnapshot` to bytes for persistence.
+/// Format: version (u8) + has_last_key (u8) + [order_key_len (u32) + order_key + pk_len (u32) + pk] + payload_len (u32) + payload
+fn encode_snapshot(snapshot: &WindowStateSnapshot, pk_ser: &OrderedRowSerde) -> Vec<u8> {
+    let mut bytes = Vec::new();
+    bytes.push(SNAPSHOT_VERSION);
+
+    if let Some(key) = &snapshot.last_output_key {
+        bytes.push(1u8);
+        // Encode order_key
+        let order_key_bytes = &key.order_key;
+        bytes.extend_from_slice(&(order_key_bytes.len() as u32).to_le_bytes());
+        bytes.extend_from_slice(order_key_bytes);
+        // Encode pk using the serde
+        let mut pk_bytes = Vec::new();
+        pk_ser.serialize(key.pk.as_inner(), &mut pk_bytes);
+        bytes.extend_from_slice(&(pk_bytes.len() as u32).to_le_bytes());
+        bytes.extend_from_slice(&pk_bytes);
+    } else {
+        bytes.push(0u8);
+    }
+
+    // Encode payload
+    bytes.extend_from_slice(&(snapshot.payload.len() as u32).to_le_bytes());
+    bytes.extend_from_slice(&snapshot.payload);
+    bytes
+}
+
+/// Decode a `WindowStateSnapshot` from bytes during recovery.
+fn decode_snapshot(
+    bytes: &[u8],
+    pk_deser: &OrderedRowSerde,
+) -> StreamExecutorResult<WindowStateSnapshot> {
+    if bytes.is_empty() {
+        return Err(StreamExecutorError::from(anyhow::anyhow!(
+            "invalid snapshot: empty bytes"
+        )));
+    }
+
+    let mut offset = 0;
+    let version = bytes[offset];
+    offset += 1;
+
+    if version != SNAPSHOT_VERSION {
+        return Err(StreamExecutorError::from(anyhow::anyhow!(
+            "unsupported snapshot version: {}",
+            version
+        )));
+    }
+
+    if bytes.len() < offset + 1 {
+        return Err(StreamExecutorError::from(anyhow::anyhow!(
+            "invalid snapshot: missing has_last_key"
+        )));
+    }
+    let has_last_key = bytes[offset];
+    offset += 1;
+
+    let last_output_key = if has_last_key == 1 {
+        // Decode order_key
+        if bytes.len() < offset + 4 {
+            return Err(StreamExecutorError::from(anyhow::anyhow!(
+                "invalid snapshot: missing order_key_len"
+            )));
+        }
+        let order_key_len =
+            u32::from_le_bytes(bytes[offset..offset + 4].try_into().unwrap()) as usize;
+        offset += 4;
+
+        if bytes.len() < offset + order_key_len {
+            return Err(StreamExecutorError::from(anyhow::anyhow!(
+                "invalid snapshot: missing order_key bytes"
+            )));
+        }
+        let order_key: MemcmpEncoded = bytes[offset..offset + order_key_len].to_vec().into();
+        offset += order_key_len;
+
+        // Decode pk
+        if bytes.len() < offset + 4 {
+            return Err(StreamExecutorError::from(anyhow::anyhow!(
+                "invalid snapshot: missing pk_len"
+            )));
+        }
+        let pk_len = u32::from_le_bytes(bytes[offset..offset + 4].try_into().unwrap()) as usize;
+        offset += 4;
+
+        if bytes.len() < offset + pk_len {
+            return Err(StreamExecutorError::from(anyhow::anyhow!(
+                "invalid snapshot: missing pk bytes"
+            )));
+        }
+        let pk_bytes = &bytes[offset..offset + pk_len];
+        offset += pk_len;
+        let pk = pk_deser.deserialize(pk_bytes).map_err(|e| {
+            StreamExecutorError::from(anyhow::anyhow!("failed to deserialize pk: {}", e))
+        })?;
+
+        Some(StateKey {
+            order_key,
+            pk: pk.into(),
+        })
+    } else {
+        None
+    };
+
+    // Decode payload
+    if bytes.len() < offset + 4 {
+        return Err(StreamExecutorError::from(anyhow::anyhow!(
+            "invalid snapshot: missing payload_len"
+        )));
+    }
+    let payload_len = u32::from_le_bytes(bytes[offset..offset + 4].try_into().unwrap()) as usize;
+    offset += 4;
+
+    if bytes.len() < offset + payload_len {
+        return Err(StreamExecutorError::from(anyhow::anyhow!(
+            "invalid snapshot: missing payload bytes"
+        )));
+    }
+    let payload = bytes[offset..offset + payload_len].to_vec();
+
+    Ok(WindowStateSnapshot {
+        last_output_key,
+        payload,
+    })
+}
 
 /// [`EowcOverWindowExecutor`] consumes ordered input (on order key column with watermark in
 /// ascending order) and outputs window function results. One [`EowcOverWindowExecutor`] can handle
@@ -101,6 +239,12 @@ struct ExecutorInner<S: StateStore> {
     state_table: StateTable<S>,
     state_table_schema_len: usize,
     watermark_sequence: AtomicU64Ref,
+    /// Optional state table for persisting window function intermediate states.
+    /// See `StreamEowcOverWindow::infer_intermediate_state_table` for schema definition.
+    intermediate_state_table: Option<StateTable<S>>,
+    /// Serde for input stream key (pk), used for encoding/decoding StateKey in snapshots.
+    /// Only initialized when `intermediate_state_table` is present.
+    pk_serde: Option<OrderedRowSerde>,
 }
 
 struct ExecutionVars<S: StateStore> {
@@ -125,11 +269,29 @@ pub struct EowcOverWindowExecutorArgs<S: StateStore> {
     pub order_key_index: usize,
     pub state_table: StateTable<S>,
     pub watermark_epoch: AtomicU64Ref,
+    /// Optional state table for persisting window function intermediate states.
+    /// See `StreamEowcOverWindow::infer_intermediate_state_table` for schema definition.
+    pub intermediate_state_table: Option<StateTable<S>>,
 }
 
 impl<S: StateStore> EowcOverWindowExecutor<S> {
     pub fn new(args: EowcOverWindowExecutorArgs<S>) -> Self {
         let input_info = args.input.info().clone();
+
+        // Build pk_serde if intermediate_state_table is present
+        let pk_serde = args.intermediate_state_table.as_ref().map(|_| {
+            let pk_data_types: Vec<_> = input_info
+                .stream_key
+                .iter()
+                .map(|&i| args.schema[i].data_type())
+                .collect();
+            let pk_order_types: Vec<_> = input_info
+                .stream_key
+                .iter()
+                .map(|_| OrderType::ascending())
+                .collect();
+            OrderedRowSerde::new(pk_data_types, pk_order_types)
+        });
 
         Self {
             input: args.input,
@@ -143,8 +305,119 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
                 state_table: args.state_table,
                 state_table_schema_len: input_info.schema.len(),
                 watermark_sequence: args.watermark_epoch,
+                intermediate_state_table: args.intermediate_state_table,
+                pk_serde,
             },
         }
+    }
+
+    /// Load intermediate state snapshots from the state table and restore into partition states.
+    async fn load_intermediate_state(
+        this: &ExecutorInner<S>,
+        partition: &mut Partition,
+        partition_key: impl Row,
+        encoded_partition_key: &MemcmpEncoded,
+    ) -> StreamExecutorResult<()> {
+        let Some(intermediate_state_table) = &this.intermediate_state_table else {
+            return Ok(());
+        };
+        let pk_serde = this
+            .pk_serde
+            .as_ref()
+            .expect("pk_serde must be set when intermediate_state_table is present");
+
+        for state in partition.states.iter_mut() {
+            state.enable_persistence();
+        }
+
+        let partition_key_owned = partition_key.to_owned_row();
+        if let Some(row) = intermediate_state_table
+            .get_row(&partition_key_owned)
+            .await?
+        {
+            let num_partition_key_cols = this.partition_key_indices.len();
+            let num_calls = this.calls.len();
+
+            for call_index in 0..num_calls {
+                let state_col = num_partition_key_cols + call_index;
+                if state_col < row.len() {
+                    if let Some(state_bytes) = row.datum_at(state_col) {
+                        let snapshot = decode_snapshot(state_bytes.into_bytea(), pk_serde)?;
+                        debug!(
+                            "Restoring intermediate state for partition {:?}, call_index {}, has_last_key: {}",
+                            encoded_partition_key,
+                            call_index,
+                            snapshot.last_output_key.is_some()
+                        );
+                        partition
+                            .states
+                            .iter_mut()
+                            .nth(call_index)
+                            .unwrap()
+                            .restore(snapshot)?;
+                    }
+                } else {
+                    tracing::warn!(
+                        "Intermediate state row has fewer columns ({}) than expected ({}), skipping call_index {}",
+                        row.len(),
+                        num_partition_key_cols + num_calls,
+                        call_index
+                    );
+                }
+            }
+            partition.intermediate_state_row = Some(row);
+        }
+        Ok(())
+    }
+
+    /// Persist intermediate state snapshots to the state table.
+    fn persist_intermediate_state(
+        this: &mut ExecutorInner<S>,
+        partition: &mut Partition,
+        partition_key: impl Row,
+    ) {
+        let Some(intermediate_state_table) = &mut this.intermediate_state_table else {
+            return;
+        };
+        let pk_serde = this
+            .pk_serde
+            .as_ref()
+            .expect("pk_serde must be set when intermediate_state_table is present");
+
+        let num_calls = partition.states.len();
+        let num_partition_key_cols = partition_key.len();
+
+        // Build the new row: partition_key columns + state_0..state_{n-1}
+        let mut new_row_values = Vec::with_capacity(num_partition_key_cols + num_calls);
+        for datum in partition_key.iter() {
+            new_row_values.push(datum.to_owned_datum());
+        }
+
+        // For each call, encode snapshot or preserve previous value
+        for (call_index, state) in partition.states.iter().enumerate() {
+            if let Some(snapshot) = state.snapshot() {
+                let snapshot_bytes = encode_snapshot(&snapshot, pk_serde);
+                new_row_values.push(Some(snapshot_bytes.into_boxed_slice().into()));
+            } else if let Some(ref old_row) = partition.intermediate_state_row {
+                let state_col = num_partition_key_cols + call_index;
+                if state_col < old_row.len() {
+                    new_row_values.push(old_row.datum_at(state_col).to_owned_datum());
+                } else {
+                    new_row_values.push(None);
+                }
+            } else {
+                new_row_values.push(None);
+            }
+        }
+        let new_row = OwnedRow::new(new_row_values);
+
+        // Upsert: update if old row exists, otherwise insert
+        if let Some(old_row) = partition.intermediate_state_row.take() {
+            intermediate_state_table.update(old_row, new_row.clone());
+        } else {
+            intermediate_state_table.insert(new_row.clone());
+        }
+        partition.intermediate_state_row = Some(new_row);
     }
 
     async fn ensure_key_in_cache(
@@ -160,13 +433,18 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
         let mut partition = Partition {
             states: WindowStates::new(this.calls.iter().map(create_window_state).try_collect()?),
             curr_row_buffer: Default::default(),
+            intermediate_state_row: None,
         };
+
+        // If intermediate state table exists, load and restore intermediate state snapshots
+        Self::load_intermediate_state(this, &mut partition, &partition_key, encoded_partition_key)
+            .await?;
 
         let sub_range: &(Bound<OwnedRow>, Bound<OwnedRow>) = &(Bound::Unbounded, Bound::Unbounded);
         // Recover states from state table.
         let table_iter = this
             .state_table
-            .iter_with_prefix(partition_key, sub_range, PrefetchOptions::default())
+            .iter_with_prefix(&partition_key, sub_range, PrefetchOptions::default())
             .await?;
 
         #[for_await]
@@ -202,6 +480,7 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
         assert!(partition.states.are_aligned());
 
         // Ignore ready windows (all ready windows were outputted before).
+        // Use just_slide which calls slide_no_output and respects recovery skip logic.
         while partition.states.are_ready() {
             partition.states.just_slide()?;
             partition.curr_row_buffer.pop_front();
@@ -314,6 +593,9 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
                         this.state_table.delete(state_row);
                     }
                 }
+
+                // Persist intermediate state snapshots if intermediate_state_table exists
+                Self::persist_intermediate_state(this, partition, &partition_key);
             }
         }
 
@@ -350,6 +632,9 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
         let first_epoch = barrier.epoch;
         yield Message::Barrier(barrier);
         this.state_table.init_epoch(first_epoch).await?;
+        if let Some(intermediate_state_table) = &mut this.intermediate_state_table {
+            intermediate_state_table.init_epoch(first_epoch).await?;
+        }
 
         #[for_await]
         for msg in input {
@@ -364,18 +649,41 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
                         yield Message::Chunk(chunk);
                     }
                     this.state_table.try_flush().await?;
+                    if let Some(intermediate_state_table) = &mut this.intermediate_state_table {
+                        intermediate_state_table.try_flush().await?;
+                    }
                 }
                 Message::Barrier(barrier) => {
                     let post_commit = this.state_table.commit(barrier.epoch).await?;
+                    let intermediate_post_commit = if let Some(intermediate_state_table) =
+                        &mut this.intermediate_state_table
+                    {
+                        Some(intermediate_state_table.commit(barrier.epoch).await?)
+                    } else {
+                        None
+                    };
+
                     vars.partitions.evict();
 
                     let update_vnode_bitmap = barrier.as_update_vnode_bitmap(this.actor_ctx.id);
                     yield Message::Barrier(barrier);
 
-                    if let Some((_, cache_may_stale)) =
-                        post_commit.post_yield_barrier(update_vnode_bitmap).await?
-                        && cache_may_stale
+                    let mut cache_may_stale = false;
+                    if let Some((_, stale)) = post_commit
+                        .post_yield_barrier(update_vnode_bitmap.clone())
+                        .await?
                     {
+                        cache_may_stale = cache_may_stale || stale;
+                    }
+                    if let Some(intermediate_post_commit) = intermediate_post_commit {
+                        if let Some((_, stale)) = intermediate_post_commit
+                            .post_yield_barrier(update_vnode_bitmap)
+                            .await?
+                        {
+                            cache_may_stale = cache_may_stale || stale;
+                        }
+                    }
+                    if cache_may_stale {
                         vars.partitions.clear();
                     }
                 }
