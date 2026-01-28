@@ -15,7 +15,7 @@ SET sink_decouple = true;
 # 3. Execution: Create Sink with specific rate limit (1000 rows/sec)
 # Using blackhole connector to isolate backfill speed from network I/O
 statement ok
-CREATE SINK s1 FROM t1 WITH (connector='blackhole') 
+CREATE SINK s1 FROM t1 WITH (connector='blackhole')
 WITH (backfill_rate_limit=1000);
 
 # 4. Verification Loop
@@ -29,12 +29,12 @@ SELECT processed_rows FROM rw_catalog.rw_ddl_progress WHERE name = 's1';
 sleep 5s
 
 # Check progress again.
-# Expected: ~5000 rows (1000 rows/s * 5s). 
+# Expected: ~5000 rows (1000 rows/s * 5s).
 # If it returns 100000, the limit failed.
 query I
 SELECT processed_rows FROM rw_catalog.rw_ddl_progress WHERE name = 's1';
 ----
-5000 
+5000
 
 # 5. Dynamic Alter Test
 statement ok
