@@ -25,11 +25,13 @@ use prometheus::{
     register_int_counter_vec_with_registry, register_int_gauge_vec_with_registry,
     register_int_gauge_with_registry,
 };
+use risingwave_common::catalog::FragmentTypeFlag;
 use risingwave_common::metrics::{
     LabelGuardedHistogramVec, LabelGuardedIntCounterVec, LabelGuardedIntGaugeVec,
     LabelGuardedUintGaugeVec,
 };
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
+use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::util::stream_graph_visitor::{
     visit_stream_node_source_backfill, visit_stream_node_stream_scan,
 };
@@ -37,8 +39,6 @@ use risingwave_common::{
     register_guarded_histogram_vec_with_registry, register_guarded_int_counter_vec_with_registry,
     register_guarded_int_gauge_vec_with_registry, register_guarded_uint_gauge_vec_with_registry,
 };
-use risingwave_common::{catalog::FragmentTypeFlag};
-use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_connector::source::monitor::EnumeratorMetrics as SourceEnumeratorMetrics;
 use risingwave_meta_model::WorkerId;
 use risingwave_object_store::object::object_metrics::{
@@ -1299,20 +1299,20 @@ pub async fn refresh_relation_info_metrics(
 fn extract_backfill_fragment_info(
     distribution: &FragmentDistribution,
 ) -> Option<BackfillFragmentInfo> {
-    let backfill_type = if distribution.fragment_type_mask & FragmentTypeFlag::SourceScan as u32 != 0
-    {
-        "SOURCE"
-    } else if distribution.fragment_type_mask
-        & (FragmentTypeFlag::SnapshotBackfillStreamScan as u32
-            | FragmentTypeFlag::CrossDbSnapshotBackfillStreamScan as u32)
-        != 0
-    {
-        "SNAPSHOT_BACKFILL"
-    } else if distribution.fragment_type_mask & FragmentTypeFlag::StreamScan as u32 != 0 {
-        "ARRANGEMENT_OR_NO_SHUFFLE"
-    } else {
-        return None;
-    };
+    let backfill_type =
+        if distribution.fragment_type_mask & FragmentTypeFlag::SourceScan as u32 != 0 {
+            "SOURCE"
+        } else if distribution.fragment_type_mask
+            & (FragmentTypeFlag::SnapshotBackfillStreamScan as u32
+                | FragmentTypeFlag::CrossDbSnapshotBackfillStreamScan as u32)
+            != 0
+        {
+            "SNAPSHOT_BACKFILL"
+        } else if distribution.fragment_type_mask & FragmentTypeFlag::StreamScan as u32 != 0 {
+            "ARRANGEMENT_OR_NO_SHUFFLE"
+        } else {
+            return None;
+        };
 
     let stream_node = distribution.node.as_ref()?;
     let mut info = None;
@@ -1320,14 +1320,14 @@ fn extract_backfill_fragment_info(
         "SOURCE" => {
             visit_stream_node_source_backfill(stream_node, |node| {
                 info = Some(BackfillFragmentInfo {
-                    job_id: distribution.table_id,
-                    fragment_id: distribution.fragment_id,
+                    job_id: distribution.table_id.as_raw_id(),
+                    fragment_id: distribution.fragment_id.as_raw_id(),
                     backfill_state_table_id: node
                         .state_table
                         .as_ref()
-                        .map(|table| table.id)
+                        .map(|table| table.id.as_raw_id())
                         .unwrap_or_default(),
-                    backfill_target_relation_id: node.upstream_source_id,
+                    backfill_target_relation_id: node.upstream_source_id.as_raw_id(),
                     backfill_type,
                     backfill_epoch: 0,
                 });
@@ -1336,14 +1336,14 @@ fn extract_backfill_fragment_info(
         "SNAPSHOT_BACKFILL" | "ARRANGEMENT_OR_NO_SHUFFLE" => {
             visit_stream_node_stream_scan(stream_node, |node| {
                 info = Some(BackfillFragmentInfo {
-                    job_id: distribution.table_id,
-                    fragment_id: distribution.fragment_id,
+                    job_id: distribution.table_id.as_raw_id(),
+                    fragment_id: distribution.fragment_id.as_raw_id(),
                     backfill_state_table_id: node
                         .state_table
                         .as_ref()
-                        .map(|table| table.id)
+                        .map(|table| table.id.as_raw_id())
                         .unwrap_or_default(),
-                    backfill_target_relation_id: node.table_id,
+                    backfill_target_relation_id: node.table_id.as_raw_id(),
                     backfill_type,
                     backfill_epoch: node.snapshot_backfill_epoch.unwrap_or_default(),
                 });
@@ -1381,7 +1381,7 @@ pub async fn refresh_backfill_info_metrics(
                 &info.fragment_id.to_string(),
                 &info.backfill_state_table_id.to_string(),
                 &info.backfill_target_relation_id.to_string(),
-                info.backfill_type,
+                &info.backfill_type.to_string(),
                 &info.backfill_epoch.to_string(),
             ])
             .set(1);
