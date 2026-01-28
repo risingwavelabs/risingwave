@@ -503,7 +503,10 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                             }
                             Mutation::Throttle(fragment_to_apply) => {
                                 if let Some(entry) = fragment_to_apply.get(&fragment_id)
-                                    && matches!(entry.throttle_type(), ThrottleType::Sink | ThrottleType::Backfill)
+                                    && matches!(
+                                        entry.throttle_type(),
+                                        ThrottleType::Sink | ThrottleType::Backfill
+                                    )
                                 {
                                     tracing::info!(
                                         rate_limit = entry.rate_limit,
