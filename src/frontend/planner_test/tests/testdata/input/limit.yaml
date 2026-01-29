@@ -92,3 +92,11 @@
   expected_outputs:
   - batch_plan
   - stream_plan
+- sql: |
+    -- Regression test: column pruning may remove all output columns of the input of LIMIT.
+    -- `LogicalLimit` will be rewritten to `LogicalTopN` for streaming queries, and should not panic
+    -- when the input schema becomes empty.
+    create table t (v int);
+    select 1 c from (select v from t limit 10) s;
+  expected_outputs:
+  - stream_plan

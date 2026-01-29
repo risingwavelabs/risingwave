@@ -68,6 +68,10 @@ impl HummockManager {
         &self,
         epoch_watermark: HummockEpoch,
     ) -> Result<()> {
+        let _timer = self
+            .metrics
+            .time_travel_vacuum_metadata_latency
+            .start_timer();
         let min_pinned_version_id = self.context_info.read().await.min_pinned_version_id();
         let sql_store = self.env.meta_store_ref();
         let txn = sql_store.conn.begin().await?;
@@ -84,10 +88,24 @@ impl HummockManager {
             txn.commit().await?;
             return Ok(());
         };
-        let watermark_version_id = std::cmp::min(
+        let mut watermark_version_id = std::cmp::min(
             version_watermark.version_id,
             min_pinned_version_id.to_u64().try_into().unwrap(),
         );
+        if let Some(max_version_count) = self.env.opts.time_travel_vacuum_max_version_count
+            && let Some(earliest_version_id) = hummock_time_travel_version::Entity::find()
+                .select_only()
+                .column(hummock_time_travel_version::Column::VersionId)
+                .order_by_asc(hummock_time_travel_version::Column::VersionId)
+                .into_tuple::<HummockVersionId>()
+                .one(&txn)
+                .await?
+        {
+            watermark_version_id = std::cmp::min(
+                watermark_version_id,
+                earliest_version_id.saturating_add(max_version_count as i64),
+            );
+        }
         let res = hummock_epoch_to_version::Entity::delete_many()
             .filter(
                 hummock_epoch_to_version::Column::Epoch
@@ -95,9 +113,9 @@ impl HummockManager {
             )
             .exec(&txn)
             .await?;
-        tracing::debug!(
+        tracing::info!(
             epoch_watermark,
-            "delete {} rows from hummock_epoch_to_version",
+            "Delete {} rows from hummock_epoch_to_version.",
             res.rows_affected
         );
         let latest_valid_version = hummock_time_travel_version::Entity::find()
@@ -250,10 +268,10 @@ impl HummockManager {
             )
             .exec(&txn)
             .await?;
-        tracing::debug!(
-            epoch_watermark_version_id = ?watermark_version_id,
-            ?latest_valid_version_id,
-            "delete {} rows from hummock_time_travel_version",
+        tracing::info!(
+            watermark_version_id,
+            latest_valid_version_id = latest_valid_version_id.to_u64(),
+            "Deleted {} rows from hummock_time_travel_version.",
             res.rows_affected
         );
 
@@ -263,10 +281,10 @@ impl HummockManager {
             )
             .exec(&txn)
             .await?;
-        tracing::debug!(
-            epoch_watermark_version_id = ?watermark_version_id,
-            ?latest_valid_version_id,
-            "delete {} rows from hummock_time_travel_delta",
+        tracing::info!(
+            watermark_version_id,
+            latest_valid_version_id = latest_valid_version_id.to_u64(),
+            "Deleted {} rows from hummock_time_travel_delta.",
             res.rows_affected
         );
 
@@ -528,6 +546,10 @@ impl HummockManager {
         skip_sst_ids: &HashSet<HummockSstableId>,
         tables_to_commit: impl Iterator<Item = (&TableId, &CompactionGroupId, u64)>,
     ) -> Result<Option<HashSet<HummockSstableId>>> {
+        let _timer = self
+            .metrics
+            .time_travel_write_metadata_latency
+            .start_timer();
         if self
             .env
             .system_params_reader()
