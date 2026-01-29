@@ -75,6 +75,7 @@ use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_common::must_match;
 use risingwave_connector::sink::log_store::{ChunkId, LogStoreResult};
 use risingwave_storage::StateStore;
+use risingwave_storage::store::timeout_auto_rebuild::TimeoutAutoRebuildIter;
 use risingwave_storage::store::{
     LocalStateStore, NewLocalOptions, OpConsistencyLevel, StateStoreRead,
 };
@@ -84,7 +85,6 @@ use tokio_stream::adapters::Peekable;
 
 use crate::common::log_store_impl::kv_log_store::buffer::LogStoreBufferItem;
 use crate::common::log_store_impl::kv_log_store::reader::LogStoreReadStateStreamRangeStart;
-use crate::common::log_store_impl::kv_log_store::reader::timeout_auto_rebuild::TimeoutAutoRebuildIter;
 use crate::common::log_store_impl::kv_log_store::serde::{
     KvLogStoreItem, LogStoreItemMergeStream, LogStoreRowSerde,
 };

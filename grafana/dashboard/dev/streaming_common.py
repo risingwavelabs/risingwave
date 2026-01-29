@@ -120,3 +120,14 @@ def _actor_busy_rate_target(panels: Panels, rate_interval: str):
         "fragment {{fragment_id}}",
     )
 
+def relabel_materialized_view_id_as_id(expr: str) -> str:
+    """Relabel materialized_view_id -> id for relation-level tables."""
+    return f"label_replace(({expr}), 'id', '$1', 'materialized_view_id', '(.+)')"
+
+def relabel_fragment_id_as_id(expr: str) -> str:
+    """Relabel fragment_id -> id for fragment-level tables."""
+    return f"label_replace(({expr}), 'id', '$1', 'fragment_id', '(.+)')"
+
+def topk_percent_expr(expr: str, k: int = 10) -> str:
+    """Return top-k values as percent (0-100)."""
+    return f"topk({k}, ({expr}) * 100)"
