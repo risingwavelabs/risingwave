@@ -1068,6 +1068,7 @@ mod tests {
             StreamingJobExtraInfo {
                 timezone: Some("UTC".to_owned()),
                 config_override: "cfg".into(),
+                adaptive_parallelism_strategy: None,
                 job_definition: "definition".to_owned(),
                 backfill_orders: None,
             },

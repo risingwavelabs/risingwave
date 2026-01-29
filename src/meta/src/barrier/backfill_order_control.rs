@@ -245,10 +245,15 @@ impl BackfillOrderState {
                         "missing dependency"
                     );
                     if child.remaining_dependencies.is_empty() {
-                        tracing::debug!(fragment_id = ?child_id, "schedule next backfill node");
+                        let should_schedule = !child.remaining_actors.is_empty();
+                        if should_schedule {
+                            tracing::debug!(fragment_id = ?child_id, "schedule next backfill node");
+                        }
                         self.current_backfill_nodes
                             .insert(child.fragment_id, child.clone());
-                        newly_scheduled.push(child.fragment_id);
+                        if should_schedule {
+                            newly_scheduled.push(child.fragment_id);
+                        }
                         child.remaining_actors.is_empty()
                     } else {
                         false

@@ -1112,6 +1112,14 @@ impl MetaClient {
         Ok(resp.tables)
     }
 
+    pub async fn risectl_resume_backfill(
+        &self,
+        request: RisectlResumeBackfillRequest,
+    ) -> Result<()> {
+        self.inner.risectl_resume_backfill(request).await?;
+        Ok(())
+    }
+
     pub async fn flush(&self, database_id: DatabaseId) -> Result<HummockVersionId> {
         let request = FlushRequest { database_id };
         let resp = self.inner.flush(request).await?;
@@ -2601,6 +2609,7 @@ macro_rules! for_all_meta_rpc {
             ,{ ddl_client, replace_job_plan, ReplaceJobPlanRequest, ReplaceJobPlanResponse }
             ,{ ddl_client, alter_source, AlterSourceRequest, AlterSourceResponse }
             ,{ ddl_client, risectl_list_state_tables, RisectlListStateTablesRequest, RisectlListStateTablesResponse }
+            ,{ ddl_client, risectl_resume_backfill, RisectlResumeBackfillRequest, RisectlResumeBackfillResponse }
             ,{ ddl_client, get_ddl_progress, GetDdlProgressRequest, GetDdlProgressResponse }
             ,{ ddl_client, create_connection, CreateConnectionRequest, CreateConnectionResponse }
             ,{ ddl_client, list_connections, ListConnectionsRequest, ListConnectionsResponse }
