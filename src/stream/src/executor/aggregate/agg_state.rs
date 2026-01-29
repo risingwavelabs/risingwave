@@ -19,7 +19,9 @@ use risingwave_common::must_match;
 use risingwave_common::types::Datum;
 use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_common_estimate_size::EstimateSize;
-use risingwave_expr::aggregate::{AggCall, AggregateState, BoxedAggregateFunction};
+use risingwave_expr::aggregate::{
+    AggCall, AggType, AggregateState, BoxedAggregateFunction, PbAggKind,
+};
 use risingwave_pb::stream_plan::PbAggNodeVersion;
 use risingwave_storage::StateStore;
 
@@ -111,8 +113,18 @@ impl AggState {
     ) -> StreamExecutorResult<()> {
         match self {
             Self::Value(state) => {
-                let chunk = chunk.project_with_vis(call.args.val_indices(), visibility);
-                func.update(state, &chunk).await?;
+                // For append-only `first_value`/`last_value` value-state, the aggregate needs to
+                // inspect ORDER BY columns and stream key columns. Pass the unprojected chunk.
+                if matches!(
+                    call.agg_type,
+                    AggType::Builtin(PbAggKind::FirstValue | PbAggKind::LastValue)
+                ) {
+                    let chunk = chunk.clone_with_vis(visibility);
+                    func.update(state, &chunk).await?;
+                } else {
+                    let chunk = chunk.project_with_vis(call.args.val_indices(), visibility);
+                    func.update(state, &chunk).await?;
+                }
                 Ok(())
             }
             Self::MaterializedInput(state) => {

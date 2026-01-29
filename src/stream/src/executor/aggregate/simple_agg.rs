@@ -17,13 +17,16 @@ use std::collections::HashMap;
 use risingwave_common::array::stream_record::Record;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_expr::aggregate::{AggCall, BoxedAggregateFunction, build_retractable};
+use risingwave_expr::aggregate::{AggCall, BoxedAggregateFunction};
 use risingwave_pb::stream_plan::PbAggNodeVersion;
 
 use super::agg_group::{AggGroup, AlwaysOutput};
 use super::agg_state::AggStateStorage;
 use super::distinct::DistinctDeduplicater;
-use super::{AggExecutorArgs, SimpleAggExecutorExtraArgs, agg_call_filter_res, iter_table_storage};
+use super::{
+    AggExecutorArgs, SimpleAggExecutorExtraArgs, agg_call_filter_res, build_streaming_agg_funcs,
+    iter_table_storage,
+};
 use crate::executor::prelude::*;
 
 /// `SimpleAggExecutor` is the aggregation operator for streaming system.
@@ -117,6 +120,12 @@ impl<S: StateStore> Execute for SimpleAggExecutor<S> {
 impl<S: StateStore> SimpleAggExecutor<S> {
     pub fn new(args: AggExecutorArgs<S, SimpleAggExecutorExtraArgs>) -> StreamResult<Self> {
         let input_info = args.input.info().clone();
+        let agg_funcs = build_streaming_agg_funcs(
+            &args.agg_calls,
+            &args.storages,
+            &input_info.stream_key,
+            &input_info.schema,
+        )?;
         Ok(Self {
             input: args.input,
             inner: ExecutorInner {
@@ -125,7 +134,7 @@ impl<S: StateStore> SimpleAggExecutor<S> {
                 info: args.info,
                 input_stream_key: input_info.stream_key,
                 input_schema: input_info.schema,
-                agg_funcs: args.agg_calls.iter().map(build_retractable).try_collect()?,
+                agg_funcs,
                 agg_calls: args.agg_calls,
                 row_count_index: args.row_count_index,
                 storages: args.storages,
