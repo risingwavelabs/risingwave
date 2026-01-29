@@ -17,7 +17,7 @@ use std::ops::Deref;
 
 use itertools::{EitherOrBoth, Itertools};
 use risingwave_common::bail;
-use risingwave_common::catalog::{Field, TableId};
+use risingwave_common::catalog::{DEFAULT_SCHEMA_NAME, Field, TableId};
 use risingwave_sqlparser::ast::{
     AsOf, Expr as ParserExpr, FunctionArg, FunctionArgExpr, Ident, ObjectName, TableAlias,
     TableFactor,
@@ -219,7 +219,10 @@ impl Binder {
 
         let name = identifiers.pop().unwrap().real_value();
 
-        let schema_name = identifiers.pop().map(|ident| ident.real_value());
+        let schema_name = identifiers
+            .pop()
+            .map(|ident| ident.real_value())
+            .unwrap_or_else(|| DEFAULT_SCHEMA_NAME.to_owned());
         let database_name = identifiers.pop().map(|ident| ident.real_value());
 
         if let Some(database_name) = database_name
@@ -231,7 +234,7 @@ impl Binder {
             ));
         }
 
-        Ok((schema_name, name))
+        Ok((Some(schema_name), name))
     }
 
     /// check whether the name is a cross-database reference
