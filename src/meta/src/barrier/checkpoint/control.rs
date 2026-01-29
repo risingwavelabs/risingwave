@@ -167,6 +167,12 @@ impl CheckpointControl {
         })
     }
 
+    pub(crate) fn may_have_snapshot_backfilling_jobs(&self) -> bool {
+        self.databases
+            .values()
+            .any(|database| database.may_have_snapshot_backfilling_jobs())
+    }
+
     /// return Some(failed `database_id` -> `err`)
     pub(crate) fn handle_new_barrier(
         &mut self,
@@ -268,7 +274,8 @@ impl CheckpointControl {
                     | Command::Refresh { .. }
                     | Command::ListFinish { .. }
                     | Command::LoadFinish { .. }
-                    | Command::ResetSource { .. } => {
+                    | Command::ResetSource { .. }
+                    | Command::ResumeBackfill { .. } => {
                         if cfg!(debug_assertions) {
                             panic!(
                                 "new database graph info can only be created for normal creating streaming job, but get command: {} {:?}",
@@ -526,6 +533,12 @@ impl DatabaseCheckpointControlStatus {
             DatabaseCheckpointControlStatus::Running(state) => Some(state),
             DatabaseCheckpointControlStatus::Recovering(_) => None,
         }
+    }
+
+    fn may_have_snapshot_backfilling_jobs(&self) -> bool {
+        self.running_state()
+            .map(|database| !database.creating_streaming_job_controls.is_empty())
+            .unwrap_or(true) // there can be snapshot backfilling jobs when the database is recovering.
     }
 
     fn database_state(
