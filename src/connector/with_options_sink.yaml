@@ -665,10 +665,10 @@ IcebergConfig:
     required: false
     default: 'IcebergWriteMode :: MergeOnRead'
   - name: format_version
-    field_type: u8
+    field_type: FormatVersion
     comments: Iceberg format version for table creation.
     required: false
-    default: '2'
+    default: 'FormatVersion :: V2'
   - name: snapshot_expiration_max_age_millis
     field_type: i64
     comments: |-
