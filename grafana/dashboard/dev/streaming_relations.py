@@ -129,7 +129,7 @@ def _(outer_panels: Panels):
                             f"/ 1000000000), "
                             f"'id', '$1', 'materialized_view_id', '(.*)'"
                             f") * on(id) group_left(name, type) {metric('relation_info')}",
-                            "relation {{name}} (id={{id}} type={{type}})",
+                            "{{type}} {{name}} id {{id}}",
                         )
                     ],
                 ),
