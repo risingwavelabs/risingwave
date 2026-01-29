@@ -102,10 +102,21 @@ SELECT COUNT(*) FROM mv_test;
 9
 
 # Test 3: Inject offsets (UNSAFE)
-# Use Python script only for getting Kafka offsets (complex operation)
+# This test verifies offset injection by injecting a backward offset,
+# which should cause duplicate message consumption.
+
+# Record current count before injection
+query I
+SELECT COUNT(*) FROM mv_test;
+----
+9
+
+# Get Kafka offsets with skip_last=4 to go back 4 messages
+# This will inject offset = high_watermark - 4, causing re-consumption of last 4 messages
 system ok
 python3 e2e_test/source_inline/kafka/alter/get_kafka_offsets.py \
     --topic test_safe_update \
+    --skip-last 4 \
     --output /tmp/offsets.json
 
 # Call risectl to inject offsets
@@ -123,15 +134,33 @@ echo "Offsets: $OFFSETS" && \
     --source-id $SOURCE_ID \
     --offsets "$OFFSETS"
 
-# Produce more data - should be consumed based on new offsets
+# After offset injection with backward offset, the source should re-read 4 messages
+# This will result in duplicates, so count should increase by 4
+# Wait for the re-consumption to happen
+sleep 3s
+
+# Verify count increased due to duplicate consumption from backward offset injection
+# Original: 9, re-read 4 messages = 13
+query I retry 5 backoff 1s
+SELECT COUNT(*) FROM mv_test;
+----
+13
+
+# Produce new data - should be consumed normally
 system ok
 cat <<EOF | rpk topic produce 'test_safe_update' -f "%v\n"
 {"id": 10, "data": "after_inject"}
 {"id": 11, "data": "after_inject"}
 EOF
 
-# Verify at least one message with "after_inject" was consumed
+# Verify new messages are consumed (total should be 13 + 2 = 15)
 query I retry 5 backoff 1s
+SELECT COUNT(*) FROM mv_test;
+----
+15
+
+# Verify the "after_inject" messages were consumed
+query I
 SELECT COUNT(*) FROM mv_test WHERE data = 'after_inject';
 ----
 2
