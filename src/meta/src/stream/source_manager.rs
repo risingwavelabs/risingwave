@@ -512,6 +512,54 @@ impl SourceManager {
             }
         }
     }
+
+    /// Reset source split assignments by clearing the cached split state
+    /// and triggering re-discovery. This is an UNSAFE operation that may
+    /// cause data duplication or loss depending on the connector.
+    pub async fn reset_source_splits(&self, source_id: SourceId) -> MetaResult<()> {
+        tracing::warn!(
+            source_id = source_id.as_raw_id(),
+            "UNSAFE: Resetting source splits - clearing cached state and triggering re-discovery"
+        );
+
+        let core = self.core.lock().await;
+        if let Some(handle) = core.managed_sources.get(&source_id) {
+            // Clear the cached splits to force re-discovery
+            {
+                let mut splits_guard = handle.splits.lock().await;
+                tracing::info!(
+                    source_id = source_id.as_raw_id(),
+                    prev_splits = ?splits_guard.splits.as_ref().map(|s| s.len()),
+                    "Clearing cached splits"
+                );
+                splits_guard.splits = None;
+            }
+
+            // Force a tick to re-discover splits
+            tracing::info!(
+                source_id = source_id.as_raw_id(),
+                "Triggering split re-discovery via force_tick"
+            );
+            handle.force_tick().await.with_context(|| {
+                format!(
+                    "failed to force tick for source {} after split reset",
+                    source_id.as_raw_id()
+                )
+            })?;
+
+            tracing::info!(
+                source_id = source_id.as_raw_id(),
+                "Split reset completed - new splits will be assigned on next tick"
+            );
+            Ok(())
+        } else {
+            Err(anyhow::anyhow!(
+                "source {} not found in source manager",
+                source_id.as_raw_id()
+            )
+            .into())
+        }
+    }
 }
 
 #[derive(strum::Display, Debug)]
