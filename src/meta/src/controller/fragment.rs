@@ -1323,24 +1323,20 @@ impl CatalogController {
             let mut internal_table_id: Option<TableId> = None;
 
             visit_stream_node_body(&stream_node, |body| {
-                if let NodeBody::Sink(node) = body {
-                    if node.log_store_type == SinkLogStoreType::KvLogStore as i32 {
-                        if let Some(table) = &node.table {
+                if let NodeBody::Sink(node) = body
+                    && node.log_store_type == SinkLogStoreType::KvLogStore as i32
+                        && let Some(table) = &node.table {
                             internal_table_id = Some(TableId::new(table.id.as_raw_id()));
                         }
-                    }
-                }
             });
 
-            if let Some(table_id) = internal_table_id {
-                if let Some(existing) = mapping.insert(sink_id, table_id) {
-                    if existing != table_id {
+            if let Some(table_id) = internal_table_id
+                && let Some(existing) = mapping.insert(sink_id, table_id)
+                    && existing != table_id {
                         tracing::warn!(
                             "sink {sink_id:?} has multiple log store tables: {existing:?} vs {table_id:?}"
                         );
                     }
-                }
-            }
         }
 
         Ok(mapping.into_iter().collect())
