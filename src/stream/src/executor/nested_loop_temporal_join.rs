@@ -20,6 +20,7 @@ use futures_async_stream::try_stream;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::array::stream_chunk_builder::StreamChunkBuilder;
 use risingwave_common::bitmap::BitmapBuilder;
+use risingwave_common::ensure;
 use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_expr::expr::NonStrictExpression;
@@ -49,6 +50,7 @@ pub struct NestedLoopTemporalJoinExecutor<S: StateStore, const T: JoinTypePrimit
     // TODO: update metrics
     #[allow(dead_code)]
     metrics: Arc<StreamingMetrics>,
+    snapshot_epoch: Option<HummockEpoch>,
 }
 
 struct TemporalSide<S: StateStore> {
@@ -63,7 +65,7 @@ async fn phase1_handle_chunk<S: StateStore, E: phase1::Phase1Evaluation>(
     chunk_size: usize,
     right_size: usize,
     full_schema: Vec<DataType>,
-    epoch: HummockEpoch,
+    read_epoch: HummockReadEpoch,
     right_table: &mut TemporalSide<S>,
     chunk: StreamChunk,
 ) {
@@ -75,7 +77,7 @@ async fn phase1_handle_chunk<S: StateStore, E: phase1::Phase1Evaluation>(
         for right_row in right_table
             .source
             .batch_iter(
-                HummockReadEpoch::NoWait(epoch),
+                read_epoch,
                 false,
                 PrefetchOptions::prefetch_for_large_range_scan(),
             )
@@ -108,6 +110,7 @@ impl<S: StateStore, const T: JoinTypePrimitive> NestedLoopTemporalJoinExecutor<S
         output_indices: Vec<usize>,
         metrics: Arc<StreamingMetrics>,
         chunk_size: usize,
+        snapshot_epoch: Option<HummockEpoch>,
     ) -> Self {
         let _metrics_info = MetricsInfo::new(
             metrics.clone(),
@@ -126,6 +129,7 @@ impl<S: StateStore, const T: JoinTypePrimitive> NestedLoopTemporalJoinExecutor<S
             output_indices,
             chunk_size,
             metrics,
+            snapshot_epoch,
         }
     }
 
@@ -160,6 +164,13 @@ impl<S: StateStore, const T: JoinTypePrimitive> NestedLoopTemporalJoinExecutor<S
                 }
                 InternalMessage::Chunk(chunk) => {
                     let epoch = prev_epoch.expect("Chunk data should come after some barrier.");
+                    let read_epoch = if let Some(snapshot_epoch) = self.snapshot_epoch
+                        && epoch < snapshot_epoch
+                    {
+                        HummockReadEpoch::Committed(snapshot_epoch)
+                    } else {
+                        HummockReadEpoch::NoWait(epoch)
+                    };
 
                     let full_schema = full_schema.clone();
 
@@ -168,7 +179,7 @@ impl<S: StateStore, const T: JoinTypePrimitive> NestedLoopTemporalJoinExecutor<S
                             self.chunk_size,
                             right_size,
                             full_schema,
-                            epoch,
+                            read_epoch,
                             &mut self.right_table,
                             chunk,
                         );
@@ -195,7 +206,7 @@ impl<S: StateStore, const T: JoinTypePrimitive> NestedLoopTemporalJoinExecutor<S
                             self.chunk_size,
                             right_size,
                             full_schema,
-                            epoch,
+                            read_epoch,
                             &mut self.right_table,
                             chunk,
                         );
@@ -242,7 +253,7 @@ impl<S: StateStore, const T: JoinTypePrimitive> NestedLoopTemporalJoinExecutor<S
                             self.chunk_size,
                             right_size,
                             full_schema,
-                            epoch,
+                            read_epoch,
                             &mut self.right_table,
                             chunk,
                         );

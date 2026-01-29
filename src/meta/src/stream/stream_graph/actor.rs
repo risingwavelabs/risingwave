@@ -139,9 +139,7 @@ impl FragmentActorBuilder {
                         downstream_fragment_id: self.fragment_id,
                     }];
 
-                let is_shuffled_backfill = stream_scan.stream_scan_type
-                    == StreamScanType::ArrangementBackfill as i32
-                    || stream_scan.stream_scan_type == StreamScanType::SnapshotBackfill as i32;
+                let is_shuffled_backfill = stream_scan.stream_scan_type().is_shuffled_backfill();
                 if !is_shuffled_backfill {
                     assert!(upstream_no_shuffle_actor.is_some());
                 }

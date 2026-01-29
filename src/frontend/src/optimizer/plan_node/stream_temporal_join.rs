@@ -276,6 +276,7 @@ impl TryToStreamPb for StreamTemporalJoin {
                 Some(memo_table.to_internal_table_prost())
             },
             is_nested_loop: self.is_nested_loop,
+            snapshot_backfill_epoch: None,
         })))
     }
 }

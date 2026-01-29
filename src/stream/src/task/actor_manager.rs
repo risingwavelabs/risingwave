@@ -108,6 +108,7 @@ impl StreamActorManager {
         }
     }
 
+    #[expect(clippy::too_many_arguments)]
     async fn create_snapshot_backfill_node(
         &self,
         stream_node: &StreamNode,
@@ -116,6 +117,7 @@ impl StreamActorManager {
         vnode_bitmap: Option<Bitmap>,
         local_barrier_manager: &LocalBarrierManager,
         state_store: impl StateStore,
+        skip_snapshot_read: bool,
     ) -> StreamResult<Executor> {
         let [upstream_node, _]: &[_; 2] = stream_node.input.as_slice().try_into().unwrap();
         let chunk_size = actor_context.config.developer.chunk_size;
@@ -179,6 +181,7 @@ impl StreamActorManager {
             barrier_rx,
             self.streaming_metrics.clone(),
             node.snapshot_backfill_epoch,
+            skip_snapshot_read,
         )
         .boxed();
 
@@ -234,8 +237,11 @@ impl StreamActorManager {
         let is_stateful = is_stateful_executor(node);
 
         let executor = if let NodeBody::StreamScan(stream_scan) = node.get_node_body().unwrap()
-            && let Ok(StreamScanType::SnapshotBackfill) = stream_scan.get_stream_scan_type()
-        {
+            && let Ok(scan_type) = stream_scan.get_stream_scan_type()
+            && matches!(
+                scan_type,
+                StreamScanType::SnapshotBackfill | StreamScanType::SnapshotBackfillNoUpstream
+            ) {
             dispatch_state_store!(env.state_store(), store, {
                 self.create_snapshot_backfill_node(
                     node,
@@ -244,6 +250,7 @@ impl StreamActorManager {
                     vnode_bitmap,
                     local_barrier_manager,
                     store,
+                    scan_type == StreamScanType::SnapshotBackfillNoUpstream,
                 )
                 .await
             })?

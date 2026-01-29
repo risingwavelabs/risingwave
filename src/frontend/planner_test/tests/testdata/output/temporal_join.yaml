@@ -311,7 +311,7 @@
     create table version(id2 int, a2 int, b2 int, c2 int, primary key (id2));
     with version as (select * from version) select id1, a1, id2, a2 from stream left join version FOR SYSTEM_TIME AS OF PROCTIME() on id1= id2;
   binder_error: 'Bind error: Right table of a temporal join should not be a CTE. It should be a table, index, or materialized view'
-- name: forbid temporal join with snapshot backfill
+- name: temporal join works with snapshot backfill
   sql: |
     set streaming_use_snapshot_backfill = true;
     create table stream(id1 int, a1 int, b1 int, v1 timestamp with time zone, watermark for v1 as v1 - INTERVAL '10' SECOND) APPEND ONLY;
@@ -322,6 +322,6 @@
     └─StreamExchange { dist: HashShard(stream.id1, stream._row_id) }
       └─StreamTemporalJoin { type: LeftOuter, append_only: true, predicate: stream.id1 = version.id2, nested_loop: false, output_watermarks: [[stream.v1]], output: [stream.id1, stream.a1, version.id2, stream.v1, stream._row_id] }
         ├─StreamExchange { dist: HashShard(stream.id1) }
-        │ └─StreamTableScan { table: stream, columns: [stream.id1, stream.a1, stream.v1, stream._row_id], stream_scan_type: ArrangementBackfill, stream_key: [stream._row_id], pk: [_row_id], dist: UpstreamHashShard(stream._row_id) }
+        │ └─StreamTableScan { table: stream, columns: [stream.id1, stream.a1, stream.v1, stream._row_id], stream_scan_type: SnapshotBackfill, stream_key: [stream._row_id], pk: [_row_id], dist: UpstreamHashShard(stream._row_id) }
         └─StreamExchange [no_shuffle] { dist: UpstreamHashShard(version.id2) }
-          └─StreamTableScan { table: version, columns: [version.id2], stream_scan_type: UpstreamOnly, stream_key: [version.id2], pk: [id2], dist: UpstreamHashShard(version.id2) }
+          └─StreamTableScan { table: version, columns: [version.id2], stream_scan_type: SnapshotBackfillNoUpstream, stream_key: [version.id2], pk: [id2], dist: UpstreamHashShard(version.id2) }

@@ -331,3 +331,178 @@ async fn test_recovery_cancels_foreground_ddl() -> Result<()> {
     }
     Ok(())
 }
+
+#[tokio::test]
+async fn test_snapshot_backfill_temporal_join_no_upstream() -> Result<()> {
+    let mut cluster = Cluster::start(Configuration::for_backfill()).await?;
+    let mut session = cluster.start_session();
+
+    for parallelism in [1, 2] {
+        session
+            .run(format!("SET STREAMING_PARALLELISM={parallelism};"))
+            .await?;
+        session
+            .run("SET STREAMING_USE_SNAPSHOT_BACKFILL=true;")
+            .await?;
+        session
+            .run(
+                "CREATE TABLE snapshot_stream (
+                    id int,
+                    payload int,
+                    ts timestamp with time zone,
+                    WATERMARK FOR ts AS ts - INTERVAL '1' SECOND,
+                    PRIMARY KEY (id)
+                ) APPEND ONLY;",
+            )
+            .await?;
+        session
+            .run("CREATE TABLE snapshot_lookup (id int PRIMARY KEY, info int);")
+            .await?;
+        session
+            .run("INSERT INTO snapshot_lookup VALUES (1, 10), (2, 20);")
+            .await?;
+        session
+            .run("INSERT INTO snapshot_stream VALUES (1, 100, '2024-01-01 00:00:00+00');")
+            .await?;
+        session.run("FLUSH;").await?;
+
+        session
+            .run(
+                "CREATE MATERIALIZED VIEW snapshot_temporal_mv AS
+                SELECT s.id, s.payload, l.info
+                FROM snapshot_stream AS s
+                LEFT JOIN snapshot_lookup FOR SYSTEM_TIME AS OF PROCTIME() AS l
+                ON s.id = l.id;",
+            )
+            .await?;
+
+        session
+            .run("INSERT INTO snapshot_stream VALUES (2, 200, '2024-01-02 00:00:00+00');")
+            .await?;
+        session.run("FLUSH;").await?;
+
+        let result = session
+            .run("SELECT id, payload, info FROM snapshot_temporal_mv ORDER BY id;")
+            .await?;
+        assert_eq!(
+            result.trim().split_whitespace().collect::<Vec<_>>(),
+            vec!["1", "100", "10", "2", "200", "20"]
+        );
+
+        session
+            .run("DROP MATERIALIZED VIEW snapshot_temporal_mv;")
+            .await?;
+        session.run("DROP TABLE snapshot_stream;").await?;
+        session.run("DROP TABLE snapshot_lookup;").await?;
+    }
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_snapshot_backfill_temporal_join_continuous_workload() -> Result<()> {
+    let mut cluster = Cluster::start(Configuration::for_backfill()).await?;
+    let mut session = cluster.start_session();
+
+    session.run("SET STREAMING_PARALLELISM=2;").await?;
+    session
+        .run("SET STREAMING_USE_SNAPSHOT_BACKFILL=true;")
+        .await?;
+    session.run("SET BACKGROUND_DDL=true;").await?;
+
+    session
+        .run(
+            "CREATE TABLE upstream_source (\n                id int,\n                payload int,\n                ts timestamp with time zone,\n                PRIMARY KEY (id)\n            ) APPEND ONLY;",
+        )
+        .await?;
+    session
+        .run(
+            "INSERT INTO upstream_source\n             SELECT v, v * 100, TIMESTAMP '2024-01-01 00:00:00+00' + (v || ' days')::interval\n             FROM generate_series(1, 30) AS v;",
+        )
+        .await?;
+
+    session
+        .run(
+            "CREATE TABLE snapshot_stream (\n                id int,\n                payload int,\n                ts timestamp with time zone,\n                PRIMARY KEY (id)\n            ) APPEND ONLY;",
+        )
+        .await?;
+
+    session.run("SET BACKFILL_RATE_LIMIT=1;").await?;
+    session
+        .run(
+            "CREATE SINK upstream_to_snapshot into snapshot_stream AS\n                SELECT id, payload, ts FROM upstream_source;",
+        )
+        .await?;
+    // wait for 30 rows
+    loop {
+        let row_count: usize = session.run("select count(*) from snapshot_stream").await?.parse().unwrap();
+        assert_ne!(row_count, 30);
+        assert!(row_count < 30);
+        if row_count > 10 {
+            break;
+        }
+    }
+    session.run("SET BACKFILL_RATE_LIMIT=default;").await?;
+
+    session
+        .run("CREATE TABLE snapshot_lookup (id int PRIMARY KEY, info int);")
+        .await?;
+    session
+        .run(
+            "INSERT INTO snapshot_lookup\n             SELECT v, v * 10 FROM generate_series(1, 30) AS v;",
+        )
+        .await?;
+
+    session
+        .run(
+            "flush;",
+        )
+        .await?;
+
+    session
+        .run(
+            "CREATE MATERIALIZED VIEW snapshot_temporal_mv AS\n            SELECT s.id, s.payload, l.info\n            FROM snapshot_stream AS s\n            LEFT JOIN snapshot_lookup FOR SYSTEM_TIME AS OF PROCTIME() AS l\n            ON s.id = l.id;",
+        )
+        .await?;
+
+    let ddl_progress = session
+        .run(
+            "SELECT backfill_type FROM rw_ddl_progress order by ddl_id desc LIMIT 1;",
+        )
+        .await?;
+    assert_eq!(ddl_progress.trim(), "SNAPSHOT_BACKFILL");
+
+    session
+        .run(
+            "wait;",
+        )
+        .await?;
+
+    for _ in 0..100 {
+        let count = session
+            .run("SELECT COUNT(*) FROM snapshot_temporal_mv;")
+            .await?;
+        if count.trim() == "30" {
+            break;
+        }
+        sleep(Duration::from_millis(50)).await;
+    }
+
+    let result = session
+        .run("SELECT id, payload, info FROM snapshot_temporal_mv ORDER BY id;")
+        .await?;
+    let expected_rows = (1..=30)
+        .map(|v| format!("{} {} {}", v, v * 100, v * 10))
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert_eq!(result.trim(), expected_rows);
+
+    session.run("DROP SINK upstream_to_snapshot;").await?;
+    session
+        .run("DROP MATERIALIZED VIEW snapshot_temporal_mv;")
+        .await?;
+    session.run("DROP TABLE upstream_source;").await?;
+    session.run("DROP TABLE snapshot_stream;").await?;
+    session.run("DROP TABLE snapshot_lookup;").await?;
+    Ok(())
+}
