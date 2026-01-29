@@ -30,7 +30,7 @@ use risingwave_hummock_sdk::key::{
     TableKey, TableKeyRange, is_empty_key_range, vnode, vnode_range,
 };
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
-use risingwave_hummock_sdk::table_watermark::{TableWatermarksIndex, WatermarkSerdeType};
+use risingwave_hummock_sdk::table_watermark::TableWatermarksIndex;
 use risingwave_hummock_sdk::version::{HummockVersion, LocalHummockVersion};
 use risingwave_hummock_sdk::{HummockRawObjectId, HummockReadEpoch, SyncResult};
 use risingwave_rpc_client::HummockMetaClient;
