@@ -272,8 +272,9 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                         source_id = %core.source_id,
                         source_name = %core.source_name,
                         fragment_id = %self.actor_ctx.fragment_id,
+                        reading_file = ?reading_file,
                         error = %e.as_report(),
-                        "Fetch Error"
+                        "Fetch Error, aborting actor"
                     );
                     GLOBAL_ERROR_METRICS.user_source_error.report([
                         "File source fetch error".to_owned(),
@@ -281,8 +282,10 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                         core.source_name.clone(),
                         self.actor_ctx.fragment_id.to_string(),
                     ]);
-                    splits_on_fetch = 0;
-                    reading_file = None;
+                    // Do not swallow the error and retry infinitely on each barrier.
+                    // Propagate the error to fail the actor, so the job enters failed/suspended state
+                    // with a clear error message.
+                    return Err(e);
                 }
                 Ok(msg) => {
                     match msg {
