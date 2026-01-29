@@ -128,7 +128,7 @@ impl ToStream for LogicalLimit {
         // are returned by `LIMIT/OFFSET`. We prefer to use the first visible column as a stable
         // ordering if it exists; otherwise, fall back to an empty order and rely on the input
         // stream key (e.g. `_row_id`/PK) as the tie-breaker.
-        let order = if self.input().schema().len() > 0 {
+        let order = if !self.input().schema().is_empty() {
             Order::new(vec![ColumnOrder::new(0, OrderType::ascending())])
         } else {
             Order::any()
