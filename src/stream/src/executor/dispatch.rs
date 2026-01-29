@@ -955,7 +955,6 @@ impl Dispatcher for HashDataDispatcher {
         let mut vis_maps = repeat_with(|| BitmapBuilder::with_capacity(chunk.capacity()))
             .take(num_outputs)
             .collect_vec();
-        let mut last_update_delete_row_idx = None;
         let mut new_ops: Vec<Op> = Vec::with_capacity(chunk.capacity());
 
         for (row_idx, ((vnode, &op), visible)) in vnodes
@@ -975,46 +974,13 @@ impl Dispatcher for HashDataDispatcher {
                 continue;
             }
 
-            // The `Update` message, noted by an `UpdateDelete` and a successive `UpdateInsert`,
-            // need to be rewritten to common `Delete` and `Insert` if the distribution key
-            // columns are changed, since the distribution key will eventually be part of the
-            // stream key of the downstream executor, and there's an invariant that stream key
-            // must be the same for rows within an `Update` pair.
-            if op == Op::UpdateDelete {
-                last_update_delete_row_idx = Some(row_idx);
-            } else if op == Op::UpdateInsert {
-                let delete_row_idx = last_update_delete_row_idx
-                    .take()
-                    .expect("missing U- before U+");
-                if delete_row_idx + 1 != row_idx {
-                    let middle_ops = (delete_row_idx + 1..row_idx)
-                        .map(|idx| (idx, chunk.ops()[idx], chunk.visibility().is_set(idx)))
-                        .collect::<Vec<_>>();
-                    tracing::warn!(
-                        delete_row_idx,
-                        row_idx,
-                        gap = row_idx.saturating_sub(delete_row_idx + 1),
-                        middle_ops = ?middle_ops,
-                        "U- and U+ are not adjacent"
-                    );
-                }
-
-                // Check if any distribution key column value changed
-                let dist_key_changed = chunk.row_at(delete_row_idx).1.project(&self.keys)
-                    != chunk.row_at(row_idx).1.project(&self.keys);
-
-                if dist_key_changed {
-                    new_ops.push(Op::Delete);
-                    new_ops.push(Op::Insert);
-                } else {
-                    new_ops.push(Op::UpdateDelete);
-                    new_ops.push(Op::UpdateInsert);
-                }
-            } else {
-                new_ops.push(op);
+            // Always rewrite UpdateDelete/UpdateInsert to Delete/Insert.
+            match op {
+                Op::UpdateDelete => new_ops.push(Op::Delete),
+                Op::UpdateInsert => new_ops.push(Op::Insert),
+                _ => new_ops.push(op),
             }
         }
-        assert!(last_update_delete_row_idx.is_none(), "missing U+ after U-");
 
         let ops = new_ops;
         // Apply output mapping after calculating the vnode and new visibility maps.
