@@ -701,7 +701,7 @@ impl CatalogController {
         let inner = self.inner.read().await;
         let ids: Vec<_> = ids.iter().cloned().collect();
 
-        let tables: Vec<(ObjectId, String, String, String)> = Object::find()
+        let tables: Vec<(ObjectId, String, String, String, TableType)> = Object::find()
             .select_only()
             .join(JoinType::InnerJoin, object::Relation::Table.def())
             .join(JoinType::InnerJoin, object::Relation::Database2.def())
@@ -711,6 +711,7 @@ impl CatalogController {
             .column(database::Column::Name)
             .column(schema::Column::Name)
             .column(table::Column::Name)
+            .column(table::Column::TableType)
             .into_tuple()
             .all(&inner.db)
             .await?;
@@ -733,7 +734,10 @@ impl CatalogController {
         result.extend(
             tables
                 .into_iter()
-                .map(|(id, db, schema, name)| (id, db, schema, name, "table".to_owned())),
+                .map(|(id, db, schema, name, table_type)| {
+                    let relation_type = PbTableType::from(table_type).as_str_name();
+                    (id, db, schema, name, relation_type.to_owned())
+                }),
         );
         result.extend(
             sources

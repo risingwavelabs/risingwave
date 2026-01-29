@@ -561,16 +561,11 @@ impl InflightDatabaseInfo {
 
     pub fn gen_fragment_backfill_progress(&self) -> Vec<FragmentBackfillProgress> {
         let mut result = Vec::new();
-        for (job_id, job) in &self.jobs {
+        for job in self.jobs.values() {
             let CreateStreamingJobStatus::Creating { tracker } = &job.status else {
                 continue;
             };
-            let mut fragment_progress =
-                tracker.collect_fragment_progress(&job.fragment_infos, true);
-            if fragment_progress.is_empty() && tracker.is_finished() {
-                fragment_progress =
-                    crate::barrier::progress::collect_done_fragments(*job_id, &job.fragment_infos);
-            }
+            let fragment_progress = tracker.collect_fragment_progress(&job.fragment_infos, true);
             result.extend(fragment_progress);
         }
         result
