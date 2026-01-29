@@ -257,6 +257,7 @@ pub struct IcebergListResult {
     pub equality_delete_files: Vec<FileScanTask>,
     pub position_delete_files: Vec<FileScanTask>,
     pub equality_delete_columns: Vec<String>,
+    pub format_version: u8,
 }
 
 impl IcebergSplitEnumerator {
@@ -324,6 +325,7 @@ impl IcebergSplitEnumerator {
         snapshot_id: i64,
         predicate: IcebergPredicate,
     ) -> ConnectorResult<IcebergListResult> {
+        let format_version = table.metadata().format_version();
         let table_schema = table.metadata().current_schema();
         tracing::debug!("iceberg_table_schema: {:?}", table_schema);
 
@@ -402,6 +404,7 @@ impl IcebergSplitEnumerator {
             equality_delete_files,
             position_delete_files,
             equality_delete_columns,
+            format_version: format_version as u8,
         })
     }
 
