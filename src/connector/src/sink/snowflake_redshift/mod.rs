@@ -294,10 +294,6 @@ impl SnowflakeRedshiftSinkJdbcWriter {
                 .properties
                 .insert("database.name".to_owned(), database_name);
         }
-
-        if let Some(user) = param.properties.remove("user") {
-            param.properties.insert("user".to_owned(), user);
-        }
         param
             .properties
             .insert("table.name".to_owned(), full_table_name.clone());
