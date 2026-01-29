@@ -212,7 +212,29 @@ def _(outer_panels: Panels):
                         ),
                     ],
                 ),
-                panels.subheader("Cache Memory Usage By Relation"),
+                panels.subheader("Memory Usage By Relation"),
+                panels.timeseries_bytes(
+                    "Total Memory Usage",
+                    "Executor cache + shared buffer imm size aggregated by relation.",
+                    [
+                        panels.target(
+                            _relation_metric_with_metadata(
+                                "("
+                                + relabel_materialized_view_id_as_id(
+                                    f"sum({metric('stream_memory_usage')} * on(table_id) group_left(materialized_view_id) {metric('table_info')}) by (materialized_view_id)"
+                                )
+                                + " + "
+                                + relabel_materialized_view_id_as_id(
+                                    _sum_fragment_metric_by_mv(
+                                        metric("state_store_per_fragment_imm_size")
+                                    )
+                                )
+                                + ")"
+                            ),
+                            "relation {{name}} (id={{id}} type={{type}})",
+                        ),
+                    ],
+                ),
                 panels.timeseries_bytes(
                     "Executor Cache Memory Usage of Materialized Views",
                     "Memory usage aggregated by materialized views",
@@ -223,7 +245,6 @@ def _(outer_panels: Panels):
                         ),
                     ],
                 ),
-                panels.subheader("Shared Buffer Memory Usage By Relation"),
                 panels.timeseries_bytes(
                     "Shared Buffer Memory Usage",
                     "Shared buffer imm size aggregated by relation.",
