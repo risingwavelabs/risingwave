@@ -224,6 +224,8 @@ mod grouping_sets_to_expand_rule;
 pub use grouping_sets_to_expand_rule::*;
 mod apply_project_set_transpose_rule;
 pub use apply_project_set_transpose_rule::*;
+mod apply_array_agg_unnest_to_array_transform_rule;
+pub use apply_array_agg_unnest_to_array_transform_rule::*;
 mod apply_table_function_to_project_set_rule;
 pub use apply_table_function_to_project_set_rule::*;
 mod cross_join_eliminate_rule;
@@ -297,6 +299,7 @@ macro_rules! for_all_rules {
             , { ApplyFilterTransposeRule }
             , { ApplyProjectTransposeRule }
             , { ApplyProjectSetTransposeRule }
+            , { ApplyArrayAggUnnestToArrayTransformRule }
             , { ApplyTableFunctionToProjectSetRule }
             , { ApplyEliminateRule }
             , { ApplyJoinTransposeRule }
