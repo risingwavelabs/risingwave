@@ -640,7 +640,7 @@
     StreamMaterialize { columns: [event_id, related_info, time], stream_key: [event_id], pk_columns: [event_id], pk_conflict: NoCheck }
     └─StreamProject { exprs: [events.event_id, vector_info, events.time] }
       └─StreamVectorIndexLookupJoin { top_n: 3, distance_type: L2Sqr, index_name: "i", vector: events.embedding, lookup_output: [("name", Varchar)], include_distance: false, as_of: ProcessTime }
-        └─StreamTableScan { table: events, columns: [events.event_id, events.time, events.embedding], stream_scan_type: ArrangementBackfill, stream_key: [events.event_id], pk: [event_id], dist: UpstreamHashShard(events.event_id) }
+        └─StreamTableScan { table: events, columns: [events.event_id, events.time, events.embedding], stream_scan_type: SnapshotBackfill, stream_key: [events.event_id], pk: [event_id], dist: UpstreamHashShard(events.event_id) }
 - id: correlated_read_without_embedding
   before:
   - create_correlated_tables_with_column_value_index
@@ -671,4 +671,4 @@
     StreamMaterialize { columns: [event_id, related_info, time], stream_key: [event_id], pk_columns: [event_id], pk_conflict: NoCheck }
     └─StreamProject { exprs: [events.event_id, vector_info, events.time] }
       └─StreamVectorIndexLookupJoin { top_n: 3, distance_type: L2Sqr, index_name: "i", vector: events.embedding, lookup_output: [("items.id", Int32), ("name", Varchar)], include_distance: true, as_of: ProcessTime }
-        └─StreamTableScan { table: events, columns: [events.event_id, events.time, events.embedding], stream_scan_type: ArrangementBackfill, stream_key: [events.event_id], pk: [event_id], dist: UpstreamHashShard(events.event_id) }
+        └─StreamTableScan { table: events, columns: [events.event_id, events.time, events.embedding], stream_scan_type: SnapshotBackfill, stream_key: [events.event_id], pk: [event_id], dist: UpstreamHashShard(events.event_id) }

@@ -868,7 +868,7 @@ async fn make_consume_snapshot_stream<'a, S: StateStore>(
     let mut epoch_row_count = 0;
     let mut backfill_paused = initial_backfill_paused;
     loop {
-        let throttle_snapshot_stream = epoch_row_count as u64 > rate_limit.to_u64();
+        let throttle_snapshot_stream = epoch_row_count as u64 >= rate_limit.to_u64();
         match select_barrier_and_snapshot_stream(
             barrier_rx,
             &mut snapshot_stream,
@@ -885,13 +885,7 @@ async fn make_consume_snapshot_stream<'a, S: StateStore>(
                     return Err(anyhow!("should not receive barrier with epoch {barrier_epoch:?} later than snapshot epoch {snapshot_epoch}").into());
                 }
                 if barrier.should_start_fragment_backfill(actor_ctx.fragment_id) {
-                    if backfill_paused {
-                        backfill_paused = false;
-                    } else {
-                        tracing::error!(
-                            "received start fragment backfill mutation, but backfill is not paused"
-                        );
-                    }
+                    backfill_paused = false;
                 }
                 if let Some(chunk) = snapshot_stream.consume_builder() {
                     count += chunk.cardinality();

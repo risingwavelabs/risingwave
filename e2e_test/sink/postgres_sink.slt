@@ -12,6 +12,9 @@ drop table if exists rw_types_table_append_only cascade;
 system ok
 PGDATABASE=sink_test createdb
 
+statement ok
+set sink_decouple = false;
+
 ################### test table pk can mismatch
 
 system ok

@@ -154,6 +154,13 @@ pub struct StreamingDeveloperConfig {
     /// If true, it's decided by session variable `streaming_use_arrangement_backfill` (default true)
     pub enable_arrangement_backfill: bool,
 
+    #[serde(default = "default::developer::stream_enable_snapshot_backfill")]
+    /// Enable snapshot backfill
+    /// If false, the snapshot backfill will be disabled,
+    /// even if session variable set.
+    /// If true, it's decided by session variable `streaming_use_snapshot_backfill` (default true)
+    pub enable_snapshot_backfill: bool,
+
     #[serde(default = "default::developer::stream_high_join_amplification_threshold")]
     /// If number of hash join matches exceeds this threshold number,
     /// it will be logged.
