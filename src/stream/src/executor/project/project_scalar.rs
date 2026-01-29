@@ -115,6 +115,7 @@ impl Inner {
         let mut new_chunk = apply_project_exprs(&self.exprs, chunk).await?;
         if self.eliminate_noop_updates {
             new_chunk = new_chunk.eliminate_adjacent_noop_update();
+            new_chunk = new_chunk.compact_vis();
         }
         Ok(Some(new_chunk))
     }
