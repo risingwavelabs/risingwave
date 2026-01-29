@@ -45,11 +45,11 @@ use tokio::{select, time};
 pub use worker::create_source_worker;
 use worker::{ConnectorSourceWorkerHandle, create_source_worker_async};
 
-use crate::MetaResult;
 use crate::barrier::{BarrierScheduler, Command, ReplaceStreamJobPlan, SharedActorInfos};
 use crate::manager::{MetaSrvEnv, MetadataManager};
 use crate::model::{ActorId, FragmentId, StreamJobFragments};
 use crate::rpc::metrics::MetaMetrics;
+use crate::{MetaError, MetaResult};
 
 pub type SourceManagerRef = Arc<SourceManager>;
 pub type SplitAssignment = HashMap<FragmentId, HashMap<ActorId, Vec<SplitImpl>>>;
@@ -559,6 +559,64 @@ impl SourceManager {
             )
             .into())
         }
+    }
+
+    /// Validate split offsets before injecting them.
+    /// Returns Ok(()) if all validations pass, otherwise returns an error.
+    ///
+    /// Validations performed:
+    /// 1. Source exists in source manager
+    /// 2. All requested split IDs exist in the source's current splits
+    pub async fn validate_inject_source_offsets(
+        &self,
+        source_id: SourceId,
+        split_offsets: &HashMap<String, String>,
+    ) -> MetaResult<()> {
+        let core = self.core.lock().await;
+
+        // Check if source exists
+        let handle = core.managed_sources.get(&source_id).ok_or_else(|| {
+            MetaError::invalid_parameter(format!(
+                "source {} not found in source manager",
+                source_id.as_raw_id()
+            ))
+        })?;
+
+        // Get current splits
+        let splits_guard = handle.splits.lock().await;
+        let current_splits = splits_guard.splits.as_ref().ok_or_else(|| {
+            MetaError::invalid_parameter(format!(
+                "source {} has no discovered splits yet, cannot inject offsets",
+                source_id.as_raw_id()
+            ))
+        })?;
+
+        // Validate all requested split IDs exist
+        let current_split_ids: HashSet<&str> = current_splits.keys().map(|s| s.as_ref()).collect();
+        let mut invalid_splits = Vec::new();
+
+        for split_id in split_offsets.keys() {
+            if !current_split_ids.contains(split_id.as_str()) {
+                invalid_splits.push(split_id.clone());
+            }
+        }
+
+        if !invalid_splits.is_empty() {
+            return Err(MetaError::invalid_parameter(format!(
+                "invalid split IDs for source {}: {:?}. Valid splits are: {:?}",
+                source_id.as_raw_id(),
+                invalid_splits,
+                current_split_ids.iter().collect::<Vec<_>>()
+            )));
+        }
+
+        tracing::info!(
+            source_id = source_id.as_raw_id(),
+            num_splits = split_offsets.len(),
+            "Validated inject source offsets request"
+        );
+
+        Ok(())
     }
 }
 
