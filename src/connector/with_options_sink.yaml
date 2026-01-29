@@ -1404,10 +1404,14 @@ RedShiftConfig:
     field_type: bool
     required: false
     default: Default::default
-  - name: schedule_seconds
+  - name: writer_target_interval_seconds
     field_type: u64
     required: false
     default: '3600'
+  - name: write_intermediate_interval_seconds
+    field_type: u64
+    required: false
+    default: '1800'
   - name: batch_insert_rows
     field_type: u32
     required: false
@@ -1537,10 +1541,14 @@ SnowflakeV2Config:
   - name: schema
     field_type: String
     required: false
-  - name: snowflake_schedule_seconds
+  - name: writer_target_interval_seconds
     field_type: u64
     required: false
     default: '3600'
+  - name: write_intermediate_interval_seconds
+    field_type: u64
+    required: false
+    default: '1800'
   - name: warehouse
     field_type: String
     required: false
