@@ -1255,7 +1255,7 @@ async fn test_clear_shared_buffer() {
 async fn test_replicated_local_hummock_storage() {
     use risingwave_storage::store::ReadOptions;
     const TEST_TABLE_ID: TableId = TableId::new(233);
-    
+
     let (hummock_storage, meta_client) = with_hummock_storage(TEST_TABLE_ID).await;
 
     let epoch0 = meta_client
