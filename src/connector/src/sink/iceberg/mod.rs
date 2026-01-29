@@ -74,6 +74,7 @@ use risingwave_pb::connector_service::SinkMetadata;
 use risingwave_pb::connector_service::sink_metadata::Metadata::Serialized;
 use risingwave_pb::connector_service::sink_metadata::SerializedMetadata;
 use risingwave_pb::stream_plan::PbSinkSchemaChange;
+use serde::de::{self, Deserializer, Visitor};
 use serde::{Deserialize, Serialize};
 use serde_json::from_value;
 use serde_with::{DisplayFromStr, serde_as};
@@ -198,8 +199,8 @@ fn default_iceberg_write_mode() -> IcebergWriteMode {
     IcebergWriteMode::MergeOnRead
 }
 
-fn default_iceberg_format_version() -> u8 {
-    2
+fn default_iceberg_format_version() -> FormatVersion {
+    FormatVersion::V2
 }
 
 fn default_true() -> bool {
@@ -208,6 +209,70 @@ fn default_true() -> bool {
 
 fn default_some_true() -> Option<bool> {
     Some(true)
+}
+
+fn parse_format_version_str(value: &str) -> std::result::Result<FormatVersion, String> {
+    let parsed = value
+        .trim()
+        .parse::<u8>()
+        .map_err(|_| "`format-version` must be one of 1, 2, or 3".to_owned())?;
+    match parsed {
+        1 => Ok(FormatVersion::V1),
+        2 => Ok(FormatVersion::V2),
+        3 => Ok(FormatVersion::V3),
+        _ => Err("`format-version` must be one of 1, 2, or 3".to_owned()),
+    }
+}
+
+fn deserialize_format_version<'de, D>(
+    deserializer: D,
+) -> std::result::Result<FormatVersion, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    struct FormatVersionVisitor;
+
+    impl<'de> Visitor<'de> for FormatVersionVisitor {
+        type Value = FormatVersion;
+
+        fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            formatter.write_str("format-version as 1, 2, or 3")
+        }
+
+        fn visit_u64<E>(self, value: u64) -> std::result::Result<Self::Value, E>
+        where
+            E: de::Error,
+        {
+            let value = u8::try_from(value)
+                .map_err(|_| E::custom("`format-version` must be one of 1, 2, or 3"))?;
+            parse_format_version_str(&value.to_string()).map_err(E::custom)
+        }
+
+        fn visit_i64<E>(self, value: i64) -> std::result::Result<Self::Value, E>
+        where
+            E: de::Error,
+        {
+            let value = u8::try_from(value)
+                .map_err(|_| E::custom("`format-version` must be one of 1, 2, or 3"))?;
+            parse_format_version_str(&value.to_string()).map_err(E::custom)
+        }
+
+        fn visit_str<E>(self, value: &str) -> std::result::Result<Self::Value, E>
+        where
+            E: de::Error,
+        {
+            parse_format_version_str(value).map_err(E::custom)
+        }
+
+        fn visit_string<E>(self, value: String) -> std::result::Result<Self::Value, E>
+        where
+            E: de::Error,
+        {
+            self.visit_str(&value)
+        }
+    }
+
+    deserializer.deserialize_any(FormatVersionVisitor)
 }
 
 /// Compaction type for Iceberg sink
@@ -351,9 +416,12 @@ pub struct IcebergConfig {
     pub write_mode: IcebergWriteMode,
 
     /// Iceberg format version for table creation.
-    #[serde(rename = "format_version", default = "default_iceberg_format_version")]
-    #[serde_as(as = "DisplayFromStr")]
-    pub format_version: u8,
+    #[serde(
+        rename = "format_version",
+        default = "default_iceberg_format_version",
+        deserialize_with = "deserialize_format_version"
+    )]
+    pub format_version: FormatVersion,
 
     /// The maximum age (in milliseconds) for snapshots before they expire
     /// For example, if set to 3600000, snapshots older than 1 hour will be expired
@@ -483,12 +551,6 @@ impl IcebergConfig {
             )));
         }
 
-        if !matches!(config.format_version, 1..=3) {
-            return Err(SinkError::Config(anyhow!(
-                "`format-version` must be one of 1, 2, or 3"
-            )));
-        }
-
         Ok(config)
     }
 
@@ -519,12 +581,7 @@ impl IcebergConfig {
     }
 
     pub fn table_format_version(&self) -> FormatVersion {
-        match self.format_version {
-            1 => FormatVersion::V1,
-            2 => FormatVersion::V2,
-            3 => FormatVersion::V3,
-            _ => unreachable!("format_version is validated during config parsing"),
-        }
+        self.format_version
     }
 
     pub fn compaction_interval_sec(&self) -> u64 {
@@ -734,7 +791,7 @@ async fn create_table_if_not_exists_impl(config: &IcebergConfig, param: &SinkPar
         // Put format-version into table properties, because catalog like jdbc extract format-version from table properties.
         let properties = HashMap::from([(
             TableProperties::PROPERTY_FORMAT_VERSION.to_owned(),
-            config.format_version.to_string(),
+            (config.format_version as u8).to_string(),
         )]);
 
         let table_creation_builder = TableCreation::builder()
@@ -2780,6 +2837,8 @@ pub fn should_enable_iceberg_cow(sink_type: &str, write_mode: IcebergWriteMode) 
 
 impl crate::with_options::WithOptions for IcebergWriteMode {}
 
+impl crate::with_options::WithOptions for FormatVersion {}
+
 impl crate::with_options::WithOptions for CompactionType {}
 
 #[cfg(test)]
@@ -3056,7 +3115,7 @@ mod test {
             compaction_interval_sec: Some(DEFAULT_ICEBERG_COMPACTION_INTERVAL / 2),
             enable_snapshot_expiration: true,
             write_mode: IcebergWriteMode::MergeOnRead,
-            format_version: 2,
+            format_version: FormatVersion::V2,
             snapshot_expiration_max_age_millis: None,
             snapshot_expiration_retain_last: None,
             snapshot_expiration_clear_expired_files: true,
