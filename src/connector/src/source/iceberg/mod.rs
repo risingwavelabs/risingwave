@@ -25,6 +25,7 @@ use futures_async_stream::{for_await, try_stream};
 use iceberg::Catalog;
 use iceberg::expr::{BoundPredicate, Predicate as IcebergPredicate};
 use iceberg::scan::FileScanTask;
+use iceberg::spec::FormatVersion;
 use iceberg::table::Table;
 pub use parquet_file_handler::*;
 use phf::{Set, phf_set};
@@ -257,7 +258,7 @@ pub struct IcebergListResult {
     pub equality_delete_files: Vec<FileScanTask>,
     pub position_delete_files: Vec<FileScanTask>,
     pub equality_delete_columns: Vec<String>,
-    pub format_version: u8,
+    pub format_version: FormatVersion,
 }
 
 impl IcebergSplitEnumerator {
@@ -404,7 +405,7 @@ impl IcebergSplitEnumerator {
             equality_delete_files,
             position_delete_files,
             equality_delete_columns,
-            format_version: format_version as u8,
+            format_version,
         })
     }
 

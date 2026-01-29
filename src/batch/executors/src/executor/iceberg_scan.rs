@@ -85,7 +85,6 @@ impl IcebergScanExecutor {
     async fn do_execute(mut self: Box<Self>) {
         let table = self.iceberg_config.load_table().await?;
         let data_types = self.schema.data_types();
-        let use_reader_delete_filter = table.metadata().format_version() as u8 >= 3;
 
         let data_file_scan_tasks = match Option::take(&mut self.file_scan_tasks) {
             Some(IcebergFileScanTask::Data(data_file_scan_tasks)) => data_file_scan_tasks,
@@ -109,7 +108,8 @@ impl IcebergScanExecutor {
                     chunk_size: self.chunk_size,
                     need_seq_num: self.need_seq_num,
                     need_file_path_and_pos: self.need_file_path_and_pos,
-                    handle_delete_files: use_reader_delete_filter,
+                    handle_delete_files: table.metadata().format_version()
+                        >= iceberg::spec::FormatVersion::V3,
                 },
                 self.metrics.as_ref().map(|m| m.iceberg_scan_metrics()),
             ) {

@@ -34,7 +34,7 @@ use std::collections::HashMap;
 
 use anyhow::Context;
 use iceberg::scan::FileScanTask;
-use iceberg::spec::DataContentType;
+use iceberg::spec::{DataContentType, FormatVersion};
 use risingwave_common::catalog::{
     ColumnCatalog, ICEBERG_FILE_PATH_COLUMN_NAME, ICEBERG_FILE_POS_COLUMN_NAME,
     ICEBERG_SEQUENCE_NUM_COLUMN_NAME,
@@ -127,16 +127,18 @@ impl FallibleRule<Logical> for IcebergIntermediateScanRule {
             projection_columns.sort_unstable_by_key(|&s| schema.field_id_by_name(s));
             projection_columns.dedup();
             set_project_field_ids(&mut data_files, &schema, projection_columns.iter())?;
-            let use_reader_for_position_delete = format_version >= 3;
-            if use_reader_for_position_delete {
-                for file in &mut data_files {
-                    file.deletes.retain(|delete| {
-                        delete.data_file_content == DataContentType::PositionDeletes
-                    });
+            match format_version {
+                FormatVersion::V1 | FormatVersion::V2 => {
+                    for file in &mut data_files {
+                        file.deletes.clear();
+                    }
                 }
-            } else {
-                for file in &mut data_files {
-                    file.deletes.clear();
+                FormatVersion::V3 => {
+                    for file in &mut data_files {
+                        file.deletes.retain(|delete| {
+                            delete.data_file_content == DataContentType::PositionDeletes
+                        });
+                    }
                 }
             }
 
@@ -149,7 +151,7 @@ impl FallibleRule<Logical> for IcebergIntermediateScanRule {
                 projection_columns.push(ICEBERG_SEQUENCE_NUM_COLUMN_NAME);
             }
             let use_position_delete_join =
-                !position_delete_files.is_empty() && !use_reader_for_position_delete;
+                !position_delete_files.is_empty() && format_version < FormatVersion::V3;
             if use_position_delete_join {
                 projection_columns.push(ICEBERG_FILE_PATH_COLUMN_NAME);
                 projection_columns.push(ICEBERG_FILE_POS_COLUMN_NAME);

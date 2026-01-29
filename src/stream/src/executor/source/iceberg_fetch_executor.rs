@@ -358,7 +358,6 @@ impl<S: StateStore> IcebergFetchExecutor<S> {
             _ => unreachable!(),
         };
         let table = properties.load_table().await?;
-        let use_reader_delete_filter = table.metadata().format_version() as u8 >= 3;
 
         for task in batch {
             let mut chunks = vec![];
@@ -370,7 +369,8 @@ impl<S: StateStore> IcebergFetchExecutor<S> {
                     chunk_size: streaming_config.developer.chunk_size,
                     need_seq_num: true, /* Although this column is unnecessary, we still keep it for potential usage in the future */
                     need_file_path_and_pos: true,
-                    handle_delete_files: use_reader_delete_filter,
+                    handle_delete_files: table.metadata().format_version()
+                        >= iceberg::spec::FormatVersion::V3,
                 },
                 None,
             ) {
