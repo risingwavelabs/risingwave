@@ -180,3 +180,17 @@
           └─StreamGroupTopN { order: [t.a ASC], limit: 1, offset: 0, group_key: [_vnode] }
             └─StreamProject { exprs: [t.a, Vnode(t.a) as _vnode] }
               └─StreamTableScan { table: t, columns: [t.a], stream_scan_type: ArrangementBackfill, stream_key: [t.a], pk: [a], dist: UpstreamHashShard(t.a) }
+- sql: |
+    -- Regression test: column pruning may remove all output columns of the input of LIMIT.
+    -- `LogicalLimit` will be rewritten to `LogicalTopN` for streaming queries, and should not panic
+    -- when the input schema becomes empty.
+    create table t (v int);
+    select 1 c from (select v from t limit 10) s;
+  stream_plan: |-
+    StreamMaterialize { columns: [c, t._row_id(hidden)], stream_key: [t._row_id], pk_columns: [t._row_id], pk_conflict: NoCheck }
+    └─StreamProject { exprs: [1:Int32, t._row_id] }
+      └─StreamTopN { order: [], limit: 10, offset: 0 }
+        └─StreamExchange { dist: Single }
+          └─StreamGroupTopN { order: [], limit: 10, offset: 0, group_key: [_vnode] }
+            └─StreamProject { exprs: [t._row_id, Vnode(t._row_id) as _vnode] }
+              └─StreamTableScan { table: t, columns: [t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
