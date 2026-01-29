@@ -381,7 +381,7 @@ impl LogSinker for RemoteLogSinker {
                 {
                     sink_writer_metrics
                         .sink_commit_duration
-                        .observe(start_time.elapsed().as_millis() as f64);
+                        .observe(start_time.elapsed().as_secs_f64());
                 }
 
                 log_reader.truncate(persisted_offset)?;
