@@ -779,6 +779,7 @@ async fn make_snapshot_stream(
     backfill_state: &BackfillState<impl StateStore>,
     rate_limit: RateLimit,
     chunk_size: usize,
+    snapshot_rebuild_interval: Duration,
 ) -> StreamExecutorResult<VnodeStream<impl super::vnode_stream::ChangeLogRowStream>> {
     let data_types = upstream_table.schema().data_types();
     let vnode_streams = try_join_all(backfill_state.latest_progress().filter_map(
@@ -802,6 +803,7 @@ async fn make_snapshot_stream(
                         start_pk,
                         vnode,
                         PrefetchOptions::prefetch_for_large_range_scan(),
+                        snapshot_rebuild_interval,
                     )
                     .map_ok(move |stream| {
                         let stream = stream.map_ok(ChangeLogRow::Insert).map_err(Into::into);
@@ -842,6 +844,7 @@ async fn make_consume_snapshot_stream<'a, S: StateStore>(
         &*backfill_state,
         *rate_limit,
         chunk_size,
+        actor_ctx.config.developer.snapshot_iter_rebuild_interval(),
     )
     .await?;
 
