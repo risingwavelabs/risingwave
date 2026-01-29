@@ -222,7 +222,7 @@ fn parse_compression_algorithm_with_level(
     name: &str,
 ) -> Result<CompressionAlgorithm> {
     // Format: 'level:algorithm' e.g., '3:lz4', '6:zstd', '0:none'
-    // level: 0-6 (LSM-tree levels)
+    // level: non-negative integer (validation is done by meta service)
     // algorithm: none, lz4, zstd
     let input_str = match value {
         SqlOptionValue::Value(Value::SingleQuotedString(s))
@@ -236,33 +236,31 @@ fn parse_compression_algorithm_with_level(
         }
     };
 
-    let parts: Vec<&str> = input_str.split(':').collect();
-    if parts.len() != 2 {
-        return Err(ErrorCode::InvalidInputSyntax(format!(
+    let (level_str, algo_str) = input_str.split_once(':').ok_or_else(|| {
+        ErrorCode::InvalidInputSyntax(format!(
             "invalid format for {}: '{}', expected 'level:algorithm' (e.g., '3:lz4', '6:zstd')",
             name, input_str
         ))
-        .into());
-    }
+    })?;
 
-    let level: u32 = parts[0].parse().map_err(|_| {
+    let level: u32 = level_str.parse().map_err(|_| {
         ErrorCode::InvalidInputSyntax(format!(
             "invalid level for {}: '{}', expected a non-negative integer",
-            name, parts[0]
+            name, level_str
         ))
     })?;
 
     // Note: level validation (whether it exceeds max_level) is done by meta service
     // since max_level is per-compaction-group configuration
 
-    let algo_name = match parts[1] {
+    let algo_name = match algo_str {
         "none" => "None",
         "lz4" => "Lz4",
         "zstd" => "Zstd",
         _ => {
             return Err(ErrorCode::InvalidInputSyntax(format!(
                 "invalid compression algorithm for {}: '{}', expected one of: none, lz4, zstd",
-                name, parts[1]
+                name, algo_str
             ))
             .into());
         }

@@ -4281,4 +4281,25 @@ fn parse_alter_compaction_group() {
         }
         _ => panic!("unexpected statement kind"),
     }
+
+    // String config
+    match verified_stmt("ALTER COMPACTION GROUP 2 SET compression_algorithm = '6:lz4'") {
+        Statement::AlterCompactionGroup {
+            group_ids,
+            operation,
+        } => {
+            assert_eq!(group_ids, vec![2]);
+            match operation {
+                AlterCompactionGroupOperation::Set { configs } => {
+                    assert_eq!(configs.len(), 1);
+                    assert_eq!(configs[0].name.real_value(), "compression_algorithm");
+                    assert_eq!(
+                        configs[0].value,
+                        SqlOptionValue::Value(Value::SingleQuotedString("6:lz4".into()))
+                    );
+                }
+            }
+        }
+        _ => panic!("unexpected statement kind"),
+    }
 }
