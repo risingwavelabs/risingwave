@@ -331,6 +331,7 @@ impl StreamChunk {
     pub fn eliminate_adjacent_noop_update(self) -> Self {
         let len = self.data_chunk().capacity();
         let mut c: StreamChunkMut = self.into();
+        let mut eliminated = false;
         let mut prev_r = None;
         for curr in 0..len {
             if !c.vis(curr) {
@@ -361,12 +362,18 @@ impl StreamChunk {
             {
                 c.set_vis(prev, false);
                 c.set_vis(curr, false);
+                eliminated = true;
                 prev_r = None;
             } else {
                 prev_r = Some(curr);
             }
         }
-        c.into()
+        let chunk: StreamChunk = c.into();
+        if eliminated {
+            chunk.compact_vis()
+        } else {
+            chunk
+        }
     }
 
     /// Reorder columns and set visibility.
