@@ -31,7 +31,7 @@ use risingwave_hummock_sdk::key::{
 };
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::table_watermark::TableWatermarksIndex;
-use risingwave_hummock_sdk::version::{HummockVersion, LocalHummockVersion};
+use risingwave_hummock_sdk::version::HummockVersion;
 use risingwave_hummock_sdk::{HummockRawObjectId, HummockReadEpoch, SyncResult};
 use risingwave_rpc_client::HummockMetaClient;
 use thiserror_ext::AsReport;
