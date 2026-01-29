@@ -595,15 +595,15 @@ impl Drop for RedshiftSinkCommitter {
 #[async_trait]
 impl SinglePhaseCommitCoordinator for RedshiftSinkCommitter {
     async fn init(&mut self) -> Result<()> {
-        Self::flush_manifest_to_redshift(
-            &self.client,
-            &self.config,
-            self.config.s3_inner.as_ref().ok_or_else(|| {
-                SinkError::Config(anyhow!("S3 configuration is required for S3 sink"))
-            })?,
-            self.is_append_only,
-        )
-        .await?;
+        if let Some(s3_inner) = &self.config.s3_inner {
+            Self::flush_manifest_to_redshift(
+                &self.client,
+                &self.config,
+                s3_inner,
+                self.is_append_only,
+            )
+            .await?;
+        }
         Ok(())
     }
 
