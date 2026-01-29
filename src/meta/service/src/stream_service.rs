@@ -1019,6 +1019,12 @@ impl StreamManagerService for StreamServiceImpl {
         let source_id = request.source_id;
         let split_offsets = request.split_offsets;
 
+        // Validate split IDs exist before proceeding
+        self.stream_manager
+            .source_manager
+            .validate_inject_source_offsets(source_id.into(), &split_offsets)
+            .await?;
+
         tracing::warn!(
             source_id = source_id,
             num_offsets = split_offsets.len(),
