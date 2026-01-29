@@ -37,7 +37,7 @@ mod maybe_tls_connector;
 pub mod postgres;
 
 pub use iceberg::{IcebergCommon, IcebergTableIdentifier};
-pub use postgres::{PostgresExternalTable, SslMode, TcpKeepaliveConfig, create_pg_client};
+pub use postgres::{PostgresExternalTable, SslMode, create_pg_client};
 
 #[cfg(test)]
 mod common_test;
