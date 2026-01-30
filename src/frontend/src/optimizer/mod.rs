@@ -1188,7 +1188,12 @@ impl LogicalPlanRoot {
     pub fn should_use_snapshot_backfill(&self) -> bool {
         let ctx = self.plan.ctx();
         let session_ctx = ctx.session_ctx();
-        let use_snapshot_backfill = session_ctx.config().streaming_use_snapshot_backfill();
+        let use_snapshot_backfill = session_ctx
+            .env()
+            .streaming_config()
+            .developer
+            .enable_snapshot_backfill
+            && session_ctx.config().streaming_use_snapshot_backfill();
         if use_snapshot_backfill {
             if let Some(warning_msg) = self.plan.forbid_snapshot_backfill() {
                 self.plan.ctx().session_ctx().notice_to_user(warning_msg);
