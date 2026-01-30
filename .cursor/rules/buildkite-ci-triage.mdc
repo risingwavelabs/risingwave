@@ -1,8 +1,9 @@
 # Buildkite CI Triage
 
-Motivation: CI failures can be flaky and expensive to reproduce locally. This guide documents a repeatable way to quickly locate the failing test case and the exact diff/mismatch using Buildkite build/job logs and uploaded artifacts.
+This is a fully programmatic guide to locate the failing test case and the exact diff/mismatch directly from Buildkite build/job logs and uploaded artifacts (i.e. scriptable triage via JSON + CLI tools).
 
-Preferred workflow: use `bk` CLI when you have access (structured JSON, easy job/artifact navigation). Fallback: many Buildkite pages/log endpoints are publicly readable, so you can still triage via `curl` + `jq` even without local `bk` auth.
+Preferred workflow: use `bk` CLI when you have access (structured JSON, easy job/artifact navigation).
+Fallback: many Buildkite endpoints are publicly readable, so you can still triage via `curl` + `jq` even without local `bk` auth.
 
 Tip: If `bk` says it needs an API token/org slug, run `bk configure` or set `BUILDKITE_API_TOKEN` and `BUILDKITE_ORGANIZATION_SLUG=risingwavelabs`.
 
