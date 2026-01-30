@@ -150,7 +150,7 @@ pub fn storage_memory_config(
                     << 20;
             if config_storage_memory_bytes as f64 > max_storage_memory_bytes {
                 tracing::warn!(
-                    "config block_cache_capacity_mb {} + meta_cache_capacity_mb {} + shared_buffer_capacity_mb {}  + compactor_memory_limit_mb {} = {} exceeds allowed storage_memory_bytes {}. These configs will be ignored.",
+                    "config block_cache_capacity_mb {} + meta_cache_capacity_mb {} + shared_buffer_capacity_mb {} + compactor_memory_limit_mb {} = {} exceeds allowed storage_memory_bytes {}. These configs will be ignored.",
                     block_cache_capacity_mb,
                     meta_cache_capacity_mb,
                     shared_buffer_capacity_mb,
