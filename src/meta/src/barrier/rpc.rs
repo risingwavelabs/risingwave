@@ -879,7 +879,7 @@ impl ControlStreamManager {
                 .map(|(job_id, (fragment_infos, is_background_creating))| {
                     let status = if is_background_creating {
                         let backfill_ordering = job_backfill_orders(job_extra_info, job_id);
-                        let backfill_ordering = StreamFragmentGraph::extend_fragment_backfill_ordering_with_lacality_backfill(
+                        let backfill_ordering = StreamFragmentGraph::extend_fragment_backfill_ordering_with_locality_backfill(
                             backfill_ordering,
                             fragment_relations,
                             || fragment_infos.iter().map(|(fragment_id, fragment)| {
@@ -991,7 +991,7 @@ impl ControlStreamManager {
                     }
                 }));
             let database_backfill_orders =
-                StreamFragmentGraph::extend_fragment_backfill_ordering_with_lacality_backfill(
+                StreamFragmentGraph::extend_fragment_backfill_ordering_with_locality_backfill(
                     database_backfill_orders,
                     fragment_relations,
                     || {
@@ -1060,7 +1060,7 @@ impl ControlStreamManager {
             }
             let job_backfill_orders = job_backfill_orders(job_extra_info, job_id);
             let job_backfill_orders =
-                StreamFragmentGraph::extend_fragment_backfill_ordering_with_lacality_backfill(
+                StreamFragmentGraph::extend_fragment_backfill_ordering_with_locality_backfill(
                     job_backfill_orders,
                     fragment_relations,
                     || {

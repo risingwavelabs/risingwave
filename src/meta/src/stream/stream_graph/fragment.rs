@@ -1137,7 +1137,7 @@ impl StreamFragmentGraph {
         }
     }
 
-    pub fn extend_fragment_backfill_ordering_with_lacality_backfill<
+    pub fn extend_fragment_backfill_ordering_with_locality_backfill<
         'a,
         FI: Iterator<Item = (FragmentId, FragmentTypeMask, &'a PbStreamNode)> + 'a,
     >(

@@ -497,7 +497,7 @@ impl GlobalStreamManager {
         );
 
         let fragment_backfill_ordering =
-            StreamFragmentGraph::extend_fragment_backfill_ordering_with_lacality_backfill(
+            StreamFragmentGraph::extend_fragment_backfill_ordering_with_locality_backfill(
                 fragment_backfill_ordering,
                 &stream_job_fragments.downstreams,
                 || {
