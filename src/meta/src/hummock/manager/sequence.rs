@@ -99,6 +99,10 @@ pub async fn next_compaction_task_id(env: &MetaSrvEnv) -> Result<u64> {
     env.hummock_seq.next_interval(COMPACTION_TASK_ID, 1).await
 }
 
+pub async fn next_compaction_task_id_interval(env: &MetaSrvEnv, num: u32) -> Result<u64> {
+    env.hummock_seq.next_interval(COMPACTION_TASK_ID, num).await
+}
+
 pub async fn next_meta_backup_id(env: &MetaSrvEnv) -> Result<u64> {
     env.hummock_seq.next_interval(META_BACKUP_ID, 1).await
 }
