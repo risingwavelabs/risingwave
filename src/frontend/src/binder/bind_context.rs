@@ -33,15 +33,23 @@ use crate::binder::{BoundQuery, COLUMN_GROUP_PREFIX, ShareId};
 #[derive(Debug, Clone)]
 pub struct ColumnBinding {
     pub table_name: String,
+    pub schema_name: Option<String>,
     pub index: usize,
     pub is_hidden: bool,
     pub field: Field,
 }
 
 impl ColumnBinding {
-    pub fn new(table_name: String, index: usize, is_hidden: bool, field: Field) -> Self {
+    pub fn new(
+        table_name: String,
+        schema_name: Option<String>,
+        index: usize,
+        is_hidden: bool,
+        field: Field,
+    ) -> Self {
         ColumnBinding {
             table_name,
+            schema_name,
             index,
             is_hidden,
             field,
