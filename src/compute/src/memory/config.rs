@@ -122,7 +122,12 @@ pub fn storage_memory_config(
     let compactor_memory_limit_mb = storage_config.compactor_memory_limit_mb.unwrap_or(
         ((non_reserved_memory_bytes as f64 * default_compactor_memory_proportion).ceil() as usize) >> 20,
     );
-    tracing::warn!("default_storage_memory_bytes={} max_storage_memory_bytes={} compactor_memory_limit_mb={}", default_storage_memory_bytes, max_storage_memory_bytes, compactor_memory_limit_mb);
+    tracing::debug!(
+        "default_storage_memory_bytes={} max_storage_memory_bytes={} compactor_memory_limit_mb={}",
+        default_storage_memory_bytes,
+        max_storage_memory_bytes,
+        compactor_memory_limit_mb
+    );
 
     // Only if all cache capacities and compactor memory are specified and their sum doesn't exceed the max allowed storage_memory_bytes, will we use them.
     // Other invalid combinations of the cache capacities and compactor memory config will be ignored.
