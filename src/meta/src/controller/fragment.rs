@@ -61,7 +61,7 @@ use sea_orm::ActiveValue::Set;
 use sea_orm::sea_query::Expr;
 use sea_orm::{
     ColumnTrait, ConnectionTrait, EntityTrait, FromQueryResult, JoinType, PaginatorTrait,
-    QueryFilter, QuerySelect, RelationTrait, TransactionTrait,
+    QueryFilter, QuerySelect, RelationTrait, StreamTrait, TransactionTrait,
 };
 use serde::{Deserialize, Serialize};
 
@@ -698,9 +698,21 @@ impl CatalogController {
         fragment_ids: Vec<FragmentId>,
     ) -> MetaResult<FragmentDownstreamRelation> {
         let inner = self.inner.read().await;
+        self.get_fragment_downstream_relations_in_txn(&inner.db, fragment_ids)
+            .await
+    }
+
+    pub async fn get_fragment_downstream_relations_in_txn<C>(
+        &self,
+        txn: &C,
+        fragment_ids: Vec<FragmentId>,
+    ) -> MetaResult<FragmentDownstreamRelation>
+    where
+        C: ConnectionTrait + StreamTrait + Send,
+    {
         let mut stream = FragmentRelation::find()
             .filter(fragment_relation::Column::SourceFragmentId.is_in(fragment_ids))
-            .stream(&inner.db)
+            .stream(txn)
             .await?;
         let mut relations = FragmentDownstreamRelation::new();
         while let Some(relation) = stream.try_next().await? {
@@ -1376,6 +1388,17 @@ impl CatalogController {
         let inner = self.inner.read().await;
         let txn = inner.db.begin().await?;
 
+        self.load_fragment_context_in_txn(&txn, database_id).await
+    }
+
+    pub async fn load_fragment_context_in_txn<C>(
+        &self,
+        txn: &C,
+        database_id: Option<DatabaseId>,
+    ) -> MetaResult<LoadedFragmentContext>
+    where
+        C: ConnectionTrait,
+    {
         let mut query = StreamingJob::find()
             .select_only()
             .column(streaming_job::Column::JobId);
@@ -1386,7 +1409,7 @@ impl CatalogController {
                 .filter(object::Column::DatabaseId.eq(database_id));
         }
 
-        let jobs: Vec<JobId> = query.into_tuple().all(&txn).await?;
+        let jobs: Vec<JobId> = query.into_tuple().all(txn).await?;
 
         let jobs: HashSet<JobId> = jobs.into_iter().collect();
 
@@ -1394,7 +1417,7 @@ impl CatalogController {
             return Ok(LoadedFragmentContext::default());
         }
 
-        load_fragment_context_for_jobs(&txn, jobs).await
+        load_fragment_context_for_jobs(txn, jobs).await
     }
 
     #[await_tree::instrument]
@@ -1758,26 +1781,46 @@ impl CatalogController {
         target_table: &PbTable,
         target_fragment_id: FragmentId,
     ) -> MetaResult<Vec<UpstreamSinkInfo>> {
-        let incoming_sinks = self.get_table_incoming_sinks(target_table.id).await?;
-
         let inner = self.inner.read().await;
         let txn = inner.db.begin().await?;
 
-        let sink_ids = incoming_sinks.iter().map(|s| s.id).collect_vec();
-        let sink_fragment_ids = get_sink_fragment_by_ids(&txn, sink_ids).await?;
+        self.get_all_upstream_sink_infos_in_txn(&txn, target_table, target_fragment_id)
+            .await
+    }
+
+    pub async fn get_all_upstream_sink_infos_in_txn<C>(
+        &self,
+        txn: &C,
+        target_table: &PbTable,
+        target_fragment_id: FragmentId,
+    ) -> MetaResult<Vec<UpstreamSinkInfo>>
+    where
+        C: ConnectionTrait,
+    {
+        let incoming_sinks = Sink::find()
+            .filter(sink::Column::TargetTable.eq(target_table.id))
+            .all(txn)
+            .await?;
+
+        let sink_ids = incoming_sinks.iter().map(|s| s.sink_id).collect_vec();
+        let sink_fragment_ids = get_sink_fragment_by_ids(txn, sink_ids).await?;
 
         let mut upstream_sink_infos = Vec::with_capacity(incoming_sinks.len());
-        for pb_sink in &incoming_sinks {
+        for sink in &incoming_sinks {
             let sink_fragment_id =
                 sink_fragment_ids
-                    .get(&pb_sink.id)
+                    .get(&sink.sink_id)
                     .cloned()
                     .ok_or(anyhow::anyhow!(
                         "sink fragment not found for sink id {}",
-                        pb_sink.id
+                        sink.sink_id
                     ))?;
             let upstream_info = build_upstream_sink_info(
-                pb_sink,
+                sink.sink_id,
+                sink.original_target_columns
+                    .as_ref()
+                    .map(|cols| cols.to_protobuf())
+                    .unwrap_or_default(),
                 sink_fragment_id,
                 target_table,
                 target_fragment_id,

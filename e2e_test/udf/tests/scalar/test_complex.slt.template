@@ -1,3 +1,11 @@
+# Currently all UDFs will be considered impure, which need to be materialized on retract streams.
+# However, the optimizer doesn't seem to extract impure expressions from all places.
+# As a result, we may get an error when running this test in streaming mode:
+#  using an impure expression (user-defined function) in ... on a retract stream may lead to inconsistent results
+# TODO: correctly extract impure expressions and remove this bypass.
+statement ok
+set streaming_unsafe_allow_unmaterialized_impure_expr to true;
+
 statement ok
 create table t (a int, b real, c decimal, d varchar, e jsonb);
 
@@ -134,3 +142,6 @@ drop $view_type v1;
 
 statement ok
 drop table t;
+
+statement ok
+set streaming_unsafe_allow_unmaterialized_impure_expr to default;

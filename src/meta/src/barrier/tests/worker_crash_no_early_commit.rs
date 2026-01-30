@@ -38,9 +38,10 @@ use tokio::task::yield_now;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
 use crate::MetaResult;
-use crate::barrier::command::CommandContext;
+use crate::barrier::command::PostCollectCommand;
 use crate::barrier::context::GlobalBarrierWorkerContext;
 use crate::barrier::progress::TrackingJob;
+use crate::barrier::rpc::from_partial_graph_id;
 use crate::barrier::schedule::MarkReadyOptions;
 use crate::barrier::worker::GlobalBarrierWorker;
 use crate::barrier::{
@@ -87,7 +88,7 @@ impl GlobalBarrierWorkerContext for MockBarrierWorkerContext {
         self.0.send(ContextRequest::MarkReady).unwrap();
     }
 
-    async fn post_collect_command<'a>(&'a self, _command: &'a CommandContext) -> MetaResult<()> {
+    async fn post_collect_command(&self, _command: PostCollectCommand) -> MetaResult<()> {
         unreachable!()
     }
 
@@ -262,6 +263,7 @@ async fn test_barrier_manager_worker_crash_no_early_commit() {
                 ]),
             )]),
         )]),
+        backfill_orders: Default::default(),
         state_table_committed_epochs: HashMap::from_iter([
             (table1, initial_epoch),
             (table2, initial_epoch),
@@ -321,24 +323,26 @@ async fn test_barrier_manager_worker_crash_no_early_commit() {
         else {
             unreachable!()
         };
-        assert_eq!(req.database_id, database_id.as_raw_id());
+        let (req_database_id, _) = from_partial_graph_id(req.partial_graph_id);
         let partial_graph_id = req.partial_graph_id;
+        assert_eq!(req_database_id, database_id);
         let Request::InjectBarrier(init_inject_request) =
             request_rx.recv().await.unwrap().request.unwrap()
         else {
             unreachable!()
         };
+        let (initial_req_database_id, _) =
+            from_partial_graph_id(init_inject_request.partial_graph_id);
         let epoch = init_inject_request.barrier.unwrap().epoch.unwrap();
         assert_eq!(epoch.prev, initial_epoch);
         assert_eq!(partial_graph_id, init_inject_request.partial_graph_id);
-        assert_eq!(init_inject_request.database_id, database_id.as_raw_id());
+        assert_eq!(initial_req_database_id, database_id);
         response_tx
             .send(Ok(StreamingControlStreamResponse {
                 response: Some(Response::CompleteBarrier(BarrierCompleteResponse {
                     worker_id: worker.id as _,
                     partial_graph_id,
                     epoch: epoch.prev,
-                    database_id,
                     ..Default::default()
                 })),
             }))
@@ -366,14 +370,15 @@ async fn test_barrier_manager_worker_crash_no_early_commit() {
     let epoch1 = init_inject_request.barrier.unwrap().epoch.unwrap();
     assert_eq!(epoch1.prev, initial_epoch.curr);
     assert_eq!(partial_graph_id, init_inject_request.partial_graph_id);
-    assert_eq!(init_inject_request.database_id, database_id.as_raw_id());
+    let (initial_request_database_id, _) =
+        from_partial_graph_id(init_inject_request.partial_graph_id);
+    assert_eq!(initial_request_database_id, database_id);
     response_tx1
         .send(Ok(StreamingControlStreamResponse {
             response: Some(Response::CompleteBarrier(BarrierCompleteResponse {
                 worker_id: worker1.id as _,
                 partial_graph_id,
                 epoch: epoch1.prev,
-                database_id,
                 ..Default::default()
             })),
         }))
@@ -391,10 +396,12 @@ async fn test_barrier_manager_worker_crash_no_early_commit() {
         else {
             unreachable!()
         };
+        let (initial_request_database_id, _) =
+            from_partial_graph_id(init_inject_request.partial_graph_id);
         let epoch = init_inject_request.barrier.unwrap().epoch.unwrap();
         assert_eq!(epoch.prev, initial_epoch.curr);
         assert_eq!(partial_graph_id, init_inject_request.partial_graph_id);
-        assert_eq!(init_inject_request.database_id, database_id.as_raw_id());
+        assert_eq!(initial_request_database_id, database_id);
     }
 
     // worker2 crashes before sending the response

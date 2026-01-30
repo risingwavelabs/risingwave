@@ -93,3 +93,30 @@
         └─StreamSourceScan { columns: [x, y, _rw_kafka_timestamp, _rw_kafka_partition, _rw_kafka_offset, _row_id] }
   with_config_map:
     streaming_use_shared_source: 'true'
+- before:
+  - create_source
+  sql: |
+    CREATE TABLE t(x int,y int);
+    set streaming_use_snapshot_backfill = true;
+    select * from s union select * from t;
+  logical_plan: |-
+    LogicalUnion { all: false }
+    ├─LogicalProject { exprs: [x, y] }
+    │ └─LogicalSource { source: s, is_shared: true, columns: [x, y, _rw_kafka_timestamp, _rw_kafka_partition, _rw_kafka_offset, _row_id] }
+    └─LogicalProject { exprs: [t.x, t.y] }
+      └─LogicalScan { table: t, columns: [t.x, t.y, t._row_id, t._rw_timestamp] }
+  stream_plan: |-
+    StreamMaterialize { columns: [x, y], stream_key: [x, y], pk_columns: [x, y], pk_conflict: NoCheck }
+    └─StreamProject { exprs: [x, y], noop_update_hint: true }
+      └─StreamHashAgg { group_key: [x, y], aggs: [count] }
+        └─StreamExchange { dist: HashShard(x, y) }
+          └─StreamUnion { all: true }
+            ├─StreamExchange { dist: HashShard(_row_id, 0:Int32) }
+            │ └─StreamProject { exprs: [x, y, _row_id, 0:Int32] }
+            │   └─StreamRowIdGen { row_id_index: 5 }
+            │     └─StreamSourceScan { columns: [x, y, _rw_kafka_timestamp, _rw_kafka_partition, _rw_kafka_offset, _row_id] }
+            └─StreamExchange { dist: HashShard(t._row_id, 1:Int32) }
+              └─StreamProject { exprs: [t.x, t.y, t._row_id, 1:Int32] }
+                └─StreamTableScan { table: t, columns: [t.x, t.y, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+  with_config_map:
+    streaming_use_shared_source: 'true'

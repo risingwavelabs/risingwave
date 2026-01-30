@@ -419,6 +419,21 @@ impl EnforceSecret for IcebergConfig {
 }
 
 impl IcebergConfig {
+    /// Validate that append-only sinks use merge-on-read mode
+    /// Copy-on-write is strictly worse than merge-on-read for append-only workloads
+    fn validate_append_only_write_mode(
+        sink_type: &str,
+        write_mode: IcebergWriteMode,
+    ) -> Result<()> {
+        if sink_type == SINK_TYPE_APPEND_ONLY && write_mode == IcebergWriteMode::CopyOnWrite {
+            return Err(SinkError::Config(anyhow!(
+                "'copy-on-write' mode is not supported for append-only iceberg sink. \
+                 Please use 'merge-on-read' instead, which is strictly better for append-only workloads."
+            )));
+        }
+        Ok(())
+    }
+
     pub fn from_btreemap(values: BTreeMap<String, String>) -> Result<Self> {
         let mut config =
             serde_json::from_value::<IcebergConfig>(serde_json::to_value(&values).unwrap())
@@ -448,6 +463,9 @@ impl IcebergConfig {
                 )));
             }
         }
+
+        // Enforce merge-on-read for append-only sinks
+        Self::validate_append_only_write_mode(&config.r#type, config.write_mode)?;
 
         // All configs start with "catalog." will be treated as java configs.
         config.java_catalog_props = values
@@ -510,7 +528,7 @@ impl IcebergConfig {
     }
 
     pub fn trigger_snapshot_count(&self) -> usize {
-        self.trigger_snapshot_count.unwrap_or(16)
+        self.trigger_snapshot_count.unwrap_or(usize::MAX)
     }
 
     pub fn small_files_threshold_mb(&self) -> u64 {
@@ -644,8 +662,10 @@ async fn create_table_if_not_exists_impl(config: &IcebergConfig, param: &SinkPar
             match &config.common.warehouse_path {
                 Some(warehouse_path) => {
                     let is_s3_tables = warehouse_path.starts_with("arn:aws:s3tables");
+                    // BigLake catalog federation uses bq:// prefix for BigQuery-managed Iceberg tables
+                    let is_bq_catalog_federation = warehouse_path.starts_with("bq://");
                     let url = Url::parse(warehouse_path);
-                    if url.is_err() || is_s3_tables {
+                    if url.is_err() || is_s3_tables || is_bq_catalog_federation {
                         // For rest catalog, the warehouse_path could be a warehouse name.
                         // In this case, we should specify the location when creating a table.
                         if config.common.catalog_type() == "rest"
@@ -782,6 +802,12 @@ impl Sink for IcebergSink {
                 .check_available()
                 .map_err(|e| anyhow::anyhow!(e))?;
         }
+
+        // Enforce merge-on-read for append-only tables
+        IcebergConfig::validate_append_only_write_mode(
+            &self.config.r#type,
+            self.config.write_mode,
+        )?;
 
         // Validate compaction type configuration
         let compaction_type = self.config.compaction_type();
@@ -2928,6 +2954,9 @@ mod test {
                 adlsgen2_account_key: None,
                 adlsgen2_endpoint: None,
                 vended_credentials: None,
+                catalog_security: None,
+                gcp_auth_scopes: None,
+                catalog_io_impl: None,
             },
             table: IcebergTableIdentifier {
                 database_name: Some("demo_db".to_owned()),
@@ -3080,6 +3109,234 @@ mod test {
         test_create_catalog(values).await;
     }
 
+    /// Test parsing Google authentication configuration with custom scopes.
+    #[test]
+    fn test_parse_google_auth_with_custom_scopes() {
+        let values: BTreeMap<String, String> = [
+            ("connector", "iceberg"),
+            ("type", "append-only"),
+            ("force_append_only", "true"),
+            ("catalog.name", "biglake-catalog"),
+            ("catalog.type", "rest"),
+            (
+                "catalog.uri",
+                "https://biglake.googleapis.com/iceberg/v1/restcatalog",
+            ),
+            ("warehouse.path", "bq://projects/my-gcp-project"),
+            ("catalog.security", "google"),
+            ("gcp.auth.scopes", "https://www.googleapis.com/auth/cloud-platform,https://www.googleapis.com/auth/bigquery"),
+            ("database.name", "my_dataset"),
+            ("table.name", "my_table"),
+        ]
+        .into_iter()
+        .map(|(k, v)| (k.to_owned(), v.to_owned()))
+        .collect();
+
+        let iceberg_config = IcebergConfig::from_btreemap(values).unwrap();
+
+        // Verify catalog type
+        assert_eq!(iceberg_config.catalog_type(), "rest");
+
+        // Verify Google-specific options
+        assert_eq!(
+            iceberg_config.common.catalog_security.as_deref(),
+            Some("google")
+        );
+        assert_eq!(
+            iceberg_config.common.gcp_auth_scopes.as_deref(),
+            Some(
+                "https://www.googleapis.com/auth/cloud-platform,https://www.googleapis.com/auth/bigquery"
+            )
+        );
+
+        // Verify warehouse path with bq:// prefix
+        assert_eq!(
+            iceberg_config.common.warehouse_path.as_deref(),
+            Some("bq://projects/my-gcp-project")
+        );
+    }
+
+    /// Test parsing BigLake/Google Cloud REST catalog configuration.
+    #[test]
+    fn test_parse_biglake_google_auth_config() {
+        let values: BTreeMap<String, String> = [
+            ("connector", "iceberg"),
+            ("type", "append-only"),
+            ("force_append_only", "true"),
+            ("catalog.name", "biglake-catalog"),
+            ("catalog.type", "rest"),
+            (
+                "catalog.uri",
+                "https://biglake.googleapis.com/iceberg/v1/restcatalog",
+            ),
+            ("warehouse.path", "bq://projects/my-gcp-project"),
+            (
+                "catalog.header",
+                "x-goog-user-project=my-gcp-project",
+            ),
+            ("catalog.security", "google"),
+            ("gcp.auth.scopes", "https://www.googleapis.com/auth/cloud-platform,https://www.googleapis.com/auth/bigquery"),
+            ("database.name", "my_dataset"),
+            ("table.name", "my_table"),
+        ]
+        .into_iter()
+        .map(|(k, v)| (k.to_owned(), v.to_owned()))
+        .collect();
+
+        let iceberg_config = IcebergConfig::from_btreemap(values).unwrap();
+
+        // Verify catalog type
+        assert_eq!(iceberg_config.catalog_type(), "rest");
+
+        // Verify Google-specific options
+        assert_eq!(
+            iceberg_config.common.catalog_security.as_deref(),
+            Some("google")
+        );
+        assert_eq!(
+            iceberg_config.common.gcp_auth_scopes.as_deref(),
+            Some(
+                "https://www.googleapis.com/auth/cloud-platform,https://www.googleapis.com/auth/bigquery"
+            )
+        );
+
+        // Verify warehouse path with bq:// prefix
+        assert_eq!(
+            iceberg_config.common.warehouse_path.as_deref(),
+            Some("bq://projects/my-gcp-project")
+        );
+
+        // Verify custom header
+        assert_eq!(
+            iceberg_config.common.catalog_header.as_deref(),
+            Some("x-goog-user-project=my-gcp-project")
+        );
+    }
+
+    /// Test parsing `oauth2` security configuration.
+    #[test]
+    fn test_parse_oauth2_security_config() {
+        let values: BTreeMap<String, String> = [
+            ("connector", "iceberg"),
+            ("type", "append-only"),
+            ("force_append_only", "true"),
+            ("catalog.name", "oauth2-catalog"),
+            ("catalog.type", "rest"),
+            ("catalog.uri", "https://example.com/iceberg/rest"),
+            ("warehouse.path", "s3://my-bucket/warehouse"),
+            ("catalog.security", "oauth2"),
+            ("catalog.credential", "client_id:client_secret"),
+            ("catalog.token", "bearer-token"),
+            (
+                "catalog.oauth2_server_uri",
+                "https://oauth.example.com/token",
+            ),
+            ("catalog.scope", "read write"),
+            ("database.name", "test_db"),
+            ("table.name", "test_table"),
+        ]
+        .into_iter()
+        .map(|(k, v)| (k.to_owned(), v.to_owned()))
+        .collect();
+
+        let iceberg_config = IcebergConfig::from_btreemap(values).unwrap();
+
+        // Verify catalog type
+        assert_eq!(iceberg_config.catalog_type(), "rest");
+
+        // Verify OAuth2-specific options
+        assert_eq!(
+            iceberg_config.common.catalog_security.as_deref(),
+            Some("oauth2")
+        );
+        assert_eq!(
+            iceberg_config.common.catalog_credential.as_deref(),
+            Some("client_id:client_secret")
+        );
+        assert_eq!(
+            iceberg_config.common.catalog_token.as_deref(),
+            Some("bearer-token")
+        );
+        assert_eq!(
+            iceberg_config.common.catalog_oauth2_server_uri.as_deref(),
+            Some("https://oauth.example.com/token")
+        );
+        assert_eq!(
+            iceberg_config.common.catalog_scope.as_deref(),
+            Some("read write")
+        );
+    }
+
+    /// Test parsing invalid security configuration.
+    #[test]
+    fn test_parse_invalid_security_config() {
+        let values: BTreeMap<String, String> = [
+            ("connector", "iceberg"),
+            ("type", "append-only"),
+            ("force_append_only", "true"),
+            ("catalog.name", "invalid-catalog"),
+            ("catalog.type", "rest"),
+            ("catalog.uri", "https://example.com/iceberg/rest"),
+            ("warehouse.path", "s3://my-bucket/warehouse"),
+            ("catalog.security", "invalid_security_type"),
+            ("database.name", "test_db"),
+            ("table.name", "test_table"),
+        ]
+        .into_iter()
+        .map(|(k, v)| (k.to_owned(), v.to_owned()))
+        .collect();
+
+        // This should still parse successfully, but with a warning for unknown security type
+        let iceberg_config = IcebergConfig::from_btreemap(values).unwrap();
+
+        // Verify that the invalid security type is still stored
+        assert_eq!(
+            iceberg_config.common.catalog_security.as_deref(),
+            Some("invalid_security_type")
+        );
+
+        // Verify catalog type
+        assert_eq!(iceberg_config.catalog_type(), "rest");
+    }
+
+    /// Test parsing custom `FileIO` implementation configuration.
+    #[test]
+    fn test_parse_custom_io_impl_config() {
+        let values: BTreeMap<String, String> = [
+            ("connector", "iceberg"),
+            ("type", "append-only"),
+            ("force_append_only", "true"),
+            ("catalog.name", "gcs-catalog"),
+            ("catalog.type", "rest"),
+            ("catalog.uri", "https://example.com/iceberg/rest"),
+            ("warehouse.path", "gs://my-bucket/warehouse"),
+            ("catalog.security", "google"),
+            ("catalog.io_impl", "org.apache.iceberg.gcp.gcs.GCSFileIO"),
+            ("database.name", "test_db"),
+            ("table.name", "test_table"),
+        ]
+        .into_iter()
+        .map(|(k, v)| (k.to_owned(), v.to_owned()))
+        .collect();
+
+        let iceberg_config = IcebergConfig::from_btreemap(values).unwrap();
+
+        // Verify catalog type
+        assert_eq!(iceberg_config.catalog_type(), "rest");
+
+        // Verify custom `FileIO` implementation
+        assert_eq!(
+            iceberg_config.common.catalog_io_impl.as_deref(),
+            Some("org.apache.iceberg.gcp.gcs.GCSFileIO")
+        );
+
+        // Verify Google security is set
+        assert_eq!(
+            iceberg_config.common.catalog_security.as_deref(),
+            Some("google")
+        );
+    }
+
     #[test]
     fn test_config_constants_consistency() {
         // This test ensures our constants match the expected configuration names
@@ -3148,5 +3405,117 @@ mod test {
         assert_eq!(iceberg_config.trigger_snapshot_count, Some(10));
         assert_eq!(iceberg_config.target_file_size_mb, Some(256));
         assert_eq!(iceberg_config.compaction_type, Some(CompactionType::Full));
+    }
+
+    #[test]
+    fn test_append_only_rejects_copy_on_write() {
+        // Test that append-only sinks reject copy-on-write mode
+        let values = [
+            ("connector", "iceberg"),
+            ("type", "append-only"),
+            ("warehouse.path", "s3://iceberg"),
+            ("s3.endpoint", "http://127.0.0.1:9301"),
+            ("s3.access.key", "test"),
+            ("s3.secret.key", "test"),
+            ("s3.region", "us-east-1"),
+            ("catalog.type", "storage"),
+            ("catalog.name", "demo"),
+            ("database.name", "test_db"),
+            ("table.name", "test_table"),
+            ("write_mode", "copy-on-write"),
+        ]
+        .into_iter()
+        .map(|(k, v)| (k.to_owned(), v.to_owned()))
+        .collect();
+
+        let result = IcebergConfig::from_btreemap(values);
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("'copy-on-write' mode is not supported for append-only iceberg sink")
+        );
+    }
+
+    #[test]
+    fn test_append_only_accepts_merge_on_read() {
+        // Test that append-only sinks accept merge-on-read mode (explicit)
+        let values = [
+            ("connector", "iceberg"),
+            ("type", "append-only"),
+            ("warehouse.path", "s3://iceberg"),
+            ("s3.endpoint", "http://127.0.0.1:9301"),
+            ("s3.access.key", "test"),
+            ("s3.secret.key", "test"),
+            ("s3.region", "us-east-1"),
+            ("catalog.type", "storage"),
+            ("catalog.name", "demo"),
+            ("database.name", "test_db"),
+            ("table.name", "test_table"),
+            ("write_mode", "merge-on-read"),
+        ]
+        .into_iter()
+        .map(|(k, v)| (k.to_owned(), v.to_owned()))
+        .collect();
+
+        let result = IcebergConfig::from_btreemap(values);
+        assert!(result.is_ok());
+        let config = result.unwrap();
+        assert_eq!(config.write_mode, IcebergWriteMode::MergeOnRead);
+    }
+
+    #[test]
+    fn test_append_only_defaults_to_merge_on_read() {
+        // Test that append-only sinks default to merge-on-read when write_mode is not specified
+        let values = [
+            ("connector", "iceberg"),
+            ("type", "append-only"),
+            ("warehouse.path", "s3://iceberg"),
+            ("s3.endpoint", "http://127.0.0.1:9301"),
+            ("s3.access.key", "test"),
+            ("s3.secret.key", "test"),
+            ("s3.region", "us-east-1"),
+            ("catalog.type", "storage"),
+            ("catalog.name", "demo"),
+            ("database.name", "test_db"),
+            ("table.name", "test_table"),
+        ]
+        .into_iter()
+        .map(|(k, v)| (k.to_owned(), v.to_owned()))
+        .collect();
+
+        let result = IcebergConfig::from_btreemap(values);
+        assert!(result.is_ok());
+        let config = result.unwrap();
+        assert_eq!(config.write_mode, IcebergWriteMode::MergeOnRead);
+    }
+
+    #[test]
+    fn test_upsert_accepts_copy_on_write() {
+        // Test that upsert sinks accept copy-on-write mode
+        let values = [
+            ("connector", "iceberg"),
+            ("type", "upsert"),
+            ("primary_key", "id"),
+            ("warehouse.path", "s3://iceberg"),
+            ("s3.endpoint", "http://127.0.0.1:9301"),
+            ("s3.access.key", "test"),
+            ("s3.secret.key", "test"),
+            ("s3.region", "us-east-1"),
+            ("catalog.type", "storage"),
+            ("catalog.name", "demo"),
+            ("database.name", "test_db"),
+            ("table.name", "test_table"),
+            ("write_mode", "copy-on-write"),
+        ]
+        .into_iter()
+        .map(|(k, v)| (k.to_owned(), v.to_owned()))
+        .collect();
+
+        let result = IcebergConfig::from_btreemap(values);
+        assert!(result.is_ok());
+        let config = result.unwrap();
+        assert_eq!(config.write_mode, IcebergWriteMode::CopyOnWrite);
     }
 }

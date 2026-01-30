@@ -37,7 +37,7 @@ use risingwave_connector::sink::snowflake_redshift::redshift::RedshiftSink;
 use risingwave_connector::sink::snowflake_redshift::snowflake::SnowflakeV2Sink;
 use risingwave_connector::sink::{
     CONNECTOR_TYPE_KEY, SINK_SNAPSHOT_OPTION, SINK_TYPE_OPTION, SINK_USER_FORCE_APPEND_ONLY_OPTION,
-    Sink, enforce_secret_sink,
+    SINK_USER_IGNORE_DELETE_OPTION, Sink, enforce_secret_sink,
 };
 use risingwave_connector::{
     AUTO_SCHEMA_CHANGE_KEY, SINK_CREATE_TABLE_IF_NOT_EXISTS_KEY, SINK_INTERMEDIATE_TABLE_NAME,
@@ -321,6 +321,9 @@ pub async fn gen_sink_plan(
                 if let Some(v) = resolved_with_options.get(SINK_USER_FORCE_APPEND_ONLY_OPTION) {
                     f.options.insert(SINK_USER_FORCE_APPEND_ONLY_OPTION.into(), v.into());
                 }
+                if let Some(v) = resolved_with_options.get(SINK_USER_IGNORE_DELETE_OPTION) {
+                    f.options.insert(SINK_USER_IGNORE_DELETE_OPTION.into(), v.into());
+                }
                 f
             }),
             // Case C: no format + encode required
@@ -387,6 +390,8 @@ pub async fn gen_sink_plan(
         }
     }
 
+    let allow_snapshot_backfill = target_table_catalog.is_none() && !is_iceberg_engine_internal;
+
     let sink_plan = plan_root.gen_sink_plan(
         sink_table_name,
         definition,
@@ -400,6 +405,7 @@ pub async fn gen_sink_plan(
         partition_info,
         user_specified_columns,
         auto_refresh_schema_from_table,
+        allow_snapshot_backfill,
     )?;
 
     let sink_desc = sink_plan.sink_desc().clone();

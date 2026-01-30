@@ -141,25 +141,26 @@ message DropSubscriptionResponse {
   WaitVersion version = 2;
 }
 
+// If SERVERLESS, the materialized view should be created using serverless backfill
+// For that the controller will create a new compute node, which does backfilling and then is deleted.
+// May alleviate pressure on the cluster during backfill process.
+message StreamingJobResourceType {
+  oneof resource_type {
+    bool regular = 1;
+    // The specific resource group to use for the streaming job. If not set, the database resource group is used.
+    string specific_resource_group = 2;
+    string serverless_backfill_resource_group = 3;
+  }
+}
+
 message CreateMaterializedViewRequest {
   catalog.Table materialized_view = 1;
   stream_plan.StreamFragmentGraph fragment_graph = 2;
 
-  // If SERVERLESS, the materialized view should be created using serverless backfill
-  // For that the controller will create a new compute node, which does backfilling and then is deleted.
-  // May alleviate pressure on the cluster during backfill process.
-  enum BackfillType {
-    UNSPECIFIED = 0;
-    REGULAR = 1;
-    SERVERLESS = 2;
-  }
-  BackfillType backfill = 3;
+  StreamingJobResourceType resource_type = 3;
 
   // The list of object IDs that this materialized view depends on.
   repeated uint32 dependencies = 4;
-
-  // The specific resource group to use for the materialized view. If not set, the database resource group is used.
-  optional string specific_resource_group = 5;
 
   bool if_not_exists = 6;
 }
@@ -291,6 +292,8 @@ message AlterOwnerRequest {
     uint32 database_id = 6;
     uint32 subscription_id = 7;
     uint32 connection_id = 8;
+    uint32 secret_id = 9;
+    uint32 function_id = 10;
   }
   uint32 owner_id = 20;
 }
@@ -411,6 +414,17 @@ message RisectlListStateTablesResponse {
   repeated catalog.Table tables = 1;
 }
 
+// Used by risectl
+message RisectlResumeBackfillRequest {
+  oneof target {
+    uint32 job_id = 1;
+    uint32 fragment_id = 2;
+  }
+}
+
+// Used by risectl
+message RisectlResumeBackfillResponse {}
+
 message CreateIndexRequest {
   catalog.Index index = 1;
   catalog.Table index_table = 2;
@@ -483,11 +497,20 @@ message GetTableResponse {
 
 message GetDdlProgressRequest {}
 
+enum BackfillType {
+  BACKFILL_TYPE_UNSPECIFIED = 0;
+  NORMAL_BACKFILL = 1;
+  SNAPSHOT_BACKFILL = 2;
+}
+
 message DdlProgress {
   uint64 id = 1;
   string statement = 2;
   string progress = 3;
   string create_type = 4;
+  int64 initialized_at_time_millis = 5;
+  bool is_serverless_backfill = 6;
+  BackfillType backfill_type = 7;
 }
 
 message GetDdlProgressResponse {
@@ -677,6 +700,7 @@ service DdlService {
   rpc AlterResourceGroup(AlterResourceGroupRequest) returns (AlterResourceGroupResponse);
   rpc DropTable(DropTableRequest) returns (DropTableResponse);
   rpc RisectlListStateTables(RisectlListStateTablesRequest) returns (RisectlListStateTablesResponse);
+  rpc RisectlResumeBackfill(RisectlResumeBackfillRequest) returns (RisectlResumeBackfillResponse);
   rpc CreateView(CreateViewRequest) returns (CreateViewResponse);
   rpc DropView(DropViewRequest) returns (DropViewResponse);
   rpc CreateIndex(CreateIndexRequest) returns (CreateIndexResponse);

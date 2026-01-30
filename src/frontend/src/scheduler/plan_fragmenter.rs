@@ -21,7 +21,6 @@ use anyhow::anyhow;
 use async_recursion::async_recursion;
 use enum_as_inner::EnumAsInner;
 use futures::TryStreamExt;
-use iceberg::expr::Predicate as IcebergPredicate;
 use itertools::Itertools;
 use petgraph::{Directed, Graph};
 use pgwire::pg_server::SessionId;
@@ -36,14 +35,15 @@ use risingwave_connector::source::filesystem::opendal_source::opendal_enumerator
 use risingwave_connector::source::filesystem::opendal_source::{
     BatchPosixFsEnumerator, OpendalAzblob, OpendalGcs, OpendalS3,
 };
-use risingwave_connector::source::iceberg::IcebergSplitEnumerator;
+use risingwave_connector::source::iceberg::{
+    IcebergFileScanTask, IcebergSplit, IcebergSplitEnumerator,
+};
 use risingwave_connector::source::kafka::KafkaSplitEnumerator;
 use risingwave_connector::source::prelude::DatagenSplitEnumerator;
 use risingwave_connector::source::reader::reader::build_opendal_fs_list_for_batch;
 use risingwave_connector::source::{
     ConnectorProperties, SourceEnumeratorContext, SplitEnumerator, SplitImpl,
 };
-use risingwave_pb::batch_plan::iceberg_scan_node::IcebergScanType;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::{ExchangeInfo, ScanRange as ScanRangeProto};
 use risingwave_pb::plan_common::Field as PbField;
@@ -316,12 +316,16 @@ impl Query {
 
 #[derive(Debug, Clone)]
 pub enum SourceFetchParameters {
-    IcebergSpecificInfo(IcebergSpecificInfo),
     KafkaTimebound {
         lower: Option<i64>,
         upper: Option<i64>,
     },
     Empty,
+}
+
+#[derive(Debug, Clone)]
+pub enum UnpartitionedData {
+    Iceberg(IcebergFileScanTask),
 }
 
 #[derive(Debug, Clone)]
@@ -335,17 +339,11 @@ pub struct SourceFetchInfo {
     pub fetch_parameters: SourceFetchParameters,
 }
 
-#[derive(Debug, Clone)]
-pub struct IcebergSpecificInfo {
-    pub iceberg_scan_type: IcebergScanType,
-    pub predicate: IcebergPredicate,
-    pub snapshot_id: Option<i64>,
-}
-
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub enum SourceScanInfo {
     /// Split Info
     Incomplete(SourceFetchInfo),
+    Unpartitioned(UnpartitionedData),
     Complete(Vec<SplitImpl>),
 }
 
@@ -355,13 +353,63 @@ impl SourceScanInfo {
     }
 
     pub async fn complete(self, batch_parallelism: usize) -> SchedulerResult<Self> {
-        let fetch_info = match self {
-            SourceScanInfo::Incomplete(fetch_info) => fetch_info,
+        match self {
+            SourceScanInfo::Incomplete(fetch_info) => fetch_info.complete(batch_parallelism).await,
+            SourceScanInfo::Unpartitioned(data) => data.complete(batch_parallelism),
             SourceScanInfo::Complete(_) => {
                 unreachable!("Never call complete when SourceScanInfo is already complete")
             }
+        }
+    }
+
+    pub fn split_info(&self) -> SchedulerResult<&Vec<SplitImpl>> {
+        match self {
+            Self::Incomplete(_) => Err(SchedulerError::Internal(anyhow!(
+                "Should not get split info from incomplete source scan info"
+            ))),
+            Self::Unpartitioned(_) => Err(SchedulerError::Internal(anyhow!(
+                "Should not get split info from unpartitioned source scan info"
+            ))),
+            Self::Complete(split_info) => Ok(split_info),
+        }
+    }
+}
+
+impl UnpartitionedData {
+    fn complete(self, batch_parallelism: usize) -> SchedulerResult<SourceScanInfo> {
+        macro_rules! split_iceberg_tasks {
+            ($tasks:expr, $variant:ident) => {
+                IcebergSplitEnumerator::split_n_vecs($tasks, batch_parallelism)
+                    .into_iter()
+                    .enumerate()
+                    .map(|(id, tasks)| {
+                        SplitImpl::Iceberg(IcebergSplit {
+                            split_id: id.try_into().unwrap(),
+                            task: IcebergFileScanTask::$variant(tasks),
+                        })
+                    })
+                    .collect()
+            };
+        }
+
+        let splits = match self {
+            UnpartitionedData::Iceberg(task) => match task {
+                IcebergFileScanTask::Data(tasks) => split_iceberg_tasks!(tasks, Data),
+                IcebergFileScanTask::EqualityDelete(tasks) => {
+                    split_iceberg_tasks!(tasks, EqualityDelete)
+                }
+                IcebergFileScanTask::PositionDelete(tasks) => {
+                    split_iceberg_tasks!(tasks, PositionDelete)
+                }
+            },
         };
-        match (fetch_info.connector, fetch_info.fetch_parameters) {
+        Ok(SourceScanInfo::Complete(splits))
+    }
+}
+
+impl SourceFetchInfo {
+    async fn complete(self, _batch_parallelism: usize) -> SchedulerResult<SourceScanInfo> {
+        match (self.connector, self.fetch_parameters) {
             (
                 ConnectorProperties::Kafka(prop),
                 SourceFetchParameters::KafkaTimebound { lower, upper },
@@ -436,43 +484,11 @@ impl SourceScanInfo {
 
                 Ok(SourceScanInfo::Complete(res))
             }
-            (
-                ConnectorProperties::Iceberg(prop),
-                SourceFetchParameters::IcebergSpecificInfo(iceberg_specific_info),
-            ) => {
-                let iceberg_enumerator =
-                    IcebergSplitEnumerator::new(*prop, SourceEnumeratorContext::dummy().into())
-                        .await?;
-
-                let split_info = iceberg_enumerator
-                    .list_splits_batch(
-                        fetch_info.schema,
-                        iceberg_specific_info.snapshot_id,
-                        batch_parallelism,
-                        iceberg_specific_info.iceberg_scan_type,
-                        iceberg_specific_info.predicate,
-                    )
-                    .await?
-                    .into_iter()
-                    .map(SplitImpl::Iceberg)
-                    .collect_vec();
-
-                Ok(SourceScanInfo::Complete(split_info))
-            }
             (connector, _) => Err(SchedulerError::Internal(anyhow!(
                 "Unsupported to query directly from this {} source, \
                  please create a table or streaming job from it",
                 connector.kind()
             ))),
-        }
-    }
-
-    pub fn split_info(&self) -> SchedulerResult<&Vec<SplitImpl>> {
-        match self {
-            Self::Incomplete(_) => Err(SchedulerError::Internal(anyhow!(
-                "Should not get split info from incomplete source scan info"
-            ))),
-            Self::Complete(split_info) => Ok(split_info),
         }
     }
 }
@@ -835,7 +851,10 @@ impl StageGraph {
                 StageCompleteInfo::ExchangeInfo((exchange_info, stage.parallelism)),
             );
             None
-        } else if matches!(stage.source_info, Some(SourceScanInfo::Incomplete(_))) {
+        } else if matches!(
+            stage.source_info,
+            Some(SourceScanInfo::Incomplete(_)) | Some(SourceScanInfo::Unpartitioned(_))
+        ) {
             let complete_source_info = stage
                 .source_info
                 .as_ref()
@@ -864,7 +883,7 @@ impl StageGraph {
                         _ => complete_source_info.split_info().unwrap().len() as u32,
                     }
                 }
-                _ => unreachable!(),
+                _ => complete_source_info.split_info().unwrap().len() as u32,
             };
             // For file source batch read, all the files  to be read are divide into several parts to prevent the task from taking up too many resources.
             // todo(wcy-fdu): Currently it will be divided into half of batch_parallelism groups, and this will be changed to configurable later.
@@ -1211,22 +1230,10 @@ impl BatchPlanFragmenter {
             }
         } else if let Some(batch_iceberg_scan) = node.as_batch_iceberg_scan() {
             let batch_iceberg_scan: &BatchIcebergScan = batch_iceberg_scan;
-            let source_catalog = batch_iceberg_scan.source_catalog();
-            if let Some(source_catalog) = source_catalog {
-                let property =
-                    ConnectorProperties::extract(source_catalog.with_properties.clone(), false)?;
-                return Ok(Some(SourceScanInfo::new(SourceFetchInfo {
-                    schema: batch_iceberg_scan.base.schema().clone(),
-                    connector: property,
-                    fetch_parameters: SourceFetchParameters::IcebergSpecificInfo(
-                        IcebergSpecificInfo {
-                            predicate: batch_iceberg_scan.predicate.clone(),
-                            iceberg_scan_type: batch_iceberg_scan.iceberg_scan_type(),
-                            snapshot_id: batch_iceberg_scan.snapshot_id(),
-                        },
-                    ),
-                })));
-            }
+            let task = batch_iceberg_scan.task.clone();
+            return Ok(Some(SourceScanInfo::Unpartitioned(
+                UnpartitionedData::Iceberg(task),
+            )));
         } else if let Some(source_node) = node.as_batch_source() {
             // TODO: use specific batch operator instead of batch source.
             let source_node: &BatchSource = source_node;

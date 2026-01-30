@@ -38,6 +38,7 @@ pub use storage::{
 };
 pub mod merge;
 pub mod mutate;
+pub mod none_as_empty_string;
 pub mod system;
 pub mod utils;
 
@@ -116,6 +117,7 @@ pub struct RwConfig {
 /// `[batch.developer.batch_compute_client_config]`
 /// `[batch.developer.batch_frontend_client_config]`
 /// `[streaming.developer.stream_compute_client_config]`
+#[serde_with::apply(Option => #[serde(with = "none_as_empty_string")])]
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde, ConfigDoc)]
 pub struct RpcClientConfig {
     #[serde(default = "default::developer::rpc_client_connect_timeout_secs")]
@@ -268,6 +270,11 @@ pub mod default {
         pub fn time_travel_vacuum_interval_sec() -> u64 {
             30
         }
+
+        pub fn time_travel_vacuum_max_version_count() -> Option<u32> {
+            Some(10000)
+        }
+
         pub fn hummock_time_travel_epoch_version_insert_batch_size() -> usize {
             1000
         }
@@ -332,6 +339,10 @@ pub mod default {
             true
         }
 
+        pub fn stream_enable_snapshot_backfill() -> bool {
+            true
+        }
+
         pub fn enable_shared_source() -> bool {
             true
         }
@@ -366,6 +377,10 @@ pub mod default {
             None
         }
 
+        pub fn stream_snapshot_iter_rebuild_interval_secs() -> u64 {
+            10 * 60
+        }
+
         pub fn enable_explain_analyze_stats() -> bool {
             true
         }
@@ -388,6 +403,10 @@ pub mod default {
 
         pub fn iceberg_sink_write_parquet_max_row_group_rows() -> usize {
             100_000
+        }
+
+        pub fn materialize_force_overwrite_on_no_check() -> bool {
+            false
         }
 
         pub fn refresh_scheduler_interval_sec() -> u64 {

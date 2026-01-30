@@ -17,11 +17,12 @@ use std::time::Duration;
 
 use anyhow::{Context, anyhow};
 use risingwave_common::bail;
+use risingwave_common::cast::datetime_to_timestamp_millis;
 use risingwave_common::hash::VnodeCount;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_meta_model::{
     PrivateLinkService, connection, database, function, index, object, schema, secret, sink,
-    source, subscription, table, view,
+    source, streaming_job as streaming_job_model, subscription, table, view,
 };
 use risingwave_meta_model_migration::{MigrationStatus, Migrator, MigratorTrait};
 use risingwave_pb::catalog::connection::PbInfo as PbConnectionInfo;
@@ -170,7 +171,24 @@ impl SqlMetaStore {
     }
 }
 
-pub struct ObjectModel<M: ModelTrait>(M, object::Model);
+pub struct ObjectModel<M: ModelTrait>(M, object::Model, Option<streaming_job_model::Model>);
+
+fn stream_job_status_and_create_type(
+    streaming_job: &Option<streaming_job_model::Model>,
+) -> (i32, i32) {
+    streaming_job
+        .as_ref()
+        .map(|job| {
+            (
+                PbStreamJobStatus::from(job.job_status) as i32,
+                PbCreateType::from(job.create_type.clone()) as i32,
+            )
+        })
+        .unwrap_or((
+            PbStreamJobStatus::Created as i32,
+            PbCreateType::Foreground as i32,
+        ))
+}
 
 impl From<ObjectModel<database::Model>> for PbDatabase {
     fn from(value: ObjectModel<database::Model>) -> Self {
@@ -211,6 +229,7 @@ impl From<ObjectModel<schema::Model>> for PbSchema {
 
 impl From<ObjectModel<table::Model>> for PbTable {
     fn from(value: ObjectModel<table::Model>) -> Self {
+        let (stream_job_status, create_type) = stream_job_status_and_create_type(&value.2);
         Self {
             id: value.0.table_id,
             schema_id: value.1.schema_id.unwrap(),
@@ -248,15 +267,16 @@ impl From<ObjectModel<table::Model>> for PbTable {
                 .cardinality
                 .map(|cardinality| cardinality.to_protobuf()),
             initialized_at_epoch: Some(
-                Epoch::from_unix_millis(value.1.initialized_at.and_utc().timestamp_millis() as _).0,
+                Epoch::from_unix_millis(datetime_to_timestamp_millis(value.1.initialized_at) as _)
+                    .0,
             ),
             created_at_epoch: Some(
-                Epoch::from_unix_millis(value.1.created_at.and_utc().timestamp_millis() as _).0,
+                Epoch::from_unix_millis(datetime_to_timestamp_millis(value.1.created_at) as _).0,
             ),
             #[expect(deprecated)]
             cleaned_by_watermark: value.0.cleaned_by_watermark,
-            stream_job_status: PbStreamJobStatus::Created as _,
-            create_type: PbCreateType::Foreground as _,
+            stream_job_status,
+            create_type,
             version: value.0.version.map(|v| v.to_protobuf()),
             optional_associated_source_id: value.0.optional_associated_source_id.map(Into::into),
             description: value.0.description,
@@ -309,10 +329,11 @@ impl From<ObjectModel<source::Model>> for PbSource {
             connection_id: value.0.connection_id,
             // todo: using the timestamp from the database directly.
             initialized_at_epoch: Some(
-                Epoch::from_unix_millis(value.1.initialized_at.and_utc().timestamp_millis() as _).0,
+                Epoch::from_unix_millis(datetime_to_timestamp_millis(value.1.initialized_at) as _)
+                    .0,
             ),
             created_at_epoch: Some(
-                Epoch::from_unix_millis(value.1.created_at.and_utc().timestamp_millis() as _).0,
+                Epoch::from_unix_millis(datetime_to_timestamp_millis(value.1.created_at) as _).0,
             ),
             version: value.0.version as _,
             optional_associated_table_id: value.0.optional_associated_table_id.map(Into::into),
@@ -330,6 +351,7 @@ impl From<ObjectModel<source::Model>> for PbSource {
 
 impl From<ObjectModel<sink::Model>> for PbSink {
     fn from(value: ObjectModel<sink::Model>) -> Self {
+        let (stream_job_status, create_type) = stream_job_status_and_create_type(&value.2);
         let mut secret_ref_map = BTreeMap::new();
         if let Some(secret_ref) = value.0.secret_ref {
             secret_ref_map = secret_ref.to_protobuf();
@@ -350,19 +372,20 @@ impl From<ObjectModel<sink::Model>> for PbSink {
             definition: value.0.definition,
             connection_id: value.0.connection_id,
             initialized_at_epoch: Some(
-                Epoch::from_unix_millis(value.1.initialized_at.and_utc().timestamp_millis() as _).0,
+                Epoch::from_unix_millis(datetime_to_timestamp_millis(value.1.initialized_at) as _)
+                    .0,
             ),
             created_at_epoch: Some(
-                Epoch::from_unix_millis(value.1.created_at.and_utc().timestamp_millis() as _).0,
+                Epoch::from_unix_millis(datetime_to_timestamp_millis(value.1.created_at) as _).0,
             ),
             db_name: value.0.db_name,
             sink_from_name: value.0.sink_from_name,
-            stream_job_status: PbStreamJobStatus::Created as _,
+            stream_job_status,
             format_desc: value.0.sink_format_desc.map(|desc| desc.to_protobuf()),
             target_table: value.0.target_table,
             initialized_at_cluster_version: value.1.initialized_at_cluster_version,
             created_at_cluster_version: value.1.created_at_cluster_version,
-            create_type: PbCreateType::Foreground as _,
+            create_type,
             secret_refs: secret_ref_map,
             original_target_columns: value
                 .0
@@ -385,10 +408,11 @@ impl From<ObjectModel<subscription::Model>> for PbSubscription {
             retention_seconds: value.0.retention_seconds as _,
             definition: value.0.definition,
             initialized_at_epoch: Some(
-                Epoch::from_unix_millis(value.1.initialized_at.and_utc().timestamp_millis() as _).0,
+                Epoch::from_unix_millis(datetime_to_timestamp_millis(value.1.initialized_at) as _)
+                    .0,
             ),
             created_at_epoch: Some(
-                Epoch::from_unix_millis(value.1.created_at.and_utc().timestamp_millis() as _).0,
+                Epoch::from_unix_millis(datetime_to_timestamp_millis(value.1.created_at) as _).0,
             ),
             initialized_at_cluster_version: value.1.initialized_at_cluster_version,
             created_at_cluster_version: value.1.created_at_cluster_version,
@@ -400,6 +424,7 @@ impl From<ObjectModel<subscription::Model>> for PbSubscription {
 
 impl From<ObjectModel<index::Model>> for PbIndex {
     fn from(value: ObjectModel<index::Model>) -> Self {
+        let (stream_job_status, create_type) = stream_job_status_and_create_type(&value.2);
         Self {
             id: value.0.index_id as _,
             schema_id: value.1.schema_id.unwrap(),
@@ -416,15 +441,16 @@ impl From<ObjectModel<index::Model>> for PbIndex {
                 .unwrap_or_default(),
             index_columns_len: value.0.index_columns_len as _,
             initialized_at_epoch: Some(
-                Epoch::from_unix_millis(value.1.initialized_at.and_utc().timestamp_millis() as _).0,
+                Epoch::from_unix_millis(datetime_to_timestamp_millis(value.1.initialized_at) as _)
+                    .0,
             ),
             created_at_epoch: Some(
-                Epoch::from_unix_millis(value.1.created_at.and_utc().timestamp_millis() as _).0,
+                Epoch::from_unix_millis(datetime_to_timestamp_millis(value.1.created_at) as _).0,
             ),
-            stream_job_status: PbStreamJobStatus::Created as _,
+            stream_job_status,
             initialized_at_cluster_version: value.1.initialized_at_cluster_version,
             created_at_cluster_version: value.1.created_at_cluster_version,
-            create_type: risingwave_pb::catalog::CreateType::Foreground.into(), /* Default for existing indexes */
+            create_type,
         }
     }
 }
@@ -441,7 +467,7 @@ impl From<ObjectModel<view::Model>> for PbView {
             sql: value.0.definition,
             columns: value.0.columns.to_protobuf(),
             created_at_epoch: Some(
-                Epoch::from_unix_millis(value.1.created_at.and_utc().timestamp_millis() as _).0,
+                Epoch::from_unix_millis(datetime_to_timestamp_millis(value.1.created_at) as _).0,
             ),
             created_at_cluster_version: value.1.created_at_cluster_version,
         }
@@ -496,7 +522,7 @@ impl From<ObjectModel<function::Model>> for PbFunction {
                 .as_ref()
                 .and_then(|o| o.0.get("batch").map(|v| v == "true")),
             created_at_epoch: Some(
-                Epoch::from_unix_millis(value.1.created_at.and_utc().timestamp_millis() as _).0,
+                Epoch::from_unix_millis(datetime_to_timestamp_millis(value.1.created_at) as _).0,
             ),
             created_at_cluster_version: value.1.created_at_cluster_version,
         }

@@ -34,7 +34,7 @@ use risingwave_common::{bail, hash};
 use risingwave_connector::source::cdc::{CDC_BACKFILL_MAX_PARALLELISM, CdcScanOptions};
 use risingwave_meta_model::WorkerId;
 use risingwave_meta_model::fragment::DistributionType;
-use risingwave_pb::common::{ActorInfo, WorkerNode};
+use risingwave_pb::common::WorkerNode;
 use risingwave_pb::meta::table_fragments::fragment::PbFragmentDistributionType;
 use risingwave_pb::stream_plan::DispatcherType::{self, *};
 
@@ -445,28 +445,6 @@ pub struct Locations {
     pub actor_locations: BTreeMap<ActorId, ActorAlignmentId>,
     /// worker location map.
     pub worker_locations: HashMap<WorkerId, WorkerNode>,
-}
-
-impl Locations {
-    /// Returns all actors for every worker node.
-    pub fn worker_actors(&self) -> HashMap<WorkerId, Vec<ActorId>> {
-        self.actor_locations
-            .iter()
-            .map(|(actor_id, alignment_id)| (alignment_id.worker_id(), *actor_id))
-            .into_group_map()
-    }
-
-    /// Returns an iterator of `ActorInfo`.
-    pub fn actor_infos(&self) -> impl Iterator<Item = ActorInfo> + '_ {
-        self.actor_locations
-            .iter()
-            .map(|(&actor_id, alignment_id)| ActorInfo {
-                actor_id,
-                host: self.worker_locations[&(alignment_id.worker_id() as WorkerId)]
-                    .host
-                    .clone(),
-            })
-    }
 }
 
 #[cfg(test)]

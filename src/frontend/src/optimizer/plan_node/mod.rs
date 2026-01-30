@@ -55,8 +55,8 @@ use super::property::{
     Distribution, FunctionalDependencySet, MonotonicityMap, Order, WatermarkColumns,
 };
 use crate::error::{ErrorCode, Result};
-use crate::optimizer::ExpressionSimplifyRewriter;
 use crate::optimizer::property::StreamKind;
+use crate::optimizer::{ExpressionSimplifyRewriter, PlanVisitor};
 use crate::session::current::notice_to_user;
 use crate::utils::{PrettySerde, build_graph_from_pretty};
 
@@ -563,6 +563,42 @@ impl LogicalPlanRef {
             dyn_t.predicate_pushdown(predicate, ctx)
         }
     }
+
+    pub fn forbid_snapshot_backfill(&self) -> Option<String> {
+        struct ForbidSnapshotBackfill {
+            warning_msg: Option<String>,
+        }
+        impl LogicalPlanVisitor for ForbidSnapshotBackfill {
+            type Result = ();
+
+            type DefaultBehavior = impl DefaultBehavior<Self::Result>;
+
+            fn default_behavior() -> Self::DefaultBehavior {
+                DefaultValue
+            }
+
+            fn visit_logical_join(&mut self, plan: &LogicalJoin) -> Self::Result {
+                self.visit(plan.left());
+                self.visit(plan.right());
+                if self.warning_msg.is_none() && plan.should_be_temporal_join() {
+                    self.warning_msg =
+                        Some("snapshot backfill disabled due to temporal join".to_owned());
+                }
+            }
+
+            fn visit_logical_source(&mut self, plan: &LogicalSource) -> Self::Result {
+                if self.warning_msg.is_none() && plan.is_shared_source() {
+                    self.warning_msg = Some(format!(
+                        "snapshot backfill disabled due to using shared source {:?}",
+                        plan.core.catalog.as_ref().map(|c| &c.name)
+                    ));
+                }
+            }
+        }
+        let mut forbid_snapshot = ForbidSnapshotBackfill { warning_msg: None };
+        forbid_snapshot.visit(self.clone());
+        forbid_snapshot.warning_msg
+    }
 }
 
 impl ColPrunable for LogicalPlanRef {
@@ -1006,7 +1042,6 @@ mod logical_agg;
 mod logical_apply;
 mod logical_cdc_scan;
 mod logical_changelog;
-mod logical_cte_ref;
 mod logical_dedup;
 mod logical_delete;
 mod logical_except;
@@ -1027,7 +1062,6 @@ mod logical_now;
 mod logical_over_window;
 mod logical_project;
 mod logical_project_set;
-mod logical_recursive_union;
 mod logical_scan;
 mod logical_share;
 mod logical_source;
@@ -1087,6 +1121,7 @@ mod batch_postgres_query;
 mod batch_mysql_query;
 mod derive;
 mod logical_file_scan;
+mod logical_iceberg_intermediate_scan;
 mod logical_iceberg_scan;
 mod logical_postgres_query;
 
@@ -1141,7 +1176,6 @@ pub use logical_agg::LogicalAgg;
 pub use logical_apply::LogicalApply;
 pub use logical_cdc_scan::LogicalCdcScan;
 pub use logical_changelog::LogicalChangeLog;
-pub use logical_cte_ref::LogicalCteRef;
 pub use logical_dedup::LogicalDedup;
 pub use logical_delete::LogicalDelete;
 pub use logical_except::LogicalExcept;
@@ -1151,6 +1185,7 @@ pub use logical_filter::LogicalFilter;
 pub use logical_gap_fill::LogicalGapFill;
 pub use logical_get_channel_delta_stats::LogicalGetChannelDeltaStats;
 pub use logical_hop_window::LogicalHopWindow;
+pub use logical_iceberg_intermediate_scan::LogicalIcebergIntermediateScan;
 pub use logical_iceberg_scan::LogicalIcebergScan;
 pub use logical_insert::LogicalInsert;
 pub use logical_intersect::LogicalIntersect;
@@ -1166,7 +1201,6 @@ pub use logical_over_window::LogicalOverWindow;
 pub use logical_postgres_query::LogicalPostgresQuery;
 pub use logical_project::LogicalProject;
 pub use logical_project_set::LogicalProjectSet;
-pub use logical_recursive_union::LogicalRecursiveUnion;
 pub use logical_scan::LogicalScan;
 pub use logical_share::LogicalShare;
 pub use logical_source::LogicalSource;
@@ -1231,7 +1265,9 @@ use crate::expr::{ExprImpl, ExprRewriter, ExprVisitor, InputRef, Literal};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_rewriter::PlanCloner;
-use crate::optimizer::plan_visitor::ExprCorrelatedIdFinder;
+use crate::optimizer::plan_visitor::{
+    DefaultBehavior, DefaultValue, ExprCorrelatedIdFinder, LogicalPlanVisitor,
+};
 use crate::scheduler::SchedulerResult;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::utils::{ColIndexMapping, Condition, DynEq, DynHash, Endo, Layer, Visit};
@@ -1282,8 +1318,7 @@ macro_rules! for_all_plan_nodes {
             , { Logical, MaxOneRow }
             , { Logical, KafkaScan }
             , { Logical, IcebergScan }
-            , { Logical, RecursiveUnion }
-            , { Logical, CteRef }
+            , { Logical, IcebergIntermediateScan }
             , { Logical, ChangeLog }
             , { Logical, FileScan }
             , { Logical, PostgresQuery }

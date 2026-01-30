@@ -37,6 +37,49 @@ use super::{Access, AccessError, AccessResult};
 use crate::parser::DatumCow;
 use crate::schema::{InvalidOptionError, bail_invalid_option_error};
 
+/// Try to parse Debezium `PostGIS` `geometry` object.
+///
+/// Debezium represents `PostGIS` `geometry` as an object: `{"srid": <int>, "wkb": <base64_string>}`.
+/// For our current Postgres CDC ingestion, the `wkb` field is expected to be EWKB bytes (base64-encoded),
+/// and `srid` is redundant. We decode `wkb` into raw bytes and store it as `bytea`.
+///
+/// Note: Debezium provides an SMT to convert between `WKB` and `EWKB`, which may be useful for future
+/// unification across connectors (e.g., MySQL): see `GeometryFormatTransformer`.
+///
+/// Return semantics:
+/// - `Ok(Some(bytes))`: The input matches the Debezium geometry shape (`srid` is numeric AND `wkb` is string),
+///   and we successfully decoded `wkb` into bytes.
+/// - `Ok(None)`: The input does NOT look like a Debezium geometry object. This allows the caller to keep the
+///   match arm focused on dispatching, and avoids misclassifying other JSON objects that might map to `bytea`
+///   in the future.
+/// - `Err(...)`: The input looks like a Debezium geometry object, but decoding/parsing failed (e.g. invalid
+///   base64). This indicates a real data/format error and should not be silently ignored.
+fn try_parse_debezium_geometry_as_bytea(
+    value: &BorrowedValue<'_>,
+    create_error: impl Fn() -> AccessError,
+) -> AccessResult<Option<Box<[u8]>>> {
+    let obj = match value.as_object() {
+        Some(obj) => obj,
+        None => return Ok(None),
+    };
+
+    // Strictly identify the geometry object by checking both fields and their types.
+    // There may be other objects that map to bytea in the future.
+    let srid = obj.get("srid").and_then(|v| v.as_i64());
+    let wkb = obj.get("wkb").and_then(|v| v.as_str());
+
+    let (Some(_srid), Some(wkb)) = (srid, wkb) else {
+        return Ok(None);
+    };
+
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(wkb)
+        .map_err(|_| create_error())?
+        .into_boxed_slice();
+
+    Ok(Some(bytes))
+}
+
 #[derive(Clone, Debug)]
 pub enum ByteaHandling {
     Standard,
@@ -652,6 +695,14 @@ impl JsonParseOptions {
                         .map_err(|_| create_error())?
                         .into_boxed_slice()
                         .into(),
+                }
+            }
+            // Handle Debezium PostGIS geometry type: {"srid": <int>, "wkb": <base64_string>}
+            // We extract the wkb field and decode it as EWKB bytes
+            (DataType::Bytea, ValueType::Object) => {
+                match try_parse_debezium_geometry_as_bytea(value, create_error)? {
+                    Some(bytes) => bytes.into(),
+                    None => Err(create_error())?,
                 }
             }
             // ---- Jsonb -----

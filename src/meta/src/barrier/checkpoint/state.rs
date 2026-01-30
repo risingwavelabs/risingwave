@@ -21,20 +21,23 @@ use risingwave_common::id::JobId;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
-use risingwave_pb::stream_plan::barrier_mutation::PbMutation;
+use risingwave_pb::stream_plan::barrier_mutation::{Mutation, PbMutation};
 use risingwave_pb::stream_plan::update_mutation::PbDispatcherUpdate;
 use risingwave_pb::stream_plan::{
-    PbStartFragmentBackfillMutation, PbSubscriptionUpstreamInfo, PbUpdateMutation,
+    PbStartFragmentBackfillMutation, PbSubscriptionUpstreamInfo, PbUpdateMutation, ThrottleMutation,
 };
 use tracing::warn;
 
 use crate::MetaResult;
 use crate::barrier::checkpoint::{CreatingStreamingJobControl, DatabaseCheckpointControl};
+use crate::barrier::command::PostCollectCommand;
+use crate::barrier::context::CreateSnapshotBackfillJobCommandInfo;
 use crate::barrier::edge_builder::FragmentEdgeBuilder;
 use crate::barrier::info::{
     BarrierInfo, CreateStreamingJobStatus, InflightStreamingJobInfo, SubscriberType,
 };
-use crate::barrier::rpc::ControlStreamManager;
+use crate::barrier::notifier::Notifier;
+use crate::barrier::rpc::{ControlStreamManager, to_partial_graph_id};
 use crate::barrier::utils::NodeToCollect;
 use crate::barrier::{BarrierKind, Command, CreateStreamingJobType, TracedEpoch};
 use crate::controller::fragment::InflightFragmentInfo;
@@ -126,7 +129,7 @@ pub(super) struct ApplyCommandInfo {
     pub table_ids_to_commit: HashSet<TableId>,
     pub jobs_to_wait: HashSet<JobId>,
     pub node_to_collect: NodeToCollect,
-    pub command: Option<Command>,
+    pub command: PostCollectCommand,
 }
 
 impl DatabaseCheckpointControl {
@@ -135,6 +138,7 @@ impl DatabaseCheckpointControl {
     pub(super) fn apply_command(
         &mut self,
         mut command: Option<Command>,
+        notifiers: &mut Vec<Notifier>,
         barrier_info: &BarrierInfo,
         control_stream_manager: &mut ControlStreamManager,
         hummock_version_stats: &HummockVersionStats,
@@ -189,7 +193,13 @@ impl DatabaseCheckpointControl {
                         .collect();
 
                     let job = CreatingStreamingJobControl::new(
-                        info,
+                        CreateSnapshotBackfillJobCommandInfo {
+                            info: info.clone(),
+                            snapshot_backfill_info: snapshot_backfill_info.clone(),
+                            cross_db_snapshot_backfill_info: cross_db_snapshot_backfill_info
+                                .clone(),
+                        },
+                        take(notifiers),
                         snapshot_backfill_upstream_tables,
                         snapshot_epoch,
                         hummock_version_stats,
@@ -394,13 +404,16 @@ impl DatabaseCheckpointControl {
                                     )
                                 }),
                         );
+                        // new actors belong to the database partial graph
+                        let partial_graph_id = to_partial_graph_id(self.database_id, None);
                         let mut edge_builder = FragmentEdgeBuilder::new(
                             info.upstream_fragment_downstreams
                                 .keys()
                                 .map(|upstream_fragment_id| {
                                     self.database_info.fragment(*upstream_fragment_id)
                                 })
-                                .chain(new_fragment_info.values()),
+                                .chain(new_fragment_info.values())
+                                .map(|info| (info, partial_graph_id)),
                             control_stream_manager,
                         );
                         edge_builder.add_relations(&info.upstream_fragment_downstreams);
@@ -522,7 +535,31 @@ impl DatabaseCheckpointControl {
 
         for (job_id, creating_job) in &mut self.creating_streaming_job_controls {
             if !finished_snapshot_backfill_jobs.contains(job_id) {
-                creating_job.on_new_upstream_barrier(control_stream_manager, barrier_info)?;
+                let throttle_mutation = if let Some(Command::Throttle { jobs, config }) = &command
+                    && jobs.contains(job_id)
+                {
+                    assert_eq!(
+                        jobs.len(),
+                        1,
+                        "should not alter rate limit of snapshot backfill job with other jobs"
+                    );
+                    Some((
+                        Mutation::Throttle(ThrottleMutation {
+                            fragment_throttle: config
+                                .iter()
+                                .map(|(fragment_id, config)| (*fragment_id, *config))
+                                .collect(),
+                        }),
+                        take(notifiers),
+                    ))
+                } else {
+                    None
+                };
+                creating_job.on_new_upstream_barrier(
+                    control_stream_manager,
+                    barrier_info,
+                    throttle_mutation,
+                )?;
             }
         }
 
@@ -533,6 +570,7 @@ impl DatabaseCheckpointControl {
             barrier_info,
             &node_actors,
             InflightFragmentInfo::existing_table_ids(self.database_info.fragment_infos()),
+            InflightFragmentInfo::workers(self.database_info.fragment_infos()),
             actors_to_create,
         )?;
 
@@ -541,7 +579,9 @@ impl DatabaseCheckpointControl {
             table_ids_to_commit,
             jobs_to_wait: finished_snapshot_backfill_jobs,
             node_to_collect,
-            command,
+            command: command
+                .map(Command::into_post_collect)
+                .unwrap_or(PostCollectCommand::barrier()),
         })
     }
 }
