@@ -22,22 +22,47 @@ dump_java_binding_diagnostics() {
     ldd --version 2>&1 | head -n 5 || true
 
     # Try to find the extracted JNI library path from the failing run. JarJniLoader extracts to /tmp.
+    # Note: the extracted temp file may be removed when the JVM exits, so also try to locate it in jars.
     so_path="$(ls -1 /tmp/librisingwave_java_binding*.so 2>/dev/null | head -n 1)"
     if [[ -n "${so_path}" && -f "${so_path}" ]]; then
-        echo "+++ java-binding diagnostics: static TLS scan"
+        echo "+++ java-binding diagnostics: static TLS scan (extracted /tmp)"
         ci/scripts/diagnose-static-tls.sh "${so_path}" || true
     else
-        echo "+++ java-binding diagnostics: no /tmp/librisingwave_java_binding*.so found, trying packaged JNI"
+        echo "+++ java-binding diagnostics: no /tmp/librisingwave_java_binding*.so found, trying dependency jars"
+
         RISINGWAVE_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)"
         if [[ -n "${RISINGWAVE_ROOT}" && -d "${RISINGWAVE_ROOT}/java" ]]; then
-            packaged_so="$(
-                find "${RISINGWAVE_ROOT}/java/java-binding-integration-test/target/classes" \
-                    -type f -name "librisingwave_java_binding*.so" 2>/dev/null | head -n 1
-            )"
-            if [[ -n "${packaged_so}" && -f "${packaged_so}" ]]; then
-                ci/scripts/diagnose-static-tls.sh "${packaged_so}" || true
+            dep_dir="${RISINGWAVE_ROOT}/java/java-binding-integration-test/target/dependency"
+            if [[ -d "${dep_dir}" ]]; then
+                tmp_extract_dir="$(mktemp -d /tmp/rw-java-binding-jni.XXXXXX 2>/dev/null || mktemp -d)"
+                jni_relpath=""
+                jni_jar=""
+
+                # Find the JNI .so packaged in a dependency jar (e.g. java-binding*.jar).
+                for j in "${dep_dir}"/*.jar; do
+                    [[ -f "${j}" ]] || continue
+                    p="$(jar tf "${j}" 2>/dev/null | grep -E '(^|/)risingwave/jni/.*/librisingwave_java_binding.*\.so$' | head -n 1)"
+                    if [[ -n "${p}" ]]; then
+                        jni_relpath="${p}"
+                        jni_jar="${j}"
+                        break
+                    fi
+                done
+
+                if [[ -n "${jni_relpath}" && -n "${jni_jar}" ]]; then
+                    echo "found packaged JNI: ${jni_jar} -> ${jni_relpath}"
+                    (cd "${tmp_extract_dir}" && jar xf "${jni_jar}" "${jni_relpath}") || true
+                    packaged_so="${tmp_extract_dir}/${jni_relpath}"
+                    if [[ -f "${packaged_so}" ]]; then
+                        ci/scripts/diagnose-static-tls.sh "${packaged_so}" || true
+                    else
+                        echo "failed to extract packaged JNI .so to ${packaged_so}"
+                    fi
+                else
+                    echo "no risingwave/jni/**/librisingwave_java_binding*.so found in ${dep_dir}"
+                fi
             else
-                echo "no packaged librisingwave_java_binding*.so found under target/classes"
+                echo "dependency dir not found: ${dep_dir}"
             fi
         fi
     fi
@@ -55,8 +80,11 @@ dump_java_binding_diagnostics() {
                 2> /tmp/java-binding-ld-debug.log
             rc=$?
             echo "LD_DEBUG repro exit code: ${rc}"
-            echo "--- tail /tmp/java-binding-ld-debug.log"
-            tail -n 200 /tmp/java-binding-ld-debug.log || true
+            echo "--- grep /tmp/java-binding-ld-debug.log (interesting lines)"
+            grep -nE "librisingwave_java_binding|static TLS block|cannot allocate memory|error: symbol lookup error|find library=|calling init:" \
+                /tmp/java-binding-ld-debug.log \
+                | tail -n 200 \
+                || true
             exit 0
         ) || true
     fi
