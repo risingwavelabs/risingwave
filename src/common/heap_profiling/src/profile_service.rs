@@ -18,7 +18,6 @@ use std::path::Path;
 
 use itertools::Itertools;
 use risingwave_common::config::ServerConfig;
-use risingwave_common_heap_profiling::{AUTO_DUMP_SUFFIX, COLLAPSED_SUFFIX, MANUALLY_DUMP_SUFFIX};
 use risingwave_pb::monitor_service::{
     AnalyzeHeapRequest, AnalyzeHeapResponse, HeapProfilingRequest, HeapProfilingResponse,
     ListHeapProfilingRequest, ListHeapProfilingResponse, ProfilingRequest, ProfilingResponse,
@@ -27,6 +26,8 @@ use risingwave_rpc_client::error::ToTonicStatus as _;
 use thiserror_ext::AsReport;
 use tokio::time::Duration;
 use tonic::{Code, Request, Response, Status};
+
+use crate::{AUTO_DUMP_SUFFIX, COLLAPSED_SUFFIX, MANUALLY_DUMP_SUFFIX};
 
 /// Implementation of the profiling related services in `MonitorService`.
 /// Can be reused to implement the same services in different types of worker nodes.
@@ -169,15 +170,13 @@ impl ProfileServiceImpl {
 
         // run jeprof if the target was not analyzed before
         if !collapsed_path.exists() {
-            risingwave_common_heap_profiling::jeprof::run(
-                dumped_path_str,
-                collapsed_path_str.clone(),
-            )
-            .await
-            .map_err(|e| e.to_status(Code::Internal, "monitor"))?;
+            crate::jeprof::run(dumped_path_str, collapsed_path_str.clone())
+                .await
+                .map_err(|e| e.to_status(Code::Internal, "monitor"))?;
         }
 
         let file = fs::read(Path::new(&collapsed_path_str))?;
         Ok(Response::new(AnalyzeHeapResponse { result: file }))
     }
 }
+

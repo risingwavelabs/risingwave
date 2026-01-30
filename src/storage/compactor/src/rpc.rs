@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use risingwave_common::config::ServerConfig;
-use risingwave_common_service::ProfileServiceImpl;
+use risingwave_common_heap_profiling::ProfileServiceImpl;
 use risingwave_pb::compactor::compactor_service_server::CompactorService;
 use risingwave_pb::compactor::{
     DispatchCompactionTaskRequest, DispatchCompactionTaskResponse, EchoRequest, EchoResponse,

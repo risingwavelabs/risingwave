@@ -19,6 +19,8 @@ pub const AUTO_DUMP_SUFFIX: &str = "auto.heap";
 pub const COLLAPSED_SUFFIX: &str = "collapsed";
 
 pub mod jeprof;
+pub mod profile_service;
 pub mod profiler;
 
 pub use profiler::HeapProfiler;
+pub use profile_service::ProfileServiceImpl;

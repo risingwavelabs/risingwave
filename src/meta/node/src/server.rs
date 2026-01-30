@@ -431,7 +431,7 @@ pub async fn start_service_as_election_leader(
             hummock_manager: hummock_manager.clone(),
             monitor_clients: MonitorClientPool::new(1, RpcClientConfig::default()),
             diagnose_command,
-            profile_service: risingwave_common_service::ProfileServiceImpl::new(
+            profile_service: risingwave_common_heap_profiling::ProfileServiceImpl::new(
                 server_config.clone(),
             ),
             trace_state,
