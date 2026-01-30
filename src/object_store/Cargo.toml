@@ -16,17 +16,15 @@ await-tree = { workspace = true }
 aws-config = { workspace = true }
 # add the dependency explicitly to enable hardcoded-credentials feature
 aws-credential-types = { workspace = true }
-aws-sdk-s3 = { version = "0.5", package = "madsim-aws-sdk-s3" }
+aws-sdk-s3 = { version = "0.5", package = "madsim-aws-sdk-s3", default-features = false, features = ["rt-tokio"] }
 aws-smithy-http = { workspace = true }
-aws-smithy-runtime = { workspace = true }
+aws-smithy-http-client = { workspace = true }
 aws-smithy-runtime-api = { workspace = true }
 aws-smithy-types = { workspace = true }
 bytes = { version = "1", features = ["serde"] }
 crc32fast = "1"
 fail = "0.5"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
-hyper = { version = "0.14.27", features = ["tcp", "client"] }                    # TODO(http-bump): required by aws sdk
-hyper-rustls = { version = "0.24.2", features = ["webpki-roots"] }
 itertools = { workspace = true }
 madsim = { workspace = true }
 opendal = { workspace = true, features = [

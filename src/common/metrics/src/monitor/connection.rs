@@ -328,58 +328,6 @@ where
     }
 }
 
-// Compatibility implementation for hyper 0.14 ecosystem.
-// Should be the same as those with imports from `http::Uri` and `hyper_util::client::legacy`.
-// TODO(http-bump): remove this after there is no more dependency on hyper 0.14.
-mod compat {
-    use http_02::Uri;
-    use hyper_014::client::connect::{Connected, Connection};
-
-    use super::*;
-
-    impl<C: Service<Uri>, M: MonitorNewConnection + Clone + 'static> Service<Uri>
-        for MonitoredConnection<C, M>
-    where
-        C::Future: 'static,
-    {
-        type Error = C::Error;
-        type Response = MonitoredConnection<C::Response, M::ConnectionMonitor>;
-
-        type Future = impl Future<Output = Result<Self::Response, Self::Error>> + 'static;
-
-        fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-            let ret = self.inner.poll_ready(cx);
-            if let Poll::Ready(Err(_)) = &ret {
-                self.monitor.on_err("<poll_ready>".to_owned());
-            }
-            ret
-        }
-
-        fn call(&mut self, uri: Uri) -> Self::Future {
-            let endpoint = format!("{:?}", uri.host());
-            let monitor = self.monitor.clone();
-            self.inner
-                .call(uri)
-                .map(move |result: Result<_, _>| match result {
-                    Ok(resp) => Ok(MonitoredConnection::new(
-                        resp,
-                        monitor.new_connection_monitor(endpoint),
-                    )),
-                    Err(e) => {
-                        monitor.on_err(endpoint);
-                        Err(e)
-                    }
-                })
-        }
-    }
-
-    impl<C: Connection, M> Connection for MonitoredConnection<C, M> {
-        fn connected(&self) -> Connected {
-            self.inner.connected()
-        }
-    }
-}
-
 #[derive(Clone)]
 pub struct ConnectionMetrics {
     connection_count: IntGaugeVec,
