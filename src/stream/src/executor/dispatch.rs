@@ -1660,10 +1660,10 @@ mod tests {
             projected,
             StreamChunk::from_pretty(
                 "  I I
-                U- 1 1
+                - 1 1
                 U+ 1 2 D
                 U- 1 2 D
-                U+ 1 3",
+                + 1 3",
             )
         );
 
