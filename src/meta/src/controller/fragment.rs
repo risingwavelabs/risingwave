@@ -1142,6 +1142,7 @@ impl CatalogController {
         let txn = inner.db.begin().await?;
 
         let fragments_query = Self::build_fragment_query(is_creating);
+        #[allow(clippy::type_complexity)]
         let fragments: Vec<(
             FragmentId,
             JobId,
