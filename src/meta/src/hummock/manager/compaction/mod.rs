@@ -378,12 +378,7 @@ impl HummockManager {
             &self.env.opts,
         ));
         // Pre-allocate task ids for this loop to avoid per-group SQL transactions.
-        let task_id_capacity: u32 = compaction_groups.len().try_into().unwrap_or_else(|_| {
-            panic!(
-                "compaction group count {} exceeds u32",
-                compaction_groups.len()
-            )
-        });
+        let task_id_capacity = compaction_groups.len() as u32;
         let mut next_task_id =
             next_compaction_task_id_interval(&self.env, task_id_capacity).await?;
         let task_id_end = next_task_id + u64::from(task_id_capacity);
