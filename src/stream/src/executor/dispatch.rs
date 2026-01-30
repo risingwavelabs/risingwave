@@ -1680,4 +1680,63 @@ mod tests {
 
         hash_dispatcher.dispatch_data(projected).await.unwrap();
     }
+
+    #[tokio::test]
+    async fn test_hash_dispatcher_missing_update_delete_after_project() {
+        let schema = Schema {
+            fields: vec![
+                Field::unnamed(DataType::Int64),
+                Field::unnamed(DataType::Int64),
+            ],
+        };
+        let (mut tx, source) = MockSource::channel();
+        let source = source.into_executor(schema, vec![0]);
+
+        let proj = ProjectExecutor::new(
+            ActorContext::for_test(123),
+            source,
+            vec![NonStrictExpression::for_test(InputRefExpression::new(
+                DataType::Int64,
+                0,
+            ))],
+            MultiMap::new(),
+            vec![],
+            true,
+        );
+        let mut proj = proj.boxed().execute();
+
+        tx.push_barrier(test_epoch(1), false);
+        proj.expect_barrier().await;
+
+        tx.push_chunk(StreamChunk::from_pretty(
+            "  I I
+            + 1 10
+            U- 1 10
+            U+ 1 30",
+        ));
+
+        let projected = proj.expect_chunk().await;
+        assert_eq!(
+            projected,
+            StreamChunk::from_pretty(
+                "  I
+                + 1 D
+                U- 1 D
+                + 1",
+            )
+        );
+
+        let (output_tx, _output_rx) = channel_for_test();
+        let outputs = vec![Output::new(ActorId::new(1), output_tx)];
+        let hash_mapping = vec![ActorId::new(1); VirtualNode::COUNT_FOR_TEST];
+        let mut hash_dispatcher = HashDataDispatcher::new(
+            outputs,
+            vec![0],
+            DispatchOutputMapping::Simple(vec![0]),
+            hash_mapping,
+            0.into(),
+        );
+
+        hash_dispatcher.dispatch_data(projected).await.unwrap();
+    }
 }
