@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2026 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,15 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::catalog::FragmentTypeFlag;
-use risingwave_common::types::Fields;
+use risingwave_common::types::{Fields, JsonbVal};
 use risingwave_frontend_macro::system_catalog;
+use serde_json::json;
 
+use super::rw_fragments::extract_fragment_type_flag;
 use crate::catalog::system_catalog::SysCatalogReaderImpl;
 use crate::error::Result;
 
 #[derive(Fields)]
-struct RwFragment {
+struct RwFragmentInfo {
     #[primary_key]
     fragment_id: i32,
     table_id: i32,
@@ -31,29 +32,16 @@ struct RwFragment {
     parallelism: i32,
     max_parallelism: i32,
     parallelism_policy: String,
+    node: JsonbVal,
 }
 
-pub(super) fn extract_fragment_type_flag(mask: u32) -> Vec<FragmentTypeFlag> {
-    let mut result = vec![];
-    for i in 0..32 {
-        let bit = 1 << i;
-        if mask & bit != 0 {
-            match FragmentTypeFlag::try_from(bit) {
-                Err(_) => continue,
-                Ok(flag) => result.push(flag),
-            };
-        }
-    }
-    result
-}
-
-#[system_catalog(table, "rw_catalog.rw_fragments")]
-async fn read_rw_fragment(reader: &SysCatalogReaderImpl) -> Result<Vec<RwFragment>> {
-    let distributions = reader.meta_client.list_fragment_distribution(false).await?;
+#[system_catalog(table, "rw_catalog.rw_fragment_infos")]
+async fn read_rw_fragment_infos(reader: &SysCatalogReaderImpl) -> Result<Vec<RwFragmentInfo>> {
+    let distributions = reader.meta_client.list_fragment_distribution(true).await?;
 
     Ok(distributions
         .into_iter()
-        .map(|distribution| RwFragment {
+        .map(|distribution| RwFragmentInfo {
             fragment_id: distribution.fragment_id.as_i32_id(),
             table_id: distribution.table_id.as_i32_id(),
             distribution_type: distribution.distribution_type().as_str_name().into(),
@@ -74,22 +62,7 @@ async fn read_rw_fragment(reader: &SysCatalogReaderImpl) -> Result<Vec<RwFragmen
             parallelism: distribution.parallelism as i32,
             max_parallelism: distribution.vnode_count as i32,
             parallelism_policy: distribution.parallelism_policy,
+            node: json!(distribution.node).into(),
         })
         .collect())
-}
-
-#[cfg(test)]
-mod tests {
-    use risingwave_common::catalog::FragmentTypeFlag;
-
-    use super::extract_fragment_type_flag;
-
-    #[test]
-    fn test_extract_mask() {
-        let mask = (FragmentTypeFlag::Source as u32) | (FragmentTypeFlag::StreamScan as u32);
-        let result = extract_fragment_type_flag(mask);
-        assert_eq!(result.len(), 2);
-        assert!(result.contains(&FragmentTypeFlag::Source));
-        assert!(result.contains(&FragmentTypeFlag::StreamScan))
-    }
 }

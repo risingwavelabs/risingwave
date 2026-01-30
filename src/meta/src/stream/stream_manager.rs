@@ -43,7 +43,8 @@ use crate::controller::catalog::DropTableConnectorContext;
 use crate::controller::fragment::{InflightActorInfo, InflightFragmentInfo};
 use crate::error::bail_invalid_parameter;
 use crate::manager::{
-    MetaSrvEnv, MetadataManager, NotificationVersion, StreamingJob, StreamingJobType,
+    ActiveStreamingWorkerNodes, MetaSrvEnv, MetadataManager, NotificationVersion, StreamingJob,
+    StreamingJobType,
 };
 use crate::model::{
     ActorId, DownstreamFragmentRelation, Fragment, FragmentDownstreamRelation, FragmentId,
@@ -735,18 +736,12 @@ impl GlobalStreamManager {
             }
         }
 
-        let worker_nodes = self
-            .metadata_manager
-            .list_active_streaming_compute_nodes()
-            .await?
-            .into_iter()
-            .filter(|w| w.is_streaming_schedulable())
-            .collect_vec();
-        let workers = worker_nodes.into_iter().map(|x| (x.id, x)).collect();
+        let active_workers =
+            ActiveStreamingWorkerNodes::new_snapshot(self.metadata_manager.clone()).await?;
 
         let commands = self
             .scale_controller
-            .reschedule_inplace(HashMap::from([(job_id, policy)]), workers)
+            .reschedule_inplace(HashMap::from([(job_id, policy)]), active_workers.current())
             .await?;
 
         if !deferred {
@@ -781,14 +776,8 @@ impl GlobalStreamManager {
             ),
         };
 
-        let worker_nodes = self
-            .metadata_manager
-            .list_active_streaming_compute_nodes()
-            .await?
-            .into_iter()
-            .filter(|w| w.is_streaming_schedulable())
-            .collect_vec();
-        let workers = worker_nodes.into_iter().map(|x| (x.id, x)).collect();
+        let active_workers =
+            ActiveStreamingWorkerNodes::new_snapshot(self.metadata_manager.clone()).await?;
 
         let cdc_fragment_id = {
             let inner = self.metadata_manager.catalog_controller.inner.read().await;
@@ -829,7 +818,7 @@ impl GlobalStreamManager {
 
         let commands = self
             .scale_controller
-            .reschedule_fragment_inplace(fragment_policy, workers)
+            .reschedule_fragment_inplace(fragment_policy, active_workers.current())
             .await?;
 
         let _source_pause_guard = self.source_manager.pause_tick().await;
@@ -853,14 +842,8 @@ impl GlobalStreamManager {
 
         let _reschedule_job_lock = self.reschedule_lock_write_guard().await;
 
-        let workers = self
-            .metadata_manager
-            .list_active_streaming_compute_nodes()
-            .await?
-            .into_iter()
-            .filter(|w| w.is_streaming_schedulable())
-            .map(|worker| (worker.id, worker))
-            .collect();
+        let active_workers =
+            ActiveStreamingWorkerNodes::new_snapshot(self.metadata_manager.clone()).await?;
 
         let fragment_policy = fragment_targets
             .into_iter()
@@ -869,7 +852,7 @@ impl GlobalStreamManager {
 
         let commands = self
             .scale_controller
-            .reschedule_fragment_inplace(fragment_policy, workers)
+            .reschedule_fragment_inplace(fragment_policy, active_workers.current())
             .await?;
 
         let _source_pause_guard = self.source_manager.pause_tick().await;
