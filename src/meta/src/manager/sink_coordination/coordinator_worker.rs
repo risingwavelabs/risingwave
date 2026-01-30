@@ -20,6 +20,7 @@ use std::task::Poll;
 use std::time::{Duration, Instant};
 
 use anyhow::anyhow;
+use await_tree::InstrumentAwait;
 use futures::future::{Either, pending, select};
 use futures::pin_mut;
 use itertools::Itertools;
@@ -709,16 +710,33 @@ impl CoordinatorWorker {
                                 if let Some(schema_change) = schema_change {
                                     coordinator
                                         .commit_schema_change(epoch, schema_change)
+                                        .instrument_await(Self::commit_span(
+                                            "single_phase_schema_change",
+                                            sink_id,
+                                            epoch,
+                                        ))
                                         .await?;
                                 }
                             }
                             SinkCommitCoordinator::TwoPhase(coordinator) => {
                                 if let Some(metadata) = metadata {
-                                    coordinator.commit_data(epoch, metadata).await?;
+                                    coordinator
+                                        .commit_data(epoch, metadata)
+                                        .instrument_await(Self::commit_span(
+                                            "two_phase_commit_data",
+                                            sink_id,
+                                            epoch,
+                                        ))
+                                        .await?;
                                 }
                                 if let Some(schema_change) = schema_change {
                                     coordinator
                                         .commit_schema_change(epoch, schema_change)
+                                        .instrument_await(Self::commit_span(
+                                            "two_phase_commit_schema_change",
+                                            sink_id,
+                                            epoch,
+                                        ))
                                         .await?;
                                 }
                             }
@@ -787,7 +805,9 @@ impl CoordinatorWorker {
                         if !metadatas.is_empty() {
                             let start_time = Instant::now();
                             run_future_with_periodic_fn(
-                                coordinator.commit_data(epoch, metadatas),
+                                coordinator.commit_data(epoch, metadatas).instrument_await(
+                                    Self::commit_span("single_phase_commit_data", sink_id, epoch),
+                                ),
                                 Duration::from_secs(5),
                                 || {
                                     warn!(
@@ -817,6 +837,11 @@ impl CoordinatorWorker {
                     SinkCommitCoordinator::TwoPhase(coordinator) => {
                         let commit_metadata = coordinator
                             .pre_commit(epoch, metadatas, first_schema_change.clone())
+                            .instrument_await(Self::commit_span(
+                                "two_phase_pre_commit",
+                                sink_id,
+                                epoch,
+                            ))
                             .await?;
                         if commit_metadata.is_some() || first_schema_change.is_some() {
                             persist_pre_commit_metadata(
@@ -904,5 +929,9 @@ impl CoordinatorWorker {
         }
 
         Ok(two_phase_handler)
+    }
+
+    fn commit_span(stage: &str, sink_id: SinkId, epoch: u64) -> await_tree::Span {
+        await_tree::span!("sink_coord_{stage} (sink_id {sink_id}, epoch {epoch})").long_running()
     }
 }
