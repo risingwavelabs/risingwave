@@ -67,7 +67,9 @@ use crate::hummock::compaction::selector::{
 };
 use crate::hummock::compaction::{CompactStatus, CompactionDeveloperConfig, CompactionSelector};
 use crate::hummock::error::{Error, Result};
-use crate::hummock::manager::sequence::next_compaction_task_id_interval;
+use crate::hummock::manager::sequence::{
+    next_compaction_task_id, next_compaction_task_id_interval,
+};
 use crate::hummock::manager::transaction::{
     HummockVersionStatsTransaction, HummockVersionTransaction,
 };
@@ -378,7 +380,8 @@ impl HummockManager {
             &self.env.opts,
         ));
         // Pre-allocate task ids for this loop to avoid per-group SQL transactions.
-        let task_id_capacity = compaction_groups.len() as u32;
+        // Each group consumes at most one task_id (trivial tasks share the same id with normal task).
+        let task_id_capacity = compaction_groups.len().min(max_select_count) as u32;
         let mut next_task_id =
             next_compaction_task_id_interval(&self.env, task_id_capacity).await?;
         let task_id_end = next_task_id + u64::from(task_id_capacity);
@@ -407,9 +410,14 @@ impl HummockManager {
                 }
             };
 
-            assert!(next_task_id < task_id_end);
-            let task_id = next_task_id;
-            next_task_id += 1;
+            // Use pre-allocated task id if available, otherwise fallback to fetching a new one.
+            let task_id = if next_task_id < task_id_end {
+                let id = next_task_id;
+                next_task_id += 1;
+                id
+            } else {
+                next_compaction_task_id(&self.env).await?
+            };
 
             if !compaction_statuses.contains_key(&compaction_group_id) {
                 // lazy initialize.
