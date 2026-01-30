@@ -1,0 +1,113 @@
+# Buildkite CI Triage (Public Logs + Artifacts)
+
+Motivation: CI failures can be flaky and expensive to reproduce locally. This guide documents a repeatable way to quickly locate the failing test case and the exact diff/mismatch using Buildkite build/job logs and uploaded artifacts.
+
+Preferred workflow: use `bk` CLI when you have access (structured JSON, easy job/artifact navigation). Fallback: many Buildkite pages/log endpoints are publicly readable, so you can still triage via `curl` + `jq` even without local `bk` auth.
+
+Tip: If `bk` says it needs an API token/org slug, run `bk configure` or set `BUILDKITE_API_TOKEN` and `BUILDKITE_ORGANIZATION_SLUG=risingwavelabs`.
+
+## 0) Find failing Buildkite checks for a PR
+
+- **bk CLI**
+  - List recent builds for a branch and pick the failing build number:
+    - `export BUILDKITE_ORGANIZATION_SLUG=risingwavelabs`
+    - `bk build list --pipeline <pipeline> --branch <branch> --limit 20 -o json`
+
+- **curl (public web UI; less reliable than JSON)**
+  - The easiest way is still "open the build URL from GitHub checks".
+  - As a fallback, you can fetch the branch build listing HTML and manually spot build numbers:
+    - `curl -sSL 'https://buildkite.com/<org>/<pipeline>/builds?branch=<urlencoded-branch>'`
+
+- **GitHub (recommended)**
+  - Use GitHub CLI to list checks:
+    - `gh pr checks <PR_NUMBER> --watch=false`
+  - Identify failing Buildkite checks and capture the Buildkite build URL(s), e.g.:
+    - `https://buildkite.com/<org>/<pipeline>/builds/<build_number>`
+
+## 1) Get Build Info As JSON (Pick One)
+
+- **bk CLI**
+  - Ensure org slug is set:
+    - `export BUILDKITE_ORGANIZATION_SLUG=risingwavelabs`
+  - Fetch build JSON:
+    - `bk build view <build_number> --pipeline <pipeline> -o json > .context/bk_<build_number>.json`
+
+- **curl (public web JSON)**
+  - Fetch build JSON:
+    - `curl -sSL https://buildkite.com/<org>/<pipeline>/builds/<build_number>.json > .context/bk_<build_number>.json`
+
+Notes:
+- The `builds/<N>.json` response is a single JSON object (not wrapped in `{ "build": ... }`).
+- Some fields like `raw_log_url` may be null; prefer using job `id` + the endpoints below.
+
+## 2) List Failed Jobs In A Build (Pick One)
+
+- **bk CLI**
+  - Easiest: parse the JSON from step (1):
+    - `jq -r '.jobs[] | select(.exit_status!=null and .exit_status!=0) | [(.name // .step.label), (.exit_status|tostring), .id] | @tsv' .context/bk_<build_number>.json`
+
+- **curl**
+  - Same approach: parse the JSON you downloaded in step (1).
+
+## 3) Fetch A Job Log (Pick One)
+
+- **bk CLI**
+  - `bk job log <job_id> -p <pipeline> -b <build_number> --no-timestamps`
+  - If the output contains ANSI escapes, strip them:
+    - `... | tr -cd '\11\12\15\40-\176' | perl -pe 's/\[[0-9;]*[mK]//g; s/\r//g'`
+
+- **curl (public web log JSON)**
+  - Fetch:
+    - `curl -sSL 'https://buildkite.com/organizations/<org>/pipelines/<pipeline>/builds/<build_number>/jobs/<job_id>/log' > .context/job_<job_id>_log.json`
+  - Convert to plain text:
+    - Load JSON, `html.unescape(output)`, regex-strip `<...>` tags, then `splitlines()`.
+
+Common patterns to search:
+- `query result mismatch`
+- `[Diff] (-expected|+actual)`
+- `query is expected to fail with error:`
+- Specific substring you suspect changed (e.g. `StructType { fields`)
+
+## 4) Inspect Artifacts (Pick One)
+
+Many CI scripts upload extra logs as artifacts (e.g. `risedev-logs.zip`, `risedev-logs/batch-*.log`) which contain the real failure details.
+
+- **bk CLI**
+  - List artifacts:
+    - `bk artifacts list <build_number> -p <pipeline> --job <job_id> -o json`
+  - Download an artifact by UUID:
+    - `bk artifacts download <artifact_id>`
+
+- **curl (public web artifacts JSON)**
+  - List artifacts:
+    - `curl -sSL 'https://buildkite.com/organizations/<org>/pipelines/<pipeline>/builds/<build_number>/jobs/<job_id>/artifacts'`
+  - Download a specific artifact by UUID:
+    - `curl -sSL 'https://buildkite.com/organizations/<org>/pipelines/<pipeline>/builds/<build_number>/jobs/<job_id>/artifacts/<artifact_id>' -o /tmp/artifact`
+
+Notes:
+- Some `.../download` URLs may 404 for anonymous access. The non-`/download` artifact endpoint often works and redirects internally.
+- The artifact endpoint typically responds with a 302 to `buildkiteartifacts.com` (signed URL). `curl -L` follows it.
+
+## 5) Triage Workflow (Example: e2e / SLT)
+
+1) `gh pr checks` to find failing Buildkite builds.
+2) Fetch `builds/<N>.json` and list failed jobs with `jq` (or use `bk build view` + `jq`).
+3) For a representative failed job, fetch logs (via `bk job log` or curl) and identify:
+   - which `.slt` file failed,
+   - what the expected vs actual mismatch is.
+4) If the top-level log only shows "command exited with status X", check artifacts:
+   - list artifacts (via `bk artifacts list` or curl),
+   - download `risedev-logs.zip` or `risedev-logs/batch-*.log`,
+   - `rg` within them for the mismatch string.
+5) Fix by updating the expected output file(s) under `e2e_test/**` (often a `.slt.part`).
+6) Push; Buildkite will rerun on the new commit.
+
+## 6) Practical Tips / Pitfalls
+
+- Buildkite pages are huge; prefer `.json` endpoints and `jq` over scraping HTML.
+- `curl | head` can error with "Failure writing output" due to stdout buffering; redirect to a file.
+- `bk` CLI: some commands still require `BUILDKITE_ORGANIZATION_SLUG=risingwavelabs` even if `-p` is provided.
+- Exit codes:
+  - `105`: commonly seen when the Buildkite `docker-compose` plugin reports a non-zero step (e2e/SLT jobs). Inspect the SLT output / artifacts for the real failure.
+  - `4`: commonly seen in deterministic simulation / recovery steps when the simulation runner script exits non-zero. Details are usually in uploaded logs.
+  - `143`: usually means termination/cancellation (SIGTERM), not necessarily a product regression.
