@@ -46,6 +46,11 @@ echo "== ldd (resolved paths)"
 ldd "${so_path}" || true
 echo
 
+echo "== TLS symbols (target)"
+# If there are defined TLS symbols here, they are usually the ones requiring TLS storage.
+readelf -W -s "${so_path}" 2>/dev/null | awk '$4=="TLS"{print}' || true
+echo
+
 deps=$(
   ldd "${so_path}" 2>/dev/null \
     | awk '
@@ -68,6 +73,9 @@ inspect_one() {
   # TLS section sizes
   readelf -W -S "${f}" 2>/dev/null | grep -E '\.(tdata|tbss)\b' || true
 
+  # TLS symbol table entries, if any (often empty for system libs).
+  readelf -W -s "${f}" 2>/dev/null | awk '$4=="TLS"{print}' | sed -n '1,30p' || true
+
   # Heuristic for IE/LE TLS models
   rels="$(readelf -W -r "${f}" 2>/dev/null | grep -E 'TPOFF|GOTTPOFF|DTPMOD|DTPOFF' || true)"
   if [[ -n "${rels}" ]]; then
@@ -75,6 +83,13 @@ inspect_one() {
     echo "${rels}" | sed -n '1,20p'
   else
     echo "TLS relocs: none (or not shown)"
+  fi
+
+  # Full TPOFF reloc list tends to point directly to the offending TLS symbol.
+  tpoff="$(readelf -W -r "${f}" 2>/dev/null | grep -E 'TPOFF' || true)"
+  if [[ -n "${tpoff}" ]]; then
+    echo "TPOFF relocs (up to 50):"
+    echo "${tpoff}" | sed -n '1,50p'
   fi
 }
 
@@ -91,4 +106,3 @@ echo
 echo "Tips:"
 echo "- Prime suspects are deps with PT_TLS: yes + many TPOFF* relocs."
 echo "- Use LD_DEBUG=libs on the failing java command to confirm the last loaded .so."
-
