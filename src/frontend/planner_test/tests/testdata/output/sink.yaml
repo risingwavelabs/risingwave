@@ -45,7 +45,7 @@
         └── stream key: [ t1.v3, t1.v4 ]
 
     Fragment 1
-    StreamTableScan { table: t1, columns: [t1.v1, t1.v2, t1.v3, t1.v5, t1.v4], stream_scan_type: ArrangementBackfill, stream_key: [t1.v3, t1.v4], pk: [v3, v4], dist: UpstreamHashShard(t1.v3, t1.v4) }
+    StreamTableScan { table: t1, columns: [t1.v1, t1.v2, t1.v3, t1.v5, t1.v4], stream_scan_type: SnapshotBackfill, stream_key: [t1.v3, t1.v4], pk: [v3, v4], dist: UpstreamHashShard(t1.v3, t1.v4) }
     ├── tables: [ StreamScan: 1 ]
     ├── output: [ t1.v1, t1.v2, t1.v3, t1.v5, t1.v4 ]
     ├── stream key: [ t1.v3, t1.v4 ]
@@ -71,9 +71,9 @@
     └── vnode column idx: 2
 
     Table 1
-    ├── columns: [ vnode: smallint, v3: character varying, v4: bigint, backfill_finished: boolean, row_count: bigint, _rw_timestamp: timestamp with time zone ]
+    ├── columns: [ vnode: smallint, epoch: bigint, row_count: bigint, is_epoch_finished: boolean, v3: character varying, v4: bigint, _rw_timestamp: timestamp with time zone ]
     ├── primary key: [ $0 ASC ]
-    ├── value indices: [ 1, 2, 3, 4 ]
+    ├── value indices: [ 1, 2, 3, 4, 5 ]
     ├── distribution key: [ 0 ]
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
@@ -98,7 +98,7 @@
         └── stream key: [ t1.v1, t1.v2 ]
 
     Fragment 1
-    StreamTableScan { table: t1, columns: [t1.v1, t1.v2, t1.v3, t1.v5], stream_scan_type: ArrangementBackfill, stream_key: [t1.v1, t1.v2], pk: [v1, v2], dist: UpstreamHashShard(t1.v1, t1.v2) }
+    StreamTableScan { table: t1, columns: [t1.v1, t1.v2, t1.v3, t1.v5], stream_scan_type: SnapshotBackfill, stream_key: [t1.v1, t1.v2], pk: [v1, v2], dist: UpstreamHashShard(t1.v1, t1.v2) }
     ├── tables: [ StreamScan: 1 ]
     ├── output: [ t1.v1, t1.v2, t1.v3, t1.v5 ]
     ├── stream key: [ t1.v1, t1.v2 ]
@@ -123,9 +123,9 @@
     └── vnode column idx: 2
 
     Table 1
-    ├── columns: [ vnode: smallint, v1: integer, v2: double precision, backfill_finished: boolean, row_count: bigint, _rw_timestamp: timestamp with time zone ]
+    ├── columns: [ vnode: smallint, epoch: bigint, row_count: bigint, is_epoch_finished: boolean, v1: integer, v2: double precision, _rw_timestamp: timestamp with time zone ]
     ├── primary key: [ $0 ASC ]
-    ├── value indices: [ 1, 2, 3, 4 ]
+    ├── value indices: [ 1, 2, 3, 4, 5 ]
     ├── distribution key: [ 0 ]
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
