@@ -34,6 +34,7 @@ use risingwave_connector::source::{
     StreamChunkWithState, WaitCheckpointTask, build_pulsar_ack_channel_id,
 };
 use risingwave_hummock_sdk::HummockReadEpoch;
+use risingwave_pb::common::ThrottleType;
 use risingwave_pb::id::SourceId;
 use risingwave_storage::store::TryWaitEpochOptions;
 use thiserror_ext::AsReport;
@@ -75,7 +76,7 @@ pub struct SourceExecutor<S: StateStore> {
     is_shared_non_cdc: bool,
 
     /// Local barrier manager for reporting source load finished events
-    _barrier_manager: LocalBarrierManager,
+    barrier_manager: LocalBarrierManager,
 }
 
 impl<S: StateStore> SourceExecutor<S> {
@@ -98,7 +99,7 @@ impl<S: StateStore> SourceExecutor<S> {
             system_params,
             rate_limit_rps,
             is_shared_non_cdc,
-            _barrier_manager: barrier_manager,
+            barrier_manager,
         }
     }
 
@@ -461,6 +462,39 @@ impl<S: StateStore> SourceExecutor<S> {
         Ok(())
     }
 
+    /// Report CDC source offset updated only the first time.
+    fn maybe_report_cdc_source_offset(
+        &self,
+        updated_splits: &HashMap<SplitId, SplitImpl>,
+        epoch: EpochPair,
+        source_id: SourceId,
+        must_report_cdc_offset_once: &mut bool,
+        must_wait_cdc_offset_before_report: bool,
+    ) {
+        // Report CDC source offset updated only the first time
+        if *must_report_cdc_offset_once
+            && (!must_wait_cdc_offset_before_report
+                || updated_splits
+                    .values()
+                    .any(|split| split.is_cdc_split() && !split.get_cdc_split_offset().is_empty()))
+        {
+            // Report only once, then ignore all subsequent offset updates
+            self.barrier_manager.report_cdc_source_offset_updated(
+                epoch,
+                self.actor_ctx.id,
+                source_id,
+            );
+            tracing::info!(
+                actor_id = %self.actor_ctx.id,
+                source_id = %source_id,
+                epoch = ?epoch,
+                "Reported CDC source offset updated to meta (first time only)"
+            );
+            // Mark as reported to prevent any future reports, even if offset changes
+            *must_report_cdc_offset_once = false;
+        }
+    }
+
     /// A source executor with a stream source receives:
     /// 1. Barrier messages
     /// 2. Data from external source
@@ -480,12 +514,26 @@ impl<S: StateStore> SourceExecutor<S> {
                 )
             })?;
         let first_epoch = first_barrier.epoch;
-        let mut boot_state =
+        // must_report_cdc_offset is true if and only if the source is a CDC source.
+        // must_wait_cdc_offset_before_report is true if and only if the source is a MySQL or SQL Server CDC source.
+        let (mut boot_state, mut must_report_cdc_offset_once, must_wait_cdc_offset_before_report) =
             if let Some(splits) = first_barrier.initial_split_assignment(self.actor_ctx.id) {
+                // CDC source must reach this branch.
                 tracing::debug!(?splits, "boot with splits");
-                splits.to_vec()
+                // Skip report for non-CDC.
+                let must_report_cdc_offset_once = splits.iter().any(|split| split.is_cdc_split());
+                // Only for MySQL and SQL Server CDC, we need to wait for the offset to be non-empty before reporting.
+                let must_wait_cdc_offset_before_report = must_report_cdc_offset_once
+                    && splits.iter().any(|split| {
+                        matches!(split, SplitImpl::MysqlCdc(_) | SplitImpl::SqlServerCdc(_))
+                    });
+                (
+                    splits.to_vec(),
+                    must_report_cdc_offset_once,
+                    must_wait_cdc_offset_before_report,
+                )
             } else {
-                Vec::default()
+                (Vec::default(), true, true)
             };
         let is_pause_on_startup = first_barrier.is_pause_on_startup();
         let mut is_uninitialized = first_barrier.is_newly_added(self.actor_ctx.id);
@@ -686,16 +734,17 @@ impl<S: StateStore> SourceExecutor<S> {
                                 );
                             }
                             Mutation::Throttle(fragment_to_apply) => {
-                                if let Some(new_rate_limit) =
+                                if let Some(entry) =
                                     fragment_to_apply.get(&self.actor_ctx.fragment_id)
-                                    && *new_rate_limit != self.rate_limit_rps
+                                    && entry.throttle_type() == ThrottleType::Source
+                                    && entry.rate_limit != self.rate_limit_rps
                                 {
                                     tracing::info!(
                                         "updating rate limit from {:?} to {:?}",
                                         self.rate_limit_rps,
-                                        *new_rate_limit
+                                        entry.rate_limit
                                     );
-                                    self.rate_limit_rps = *new_rate_limit;
+                                    self.rate_limit_rps = entry.rate_limit;
                                     // recreate from latest_split_info
                                     self.rebuild_stream_reader(&source_desc, &mut stream)?;
                                 }
@@ -828,6 +877,14 @@ impl<S: StateStore> SourceExecutor<S> {
                     }
 
                     let updated_splits = self.persist_state_and_clear_cache(epoch).await?;
+
+                    self.maybe_report_cdc_source_offset(
+                        &updated_splits,
+                        epoch,
+                        source_id,
+                        &mut must_report_cdc_offset_once,
+                        must_wait_cdc_offset_before_report,
+                    );
 
                     // when handle a checkpoint barrier, spawn a task to wait for epoch commit notification
                     if barrier.kind.is_checkpoint()

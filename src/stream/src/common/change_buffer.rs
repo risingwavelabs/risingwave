@@ -19,7 +19,7 @@ use indexmap::map::Entry;
 use risingwave_common::array::stream_record::Record;
 use risingwave_common::array::{Op, StreamChunk, StreamChunkBuilder};
 use risingwave_common::log::LogSuppressor;
-use risingwave_common::row::Row;
+use risingwave_common::row::{Row, RowExt as _};
 use risingwave_common::types::DataType;
 
 use crate::consistency::consistency_panic;
@@ -258,6 +258,37 @@ where
             };
             let none = builder.append_record(record);
             debug_assert!(none.is_none());
+        }
+        builder.take()
+    }
+
+    /// Consume the buffer and produce a single compacted chunk, with the given new key indices.
+    ///
+    /// The key must be a superset of the old key to ensure uniqueness. Otherwise, changes to the
+    /// same key might be written multiple times so that the correct ordering of the operations cannot
+    /// be guaranteed.
+    pub fn into_chunk_with_key(
+        self,
+        data_types: Vec<DataType>,
+        key_indices: &[usize],
+    ) -> Option<StreamChunk> {
+        let mut builder = StreamChunkBuilder::unlimited(data_types, Some(self.buffer.len()));
+        for record in self.into_records() {
+            macro_rules! append_record {
+                ($record:expr) => {
+                    let none = builder.append_record($record);
+                    debug_assert!(none.is_none());
+                };
+            }
+
+            if let Record::Update { old_row, new_row } = &record
+                && !Row::eq(&old_row.project(key_indices), new_row.project(key_indices))
+            {
+                append_record!(Record::Delete { old_row });
+                append_record!(Record::Insert { new_row });
+            } else {
+                append_record!(record);
+            }
         }
         builder.take()
     }

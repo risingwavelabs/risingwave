@@ -1,0 +1,188 @@
+# Test interval join with watermark state cleaning
+
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+SET streaming_parallelism = 1;
+
+# Test 1: Simple inequality join (left.ts >= right.ts)
+# Left side is larger, so we can clean left state and emit left watermark
+
+statement ok
+CREATE TABLE left_table (
+    id INT,
+    ts TIMESTAMPTZ,
+    val INT,
+    WATERMARK FOR ts AS ts - INTERVAL '5' SECOND
+) APPEND ONLY;
+
+statement ok
+CREATE TABLE right_table (
+    id INT,
+    ts TIMESTAMPTZ,
+    val INT,
+    WATERMARK FOR ts AS ts - INTERVAL '5' SECOND
+) APPEND ONLY;
+
+statement ok
+CREATE MATERIALIZED VIEW interval_join_mv AS
+SELECT l.id as l_id, r.id as r_id, l.ts as l_ts, r.ts as r_ts
+FROM left_table l, right_table r
+WHERE l.id = r.id AND l.ts >= r.ts;
+
+# Create an EOWC view on top to verify watermark propagation
+statement ok
+CREATE MATERIALIZED VIEW eowc_mv AS
+SELECT * FROM interval_join_mv
+EMIT ON WINDOW CLOSE;
+
+# Insert initial data
+statement ok
+INSERT INTO left_table VALUES (1, '2024-01-01 00:00:10+00', 100);
+
+statement ok
+INSERT INTO right_table VALUES (1, '2024-01-01 00:00:05+00', 200);
+
+# The join should produce a match since left.ts (10s) >= right.ts (5s)
+query IITT rowsort
+SELECT * FROM interval_join_mv;
+----
+1 1 2024-01-01 00:00:10+00:00 2024-01-01 00:00:05+00:00
+
+# Verify EOWC view has not received watermark from the join
+query IITT rowsort
+SELECT * FROM eowc_mv;
+----
+
+
+
+# Insert more data to advance watermark
+statement ok
+INSERT INTO left_table VALUES (2, '2024-01-01 00:00:30+00', 101);
+
+statement ok
+INSERT INTO right_table VALUES (2, '2024-01-01 00:00:25+00', 201);
+
+query IITT rowsort
+SELECT * FROM interval_join_mv;
+----
+1 1 2024-01-01 00:00:10+00:00 2024-01-01 00:00:05+00:00
+2 2 2024-01-01 00:00:30+00:00 2024-01-01 00:00:25+00:00
+
+# Verify EOWC view receives watermark from the join
+query IITT rowsort retry 11 backoff 1s
+SELECT * FROM eowc_mv;
+----
+1 1 2024-01-01 00:00:10+00:00 2024-01-01 00:00:05+00:00
+
+statement ok
+DROP MATERIALIZED VIEW eowc_mv;
+
+statement ok
+DROP MATERIALIZED VIEW interval_join_mv;
+
+statement ok
+DROP TABLE left_table;
+
+statement ok
+DROP TABLE right_table;
+
+# Test 2: BETWEEN condition (creates two inequality pairs)
+# a.ts BETWEEN b.ts AND b.ts + INTERVAL '10' SECOND
+# This is equivalent to: a.ts >= b.ts AND a.ts <= b.ts + INTERVAL '10' SECOND
+
+statement ok
+CREATE TABLE stream_a (
+    id INT,
+    ts TIMESTAMPTZ,
+    val INT,
+    WATERMARK FOR ts AS ts - INTERVAL '5' SECOND
+) APPEND ONLY;
+
+statement ok
+CREATE TABLE stream_b (
+    id INT,
+    ts TIMESTAMPTZ,
+    val INT,
+    WATERMARK FOR ts AS ts - INTERVAL '5' SECOND
+) APPEND ONLY;
+
+statement ok
+CREATE MATERIALIZED VIEW between_join_mv AS
+SELECT a.id as a_id, b.id as b_id, a.ts as a_ts, b.ts as b_ts, a.val, b.val as b_val
+FROM stream_a a, stream_b b
+WHERE a.id = b.id AND a.ts BETWEEN b.ts AND b.ts + INTERVAL '10' SECOND;
+
+# Create an EOWC view to verify watermark propagation
+statement ok
+CREATE MATERIALIZED VIEW between_eowc_mv AS
+SELECT * FROM between_join_mv
+EMIT ON WINDOW CLOSE;
+
+# Insert data where a.ts is within the BETWEEN range
+statement ok
+INSERT INTO stream_a VALUES (1, '2024-01-01 00:00:08+00', 10);
+
+statement ok
+INSERT INTO stream_b VALUES (1, '2024-01-01 00:00:05+00', 20);
+
+# a.ts (8s) is between b.ts (5s) and b.ts + 10s (15s), so should match
+query IITTII rowsort
+SELECT * FROM between_join_mv;
+----
+1 1 2024-01-01 00:00:08+00:00 2024-01-01 00:00:05+00:00 10 20
+
+# Verify EOWC view has not received watermark from the join
+query IITT rowsort
+SELECT * FROM between_eowc_mv;
+----
+
+
+# Insert data where a.ts is outside the BETWEEN range
+statement ok
+INSERT INTO stream_a VALUES (2, '2024-01-01 00:00:25+00', 30);
+
+statement ok
+INSERT INTO stream_b VALUES (2, '2024-01-01 00:00:05+00', 40);
+
+# a.ts (25s) is NOT between b.ts (5s) and b.ts + 10s (15s), so no match for id=2
+query IITTII rowsort
+SELECT * FROM between_join_mv;
+----
+1 1 2024-01-01 00:00:08+00:00 2024-01-01 00:00:05+00:00 10 20
+
+# Insert more data to advance watermark significantly
+statement ok
+INSERT INTO stream_a VALUES (3, '2024-01-01 00:01:00+00', 50);
+
+statement ok
+INSERT INTO stream_b VALUES (3, '2024-01-01 00:00:55+00', 60);
+
+# a.ts (60s) is between b.ts (55s) and b.ts + 10s (65s), so should match
+query IITTII rowsort
+SELECT * FROM between_join_mv;
+----
+1 1 2024-01-01 00:00:08+00:00 2024-01-01 00:00:05+00:00 10 20
+3 3 2024-01-01 00:01:00+00:00 2024-01-01 00:00:55+00:00 50 60
+
+# Verify EOWC view receives watermark - old data should be emitted
+query IITTII rowsort retry 11 backoff 1s
+SELECT * FROM between_eowc_mv;
+----
+1 1 2024-01-01 00:00:08+00:00 2024-01-01 00:00:05+00:00 10 20
+
+statement ok
+DROP MATERIALIZED VIEW between_eowc_mv;
+
+statement ok
+DROP MATERIALIZED VIEW between_join_mv;
+
+statement ok
+DROP TABLE stream_a;
+
+statement ok
+DROP TABLE stream_b;
+
+statement ok
+SET streaming_parallelism = 0;

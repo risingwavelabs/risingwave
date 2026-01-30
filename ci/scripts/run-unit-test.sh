@@ -15,7 +15,7 @@ export RW_BUILD_INSTRUMENT_COVERAGE=1
 # same test binary. Here `%4m` means that there's a pool of 4 profraw files for each test binary.
 # This achieves a good balance between the performance of running tests and generating reports.
 # https://github.com/taiki-e/cargo-llvm-cov/issues/335#issuecomment-1890349373
-export LLVM_PROFILE_FILE='/risingwave/target/risingwave-unit-test-%4m.profraw'
+export LLVM_PROFILE_FILE="${CARGO_LLVM_COV_TARGET_DIR}/risingwave-unit-test-%4m.profraw"
 
 echo "+++ Run unit tests"
 # use tee to disable progress bar

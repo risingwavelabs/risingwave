@@ -229,6 +229,8 @@ impl_plan_tree_node_for_unary! { Stream, StreamMaterializedExprs }
 
 impl StreamNode for StreamMaterializedExprs {
     fn to_stream_prost_body(&self, state: &mut BuildFragmentGraphState) -> PbNodeBody {
+        // `StreamMaterializedExprs` is specifically used to safely evaluate impure expressions by
+        // materializing results into state. So we don't need to check for pureness here.
         PbNodeBody::MaterializedExprs(Box::new(MaterializedExprsNode {
             exprs: self.exprs.iter().map(|expr| expr.to_expr_proto()).collect(),
             state_table: Some(

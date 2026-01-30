@@ -23,6 +23,8 @@ use risingwave_common::hash::{
     ActorAlignmentId, IsSingleton, VirtualNode, VnodeCount, VnodeCountCompat,
 };
 use risingwave_common::id::JobId;
+use risingwave_common::system_param::AdaptiveParallelismStrategy;
+use risingwave_common::system_param::adaptive_parallelism_strategy::parse_strategy;
 use risingwave_common::util::stream_graph_visitor::{self, visit_stream_node_body};
 use risingwave_meta_model::{DispatcherType, SourceId, StreamingParallelism, WorkerId};
 use risingwave_pb::catalog::Table;
@@ -285,6 +287,9 @@ pub struct StreamContext {
 
     /// The partial config of this job to override the global config.
     pub config_override: Arc<str>,
+
+    /// The adaptive parallelism strategy for this job if it overrides the system default.
+    pub adaptive_parallelism_strategy: Option<AdaptiveParallelismStrategy>,
 }
 
 impl StreamContext {
@@ -292,6 +297,11 @@ impl StreamContext {
         PbStreamContext {
             timezone: self.timezone.clone().unwrap_or("".into()),
             config_override: self.config_override.to_string(),
+            adaptive_parallelism_strategy: self
+                .adaptive_parallelism_strategy
+                .as_ref()
+                .map(ToString::to_string)
+                .unwrap_or_default(),
         }
     }
 
@@ -311,6 +321,14 @@ impl StreamContext {
                 Some(prost.get_timezone().clone())
             },
             config_override: prost.get_config_override().as_str().into(),
+            adaptive_parallelism_strategy: if prost.get_adaptive_parallelism_strategy().is_empty() {
+                None
+            } else {
+                Some(
+                    parse_strategy(prost.get_adaptive_parallelism_strategy())
+                        .expect("adaptive parallelism strategy should be validated in frontend"),
+                )
+            },
         }
     }
 }
@@ -321,6 +339,9 @@ impl risingwave_meta_model::streaming_job::Model {
         StreamContext {
             timezone: self.timezone.clone(),
             config_override: self.config_override.clone().unwrap_or_default().into(),
+            adaptive_parallelism_strategy: self.adaptive_parallelism_strategy.as_deref().map(|s| {
+                parse_strategy(s).expect("strategy should be validated before persisting")
+            }),
         }
     }
 }
@@ -651,6 +672,9 @@ impl StreamJobFragments {
         let table_id = match stream_node.node_body.as_ref() {
             Some(NodeBody::StreamScan(stream_scan)) => Some(stream_scan.table_id),
             Some(NodeBody::StreamCdcScan(stream_scan)) => Some(stream_scan.table_id),
+            Some(NodeBody::LocalityProvider(state)) => {
+                Some(state.state_table.as_ref().expect("must have state").id)
+            }
             _ => None,
         };
         if let Some(table_id) = table_id {

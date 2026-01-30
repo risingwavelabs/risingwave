@@ -12,7 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+mod monitor_service;
+
 use itertools::Itertools;
+pub use monitor_service::MonitorServiceImpl;
 use pgwire::pg_server::{Session, SessionManager};
 use risingwave_common::id::{DatabaseId, TableId};
 use risingwave_pb::ddl_service::{ReplaceJobPlan, TableSchemaChange, replace_job_plan};

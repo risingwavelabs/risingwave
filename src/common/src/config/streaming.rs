@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::time::Duration;
+
 use risingwave_common_proc_macro::serde_prefix_all;
 
 use super::*;
@@ -25,6 +27,7 @@ pub use join_encoding_type::*;
 pub use over_window::*;
 
 /// The section `[streaming]` in `risingwave.toml`.
+#[serde_with::apply(Option => #[serde(with = "none_as_empty_string")])]
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde, ConfigDoc)]
 pub struct StreamingConfig {
     /// The maximum number of barriers in-flight in the compute nodes.
@@ -41,16 +44,16 @@ pub struct StreamingConfig {
     pub async_stack_trace: AsyncStackTraceOption,
 
     #[serde(default)]
-    #[config_doc(omitted)]
+    #[config_doc(nested)]
     pub developer: StreamingDeveloperConfig,
 
     /// Max unique user stream errors per actor
     #[serde(default = "default::streaming::unique_user_stream_errors")]
     pub unique_user_stream_errors: usize,
 
-    /// Control the strictness of stream consistency.
-    #[serde(default = "default::streaming::unsafe_enable_strict_consistency")]
-    pub unsafe_enable_strict_consistency: bool,
+    /// Disable strict stream consistency checks.
+    #[serde(default = "default::streaming::unsafe_disable_strict_consistency")]
+    pub unsafe_disable_strict_consistency: bool,
 
     #[serde(default, flatten)]
     #[config_doc(omitted)]
@@ -61,6 +64,7 @@ pub struct StreamingConfig {
 ///
 /// It is put at [`StreamingConfig::developer`].
 #[serde_prefix_all("stream_", mode = "alias")]
+#[serde_with::apply(Option => #[serde(with = "none_as_empty_string")])]
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde, ConfigDoc)]
 pub struct StreamingDeveloperConfig {
     /// Set to true to enable per-executor row count metrics. This will produce a lot of timeseries
@@ -150,6 +154,13 @@ pub struct StreamingDeveloperConfig {
     /// If true, it's decided by session variable `streaming_use_arrangement_backfill` (default true)
     pub enable_arrangement_backfill: bool,
 
+    #[serde(default = "default::developer::stream_enable_snapshot_backfill")]
+    /// Enable snapshot backfill
+    /// If false, the snapshot backfill will be disabled,
+    /// even if session variable set.
+    /// If true, it's decided by session variable `streaming_use_snapshot_backfill` (default true)
+    pub enable_snapshot_backfill: bool,
+
     #[serde(default = "default::developer::stream_high_join_amplification_threshold")]
     /// If number of hash join matches exceeds this threshold number,
     /// it will be logged.
@@ -199,6 +210,10 @@ pub struct StreamingDeveloperConfig {
     #[serde(default)]
     pub compute_client_config: RpcClientConfig,
 
+    /// The interval in seconds to rebuild snapshot iterators during snapshot backfill.
+    #[serde(default = "default::developer::stream_snapshot_iter_rebuild_interval_secs")]
+    pub snapshot_iter_rebuild_interval_secs: u64,
+
     /// `IcebergListExecutor`: The interval in seconds for Iceberg source to list new files.
     #[serde(default = "default::developer::iceberg_list_interval_sec")]
     pub iceberg_list_interval_sec: u64,
@@ -214,6 +229,11 @@ pub struct StreamingDeveloperConfig {
     /// `IcebergSink`: The maximum number of rows in a row group when writing Parquet files.
     #[serde(default = "default::developer::iceberg_sink_write_parquet_max_row_group_rows")]
     pub iceberg_sink_write_parquet_max_row_group_rows: usize,
+
+    /// When enabled, materialized views using default `NoCheck` conflict behavior will be forced
+    /// to use `Overwrite`. Useful to avoid propagating inconsistent changelog downstream.
+    #[serde(default = "default::developer::materialize_force_overwrite_on_no_check")]
+    pub materialize_force_overwrite_on_no_check: bool,
 
     /// Whether by default enable preloading all rows in memory for state table.
     /// If true, all capable state tables will preload its state to memory
@@ -264,6 +284,21 @@ pub struct StreamingDeveloperConfig {
     pub unrecognized: Unrecognized<Self>,
 }
 
+impl StreamingDeveloperConfig {
+    pub fn snapshot_iter_rebuild_interval(&self) -> Duration {
+        let rebuild_interval = if self.snapshot_iter_rebuild_interval_secs < 10 {
+            tracing::warn!(
+                "too small rebuild_interval {} second. rewrite to 10",
+                self.snapshot_iter_rebuild_interval_secs
+            );
+            10
+        } else {
+            self.snapshot_iter_rebuild_interval_secs
+        };
+        Duration::from_secs(rebuild_interval)
+    }
+}
+
 impl StreamingConfig {
     /// Returns the dot-separated keys of all unrecognized fields, including those in `developer` section.
     pub fn unrecognized_keys(&self) -> impl Iterator<Item = String> {
@@ -304,8 +339,8 @@ pub mod default {
             10
         }
 
-        pub fn unsafe_enable_strict_consistency() -> bool {
-            true
+        pub fn unsafe_disable_strict_consistency() -> bool {
+            false
         }
 
         pub fn default_enable_mem_preload_state_table() -> bool {

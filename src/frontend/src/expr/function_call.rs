@@ -20,7 +20,7 @@ use risingwave_common::util::iter_util::ZipEqFast;
 use super::type_inference::cast;
 use super::{CastContext, CastError, Expr, ExprImpl, Literal, infer_some_all, infer_type};
 use crate::error::Result as RwResult;
-use crate::expr::{ExprDisplay, ExprType, ExprVisitor, ImpureAnalyzer, bail_cast_error};
+use crate::expr::{ExprDisplay, ExprType, bail_cast_error, is_impure_func_call};
 
 #[derive(Clone, Eq, PartialEq, Hash)]
 pub struct FunctionCall {
@@ -287,9 +287,7 @@ impl FunctionCall {
     }
 
     pub fn is_pure(&self) -> bool {
-        let mut a = ImpureAnalyzer { impure: false };
-        a.visit_function_call(self);
-        !a.impure
+        !is_impure_func_call(self)
     }
 }
 

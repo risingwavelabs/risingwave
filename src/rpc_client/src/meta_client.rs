@@ -64,7 +64,6 @@ use risingwave_pb::common::{HostAddress, OptionalUint32, OptionalUint64, WorkerN
 use risingwave_pb::connector_service::sink_coordination_service_client::SinkCoordinationServiceClient;
 use risingwave_pb::ddl_service::alter_owner_request::Object;
 use risingwave_pb::ddl_service::create_iceberg_table_request::{PbSinkJobInfo, PbTableJobInfo};
-use risingwave_pb::ddl_service::create_materialized_view_request::PbBackfillType;
 use risingwave_pb::ddl_service::ddl_service_client::DdlServiceClient;
 use risingwave_pb::ddl_service::*;
 use risingwave_pb::hummock::compact_task::TaskStatus;
@@ -420,15 +419,16 @@ impl MetaClient {
         table: PbTable,
         graph: StreamFragmentGraph,
         dependencies: HashSet<ObjectId>,
-        specific_resource_group: Option<String>,
+        resource_type: streaming_job_resource_type::ResourceType,
         if_not_exists: bool,
     ) -> Result<WaitVersion> {
         let request = CreateMaterializedViewRequest {
             materialized_view: Some(table),
             fragment_graph: Some(graph),
-            backfill: PbBackfillType::Regular as _,
+            resource_type: Some(PbStreamingJobResourceType {
+                resource_type: Some(resource_type),
+            }),
             dependencies: dependencies.into_iter().collect(),
-            specific_resource_group,
             if_not_exists,
         };
         let resp = self.inner.create_materialized_view(request).await?;
@@ -1110,6 +1110,14 @@ impl MetaClient {
         Ok(resp.tables)
     }
 
+    pub async fn risectl_resume_backfill(
+        &self,
+        request: RisectlResumeBackfillRequest,
+    ) -> Result<()> {
+        self.inner.risectl_resume_backfill(request).await?;
+        Ok(())
+    }
+
     pub async fn flush(&self, database_id: DatabaseId) -> Result<HummockVersionId> {
         let request = FlushRequest { database_id };
         let resp = self.inner.flush(request).await?;
@@ -1242,12 +1250,14 @@ impl MetaClient {
 
     pub async fn apply_throttle(
         &self,
-        kind: PbThrottleTarget,
+        throttle_target: PbThrottleTarget,
+        throttle_type: risingwave_pb::common::PbThrottleType,
         id: u32,
         rate: Option<u32>,
     ) -> Result<ApplyThrottleResponse> {
         let request = ApplyThrottleRequest {
-            kind: kind as i32,
+            throttle_target: throttle_target as i32,
+            throttle_type: throttle_type as i32,
             id,
             rate,
         };
@@ -2550,6 +2560,7 @@ macro_rules! for_all_meta_rpc {
             ,{ ddl_client, replace_job_plan, ReplaceJobPlanRequest, ReplaceJobPlanResponse }
             ,{ ddl_client, alter_source, AlterSourceRequest, AlterSourceResponse }
             ,{ ddl_client, risectl_list_state_tables, RisectlListStateTablesRequest, RisectlListStateTablesResponse }
+            ,{ ddl_client, risectl_resume_backfill, RisectlResumeBackfillRequest, RisectlResumeBackfillResponse }
             ,{ ddl_client, get_ddl_progress, GetDdlProgressRequest, GetDdlProgressResponse }
             ,{ ddl_client, create_connection, CreateConnectionRequest, CreateConnectionResponse }
             ,{ ddl_client, list_connections, ListConnectionsRequest, ListConnectionsResponse }

@@ -126,13 +126,16 @@ impl<S: StateStore> SortExecutor<S> {
                     yield Message::Barrier(barrier);
 
                     // Update the vnode bitmap for state tables of all agg calls if asked.
-                    if let Some((_, cache_may_stale)) =
-                        post_commit.post_yield_barrier(update_vnode_bitmap).await?
+                    if post_commit
+                        .post_yield_barrier(update_vnode_bitmap)
+                        .await?
+                        .is_some()
                     {
-                        // Manipulate the cache if necessary.
-                        if cache_may_stale {
-                            vars.buffer.refill_cache(None, &this.buffer_table).await?;
-                        }
+                        // `SortBuffer` may output data directly from its in-memory cache without
+                        // checking current vnode ownership. Therefore, we must rebuild the cache
+                        // whenever the vnode bitmap is updated to avoid emitting rows that no
+                        // longer belong to this actor.
+                        vars.buffer.refill_cache(None, &this.buffer_table).await?;
                     }
                 }
             }

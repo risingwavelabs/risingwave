@@ -6,8 +6,10 @@ set -euo pipefail
 source ci/scripts/common.sh
 
 echo "--- Download artifacts"
-download-and-decompress-artifact risingwave_simulation .
-chmod +x ./risingwave_simulation
+mkdir -p target/debug
+download-and-decompress-artifact risingwave_simulation target/debug/
+chmod +x ./target/debug/risingwave_simulation
+export RW_SIM=target/debug/risingwave_simulation
 
 export RUST_LOG="info,risingwave_meta::barrier::recovery=debug,\
 risingwave_meta::manager::catalog=debug,\
@@ -55,7 +57,7 @@ fi
 echo "--- EXTRA_ARGS: ${EXTRA_ARGS}"
 
 echo "--- deterministic simulation e2e, ci-3cn-2fe-1meta, recovery, background_ddl"
-seq "$TEST_NUM" | parallel --ungroup 'set -o pipefail && ((MADSIM_TEST_SEED={} ./risingwave_simulation \
+seq "$TEST_NUM" | parallel --ungroup 'set -o pipefail && ((MADSIM_TEST_SEED={} $RW_SIM \
 --kill \
 --kill-rate=${KILL_RATE} \
 ${EXTRA_ARGS:-} \
@@ -64,16 +66,15 @@ ${EXTRA_ARGS:-} \
 | awk -W interactive "{print \"(seed = {}): \" \$0; fflush()}")'
 
 echo "--- deterministic simulation e2e, ci-3cn-2fe-1meta, recovery, ddl"
-seq "$TEST_NUM" | parallel --tmpdir .risingwave --ungroup 'set -o pipefail && ((MADSIM_TEST_SEED={} ./risingwave_simulation \
+seq "$TEST_NUM" | parallel --tmpdir .risingwave --ungroup 'set -o pipefail && ((MADSIM_TEST_SEED={} $RW_SIM \
 --kill \
 --kill-rate=${KILL_RATE} \
---background-ddl-rate=${BACKGROUND_DDL_RATE} \
 ${EXTRA_ARGS:-} \
 ./e2e_test/ddl/\*\*/\*.slt 2> $LOGDIR/recovery-ddl-{}.log && rm $LOGDIR/recovery-ddl-{}.log) \
 | awk -W interactive "{print \"(seed = {}): \" \$0; fflush()}")'
 
 echo "--- deterministic simulation e2e, ci-3cn-2fe-1meta, recovery, streaming"
-seq "$TEST_NUM" | parallel --ungroup 'set -o pipefail && ((MADSIM_TEST_SEED={} ./risingwave_simulation \
+seq "$TEST_NUM" | parallel --ungroup 'set -o pipefail && ((MADSIM_TEST_SEED={} $RW_SIM \
 --kill \
 --kill-rate=${KILL_RATE} \
 --background-ddl-rate=${BACKGROUND_DDL_RATE} \
@@ -82,7 +83,7 @@ ${EXTRA_ARGS:-} \
 | awk -W interactive "{print \"(seed = {}): \" \$0; fflush()}")'
 
 echo "--- deterministic simulation e2e, ci-3cn-2fe-1meta, recovery, batch"
-seq "$TEST_NUM" | parallel --ungroup 'set -o pipefail && ((MADSIM_TEST_SEED={} ./risingwave_simulation \
+seq "$TEST_NUM" | parallel --ungroup 'set -o pipefail && ((MADSIM_TEST_SEED={} $RW_SIM \
 --kill \
 --kill-rate=${KILL_RATE} \
 --background-ddl-rate=${BACKGROUND_DDL_RATE} \
@@ -91,7 +92,7 @@ ${EXTRA_ARGS:-} \
 | awk -W interactive "{print \"(seed = {}): \" \$0; fflush()}")'
 
 echo "--- deterministic simulation e2e, ci-3cn-2fe-1meta, recovery, kafka source,sink"
-seq "$TEST_NUM" | parallel --ungroup 'set -o pipefail && ((MADSIM_TEST_SEED={} ./risingwave_simulation \
+seq "$TEST_NUM" | parallel --ungroup 'set -o pipefail && ((MADSIM_TEST_SEED={} $RW_SIM \
 --kill \
 --kill-rate=${KILL_RATE} \
 --kafka-datadir=./e2e_test/source_legacy/basic/scripts/test_data \

@@ -23,15 +23,16 @@ use std::sync::atomic::Ordering::Relaxed;
 use std::sync::{Arc, LazyLock};
 
 use bytes::Bytes;
-use prometheus::IntGauge;
 use risingwave_common::catalog::TableId;
+use risingwave_common::metrics::LabelGuardedIntGauge;
 use risingwave_hummock_sdk::EpochWithGap;
 use risingwave_hummock_sdk::key::{FullKey, TableKey, TableKeyRange, UserKey};
 
 use crate::hummock::iterator::{
     Backward, DirectionEnum, Forward, HummockIterator, HummockIteratorDirection, ValueMeta,
 };
-use crate::hummock::utils::{MemoryTracker, range_overlap};
+use crate::hummock::shared_buffer::TableMemoryMetrics;
+use crate::hummock::utils::range_overlap;
 use crate::hummock::value::HummockValue;
 use crate::hummock::{HummockEpoch, HummockResult};
 use crate::mem_table::ImmId;
@@ -121,7 +122,7 @@ pub(crate) struct SharedBufferBatchOldValues {
     /// corresponding `new_value` is `Insert`, and contains the old values of `Update` and `Delete`.
     values: Vec<Bytes>,
     pub size: usize,
-    pub global_old_value_size: IntGauge,
+    pub global_old_value_size: LabelGuardedIntGauge,
 }
 
 impl Drop for SharedBufferBatchOldValues {
@@ -131,7 +132,11 @@ impl Drop for SharedBufferBatchOldValues {
 }
 
 impl SharedBufferBatchOldValues {
-    pub(crate) fn new(values: Vec<Bytes>, size: usize, global_old_value_size: IntGauge) -> Self {
+    pub(crate) fn new(
+        values: Vec<Bytes>,
+        size: usize,
+        global_old_value_size: LabelGuardedIntGauge,
+    ) -> Self {
         global_old_value_size.add(size as _);
         Self {
             values,
@@ -141,7 +146,7 @@ impl SharedBufferBatchOldValues {
     }
 
     pub(crate) fn for_test(values: Vec<Bytes>, size: usize) -> Self {
-        Self::new(values, size, IntGauge::new("test", "test").unwrap())
+        Self::new(values, size, LabelGuardedIntGauge::test_int_gauge::<1>())
     }
 }
 
@@ -154,7 +159,7 @@ pub(crate) struct SharedBufferBatchInner {
     epochs: Vec<HummockEpoch>,
     /// Total size of all key-value items (excluding the `epoch` of value versions)
     size: usize,
-    _tracker: Option<MemoryTracker>,
+    per_table_tracker: Arc<TableMemoryMetrics>,
     /// For a batch created from multiple batches, this will be
     /// the largest batch id among input batches
     batch_id: SharedBufferBatchId,
@@ -167,7 +172,7 @@ impl SharedBufferBatchInner {
         payload: Vec<SharedBufferItem>,
         old_values: Option<SharedBufferBatchOldValues>,
         size: usize,
-        _tracker: Option<MemoryTracker>,
+        table_metrics: Arc<TableMemoryMetrics>,
     ) -> Self {
         assert!(!payload.is_empty());
         debug_assert!(payload.iter().is_sorted_by_key(|(key, _)| key));
@@ -187,13 +192,16 @@ impl SharedBufferBatchInner {
         }
 
         let batch_id = SHARED_BUFFER_BATCH_ID_GENERATOR.fetch_add(1, Relaxed);
+
+        table_metrics.inc_imm(size);
+
         SharedBufferBatchInner {
             entries,
             new_values,
             old_values,
             epochs: vec![epoch],
             size,
-            _tracker,
+            per_table_tracker: table_metrics,
             batch_id,
         }
     }
@@ -202,7 +210,6 @@ impl SharedBufferBatchInner {
         SharedBufferKeyEntry::values(i, &self.entries, &self.new_values)
     }
 
-    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new_with_multi_epoch_batches(
         epochs: Vec<HummockEpoch>,
         entries: Vec<SharedBufferKeyEntry>,
@@ -210,7 +217,6 @@ impl SharedBufferBatchInner {
         old_values: Option<SharedBufferBatchOldValues>,
         size: usize,
         imm_id: ImmId,
-        tracker: Option<MemoryTracker>,
     ) -> Self {
         assert!(new_values.len() >= entries.len());
         assert!(!entries.is_empty());
@@ -231,7 +237,7 @@ impl SharedBufferBatchInner {
             old_values,
             epochs,
             size,
-            _tracker: tracker,
+            per_table_tracker: TableMemoryMetrics::for_test(),
             batch_id: imm_id,
         }
     }
@@ -268,6 +274,12 @@ impl SharedBufferBatchInner {
 impl PartialEq for SharedBufferBatchInner {
     fn eq(&self, other: &Self) -> bool {
         self.entries == other.entries && self.new_values == other.new_values
+    }
+}
+
+impl Drop for SharedBufferBatchInner {
+    fn drop(&mut self) {
+        self.per_table_tracker.dec_imm(self.size);
     }
 }
 
@@ -317,7 +329,7 @@ impl SharedBufferBatch {
                 sorted_items,
                 old_values,
                 size,
-                None,
+                TableMemoryMetrics::for_test(),
             )),
             table_id,
         }
@@ -511,7 +523,7 @@ impl SharedBufferBatch {
         old_values: Option<SharedBufferBatchOldValues>,
         size: usize,
         table_id: TableId,
-        tracker: Option<MemoryTracker>,
+        table_metrics: Arc<TableMemoryMetrics>,
     ) -> Self {
         let inner = SharedBufferBatchInner::new(
             epoch,
@@ -519,7 +531,7 @@ impl SharedBufferBatch {
             sorted_items,
             old_values,
             size,
-            tracker,
+            table_metrics,
         );
         SharedBufferBatch {
             inner: Arc::new(inner),
@@ -535,8 +547,14 @@ impl SharedBufferBatch {
         size: usize,
         table_id: TableId,
     ) -> Self {
-        let inner =
-            SharedBufferBatchInner::new(epoch, spill_offset, sorted_items, None, size, None);
+        let inner = SharedBufferBatchInner::new(
+            epoch,
+            spill_offset,
+            sorted_items,
+            None,
+            size,
+            TableMemoryMetrics::for_test(),
+        );
         SharedBufferBatch {
             inner: Arc::new(inner),
             table_id,
@@ -762,6 +780,7 @@ impl<D: HummockIteratorDirection, const IS_NEW_VALUE: bool> HummockIterator
                     DirectionEnum::Forward => {
                         // seek key table id < batch table id, so seek to beginning
                         self.rewind().await?;
+                        return Ok(());
                     }
                     DirectionEnum::Backward => {
                         self.invalidate();
@@ -778,6 +797,7 @@ impl<D: HummockIteratorDirection, const IS_NEW_VALUE: bool> HummockIterator
                     DirectionEnum::Backward => {
                         // seek key table id > batch table id, so seek to end
                         self.rewind().await?;
+                        return Ok(());
                     }
                 };
             }
@@ -1404,7 +1424,7 @@ mod tests {
         ];
         // newer data comes first
         let imms = vec![imm3, imm2, imm1];
-        let merged_imm = merge_imms_in_memory(table_id, imms.clone(), None).await;
+        let merged_imm = merge_imms_in_memory(table_id, imms.clone()).await;
 
         // Point lookup
         for (i, items) in batch_items.iter().enumerate() {
@@ -1591,7 +1611,7 @@ mod tests {
         ];
         // newer data comes first
         let imms = vec![imm3, imm2, imm1];
-        let merged_imm = merge_imms_in_memory(table_id, imms.clone(), None).await;
+        let merged_imm = merge_imms_in_memory(table_id, imms.clone()).await;
 
         // Point lookup
         for (i, items) in batch_items.iter().enumerate() {
@@ -1719,5 +1739,60 @@ mod tests {
             }
             assert_eq!(expected, output);
         }
+    }
+    #[tokio::test]
+    async fn test_shared_buffer_batch_seek_bug() {
+        // Reproduce the bug where seek falls through to binary_search when table_id mismatch
+        let epoch = test_epoch(1);
+        let table_id = TableId::new(100);
+        let shared_buffer_items: Vec<(Vec<u8>, SharedBufferValue<Bytes>)> = vec![(
+            iterator_test_table_key_of(1), // "key_test_000...001"
+            SharedBufferValue::Insert(Bytes::from("value1")),
+        )];
+        let shared_buffer_batch = SharedBufferBatch::for_test(
+            transform_shared_buffer(shared_buffer_items.clone()),
+            epoch,
+            table_id,
+        );
+
+        // Case 1: Seek with smaller TableId (99), but larger TableKey ("key_test_000...002").
+        // "key_test...002" > "key_test...001".
+        // Forward Iterator.
+        // Expected: Should land on the first item (TableId 100 > TableId 99).
+        // Bug description: rewinds (index 0), then binary_search("key_2") in batch (only "key_1").
+        // "key_2" > "key_1", so index becomes 1 (end). Iterator invalid.
+        let mut iter = shared_buffer_batch.clone().into_forward_iter();
+        let seek_key = FullKey::for_test(
+            TableId::new(99),
+            iterator_test_table_key_of(2), // larger key
+            epoch,
+        );
+        iter.seek(seek_key.to_ref()).await.unwrap();
+
+        assert!(
+            iter.is_valid(),
+            "Iterator should be valid when seeking with smaller table_id, even if the key part is larger"
+        );
+        assert_eq!(iter.key().user_key.table_id, table_id);
+
+        // Case 2: Seek with larger TableId (101), but smaller TableKey ("key_test_000...000").
+        // "key_test...000" < "key_test...001".
+        // Backward Iterator.
+        // Expected: Should land on the last item (TableId 100 < TableId 101).
+        // Bug description: rewinds (index valid), then binary_search("key_0") which returns Err(0) (insertion point at start).
+        // Backward generic logic for Err(0) is `invalidate()`.
+        let mut iter = shared_buffer_batch.clone().into_backward_iter();
+        let seek_key = FullKey::for_test(
+            TableId::new(101),
+            iterator_test_table_key_of(0), // smaller key
+            epoch,
+        );
+        iter.seek(seek_key.to_ref()).await.unwrap();
+
+        assert!(
+            iter.is_valid(),
+            "Iterator should be valid when seeking with larger table_id, even if the key part is smaller"
+        );
+        assert_eq!(iter.key().user_key.table_id, table_id);
     }
 }

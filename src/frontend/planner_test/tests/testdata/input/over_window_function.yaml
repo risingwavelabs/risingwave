@@ -213,6 +213,16 @@
     - logical_plan
     - stream_plan
     - batch_plan
+- id: TopN by row_number with rank output and offset
+  sql: |
+    create table t(x int, y int);
+    select x, y, rank from
+      (select *, row_number() over(PARTITION BY x ORDER BY y) rank from t)
+    where rank = 2;
+  expected_outputs:
+    - logical_plan
+    - stream_plan
+    - batch_plan
 - id: TopN by row_number without rank output, 1
   sql: |
     create table t(x int, y int);

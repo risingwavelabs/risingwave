@@ -16,7 +16,8 @@ use risingwave_common::util::StackTraceResponseExt as _;
 use risingwave_pb::common::{WorkerNode, WorkerType};
 use risingwave_pb::monitor_service::stack_trace_request::ActorTracesFormat;
 use risingwave_pb::monitor_service::{StackTraceRequest, StackTraceResponse};
-use risingwave_rpc_client::ComputeClientPool;
+use risingwave_rpc_client::MonitorClientPool;
+use thiserror_ext::AsReport as _;
 
 use crate::MetaResult;
 use crate::manager::MetadataManager;
@@ -75,14 +76,31 @@ pub async fn dump_worker_node_await_tree(
     let req = StackTraceRequest {
         actor_traces_format: actor_traces_format as i32,
     };
-    // This is also applicable to compactor.
-    let compute_clients = ComputeClientPool::adhoc();
+    let clients = MonitorClientPool::adhoc();
 
     for worker_node in worker_nodes {
-        let client = compute_clients.get(worker_node).await?;
-        let result = client.stack_trace(req).await?;
+        let worker_id = worker_node.id;
 
-        all.merge_other(result);
+        let client = match clients.get(worker_node).await {
+            Ok(client) => client,
+            Err(e) => {
+                all.node_errors
+                    .insert(worker_id, format!("failed to connect: {}", e.as_report()));
+                continue;
+            }
+        };
+
+        match client.await_tree(req).await {
+            Ok(result) => {
+                all.merge_other(result);
+            }
+            Err(e) => {
+                all.node_errors.insert(
+                    worker_id,
+                    format!("failed to collect stack trace: {}", e.as_report()),
+                );
+            }
+        }
     }
 
     Ok(all)

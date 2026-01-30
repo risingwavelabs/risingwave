@@ -129,6 +129,10 @@ pub const USER_COLUMN_ID_OFFSET: i32 = ROW_ID_COLUMN_ID.next().get_id();
 pub const RW_TIMESTAMP_COLUMN_NAME: &str = "_rw_timestamp";
 pub const RW_TIMESTAMP_COLUMN_ID: ColumnId = ColumnId::new(-1);
 
+/// The column name for the projected row ID in `ProjectSet`.
+/// This is a hidden column used to track row indices when expanding set-returning functions.
+pub const PROJECTED_ROW_ID_COLUMN_NAME: &str = "_rw_projected_row_id";
+
 pub const ICEBERG_SEQUENCE_NUM_COLUMN_NAME: &str = "_iceberg_sequence_number";
 pub const ICEBERG_FILE_PATH_COLUMN_NAME: &str = "_iceberg_file_path";
 pub const ICEBERG_FILE_POS_COLUMN_NAME: &str = "_iceberg_file_pos";

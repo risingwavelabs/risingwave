@@ -31,6 +31,7 @@ use risingwave_connector::source::cdc::external::{
     CdcOffset, ExternalCdcTableType, ExternalTableReaderImpl,
 };
 use risingwave_connector::source::{CdcTableSnapshotSplit, CdcTableSnapshotSplitRaw};
+use risingwave_pb::common::ThrottleType;
 use rw_futures_util::pausable;
 use thiserror_ext::AsReport;
 use tracing::Instrument;
@@ -425,12 +426,14 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
                                                 // TODO(zw): optimization: improve throttle.
                                                 // 1. Handle rate limit 0. Currently, to resume the process, the actor must be rebuilt.
                                                 // 2. Apply new rate limit immediately.
-                                                if let Some(new_rate_limit) =
+                                                if let Some(entry) =
                                                     some.get(&self.actor_ctx.fragment_id)
-                                                    && *new_rate_limit != self.rate_limit_rps
+                                                    && entry.throttle_type()
+                                                        == ThrottleType::Backfill
+                                                    && entry.rate_limit != self.rate_limit_rps
                                                 {
                                                     // The new rate limit will take effect since next split.
-                                                    self.rate_limit_rps = *new_rate_limit;
+                                                    self.rate_limit_rps = entry.rate_limit;
                                                 }
                                             }
                                             Mutation::Update(UpdateMutation {

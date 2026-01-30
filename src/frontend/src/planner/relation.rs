@@ -16,7 +16,6 @@ use std::collections::HashMap;
 use std::ops::Deref;
 use std::rc::Rc;
 
-use either::Either;
 use itertools::Itertools;
 use risingwave_common::catalog::{
     ColumnCatalog, Engine, Field, RISINGWAVE_ICEBERG_ROW_ID, ROW_ID_COLUMN_NAME, Schema,
@@ -26,17 +25,16 @@ use risingwave_common::{bail, bail_not_implemented};
 use risingwave_sqlparser::ast::AsOf;
 
 use crate::binder::{
-    BoundBackCteRef, BoundBaseTable, BoundGapFill, BoundJoin, BoundShare, BoundShareInput,
-    BoundSource, BoundSystemTable, BoundWatermark, BoundWindowTableFunction, Relation,
-    WindowTableFunctionKind,
+    BoundBaseTable, BoundGapFill, BoundJoin, BoundShare, BoundShareInput, BoundSource,
+    BoundSystemTable, BoundWatermark, BoundWindowTableFunction, Relation, WindowTableFunctionKind,
 };
 use crate::error::{ErrorCode, Result};
 use crate::expr::{CastContext, Expr, ExprImpl, ExprType, FunctionCall, InputRef, Literal};
 use crate::optimizer::plan_node::generic::SourceNodeKind;
 use crate::optimizer::plan_node::{
-    LogicalApply, LogicalCteRef, LogicalGapFill, LogicalHopWindow, LogicalJoin,
-    LogicalPlanRef as PlanRef, LogicalProject, LogicalScan, LogicalShare, LogicalSource,
-    LogicalSysScan, LogicalTableFunction, LogicalValues,
+    LogicalApply, LogicalGapFill, LogicalHopWindow, LogicalJoin, LogicalPlanRef as PlanRef,
+    LogicalProject, LogicalScan, LogicalShare, LogicalSource, LogicalSysScan, LogicalTableFunction,
+    LogicalValues,
 };
 use crate::optimizer::property::Cardinality;
 use crate::planner::{PlanFor, Planner};
@@ -61,9 +59,7 @@ impl Planner {
                 with_ordinality,
             } => self.plan_table_function(tf, with_ordinality),
             Relation::Watermark(tf) => self.plan_watermark(*tf),
-            // note that rcte (i.e., RecursiveUnion) is included *implicitly* in share.
             Relation::Share(share) => self.plan_share(*share),
-            Relation::BackCteRef(cte_ref) => self.plan_cte_ref(*cte_ref),
             Relation::GapFill(bound_gap_fill) => self.plan_gap_fill(*bound_gap_fill),
         }
     }
@@ -369,13 +365,11 @@ source: {:?}",
 
     pub(super) fn plan_share(&mut self, share: BoundShare) -> Result<PlanRef> {
         match share.input {
-            BoundShareInput::Query(Either::Left(nonrecursive_query)) => {
+            BoundShareInput::Query(query) => {
                 let id = share.share_id;
                 match self.share_cache.get(&id) {
                     None => {
-                        let result = self
-                            .plan_query(nonrecursive_query)?
-                            .into_unordered_subplan();
+                        let result = self.plan_query(query)?.into_unordered_subplan();
                         let logical_share = LogicalShare::create(result);
                         self.share_cache.insert(id, logical_share.clone());
                         Ok(logical_share)
@@ -383,12 +377,6 @@ source: {:?}",
                     Some(result) => Ok(result.clone()),
                 }
             }
-            // for the recursive union in rcte
-            BoundShareInput::Query(Either::Right(recursive_union)) => self.plan_recursive_union(
-                *recursive_union.base,
-                *recursive_union.recursive,
-                share.share_id,
-            ),
             BoundShareInput::ChangeLog(relation) => {
                 let id = share.share_id;
                 let result = self.plan_changelog(relation)?;
@@ -401,12 +389,6 @@ source: {:?}",
 
     pub(super) fn plan_watermark(&mut self, _watermark: BoundWatermark) -> Result<PlanRef> {
         todo!("plan watermark");
-    }
-
-    pub(super) fn plan_cte_ref(&mut self, cte_ref: BoundBackCteRef) -> Result<PlanRef> {
-        // TODO: this is actually duplicated from `plan_recursive_union`, refactor?
-        let base = self.plan_set_expr(cte_ref.base, vec![], &[])?;
-        Ok(LogicalCteRef::create(cte_ref.share_id, base))
     }
 
     pub(super) fn plan_gap_fill(&mut self, gap_fill: BoundGapFill) -> Result<PlanRef> {

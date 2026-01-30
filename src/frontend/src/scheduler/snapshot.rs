@@ -65,7 +65,7 @@ impl ReadSnapshot {
                 )),
             },
             ReadSnapshot::ReadUncommitted => BatchQueryEpoch {
-                epoch: Some(batch_query_epoch::Epoch::Current(u64::MAX)),
+                epoch: Some(batch_query_epoch::Epoch::Current(Epoch::now().0)),
             },
             ReadSnapshot::Other(e) => BatchQueryEpoch {
                 epoch: Some(batch_query_epoch::Epoch::Backup(e.0)),

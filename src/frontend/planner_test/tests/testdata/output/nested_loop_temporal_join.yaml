@@ -18,7 +18,7 @@
   stream_plan: |-
     StreamMaterialize { columns: [id1, a1, id2, a2, stream._row_id(hidden), version._row_id(hidden)], stream_key: [stream._row_id, version._row_id], pk_columns: [stream._row_id, version._row_id], pk_conflict: NoCheck }
     └─StreamExchange { dist: HashShard(stream._row_id, version._row_id) }
-      └─StreamTemporalJoin { type: Inner, append_only: true, predicate:  AND (stream.a1 > version.a2) AND (version.a2 < 10:Int32), nested_loop: true, output: [stream.id1, stream.a1, version.id2, version.a2, stream._row_id, version._row_id] }
+      └─StreamTemporalJoin { type: Inner, append_only: true, predicate: (stream.a1 > version.a2) AND (version.a2 < 10:Int32), nested_loop: true, output: [stream.id1, stream.a1, version.id2, version.a2, stream._row_id, version._row_id] }
         ├─StreamExchange { dist: Broadcast }
         │ └─StreamTableScan { table: stream, columns: [stream.id1, stream.a1, stream._row_id], stream_scan_type: ArrangementBackfill, stream_key: [stream._row_id], pk: [_row_id], dist: UpstreamHashShard(stream._row_id) }
         └─StreamExchange [no_shuffle] { dist: UpstreamHashShard(version._row_id) }
@@ -31,7 +31,7 @@
   stream_plan: |-
     StreamMaterialize { columns: [id1, a1, id2, a2, stream._row_id(hidden), version._row_id(hidden)], stream_key: [stream._row_id, version._row_id], pk_columns: [stream._row_id, version._row_id], pk_conflict: NoCheck }
     └─StreamExchange { dist: HashShard(stream._row_id, version._row_id) }
-      └─StreamTemporalJoin { type: Inner, append_only: true, predicate: , nested_loop: true, output: [stream.id1, stream.a1, version.id2, version.a2, stream._row_id, version._row_id] }
+      └─StreamTemporalJoin { type: Inner, append_only: true, predicate: true, nested_loop: true, output: [stream.id1, stream.a1, version.id2, version.a2, stream._row_id, version._row_id] }
         ├─StreamExchange { dist: Broadcast }
         │ └─StreamTableScan { table: stream, columns: [stream.id1, stream.a1, stream._row_id], stream_scan_type: ArrangementBackfill, stream_key: [stream._row_id], pk: [_row_id], dist: UpstreamHashShard(stream._row_id) }
         └─StreamExchange [no_shuffle] { dist: UpstreamHashShard(version._row_id) }
@@ -44,7 +44,7 @@
   stream_plan: |-
     StreamMaterialize { columns: [id1, a1, id2, a2, stream._row_id(hidden)], stream_key: [stream._row_id, id2], pk_columns: [stream._row_id, id2], pk_conflict: NoCheck }
     └─StreamExchange { dist: HashShard(version.id2, stream._row_id) }
-      └─StreamTemporalJoin { type: Inner, append_only: true, predicate:  AND (stream.a1 > version.a2) AND (version.a2 < 10:Int32), nested_loop: true, output: [stream.id1, stream.a1, version.id2, version.a2, stream._row_id] }
+      └─StreamTemporalJoin { type: Inner, append_only: true, predicate: (stream.a1 > version.a2) AND (version.a2 < 10:Int32), nested_loop: true, output: [stream.id1, stream.a1, version.id2, version.a2, stream._row_id] }
         ├─StreamExchange { dist: Broadcast }
         │ └─StreamTableScan { table: stream, columns: [stream.id1, stream.a1, stream._row_id], stream_scan_type: ArrangementBackfill, stream_key: [stream._row_id], pk: [_row_id], dist: UpstreamHashShard(stream._row_id) }
         └─StreamExchange [no_shuffle] { dist: UpstreamHashShard(version.id2) }
@@ -60,7 +60,7 @@
       └─StreamSimpleAgg [append_only] { aggs: [sum0(count), count] }
         └─StreamExchange { dist: Single }
           └─StreamStatelessSimpleAgg { aggs: [count] }
-            └─StreamTemporalJoin { type: Inner, append_only: true, predicate:  AND (stream.a1 > version.a2) AND (version.a2 < 10:Int32), nested_loop: true, output: [stream._row_id, version.id2] }
+            └─StreamTemporalJoin { type: Inner, append_only: true, predicate: (stream.a1 > version.a2) AND (version.a2 < 10:Int32), nested_loop: true, output: [stream._row_id, version.id2] }
               ├─StreamExchange { dist: Broadcast }
               │ └─StreamTableScan { table: stream, columns: [stream.a1, stream._row_id], stream_scan_type: ArrangementBackfill, stream_key: [stream._row_id], pk: [_row_id], dist: UpstreamHashShard(stream._row_id) }
               └─StreamExchange [no_shuffle] { dist: UpstreamHashShard(version.id2) }
@@ -94,9 +94,9 @@
   stream_plan: |-
     StreamMaterialize { columns: [k, x1, x2, a1, b1, stream._row_id(hidden), version1.k(hidden), version2.k(hidden)], stream_key: [stream._row_id, version1.k, version2.k], pk_columns: [stream._row_id, version1.k, version2.k], pk_conflict: NoCheck }
     └─StreamExchange { dist: HashShard(stream._row_id, version1.k, version2.k) }
-      └─StreamTemporalJoin { type: Inner, append_only: true, predicate:  AND (stream.b1 > version2.y2), nested_loop: true, output: [stream.k, version1.x1, version2.x2, stream.a1, stream.b1, stream._row_id, version1.k, version2.k] }
+      └─StreamTemporalJoin { type: Inner, append_only: true, predicate: (stream.b1 > version2.y2), nested_loop: true, output: [stream.k, version1.x1, version2.x2, stream.a1, stream.b1, stream._row_id, version1.k, version2.k] }
         ├─StreamExchange { dist: Broadcast }
-        │ └─StreamTemporalJoin { type: Inner, append_only: true, predicate:  AND (stream.a1 < version1.x1), nested_loop: true, output: [stream.k, stream.a1, stream.b1, version1.x1, stream._row_id, version1.k] }
+        │ └─StreamTemporalJoin { type: Inner, append_only: true, predicate: (stream.a1 < version1.x1), nested_loop: true, output: [stream.k, stream.a1, stream.b1, version1.x1, stream._row_id, version1.k] }
         │   ├─StreamExchange { dist: Broadcast }
         │   │ └─StreamFilter { predicate: (stream.a1 < 10:Int32) }
         │   │   └─StreamTableScan { table: stream, columns: [stream.k, stream.a1, stream.b1, stream._row_id], stream_scan_type: ArrangementBackfill, stream_key: [stream._row_id], pk: [_row_id], dist: UpstreamHashShard(stream._row_id) }

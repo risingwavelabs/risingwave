@@ -22,6 +22,9 @@ message StackTraceResponse {
   map<uint32, string> barrier_worker_state = 5; // key: worker id
   map<uint32, string> jvm_stack_traces = 6; // key: worker id. Might be empty if the worker doesn't run JVM.
   map<string, string> meta_traces = 7;
+  // Per-worker error messages when collecting stack traces from the cluster.
+  // Key: worker id.
+  map<uint32, string> node_errors = 8;
 }
 
 // CPU profiling

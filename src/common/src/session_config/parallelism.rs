@@ -12,12 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::num::{NonZeroU64, ParseIntError};
+use std::num::{NonZeroU64, NonZeroUsize, ParseIntError};
 use std::str::FromStr;
+
+use risingwave_common::system_param::adaptive_parallelism_strategy::{
+    AdaptiveParallelismStrategy, ParallelismStrategyParseError, parse_strategy,
+};
 
 const KEYWORD_DEFAULT: &str = "default";
 const KEYWORD_ADAPTIVE: &str = "adaptive";
 const KEYWORD_AUTO: &str = "auto";
+const KEYWORD_DEFAULT_STRATEGY: &str = "default";
 
 #[derive(Copy, Default, Debug, Clone, PartialEq, Eq)]
 pub enum ConfigParallelism {
@@ -59,5 +64,109 @@ impl std::fmt::Display for ConfigParallelism {
                 write!(f, "{}", n)
             }
         }
+    }
+}
+
+#[derive(Copy, Default, Debug, Clone, PartialEq)]
+pub enum ConfigAdaptiveParallelismStrategy {
+    #[default]
+    Default,
+    Auto,
+    Full,
+    Bounded(NonZeroU64),
+    Ratio(f32),
+}
+
+impl FromStr for ConfigAdaptiveParallelismStrategy {
+    type Err = ParallelismStrategyParseError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if s.eq_ignore_ascii_case(KEYWORD_DEFAULT_STRATEGY) {
+            return Ok(Self::Default);
+        }
+
+        let strategy = parse_strategy(s)?;
+        Ok(strategy.into())
+    }
+}
+
+impl From<AdaptiveParallelismStrategy> for ConfigAdaptiveParallelismStrategy {
+    fn from(value: AdaptiveParallelismStrategy) -> Self {
+        match value {
+            AdaptiveParallelismStrategy::Auto => Self::Auto,
+            AdaptiveParallelismStrategy::Full => Self::Full,
+            AdaptiveParallelismStrategy::Bounded(n) => {
+                // Safe to unwrap since `n` is non-zero.
+                Self::Bounded(NonZeroU64::new(n.get() as u64).unwrap())
+            }
+            AdaptiveParallelismStrategy::Ratio(r) => Self::Ratio(r),
+        }
+    }
+}
+
+impl From<ConfigAdaptiveParallelismStrategy> for Option<AdaptiveParallelismStrategy> {
+    fn from(value: ConfigAdaptiveParallelismStrategy) -> Self {
+        match value {
+            ConfigAdaptiveParallelismStrategy::Default => None,
+            ConfigAdaptiveParallelismStrategy::Auto => Some(AdaptiveParallelismStrategy::Auto),
+            ConfigAdaptiveParallelismStrategy::Full => Some(AdaptiveParallelismStrategy::Full),
+            ConfigAdaptiveParallelismStrategy::Bounded(n) => {
+                Some(AdaptiveParallelismStrategy::Bounded(
+                    NonZeroUsize::new(n.get() as usize)
+                        // Bounded strategy requires non-zero; `NonZeroU64` guarantees this.
+                        .unwrap(),
+                ))
+            }
+            ConfigAdaptiveParallelismStrategy::Ratio(r) => {
+                Some(AdaptiveParallelismStrategy::Ratio(r))
+            }
+        }
+    }
+}
+
+impl std::fmt::Display for ConfigAdaptiveParallelismStrategy {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ConfigAdaptiveParallelismStrategy::Default => {
+                write!(f, "{}", KEYWORD_DEFAULT_STRATEGY)
+            }
+            ConfigAdaptiveParallelismStrategy::Auto => AdaptiveParallelismStrategy::Auto.fmt(f),
+            ConfigAdaptiveParallelismStrategy::Full => AdaptiveParallelismStrategy::Full.fmt(f),
+            ConfigAdaptiveParallelismStrategy::Bounded(n) => {
+                AdaptiveParallelismStrategy::Bounded(NonZeroUsize::new(n.get() as usize).unwrap())
+                    .fmt(f)
+            }
+            ConfigAdaptiveParallelismStrategy::Ratio(r) => {
+                AdaptiveParallelismStrategy::Ratio(*r).fmt(f)
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_strategy_parse_default() {
+        assert_eq!(
+            "default"
+                .parse::<ConfigAdaptiveParallelismStrategy>()
+                .unwrap(),
+            ConfigAdaptiveParallelismStrategy::Default
+        );
+    }
+
+    #[test]
+    fn test_strategy_parse_ratio() {
+        let strategy: ConfigAdaptiveParallelismStrategy = "Ratio(0.5)".parse().unwrap();
+        assert_eq!(strategy, ConfigAdaptiveParallelismStrategy::Ratio(0.5));
+    }
+
+    #[test]
+    fn test_strategy_into_option() {
+        let opt: Option<AdaptiveParallelismStrategy> =
+            ConfigAdaptiveParallelismStrategy::Full.into();
+        assert_eq!(opt, Some(AdaptiveParallelismStrategy::Full));
     }
 }

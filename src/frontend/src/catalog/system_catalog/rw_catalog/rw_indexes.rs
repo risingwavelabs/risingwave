@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::catalog::CreateType;
 use risingwave_common::types::{Fields, Timestamptz};
 use risingwave_frontend_macro::system_catalog;
 
@@ -35,6 +36,7 @@ struct RwIndex {
     created_at: Option<Timestamptz>,
     initialized_at_cluster_version: Option<String>,
     created_at_cluster_version: Option<String>,
+    background_ddl: bool,
 }
 
 #[system_catalog(table, "rw_catalog.rw_indexes")]
@@ -91,6 +93,7 @@ fn read_rw_indexes(reader: &SysCatalogReaderImpl) -> Result<Vec<RwIndex>> {
                     created_at: index.created_at_epoch.map(|e| e.as_timestamptz()),
                     initialized_at_cluster_version: index.initialized_at_cluster_version.clone(),
                     created_at_cluster_version: index.created_at_cluster_version.clone(),
+                    background_ddl: index.create_type == CreateType::Background,
                 }
             })
         })

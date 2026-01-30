@@ -13,10 +13,11 @@ option optimize_for = SPEED;
 message InjectBarrierRequest {
   string request_id = 1;
   stream_plan.Barrier barrier = 2;
-  uint32 database_id = 3;
+  reserved 3;
+  reserved "database_id";
   repeated uint32 actor_ids_to_collect = 4;
   repeated uint32 table_ids_to_sync = 5;
-  uint32 partial_graph_id = 6;
+  uint64 partial_graph_id = 6;
 
   message FragmentBuildActorInfo {
     uint32 fragment_id = 1;
@@ -79,10 +80,11 @@ message BarrierCompleteResponse {
   uint32 worker_id = 5;
   map<uint32, hummock.TableWatermarks> table_watermarks = 6;
   repeated hummock.SstableInfo old_value_sstables = 7;
-  uint32 partial_graph_id = 8;
+  uint64 partial_graph_id = 8;
   // prev_epoch of barrier
   uint64 epoch = 9;
-  uint32 database_id = 10;
+  reserved 10;
+  reserved "database_id";
   // Used for refreshable batch source.
   // SourceExecutor reports the source load is finished, and then
   // meta will issue a LoadFinish barrier to notify MaterializeExecutor to start diff calculation.
@@ -116,6 +118,15 @@ message BarrierCompleteResponse {
     uint32 associated_source_id = 3;
   }
   repeated ListFinishedSource list_finished_sources = 16;
+  // SourceExecutor reports that CDC source has updated offset at least once.
+  // Meta will mark the CDC source as created only after receiving this notification.
+  message CdcSourceOffsetUpdated {
+    // The actor that reported the offset update.
+    uint32 reporter_actor_id = 1;
+    // The source identifier for the CDC source.
+    uint32 source_id = 2;
+  }
+  repeated CdcSourceOffsetUpdated cdc_source_offset_updated = 17;
 }
 
 message StreamingControlStreamRequest {
@@ -124,18 +135,19 @@ message StreamingControlStreamRequest {
   }
 
   message CreatePartialGraphRequest {
-    uint32 partial_graph_id = 1;
-    uint32 database_id = 2;
+    uint64 partial_graph_id = 1;
+    reserved 2;
+    reserved "database_id";
   }
 
   message RemovePartialGraphRequest {
-    repeated uint32 partial_graph_ids = 1;
-    uint32 database_id = 2;
+    repeated uint64 partial_graph_ids = 1;
   }
 
-  message ResetDatabaseRequest {
-    uint32 database_id = 1;
-    uint32 reset_request_id = 2;
+  message ResetPartialGraphsRequest {
+    repeated uint64 partial_graph_ids = 1;
+    reserved 2, 3;
+    reserved "reset_request_id", "database_id";
   }
 
   oneof request {
@@ -143,7 +155,7 @@ message StreamingControlStreamRequest {
     InjectBarrierRequest inject_barrier = 2;
     RemovePartialGraphRequest remove_partial_graph = 3;
     CreatePartialGraphRequest create_partial_graph = 4;
-    ResetDatabaseRequest reset_database = 5;
+    ResetPartialGraphsRequest reset_partial_graphs = 5;
   }
 }
 
@@ -155,22 +167,23 @@ message ScoredError {
 message StreamingControlStreamResponse {
   message InitResponse {}
   message ShutdownResponse {}
-  message ReportDatabaseFailureResponse {
-    uint32 database_id = 1;
+  message ReportPartialGraphFailureResponse {
+    uint64 partial_graph_id = 1;
   }
 
-  message ResetDatabaseResponse {
-    uint32 database_id = 1;
+  message ResetPartialGraphResponse {
+    uint64 partial_graph_id = 1;
     optional ScoredError root_err = 2;
-    uint32 reset_request_id = 3;
+    reserved 3;
+    reserved "reset_request_id";
   }
 
   oneof response {
     InitResponse init = 1;
     BarrierCompleteResponse complete_barrier = 2;
     ShutdownResponse shutdown = 3;
-    ReportDatabaseFailureResponse report_database_failure = 4;
-    ResetDatabaseResponse reset_database = 5;
+    ReportPartialGraphFailureResponse report_partial_graph_failure = 4;
+    ResetPartialGraphResponse reset_partial_graph = 5;
   }
 }
 

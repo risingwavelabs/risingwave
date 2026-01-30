@@ -248,6 +248,20 @@ impl TwoPhaseCommitHandler {
     fn is_empty(&self) -> bool {
         self.pending_epochs.is_empty() && self.prepared_epochs.is_empty()
     }
+
+    /// Whether there exists an uncommitted schema change.
+    ///
+    /// Per current design, if a `schema_change` exists, it should be attached to the latest
+    /// uncommitted item across `pending_epochs` and `prepared_epochs`.
+    fn has_uncommitted_schema_change(&self) -> bool {
+        if let Some((_, _, schema_change)) = self.pending_epochs.back() {
+            schema_change.is_some()
+        } else if let Some((_, _, schema_change)) = self.prepared_epochs.back() {
+            schema_change.is_some()
+        } else {
+            false
+        }
+    }
 }
 
 struct CoordinationHandleManager {
@@ -571,7 +585,7 @@ impl CoordinatorWorker {
         two_phase_handler: &mut TwoPhaseCommitHandler,
     ) -> anyhow::Result<()> {
         assert!(matches!(self.curr_state, CoordinatorWorkerState::Running));
-        if !two_phase_handler.is_empty() {
+        if two_phase_handler.has_uncommitted_schema_change() {
             // Delay handling init requests until all pending epochs are flushed.
             self.curr_state = CoordinatorWorkerState::WaitingForFlushed(pending_handle_ids.clone());
         } else {

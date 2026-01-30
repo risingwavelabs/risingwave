@@ -22,11 +22,11 @@ use rand::rng as thread_rng;
 use rand::seq::IndexedRandom;
 use replace_job_plan::{ReplaceSource, ReplaceTable};
 use risingwave_common::catalog::{AlterDatabaseParam, ColumnCatalog};
-use risingwave_common::id::TableId;
+use risingwave_common::id::{FragmentId, JobId, ObjectId, TableId};
 use risingwave_common::types::DataType;
 use risingwave_common::util::stream_graph_visitor;
 use risingwave_connector::sink::catalog::SinkId;
-use risingwave_meta::barrier::{BarrierScheduler, Command};
+use risingwave_meta::barrier::{BarrierScheduler, Command, ResumeBackfillTarget};
 use risingwave_meta::manager::{EventLogManagerRef, MetadataManager, iceberg_compaction};
 use risingwave_meta::model::TableParallelism as ModelTableParallelism;
 use risingwave_meta::rpc::metrics::MetaMetrics;
@@ -42,12 +42,13 @@ use risingwave_pb::ddl_service::create_iceberg_table_request::{PbSinkJobInfo, Pb
 use risingwave_pb::ddl_service::ddl_service_server::DdlService;
 use risingwave_pb::ddl_service::drop_table_request::PbSourceId;
 use risingwave_pb::ddl_service::replace_job_plan::ReplaceMaterializedView;
-use risingwave_pb::ddl_service::*;
+use risingwave_pb::ddl_service::{streaming_job_resource_type, *};
 use risingwave_pb::frontend_service::GetTableReplacePlanRequest;
 use risingwave_pb::id::SourceId;
 use risingwave_pb::meta::event_log;
 use risingwave_pb::meta::table_parallelism::{FixedParallelism, Parallelism};
 use risingwave_pb::stream_plan::stream_node::NodeBody;
+use risingwave_pb::stream_plan::throttle_mutation::ThrottleConfig;
 use thiserror_ext::AsReport;
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
@@ -135,6 +136,10 @@ impl DdlServiceImpl {
             streaming_job: replace_streaming_job,
             fragment_graph: fragment_graph.unwrap(),
         }
+    }
+
+    fn default_streaming_job_resource_type() -> streaming_job_resource_type::ResourceType {
+        streaming_job_resource_type::ResourceType::Regular(true)
     }
 
     pub fn start_migrate_table_fragments(&self) -> (JoinHandle<()>, Sender<()>) {
@@ -374,7 +379,7 @@ impl DdlService for DdlServiceImpl {
                         stream_job,
                         fragment_graph,
                         dependencies: HashSet::new(),
-                        specific_resource_group: None,
+                        resource_type: Self::default_streaming_job_resource_type(),
                         if_not_exists: req.if_not_exists,
                     })
                     .await?;
@@ -446,7 +451,7 @@ impl DdlService for DdlServiceImpl {
             stream_job,
             fragment_graph,
             dependencies,
-            specific_resource_group: None,
+            resource_type: Self::default_streaming_job_resource_type(),
             if_not_exists: req.if_not_exists,
         };
 
@@ -528,9 +533,9 @@ impl DdlService for DdlServiceImpl {
 
         let req = request.into_inner();
         let mview = req.get_materialized_view()?.clone();
-        let specific_resource_group = req.specific_resource_group.clone();
         let fragment_graph = req.get_fragment_graph()?.clone();
         let dependencies = req.get_dependencies().iter().copied().collect();
+        let resource_type = req.resource_type.unwrap().resource_type.unwrap();
 
         let stream_job = StreamingJob::MaterializedView(mview);
         let version = self
@@ -539,7 +544,7 @@ impl DdlService for DdlServiceImpl {
                 stream_job,
                 fragment_graph,
                 dependencies,
-                specific_resource_group,
+                resource_type,
                 if_not_exists: req.if_not_exists,
             })
             .await?;
@@ -592,7 +597,7 @@ impl DdlService for DdlServiceImpl {
                 stream_job,
                 fragment_graph,
                 dependencies: HashSet::new(),
-                specific_resource_group: None,
+                resource_type: Self::default_streaming_job_resource_type(),
                 if_not_exists: req.if_not_exists,
             })
             .await?;
@@ -682,7 +687,7 @@ impl DdlService for DdlServiceImpl {
                 stream_job,
                 fragment_graph,
                 dependencies,
-                specific_resource_group: None,
+                resource_type: Self::default_streaming_job_resource_type(),
                 if_not_exists: request.if_not_exists,
             })
             .await?;
@@ -769,6 +774,62 @@ impl DdlService for DdlServiceImpl {
             .list_all_state_tables()
             .await?;
         Ok(Response::new(RisectlListStateTablesResponse { tables }))
+    }
+
+    async fn risectl_resume_backfill(
+        &self,
+        request: Request<RisectlResumeBackfillRequest>,
+    ) -> Result<Response<RisectlResumeBackfillResponse>, Status> {
+        let request = request.into_inner();
+        let target = request
+            .target
+            .ok_or_else(|| Status::invalid_argument("missing resume backfill target"))?;
+
+        match target {
+            risectl_resume_backfill_request::Target::JobId(job_id) => {
+                let job_id = JobId::new(job_id);
+                let database_id = self
+                    .metadata_manager
+                    .catalog_controller
+                    .get_object_database_id(ObjectId::new(job_id.as_raw_id()))
+                    .await?;
+                self.barrier_scheduler
+                    .run_command(
+                        database_id,
+                        Command::ResumeBackfill {
+                            target: ResumeBackfillTarget::Job(job_id),
+                        },
+                    )
+                    .await?;
+            }
+            risectl_resume_backfill_request::Target::FragmentId(fragment_id) => {
+                let fragment_id = FragmentId::new(fragment_id);
+                let mut job_ids = self
+                    .metadata_manager
+                    .catalog_controller
+                    .get_fragment_job_id(vec![fragment_id])
+                    .await?;
+                let job_id = job_ids
+                    .pop()
+                    .ok_or_else(|| Status::invalid_argument("fragment not found"))?;
+                let job_id = JobId::new(job_id.as_raw_id());
+                let database_id = self
+                    .metadata_manager
+                    .catalog_controller
+                    .get_object_database_id(ObjectId::new(job_id.as_raw_id()))
+                    .await?;
+                self.barrier_scheduler
+                    .run_command(
+                        database_id,
+                        Command::ResumeBackfill {
+                            target: ResumeBackfillTarget::Fragment(fragment_id),
+                        },
+                    )
+                    .await?;
+            }
+        }
+
+        Ok(Response::new(RisectlResumeBackfillResponse {}))
     }
 
     async fn replace_job_plan(
@@ -1503,7 +1564,7 @@ impl DdlService for DdlServiceImpl {
                 stream_job,
                 fragment_graph,
                 dependencies: HashSet::new(),
-                specific_resource_group: None,
+                resource_type: Self::default_streaming_job_resource_type(),
                 if_not_exists,
             })
             .await?;
@@ -1575,7 +1636,7 @@ impl DdlService for DdlServiceImpl {
                 stream_job,
                 fragment_graph,
                 dependencies,
-                specific_resource_group: None,
+                resource_type: Self::default_streaming_job_resource_type(),
                 if_not_exists,
             })
             .await;
@@ -1606,6 +1667,10 @@ impl DdlService for DdlServiceImpl {
                 .metadata_manager
                 .update_source_rate_limit_by_source_id(SourceId::new(source_id), source_rate_limit)
                 .await?;
+            let throttle_config = ThrottleConfig {
+                throttle_type: risingwave_pb::common::ThrottleType::Source.into(),
+                rate_limit: source_rate_limit,
+            };
             let _ = self
                 .barrier_scheduler
                 .run_command(
@@ -1614,7 +1679,7 @@ impl DdlService for DdlServiceImpl {
                         jobs,
                         config: fragments
                             .into_iter()
-                            .map(|fragment_id| (fragment_id, source_rate_limit))
+                            .map(|fragment_id| (fragment_id, throttle_config))
                             .collect(),
                     },
                 )

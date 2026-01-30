@@ -105,6 +105,8 @@ pub struct CreateStreamingJobContext {
     pub fragment_backfill_ordering: FragmentBackfillOrder,
 
     pub locality_fragment_state_table_mapping: HashMap<FragmentId, Vec<TableId>>,
+
+    pub is_serverless_backfill: bool,
 }
 
 struct StreamingJobExecution {
@@ -349,40 +351,93 @@ impl GlobalStreamManager {
             .register(await_tree_key, await_tree_span)
             .instrument(Box::pin(fut));
 
-        let result = tokio::select! {
-            biased;
+        let result = async {
+            tokio::select! {
+                biased;
 
-            res = create_fut => res,
-            notifier = cancel_rx => {
-                let notifier = notifier.expect("sender should not be dropped");
-                tracing::debug!(id=%job_id, "cancelling streaming job");
+                res = create_fut => res,
+                notifier = cancel_rx => {
+                    let notifier = notifier.expect("sender should not be dropped");
+                    tracing::debug!(id=%job_id, "cancelling streaming job");
 
-                if let Ok(job_fragments) = self.metadata_manager.get_job_fragments_by_id(job_id)
-                    .await {
-                    // try to cancel buffered creating command.
-                    if self.barrier_scheduler.try_cancel_scheduled_create(database_id, job_id) {
-                        tracing::debug!("cancelling streaming job {job_id} in buffer queue.");
-                    } else if !job_fragments.is_created() {
-                        tracing::debug!("cancelling streaming job {job_id} by issue cancel command.");
-
-                        let cancel_command = self.metadata_manager.catalog_controller
-                            .build_cancel_command(&job_fragments)
-                            .await?;
-                        self.metadata_manager.catalog_controller
-                            .try_abort_creating_streaming_job(job_id, true)
-                            .await?;
-
-                        self.barrier_scheduler.run_command(database_id, cancel_command).await?;
-                    } else {
-                        // streaming job is already completed
-                        let _ = notifier.send(false).inspect_err(|err| tracing::warn!("failed to notify cancellation result: {err}"));
-                        return self.metadata_manager.wait_streaming_job_finished(database_id, job_id).await;
+                    enum CancelResult {
+                        Completed(MetaResult<NotificationVersion>),
+                        Failed(MetaError),
+                        Cancelled,
                     }
+
+                    let cancel_res = if let Ok(job_fragments) =
+                        self.metadata_manager.get_job_fragments_by_id(job_id).await
+                    {
+                        // try to cancel buffered creating command.
+                        if self
+                            .barrier_scheduler
+                            .try_cancel_scheduled_create(database_id, job_id)
+                        {
+                            tracing::debug!(
+                                id=%job_id,
+                                "cancelling streaming job in buffer queue."
+                            );
+                            CancelResult::Cancelled
+                        } else if !job_fragments.is_created() {
+                            tracing::debug!(
+                                id=%job_id,
+                                "cancelling streaming job by issue cancel command."
+                            );
+
+                            let cancel_result: MetaResult<()> = async {
+                                let cancel_command = self.metadata_manager.catalog_controller
+                                    .build_cancel_command(&job_fragments)
+                                    .await?;
+                                self.metadata_manager.catalog_controller
+                                    .try_abort_creating_streaming_job(job_id, true)
+                                    .await?;
+
+                                self.barrier_scheduler
+                                    .run_command(database_id, cancel_command)
+                                    .await?;
+                                Ok(())
+                            }
+                            .await;
+
+                            match cancel_result {
+                                Ok(()) => CancelResult::Cancelled,
+                                Err(err) => {
+                                    tracing::warn!(
+                                        error = ?err.as_report(),
+                                        id = %job_id,
+                                        "failed to run cancel command for creating streaming job"
+                                    );
+                                    CancelResult::Failed(err)
+                                }
+                            }
+                        } else {
+                            // streaming job is already completed
+                            CancelResult::Completed(
+                                self.metadata_manager
+                                    .wait_streaming_job_finished(database_id, job_id)
+                                    .await,
+                            )
+                        }
+                    } else {
+                        CancelResult::Cancelled
+                    };
+
+                    let (cancelled, result) = match cancel_res {
+                        CancelResult::Completed(result) => (false, result),
+                        CancelResult::Failed(err) => (false, Err(err)),
+                        CancelResult::Cancelled => (true, Err(MetaError::cancelled("create"))),
+                    };
+
+                    let _ = notifier
+                        .send(cancelled)
+                        .inspect_err(|err| tracing::warn!("failed to notify cancellation result: {err}"));
+
+                    result
                 }
-                notifier.send(true).expect("receiver should not be dropped");
-                Err(MetaError::cancelled("create"))
             }
-        };
+        }
+        .await;
 
         tracing::debug!("cleaning creating job info: {}", job_id);
         self.creating_job_info.delete_job(job_id).await;
@@ -409,6 +464,7 @@ impl GlobalStreamManager {
             fragment_backfill_ordering,
             locality_fragment_state_table_mapping,
             cdc_table_snapshot_splits,
+            is_serverless_backfill,
             ..
         }: CreateStreamingJobContext,
     ) -> MetaResult<StreamingJob> {
@@ -447,6 +503,7 @@ impl GlobalStreamManager {
             fragment_backfill_ordering,
             cdc_table_snapshot_splits,
             locality_fragment_state_table_mapping,
+            is_serverless: is_serverless_backfill,
         };
 
         let job_type = if let Some(snapshot_backfill_info) = snapshot_backfill_info {
@@ -665,16 +722,15 @@ impl GlobalStreamManager {
             .await?;
 
         if !background_jobs.is_empty() {
-            let related_jobs = self
-                .scale_controller
-                .resolve_related_no_shuffle_jobs(&background_jobs)
+            let unreschedulable = self
+                .metadata_manager
+                .collect_unreschedulable_backfill_jobs(&background_jobs)
                 .await?;
 
-            if related_jobs.contains(&job_id) {
+            if unreschedulable.contains(&job_id) {
                 bail!(
-                    "Cannot alter the job {} because the related job {:?} is currently being created",
+                    "Cannot alter the job {} because it is a non-reschedulable background backfill job",
                     job_id,
-                    background_jobs,
                 );
             }
         }

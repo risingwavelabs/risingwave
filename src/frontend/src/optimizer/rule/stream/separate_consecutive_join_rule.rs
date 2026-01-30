@@ -37,17 +37,13 @@ impl Rule<Stream> for SeparateConsecutiveJoinRule {
             right_input
         };
 
-        let core = Join::with_full_output(
+        let core = Join::with_full_output_eq_predicate(
             new_left,
             new_right,
             join.join_type(),
-            join.eq_join_predicate().all_cond(),
+            join.eq_join_predicate().clone(),
         );
-        Some(
-            StreamHashJoin::new(core, join.eq_join_predicate().clone())
-                .unwrap()
-                .into(),
-        )
+        Some(StreamHashJoin::new(core).unwrap().into())
     }
 }
 

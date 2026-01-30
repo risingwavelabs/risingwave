@@ -21,6 +21,7 @@ use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::{bail, row};
 use risingwave_common_rate_limit::{MonitoredRateLimiter, RateLimit, RateLimiter};
 use risingwave_hummock_sdk::HummockReadEpoch;
+use risingwave_pb::common::ThrottleType;
 use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::table::batch_table::BatchTable;
 
@@ -466,9 +467,10 @@ where
                             }
                         }
                         Mutation::Throttle(fragment_to_apply) => {
-                            let new_rate_limit_entry = fragment_to_apply.get(&self.fragment_id);
-                            if let Some(new_rate_limit) = new_rate_limit_entry {
-                                let new_rate_limit = (*new_rate_limit).into();
+                            if let Some(entry) = fragment_to_apply.get(&self.fragment_id)
+                                && entry.throttle_type() == ThrottleType::Backfill
+                            {
+                                let new_rate_limit = entry.rate_limit.into();
                                 let old_rate_limit = self.rate_limiter.update(new_rate_limit);
                                 if old_rate_limit != new_rate_limit {
                                     tracing::info!(

@@ -16,7 +16,7 @@ use std::any::type_name;
 use std::collections::{HashMap, HashSet};
 use std::fmt::{Debug, Formatter};
 use std::ops::Deref;
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 
 use parking_lot::Mutex;
 use prometheus::core::{
@@ -384,6 +384,22 @@ impl LabelGuardedGauge {
         LabelGuardedGaugeVec::test_gauge_vec::<N>().with_test_label::<N>()
     }
 }
+
+pub type LazyLabelGuardedMetrics<T: MetricVecBuilder> =
+    LazyLock<LabelGuardedMetric<T::M>, impl FnOnce() -> LabelGuardedMetric<T::M>>;
+
+impl<T: MetricVecBuilder> LabelGuardedMetricVec<T> {
+    #[define_opaque(LazyLabelGuardedMetrics)]
+    pub fn lazy_guarded_metrics(self, labels: Vec<String>) -> LazyLabelGuardedMetrics<T> {
+        LazyLock::new(move || self.with_guarded_label_values(&labels))
+    }
+}
+
+pub type LazyLabelGuardedHistogram = LazyLabelGuardedMetrics<VecBuilderOfHistogram>;
+pub type LazyLabelGuardedIntCounter = LazyLabelGuardedMetrics<VecBuilderOfCounter<AtomicU64>>;
+pub type LazyLabelGuardedIntGauge = LazyLabelGuardedMetrics<VecBuilderOfGauge<AtomicI64>>;
+pub type LazyLabelGuardedUintGauge = LazyLabelGuardedMetrics<VecBuilderOfGauge<AtomicU64>>;
+pub type LazyLabelGuardedGauge = LazyLabelGuardedMetrics<VecBuilderOfGauge<AtomicF64>>;
 
 pub trait MetricWithLocal {
     type Local;

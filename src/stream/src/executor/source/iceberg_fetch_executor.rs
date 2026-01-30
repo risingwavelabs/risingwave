@@ -31,6 +31,7 @@ use risingwave_common::types::{JsonbVal, ScalarRef, Serial, ToOwnedDatum};
 use risingwave_connector::source::iceberg::{IcebergScanOpts, scan_task_to_chunk_with_deletes};
 use risingwave_connector::source::reader::desc::SourceDesc;
 use risingwave_connector::source::{SourceContext, SourceCtrlOpts};
+use risingwave_pb::common::ThrottleType;
 use risingwave_storage::store::PrefetchOptions;
 use thiserror_ext::AsReport;
 
@@ -185,6 +186,9 @@ mod state {
                 sequence_number,
                 equality_ids,
                 file_size_in_bytes,
+                partition: None,
+                partition_spec: None,
+                name_mapping: None,
             }
         }
 
@@ -204,6 +208,7 @@ mod state {
                 sequence_number,
                 equality_ids,
                 file_size_in_bytes,
+                ..
             }: FileScanTask,
         ) -> Self {
             Self {
@@ -500,16 +505,17 @@ impl<S: StateStore> IcebergFetchExecutor<S> {
                                             Mutation::Pause => stream.pause_stream(),
                                             Mutation::Resume => stream.resume_stream(),
                                             Mutation::Throttle(fragment_to_apply) => {
-                                                if let Some(new_rate_limit) = fragment_to_apply
+                                                if let Some(entry) = fragment_to_apply
                                                     .get(&self.actor_ctx.fragment_id)
-                                                    && *new_rate_limit != self.rate_limit_rps
+                                                    && entry.throttle_type() == ThrottleType::Source
+                                                    && entry.rate_limit != self.rate_limit_rps
                                                 {
                                                     tracing::debug!(
                                                         "updating rate limit from {:?} to {:?}",
                                                         self.rate_limit_rps,
-                                                        *new_rate_limit
+                                                        entry.rate_limit
                                                     );
-                                                    self.rate_limit_rps = *new_rate_limit;
+                                                    self.rate_limit_rps = entry.rate_limit;
                                                     need_rebuild_reader = true;
                                                 }
                                             }
@@ -526,13 +532,15 @@ impl<S: StateStore> IcebergFetchExecutor<S> {
                                     // Propagate the barrier.
                                     yield Message::Barrier(barrier);
 
-                                    if let Some((_, cache_may_stale)) =
-                                        post_commit.post_yield_barrier(update_vnode_bitmap).await?
+                                    if post_commit
+                                        .post_yield_barrier(update_vnode_bitmap)
+                                        .await?
+                                        .is_some()
                                     {
-                                        // if cache_may_stale, we must rebuild the stream to adjust vnode mappings
-                                        if cache_may_stale {
-                                            splits_on_fetch = 0;
-                                        }
+                                        // Vnode bitmap update changes which file assignments this executor
+                                        // should read. Rebuild the reader to avoid reading splits that no
+                                        // longer belong to this actor (e.g., during scale-out).
+                                        splits_on_fetch = 0;
                                     }
 
                                     if splits_on_fetch == 0 || need_rebuild_reader {

@@ -14,3 +14,81 @@
         │ └─StreamDml { columns: [id, ts] }
         │   └─StreamSource
         └─StreamUpstreamSinkUnion
+- id: watermark ttl append-only pk
+  sql: |
+    explain create table t (
+      id int primary key,
+      ts timestamp,
+      watermark for ts as ts - interval '1 minute' with ttl
+    ) append only;
+  explain_output: |
+    StreamMaterialize { columns: [id, ts], stream_key: [id, ts], pk_columns: [id], pk_conflict: IgnoreConflict, watermark_columns: [ts] }
+    └─StreamWatermarkFilter { watermark_descs: [Desc { column: ts, expr: (ts - '00:01:00':Interval) }], output_watermarks: [[ts]] }
+      └─StreamUnion { all: true }
+        ├─StreamExchange { dist: HashShard(id) }
+        │ └─StreamDml { columns: [id, ts] }
+        │   └─StreamSource
+        └─StreamUpstreamSinkUnion
+- id: watermark ttl non-append-only row-id
+  sql: |
+    explain create table t (
+      id int,
+      ts timestamp,
+      watermark for ts as ts - interval '1 minute' with ttl
+    );
+  explain_output: |
+    StreamMaterialize { columns: [id, ts, _row_id(hidden)], stream_key: [_row_id, ts], pk_columns: [_row_id], pk_conflict: Overwrite, watermark_columns: [ts] }
+    └─StreamRowIdGen { row_id_index: 2 }
+      └─StreamWatermarkFilter [upsert] { watermark_descs: [Desc { column: ts, expr: (ts - '00:01:00':Interval) }], output_watermarks: [[ts]] }
+        └─StreamUnion { all: true }
+          ├─StreamExchange { dist: HashShard(_row_id) }
+          │ └─StreamDml { columns: [id, ts, _row_id] }
+          │   └─StreamSource
+          └─StreamUpstreamSinkUnion
+- id: watermark ttl append-only row-id
+  sql: |
+    explain create table t (
+      id int,
+      ts timestamp,
+      watermark for ts as ts - interval '1 minute' with ttl
+    ) append only;
+  explain_output: |
+    StreamMaterialize { columns: [id, ts, _row_id(hidden)], stream_key: [_row_id, ts], pk_columns: [_row_id], pk_conflict: NoCheck, watermark_columns: [ts] }
+    └─StreamRowIdGen { row_id_index: 2 }
+      └─StreamWatermarkFilter { watermark_descs: [Desc { column: ts, expr: (ts - '00:01:00':Interval) }], output_watermarks: [[ts]] }
+        └─StreamUnion { all: true }
+          ├─StreamExchange [no_shuffle] { dist: SomeShard }
+          │ └─StreamDml { columns: [id, ts, _row_id] }
+          │   └─StreamSource
+          └─StreamUpstreamSinkUnion
+- id: watermark ttl append-only proctime generated column
+  sql: |
+    explain create table t (
+      id int,
+      proc_time timestamptz as proctime(),
+      watermark for proc_time as proc_time with ttl
+    ) append only;
+  explain_output: |
+    StreamMaterialize { columns: [id, proc_time, _row_id(hidden)], stream_key: [_row_id, proc_time], pk_columns: [_row_id], pk_conflict: NoCheck, watermark_columns: [proc_time] }
+    └─StreamRowIdGen { row_id_index: 2 }
+      └─StreamWatermarkFilter { watermark_descs: [Desc { column: $expr1, expr: $expr1 }], output_watermarks: [[$expr1]] }
+        └─StreamUnion { all: true, output_watermarks: [[$expr1]] }
+          ├─StreamExchange [no_shuffle] { dist: SomeShard }
+          │ └─StreamProject { exprs: [id, Proctime as $expr1, _row_id], output_watermarks: [[$expr1]] }
+          │   └─StreamDml { columns: [id, _row_id] }
+          │     └─StreamSource
+          └─StreamUpstreamSinkUnion
+- id: watermark ttl scan keeps stream key columns
+  sql: |
+    create table t (
+      v int,
+      proc_time timestamptz as proctime(),
+      watermark for proc_time as proc_time with ttl
+    ) append only;
+    select v from t;
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchScan { table: t, columns: [t.v], distribution: SomeShard }
+  stream_plan: |-
+    StreamMaterialize { columns: [v, t._row_id(hidden), t.proc_time(hidden)], stream_key: [t._row_id, t.proc_time], pk_columns: [t._row_id, t.proc_time], pk_conflict: NoCheck, watermark_columns: [t.proc_time(hidden)] }
+    └─StreamTableScan { table: t, columns: [t.v, t._row_id, t.proc_time], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id, t.proc_time], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }

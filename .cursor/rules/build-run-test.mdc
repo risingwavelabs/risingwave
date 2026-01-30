@@ -21,14 +21,15 @@ You may need to learn how to build and test RisingWave when implementing feature
 ## End-to-End Test
 
 - Use `./risedev d` to run a RisingWave instance in the background via tmux.
-  * It builds first if needed, and kills the previous instance if exists.
+  * It builds RisingWave binaries if necessary. The build process can take up to 10 minutes, depending on the incremental build results. Use a large timeout for this step, and be patient.
+  * It kills the previous instance, if exists.
   * Optionally pass a profile name (see `risedev.yml`) to choose external services or components. By default it uses `default`.
   * This runs in the background so you do not need a separate terminal.
   * You can connect right after the command finishes.
   * Logs are written to files in `.risingwave/log` folder.
 - Use `./risedev k` to stop a RisingWave instance started by `./risedev d`.
-- When a RisingWave instance is running, you can use `./risedev psql -c "<your query>"` to run SQL queries in RW.
-- When a RisingWave instance is running, you can use `./risedev slt './path/to/e2e-test-file.slt'` to run end-to-end SLT tests.
+- Only when a RisingWave instance is running, you can use `./risedev psql -c "<your query>"` to run SQL queries in RW.
+- Only when a RisingWave instance is running, you can use `./risedev slt './path/to/e2e-test-file.slt'` to run end-to-end SLT tests.
   * File globs like `/**/*.slt` is allowed.
   * Failed run may leave some objects in the database that interfere with next run. Use `./risedev slt-clean ./path/to/e2e-test-file.slt` to reset the database before running tests.
 - The preferred way to write tests is to write tests in SQLLogicTest format.

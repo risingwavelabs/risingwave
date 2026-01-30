@@ -214,6 +214,44 @@ WHERE
 s user1
 
 statement ok
+create function add(INT, INT) returns int language sql as $$select $1 + $2$$;
+
+statement ok
+ALTER FUNCTION add OWNER TO user1;
+
+query TT
+SELECT
+    rw_functions.name AS schema_name,
+    pg_roles.rolname AS owner
+FROM
+    rw_functions
+    JOIN pg_roles ON pg_roles.oid = rw_functions.owner
+WHERE
+    rw_functions.name = 'add';
+----
+add user1
+
+statement ok
+create secret secret_1 with (
+  backend = 'meta'
+) as 'demo_secret';
+
+statement ok
+ALTER SECRET secret_1 OWNER TO user1;
+
+query TT
+SELECT
+    rw_secrets.name AS secrets_name,
+    pg_roles.rolname AS owner
+FROM
+    rw_secrets
+    JOIN pg_roles ON pg_roles.oid = rw_secrets.owner
+WHERE
+    rw_secrets.name = 'secret_1';
+----
+secret_1 user1
+
+statement ok
 DROP SCHEMA s;
 
 statement ok
@@ -236,6 +274,12 @@ DROP VIEW v;
 
 statement ok
 DROP TABLE t;
+
+statement ok
+DROP FUNCTION add;
+
+statement ok
+DROP SECRET secret_1;
 
 statement ok
 DROP USER user1;

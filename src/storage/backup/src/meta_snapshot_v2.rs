@@ -14,7 +14,9 @@
 
 use std::fmt::{Display, Formatter};
 
+use anyhow::anyhow;
 use bytes::{Buf, BufMut};
+use itertools::Itertools;
 use risingwave_hummock_sdk::version::HummockVersion;
 use serde::{Deserialize, Serialize};
 
@@ -163,6 +165,42 @@ impl Metadata for MetadataV2 {
 
     fn hummock_version(self) -> HummockVersion {
         self.hummock_version
+    }
+
+    fn storage_url(&self) -> BackupResult<String> {
+        let storage_url_from_snapshot = self
+            .system_parameters
+            .iter()
+            .filter_map(|m| {
+                if m.name == "state_store" {
+                    return Some(m.value.clone());
+                }
+                None
+            })
+            .exactly_one()
+            .map_err(|_| BackupError::Other(anyhow!("expect state_store")))?;
+        storage_url_from_snapshot
+            .strip_prefix("hummock+")
+            .map(|s| s.to_owned())
+            .ok_or_else(|| {
+                BackupError::Other(anyhow!(
+                    "invalid state_store from metadata snapshot: {}",
+                    storage_url_from_snapshot
+                ))
+            })
+    }
+
+    fn storage_directory(&self) -> BackupResult<String> {
+        self.system_parameters
+            .iter()
+            .filter_map(|m| {
+                if m.name == "data_directory" {
+                    return Some(m.value.clone());
+                }
+                None
+            })
+            .exactly_one()
+            .map_err(|_| BackupError::Other(anyhow!("expect data_directory")))
     }
 }
 

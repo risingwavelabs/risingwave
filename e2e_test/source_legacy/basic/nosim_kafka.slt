@@ -47,7 +47,7 @@ dimensions struct false NULL
 dimensions.height double precision false NULL
 dimensions.length double precision false NULL
 dimensions.width double precision false NULL
-map jsonb false NULL
+"map" jsonb false NULL
 "notMap" struct false NULL
 "notMap".a character varying false NULL
 price double precision false NULL

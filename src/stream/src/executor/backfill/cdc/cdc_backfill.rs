@@ -33,6 +33,7 @@ use risingwave_connector::source::cdc::external::{
     CdcOffset, ExternalCdcTableType, ExternalTableReaderImpl,
 };
 use risingwave_connector::source::{SourceColumnDesc, SourceContext, SourceCtrlOpts};
+use risingwave_pb::common::ThrottleType;
 use rw_futures_util::pausable;
 use thiserror_ext::AsReport;
 use tracing::Instrument;
@@ -449,11 +450,13 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                                                 snapshot_valve.resume();
                                             }
                                             Mutation::Throttle(some) => {
-                                                if let Some(new_rate_limit) =
+                                                if let Some(entry) =
                                                     some.get(&self.actor_ctx.fragment_id)
-                                                    && *new_rate_limit != self.rate_limit_rps
+                                                    && entry.throttle_type()
+                                                        == ThrottleType::Backfill
+                                                    && entry.rate_limit != self.rate_limit_rps
                                                 {
-                                                    self.rate_limit_rps = *new_rate_limit;
+                                                    self.rate_limit_rps = entry.rate_limit;
                                                     rate_limit_to_zero = self
                                                         .rate_limit_rps
                                                         .is_some_and(|val| val == 0);

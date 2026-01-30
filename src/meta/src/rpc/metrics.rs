@@ -37,6 +37,7 @@ use risingwave_common::{
 };
 use risingwave_connector::source::monitor::EnumeratorMetrics as SourceEnumeratorMetrics;
 use risingwave_meta_model::WorkerId;
+use risingwave_meta_model::table::TableType;
 use risingwave_object_store::object::object_metrics::{
     GLOBAL_OBJECT_STORE_METRICS, ObjectStoreMetrics,
 };
@@ -182,6 +183,8 @@ pub struct MetaMetrics {
 
     pub compaction_event_consumed_latency: Histogram,
     pub compaction_event_loop_iteration_latency: Histogram,
+    pub time_travel_vacuum_metadata_latency: Histogram,
+    pub time_travel_write_metadata_latency: Histogram,
 
     // ********************************** Object Store ************************************
     // Object store related metrics (for backup/restore and version checkpoint)
@@ -613,6 +616,26 @@ impl MetaMetrics {
             registry
         )
         .unwrap();
+
+        let time_travel_vacuum_metadata_latency = register_histogram_with_registry!(
+            histogram_opts!(
+                "storage_time_travel_vacuum_metadata_latency",
+                "Latency of vacuuming metadata for time travel",
+                exponential_buckets(0.1, 1.5, 20).unwrap()
+            ),
+            registry
+        )
+        .unwrap();
+        let time_travel_write_metadata_latency = register_histogram_with_registry!(
+            histogram_opts!(
+                "storage_time_travel_write_metadata_latency",
+                "Latency of writing metadata for time travel",
+                exponential_buckets(0.1, 1.5, 20).unwrap()
+            ),
+            registry
+        )
+        .unwrap();
+
         let object_store_metric = Arc::new(GLOBAL_OBJECT_STORE_METRICS.clone());
 
         let recovery_failure_cnt = register_int_counter_vec_with_registry!(
@@ -700,7 +723,7 @@ impl MetaMetrics {
 
         let relation_info = register_int_gauge_vec_with_registry!(
             "relation_info",
-            "Information of the database relation (table/source/sink)",
+            "Information of the database relation (table/source/sink/materialized view/index/internal)",
             &["id", "database", "schema", "name", "resource_group", "type"],
             registry
         )
@@ -966,6 +989,8 @@ impl MetaMetrics {
             refresh_job_finish_cnt,
             refresh_cron_job_trigger_cnt,
             refresh_cron_job_miss_cnt,
+            time_travel_vacuum_metadata_latency,
+            time_travel_write_metadata_latency,
         }
     }
 
@@ -1203,7 +1228,13 @@ pub async fn refresh_relation_info_metrics(
 
     meta_metrics.relation_info.reset();
 
-    for (id, db, schema, name, resource_group) in table_objects {
+    for (id, db, schema, name, resource_group, table_type) in table_objects {
+        let relation_type = match table_type {
+            TableType::Table => "table",
+            TableType::MaterializedView => "materialized_view",
+            TableType::Index | TableType::VectorIndex => "index",
+            TableType::Internal => "internal",
+        };
         meta_metrics
             .relation_info
             .with_label_values(&[
@@ -1212,7 +1243,7 @@ pub async fn refresh_relation_info_metrics(
                 &schema,
                 &name,
                 &resource_group,
-                &"table".to_owned(),
+                &relation_type.to_owned(),
             ])
             .set(1);
     }

@@ -46,6 +46,11 @@ primary key id NULL NULL
 distribution key id NULL NULL
 table description rw_customers NULL NULL
 
+query IT retry 4 backoff 1s
+select id,name from rw_customers order by id;
+----
+1 John
+2 Doe
 
 # add column
 system ok
