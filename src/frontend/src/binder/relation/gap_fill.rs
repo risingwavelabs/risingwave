@@ -168,7 +168,7 @@ impl Binder {
             .collect::<Vec<(bool, Field)>>();
 
         let (_, table_name) = Self::resolve_schema_qualified_name(&self.db_name, &table_name)?;
-        self.bind_table_to_context(columns, table_name, alias)?;
+        self.bind_table_to_context(columns, table_name, None, alias)?;
 
         Ok(BoundGapFill {
             input,
