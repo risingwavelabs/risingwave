@@ -22,5 +22,5 @@ pub mod jeprof;
 pub mod profile_service;
 pub mod profiler;
 
-pub use profiler::HeapProfiler;
 pub use profile_service::ProfileServiceImpl;
+pub use profiler::HeapProfiler;

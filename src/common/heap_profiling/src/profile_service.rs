@@ -179,4 +179,3 @@ impl ProfileServiceImpl {
         Ok(Response::new(AnalyzeHeapResponse { result: file }))
     }
 }
-

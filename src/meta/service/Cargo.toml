@@ -18,7 +18,6 @@ rand = { workspace = true }
 regex = { workspace = true }
 risingwave_common = { workspace = true }
 risingwave_common_heap_profiling = { workspace = true }
-risingwave_common_service = { workspace = true }
 risingwave_connector = { workspace = true }
 risingwave_hummock_sdk = { workspace = true }
 risingwave_meta = { workspace = true }
