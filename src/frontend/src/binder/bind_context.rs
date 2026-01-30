@@ -103,8 +103,8 @@ pub struct BindContext {
     pub columns: Vec<ColumnBinding>,
     // Mapping column name to indices in `columns`.
     pub indices_of: HashMap<String, Vec<usize>>,
-    // Mapping table name to [begin, end) of its columns.
-    pub range_of: HashMap<String, (usize, usize)>,
+    // Mapping (schema name, table name) to [begin, end) of its columns.
+    pub range_of: HashMap<(Option<String>, String), (usize, usize)>,
     // `clause` identifies in what clause we are binding.
     pub clause: Option<Clause>,
     // The `BindContext`'s data on its column groups
@@ -346,7 +346,7 @@ impl BindContext {
                 Entry::Occupied(e) => {
                     return Err(ErrorCode::InternalError(format!(
                         "Duplicated table name while merging adjacent contexts: {}",
-                        e.key()
+                        e.key().1
                     ))
                     .into());
                 }

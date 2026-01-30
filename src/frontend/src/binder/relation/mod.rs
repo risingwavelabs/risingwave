@@ -388,7 +388,11 @@ impl Binder {
             .into());
         }
 
-        match self.context.range_of.entry(table_name.clone()) {
+        match self
+            .context
+            .range_of
+            .entry((schema_name, table_name.clone()))
+        {
             Entry::Occupied(_) => Err(ErrorCode::InternalError(format!(
                 "Duplicated table name while binding table to context: {}",
                 table_name
