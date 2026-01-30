@@ -70,6 +70,21 @@ def _(outer_panels: Panels):
     scheduled_duration_expr = (
         f"{scheduled_duration_rate_expr} / on(fragment_id) {actor_count_expr}"
     )
+    executor_cache_usage_expr = (
+        f"sum("
+        f"  ({metric('stream_memory_usage')})"
+        f"  * on (table_id) group_left(fragment_id)"
+        f"    {metric('table_info')}"
+        f") by (fragment_id)"
+    )
+    shared_buffer_usage_expr = (
+        f"sum({metric('state_store_per_fragment_imm_size')}) by (fragment_id)"
+    )
+    total_memory_usage_expr = (
+        f"({executor_cache_usage_expr} + on(fragment_id) group_left {shared_buffer_usage_expr}) "
+        f"or {executor_cache_usage_expr} "
+        f"or {shared_buffer_usage_expr}"
+    )
     return [
         outer_panels.row_collapsed(
             "Streaming Fragments",
@@ -301,11 +316,31 @@ def _(outer_panels: Panels):
                 ),
                 panels.subheader("Memory Usage by Fragment"),
                 panels.timeseries_bytes(
+                    "Total Memory Usage",
+                    "Sum of executor cache memory and shared buffer imm size",
+                    [
+                        panels.target(
+                            total_memory_usage_expr,
+                            "fragment {{fragment_id}}",
+                        ),
+                    ],
+                ),
+                panels.timeseries_bytes(
+                    "Executor Cache Memory Usage",
+                    "",
+                    [
+                        panels.target(
+                            executor_cache_usage_expr,
+                            "fragment {{fragment_id}}",
+                        ),
+                    ],
+                ),
+                panels.timeseries_bytes(
                     "Shared Buffer Memory Usage",
                     "",
                     [
                         panels.target(
-                            f"sum({metric('state_store_per_fragment_imm_size')}) by (fragment_id)",
+                            shared_buffer_usage_expr,
                             "fragment {{fragment_id}}",
                         ),
                     ],
