@@ -653,10 +653,7 @@ impl ObjectStore for S3ObjectStore {
 impl S3ObjectStore {
     pub fn new_http_client(config: &ObjectStoreConfig) -> impl HttpClient + use<> {
         let nodelay = config.s3.nodelay;
-        let pool_idle_timeout = config
-            .s3
-            .keepalive_ms
-            .map(|keepalive_ms| Duration::from_millis(keepalive_ms));
+        let pool_idle_timeout = config.s3.keepalive_ms.map(Duration::from_millis);
 
         // Use the Smithy default (hyper 1.x) client stack. This avoids the deprecated hyper 0.14
         // connector path (`aws-smithy-runtime/tls-rustls`).
