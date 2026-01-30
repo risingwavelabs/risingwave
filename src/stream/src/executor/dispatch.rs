@@ -986,7 +986,6 @@ impl Dispatcher for HashDataDispatcher {
                 let delete_row_idx = last_update_delete_row_idx
                     .take()
                     .expect("missing U- before U+");
-                assert!(delete_row_idx + 1 == row_idx, "U- and U+ are not adjacent");
 
                 // Check if any distribution key column value changed
                 let dist_key_changed = chunk.row_at(delete_row_idx).1.project(&self.keys)
