@@ -266,7 +266,12 @@ impl Binder {
             }
         };
 
-        self.bind_table_to_context(columns, table_name.to_owned(), None, alias)?;
+        self.bind_table_to_context(
+            columns,
+            table_name.to_owned(),
+            schema_name.map(|s| s.to_owned()),
+            alias,
+        )?;
         Ok(ret)
     }
 
