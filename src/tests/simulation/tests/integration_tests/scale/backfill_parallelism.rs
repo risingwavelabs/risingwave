@@ -259,7 +259,10 @@ async fn test_backfill_parallelism_prefers_backfill_override_over_mview_override
 
 #[tokio::test]
 async fn test_alter_backfill_parallelism_during_backfill() -> Result<()> {
-    let config = Configuration::for_background_ddl();
+    let mut config = Configuration::for_background_ddl();
+    let mut per_session_queries = (*config.per_session_queries).clone();
+    per_session_queries.push("SET streaming_use_snapshot_backfill = false".into());
+    config.per_session_queries = per_session_queries.into();
     let mut cluster = Cluster::start(config).await?;
     let mut session = cluster.start_session();
 

@@ -213,20 +213,7 @@ impl ScaleController {
 
         let jobs = policy.keys().copied().collect();
 
-        let workers = workers
-            .into_iter()
-            .map(|(id, worker)| {
-                (
-                    id,
-                    WorkerInfo {
-                        parallelism: NonZeroUsize::new(worker.compute_node_parallelism()).unwrap(),
-                        resource_group: worker.resource_group(),
-                    },
-                )
-            })
-            .collect();
-
-        let command = self.rerender_inner(&txn, jobs, workers).await?;
+        let command = self.rerender_inner(&txn, jobs, &workers).await?;
 
         txn.commit().await?;
 
