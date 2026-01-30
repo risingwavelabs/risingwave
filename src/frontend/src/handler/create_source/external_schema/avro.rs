@@ -20,14 +20,22 @@ pub async fn extract_avro_table_schema(
     with_properties: &WithOptionsSecResolved,
     format_encode_options: &mut BTreeMap<String, String>,
     is_debezium: bool,
-) -> Result<Vec<ColumnCatalog>> {
+) -> Result<(Vec<ColumnCatalog>, Option<String>, Option<String>)> {
     let parser_config = SpecificParserConfig::new(info, with_properties)?;
     try_consume_schema_registry_config_from_options(format_encode_options);
     consume_aws_config_from_options(format_encode_options);
 
-    let vec_column_desc = if is_debezium {
+    if is_debezium {
         let conf = DebeziumAvroParserConfig::new(parser_config.encoding_config).await?;
-        conf.map_to_columns()?
+        let columns = conf.map_to_columns()?;
+        let columns = columns
+            .into_iter()
+            .map(|col| ColumnCatalog {
+                column_desc: ColumnDesc::from_field_without_column_id(&col),
+                is_hidden: false,
+            })
+            .collect_vec();
+        Ok((columns, None, None))
     } else {
         if let risingwave_connector::parser::EncodingProperties::Avro(avro_props) =
             &parser_config.encoding_config
@@ -39,13 +47,14 @@ pub async fn extract_avro_table_schema(
             bail_not_implemented!(issue = 12871, "avro without schema registry");
         }
         let conf = AvroParserConfig::new(parser_config.encoding_config).await?;
-        conf.map_to_columns()?
-    };
-    Ok(vec_column_desc
-        .into_iter()
-        .map(|col| ColumnCatalog {
-            column_desc: ColumnDesc::from_field_without_column_id(&col),
-            is_hidden: false,
-        })
-        .collect_vec())
+        let columns = conf.map_to_columns()?;
+        let columns = columns
+            .into_iter()
+            .map(|col| ColumnCatalog {
+                column_desc: ColumnDesc::from_field_without_column_id(&col),
+                is_hidden: false,
+            })
+            .collect_vec();
+        Ok((columns, conf.schema_version, conf.schema_content))
+    }
 }
