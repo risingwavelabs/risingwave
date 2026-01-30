@@ -124,8 +124,8 @@ pub fn storage_memory_config(
     );
     tracing::warn!("default_storage_memory_bytes={} max_storage_memory_bytes={} compactor_memory_limit_mb={}", default_storage_memory_bytes, max_storage_memory_bytes, compactor_memory_limit_mb);
 
-    // Only if the all cache capacities are specified and their sum doesn't exceed the max allowed storage_memory_bytes, will we use them.
-    // Other invalid combination of the cache capacities config will be ignored.
+    // Only if all cache capacities and compactor memory are specified and their sum doesn't exceed the max allowed storage_memory_bytes, will we use them.
+    // Other invalid combinations of the cache capacities and compactor memory config will be ignored.
     let (
         config_block_cache_capacity_mb,
         config_meta_cache_capacity_mb,
