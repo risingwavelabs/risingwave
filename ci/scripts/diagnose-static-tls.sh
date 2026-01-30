@@ -33,6 +33,7 @@ need_cmd awk
 need_cmd sed
 need_cmd grep
 need_cmd sort
+need_cmd head
 
 echo "== target"
 echo "${so_path}"
@@ -49,6 +50,11 @@ echo
 echo "== TLS symbols (target)"
 # If there are defined TLS symbols here, they are usually the ones requiring TLS storage.
 readelf -W -s "${so_path}" 2>/dev/null | awk '$4=="TLS"{print}' || true
+echo
+echo "== TLS suspects (target)"
+# Heuristic: tikv's jemalloc uses a TLS var like `_rjem_je_tsd_tls` which is frequently implicated in
+# `cannot allocate memory in static TLS block` when a .so is loaded late (e.g. JNI System.load).
+readelf -W -s "${so_path}" 2>/dev/null | awk '$4=="TLS"{print}' | grep -E '_rjem_|jemalloc|Jemalloc' || true
 echo
 
 deps=$(
@@ -75,6 +81,9 @@ inspect_one() {
 
   # TLS symbol table entries, if any (often empty for system libs).
   readelf -W -s "${f}" 2>/dev/null | awk '$4=="TLS"{print}' | sed -n '1,30p' || true
+
+  # Sometimes objdump prints relocation symbol names even when readelf output is sparse.
+  objdump -R "${f}" 2>/dev/null | grep -E 'TPOFF|GOTTPOFF|DTPMOD|DTPOFF' | head -n 30 || true
 
   # Heuristic for IE/LE TLS models
   rels="$(readelf -W -r "${f}" 2>/dev/null | grep -E 'TPOFF|GOTTPOFF|DTPMOD|DTPOFF' || true)"
