@@ -1202,15 +1202,6 @@ PubsubProperties:
       `credentials` is a JSON string containing the service account credentials.
       See the [service-account credentials guide](https://developers.google.com/workspace/guides/create-credentials#create_credentials_for_a_service_account).
       The service account must have the `pubsub.subscriber` [role](https://cloud.google.com/pubsub/docs/access-control#roles).
-
-      If not specified, the connector will attempt to use Google Application Default Credentials (ADC).
-      ADC searches for credentials in the following order:
-      1. `GOOGLE_APPLICATION_CREDENTIALS_JSON` environment variable (JSON content)
-      2. `GOOGLE_APPLICATION_CREDENTIALS` environment variable (file path)
-      3. Well-known file: `$HOME/.config/gcloud/application_default_credentials.json`
-      4. Google Cloud metadata server (when running on GCE/GKE)
-
-      See [Google ADC documentation](https://cloud.google.com/docs/authentication/application-default-credentials) for more details.
     required: false
   - name: pubsub.start_offset.nanos
     field_type: String
