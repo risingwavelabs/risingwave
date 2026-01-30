@@ -1379,7 +1379,7 @@ pub async fn refresh_backfill_progress_metrics(
     barrier_manager: &BarrierManagerRef,
     meta_metrics: Arc<MetaMetrics>,
 ) {
-    let fragment_descs = match catalog_controller.list_fragment_descs(true).await {
+    let fragment_descs = match catalog_controller.list_fragment_descs_with_node(true).await {
         Ok(fragment_descs) => fragment_descs,
         Err(err) => {
             tracing::warn!(error=%err.as_report(), "fail to list creating fragment descs");
