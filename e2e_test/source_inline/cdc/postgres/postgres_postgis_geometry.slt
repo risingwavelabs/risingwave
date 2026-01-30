@@ -36,7 +36,7 @@ create table test_geo (
 ) from geo_source table 'public.test_geo';
 
 # Test backfill: verify EWKB length (25 bytes: 9-byte header + 16-byte coordinates)
-query ITI retry 3 backoff 1s
+query ITI retry 10 backoff 1s
 select id, name, length(location) from test_geo order by id;
 ----
 1 Chicago 25
@@ -44,7 +44,7 @@ select id, name, length(location) from test_geo order by id;
 
 # Compare the full EWKB hex from upstream and RisingWave are identical.
 # This prints both sides for easier debugging when it fails.
-query IIITTT retry 3 backoff 1s
+query IIITTT retry 10 backoff 1s
 select
   ours.id,
   length(ours.location) as ours_bytes,
@@ -73,13 +73,14 @@ order by ours.id;
 system ok
 psql -c "INSERT INTO test_geo VALUES (3, 'London', ST_SetSRID(ST_MakePoint(-0.1278, 51.5074), 4326));"
 
-query ITI retry 3 backoff 1s
+
+query ITI retry 10 backoff 1s
 select id, name, length(location) from test_geo where id = 3;
 ----
 3 London 25
 
 # Compare upstream vs RisingWave EWKB for the inserted row.
-query IIITTT retry 3 backoff 1s
+query IIITTT retry 10 backoff 1s
 select
   ours.id,
   length(ours.location) as ours_bytes,
@@ -106,14 +107,15 @@ on ours.id = upstream.id;
 system ok
 psql -c "UPDATE test_geo SET location = ST_SetSRID(ST_MakePoint(0, 0), 4326) WHERE id = 1;"
 
+
 # Verify UPDATE: length should still be 25, but data changed
-query ITI retry 3 backoff 1s
+query ITI retry 10 backoff 1s
 select id, name, length(location) from test_geo where id = 1;
 ----
 1 Chicago 25
 
 # Compare upstream vs RisingWave EWKB for the updated row.
-query IIITTT retry 3 backoff 1s
+query IIITTT retry 10 backoff 1s
 select
   ours.id,
   length(ours.location) as ours_bytes,
@@ -140,9 +142,10 @@ on ours.id = upstream.id;
 system ok
 psql -c "DELETE FROM test_geo WHERE id = 2;"
 
+
 # Compare upstream vs RisingWave row counts after DELETE.
 # This avoids flaky assertions when CDC consumption is still catching up.
-query IIIIII retry 6 backoff 1s
+query IIIIII retry 10 backoff 1s
 select
   (select count(*) from test_geo) as ours_total,
   (select count(*) filter (where id = 2) from test_geo) as ours_id2,
@@ -169,6 +172,7 @@ psql -c "
     INSERT INTO test_geo VALUES (4, 'NullLocation', NULL);
 "
 
+
 query ITI retry 10 backoff 1s
 select id, name, location from test_geo where id = 4;
 ----
@@ -194,16 +198,17 @@ create table test_geo_line (
     path bytea
 ) from geo_source table 'public.test_geo_line';
 
+
 # LineString should have different length (more coordinates)
 # EWKB length = 9 (header) + 4 (num points) + 16 * 2 (coords) = 45
-query ITI retry 3 backoff 1s
+query ITI retry 10 backoff 1s
 select id, name, length(path) from test_geo_line;
 ----
 1 Route1 45
 
 # Verify LineString EWKB header (0x02 for LineString type)
 # Use 12 hex chars to include the start of SRID
-query IT retry 3 backoff 1s
+query IT retry 10 backoff 1s
 select id, substring(encode(path, 'hex') from 1 for 12) from test_geo_line where id = 1;
 ----
 1 0102000020e6

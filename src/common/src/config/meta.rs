@@ -448,6 +448,9 @@ pub struct MetaDeveloperConfig {
     #[serde(default = "default::developer::time_travel_vacuum_interval_sec")]
     pub time_travel_vacuum_interval_sec: u64,
 
+    #[serde(default = "default::developer::time_travel_vacuum_max_version_count")]
+    pub time_travel_vacuum_max_version_count: Option<u32>,
+
     /// Max number of epoch-to-version inserted into meta store per INSERT, during time travel metadata writing.
     #[serde(default = "default::developer::hummock_time_travel_epoch_version_insert_batch_size")]
     pub hummock_time_travel_epoch_version_insert_batch_size: usize,

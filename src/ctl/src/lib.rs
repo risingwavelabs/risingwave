@@ -15,7 +15,7 @@
 #![warn(clippy::large_futures, clippy::large_stack_frames)]
 
 use anyhow::Result;
-use clap::{Args, Parser, Subcommand};
+use clap::{ArgGroup, Args, Parser, Subcommand};
 use cmd_impl::bench::BenchCommands;
 use cmd_impl::hummock::SstDumpArgs;
 use itertools::Itertools;
@@ -370,6 +370,20 @@ enum MetaCommands {
     Pause,
     /// resume the stream graph
     Resume,
+    /// force resume backfill for troubleshooting
+    #[clap(
+        group(
+            ArgGroup::new("resume_backfill_target")
+                .required(true)
+                .args(&["job_id", "fragment_id"])
+        )
+    )]
+    ResumeBackfill {
+        #[clap(long)]
+        job_id: Option<u32>,
+        #[clap(long)]
+        fragment_id: Option<u32>,
+    },
     /// get cluster info
     ClusterInfo,
     /// get source split info
@@ -871,6 +885,10 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
         Commands::Bench(cmd) => cmd_impl::bench::do_bench(context, cmd).await?,
         Commands::Meta(MetaCommands::Pause) => cmd_impl::meta::pause(context).await?,
         Commands::Meta(MetaCommands::Resume) => cmd_impl::meta::resume(context).await?,
+        Commands::Meta(MetaCommands::ResumeBackfill {
+            job_id,
+            fragment_id,
+        }) => cmd_impl::meta::resume_backfill(context, job_id, fragment_id).await?,
         Commands::Meta(MetaCommands::ClusterInfo) => cmd_impl::meta::cluster_info(context).await?,
         Commands::Meta(MetaCommands::SourceSplitInfo { ignore_id }) => {
             cmd_impl::meta::source_split_info(context, ignore_id).await?

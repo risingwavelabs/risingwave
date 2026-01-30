@@ -1110,6 +1110,14 @@ impl MetaClient {
         Ok(resp.tables)
     }
 
+    pub async fn risectl_resume_backfill(
+        &self,
+        request: RisectlResumeBackfillRequest,
+    ) -> Result<()> {
+        self.inner.risectl_resume_backfill(request).await?;
+        Ok(())
+    }
+
     pub async fn flush(&self, database_id: DatabaseId) -> Result<HummockVersionId> {
         let request = FlushRequest { database_id };
         let resp = self.inner.flush(request).await?;
@@ -1153,10 +1161,15 @@ impl MetaClient {
         Ok(resp.states)
     }
 
-    pub async fn list_fragment_distributions(&self) -> Result<Vec<FragmentDistribution>> {
+    pub async fn list_fragment_distributions(
+        &self,
+        include_node: bool,
+    ) -> Result<Vec<FragmentDistribution>> {
         let resp = self
             .inner
-            .list_fragment_distribution(ListFragmentDistributionRequest {})
+            .list_fragment_distribution(ListFragmentDistributionRequest {
+                include_node: Some(include_node),
+            })
             .await?;
         Ok(resp.distributions)
     }
@@ -1164,7 +1177,9 @@ impl MetaClient {
     pub async fn list_creating_fragment_distribution(&self) -> Result<Vec<FragmentDistribution>> {
         let resp = self
             .inner
-            .list_creating_fragment_distribution(ListCreatingFragmentDistributionRequest {})
+            .list_creating_fragment_distribution(ListCreatingFragmentDistributionRequest {
+                include_node: Some(true),
+            })
             .await?;
         Ok(resp.distributions)
     }
@@ -1858,6 +1873,14 @@ impl MetaClient {
         Ok(resp.states)
     }
 
+    pub async fn list_sink_log_store_tables(
+        &self,
+    ) -> Result<Vec<list_sink_log_store_tables_response::SinkLogStoreTable>> {
+        let request = ListSinkLogStoreTablesRequest {};
+        let resp = self.inner.list_sink_log_store_tables(request).await?;
+        Ok(resp.tables)
+    }
+
     pub async fn create_iceberg_table(
         &self,
         table_job_info: PbTableJobInfo,
@@ -2503,6 +2526,7 @@ macro_rules! for_all_meta_rpc {
             ,{ stream_client, list_streaming_job_states, ListStreamingJobStatesRequest, ListStreamingJobStatesResponse }
             ,{ stream_client, list_fragment_distribution, ListFragmentDistributionRequest, ListFragmentDistributionResponse }
             ,{ stream_client, list_creating_fragment_distribution, ListCreatingFragmentDistributionRequest, ListCreatingFragmentDistributionResponse }
+            ,{ stream_client, list_sink_log_store_tables, ListSinkLogStoreTablesRequest, ListSinkLogStoreTablesResponse }
             ,{ stream_client, list_actor_states, ListActorStatesRequest, ListActorStatesResponse }
             ,{ stream_client, list_actor_splits, ListActorSplitsRequest, ListActorSplitsResponse }
             ,{ stream_client, list_object_dependencies, ListObjectDependenciesRequest, ListObjectDependenciesResponse }
@@ -2552,6 +2576,7 @@ macro_rules! for_all_meta_rpc {
             ,{ ddl_client, replace_job_plan, ReplaceJobPlanRequest, ReplaceJobPlanResponse }
             ,{ ddl_client, alter_source, AlterSourceRequest, AlterSourceResponse }
             ,{ ddl_client, risectl_list_state_tables, RisectlListStateTablesRequest, RisectlListStateTablesResponse }
+            ,{ ddl_client, risectl_resume_backfill, RisectlResumeBackfillRequest, RisectlResumeBackfillResponse }
             ,{ ddl_client, get_ddl_progress, GetDdlProgressRequest, GetDdlProgressResponse }
             ,{ ddl_client, create_connection, CreateConnectionRequest, CreateConnectionResponse }
             ,{ ddl_client, list_connections, ListConnectionsRequest, ListConnectionsResponse }

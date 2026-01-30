@@ -1254,6 +1254,8 @@ message StreamContext {
   string timezone = 1;
   // The partial config of this job to override the global config.
   string config_override = 2;
+  // The adaptive parallelism strategy for this streaming job, if explicitly set.
+  string adaptive_parallelism_strategy = 3;
 }
 
 message BackfillOrder {

@@ -19,6 +19,7 @@ use anyhow::Context;
 use risingwave_common::catalog::{DatabaseId, FragmentTypeFlag, TableId};
 use risingwave_common::id::JobId;
 use risingwave_meta_model::ActorId;
+use risingwave_meta_model::streaming_job::BackfillOrders;
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::id::SourceId;
@@ -28,9 +29,8 @@ use risingwave_pb::stream_service::barrier_complete_response::{
 use risingwave_pb::stream_service::streaming_control_stream_request::PbInitRequest;
 use risingwave_rpc_client::StreamingControlHandle;
 
-use crate::MetaResult;
 use crate::barrier::cdc_progress::CdcTableBackfillTracker;
-use crate::barrier::command::PostCollectCommand;
+use crate::barrier::command::{PostCollectCommand, ResumeBackfillTarget};
 use crate::barrier::context::{GlobalBarrierWorkerContext, GlobalBarrierWorkerContextImpl};
 use crate::barrier::progress::TrackingJob;
 use crate::barrier::schedule::MarkReadyOptions;
@@ -43,6 +43,7 @@ use crate::hummock::CommitEpochInfo;
 use crate::manager::LocalNotification;
 use crate::model::FragmentDownstreamRelation;
 use crate::stream::SourceChange;
+use crate::{MetaError, MetaResult};
 
 impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
     #[await_tree::instrument]
@@ -121,7 +122,7 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
     async fn reload_database_runtime_info(
         &self,
         database_id: DatabaseId,
-    ) -> MetaResult<Option<DatabaseRuntimeInfoSnapshot>> {
+    ) -> MetaResult<DatabaseRuntimeInfoSnapshot> {
         self.reload_database_runtime_info_impl(database_id).await
     }
 
@@ -302,6 +303,50 @@ impl PostCollectCommand {
                     })
                     .await;
             }
+            PostCollectCommand::ResumeBackfill { target } => match target {
+                ResumeBackfillTarget::Job(job_id) => {
+                    barrier_manager_context
+                        .metadata_manager
+                        .catalog_controller
+                        .update_backfill_orders_by_job_id(job_id, None)
+                        .await?;
+                }
+                ResumeBackfillTarget::Fragment(fragment_id) => {
+                    let mut job_ids = barrier_manager_context
+                        .metadata_manager
+                        .catalog_controller
+                        .get_fragment_job_id(vec![fragment_id])
+                        .await?;
+                    let job_id = job_ids.pop().ok_or_else(|| {
+                        MetaError::invalid_parameter("fragment not found".to_owned())
+                    })?;
+                    let job_id = JobId::new(job_id.as_raw_id());
+
+                    let extra_info = barrier_manager_context
+                        .metadata_manager
+                        .catalog_controller
+                        .get_streaming_job_extra_info(vec![job_id])
+                        .await?;
+                    let mut backfill_orders: BackfillOrders = extra_info
+                        .get(&job_id)
+                        .cloned()
+                        .ok_or_else(|| MetaError::invalid_parameter("job not found".to_owned()))?
+                        .backfill_orders
+                        .unwrap_or_default();
+
+                    let resumed_fragment_id = fragment_id.as_raw_id();
+                    for children in backfill_orders.0.values_mut() {
+                        children.retain(|child| *child != resumed_fragment_id);
+                    }
+                    backfill_orders.0.retain(|_, children| !children.is_empty());
+
+                    barrier_manager_context
+                        .metadata_manager
+                        .catalog_controller
+                        .update_backfill_orders_by_job_id(job_id, Some(backfill_orders))
+                        .await?;
+                }
+            },
             PostCollectCommand::CreateStreamingJob {
                 info,
                 job_type,

@@ -26,11 +26,11 @@
         ├─StreamProject { exprs: [t1.id, max(t1.v1)] }
         │ └─StreamHashAgg { group_key: [t1.id], aggs: [max(t1.v1), count] }
         │   └─StreamExchange { dist: HashShard(t1.id) }
-        │     └─StreamTableScan { table: t1, columns: [t1.id, t1.v1, t1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
+        │     └─StreamTableScan { table: t1, columns: [t1.id, t1.v1, t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
         └─StreamProject { exprs: [t2.id, max(t2.v2)] }
           └─StreamHashAgg { group_key: [t2.id], aggs: [max(t2.v2), count] }
             └─StreamExchange { dist: HashShard(t2.id) }
-              └─StreamTableScan { table: t2, columns: [t2.id, t2.v2, t2._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t2._row_id], pk: [_row_id], dist: UpstreamHashShard(t2._row_id) }
+              └─StreamTableScan { table: t2, columns: [t2.id, t2.v2, t2._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t2._row_id], pk: [_row_id], dist: UpstreamHashShard(t2._row_id) }
 - sql: |
     create table t (id int, v int);
     SELECT Tone.max_v, Ttwo.min_v
@@ -57,11 +57,11 @@
         ├─StreamProject { exprs: [t.id, max(t.v)] }
         │ └─StreamHashAgg { group_key: [t.id], aggs: [max(t.v), count] }
         │   └─StreamExchange { dist: HashShard(t.id) }
-        │     └─StreamTableScan { table: t, columns: [t.id, t.v, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+        │     └─StreamTableScan { table: t, columns: [t.id, t.v, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
         └─StreamProject { exprs: [t.id, min(t.v)] }
           └─StreamHashAgg { group_key: [t.id], aggs: [min(t.v), count] }
             └─StreamExchange { dist: HashShard(t.id) }
-              └─StreamTableScan { table: t, columns: [t.id, t.v, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+              └─StreamTableScan { table: t, columns: [t.id, t.v, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - sql: |
     create table t (v1 varchar, v2 varchar, v3 varchar);
     select
@@ -80,7 +80,7 @@
     └─StreamProject { exprs: [t.v1, t.v2, t.v3], noop_update_hint: true }
       └─StreamHashAgg { group_key: [t.v1, t.v2, t.v3], aggs: [count] }
         └─StreamExchange { dist: HashShard(t.v1, t.v2, t.v3) }
-          └─StreamTableScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+          └─StreamTableScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - sql: |
     create table t (v1 varchar, v2 varchar, v3 varchar);
     create materialized view mv as
@@ -102,4 +102,4 @@
   stream_plan: |-
     StreamMaterialize { columns: [v1, mv.v2(hidden), mv.v3(hidden)], stream_key: [v1, mv.v2, mv.v3], pk_columns: [v1, mv.v2, mv.v3], pk_conflict: NoCheck }
     └─StreamFilter { predicate: ((mv.v3 = 'world':Varchar) OR (mv.v3 = 'hello':Varchar)) }
-      └─StreamTableScan { table: mv, columns: [mv.v1, mv.v2, mv.v3], stream_scan_type: ArrangementBackfill, stream_key: [mv.v1, mv.v2, mv.v3], pk: [v1, v2, v3], dist: UpstreamHashShard(mv.v1, mv.v2, mv.v3) }
+      └─StreamTableScan { table: mv, columns: [mv.v1, mv.v2, mv.v3], stream_scan_type: SnapshotBackfill, stream_key: [mv.v1, mv.v2, mv.v3], pk: [v1, v2, v3], dist: UpstreamHashShard(mv.v1, mv.v2, mv.v3) }

@@ -270,6 +270,11 @@ pub mod default {
         pub fn time_travel_vacuum_interval_sec() -> u64 {
             30
         }
+
+        pub fn time_travel_vacuum_max_version_count() -> Option<u32> {
+            Some(10000)
+        }
+
         pub fn hummock_time_travel_epoch_version_insert_batch_size() -> usize {
             1000
         }
@@ -334,6 +339,10 @@ pub mod default {
             true
         }
 
+        pub fn stream_enable_snapshot_backfill() -> bool {
+            true
+        }
+
         pub fn enable_shared_source() -> bool {
             true
         }
@@ -366,6 +375,10 @@ pub mod default {
 
         pub fn streaming_now_progress_ratio() -> Option<f32> {
             None
+        }
+
+        pub fn stream_snapshot_iter_rebuild_interval_secs() -> u64 {
+            10 * 60
         }
 
         pub fn enable_explain_analyze_stats() -> bool {

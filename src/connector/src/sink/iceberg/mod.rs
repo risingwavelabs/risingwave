@@ -419,6 +419,21 @@ impl EnforceSecret for IcebergConfig {
 }
 
 impl IcebergConfig {
+    /// Validate that append-only sinks use merge-on-read mode
+    /// Copy-on-write is strictly worse than merge-on-read for append-only workloads
+    fn validate_append_only_write_mode(
+        sink_type: &str,
+        write_mode: IcebergWriteMode,
+    ) -> Result<()> {
+        if sink_type == SINK_TYPE_APPEND_ONLY && write_mode == IcebergWriteMode::CopyOnWrite {
+            return Err(SinkError::Config(anyhow!(
+                "'copy-on-write' mode is not supported for append-only iceberg sink. \
+                 Please use 'merge-on-read' instead, which is strictly better for append-only workloads."
+            )));
+        }
+        Ok(())
+    }
+
     pub fn from_btreemap(values: BTreeMap<String, String>) -> Result<Self> {
         let mut config =
             serde_json::from_value::<IcebergConfig>(serde_json::to_value(&values).unwrap())
@@ -448,6 +463,9 @@ impl IcebergConfig {
                 )));
             }
         }
+
+        // Enforce merge-on-read for append-only sinks
+        Self::validate_append_only_write_mode(&config.r#type, config.write_mode)?;
 
         // All configs start with "catalog." will be treated as java configs.
         config.java_catalog_props = values
@@ -510,7 +528,7 @@ impl IcebergConfig {
     }
 
     pub fn trigger_snapshot_count(&self) -> usize {
-        self.trigger_snapshot_count.unwrap_or(16)
+        self.trigger_snapshot_count.unwrap_or(usize::MAX)
     }
 
     pub fn small_files_threshold_mb(&self) -> u64 {
@@ -778,6 +796,18 @@ impl Sink for IcebergSink {
         if "snowflake".eq_ignore_ascii_case(self.config.catalog_type()) {
             bail!("Snowflake catalog only supports iceberg sources");
         }
+
+        if "glue".eq_ignore_ascii_case(self.config.catalog_type()) {
+            risingwave_common::license::Feature::IcebergSinkWithGlue
+                .check_available()
+                .map_err(|e| anyhow::anyhow!(e))?;
+        }
+
+        // Enforce merge-on-read for append-only tables
+        IcebergConfig::validate_append_only_write_mode(
+            &self.config.r#type,
+            self.config.write_mode,
+        )?;
 
         // Validate compaction type configuration
         let compaction_type = self.config.compaction_type();
@@ -3375,5 +3405,117 @@ mod test {
         assert_eq!(iceberg_config.trigger_snapshot_count, Some(10));
         assert_eq!(iceberg_config.target_file_size_mb, Some(256));
         assert_eq!(iceberg_config.compaction_type, Some(CompactionType::Full));
+    }
+
+    #[test]
+    fn test_append_only_rejects_copy_on_write() {
+        // Test that append-only sinks reject copy-on-write mode
+        let values = [
+            ("connector", "iceberg"),
+            ("type", "append-only"),
+            ("warehouse.path", "s3://iceberg"),
+            ("s3.endpoint", "http://127.0.0.1:9301"),
+            ("s3.access.key", "test"),
+            ("s3.secret.key", "test"),
+            ("s3.region", "us-east-1"),
+            ("catalog.type", "storage"),
+            ("catalog.name", "demo"),
+            ("database.name", "test_db"),
+            ("table.name", "test_table"),
+            ("write_mode", "copy-on-write"),
+        ]
+        .into_iter()
+        .map(|(k, v)| (k.to_owned(), v.to_owned()))
+        .collect();
+
+        let result = IcebergConfig::from_btreemap(values);
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("'copy-on-write' mode is not supported for append-only iceberg sink")
+        );
+    }
+
+    #[test]
+    fn test_append_only_accepts_merge_on_read() {
+        // Test that append-only sinks accept merge-on-read mode (explicit)
+        let values = [
+            ("connector", "iceberg"),
+            ("type", "append-only"),
+            ("warehouse.path", "s3://iceberg"),
+            ("s3.endpoint", "http://127.0.0.1:9301"),
+            ("s3.access.key", "test"),
+            ("s3.secret.key", "test"),
+            ("s3.region", "us-east-1"),
+            ("catalog.type", "storage"),
+            ("catalog.name", "demo"),
+            ("database.name", "test_db"),
+            ("table.name", "test_table"),
+            ("write_mode", "merge-on-read"),
+        ]
+        .into_iter()
+        .map(|(k, v)| (k.to_owned(), v.to_owned()))
+        .collect();
+
+        let result = IcebergConfig::from_btreemap(values);
+        assert!(result.is_ok());
+        let config = result.unwrap();
+        assert_eq!(config.write_mode, IcebergWriteMode::MergeOnRead);
+    }
+
+    #[test]
+    fn test_append_only_defaults_to_merge_on_read() {
+        // Test that append-only sinks default to merge-on-read when write_mode is not specified
+        let values = [
+            ("connector", "iceberg"),
+            ("type", "append-only"),
+            ("warehouse.path", "s3://iceberg"),
+            ("s3.endpoint", "http://127.0.0.1:9301"),
+            ("s3.access.key", "test"),
+            ("s3.secret.key", "test"),
+            ("s3.region", "us-east-1"),
+            ("catalog.type", "storage"),
+            ("catalog.name", "demo"),
+            ("database.name", "test_db"),
+            ("table.name", "test_table"),
+        ]
+        .into_iter()
+        .map(|(k, v)| (k.to_owned(), v.to_owned()))
+        .collect();
+
+        let result = IcebergConfig::from_btreemap(values);
+        assert!(result.is_ok());
+        let config = result.unwrap();
+        assert_eq!(config.write_mode, IcebergWriteMode::MergeOnRead);
+    }
+
+    #[test]
+    fn test_upsert_accepts_copy_on_write() {
+        // Test that upsert sinks accept copy-on-write mode
+        let values = [
+            ("connector", "iceberg"),
+            ("type", "upsert"),
+            ("primary_key", "id"),
+            ("warehouse.path", "s3://iceberg"),
+            ("s3.endpoint", "http://127.0.0.1:9301"),
+            ("s3.access.key", "test"),
+            ("s3.secret.key", "test"),
+            ("s3.region", "us-east-1"),
+            ("catalog.type", "storage"),
+            ("catalog.name", "demo"),
+            ("database.name", "test_db"),
+            ("table.name", "test_table"),
+            ("write_mode", "copy-on-write"),
+        ]
+        .into_iter()
+        .map(|(k, v)| (k.to_owned(), v.to_owned()))
+        .collect();
+
+        let result = IcebergConfig::from_btreemap(values);
+        assert!(result.is_ok());
+        let config = result.unwrap();
+        assert_eq!(config.write_mode, IcebergWriteMode::CopyOnWrite);
     }
 }
