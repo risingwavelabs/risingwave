@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#![feature(step_trait)]
 #![allow(unfulfilled_lint_expectations)]
 #![allow(clippy::doc_overindented_list_items)]
 // for derived code of `Message`

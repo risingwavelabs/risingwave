@@ -78,7 +78,7 @@ use risingwave_pb::iceberg_compaction::{
     SubscribeIcebergCompactionEventRequest, SubscribeIcebergCompactionEventResponse,
     subscribe_iceberg_compaction_event_request,
 };
-use risingwave_pb::id::{ActorId, FragmentId, SourceId};
+use risingwave_pb::id::{ActorId, FragmentId, HummockSstableId, SourceId};
 use risingwave_pb::meta::alter_connector_props_request::{
     AlterConnectorPropsObject, AlterIcebergTableIds, ExtraOptions,
 };
@@ -1121,7 +1121,7 @@ impl MetaClient {
     pub async fn flush(&self, database_id: DatabaseId) -> Result<HummockVersionId> {
         let request = FlushRequest { database_id };
         let resp = self.inner.flush(request).await?;
-        Ok(HummockVersionId::new(resp.hummock_version_id))
+        Ok(resp.hummock_version_id)
     }
 
     pub async fn wait(&self) -> Result<()> {
@@ -1365,7 +1365,7 @@ impl MetaClient {
         committed_epoch_limit: HummockEpoch,
     ) -> Result<Vec<HummockVersionDelta>> {
         let req = ListVersionDeltasRequest {
-            start_id: start_id.to_u64(),
+            start_id,
             num_limit,
             committed_epoch_limit,
         };
@@ -1387,7 +1387,7 @@ impl MetaClient {
         compaction_groups: Vec<CompactionGroupId>,
     ) -> Result<()> {
         let req = TriggerCompactionDeterministicRequest {
-            version_id: version_id.to_u64(),
+            version_id,
             compaction_groups,
         };
         self.inner.trigger_compaction_deterministic(req).await?;
@@ -1945,7 +1945,7 @@ impl HummockMetaClient for MetaClient {
     async fn unpin_version_before(&self, unpin_version_before: HummockVersionId) -> Result<()> {
         let req = UnpinVersionBeforeRequest {
             context_id: self.worker_id(),
-            unpin_version_before: unpin_version_before.to_u64(),
+            unpin_version_before,
         };
         self.inner.unpin_version_before(req).await?;
         Ok(())
@@ -1985,7 +1985,7 @@ impl HummockMetaClient for MetaClient {
         compaction_group_id: u64,
         table_id: JobId,
         level: u32,
-        sst_ids: Vec<u64>,
+        sst_ids: Vec<HummockSstableId>,
     ) -> Result<()> {
         // TODO: support key_range parameter
         let req = TriggerManualCompactionRequest {

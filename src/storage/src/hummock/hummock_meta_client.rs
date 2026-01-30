@@ -20,7 +20,7 @@ use risingwave_hummock_sdk::version::HummockVersion;
 use risingwave_hummock_sdk::{ObjectIdRange, SyncResult};
 use risingwave_pb::hummock::{PbHummockVersion, SubscribeCompactionEventRequest};
 use risingwave_pb::iceberg_compaction::SubscribeIcebergCompactionEventRequest;
-use risingwave_pb::id::{JobId, TableId};
+use risingwave_pb::id::{HummockSstableId, JobId, TableId};
 use risingwave_rpc_client::error::Result;
 use risingwave_rpc_client::{
     CompactionEventItem, HummockMetaClient, HummockMetaClientChangeLogInfo,
@@ -81,7 +81,7 @@ impl HummockMetaClient for MonitoredHummockMetaClient {
         compaction_group_id: u64,
         table_id: JobId,
         level: u32,
-        sst_ids: Vec<u64>,
+        sst_ids: Vec<HummockSstableId>,
     ) -> Result<()> {
         self.meta_client
             .trigger_manual_compaction(compaction_group_id, table_id, level, sst_ids)

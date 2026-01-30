@@ -44,7 +44,7 @@ impl LevelHandler {
         for task in &self.pending_tasks {
             if task.task_id == target_task_id {
                 for sst in &task.ssts {
-                    self.compacting_files.remove(sst);
+                    self.compacting_files.remove(&HummockSstableId::new(*sst));
                 }
             }
         }
@@ -93,7 +93,7 @@ impl LevelHandler {
         for sst in ssts {
             self.compacting_files.insert(sst.sst_id, task_id);
             total_file_size += sst.sst_size;
-            table_ids.push(sst.sst_id.inner());
+            table_ids.push(sst.sst_id.as_raw_id());
         }
 
         self.pending_tasks.push(RunningCompactTask {

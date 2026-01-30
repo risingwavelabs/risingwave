@@ -335,7 +335,7 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
             .pinned_versions;
         let ret = pinned_versions
             .into_iter()
-            .map(|v| (v.context_id, v.min_pinned_id))
+            .map(|v| (v.context_id, v.min_pinned_id.as_raw_id()))
             .collect();
         Ok(ret)
     }

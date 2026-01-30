@@ -201,7 +201,7 @@ mod tests {
     ) -> PinnedVersion {
         PinnedVersion::new(
             HummockVersion::from_rpc_protobuf(&PbHummockVersion {
-                id: version_id,
+                id: version_id.into(),
                 state_table_info: HashMap::from_iter(table_committed_epoch.into_iter().map(
                     |(table_id, committed_epoch)| {
                         (

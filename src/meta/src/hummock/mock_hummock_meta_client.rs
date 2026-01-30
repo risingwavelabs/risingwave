@@ -41,7 +41,7 @@ use risingwave_pb::hummock::{
     compact_task,
 };
 use risingwave_pb::iceberg_compaction::SubscribeIcebergCompactionEventRequest;
-use risingwave_pb::id::{JobId, TableId};
+use risingwave_pb::id::{HummockSstableId, JobId, TableId};
 use risingwave_rpc_client::error::{Result, RpcError};
 use risingwave_rpc_client::{
     CompactionEventItem, HummockMetaClient, HummockMetaClientChangeLogInfo,
@@ -229,7 +229,7 @@ impl HummockMetaClient for MockHummockMetaClient {
         _compaction_group_id: u64,
         _table_id: JobId,
         _level: u32,
-        _sst_ids: Vec<u64>,
+        _sst_ids: Vec<HummockSstableId>,
     ) -> Result<()> {
         todo!()
     }

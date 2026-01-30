@@ -256,7 +256,7 @@ impl<L: Clone> HummockVersionCommon<SstableInfo, L> {
     ) {
         let mut new_sst_id = new_sst_start_id;
         if parent_group_id == StaticCompactionGroupId::NewCompactionGroup as CompactionGroupId {
-            if new_sst_start_id != 0 {
+            if new_sst_start_id.as_raw_id() != 0 {
                 if cfg!(debug_assertions) {
                     panic!(
                         "non-zero sst start id {} for NewCompactionGroup",
@@ -264,7 +264,7 @@ impl<L: Clone> HummockVersionCommon<SstableInfo, L> {
                     );
                 } else {
                     warn!(
-                        %new_sst_start_id,
+                        new_sst_start_id = %new_sst_start_id.as_raw_id(),
                         "non-zero sst start id for NewCompactionGroup"
                     );
                 }
@@ -536,7 +536,7 @@ impl<L: Clone> HummockVersionCommon<SstableInfo, L> {
                             self.init_with_parent_group_v2(
                                 parent_group_id,
                                 *compaction_group_id,
-                                group_construct.get_new_sst_start_id().into(),
+                                group_construct.new_sst_start_id,
                                 split_key.clone(),
                             );
                         } else {
@@ -545,7 +545,7 @@ impl<L: Clone> HummockVersionCommon<SstableInfo, L> {
                                 parent_group_id,
                                 *compaction_group_id,
                                 member_table_ids,
-                                group_construct.get_new_sst_start_id().into(),
+                                group_construct.new_sst_start_id,
                             );
                         }
                     }
@@ -802,7 +802,7 @@ impl<L: Clone> HummockVersionCommon<SstableInfo, L> {
             levels.extend(group.levels.iter());
             for level in levels {
                 for table_info in &level.table_infos {
-                    if table_info.sst_id.inner() == table_info.object_id.inner() {
+                    if table_info.sst_id.as_raw_id() == table_info.object_id.as_raw_id() {
                         continue;
                     }
                     let object_id = table_info.object_id;
@@ -865,7 +865,7 @@ impl<L: Clone> HummockVersionCommon<SstableInfo, L> {
     ) {
         let mut new_sst_id = new_sst_start_id;
         if parent_group_id == StaticCompactionGroupId::NewCompactionGroup as CompactionGroupId {
-            if new_sst_start_id != 0 {
+            if new_sst_start_id.as_raw_id() != 0 {
                 if cfg!(debug_assertions) {
                     panic!(
                         "non-zero sst start id {} for NewCompactionGroup",
@@ -873,7 +873,7 @@ impl<L: Clone> HummockVersionCommon<SstableInfo, L> {
                     );
                 } else {
                     warn!(
-                        %new_sst_start_id,
+                        new_sst_start_id = %new_sst_start_id.as_raw_id(),
                         "non-zero sst start id for NewCompactionGroup"
                     );
                 }
@@ -2395,7 +2395,7 @@ mod tests {
     #[test]
     fn test_split_sst_info_for_level() {
         let mut version = HummockVersion {
-            id: HummockVersionId(0),
+            id: HummockVersionId::new(0),
             levels: HashMap::from_iter([(
                 1,
                 build_initial_compaction_group_levels(

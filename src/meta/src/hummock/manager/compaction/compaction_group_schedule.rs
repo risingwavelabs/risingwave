@@ -40,7 +40,7 @@ use crate::hummock::manager::transaction::HummockVersionTransaction;
 use crate::hummock::manager::versioning::Versioning;
 use crate::hummock::manager::{HummockManager, commit_multi_var};
 use crate::hummock::metrics_utils::remove_compaction_group_in_sst_stat;
-use crate::hummock::sequence::{next_compaction_group_id, next_sstable_object_id};
+use crate::hummock::sequence::{next_compaction_group_id, next_sstable_id};
 use crate::hummock::table_write_throughput_statistic::{
     TableWriteThroughputStatistic, TableWriteThroughputStatisticManager,
 };
@@ -462,7 +462,7 @@ impl HummockManager {
             .latest_version()
             .count_new_ssts_in_group_split(parent_group_id, split_key.clone());
 
-        let new_sst_start_id = next_sstable_object_id(&self.env, split_sst_count).await?;
+        let new_sst_start_id = next_sstable_id(&self.env, split_sst_count).await?;
         let (new_compaction_group_id, config) = {
             // All NewCompactionGroup pairs are mapped to one new compaction group.
             let new_compaction_group_id = next_compaction_group_id(&self.env).await?;
@@ -491,7 +491,7 @@ impl HummockManager {
                         group_config: Some(config.clone()),
                         group_id: new_compaction_group_id,
                         parent_group_id,
-                        new_sst_start_id: new_sst_start_id.inner(),
+                        new_sst_start_id,
                         table_ids: vec![],
                         version: CompatibilityVersion::LATEST as _, // for compatibility
                         split_key: Some(split_key.into()),

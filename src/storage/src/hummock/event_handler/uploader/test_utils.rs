@@ -93,7 +93,7 @@ impl HummockUploader {
 
 pub(super) fn test_hummock_version(epoch: HummockEpoch) -> HummockVersion {
     let mut version = HummockVersion::from_persisted_protobuf(&PbHummockVersion {
-        id: epoch,
+        id: epoch.into(),
         ..Default::default()
     });
     version.state_table_info.apply_delta(

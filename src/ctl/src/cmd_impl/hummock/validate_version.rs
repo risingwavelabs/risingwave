@@ -216,13 +216,16 @@ fn match_delta(delta: &DeltaType, sst_id: HummockSstableObjectId) -> bool {
             delta
                 .inserted_table_infos
                 .iter()
-                .any(|sst| sst.sst_id == sst_id)
-                || delta.removed_table_ids.contains(&sst_id.inner())
+                .any(|sst| sst.object_id == sst_id)
+                || delta
+                    .removed_table_ids
+                    .iter()
+                    .any(|id| id.as_raw_id() == sst_id.as_raw_id())
         }
         DeltaType::NewL0SubLevel(delta) => delta
             .inserted_table_infos
             .iter()
-            .any(|sst| sst.sst_id == sst_id),
+            .any(|sst| sst.object_id == sst_id),
     }
 }
 

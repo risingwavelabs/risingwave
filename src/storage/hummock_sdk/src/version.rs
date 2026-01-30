@@ -296,7 +296,7 @@ where
     fn from(pb_version: &PbHummockVersion) -> Self {
         #[expect(deprecated)]
         Self {
-            id: HummockVersionId(pb_version.id),
+            id: pb_version.id,
             levels: pb_version
                 .levels
                 .iter()
@@ -338,7 +338,7 @@ where
     fn from(version: &HummockVersionCommon<T>) -> Self {
         #[expect(deprecated)]
         Self {
-            id: version.id.0,
+            id: version.id,
             levels: version
                 .levels
                 .iter()
@@ -373,7 +373,7 @@ where
     fn from(version: HummockVersionCommon<T>) -> Self {
         #[expect(deprecated)]
         Self {
-            id: version.id.0,
+            id: version.id,
             levels: version
                 .levels
                 .into_iter()
@@ -402,7 +402,7 @@ where
 
 impl HummockVersion {
     pub fn next_version_id(&self) -> HummockVersionId {
-        self.id.next()
+        self.id + 1
     }
 
     pub fn need_fill_backward_compatible_state_table_info_delta(&self) -> bool {
@@ -666,8 +666,8 @@ where
     fn from(pb_version_delta: &PbHummockVersionDelta) -> Self {
         #[expect(deprecated)]
         Self {
-            id: HummockVersionId(pb_version_delta.id),
-            prev_id: HummockVersionId(pb_version_delta.prev_id),
+            id: pb_version_delta.id,
+            prev_id: pb_version_delta.prev_id,
             group_deltas: pb_version_delta
                 .group_deltas
                 .iter()
@@ -721,8 +721,8 @@ where
     fn from(version_delta: &HummockVersionDeltaCommon<T>) -> Self {
         #[expect(deprecated)]
         Self {
-            id: version_delta.id.0,
-            prev_id: version_delta.prev_id.0,
+            id: version_delta.id,
+            prev_id: version_delta.prev_id,
             group_deltas: version_delta
                 .group_deltas
                 .iter()
@@ -758,8 +758,8 @@ where
     fn from(version_delta: HummockVersionDeltaCommon<T>) -> Self {
         #[expect(deprecated)]
         Self {
-            id: version_delta.id.0,
-            prev_id: version_delta.prev_id.0,
+            id: version_delta.id,
+            prev_id: version_delta.prev_id,
             group_deltas: version_delta
                 .group_deltas
                 .into_iter()
@@ -795,8 +795,8 @@ where
     fn from(pb_version_delta: PbHummockVersionDelta) -> Self {
         #[expect(deprecated)]
         Self {
-            id: HummockVersionId(pb_version_delta.id),
-            prev_id: HummockVersionId(pb_version_delta.prev_id),
+            id: pb_version_delta.id,
+            prev_id: pb_version_delta.prev_id,
             group_deltas: pb_version_delta
                 .group_deltas
                 .into_iter()
@@ -872,10 +872,7 @@ where
             level_idx: pb_intra_level_delta.level_idx,
             l0_sub_level_id: pb_intra_level_delta.l0_sub_level_id,
             removed_table_ids: HashSet::from_iter(
-                pb_intra_level_delta
-                    .removed_table_ids
-                    .iter()
-                    .map(|sst_id| (*sst_id).into()),
+                pb_intra_level_delta.removed_table_ids.iter().copied(),
             ),
             inserted_table_infos: pb_intra_level_delta
                 .inserted_table_infos
@@ -896,11 +893,7 @@ where
         Self {
             level_idx: intra_level_delta.level_idx,
             l0_sub_level_id: intra_level_delta.l0_sub_level_id,
-            removed_table_ids: intra_level_delta
-                .removed_table_ids
-                .into_iter()
-                .map(|sst_id| sst_id.inner())
-                .collect(),
+            removed_table_ids: intra_level_delta.removed_table_ids.into_iter().collect(),
             inserted_table_infos: intra_level_delta
                 .inserted_table_infos
                 .into_iter()
@@ -923,7 +916,7 @@ where
             removed_table_ids: intra_level_delta
                 .removed_table_ids
                 .iter()
-                .map(|sst_id| sst_id.inner())
+                .copied()
                 .collect(),
             inserted_table_infos: intra_level_delta
                 .inserted_table_infos
@@ -945,10 +938,7 @@ where
             level_idx: pb_intra_level_delta.level_idx,
             l0_sub_level_id: pb_intra_level_delta.l0_sub_level_id,
             removed_table_ids: HashSet::from_iter(
-                pb_intra_level_delta
-                    .removed_table_ids
-                    .iter()
-                    .map(|sst_id| (*sst_id).into()),
+                pb_intra_level_delta.removed_table_ids.iter().copied(),
             ),
             inserted_table_infos: pb_intra_level_delta
                 .inserted_table_infos

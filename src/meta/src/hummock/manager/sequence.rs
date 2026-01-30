@@ -17,14 +17,13 @@ use std::fmt::Display;
 use std::sync::LazyLock;
 
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
-use risingwave_hummock_sdk::{
-    HummockRawObjectId, HummockSstableId, HummockSstableObjectId, TypedPrimitive,
-};
+use risingwave_hummock_sdk::{HummockRawObjectId, HummockSstableId};
 use risingwave_meta_model::hummock_sequence;
 use risingwave_meta_model::hummock_sequence::{
     COMPACTION_GROUP_ID, COMPACTION_TASK_ID, META_BACKUP_ID, SSTABLE_OBJECT_ID,
 };
 use risingwave_meta_model::prelude::HummockSequence;
+use risingwave_pb::id::TypedId;
 use sea_orm::{ActiveValue, DatabaseConnection, EntityTrait, TransactionTrait};
 use tokio::sync::Mutex;
 
@@ -107,13 +106,6 @@ pub async fn next_compaction_group_id(env: &MetaSrvEnv) -> Result<u64> {
     env.hummock_seq.next_interval(COMPACTION_GROUP_ID, 1).await
 }
 
-pub async fn next_sstable_object_id(
-    env: &MetaSrvEnv,
-    num: impl TryInto<u32> + Display + Copy,
-) -> Result<HummockSstableObjectId> {
-    next_unique_id(env, num).await
-}
-
 pub async fn next_sstable_id(
     env: &MetaSrvEnv,
     num: impl TryInto<u32> + Display + Copy,
@@ -131,7 +123,7 @@ pub async fn next_raw_object_id(
 async fn next_unique_id<const C: usize>(
     env: &MetaSrvEnv,
     num: impl TryInto<u32> + Display + Copy,
-) -> Result<TypedPrimitive<C, u64>> {
+) -> Result<TypedId<C, u64>> {
     let num: u32 = num
         .try_into()
         .unwrap_or_else(|_| panic!("fail to convert {num} into u32"));

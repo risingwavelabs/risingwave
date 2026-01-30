@@ -142,7 +142,7 @@ impl Transactional<Transaction> for HummockPinnedVersion {
     async fn upsert_in_transaction(&self, trx: &mut Transaction) -> MetadataModelResult<()> {
         let m = hummock_pinned_version::ActiveModel {
             context_id: Set(self.context_id),
-            min_pinned_id: Set(self.min_pinned_id.try_into().unwrap()),
+            min_pinned_id: Set(self.min_pinned_id),
         };
         hummock_pinned_version::Entity::insert(m)
             .on_conflict(
@@ -193,7 +193,7 @@ impl Transactional<Transaction> for HummockPinnedSnapshot {
 impl Transactional<Transaction> for HummockVersionStats {
     async fn upsert_in_transaction(&self, trx: &mut Transaction) -> MetadataModelResult<()> {
         let m = hummock_version_stats::ActiveModel {
-            id: Set(self.hummock_version_id.try_into().unwrap()),
+            id: Set(self.hummock_version_id),
             stats: Set(TableStats(self.table_stats.clone())),
         };
         hummock_version_stats::Entity::insert(m)
@@ -221,8 +221,8 @@ impl Transactional<Transaction> for HummockVersionStats {
 impl Transactional<Transaction> for HummockVersionDelta {
     async fn upsert_in_transaction(&self, trx: &mut Transaction) -> MetadataModelResult<()> {
         let m = hummock_version_delta::ActiveModel {
-            id: Set(self.id.to_u64().try_into().unwrap()),
-            prev_id: Set(self.prev_id.to_u64().try_into().unwrap()),
+            id: Set(self.id),
+            prev_id: Set(self.prev_id),
             max_committed_epoch: Set(0.into()),
             safe_epoch: Set(0.into()),
             trivial_move: Set(self.trivial_move),
@@ -246,11 +246,9 @@ impl Transactional<Transaction> for HummockVersionDelta {
     }
 
     async fn delete_in_transaction(&self, trx: &mut Transaction) -> MetadataModelResult<()> {
-        hummock_version_delta::Entity::delete_by_id(
-            HummockVersionId::try_from(self.id.to_u64()).unwrap(),
-        )
-        .exec(trx)
-        .await?;
+        hummock_version_delta::Entity::delete_by_id(self.id)
+            .exec(trx)
+            .await?;
         Ok(())
     }
 }

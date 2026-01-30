@@ -72,7 +72,7 @@ impl GcManager {
         let mut paths = Vec::with_capacity(1000);
         for object_id in object_id_list {
             let obj_prefix = self.store.get_object_prefix(
-                object_id.as_raw().inner(),
+                object_id.as_raw().as_raw_id(),
                 self.use_new_object_prefix_strategy,
             );
             paths.push(get_object_data_path(
@@ -196,7 +196,7 @@ impl HummockManager {
         // The lock order requires version lock to be held as well.
         let version_id = versioning.checkpoint.version.id;
         let res = hummock_version_delta::Entity::delete_many()
-            .filter(hummock_version_delta::Column::Id.lte(version_id.to_u64()))
+            .filter(hummock_version_delta::Column::Id.lte(version_id))
             .exec(&self.env.meta_store_ref().conn)
             .await?;
         tracing::debug!(rows_affected = res.rows_affected, "Deleted version deltas");
@@ -423,7 +423,7 @@ impl HummockManager {
         let now = self.now().await?;
         let dt = DateTime::from_timestamp(now.try_into().unwrap(), 0).unwrap();
         let mut models = object_ids.map(|o| hummock_gc_history::ActiveModel {
-            object_id: Set(o.as_raw().inner().try_into().unwrap()),
+            object_id: Set(o.as_raw().into()),
             mark_delete_at: Set(dt.naive_utc()),
         });
         let db = &self.meta_store_ref().conn;

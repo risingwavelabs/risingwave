@@ -22,7 +22,7 @@ use risingwave_pb::hummock::{
 use risingwave_pb::iceberg_compaction::{
     SubscribeIcebergCompactionEventRequest, SubscribeIcebergCompactionEventResponse,
 };
-use risingwave_pb::id::{JobId, TableId};
+use risingwave_pb::id::{HummockSstableId, JobId, TableId};
 use tokio::sync::mpsc::UnboundedSender;
 
 pub type CompactionEventItem = std::result::Result<SubscribeCompactionEventResponse, tonic::Status>;
@@ -54,7 +54,7 @@ pub trait HummockMetaClient: Send + Sync + 'static {
         compaction_group_id: u64,
         table_id: JobId,
         level: u32,
-        sst_ids: Vec<u64>,
+        sst_ids: Vec<HummockSstableId>,
     ) -> Result<()>;
     async fn trigger_full_gc(
         &self,

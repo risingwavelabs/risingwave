@@ -37,8 +37,8 @@ async fn read(reader: &SysCatalogReaderImpl) -> Result<Vec<RwHummockVersionDelta
     let rows = deltas
         .into_iter()
         .map(|d| RwHummockVersionDelta {
-            id: d.id.to_u64() as _,
-            prev_id: d.prev_id.to_u64() as _,
+            id: d.id.as_raw_id() as _,
+            prev_id: d.prev_id.as_raw_id() as _,
             trivial_move: d.trivial_move,
             group_deltas: json!(
                 d.group_deltas

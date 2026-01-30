@@ -72,7 +72,7 @@ impl ContextInfo {
         for id in self
             .pinned_versions
             .values()
-            .map(|v| HummockVersionId::new(v.min_pinned_id))
+            .map(|v| v.min_pinned_id)
             .chain(self.version_safe_points.iter().cloned())
         {
             min_pinned_version_id = cmp::min(id, min_pinned_version_id);
@@ -324,7 +324,7 @@ pub(super) fn calc_new_write_limits(
 /// Note that the result is approximate value. See `estimate_table_stats`.
 fn rebuild_table_stats(version: &HummockVersion) -> HummockVersionStats {
     let mut stats = HummockVersionStats {
-        hummock_version_id: version.id.to_u64(),
+        hummock_version_id: version.id,
         table_stats: Default::default(),
     };
     for level in version.get_combined_levels() {
@@ -395,16 +395,16 @@ mod tests {
             1.into(),
             HummockPinnedVersion {
                 context_id: 1.into(),
-                min_pinned_id: 10,
+                min_pinned_id: 10.into(),
             },
         );
-        assert_eq!(context_info.min_pinned_version_id().to_u64(), 10);
+        assert_eq!(context_info.min_pinned_version_id().as_raw_id(), 10);
         context_info
             .version_safe_points
             .push(HummockVersionId::new(5));
-        assert_eq!(context_info.min_pinned_version_id().to_u64(), 5);
+        assert_eq!(context_info.min_pinned_version_id().as_raw_id(), 5);
         context_info.version_safe_points.clear();
-        assert_eq!(context_info.min_pinned_version_id().to_u64(), 10);
+        assert_eq!(context_info.min_pinned_version_id().as_raw_id(), 10);
         context_info.pinned_versions.clear();
         assert_eq!(context_info.min_pinned_version_id(), HummockVersionId::MAX);
     }
@@ -653,7 +653,7 @@ mod tests {
             hummock_version_id,
             table_stats,
         } = rebuild_table_stats(&version);
-        assert_eq!(hummock_version_id, version.id.to_u64());
+        assert_eq!(hummock_version_id, version.id.as_raw_id());
         assert_eq!(table_stats.len(), 3);
         for (tid, stats) in table_stats {
             assert_eq!(

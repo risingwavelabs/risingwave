@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_hummock_sdk::HummockSstableId;
 use risingwave_pb::id::JobId;
 use risingwave_rpc_client::HummockMetaClient;
 
@@ -25,6 +26,7 @@ pub async fn trigger_manual_compaction(
     sst_ids: Vec<u64>,
 ) -> anyhow::Result<()> {
     let meta_client = context.meta_client().await?;
+    let sst_ids: Vec<HummockSstableId> = sst_ids.into_iter().map(HummockSstableId::new).collect();
     let result = meta_client
         .trigger_manual_compaction(compaction_group_id, table_id, level, sst_ids)
         .await;

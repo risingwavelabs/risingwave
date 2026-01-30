@@ -33,8 +33,8 @@ use risingwave_hummock_sdk::sstable_info::{SstableInfo, SstableInfoInner};
 use risingwave_hummock_sdk::table_stats::{TableStats, TableStatsMap, to_prost_table_stats_map};
 use risingwave_hummock_sdk::version::HummockVersion;
 use risingwave_hummock_sdk::{
-    CompactionGroupId, FIRST_VERSION_ID, HummockEpoch, HummockObjectId, HummockSstableObjectId,
-    HummockVersionId, LocalSstableInfo, SyncResult,
+    CompactionGroupId, FIRST_VERSION_ID, HummockEpoch, HummockObjectId, HummockSstableId,
+    HummockSstableObjectId, HummockVersionId, LocalSstableInfo, SyncResult,
 };
 use risingwave_pb::common::worker_node::Property;
 use risingwave_pb::common::{HostAddress, WorkerType};
@@ -1172,8 +1172,8 @@ async fn test_extend_objects_to_delete() {
         .iter()
         .map(|ssts| {
             ssts.iter()
-                .max_by_key(|s| s.object_id.inner())
-                .map(|s| s.object_id.inner())
+                .max_by_key(|s| s.object_id.as_raw_id())
+                .map(|s| s.object_id.as_raw_id())
                 .unwrap()
         })
         .max()
@@ -2549,15 +2549,15 @@ async fn test_merge_compaction_group_task_expired() {
         .await
         .unwrap();
 
-    let report_sst_id = 100;
+    let report_sst_id: HummockSstableId = 100.into();
     let ret = hummock_manager
         .report_compact_task(
             task2.task_id,
             TaskStatus::Success,
             vec![
                 SstableInfoInner {
-                    object_id: report_sst_id.into(),
-                    sst_id: report_sst_id.into(),
+                    object_id: report_sst_id.as_raw_id().into(),
+                    sst_id: report_sst_id,
                     key_range: KeyRange::default(),
                     table_ids: vec![100.into()],
                     min_epoch: 20,

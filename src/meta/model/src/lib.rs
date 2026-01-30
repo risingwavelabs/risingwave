@@ -77,11 +77,10 @@ pub type TransactionId = i32;
 pub type PrivilegeId = i32;
 pub type DefaultPrivilegeId = i32;
 
-pub type HummockVersionId = i64;
+pub use risingwave_pb::id::{HummockSstableObjectId, HummockVersionId};
 pub type Epoch = i64;
 pub type CompactionGroupId = i64;
 pub type CompactionTaskId = i64;
-pub type HummockSstableObjectId = i64;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, EnumIter, DeriveActiveEnum, Serialize, Deserialize)]
 #[sea_orm(rs_type = "String", db_type = "string(None)")]

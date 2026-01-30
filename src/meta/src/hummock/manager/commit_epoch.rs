@@ -401,7 +401,7 @@ impl HummockManager {
         }
 
         // Generate new SST IDs for each compaction group
-        // `next_sstable_object_id` will update the global SST ID and reserve the new SST IDs
+        // `next_sstable_id` will update the global SST ID and reserve the new SST IDs
         // So we need to get the new SST ID first and then split the SSTs
         let mut new_sst_id = next_sstable_id(&self.env, new_sst_id_number).await?;
         let mut commit_sstables: BTreeMap<u64, Vec<SstableInfo>> = BTreeMap::new();

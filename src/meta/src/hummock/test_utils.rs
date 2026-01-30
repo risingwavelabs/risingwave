@@ -380,7 +380,9 @@ pub async fn setup_compute_env(
 
 pub async fn get_sst_ids(hummock_manager: &HummockManager, number: u32) -> Vec<u64> {
     let range = hummock_manager.get_new_object_ids(number).await.unwrap();
-    (range.start_id.inner()..range.end_id.inner()).collect_vec()
+    (range.start_id..range.end_id)
+        .map(|id| id.as_raw_id())
+        .collect_vec()
 }
 
 pub async fn add_ssts(

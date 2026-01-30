@@ -38,7 +38,7 @@ async fn read_meta_snapshot(reader: &SysCatalogReaderImpl) -> Result<Vec<RwMetaS
         .into_iter()
         .map(|s| RwMetaSnapshot {
             meta_snapshot_id: s.id as _,
-            hummock_version_id: s.hummock_version_id as _,
+            hummock_version_id: s.hummock_version_id.as_raw_id() as _,
             remarks: s.remarks,
             state_table_info: Some(json!(s.state_table_info).into()),
             rw_version: s.rw_version,

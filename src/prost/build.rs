@@ -56,6 +56,7 @@ macro_rules! for_all_wrapped_id_fields {
 for_all_wrapped_id_fields! (
     backup_service {
         MetaSnapshotMetadata {
+            hummock_version_id: HummockVersionId,
             state_table_info: TableId,
         }
     }
@@ -170,6 +171,9 @@ for_all_wrapped_id_fields! (
         }
         ActorLocation {
             worker_node_id: WorkerId,
+        }
+        BatchQueryCommittedEpoch {
+            hummock_version_id: HummockVersionId,
         }
         WorkerNode {
             id: WorkerId,
@@ -290,6 +294,9 @@ for_all_wrapped_id_fields! (
         ResetSourceRequest {
             source_id: SourceId,
         }
+        WaitVersion {
+            hummock_version_id: HummockVersionId,
+        }
     }
     frontend_service {
         GetTableReplacePlanRequest {
@@ -298,6 +305,10 @@ for_all_wrapped_id_fields! (
         }
     }
     hummock {
+        BranchedObject {
+            object_id: HummockSstableObjectId,
+            sst_id: HummockSstableId,
+        }
         CancelCompactTask {
             context_id: WorkerId,
         }
@@ -314,22 +325,36 @@ for_all_wrapped_id_fields! (
         CompactionGroupInfo {
             member_table_ids: TableId,
         }
+        GetNewObjectIdsResponse {
+            start_id: HummockRawObjectId,
+            end_id: HummockRawObjectId,
+        }
         GetVersionByEpochRequest {
             table_id: TableId,
+        }
+        GroupConstruct {
+            new_sst_start_id: HummockSstableId,
+        }
+        HnswGraphFileInfo {
+            object_id: HummockHnswGraphFileId,
         }
         HummockPinnedSnapshot {
             context_id: WorkerId,
         }
         HummockPinnedVersion {
             context_id: WorkerId,
+            min_pinned_id: HummockVersionId,
         }
         HummockVersion {
+            id: HummockVersionId,
             table_watermarks: TableId,
             table_change_logs: TableId,
             state_table_info: TableId,
             vector_indexes: TableId,
         }
         HummockVersionDelta {
+            id: HummockVersionId,
+            prev_id: HummockVersionId,
             new_table_watermarks: TableId,
             removed_table_ids: TableId,
             change_log_delta: TableId,
@@ -337,7 +362,14 @@ for_all_wrapped_id_fields! (
             vector_index_delta: TableId,
         }
         HummockVersionStats {
+            hummock_version_id: HummockVersionId,
             table_stats: TableId,
+        }
+        IntraLevelDelta {
+            removed_table_ids: HummockSstableId,
+        }
+        ListVersionDeltasRequest {
+            start_id: HummockVersionId,
         }
         PinVersionRequest {
             context_id: WorkerId,
@@ -352,6 +384,8 @@ for_all_wrapped_id_fields! (
             table_ids: TableId,
         }
         SstableInfo {
+            object_id: HummockSstableObjectId,
+            sst_id: HummockSstableId,
             table_ids: TableId,
         }
         SubscribeCompactionEventRequest.Register {
@@ -360,17 +394,31 @@ for_all_wrapped_id_fields! (
         SubscribeCompactionEventRequest.ReportTask {
             table_stats_change: TableId,
         }
+        TriggerCompactionDeterministicRequest {
+            version_id: HummockVersionId,
+        }
         TriggerManualCompactionRequest {
             table_id: JobId,
+            sst_ids: HummockSstableId,
         }
         TruncateTables {
             table_ids: TableId,
         }
         UnpinVersionBeforeRequest {
             context_id: WorkerId,
+            unpin_version_before: HummockVersionId,
         }
         UnpinVersionRequest {
             context_id: WorkerId,
+        }
+        VacuumTask {
+            sstable_object_ids: HummockSstableObjectId,
+        }
+        ValidationTask {
+            sst_id_to_worker_id: HummockSstableObjectId,
+        }
+        VectorFileInfo {
+            object_id: HummockVectorFileId,
         }
         WriteLimits.WriteLimit {
             table_ids: TableId,
@@ -438,6 +486,9 @@ for_all_wrapped_id_fields! (
         }
         FlushRequest {
             database_id: DatabaseId,
+        }
+        FlushResponse {
+            hummock_version_id: HummockVersionId,
         }
         FragmentDistribution {
             fragment_id: FragmentId,

@@ -63,7 +63,7 @@ impl FrontendHummockVersion {
     pub fn to_protobuf(&self) -> PbHummockVersion {
         #[expect(deprecated)]
         PbHummockVersion {
-            id: self.id.0,
+            id: self.id,
             levels: Default::default(),
             max_committed_epoch: INVALID_EPOCH,
             table_watermarks: Default::default(),
@@ -99,7 +99,7 @@ impl FrontendHummockVersion {
 
     pub fn from_protobuf(value: PbHummockVersion) -> Self {
         Self {
-            id: HummockVersionId(value.id),
+            id: value.id,
             state_table_info: HummockVersionStateTableInfo::from_protobuf(&value.state_table_info),
             table_change_log: value
                 .table_change_logs
@@ -187,8 +187,8 @@ impl FrontendHummockVersionDelta {
     pub fn to_protobuf(&self) -> PbHummockVersionDelta {
         #[expect(deprecated)]
         PbHummockVersionDelta {
-            id: self.id.to_u64(),
-            prev_id: self.prev_id.to_u64(),
+            id: self.id,
+            prev_id: self.prev_id,
             group_deltas: Default::default(),
             max_committed_epoch: INVALID_EPOCH,
             trivial_move: false,
@@ -229,8 +229,8 @@ impl FrontendHummockVersionDelta {
 
     pub fn from_protobuf(delta: PbHummockVersionDelta) -> Self {
         Self {
-            prev_id: HummockVersionId::new(delta.prev_id),
-            id: HummockVersionId::new(delta.id),
+            prev_id: delta.prev_id,
+            id: delta.id,
             removed_table_id: delta.removed_table_ids.into_iter().collect(),
             state_table_info_delta: delta.state_table_info_delta.clone(),
             change_log_delta: delta

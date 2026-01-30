@@ -442,11 +442,11 @@ pub fn trigger_pin_unpin_version_state(
     pinned_versions: &BTreeMap<HummockContextId, HummockPinnedVersion>,
 ) {
     if let Some(m) = pinned_versions.values().map(|v| v.min_pinned_id).min() {
-        metrics.min_pinned_version_id.set(m as i64);
+        metrics.min_pinned_version_id.set(m.as_raw_id() as i64);
     } else {
         metrics
             .min_pinned_version_id
-            .set(HummockVersionId::MAX.to_u64() as _);
+            .set(HummockVersionId::MAX.as_raw_id() as _);
     }
 }
 

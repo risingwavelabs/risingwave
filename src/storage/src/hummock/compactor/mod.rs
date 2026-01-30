@@ -821,7 +821,7 @@ pub fn start_compactor(
                             table_stats_change: to_prost_table_stats_map(table_stats),
                             object_timestamps: object_timestamps
                                 .into_iter()
-                                .map(|(object_id, timestamp)| (object_id.inner(), timestamp))
+                                .map(|(object_id, timestamp)| (object_id.as_raw_id(), timestamp))
                                 .collect(),
                         })),
                         create_at: SystemTime::now()
@@ -1091,7 +1091,7 @@ pub fn start_shared_compactor(
                                             table_stats_change: to_prost_table_stats_map(table_stats),
                                             object_timestamps: object_timestamps
                                             .into_iter()
-                                            .map(|(object_id, timestamp)| (object_id.inner(), timestamp))
+                                            .map(|(object_id, timestamp)| (object_id.as_raw_id(), timestamp))
                                             .collect(),
                                     })),
                                     };

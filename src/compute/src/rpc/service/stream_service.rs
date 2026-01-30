@@ -66,7 +66,7 @@ impl StreamService for StreamServiceImpl {
                 hummock
                     .min_uncommitted_object_id()
                     .await
-                    .map(|object_id| object_id.inner())
+                    .map(|object_id| object_id.as_raw_id())
                     .unwrap_or(u64::MAX)
             } else {
                 u64::MAX

@@ -992,7 +992,7 @@ mod tests {
 
         let initial_version = PinnedVersion::new(
             HummockVersion::from_rpc_protobuf(&PbHummockVersion {
-                id: 1,
+                id: 1.into(),
                 state_table_info: HashMap::from_iter([(
                     TEST_TABLE_ID,
                     StateTableInfo {
@@ -1145,7 +1145,7 @@ mod tests {
 
         let initial_version = PinnedVersion::new(
             HummockVersion::from_rpc_protobuf(&PbHummockVersion {
-                id: 1,
+                id: 1.into(),
                 state_table_info: HashMap::from_iter([
                     (
                         table_id1,

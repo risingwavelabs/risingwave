@@ -197,7 +197,7 @@ impl CompactTask {
         self.input_ssts
             .iter()
             .flat_map(|level| level.table_infos.iter())
-            .any(|sst| sst.sst_id.inner() != sst.object_id.inner())
+            .any(|sst| sst.sst_id.as_raw_id() != sst.object_id.as_raw_id())
     }
 
     pub fn get_table_ids_from_input_ssts(&self) -> impl Iterator<Item = StateTableId> + use<> {
@@ -531,11 +531,7 @@ impl From<PbValidationTask> for ValidationTask {
                 .into_iter()
                 .map(SstableInfo::from)
                 .collect_vec(),
-            sst_id_to_worker_id: pb_validation_task
-                .sst_id_to_worker_id
-                .into_iter()
-                .map(|(object_id, worker_id)| (object_id.into(), worker_id))
-                .collect(),
+            sst_id_to_worker_id: pb_validation_task.sst_id_to_worker_id.into_iter().collect(),
         }
     }
 }
@@ -548,11 +544,7 @@ impl From<ValidationTask> for PbValidationTask {
                 .into_iter()
                 .map(|sst| sst.into())
                 .collect_vec(),
-            sst_id_to_worker_id: validation_task
-                .sst_id_to_worker_id
-                .into_iter()
-                .map(|(object_id, worker_id)| (object_id.inner(), worker_id))
-                .collect(),
+            sst_id_to_worker_id: validation_task.sst_id_to_worker_id,
         }
     }
 }
@@ -611,7 +603,7 @@ impl From<ReportTask> for PbReportTask {
             object_timestamps: value
                 .object_timestamps
                 .into_iter()
-                .map(|(object_id, timestamp)| (object_id.inner(), timestamp))
+                .map(|(object_id, timestamp)| (object_id.as_raw_id(), timestamp))
                 .collect(),
         }
     }

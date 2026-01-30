@@ -89,7 +89,7 @@ impl StreamManagerService for StreamServiceImpl {
         let version_id = self.barrier_scheduler.flush(req.database_id).await?;
         Ok(Response::new(FlushResponse {
             status: None,
-            hummock_version_id: version_id.to_u64(),
+            hummock_version_id: version_id,
         }))
     }
 

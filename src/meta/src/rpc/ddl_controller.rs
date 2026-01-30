@@ -475,7 +475,7 @@ impl DdlController {
         let notification_version = tokio::spawn(fut).await.map_err(|e| anyhow!(e))??;
         Ok(Some(WaitVersion {
             catalog_version: notification_version,
-            hummock_version_id: self.barrier_manager.get_hummock_version_id().await.to_u64(),
+            hummock_version_id: self.barrier_manager.get_hummock_version_id().await,
         }))
     }
 
