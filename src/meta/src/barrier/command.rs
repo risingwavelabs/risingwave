@@ -28,7 +28,6 @@ use risingwave_connector::source::{CdcTableSnapshotSplitRaw, SplitImpl};
 use risingwave_hummock_sdk::change_log::build_table_change_log_delta;
 use risingwave_hummock_sdk::vector_index::VectorIndexDelta;
 use risingwave_meta_model::WorkerId;
-use risingwave_pb::catalog::CreateType;
 use risingwave_pb::common::PbActorInfo;
 use risingwave_pb::hummock::vector_index_delta::PbVectorIndexInit;
 use risingwave_pb::plan_common::PbField;
@@ -60,7 +59,7 @@ use crate::barrier::rpc::{ControlStreamManager, to_partial_graph_id};
 use crate::barrier::utils::{collect_new_vector_index_info, collect_resp_info};
 use crate::controller::fragment::{InflightActorInfo, InflightFragmentInfo};
 use crate::hummock::{CommitEpochInfo, NewTableFragmentInfo};
-use crate::manager::{StreamingJob, StreamingJobType};
+use crate::manager::StreamingJob;
 use crate::model::{
     ActorId, ActorUpstreams, DispatcherId, FragmentActorDispatchers, FragmentDownstreamRelation,
     FragmentId, FragmentReplaceUpstream, StreamActorWithDispatchers, StreamJobActorsToCreate,
@@ -125,7 +124,7 @@ pub struct ReplaceStreamJobPlan {
     /// Note that there's no `SourceBackfillExecutor` involved for table with connector, so we don't need to worry about
     /// `backfill_splits`.
     pub init_split_assignment: SplitAssignment,
-    /// The `StreamingJob` info of the table to be replaced. Must be `StreamingJob::Table`
+    /// The `StreamingJob` info to be replaced.
     pub streaming_job: StreamingJob,
     /// The temporary dummy job fragments id of new table fragment
     pub tmp_id: JobId,
@@ -211,8 +210,6 @@ pub struct CreateStreamingJobCommandInfo {
     pub upstream_fragment_downstreams: FragmentDownstreamRelation,
     pub init_split_assignment: SplitAssignment,
     pub definition: String,
-    pub job_type: StreamingJobType,
-    pub create_type: CreateType,
     pub streaming_job: StreamingJob,
     pub fragment_backfill_ordering: ExtendedFragmentBackfillOrder,
     pub cdc_table_snapshot_splits: Option<Vec<CdcTableSnapshotSplitRaw>>,
@@ -618,7 +615,14 @@ impl Command {
                     })
                     .collect(),
             )),
-            Command::ReplaceStreamJob(plan) => Some((None, plan.fragment_changes())),
+            Command::ReplaceStreamJob(plan) => {
+                let new_job = if plan.old_fragments.stream_job_id != plan.streaming_job.id() {
+                    Some((plan.streaming_job.id(), None))
+                } else {
+                    None
+                };
+                Some((new_job, plan.fragment_changes()))
+            }
             Command::SourceChangeSplit(SplitState {
                 split_assignment, ..
             }) => Some((
@@ -868,13 +872,23 @@ impl CommandContext {
             truncate_tables,
         ) = collect_resp_info(resps);
 
-        let new_table_fragment_infos =
-            if let PostCollectCommand::CreateStreamingJob { info, job_type, .. } = &self.command {
-                assert!(!matches!(
-                    job_type,
-                    CreateStreamingJobType::SnapshotBackfill(_)
-                ));
-                let table_fragments = &info.stream_job_fragments;
+        let new_table_fragment_infos = {
+            let new_table_fragments = match &self.command {
+                PostCollectCommand::CreateStreamingJob { info, job_type, .. } => {
+                    assert!(!matches!(
+                        job_type,
+                        CreateStreamingJobType::SnapshotBackfill(_)
+                    ));
+                    Some(&info.stream_job_fragments)
+                }
+                PostCollectCommand::ReplaceStreamJob(plan)
+                    if plan.old_fragments.stream_job_id != plan.streaming_job.id() =>
+                {
+                    Some(&plan.new_fragments)
+                }
+                _ => None,
+            };
+            if let Some(table_fragments) = new_table_fragments {
                 let mut table_ids: HashSet<_> =
                     table_fragments.internal_table_ids().into_iter().collect();
                 if let Some(mv_table_id) = table_fragments.mv_table_id() {
@@ -884,7 +898,8 @@ impl CommandContext {
                 vec![NewTableFragmentInfo { table_ids }]
             } else {
                 vec![]
-            };
+            }
+        };
 
         let mut mv_log_store_truncate_epoch = HashMap::new();
         // TODO: may collect cross db snapshot backfill
@@ -1132,6 +1147,7 @@ impl Command {
                 replace_upstream,
                 upstream_fragment_downstreams,
                 init_split_assignment,
+                streaming_job,
                 auto_refresh_schema_sinks,
                 ..
             }) => {
@@ -1146,9 +1162,19 @@ impl Command {
                         upstream_fragment_downstreams.contains_key(fragment_id)
                     })
                     .collect();
-                let actor_cdc_table_snapshot_splits = database_info
-                    .assign_cdc_backfill_splits(old_fragments.stream_job_id)?
-                    .map(|splits| PbCdcTableSnapshotSplitsWithGeneration { splits });
+                let (actor_cdc_table_snapshot_splits, replace_sink_id) =
+                    if old_fragments.stream_job_id != streaming_job.id() {
+                        assert!(
+                            streaming_job.is_sink(),
+                            "replace only supports sink job currently"
+                        );
+                        (None, Some(old_fragments.stream_job_id))
+                    } else {
+                        let actor_cdc_table_snapshot_splits = database_info
+                            .assign_cdc_backfill_splits(old_fragments.stream_job_id)?
+                            .map(|splits| PbCdcTableSnapshotSplitsWithGeneration { splits });
+                        (actor_cdc_table_snapshot_splits, None)
+                    };
                 Self::generate_update_mutation_for_replace_table(
                     old_fragments.actor_ids().chain(
                         auto_refresh_schema_sinks
@@ -1168,6 +1194,7 @@ impl Command {
                     init_split_assignment,
                     actor_cdc_table_snapshot_splits,
                     auto_refresh_schema_sinks.as_ref(),
+                    replace_sink_id,
                 )
             }
 
@@ -1341,6 +1368,7 @@ impl Command {
                     }),
                     sink_schema_change: Default::default(),
                     subscriptions_to_drop: vec![],
+                    replace_sink_id: None,
                 });
                 tracing::debug!("update mutation: {mutation:?}");
                 Some(mutation)
@@ -1567,6 +1595,7 @@ impl Command {
         init_split_assignment: &SplitAssignment,
         cdc_table_snapshot_split_assignment: Option<PbCdcTableSnapshotSplitsWithGeneration>,
         auto_refresh_schema_sinks: Option<&Vec<AutoRefreshSchemaSinkContext>>,
+        replace_sink_id: Option<JobId>,
     ) -> Option<Mutation> {
         let dropped_actors = dropped_actors.into_iter().collect();
 
@@ -1623,6 +1652,7 @@ impl Command {
                     })
                 })
                 .collect(),
+            replace_sink_id: replace_sink_id.map(|id| id.as_raw_id()),
             ..Default::default()
         }))
     }

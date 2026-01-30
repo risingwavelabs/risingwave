@@ -501,6 +501,7 @@ impl DatabaseCheckpointControl {
                         actor_cdc_table_snapshot_splits: None, /* no cdc table backfill in snapshot backfill */
                         sink_schema_change: Default::default(), /* no sink auto schema change happened here */
                         subscriptions_to_drop,
+                        replace_sink_id: None, // no sink replacement in snapshot backfill
                     }))
                 } else {
                     let fragment_ids = self.database_info.take_pending_backfill_nodes();
