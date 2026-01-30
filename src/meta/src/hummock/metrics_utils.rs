@@ -21,12 +21,15 @@ use itertools::{Itertools, enumerate};
 use prometheus::IntGauge;
 use prometheus::core::{AtomicU64, GenericCounter};
 use risingwave_common::id::{JobId, TableId};
+use risingwave_hummock_sdk::change_log::TableChangeLog;
 use risingwave_hummock_sdk::compact_task::CompactTask;
-use risingwave_hummock_sdk::compaction_group::hummock_version_ext::object_size_map;
+use risingwave_hummock_sdk::compaction_group::hummock_version_ext::version_object_size_map;
 use risingwave_hummock_sdk::level::Levels;
 use risingwave_hummock_sdk::table_stats::PbTableStatsMap;
 use risingwave_hummock_sdk::version::HummockVersion;
-use risingwave_hummock_sdk::{CompactionGroupId, HummockContextId, HummockVersionId};
+use risingwave_hummock_sdk::{
+    CompactionGroupId, HummockContextId, HummockObjectId, HummockVersionId,
+};
 use risingwave_pb::hummock::write_limits::WriteLimit;
 use risingwave_pb::hummock::{
     CompactionConfig, HummockPinnedVersion, HummockVersionStats, LevelType,
@@ -453,9 +456,13 @@ pub fn trigger_pin_unpin_version_state(
 pub fn trigger_gc_stat(
     metrics: &MetaMetrics,
     checkpoint: &HummockVersionCheckpoint,
+    checkpoint_table_change_log_object_size: &HashMap<HummockObjectId, u64>,
     min_pinned_version_id: HummockVersionId,
+    current_table_change_log: &HashMap<TableId, TableChangeLog>,
 ) {
-    let current_version_object_size_map = object_size_map(&checkpoint.version);
+    let mut current_version_object_size_map: HashMap<_, _> =
+        version_object_size_map(&checkpoint.version);
+    current_version_object_size_map.extend(checkpoint_table_change_log_object_size);
     let current_version_object_size = current_version_object_size_map.values().sum::<u64>();
     let current_version_object_count = current_version_object_size_map.len();
     let mut old_version_object_size = 0;
@@ -486,7 +493,7 @@ pub fn trigger_gc_stat(
     metrics.stale_object_size.set(stale_object_size as _);
     metrics.stale_object_count.set(stale_object_count as _);
     // table change log
-    for (table_id, logs) in &checkpoint.version.table_change_log {
+    for (table_id, logs) in current_table_change_log {
         let object_count = logs
             .iter()
             .map(|l| l.old_value.len() + l.new_value.len())

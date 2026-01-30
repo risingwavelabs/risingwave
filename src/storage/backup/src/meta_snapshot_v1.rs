@@ -12,12 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt::{Display, Formatter};
 
 use bytes::{Buf, BufMut};
 use itertools::Itertools;
 use risingwave_common::util::iter_util::ZipEqFast;
+use risingwave_hummock_sdk::HummockRawObjectId;
 use risingwave_hummock_sdk::version::HummockVersion;
 use risingwave_pb::catalog::{
     Connection, Database, Function, Index, Schema, Secret, Sink, Source, Subscription, Table, View,
@@ -105,6 +106,10 @@ impl Metadata for ClusterMetadata {
 
     fn storage_directory(&self) -> BackupResult<String> {
         unreachable!("");
+    }
+
+    fn table_change_log_object_ids(&self) -> HashSet<HummockRawObjectId> {
+        HashSet::default()
     }
 }
 
