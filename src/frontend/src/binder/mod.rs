@@ -771,7 +771,7 @@ mod tests {
         let stmt = statements.into_iter().next().ok_or("No statement")?;
 
         let mut binder = mock_binder();
-        let _ = binder.bind_statement(&stmt)?;
+        let _ = binder.bind_statement(stmt)?;
         Ok(())
     }
 }
