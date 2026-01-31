@@ -189,9 +189,11 @@ impl BindContext {
                         format!("Could not parse {:?} as virtual table name `{COLUMN_GROUP_PREFIX}[group_id]`", table_name)))?;
                     self.get_indices_with_group_id(group_id, column_name)
                 } else {
-                    Ok(vec![
-                        self.get_index_with_table_name(column_name, table_name, schema_name)?,
-                    ])
+                    Ok(vec![self.get_index_with_table_name(
+                        column_name,
+                        table_name,
+                        schema_name,
+                    )?])
                 }
             }
             None => self.get_unqualified_indices(column_name),
@@ -327,16 +329,15 @@ impl BindContext {
             .indices_of
             .get(column_name)
             .ok_or_else(|| ErrorCode::ItemNotFound(format!("Invalid column: {}", column_name)))?;
-        match column_indexes
-            .iter()
-            .find(|column_index| {
-                let col = &self.columns[**column_index];
-                match schema_name {
-                    Some(s) => col.schema_name.as_deref() == Some(&**s) && col.table_name == *table_name,
-                    None => col.table_name == *table_name,
+        match column_indexes.iter().find(|column_index| {
+            let col = &self.columns[**column_index];
+            match schema_name {
+                Some(s) => {
+                    col.schema_name.as_deref() == Some(&**s) && col.table_name == *table_name
                 }
-            })
-        {
+                None => col.table_name == *table_name,
+            }
+        }) {
             Some(column_index) => Ok(*column_index),
             None => Err(ErrorCode::ItemNotFound(format!(
                 "missing FROM-clause entry for table \"{}\"",

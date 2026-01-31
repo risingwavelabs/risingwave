@@ -275,10 +275,7 @@ impl Binder {
                     Ident::from_real_value(table_name),
                     column,
                 ],
-                None => vec![
-                    Ident::from_real_value(table_name),
-                    column,
-                ],
+                None => vec![Ident::from_real_value(table_name), column],
             };
             Ok(Expr::CompoundIdentifier(idents))
         } else if let Some(group_id) = context.column_group_context.mapping.get(&indices[0]) {

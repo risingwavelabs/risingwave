@@ -44,10 +44,11 @@ impl Binder {
             return self.bind_sql_udf_parameter(&column_name);
         }
 
-        match self
-            .context
-            .get_column_binding_indices_with_schema(&table_name, &schema_name, &column_name)
-        {
+        match self.context.get_column_binding_indices_with_schema(
+            &table_name,
+            &schema_name,
+            &column_name,
+        ) {
             Ok(mut indices) => {
                 match indices.len() {
                     0 => unreachable!(),
@@ -91,9 +92,15 @@ impl Binder {
                 }
                 // input ref from lateral context `depth` starts from 1.
                 let depth = i + 1;
-                match context.get_column_binding_indices_with_schema(&table_name, &schema_name, &column_name) {
+                match context.get_column_binding_indices_with_schema(
+                    &table_name,
+                    &schema_name,
+                    &column_name,
+                ) {
                     Ok(indices) => {
-                        let index = indices.first().ok_or_else(|| ErrorCode::ItemNotFound(format!("Invalid column: {}", column_name)))?;
+                        let index = indices.first().ok_or_else(|| {
+                            ErrorCode::ItemNotFound(format!("Invalid column: {}", column_name))
+                        })?;
                         let column = &context.columns[*index];
                         return Ok(CorrelatedInputRef::new(
                             column.index,
@@ -117,9 +124,15 @@ impl Binder {
             }
             // `depth` starts from 1.
             let depth = i + 1;
-            match context.get_column_binding_indices_with_schema(&table_name, &schema_name, &column_name) {
+            match context.get_column_binding_indices_with_schema(
+                &table_name,
+                &schema_name,
+                &column_name,
+            ) {
                 Ok(indices) => {
-                    let index = indices.first().ok_or_else(|| ErrorCode::ItemNotFound(format!("Invalid column: {}", column_name)))?;
+                    let index = indices.first().ok_or_else(|| {
+                        ErrorCode::ItemNotFound(format!("Invalid column: {}", column_name))
+                    })?;
                     let column = &context.columns[*index];
                     return Ok(CorrelatedInputRef::new(
                         column.index,
@@ -141,9 +154,15 @@ impl Binder {
                     }
                     // correlated input ref from lateral context `depth` starts from 1.
                     let depth = i + j + 1;
-                    match context.get_column_binding_indices_with_schema(&table_name, &schema_name, &column_name) {
+                    match context.get_column_binding_indices_with_schema(
+                        &table_name,
+                        &schema_name,
+                        &column_name,
+                    ) {
                         Ok(indices) => {
-                            let index = indices.first().ok_or_else(|| ErrorCode::ItemNotFound(format!("Invalid column: {}", column_name)))?;
+                            let index = indices.first().ok_or_else(|| {
+                                ErrorCode::ItemNotFound(format!("Invalid column: {}", column_name))
+                            })?;
                             let column = &context.columns[*index];
                             return Ok(CorrelatedInputRef::new(
                                 column.index,

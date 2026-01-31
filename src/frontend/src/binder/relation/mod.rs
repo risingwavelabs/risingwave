@@ -464,14 +464,24 @@ impl Binder {
             match cte_state {
                 BindingCteState::Bound { query } => {
                     let input = BoundShareInput::Query(query);
-                    self.bind_table_to_context(input.fields()?, table_name, None, Some(&original_alias))?;
+                    self.bind_table_to_context(
+                        input.fields()?,
+                        table_name,
+                        None,
+                        Some(&original_alias),
+                    )?;
                     // we could always share the cte,
                     // no matter it's recursive or not.
                     Ok(Relation::Share(Box::new(BoundShare { share_id, input })))
                 }
                 BindingCteState::ChangeLog { table } => {
                     let input = BoundShareInput::ChangeLog(table);
-                    self.bind_table_to_context(input.fields()?, table_name, None, Some(&original_alias))?;
+                    self.bind_table_to_context(
+                        input.fields()?,
+                        table_name,
+                        None,
+                        Some(&original_alias),
+                    )?;
                     Ok(Relation::Share(Box::new(BoundShare { share_id, input })))
                 }
             }
