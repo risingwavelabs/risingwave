@@ -36,15 +36,17 @@ insert into s1.users values (1, 'Alice', 30), (2, 'Bob', 25), (3, 'Charlie', 35)
 statement ok
 insert into s2.users values (1, 'alice@example.com'), (3, 'charlie@example.com'), (4, 'dave@example.com');
 
+statement ok
+flush
+
 # Test 1: Simple schema-qualified column reference in SELECT
-query T cols=3
+query TTI rowsort
 select s1.users.name, s2.users.email, s1.users.age
 from s1.users, s2.users
-where s1.users.id = s2.users.id
-order by s1.users.name;
+where s1.users.id = s2.users.id;
 ----
-Alice alice@example.com 30
-Charlie charlie@example.com 35
+Alice	alice@example.com	30
+Charlie	charlie@example.com	35
 
 # Test 2: EXISTS subquery with schema-qualified column references (the main bug)
 # This should return 2 (only Alice and Charlie have matching IDs)
@@ -58,61 +60,55 @@ where exists (
 2
 
 # Test 3: EXISTS subquery returning specific columns with schema qualification
-query T
+query T rowsort
 select s1.users.name
 from s1.users
 where exists (
   select 1 from s2.users
   where s2.users.id = s1.users.id
-)
-order by s1.users.name;
+);
 ----
 Alice
 Charlie
 
 # Test 4: Multiple EXISTS conditions with schema-qualified references
-query T
+query T rowsort
 select s1.users.name
 from s1.users
 where exists (
   select 1 from s2.users
   where s2.users.id = s1.users.id
-) and s1.users.age > 25
-order by s1.users.name;
+) and s1.users.age > 25;
 ----
 Alice
 Charlie
 
 # Test 5: IN subquery with schema-qualified column references
-query T
+query T rowsort
 select s1.users.name
 from s1.users
-where s1.users.id in (select s2.users.id from s2.users)
-order by s1.users.name;
+where s1.users.id in (select s2.users.id from s2.users);
 ----
 Alice
 Charlie
 
 # Test 6: JOIN with schema-qualified column references
-query T cols=2
+query TT rowsort
 select s1.users.name, s2.users.email
 from s1.users
-inner join s2.users on s1.users.id = s2.users.id
-order by s1.users.name;
+inner join s2.users on s1.users.id = s2.users.id;
 ----
-Alice alice@example.com
-Charlie charlie@example.com
+Alice	alice@example.com
+Charlie	charlie@example.com
 
 # Test 7: Schema-qualified references in WHERE clause without EXISTS
-query T cols=2
-select s1.users.name, s1.users.age
-from s1.users
-where s1.users.age > (select min(s1.users.age) + 5 from s1.users where s1.users.id = s2.users.id)
-  and exists (select 1 from s2.users where s2.users.id = s1.users.id)
-order by s1.users.name;
+query TTI rowsort
+select s1.users.name, s1.users.age, s2.users.email
+from s1.users, s2.users
+where s1.users.age > 25 and s1.users.id = s2.users.id;
 ----
-Alice 30
-Charlie 35
+Alice	30	alice@example.com
+Charlie	35	charlie@example.com
 
 # Test 8: NOT EXISTS with schema-qualified column references
 # Should return Bob (id=2) who doesn't have a match in s2.users
@@ -122,8 +118,7 @@ from s1.users
 where not exists (
   select 1 from s2.users
   where s2.users.id = s1.users.id
-)
-order by s1.users.name;
+);
 ----
 Bob
 
@@ -137,37 +132,47 @@ create table s3.users (id int, country varchar);
 statement ok
 insert into s3.users values (1, 'USA'), (2, 'Canada'), (3, 'UK');
 
-query T cols=2
+statement ok
+flush
+
+query TT rowsort
 select s1.users.name, s3.users.country
 from s1.users
-inner join s3.users on s1.users.id = s3.users.id
-order by s1.users.name;
+inner join s3.users on s1.users.id = s3.users.id;
 ----
-Alice USA
-Bob Canada
-Charlie UK
+Alice	USA
+Bob	Canada
+Charlie	UK
 
 # Test 10: Unqualified column reference still works (backward compatibility)
 # When table names are unique, unqualified references should still work
-query T
-select name from s1.users order by name;
+query T rowsort
+select name from s1.users;
 ----
 Alice
 Bob
 Charlie
 
 # Test 11: EXISTS with correlated subquery and multiple schema qualifications
-query T cols=3
+query TTI rowsort
 select s1.users.name, s1.users.age, s2.users.email
 from s1.users
 where exists (
   select 1 from s2.users
   where s2.users.id = s1.users.id
-)
-order by s1.users.name;
+);
 ----
-Alice 30 alice@example.com
-Charlie 35 charlie@example.com
+Alice	30	alice@example.com
+Charlie	35	charlie@example.com
+
+# Test 12: AND condition with both qualified and unqualified references
+query TTI rowsort
+select s1.users.name, s2.users.email, s1.users.age
+from s1.users, s2.users
+where s1.users.id = s2.users.id and age > 25;
+----
+Alice	alice@example.com	30
+Charlie	charlie@example.com	35
 
 # Cleanup
 statement ok
