@@ -1,8 +1,8 @@
 statement ok
-create view v as select 1;
+create table t(v int);
 
 statement ok
-create materialized view mv as select * from v;
+create materialized view mv as select * from t;
 
 statement ok
 CREATE SINK my_sink AS select * from mv WITH (
@@ -10,12 +10,7 @@ CREATE SINK my_sink AS select * from mv WITH (
 );
 
 statement ok
-drop view v cascade;
-
-query T
-SELECT count(name) FROM rw_views WHERE name = 'v';
-----
-0
+drop sink my_sink cascade;
 
 query T
 SELECT count(name) FROM rw_sinks WHERE name = 'my_sink';
@@ -25,5 +20,9 @@ SELECT count(name) FROM rw_sinks WHERE name = 'my_sink';
 query T
 SELECT count(name) FROM rw_materialized_views WHERE name = 'mv';
 ----
-0
+1
 
+query T
+SELECT count(name) FROM rw_tables WHERE name = 't';
+----
+1
