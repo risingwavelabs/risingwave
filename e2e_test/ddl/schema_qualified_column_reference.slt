@@ -173,17 +173,18 @@ Alice
 Bob
 Charlie
 
-# Test 11: EXISTS with correlated subquery and multiple schema qualifications
+# Test 11: EXISTS with correlated subquery and additional JOIN
 query TTI rowsort
-select s1.users.name, s1.users.age, s2.users.email
+select s1.users.name, s1.users.age, s3.users.country
 from s1.users
+inner join s3.users on s1.users.id = s3.users.id
 where exists (
   select 1 from s2.users
   where s2.users.id = s1.users.id
 );
 ----
-Alice	30	alice@example.com
-Charlie	35	charlie@example.com
+Alice	30	USA
+Charlie	35	UK
 
 # Test 12: AND condition with both qualified and unqualified references
 query TTI rowsort
