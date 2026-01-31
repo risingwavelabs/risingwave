@@ -16,6 +16,26 @@
 # but different schemas. This tests the fix for the bug where schema names in
 # column references like "schema.table.column" were being ignored.
 
+# Cleanup existing resources
+statement ok
+drop table if exists s1.users;
+
+statement ok
+drop table if exists s2.users;
+
+statement ok
+drop table if exists s3.users;
+
+statement ok
+drop schema if exists s1;
+
+statement ok
+drop schema if exists s2;
+
+statement ok
+drop schema if exists s3;
+
+# Create test schemas
 statement ok
 create schema s1;
 
