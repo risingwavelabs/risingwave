@@ -340,6 +340,7 @@ impl Binder {
         &mut self,
         columns: impl IntoIterator<Item = (bool, Field)>, // bool indicates if the field is hidden
         table_name: String,
+        schema_name: Option<String>,
         alias: Option<&TableAlias>,
     ) -> Result<()> {
         const EMPTY: [Ident; 0] = [];
@@ -366,6 +367,7 @@ impl Binder {
             field.name.clone_from(&name);
             self.context.columns.push(ColumnBinding::new(
                 table_name.clone(),
+                schema_name.clone(),
                 begin + index,
                 is_hidden,
                 field,
@@ -386,7 +388,14 @@ impl Binder {
             .into());
         }
 
-        match self.context.range_of.entry(table_name.clone()) {
+        // When a table has a schema, use schema.table as the key to prevent conflicts
+        // when two tables have the same name but different schemas.
+        let range_key = match &schema_name {
+            Some(s) => format!("{}.{}", s, table_name),
+            None => table_name.clone(),
+        };
+
+        match self.context.range_of.entry(range_key) {
             Entry::Occupied(_) => Err(ErrorCode::InternalError(format!(
                 "Duplicated table name while binding table to context: {}",
                 table_name
@@ -455,14 +464,14 @@ impl Binder {
             match cte_state {
                 BindingCteState::Bound { query } => {
                     let input = BoundShareInput::Query(query);
-                    self.bind_table_to_context(input.fields()?, table_name, Some(&original_alias))?;
+                    self.bind_table_to_context(input.fields()?, table_name, None, Some(&original_alias))?;
                     // we could always share the cte,
                     // no matter it's recursive or not.
                     Ok(Relation::Share(Box::new(BoundShare { share_id, input })))
                 }
                 BindingCteState::ChangeLog { table } => {
                     let input = BoundShareInput::ChangeLog(table);
-                    self.bind_table_to_context(input.fields()?, table_name, Some(&original_alias))?;
+                    self.bind_table_to_context(input.fields()?, table_name, None, Some(&original_alias))?;
                     Ok(Relation::Share(Box::new(BoundShare { share_id, input })))
                 }
             }

@@ -266,11 +266,21 @@ impl Binder {
         column: Ident,
     ) -> Result<Expr> {
         if indices.len() == 1 {
-            let right_table = context.columns[indices[0]].table_name.as_ref();
-            Ok(Expr::CompoundIdentifier(vec![
-                Ident::from_real_value(right_table),
-                column,
-            ]))
+            let col = &context.columns[indices[0]];
+            let table_name = &col.table_name;
+            // Include schema if present to properly qualify the identifier
+            let idents = match &col.schema_name {
+                Some(schema) => vec![
+                    Ident::from_real_value(schema),
+                    Ident::from_real_value(table_name),
+                    column,
+                ],
+                None => vec![
+                    Ident::from_real_value(table_name),
+                    column,
+                ],
+            };
+            Ok(Expr::CompoundIdentifier(idents))
         } else if let Some(group_id) = context.column_group_context.mapping.get(&indices[0]) {
             Ok(Expr::CompoundIdentifier(vec![
                 Ident::from_real_value(&format!("{COLUMN_GROUP_PREFIX}{}", group_id)),

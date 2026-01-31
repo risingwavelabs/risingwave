@@ -1,0 +1,189 @@
+# Copyright 2025 RisingWave Labs
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Test for schema-qualified column references when two tables have the same name
+# but different schemas. This tests the fix for the bug where schema names in
+# column references like "schema.table.column" were being ignored.
+
+statement ok
+create schema s1;
+
+statement ok
+create schema s2;
+
+# Create two tables with the same name but different schemas
+statement ok
+create table s1.users (id int, name varchar, age int);
+
+statement ok
+create table s2.users (id int, email varchar);
+
+# Insert test data
+statement ok
+insert into s1.users values (1, 'Alice', 30), (2, 'Bob', 25), (3, 'Charlie', 35);
+
+statement ok
+insert into s2.users values (1, 'alice@example.com'), (3, 'charlie@example.com'), (4, 'dave@example.com');
+
+# Test 1: Simple schema-qualified column reference in SELECT
+query T cols=3
+select s1.users.name, s2.users.email, s1.users.age
+from s1.users, s2.users
+where s1.users.id = s2.users.id
+order by s1.users.name;
+----
+Alice alice@example.com 30
+Charlie charlie@example.com 35
+
+# Test 2: EXISTS subquery with schema-qualified column references (the main bug)
+# This should return 2 (only Alice and Charlie have matching IDs)
+query I
+select count(*) from s1.users
+where exists (
+  select 1 from s2.users
+  where s2.users.id = s1.users.id
+);
+----
+2
+
+# Test 3: EXISTS subquery returning specific columns with schema qualification
+query T
+select s1.users.name
+from s1.users
+where exists (
+  select 1 from s2.users
+  where s2.users.id = s1.users.id
+)
+order by s1.users.name;
+----
+Alice
+Charlie
+
+# Test 4: Multiple EXISTS conditions with schema-qualified references
+query T
+select s1.users.name
+from s1.users
+where exists (
+  select 1 from s2.users
+  where s2.users.id = s1.users.id
+) and s1.users.age > 25
+order by s1.users.name;
+----
+Alice
+Charlie
+
+# Test 5: IN subquery with schema-qualified column references
+query T
+select s1.users.name
+from s1.users
+where s1.users.id in (select s2.users.id from s2.users)
+order by s1.users.name;
+----
+Alice
+Charlie
+
+# Test 6: JOIN with schema-qualified column references
+query T cols=2
+select s1.users.name, s2.users.email
+from s1.users
+inner join s2.users on s1.users.id = s2.users.id
+order by s1.users.name;
+----
+Alice alice@example.com
+Charlie charlie@example.com
+
+# Test 7: Schema-qualified references in WHERE clause without EXISTS
+query T cols=2
+select s1.users.name, s1.users.age
+from s1.users
+where s1.users.age > (select min(s1.users.age) + 5 from s1.users where s1.users.id = s2.users.id)
+  and exists (select 1 from s2.users where s2.users.id = s1.users.id)
+order by s1.users.name;
+----
+Alice 30
+Charlie 35
+
+# Test 8: NOT EXISTS with schema-qualified column references
+# Should return Bob (id=2) who doesn't have a match in s2.users
+query T
+select s1.users.name
+from s1.users
+where not exists (
+  select 1 from s2.users
+  where s2.users.id = s1.users.id
+)
+order by s1.users.name;
+----
+Bob
+
+# Test 9: Three schemas with same table name
+statement ok
+create schema s3;
+
+statement ok
+create table s3.users (id int, country varchar);
+
+statement ok
+insert into s3.users values (1, 'USA'), (2, 'Canada'), (3, 'UK');
+
+query T cols=2
+select s1.users.name, s3.users.country
+from s1.users
+inner join s3.users on s1.users.id = s3.users.id
+order by s1.users.name;
+----
+Alice USA
+Bob Canada
+Charlie UK
+
+# Test 10: Unqualified column reference still works (backward compatibility)
+# When table names are unique, unqualified references should still work
+query T
+select name from s1.users order by name;
+----
+Alice
+Bob
+Charlie
+
+# Test 11: EXISTS with correlated subquery and multiple schema qualifications
+query T cols=3
+select s1.users.name, s1.users.age, s2.users.email
+from s1.users
+where exists (
+  select 1 from s2.users
+  where s2.users.id = s1.users.id
+)
+order by s1.users.name;
+----
+Alice 30 alice@example.com
+Charlie 35 charlie@example.com
+
+# Cleanup
+statement ok
+drop table s1.users;
+
+statement ok
+drop table s2.users;
+
+statement ok
+drop table s3.users;
+
+statement ok
+drop schema s1;
+
+statement ok
+drop schema s2;
+
+statement ok
+drop schema s3;

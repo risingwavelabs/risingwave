@@ -33,15 +33,23 @@ use crate::binder::{BoundQuery, COLUMN_GROUP_PREFIX, ShareId};
 #[derive(Debug, Clone)]
 pub struct ColumnBinding {
     pub table_name: String,
+    pub schema_name: Option<String>,
     pub index: usize,
     pub is_hidden: bool,
     pub field: Field,
 }
 
 impl ColumnBinding {
-    pub fn new(table_name: String, index: usize, is_hidden: bool, field: Field) -> Self {
+    pub fn new(
+        table_name: String,
+        schema_name: Option<String>,
+        index: usize,
+        is_hidden: bool,
+        field: Field,
+    ) -> Self {
         ColumnBinding {
             table_name,
+            schema_name,
             index,
             is_hidden,
             field,
@@ -165,6 +173,15 @@ impl BindContext {
         table_name: &Option<String>,
         column_name: &String,
     ) -> LiteResult<Vec<usize>> {
+        self.get_column_binding_indices_with_schema(table_name, &None, column_name)
+    }
+
+    pub fn get_column_binding_indices_with_schema(
+        &self,
+        table_name: &Option<String>,
+        schema_name: &Option<String>,
+        column_name: &String,
+    ) -> LiteResult<Vec<usize>> {
         match table_name {
             Some(table_name) => {
                 if let Some(group_id_str) = table_name.strip_prefix(COLUMN_GROUP_PREFIX) {
@@ -173,7 +190,7 @@ impl BindContext {
                     self.get_indices_with_group_id(group_id, column_name)
                 } else {
                     Ok(vec![
-                        self.get_index_with_table_name(column_name, table_name)?,
+                        self.get_index_with_table_name(column_name, table_name, schema_name)?,
                     ])
                 }
             }
@@ -304,6 +321,7 @@ impl BindContext {
         &self,
         column_name: &String,
         table_name: &String,
+        schema_name: &Option<String>,
     ) -> LiteResult<usize> {
         let column_indexes = self
             .indices_of
@@ -311,7 +329,13 @@ impl BindContext {
             .ok_or_else(|| ErrorCode::ItemNotFound(format!("Invalid column: {}", column_name)))?;
         match column_indexes
             .iter()
-            .find(|column_index| self.columns[**column_index].table_name == *table_name)
+            .find(|column_index| {
+                let col = &self.columns[**column_index];
+                match schema_name {
+                    Some(s) => col.schema_name.as_deref() == Some(&**s) && col.table_name == *table_name,
+                    None => col.table_name == *table_name,
+                }
+            })
         {
             Some(column_index) => Ok(*column_index),
             None => Err(ErrorCode::ItemNotFound(format!(
