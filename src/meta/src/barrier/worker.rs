@@ -42,7 +42,6 @@ use tracing::{Instrument, debug, error, info, warn};
 use uuid::Uuid;
 
 use crate::barrier::checkpoint::{CheckpointControl, CheckpointControlEvent};
-use crate::barrier::command::RescheduleFragmentPlan;
 use crate::barrier::complete_task::{BarrierCompleteOutput, CompletingTask};
 use crate::barrier::context::recovery::{RenderedDatabaseRuntimeInfo, render_runtime_info};
 use crate::barrier::context::{GlobalBarrierWorkerContext, GlobalBarrierWorkerContextImpl};
@@ -52,7 +51,7 @@ use crate::barrier::rpc::{
 use crate::barrier::schedule::{MarkReadyOptions, PeriodicBarriers};
 use crate::barrier::{
     BarrierManagerRequest, BarrierManagerStatus, BarrierWorkerRuntimeInfoSnapshot, Command,
-    RecoveryReason, UpdateDatabaseBarrierRequest, schedule,
+    RecoveryReason, RescheduleFragmentIntent, UpdateDatabaseBarrierRequest, schedule,
 };
 use crate::controller::scale::{
     find_fragment_no_shuffle_dags_detailed, render_fragments, render_jobs,
@@ -146,7 +145,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
     }
 }
 
-async fn resolve_reschedule_plan(
+async fn resolve_reschedule_intent(
     env: MetaSrvEnv,
     worker_nodes: HashMap<WorkerId, WorkerNode>,
     adaptive_parallelism_strategy: AdaptiveParallelismStrategy,
@@ -157,17 +156,17 @@ async fn resolve_reschedule_plan(
     };
 
     match command {
-        Command::RescheduleFragmentPlan { plan } => {
+        Command::RescheduleFragmentIntent { intent } => {
             let span = tracing::info_span!(
-                "resolve_reschedule_plan",
+                "resolve_reschedule_intent",
                 database_id = %new_barrier.database_id
             );
-            let resolved = build_reschedule_from_plan(
+            let resolved = build_reschedule_from_intent(
                 &env,
                 worker_nodes,
                 adaptive_parallelism_strategy,
                 new_barrier.database_id,
-                plan,
+                intent,
             )
             .instrument(span)
             .await;
@@ -198,12 +197,12 @@ async fn resolve_reschedule_plan(
     }
 }
 
-async fn build_reschedule_from_plan(
+async fn build_reschedule_from_intent(
     env: &MetaSrvEnv,
     worker_nodes: HashMap<WorkerId, WorkerNode>,
     adaptive_parallelism_strategy: AdaptiveParallelismStrategy,
     database_id: DatabaseId,
-    plan: RescheduleFragmentPlan,
+    intent: RescheduleFragmentIntent,
 ) -> MetaResult<Option<Command>> {
     if worker_nodes.is_empty() {
         return Err(anyhow!("no active streaming workers for reschedule").into());
@@ -212,8 +211,8 @@ async fn build_reschedule_from_plan(
     let txn = env.meta_store().conn.begin().await?;
     let actor_id_counter = env.actor_id_generator();
 
-    let rendered = match plan {
-        RescheduleFragmentPlan::Jobs(job_ids) => {
+    let rendered = match intent {
+        RescheduleFragmentIntent::Jobs(job_ids) => {
             render_jobs(
                 &txn,
                 actor_id_counter,
@@ -223,7 +222,7 @@ async fn build_reschedule_from_plan(
             )
             .await?
         }
-        RescheduleFragmentPlan::Fragments(fragment_ids) => {
+        RescheduleFragmentIntent::Fragments(fragment_ids) => {
             let fragment_ids = fragment_ids.into_iter().collect_vec();
             if fragment_ids.is_empty() {
                 return Ok(None);
@@ -646,7 +645,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                     let database_id = new_barrier.database_id;
                     let new_barrier = if matches!(
                         new_barrier.command,
-                        Some((Command::RescheduleFragmentPlan { .. }, _))
+                        Some((Command::RescheduleFragmentIntent { .. }, _))
                     ) {
                         let env = self.env.clone();
                         let worker_nodes = self
@@ -656,7 +655,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                             .map(|(worker_id, worker)| (*worker_id, worker.clone()))
                             .collect();
                         let adaptive_parallelism_strategy = self.adaptive_parallelism_strategy;
-                        match resolve_reschedule_plan(
+                        match resolve_reschedule_intent(
                             env,
                             worker_nodes,
                             adaptive_parallelism_strategy,
