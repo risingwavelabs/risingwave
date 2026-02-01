@@ -16,6 +16,7 @@ use std::assert_matches::assert_matches;
 use std::collections::{HashMap, HashSet};
 use std::mem::take;
 
+use risingwave_common::bail;
 use risingwave_common::catalog::TableId;
 use risingwave_common::id::JobId;
 use risingwave_common::util::epoch::Epoch;
@@ -143,6 +144,13 @@ impl DatabaseCheckpointControl {
         control_stream_manager: &mut ControlStreamManager,
         hummock_version_stats: &HummockVersionStats,
     ) -> MetaResult<ApplyCommandInfo> {
+        debug_assert!(
+            !matches!(command, Some(Command::RescheduleIntent { .. })),
+            "reschedule intent must be resolved before apply"
+        );
+        if matches!(command, Some(Command::RescheduleIntent { .. })) {
+            bail!("reschedule intent must be resolved before apply");
+        }
         let mut edges = self
             .database_info
             .build_edge(command.as_ref(), &*control_stream_manager);
