@@ -51,7 +51,7 @@ use crate::barrier::rpc::{
 use crate::barrier::schedule::{MarkReadyOptions, PeriodicBarriers};
 use crate::barrier::{
     BarrierManagerRequest, BarrierManagerStatus, BarrierWorkerRuntimeInfoSnapshot, Command,
-    RecoveryReason, RescheduleFragmentIntent, UpdateDatabaseBarrierRequest, schedule,
+    RecoveryReason, RescheduleIntent, UpdateDatabaseBarrierRequest, schedule,
 };
 use crate::controller::scale::{
     find_fragment_no_shuffle_dags_detailed, render_fragments, render_jobs,
@@ -133,8 +133,8 @@ mod tests {
         let new_barrier = schedule::NewBarrier {
             database_id: DatabaseId::new(1),
             command: Some((
-                Command::RescheduleFragmentIntent {
-                    intent: RescheduleFragmentIntent::Jobs(HashSet::from([JobId::new(1)])),
+                Command::RescheduleIntent {
+                    intent: RescheduleIntent::Jobs(HashSet::from([JobId::new(1)])),
                 },
                 vec![notifier],
             )),
@@ -203,7 +203,7 @@ async fn resolve_reschedule_intent(
     };
 
     match command {
-        Command::RescheduleFragmentIntent { intent } => {
+        Command::RescheduleIntent { intent } => {
             let span = tracing::info_span!(
                 "resolve_reschedule_intent",
                 database_id = %new_barrier.database_id
@@ -249,7 +249,7 @@ async fn build_reschedule_from_intent(
     worker_nodes: HashMap<WorkerId, WorkerNode>,
     adaptive_parallelism_strategy: AdaptiveParallelismStrategy,
     database_id: DatabaseId,
-    intent: RescheduleFragmentIntent,
+    intent: RescheduleIntent,
 ) -> MetaResult<Option<Command>> {
     if worker_nodes.is_empty() {
         return Err(anyhow!("no active streaming workers for reschedule").into());
@@ -259,7 +259,7 @@ async fn build_reschedule_from_intent(
     let actor_id_counter = env.actor_id_generator();
 
     let rendered = match intent {
-        RescheduleFragmentIntent::Jobs(job_ids) => {
+        RescheduleIntent::Jobs(job_ids) => {
             render_jobs(
                 &txn,
                 actor_id_counter,
@@ -269,7 +269,7 @@ async fn build_reschedule_from_intent(
             )
             .await?
         }
-        RescheduleFragmentIntent::Fragments(fragment_ids) => {
+        RescheduleIntent::Fragments(fragment_ids) => {
             let fragment_ids = fragment_ids.into_iter().collect_vec();
             if fragment_ids.is_empty() {
                 return Ok(None);
@@ -692,7 +692,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                     let database_id = new_barrier.database_id;
                     let new_barrier = if matches!(
                         new_barrier.command,
-                        Some((Command::RescheduleFragmentIntent { .. }, _))
+                        Some((Command::RescheduleIntent { .. }, _))
                     ) {
                         let env = self.env.clone();
                         let worker_nodes = self

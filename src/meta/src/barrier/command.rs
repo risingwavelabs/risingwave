@@ -105,9 +105,9 @@ pub struct Reschedule {
     pub newly_created_actors: HashMap<ActorId, (StreamActorWithDispatchers, WorkerId)>,
 }
 
-/// Intent input for rescheduling fragments. The intent will be resolved inside the barrier worker.
+/// Intent input for rescheduling jobs or fragments. The intent will be resolved inside the barrier worker.
 #[derive(Debug, Clone)]
-pub enum RescheduleFragmentIntent {
+pub enum RescheduleIntent {
     Jobs(HashSet<JobId>),
     Fragments(HashSet<FragmentId>),
 }
@@ -340,8 +340,8 @@ pub enum Command {
 
     /// Intent for rescheduling fragments. It must be resolved inside the barrier worker before
     /// injection.
-    RescheduleFragmentIntent {
-        intent: RescheduleFragmentIntent,
+    RescheduleIntent {
+        intent: RescheduleIntent,
     },
 
     /// `Reschedule` command generates a `Update` barrier by the [`Reschedule`] of each fragment.
@@ -445,7 +445,7 @@ impl std::fmt::Display for Command {
             Command::CreateStreamingJob { info, .. } => {
                 write!(f, "CreateStreamingJob: {}", info.streaming_job)
             }
-            Command::RescheduleFragmentIntent { .. } => write!(f, "RescheduleFragmentIntent"),
+            Command::RescheduleIntent { .. } => write!(f, "RescheduleIntent"),
             Command::RescheduleFragment { .. } => write!(f, "RescheduleFragment"),
             Command::ReplaceStreamJob(plan) => {
                 write!(f, "ReplaceStreamJob: {}", plan.streaming_job)
@@ -581,7 +581,7 @@ impl Command {
 
                 Some((Some((info.streaming_job.id(), cdc_tracker)), changes))
             }
-            Command::RescheduleFragmentIntent { .. } => None,
+            Command::RescheduleIntent { .. } => None,
             Command::RescheduleFragment { reschedules, .. } => Some((
                 None,
                 reschedules
@@ -745,8 +745,8 @@ impl Command {
                     cross_db_snapshot_backfill_info,
                 },
             },
-            Command::RescheduleFragmentIntent { .. } => {
-                PostCollectCommand::Command("RescheduleFragmentIntent".to_owned())
+            Command::RescheduleIntent { .. } => {
+                PostCollectCommand::Command("RescheduleIntent".to_owned())
             }
             Command::RescheduleFragment { reschedules, .. } => {
                 PostCollectCommand::RescheduleFragment { reschedules }
@@ -1189,7 +1189,7 @@ impl Command {
                 )
             }
 
-            Command::RescheduleFragmentIntent { .. } => None,
+            Command::RescheduleIntent { .. } => None,
             Command::RescheduleFragment {
                 reschedules,
                 fragment_actors,

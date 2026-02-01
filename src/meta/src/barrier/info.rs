@@ -1113,7 +1113,7 @@ impl InflightDatabaseInfo {
                 | Command::Pause
                 | Command::Resume
                 | Command::DropStreamingJobs { .. }
-                | Command::RescheduleFragmentIntent { .. }
+                | Command::RescheduleIntent { .. }
                 | Command::RescheduleFragment { .. }
                 | Command::SourceChangeSplit { .. }
                 | Command::Throttle { .. }
