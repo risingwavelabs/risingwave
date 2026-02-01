@@ -105,6 +105,13 @@ pub struct Reschedule {
     pub newly_created_actors: HashMap<ActorId, (StreamActorWithDispatchers, WorkerId)>,
 }
 
+/// Planning input for rescheduling fragments. The plan will be resolved inside the barrier worker.
+#[derive(Debug, Clone)]
+pub enum RescheduleFragmentPlan {
+    Jobs(HashSet<JobId>),
+    Fragments(HashSet<FragmentId>),
+}
+
 /// Replacing an old job with a new one. All actors in the job will be rebuilt.
 ///
 /// Current use cases:
@@ -331,6 +338,12 @@ pub enum Command {
         cross_db_snapshot_backfill_info: SnapshotBackfillInfo,
     },
 
+    /// Plan for rescheduling fragments. It must be resolved inside the barrier worker before
+    /// injection.
+    RescheduleFragmentPlan {
+        plan: RescheduleFragmentPlan,
+    },
+
     /// `Reschedule` command generates a `Update` barrier by the [`Reschedule`] of each fragment.
     /// Mainly used for scaling and migration.
     ///
@@ -432,6 +445,7 @@ impl std::fmt::Display for Command {
             Command::CreateStreamingJob { info, .. } => {
                 write!(f, "CreateStreamingJob: {}", info.streaming_job)
             }
+            Command::RescheduleFragmentPlan { .. } => write!(f, "RescheduleFragmentPlan"),
             Command::RescheduleFragment { .. } => write!(f, "RescheduleFragment"),
             Command::ReplaceStreamJob(plan) => {
                 write!(f, "ReplaceStreamJob: {}", plan.streaming_job)
@@ -567,6 +581,7 @@ impl Command {
 
                 Some((Some((info.streaming_job.id(), cdc_tracker)), changes))
             }
+            Command::RescheduleFragmentPlan { .. } => None,
             Command::RescheduleFragment { reschedules, .. } => Some((
                 None,
                 reschedules
@@ -730,6 +745,9 @@ impl Command {
                     cross_db_snapshot_backfill_info,
                 },
             },
+            Command::RescheduleFragmentPlan { .. } => {
+                PostCollectCommand::Command("RescheduleFragmentPlan".to_owned())
+            }
             Command::RescheduleFragment { reschedules, .. } => {
                 PostCollectCommand::RescheduleFragment { reschedules }
             }
@@ -1171,6 +1189,7 @@ impl Command {
                 )
             }
 
+            Command::RescheduleFragmentPlan { .. } => None,
             Command::RescheduleFragment {
                 reschedules,
                 fragment_actors,
