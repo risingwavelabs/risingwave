@@ -23,11 +23,15 @@ use anyhow::anyhow;
 use arc_swap::ArcSwap;
 use futures::{TryFutureExt, pin_mut};
 use itertools::Itertools;
+use risingwave_common::catalog::DatabaseId;
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::system_param::{AdaptiveParallelismStrategy, PAUSE_ON_NEXT_BOOTSTRAP_KEY};
+use risingwave_meta_model::WorkerId;
+use risingwave_pb::common::WorkerNode;
 use risingwave_pb::meta::Recovery;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::stream_service::streaming_control_stream_response::Response;
+use sea_orm::TransactionTrait;
 use thiserror_ext::AsReport;
 use tokio::select;
 use tokio::sync::mpsc;
@@ -38,6 +42,7 @@ use tracing::{Instrument, debug, error, info, warn};
 use uuid::Uuid;
 
 use crate::barrier::checkpoint::{CheckpointControl, CheckpointControlEvent};
+use crate::barrier::command::RescheduleFragmentPlan;
 use crate::barrier::complete_task::{BarrierCompleteOutput, CompletingTask};
 use crate::barrier::context::recovery::{RenderedDatabaseRuntimeInfo, render_runtime_info};
 use crate::barrier::context::{GlobalBarrierWorkerContext, GlobalBarrierWorkerContextImpl};
@@ -46,8 +51,11 @@ use crate::barrier::rpc::{
 };
 use crate::barrier::schedule::{MarkReadyOptions, PeriodicBarriers};
 use crate::barrier::{
-    BarrierManagerRequest, BarrierManagerStatus, BarrierWorkerRuntimeInfoSnapshot, RecoveryReason,
-    UpdateDatabaseBarrierRequest, schedule,
+    BarrierManagerRequest, BarrierManagerStatus, BarrierWorkerRuntimeInfoSnapshot, Command,
+    RecoveryReason, UpdateDatabaseBarrierRequest, schedule,
+};
+use crate::controller::scale::{
+    find_fragment_no_shuffle_dags_detailed, render_fragments, render_jobs,
 };
 use crate::error::MetaErrorInner;
 use crate::hummock::HummockManagerRef;
@@ -57,7 +65,9 @@ use crate::manager::{
     MetadataManager,
 };
 use crate::rpc::metrics::GLOBAL_META_METRICS;
-use crate::stream::{GlobalRefreshManagerRef, ScaleControllerRef, SourceManagerRef};
+use crate::stream::{
+    GlobalRefreshManagerRef, ScaleControllerRef, SourceManagerRef, build_reschedule_commands,
+};
 use crate::{MetaError, MetaResult};
 
 /// [`crate::barrier::worker::GlobalBarrierWorker`] sends barriers to all registered compute nodes and
@@ -134,6 +144,104 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
             term_id: "uninitialized".into(),
         }
     }
+}
+
+async fn resolve_reschedule_plan(
+    env: MetaSrvEnv,
+    worker_nodes: HashMap<WorkerId, WorkerNode>,
+    adaptive_parallelism_strategy: AdaptiveParallelismStrategy,
+    mut new_barrier: schedule::NewBarrier,
+) -> MetaResult<Option<schedule::NewBarrier>> {
+    let Some((command, notifiers)) = new_barrier.command.take() else {
+        return Ok(Some(new_barrier));
+    };
+
+    match command {
+        Command::RescheduleFragmentPlan { plan } => {
+            let span = tracing::info_span!(
+                "resolve_reschedule_plan",
+                database_id = %new_barrier.database_id
+            );
+            let resolved = build_reschedule_from_plan(
+                &env,
+                worker_nodes,
+                adaptive_parallelism_strategy,
+                new_barrier.database_id,
+                plan,
+            )
+            .instrument(span)
+            .await;
+            match resolved {
+                Ok(Some(command)) => {
+                    new_barrier.command = Some((command, notifiers));
+                    Ok(Some(new_barrier))
+                }
+                Ok(None) => {
+                    for mut notifier in notifiers {
+                        notifier.notify_started();
+                        notifier.notify_collected();
+                    }
+                    Ok(None)
+                }
+                Err(err) => {
+                    for notifier in notifiers {
+                        notifier.notify_start_failed(err.clone());
+                    }
+                    Ok(None)
+                }
+            }
+        }
+        _ => {
+            new_barrier.command = Some((command, notifiers));
+            Ok(Some(new_barrier))
+        }
+    }
+}
+
+async fn build_reschedule_from_plan(
+    env: &MetaSrvEnv,
+    worker_nodes: HashMap<WorkerId, WorkerNode>,
+    adaptive_parallelism_strategy: AdaptiveParallelismStrategy,
+    database_id: DatabaseId,
+    plan: RescheduleFragmentPlan,
+) -> MetaResult<Option<Command>> {
+    if worker_nodes.is_empty() {
+        return Err(anyhow!("no active streaming workers for reschedule").into());
+    }
+
+    let txn = env.meta_store().conn.begin().await?;
+    let actor_id_counter = env.actor_id_generator();
+
+    let rendered = match plan {
+        RescheduleFragmentPlan::Jobs(job_ids) => {
+            render_jobs(
+                &txn,
+                actor_id_counter,
+                job_ids,
+                &worker_nodes,
+                adaptive_parallelism_strategy,
+            )
+            .await?
+        }
+        RescheduleFragmentPlan::Fragments(fragment_ids) => {
+            let fragment_ids = fragment_ids.into_iter().collect_vec();
+            if fragment_ids.is_empty() {
+                return Ok(None);
+            }
+            let ensembles = find_fragment_no_shuffle_dags_detailed(&txn, &fragment_ids).await?;
+            render_fragments(
+                &txn,
+                actor_id_counter,
+                ensembles,
+                &worker_nodes,
+                adaptive_parallelism_strategy,
+            )
+            .await?
+        }
+    };
+
+    let mut commands = build_reschedule_commands(env, &txn, rendered.fragments).await?;
+    Ok(commands.remove(&database_id))
 }
 
 impl GlobalBarrierWorker<GlobalBarrierWorkerContextImpl> {
@@ -536,6 +644,36 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                 }
                 new_barrier = self.periodic_barriers.next_barrier(&*self.context) => {
                     let database_id = new_barrier.database_id;
+                    let new_barrier = if matches!(
+                        new_barrier.command,
+                        Some((Command::RescheduleFragmentPlan { .. }, _))
+                    ) {
+                        let env = self.env.clone();
+                        let worker_nodes = self
+                            .active_streaming_nodes
+                            .current()
+                            .iter()
+                            .map(|(worker_id, worker)| (*worker_id, worker.clone()))
+                            .collect();
+                        let adaptive_parallelism_strategy = self.adaptive_parallelism_strategy;
+                        match resolve_reschedule_plan(
+                            env,
+                            worker_nodes,
+                            adaptive_parallelism_strategy,
+                            new_barrier,
+                        )
+                        .await
+                        {
+                            Ok(Some(new_barrier)) => new_barrier,
+                            Ok(None) => continue,
+                            Err(err) => {
+                                self.failure_recovery(err).await;
+                                continue;
+                            }
+                        }
+                    } else {
+                        new_barrier
+                    };
                     if let Err(e) = self.checkpoint_control.handle_new_barrier(new_barrier, &mut self.control_stream_manager) {
                         if !self.enable_recovery {
                             panic!(

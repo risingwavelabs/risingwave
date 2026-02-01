@@ -31,6 +31,7 @@ mod backfill_order_control;
 pub mod cdc_progress;
 mod checkpoint;
 mod command;
+pub use command::RescheduleFragmentPlan;
 mod complete_task;
 pub(super) mod context;
 mod edge_builder;
