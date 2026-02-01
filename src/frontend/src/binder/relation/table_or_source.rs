@@ -499,7 +499,7 @@ impl Binder {
                 .iter()
                 .map(|c| (c.is_hidden, (&c.column_desc).into())),
             table_name.to_owned(),
-            None,
+            Some(schema_name.to_owned()),
             None,
         )?;
 
