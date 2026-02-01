@@ -266,7 +266,7 @@ impl CheckpointControl {
                         return Ok(());
                     }
                     Command::RescheduleFragment { .. }
-                    | Command::RescheduleFragmentPlan { .. }
+                    | Command::RescheduleFragmentIntent { .. }
                     | Command::ReplaceStreamJob(_)
                     | Command::SourceChangeSplit(_)
                     | Command::Throttle { .. }
@@ -1065,11 +1065,11 @@ impl DatabaseCheckpointControl {
             (None, vec![])
         };
 
-        if let Some(Command::RescheduleFragmentPlan { .. }) = &command {
-            warn!("reschedule plan should be resolved before injection");
+        if let Some(Command::RescheduleFragmentIntent { .. }) = &command {
+            warn!("reschedule intent should be resolved before injection");
             for notifier in notifiers {
                 notifier.notify_start_failed(
-                    anyhow!("reschedule plan must be resolved before injection").into(),
+                    anyhow!("reschedule intent must be resolved before injection").into(),
                 );
             }
             return Ok(());

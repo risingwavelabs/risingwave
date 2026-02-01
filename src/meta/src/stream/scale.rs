@@ -35,7 +35,7 @@ use tokio::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard, oneshot};
 use tokio::task::JoinHandle;
 use tokio::time::{Instant, MissedTickBehavior};
 
-use crate::barrier::{Command, Reschedule, RescheduleFragmentPlan, SharedFragmentInfo};
+use crate::barrier::{Command, Reschedule, RescheduleFragmentIntent, SharedFragmentInfo};
 use crate::controller::scale::{FragmentRenderMap, find_fragment_no_shuffle_dags_detailed};
 use crate::error::bail_invalid_parameter;
 use crate::manager::{ActiveStreamingWorkerNodes, LocalNotification, MetaSrvEnv, MetadataManager};
@@ -165,7 +165,7 @@ impl ScaleController {
         }
 
         let job_ids: HashSet<JobId> = policy.keys().copied().collect();
-        let commands = plan_reschedule_for_jobs(&txn, job_ids).await?;
+        let commands = build_reschedule_intent_for_jobs(&txn, job_ids).await?;
 
         txn.commit().await?;
 
@@ -272,7 +272,7 @@ impl ScaleController {
             .iter()
             .flat_map(|ensemble| ensemble.component_fragments())
             .collect();
-        let commands = plan_reschedule_for_fragments(&txn, target_fragment_ids).await?;
+        let commands = build_reschedule_intent_for_fragments(&txn, target_fragment_ids).await?;
 
         txn.commit().await?;
 
@@ -286,13 +286,13 @@ impl ScaleController {
 
         let inner = self.metadata_manager.catalog_controller.inner.read().await;
         let txn = inner.db.begin().await?;
-        let commands = plan_reschedule_for_jobs(&txn, jobs).await?;
+        let commands = build_reschedule_intent_for_jobs(&txn, jobs).await?;
         txn.commit().await?;
         Ok(commands)
     }
 }
 
-async fn plan_reschedule_for_jobs(
+async fn build_reschedule_intent_for_jobs(
     txn: &impl ConnectionTrait,
     job_ids: HashSet<JobId>,
 ) -> MetaResult<HashMap<DatabaseId, Command>> {
@@ -334,15 +334,15 @@ async fn plan_reschedule_for_jobs(
         .map(|(database_id, job_ids)| {
             (
                 database_id,
-                Command::RescheduleFragmentPlan {
-                    plan: RescheduleFragmentPlan::Jobs(job_ids),
+                Command::RescheduleFragmentIntent {
+                    intent: RescheduleFragmentIntent::Jobs(job_ids),
                 },
             )
         })
         .collect())
 }
 
-async fn plan_reschedule_for_fragments(
+async fn build_reschedule_intent_for_fragments(
     txn: &impl ConnectionTrait,
     fragment_ids: HashSet<FragmentId>,
 ) -> MetaResult<HashMap<DatabaseId, Command>> {
@@ -386,8 +386,8 @@ async fn plan_reschedule_for_fragments(
         .map(|(database_id, fragment_ids)| {
             (
                 database_id,
-                Command::RescheduleFragmentPlan {
-                    plan: RescheduleFragmentPlan::Fragments(fragment_ids),
+                Command::RescheduleFragmentIntent {
+                    intent: RescheduleFragmentIntent::Fragments(fragment_ids),
                 },
             )
         })
