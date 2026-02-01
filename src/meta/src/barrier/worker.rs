@@ -255,7 +255,12 @@ async fn build_reschedule_from_intent(
         return Err(anyhow!("no active streaming workers for reschedule").into());
     }
 
-    let txn = env.meta_store().conn.begin().await?;
+    let txn = env
+        .meta_store()
+        .conn
+        .begin_with_config(None, Some(sea_orm::AccessMode::ReadOnly))
+        .await?;
+    // Read-only transaction; no commit needed.
     let actor_id_counter = env.actor_id_generator();
 
     let rendered = match intent {
