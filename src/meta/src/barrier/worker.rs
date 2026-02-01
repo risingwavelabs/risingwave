@@ -109,6 +109,53 @@ pub(super) struct GlobalBarrierWorker<C> {
     term_id: String,
 }
 
+#[cfg(test)]
+mod tests {
+    use std::collections::{HashMap, HashSet};
+
+    use risingwave_common::id::JobId;
+    use tokio::sync::oneshot;
+
+    use super::*;
+    use crate::barrier::notifier::Notifier;
+
+    #[tokio::test]
+    async fn test_reschedule_intent_without_workers_notifies_start_failed() {
+        let env = MetaSrvEnv::for_test().await;
+        let (started_tx, started_rx) = oneshot::channel();
+        let (_collected_tx, _collected_rx) = oneshot::channel();
+
+        let notifier = Notifier {
+            started: Some(started_tx),
+            collected: Some(_collected_tx),
+        };
+
+        let new_barrier = schedule::NewBarrier {
+            database_id: DatabaseId::new(1),
+            command: Some((
+                Command::RescheduleFragmentIntent {
+                    intent: RescheduleFragmentIntent::Jobs(HashSet::from([JobId::new(1)])),
+                },
+                vec![notifier],
+            )),
+            span: tracing::Span::none(),
+            checkpoint: false,
+        };
+
+        let result = resolve_reschedule_intent(
+            env,
+            HashMap::new(),
+            AdaptiveParallelismStrategy::default(),
+            new_barrier,
+        )
+        .await;
+
+        assert!(matches!(result, Ok(None)));
+        let started = started_rx.await.expect("started notifier dropped");
+        assert!(started.is_err());
+    }
+}
+
 impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
     pub(super) async fn new_inner(
         env: MetaSrvEnv,
