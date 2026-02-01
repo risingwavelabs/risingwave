@@ -35,7 +35,7 @@ use tokio::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard, oneshot};
 use tokio::task::JoinHandle;
 use tokio::time::{Instant, MissedTickBehavior};
 
-use crate::barrier::{Command, Reschedule, RescheduleFragmentIntent, SharedFragmentInfo};
+use crate::barrier::{Command, Reschedule, RescheduleIntent, SharedFragmentInfo};
 use crate::controller::scale::{FragmentRenderMap, find_fragment_no_shuffle_dags_detailed};
 use crate::error::bail_invalid_parameter;
 use crate::manager::{ActiveStreamingWorkerNodes, LocalNotification, MetaSrvEnv, MetadataManager};
@@ -334,8 +334,8 @@ async fn build_reschedule_intent_for_jobs(
         .map(|(database_id, job_ids)| {
             (
                 database_id,
-                Command::RescheduleFragmentIntent {
-                    intent: RescheduleFragmentIntent::Jobs(job_ids),
+                Command::RescheduleIntent {
+                    intent: RescheduleIntent::Jobs(job_ids),
                 },
             )
         })
@@ -386,8 +386,8 @@ async fn build_reschedule_intent_for_fragments(
         .map(|(database_id, fragment_ids)| {
             (
                 database_id,
-                Command::RescheduleFragmentIntent {
-                    intent: RescheduleFragmentIntent::Fragments(fragment_ids),
+                Command::RescheduleIntent {
+                    intent: RescheduleIntent::Fragments(fragment_ids),
                 },
             )
         })

@@ -31,7 +31,7 @@ mod backfill_order_control;
 pub mod cdc_progress;
 mod checkpoint;
 mod command;
-pub use command::RescheduleFragmentIntent;
+pub use command::RescheduleIntent;
 mod complete_task;
 pub(super) mod context;
 mod edge_builder;
