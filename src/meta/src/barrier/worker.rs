@@ -223,6 +223,7 @@ async fn resolve_reschedule_intent(
                     Ok(Some(new_barrier))
                 }
                 Ok(None) => {
+                    // No-op intent: notify to unblock callers even though no barrier is injected.
                     for mut notifier in notifiers {
                         notifier.notify_started();
                         notifier.notify_collected();
@@ -260,7 +261,7 @@ async fn build_reschedule_from_intent(
         .conn
         .begin_with_config(None, Some(sea_orm::AccessMode::ReadOnly))
         .await?;
-    // Read-only transaction; no commit needed.
+    // Read-only transaction; dropping `txn` will rollback and release the snapshot.
     let actor_id_counter = env.actor_id_generator();
 
     let rendered = match intent {

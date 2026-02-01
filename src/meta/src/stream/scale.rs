@@ -394,6 +394,17 @@ async fn build_reschedule_intent_for_fragments(
         .collect())
 }
 
+/// Build a `Reschedule` by diffing the previously materialized fragment state against
+/// the newly rendered actor layout.
+///
+/// This function assumes a full rebuild (no kept actors) and produces:
+/// - actor additions/removals and vnode bitmap updates
+/// - dispatcher updates for upstream/downstream fragments
+/// - updated split assignments for source actors
+///
+/// `upstream_fragments`/`downstream_fragments` describe neighbor fragments and dispatcher types,
+/// while `all_actor_dispatchers` contains the new dispatcher list for each actor. `job_extra_info`
+/// supplies job-level context for building new actors.
 fn diff_fragment(
     prev_fragment_info: &SharedFragmentInfo,
     curr_actors: &HashMap<ActorId, InflightActorInfo>,
