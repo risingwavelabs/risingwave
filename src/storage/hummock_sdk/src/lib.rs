@@ -22,7 +22,7 @@ mod key_cmp;
 use std::borrow::Borrow;
 use std::cmp::Ordering;
 use std::collections::HashMap;
-use std::fmt::{Display, Formatter};
+use std::fmt::{Debug, Display, Formatter};
 use std::ops::{Add, AddAssign, Sub};
 use std::str::FromStr;
 
@@ -31,7 +31,6 @@ use risingwave_common::util::epoch::EPOCH_SPILL_TIME_MASK;
 use risingwave_pb::common::{BatchQueryEpoch, batch_query_epoch};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use sstable_info::SstableInfo;
-use tracing::warn;
 
 use crate::key_range::KeyRangeCommon;
 use crate::table_stats::TableStatsMap;
@@ -63,7 +62,7 @@ use risingwave_pb::hummock::{PbVectorIndexObjectType, VectorIndexObjectType};
 use crate::table_watermark::TableWatermarks;
 use crate::vector_index::VectorIndexAdd;
 
-#[derive(Debug, Eq, PartialEq, Clone, Copy, Hash, Ord, PartialOrd)]
+#[derive(Eq, PartialEq, Clone, Copy, Hash, Ord, PartialOrd)]
 #[cfg_attr(any(test, feature = "test"), derive(Default))]
 pub struct TypedPrimitive<const C: usize, P>(P);
 
@@ -110,6 +109,12 @@ impl<const C: usize, P: Add<Output = P>> Add<P> for TypedPrimitive<C, P> {
 impl<const C: usize, P: AddAssign> AddAssign<P> for TypedPrimitive<C, P> {
     fn add_assign(&mut self, rhs: P) {
         self.0 += rhs;
+    }
+}
+
+impl<const C: usize, P: Debug> Debug for TypedPrimitive<C, P> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self.0)
     }
 }
 
@@ -450,15 +455,7 @@ impl From<BatchQueryEpoch> for HummockReadEpoch {
                 epoch.epoch,
                 HummockVersionId::new(epoch.hummock_version_id),
             ),
-            batch_query_epoch::Epoch::Current(epoch) => {
-                if epoch != HummockEpoch::MAX {
-                    warn!(
-                        epoch,
-                        "ignore specified current epoch and set it to u64::MAX"
-                    );
-                }
-                HummockReadEpoch::NoWait(HummockEpoch::MAX)
-            }
+            batch_query_epoch::Epoch::Current(epoch) => HummockReadEpoch::NoWait(epoch),
             batch_query_epoch::Epoch::Backup(epoch) => HummockReadEpoch::Backup(epoch),
             batch_query_epoch::Epoch::TimeTravel(epoch) => HummockReadEpoch::TimeTravel(epoch),
         }

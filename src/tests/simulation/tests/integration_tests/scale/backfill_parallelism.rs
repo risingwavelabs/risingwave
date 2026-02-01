@@ -155,7 +155,7 @@ async fn test_backfill_parallelism_persists_after_recovery() -> Result<()> {
 
     session.run("create table t(v int);").await?;
     session
-        .run("insert into t select * from generate_series(1, 200);")
+        .run("insert into t select * from generate_series(1, 500);")
         .await?;
     session
         .run("create materialized view m as select * from t;")

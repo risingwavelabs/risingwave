@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::time::Duration;
+
 use risingwave_common_proc_macro::serde_prefix_all;
 
 use super::*;
@@ -25,6 +27,7 @@ pub use join_encoding_type::*;
 pub use over_window::*;
 
 /// The section `[streaming]` in `risingwave.toml`.
+#[serde_with::apply(Option => #[serde(with = "none_as_empty_string")])]
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde, ConfigDoc)]
 pub struct StreamingConfig {
     /// The maximum number of barriers in-flight in the compute nodes.
@@ -41,7 +44,7 @@ pub struct StreamingConfig {
     pub async_stack_trace: AsyncStackTraceOption,
 
     #[serde(default)]
-    #[config_doc(omitted)]
+    #[config_doc(nested)]
     pub developer: StreamingDeveloperConfig,
 
     /// Max unique user stream errors per actor
@@ -61,6 +64,7 @@ pub struct StreamingConfig {
 ///
 /// It is put at [`StreamingConfig::developer`].
 #[serde_prefix_all("stream_", mode = "alias")]
+#[serde_with::apply(Option => #[serde(with = "none_as_empty_string")])]
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde, ConfigDoc)]
 pub struct StreamingDeveloperConfig {
     /// Set to true to enable per-executor row count metrics. This will produce a lot of timeseries
@@ -150,6 +154,13 @@ pub struct StreamingDeveloperConfig {
     /// If true, it's decided by session variable `streaming_use_arrangement_backfill` (default true)
     pub enable_arrangement_backfill: bool,
 
+    #[serde(default = "default::developer::stream_enable_snapshot_backfill")]
+    /// Enable snapshot backfill
+    /// If false, the snapshot backfill will be disabled,
+    /// even if session variable set.
+    /// If true, it's decided by session variable `streaming_use_snapshot_backfill` (default true)
+    pub enable_snapshot_backfill: bool,
+
     #[serde(default = "default::developer::stream_high_join_amplification_threshold")]
     /// If number of hash join matches exceeds this threshold number,
     /// it will be logged.
@@ -198,6 +209,10 @@ pub struct StreamingDeveloperConfig {
 
     #[serde(default)]
     pub compute_client_config: RpcClientConfig,
+
+    /// The interval in seconds to rebuild snapshot iterators during snapshot backfill.
+    #[serde(default = "default::developer::stream_snapshot_iter_rebuild_interval_secs")]
+    pub snapshot_iter_rebuild_interval_secs: u64,
 
     /// `IcebergListExecutor`: The interval in seconds for Iceberg source to list new files.
     #[serde(default = "default::developer::iceberg_list_interval_sec")]
@@ -267,6 +282,21 @@ pub struct StreamingDeveloperConfig {
     #[serde_prefix_all(skip)]
     #[config_doc(omitted)]
     pub unrecognized: Unrecognized<Self>,
+}
+
+impl StreamingDeveloperConfig {
+    pub fn snapshot_iter_rebuild_interval(&self) -> Duration {
+        let rebuild_interval = if self.snapshot_iter_rebuild_interval_secs < 10 {
+            tracing::warn!(
+                "too small rebuild_interval {} second. rewrite to 10",
+                self.snapshot_iter_rebuild_interval_secs
+            );
+            10
+        } else {
+            self.snapshot_iter_rebuild_interval_secs
+        };
+        Duration::from_secs(rebuild_interval)
+    }
 }
 
 impl StreamingConfig {

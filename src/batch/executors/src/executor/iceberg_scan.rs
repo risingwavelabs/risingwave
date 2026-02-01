@@ -108,7 +108,8 @@ impl IcebergScanExecutor {
                     chunk_size: self.chunk_size,
                     need_seq_num: self.need_seq_num,
                     need_file_path_and_pos: self.need_file_path_and_pos,
-                    handle_delete_files: false,
+                    handle_delete_files: table.metadata().format_version()
+                        >= iceberg::spec::FormatVersion::V3,
                 },
                 self.metrics.as_ref().map(|m| m.iceberg_scan_metrics()),
             ) {

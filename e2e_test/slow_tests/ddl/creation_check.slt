@@ -8,8 +8,9 @@ statement ok
 insert into t select 1 from generate_series(1, 10000);
 
 # trigger high barrier latency
+# disable snapshot backfill because high barrier latency in snapshot backfilling jobs won't cause high barrier latency in upstream database
 system ok
-./risedev psql -c 'create materialized view m1 as select x.v1 from t x join t y using(v1);' &
+./risedev psql -c 'set streaming_use_snapshot_backfill = false;create materialized view m1 as select x.v1 from t x join t y using(v1);' &
 
 sleep 1s
 
