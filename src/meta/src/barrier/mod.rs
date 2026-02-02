@@ -24,7 +24,7 @@ use tokio::sync::oneshot::Sender;
 use self::notifier::Notifier;
 use crate::barrier::info::BarrierInfo;
 use crate::manager::ActiveStreamingWorkerNodes;
-use crate::model::{ActorId, FragmentId, StreamActor, SubscriptionId};
+use crate::model::{ActorId, BackfillUpstreamType, FragmentId, StreamActor, SubscriptionId};
 use crate::{MetaError, MetaResult};
 
 mod backfill_order_control;
@@ -109,6 +109,15 @@ pub(crate) struct BackfillProgress {
     pub(crate) backfill_type: PbBackfillType,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct FragmentBackfillProgress {
+    pub(crate) job_id: JobId,
+    pub(crate) fragment_id: FragmentId,
+    pub(crate) consumed_rows: u64,
+    pub(crate) done: bool,
+    pub(crate) upstream_type: BackfillUpstreamType,
+}
+
 pub(crate) struct UpdateDatabaseBarrierRequest {
     pub database_id: DatabaseId,
     pub barrier_interval_ms: Option<u32>,
@@ -118,6 +127,7 @@ pub(crate) struct UpdateDatabaseBarrierRequest {
 
 pub(crate) enum BarrierManagerRequest {
     GetBackfillProgress(Sender<MetaResult<HashMap<JobId, BackfillProgress>>>),
+    GetFragmentBackfillProgress(Sender<MetaResult<Vec<FragmentBackfillProgress>>>),
     GetCdcProgress(Sender<MetaResult<HashMap<JobId, CdcProgress>>>),
     AdhocRecovery(Sender<()>),
     UpdateDatabaseBarrier(UpdateDatabaseBarrierRequest),
