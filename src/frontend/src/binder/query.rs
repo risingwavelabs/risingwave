@@ -377,7 +377,7 @@ impl Binder {
 
             // check if the cte name already exist on BindContext
             if cte_names.contains(&table_name) {
-                return Err(ErrorCode::DuplicatedTableName(format!(
+                return Err(ErrorCode::DuplicateRelationName(format!(
                     "WITH query name \"{}\" specified more than once",
                     table_name
                 ))

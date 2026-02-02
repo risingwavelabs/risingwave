@@ -152,8 +152,8 @@ pub enum ErrorCode {
     SessionNotFound,
     #[error("Item not found: {0}")]
     ItemNotFound(String),
-    #[error("Item not found: {0}")]
-    DuplicatedTableName(String),
+    #[error("Duplicate Relation Name: {0}")]
+    DuplicateRelationName(String),
     #[error("Invalid input syntax: {0}")]
     InvalidInputSyntax(#[message] String),
     #[error("Can not compare in memory: {0}")]
