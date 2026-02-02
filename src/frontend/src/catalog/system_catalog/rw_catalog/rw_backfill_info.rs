@@ -19,6 +19,7 @@ use risingwave_common::util::stream_graph_visitor::{
     visit_stream_node_source_backfill, visit_stream_node_stream_scan,
 };
 use risingwave_frontend_macro::system_catalog;
+use risingwave_pb::id::RelationId;
 use risingwave_pb::meta::FragmentDistribution;
 
 use crate::catalog::system_catalog::SysCatalogReaderImpl;
@@ -31,7 +32,7 @@ struct RwBackfillInfo {
     #[primary_key]
     fragment_id: FragmentId,
     backfill_state_table_id: TableId,
-    backfill_target_relation_id: i32,
+    backfill_target_relation_id: RelationId,
     backfill_type: String,
     backfill_epoch: i64,
 }
@@ -68,7 +69,7 @@ fn extract_stream_scan(fragment_distribution: &FragmentDistribution) -> Option<R
                         .as_ref()
                         .map(|table| table.id)
                         .unwrap_or(TableId::placeholder()),
-                    backfill_target_relation_id: node.upstream_source_id.as_i32_id(),
+                    backfill_target_relation_id: node.upstream_source_id.as_relation_id(),
                     backfill_type: backfill_type.to_string(),
                     backfill_epoch: 0,
                 });
@@ -84,7 +85,7 @@ fn extract_stream_scan(fragment_distribution: &FragmentDistribution) -> Option<R
                         .as_ref()
                         .map(|table| table.id)
                         .unwrap_or(TableId::placeholder()),
-                    backfill_target_relation_id: node.table_id.as_i32_id(),
+                    backfill_target_relation_id: node.table_id.as_relation_id(),
                     backfill_type: backfill_type.to_string(),
                     backfill_epoch: node.snapshot_backfill_epoch() as _,
                 });

@@ -14,7 +14,7 @@
 
 use risingwave_common::types::Fields;
 use risingwave_frontend_macro::system_catalog;
-use risingwave_pb::id::{ObjectId, UserId};
+use risingwave_pb::id::{ObjectId, SchemaId, UserId};
 
 use crate::catalog::OwnedByUserCatalog;
 use crate::catalog::system_catalog::SysCatalogReaderImpl;
@@ -27,7 +27,7 @@ struct PgClass {
     #[primary_key]
     oid: ObjectId,
     relname: String,
-    relnamespace: i32,
+    relnamespace: SchemaId,
     relowner: UserId,
     // p = permanent table, u = unlogged table, t = temporary table
     relpersistence: String,
@@ -55,7 +55,7 @@ fn read_pg_class_info(reader: &SysCatalogReaderImpl) -> Result<Vec<PgClass>> {
                 .map(|table| PgClass {
                     oid: table.id.as_object_id(),
                     relname: table.name.clone(),
-                    relnamespace: table.schema_id.as_i32_id(),
+                    relnamespace: table.schema_id,
                     relowner: table.owner,
                     relpersistence: "p".to_owned(),
                     relkind: "r".to_owned(),
@@ -69,7 +69,7 @@ fn read_pg_class_info(reader: &SysCatalogReaderImpl) -> Result<Vec<PgClass>> {
                 .chain(schema.iter_all_mvs().map(|mview| PgClass {
                     oid: mview.id.as_object_id(),
                     relname: mview.name.clone(),
-                    relnamespace: mview.schema_id.as_i32_id(),
+                    relnamespace: mview.schema_id,
                     relowner: mview.owner,
                     relpersistence: "p".to_owned(),
                     relkind: "m".to_owned(),
@@ -83,7 +83,7 @@ fn read_pg_class_info(reader: &SysCatalogReaderImpl) -> Result<Vec<PgClass>> {
                 .chain(schema.iter_system_tables().map(|table| PgClass {
                     oid: table.id.as_object_id(),
                     relname: table.name.clone(),
-                    relnamespace: schema.id().as_i32_id(),
+                    relnamespace: schema.id(),
                     relowner: table.owner,
                     relpersistence: "p".to_owned(),
                     relkind: "r".to_owned(),
@@ -97,7 +97,7 @@ fn read_pg_class_info(reader: &SysCatalogReaderImpl) -> Result<Vec<PgClass>> {
                 .chain(schema.iter_index().map(|index| PgClass {
                     oid: index.id.as_object_id(),
                     relname: index.name.clone(),
-                    relnamespace: schema.id().as_i32_id(),
+                    relnamespace: schema.id(),
                     relowner: index.owner(),
                     relpersistence: "p".to_owned(),
                     relkind: "i".to_owned(),
@@ -111,7 +111,7 @@ fn read_pg_class_info(reader: &SysCatalogReaderImpl) -> Result<Vec<PgClass>> {
                 .chain(schema.iter_view().map(|view| PgClass {
                     oid: view.id.as_object_id(),
                     relname: view.name.clone(),
-                    relnamespace: schema.id().as_i32_id(),
+                    relnamespace: schema.id(),
                     relowner: view.owner,
                     relpersistence: "p".to_owned(),
                     relkind: "v".to_owned(),
@@ -125,7 +125,7 @@ fn read_pg_class_info(reader: &SysCatalogReaderImpl) -> Result<Vec<PgClass>> {
                 .chain(schema.iter_source().map(|source| PgClass {
                     oid: source.id.as_object_id(),
                     relname: source.name.clone(),
-                    relnamespace: schema.id().as_i32_id(),
+                    relnamespace: schema.id(),
                     relowner: source.owner,
                     relpersistence: "p".to_owned(),
                     relkind: "s".to_owned(), // s for the source in rw.
@@ -139,7 +139,7 @@ fn read_pg_class_info(reader: &SysCatalogReaderImpl) -> Result<Vec<PgClass>> {
                 .chain(schema.iter_sink().map(|sink| PgClass {
                     oid: sink.id.as_object_id(),
                     relname: sink.name.clone(),
-                    relnamespace: schema.id().as_i32_id(),
+                    relnamespace: schema.id(),
                     relowner: sink.owner,
                     relpersistence: "p".to_owned(),
                     relkind: "k".to_owned(), // k for the sink in rw.
@@ -153,7 +153,7 @@ fn read_pg_class_info(reader: &SysCatalogReaderImpl) -> Result<Vec<PgClass>> {
                 .chain(schema.iter_subscription().map(|subscription| PgClass {
                     oid: subscription.id.as_object_id(),
                     relname: subscription.name.clone(),
-                    relnamespace: schema.id().as_i32_id(),
+                    relnamespace: schema.id(),
                     relowner: subscription.owner,
                     relpersistence: "p".to_owned(),
                     relkind: "u".to_owned(), // u for the subscription in rw.
@@ -167,7 +167,7 @@ fn read_pg_class_info(reader: &SysCatalogReaderImpl) -> Result<Vec<PgClass>> {
                 .chain(schema.iter_connections().map(|connection| PgClass {
                     oid: connection.id.as_object_id(),
                     relname: connection.name.clone(),
-                    relnamespace: schema.id().as_i32_id(),
+                    relnamespace: schema.id(),
                     relowner: connection.owner,
                     relpersistence: "p".to_owned(),
                     relkind: "c".to_owned(), // c for the connection in rw.

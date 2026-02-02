@@ -610,6 +610,9 @@ for_all_wrapped_id_fields! (
             actor_splits: ActorId,
             actor_dispatchers: ActorId,
         }
+        BackfillOrder {
+            order: RelationId,
+        }
         CdcFilterNode {
             upstream_source_id: SourceId,
         }

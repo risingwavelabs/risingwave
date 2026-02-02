@@ -307,7 +307,8 @@ declare_id_types!(
     SecretId,
     SubscriberId,
     LocalOperatorId,
-    UserId
+    UserId,
+    RelationId
 );
 
 declare_id_type!(ObjectId, u32, 256);
@@ -526,3 +527,17 @@ impl_object_id_conversion!(
     ConnectionId,
     SecretId
 );
+
+macro_rules! declare_relation {
+    ($($id_name:ident),+) => {
+        $(
+            impl $id_name {
+                pub fn as_relation_id(self) -> RelationId {
+                    RelationId::new(self.0)
+                }
+            }
+        )+
+    };
+}
+
+declare_relation!(TableId, SourceId, SinkId, IndexId, ViewId, SubscriptionId);

@@ -15,6 +15,7 @@
 use risingwave_common::id::UserId;
 use risingwave_common::types::{Fields, Timestamptz};
 use risingwave_frontend_macro::system_catalog;
+use risingwave_pb::id::RelationId;
 use serde_json::json;
 
 use crate::catalog::system_catalog::SysCatalogReaderImpl;
@@ -31,7 +32,7 @@ struct RwRelationInfo {
     relationowner: UserId,
     definition: String,
     relationtype: String,
-    relationid: i32,
+    relationid: RelationId,
     relationtimezone: String, // The timezone used to interpret ambiguous dates/timestamps as tstz
     fragments: Option<String>, // fragments is json encoded fragment infos.
     initialized_at: Option<Timestamptz>,
@@ -108,7 +109,7 @@ async fn read_relation_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwRelat
                         relationowner: t.owner,
                         definition: t.create_sql(),
                         relationtype: "MATERIALIZED VIEW".into(),
-                        relationid: t.id.as_i32_id(),
+                        relationid: t.id.as_relation_id(),
                         relationtimezone: fragments.get_ctx().unwrap().get_timezone().clone(),
                         fragments: Some(json!(fragments.get_fragments()).to_string()),
                         initialized_at: t.initialized_at_epoch.map(|e| e.as_timestamptz()),
@@ -129,7 +130,7 @@ async fn read_relation_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwRelat
                         relationowner: t.owner,
                         definition: t.create_sql_purified(),
                         relationtype: "TABLE".into(),
-                        relationid: t.id.as_i32_id(),
+                        relationid: t.id.as_relation_id(),
                         relationtimezone: fragments.get_ctx().unwrap().get_timezone().clone(),
                         fragments: Some(json!(fragments.get_fragments()).to_string()),
                         initialized_at: t.initialized_at_epoch.map(|e| e.as_timestamptz()),
@@ -150,7 +151,7 @@ async fn read_relation_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwRelat
                         relationowner: t.owner,
                         definition: t.definition.clone(),
                         relationtype: "SINK".into(),
-                        relationid: t.id.as_i32_id(),
+                        relationid: t.id.as_relation_id(),
                         relationtimezone: fragments.get_ctx().unwrap().get_timezone().clone(),
                         fragments: Some(json!(fragments.get_fragments()).to_string()),
                         initialized_at: t.initialized_at_epoch.map(|e| e.as_timestamptz()),
@@ -172,7 +173,7 @@ async fn read_relation_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwRelat
                         relationowner: index_table.owner,
                         definition: index_table.create_sql(),
                         relationtype: "INDEX".into(),
-                        relationid: index_table.id.as_i32_id(),
+                        relationid: index_table.id.as_relation_id(),
                         relationtimezone: fragments.get_ctx().unwrap().get_timezone().clone(),
                         fragments: Some(json!(fragments.get_fragments()).to_string()),
                         initialized_at: t.initialized_at_epoch.map(|e| e.as_timestamptz()),
@@ -204,7 +205,7 @@ async fn read_relation_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwRelat
                     relationowner: t.owner,
                     definition: t.create_sql_purified(),
                     relationtype: "SOURCE".into(),
-                    relationid: t.id.as_i32_id(),
+                    relationid: t.id.as_relation_id(),
                     relationtimezone: timezone,
                     fragments,
                     initialized_at: t.initialized_at_epoch.map(|e| e.as_timestamptz()),
@@ -223,7 +224,7 @@ async fn read_relation_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwRelat
                     relationowner: t.owner,
                     definition: t.definition.clone(),
                     relationtype: "SUBSCRIPTION".into(),
-                    relationid: t.id.as_i32_id(),
+                    relationid: t.id.as_relation_id(),
                     relationtimezone: "".into(),
                     fragments: None,
                     initialized_at: t.initialized_at_epoch.map(|e| e.as_timestamptz()),
