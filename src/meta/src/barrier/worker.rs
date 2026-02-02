@@ -31,7 +31,6 @@ use risingwave_pb::common::WorkerNode;
 use risingwave_pb::meta::Recovery;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::stream_service::streaming_control_stream_response::Response;
-use sea_orm::TransactionTrait;
 use thiserror_ext::AsReport;
 use tokio::select;
 use tokio::sync::mpsc;
@@ -51,11 +50,9 @@ use crate::barrier::rpc::{
 use crate::barrier::schedule::{MarkReadyOptions, PeriodicBarriers};
 use crate::barrier::{
     BarrierManagerRequest, BarrierManagerStatus, BarrierWorkerRuntimeInfoSnapshot, Command,
-    RecoveryReason, RescheduleIntent, UpdateDatabaseBarrierRequest, schedule,
+    RecoveryReason, RescheduleContext, UpdateDatabaseBarrierRequest, schedule,
 };
-use crate::controller::scale::{
-    find_fragment_no_shuffle_dags_detailed, render_fragments, render_jobs,
-};
+use crate::controller::scale::render_actor_assignments;
 use crate::error::MetaErrorInner;
 use crate::hummock::HummockManagerRef;
 use crate::manager::sink_coordination::SinkCoordinatorManager;
@@ -111,12 +108,12 @@ pub(super) struct GlobalBarrierWorker<C> {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::{HashMap, HashSet};
+    use std::collections::HashMap;
 
-    use risingwave_common::id::JobId;
     use tokio::sync::oneshot;
 
     use super::*;
+    use crate::barrier::RescheduleContext;
     use crate::barrier::notifier::Notifier;
 
     #[tokio::test]
@@ -134,7 +131,7 @@ mod tests {
             database_id: DatabaseId::new(1),
             command: Some((
                 Command::RescheduleIntent {
-                    intent: RescheduleIntent::Jobs(HashSet::from([JobId::new(1)])),
+                    context: RescheduleContext::empty(),
                 },
                 vec![notifier],
             )),
@@ -147,8 +144,7 @@ mod tests {
             HashMap::new(),
             AdaptiveParallelismStrategy::default(),
             new_barrier,
-        )
-        .await;
+        );
 
         assert!(matches!(result, Ok(None)));
         let started = started_rx.await.expect("started notifier dropped");
@@ -192,7 +188,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
     }
 }
 
-async fn resolve_reschedule_intent(
+fn resolve_reschedule_intent(
     env: MetaSrvEnv,
     worker_nodes: HashMap<WorkerId, WorkerNode>,
     adaptive_parallelism_strategy: AdaptiveParallelismStrategy,
@@ -203,20 +199,21 @@ async fn resolve_reschedule_intent(
     };
 
     match command {
-        Command::RescheduleIntent { intent } => {
+        Command::RescheduleIntent { context } => {
             let span = tracing::info_span!(
                 "resolve_reschedule_intent",
                 database_id = %new_barrier.database_id
             );
-            let resolved = build_reschedule_from_intent(
-                &env,
-                worker_nodes,
-                adaptive_parallelism_strategy,
-                new_barrier.database_id,
-                intent,
-            )
-            .instrument(span)
-            .await;
+            let resolved = {
+                let _guard = span.enter();
+                build_reschedule_from_context(
+                    &env,
+                    worker_nodes,
+                    adaptive_parallelism_strategy,
+                    new_barrier.database_id,
+                    context,
+                )
+            };
             match resolved {
                 Ok(Some(command)) => {
                     new_barrier.command = Some((command, notifiers));
@@ -245,54 +242,30 @@ async fn resolve_reschedule_intent(
     }
 }
 
-async fn build_reschedule_from_intent(
+fn build_reschedule_from_context(
     env: &MetaSrvEnv,
     worker_nodes: HashMap<WorkerId, WorkerNode>,
     adaptive_parallelism_strategy: AdaptiveParallelismStrategy,
     database_id: DatabaseId,
-    intent: RescheduleIntent,
+    context: RescheduleContext,
 ) -> MetaResult<Option<Command>> {
     if worker_nodes.is_empty() {
         return Err(anyhow!("no active streaming workers for reschedule").into());
     }
 
-    let txn = env
-        .meta_store()
-        .conn
-        .begin_with_config(None, Some(sea_orm::AccessMode::ReadOnly))
-        .await?;
-    // Read-only transaction; dropping `txn` will rollback and release the snapshot.
     let actor_id_counter = env.actor_id_generator();
+    if context.is_empty() {
+        return Ok(None);
+    }
 
-    let rendered = match intent {
-        RescheduleIntent::Jobs(job_ids) => {
-            render_jobs(
-                &txn,
-                actor_id_counter,
-                job_ids,
-                &worker_nodes,
-                adaptive_parallelism_strategy,
-            )
-            .await?
-        }
-        RescheduleIntent::Fragments(fragment_ids) => {
-            let fragment_ids = fragment_ids.into_iter().collect_vec();
-            if fragment_ids.is_empty() {
-                return Ok(None);
-            }
-            let ensembles = find_fragment_no_shuffle_dags_detailed(&txn, &fragment_ids).await?;
-            render_fragments(
-                &txn,
-                actor_id_counter,
-                ensembles,
-                &worker_nodes,
-                adaptive_parallelism_strategy,
-            )
-            .await?
-        }
-    };
+    let rendered = render_actor_assignments(
+        actor_id_counter,
+        &worker_nodes,
+        adaptive_parallelism_strategy,
+        &context.loaded,
+    )?;
 
-    let mut commands = build_reschedule_commands(env, &txn, rendered.fragments).await?;
+    let mut commands = build_reschedule_commands(env, rendered.fragments, context)?;
     Ok(commands.remove(&database_id))
 }
 
@@ -713,9 +686,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                             worker_nodes,
                             adaptive_parallelism_strategy,
                             new_barrier,
-                        )
-                        .await
-                        {
+                        ) {
                             Ok(Some(new_barrier)) => new_barrier,
                             Ok(None) => continue,
                             Err(err) => {

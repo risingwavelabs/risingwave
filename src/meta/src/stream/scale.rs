@@ -35,8 +35,11 @@ use tokio::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard, oneshot};
 use tokio::task::JoinHandle;
 use tokio::time::{Instant, MissedTickBehavior};
 
-use crate::barrier::{Command, Reschedule, RescheduleIntent, SharedFragmentInfo};
-use crate::controller::scale::{FragmentRenderMap, find_fragment_no_shuffle_dags_detailed};
+use crate::barrier::{Command, Reschedule, RescheduleContext, SharedFragmentInfo};
+use crate::controller::scale::{
+    FragmentRenderMap, LoadedFragmentContext, NoShuffleEnsemble,
+    find_fragment_no_shuffle_dags_detailed, load_fragment_context, load_fragment_context_for_jobs,
+};
 use crate::error::bail_invalid_parameter;
 use crate::manager::{ActiveStreamingWorkerNodes, LocalNotification, MetaSrvEnv, MetadataManager};
 use crate::model::{ActorId, FragmentId, StreamActor, StreamActorWithDispatchers};
@@ -321,25 +324,24 @@ async fn build_reschedule_intent_for_jobs(
         ));
     }
 
-    let mut commands = HashMap::new();
-    for (database_id, job_id) in database_jobs {
-        commands
-            .entry(database_id)
-            .or_insert_with(HashSet::new)
-            .insert(job_id);
+    let reschedule_context = load_reschedule_context_for_jobs(txn, job_ids).await?;
+    if reschedule_context.is_empty() {
+        return Ok(HashMap::new());
     }
 
-    Ok(commands
+    let database_ids: HashSet<DatabaseId> = database_jobs
         .into_iter()
-        .map(|(database_id, job_ids)| {
-            (
-                database_id,
-                Command::RescheduleIntent {
-                    intent: RescheduleIntent::Jobs(job_ids),
-                },
-            )
-        })
-        .collect())
+        .map(|(database_id, _)| database_id)
+        .collect();
+
+    let mut commands = HashMap::new();
+    for database_id in database_ids {
+        if let Some(context) = reschedule_context.for_database(database_id) {
+            commands.insert(database_id, Command::RescheduleIntent { context });
+        }
+    }
+
+    Ok(commands)
 }
 
 async fn build_reschedule_intent_for_fragments(
@@ -373,25 +375,104 @@ async fn build_reschedule_intent_for_fragments(
         ));
     }
 
-    let mut commands = HashMap::new();
-    for (fragment_id, database_id) in fragment_databases {
-        commands
-            .entry(database_id)
-            .or_insert_with(HashSet::new)
-            .insert(fragment_id);
+    let ensembles = find_fragment_no_shuffle_dags_detailed(txn, &fragment_id_list).await?;
+    let reschedule_context = load_reschedule_context_for_ensembles(txn, ensembles).await?;
+    if reschedule_context.is_empty() {
+        return Ok(HashMap::new());
     }
 
-    Ok(commands
+    let database_ids: HashSet<DatabaseId> = fragment_databases
         .into_iter()
-        .map(|(database_id, fragment_ids)| {
-            (
-                database_id,
-                Command::RescheduleIntent {
-                    intent: RescheduleIntent::Fragments(fragment_ids),
-                },
-            )
-        })
-        .collect())
+        .map(|(_, database_id)| database_id)
+        .collect();
+
+    let mut commands = HashMap::new();
+    for database_id in database_ids {
+        if let Some(context) = reschedule_context.for_database(database_id) {
+            commands.insert(database_id, Command::RescheduleIntent { context });
+        }
+    }
+
+    Ok(commands)
+}
+
+async fn load_reschedule_context_for_jobs(
+    txn: &impl ConnectionTrait,
+    job_ids: HashSet<JobId>,
+) -> MetaResult<RescheduleContext> {
+    let loaded = load_fragment_context_for_jobs(txn, job_ids).await?;
+    build_reschedule_context_from_loaded(txn, loaded).await
+}
+
+async fn load_reschedule_context_for_ensembles(
+    txn: &impl ConnectionTrait,
+    ensembles: Vec<NoShuffleEnsemble>,
+) -> MetaResult<RescheduleContext> {
+    let loaded = load_fragment_context(txn, ensembles).await?;
+    build_reschedule_context_from_loaded(txn, loaded).await
+}
+
+async fn build_reschedule_context_from_loaded(
+    txn: &impl ConnectionTrait,
+    loaded: LoadedFragmentContext,
+) -> MetaResult<RescheduleContext> {
+    if loaded.is_empty() {
+        return Ok(RescheduleContext::empty());
+    }
+
+    let job_ids = loaded.job_map.keys().copied().collect_vec();
+    let job_extra_info = get_streaming_job_extra_info(txn, job_ids).await?;
+
+    let fragment_ids = loaded
+        .job_fragments
+        .values()
+        .flat_map(|fragments| fragments.keys().copied())
+        .collect_vec();
+
+    let upstreams: Vec<(FragmentId, FragmentId, DispatcherType)> = FragmentRelation::find()
+        .select_only()
+        .columns([
+            fragment_relation::Column::TargetFragmentId,
+            fragment_relation::Column::SourceFragmentId,
+            fragment_relation::Column::DispatcherType,
+        ])
+        .filter(fragment_relation::Column::TargetFragmentId.is_in(fragment_ids.clone()))
+        .into_tuple()
+        .all(txn)
+        .await?;
+
+    let mut upstream_fragments = HashMap::new();
+    for (fragment, upstream, dispatcher) in upstreams {
+        upstream_fragments
+            .entry(fragment as FragmentId)
+            .or_insert(HashMap::new())
+            .insert(upstream as FragmentId, dispatcher);
+    }
+
+    let downstreams = FragmentRelation::find()
+        .filter(fragment_relation::Column::SourceFragmentId.is_in(fragment_ids.clone()))
+        .all(txn)
+        .await?;
+
+    let mut downstream_fragments = HashMap::new();
+    let mut downstream_relations = HashMap::new();
+    for relation in downstreams {
+        let source_fragment_id = relation.source_fragment_id as FragmentId;
+        let target_fragment_id = relation.target_fragment_id as FragmentId;
+        downstream_fragments
+            .entry(source_fragment_id)
+            .or_insert(HashMap::new())
+            .insert(target_fragment_id, relation.dispatcher_type);
+        downstream_relations.insert((source_fragment_id, target_fragment_id), relation);
+    }
+
+    Ok(RescheduleContext {
+        loaded,
+        job_extra_info,
+        upstream_fragments,
+        downstream_fragments,
+        downstream_relations,
+    })
 }
 
 /// Build a `Reschedule` by diffing the previously materialized fragment state against
@@ -539,21 +620,22 @@ fn diff_fragment(
     Ok(reschedule)
 }
 
-pub(crate) async fn build_reschedule_commands(
+pub(crate) fn build_reschedule_commands(
     env: &MetaSrvEnv,
-    txn: &impl ConnectionTrait,
     render_result: FragmentRenderMap,
+    context: RescheduleContext,
 ) -> MetaResult<HashMap<DatabaseId, Command>> {
     if render_result.is_empty() {
         return Ok(HashMap::new());
     }
 
-    let job_ids = render_result
-        .values()
-        .flat_map(|jobs| jobs.keys().copied())
-        .collect_vec();
-
-    let job_extra_info = get_streaming_job_extra_info(txn, job_ids).await?;
+    let RescheduleContext {
+        job_extra_info,
+        upstream_fragments: mut all_upstream_fragments,
+        downstream_fragments: mut all_downstream_fragments,
+        mut downstream_relations,
+        ..
+    } = context;
 
     let fragment_ids = render_result
         .values()
@@ -561,52 +643,6 @@ pub(crate) async fn build_reschedule_commands(
         .flatten()
         .map(|(fragment_id, _)| *fragment_id)
         .collect_vec();
-
-    let upstreams: Vec<(
-        risingwave_meta_model::FragmentId,
-        risingwave_meta_model::FragmentId,
-        DispatcherType,
-    )> = FragmentRelation::find()
-        .select_only()
-        .columns([
-            fragment_relation::Column::TargetFragmentId,
-            fragment_relation::Column::SourceFragmentId,
-            fragment_relation::Column::DispatcherType,
-        ])
-        .filter(fragment_relation::Column::TargetFragmentId.is_in(fragment_ids.clone()))
-        .into_tuple()
-        .all(txn)
-        .await?;
-
-    let downstreams = FragmentRelation::find()
-        .filter(fragment_relation::Column::SourceFragmentId.is_in(fragment_ids.clone()))
-        .all(txn)
-        .await?;
-
-    let mut all_upstream_fragments = HashMap::new();
-
-    for (fragment, upstream, dispatcher) in upstreams {
-        let fragment_id = fragment as FragmentId;
-        let upstream_id = upstream as FragmentId;
-        all_upstream_fragments
-            .entry(fragment_id)
-            .or_insert(HashMap::new())
-            .insert(upstream_id, dispatcher);
-    }
-
-    let mut all_downstream_fragments = HashMap::new();
-
-    let mut downstream_relations = HashMap::new();
-    for relation in downstreams {
-        let source_fragment_id = relation.source_fragment_id as FragmentId;
-        let target_fragment_id = relation.target_fragment_id as FragmentId;
-        all_downstream_fragments
-            .entry(source_fragment_id)
-            .or_insert(HashMap::new())
-            .insert(target_fragment_id, relation.dispatcher_type);
-
-        downstream_relations.insert((source_fragment_id, target_fragment_id), relation);
-    }
 
     let all_related_fragment_ids: HashSet<_> = fragment_ids
         .iter()
