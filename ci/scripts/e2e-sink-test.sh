@@ -61,10 +61,12 @@ RUST_LOG="await_tree::future=error" risedev ci-start ci-1cn-1fe-jdbc-to-native
 
 echo "--- test sink: jdbc:postgres switch to postgres native"
 # check sink destination postgres
-risedev slt './e2e_test/sink/remote/jdbc.load.slt'
+risedev slt './e2e_test/sink/remote/jdbc.create.slt'
+risedev slt './e2e_test/sink/remote/jdbc.write.slt'
 sleep 1
 SLT_PASSWORD=$PGPASSWORD sqllogictest -h db -p 5432 -d test './e2e_test/sink/remote/jdbc.check.pg.slt' --label 'pg-native'
 sleep 1
+risedev slt './e2e_test/sink/remote/jdbc.cleanup.slt'
 
 echo "--- killing risingwave cluster: ci-1cn-1fe-switch-to-pg-native"
 risedev ci-kill
@@ -106,10 +108,12 @@ prepare_pg
 echo "--- testing remote sinks"
 
 # check sink destination postgres
-risedev slt './e2e_test/sink/remote/jdbc.load.slt'
+risedev slt './e2e_test/sink/remote/jdbc.create.slt'
+risedev slt './e2e_test/sink/remote/jdbc.write.slt'
 sleep 1
 SLT_PASSWORD=$PGPASSWORD sqllogictest -h db -p 5432 -d test './e2e_test/sink/remote/jdbc.check.pg.slt' --label 'jdbc'
 sleep 1
+risedev slt './e2e_test/sink/remote/jdbc.cleanup.slt'
 
 # check sink destination mysql using shell
 diff -u ./e2e_test/sink/remote/mysql_expected_result_0.tsv \

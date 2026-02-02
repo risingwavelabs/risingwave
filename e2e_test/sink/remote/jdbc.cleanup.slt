@@ -1,0 +1,32 @@
+statement ok
+DROP SINK s_postgres_0;
+
+statement ok
+DROP SINK s_postgres_1;
+
+statement ok
+DROP SINK s2_postgres;
+
+statement ok
+DROP SINK s2_mysql;
+
+statement ok
+DROP SINK s_mysql_0;
+
+statement ok
+DROP SINK s_mysql_1;
+
+statement ok
+DROP MATERIALIZED VIEW mv_remote_0;
+
+statement ok
+DROP MATERIALIZED VIEW mv_remote_1;
+
+statement ok
+DROP TABLE t_remote_0;
+
+statement ok
+DROP TABLE t_remote_1;
+
+statement ok
+DROP TABLE rw_typed_data;
