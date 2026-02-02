@@ -327,6 +327,9 @@ for_all_wrapped_id_fields! (
         GetTablesResponse {
             tables: TableId,
         }
+        ReplaceSinkRequest {
+            dependencies: ObjectId,
+        }
         ResetSourceRequest {
             source_id: SourceId,
         }
