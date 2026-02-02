@@ -516,6 +516,19 @@ mod tests {
             (ADAPTIVE_PARALLELISM_STRATEGY_KEY, "Auto"),
             (PER_DATABASE_ISOLATION_KEY, "true"),
             (ENFORCE_SECRET_KEY, "false"),
+            (STREAMING_PARALLELISM_FOR_TABLE_KEY, "2"),
+            (STREAMING_PARALLELISM_FOR_MATERIALIZED_VIEW_KEY, "2"),
+            (STREAMING_PARALLELISM_FOR_SINK_KEY, "2"),
+            (STREAMING_PARALLELISM_FOR_SOURCE_KEY, "2"),
+            (STREAMING_PARALLELISM_FOR_INDEX_KEY, "2"),
+            (ADAPTIVE_PARALLELISM_STRATEGY_FOR_TABLE_KEY, "Auto"),
+            (
+                ADAPTIVE_PARALLELISM_STRATEGY_FOR_MATERIALIZED_VIEW_KEY,
+                "Auto",
+            ),
+            (ADAPTIVE_PARALLELISM_STRATEGY_FOR_SINK_KEY, "Auto"),
+            (ADAPTIVE_PARALLELISM_STRATEGY_FOR_SOURCE_KEY, "Auto"),
+            (ADAPTIVE_PARALLELISM_STRATEGY_FOR_INDEX_KEY, "Auto"),
             ("a_deprecated_param", "foo"),
         ];
 
