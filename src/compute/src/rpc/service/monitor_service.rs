@@ -19,7 +19,7 @@ use foyer::{HybridCache, TracingOptions};
 use prometheus::core::Collector;
 use prometheus::proto::Metric;
 use risingwave_common::config::{MetricLevel, ServerConfig};
-use risingwave_common_service::ProfileServiceImpl;
+use risingwave_common_heap_profiling::ProfileServiceImpl;
 use risingwave_hummock_sdk::HummockSstableObjectId;
 use risingwave_jni_core::jvm_runtime::dump_jvm_stack_traces;
 use risingwave_pb::monitor_service::monitor_service_server::MonitorService;

@@ -116,6 +116,269 @@ SELECT COUNT(*) FROM t;
 statement ok
 DROP TABLE t;
 
+# ==================== DataFusion Native Aggregate Functions ====================
+
+statement ok
+CREATE TABLE agg_test (
+    grp INT,
+    val_int INT,
+    val_bigint BIGINT,
+    val_float FLOAT,
+    val_double DOUBLE,
+    val_bool BOOLEAN,
+) WITH (commit_checkpoint_interval = 1) ENGINE = iceberg;
+
+statement ok
+INSERT INTO agg_test VALUES
+    (1, 10, 100, 1.5, 10.5, true),
+    (1, 20, 200, 2.5, 20.5, true),
+    (1, 30, 300, 3.5, 30.5, false),
+    (2, 5, 50, 0.5, 5.5, false),
+    (2, 15, 150, 1.0, 15.0, true),
+    (2, NULL, NULL, NULL, NULL, NULL);
+
+statement ok
+FLUSH;
+
+sleep 5s
+
+# ==================== SUM Aggregate Tests ====================
+
+query ???
+SELECT grp, sum(val_int), sum(val_bigint)
+FROM agg_test
+GROUP BY grp
+ORDER BY grp;
+----
+1 60 600
+2 20 200
+
+# ==================== MIN/MAX Aggregate Tests ====================
+
+query ????
+SELECT grp, min(val_int), max(val_int), min(val_float)
+FROM agg_test
+GROUP BY grp
+ORDER BY grp;
+----
+1 10 30 1.5
+2 5 15 0.5
+
+# ==================== COUNT Aggregate Tests ====================
+# count(*) and count(column)
+
+query ???
+SELECT grp, count(*), count(val_int)
+FROM agg_test
+GROUP BY grp
+ORDER BY grp;
+----
+1 3 3
+2 3 2
+
+# ==================== AVG Aggregate Tests ====================
+
+query ???
+SELECT grp, avg(val_int), avg(val_float)
+FROM agg_test
+GROUP BY grp
+ORDER BY grp;
+----
+1 20.00000000000000 2.5
+2 10.00000000000000 0.75
+
+# ==================== Variance Tests ====================
+# var_pop(column) and var_samp(column)
+
+query ??
+SELECT grp, var_pop(val_int)
+FROM agg_test
+GROUP BY grp
+ORDER BY grp;
+----
+1 66.66666666666666
+2 25.00000000000000
+
+query ??
+SELECT grp, var_samp(val_int)
+FROM agg_test
+GROUP BY grp
+ORDER BY grp;
+----
+1 100.00000000000000
+2 50.00000000000000
+
+# ==================== Standard Deviation Tests ====================
+# stddev_pop(column) and stddev_samp(column)
+
+query ??
+SELECT grp, stddev_pop(val_int)
+FROM agg_test
+GROUP BY grp
+ORDER BY grp;
+----
+1 8.164965809277259
+2 5.000000000000000
+
+query ??
+SELECT grp, stddev_samp(val_int)
+FROM agg_test
+GROUP BY grp
+ORDER BY grp;
+----
+1 10.000000000000000
+2 7.071067811865476
+
+# ==================== Bitwise Aggregate Tests ====================
+# bit_and(column), bit_or(column), bit_xor(column)
+
+query ???
+SELECT grp, bit_and(val_int), bit_or(val_int), bit_xor(val_int)
+FROM agg_test
+GROUP BY grp
+ORDER BY grp;
+----
+1 0 30 0
+2 5 15 10
+
+# ==================== Boolean Aggregate Tests ====================
+# bool_and(column) and bool_or(column)
+
+query ??
+SELECT grp, bool_and(val_bool), bool_or(val_bool)
+FROM agg_test
+GROUP BY grp
+ORDER BY grp;
+----
+1 f t
+2 f t
+
+# ==================== First/Last Value Tests ====================
+# first_value(column ORDER BY ...) and last_value(column ORDER BY ...)
+
+query ??
+SELECT grp, first_value(val_int ORDER BY val_int), last_value(val_int ORDER BY val_int)
+FROM agg_test
+GROUP BY grp
+ORDER BY grp;
+----
+1 10 30
+2 5 NULL
+
+# ==================== Array Aggregate Tests ====================
+# array_agg(column ORDER BY ...)
+
+query ?
+SELECT array_agg(val_int ORDER BY val_int)
+FROM agg_test
+WHERE grp = 1;
+----
+{10,20,30}
+
+query ?
+SELECT array_agg(val_int ORDER BY val_int DESC)
+FROM agg_test
+WHERE grp = 1;
+----
+{30,20,10}
+
+# Test array_agg with NULLs
+query ?
+SELECT array_agg(val_int ORDER BY val_int)
+FROM agg_test
+WHERE grp = 2;
+----
+{5,15,NULL}
+
+# ==================== DISTINCT Modifier Tests ====================
+
+statement ok
+INSERT INTO agg_test VALUES
+    (3, 1, 10, 1.0, 1.0, true),
+    (3, 1, 10, 1.0, 1.0, true),
+    (3, 2, 20, 2.0, 2.0, false);
+
+statement ok
+FLUSH;
+
+sleep 3s
+
+query ??
+SELECT count(val_int), count(DISTINCT val_int)
+FROM agg_test
+WHERE grp = 3;
+----
+3 2
+
+query ??
+SELECT sum(val_int), sum(DISTINCT val_int)
+FROM agg_test
+WHERE grp = 3;
+----
+4 3
+
+# ==================== FILTER Clause Tests ====================
+
+query ??
+SELECT
+    sum(val_int),
+    sum(val_int) FILTER (WHERE val_bool = true)
+FROM agg_test
+WHERE grp = 1;
+----
+60 30
+
+query ??
+SELECT
+    count(*),
+    count(*) FILTER (WHERE val_int > 10)
+FROM agg_test
+WHERE grp = 1;
+----
+3 2
+
+# ==================== Multiple Aggregates Tests ====================
+
+query ???????
+SELECT
+    grp,
+    sum(val_int),
+    avg(val_float),
+    min(val_int),
+    max(val_int),
+    count(*),
+    bool_or(val_bool)
+FROM agg_test
+WHERE grp <= 2
+GROUP BY grp
+ORDER BY grp;
+----
+1 60 2.5 10 30 3 t
+2 20 0.75 5 15 3 t
+
+# ==================== Aggregates with Expressions Tests ====================
+
+query ??
+SELECT
+    sum(val_int * 2),
+    avg(val_float + val_double)
+FROM agg_test
+WHERE grp = 1;
+----
+120 23
+
+# ==================== Empty Result Set Tests ====================
+
+query ?????
+SELECT sum(val_int), avg(val_float), min(val_int), max(val_int), count(*)
+FROM agg_test
+WHERE grp = 999;
+----
+NULL NULL NULL NULL 0
+
+statement ok
+DROP TABLE agg_test;
+
 statement ok
 DROP CONNECTION my_conn;
 

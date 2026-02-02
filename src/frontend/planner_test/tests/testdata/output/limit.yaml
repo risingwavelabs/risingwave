@@ -141,7 +141,7 @@
           └─StreamSimpleAgg [append_only] { aggs: [sum0(count), count] }
             └─StreamExchange { dist: Single }
               └─StreamStatelessSimpleAgg { aggs: [count] }
-                └─StreamTableScan { table: t, columns: [t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+                └─StreamTableScan { table: t, columns: [t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - sql: |
     create table t (a int);
     select count(*) from t order by 1 limit 1;
@@ -165,7 +165,7 @@
           └─StreamSimpleAgg [append_only] { aggs: [sum0(count), count] }
             └─StreamExchange { dist: Single }
               └─StreamStatelessSimpleAgg { aggs: [count] }
-                └─StreamTableScan { table: t, columns: [t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+                └─StreamTableScan { table: t, columns: [t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - sql: |
     create table t (a int primary key);
     select * from t limit 1;
@@ -181,7 +181,7 @@
         └─StreamExchange { dist: Single }
           └─StreamGroupTopN { order: [t.a ASC], limit: 1, offset: 0, group_key: [_vnode] }
             └─StreamProject { exprs: [t.a, Vnode(t.a) as _vnode] }
-              └─StreamTableScan { table: t, columns: [t.a], stream_scan_type: ArrangementBackfill, stream_key: [t.a], pk: [a], dist: UpstreamHashShard(t.a) }
+              └─StreamTableScan { table: t, columns: [t.a], stream_scan_type: SnapshotBackfill, stream_key: [t.a], pk: [a], dist: UpstreamHashShard(t.a) }
 - sql: |
     -- Regression test: column pruning may remove all output columns of the input of LIMIT.
     -- `LogicalLimit` will be rewritten to `LogicalTopN` for streaming queries, and should not panic
@@ -195,4 +195,4 @@
         └─StreamExchange { dist: Single }
           └─StreamGroupTopN { order: [], limit: 10, offset: 0, group_key: [_vnode] }
             └─StreamProject { exprs: [t._row_id, Vnode(t._row_id) as _vnode] }
-              └─StreamTableScan { table: t, columns: [t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+              └─StreamTableScan { table: t, columns: [t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }

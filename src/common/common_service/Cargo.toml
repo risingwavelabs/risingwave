@@ -11,20 +11,15 @@ repository = { workspace = true }
 async-trait = "0.1"
 axum = { workspace = true }
 axum-extra = { workspace = true, features = ["query"] }
-chrono = { workspace = true }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 http = "1"
-itertools = { workspace = true }
-pprof = { version = "0.15", features = ["flamegraph"] }
 prometheus = { version = "0.14" }
 risingwave_common = { workspace = true }
-risingwave_common_heap_profiling = { workspace = true }
 risingwave_pb = { workspace = true }
 risingwave_rpc_client = { workspace = true }
 serde = { workspace = true }
 thiserror = { workspace = true }
 thiserror-ext = { workspace = true }
-tikv-jemalloc-ctl = { workspace = true }
 tokio = { version = "0.2", package = "madsim-tokio", features = ["rt", "rt-multi-thread", "sync", "macros", "time", "signal"] }
 tonic = { workspace = true }
 tower = { version = "0.5", features = ["util", "load-shed"] }

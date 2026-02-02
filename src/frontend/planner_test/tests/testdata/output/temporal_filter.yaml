@@ -8,7 +8,7 @@
     └─StreamProject { exprs: [t1.ts, t1._row_id] }
       └─StreamDynamicFilter { predicate: ($expr1 > now), output_watermarks: [[$expr1]], output: [t1.ts, $expr1, t1._row_id], cleaned_by_watermark: true }
         ├─StreamProject { exprs: [t1.ts, AddWithTimeZone(t1.ts, '01:00:00':Interval, 'UTC':Varchar) as $expr1, t1._row_id] }
-        │ └─StreamTableScan { table: t1, columns: [t1.ts, t1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
+        │ └─StreamTableScan { table: t1, columns: [t1.ts, t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
         └─StreamExchange { dist: Broadcast }
           └─StreamNow { output: [now] }
 - name: Temporal filter works on complex columns on LHS (part 2)
@@ -20,7 +20,7 @@
     └─StreamProject { exprs: [t1.ts, t1.time_to_live, t1._row_id] }
       └─StreamDynamicFilter { predicate: ($expr1 > now), output_watermarks: [[$expr1]], output: [t1.ts, t1.time_to_live, $expr1, t1._row_id], cleaned_by_watermark: true }
         ├─StreamProject { exprs: [t1.ts, t1.time_to_live, AddWithTimeZone(t1.ts, (t1.time_to_live * 1.5:Decimal), 'UTC':Varchar) as $expr1, t1._row_id] }
-        │ └─StreamTableScan { table: t1, columns: [t1.ts, t1.time_to_live, t1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
+        │ └─StreamTableScan { table: t1, columns: [t1.ts, t1.time_to_live, t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
         └─StreamExchange { dist: Broadcast }
           └─StreamNow { output: [now] }
 - name: Temporal filter works on complex columns on LHS (part 2, flipped)
@@ -32,7 +32,7 @@
     └─StreamProject { exprs: [t1.ts, t1.additional_time_to_live, t1._row_id] }
       └─StreamDynamicFilter { predicate: ($expr1 > $expr2), output_watermarks: [[$expr1]], output: [t1.ts, t1.additional_time_to_live, $expr1, t1._row_id], cleaned_by_watermark: true }
         ├─StreamProject { exprs: [t1.ts, t1.additional_time_to_live, AddWithTimeZone(t1.ts, (t1.additional_time_to_live * 1.5:Decimal), 'UTC':Varchar) as $expr1, t1._row_id] }
-        │ └─StreamTableScan { table: t1, columns: [t1.ts, t1.additional_time_to_live, t1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
+        │ └─StreamTableScan { table: t1, columns: [t1.ts, t1.additional_time_to_live, t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
         └─StreamExchange { dist: Broadcast }
           └─StreamProject { exprs: [SubtractWithTimeZone(now, '00:15:00':Interval, 'UTC':Varchar) as $expr2], output_watermarks: [[$expr2]], noop_update_hint: true }
             └─StreamNow { output: [now] }
@@ -43,7 +43,7 @@
   stream_plan: |-
     StreamMaterialize { columns: [ts, t1._row_id(hidden)], stream_key: [t1._row_id], pk_columns: [t1._row_id], pk_conflict: NoCheck }
     └─StreamDynamicFilter { predicate: (t1.ts < $expr1), output: [t1.ts, t1._row_id], cleaned_by_watermark: true }
-      ├─StreamTableScan { table: t1, columns: [t1.ts, t1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
+      ├─StreamTableScan { table: t1, columns: [t1.ts, t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
       └─StreamExchange { dist: Broadcast }
         └─StreamProject { exprs: [SubtractWithTimeZone(now, '00:15:00':Interval, 'UTC':Varchar) as $expr1], output_watermarks: [[$expr1]], noop_update_hint: true }
           └─StreamNow { output: [now] }
@@ -51,7 +51,7 @@
     Fragment 0
     StreamMaterialize { columns: [ts, t1._row_id(hidden)], stream_key: [t1._row_id], pk_columns: [t1._row_id], pk_conflict: NoCheck }
     └── StreamDynamicFilter { predicate: (t1.ts < $expr1), output: [t1.ts, t1._row_id], cleaned_by_watermark: true } { tables: [ DynamicFilterLeft: 0, DynamicFilterRight: 1 ] }
-        ├── StreamTableScan { table: t1, columns: [t1.ts, t1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
+        ├── StreamTableScan { table: t1, columns: [t1.ts, t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
         │   ├── tables: [ StreamScan: 2 ]
         │   ├── Upstream
         │   └── BatchPlanNode
@@ -66,9 +66,9 @@
     Table 1 { columns: [ $expr1, _rw_timestamp ], primary key: [], value indices: [ 0 ], distribution key: [], read pk prefix len hint: 0 }
 
     Table 2
-    ├── columns: [ vnode, _row_id, backfill_finished, row_count, _rw_timestamp ]
+    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, _row_id, _rw_timestamp ]
     ├── primary key: [ $0 ASC ]
-    ├── value indices: [ 1, 2, 3 ]
+    ├── value indices: [ 1, 2, 3, 4 ]
     ├── distribution key: [ 0 ]
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
@@ -87,7 +87,7 @@
       └─StreamHashJoin { type: LeftSemi, predicate: $expr1 = $expr2, output: [t1.ts, t1._row_id, $expr1] }
         ├─StreamExchange { dist: HashShard($expr1) }
         │ └─StreamProject { exprs: [t1.ts, DateTrunc('week':Varchar, t1.ts, 'UTC':Varchar) as $expr1, t1._row_id] }
-        │   └─StreamTableScan { table: t1, columns: [t1.ts, t1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
+        │   └─StreamTableScan { table: t1, columns: [t1.ts, t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
         └─StreamExchange { dist: HashShard($expr2) }
           └─StreamProject { exprs: [DateTrunc('week':Varchar, now, 'UTC':Varchar) as $expr2], output_watermarks: [[$expr2]], noop_update_hint: true }
             └─StreamNow { output: [now] }
@@ -104,7 +104,7 @@
 
     Fragment 2
     StreamProject { exprs: [t1.ts, DateTrunc('week':Varchar, t1.ts, 'UTC':Varchar) as $expr1, t1._row_id] }
-    └── StreamTableScan { table: t1, columns: [t1.ts, t1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
+    └── StreamTableScan { table: t1, columns: [t1.ts, t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
         ├── tables: [ StreamScan: 4 ]
         ├── Upstream
         └── BatchPlanNode
@@ -113,7 +113,12 @@
     StreamProject { exprs: [DateTrunc('week':Varchar, now, 'UTC':Varchar) as $expr2], output_watermarks: [[$expr2]], noop_update_hint: true }
     └── StreamNow { output: [now] } { tables: [ Now: 5 ] }
 
-    Table 0 { columns: [ t1_ts, $expr1, t1__row_id, _rw_timestamp ], primary key: [ $1 ASC, $2 ASC ], value indices: [ 0, 1, 2 ], distribution key: [ 1 ], read pk prefix len hint: 1 }
+    Table 0
+    ├── columns: [ t1_ts, $expr1, t1__row_id, _rw_timestamp ]
+    ├── primary key: [ $1 ASC, $2 ASC ]
+    ├── value indices: [ 0, 1, 2 ]
+    ├── distribution key: [ 1 ]
+    └── read pk prefix len hint: 1
 
     Table 1 { columns: [ $expr1, t1__row_id, _degree, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
@@ -122,9 +127,9 @@
     Table 3 { columns: [ $expr2, _degree, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
     Table 4
-    ├── columns: [ vnode, _row_id, backfill_finished, row_count, _rw_timestamp ]
+    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, _row_id, _rw_timestamp ]
     ├── primary key: [ $0 ASC ]
-    ├── value indices: [ 1, 2, 3 ]
+    ├── value indices: [ 1, 2, 3, 4 ]
     ├── distribution key: [ 0 ]
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
@@ -145,7 +150,7 @@
   stream_plan: |-
     StreamMaterialize { columns: [ts, t1._row_id(hidden)], stream_key: [t1._row_id], pk_columns: [t1._row_id], pk_conflict: NoCheck }
     └─StreamDynamicFilter [append_only] { predicate: (t1.ts < $expr1), output: [t1.ts, t1._row_id], cleaned_by_watermark: true }
-      ├─StreamTableScan { table: t1, columns: [t1.ts, t1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
+      ├─StreamTableScan { table: t1, columns: [t1.ts, t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
       └─StreamExchange { dist: Broadcast }
         └─StreamProject { exprs: [SubtractWithTimeZone(now, '00:15:00':Interval, 'UTC':Varchar) as $expr1], output_watermarks: [[$expr1]], noop_update_hint: true }
           └─StreamNow { output: [now] }
@@ -154,7 +159,7 @@
     StreamMaterialize { columns: [ts, t1._row_id(hidden)], stream_key: [t1._row_id], pk_columns: [t1._row_id], pk_conflict: NoCheck }
     └── StreamDynamicFilter [append_only] { predicate: (t1.ts < $expr1), output: [t1.ts, t1._row_id], cleaned_by_watermark: true }
         ├── tables: [ DynamicFilterLeft: 0, DynamicFilterRight: 1 ]
-        ├── StreamTableScan { table: t1, columns: [t1.ts, t1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
+        ├── StreamTableScan { table: t1, columns: [t1.ts, t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
         │   ├── tables: [ StreamScan: 2 ]
         │   ├── Upstream
         │   └── BatchPlanNode
@@ -169,9 +174,9 @@
     Table 1 { columns: [ $expr1, _rw_timestamp ], primary key: [], value indices: [ 0 ], distribution key: [], read pk prefix len hint: 0 }
 
     Table 2
-    ├── columns: [ vnode, _row_id, backfill_finished, row_count, _rw_timestamp ]
+    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, _row_id, _rw_timestamp ]
     ├── primary key: [ $0 ASC ]
-    ├── value indices: [ 1, 2, 3 ]
+    ├── value indices: [ 1, 2, 3, 4 ]
     ├── distribution key: [ 0 ]
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
@@ -188,7 +193,7 @@
     StreamMaterialize { columns: [ts, t1._row_id(hidden)], stream_key: [t1._row_id], pk_columns: [t1._row_id], pk_conflict: NoCheck, watermark_columns: [ts] }
     └─StreamDynamicFilter { predicate: (t1.ts >= $expr2), output_watermarks: [[t1.ts]], output: [t1.ts, t1._row_id], cleaned_by_watermark: true }
       ├─StreamDynamicFilter { predicate: (t1.ts < $expr1), output: [t1.ts, t1._row_id], cleaned_by_watermark: true }
-      │ ├─StreamTableScan { table: t1, columns: [t1.ts, t1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
+      │ ├─StreamTableScan { table: t1, columns: [t1.ts, t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
       │ └─StreamExchange { dist: Broadcast }
       │   └─StreamProject { exprs: [SubtractWithTimeZone(now, '01:00:00':Interval, 'UTC':Varchar) as $expr1], output_watermarks: [[$expr1]], noop_update_hint: true }
       │     └─StreamNow { output: [now] }
@@ -201,7 +206,7 @@
     └── StreamDynamicFilter { predicate: (t1.ts >= $expr2), output_watermarks: [[t1.ts]], output: [t1.ts, t1._row_id], cleaned_by_watermark: true }
         ├── tables: [ DynamicFilterLeft: 0, DynamicFilterRight: 1 ]
         ├── StreamDynamicFilter { predicate: (t1.ts < $expr1), output: [t1.ts, t1._row_id], cleaned_by_watermark: true } { tables: [ DynamicFilterLeft: 2, DynamicFilterRight: 3 ] }
-        │   ├── StreamTableScan { table: t1, columns: [t1.ts, t1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
+        │   ├── StreamTableScan { table: t1, columns: [t1.ts, t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
         │   │   ├── tables: [ StreamScan: 4 ]
         │   │   ├── Upstream
         │   │   └── BatchPlanNode
@@ -225,9 +230,9 @@
     Table 3 { columns: [ $expr1, _rw_timestamp ], primary key: [], value indices: [ 0 ], distribution key: [], read pk prefix len hint: 0 }
 
     Table 4
-    ├── columns: [ vnode, _row_id, backfill_finished, row_count, _rw_timestamp ]
+    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, _row_id, _rw_timestamp ]
     ├── primary key: [ $0 ASC ]
-    ├── value indices: [ 1, 2, 3 ]
+    ├── value indices: [ 1, 2, 3, 4 ]
     ├── distribution key: [ 0 ]
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
@@ -250,7 +255,7 @@
         ├─StreamExchange { dist: HashShard(t1.a) }
         │ └─StreamDynamicFilter { predicate: (t1.ta >= $expr2), output_watermarks: [[t1.ta]], output: [t1.a, t1.ta, t1._row_id], cleaned_by_watermark: true }
         │   ├─StreamDynamicFilter { predicate: (t1.ta < $expr1), output: [t1.a, t1.ta, t1._row_id], cleaned_by_watermark: true }
-        │   │ ├─StreamTableScan { table: t1, columns: [t1.a, t1.ta, t1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
+        │   │ ├─StreamTableScan { table: t1, columns: [t1.a, t1.ta, t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
         │   │ └─StreamExchange { dist: Broadcast }
         │   │   └─StreamProject { exprs: [SubtractWithTimeZone(now, '01:00:00':Interval, 'UTC':Varchar) as $expr1], output_watermarks: [[$expr1]], noop_update_hint: true }
         │   │     └─StreamNow { output: [now] }
@@ -258,7 +263,7 @@
         │     └─StreamProject { exprs: [SubtractWithTimeZone(now, '02:00:00':Interval, 'UTC':Varchar) as $expr2], output_watermarks: [[$expr2]], noop_update_hint: true }
         │       └─StreamNow { output: [now] }
         └─StreamExchange { dist: HashShard(t2.b) }
-          └─StreamTableScan { table: t2, columns: [t2.b, t2.tb, t2._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t2._row_id], pk: [_row_id], dist: UpstreamHashShard(t2._row_id) }
+          └─StreamTableScan { table: t2, columns: [t2.b, t2.tb, t2._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t2._row_id], pk: [_row_id], dist: UpstreamHashShard(t2._row_id) }
 - name: Temporal filter in on clause for left join's left side
   sql: |
     create table t1 (a int, ta timestamp with time zone);
@@ -277,11 +282,11 @@
     └─StreamExchange { dist: HashShard(t2.b, t2._row_id, t1._row_id) }
       └─StreamHashJoin { type: LeftOuter, predicate: t2.b = t1.a, output: [t1.a, t1.ta, t2.b, t2.tb, t2._row_id, t1._row_id] }
         ├─StreamExchange { dist: HashShard(t2.b) }
-        │ └─StreamTableScan { table: t2, columns: [t2.b, t2.tb, t2._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t2._row_id], pk: [_row_id], dist: UpstreamHashShard(t2._row_id) }
+        │ └─StreamTableScan { table: t2, columns: [t2.b, t2.tb, t2._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t2._row_id], pk: [_row_id], dist: UpstreamHashShard(t2._row_id) }
         └─StreamExchange { dist: HashShard(t1.a) }
           └─StreamDynamicFilter { predicate: (t1.ta >= $expr2), output_watermarks: [[t1.ta]], output: [t1.a, t1.ta, t1._row_id], cleaned_by_watermark: true }
             ├─StreamDynamicFilter { predicate: (t1.ta < $expr1), output: [t1.a, t1.ta, t1._row_id], cleaned_by_watermark: true }
-            │ ├─StreamTableScan { table: t1, columns: [t1.a, t1.ta, t1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
+            │ ├─StreamTableScan { table: t1, columns: [t1.a, t1.ta, t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
             │ └─StreamExchange { dist: Broadcast }
             │   └─StreamProject { exprs: [SubtractWithTimeZone(now, '01:00:00':Interval, 'UTC':Varchar) as $expr1], output_watermarks: [[$expr1]], noop_update_hint: true }
             │     └─StreamNow { output: [now] }
@@ -306,11 +311,11 @@
     └─StreamExchange { dist: HashShard(t1.a, t1._row_id, t2._row_id) }
       └─StreamHashJoin { type: LeftOuter, predicate: t1.a = t2.b, output: [t1.a, t1.ta, t2.b, t2.tb, t1._row_id, t2._row_id] }
         ├─StreamExchange { dist: HashShard(t1.a) }
-        │ └─StreamTableScan { table: t1, columns: [t1.a, t1.ta, t1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
+        │ └─StreamTableScan { table: t1, columns: [t1.a, t1.ta, t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
         └─StreamExchange { dist: HashShard(t2.b) }
           └─StreamDynamicFilter { predicate: (t2.tb >= $expr2), output_watermarks: [[t2.tb]], output: [t2.b, t2.tb, t2._row_id], cleaned_by_watermark: true }
             ├─StreamDynamicFilter { predicate: (t2.tb < $expr1), output: [t2.b, t2.tb, t2._row_id], cleaned_by_watermark: true }
-            │ ├─StreamTableScan { table: t2, columns: [t2.b, t2.tb, t2._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t2._row_id], pk: [_row_id], dist: UpstreamHashShard(t2._row_id) }
+            │ ├─StreamTableScan { table: t2, columns: [t2.b, t2.tb, t2._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t2._row_id], pk: [_row_id], dist: UpstreamHashShard(t2._row_id) }
             │ └─StreamExchange { dist: Broadcast }
             │   └─StreamProject { exprs: [SubtractWithTimeZone(now, '01:00:00':Interval, 'UTC':Varchar) as $expr1], output_watermarks: [[$expr1]], noop_update_hint: true }
             │     └─StreamNow { output: [now] }
@@ -355,7 +360,7 @@
       │     │ └─StreamFilter { predicate: Not((t1.ts > '2023-12-18 00:00:00+00:00':Timestamptz)) }
       │     │   └─StreamShare { id: 2 }
       │     │     └─StreamFilter { predicate: IsNotNull(t1.ts) }
-      │     │       └─StreamTableScan { table: t1, columns: [t1.ts, t1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
+      │     │       └─StreamTableScan { table: t1, columns: [t1.ts, t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
       │     └─StreamExchange { dist: Broadcast }
       │       └─StreamNow { output: [now] }
       └─StreamExchange { dist: HashShard(t1._row_id, 1:Int32) }
@@ -363,7 +368,7 @@
           └─StreamFilter { predicate: (t1.ts > '2023-12-18 00:00:00+00:00':Timestamptz) }
             └─StreamShare { id: 2 }
               └─StreamFilter { predicate: IsNotNull(t1.ts) }
-                └─StreamTableScan { table: t1, columns: [t1.ts, t1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
+                └─StreamTableScan { table: t1, columns: [t1.ts, t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
 - name: Temporal filter with or is null
   sql: |
     create table t1 (ts timestamp with time zone);
@@ -377,14 +382,14 @@
       │     ├─StreamProject { exprs: [t1.ts, AddWithTimeZone(t1.ts, '01:00:00':Interval, 'UTC':Varchar) as $expr1, t1._row_id] }
       │     │ └─StreamFilter { predicate: Not(IsNull(t1.ts)) }
       │     │   └─StreamShare { id: 1 }
-      │     │     └─StreamTableScan { table: t1, columns: [t1.ts, t1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
+      │     │     └─StreamTableScan { table: t1, columns: [t1.ts, t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
       │     └─StreamExchange { dist: Broadcast }
       │       └─StreamNow { output: [now] }
       └─StreamExchange { dist: HashShard(t1._row_id, 1:Int32) }
         └─StreamProject { exprs: [t1.ts, t1._row_id, 1:Int32] }
           └─StreamFilter { predicate: IsNull(t1.ts) }
             └─StreamShare { id: 1 }
-              └─StreamTableScan { table: t1, columns: [t1.ts, t1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
+              └─StreamTableScan { table: t1, columns: [t1.ts, t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
 - name: Temporal filter with or predicate
   sql: |
     create table t1 (ts timestamp with time zone);
@@ -399,7 +404,7 @@
       │     │ └─StreamFilter { predicate: Not((t1.ts > '2023-12-18 00:00:00+00:00':Timestamptz)) AND Not(IsNull(t1.ts)) }
       │     │   └─StreamShare { id: 2 }
       │     │     └─StreamFilter { predicate: (((Not((t1.ts > '2023-12-18 00:00:00+00:00':Timestamptz)) AND Not(IsNull(t1.ts))) OR (t1.ts > '2023-12-18 00:00:00+00:00':Timestamptz)) OR IsNull(t1.ts)) }
-      │     │       └─StreamTableScan { table: t1, columns: [t1.ts, t1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
+      │     │       └─StreamTableScan { table: t1, columns: [t1.ts, t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
       │     └─StreamExchange { dist: Broadcast }
       │       └─StreamNow { output: [now] }
       └─StreamExchange { dist: HashShard(t1._row_id, 1:Int32) }
@@ -407,7 +412,7 @@
           └─StreamFilter { predicate: ((t1.ts > '2023-12-18 00:00:00+00:00':Timestamptz) OR IsNull(t1.ts)) }
             └─StreamShare { id: 2 }
               └─StreamFilter { predicate: (((Not((t1.ts > '2023-12-18 00:00:00+00:00':Timestamptz)) AND Not(IsNull(t1.ts))) OR (t1.ts > '2023-12-18 00:00:00+00:00':Timestamptz)) OR IsNull(t1.ts)) }
-                └─StreamTableScan { table: t1, columns: [t1.ts, t1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
+                └─StreamTableScan { table: t1, columns: [t1.ts, t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
 - name: Many Temporal filter with or predicate
   sql: |
     create table t (t timestamp with time zone, a int);
@@ -427,7 +432,7 @@
       │     │     │     ├─StreamFilter { predicate: IsNotNull(t.a) AND Not(IsNull(t.t)) AND Not((t.a < 1:Int32)) }
       │     │     │     │ └─StreamShare { id: 2 }
       │     │     │     │   └─StreamFilter { predicate: IsNotNull(t.a) AND (((Not(IsNull(t.t)) AND Not((t.a < 1:Int32))) OR IsNull(t.t)) OR (t.a < 1:Int32)) }
-      │     │     │     │     └─StreamTableScan { table: t, columns: [t.t, t.a, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+      │     │     │     │     └─StreamTableScan { table: t, columns: [t.t, t.a, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
       │     │     │     └─StreamExchange { dist: Broadcast }
       │     │     │       └─StreamProject { exprs: [SubtractWithTimeZone(now, '01:00:00':Interval, 'UTC':Varchar) as $expr1], output_watermarks: [[$expr1]], noop_update_hint: true }
       │     │     │         └─StreamNow { output: [now] }
@@ -436,7 +441,7 @@
       │     │         └─StreamFilter { predicate: IsNotNull(t.a) AND (IsNull(t.t) OR (t.a < 1:Int32)) }
       │     │           └─StreamShare { id: 2 }
       │     │             └─StreamFilter { predicate: IsNotNull(t.a) AND (((Not(IsNull(t.t)) AND Not((t.a < 1:Int32))) OR IsNull(t.t)) OR (t.a < 1:Int32)) }
-      │     │               └─StreamTableScan { table: t, columns: [t.t, t.a, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+      │     │               └─StreamTableScan { table: t, columns: [t.t, t.a, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
       │     └─StreamExchange { dist: Broadcast }
       │       └─StreamProject { exprs: [SubtractWithTimeZone(now, '01:00:00':Interval, 'UTC':Varchar) as $expr2], output_watermarks: [[$expr2]], noop_update_hint: true }
       │         └─StreamNow { output: [now] }
@@ -451,7 +456,7 @@
                 │     ├─StreamFilter { predicate: IsNotNull(t.a) AND Not(IsNull(t.t)) AND Not((t.a < 1:Int32)) }
                 │     │ └─StreamShare { id: 2 }
                 │     │   └─StreamFilter { predicate: IsNotNull(t.a) AND (((Not(IsNull(t.t)) AND Not((t.a < 1:Int32))) OR IsNull(t.t)) OR (t.a < 1:Int32)) }
-                │     │     └─StreamTableScan { table: t, columns: [t.t, t.a, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+                │     │     └─StreamTableScan { table: t, columns: [t.t, t.a, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
                 │     └─StreamExchange { dist: Broadcast }
                 │       └─StreamProject { exprs: [SubtractWithTimeZone(now, '01:00:00':Interval, 'UTC':Varchar) as $expr1], output_watermarks: [[$expr1]], noop_update_hint: true }
                 │         └─StreamNow { output: [now] }
@@ -460,7 +465,7 @@
                     └─StreamFilter { predicate: IsNotNull(t.a) AND (IsNull(t.t) OR (t.a < 1:Int32)) }
                       └─StreamShare { id: 2 }
                         └─StreamFilter { predicate: IsNotNull(t.a) AND (((Not(IsNull(t.t)) AND Not((t.a < 1:Int32))) OR IsNull(t.t)) OR (t.a < 1:Int32)) }
-                          └─StreamTableScan { table: t, columns: [t.t, t.a, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+                          └─StreamTableScan { table: t, columns: [t.t, t.a, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - name: Non-trivial now expression
   sql: |
     create table t (ts timestamp with time zone, a int);
@@ -470,7 +475,7 @@
     └─StreamProject { exprs: [t.ts, t.a, t._row_id] }
       └─StreamDynamicFilter { predicate: ($expr1 > $expr2), output_watermarks: [[$expr1]], output: [t.ts, t.a, $expr1, t._row_id], cleaned_by_watermark: true }
         ├─StreamProject { exprs: [t.ts, t.a, AddWithTimeZone(t.ts, '01:00:00':Interval, 'UTC':Varchar) as $expr1, t._row_id] }
-        │ └─StreamTableScan { table: t, columns: [t.ts, t.a, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+        │ └─StreamTableScan { table: t, columns: [t.ts, t.a, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
         └─StreamExchange { dist: Broadcast }
           └─StreamProject { exprs: [DateTrunc('day':Varchar, now, 'UTC':Varchar) as $expr2], output_watermarks: [[$expr2]], noop_update_hint: true }
             └─StreamNow { output: [now] }
@@ -483,7 +488,7 @@
     └─StreamProject { exprs: [t.ts, t.a, t._row_id] }
       └─StreamDynamicFilter { predicate: ($expr1 > $expr2), output: [t.ts, t.a, $expr1, t._row_id] }
         ├─StreamProject { exprs: [t.ts, t.a, AddWithTimeZone(t.ts, '01:00:00':Interval, 'UTC':Varchar) as $expr1, t._row_id] }
-        │ └─StreamTableScan { table: t, columns: [t.ts, t.a, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+        │ └─StreamTableScan { table: t, columns: [t.ts, t.a, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
         └─StreamExchange { dist: Broadcast }
           └─StreamProject { exprs: [DateTrunc('day':Varchar, SubtractWithTimeZone('2024-07-18 00:00:00+00:00':Timestamptz, ('2024-07-18 00:00:00+00:00':Timestamptz - now), 'UTC':Varchar), 'UTC':Varchar) as $expr2], noop_update_hint: true }
             └─StreamNow { output: [now] }
@@ -504,7 +509,7 @@
       │   └─StreamExchange { dist: Single }
       │     └─StreamGroupTopN { order: [t.a ASC], limit: 10, offset: 0, group_key: [_vnode] }
       │       └─StreamProject { exprs: [t.a, t.ta, t._row_id, Vnode(t._row_id) as _vnode] }
-      │         └─StreamTableScan { table: t, columns: [t.a, t.ta, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+      │         └─StreamTableScan { table: t, columns: [t.a, t.ta, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
       └─StreamExchange { dist: Broadcast }
         └─StreamProject { exprs: [SubtractWithTimeZone(now, '02:00:00':Interval, 'UTC':Varchar) as $expr1], output_watermarks: [[$expr1]], noop_update_hint: true }
           └─StreamNow { output: [now] }
@@ -521,7 +526,7 @@
     Fragment 1
     StreamGroupTopN { order: [t.a ASC], limit: 10, offset: 0, group_key: [_vnode] } { tables: [ GroupTopN: 3 ] }
     └── StreamProject { exprs: [t.a, t.ta, t._row_id, Vnode(t._row_id) as _vnode] }
-        └── StreamTableScan { table: t, columns: [t.a, t.ta, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+        └── StreamTableScan { table: t, columns: [t.a, t.ta, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
             ├── tables: [ StreamScan: 4 ]
             ├── Upstream
             └── BatchPlanNode
@@ -534,7 +539,12 @@
 
     Table 1 { columns: [ $expr1, _rw_timestamp ], primary key: [], value indices: [ 0 ], distribution key: [], read pk prefix len hint: 0 }
 
-    Table 2 { columns: [ t_a, t_ta, t__row_id, _vnode, _rw_timestamp ], primary key: [ $0 ASC, $2 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [], read pk prefix len hint: 0 }
+    Table 2
+    ├── columns: [ t_a, t_ta, t__row_id, _vnode, _rw_timestamp ]
+    ├── primary key: [ $0 ASC, $2 ASC ]
+    ├── value indices: [ 0, 1, 2, 3 ]
+    ├── distribution key: []
+    └── read pk prefix len hint: 0
 
     Table 3
     ├── columns: [ t_a, t_ta, t__row_id, _vnode, _rw_timestamp ]
@@ -545,9 +555,9 @@
     └── vnode column idx: 3
 
     Table 4
-    ├── columns: [ vnode, _row_id, backfill_finished, row_count, _rw_timestamp ]
+    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, _row_id, _rw_timestamp ]
     ├── primary key: [ $0 ASC ]
-    ├── value indices: [ 1, 2, 3 ]
+    ├── value indices: [ 1, 2, 3, 4 ]
     ├── distribution key: [ 0 ]
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
@@ -573,9 +583,9 @@
       │     │     └─StreamFilter { predicate: (IsNotNull(t1._row_id) OR IsNotNull(t2._row_id)) }
       │     │       └─StreamHashJoin { type: FullOuter, predicate: t1.ta = t2.tb, output: [t1.a, t1.ta, t2.b, t2.tb, t1._row_id, t2._row_id] }
       │     │         ├─StreamExchange { dist: HashShard(t1.ta) }
-      │     │         │ └─StreamTableScan { table: t1, columns: [t1.a, t1.ta, t1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
+      │     │         │ └─StreamTableScan { table: t1, columns: [t1.a, t1.ta, t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
       │     │         └─StreamExchange { dist: HashShard(t2.tb) }
-      │     │           └─StreamTableScan { table: t2, columns: [t2.b, t2.tb, t2._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t2._row_id], pk: [_row_id], dist: UpstreamHashShard(t2._row_id) }
+      │     │           └─StreamTableScan { table: t2, columns: [t2.b, t2.tb, t2._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t2._row_id], pk: [_row_id], dist: UpstreamHashShard(t2._row_id) }
       │     └─StreamExchange { dist: Broadcast }
       │       └─StreamProject { exprs: [SubtractWithTimeZone(now, '02:00:00':Interval, 'UTC':Varchar) as $expr1], output_watermarks: [[$expr1]], noop_update_hint: true }
       │         └─StreamNow { output: [now] }
@@ -586,9 +596,9 @@
               └─StreamFilter { predicate: (IsNotNull(t1._row_id) OR IsNotNull(t2._row_id)) }
                 └─StreamHashJoin { type: FullOuter, predicate: t1.ta = t2.tb, output: [t1.a, t1.ta, t2.b, t2.tb, t1._row_id, t2._row_id] }
                   ├─StreamExchange { dist: HashShard(t1.ta) }
-                  │ └─StreamTableScan { table: t1, columns: [t1.a, t1.ta, t1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
+                  │ └─StreamTableScan { table: t1, columns: [t1.a, t1.ta, t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
                   └─StreamExchange { dist: HashShard(t2.tb) }
-                    └─StreamTableScan { table: t2, columns: [t2.b, t2.tb, t2._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t2._row_id], pk: [_row_id], dist: UpstreamHashShard(t2._row_id) }
+                    └─StreamTableScan { table: t2, columns: [t2.b, t2.tb, t2._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t2._row_id], pk: [_row_id], dist: UpstreamHashShard(t2._row_id) }
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [a, ta, b, tb, t1._row_id(hidden), t2._row_id(hidden), t1.ta(hidden), t2.tb(hidden), $src(hidden)], stream_key: [t1._row_id, t2._row_id, t1.ta, t2.tb, $src], pk_columns: [t1._row_id, t2._row_id, t1.ta, t2.tb, $src], pk_conflict: NoCheck }
@@ -613,12 +623,12 @@
         └── StreamExchange Hash([1]) from 5
 
     Fragment 4
-    StreamTableScan { table: t1, columns: [t1.a, t1.ta, t1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) } { tables: [ StreamScan: 6 ] }
+    StreamTableScan { table: t1, columns: [t1.a, t1.ta, t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) } { tables: [ StreamScan: 6 ] }
     ├── Upstream
     └── BatchPlanNode
 
     Fragment 5
-    StreamTableScan { table: t2, columns: [t2.b, t2.tb, t2._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t2._row_id], pk: [_row_id], dist: UpstreamHashShard(t2._row_id) } { tables: [ StreamScan: 7 ] }
+    StreamTableScan { table: t2, columns: [t2.b, t2.tb, t2._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t2._row_id], pk: [_row_id], dist: UpstreamHashShard(t2._row_id) } { tables: [ StreamScan: 7 ] }
     ├── Upstream
     └── BatchPlanNode
 
@@ -643,9 +653,9 @@
 
     Table 5 { columns: [ t2_tb, t2__row_id, _degree, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 6 { columns: [ vnode, _row_id, backfill_finished, row_count, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
+    Table 6 { columns: [ vnode, epoch, row_count, is_epoch_finished, _row_id, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3, 4 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
 
-    Table 7 { columns: [ vnode, _row_id, backfill_finished, row_count, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
+    Table 7 { columns: [ vnode, epoch, row_count, is_epoch_finished, _row_id, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3, 4 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
 
     Table 8 { columns: [ now, _rw_timestamp ], primary key: [], value indices: [ 0 ], distribution key: [], read pk prefix len hint: 0 }
 

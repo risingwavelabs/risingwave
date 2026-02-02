@@ -1,0 +1,8 @@
+statement ok
+create table t(id int, name string);
+
+statement error Serverless Backfill is disabled
+create materialized view serverless_backfill_mv with (cloud.serverless_backfill_enabled = true) as select * from t;
+
+statement ok
+drop table t;

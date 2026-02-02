@@ -241,7 +241,7 @@ pub struct SessionConfig {
     #[parameter(default = true)]
     streaming_use_arrangement_backfill: bool,
 
-    #[parameter(default = false)]
+    #[parameter(default = true)]
     streaming_use_snapshot_backfill: bool,
 
     /// Allow `jsonb` in stream key

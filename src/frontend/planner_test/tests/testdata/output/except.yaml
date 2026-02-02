@@ -29,9 +29,9 @@
       └─StreamHashAgg { group_key: [t1.a, t1.b, t1.c], aggs: [count] }
         └─StreamHashJoin { type: LeftAnti, predicate: t1.a IS NOT DISTINCT FROM t2.a AND t1.b IS NOT DISTINCT FROM t2.b AND t1.c IS NOT DISTINCT FROM t2.c, output: all }
           ├─StreamExchange { dist: HashShard(t1.a, t1.b, t1.c) }
-          │ └─StreamTableScan { table: t1, columns: [t1.a, t1.b, t1.c, t1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
+          │ └─StreamTableScan { table: t1, columns: [t1.a, t1.b, t1.c, t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
           └─StreamExchange { dist: HashShard(t2.a, t2.b, t2.c) }
-            └─StreamTableScan { table: t2, columns: [t2.a, t2.b, t2.c, t2._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t2._row_id], pk: [_row_id], dist: UpstreamHashShard(t2._row_id) }
+            └─StreamTableScan { table: t2, columns: [t2.a, t2.b, t2.c, t2._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t2._row_id], pk: [_row_id], dist: UpstreamHashShard(t2._row_id) }
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [a, b, c], stream_key: [a, b, c], pk_columns: [a, b, c], pk_conflict: NoCheck }
@@ -43,18 +43,23 @@
                 └── StreamExchange Hash([0, 1, 2]) from 2
 
     Fragment 1
-    StreamTableScan { table: t1, columns: [t1.a, t1.b, t1.c, t1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
+    StreamTableScan { table: t1, columns: [t1.a, t1.b, t1.c, t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
     ├── tables: [ StreamScan: 5 ]
     ├── Upstream
     └── BatchPlanNode
 
     Fragment 2
-    StreamTableScan { table: t2, columns: [t2.a, t2.b, t2.c, t2._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t2._row_id], pk: [_row_id], dist: UpstreamHashShard(t2._row_id) }
+    StreamTableScan { table: t2, columns: [t2.a, t2.b, t2.c, t2._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t2._row_id], pk: [_row_id], dist: UpstreamHashShard(t2._row_id) }
     ├── tables: [ StreamScan: 6 ]
     ├── Upstream
     └── BatchPlanNode
 
-    Table 0 { columns: [ t1_a, t1_b, t1_c, count, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC, $2 ASC ], value indices: [ 3 ], distribution key: [ 0, 1, 2 ], read pk prefix len hint: 3 }
+    Table 0
+    ├── columns: [ t1_a, t1_b, t1_c, count, _rw_timestamp ]
+    ├── primary key: [ $0 ASC, $1 ASC, $2 ASC ]
+    ├── value indices: [ 3 ]
+    ├── distribution key: [ 0, 1, 2 ]
+    └── read pk prefix len hint: 3
 
     Table 1
     ├── columns: [ t1_a, t1_b, t1_c, t1__row_id, _rw_timestamp ]
@@ -85,17 +90,17 @@
     └── read pk prefix len hint: 3
 
     Table 5
-    ├── columns: [ vnode, _row_id, backfill_finished, row_count, _rw_timestamp ]
+    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, _row_id, _rw_timestamp ]
     ├── primary key: [ $0 ASC ]
-    ├── value indices: [ 1, 2, 3 ]
+    ├── value indices: [ 1, 2, 3, 4 ]
     ├── distribution key: [ 0 ]
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
 
     Table 6
-    ├── columns: [ vnode, _row_id, backfill_finished, row_count, _rw_timestamp ]
+    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, _row_id, _rw_timestamp ]
     ├── primary key: [ $0 ASC ]
-    ├── value indices: [ 1, 2, 3 ]
+    ├── value indices: [ 1, 2, 3, 4 ]
     ├── distribution key: [ 0 ]
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
@@ -124,9 +129,9 @@
         └─StreamExchange { dist: HashShard(t1.a) }
           └─StreamHashJoin { type: LeftAnti, predicate: t1.a IS NOT DISTINCT FROM t2.a AND t1.b IS NOT DISTINCT FROM t2.b AND t1.c IS NOT DISTINCT FROM t2.c, output: all }
             ├─StreamExchange { dist: HashShard(t1.a, t1.b, t1.c) }
-            │ └─StreamTableScan { table: t1, columns: [t1.a, t1.b, t1.c], stream_scan_type: ArrangementBackfill, stream_key: [t1.a], pk: [a], dist: UpstreamHashShard(t1.a) }
+            │ └─StreamTableScan { table: t1, columns: [t1.a, t1.b, t1.c], stream_scan_type: SnapshotBackfill, stream_key: [t1.a], pk: [a], dist: UpstreamHashShard(t1.a) }
             └─StreamExchange { dist: HashShard(t2.a, t2.b, t2.c) }
-              └─StreamTableScan { table: t2, columns: [t2.a, t2.b, t2.c], stream_scan_type: ArrangementBackfill, stream_key: [t2.a], pk: [a], dist: UpstreamHashShard(t2.a) }
+              └─StreamTableScan { table: t2, columns: [t2.a, t2.b, t2.c], stream_scan_type: SnapshotBackfill, stream_key: [t2.a], pk: [a], dist: UpstreamHashShard(t2.a) }
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [a, b, c], stream_key: [a], pk_columns: [a], pk_conflict: NoCheck }
@@ -142,13 +147,13 @@
     └── StreamExchange Hash([0, 1, 2]) from 3
 
     Fragment 2
-    StreamTableScan { table: t1, columns: [t1.a, t1.b, t1.c], stream_scan_type: ArrangementBackfill, stream_key: [t1.a], pk: [a], dist: UpstreamHashShard(t1.a) }
+    StreamTableScan { table: t1, columns: [t1.a, t1.b, t1.c], stream_scan_type: SnapshotBackfill, stream_key: [t1.a], pk: [a], dist: UpstreamHashShard(t1.a) }
     ├── tables: [ StreamScan: 5 ]
     ├── Upstream
     └── BatchPlanNode
 
     Fragment 3
-    StreamTableScan { table: t2, columns: [t2.a, t2.b, t2.c], stream_scan_type: ArrangementBackfill, stream_key: [t2.a], pk: [a], dist: UpstreamHashShard(t2.a) }
+    StreamTableScan { table: t2, columns: [t2.a, t2.b, t2.c], stream_scan_type: SnapshotBackfill, stream_key: [t2.a], pk: [a], dist: UpstreamHashShard(t2.a) }
     ├── tables: [ StreamScan: 6 ]
     ├── Upstream
     └── BatchPlanNode
@@ -189,17 +194,17 @@
     └── read pk prefix len hint: 3
 
     Table 5
-    ├── columns: [ vnode, a, backfill_finished, row_count, _rw_timestamp ]
+    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, a, _rw_timestamp ]
     ├── primary key: [ $0 ASC ]
-    ├── value indices: [ 1, 2, 3 ]
+    ├── value indices: [ 1, 2, 3, 4 ]
     ├── distribution key: [ 0 ]
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
 
     Table 6
-    ├── columns: [ vnode, a, backfill_finished, row_count, _rw_timestamp ]
+    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, a, _rw_timestamp ]
     ├── primary key: [ $0 ASC ]
-    ├── value indices: [ 1, 2, 3 ]
+    ├── value indices: [ 1, 2, 3, 4 ]
     ├── distribution key: [ 0 ]
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0

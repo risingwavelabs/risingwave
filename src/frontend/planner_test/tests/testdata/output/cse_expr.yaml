@@ -12,7 +12,7 @@
     StreamMaterialize { columns: [x, y, t._row_id(hidden)], stream_key: [t._row_id], pk_columns: [t._row_id], pk_conflict: NoCheck }
     └─StreamProject { exprs: [JsonbAccess($expr1, 'c':Varchar) as $expr2, JsonbAccess($expr1, 'b':Varchar) as $expr3, t._row_id], noop_update_hint: true }
       └─StreamProject { exprs: [t.v1, JsonbAccess(t.v1, 'a':Varchar) as $expr1, t._row_id], noop_update_hint: true }
-        └─StreamTableScan { table: t, columns: [t.v1, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+        └─StreamTableScan { table: t, columns: [t.v1, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - name: Common sub expression extract2
   sql: |
     create table t (v1 jsonb);
@@ -26,7 +26,7 @@
     StreamMaterialize { columns: [x, y, t._row_id(hidden)], stream_key: [t._row_id], pk_columns: [t._row_id], pk_conflict: NoCheck }
     └─StreamProject { exprs: [$expr1, $expr1, t._row_id] }
       └─StreamProject { exprs: [t.v1, JsonbAccess(JsonbAccess(t.v1, 'a':Varchar), 'c':Varchar) as $expr1, t._row_id], noop_update_hint: true }
-        └─StreamTableScan { table: t, columns: [t.v1, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+        └─StreamTableScan { table: t, columns: [t.v1, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - name: Common sub expression shouldn't extract impure function
   sql: |
     create table t(v1 varchar, v2 double, v3 double);
@@ -41,7 +41,7 @@
     └─StreamProject { exprs: [$expr2, $expr3, $expr1, $expr1, t._row_id] }
       └─StreamMaterializedExprs { exprs: [(PgSleep(t.v2) + 1:Int32) as $expr2, (PgSleep(t.v2) + 1:Int32) as $expr3] }
         └─StreamProject { exprs: [t.v2, (t.v2 + 1:Float64) as $expr1, t._row_id] }
-          └─StreamTableScan { table: t, columns: [t.v2, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+          └─StreamTableScan { table: t, columns: [t.v2, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - name: Common sub expression shouldn't extract const
   sql: |
     SELECT x,
@@ -74,7 +74,7 @@
         └─StreamExchange { dist: Single }
           └─StreamStatelessSimpleAgg { aggs: [sum($expr1), sum(t.v), count(t.v)] }
             └─StreamProject { exprs: [(t.v * t.v) as $expr1, t.v, t._row_id] }
-              └─StreamTableScan { table: t, columns: [t.v, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+              └─StreamTableScan { table: t, columns: [t.v, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - name: Common sub expression shouldn't extract partial expression of `some`/`all`. See 11766
   sql: |
     with t(v, arr) as (select 1, array[2, 3]) select v < all(arr), v < some(arr) from t;

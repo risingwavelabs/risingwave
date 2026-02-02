@@ -18,6 +18,7 @@ futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = { workspace = true }
 futures-util = "0.3"
 hashbrown = { workspace = true }
+iceberg = { workspace = true }
 itertools = { workspace = true }
 linkme = { workspace = true }
 mysql_async = { workspace = true }

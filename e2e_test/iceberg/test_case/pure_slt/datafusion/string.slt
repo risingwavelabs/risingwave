@@ -1,0 +1,396 @@
+statement ok
+set enable_datafusion_engine = true;
+
+statement ok
+create secret my_secret with (
+  backend = 'meta'
+) as 'hummockadmin';
+
+statement ok
+create connection my_conn
+with (
+    type = 'iceberg',
+    warehouse.path = 's3://hummock001/iceberg_connection',
+    s3.access.key = secret my_secret,
+    s3.secret.key = secret my_secret,
+    s3.endpoint = 'http://127.0.0.1:9301',
+    s3.region = 'us-west-2',
+    catalog.type = 'storage',
+);
+
+statement ok
+set iceberg_engine_connection = 'public.my_conn';
+
+# ==================== String Table ====================
+
+statement ok
+CREATE TABLE t_string (
+    id INT PRIMARY KEY,
+    v_varchar VARCHAR
+) WITH (commit_checkpoint_interval = 1) ENGINE = iceberg;
+
+statement ok
+INSERT INTO t_string VALUES
+(1, 'hello'),
+(2, 'RisingWave'),
+(3, 'Unicode: 你好🚀'),
+(4, NULL);
+
+statement ok
+FLUSH;
+
+sleep 5s
+
+# ==================== ASCII Function Tests ====================
+# ascii(str) returns the Unicode code point of the first character
+
+query I
+SELECT ascii(v_varchar) FROM t_string WHERE id = 1;
+----
+104
+
+query I
+SELECT ascii(v_varchar) FROM t_string WHERE id = 2;
+----
+82
+
+# Unicode character - 'U' has code point 85
+query I
+SELECT ascii(v_varchar) FROM t_string WHERE id = 3;
+----
+85
+
+# Emoji - '🚀' has code point 128640
+query I
+SELECT ascii('🚀');
+----
+128640
+
+# Chinese character - '你' has code point 20320
+query I
+SELECT ascii('你好');
+----
+20320
+
+# NULL handling - ascii of NULL returns NULL
+query I
+SELECT ascii(v_varchar) FROM t_string WHERE id = 4;
+----
+NULL
+
+# Empty string returns 0
+query I
+SELECT ascii('');
+----
+0
+
+# ==================== Character Length / Char Length Tests ====================
+# character_length(str) / char_length(str) returns the number of characters (Unicode code points)
+
+query I
+SELECT character_length(v_varchar) FROM t_string WHERE id = 1;
+----
+5
+
+query I
+SELECT char_length(v_varchar) FROM t_string WHERE id = 2;
+----
+10
+
+# Unicode string - counts characters not bytes
+# 'Unicode: 你好🚀' = 9 ASCII chars + 2 Chinese chars + 1 emoji = 12 characters
+query I
+SELECT character_length(v_varchar) FROM t_string WHERE id = 3;
+----
+12
+
+# NULL handling
+query I
+SELECT character_length(v_varchar) FROM t_string WHERE id = 4;
+----
+NULL
+
+# Verify char_length is an alias for character_length
+query I
+SELECT char_length('hello');
+----
+5
+
+# Length of pure emoji string
+query I
+SELECT character_length('🚀🌍🎉');
+----
+3
+
+# Empty string has length 0
+query I
+SELECT character_length('');
+----
+0
+
+# ==================== Combined Tests ====================
+
+query II
+SELECT ascii(v_varchar), character_length(v_varchar) FROM t_string WHERE id = 1;
+----
+104 5
+
+query II rowsort
+SELECT ascii(v_varchar), character_length(v_varchar) FROM t_string WHERE v_varchar IS NOT NULL;
+----
+104 5
+82 10
+85 12
+
+# ==================== CHR Function Tests ====================
+# chr(code) returns the character with the given Unicode code point
+
+query T
+SELECT chr(104);
+----
+h
+
+query T
+SELECT chr(128640);
+----
+🚀
+
+query T
+SELECT chr(20320);
+----
+你
+
+# ==================== REPEAT Function Tests ====================
+# repeat(str, n) repeats string n times
+
+query T
+SELECT repeat('ab', 3);
+----
+ababab
+
+query T
+SELECT repeat('🚀', 2);
+----
+🚀🚀
+
+query T
+SELECT repeat('hi', 0);
+----
+(empty)
+
+# ==================== REPLACE Function Tests ====================
+# replace(str, from, to) replaces all occurrences
+
+query T
+SELECT replace('hello world', 'world', 'RisingWave');
+----
+hello RisingWave
+
+query T
+SELECT replace('aaa', 'a', 'bb');
+----
+bbbbbb
+
+query T
+SELECT replace('hello', 'x', 'y');
+----
+hello
+
+# ==================== REVERSE Function Tests ====================
+# reverse(str) reverses the string
+
+query T
+SELECT reverse('hello');
+----
+olleh
+
+query T
+SELECT reverse('🚀ab');
+----
+ba🚀
+
+# ==================== TRANSLATE Function Tests ====================
+# translate(str, from, to) replaces characters
+
+query T
+SELECT translate('hello', 'el', '12');
+----
+h122o
+
+query T
+SELECT translate('abcd', 'abc', '123');
+----
+123d
+
+# ==================== TRIM Functions Tests ====================
+# btrim/ltrim/rtrim trim characters from string
+
+query T
+SELECT btrim('  hello  ');
+----
+hello
+
+query T
+SELECT ltrim('  hello  ');
+----
+hello
+
+query T
+SELECT rtrim('  hello  ');
+----
+  hello
+
+query T
+SELECT btrim('xxhelloxx', 'x');
+----
+hello
+
+query T
+SELECT ltrim('xxhelloxx', 'x');
+----
+helloxx
+
+query T
+SELECT rtrim('xxhelloxx', 'x');
+----
+xxhello
+
+# ==================== STARTS_WITH Function Tests ====================
+# starts_with(str, prefix) checks if string starts with prefix
+
+query B
+SELECT starts_with('hello', 'hel');
+----
+t
+
+query B
+SELECT starts_with('hello', 'world');
+----
+f
+
+query B
+SELECT starts_with('🚀hello', '🚀');
+----
+t
+
+# ==================== SPLIT_PART Function Tests ====================
+# split_part(str, delimiter, index) splits string and returns part
+
+query T
+SELECT split_part('a.b.c', '.', 1);
+----
+a
+
+query T
+SELECT split_part('a.b.c', '.', 2);
+----
+b
+
+query T
+SELECT split_part('a.b.c', '.', 3);
+----
+c
+
+# Negative index counts from end
+query T
+SELECT split_part('a.b.c', '.', -1);
+----
+c
+
+# ==================== POSITION Function Tests ====================
+# position(substr IN str) / strpos(str, substr) returns 1-based position
+
+query I
+SELECT position('lo' IN 'hello');
+----
+4
+
+query I
+SELECT position('x' IN 'hello');
+----
+0
+
+query I
+SELECT position('🚀' IN 'hello🚀world');
+----
+6
+
+# ==================== LPAD/RPAD Function Tests ====================
+# lpad/rpad pad string to specified length
+
+query T
+SELECT lpad('hi', 5);
+----
+   hi
+
+query T
+SELECT rpad('hi', 5);
+----
+hi
+
+query T
+SELECT lpad('hi', 5, 'xy');
+----
+xyxhi
+
+query T
+SELECT rpad('hi', 5, 'xy');
+----
+hixyx
+
+query T
+SELECT lpad('hello', 3);
+----
+hel
+
+# ==================== SUBSTR Function Tests ====================
+# substr(str, start, [length]) extracts substring
+
+query T
+SELECT substr('hello', 2);
+----
+ello
+
+query T
+SELECT substr('hello', 2, 3);
+----
+ell
+
+query T
+SELECT substr('你好世界', 2, 2);
+----
+好世
+
+# ==================== LEFT/RIGHT Function Tests ====================
+# left(str, n) / right(str, n) returns first/last n characters
+
+query T
+SELECT left('hello', 3);
+----
+hel
+
+query T
+SELECT right('hello', 3);
+----
+llo
+
+query T
+SELECT left('你好世界', 2);
+----
+你好
+
+query T
+SELECT right('你好世界', 2);
+----
+世界
+
+# ==================== Cleanup ====================
+
+statement ok
+DROP TABLE t_string;
+
+statement ok
+DROP CONNECTION my_conn;
+
+statement ok
+DROP SECRET my_secret;

@@ -19,30 +19,30 @@
               │   │ └─StreamHashJoin { type: Inner, predicate: t.id = t.id, output: [t.id, t.id, t._row_id, t._row_id] }
               │   │   ├─StreamExchange { dist: HashShard(t.id) }
               │   │   │ └─StreamFilter { predicate: IsNotNull(t.id) }
-              │   │   │   └─StreamTableScan { table: t, columns: [t.id, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+              │   │   │   └─StreamTableScan { table: t, columns: [t.id, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
               │   │   └─StreamExchange { dist: HashShard(t.id) }
               │   │     └─StreamFilter { predicate: IsNotNull(t.id) }
-              │   │       └─StreamTableScan { table: t, columns: [t.id, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+              │   │       └─StreamTableScan { table: t, columns: [t.id, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
               │   └─StreamHashJoin { type: Inner, predicate: t.id = t.id, output: [t.id, t.id, t._row_id, t._row_id] }
               │     ├─StreamExchange { dist: HashShard(t.id) }
               │     │ └─StreamFilter { predicate: IsNotNull(t.id) }
-              │     │   └─StreamTableScan { table: t, columns: [t.id, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+              │     │   └─StreamTableScan { table: t, columns: [t.id, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
               │     └─StreamExchange { dist: HashShard(t.id) }
               │       └─StreamFilter { predicate: IsNotNull(t.id) }
-              │         └─StreamTableScan { table: t, columns: [t.id, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+              │         └─StreamTableScan { table: t, columns: [t.id, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
               └─StreamHashJoin { type: Inner, predicate: t.id = t.id AND t.id = t.id AND t.id = t.id AND t.id = t.id, output: [t.id, t.id, t.id, t.id, t._row_id, t._row_id, t._row_id, t._row_id] }
                 ├─StreamExchange { dist: HashShard(t.id) }
                 │ └─StreamHashJoin { type: Inner, predicate: t.id = t.id, output: [t.id, t.id, t._row_id, t._row_id] }
                 │   ├─StreamExchange { dist: HashShard(t.id) }
                 │   │ └─StreamFilter { predicate: IsNotNull(t.id) }
-                │   │   └─StreamTableScan { table: t, columns: [t.id, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+                │   │   └─StreamTableScan { table: t, columns: [t.id, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
                 │   └─StreamExchange { dist: HashShard(t.id) }
                 │     └─StreamFilter { predicate: IsNotNull(t.id) }
-                │       └─StreamTableScan { table: t, columns: [t.id, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+                │       └─StreamTableScan { table: t, columns: [t.id, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
                 └─StreamHashJoin { type: Inner, predicate: t.id = t.id, output: [t.id, t.id, t._row_id, t._row_id] }
                   ├─StreamExchange { dist: HashShard(t.id) }
                   │ └─StreamFilter { predicate: IsNotNull(t.id) }
-                  │   └─StreamTableScan { table: t, columns: [t.id, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+                  │   └─StreamTableScan { table: t, columns: [t.id, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
                   └─StreamExchange { dist: HashShard(t.id) }
                     └─StreamFilter { predicate: IsNotNull(t.id) }
-                      └─StreamTableScan { table: t, columns: [t.id, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+                      └─StreamTableScan { table: t, columns: [t.id, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }

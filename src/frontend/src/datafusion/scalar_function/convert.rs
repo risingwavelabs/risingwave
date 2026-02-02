@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2026 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,60 +12,39 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Integration of RisingWave scalar functions with DataFusion.
-//!
-//! This module provides the bridge between RisingWave's scalar function system and DataFusion's
-//! expression evaluation engine. It enables RisingWave scalar functions to be executed within
-//! DataFusion query plans.
-//!
-//! ## Overview
-//!
-//! The main entry point is [`convert_function_call`], which converts a RisingWave [`FunctionCall`]
-//! into a DataFusion expression ([`DFExpr`]). The module uses rule-like abstractions to determine
-//! whether a RisingWave expression can be directly converted to a native DataFusion expression,
-//! or if it requires wrapping with [`ScalarUDFImpl`].
-//!
-//! If an expression matches one of the conversion rules (unary operations, binary operations,
-//! case expressions, or cast expressions), it is converted directly to the corresponding DataFusion
-//! expression. Otherwise, the expression falls back to being wrapped in [`RwScalarFunction`],
-//! which uses RisingWave's native scalar function execution engine within DataFusion's query plan.
-//!
-//! ## RisingWave Scalar Function Wrapper
-//!
-//! For functions that DataFusion cannot handle directly, [`RwScalarFunction`] implements
-//! [`ScalarUDFImpl`] to wrap RisingWave's expression evaluation logic. This allows seamless
-//! execution of RisingWave functions within DataFusion's query execution engine.
-//!
-//! The wrapper handles:
-//! - Type casting from DataFusion types to RisingWave types
-//! - Data chunk creation and manipulation
-//! - Async expression evaluation using RisingWave's executor
-//! - Result conversion back to DataFusion-compatible types
+//! Conversion functions from RisingWave function calls to DataFusion expressions.
 
 use std::sync::Arc;
 
-use datafusion::arrow::datatypes::DataType as DFDataType;
-use datafusion::functions::{math, unicode};
+use datafusion::functions::{core, datetime, math, string, unicode};
 use datafusion::logical_expr::expr::ScalarFunction;
 use datafusion::logical_expr::{
-    BinaryExpr, Case, Cast, ColumnarValue, Operator, ScalarFunctionArgs, ScalarUDF, ScalarUDFImpl,
-    Signature, TypeSignature, Volatility,
+    BinaryExpr, Case, Cast, Operator, ScalarUDF, Signature, TypeSignature, Volatility,
 };
 use datafusion::prelude::Expr as DFExpr;
-use datafusion_common::Result as DFResult;
 use itertools::Itertools;
 use risingwave_common::array::arrow::IcebergArrowConvert;
 use risingwave_common::bail_not_implemented;
 use risingwave_common::types::DataType as RwDataType;
-use risingwave_expr::expr::{BoxedExpression, ValueImpl, build_from_prost};
+use risingwave_expr::expr::build_from_prost;
 
-use crate::datafusion::{
-    CastExecutor, ColumnTrait, convert_expr, convert_scalar_value, create_data_chunk,
-    to_datafusion_error,
-};
-use crate::error::{Result as RwResult, RwError};
+use super::data_type_ext::RwDataTypeDataFusionExt;
+use super::rw_scalar_function::RwScalarFunction;
+use crate::datafusion::{CastExecutor, ColumnTrait, convert_expr};
+use crate::error::Result as RwResult;
 use crate::expr::{Expr, ExprType, FunctionCall};
 
+/// Converts a RisingWave [`FunctionCall`] into a DataFusion expression.
+///
+/// This function tries multiple conversion strategies in order:
+/// 1. Unary functions (NOT, IS NULL, etc.)
+/// 2. Binary functions (arithmetic, comparison, logical)
+/// 3. Case expressions
+/// 4. Cast expressions
+/// 5. Field access (struct fields)
+/// 6. Row construction
+/// 7. Trivial DataFusion functions (math, string, datetime)
+/// 8. Fallback to RisingWave expression wrapper
 pub fn convert_function_call(
     func_call: &FunctionCall,
     input_columns: &impl ColumnTrait,
@@ -84,6 +63,8 @@ pub fn convert_function_call(
         convert_binary_func,
         convert_case_func,
         convert_cast_func,
+        convert_field_func,
+        convert_row_func,
         convert_trivial_datafusion_func,
         fallback_rw_expr_builder
     );
@@ -248,39 +229,91 @@ fn can_cast_by_datafusion(from: &RwDataType, to: &RwDataType) -> bool {
     from.is_datafusion_native() && to.is_datafusion_native()
 }
 
-#[easy_ext::ext(RwDataTypeDataFusionExt)]
-impl RwDataType {
-    pub fn is_datafusion_native(&self) -> bool {
-        match self {
-            RwDataType::Boolean
-            | RwDataType::Int32
-            | RwDataType::Int64
-            | RwDataType::Float32
-            | RwDataType::Float64
-            | RwDataType::Date
-            | RwDataType::Time
-            | RwDataType::Timestamp
-            | RwDataType::Timestamptz
-            | RwDataType::Varchar
-            | RwDataType::Bytea
-            | RwDataType::Serial
-            | RwDataType::Decimal => true,
-            RwDataType::Struct(v) => v.types().all(RwDataTypeDataFusionExt::is_datafusion_native),
-            RwDataType::List(list) => list.elem().is_datafusion_native(),
-            RwDataType::Map(map) => {
-                map.key().is_datafusion_native() && map.value().is_datafusion_native()
-            }
-            _ => false,
-        }
+/// Converts struct field access expression.
+///
+/// RW uses index-based access `field(struct, int4)`, while DF uses name-based access
+/// `get_field(struct, field_name)`. We look up the field name from the struct type at the given index.
+fn convert_field_func(
+    func_call: &FunctionCall,
+    input_columns: &impl ColumnTrait,
+) -> Option<DFExpr> {
+    if func_call.func_type() != ExprType::Field {
+        return None;
+    }
+    if func_call.inputs().len() != 2 {
+        return None;
     }
 
-    pub fn to_datafusion_native(&self) -> Option<DFDataType> {
-        if !self.is_datafusion_native() {
-            return None;
-        }
-        let arrow_field = IcebergArrowConvert.to_arrow_field("", self).ok()?;
-        Some(arrow_field.data_type().clone())
+    let struct_expr = &func_call.inputs()[0];
+    let index_expr = &func_call.inputs()[1];
+    let struct_type = match struct_expr.return_type() {
+        RwDataType::Struct(s) => s,
+        _ => return None,
+    };
+    if !struct_type.types().all(|ty| ty.is_datafusion_native()) {
+        return None;
     }
+
+    let index = match index_expr {
+        crate::expr::ExprImpl::Literal(lit) => *lit.get_data().as_ref()?.as_int32() as usize,
+        _ => return None,
+    };
+    let field_name = struct_type.names().nth(index)?;
+
+    let df_struct_expr = convert_expr(struct_expr, input_columns).ok()?;
+    let args = vec![
+        df_struct_expr,
+        DFExpr::Literal(
+            datafusion_common::ScalarValue::Utf8(Some(field_name.to_owned())),
+            None,
+        ),
+    ];
+
+    Some(DFExpr::ScalarFunction(ScalarFunction {
+        func: core::get_field(),
+        args,
+    }))
+}
+
+/// Converts row construction expression.
+///
+/// RW uses field names `f1`, `f2`, etc., while DF's `struct()` uses `c0`, `c1`, etc.
+/// We use DF's `named_struct()` to preserve the RW field naming convention.
+fn convert_row_func(func_call: &FunctionCall, input_columns: &impl ColumnTrait) -> Option<DFExpr> {
+    if func_call.func_type() != ExprType::Row {
+        return None;
+    }
+    if func_call.inputs().is_empty() {
+        return None;
+    }
+
+    if !func_call
+        .inputs()
+        .iter()
+        .all(|input| input.return_type().is_datafusion_native())
+    {
+        return None;
+    }
+    if !func_call.return_type().is_datafusion_native() {
+        return None;
+    }
+
+    // Build named_struct args: [name1, expr1, name2, expr2, ...]
+    // RW uses f1, f2, f3, ... as field names for unnamed structs
+    let mut args = Vec::with_capacity(func_call.inputs().len() * 2);
+    for (i, input) in func_call.inputs().iter().enumerate() {
+        // Field name: f1, f2, f3, ... (1-indexed to match RW convention)
+        args.push(DFExpr::Literal(
+            datafusion_common::ScalarValue::Utf8(Some(format!("f{}", i + 1))),
+            None,
+        ));
+        args.push(convert_expr(input, input_columns).ok()?);
+    }
+
+    Some(DFExpr::ScalarFunction(ScalarFunction {
+        func: core::named_struct(),
+        args,
+    }))
 }
 
 fn convert_trivial_datafusion_func(
@@ -299,7 +332,17 @@ fn convert_trivial_datafusion_func(
     }
 
     let udf_impl: Arc<ScalarUDF> = match func_call.func_type() {
-        ExprType::Round => math::round(),
+        // Math functions
+        //
+        // Note: `round` is intentionally NOT mapped because RisingWave uses banker's rounding
+        // (round_ties_even) while DataFusion uses standard rounding (round ties away from zero).
+        // Example: round(2.5) -> RW: 2.0, DF: 3.0
+        //
+        // Edge case differences for error handling (RW returns error, DF returns NaN/inf):
+        // - sqrt: negative input -> RW: error, DF: NaN
+        // - ln/log10: input <= 0 -> RW: error, DF: NaN/-inf
+        // - exp: extreme values -> RW: error, DF: inf/0
+        // - pow: 0^negative or negative^frac -> RW: error, DF: inf/NaN
         ExprType::Abs => math::abs(),
         ExprType::Ceil => math::ceil(),
         ExprType::Floor => math::floor(),
@@ -325,7 +368,51 @@ fn convert_trivial_datafusion_func(
         ExprType::Atanh => math::atanh(),
         ExprType::Ln => math::ln(),
         ExprType::Log10 => math::log10(),
+        // Date/time functions
+        //
+        // Note: The following functions are NOT mapped due to incompatibilities:
+        // - date_part/extract: Return type differs (RW: Decimal/Float64 with subsecond precision,
+        //   DF: Int32 for most fields). Example: second -> RW: 57.123456, DF: 57
+        // - make_time: Signature differs (RW: float8 for seconds with nanosecond precision,
+        //   DF: int32 for seconds only)
+        // - to_timestamp/from_unixtime: Different signatures and timezone handling
+        // - to_char/to_date: Format string syntax differs - RW uses PostgreSQL patterns (YYYY-MM-DD),
+        //   DF uses Chrono patterns (%Y-%m-%d). Same format string produces different results.
+        // - date_trunc: RW supports 'decade', 'century', 'millennium' granularities, DF doesn't. And RW deals with timezone differently.
+        // - date_bin: Iceberg doesn't support interval type.
+        //
+        // Edge case differences (acceptable):
+        // - make_date: BC year handling differs (RW adjusts negative years, DF doesn't)
+        ExprType::MakeDate => datetime::make_date(),
+        // String functions
+        //
+        // Note: The following functions are NOT mapped due to incompatibilities:
+        // - upper/lower: RW uses ASCII-only conversion (to_ascii_uppercase/lowercase),
+        //   DF uses full Unicode (to_uppercase/lowercase). Example: 'Ångström' -> RW: 'ÅNGSTRÖM', DF: 'ÅNGSTRÖM' with proper Unicode
+        // - initcap: RW uses whitespace as word boundary, DF uses non-alphanumeric characters
+        //
+        // Edge case differences (acceptable):
+        // - chr: RW returns empty for invalid code points, DF returns '\u{0000}' for 0
+        ExprType::Ascii => string::ascii(),
+        ExprType::CharLength => unicode::character_length(),
+        ExprType::Chr => string::chr(),
+        ExprType::Repeat => string::repeat(),
+        ExprType::Replace => string::replace(),
+        ExprType::Reverse => unicode::reverse(),
+        ExprType::Translate => unicode::translate(),
+        ExprType::Trim => string::btrim(),
+        ExprType::Ltrim => string::ltrim(),
+        ExprType::Rtrim => string::rtrim(),
+        ExprType::StartsWith => string::starts_with(),
+        ExprType::SplitPart => string::split_part(),
+        ExprType::Position => unicode::strpos(),
+        ExprType::Lpad => unicode::lpad(),
+        ExprType::Rpad => unicode::rpad(),
         ExprType::Substr => unicode::substr(),
+        ExprType::Left => unicode::left(),
+        ExprType::Right => unicode::right(),
+        // Misc functions
+        ExprType::Coalesce => core::coalesce(),
         _ => return None,
     };
     let args = func_call
@@ -380,73 +467,4 @@ fn fallback_rw_expr_builder(
             .map(|i| DFExpr::Column(input_columns.column(i)))
             .collect(),
     }))
-}
-
-#[derive(Debug, educe::Educe)]
-#[educe(PartialEq, Eq, Hash)]
-struct RwScalarFunction {
-    // DataFusion uses function name as column identifier, so we need to keep unique names for different functions to avoid conflicts
-    name: String,
-    column_name: Vec<String>,
-    #[educe(PartialEq(ignore), Hash(ignore))]
-    cast: CastExecutor,
-    #[educe(PartialEq(ignore), Hash(ignore))]
-    expr: BoxedExpression,
-    #[educe(PartialEq(ignore), Hash(ignore))]
-    signature: Signature,
-}
-
-impl ScalarUDFImpl for RwScalarFunction {
-    fn as_any(&self) -> &dyn std::any::Any {
-        self
-    }
-
-    fn name(&self) -> &str {
-        &self.name
-    }
-
-    fn signature(&self) -> &Signature {
-        &self.signature
-    }
-
-    fn return_type(&self, _: &[DFDataType]) -> DFResult<DFDataType> {
-        let field = IcebergArrowConvert
-            .to_arrow_field("", &self.expr.return_type())
-            .map_err(to_datafusion_error)?;
-        Ok(field.data_type().clone())
-    }
-
-    fn invoke_with_args(&self, args: ScalarFunctionArgs) -> DFResult<ColumnarValue> {
-        let arrays = args
-            .args
-            .into_iter()
-            .map(|cv| cv.into_array(1))
-            .collect::<DFResult<Vec<_>>>()?;
-        let chunk =
-            create_data_chunk(arrays.into_iter(), args.number_rows).map_err(to_datafusion_error)?;
-
-        let value = tokio::task::block_in_place(|| {
-            tokio::runtime::Handle::current().block_on(async {
-                let chunk = self.cast.execute(chunk).await?;
-                let value = self.expr.eval_v2(&chunk).await?;
-                Ok::<ValueImpl, RwError>(value)
-            })
-        })
-        .map_err(to_datafusion_error)?;
-
-        let res = match value {
-            ValueImpl::Array(array_impl) => {
-                let array = IcebergArrowConvert
-                    .to_arrow_array(args.return_field.data_type(), &array_impl)
-                    .map_err(to_datafusion_error)?;
-                ColumnarValue::Array(array)
-            }
-            ValueImpl::Scalar { value, .. } => {
-                let value = convert_scalar_value(&value, self.expr.return_type())
-                    .map_err(to_datafusion_error)?;
-                ColumnarValue::Scalar(value)
-            }
-        };
-        Ok(res)
-    }
 }

@@ -34,6 +34,7 @@ use std::collections::HashMap;
 
 use anyhow::Context;
 use iceberg::scan::FileScanTask;
+use iceberg::spec::{DataContentType, FormatVersion};
 use risingwave_common::catalog::{
     ColumnCatalog, ICEBERG_FILE_PATH_COLUMN_NAME, ICEBERG_FILE_POS_COLUMN_NAME,
     ICEBERG_SEQUENCE_NUM_COLUMN_NAME,
@@ -100,6 +101,7 @@ impl FallibleRule<Logical> for IcebergIntermediateScanRule {
                 mut equality_delete_files,
                 mut position_delete_files,
                 equality_delete_columns,
+                format_version,
             }) = list_result
             else {
                 tracing::info!(
@@ -125,8 +127,19 @@ impl FallibleRule<Logical> for IcebergIntermediateScanRule {
             projection_columns.sort_unstable_by_key(|&s| schema.field_id_by_name(s));
             projection_columns.dedup();
             set_project_field_ids(&mut data_files, &schema, projection_columns.iter())?;
-            for file in &mut data_files {
-                file.deletes.clear();
+            match format_version {
+                FormatVersion::V1 | FormatVersion::V2 => {
+                    for file in &mut data_files {
+                        file.deletes.clear();
+                    }
+                }
+                FormatVersion::V3 => {
+                    for file in &mut data_files {
+                        file.deletes.retain(|delete| {
+                            delete.data_file_content == DataContentType::PositionDeletes
+                        });
+                    }
+                }
             }
 
             let column_catalog_map: HashMap<&str, &ColumnCatalog> = catalog
@@ -137,7 +150,9 @@ impl FallibleRule<Logical> for IcebergIntermediateScanRule {
             if !equality_delete_files.is_empty() {
                 projection_columns.push(ICEBERG_SEQUENCE_NUM_COLUMN_NAME);
             }
-            if !position_delete_files.is_empty() {
+            let use_position_delete_join =
+                !position_delete_files.is_empty() && format_version < FormatVersion::V3;
+            if use_position_delete_join {
                 projection_columns.push(ICEBERG_FILE_PATH_COLUMN_NAME);
                 projection_columns.push(ICEBERG_FILE_POS_COLUMN_NAME);
             }
@@ -164,7 +179,7 @@ impl FallibleRule<Logical> for IcebergIntermediateScanRule {
             }
 
             // Add anti-join for position delete files
-            if !position_delete_files.is_empty() {
+            if use_position_delete_join {
                 set_project_field_ids(
                     &mut position_delete_files,
                     &schema,

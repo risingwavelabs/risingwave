@@ -8,6 +8,12 @@ statement ok
 create table explain_analyze_test.t1(v1 int primary key)
 with (connector='datagen', datagen.rows.per.second='1', fields.id.kind = 'sequence', fields.v1.start = '1', fields.v2.end = '1000000');
 
+# wait until there are some data in the table to that the 0 rate limit can prevent backfill finish
+query T retry 3 backoff 1s
+select count(*) > 0 from explain_analyze_test.t1;
+----
+t
+
 statement ok
 create materialized view explain_analyze_test.m1 as select * from explain_analyze_test.t1;
 
