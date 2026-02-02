@@ -14,6 +14,7 @@
 
 use risingwave_common::types::Fields;
 use risingwave_frontend_macro::system_catalog;
+use risingwave_pb::id::ObjectId;
 
 use crate::TableCatalog;
 use crate::catalog::schema_catalog::SchemaCatalog;
@@ -26,7 +27,7 @@ use crate::error::Result;
 #[derive(Fields)]
 struct PgConstraint {
     #[primary_key]
-    oid: i32,
+    oid: ObjectId,
     conname: String,
     connamespace: i32,
     contype: String,
@@ -58,7 +59,7 @@ impl PgConstraint {
         // List of the constrained columns. First column starts from 1.
         let conkey: Vec<_> = table.pk.iter().map(|i| (*i + 1) as i16).collect();
         PgConstraint {
-            oid: table.id.as_i32_id(), // Use table_id as a mock oid of constraint here.
+            oid: table.id.as_object_id(), // Use table_id as a mock oid of constraint here.
             conname: format!("{}_pkey", &table.name),
             connamespace: schema.id().as_i32_id(),
             contype: "p".to_owned(), // p = primary key constraint
@@ -95,7 +96,7 @@ impl PgConstraint {
             .map(|i| (i.column_index + 1) as i16)
             .collect();
         PgConstraint {
-            oid: table.id.as_i32_id(), // Use table_id as a mock oid of constraint here.
+            oid: table.id.as_object_id(), // Use table_id as a mock oid of constraint here.
             conname: format!("{}_pkey", &table.name),
             connamespace: schema.id().as_i32_id(),
             contype: "p".to_owned(), // p = primary key constraint

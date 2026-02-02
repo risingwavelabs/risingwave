@@ -16,7 +16,6 @@ use std::rc::Rc;
 
 use either::Either;
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_common::catalog::UserId;
 use risingwave_sqlparser::ast::CreateSubscriptionStatement;
 
 use super::{HandlerArgs, RwPgResponse};
@@ -59,7 +58,7 @@ pub fn create_subscription_catalog(
         database_id: subscription_database_id,
         schema_id: subscription_schema_id,
         dependent_table_id,
-        owner: UserId::new(session.user_id()),
+        owner: session.user_id(),
         initialized_at_epoch: None,
         created_at_epoch: None,
         created_at_cluster_version: None,

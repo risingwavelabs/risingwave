@@ -427,7 +427,7 @@ impl CatalogWriter for MockCatalogWriter {
         _connection_name: String,
         _database_id: DatabaseId,
         _schema_id: SchemaId,
-        _owner_id: u32,
+        _owner_id: UserId,
         _connection: create_connection_request::Payload,
     ) -> Result<()> {
         unreachable!()
@@ -438,7 +438,7 @@ impl CatalogWriter for MockCatalogWriter {
         _secret_name: String,
         _database_id: DatabaseId,
         _schema_id: SchemaId,
-        _owner_id: u32,
+        _owner_id: UserId,
         _payload: Vec<u8>,
     ) -> Result<()> {
         unreachable!()
@@ -643,7 +643,7 @@ impl CatalogWriter for MockCatalogWriter {
         Ok(())
     }
 
-    async fn alter_owner(&self, object: Object, owner_id: u32) -> Result<()> {
+    async fn alter_owner(&self, object: Object, owner_id: UserId) -> Result<()> {
         for database in self.catalog.read().iter_databases() {
             for schema in database.iter_schemas() {
                 match object {
@@ -715,7 +715,7 @@ impl CatalogWriter for MockCatalogWriter {
         _secret_name: String,
         _database_id: DatabaseId,
         _schema_id: SchemaId,
-        _owner_id: u32,
+        _owner_id: UserId,
         _payload: Vec<u8>,
     ) -> Result<()> {
         unreachable!()
@@ -934,7 +934,7 @@ pub struct MockUserInfoWriter {
 impl UserInfoWriter for MockUserInfoWriter {
     async fn create_user(&self, user: UserInfo) -> Result<()> {
         let mut user = user;
-        user.id = self.gen_id();
+        user.id = self.gen_id().into();
         self.user_info.write().create_user(user);
         Ok(())
     }
@@ -1049,7 +1049,7 @@ impl MockUserInfoWriter {
         });
         Self {
             user_info,
-            id: AtomicU32::new(NON_RESERVED_USER_ID as u32),
+            id: AtomicU32::new(NON_RESERVED_USER_ID.as_raw_id()),
         }
     }
 

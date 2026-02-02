@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use risingwave_common::catalog::FragmentTypeFlag;
+use risingwave_common::id::{FragmentId, JobId, TableId};
 use risingwave_common::types::Fields;
 use risingwave_common::util::stream_graph_visitor::{
     visit_stream_node_source_backfill, visit_stream_node_stream_scan,
@@ -26,10 +27,10 @@ use crate::error::Result;
 
 #[derive(Fields)]
 struct RwBackfillInfo {
-    job_id: i32,
+    job_id: JobId,
     #[primary_key]
-    fragment_id: i32,
-    backfill_state_table_id: i32,
+    fragment_id: FragmentId,
+    backfill_state_table_id: TableId,
     backfill_target_relation_id: i32,
     backfill_type: String,
     backfill_epoch: i64,
@@ -60,13 +61,13 @@ fn extract_stream_scan(fragment_distribution: &FragmentDistribution) -> Option<R
         CatalogBackfillType::Source => {
             visit_stream_node_source_backfill(stream_node, |node| {
                 scan = Some(RwBackfillInfo {
-                    job_id: fragment_distribution.table_id.as_i32_id(),
-                    fragment_id: fragment_distribution.fragment_id.as_i32_id(),
+                    job_id: fragment_distribution.table_id,
+                    fragment_id: fragment_distribution.fragment_id,
                     backfill_state_table_id: node
                         .state_table
                         .as_ref()
-                        .map(|table| table.id.as_i32_id())
-                        .unwrap_or(0),
+                        .map(|table| table.id)
+                        .unwrap_or(TableId::placeholder()),
                     backfill_target_relation_id: node.upstream_source_id.as_i32_id(),
                     backfill_type: backfill_type.to_string(),
                     backfill_epoch: 0,
@@ -76,13 +77,13 @@ fn extract_stream_scan(fragment_distribution: &FragmentDistribution) -> Option<R
         CatalogBackfillType::SnapshotBackfill | CatalogBackfillType::ArrangementOrNoShuffle => {
             visit_stream_node_stream_scan(stream_node, |node| {
                 scan = Some(RwBackfillInfo {
-                    job_id: fragment_distribution.table_id.as_i32_id(),
-                    fragment_id: fragment_distribution.fragment_id.as_i32_id(),
+                    job_id: fragment_distribution.table_id,
+                    fragment_id: fragment_distribution.fragment_id,
                     backfill_state_table_id: node
                         .state_table
                         .as_ref()
-                        .map(|table| table.id.as_i32_id())
-                        .unwrap_or(0),
+                        .map(|table| table.id)
+                        .unwrap_or(TableId::placeholder()),
                     backfill_target_relation_id: node.table_id.as_i32_id(),
                     backfill_type: backfill_type.to_string(),
                     backfill_epoch: node.snapshot_backfill_epoch() as _,

@@ -87,7 +87,7 @@ impl CatalogController {
                     None
                 };
                 MetaTelemetryJobDesc {
-                    table_id: table_id.as_i32_id(),
+                    table_id,
                     connector: connector_info,
                     optimization: vec![],
                 }

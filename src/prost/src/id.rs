@@ -66,10 +66,7 @@ impl<const N: usize, P: FromStr> FromStr for TypedId<N, P> {
     }
 }
 
-impl<const N: usize, P> TypedId<N, P>
-where
-    Self: UniqueTypedIdDeclaration,
-{
+impl<const N: usize, P> TypedId<N, P> {
     pub const fn new(inner: P) -> Self {
         TypedId(inner)
     }
@@ -112,10 +109,7 @@ where
 
 type TypedU32Id<const N: usize> = TypedId<N, u32>;
 
-impl<const N: usize> TypedU32Id<N>
-where
-    Self: UniqueTypedIdDeclaration,
-{
+impl<const N: usize> TypedU32Id<N> {
     pub const fn placeholder() -> Self {
         Self(OBJECT_ID_PLACEHOLDER)
     }
@@ -312,7 +306,8 @@ declare_id_types!(
     ConnectionId,
     SecretId,
     SubscriberId,
-    LocalOperatorId
+    LocalOperatorId,
+    UserId
 );
 
 declare_id_type!(ObjectId, u32, 256);

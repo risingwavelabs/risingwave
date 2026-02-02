@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::id::UserId;
 use risingwave_common::types::{Fields, Timestamptz};
 use risingwave_frontend_macro::system_catalog;
 use serde_json::json;
@@ -27,7 +28,7 @@ use crate::error::Result;
 struct RwRelationInfo {
     schemaname: String,
     relationname: String,
-    relationowner: i32,
+    relationowner: UserId,
     definition: String,
     relationtype: String,
     relationid: i32,
@@ -104,7 +105,7 @@ async fn read_relation_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwRelat
                     rows.push(RwRelationInfo {
                         schemaname: schema.clone(),
                         relationname: t.name.clone(),
-                        relationowner: t.owner as i32,
+                        relationowner: t.owner,
                         definition: t.create_sql(),
                         relationtype: "MATERIALIZED VIEW".into(),
                         relationid: t.id.as_i32_id(),
@@ -125,7 +126,7 @@ async fn read_relation_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwRelat
                     rows.push(RwRelationInfo {
                         schemaname: schema.clone(),
                         relationname: t.name.clone(),
-                        relationowner: t.owner as i32,
+                        relationowner: t.owner,
                         definition: t.create_sql_purified(),
                         relationtype: "TABLE".into(),
                         relationid: t.id.as_i32_id(),
@@ -146,7 +147,7 @@ async fn read_relation_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwRelat
                     rows.push(RwRelationInfo {
                         schemaname: schema.clone(),
                         relationname: t.name.clone(),
-                        relationowner: t.owner.user_id as i32,
+                        relationowner: t.owner,
                         definition: t.definition.clone(),
                         relationtype: "SINK".into(),
                         relationid: t.id.as_i32_id(),
@@ -168,7 +169,7 @@ async fn read_relation_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwRelat
                     rows.push(RwRelationInfo {
                         schemaname: schema.clone(),
                         relationname: t.name.clone(),
-                        relationowner: index_table.owner as i32,
+                        relationowner: index_table.owner,
                         definition: index_table.create_sql(),
                         relationtype: "INDEX".into(),
                         relationid: index_table.id.as_i32_id(),
@@ -200,7 +201,7 @@ async fn read_relation_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwRelat
                 rows.push(RwRelationInfo {
                     schemaname: schema.clone(),
                     relationname: t.name.clone(),
-                    relationowner: t.owner as i32,
+                    relationowner: t.owner,
                     definition: t.create_sql_purified(),
                     relationtype: "SOURCE".into(),
                     relationid: t.id.as_i32_id(),
@@ -219,7 +220,7 @@ async fn read_relation_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwRelat
                 rows.push(RwRelationInfo {
                     schemaname: schema.clone(),
                     relationname: t.name.clone(),
-                    relationowner: t.owner.user_id as i32,
+                    relationowner: t.owner,
                     definition: t.definition.clone(),
                     relationtype: "SUBSCRIPTION".into(),
                     relationid: t.id.as_i32_id(),

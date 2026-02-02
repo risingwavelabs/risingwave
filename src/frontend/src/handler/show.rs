@@ -375,7 +375,7 @@ impl From<Arc<IndexCatalog>> for ShowIndexRow {
 #[derive(Fields)]
 #[fields(style = "Title Case")]
 struct ShowClusterRow {
-    id: i32,
+    id: WorkerId,
     addr: String,
     r#type: String,
     state: String,
@@ -710,7 +710,7 @@ pub async fn handle_show_object(
                 let addr: HostAddr = worker.host.as_ref().unwrap().into();
                 let property = worker.property.as_ref();
                 ShowClusterRow {
-                    id: worker.id.as_i32_id(),
+                    id: worker.id,
                     addr: addr.to_string(),
                     r#type: worker.get_type().unwrap().as_str_name().into(),
                     state: worker.get_state().unwrap().as_str_name().to_owned(),
@@ -897,7 +897,7 @@ pub fn handle_show_create_object(
         ShowCreateType::Sink => {
             let (sink, schema) =
                 catalog_reader.get_any_sink_by_name(&database, schema_path, &object_name)?;
-            if !has_access_to_object(current_user, sink.id, sink.owner.user_id) {
+            if !has_access_to_object(current_user, sink.id, sink.owner) {
                 return Err(CatalogError::not_found("sink", name.to_string()).into());
             }
             (sink.create_sql(), schema)
@@ -939,7 +939,7 @@ pub fn handle_show_create_object(
         ShowCreateType::Subscription => {
             let (subscription, schema) =
                 catalog_reader.get_subscription_by_name(&database, schema_path, &object_name)?;
-            if !has_access_to_object(current_user, subscription.id, subscription.owner.user_id) {
+            if !has_access_to_object(current_user, subscription.id, subscription.owner) {
                 return Err(CatalogError::not_found("subscription", name.to_string()).into());
             }
             (subscription.create_sql(), schema)
