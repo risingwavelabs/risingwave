@@ -20,6 +20,7 @@ use await_tree::InstrumentAwait;
 use parking_lot::{Mutex, MutexGuard};
 use risingwave_common::array::StreamChunk;
 use risingwave_common::bitmap::Bitmap;
+use risingwave_common_estimate_size::EstimateSize;
 use risingwave_connector::sink::log_store::{ChunkId, LogStoreResult, TruncateOffset};
 use risingwave_pb::stream_plan::PbSinkSchemaChange;
 use tokio::sync::Notify;
@@ -70,13 +71,23 @@ struct LogStoreBufferInner {
 }
 
 impl LogStoreBufferInner {
-    fn update_unconsumed_buffer_metrics(&self) {
+    fn item_heap_size(item: &LogStoreBufferItem) -> usize {
+        match item {
+            LogStoreBufferItem::StreamChunk { chunk, .. } => chunk.estimated_heap_size(),
+            LogStoreBufferItem::Flushed { vnode_bitmap, .. } => vnode_bitmap.estimated_heap_size(),
+            LogStoreBufferItem::Barrier { .. } => 0,
+        }
+    }
+
+    fn update_buffer_metrics(&self) {
         let mut epoch_count = 0;
         let mut row_count = 0;
+        let mut memory_bytes = 0;
         for (_, item) in &self.unconsumed_queue {
             match item {
                 LogStoreBufferItem::StreamChunk { chunk, .. } => {
                     row_count += chunk.cardinality();
+                    memory_bytes += Self::item_heap_size(item);
                 }
                 LogStoreBufferItem::Flushed {
                     start_seq_id,
@@ -84,11 +95,16 @@ impl LogStoreBufferInner {
                     ..
                 } => {
                     row_count += (end_seq_id - start_seq_id) as usize;
+                    memory_bytes += Self::item_heap_size(item);
                 }
                 LogStoreBufferItem::Barrier { .. } => {
                     epoch_count += 1;
+                    memory_bytes += Self::item_heap_size(item);
                 }
             }
+        }
+        for (_, item) in &self.consumed_queue {
+            memory_bytes += Self::item_heap_size(item);
         }
         self.metrics.buffer_unconsumed_epoch_count.set(epoch_count);
         self.metrics.buffer_unconsumed_row_count.set(row_count as _);
@@ -101,6 +117,7 @@ impl LogStoreBufferInner {
                 .map(|(epoch, _)| *epoch)
                 .unwrap_or_default() as _,
         );
+        self.metrics.buffer_memory_bytes.set(memory_bytes as _);
     }
 
     fn can_add_stream_chunk(&self) -> bool {
@@ -115,7 +132,7 @@ impl LogStoreBufferInner {
             self.next_chunk_id = 0;
         }
         self.unconsumed_queue.push_front((epoch, item));
-        self.update_unconsumed_buffer_metrics();
+        self.update_buffer_metrics();
     }
 
     pub(crate) fn try_add_stream_chunk(
@@ -141,7 +158,7 @@ impl LogStoreBufferInner {
                     chunk_id,
                 },
             ));
-            self.update_unconsumed_buffer_metrics();
+            self.update_buffer_metrics();
             None
         }
     }
@@ -149,7 +166,7 @@ impl LogStoreBufferInner {
     fn pop_item(&mut self) -> Option<(u64, LogStoreBufferItem)> {
         if let Some((epoch, item)) = self.unconsumed_queue.pop_back() {
             self.consumed_queue.push_front((epoch, item.clone()));
-            self.update_unconsumed_buffer_metrics();
+            self.update_buffer_metrics();
             Some((epoch, item))
         } else {
             None
@@ -201,7 +218,7 @@ impl LogStoreBufferInner {
                 },
             );
         }
-        self.update_unconsumed_buffer_metrics();
+        self.update_buffer_metrics();
     }
 
     fn add_truncate_offset(&mut self, (epoch, seq_id): ReaderTruncationOffsetType) {
@@ -221,7 +238,7 @@ impl LogStoreBufferInner {
                 self.unconsumed_queue.push_back((epoch, item));
             }
         }
-        self.update_unconsumed_buffer_metrics();
+        self.update_buffer_metrics();
     }
 
     fn clear(&mut self) {
@@ -468,6 +485,7 @@ impl LogStoreBufferReceiver {
                 }
             }
         }
+        inner.update_buffer_metrics();
         if let Some(offset) = latest_offset {
             inner.add_truncate_offset(offset);
             self.truncate_notify.notify_waiters();
