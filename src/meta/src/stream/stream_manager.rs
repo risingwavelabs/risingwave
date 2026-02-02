@@ -34,7 +34,10 @@ use thiserror_ext::AsReport;
 use tokio::sync::{Mutex, OwnedSemaphorePermit, oneshot};
 use tracing::Instrument;
 
-use super::{FragmentBackfillOrder, Locations, ReschedulePolicy, ScaleControllerRef};
+use super::{
+    Locations, ReschedulePolicy, ScaleControllerRef, StreamFragmentGraph,
+    UserDefinedFragmentBackfillOrder,
+};
 use crate::barrier::{
     BarrierScheduler, Command, CreateStreamingJobCommandInfo, CreateStreamingJobType,
     ReplaceStreamJobPlan, SnapshotBackfillInfo,
@@ -103,7 +106,7 @@ pub struct CreateStreamingJobContext {
 
     pub streaming_job: StreamingJob,
 
-    pub fragment_backfill_ordering: FragmentBackfillOrder,
+    pub fragment_backfill_ordering: UserDefinedFragmentBackfillOrder,
 
     pub locality_fragment_state_table_mapping: HashMap<FragmentId, Vec<TableId>>,
 
@@ -492,6 +495,20 @@ impl GlobalStreamManager {
                 )
                 .await?,
         );
+
+        let fragment_backfill_ordering =
+            StreamFragmentGraph::extend_fragment_backfill_ordering_with_locality_backfill(
+                fragment_backfill_ordering,
+                &stream_job_fragments.downstreams,
+                || {
+                    stream_job_fragments
+                        .fragments
+                        .iter()
+                        .map(|(fragment_id, fragment)| {
+                            (*fragment_id, fragment.fragment_type_mask, &fragment.nodes)
+                        })
+                },
+            );
 
         let info = CreateStreamingJobCommandInfo {
             stream_job_fragments,

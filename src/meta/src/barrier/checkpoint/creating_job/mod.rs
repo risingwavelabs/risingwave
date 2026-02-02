@@ -55,7 +55,7 @@ use crate::barrier::{
 use crate::controller::fragment::InflightFragmentInfo;
 use crate::model::{FragmentDownstreamRelation, StreamActor, StreamJobActorsToCreate};
 use crate::rpc::metrics::GLOBAL_META_METRICS;
-use crate::stream::{FragmentBackfillOrder, build_actor_connector_splits};
+use crate::stream::{ExtendedFragmentBackfillOrder, build_actor_connector_splits};
 
 #[derive(Debug)]
 pub(crate) struct CreatingJobInfo {
@@ -404,7 +404,7 @@ impl CreatingStreamingJobControl {
         committed_epoch: u64,
         upstream_barrier_info: &BarrierInfo,
         fragment_infos: HashMap<FragmentId, InflightFragmentInfo>,
-        backfill_order: FragmentBackfillOrder,
+        backfill_order: ExtendedFragmentBackfillOrder,
         fragment_relations: &FragmentDownstreamRelation,
         version_stat: &HummockVersionStats,
         new_actors: StreamJobActorsToCreate,

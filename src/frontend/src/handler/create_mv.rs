@@ -332,7 +332,7 @@ pub(crate) async fn gen_create_mv_graph(
 
     if is_serverless_backfill && sbc_addr.is_empty() {
         return Err(RwError::from(InvalidInputSyntax(
-            "Serverless Backfill is disabled on-premise. Use RisingWave cloud at https://cloud.risingwave.com/auth/signup to try this feature".to_owned(),
+            "Serverless Backfill is disabled. Use RisingWave cloud at https://cloud.risingwave.com/auth/signup to try this feature".to_owned(),
         )));
     }
 
