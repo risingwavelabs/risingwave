@@ -110,17 +110,27 @@ pub fn storage_memory_config(
     storage_config: &StorageConfig,
     is_serving: bool,
 ) -> StorageMemoryConfig {
-    let (default_storage_memory_proportion, default_compactor_memory_proportion) = if embedded_compactor_enabled {
-        (STORAGE_MEMORY_DEFAULT_PROPORTION, COMPACTOR_MEMORY_DEFAULT_PROPORTION)
-    } else {
-        (STORAGE_MEMORY_DEFAULT_PROPORTION + COMPACTOR_MEMORY_DEFAULT_PROPORTION, 0.0)
-    };
+    let (default_storage_memory_proportion, default_compactor_memory_proportion) =
+        if embedded_compactor_enabled {
+            (
+                STORAGE_MEMORY_DEFAULT_PROPORTION,
+                COMPACTOR_MEMORY_DEFAULT_PROPORTION,
+            )
+        } else {
+            (
+                STORAGE_MEMORY_DEFAULT_PROPORTION + COMPACTOR_MEMORY_DEFAULT_PROPORTION,
+                0.0,
+            )
+        };
 
-    let default_storage_memory_bytes = (non_reserved_memory_bytes as f64 * default_storage_memory_proportion).ceil();
-    let max_storage_memory_bytes = (non_reserved_memory_bytes as f64 * STORAGE_MEMORY_MAX_PROPORTION).ceil();
+    let default_storage_memory_bytes =
+        (non_reserved_memory_bytes as f64 * default_storage_memory_proportion).ceil();
+    let max_storage_memory_bytes =
+        (non_reserved_memory_bytes as f64 * STORAGE_MEMORY_MAX_PROPORTION).ceil();
 
     let compactor_memory_limit_mb = storage_config.compactor_memory_limit_mb.unwrap_or(
-        ((non_reserved_memory_bytes as f64 * default_compactor_memory_proportion).ceil() as usize) >> 20,
+        ((non_reserved_memory_bytes as f64 * default_compactor_memory_proportion).ceil() as usize)
+            >> 20,
     );
     tracing::debug!(
         "default_storage_memory_bytes={} max_storage_memory_bytes={} compactor_memory_limit_mb={}",
@@ -145,9 +155,11 @@ pub fn storage_memory_config(
             Some(meta_cache_capacity_mb),
             Some(shared_buffer_capacity_mb),
         ) => {
-            let config_storage_memory_bytes =
-                (block_cache_capacity_mb + meta_cache_capacity_mb + shared_buffer_capacity_mb + compactor_memory_limit_mb)
-                    << 20;
+            let config_storage_memory_bytes = (block_cache_capacity_mb
+                + meta_cache_capacity_mb
+                + shared_buffer_capacity_mb
+                + compactor_memory_limit_mb)
+                << 20;
             if config_storage_memory_bytes as f64 > max_storage_memory_bytes {
                 tracing::warn!(
                     "config block_cache_capacity_mb {} + meta_cache_capacity_mb {} + shared_buffer_capacity_mb {} + compactor_memory_limit_mb {} = {} exceeds allowed storage_memory_bytes {}. These configs will be ignored.",
@@ -177,9 +189,11 @@ pub fn storage_memory_config(
     };
 
     let mut default_block_cache_capacity_mb =
-        ((default_storage_memory_bytes * STORAGE_BLOCK_CACHE_MEMORY_PROPORTION).ceil() as usize) >> 20;
+        ((default_storage_memory_bytes * STORAGE_BLOCK_CACHE_MEMORY_PROPORTION).ceil() as usize)
+            >> 20;
     let default_meta_cache_capacity_mb =
-        ((default_storage_memory_bytes * STORAGE_META_CACHE_MEMORY_PROPORTION).ceil() as usize) >> 20;
+        ((default_storage_memory_bytes * STORAGE_META_CACHE_MEMORY_PROPORTION).ceil() as usize)
+            >> 20;
     let meta_cache_capacity_mb = config_meta_cache_capacity_mb.unwrap_or(
         // adapt to old version
         storage_config
@@ -198,7 +212,8 @@ pub fn storage_memory_config(
     }
 
     let default_shared_buffer_capacity_mb =
-        ((default_storage_memory_bytes * STORAGE_SHARED_BUFFER_MEMORY_PROPORTION).ceil() as usize) >> 20;
+        ((default_storage_memory_bytes * STORAGE_SHARED_BUFFER_MEMORY_PROPORTION).ceil() as usize)
+            >> 20;
     let mut shared_buffer_capacity_mb = config_shared_buffer_capacity_mb.unwrap_or(std::cmp::min(
         default_shared_buffer_capacity_mb,
         STORAGE_SHARED_BUFFER_MAX_MEMORY_MB,
