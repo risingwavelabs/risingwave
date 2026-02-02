@@ -97,6 +97,16 @@ macro_rules! for_all_params {
             { adaptive_parallelism_strategy,            risingwave_common::system_param::AdaptiveParallelismStrategy,   Some(Default::default()),       true,   "The strategy for Adaptive Parallelism.", },
             { per_database_isolation,                   bool,                           Some(true),                     true,   "Whether per database isolation is enabled", },
             { enforce_secret,                  bool,                           Some(false),                    true,   "Whether to enforce secret on cloud.", },
+            { streaming_parallelism_for_table, u32,                            Some(0_u32),                        true,   "The number of parallelism for streaming table.", },
+            { streaming_parallelism_for_materialized_view, u32,                Some(0_u32),                        true,   "The number of parallelism for streaming materialized view.", },
+            { streaming_parallelism_for_sink,  u32,                            Some(0_u32),                        true,   "The number of parallelism for streaming sink.", },
+            { streaming_parallelism_for_source, u32,                           Some(0_u32),                        true,   "The number of parallelism for streaming source.", },
+            { streaming_parallelism_for_index, u32,                            Some(0_u32),                        true,   "The number of parallelism for streaming index.", },
+            { adaptive_parallelism_strategy_for_table, risingwave_common::system_param::AdaptiveParallelismStrategy, Some(Default::default()), true, "The strategy for Adaptive Parallelism for table.", },
+            { adaptive_parallelism_strategy_for_materialized_view, risingwave_common::system_param::AdaptiveParallelismStrategy, Some(Default::default()), true, "The strategy for Adaptive Parallelism for materialized view.", },
+            { adaptive_parallelism_strategy_for_sink, risingwave_common::system_param::AdaptiveParallelismStrategy, Some(Default::default()), true, "The strategy for Adaptive Parallelism for sink.", },
+            { adaptive_parallelism_strategy_for_source, risingwave_common::system_param::AdaptiveParallelismStrategy, Some(Default::default()), true, "The strategy for Adaptive Parallelism for source.", },
+            { adaptive_parallelism_strategy_for_index, risingwave_common::system_param::AdaptiveParallelismStrategy, Some(Default::default()), true, "The strategy for Adaptive Parallelism for index.", },
         }
     };
 }
