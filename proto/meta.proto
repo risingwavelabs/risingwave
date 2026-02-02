@@ -436,7 +436,9 @@ message InjectSourceOffsetsRequest {
   map<string, string> split_offsets = 2;
 }
 
-message InjectSourceOffsetsResponse {}
+message InjectSourceOffsetsResponse {
+  repeated string applied_split_ids = 1;
+}
 
 message ListCdcProgressRequest {}
 

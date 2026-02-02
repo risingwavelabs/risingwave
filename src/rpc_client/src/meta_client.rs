@@ -1582,13 +1582,13 @@ impl MetaClient {
         &self,
         source_id: SourceId,
         split_offsets: HashMap<String, String>,
-    ) -> Result<()> {
+    ) -> Result<Vec<String>> {
         let req = InjectSourceOffsetsRequest {
             source_id: source_id.as_raw_id(),
             split_offsets,
         };
-        let _resp = self.inner.inject_source_offsets(req).await?;
-        Ok(())
+        let resp = self.inner.inject_source_offsets(req).await?;
+        Ok(resp.applied_split_ids)
     }
 
     pub async fn set_system_param(

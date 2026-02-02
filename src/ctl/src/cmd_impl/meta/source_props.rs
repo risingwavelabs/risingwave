@@ -120,10 +120,11 @@ pub async fn inject_source_offsets(
     println!("Make sure you know the exact offsets needed before proceeding.");
     println!();
 
-    meta_client
+    let applied_splits = meta_client
         .inject_source_offsets(SourceId::from(source_id), offsets)
         .await?;
 
     println!("Source offsets injected successfully!");
+    println!("Applied to splits: {:?}", applied_splits);
     Ok(())
 }

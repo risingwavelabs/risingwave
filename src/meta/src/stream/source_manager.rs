@@ -562,41 +562,64 @@ impl SourceManager {
     }
 
     /// Validate split offsets before injecting them.
-    /// Returns Ok(()) if all validations pass, otherwise returns an error.
+    /// Returns `Ok(applied_split_ids)` if all validations pass, otherwise returns an error.
     ///
     /// Validations performed:
     /// 1. Source exists in source manager
-    /// 2. All requested split IDs exist in the source's current splits
+    /// 2. All requested split IDs exist in the source's current splits (runtime assignment)
     pub async fn validate_inject_source_offsets(
         &self,
         source_id: SourceId,
         split_offsets: &HashMap<String, String>,
-    ) -> MetaResult<()> {
-        let core = self.core.lock().await;
+    ) -> MetaResult<Vec<String>> {
+        let (fragment_ids, env) = {
+            let core = self.core.lock().await;
 
-        // Check if source exists
-        let handle = core.managed_sources.get(&source_id).ok_or_else(|| {
-            MetaError::invalid_parameter(format!(
-                "source {} not found in source manager",
-                source_id.as_raw_id()
-            ))
-        })?;
+            // Check if source exists
+            let _ = core.managed_sources.get(&source_id).ok_or_else(|| {
+                MetaError::invalid_parameter(format!(
+                    "source {} not found in source manager",
+                    source_id.as_raw_id()
+                ))
+            })?;
 
-        // Get current splits
-        let splits_guard = handle.splits.lock().await;
-        let current_splits = splits_guard.splits.as_ref().ok_or_else(|| {
-            MetaError::invalid_parameter(format!(
-                "source {} has no discovered splits yet, cannot inject offsets",
+            let mut ids = Vec::new();
+            if let Some(src_frags) = core.source_fragments.get(&source_id) {
+                ids.extend(src_frags.iter().copied());
+            }
+            if let Some(backfill_frags) = core.backfill_fragments.get(&source_id) {
+                ids.extend(
+                    backfill_frags
+                        .iter()
+                        .flat_map(|(id, upstream)| [*id, *upstream]),
+                );
+            }
+            (ids, core.env.clone())
+        };
+
+        if fragment_ids.is_empty() {
+            return Err(MetaError::invalid_parameter(format!(
+                "source {} has no running fragments",
                 source_id.as_raw_id()
-            ))
-        })?;
+            )));
+        }
+
+        let guard = env.shared_actor_infos().read_guard();
+        let mut assigned_split_ids = HashSet::new();
+        for fragment_id in fragment_ids {
+            if let Some(fragment) = guard.get_fragment(fragment_id) {
+                for actor in fragment.actors.values() {
+                    for split in &actor.splits {
+                        assigned_split_ids.insert(split.id().to_string());
+                    }
+                }
+            }
+        }
 
         // Validate all requested split IDs exist
-        let current_split_ids: HashSet<&str> = current_splits.keys().map(|s| s.as_ref()).collect();
         let mut invalid_splits = Vec::new();
-
         for split_id in split_offsets.keys() {
-            if !current_split_ids.contains(split_id.as_str()) {
+            if !assigned_split_ids.contains(split_id) {
                 invalid_splits.push(split_id.clone());
             }
         }
@@ -606,7 +629,7 @@ impl SourceManager {
                 "invalid split IDs for source {}: {:?}. Valid splits are: {:?}",
                 source_id.as_raw_id(),
                 invalid_splits,
-                current_split_ids.iter().collect::<Vec<_>>()
+                assigned_split_ids.iter().collect::<Vec<_>>()
             )));
         }
 
@@ -616,7 +639,7 @@ impl SourceManager {
             "Validated inject source offsets request"
         );
 
-        Ok(())
+        Ok(split_offsets.keys().cloned().collect())
     }
 }
 
