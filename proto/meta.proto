@@ -797,6 +797,16 @@ message SystemParams {
   optional string adaptive_parallelism_strategy = 19;
   optional bool per_database_isolation = 20;
   optional bool enforce_secret = 21;
+  optional uint32 streaming_parallelism_for_table = 22;
+  optional uint32 streaming_parallelism_for_materialized_view = 23;
+  optional uint32 streaming_parallelism_for_sink = 24;
+  optional uint32 streaming_parallelism_for_source = 25;
+  optional uint32 streaming_parallelism_for_index = 26;
+  optional string adaptive_parallelism_strategy_for_table = 27;
+  optional string adaptive_parallelism_strategy_for_materialized_view = 28;
+  optional string adaptive_parallelism_strategy_for_sink = 29;
+  optional string adaptive_parallelism_strategy_for_source = 30;
+  optional string adaptive_parallelism_strategy_for_index = 31;
 }
 
 message GetSystemParamsRequest {}
