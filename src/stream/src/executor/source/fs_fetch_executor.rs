@@ -14,6 +14,9 @@
 
 use std::marker::PhantomData;
 use std::ops::Bound;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use either::Either;
 use futures::TryStreamExt;
@@ -23,6 +26,7 @@ use risingwave_common::catalog::ColumnId;
 use risingwave_common::hash::VnodeBitmapExt;
 use risingwave_common::id::SourceId;
 use risingwave_common::metrics::GLOBAL_ERROR_METRICS;
+use risingwave_common::types::JsonbVal;
 use risingwave_common::types::ScalarRef;
 use risingwave_connector::source::filesystem::OpendalFsSplit;
 use risingwave_connector::source::filesystem::opendal_source::{
@@ -46,8 +50,58 @@ use crate::executor::prelude::*;
 use crate::executor::stream_reader::StreamReaderWithPause;
 
 const SPLIT_BATCH_SIZE: usize = 1000;
+const DIRTY_FIELD: &str = "__rw_fs_fetch_dirty";
+const MAX_RETRIES_PER_SPLIT: u32 = 3;
+const RETRY_BASE_BACKOFF: Duration = Duration::from_millis(200);
 
 type SplitBatch = Option<Vec<SplitImpl>>;
+
+/// A stream wrapper that sets `reading_file` before polling the underlying stream for the first time.
+///
+/// This helps attribute errors that happen before the first chunk is produced (e.g., invalid UTF-8)
+/// to the corresponding split.
+struct SetReadingFileOnPoll<S> {
+    inner: S,
+    reading_file: Arc<Mutex<Option<Arc<str>>>>,
+    split_id: Arc<str>,
+    is_set: bool,
+}
+
+impl<S> SetReadingFileOnPoll<S> {
+    fn new(inner: S, reading_file: Arc<Mutex<Option<Arc<str>>>>, split_id: Arc<str>) -> Self {
+        Self {
+            inner,
+            reading_file,
+            split_id,
+            is_set: false,
+        }
+    }
+
+    fn set_if_needed(&mut self) {
+        if !self.is_set {
+            *self.reading_file.lock().expect("mutex poisoned") = Some(self.split_id.clone());
+            self.is_set = true;
+        }
+    }
+}
+
+impl<S> futures::Stream for SetReadingFileOnPoll<S>
+where
+    S: futures::Stream,
+{
+    type Item = S::Item;
+
+    fn poll_next(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Self::Item>> {
+        // SAFETY: We never move `inner` out of `self`. We only mutate fields in place.
+        let this = unsafe { self.get_unchecked_mut() };
+        this.set_if_needed();
+        // SAFETY: We do not move `inner` after pinning.
+        unsafe { std::pin::Pin::new_unchecked(&mut this.inner) }.poll_next(cx)
+    }
+}
 
 pub struct FsFetchExecutor<S: StateStore, Src: OpendalSource> {
     actor_ctx: ActorContextRef,
@@ -65,6 +119,37 @@ pub struct FsFetchExecutor<S: StateStore, Src: OpendalSource> {
 }
 
 impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
+    async fn mark_split_dirty(
+        state_store_handler: &mut SourceStateTableHandler<S>,
+        split_id: &str,
+    ) -> StreamExecutorResult<()> {
+        // Persist dirty mark on the **same key** as the split to ensure vnode locality.
+        //
+        // NOTE: retry count stays in memory (方案 B).
+        let row = state_store_handler
+            .get(split_id)
+            .await?
+            .unwrap_or_else(|| panic!("split_id {split_id:?} should exist in state table"));
+        let jsonb = match row.datum_at(1) {
+            Some(ScalarRefImpl::Jsonb(jsonb_ref)) => jsonb_ref.to_owned_scalar(),
+            _ => unreachable!(),
+        };
+        let mut v = jsonb.take();
+        match v {
+            serde_json::Value::Object(ref mut map) => {
+                map.insert(DIRTY_FIELD.to_owned(), serde_json::Value::Bool(true));
+            }
+            other => {
+                // Fallback: wrap the original value.
+                v = serde_json::json!({ DIRTY_FIELD: true, "split": other });
+            }
+        }
+        state_store_handler.set(split_id, JsonbVal::from(v)).await?;
+        // Best-effort flush; commit still happens on barrier.
+        state_store_handler.try_flush().await?;
+        Ok(())
+    }
+
     pub fn new(
         actor_ctx: ActorContextRef,
         stream_source_core: StreamSourceCore<S>,
@@ -88,6 +173,7 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
         source_desc: &SourceDesc,
         stream: &mut StreamReaderWithPause<BIASED, Option<StreamChunk>>,
         rate_limit_rps: Option<u32>,
+        reading_file: Arc<Mutex<Option<Arc<str>>>>,
     ) -> StreamExecutorResult<()> {
         let mut batch = Vec::with_capacity(SPLIT_BATCH_SIZE);
         let state_table = state_store_handler.state_table();
@@ -106,6 +192,14 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                 let row = item?;
                 let split = match row.datum_at(1) {
                     Some(ScalarRefImpl::Jsonb(jsonb_ref)) => match properties {
+                        // Skip dirty splits (persisted in the split's own jsonb value).
+                        _ if jsonb_ref
+                            .access_object_field(DIRTY_FIELD)
+                            .and_then(|v| v.as_bool().ok())
+                            .unwrap_or(false) =>
+                        {
+                            continue;
+                        }
                         risingwave_connector::source::ConnectorProperties::Gcs(_) => {
                             let split: OpendalFsSplit<OpendalGcs> =
                                 OpendalFsSplit::restore_from_json(jsonb_ref.to_owned_scalar())?;
@@ -148,6 +242,7 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
             // to a new approach where each SourceReader reads only one file.
             // Then, merge the streams of multiple files serially here.
             for split in batch {
+                let split_id = split.id();
                 let single_file_stream = Self::build_single_file_stream_reader(
                     column_ids.clone(),
                     source_ctx.clone(),
@@ -158,6 +253,9 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                 .await?
                 .map_err(StreamExecutorError::connector_error);
                 let single_file_stream = single_file_stream.map(|reader| reader);
+                let single_file_stream =
+                    SetReadingFileOnPoll::new(single_file_stream, reading_file.clone(), split_id)
+                        .boxed();
                 merged_stream = merged_stream.chain(single_file_stream).boxed();
             }
 
@@ -241,6 +339,9 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
         // Initialize state table.
         state_store_handler.init_epoch(first_epoch).await?;
 
+        let reading_file: Arc<Mutex<Option<Arc<str>>>> = Arc::new(Mutex::new(None));
+        let mut retry_counts: HashMap<Arc<str>, u32> = HashMap::new();
+
         let mut splits_on_fetch: usize = 0;
         let mut stream = StreamReaderWithPause::<true, Option<StreamChunk>>::new(
             upstream,
@@ -261,31 +362,78 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
             &source_desc,
             &mut stream,
             self.rate_limit_rps,
+            reading_file.clone(),
         )
         .await?;
-        let mut reading_file: Option<Arc<str>> = None;
 
         while let Some(msg) = stream.next().await {
             match msg {
                 Err(e) => {
-                    tracing::error!(
-                        source_id = %core.source_id,
-                        source_name = %core.source_name,
-                        fragment_id = %self.actor_ctx.fragment_id,
-                        reading_file = ?reading_file,
-                        error = %e.as_report(),
-                        "Fetch Error, aborting actor"
-                    );
-                    GLOBAL_ERROR_METRICS.user_source_error.report([
-                        "File source fetch error".to_owned(),
-                        core.source_id.to_string(),
-                        core.source_name.clone(),
-                        self.actor_ctx.fragment_id.to_string(),
-                    ]);
-                    // Do not swallow the error and retry infinitely on each barrier.
-                    // Propagate the error to fail the actor, so the job enters failed/suspended state
-                    // with a clear error message.
-                    return Err(e);
+                    let cur_file = reading_file.lock().expect("mutex poisoned").clone();
+                    let Some(split_id) = cur_file else {
+                        tracing::error!(
+                            source_id = %core.source_id,
+                            source_name = %core.source_name,
+                            fragment_id = %self.actor_ctx.fragment_id,
+                            error = %e.as_report(),
+                            "Fetch Error but failed to infer reading file; aborting actor"
+                        );
+                        return Err(e);
+                    };
+
+                    let retries_done = retry_counts.entry(split_id.clone()).or_insert(0);
+                    if *retries_done < MAX_RETRIES_PER_SPLIT {
+                        *retries_done = retries_done.saturating_add(1);
+                        let backoff = RETRY_BASE_BACKOFF
+                            .checked_mul(1u32 << (*retries_done - 1))
+                            .unwrap_or(Duration::from_secs(60));
+                        tracing::warn!(
+                            source_id = %core.source_id,
+                            source_name = %core.source_name,
+                            fragment_id = %self.actor_ctx.fragment_id,
+                            reading_file = %split_id,
+                            retries_done = *retries_done,
+                            max_retries = MAX_RETRIES_PER_SPLIT,
+                            error = %e.as_report(),
+                            "Fetch Error, retrying file split"
+                        );
+                        tokio::time::sleep(backoff).await;
+                    } else {
+                        // Exceeded max retries: persist dirty mark and skip this split afterwards.
+                        Self::mark_split_dirty(&mut state_store_handler, split_id.as_ref()).await?;
+                        retry_counts.remove(&split_id);
+                        tracing::error!(
+                            source_id = %core.source_id,
+                            source_name = %core.source_name,
+                            fragment_id = %self.actor_ctx.fragment_id,
+                            reading_file = %split_id,
+                            max_retries = MAX_RETRIES_PER_SPLIT,
+                            error = %e.as_report(),
+                            "Fetch Error, exceeded max retries; marking split dirty and skipping"
+                        );
+                        GLOBAL_ERROR_METRICS.user_source_error.report([
+                            "File source dirty split".to_owned(),
+                            core.source_id.to_string(),
+                            core.source_name.clone(),
+                            self.actor_ctx.fragment_id.to_string(),
+                        ]);
+                    }
+
+                    // Clear current reading file and rebuild reader to continue with other splits.
+                    *reading_file.lock().expect("mutex poisoned") = None;
+                    splits_on_fetch = 0;
+                    Self::replace_with_new_batch_reader(
+                        &mut splits_on_fetch,
+                        &state_store_handler,
+                        core.column_ids.clone(),
+                        self.build_source_ctx(&source_desc, core.source_id, &core.source_name),
+                        &source_desc,
+                        &mut stream,
+                        self.rate_limit_rps,
+                        reading_file.clone(),
+                    )
+                    .await?;
+                    continue;
                 }
                 Ok(msg) => {
                     match msg {
@@ -310,7 +458,8 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                                                     );
                                                     self.rate_limit_rps = entry.rate_limit;
                                                     splits_on_fetch = 0;
-                                                    reading_file = None;
+                                                    *reading_file.lock().expect("mutex poisoned") =
+                                                        None;
                                                 }
                                             }
                                             _ => (),
@@ -335,7 +484,7 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                                         // should read. Rebuild the reader to avoid reading splits that no
                                         // longer belong to this actor (e.g., during scale-out).
                                         splits_on_fetch = 0;
-                                        reading_file = None;
+                                        *reading_file.lock().expect("mutex poisoned") = None;
                                     }
 
                                     if splits_on_fetch == 0 {
@@ -351,6 +500,7 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                                             &source_desc,
                                             &mut stream,
                                             self.rate_limit_rps,
+                                            reading_file.clone(),
                                         )
                                         .await?;
                                     }
@@ -359,7 +509,7 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                                 // store into state table.
                                 Message::Chunk(chunk) => {
                                     // For Parquet encoding, the offset indicates the current row being read.
-                                    let file_assignment = chunk
+                                    let file_assignment: Vec<OpendalFsSplit<Src>> = chunk
                                         .data_chunk()
                                         .rows()
                                         .filter_map(|row| {
@@ -377,7 +527,27 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                                             }
                                         })
                                         .collect();
-                                    state_store_handler.set_states(file_assignment).await?;
+
+                                    // Do not overwrite dirty marks.
+                                    let mut to_set = Vec::with_capacity(file_assignment.len());
+                                    for split in file_assignment {
+                                        let split_id = split.id();
+                                        let is_dirty = state_store_handler
+                                            .get(&split_id)
+                                            .await?
+                                            .and_then(|row| match row.datum_at(1) {
+                                                Some(ScalarRefImpl::Jsonb(jsonb_ref)) => jsonb_ref
+                                                    .access_object_field(DIRTY_FIELD)
+                                                    .and_then(|v| v.as_bool().ok()),
+                                                _ => None,
+                                            })
+                                            .unwrap_or(false);
+                                        if !is_dirty {
+                                            to_set.push(split);
+                                        }
+                                    }
+
+                                    state_store_handler.set_states(to_set).await?;
                                     state_store_handler.try_flush().await?;
                                 }
                                 Message::Watermark(_) => unreachable!(),
@@ -410,7 +580,8 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                                 .unwrap();
                                 debug_assert_eq!(mapping.len(), 1);
                                 if let Some((split_id, offset)) = mapping.into_iter().next() {
-                                    reading_file = Some(split_id.clone());
+                                    *reading_file.lock().expect("mutex poisoned") =
+                                        Some(split_id.clone());
                                     let row = state_store_handler.get(&split_id).await?
                                         .unwrap_or_else(|| {
                                             panic!("The fs_split (file_name) {:?} should be in the state table.",
@@ -438,10 +609,13 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                                 yield Message::Chunk(chunk);
                             }
                             None => {
-                                tracing::debug!("Deleting file: {:?}", reading_file);
-                                if let Some(ref delete_file_name) = reading_file {
+                                let cur_file = reading_file.lock().expect("mutex poisoned").clone();
+                                tracing::debug!("Deleting file: {:?}", cur_file);
+                                if let Some(ref delete_file_name) = cur_file {
                                     splits_on_fetch -= 1;
                                     state_store_handler.delete(delete_file_name).await?;
+                                    // Clean up in-memory retry count.
+                                    retry_counts.remove(delete_file_name);
                                 }
                             }
                         },
