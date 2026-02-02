@@ -1006,7 +1006,8 @@ impl StreamManagerService for StreamServiceImpl {
         let split_offsets = request.split_offsets;
 
         // Validate split IDs exist before proceeding
-        self.stream_manager
+        let applied_split_ids = self
+            .stream_manager
             .source_manager
             .validate_inject_source_offsets(source_id.into(), &split_offsets)
             .await?;
@@ -1033,7 +1034,9 @@ impl StreamManagerService for StreamServiceImpl {
             )
             .await?;
 
-        Ok(Response::new(InjectSourceOffsetsResponse {}))
+        Ok(Response::new(InjectSourceOffsetsResponse {
+            applied_split_ids,
+        }))
     }
 }
 

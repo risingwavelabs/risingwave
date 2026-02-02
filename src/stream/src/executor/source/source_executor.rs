@@ -430,6 +430,8 @@ impl<S: StateStore> SourceExecutor<S> {
 
         // Update splits and prepare JSON states for persistence
         let mut json_states: Vec<(String, JsonbVal)> = Vec::new();
+        let mut failed_splits: Vec<String> = Vec::new();
+
         for (split_id, offset) in &offsets_to_inject {
             if let Some(split) = self
                 .stream_source_core
@@ -450,6 +452,7 @@ impl<S: StateStore> SourceExecutor<S> {
                         error = ?e.as_report(),
                         "Failed to update split offset"
                     );
+                    failed_splits.push(split_id.clone());
                     continue;
                 }
                 // Mark this split as updated for persistence
@@ -461,6 +464,13 @@ impl<S: StateStore> SourceExecutor<S> {
                     .unwrap_or_else(|_| serde_json::json!({ "offset": offset }));
                 json_states.push((split_id.clone(), JsonbVal::from(json_value)));
             }
+        }
+
+        if !failed_splits.is_empty() {
+            return Err(StreamExecutorError::connector_error(anyhow!(
+                "failed to inject offsets for splits: {:?}",
+                failed_splits
+            )));
         }
 
         let num_injected = json_states.len();
