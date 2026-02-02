@@ -112,7 +112,10 @@ SELECT COUNT(*) FROM mv_test;
 9
 
 # Get Kafka offsets with skip_last=4 to go back 4 messages
-# This will inject offset = high_watermark - 4, causing re-consumption of last 4 messages
+# The script calculates offset = high_watermark - 4 - 1.
+# Since inject-source-offsets treats the value as "last consumed offset",
+# consumption will resume from (high_watermark - 4 - 1) + 1 = high_watermark - 4.
+# This causes re-consumption of the last 4 messages.
 system ok
 python3 e2e_test/source_inline/kafka/alter/get_kafka_offsets.py \
     --topic test_safe_update \

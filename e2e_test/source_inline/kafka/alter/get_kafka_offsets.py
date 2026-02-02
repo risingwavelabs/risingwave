@@ -31,8 +31,9 @@ def get_kafka_offsets(broker, topic, skip_last_n=2):
             tp = TopicPartition(topic, partition_id)
             low, high = consumer.get_watermark_offsets(tp)
             # Set offset to skip last N messages
-            # This simulates moving forward in the stream
-            new_offset = max(0, high - skip_last_n)
+            # inject_source_offsets expects "last_seen_offset", so start_offset = offset + 1.
+            # We subtract 1 to ensure we start reading from (high - skip_last_n).
+            new_offset = high - skip_last_n - 1
             offsets[str(partition_id)] = str(new_offset)
 
         return offsets
