@@ -65,6 +65,7 @@ pub struct PostgresConfig {
     #[serde_as(as = "DisplayFromStr")]
     pub tcp_keepalive_enable: bool,
 
+    #[serde(flatten)]
     pub tcp_keepalive: Option<TcpKeepaliveConfig>,
 }
 
