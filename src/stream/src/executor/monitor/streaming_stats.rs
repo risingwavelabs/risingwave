@@ -1097,7 +1097,7 @@ impl StreamingMetrics {
                 registry
             )
             .unwrap();
-        
+
         let kv_log_store_buffer_memory_bytes =
             register_guarded_int_gauge_vec_with_registry!(
                 "kv_log_store_buffer_memory_bytes",
