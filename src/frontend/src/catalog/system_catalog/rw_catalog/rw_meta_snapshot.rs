@@ -14,6 +14,7 @@
 
 use risingwave_common::types::{Fields, JsonbVal};
 use risingwave_frontend_macro::system_catalog;
+use risingwave_pb::id::HummockVersionId;
 use serde_json::json;
 
 use crate::catalog::system_catalog::SysCatalogReaderImpl;
@@ -23,7 +24,7 @@ use crate::error::Result;
 struct RwMetaSnapshot {
     #[primary_key]
     meta_snapshot_id: i64,
-    hummock_version_id: i64,
+    hummock_version_id: HummockVersionId,
     remarks: Option<String>,
     state_table_info: Option<JsonbVal>,
     rw_version: Option<String>,
@@ -38,7 +39,7 @@ async fn read_meta_snapshot(reader: &SysCatalogReaderImpl) -> Result<Vec<RwMetaS
         .into_iter()
         .map(|s| RwMetaSnapshot {
             meta_snapshot_id: s.id as _,
-            hummock_version_id: s.hummock_version_id.as_raw_id() as _,
+            hummock_version_id: s.hummock_version_id,
             remarks: s.remarks,
             state_table_info: Some(json!(s.state_table_info).into()),
             rw_version: s.rw_version,

@@ -266,7 +266,7 @@ impl HummockManager {
         timer.observe_duration();
         self.metrics
             .checkpoint_version_id
-            .set(new_checkpoint_id.as_raw_id() as i64);
+            .set(new_checkpoint_id.as_i64_id());
 
         Ok(new_checkpoint_id - old_checkpoint_id)
     }

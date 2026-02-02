@@ -17,6 +17,7 @@ use std::collections::HashMap;
 use risingwave_common::types::{Fields, JsonbVal};
 use risingwave_frontend_macro::system_catalog;
 use risingwave_pb::hummock::hummock_version_delta::PbGroupDeltas;
+use risingwave_pb::id::HummockVersionId;
 use serde_json::json;
 
 use crate::catalog::system_catalog::SysCatalogReaderImpl;
@@ -25,8 +26,8 @@ use crate::error::Result;
 #[derive(Fields)]
 struct RwHummockVersionDelta {
     #[primary_key]
-    id: i64,
-    prev_id: i64,
+    id: HummockVersionId,
+    prev_id: HummockVersionId,
     trivial_move: bool,
     group_deltas: JsonbVal,
 }
@@ -37,8 +38,8 @@ async fn read(reader: &SysCatalogReaderImpl) -> Result<Vec<RwHummockVersionDelta
     let rows = deltas
         .into_iter()
         .map(|d| RwHummockVersionDelta {
-            id: d.id.as_raw_id() as _,
-            prev_id: d.prev_id.as_raw_id() as _,
+            id: d.id,
+            prev_id: d.prev_id,
             trivial_move: d.trivial_move,
             group_deltas: json!(
                 d.group_deltas

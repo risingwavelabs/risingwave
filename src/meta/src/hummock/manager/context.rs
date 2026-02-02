@@ -455,7 +455,7 @@ impl HummockManager {
 
 fn trigger_safepoint_stat(metrics: &MetaMetrics, safepoints: &[HummockVersionId]) {
     if let Some(sp) = safepoints.iter().min() {
-        metrics.min_safepoint_version_id.set(sp.as_raw_id() as _);
+        metrics.min_safepoint_version_id.set(sp.as_i64_id());
     } else {
         metrics.min_safepoint_version_id.set(u64::MAX as _);
     }

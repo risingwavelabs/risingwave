@@ -50,7 +50,7 @@ fn trigger_version_stat(metrics: &MetaMetrics, current_version: &HummockVersion)
         .set(current_version.estimated_encode_len() as i64);
     metrics
         .current_version_id
-        .set(current_version.id.as_raw_id() as i64);
+        .set(current_version.id.as_i64_id());
 }
 
 pub(super) struct HummockVersionTransaction<'a> {

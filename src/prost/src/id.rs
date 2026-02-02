@@ -137,10 +137,6 @@ impl<const N: usize> TypedU32Id<N> {
     pub fn is_placeholder(&self) -> bool {
         self.0 == OBJECT_ID_PLACEHOLDER
     }
-
-    pub fn as_i32_id(self) -> i32 {
-        self.to_i32()
-    }
 }
 
 impl<const N: usize, P> From<P> for TypedId<N, P> {
@@ -201,6 +197,10 @@ macro_rules! impl_typed_id_conversion {
                             self.0 as _
                         }
                     })
+                }
+
+                pub fn [< as_ $signed _id >](self) -> $signed {
+                    self.[< to_ $signed >]()
                 }
             }
         }
