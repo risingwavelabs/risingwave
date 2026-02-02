@@ -14,7 +14,6 @@
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fmt::Debug;
-use std::num::NonZeroUsize;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -36,11 +35,11 @@ use tokio::time::{Instant, MissedTickBehavior};
 
 use crate::barrier::{Command, Reschedule, SharedFragmentInfo};
 use crate::controller::scale::{
-    FragmentRenderMap, NoShuffleEnsemble, RenderedGraph, WorkerInfo,
-    find_fragment_no_shuffle_dags_detailed, render_fragments, render_jobs,
+    FragmentRenderMap, NoShuffleEnsemble, RenderedGraph, find_fragment_no_shuffle_dags_detailed,
+    render_fragments, render_jobs,
 };
 use crate::error::bail_invalid_parameter;
-use crate::manager::{LocalNotification, MetaSrvEnv, MetadataManager};
+use crate::manager::{ActiveStreamingWorkerNodes, LocalNotification, MetaSrvEnv, MetadataManager};
 use crate::model::{ActorId, FragmentId, StreamActor, StreamActorWithDispatchers};
 use crate::stream::{GlobalStreamManager, SourceManagerRef};
 use crate::{MetaError, MetaResult};
@@ -263,7 +262,7 @@ impl ScaleController {
     pub async fn reschedule_inplace(
         &self,
         policy: HashMap<JobId, ReschedulePolicy>,
-        workers: HashMap<WorkerId, PbWorkerNode>,
+        workers: &HashMap<WorkerId, WorkerNode>,
     ) -> MetaResult<HashMap<DatabaseId, Command>> {
         let inner = self.metadata_manager.catalog_controller.inner.read().await;
         let txn = inner.db.begin().await?;
@@ -305,19 +304,6 @@ impl ScaleController {
 
         let jobs = policy.keys().copied().collect();
 
-        let workers = workers
-            .into_iter()
-            .map(|(id, worker)| {
-                (
-                    id,
-                    WorkerInfo {
-                        parallelism: NonZeroUsize::new(worker.compute_node_parallelism()).unwrap(),
-                        resource_group: worker.resource_group(),
-                    },
-                )
-            })
-            .collect();
-
         let command = self.rerender_inner(&txn, jobs, workers).await?;
 
         txn.commit().await?;
@@ -328,7 +314,7 @@ impl ScaleController {
     pub async fn reschedule_fragment_inplace(
         &self,
         policy: HashMap<risingwave_meta_model::FragmentId, Option<StreamingParallelism>>,
-        workers: HashMap<WorkerId, PbWorkerNode>,
+        workers: &HashMap<WorkerId, PbWorkerNode>,
     ) -> MetaResult<HashMap<DatabaseId, Command>> {
         if policy.is_empty() {
             return Ok(HashMap::new());
@@ -417,19 +403,6 @@ impl ScaleController {
             target_ensembles.push(ensemble);
         }
 
-        let workers = workers
-            .into_iter()
-            .map(|(id, worker)| {
-                (
-                    id,
-                    WorkerInfo {
-                        parallelism: NonZeroUsize::new(worker.compute_node_parallelism()).unwrap(),
-                        resource_group: worker.resource_group(),
-                    },
-                )
-            })
-            .collect();
-
         let command = self
             .rerender_fragment_inner(&txn, target_ensembles, workers)
             .await?;
@@ -442,7 +415,7 @@ impl ScaleController {
     async fn rerender(
         &self,
         jobs: HashSet<JobId>,
-        workers: BTreeMap<WorkerId, WorkerInfo>,
+        workers: &HashMap<WorkerId, WorkerNode>,
     ) -> MetaResult<HashMap<DatabaseId, Command>> {
         let inner = self.metadata_manager.catalog_controller.inner.read().await;
         self.rerender_inner(&inner.db, jobs, workers).await
@@ -452,7 +425,7 @@ impl ScaleController {
         &self,
         txn: &impl ConnectionTrait,
         ensembles: Vec<NoShuffleEnsemble>,
-        workers: BTreeMap<WorkerId, WorkerInfo>,
+        workers: &HashMap<WorkerId, WorkerNode>,
     ) -> MetaResult<HashMap<DatabaseId, Command>> {
         if ensembles.is_empty() {
             return Ok(HashMap::new());
@@ -479,7 +452,7 @@ impl ScaleController {
         &self,
         txn: &impl ConnectionTrait,
         jobs: HashSet<JobId>,
-        workers: BTreeMap<WorkerId, WorkerInfo>,
+        workers: &HashMap<WorkerId, WorkerNode>,
     ) -> MetaResult<HashMap<DatabaseId, Command>> {
         let adaptive_parallelism_strategy = {
             let system_params_reader = self.env.system_params_reader().await;
@@ -852,31 +825,8 @@ impl GlobalStreamManager {
             return Ok(false);
         }
 
-        let workers = self
-            .metadata_manager
-            .cluster_controller
-            .list_active_streaming_workers()
-            .await?;
-
-        let schedulable_workers: BTreeMap<_, _> = workers
-            .iter()
-            .filter(|worker| {
-                !worker
-                    .property
-                    .as_ref()
-                    .map(|p| p.is_unschedulable)
-                    .unwrap_or(false)
-            })
-            .map(|worker| {
-                (
-                    worker.id,
-                    WorkerInfo {
-                        parallelism: NonZeroUsize::new(worker.compute_node_parallelism()).unwrap(),
-                        resource_group: worker.resource_group(),
-                    },
-                )
-            })
-            .collect();
+        let active_workers =
+            ActiveStreamingWorkerNodes::new_snapshot(self.metadata_manager.clone()).await?;
 
         if job_ids.is_empty() {
             tracing::info!("no streaming jobs for scaling, maybe an empty cluster");
@@ -886,7 +836,7 @@ impl GlobalStreamManager {
         tracing::info!(
             "trigger parallelism control for jobs: {:#?}, workers {:#?}",
             job_ids,
-            schedulable_workers
+            active_workers.current()
         );
 
         let batch_size = match self.env.opts.parallelism_control_batch_size {
@@ -898,7 +848,7 @@ impl GlobalStreamManager {
             "total {} streaming jobs, batch size {}, schedulable worker ids: {:?}",
             job_ids.len(),
             batch_size,
-            schedulable_workers
+            active_workers.current()
         );
 
         let batches: Vec<_> = job_ids
@@ -913,7 +863,7 @@ impl GlobalStreamManager {
 
             let commands = self
                 .scale_controller
-                .rerender(jobs, schedulable_workers.clone())
+                .rerender(jobs, active_workers.current())
                 .await?;
 
             let futures = commands.into_iter().map(|(database_id, command)| {
