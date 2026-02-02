@@ -67,8 +67,13 @@ const DISABLE_SOURCE_RATE_LIMIT: i32 = -1;
 const DISABLE_DML_RATE_LIMIT: i32 = -1;
 const DISABLE_SINK_RATE_LIMIT: i32 = -1;
 
-/// Default parallelism bound for sources and tables
-const DEFAULT_SOURCE_TABLE_PARALLELISM_BOUND: std::num::NonZeroU64 =
+/// Default parallelism bound for tables
+const DEFAULT_TABLE_PARALLELISM_BOUND: std::num::NonZeroU64 =
+    // SAFETY: 4 is non-zero
+    unsafe { std::num::NonZeroU64::new_unchecked(4) };
+
+/// Default parallelism bound for sources
+const DEFAULT_SOURCE_PARALLELISM_BOUND: std::num::NonZeroU64 =
     // SAFETY: 4 is non-zero
     unsafe { std::num::NonZeroU64::new_unchecked(4) };
 
@@ -186,7 +191,7 @@ pub struct SessionConfig {
     streaming_parallelism_strategy: ConfigAdaptiveParallelismStrategy,
 
     /// Specific adaptive parallelism strategy for table. Defaults to `BOUNDED(4)`.
-    #[parameter(default = ConfigAdaptiveParallelismStrategy::Bounded(DEFAULT_SOURCE_TABLE_PARALLELISM_BOUND))]
+    #[parameter(default = ConfigAdaptiveParallelismStrategy::Bounded(DEFAULT_TABLE_PARALLELISM_BOUND))]
     streaming_parallelism_strategy_for_table: ConfigAdaptiveParallelismStrategy,
 
     /// Specific parallelism for table. By default, it will fall back to `STREAMING_PARALLELISM`.
@@ -210,7 +215,7 @@ pub struct SessionConfig {
     streaming_parallelism_for_index: ConfigParallelism,
 
     /// Specific adaptive parallelism strategy for source. Defaults to `BOUNDED(4)`.
-    #[parameter(default = ConfigAdaptiveParallelismStrategy::Bounded(DEFAULT_SOURCE_TABLE_PARALLELISM_BOUND))]
+    #[parameter(default = ConfigAdaptiveParallelismStrategy::Bounded(DEFAULT_SOURCE_PARALLELISM_BOUND))]
     streaming_parallelism_strategy_for_source: ConfigAdaptiveParallelismStrategy,
 
     /// Specific parallelism for source. By default, it will fall back to `STREAMING_PARALLELISM`.
