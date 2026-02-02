@@ -177,6 +177,7 @@ pub struct StreamingMetrics {
     pub kv_log_store_buffer_unconsumed_row_count: LabelGuardedIntGaugeVec,
     pub kv_log_store_buffer_unconsumed_epoch_count: LabelGuardedIntGaugeVec,
     pub kv_log_store_buffer_unconsumed_min_epoch: LabelGuardedIntGaugeVec,
+    pub kv_log_store_buffer_memory_bytes: LabelGuardedIntGaugeVec,
 
     pub sync_kv_log_store_read_count: LabelGuardedIntCounterVec,
     pub sync_kv_log_store_read_size: LabelGuardedIntCounterVec,
@@ -189,6 +190,7 @@ pub struct StreamingMetrics {
     pub sync_kv_log_store_buffer_unconsumed_row_count: LabelGuardedIntGaugeVec,
     pub sync_kv_log_store_buffer_unconsumed_epoch_count: LabelGuardedIntGaugeVec,
     pub sync_kv_log_store_buffer_unconsumed_min_epoch: LabelGuardedIntGaugeVec,
+    pub sync_kv_log_store_buffer_memory_bytes: LabelGuardedIntGaugeVec,
 
     // Memory management
     pub lru_runtime_loop_count: IntCounter,
@@ -986,6 +988,14 @@ impl StreamingMetrics {
                 registry
             )
             .unwrap();
+        let sync_kv_log_store_buffer_memory_bytes =
+            register_guarded_int_gauge_vec_with_registry!(
+                "sync_kv_log_store_buffer_memory_bytes",
+                "Estimated heap bytes used by synced kv log store buffer (unconsumed + consumed but not truncated)",
+                &["actor_id", "target", "fragment_id", "relation"],
+                registry
+            )
+            .unwrap();
 
         let kv_log_store_storage_write_count = register_guarded_int_counter_vec_with_registry!(
             "kv_log_store_storage_write_count",
@@ -1083,6 +1093,14 @@ impl StreamingMetrics {
             register_guarded_int_gauge_vec_with_registry!(
                 "kv_log_store_buffer_unconsumed_min_epoch",
                 "Number of Unconsumed Epoch in buffer",
+                &["actor_id", "connector", "sink_id", "sink_name"],
+                registry
+            )
+            .unwrap();
+        let kv_log_store_buffer_memory_bytes =
+            register_guarded_int_gauge_vec_with_registry!(
+                "kv_log_store_buffer_memory_bytes",
+                "Estimated heap bytes used by kv log store buffer (unconsumed + consumed but not truncated)",
                 &["actor_id", "connector", "sink_id", "sink_name"],
                 registry
             )
@@ -1325,6 +1343,7 @@ impl StreamingMetrics {
             kv_log_store_buffer_unconsumed_row_count,
             kv_log_store_buffer_unconsumed_epoch_count,
             kv_log_store_buffer_unconsumed_min_epoch,
+            kv_log_store_buffer_memory_bytes,
             sync_kv_log_store_read_count,
             sync_kv_log_store_read_size,
             sync_kv_log_store_write_pause_duration_ns,
@@ -1336,6 +1355,7 @@ impl StreamingMetrics {
             sync_kv_log_store_buffer_unconsumed_row_count,
             sync_kv_log_store_buffer_unconsumed_epoch_count,
             sync_kv_log_store_buffer_unconsumed_min_epoch,
+            sync_kv_log_store_buffer_memory_bytes,
             lru_runtime_loop_count,
             lru_latest_sequence,
             lru_watermark_sequence,

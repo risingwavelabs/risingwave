@@ -126,6 +126,7 @@ pub mod metrics {
         pub buffer_unconsumed_row_count: LabelGuardedIntGauge,
         pub buffer_unconsumed_epoch_count: LabelGuardedIntGauge,
         pub buffer_unconsumed_min_epoch: LabelGuardedIntGauge,
+        pub buffer_memory_bytes: LabelGuardedIntGauge,
         pub buffer_read_count: LabelGuardedIntCounter,
         pub buffer_read_size: LabelGuardedIntCounter,
 
@@ -193,6 +194,9 @@ pub mod metrics {
                 .with_guarded_label_values(labels);
             let buffer_unconsumed_min_epoch = metrics
                 .sync_kv_log_store_buffer_unconsumed_min_epoch
+                .with_guarded_label_values(labels);
+            let buffer_memory_bytes = metrics
+                .sync_kv_log_store_buffer_memory_bytes
                 .with_guarded_label_values(labels);
             let buffer_read_count = metrics
                 .sync_kv_log_store_read_count
@@ -288,6 +292,7 @@ pub mod metrics {
                 buffer_unconsumed_row_count,
                 buffer_unconsumed_epoch_count,
                 buffer_unconsumed_min_epoch,
+                buffer_memory_bytes,
                 buffer_read_count,
                 buffer_read_size,
                 total_read_count,
@@ -316,6 +321,7 @@ pub mod metrics {
                 buffer_unconsumed_row_count: LabelGuardedIntGauge::test_int_gauge::<4>(),
                 buffer_unconsumed_epoch_count: LabelGuardedIntGauge::test_int_gauge::<4>(),
                 buffer_unconsumed_min_epoch: LabelGuardedIntGauge::test_int_gauge::<4>(),
+                buffer_memory_bytes: LabelGuardedIntGauge::test_int_gauge::<4>(),
                 buffer_read_count: LabelGuardedIntCounter::test_int_counter::<5>(),
                 buffer_read_size: LabelGuardedIntCounter::test_int_counter::<5>(),
                 total_read_count: LabelGuardedIntCounter::test_int_counter::<5>(),
