@@ -84,8 +84,6 @@ pub struct HummockStateStoreMetrics {
     // memory
     pub per_table_imm_size: RelabeledGuardedIntGaugeVec,
     pub per_table_imm_count: RelabeledGuardedIntGaugeVec,
-    pub per_fragment_imm_size: RelabeledGuardedIntGaugeVec,
-    pub per_fragment_imm_count: RelabeledGuardedIntGaugeVec,
     pub mem_table_spill_counts: RelabeledGuardedIntCounterVec,
     pub old_value_size: RelabeledGuardedIntGaugeVec,
 
@@ -442,15 +440,16 @@ impl HummockStateStoreMetrics {
         let per_table_imm_size = register_guarded_int_gauge_vec_with_registry!(
             "state_store_per_table_imm_size",
             "Total imm size per table",
-            &["table_id"],
+            &["table_id", "fragment_id"],
             registry
         )
         .unwrap();
 
-        let per_table_imm_size = RelabeledGuardedIntGaugeVec::with_metric_level(
+        let per_table_imm_size = RelabeledGuardedIntGaugeVec::with_metric_level_relabel_n(
             MetricLevel::Debug,
             per_table_imm_size,
             metric_level,
+            1,
         );
 
         let per_table_imm_count = register_guarded_int_gauge_vec_with_registry!(
@@ -464,34 +463,6 @@ impl HummockStateStoreMetrics {
         let per_table_imm_count = RelabeledGuardedIntGaugeVec::with_metric_level(
             MetricLevel::Debug,
             per_table_imm_count,
-            metric_level,
-        );
-
-        let per_fragment_imm_size = register_guarded_int_gauge_vec_with_registry!(
-            "state_store_per_fragment_imm_size",
-            "Total imm size per fragment",
-            &["fragment_id"],
-            registry
-        )
-        .unwrap();
-
-        let per_fragment_imm_size = RelabeledGuardedIntGaugeVec::with_metric_level(
-            MetricLevel::Info,
-            per_fragment_imm_size,
-            metric_level,
-        );
-
-        let per_fragment_imm_count = register_guarded_int_gauge_vec_with_registry!(
-            "state_store_per_fragment_imm_count",
-            "Total imm count per fragment",
-            &["fragment_id"],
-            registry
-        )
-        .unwrap();
-
-        let per_fragment_imm_count = RelabeledGuardedIntGaugeVec::with_metric_level(
-            MetricLevel::Info,
-            per_fragment_imm_count,
             metric_level,
         );
 
@@ -642,8 +613,6 @@ impl HummockStateStoreMetrics {
             uploader_per_table_imm_count,
             per_table_imm_size,
             per_table_imm_count,
-            per_fragment_imm_size,
-            per_fragment_imm_count,
             mem_table_spill_counts,
             old_value_size,
 
