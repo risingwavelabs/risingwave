@@ -488,6 +488,35 @@ impl DdlService for DdlServiceImpl {
         }))
     }
 
+    async fn replace_sink(
+        &self,
+        request: Request<ReplaceSinkRequest>,
+    ) -> Result<Response<ReplaceSinkResponse>, Status> {
+        self.env.idle_manager().record_activity();
+
+        let req = request.into_inner();
+
+        let sink = req.get_sink()?.clone();
+        let fragment_graph = req.get_fragment_graph()?.clone();
+        let dependencies = req.get_dependencies().iter().copied().collect();
+
+        let stream_job = StreamingJob::Sink(sink);
+
+        let command = DdlCommand::ReplaceSink {
+            stream_job,
+            fragment_graph,
+            dependencies,
+            resource_type: Self::default_streaming_job_resource_type(),
+        };
+
+        let version = self.ddl_controller.run_command(command).await?;
+
+        Ok(Response::new(ReplaceSinkResponse {
+            status: None,
+            version,
+        }))
+    }
+
     async fn create_subscription(
         &self,
         request: Request<CreateSubscriptionRequest>,

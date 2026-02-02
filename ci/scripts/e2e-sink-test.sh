@@ -85,6 +85,9 @@ risedev show-risedev-env
 echo "--- testing postgres_sink"
 risedev slt './e2e_test/sink/postgres_sink.slt'
 
+echo "--- testing replace_sink_to_postgres"
+risedev slt './e2e_test/sink/replace_sink_to_postgres.slt'
+
 echo "--- testing common sinks"
 risedev slt './e2e_test/sink/append_only_sink.slt'
 risedev slt './e2e_test/sink/create_sink_as.slt'
@@ -97,6 +100,7 @@ risedev slt './e2e_test/sink/rate_limit.slt'
 risedev slt './e2e_test/sink/auto_schema_change.slt'
 risedev slt './e2e_test/sink/sink_vector_columns.slt'
 risedev slt './e2e_test/sink/force_compaction_sink.slt'
+risedev slt './e2e_test/sink/replace_sink.slt'
 risedev slt './e2e_test/sink/bug_fixes/**/*.slt'
 sleep 1
 

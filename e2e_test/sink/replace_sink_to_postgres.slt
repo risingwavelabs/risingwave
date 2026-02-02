@@ -1,0 +1,376 @@
+# Tests for REPLACE SINK with PostgreSQL downstream
+# These tests verify data flow by querying the downstream PostgreSQL tables
+
+control substitution on
+
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+################### Setup PostgreSQL database and tables ###################
+
+system ok
+PGDATABASE=postgres psql -c "DROP DATABASE IF EXISTS replace_sink_test WITH (FORCE)"
+
+system ok
+PGDATABASE=replace_sink_test createdb
+
+# Create tables for different test scenarios
+system ok
+PGDATABASE=replace_sink_test psql -c "CREATE TABLE pg_basic (
+    id INT PRIMARY KEY,
+    val VARCHAR(255)
+)"
+
+system ok
+PGDATABASE=replace_sink_test psql -c "CREATE TABLE pg_mv (
+    id INT PRIMARY KEY,
+    doubled_val INT
+)"
+
+system ok
+PGDATABASE=replace_sink_test psql -c "CREATE TABLE pg_append_only (
+    id INT,
+    val VARCHAR(255)
+)"
+
+system ok
+PGDATABASE=replace_sink_test psql -c "CREATE TABLE pg_target_1 (
+    id INT PRIMARY KEY,
+    val VARCHAR(255)
+)"
+
+system ok
+PGDATABASE=replace_sink_test psql -c "CREATE TABLE pg_target_2 (
+    id INT PRIMARY KEY,
+    val VARCHAR(255)
+)"
+
+################### Test 1: Basic flow - sink from table ###################
+# Create sink from table (with pre-inserted data), complete backfill,
+# query downstream, replace sink, query downstream, insert new data, query downstream
+
+statement ok
+CREATE TABLE t_basic (id INT PRIMARY KEY, val VARCHAR);
+
+statement ok
+INSERT INTO t_basic VALUES (1, 'a'), (2, 'b'), (3, 'c');
+
+# Create sink to PostgreSQL
+statement ok
+CREATE SINK sink_basic FROM t_basic WITH (
+    connector = 'postgres',
+    host = '$PGHOST',
+    port = '$PGPORT',
+    user = '$PGUSER',
+    password = '$PGPASSWORD',
+    database = 'replace_sink_test',
+    table = 'pg_basic',
+    type = 'upsert',
+    primary_key = 'id'
+);
+
+# Query downstream after initial backfill
+query I retry 5 backoff 1s
+SELECT * FROM postgres_query('$PGHOST', '$PGPORT', '$PGUSER', '${PGPASSWORD:postgres}', 'replace_sink_test', 'SELECT id, val FROM pg_basic ORDER BY id;');
+----
+1 a
+2 b
+3 c
+
+# Replace sink with the same definition
+statement ok
+REPLACE SINK sink_basic FROM t_basic WITH (
+    connector = 'postgres',
+    host = '$PGHOST',
+    port = '$PGPORT',
+    user = '$PGUSER',
+    password = '$PGPASSWORD',
+    database = 'replace_sink_test',
+    table = 'pg_basic',
+    type = 'upsert',
+    primary_key = 'id'
+);
+
+# Query downstream after replace - data should still be there (no change)
+query I
+SELECT * FROM postgres_query('$PGHOST', '$PGPORT', '$PGUSER', '${PGPASSWORD:postgres}', 'replace_sink_test', 'SELECT id, val FROM pg_basic ORDER BY id;');
+----
+1 a
+2 b
+3 c
+
+# Insert new data into upstream table
+statement ok
+INSERT INTO t_basic VALUES (4, 'd'), (5, 'e');
+
+# Query downstream after insert - new data should appear
+query I retry 5 backoff 1s
+SELECT * FROM postgres_query('$PGHOST', '$PGPORT', '$PGUSER', '${PGPASSWORD:postgres}', 'replace_sink_test', 'SELECT id, val FROM pg_basic ORDER BY id;');
+----
+1 a
+2 b
+3 c
+4 d
+5 e
+
+# Cleanup
+statement ok
+DROP SINK sink_basic;
+
+statement ok
+DROP TABLE t_basic;
+
+################### Test 2: Sink from MV ###################
+# Create sink from MV, query downstream, replace, query downstream, insert data
+
+statement ok
+CREATE TABLE t_for_mv (id INT PRIMARY KEY, val INT);
+
+statement ok
+INSERT INTO t_for_mv VALUES (1, 100), (2, 200), (3, 300);
+
+statement ok
+CREATE MATERIALIZED VIEW mv_for_sink AS SELECT id, val * 2 AS doubled_val FROM t_for_mv;
+
+# Create sink from MV
+statement ok
+CREATE SINK sink_from_mv FROM mv_for_sink WITH (
+    connector = 'postgres',
+    host = '$PGHOST',
+    port = '$PGPORT',
+    user = '$PGUSER',
+    password = '$PGPASSWORD',
+    database = 'replace_sink_test',
+    table = 'pg_mv',
+    type = 'upsert',
+    primary_key = 'id'
+);
+
+statement ok
+FLUSH;
+
+# Query downstream after initial backfill
+query I retry 5 backoff 1s
+SELECT * FROM postgres_query('$PGHOST', '$PGPORT', '$PGUSER', '${PGPASSWORD:postgres}', 'replace_sink_test', 'SELECT id, doubled_val FROM pg_mv ORDER BY id;');
+----
+1 200
+2 400
+3 600
+
+# Replace the sink
+statement ok
+REPLACE SINK sink_from_mv FROM mv_for_sink WITH (
+    connector = 'postgres',
+    host = '$PGHOST',
+    port = '$PGPORT',
+    user = '$PGUSER',
+    password = '$PGPASSWORD',
+    database = 'replace_sink_test',
+    table = 'pg_mv',
+    type = 'upsert',
+    primary_key = 'id'
+);
+
+# Query downstream after replace
+query I
+SELECT * FROM postgres_query('$PGHOST', '$PGPORT', '$PGUSER', '${PGPASSWORD:postgres}', 'replace_sink_test', 'SELECT id, doubled_val FROM pg_mv ORDER BY id;');
+----
+1 200
+2 400
+3 600
+
+# Insert new data into source table
+statement ok
+INSERT INTO t_for_mv VALUES (4, 400), (5, 500);
+
+statement ok
+FLUSH;
+
+# Query downstream - new data should appear
+query I retry 5 backoff 1s
+SELECT * FROM postgres_query('$PGHOST', '$PGPORT', '$PGUSER', '${PGPASSWORD:postgres}', 'replace_sink_test', 'SELECT id, doubled_val FROM pg_mv ORDER BY id;');
+----
+1 200
+2 400
+3 600
+4 800
+5 1000
+
+# Cleanup
+statement ok
+DROP SINK sink_from_mv;
+
+statement ok
+DROP MATERIALIZED VIEW mv_for_sink;
+
+statement ok
+DROP TABLE t_for_mv;
+
+################### Test 3: Append-only sink - verify no duplicate backfill ###################
+# Create append-only sink, replace, check downstream has no duplicates
+
+statement ok
+CREATE TABLE t_append_only (id INT, val VARCHAR) APPEND ONLY;
+
+statement ok
+INSERT INTO t_append_only VALUES (1, 'row1'), (2, 'row2'), (3, 'row3');
+
+# Create append-only sink
+statement ok
+CREATE SINK sink_append_only FROM t_append_only WITH (
+    connector = 'postgres',
+    host = '$PGHOST',
+    port = '$PGPORT',
+    user = '$PGUSER',
+    password = '$PGPASSWORD',
+    database = 'replace_sink_test',
+    table = 'pg_append_only',
+    type = 'append-only',
+    force_append_only = 'true'
+);
+
+# Query downstream after initial backfill - should have 3 rows
+query I retry 5 backoff 1s
+SELECT * FROM postgres_query('$PGHOST', '$PGPORT', '$PGUSER', '${PGPASSWORD:postgres}', 'replace_sink_test', 'SELECT COUNT(*) FROM pg_append_only;');
+----
+3
+
+query I
+SELECT * FROM postgres_query('$PGHOST', '$PGPORT', '$PGUSER', '${PGPASSWORD:postgres}', 'replace_sink_test', 'SELECT id, val FROM pg_append_only ORDER BY id;');
+----
+1 row1
+2 row2
+3 row3
+
+# Replace the append-only sink - should NOT re-backfill
+statement ok
+REPLACE SINK sink_append_only FROM t_append_only WITH (
+    connector = 'postgres',
+    host = '$PGHOST',
+    port = '$PGPORT',
+    user = '$PGUSER',
+    password = '$PGPASSWORD',
+    database = 'replace_sink_test',
+    table = 'pg_append_only',
+    type = 'append-only',
+    force_append_only = 'true'
+);
+
+# Query downstream after replace - should still have only 3 rows (no duplicate backfill)
+query I
+SELECT * FROM postgres_query('$PGHOST', '$PGPORT', '$PGUSER', '${PGPASSWORD:postgres}', 'replace_sink_test', 'SELECT COUNT(*) FROM pg_append_only;');
+----
+3
+
+# Insert new data
+statement ok
+INSERT INTO t_append_only VALUES (4, 'row4'), (5, 'row5');
+
+# Query downstream - should have 5 rows now
+query I retry 5 backoff 1s
+SELECT * FROM postgres_query('$PGHOST', '$PGPORT', '$PGUSER', '${PGPASSWORD:postgres}', 'replace_sink_test', 'SELECT COUNT(*) FROM pg_append_only;');
+----
+5
+
+# Cleanup
+statement ok
+DROP SINK sink_append_only;
+
+statement ok
+DROP TABLE t_append_only;
+
+################### Test 4: Replace sink to different target table ###################
+# Create sink to one table, replace to another table, verify data flow
+
+statement ok
+CREATE TABLE rw_source (id INT PRIMARY KEY, val VARCHAR);
+
+statement ok
+INSERT INTO rw_source VALUES (1, 'initial_1'), (2, 'initial_2'), (3, 'initial_3');
+
+# Create sink to first PostgreSQL table
+statement ok
+CREATE SINK sink_to_pg FROM rw_source WITH (
+    connector = 'postgres',
+    host = '$PGHOST',
+    port = '$PGPORT',
+    user = '$PGUSER',
+    password = '$PGPASSWORD',
+    database = 'replace_sink_test',
+    table = 'pg_target_1',
+    type = 'upsert',
+    primary_key = 'id'
+);
+
+# Verify data appeared in pg_target_1
+query I retry 5 backoff 1s
+SELECT * FROM postgres_query('$PGHOST', '$PGPORT', '$PGUSER', '${PGPASSWORD:postgres}', 'replace_sink_test', 'SELECT id, val FROM pg_target_1 ORDER BY id;');
+----
+1 initial_1
+2 initial_2
+3 initial_3
+
+# Verify pg_target_2 is empty
+query I
+SELECT * FROM postgres_query('$PGHOST', '$PGPORT', '$PGUSER', '${PGPASSWORD:postgres}', 'replace_sink_test', 'SELECT COUNT(*) FROM pg_target_2;');
+----
+0
+
+# Now REPLACE SINK to redirect to pg_target_2
+statement ok
+REPLACE SINK sink_to_pg FROM rw_source WITH (
+    connector = 'postgres',
+    host = '$PGHOST',
+    port = '$PGPORT',
+    user = '$PGUSER',
+    password = '$PGPASSWORD',
+    database = 'replace_sink_test',
+    table = 'pg_target_2',
+    type = 'upsert',
+    primary_key = 'id'
+);
+
+# pg_target_2 should still be empty after replace (no re-backfill)
+query I
+SELECT * FROM postgres_query('$PGHOST', '$PGPORT', '$PGUSER', '${PGPASSWORD:postgres}', 'replace_sink_test', 'SELECT COUNT(*) FROM pg_target_2;');
+----
+0
+
+# pg_target_1 should still have the old data (not affected by replace)
+query I
+SELECT * FROM postgres_query('$PGHOST', '$PGPORT', '$PGUSER', '${PGPASSWORD:postgres}', 'replace_sink_test', 'SELECT id, val FROM pg_target_1 ORDER BY id;');
+----
+1 initial_1
+2 initial_2
+3 initial_3
+
+# Insert NEW data into RisingWave source
+statement ok
+INSERT INTO rw_source VALUES (4, 'new_4'), (5, 'new_5');
+
+# NEW data should appear in pg_target_2 (new target)
+query I retry 5 backoff 1s
+SELECT * FROM postgres_query('$PGHOST', '$PGPORT', '$PGUSER', '${PGPASSWORD:postgres}', 'replace_sink_test', 'SELECT id, val FROM pg_target_2 ORDER BY id;');
+----
+4 new_4
+5 new_5
+
+# pg_target_1 should still have only the old data (no new data)
+query I
+SELECT * FROM postgres_query('$PGHOST', '$PGPORT', '$PGUSER', '${PGPASSWORD:postgres}', 'replace_sink_test', 'SELECT id, val FROM pg_target_1 ORDER BY id;');
+----
+1 initial_1
+2 initial_2
+3 initial_3
+
+# Cleanup
+statement ok
+DROP SINK sink_to_pg;
+
+statement ok
+DROP TABLE rw_source;
+
+################### Cleanup PostgreSQL database ###################
+
+system ok
+PGDATABASE=postgres psql -c "DROP DATABASE replace_sink_test WITH (FORCE)"

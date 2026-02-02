@@ -1368,6 +1368,10 @@ pub enum Statement {
     CreateSink {
         stmt: CreateSinkStatement,
     },
+    /// REPLACE SINK
+    ReplaceSink {
+        stmt: ReplaceSinkStatement,
+    },
     /// CREATE SUBSCRIPTION
     CreateSubscription {
         stmt: CreateSubscriptionStatement,
@@ -2167,6 +2171,7 @@ impl Statement {
             ),
             Statement::CreateSource { stmt } => write!(f, "CREATE SOURCE {}", stmt,),
             Statement::CreateSink { stmt } => write!(f, "CREATE SINK {}", stmt,),
+            Statement::ReplaceSink { stmt } => write!(f, "REPLACE SINK {}", stmt,),
             Statement::CreateSubscription { stmt } => write!(f, "CREATE SUBSCRIPTION {}", stmt,),
             Statement::CreateConnection { stmt } => write!(f, "CREATE CONNECTION {}", stmt,),
             Statement::DeclareCursor { stmt } => write!(f, "DECLARE {}", stmt,),

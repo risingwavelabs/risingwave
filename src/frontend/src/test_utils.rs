@@ -391,6 +391,15 @@ impl CatalogWriter for MockCatalogWriter {
         self.create_sink_inner(sink, graph)
     }
 
+    async fn replace_sink(
+        &self,
+        _sink: PbSink,
+        _graph: StreamFragmentGraph,
+        _dependencies: HashSet<ObjectId>,
+    ) -> Result<()> {
+        unimplemented!("replace_sink is not implemented in MockCatalogWriter")
+    }
+
     async fn create_subscription(&self, subscription: PbSubscription) -> Result<()> {
         self.create_subscription_inner(subscription)
     }
