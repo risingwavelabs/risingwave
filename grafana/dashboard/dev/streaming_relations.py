@@ -90,7 +90,7 @@ def _(outer_panels: Panels):
         f"{metric('table_info')}) by (materialized_view_id)"
     )
     shared_buffer_usage_expr = _sum_fragment_metric_by_mv(
-        metric("state_store_per_fragment_imm_size")
+        metric("state_store_per_table_imm_size")
     )
     total_memory_usage_expr = (
         f"({executor_cache_usage_expr} + on(materialized_view_id) group_left {shared_buffer_usage_expr}) "

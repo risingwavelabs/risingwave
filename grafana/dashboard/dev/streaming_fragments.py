@@ -78,7 +78,7 @@ def _(outer_panels: Panels):
         f") by (fragment_id)"
     )
     shared_buffer_usage_expr = (
-        f"sum({metric('state_store_per_fragment_imm_size')}) by (fragment_id)"
+        f"sum({metric('state_store_per_table_imm_size')}) by (fragment_id)"
     )
     total_memory_usage_expr = (
         f"({executor_cache_usage_expr} + on(fragment_id) group_left {shared_buffer_usage_expr}) "
