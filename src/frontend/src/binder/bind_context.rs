@@ -34,6 +34,8 @@ use crate::binder::{BoundQuery, COLUMN_GROUP_PREFIX, ShareId};
 pub struct ColumnBinding {
     pub table_name: String,
     pub schema_name: Option<String>,
+    /// if the table has table alias, `table_alias` store the original table name
+    pub table_alias: Option<String>,
     pub index: usize,
     pub is_hidden: bool,
     pub field: Field,
@@ -43,6 +45,7 @@ impl ColumnBinding {
     pub fn new(
         table_name: String,
         schema_name: Option<String>,
+        table_alias: Option<String>,
         index: usize,
         is_hidden: bool,
         field: Field,
@@ -50,6 +53,7 @@ impl ColumnBinding {
         ColumnBinding {
             table_name,
             schema_name,
+            table_alias,
             index,
             is_hidden,
             field,

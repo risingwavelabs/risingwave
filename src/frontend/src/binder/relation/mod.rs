@@ -344,9 +344,11 @@ impl Binder {
         alias: Option<&TableAlias>,
     ) -> Result<()> {
         const EMPTY: [Ident; 0] = [];
-        let (table_name, column_aliases) = match alias {
-            None => (table_name, &EMPTY[..]),
-            Some(TableAlias { name, columns }) => (name.real_value(), columns.as_slice()),
+        let (table_name, column_aliases, table_alias) = match alias {
+            None => (table_name, &EMPTY[..], None),
+            Some(TableAlias { name, columns }) => {
+                (name.real_value(), columns.as_slice(), Some(table_name))
+            }
         };
 
         let num_col_aliases = column_aliases.len();
@@ -368,6 +370,7 @@ impl Binder {
             self.context.columns.push(ColumnBinding::new(
                 table_name.clone(),
                 schema_name.clone(),
+                table_alias.clone(),
                 begin + index,
                 is_hidden,
                 field,
