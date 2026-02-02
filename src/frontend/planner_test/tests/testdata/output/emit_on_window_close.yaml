@@ -7,7 +7,7 @@
     └─StreamProject { exprs: [t.v1, min(t.v2), count(distinct t.v3)] }
       └─StreamHashAgg { group_key: [t.v1], aggs: [min(t.v2), count(distinct t.v3), count] }
         └─StreamExchange { dist: HashShard(t.v1) }
-          └─StreamTableScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+          └─StreamTableScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
   eowc_stream_error: |-
     Not supported: Emit-On-Window-Close mode requires a watermark column in GROUP BY.
     HINT: Please try to GROUP BY a watermark column
@@ -92,14 +92,14 @@
       └─StreamHashAgg [append_only] { group_key: [$expr1], aggs: [max(t.b), count], output_watermarks: [[$expr1]] }
         └─StreamExchange { dist: HashShard($expr1) }
           └─StreamProject { exprs: [TumbleStart(t.a, '01:00:00':Interval) as $expr1, t.b, t._row_id], output_watermarks: [[$expr1]] }
-            └─StreamTableScan { table: t, columns: [t.a, t.b, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+            └─StreamTableScan { table: t, columns: [t.a, t.b, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
   eowc_stream_plan: |-
     StreamMaterialize { columns: [window_start, max], stream_key: [window_start], pk_columns: [window_start], pk_conflict: NoCheck, watermark_columns: [window_start] }
     └─StreamProject { exprs: [$expr1, max(t.b)], output_watermarks: [[$expr1]] }
       └─StreamHashAgg [append_only, eowc] { group_key: [$expr1], aggs: [max(t.b), count], output_watermarks: [[$expr1]] }
         └─StreamExchange { dist: HashShard($expr1) }
           └─StreamProject { exprs: [TumbleStart(t.a, '01:00:00':Interval) as $expr1, t.b, t._row_id], output_watermarks: [[$expr1]] }
-            └─StreamTableScan { table: t, columns: [t.a, t.b, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+            └─StreamTableScan { table: t, columns: [t.a, t.b, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
   eowc_stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [window_start, max], stream_key: [window_start], pk_columns: [window_start], pk_conflict: NoCheck, watermark_columns: [window_start] }
@@ -109,7 +109,7 @@
 
     Fragment 1
     StreamProject { exprs: [TumbleStart(t.a, '01:00:00':Interval) as $expr1, t.b, t._row_id], output_watermarks: [[$expr1]] }
-    └── StreamTableScan { table: t, columns: [t.a, t.b, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+    └── StreamTableScan { table: t, columns: [t.a, t.b, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
         ├── tables: [ StreamScan: 1 ]
         ├── Upstream
         └── BatchPlanNode
@@ -117,9 +117,9 @@
     Table 0 { columns: [ $expr1, max(t_b), count, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
     Table 1
-    ├── columns: [ vnode, _row_id, backfill_finished, row_count, _rw_timestamp ]
+    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, _row_id, _rw_timestamp ]
     ├── primary key: [ $0 ASC ]
-    ├── value indices: [ 1, 2, 3 ]
+    ├── value indices: [ 1, 2, 3, 4 ]
     ├── distribution key: [ 0 ]
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
@@ -228,9 +228,9 @@
         └─StreamHashJoin [interval, append_only] { type: Inner, predicate: s1.id = s2.id AND (s1.ts >= s2.ts) AND ($expr1 <= s2.ts), conditions_to_clean_left_state_table: (s1.ts >= s2.ts), conditions_to_clean_right_state_table: ($expr1 <= s2.ts), output_watermarks: [[s1.ts], [s2.ts]], output: [s1.id, s1.value, s2.id, s2.value, s1.ts, s2.ts, s1._row_id, s2._row_id] }
           ├─StreamExchange { dist: HashShard(s1.id) }
           │ └─StreamProject { exprs: [s1.id, s1.value, s1.ts, (s1.ts - '00:01:00':Interval) as $expr1, s1._row_id], output_watermarks: [[s1.ts, $expr1]] }
-          │   └─StreamTableScan { table: s1, columns: [s1.id, s1.value, s1.ts, s1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [s1._row_id], pk: [_row_id], dist: UpstreamHashShard(s1._row_id) }
+          │   └─StreamTableScan { table: s1, columns: [s1.id, s1.value, s1.ts, s1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [s1._row_id], pk: [_row_id], dist: UpstreamHashShard(s1._row_id) }
           └─StreamExchange { dist: HashShard(s2.id) }
-            └─StreamTableScan { table: s2, columns: [s2.id, s2.value, s2.ts, s2._row_id], stream_scan_type: ArrangementBackfill, stream_key: [s2._row_id], pk: [_row_id], dist: UpstreamHashShard(s2._row_id) }
+            └─StreamTableScan { table: s2, columns: [s2.id, s2.value, s2.ts, s2._row_id], stream_scan_type: SnapshotBackfill, stream_key: [s2._row_id], pk: [_row_id], dist: UpstreamHashShard(s2._row_id) }
   eowc_stream_plan: |-
     StreamMaterialize { columns: [id1, value1, id2, value2, ts1, ts2, s1._row_id(hidden), s2._row_id(hidden), count], stream_key: [s1._row_id, s2._row_id, id1, value2], pk_columns: [s1._row_id, s2._row_id, id1, value2], pk_conflict: NoCheck }
     └─StreamEowcOverWindow { window_functions: [count() OVER(PARTITION BY s2.value ORDER BY s2.ts ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
@@ -239,6 +239,6 @@
           └─StreamHashJoin [interval, append_only] { type: Inner, predicate: s1.id = s2.id AND (s1.ts >= s2.ts) AND ($expr1 <= s2.ts), conditions_to_clean_left_state_table: (s1.ts >= s2.ts), conditions_to_clean_right_state_table: ($expr1 <= s2.ts), output_watermarks: [[s1.ts], [s2.ts]], output: [s1.id, s1.value, s2.id, s2.value, s1.ts, s2.ts, s1._row_id, s2._row_id] }
             ├─StreamExchange { dist: HashShard(s1.id) }
             │ └─StreamProject { exprs: [s1.id, s1.value, s1.ts, (s1.ts - '00:01:00':Interval) as $expr1, s1._row_id], output_watermarks: [[s1.ts, $expr1]] }
-            │   └─StreamTableScan { table: s1, columns: [s1.id, s1.value, s1.ts, s1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [s1._row_id], pk: [_row_id], dist: UpstreamHashShard(s1._row_id) }
+            │   └─StreamTableScan { table: s1, columns: [s1.id, s1.value, s1.ts, s1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [s1._row_id], pk: [_row_id], dist: UpstreamHashShard(s1._row_id) }
             └─StreamExchange { dist: HashShard(s2.id) }
-              └─StreamTableScan { table: s2, columns: [s2.id, s2.value, s2.ts, s2._row_id], stream_scan_type: ArrangementBackfill, stream_key: [s2._row_id], pk: [_row_id], dist: UpstreamHashShard(s2._row_id) }
+              └─StreamTableScan { table: s2, columns: [s2.id, s2.value, s2.ts, s2._row_id], stream_scan_type: SnapshotBackfill, stream_key: [s2._row_id], pk: [_row_id], dist: UpstreamHashShard(s2._row_id) }

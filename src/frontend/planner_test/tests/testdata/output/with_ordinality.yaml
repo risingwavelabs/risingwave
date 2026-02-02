@@ -22,7 +22,7 @@
     StreamMaterialize { columns: [x, arr, unnest, ordinality, t._row_id(hidden), _rw_projected_row_id(hidden)], stream_key: [t._row_id, _rw_projected_row_id], pk_columns: [t._row_id, _rw_projected_row_id], pk_conflict: NoCheck }
     └─StreamProject { exprs: [t.x, t.arr, Unnest($1), (_rw_projected_row_id + 1:Int64) as $expr1, t._row_id, _rw_projected_row_id] }
       └─StreamProjectSet { select_list: [$0, $1, Unnest($1), $2] }
-        └─StreamTableScan { table: t, columns: [t.x, t.arr, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+        └─StreamTableScan { table: t, columns: [t.x, t.arr, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - sql: |
     create table t(x int , arr int[]);
     select * from t cross join unnest(arr) WITH ORDINALITY as foo;
@@ -35,7 +35,7 @@
     StreamMaterialize { columns: [x, arr, foo, ordinality, t._row_id(hidden), _rw_projected_row_id(hidden)], stream_key: [t._row_id, _rw_projected_row_id], pk_columns: [t._row_id, _rw_projected_row_id], pk_conflict: NoCheck }
     └─StreamProject { exprs: [t.x, t.arr, Unnest($1), (_rw_projected_row_id + 1:Int64) as $expr1, t._row_id, _rw_projected_row_id] }
       └─StreamProjectSet { select_list: [$0, $1, Unnest($1), $2] }
-        └─StreamTableScan { table: t, columns: [t.x, t.arr, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+        └─StreamTableScan { table: t, columns: [t.x, t.arr, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - sql: |
     create table t(x int , arr int[]);
     select * from t cross join unnest(arr) WITH ORDINALITY as foo(a);
@@ -48,7 +48,7 @@
     StreamMaterialize { columns: [x, arr, a, ordinality, t._row_id(hidden), _rw_projected_row_id(hidden)], stream_key: [t._row_id, _rw_projected_row_id], pk_columns: [t._row_id, _rw_projected_row_id], pk_conflict: NoCheck }
     └─StreamProject { exprs: [t.x, t.arr, Unnest($1), (_rw_projected_row_id + 1:Int64) as $expr1, t._row_id, _rw_projected_row_id] }
       └─StreamProjectSet { select_list: [$0, $1, Unnest($1), $2] }
-        └─StreamTableScan { table: t, columns: [t.x, t.arr, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+        └─StreamTableScan { table: t, columns: [t.x, t.arr, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - sql: |
     create table t(x int , arr int[]);
     select * from t cross join unnest(arr) WITH ORDINALITY as foo(a,ord);
@@ -61,7 +61,7 @@
     StreamMaterialize { columns: [x, arr, a, ord, t._row_id(hidden), _rw_projected_row_id(hidden)], stream_key: [t._row_id, _rw_projected_row_id], pk_columns: [t._row_id, _rw_projected_row_id], pk_conflict: NoCheck }
     └─StreamProject { exprs: [t.x, t.arr, Unnest($1), (_rw_projected_row_id + 1:Int64) as $expr1, t._row_id, _rw_projected_row_id] }
       └─StreamProjectSet { select_list: [$0, $1, Unnest($1), $2] }
-        └─StreamTableScan { table: t, columns: [t.x, t.arr, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+        └─StreamTableScan { table: t, columns: [t.x, t.arr, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - name: use alias columns explicitlity
   sql: |
     create table t(x int , arr int[]);
@@ -75,7 +75,7 @@
     StreamMaterialize { columns: [x, arr, a, ord, t._row_id(hidden), _rw_projected_row_id(hidden)], stream_key: [t._row_id, _rw_projected_row_id], pk_columns: [t._row_id, _rw_projected_row_id], pk_conflict: NoCheck }
     └─StreamProject { exprs: [t.x, t.arr, Unnest($1), (_rw_projected_row_id + 1:Int64) as $expr1, t._row_id, _rw_projected_row_id] }
       └─StreamProjectSet { select_list: [$0, $1, Unnest($1), $2] }
-        └─StreamTableScan { table: t, columns: [t.x, t.arr, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+        └─StreamTableScan { table: t, columns: [t.x, t.arr, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - sql: |
     create table t(x int , arr int[]);
     select * from t cross join unnest(arr) WITH ORDINALITY as foo(a,ord,bar);
@@ -97,7 +97,7 @@
     └─StreamProject { exprs: [t.x, t.arr, Unnest($1), (_rw_projected_row_id + 1:Int64) as $expr1, t._row_id, _rw_projected_row_id] }
       └─StreamFilter { predicate: ((_rw_projected_row_id + 1:Int64) > 1:Int32) }
         └─StreamProjectSet { select_list: [$0, $1, Unnest($1), $2] }
-          └─StreamTableScan { table: t, columns: [t.x, t.arr, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+          └─StreamTableScan { table: t, columns: [t.x, t.arr, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - name: correlated arg uses array concat (int[] || int)
   sql: |
     create table t(x int , arr int[]);
@@ -112,7 +112,7 @@
     StreamMaterialize { columns: [x, arr, val, ord, t._row_id(hidden), _rw_projected_row_id(hidden)], stream_key: [t._row_id, _rw_projected_row_id], pk_columns: [t._row_id, _rw_projected_row_id], pk_conflict: NoCheck }
     └─StreamProject { exprs: [t.x, t.arr, Unnest(ArrayAppend($1, $0)), (_rw_projected_row_id + 1:Int64) as $expr1, t._row_id, _rw_projected_row_id] }
       └─StreamProjectSet { select_list: [$0, $1, Unnest(ArrayAppend($1, $0)), $2] }
-        └─StreamTableScan { table: t, columns: [t.x, t.arr, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+        └─StreamTableScan { table: t, columns: [t.x, t.arr, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - name: multiple correlated table functions with ordinality
   sql: |
     create table t(x int , arr int[]);
@@ -133,7 +133,7 @@
       └─StreamProjectSet { select_list: [$0, $1, $2, $3, Unnest(ArrayAppend($1, $0)), $4, $5] }
         └─StreamProject { exprs: [t.x, t.arr, Unnest($1), (_rw_projected_row_id + 1:Int64) as $expr1, t._row_id, _rw_projected_row_id] }
           └─StreamProjectSet { select_list: [$0, $1, Unnest($1), $2] }
-            └─StreamTableScan { table: t, columns: [t.x, t.arr, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+            └─StreamTableScan { table: t, columns: [t.x, t.arr, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - sql: |
     create table t(x int , arr int[]);
     select * from t cross join unnest(arr) WITH ORDINALITY, unnest(arr) WITH ORDINALITY AS unnest_2(arr_2,ordinality_2);
@@ -150,7 +150,7 @@
       └─StreamProjectSet { select_list: [$0, $1, $2, $3, Unnest($1), $4, $5] }
         └─StreamProject { exprs: [t.x, t.arr, Unnest($1), (_rw_projected_row_id + 1:Int64) as $expr1, t._row_id, _rw_projected_row_id] }
           └─StreamProjectSet { select_list: [$0, $1, Unnest($1), $2] }
-            └─StreamTableScan { table: t, columns: [t.x, t.arr, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+            └─StreamTableScan { table: t, columns: [t.x, t.arr, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - sql: |
     select * from abs(1) WITH ORDINALITY;
   batch_plan: |-

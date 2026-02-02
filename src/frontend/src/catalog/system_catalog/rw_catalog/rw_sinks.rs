@@ -111,12 +111,9 @@ fn read_rw_sinks_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwSink>> {
     "rw_catalog.rw_sink_decouple",
     "WITH decoupled_sink_internal_table_ids AS (
         SELECT
-            (node->'sink'->'table'->'id')::int as internal_table_id
-        FROM rw_catalog.rw_fragments
-        WHERE
-            'SINK' = any(flags)
-            AND
-            (node->'sink'->'logStoreType')::string = '\"SINK_LOG_STORE_TYPE_KV_LOG_STORE\"'
+            sink_id,
+            internal_table_id
+        FROM rw_catalog.rw_sink_log_store_tables
     ),
     internal_table_vnode_count AS (
         SELECT
@@ -133,12 +130,12 @@ fn read_rw_sinks_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwSink>> {
         watermark_vnode_count
     FROM rw_catalog.rw_sinks
         LEFT JOIN
-            (rw_catalog.rw_fragments
+            (decoupled_sink_internal_table_ids
                 JOIN
                     internal_table_vnode_count
-                ON internal_table_id = any(state_table_ids)
+                ON decoupled_sink_internal_table_ids.internal_table_id = internal_table_vnode_count.internal_table_id
             )
-        ON table_id = rw_catalog.rw_sinks.id
+        ON sink_id = rw_catalog.rw_sinks.id
     "
 )]
 #[derive(Fields)]

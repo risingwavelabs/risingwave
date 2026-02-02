@@ -1,19 +1,59 @@
 from ..common import *
 from . import section
-from .streaming_common import _actor_busy_rate_expr
+from .streaming_common import (
+    _actor_busy_rate_expr,
+    relabel_materialized_view_id_as_id,
+    topk_percent_expr,
+)
 
-def _relation_busy_rate_expr(rate_interval: str):
+def _relation_busy_rate_expr_by_mv(rate_interval: str):
+    """Return per-relation busy rate (by materialized_view_id), based on busiest actor."""
     actor_busy_rate_expr = _actor_busy_rate_expr(rate_interval)
-    relation_busy_rate_expr = (
+    return (
         f"topk(1,"
         f"  ({actor_busy_rate_expr}) * on (fragment_id) group_right {metric('table_info')}"
         f") by (materialized_view_id)"
     )
+
+def _relation_busy_rate_expr(rate_interval: str):
+    """Return per-relation busy rate with relation metadata labels attached."""
+    relation_busy_rate_expr = _relation_busy_rate_expr_by_mv(rate_interval)
     relation_busy_rate_with_metadata_expr = (
-        f"label_replace(({relation_busy_rate_expr}), 'id', '$1', 'materialized_view_id', '(.*)')"
+        f"{relabel_materialized_view_id_as_id(relation_busy_rate_expr)}"
         f"* on (id) group_left (name, type) {metric('relation_info')}"
     )
     return relation_busy_rate_with_metadata_expr
+
+def _relation_metric_with_metadata(expr: str) -> str:
+    """Join relation_info to add name/type labels after peak computation."""
+    return f"({expr}) * on (id) group_left (name, type) {metric('relation_info')}"
+
+def _relation_busy_peak_topk_expr(rate_interval: str) -> str:
+    """Compute top-k peak busy rate for relations over the dashboard range."""
+    per_mv_busy_expr = _relation_busy_rate_expr_by_mv(rate_interval)
+    per_mv_busy_with_id_expr = relabel_materialized_view_id_as_id(per_mv_busy_expr)
+    with_metadata_expr = _relation_metric_with_metadata(per_mv_busy_with_id_expr)
+    peak_expr = f"max_over_time(({with_metadata_expr})[$__range:$__interval])"
+    return topk_percent_expr(peak_expr)
+
+def _relation_cpu_peak_topk_expr(
+    poll_duration_rate_expr: str, actor_count_expr: str
+) -> str:
+    """Compute top-k peak CPU rate for relations, normalized by actor count."""
+    per_fragment_rate_expr = (
+        f"({poll_duration_rate_expr}) / on(fragment_id) {actor_count_expr}"
+    )
+    per_mv_rate_expr = _sum_fragment_metric_by_mv(per_fragment_rate_expr)
+    per_mv_rate_expr = f"({per_mv_rate_expr}) / 1000000000"
+    per_mv_rate_with_id_expr = relabel_materialized_view_id_as_id(per_mv_rate_expr)
+    with_metadata_expr = (
+        f"({per_mv_rate_with_id_expr}) * on (id) group_left (name, type)"
+        f" {metric('relation_info')}"
+    )
+    peak_expr = (
+        f"max_over_time(({with_metadata_expr})[$__range:$__interval])"
+    )
+    return topk_percent_expr(peak_expr)
 
 def _relation_busy_rate_target(panels: Panels, rate_interval: str):
     return panels.target(
@@ -33,14 +73,48 @@ def _sum_fragment_metric_by_mv(expr: str) -> str:
 @section
 def _(outer_panels: Panels):
     panels = outer_panels.sub_panel()
+    actor_count_expr = (
+        f"clamp_min(sum({metric('stream_actor_count')}) by (fragment_id), 1)"
+    )
+    poll_duration_rate_expr = (
+        f"sum(rate({metric('stream_actor_poll_duration')}[$__rate_interval])) by (fragment_id)"
+    )
     poll_duration_expr = (
-        f"sum(rate({metric('stream_actor_poll_duration')}[$__rate_interval])) by (fragment_id) "
-        f"/ on(fragment_id) sum({metric('stream_actor_count')}) by (fragment_id)"
+        f"{poll_duration_rate_expr} / on(fragment_id) {actor_count_expr}"
     )
     return [
         outer_panels.row_collapsed(
             "Streaming Relation Metrics",
             [
+                panels.subheader("Overview"),
+                panels.table_info(
+                    "Top Relations by Busy Rate",
+                    "Top 10 relations with the highest peak busy rate (%).",
+                    [
+                        panels.table_target(
+                            _relation_busy_peak_topk_expr("$__rate_interval")
+                        )
+                    ],
+                    ["id", "name", "Value", "type"],
+                    dict.fromkeys(["Time"], True),
+                    {"Value": "rate"},
+                    {"rate": "percent"},
+                ),
+                panels.table_info(
+                    "Top Relations by CPU Rate",
+                    "Top 10 relations with the highest peak CPU rate (%).",
+                    [
+                        panels.table_target(
+                            _relation_cpu_peak_topk_expr(
+                                poll_duration_rate_expr, actor_count_expr
+                            )
+                        )
+                    ],
+                    ["id", "name", "Value", "type"],
+                    dict.fromkeys(["Time"], True),
+                    {"Value": "rate"},
+                    {"rate": "percent"},
+                ),
                 panels.subheader("CPU Usage By Relation"),
                 panels.timeseries_percentage(
                     "CPU Usage Per Streaming Job",

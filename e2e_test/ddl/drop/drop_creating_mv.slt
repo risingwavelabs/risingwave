@@ -19,6 +19,7 @@ onlyif can-use-recover
 sleep 5s
 
 onlyif can-use-recover
+skipif madsim
 query I
 select background_ddl from rw_catalog.rw_materialized_views where name='m1';
 ----
@@ -41,6 +42,7 @@ onlyif can-use-recover
 sleep 5s
 
 onlyif can-use-recover
+skipif madsim
 query I
 select background_ddl from rw_catalog.rw_materialized_views where name='m1';
 ----
@@ -62,6 +64,7 @@ onlyif can-use-recover
 sleep 5s
 
 onlyif can-use-recover
+skipif madsim
 query I
 select background_ddl from rw_catalog.rw_materialized_views where name='m1';
 ----
@@ -75,6 +78,7 @@ onlyif can-use-recover
 sleep 5s
 
 onlyif can-use-recover
+skipif madsim
 query I
 select background_ddl from rw_catalog.rw_materialized_views where name='m1';
 ----
@@ -94,6 +98,7 @@ set background_ddl=false;
 statement ok
 create materialized view m1 as select * from t;
 
+skipif madsim
 query I
 select background_ddl from rw_catalog.rw_materialized_views where name='m1';
 ----

@@ -339,6 +339,10 @@ pub mod default {
             true
         }
 
+        pub fn stream_enable_snapshot_backfill() -> bool {
+            true
+        }
+
         pub fn enable_shared_source() -> bool {
             true
         }
@@ -371,6 +375,10 @@ pub mod default {
 
         pub fn streaming_now_progress_ratio() -> Option<f32> {
             None
+        }
+
+        pub fn stream_snapshot_iter_rebuild_interval_secs() -> u64 {
+            10 * 60
         }
 
         pub fn enable_explain_analyze_stats() -> bool {
