@@ -110,6 +110,18 @@ message CreateSinkResponse {
   WaitVersion version = 2;
 }
 
+message ReplaceSinkRequest {
+  catalog.Sink sink = 1;
+  stream_plan.StreamFragmentGraph fragment_graph = 2;
+  // The list of object IDs that this sink depends on.
+  repeated uint32 dependencies = 3;
+}
+
+message ReplaceSinkResponse {
+  common.Status status = 1;
+  WaitVersion version = 2;
+}
+
 message DropSinkRequest {
   uint32 sink_id = 1;
   bool cascade = 2;
@@ -680,6 +692,7 @@ service DdlService {
   rpc CreateSource(CreateSourceRequest) returns (CreateSourceResponse);
   rpc DropSource(DropSourceRequest) returns (DropSourceResponse);
   rpc CreateSink(CreateSinkRequest) returns (CreateSinkResponse);
+  rpc ReplaceSink(ReplaceSinkRequest) returns (ReplaceSinkResponse);
   rpc CreateSubscription(CreateSubscriptionRequest) returns (CreateSubscriptionResponse);
   rpc DropSink(DropSinkRequest) returns (DropSinkResponse);
   rpc DropSubscription(DropSubscriptionRequest) returns (DropSubscriptionResponse);

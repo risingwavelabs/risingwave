@@ -1,0 +1,161 @@
+# Tests for REPLACE SINK functionality - Error scenarios and special cases
+# Tests that need to query downstream data are in replace_sink_postgres.slt
+
+control substitution on
+
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+################### Test unsupported scenarios ###################
+
+# Setup for unsupported scenario tests
+statement ok
+CREATE TABLE t_source (id INT PRIMARY KEY, val VARCHAR);
+
+statement ok
+INSERT INTO t_source VALUES (1, 'a'), (2, 'b'), (3, 'c');
+
+statement ok
+CREATE TABLE t_target (id INT PRIMARY KEY, val VARCHAR);
+
+# Test: New sink cannot be sink-into-table
+statement ok
+CREATE SINK sink_from_table FROM t_source WITH (
+    connector = 'blackhole'
+);
+
+statement error REPLACE SINK does not support sink into table
+REPLACE SINK sink_from_table INTO t_target FROM t_source;
+
+statement ok
+DROP SINK sink_from_table;
+
+# Test: New sink cannot be sink-as-query (AS query syntax)
+statement ok
+CREATE SINK sink_from_table FROM t_source WITH (
+    connector = 'blackhole'
+);
+
+statement error REPLACE SINK does not support AS query syntax
+REPLACE SINK sink_from_table AS SELECT * FROM t_source WITH (
+    connector = 'blackhole'
+);
+
+statement ok
+DROP SINK sink_from_table;
+
+# Test: Old sink cannot be sink-as-query
+statement ok
+CREATE SINK sink_as_query AS SELECT * FROM t_source WITH (
+    connector = 'blackhole'
+);
+
+statement error REPLACE SINK is not supported for sinks created with AS query syntax
+REPLACE SINK sink_as_query FROM t_source WITH (
+    connector = 'blackhole'
+);
+
+statement ok
+DROP SINK sink_as_query;
+
+# Cleanup for unsupported scenarios
+statement ok
+DROP TABLE t_target;
+
+statement ok
+DROP TABLE t_source;
+
+################### Test: Cannot replace a sink that is still backfilling ###################
+
+# Create table with a lot of data
+statement ok
+CREATE TABLE t_large (id INT PRIMARY KEY, val INT);
+
+statement ok
+INSERT INTO t_large SELECT * FROM generate_series(1, 10000);
+
+# Enable background DDL with very slow backfill rate
+statement ok
+SET BACKGROUND_DDL = true;
+
+statement ok
+SET BACKFILL_RATE_LIMIT = 1;
+
+# Create sink that will backfill in background
+statement ok
+CREATE SINK sink_still_backfilling FROM t_large WITH (
+    connector = 'blackhole'
+);
+
+# The sink should be creating in background, there should be a job
+query I
+SELECT count(*) > 0 FROM rw_catalog.rw_ddl_progress;
+----
+t
+
+# Try to replace a sink that is still backfilling - should fail
+statement error only sink in Created status can be replaced
+REPLACE SINK sink_still_backfilling FROM t_large WITH (
+    connector = 'blackhole'
+);
+
+# Cleanup
+statement ok
+DROP SINK sink_still_backfilling;
+
+statement ok
+DROP TABLE t_large;
+
+statement ok
+SET BACKGROUND_DDL = false;
+
+statement ok
+SET BACKFILL_RATE_LIMIT = default;
+
+################### Test: Replace sink with snapshot = true should fail ###################
+
+statement ok
+CREATE TABLE t_snapshot_test (id INT PRIMARY KEY, val VARCHAR);
+
+statement ok
+INSERT INTO t_snapshot_test VALUES (1, 'a'), (2, 'b');
+
+statement ok
+CREATE SINK sink_snapshot FROM t_snapshot_test WITH (
+    connector = 'blackhole'
+);
+
+# Replace with explicit snapshot = false (the only allowed value)
+statement ok
+REPLACE SINK sink_snapshot FROM t_snapshot_test WITH (
+    connector = 'blackhole',
+    snapshot = 'false'
+);
+
+# Replace with snapshot = true should fail
+statement error REPLACE SINK does not support backfill
+REPLACE SINK sink_snapshot FROM t_snapshot_test WITH (
+    connector = 'blackhole',
+    snapshot = 'true'
+);
+
+# Cleanup
+statement ok
+DROP SINK sink_snapshot;
+
+statement ok
+DROP TABLE t_snapshot_test;
+
+################### Test: Replace sink - non-existent sink should fail ###################
+
+statement error sink not found
+REPLACE SINK sink_does_not_exist FROM t_nonexistent WITH (
+    connector = 'blackhole'
+);
+
+################### Test: Replace sink - non-existent source should fail ###################
+
+statement error
+REPLACE SINK sink_exists FROM t_nonexistent_source WITH (
+    connector = 'blackhole'
+);
