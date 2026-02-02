@@ -111,7 +111,11 @@ async fn test_background_arrangement_backfill_offline_scaling() -> Result<()> {
 
 #[tokio::test]
 async fn test_background_ddl_scale_during_backfill() -> Result<()> {
-    let config = Configuration::for_background_ddl();
+    let mut config = Configuration::for_background_ddl();
+    let mut per_session_queries = (*config.per_session_queries).clone();
+    // TODO: remove it after support online scale of snapshot backfill
+    per_session_queries.push("SET streaming_use_snapshot_backfill = false".into());
+    config.per_session_queries = per_session_queries.into();
     let mut cluster = Cluster::start(config).await?;
     let mut session = cluster.start_session();
 

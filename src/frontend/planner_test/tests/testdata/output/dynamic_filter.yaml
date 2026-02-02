@@ -16,14 +16,14 @@
   stream_plan: |-
     StreamMaterialize { columns: [v1, t1._row_id(hidden)], stream_key: [t1._row_id], pk_columns: [t1._row_id], pk_conflict: NoCheck }
     └─StreamDynamicFilter { predicate: (t1.v1 > max(max(t2.v2))), output: [t1.v1, t1._row_id] }
-      ├─StreamTableScan { table: t1, columns: [t1.v1, t1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
+      ├─StreamTableScan { table: t1, columns: [t1.v1, t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
       └─StreamExchange { dist: Broadcast }
         └─StreamProject { exprs: [max(max(t2.v2))] }
           └─StreamSimpleAgg { aggs: [max(max(t2.v2)), count] }
             └─StreamExchange { dist: Single }
               └─StreamHashAgg { group_key: [_vnode], aggs: [max(t2.v2), count] }
                 └─StreamProject { exprs: [t2.v2, t2._row_id, Vnode(t2._row_id) as _vnode] }
-                  └─StreamTableScan { table: t2, columns: [t2.v2, t2._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t2._row_id], pk: [_row_id], dist: UpstreamHashShard(t2._row_id) }
+                  └─StreamTableScan { table: t2, columns: [t2.v2, t2._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t2._row_id], pk: [_row_id], dist: UpstreamHashShard(t2._row_id) }
 - name: |
     With Top-1 on inner side
   before:
@@ -38,14 +38,14 @@
   stream_plan: |-
     StreamMaterialize { columns: [v1, t1._row_id(hidden)], stream_key: [t1._row_id], pk_columns: [t1._row_id], pk_conflict: NoCheck }
     └─StreamDynamicFilter { predicate: (t1.v1 > t2.v2), output: [t1.v1, t1._row_id] }
-      ├─StreamTableScan { table: t1, columns: [t1.v1, t1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
+      ├─StreamTableScan { table: t1, columns: [t1.v1, t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
       └─StreamExchange { dist: Broadcast }
         └─StreamProject { exprs: [t2.v2] }
           └─StreamTopN { order: [t2.v2 DESC], limit: 1, offset: 0 }
             └─StreamExchange { dist: Single }
               └─StreamGroupTopN { order: [t2.v2 DESC], limit: 1, offset: 0, group_key: [_vnode] }
                 └─StreamProject { exprs: [t2.v2, t2._row_id, Vnode(t2._row_id) as _vnode] }
-                  └─StreamTableScan { table: t2, columns: [t2.v2, t2._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t2._row_id], pk: [_row_id], dist: UpstreamHashShard(t2._row_id) }
+                  └─StreamTableScan { table: t2, columns: [t2.v2, t2._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t2._row_id], pk: [_row_id], dist: UpstreamHashShard(t2._row_id) }
 - name: |
     With Limit-1 on inner side
   before:
@@ -60,14 +60,14 @@
   stream_plan: |-
     StreamMaterialize { columns: [v1, t1._row_id(hidden)], stream_key: [t1._row_id], pk_columns: [t1._row_id], pk_conflict: NoCheck }
     └─StreamDynamicFilter { predicate: (t1.v1 > t2.v2), output: [t1.v1, t1._row_id] }
-      ├─StreamTableScan { table: t1, columns: [t1.v1, t1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
+      ├─StreamTableScan { table: t1, columns: [t1.v1, t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
       └─StreamExchange { dist: Broadcast }
         └─StreamProject { exprs: [t2.v2] }
           └─StreamTopN { order: [t2.v2 ASC], limit: 1, offset: 0 }
             └─StreamExchange { dist: Single }
               └─StreamGroupTopN { order: [t2.v2 ASC], limit: 1, offset: 0, group_key: [_vnode] }
                 └─StreamProject { exprs: [t2.v2, t2._row_id, Vnode(t2._row_id) as _vnode] }
-                  └─StreamTableScan { table: t2, columns: [t2.v2, t2._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t2._row_id], pk: [_row_id], dist: UpstreamHashShard(t2._row_id) }
+                  └─StreamTableScan { table: t2, columns: [t2.v2, t2._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t2._row_id], pk: [_row_id], dist: UpstreamHashShard(t2._row_id) }
 - name: With Simple Agg upstream materialized view on inner side
   before:
   - create_tables
@@ -81,9 +81,9 @@
   stream_plan: |-
     StreamMaterialize { columns: [v1, t1._row_id(hidden)], stream_key: [t1._row_id], pk_columns: [t1._row_id], pk_conflict: NoCheck }
     └─StreamDynamicFilter { predicate: (t1.v1 > max_v2.max), output: [t1.v1, t1._row_id] }
-      ├─StreamTableScan { table: t1, columns: [t1.v1, t1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
+      ├─StreamTableScan { table: t1, columns: [t1.v1, t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
       └─StreamExchange { dist: Broadcast }
-        └─StreamTableScan { table: max_v2, columns: [max_v2.max], stream_scan_type: ArrangementBackfill, stream_key: [], pk: [], dist: Single }
+        └─StreamTableScan { table: max_v2, columns: [max_v2.max], stream_scan_type: SnapshotBackfill, stream_key: [], pk: [], dist: Single }
 - name: |
     Output indices of Dynamic Filter
     TODO: currently implemented by adding a Project, https://github.com/risingwavelabs/risingwave/issues/3419
@@ -102,14 +102,14 @@
     └─StreamProject { exprs: [t1.v1, t1._row_id] }
       └─StreamDynamicFilter { predicate: ($expr1 > max(max(t2.v2))), output: [t1.v1, $expr1, t1._row_id] }
         ├─StreamProject { exprs: [t1.v1, (t1.v1 + t1.v1) as $expr1, t1._row_id] }
-        │ └─StreamTableScan { table: t1, columns: [t1.v1, t1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
+        │ └─StreamTableScan { table: t1, columns: [t1.v1, t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
         └─StreamExchange { dist: Broadcast }
           └─StreamProject { exprs: [max(max(t2.v2))] }
             └─StreamSimpleAgg { aggs: [max(max(t2.v2)), count] }
               └─StreamExchange { dist: Single }
                 └─StreamHashAgg { group_key: [_vnode], aggs: [max(t2.v2), count] }
                   └─StreamProject { exprs: [t2.v2, t2._row_id, Vnode(t2._row_id) as _vnode] }
-                    └─StreamTableScan { table: t2, columns: [t2.v2, t2._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t2._row_id], pk: [_row_id], dist: UpstreamHashShard(t2._row_id) }
+                    └─StreamTableScan { table: t2, columns: [t2.v2, t2._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t2._row_id], pk: [_row_id], dist: UpstreamHashShard(t2._row_id) }
 - name: Ensure error on multiple rows on inner side
   before:
   - create_tables
@@ -153,14 +153,14 @@
     └─StreamExchange { dist: HashShard(t1.v1, t1._row_id) }
       └─StreamHashJoin { type: Inner, predicate: t1.v1 = max(max(t2.v2)), output: [t1.v1, max(max(t2.v2)), t1._row_id] }
         ├─StreamExchange { dist: HashShard(t1.v1) }
-        │ └─StreamTableScan { table: t1, columns: [t1.v1, t1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
+        │ └─StreamTableScan { table: t1, columns: [t1.v1, t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
         └─StreamExchange { dist: HashShard(max(max(t2.v2))) }
           └─StreamProject { exprs: [max(max(t2.v2))] }
             └─StreamSimpleAgg { aggs: [max(max(t2.v2)), count] }
               └─StreamExchange { dist: Single }
                 └─StreamHashAgg { group_key: [_vnode], aggs: [max(t2.v2), count] }
                   └─StreamProject { exprs: [t2.v2, t2._row_id, Vnode(t2._row_id) as _vnode] }
-                    └─StreamTableScan { table: t2, columns: [t2.v2, t2._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t2._row_id], pk: [_row_id], dist: UpstreamHashShard(t2._row_id) }
+                    └─StreamTableScan { table: t2, columns: [t2.v2, t2._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t2._row_id], pk: [_row_id], dist: UpstreamHashShard(t2._row_id) }
 - name: Dynamic filter join on unequal types
   sql: |
     create table t1 (v1 int);
@@ -177,14 +177,14 @@
     └─StreamProject { exprs: [t1.v1, t1._row_id] }
       └─StreamDynamicFilter { predicate: ($expr1 > max(max(t2.v2))), output: [t1.v1, $expr1, t1._row_id] }
         ├─StreamProject { exprs: [t1.v1, t1.v1::Int64 as $expr1, t1._row_id] }
-        │ └─StreamTableScan { table: t1, columns: [t1.v1, t1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
+        │ └─StreamTableScan { table: t1, columns: [t1.v1, t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
         └─StreamExchange { dist: Broadcast }
           └─StreamProject { exprs: [max(max(t2.v2))] }
             └─StreamSimpleAgg { aggs: [max(max(t2.v2)), count] }
               └─StreamExchange { dist: Single }
                 └─StreamHashAgg { group_key: [_vnode], aggs: [max(t2.v2), count] }
                   └─StreamProject { exprs: [t2.v2, t2._row_id, Vnode(t2._row_id) as _vnode] }
-                    └─StreamTableScan { table: t2, columns: [t2.v2, t2._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t2._row_id], pk: [_row_id], dist: UpstreamHashShard(t2._row_id) }
+                    └─StreamTableScan { table: t2, columns: [t2.v2, t2._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t2._row_id], pk: [_row_id], dist: UpstreamHashShard(t2._row_id) }
 - name: Dynamic filter on semi join
   sql: |
     create table t1 (v1 int);
@@ -193,14 +193,14 @@
   stream_plan: |-
     StreamMaterialize { columns: [v1, t1._row_id(hidden)], stream_key: [t1._row_id], pk_columns: [t1._row_id], pk_conflict: NoCheck }
     └─StreamDynamicFilter { predicate: (t1.v1 > max(max(t2.v2))), output: [t1.v1, t1._row_id] }
-      ├─StreamTableScan { table: t1, columns: [t1.v1, t1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
+      ├─StreamTableScan { table: t1, columns: [t1.v1, t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
       └─StreamExchange { dist: Broadcast }
         └─StreamProject { exprs: [max(max(t2.v2))] }
           └─StreamSimpleAgg { aggs: [max(max(t2.v2)), count] }
             └─StreamExchange { dist: Single }
               └─StreamHashAgg { group_key: [_vnode], aggs: [max(t2.v2), count] }
                 └─StreamProject { exprs: [t2.v2, t2._row_id, Vnode(t2._row_id) as _vnode] }
-                  └─StreamTableScan { table: t2, columns: [t2.v2, t2._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t2._row_id], pk: [_row_id], dist: UpstreamHashShard(t2._row_id) }
+                  └─StreamTableScan { table: t2, columns: [t2.v2, t2._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t2._row_id], pk: [_row_id], dist: UpstreamHashShard(t2._row_id) }
 - name: Complex expression on RHS of condition will still result in dynamic filter
   before:
   - create_tables
@@ -215,14 +215,14 @@
   stream_plan: |-
     StreamMaterialize { columns: [v1, t1._row_id(hidden)], stream_key: [t1._row_id], pk_columns: [t1._row_id], pk_conflict: NoCheck }
     └─StreamDynamicFilter { predicate: (t1.v1 > $expr1), output: [t1.v1, t1._row_id] }
-      ├─StreamTableScan { table: t1, columns: [t1.v1, t1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
+      ├─StreamTableScan { table: t1, columns: [t1.v1, t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
       └─StreamExchange { dist: Broadcast }
         └─StreamProject { exprs: [(2:Int32 * max(max(t2.v2))) as $expr1] }
           └─StreamSimpleAgg { aggs: [max(max(t2.v2)), count] }
             └─StreamExchange { dist: Single }
               └─StreamHashAgg { group_key: [_vnode], aggs: [max(t2.v2), count] }
                 └─StreamProject { exprs: [t2.v2, t2._row_id, Vnode(t2._row_id) as _vnode] }
-                  └─StreamTableScan { table: t2, columns: [t2.v2, t2._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t2._row_id], pk: [_row_id], dist: UpstreamHashShard(t2._row_id) }
+                  └─StreamTableScan { table: t2, columns: [t2.v2, t2._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t2._row_id], pk: [_row_id], dist: UpstreamHashShard(t2._row_id) }
 - name: two predicate on the same subquery
   before:
   - create_tables
@@ -243,7 +243,7 @@
     StreamMaterialize { columns: [v1, t1._row_id(hidden)], stream_key: [t1._row_id], pk_columns: [t1._row_id], pk_conflict: NoCheck }
     └─StreamDynamicFilter { predicate: (t1.v1 < $expr1), output: [t1.v1, t1._row_id] }
       ├─StreamDynamicFilter { predicate: (t1.v1 > max(max(t2.v2))), output: [t1.v1, t1._row_id] }
-      │ ├─StreamTableScan { table: t1, columns: [t1.v1, t1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
+      │ ├─StreamTableScan { table: t1, columns: [t1.v1, t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
       │ └─StreamExchange { dist: Broadcast }
       │   └─StreamShare { id: 6 }
       │     └─StreamProject { exprs: [max(max(t2.v2))] }
@@ -251,7 +251,7 @@
       │         └─StreamExchange { dist: Single }
       │           └─StreamHashAgg { group_key: [_vnode], aggs: [max(t2.v2), count] }
       │             └─StreamProject { exprs: [t2.v2, t2._row_id, Vnode(t2._row_id) as _vnode] }
-      │               └─StreamTableScan { table: t2, columns: [t2.v2, t2._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t2._row_id], pk: [_row_id], dist: UpstreamHashShard(t2._row_id) }
+      │               └─StreamTableScan { table: t2, columns: [t2.v2, t2._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t2._row_id], pk: [_row_id], dist: UpstreamHashShard(t2._row_id) }
       └─StreamExchange { dist: Broadcast }
         └─StreamProject { exprs: [(max(max(t2.v2)) + 5:Int32) as $expr1] }
           └─StreamShare { id: 6 }
@@ -260,4 +260,4 @@
                 └─StreamExchange { dist: Single }
                   └─StreamHashAgg { group_key: [_vnode], aggs: [max(t2.v2), count] }
                     └─StreamProject { exprs: [t2.v2, t2._row_id, Vnode(t2._row_id) as _vnode] }
-                      └─StreamTableScan { table: t2, columns: [t2.v2, t2._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t2._row_id], pk: [_row_id], dist: UpstreamHashShard(t2._row_id) }
+                      └─StreamTableScan { table: t2, columns: [t2.v2, t2._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t2._row_id], pk: [_row_id], dist: UpstreamHashShard(t2._row_id) }

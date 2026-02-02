@@ -431,7 +431,7 @@ pub async fn start_service_as_election_leader(
             hummock_manager: hummock_manager.clone(),
             monitor_clients: MonitorClientPool::new(1, RpcClientConfig::default()),
             diagnose_command,
-            profile_service: risingwave_common_service::ProfileServiceImpl::new(
+            profile_service: risingwave_common_heap_profiling::ProfileServiceImpl::new(
                 server_config.clone(),
             ),
             trace_state,
@@ -492,6 +492,7 @@ pub async fn start_service_as_election_leader(
         hummock_manager.clone(),
         metadata_manager.clone(),
         iceberg_compaction_stat_tx,
+        env.await_tree_reg().clone(),
     );
     tracing::info!("SinkCoordinatorManager started");
     // TODO(shutdown): remove this as there's no need to gracefully shutdown some of these sub-tasks.
@@ -643,6 +644,18 @@ pub async fn start_service_as_election_leader(
         hummock_manager.clone(),
         backup_manager.clone(),
         &env.opts,
+        {
+            let barrier_manager = barrier_manager.clone();
+            Box::new(move || {
+                let barrier_manager = barrier_manager.clone();
+                Box::pin(async move {
+                    barrier_manager.may_snapshot_backfilling_job().await.unwrap_or_else(|e| {
+                        tracing::warn!(err = %e.as_report(), "failed to check having snapshot backfilling jobs. pause vacuum time travel");
+                        true
+                    })
+                })
+            })
+        }
     ));
     sub_tasks.push(start_worker_info_monitor(
         metadata_manager.clone(),
@@ -653,6 +666,7 @@ pub async fn start_service_as_election_leader(
     sub_tasks.push(start_info_monitor(
         metadata_manager.clone(),
         hummock_manager.clone(),
+        barrier_manager.clone(),
         env.system_params_manager_impl_ref(),
         meta_metrics.clone(),
     ));

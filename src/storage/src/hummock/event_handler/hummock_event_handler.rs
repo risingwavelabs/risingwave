@@ -504,6 +504,7 @@ impl HummockEventHandler {
     fn handle_clear(&mut self, notifier: oneshot::Sender<()>, table_ids: Option<HashSet<TableId>>) {
         info!(
             current_version_id = ?self.uploader.hummock_version().id(),
+            ?table_ids,
             "handle clear event"
         );
 
