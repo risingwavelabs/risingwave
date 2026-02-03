@@ -73,6 +73,7 @@ use risingwave_common::array::StreamChunk;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_common::must_match;
+use risingwave_common_estimate_size::EstimateSize;
 use risingwave_connector::sink::log_store::{ChunkId, LogStoreResult};
 use risingwave_storage::StateStore;
 use risingwave_storage::store::timeout_auto_rebuild::TimeoutAutoRebuildIter;
@@ -1060,7 +1061,7 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
             },
         ));
         buffer.next_chunk_id = 0;
-        buffer.update_unconsumed_buffer_metrics();
+        buffer.update_buffer_metrics();
 
         Ok(post_seal)
     }
@@ -1162,7 +1163,7 @@ impl SyncedLogStoreBuffer {
             );
         }
         // FIXME(kwannoel): Seems these metrics are updated _after_ the flush info is reported.
-        self.update_unconsumed_buffer_metrics();
+        self.update_buffer_metrics();
     }
 
     fn add_chunk_to_buffer(
@@ -1185,7 +1186,7 @@ impl SyncedLogStoreBuffer {
                 chunk_id,
             },
         ));
-        self.update_unconsumed_buffer_metrics();
+        self.update_buffer_metrics();
     }
 
     fn pop_front(&mut self) -> Option<(u64, LogStoreBufferItem)> {
@@ -1199,13 +1200,14 @@ impl SyncedLogStoreBuffer {
             }
             _ => {}
         }
-        self.update_unconsumed_buffer_metrics();
+        self.update_buffer_metrics();
         item
     }
 
-    fn update_unconsumed_buffer_metrics(&self) {
+    fn update_buffer_metrics(&self) {
         let mut epoch_count = 0;
         let mut row_count = 0;
+        let mut memory_bytes = 0;
         for (_, item) in &self.buffer {
             match item {
                 LogStoreBufferItem::StreamChunk { chunk, .. } => {
@@ -1222,6 +1224,7 @@ impl SyncedLogStoreBuffer {
                     epoch_count += 1;
                 }
             }
+            memory_bytes += item.estimated_size();
         }
         self.metrics.buffer_unconsumed_epoch_count.set(epoch_count);
         self.metrics.buffer_unconsumed_row_count.set(row_count as _);
@@ -1234,6 +1237,7 @@ impl SyncedLogStoreBuffer {
                 .map(|(epoch, _)| *epoch)
                 .unwrap_or_default() as _,
         );
+        self.metrics.buffer_memory_bytes.set(memory_bytes as _);
     }
 }
 
