@@ -35,7 +35,7 @@ dyn-clone = "1.0.14"
 easy-ext = "1"
 educe = "0.6"
 either = "1"
-enum-as-inner = "0.6"
+enum-as-inner = "0.7"
 fancy-regex = "0.17.0"
 fixedbitset = "0.5"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
