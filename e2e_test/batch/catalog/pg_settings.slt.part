@@ -42,6 +42,7 @@ user enable_datafusion_engine
 user enable_index_selection
 user enable_join_ordering
 user enable_locality_backfill
+user enable_serverless_backfill
 user enable_share_plan
 user enable_two_phase_agg
 user extra_float_digits
@@ -95,7 +96,6 @@ user streaming_unsafe_allow_unmaterialized_impure_expr
 user streaming_use_arrangement_backfill
 user streaming_use_shared_source
 user streaming_use_snapshot_backfill
-user enable_serverless_backfill
 user synchronize_seqscans
 user timezone
 user transaction_isolation
