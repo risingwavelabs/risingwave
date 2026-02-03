@@ -30,7 +30,7 @@ macro_rules! for_all_wrapped_id_fields {
             $(
                 $($type_part:ident).* {
                     $(
-                        $field_name:ident: $type_name:ty,
+                        $field_name:ident: $type_name:ident $(-> $value_type_name:ident)?,
                     )+
                 }
             )+
@@ -43,7 +43,7 @@ macro_rules! for_all_wrapped_id_fields {
                         &concat!(stringify!($outer_part), $(stringify!(.$type_part)),*),
                         vec![
                             $(
-                                (stringify!($field_name), stringify!($type_name))
+                                (stringify!($field_name), stringify!($type_name $(-> $value_type_name)?))
                             ),*
                         ]
                     ),
@@ -483,7 +483,7 @@ for_all_wrapped_id_fields! (
             sstable_object_ids: HummockSstableObjectId,
         }
         ValidationTask {
-            sst_id_to_worker_id: HummockSstableObjectId,
+            sst_id_to_worker_id: HummockSstableObjectId->WorkerId,
         }
         VectorFileInfo {
             object_id: HummockVectorFileId,
@@ -574,7 +574,7 @@ for_all_wrapped_id_fields! (
             map: FragmentId,
         }
         FragmentToRelationMap {
-            fragment_to_relation_map: FragmentId,
+            fragment_to_relation_map: FragmentId->JobId,
         }
         FragmentWorkerSlotMapping {
             fragment_id: FragmentId,
@@ -599,7 +599,7 @@ for_all_wrapped_id_fields! (
             table_id: TableId,
         }
         GetServingVnodeMappingsResponse {
-            fragment_to_table: FragmentId,
+            fragment_to_table: FragmentId->JobId,
         }
         HeartbeatRequest {
             node_id: WorkerId,
@@ -1262,10 +1262,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     for (wrapped_type, wrapped_fields) in &wrapped_fields() {
         for (field_name, field_type) in wrapped_fields {
-            prost_config.field_wrapper(
-                format!("{wrapped_type}.{field_name}"),
-                format!("crate::id::{field_type}"),
-            );
+            let field_wrapper = if let Some((key_type, value_type)) = field_type.split_once("->") {
+                format!("crate::id::{key_type}->crate::id::{value_type}")
+            } else {
+                format!("crate::id::{field_type}")
+            };
+            prost_config.field_wrapper(format!("{wrapped_type}.{field_name}"), field_wrapper);
         }
     }
     // Compile the proto files.
@@ -1295,7 +1297,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         );
         let file_content = file_content.replace(
             ".map(|(k,v)| (k.0, v.0)).collect()",
-            ".map(|(k,v)| (k.0.into(), v.0)).collect()",
+            ".map(|(k,v)| (k.0.into(), v.0.into())).collect()",
         );
         let module_path_id = serde_proto_file.replace('.', "::");
         fs_err::write(

@@ -9979,7 +9979,7 @@ dependencies = [
 [[package]]
 name = "prost"
 version = "0.13.4"
-source = "git+https://github.com/risingwavelabs/prost.git?rev=4a442caf7c0a43feb4aea64bde6aea4488d9917f#4a442caf7c0a43feb4aea64bde6aea4488d9917f"
+source = "git+https://github.com/risingwavelabs/prost.git?rev=7729254fdad1f9a4a4599e09a158a50faa0bc268#7729254fdad1f9a4a4599e09a158a50faa0bc268"
 dependencies = [
  "bytes",
  "prost-derive 0.13.4",
@@ -10020,7 +10020,7 @@ dependencies = [
 [[package]]
 name = "prost-build"
 version = "0.13.4"
-source = "git+https://github.com/risingwavelabs/prost.git?rev=4a442caf7c0a43feb4aea64bde6aea4488d9917f#4a442caf7c0a43feb4aea64bde6aea4488d9917f"
+source = "git+https://github.com/risingwavelabs/prost.git?rev=7729254fdad1f9a4a4599e09a158a50faa0bc268#7729254fdad1f9a4a4599e09a158a50faa0bc268"
 dependencies = [
  "heck 0.5.0",
  "itertools 0.13.0",
@@ -10052,7 +10052,7 @@ dependencies = [
 [[package]]
 name = "prost-derive"
 version = "0.13.4"
-source = "git+https://github.com/risingwavelabs/prost.git?rev=4a442caf7c0a43feb4aea64bde6aea4488d9917f#4a442caf7c0a43feb4aea64bde6aea4488d9917f"
+source = "git+https://github.com/risingwavelabs/prost.git?rev=7729254fdad1f9a4a4599e09a158a50faa0bc268#7729254fdad1f9a4a4599e09a158a50faa0bc268"
 dependencies = [
  "anyhow",
  "itertools 0.13.0",
@@ -10110,7 +10110,7 @@ dependencies = [
 [[package]]
 name = "prost-types"
 version = "0.13.4"
-source = "git+https://github.com/risingwavelabs/prost.git?rev=4a442caf7c0a43feb4aea64bde6aea4488d9917f#4a442caf7c0a43feb4aea64bde6aea4488d9917f"
+source = "git+https://github.com/risingwavelabs/prost.git?rev=7729254fdad1f9a4a4599e09a158a50faa0bc268#7729254fdad1f9a4a4599e09a158a50faa0bc268"
 dependencies = [
  "prost 0.13.4",
 ]
@@ -12417,6 +12417,7 @@ dependencies = [
  "pbjson-build",
  "prost 0.13.4",
  "prost-build 0.13.4",
+ "prost-derive 0.13.4",
  "prost-helpers",
  "risingwave_error",
  "sea-orm",
