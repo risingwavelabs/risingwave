@@ -60,9 +60,7 @@ impl EstimateSize for LogStoreBufferItem {
         match self {
             LogStoreBufferItem::StreamChunk { chunk, .. } => chunk.estimated_heap_size(),
             LogStoreBufferItem::Flushed { vnode_bitmap, .. } => vnode_bitmap.estimated_heap_size(),
-            LogStoreBufferItem::Barrier { .. } => {
-                0
-            }
+            LogStoreBufferItem::Barrier { .. } => 0,
         }
     }
 
@@ -86,9 +84,7 @@ impl EstimateSize for LogStoreBufferItem {
                 end_seq_id: _,
                 chunk_id: _,
             } => vnode_bitmap.estimated_size() + size_of::<SeqId>() * 2 + size_of::<ChunkId>(),
-            LogStoreBufferItem::Barrier { .. } => {
-                0
-            }
+            LogStoreBufferItem::Barrier { .. } => 0,
         }
     }
 }
@@ -130,10 +126,10 @@ impl LogStoreBufferInner {
                     epoch_count += 1;
                 }
             }
-            memory_bytes += item.estimated_heap_size();
+            memory_bytes += item.estimated_size();
         }
         for (_, item) in &self.consumed_queue {
-            memory_bytes += item.estimated_heap_size();
+            memory_bytes += item.estimated_size();
         }
         self.metrics.buffer_unconsumed_epoch_count.set(epoch_count);
         self.metrics.buffer_unconsumed_row_count.set(row_count as _);
