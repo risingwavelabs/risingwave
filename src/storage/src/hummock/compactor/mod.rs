@@ -819,10 +819,7 @@ pub fn start_compactor(
                                 .map(|sst| sst.into())
                                 .collect(),
                             table_stats_change: to_prost_table_stats_map(table_stats),
-                            object_timestamps: object_timestamps
-                                .into_iter()
-                                .map(|(object_id, timestamp)| (object_id.as_raw_id(), timestamp))
-                                .collect(),
+                            object_timestamps,
                         })),
                         create_at: SystemTime::now()
                             .duration_since(std::time::UNIX_EPOCH)

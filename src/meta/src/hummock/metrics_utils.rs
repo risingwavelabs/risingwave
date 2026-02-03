@@ -619,7 +619,7 @@ pub fn build_level_metrics_label(
     compaction_group_id: CompactionGroupId,
     level_idx: usize,
 ) -> String {
-    format!("cg{}_L{}", compaction_group_id.as_raw_id(), level_idx)
+    format!("cg{}_L{}", compaction_group_id, level_idx)
 }
 
 pub fn build_level_l0_metrics_label(

@@ -34,7 +34,7 @@ async fn read(reader: &SysCatalogReaderImpl) -> Result<Vec<RwHummockBranchedObje
         .into_iter()
         .map(|o| RwHummockBranchedObject {
             object_id: o.object_id,
-            sst_id: o.sst_id.into_iter().map(|id| id.as_raw_id() as _).collect(),
+            sst_id: o.sst_id.into_iter().map(|id| id.as_i64_id()).collect(),
             compaction_group_id: o.compaction_group_id,
         })
         .collect();

@@ -346,9 +346,7 @@ async fn check_gc_history(
         ?expired_object_ids,
         "new SSTs are rejected because they have already been GCed"
     );
-    Err(Error::InvalidSst(
-        expired_object_ids[0].object_id.as_raw_id().into(),
-    ))
+    Err(Error::InvalidSst(expired_object_ids[0].object_id))
 }
 
 // pin and unpin method

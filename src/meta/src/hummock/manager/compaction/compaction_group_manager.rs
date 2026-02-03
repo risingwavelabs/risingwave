@@ -118,17 +118,11 @@ impl HummockManager {
                 tracing::warn!("`mv_table` {} found in `internal_tables`", mv_table);
             }
             // materialized_view
-            pairs.push((
-                mv_table,
-                CompactionGroupId::from(StaticCompactionGroupId::MaterializedView),
-            ));
+            pairs.push((mv_table, StaticCompactionGroupId::MaterializedView));
         }
         // internal states
         for table_id in internal_tables {
-            pairs.push((
-                table_id,
-                CompactionGroupId::from(StaticCompactionGroupId::StateDefault),
-            ));
+            pairs.push((table_id, StaticCompactionGroupId::StateDefault));
         }
         self.register_table_ids_for_test(&pairs).await?;
         Ok(())
@@ -327,9 +321,7 @@ impl HummockManager {
         let groups_to_remove = modified_groups
             .into_iter()
             .filter_map(|(group_id, member_count)| {
-                if member_count == 0
-                    && group_id > CompactionGroupId::from(StaticCompactionGroupId::End)
-                {
+                if member_count == 0 && group_id > StaticCompactionGroupId::End {
                     return Some((
                         group_id,
                         new_version_delta
@@ -524,9 +516,11 @@ impl CompactionGroupManager {
     /// Tries to get compaction group config for `compaction_group_id`.
     pub(crate) fn try_get_compaction_group_config(
         &self,
-        compaction_group_id: CompactionGroupId,
+        compaction_group_id: impl Into<CompactionGroupId>,
     ) -> Option<CompactionGroup> {
-        self.compaction_groups.get(&compaction_group_id).cloned()
+        self.compaction_groups
+            .get(&compaction_group_id.into())
+            .cloned()
     }
 
     /// Tries to get compaction group config for `compaction_group_id`.
@@ -777,7 +771,7 @@ mod tests {
         assert_eq!(inner.compaction_groups.len(), 4);
         assert_eq!(
             inner
-                .try_get_compaction_group_config(100.into())
+                .try_get_compaction_group_config(100)
                 .unwrap()
                 .compaction_config
                 .max_sub_compaction,
@@ -785,7 +779,7 @@ mod tests {
         );
         assert_eq!(
             inner
-                .try_get_compaction_group_config(200.into())
+                .try_get_compaction_group_config(200)
                 .unwrap()
                 .compaction_config
                 .max_sub_compaction,

@@ -383,6 +383,9 @@ for_all_wrapped_id_fields! (
             group_id: CompactionGroupId,
             parent_group_id: CompactionGroupId,
         }
+        HummockVersionCheckpoint {
+            stale_objects: HummockVersionId,
+        }
         HummockVersionDelta {
             id: HummockVersionId,
             prev_id: HummockVersionId,
@@ -399,6 +402,9 @@ for_all_wrapped_id_fields! (
         }
         IntraLevelDelta {
             removed_table_ids: HummockSstableId,
+        }
+        LevelHandler.RunningCompactTask {
+            ssts: HummockSstableId,
         }
         ListActiveWriteLimitResponse {
             write_limits: CompactionGroupId,
@@ -448,6 +454,7 @@ for_all_wrapped_id_fields! (
         }
         SubscribeCompactionEventRequest.ReportTask {
             table_stats_change: TableId,
+            object_timestamps: HummockSstableObjectId,
         }
         TriggerCompactionDeterministicRequest {
             version_id: HummockVersionId,

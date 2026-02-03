@@ -1070,8 +1070,8 @@ impl GroupMergeValidator {
                 .as_ref();
 
             tracing::warn!(
-                group_id = group.group_id.as_raw_id(),
-                next_group_id = next_group.group_id.as_raw_id(),
+                group_id = %group.group_id,
+                next_group_id = %next_group.group_id,
                 left_config = ?left_config,
                 right_config = ?right_config,
                 "compaction config mismatch detected while merging compaction groups"

@@ -1163,7 +1163,7 @@ pub mod tests {
     #[test]
     fn test_manual_compaction_selector_l0() {
         let config = CompactionConfigBuilder::new().max_level(4).build();
-        let group_config = CompactionGroup::new(1.into(), config);
+        let group_config = CompactionGroup::new(1, config);
         let l0 = generate_l0_nonoverlapping_sublevels(vec![
             generate_table(0, 1, 0, 500, 1),
             generate_table(1, 1, 0, 500, 1),
@@ -1277,7 +1277,7 @@ pub mod tests {
     #[test]
     fn test_manual_compaction_selector() {
         let config = CompactionConfigBuilder::new().max_level(4).build();
-        let group_config = CompactionGroup::new(1.into(), config);
+        let group_config = CompactionGroup::new(1, config);
         let l0 = generate_l0_nonoverlapping_sublevels(vec![]);
         assert_eq!(l0.sub_levels.len(), 0);
         let levels = vec![

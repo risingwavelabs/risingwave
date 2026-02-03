@@ -117,9 +117,9 @@ fn gen_local_sstable_info(sst_id: u64, table_ids: Vec<u32>, epoch: u64) -> Local
 }
 fn get_compaction_group_object_ids(
     version: &HummockVersion,
-    group_id: CompactionGroupId,
+    group_id: impl Into<CompactionGroupId>,
 ) -> Vec<HummockSstableObjectId> {
-    get_compaction_group_ssts(version, group_id)
+    get_compaction_group_ssts(version, group_id.into())
         .map(|(object_id, _)| object_id)
         .collect_vec()
 }
@@ -1170,12 +1170,7 @@ async fn test_extend_objects_to_delete() {
     .await;
     let max_committed_object_id = sst_infos
         .iter()
-        .map(|ssts| {
-            ssts.iter()
-                .max_by_key(|s| s.object_id.as_raw_id())
-                .map(|s| s.object_id.as_raw_id())
-                .unwrap()
-        })
+        .map(|ssts| ssts.iter().map(|s| s.object_id).max().unwrap())
         .max()
         .unwrap();
     let orphan_sst_num: usize = 10;
@@ -1185,7 +1180,7 @@ async fn test_extend_objects_to_delete() {
         .map(|s| HummockObjectId::Sstable(s.object_id))
         .chain(
             (max_committed_object_id + 1..=max_committed_object_id + orphan_sst_num as u64)
-                .map(|id| HummockObjectId::Sstable(id.into())),
+                .map(HummockObjectId::Sstable),
         )
         .collect_vec();
     assert_eq!(
@@ -1430,11 +1425,11 @@ async fn test_move_state_tables_to_dedicated_compaction_group_on_commit() {
     let current_version = hummock_manager.get_current_version().await;
     assert_eq!(current_version.levels.len(), 2);
     assert_eq!(
-        get_compaction_group_object_ids(&current_version, 2.into()),
+        get_compaction_group_object_ids(&current_version, 2),
         vec![10]
     );
     assert_eq!(
-        get_compaction_group_object_ids(&current_version, 3.into()),
+        get_compaction_group_object_ids(&current_version, 3),
         vec![10]
     );
     assert_eq!(

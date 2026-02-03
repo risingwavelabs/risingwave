@@ -52,7 +52,7 @@ impl HummockVersionCheckpoint {
             stale_objects: checkpoint
                 .stale_objects
                 .iter()
-                .map(|(version_id, objects)| (HummockVersionId::new(*version_id), objects.clone()))
+                .map(|(version_id, objects)| (*version_id, objects.clone()))
                 .collect(),
         }
     }
@@ -63,7 +63,7 @@ impl HummockVersionCheckpoint {
             stale_objects: self
                 .stale_objects
                 .iter()
-                .map(|(version_id, objects)| (version_id.as_raw_id(), objects.clone()))
+                .map(|(version_id, objects)| (*version_id, objects.clone()))
                 .collect(),
         }
     }

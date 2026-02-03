@@ -89,12 +89,7 @@ pub struct LocalSelectorStatistic {
 impl LocalSelectorStatistic {
     pub fn report_to_metrics(&self, group_id: CompactionGroupId, metrics: &MetaMetrics) {
         for (start_level, target_level, stats) in &self.skip_picker {
-            let level_label = format!(
-                "cg{}-{}-to-{}",
-                group_id.as_raw_id(),
-                start_level,
-                target_level
-            );
+            let level_label = format!("cg{}-{}-to-{}", group_id, start_level, target_level);
             if stats.skip_by_write_amp_limit > 0 {
                 metrics
                     .compact_skip_frequency

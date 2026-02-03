@@ -556,7 +556,7 @@ impl HummockManager {
                 warn!(
                     "COMPACTION SLOW: the task-{} of group-{}(size: {}MB) level-{} has not finished after {:?}, {}, it may cause pending sstable files({:?}) blocking other task.",
                     task_id,
-                    group_id.as_raw_id(),
+                    group_id,
                     group_size / 1024 / 1024,
                     *level_id,
                     compact_time,

@@ -580,11 +580,7 @@ impl From<PbReportTask> for ReportTask {
                 .into_iter()
                 .map(SstableInfo::from)
                 .collect_vec(),
-            object_timestamps: value
-                .object_timestamps
-                .into_iter()
-                .map(|(object_id, timestamp)| (object_id.into(), timestamp))
-                .collect(),
+            object_timestamps: value.object_timestamps,
         }
     }
 }
@@ -600,11 +596,7 @@ impl From<ReportTask> for PbReportTask {
                 .into_iter()
                 .map(|sst| sst.into())
                 .collect_vec(),
-            object_timestamps: value
-                .object_timestamps
-                .into_iter()
-                .map(|(object_id, timestamp)| (object_id.as_raw_id(), timestamp))
-                .collect(),
+            object_timestamps: value.object_timestamps,
         }
     }
 }

@@ -255,8 +255,8 @@ impl<L: Clone> HummockVersionCommon<SstableInfo, L> {
         new_sst_start_id: HummockSstableId,
     ) {
         let mut new_sst_id = new_sst_start_id;
-        if parent_group_id == CompactionGroupId::from(StaticCompactionGroupId::NewCompactionGroup) {
-            if new_sst_start_id.as_raw_id() != 0 {
+        if parent_group_id == StaticCompactionGroupId::NewCompactionGroup {
+            if new_sst_start_id != 0 {
                 if cfg!(debug_assertions) {
                     panic!(
                         "non-zero sst start id {} for NewCompactionGroup",
@@ -264,7 +264,7 @@ impl<L: Clone> HummockVersionCommon<SstableInfo, L> {
                     );
                 } else {
                     warn!(
-                        new_sst_start_id = %new_sst_start_id.as_raw_id(),
+                        %new_sst_start_id,
                         "non-zero sst start id for NewCompactionGroup"
                     );
                 }
@@ -864,8 +864,8 @@ impl<L: Clone> HummockVersionCommon<SstableInfo, L> {
         split_key: Option<Bytes>,
     ) {
         let mut new_sst_id = new_sst_start_id;
-        if parent_group_id == CompactionGroupId::from(StaticCompactionGroupId::NewCompactionGroup) {
-            if new_sst_start_id.as_raw_id() != 0 {
+        if parent_group_id == StaticCompactionGroupId::NewCompactionGroup {
+            if new_sst_start_id != 0 {
                 if cfg!(debug_assertions) {
                     panic!(
                         "non-zero sst start id {} for NewCompactionGroup",

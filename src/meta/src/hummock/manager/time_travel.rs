@@ -25,9 +25,7 @@ use risingwave_hummock_sdk::time_travel::{
     IncompleteHummockVersion, IncompleteHummockVersionDelta, refill_version,
 };
 use risingwave_hummock_sdk::version::{GroupDeltaCommon, HummockVersion, HummockVersionDelta};
-use risingwave_hummock_sdk::{
-    CompactionGroupId, HummockEpoch, HummockObjectId, HummockSstableId, HummockSstableObjectId,
-};
+use risingwave_hummock_sdk::{CompactionGroupId, HummockEpoch, HummockObjectId, HummockSstableId};
 use risingwave_meta_model::hummock_sstable_info::SstableInfoV2Backend;
 use risingwave_meta_model::{
     HummockVersionId, hummock_epoch_to_version, hummock_sstable_info, hummock_time_travel_delta,
@@ -562,8 +560,8 @@ impl HummockManager {
                         break;
                     };
                     batch.push(hummock_sstable_info::ActiveModel {
-                        sst_id: Set(HummockSstableObjectId::new(sst_info.sst_id.as_raw_id())),
-                        object_id: Set(HummockSstableObjectId::new(sst_info.object_id.as_raw_id())),
+                        sst_id: Set(sst_info.sst_id),
+                        object_id: Set(sst_info.object_id),
                         sstable_info: Set(SstableInfoV2Backend::from(&sst_info.to_protobuf())),
                     });
                     remain -= 1;

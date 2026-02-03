@@ -398,13 +398,13 @@ mod tests {
                 min_pinned_id: 10.into(),
             },
         );
-        assert_eq!(context_info.min_pinned_version_id().as_raw_id(), 10);
+        assert_eq!(context_info.min_pinned_version_id(), 10);
         context_info
             .version_safe_points
             .push(HummockVersionId::new(5));
-        assert_eq!(context_info.min_pinned_version_id().as_raw_id(), 5);
+        assert_eq!(context_info.min_pinned_version_id(), 5);
         context_info.version_safe_points.clear();
-        assert_eq!(context_info.min_pinned_version_id().as_raw_id(), 10);
+        assert_eq!(context_info.min_pinned_version_id(), 10);
         context_info.pinned_versions.clear();
         assert_eq!(context_info.min_pinned_version_id(), HummockVersionId::MAX);
     }
@@ -658,7 +658,7 @@ mod tests {
             hummock_version_id,
             table_stats,
         } = rebuild_table_stats(&version);
-        assert_eq!(hummock_version_id, version.id.as_raw_id());
+        assert_eq!(hummock_version_id, version.id);
         assert_eq!(table_stats.len(), 3);
         for (tid, stats) in table_stats {
             assert_eq!(

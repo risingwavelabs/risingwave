@@ -226,7 +226,7 @@ mod test {
             .max_level(4)
             .max_space_reclaim_bytes(400)
             .build();
-        let group_config = CompactionGroup::new(1.into(), config);
+        let group_config = CompactionGroup::new(1, config);
         let l0 = generate_l0_nonoverlapping_sublevels(vec![]);
         assert_eq!(l0.sub_levels.len(), 0);
 
