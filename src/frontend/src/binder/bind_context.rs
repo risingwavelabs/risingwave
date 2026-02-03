@@ -193,6 +193,28 @@ impl BindContext {
         }
     }
 
+    pub fn get_table_alias(
+        &self,
+        schema_name: &String,
+        table_name: &String,
+        column_name: &String,
+    ) -> LiteResult<Option<usize>> {
+        let column_indexes = self
+            .indices_of
+            .get(column_name)
+            .ok_or_else(|| ErrorCode::ItemNotFound(format!("Invalid column: {}", column_name)))?;
+        for index in column_indexes {
+            let column = &self.columns[*index];
+            if let (Some(schema), Some(table_alias)) = (&column.schema_name, &column.table_alias)
+                && schema == schema_name
+                && table_alias == table_name
+            {
+                return Ok(Some(*index));
+            }
+        }
+        Ok(None)
+    }
+
     fn get_indices_with_group_id(
         &self,
         group_id: u32,

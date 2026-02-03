@@ -23,7 +23,7 @@ use crate::expr::{CorrelatedInputRef, ExprImpl, ExprType, FunctionCall, InputRef
 impl Binder {
     pub fn bind_column(&mut self, idents: &[Ident]) -> Result<ExprImpl> {
         // TODO: check quote style of `ident`.
-        let (_schema_name, table_name, column_name) = match idents {
+        let (schema_name, table_name, column_name) = match idents {
             [column] => (None, None, column.real_value()),
             [table, column] => (None, Some(table.real_value()), column.real_value()),
             [schema, table, column] => {
@@ -93,9 +93,23 @@ impl Binder {
                 }
             }
             Err(e) => {
-                // If the error message is not that the column is not found, throw the error
+                // If a column is referenced using three-level qualification and the table has an alias,
+                // prompt the user to use the table alias instead.
                 if let ErrorCode::ItemNotFound(_) = e {
+                    if let (Some(schema), Some(table)) = (&schema_name, &table_name)
+                        && let Some(index) =
+                            self.context.get_table_alias(schema, table, &column_name)?
+                    {
+                        let column = &self.context.columns[index];
+                        return Err(ErrorCode::InvalidReference(format!(
+                            "missing FROM-clause entry for table \"{}\"\n\
+                            HINT:  Perhaps you meant to reference the table alias \"{}\".",
+                            table, column.table_name
+                        ))
+                        .into());
+                    };
                 } else {
+                    // If the error message is not that the column is not found, throw the error
                     return Err(e.into());
                 }
             }
