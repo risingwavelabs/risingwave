@@ -278,8 +278,9 @@ impl<S: StateStore> SnapshotBackfillExecutor<S> {
                         {
                             // we must call `next_epoch` after `consumed_epoch`, and otherwise in `next_epoch`
                             // we may block the upstream, and the upstream never get a chance to finish the `next_epoch`
-                            let next_prev_epoch =
-                                self.upstream_table.next_epoch(barrier_epoch.prev).await?;
+                            let next_prev_epoch = upstream_buffer
+                                .run_future(self.upstream_table.next_epoch(barrier_epoch.prev))
+                                .await?;
                             assert_eq!(next_prev_epoch, barrier.epoch.prev);
                         }
                         barrier_epoch = barrier.epoch;
