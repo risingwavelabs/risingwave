@@ -375,7 +375,7 @@ impl Binder {
             let Cte { alias, cte_inner } = cte_table;
             let table_name = alias.name.real_value();
 
-            // check if the cte name already exist on BindContext
+            // Check whether there are duplicate CTE names within the same WITH clause.
             if cte_names.contains(&table_name) {
                 return Err(ErrorCode::DuplicateRelationName(format!(
                     "WITH query name \"{}\" specified more than once",
