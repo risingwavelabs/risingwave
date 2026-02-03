@@ -435,7 +435,7 @@ mod tests {
             false,
         );
         assert_eq!(memory_config.block_cache_capacity_mb, 737);
-        assert_eq!(memory_config.meta_cache_capacity_mb, 860);
+        assert_eq!(memory_config.meta_cache_capacity_mb, 983);
         assert_eq!(memory_config.shared_buffer_capacity_mb, 737);
         assert_eq!(memory_config.compactor_memory_limit_mb, 819);
 
@@ -447,7 +447,7 @@ mod tests {
             true,
         );
         assert_eq!(memory_config.block_cache_capacity_mb, 1966);
-        assert_eq!(memory_config.meta_cache_capacity_mb, 1146);
+        assert_eq!(memory_config.meta_cache_capacity_mb, 1310);
         assert_eq!(memory_config.shared_buffer_capacity_mb, 1);
         assert_eq!(memory_config.compactor_memory_limit_mb, 0);
 
@@ -461,7 +461,7 @@ mod tests {
             false,
         );
         assert_eq!(memory_config.block_cache_capacity_mb, 737);
-        assert_eq!(memory_config.meta_cache_capacity_mb, 860);
+        assert_eq!(memory_config.meta_cache_capacity_mb, 983);
         assert_eq!(memory_config.shared_buffer_capacity_mb, 737);
         assert_eq!(memory_config.compactor_memory_limit_mb, 819);
 
@@ -479,6 +479,34 @@ mod tests {
         assert_eq!(memory_config.block_cache_capacity_mb, 512);
         assert_eq!(memory_config.meta_cache_capacity_mb, 128);
         assert_eq!(memory_config.shared_buffer_capacity_mb, 1024);
+        assert_eq!(memory_config.compactor_memory_limit_mb, 512);
+
+        // Total storage memory is high but below proportion limit
+        // Check that specified config is correctly applied
+        storage_config.cache.meta_cache_capacity_mb = Some(5120);
+        let memory_config = storage_memory_config(
+            total_non_reserved_memory_bytes,
+            true,
+            &storage_config,
+            false,
+        );
+        assert_eq!(memory_config.block_cache_capacity_mb, 512);
+        assert_eq!(memory_config.meta_cache_capacity_mb, 5120);
+        assert_eq!(memory_config.shared_buffer_capacity_mb, 1024);
+        assert_eq!(memory_config.compactor_memory_limit_mb, 512);
+
+        // Total storage memory exceed proportion limit
+        // Check that specified config is ignored and fallback to defaults
+        storage_config.cache.meta_cache_capacity_mb = Some(10240);
+        let memory_config = storage_memory_config(
+            total_non_reserved_memory_bytes,
+            true,
+            &storage_config,
+            false,
+        );
+        assert_eq!(memory_config.block_cache_capacity_mb, 737);
+        assert_eq!(memory_config.meta_cache_capacity_mb, 983);
+        assert_eq!(memory_config.shared_buffer_capacity_mb, 737);
         assert_eq!(memory_config.compactor_memory_limit_mb, 512);
     }
 
