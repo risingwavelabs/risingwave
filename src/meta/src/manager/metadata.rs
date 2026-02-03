@@ -395,6 +395,12 @@ impl MetadataManager {
         self.cluster_controller.get_streaming_cluster_info().await
     }
 
+    pub async fn get_job_backfill_rate_limit(&self, job_id: JobId) -> MetaResult<Option<i32>> {
+        self.catalog_controller
+            .get_job_backfill_rate_limit(job_id)
+            .await
+    }
+
     pub async fn get_all_table_options(&self) -> MetaResult<HashMap<TableId, TableOption>> {
         self.catalog_controller.get_all_table_options().await
     }
@@ -565,6 +571,26 @@ impl MetadataManager {
     ) -> MetaResult<HashSet<FragmentId>> {
         self.catalog_controller
             .update_backfill_rate_limit_by_job_id(job_id, rate_limit)
+            .await
+    }
+
+    pub async fn apply_backfill_rate_limit_by_job_id_without_override(
+        &self,
+        job_id: JobId,
+        rate_limit: Option<u32>,
+    ) -> MetaResult<HashSet<FragmentId>> {
+        self.catalog_controller
+            .apply_backfill_rate_limit_by_job_id_without_override(job_id, rate_limit)
+            .await
+    }
+
+    pub async fn init_job_backfill_rate_limit_if_missing(
+        &self,
+        job_id: JobId,
+        rate_limit: Option<u32>,
+    ) -> MetaResult<()> {
+        self.catalog_controller
+            .init_job_backfill_rate_limit_if_missing(job_id, rate_limit)
             .await
     }
 
