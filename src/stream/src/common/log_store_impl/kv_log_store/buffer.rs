@@ -60,8 +60,8 @@ impl EstimateSize for LogStoreBufferItem {
         match self {
             LogStoreBufferItem::StreamChunk { chunk, .. } => chunk.estimated_heap_size(),
             LogStoreBufferItem::Flushed { vnode_bitmap, .. } => vnode_bitmap.estimated_heap_size(),
-            LogStoreBufferItem::Barrier { schema_change, .. } => {
-                estimate_schema_change(schema_change.as_ref())
+            LogStoreBufferItem::Barrier { .. } => {
+                0
             }
         }
     }
@@ -86,59 +86,11 @@ impl EstimateSize for LogStoreBufferItem {
                 end_seq_id: _,
                 chunk_id: _,
             } => vnode_bitmap.estimated_size() + size_of::<SeqId>() * 2 + size_of::<ChunkId>(),
-            LogStoreBufferItem::Barrier { schema_change, .. } => {
-                estimate_schema_change(schema_change.as_ref())
-                    + size_of::<Option<PbSinkSchemaChange>>()
+            LogStoreBufferItem::Barrier { .. } => {
+                0
             }
         }
     }
-}
-
-fn estimate_schema_change(schema_change: Option<&PbSinkSchemaChange>) -> usize {
-    schema_change
-        .map(|sc| {
-            let mut size = 0;
-            size += estimate_vec(&sc.original_schema, estimate_field);
-            if let Some(op) = &sc.op {
-                use risingwave_pb::stream_plan::sink_schema_change::Op;
-                match op {
-                    Op::AddColumns(add) => {
-                        size += estimate_vec(&add.fields, estimate_field);
-                    }
-                    Op::DropColumns(drop) => {
-                        size += estimate_vec(&drop.column_names, estimate_string);
-                    }
-                }
-            }
-            size
-        })
-        .unwrap_or(0)
-}
-
-fn estimate_field(field: &risingwave_pb::plan_common::Field) -> usize {
-    let mut size = estimate_option(field.data_type.as_ref(), estimate_data_type);
-    size += estimate_string(&field.name);
-    size
-}
-
-fn estimate_data_type(dt: &risingwave_pb::data::DataType) -> usize {
-    let mut size = 0;
-    size += estimate_vec(&dt.field_type, estimate_data_type);
-    size += estimate_vec(&dt.field_names, estimate_string);
-    size += dt.field_ids.capacity() * size_of::<i32>();
-    size
-}
-
-fn estimate_string(s: &String) -> usize {
-    s.capacity()
-}
-
-fn estimate_vec<T>(v: &Vec<T>, elem_est: impl Fn(&T) -> usize) -> usize {
-    v.capacity() * size_of::<T>() + v.iter().map(elem_est).sum::<usize>()
-}
-
-fn estimate_option<T>(opt: Option<&T>, elem_est: impl Fn(&T) -> usize) -> usize {
-    opt.map(elem_est).unwrap_or(0)
 }
 
 struct LogStoreBufferInner {
