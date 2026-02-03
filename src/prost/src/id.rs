@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::any::type_name;
+use std::borrow::Borrow;
 use std::collections::{BTreeMap, HashMap};
 use std::fmt::Formatter;
 use std::iter::Step;
@@ -64,6 +65,13 @@ impl<const N: usize, P: FromStr> FromStr for TypedId<N, P> {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         Ok(Self(<P as FromStr>::from_str(s)?))
+    }
+}
+
+impl<const N: usize, P> Borrow<P> for TypedId<N, P> {
+    fn borrow(&self) -> &P {
+        // Safety: transparent repr
+        unsafe { std::mem::transmute(self) }
     }
 }
 

@@ -386,6 +386,9 @@ for_all_wrapped_id_fields! (
         HummockVersionCheckpoint {
             stale_objects: HummockVersionId,
         }
+        HummockVersionCheckpoint.StaleObjects {
+            id: HummockSstableObjectId,
+        }
         HummockVersionDelta {
             id: HummockVersionId,
             prev_id: HummockVersionId,
@@ -427,6 +430,7 @@ for_all_wrapped_id_fields! (
         }
         ReportCompactionTaskRequest.ReportTask {
             table_stats_change: TableId,
+            object_timestamps: HummockSstableObjectId,
         }
         RiseCtlUpdateCompactionConfigRequest {
             compaction_group_ids: CompactionGroupId,
@@ -483,6 +487,9 @@ for_all_wrapped_id_fields! (
         }
         VectorFileInfo {
             object_id: HummockVectorFileId,
+        }
+        VectorIndexObject {
+            id: HummockRawObjectId,
         }
         WriteLimits {
             write_limits: CompactionGroupId,

@@ -873,7 +873,7 @@ impl<L: Clone> HummockVersionCommon<SstableInfo, L> {
                     );
                 } else {
                     warn!(
-                        new_sst_start_id = %new_sst_start_id.as_raw_id(),
+                        %new_sst_start_id,
                         "non-zero sst start id for NewCompactionGroup"
                     );
                 }
@@ -1184,7 +1184,7 @@ impl<T, L> HummockVersionCommon<T, L> {
 }
 
 pub fn build_initial_compaction_group_levels(
-    group_id: CompactionGroupId,
+    group_id: impl Into<CompactionGroupId>,
     compaction_config: &CompactionConfig,
 ) -> Levels {
     let mut levels = vec![];
@@ -1207,7 +1207,7 @@ pub fn build_initial_compaction_group_levels(
             total_file_size: 0,
             uncompressed_file_size: 0,
         },
-        group_id,
+        group_id: group_id.into(),
         parent_group_id: 0.into(),
         member_table_ids: vec![],
         compaction_group_version_id: 0,
@@ -1226,7 +1226,7 @@ fn split_sst_info_for_level(
         let removed_table_ids = sst_info
             .table_ids
             .iter()
-            .filter(|table_id| member_table_ids.contains(table_id))
+            .filter(|table_id| member_table_ids.contains(*table_id))
             .cloned()
             .collect_vec();
         let sst_size = sst_info.sst_size;
@@ -1699,7 +1699,7 @@ mod tests {
         // Add to sub level
         version
             .levels
-            .get_mut(&0.into())
+            .get_mut(&0)
             .unwrap()
             .l0
             .sub_levels
@@ -1717,22 +1717,17 @@ mod tests {
         assert_eq!(version.get_object_ids(false).count(), 1);
 
         // Add to non sub level
-        version
-            .levels
-            .get_mut(&0.into())
-            .unwrap()
-            .levels
-            .push(Level {
-                table_infos: vec![
-                    SstableInfoInner {
-                        object_id: 22.into(),
-                        sst_id: 22.into(),
-                        ..Default::default()
-                    }
-                    .into(),
-                ],
-                ..Default::default()
-            });
+        version.levels.get_mut(&0).unwrap().levels.push(Level {
+            table_infos: vec![
+                SstableInfoInner {
+                    object_id: 22.into(),
+                    sst_id: 22.into(),
+                    ..Default::default()
+                }
+                .into(),
+            ],
+            ..Default::default()
+        });
         assert_eq!(version.get_object_ids(false).count(), 2);
     }
 
@@ -1744,7 +1739,7 @@ mod tests {
                 (
                     0.into(),
                     build_initial_compaction_group_levels(
-                        0.into(),
+                        0,
                         &CompactionConfig {
                             max_level: 6,
                             ..Default::default()
@@ -1754,7 +1749,7 @@ mod tests {
                 (
                     1.into(),
                     build_initial_compaction_group_levels(
-                        1.into(),
+                        1,
                         &CompactionConfig {
                             max_level: 6,
                             ..Default::default()
@@ -1803,7 +1798,7 @@ mod tests {
                             0,
                             version
                                 .levels
-                                .get(&1.into())
+                                .get(&1)
                                 .as_ref()
                                 .unwrap()
                                 .compaction_group_version_id,
@@ -1817,7 +1812,7 @@ mod tests {
 
         version.apply_version_delta(&version_delta);
         let mut cg1 = build_initial_compaction_group_levels(
-            1.into(),
+            1,
             &CompactionConfig {
                 max_level: 6,
                 ..Default::default()
@@ -1844,7 +1839,7 @@ mod tests {
                     (
                         2.into(),
                         build_initial_compaction_group_levels(
-                            2.into(),
+                            2,
                             &CompactionConfig {
                                 max_level: 6,
                                 ..Default::default()
@@ -1887,7 +1882,7 @@ mod tests {
     #[test]
     fn test_merge_levels() {
         let mut left_levels = build_initial_compaction_group_levels(
-            1.into(),
+            1,
             &CompactionConfig {
                 max_level: 6,
                 ..Default::default()
@@ -1895,7 +1890,7 @@ mod tests {
         );
 
         let mut right_levels = build_initial_compaction_group_levels(
-            2.into(),
+            2,
             &CompactionConfig {
                 max_level: 6,
                 ..Default::default()
@@ -2195,7 +2190,7 @@ mod tests {
         {
             // test empty left
             let mut left_levels = build_initial_compaction_group_levels(
-                1.into(),
+                1,
                 &CompactionConfig {
                     max_level: 6,
                     ..Default::default()
@@ -2221,7 +2216,7 @@ mod tests {
             // test empty right
             let mut left_levels = left_levels.clone();
             let right_levels = build_initial_compaction_group_levels(
-                2.into(),
+                2,
                 &CompactionConfig {
                     max_level: 6,
                     ..Default::default()
@@ -2404,7 +2399,7 @@ mod tests {
             levels: HashMap::from_iter([(
                 1.into(),
                 build_initial_compaction_group_levels(
-                    1.into(),
+                    1,
                     &CompactionConfig {
                         max_level: 6,
                         ..Default::default()
@@ -2414,7 +2409,7 @@ mod tests {
             ..Default::default()
         };
 
-        let cg1 = version.levels.get_mut(&1.into()).unwrap();
+        let cg1 = version.levels.get_mut(&1).unwrap();
 
         cg1.levels[0] = Level {
             level_idx: 1,

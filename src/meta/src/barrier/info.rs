@@ -1161,7 +1161,7 @@ impl InflightDatabaseInfo {
                             !info
                                 .stream_job_fragments
                                 .fragments
-                                .contains_key(fragment_id)
+                                .contains_key(&**fragment_id)
                         })
                         .unwrap_or(true)
                     })

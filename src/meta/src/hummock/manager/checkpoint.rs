@@ -195,16 +195,16 @@ impl HummockManager {
             let mut vector_files = vec![];
             for object_id in removed_object_ids {
                 match object_id {
-                    HummockObjectId::Sstable(sst_id) => sst_ids.push(sst_id.as_raw_id()),
+                    HummockObjectId::Sstable(sst_id) => sst_ids.push(sst_id),
                     HummockObjectId::VectorFile(vector_file_id) => {
                         vector_files.push(PbVectorIndexObject {
-                            id: vector_file_id.as_raw_id(),
+                            id: vector_file_id.as_raw(),
                             object_type: PbVectorIndexObjectType::VectorIndexObjectVector as _,
                         })
                     }
                     HummockObjectId::HnswGraphFile(graph_file_id) => {
                         vector_files.push(PbVectorIndexObject {
-                            id: graph_file_id.as_raw_id(),
+                            id: graph_file_id.as_raw(),
                             object_type: PbVectorIndexObjectType::VectorIndexObjectHnswGraph as _,
                         });
                     }

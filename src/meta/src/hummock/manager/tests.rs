@@ -1316,9 +1316,9 @@ async fn test_version_stats() {
 
     let stats_after_commit = hummock_manager.get_version_stats().await;
     assert_eq!(stats_after_commit.table_stats.len(), 3);
-    let table1_stats = stats_after_commit.table_stats.get(&1.into()).unwrap();
-    let table2_stats = stats_after_commit.table_stats.get(&2.into()).unwrap();
-    let table3_stats = stats_after_commit.table_stats.get(&3.into()).unwrap();
+    let table1_stats = stats_after_commit.table_stats.get(&1).unwrap();
+    let table2_stats = stats_after_commit.table_stats.get(&2).unwrap();
+    let table3_stats = stats_after_commit.table_stats.get(&3).unwrap();
     assert_eq!(table1_stats.total_key_count, 10);
     assert_eq!(table1_stats.total_value_size, 100);
     assert_eq!(table1_stats.total_key_size, 1000);
@@ -1369,9 +1369,9 @@ async fn test_version_stats() {
         .await
         .unwrap();
     let stats_after_compact = hummock_manager.get_version_stats().await;
-    let compact_table1_stats = stats_after_compact.table_stats.get(&1.into()).unwrap();
-    let compact_table2_stats = stats_after_compact.table_stats.get(&2.into()).unwrap();
-    let compact_table3_stats = stats_after_compact.table_stats.get(&3.into()).unwrap();
+    let compact_table1_stats = stats_after_compact.table_stats.get(&1).unwrap();
+    let compact_table2_stats = stats_after_compact.table_stats.get(&2).unwrap();
+    let compact_table3_stats = stats_after_compact.table_stats.get(&3).unwrap();
     assert_eq!(compact_table1_stats, table1_stats);
     assert_eq!(compact_table2_stats.total_key_count, 10);
     assert_eq!(compact_table2_stats.total_value_size, 100);

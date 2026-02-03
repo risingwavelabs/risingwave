@@ -50,7 +50,7 @@ impl SpaceReclaimCompactionPicker {
         // it means all the table exist , so we not need to pick this sst
         sst.table_ids
             .iter()
-            .filter(|id| self.all_table_ids.contains(id))
+            .filter(|id| self.all_table_ids.contains(&**id))
             .count()
     }
 }

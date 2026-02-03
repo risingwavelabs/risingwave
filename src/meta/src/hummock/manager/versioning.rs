@@ -489,7 +489,7 @@ mod tests {
         );
         assert_eq!(new_write_limits.len(), 1);
         for _ in 1..=10 {
-            add_level_to_l0(version.levels.get_mut(&1.into()).unwrap());
+            add_level_to_l0(version.levels.get_mut(&1).unwrap());
             let new_write_limits =
                 calc_new_write_limits(target_groups.clone(), origin_snapshot.clone(), &version);
             assert_eq!(
@@ -497,7 +497,7 @@ mod tests {
                 "write limit should not be triggered for group 1"
             );
         }
-        add_level_to_l0(version.levels.get_mut(&1.into()).unwrap());
+        add_level_to_l0(version.levels.get_mut(&1).unwrap());
         let new_write_limits =
             calc_new_write_limits(target_groups.clone(), origin_snapshot.clone(), &version);
         assert_ne!(
@@ -505,7 +505,7 @@ mod tests {
             "write limit should be triggered for group 1"
         );
         assert_eq!(
-            new_write_limits.get(&1.into()).as_ref().unwrap().reason,
+            new_write_limits.get(&1).as_ref().unwrap().reason,
             "WriteStop(l0_level_count: 11, threshold: 10) too many L0 sub levels"
         );
         assert_eq!(new_write_limits.len(), 2);
@@ -526,14 +526,14 @@ mod tests {
             "write limit should be triggered for group 1"
         );
         assert_eq!(
-            new_write_limits.get(&1.into()).as_ref().unwrap().reason,
+            new_write_limits.get(&1).as_ref().unwrap().reason,
             "WriteStop(l0_level_count: 11, threshold: 5) too many L0 sub levels"
         );
 
         set_sub_level_number_threshold_for_group_1(&mut target_groups, 100);
         let last_level = version
             .levels
-            .get_mut(&1.into())
+            .get_mut(&1)
             .unwrap()
             .l0
             .sub_levels
@@ -559,12 +559,7 @@ mod tests {
             }
             .into(),
         ]);
-        version
-            .levels
-            .get_mut(&1.into())
-            .unwrap()
-            .l0
-            .total_file_size += 200;
+        version.levels.get_mut(&1).unwrap().l0.total_file_size += 200;
         let new_write_limits =
             calc_new_write_limits(target_groups.clone(), origin_snapshot.clone(), &version);
         assert_eq!(
@@ -580,7 +575,7 @@ mod tests {
             "write limit should be triggered for group 1"
         );
         assert_eq!(
-            new_write_limits.get(&1.into()).as_ref().unwrap().reason,
+            new_write_limits.get(&1).as_ref().unwrap().reason,
             "WriteStop(l0_size: 200, threshold: 10) too large L0 size"
         );
 
@@ -600,7 +595,7 @@ mod tests {
             "write limit should be triggered for group 1"
         );
         assert_eq!(
-            new_write_limits.get(&1.into()).as_ref().unwrap().reason,
+            new_write_limits.get(&1).as_ref().unwrap().reason,
             "WriteStop(l0_sst_count: 2, threshold: 1) too many L0 sst files"
         );
 

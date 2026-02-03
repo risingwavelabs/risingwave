@@ -300,10 +300,8 @@ impl StreamManagerService for StreamServiceImpl {
                                     id: actor.actor_id,
                                     node: Some(fragment.nodes.clone()),
                                     dispatcher: dispatchers
-                                        .get_mut(&(fragment.fragment_id as _))
-                                        .and_then(|dispatchers| {
-                                            dispatchers.remove(&(actor.actor_id as _))
-                                        })
+                                        .get_mut(&fragment.fragment_id)
+                                        .and_then(|dispatchers| dispatchers.remove(&actor.actor_id))
                                         .unwrap_or_default(),
                                 })
                                 .collect_vec(),
@@ -576,7 +574,7 @@ impl StreamManagerService for StreamServiceImpl {
             let guard = self.env.shared_actor_infos().read_guard();
             guard
                 .iter_over_fragments()
-                .filter(|(frag_id, _)| all_fragment_ids.contains(frag_id))
+                .filter(|(frag_id, _)| all_fragment_ids.contains(*frag_id))
                 .flat_map(|(fragment_id, fragment_info)| {
                     fragment_info
                         .actors
@@ -596,11 +594,7 @@ impl StreamManagerService for StreamServiceImpl {
         let fragment_to_source: HashMap<_, _> = source_fragments
             .into_iter()
             .flat_map(|(source_id, fragment_ids)| {
-                let source_type = if is_shared_source
-                    .get(&(source_id as _))
-                    .copied()
-                    .unwrap_or(false)
-                {
+                let source_type = if is_shared_source.get(&source_id).copied().unwrap_or(false) {
                     FragmentType::SharedSource
                 } else {
                     FragmentType::NonSharedSource
@@ -633,12 +627,12 @@ impl StreamManagerService for StreamServiceImpl {
             .into_iter()
             .flat_map(|(actor_id, fragment_id)| {
                 let (source_id, fragment_type) = fragment_to_source
-                    .get(&(fragment_id as _))
+                    .get(&fragment_id)
                     .copied()
                     .unwrap_or_default();
 
                 actor_splits
-                    .remove(&(actor_id as _))
+                    .remove(&actor_id)
                     .unwrap_or_default()
                     .into_iter()
                     .map(move |split| list_actor_splits_response::ActorSplit {

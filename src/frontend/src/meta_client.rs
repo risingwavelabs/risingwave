@@ -112,7 +112,7 @@ pub trait FrontendMetaClient: Send + Sync {
     ) -> Result<HashMap<TableId, Table>>;
 
     /// Returns vector of (`worker_id`, `min_pinned_version_id`)
-    async fn list_hummock_pinned_versions(&self) -> Result<Vec<(WorkerId, u64)>>;
+    async fn list_hummock_pinned_versions(&self) -> Result<Vec<(WorkerId, HummockVersionId)>>;
 
     async fn get_hummock_current_version(&self) -> Result<HummockVersion>;
 
@@ -327,7 +327,7 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
         Ok(tables)
     }
 
-    async fn list_hummock_pinned_versions(&self) -> Result<Vec<(WorkerId, u64)>> {
+    async fn list_hummock_pinned_versions(&self) -> Result<Vec<(WorkerId, HummockVersionId)>> {
         let pinned_versions = self
             .0
             .risectl_get_pinned_versions_summary()
@@ -337,7 +337,7 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
             .pinned_versions;
         let ret = pinned_versions
             .into_iter()
-            .map(|v| (v.context_id, v.min_pinned_id.as_raw_id()))
+            .map(|v| (v.context_id, v.min_pinned_id))
             .collect();
         Ok(ret)
     }

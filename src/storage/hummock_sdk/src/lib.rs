@@ -161,7 +161,7 @@ pub fn get_stale_object_ids(
     stale_objects
         .id
         .iter()
-        .map(|sst_id| HummockObjectId::Sstable((*sst_id).into()))
+        .map(|sst_id| HummockObjectId::Sstable(*sst_id))
         .chain(stale_objects.vector_files.iter().map(
             |file| match file.get_object_type().unwrap() {
                 PbVectorIndexObjectType::VectorIndexObjectUnspecified => {

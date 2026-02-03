@@ -627,9 +627,9 @@ pub fn build_level_l0_metrics_label(
     overlapping: bool,
 ) -> String {
     if overlapping {
-        format!("cg{}_l0_sub_overlapping", compaction_group_id.as_raw_id())
+        format!("cg{}_l0_sub_overlapping", compaction_group_id)
     } else {
-        format!("cg{}_l0_sub_non_overlap", compaction_group_id.as_raw_id())
+        format!("cg{}_l0_sub_non_overlap", compaction_group_id)
     }
 }
 
@@ -640,9 +640,7 @@ pub fn build_compact_task_stat_metrics_label(
 ) -> String {
     format!(
         "cg{} L{} -> L{}",
-        compaction_group_id.as_raw_id(),
-        select_level,
-        target_level
+        compaction_group_id, select_level, target_level
     )
 }
 
@@ -652,11 +650,11 @@ pub fn build_compact_task_l0_stat_metrics_label(
     partition: bool,
 ) -> String {
     if partition {
-        format!("cg{}_l0_sub_partition", compaction_group_id.as_raw_id())
+        format!("cg{}_l0_sub_partition", compaction_group_id)
     } else if overlapping {
-        format!("cg{}_l0_sub_overlapping", compaction_group_id.as_raw_id())
+        format!("cg{}_l0_sub_overlapping", compaction_group_id)
     } else {
-        format!("cg{}_l0_sub_non_overlap", compaction_group_id.as_raw_id())
+        format!("cg{}_l0_sub_non_overlap", compaction_group_id)
     }
 }
 
