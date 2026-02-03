@@ -16,6 +16,7 @@
 
 use std::cmp::max;
 use std::collections::HashMap;
+use std::fmt::Write as FmtWrite;
 use std::future::Future;
 use std::io::Write;
 use std::path::PathBuf;
@@ -212,6 +213,60 @@ metrics_level = "Disabled"
                 "create view if not exists mview_parallelism as select m.name, tf.parallelism from rw_materialized_views m, rw_table_fragments tf where m.id = tf.table_id;".into(),
             ]
                 .into(),
+            ..Default::default()
+        }
+    }
+
+    pub fn for_system_params<K, V, I>(params: I) -> Self
+    where
+        I: IntoIterator<Item = (K, V)>,
+        K: AsRef<str>,
+        V: AsRef<str>,
+    {
+        let config_path = {
+            let mut file =
+                tempfile::NamedTempFile::new().expect("failed to create temp config file");
+
+            let mut params_map: HashMap<String, String> = params
+                .into_iter()
+                .map(|(k, v)| (k.as_ref().to_owned(), v.as_ref().to_owned()))
+                .collect();
+            for (k, v) in [
+                ("state_store", "\"hummock+memory-isolated-for-test\""),
+                ("data_directory", "\"hummock_001\""),
+                ("backup_storage_url", "\"memory-isolated-for-test\""),
+                ("backup_storage_directory", "\"backup\""),
+                ("use_new_object_prefix_strategy", "false"),
+            ] {
+                params_map
+                    .entry(k.to_owned())
+                    .or_insert_with(|| v.to_owned());
+            }
+
+            let mut system_kvs = String::new();
+            for (k, v) in params_map.iter().sorted_by(|(a, _), (b, _)| a.cmp(b)) {
+                writeln!(&mut system_kvs, "{k} = {v}").expect("failed to build system params");
+            }
+            let config_data = format!(
+                r#"[system]
+{system_kvs}[server]
+telemetry_enabled = false
+metrics_level = "Disabled"
+"#
+            );
+
+            file.write_all(config_data.as_bytes())
+                .expect("failed to write config file");
+            file.into_temp_path()
+        };
+
+        Configuration {
+            config_path: ConfigPath::Temp(config_path.into()),
+            frontend_nodes: 1,
+            compute_nodes: 3,
+            meta_nodes: 1,
+            compactor_nodes: 1,
+            compute_node_cores: 2,
             ..Default::default()
         }
     }
