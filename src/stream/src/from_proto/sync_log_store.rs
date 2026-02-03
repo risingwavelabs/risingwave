@@ -42,7 +42,11 @@ impl ExecutorBuilder for SyncLogStoreExecutorBuilder {
             let actor_id = actor_context.id;
             let fragment_id = params.fragment_id;
             let name = "sync_log_store";
-            let target = "unaligned_hash_join";
+            let target = if node.metrics_target.is_empty() {
+                "unaligned_hash_join"
+            } else {
+                node.metrics_target.as_str()
+            };
             SyncedKvLogStoreMetrics::new(streaming_metrics, actor_id, fragment_id, name, target)
         };
 
