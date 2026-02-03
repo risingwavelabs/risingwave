@@ -640,7 +640,7 @@ impl HummockManager {
             )));
         }
 
-        fn check_table_ids_valid(cg_id_to_table_ids: &BTreeMap<u64, Vec<TableId>>) {
+        fn check_table_ids_valid(cg_id_to_table_ids: &BTreeMap<CompactionGroupId, Vec<TableId>>) {
             // 1. table_ids in different cg are sorted.
             {
                 cg_id_to_table_ids
@@ -675,9 +675,9 @@ impl HummockManager {
         // The new compaction group id is always generate on the right side
         // Hence, we return the first compaction group id as the result
         // split 1
-        let mut cg_id_to_table_ids: BTreeMap<u64, Vec<TableId>> = BTreeMap::new();
+        let mut cg_id_to_table_ids: BTreeMap<CompactionGroupId, Vec<TableId>> = BTreeMap::new();
         let table_id_to_split = *table_ids.first().unwrap();
-        let mut target_compaction_group_id = 0;
+        let mut target_compaction_group_id: CompactionGroupId = 0.into();
         let result_vec = self
             .split_compaction_group_impl(
                 parent_group_id,
@@ -768,7 +768,7 @@ impl HummockManager {
         table_write_throughput_statistic_manager: &TableWriteThroughputStatisticManager,
         table_id: TableId,
         _table_size: &u64,
-        parent_group_id: u64,
+        parent_group_id: CompactionGroupId,
     ) {
         let mut table_throughput = table_write_throughput_statistic_manager
             .get_table_throughput_descending(
@@ -1016,10 +1016,10 @@ impl GroupMergeValidator {
         versioning: &MonitoredRwLock<Versioning>,
     ) -> Result<()> {
         // TODO: remove this check after refactor group id
-        if (group.group_id == StaticCompactionGroupId::StateDefault as u64
-            && next_group.group_id == StaticCompactionGroupId::MaterializedView as u64)
-            || (group.group_id == StaticCompactionGroupId::MaterializedView as u64
-                && next_group.group_id == StaticCompactionGroupId::StateDefault as u64)
+        if (group.group_id == StaticCompactionGroupId::StateDefault
+            && next_group.group_id == StaticCompactionGroupId::MaterializedView)
+            || (group.group_id == StaticCompactionGroupId::MaterializedView
+                && next_group.group_id == StaticCompactionGroupId::StateDefault)
         {
             return Err(Error::CompactionGroup(format!(
                 "group-{} and group-{} are both StaticCompactionGroupId",
@@ -1070,8 +1070,8 @@ impl GroupMergeValidator {
                 .as_ref();
 
             tracing::warn!(
-                group_id = group.group_id,
-                next_group_id = next_group.group_id,
+                group_id = group.group_id.as_raw_id(),
+                next_group_id = next_group.group_id.as_raw_id(),
                 left_config = ?left_config,
                 right_config = ?right_config,
                 "compaction config mismatch detected while merging compaction groups"

@@ -412,7 +412,8 @@ declare_id_types!(
     HummockSstableId,
     HummockVectorFileId,
     HummockHnswGraphFileId,
-    HummockVersionId
+    HummockVersionId,
+    CompactionGroupId
 );
 
 macro_rules! impl_as {

@@ -299,7 +299,7 @@ mod tests {
             },
         );
         raw.compaction_groups.push(CompactionGroup {
-            id: 3000,
+            id: 3000.into(),
             ..Default::default()
         });
         raw.encode_to(&mut buf).unwrap();

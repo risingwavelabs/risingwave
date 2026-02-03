@@ -43,8 +43,8 @@ async fn read(reader: &SysCatalogReaderImpl) -> Result<Vec<RwHummockCompactionGr
     let mut rows = info
         .into_iter()
         .map(|i| RwHummockCompactionGroupConfig {
-            id: i.id as _,
-            parent_id: Some(i.parent_id as _),
+            id: i.id.as_raw_id() as _,
+            parent_id: Some(i.parent_id.as_raw_id() as _),
             member_tables: Some(json!(i.member_table_ids).into()),
             compaction_config: Some(json!(i.compaction_config).into()),
             active_write_limit: write_limits.remove(&i.id).map(|w| json!(w).into()),
@@ -56,7 +56,7 @@ async fn read(reader: &SysCatalogReaderImpl) -> Result<Vec<RwHummockCompactionGr
         write_limits
             .into_iter()
             .map(|(cg, w)| RwHummockCompactionGroupConfig {
-                id: cg as _,
+                id: cg.as_raw_id() as _,
                 parent_id: None,
                 member_tables: None,
                 compaction_config: None,

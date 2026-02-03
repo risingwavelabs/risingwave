@@ -50,7 +50,7 @@ impl From<sea_orm::DbErr> for MetadataModelError {
 impl Transactional<Transaction> for CompactionGroup {
     async fn upsert_in_transaction(&self, trx: &mut Transaction) -> MetadataModelResult<()> {
         let m = compaction_config::ActiveModel {
-            compaction_group_id: Set(self.group_id.try_into().unwrap()),
+            compaction_group_id: Set(self.group_id),
             config: Set(CompactionConfig::from(&(*self.compaction_config))),
         };
         compaction_config::Entity::insert(m)
@@ -78,7 +78,7 @@ impl Transactional<Transaction> for CompactionGroup {
 impl Transactional<Transaction> for CompactStatus {
     async fn upsert_in_transaction(&self, trx: &mut Transaction) -> MetadataModelResult<()> {
         let m = compaction_status::ActiveModel {
-            compaction_group_id: Set(self.compaction_group_id.try_into().unwrap()),
+            compaction_group_id: Set(self.compaction_group_id),
             status: Set(LevelHandlers::from(
                 self.level_handlers.iter().map_into().collect_vec(),
             )),
@@ -255,17 +255,14 @@ impl Transactional<Transaction> for HummockVersionDelta {
 
 impl From<compaction_config::Model> for CompactionGroup {
     fn from(value: compaction_config::Model) -> Self {
-        Self::new(
-            value.compaction_group_id.try_into().unwrap(),
-            value.config.to_protobuf(),
-        )
+        Self::new(value.compaction_group_id, value.config.to_protobuf())
     }
 }
 
 impl From<compaction_status::Model> for CompactStatus {
     fn from(value: compaction_status::Model) -> Self {
         Self {
-            compaction_group_id: value.compaction_group_id.try_into().unwrap(),
+            compaction_group_id: value.compaction_group_id,
             level_handlers: value.status.to_protobuf().iter().map_into().collect(),
         }
     }

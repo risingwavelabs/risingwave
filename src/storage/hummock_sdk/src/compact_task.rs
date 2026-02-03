@@ -24,12 +24,12 @@ use risingwave_pb::hummock::{
     PbValidationTask,
 };
 
-use crate::HummockSstableObjectId;
 use crate::compaction_group::StateTableId;
 use crate::key_range::KeyRange;
 use crate::level::InputLevel;
 use crate::sstable_info::SstableInfo;
 use crate::table_watermark::{TableWatermarks, WatermarkSerdeType};
+use crate::{CompactionGroupId, HummockSstableObjectId};
 
 #[derive(Clone, PartialEq, Default, Debug)]
 pub struct CompactTask {
@@ -49,7 +49,7 @@ pub struct CompactTask {
     pub base_level: u32,
     pub task_status: PbTaskStatus,
     /// compaction group the task belongs to.
-    pub compaction_group_id: u64,
+    pub compaction_group_id: CompactionGroupId,
     /// compaction group id when the compaction task is created
     pub compaction_group_version_id: u64,
     /// `existing_table_ids` for compaction drop key

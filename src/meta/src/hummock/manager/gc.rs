@@ -555,8 +555,8 @@ async fn collect_min_uncommitted_object_id(
         .into_iter()
         .map(|resp| resp.min_uncommitted_object_id)
         .min()
-        .unwrap_or(u64::MAX);
-    Ok(min_watermark.into())
+        .unwrap_or(u64::MAX.into());
+    Ok(min_watermark)
 }
 
 pub struct FullGcState {
@@ -601,7 +601,7 @@ mod tests {
             hummock_manager.clone(),
             worker_id as _,
         ));
-        let compaction_group_id = StaticCompactionGroupId::StateDefault.into();
+        let compaction_group_id = StaticCompactionGroupId::StateDefault;
         hummock_manager
             .start_full_gc(
                 Duration::from_secs(hummock_manager.env.opts.min_sst_retention_time_sec + 1),

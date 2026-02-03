@@ -433,7 +433,7 @@ pub fn compaction_selector_context<'a>(
 pub async fn get_compaction_group_id_by_table_id(
     hummock_manager_ref: HummockManagerRef,
     table_id: impl Into<TableId>,
-) -> u64 {
+) -> CompactionGroupId {
     let version = hummock_manager_ref.get_current_version().await;
     let mapping = version.state_table_info.build_table_compaction_group_id();
     *mapping.get(&table_id.into()).unwrap()

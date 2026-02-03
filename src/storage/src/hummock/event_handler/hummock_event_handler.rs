@@ -997,7 +997,7 @@ mod tests {
                     TEST_TABLE_ID,
                     StateTableInfo {
                         committed_epoch: epoch0,
-                        compaction_group_id: StaticCompactionGroupId::StateDefault as _,
+                        compaction_group_id: StaticCompactionGroupId::StateDefault,
                     },
                 )]),
                 ..Default::default()
@@ -1151,14 +1151,14 @@ mod tests {
                         table_id1,
                         StateTableInfo {
                             committed_epoch: epoch0,
-                            compaction_group_id: StaticCompactionGroupId::StateDefault as _,
+                            compaction_group_id: StaticCompactionGroupId::StateDefault,
                         },
                     ),
                     (
                         table_id2,
                         StateTableInfo {
                             committed_epoch: epoch0,
-                            compaction_group_id: StaticCompactionGroupId::StateDefault as _,
+                            compaction_group_id: StaticCompactionGroupId::StateDefault,
                         },
                     ),
                 ]),

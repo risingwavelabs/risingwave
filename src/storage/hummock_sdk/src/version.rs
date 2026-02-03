@@ -300,9 +300,7 @@ where
             levels: pb_version
                 .levels
                 .iter()
-                .map(|(group_id, levels)| {
-                    (*group_id as CompactionGroupId, LevelsCommon::from(levels))
-                })
+                .map(|(group_id, levels)| ((*group_id), LevelsCommon::from(levels)))
                 .collect(),
             max_committed_epoch: pb_version.max_committed_epoch,
             table_watermarks: pb_version
@@ -342,7 +340,7 @@ where
             levels: version
                 .levels
                 .iter()
-                .map(|(group_id, levels)| (*group_id as _, levels.into()))
+                .map(|(group_id, levels)| (*group_id, levels.into()))
                 .collect(),
             max_committed_epoch: version.max_committed_epoch,
             table_watermarks: version
@@ -377,7 +375,7 @@ where
             levels: version
                 .levels
                 .into_iter()
-                .map(|(group_id, levels)| (group_id as _, levels.into()))
+                .map(|(group_id, levels)| (group_id, levels.into()))
                 .collect(),
             max_committed_epoch: version.max_committed_epoch,
             table_watermarks: version
@@ -671,12 +669,7 @@ where
             group_deltas: pb_version_delta
                 .group_deltas
                 .iter()
-                .map(|(group_id, deltas)| {
-                    (
-                        *group_id as CompactionGroupId,
-                        GroupDeltasCommon::from(deltas),
-                    )
-                })
+                .map(|(group_id, deltas)| ((*group_id), GroupDeltasCommon::from(deltas)))
                 .collect(),
             max_committed_epoch: pb_version_delta.max_committed_epoch,
             trivial_move: pb_version_delta.trivial_move,
@@ -703,12 +696,12 @@ where
             state_table_info_delta: pb_version_delta
                 .state_table_info_delta
                 .iter()
-                .map(|(table_id, delta)| (*table_id, *delta))
+                .map(|(table_id, delta)| ((*table_id), *delta))
                 .collect(),
             vector_index_delta: pb_version_delta
                 .vector_index_delta
                 .iter()
-                .map(|(table_id, delta)| (*table_id, delta.clone().into()))
+                .map(|(table_id, delta)| ((*table_id), delta.clone().into()))
                 .collect(),
         }
     }
@@ -726,7 +719,7 @@ where
             group_deltas: version_delta
                 .group_deltas
                 .iter()
-                .map(|(group_id, deltas)| (*group_id as _, deltas.into()))
+                .map(|(group_id, deltas)| (*group_id, deltas.into()))
                 .collect(),
             max_committed_epoch: version_delta.max_committed_epoch,
             trivial_move: version_delta.trivial_move,
@@ -763,7 +756,7 @@ where
             group_deltas: version_delta
                 .group_deltas
                 .into_iter()
-                .map(|(group_id, deltas)| (group_id as _, deltas.into()))
+                .map(|(group_id, deltas)| (group_id, deltas.into()))
                 .collect(),
             max_committed_epoch: version_delta.max_committed_epoch,
             trivial_move: version_delta.trivial_move,
@@ -778,7 +771,7 @@ where
                 .into_iter()
                 .map(|(table_id, log_delta)| (table_id, log_delta.into()))
                 .collect(),
-            state_table_info_delta: version_delta.state_table_info_delta.clone(),
+            state_table_info_delta: version_delta.state_table_info_delta,
             vector_index_delta: version_delta
                 .vector_index_delta
                 .into_iter()
@@ -800,7 +793,7 @@ where
             group_deltas: pb_version_delta
                 .group_deltas
                 .into_iter()
-                .map(|(group_id, deltas)| (group_id as CompactionGroupId, deltas.into()))
+                .map(|(group_id, deltas)| (group_id, deltas.into()))
                 .collect(),
             max_committed_epoch: pb_version_delta.max_committed_epoch,
             trivial_move: pb_version_delta.trivial_move,
@@ -826,7 +819,7 @@ where
             state_table_info_delta: pb_version_delta
                 .state_table_info_delta
                 .iter()
-                .map(|(table_id, delta)| (*table_id, *delta))
+                .map(|(table_id, delta)| ((*table_id), *delta))
                 .collect(),
             vector_index_delta: pb_version_delta
                 .vector_index_delta

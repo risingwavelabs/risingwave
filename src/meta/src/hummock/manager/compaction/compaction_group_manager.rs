@@ -216,7 +216,7 @@ impl HummockManager {
         for (table_id, raw_group_id) in pairs {
             let table_id = (*table_id).into();
             let mut group_id = *raw_group_id;
-            if group_id == StaticCompactionGroupId::NewCompactionGroup as u64 {
+            if group_id == StaticCompactionGroupId::NewCompactionGroup {
                 let mut is_group_init = false;
                 group_id = *new_compaction_group_id
                     .get_or_try_init(|| async {
@@ -327,7 +327,8 @@ impl HummockManager {
         let groups_to_remove = modified_groups
             .into_iter()
             .filter_map(|(group_id, member_count)| {
-                if member_count == 0 && group_id > StaticCompactionGroupId::End as CompactionGroupId
+                if member_count == 0
+                    && group_id > CompactionGroupId::from(StaticCompactionGroupId::End)
                 {
                     return Some((
                         group_id,
@@ -714,6 +715,7 @@ mod tests {
 
     use itertools::Itertools;
     use risingwave_common::id::JobId;
+    use risingwave_hummock_sdk::CompactionGroupId;
     use risingwave_pb::hummock::rise_ctl_update_compaction_config_request::mutable_config::MutableConfig;
 
     use crate::controller::SqlMetaStore;
@@ -732,11 +734,12 @@ mod tests {
         async fn update_compaction_config(
             meta: &SqlMetaStore,
             inner: &mut CompactionGroupManager,
-            cg_ids: &[u64],
+            cg_ids: &[impl Into<CompactionGroupId> + Copy],
             config_to_update: &[MutableConfig],
         ) -> Result<()> {
+            let cg_ids = cg_ids.iter().copied().map_into().collect_vec();
             let mut compaction_groups_txn = inner.start_compaction_groups_txn();
-            compaction_groups_txn.update_compaction_config(cg_ids, config_to_update)?;
+            compaction_groups_txn.update_compaction_config(&cg_ids, config_to_update)?;
             commit_multi_var!(meta, compaction_groups_txn)
         }
 
@@ -747,7 +750,10 @@ mod tests {
         ) {
             let default_config = inner.default_compaction_config();
             let mut compaction_groups_txn = inner.start_compaction_groups_txn();
-            if compaction_groups_txn.try_create_compaction_groups(cg_ids, default_config) {
+            if compaction_groups_txn.try_create_compaction_groups(
+                &cg_ids.iter().copied().map_into().collect_vec(),
+                default_config,
+            ) {
                 commit_multi_var!(meta, compaction_groups_txn).unwrap();
             }
         }
@@ -771,7 +777,7 @@ mod tests {
         assert_eq!(inner.compaction_groups.len(), 4);
         assert_eq!(
             inner
-                .try_get_compaction_group_config(100)
+                .try_get_compaction_group_config(100.into())
                 .unwrap()
                 .compaction_config
                 .max_sub_compaction,
@@ -779,7 +785,7 @@ mod tests {
         );
         assert_eq!(
             inner
-                .try_get_compaction_group_config(200)
+                .try_get_compaction_group_config(200.into())
                 .unwrap()
                 .compaction_config
                 .max_sub_compaction,

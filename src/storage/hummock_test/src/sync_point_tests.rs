@@ -187,7 +187,7 @@ pub async fn compact_once(
     // 2. get compact task
     let mut compact_task = hummock_manager_ref
         .manual_get_compact_task(
-            StaticCompactionGroupId::StateDefault.into(),
+            StaticCompactionGroupId::StateDefault,
             manual_compcation_option,
         )
         .await
@@ -449,7 +449,7 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
     // 4. get the latest version and check
     let version = hummock_manager_ref.get_current_version().await;
     let base_level = &version
-        .get_compaction_group_levels(StaticCompactionGroupId::StateDefault.into())
+        .get_compaction_group_levels(StaticCompactionGroupId::StateDefault)
         .levels[4];
     assert_eq!(base_level.table_infos.len(), 3);
     assert!(base_level.table_infos[0].key_range.right_exclusive);

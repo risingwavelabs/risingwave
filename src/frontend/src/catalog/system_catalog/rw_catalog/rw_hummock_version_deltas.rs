@@ -44,7 +44,7 @@ async fn read(reader: &SysCatalogReaderImpl) -> Result<Vec<RwHummockVersionDelta
             group_deltas: json!(
                 d.group_deltas
                     .into_iter()
-                    .map(|(group_id, deltas)| (group_id, PbGroupDeltas::from(deltas)))
+                    .map(|(group_id, deltas)| (group_id.as_raw_id(), PbGroupDeltas::from(deltas)))
                     .collect::<HashMap<u64, PbGroupDeltas>>()
             )
             .into(),

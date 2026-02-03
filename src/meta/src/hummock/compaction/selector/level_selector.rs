@@ -596,7 +596,7 @@ pub mod tests {
             .compaction_mode(CompactionMode::Range as i32)
             .level0_sub_level_compact_level_count(3)
             .build();
-        let group_config = CompactionGroup::new(1, config.clone());
+        let group_config = CompactionGroup::new(1.into(), config.clone());
         let levels = vec![
             generate_level(1, vec![]),
             generate_level(2, generate_tables(0..5, 0..1000, 3, 10)),
@@ -637,7 +637,7 @@ pub mod tests {
             .target_file_size_base(20)
             .compaction_filter_mask(compaction_filter_flag.into())
             .build();
-        let group_config = CompactionGroup::new(1, config.clone());
+        let group_config = CompactionGroup::new(1.into(), config.clone());
         let mut selector = DynamicLevelSelector::default();
 
         levels.l0.sub_levels.clear();

@@ -345,7 +345,7 @@ impl HummockSnapshotManager {
                     table_id,
                     StateTableInfoDelta {
                         committed_epoch: INVALID_EPOCH,
-                        compaction_group_id: 0,
+                        compaction_group_id: 0.into(),
                     },
                 )]),
                 &HashSet::new(),

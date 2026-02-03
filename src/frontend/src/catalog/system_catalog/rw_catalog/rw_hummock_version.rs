@@ -20,7 +20,9 @@ use risingwave_common::id::TableId;
 use risingwave_common::types::{Fields, JsonbVal};
 use risingwave_frontend_macro::system_catalog;
 use risingwave_hummock_sdk::version::HummockVersion;
-use risingwave_pb::id::{HummockSstableId, HummockSstableObjectId, HummockVersionId};
+use risingwave_pb::id::{
+    CompactionGroupId, HummockSstableId, HummockSstableObjectId, HummockVersionId,
+};
 use serde_json::json;
 
 use crate::catalog::system_catalog::SysCatalogReaderImpl;
@@ -38,7 +40,7 @@ struct RwHummockSstable {
     #[primary_key]
     sstable_id: HummockSstableId,
     object_id: HummockSstableObjectId,
-    compaction_group_id: i64,
+    compaction_group_id: CompactionGroupId,
     level_id: i32,
     sub_level_id: Option<i64>,
     level_type: i32,
@@ -116,7 +118,7 @@ fn version_to_sstable_rows(version: HummockVersion) -> Vec<RwHummockSstable> {
                 sstables.push(RwHummockSstable {
                     sstable_id: sst.sst_id,
                     object_id: sst.object_id,
-                    compaction_group_id: cg.group_id as _,
+                    compaction_group_id: cg.group_id,
                     level_id: level.level_idx as _,
                     sub_level_id: (level.level_idx == 0).then_some(level.sub_level_id as _),
                     level_type: level.level_type as _,

@@ -308,11 +308,16 @@ for_all_wrapped_id_fields! (
         BranchedObject {
             object_id: HummockSstableObjectId,
             sst_id: HummockSstableId,
+            compaction_group_id: CompactionGroupId,
         }
         CancelCompactTask {
             context_id: WorkerId,
         }
+        CompactStatus {
+            compaction_group_id: CompactionGroupId,
+        }
         CompactTask {
+            compaction_group_id: CompactionGroupId,
             existing_table_ids: TableId,
             table_options: TableId,
             table_vnode_partition: TableId,
@@ -322,8 +327,22 @@ for_all_wrapped_id_fields! (
         CompactTaskAssignment {
             context_id: WorkerId,
         }
+        CompactTaskProgress {
+            compaction_group_id: CompactionGroupId,
+        }
+        CompactionGroup {
+            id: CompactionGroupId,
+        }
         CompactionGroupInfo {
+            id: CompactionGroupId,
+            parent_id: CompactionGroupId,
             member_table_ids: TableId,
+        }
+        GetCompactionScoreRequest {
+            compaction_group_id: CompactionGroupId,
+        }
+        GetCompactionScoreResponse {
+            compaction_group_id: CompactionGroupId,
         }
         GetNewObjectIdsResponse {
             start_id: HummockRawObjectId,
@@ -332,8 +351,15 @@ for_all_wrapped_id_fields! (
         GetVersionByEpochRequest {
             table_id: TableId,
         }
+
         GroupConstruct {
             new_sst_start_id: HummockSstableId,
+            parent_group_id: CompactionGroupId,
+            group_id: CompactionGroupId,
+        }
+        GroupMerge {
+            left_group_id: CompactionGroupId,
+            right_group_id: CompactionGroupId,
         }
         HnswGraphFileInfo {
             object_id: HummockHnswGraphFileId,
@@ -351,6 +377,11 @@ for_all_wrapped_id_fields! (
             table_change_logs: TableId,
             state_table_info: TableId,
             vector_indexes: TableId,
+            levels: CompactionGroupId,
+        }
+        HummockVersion.Levels {
+            group_id: CompactionGroupId,
+            parent_group_id: CompactionGroupId,
         }
         HummockVersionDelta {
             id: HummockVersionId,
@@ -360,6 +391,7 @@ for_all_wrapped_id_fields! (
             change_log_delta: TableId,
             state_table_info_delta: TableId,
             vector_index_delta: TableId,
+            group_deltas: CompactionGroupId,
         }
         HummockVersionStats {
             hummock_version_id: HummockVersionId,
@@ -368,8 +400,15 @@ for_all_wrapped_id_fields! (
         IntraLevelDelta {
             removed_table_ids: HummockSstableId,
         }
+        ListActiveWriteLimitResponse {
+            write_limits: CompactionGroupId,
+        }
         ListVersionDeltasRequest {
             start_id: HummockVersionId,
+        }
+        MergeCompactionGroupRequest {
+            left_group_id: CompactionGroupId,
+            right_group_id: CompactionGroupId,
         }
         PinVersionRequest {
             context_id: WorkerId,
@@ -377,16 +416,32 @@ for_all_wrapped_id_fields! (
         PinnedVersionsSummary {
             workers: WorkerId,
         }
+        ReplayVersionDeltaResponse {
+            modified_compaction_groups: CompactionGroupId,
+        }
         ReportCompactionTaskRequest.ReportTask {
             table_stats_change: TableId,
         }
+        RiseCtlUpdateCompactionConfigRequest {
+            compaction_group_ids: CompactionGroupId,
+        }
         SplitCompactionGroupRequest {
+            group_id: CompactionGroupId,
             table_ids: TableId,
+        }
+        SplitCompactionGroupResponse {
+            new_group_id: CompactionGroupId,
         }
         SstableInfo {
             object_id: HummockSstableObjectId,
             sst_id: HummockSstableId,
             table_ids: TableId,
+        }
+        StateTableInfo {
+            compaction_group_id: CompactionGroupId,
+        }
+        StateTableInfoDelta {
+            compaction_group_id: CompactionGroupId,
         }
         SubscribeCompactionEventRequest.Register {
             context_id: WorkerId,
@@ -396,8 +451,10 @@ for_all_wrapped_id_fields! (
         }
         TriggerCompactionDeterministicRequest {
             version_id: HummockVersionId,
+            compaction_groups: CompactionGroupId,
         }
         TriggerManualCompactionRequest {
+            compaction_group_id: CompactionGroupId,
             table_id: JobId,
             sst_ids: HummockSstableId,
         }
@@ -419,6 +476,9 @@ for_all_wrapped_id_fields! (
         }
         VectorFileInfo {
             object_id: HummockVectorFileId,
+        }
+        WriteLimits {
+            write_limits: CompactionGroupId,
         }
         WriteLimits.WriteLimit {
             table_ids: TableId,
@@ -810,6 +870,9 @@ for_all_wrapped_id_fields! (
         }
         BarrierCompleteResponse.LocalSstableInfo {
             table_stats_map: TableId,
+        }
+        GetMinUncommittedObjectIdResponse {
+            min_uncommitted_object_id: HummockRawObjectId,
         }
         InjectBarrierRequest {
             table_ids_to_sync: TableId,

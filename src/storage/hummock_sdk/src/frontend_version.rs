@@ -218,11 +218,7 @@ impl FrontendHummockVersionDelta {
                     )
                 })
                 .collect(),
-            state_table_info_delta: self
-                .state_table_info_delta
-                .iter()
-                .map(|(table_id, delta)| (*table_id, *delta))
-                .collect(),
+            state_table_info_delta: self.state_table_info_delta.clone(),
             vector_index_delta: Default::default(),
         }
     }
@@ -232,7 +228,11 @@ impl FrontendHummockVersionDelta {
             prev_id: delta.prev_id,
             id: delta.id,
             removed_table_id: delta.removed_table_ids.into_iter().collect(),
-            state_table_info_delta: delta.state_table_info_delta.clone(),
+            state_table_info_delta: delta
+                .state_table_info_delta
+                .iter()
+                .map(|(table_id, delta)| ((*table_id), *delta))
+                .collect(),
             change_log_delta: delta
                 .change_log_delta
                 .iter()

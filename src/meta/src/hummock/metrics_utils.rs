@@ -615,40 +615,48 @@ pub fn trigger_split_stat(metrics: &MetaMetrics, version: &HummockVersion) {
     }
 }
 
-pub fn build_level_metrics_label(compaction_group_id: u64, level_idx: usize) -> String {
-    format!("cg{}_L{}", compaction_group_id, level_idx)
+pub fn build_level_metrics_label(
+    compaction_group_id: CompactionGroupId,
+    level_idx: usize,
+) -> String {
+    format!("cg{}_L{}", compaction_group_id.as_raw_id(), level_idx)
 }
 
-pub fn build_level_l0_metrics_label(compaction_group_id: u64, overlapping: bool) -> String {
+pub fn build_level_l0_metrics_label(
+    compaction_group_id: CompactionGroupId,
+    overlapping: bool,
+) -> String {
     if overlapping {
-        format!("cg{}_l0_sub_overlapping", compaction_group_id)
+        format!("cg{}_l0_sub_overlapping", compaction_group_id.as_raw_id())
     } else {
-        format!("cg{}_l0_sub_non_overlap", compaction_group_id)
+        format!("cg{}_l0_sub_non_overlap", compaction_group_id.as_raw_id())
     }
 }
 
 pub fn build_compact_task_stat_metrics_label(
-    compaction_group_id: u64,
+    compaction_group_id: CompactionGroupId,
     select_level: usize,
     target_level: usize,
 ) -> String {
     format!(
         "cg{} L{} -> L{}",
-        compaction_group_id, select_level, target_level
+        compaction_group_id.as_raw_id(),
+        select_level,
+        target_level
     )
 }
 
 pub fn build_compact_task_l0_stat_metrics_label(
-    compaction_group_id: u64,
+    compaction_group_id: CompactionGroupId,
     overlapping: bool,
     partition: bool,
 ) -> String {
     if partition {
-        format!("cg{}_l0_sub_partition", compaction_group_id)
+        format!("cg{}_l0_sub_partition", compaction_group_id.as_raw_id())
     } else if overlapping {
-        format!("cg{}_l0_sub_overlapping", compaction_group_id)
+        format!("cg{}_l0_sub_overlapping", compaction_group_id.as_raw_id())
     } else {
-        format!("cg{}_l0_sub_non_overlap", compaction_group_id)
+        format!("cg{}_l0_sub_non_overlap", compaction_group_id.as_raw_id())
     }
 }
 

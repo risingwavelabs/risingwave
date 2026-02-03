@@ -63,14 +63,11 @@ impl StreamService for StreamServiceImpl {
     ) -> Result<Response<GetMinUncommittedObjectIdResponse>, Status> {
         let min_uncommitted_object_id =
             if let Some(hummock) = self.mgr.env.state_store().as_hummock() {
-                hummock
-                    .min_uncommitted_object_id()
-                    .await
-                    .map(|object_id| object_id.as_raw_id())
-                    .unwrap_or(u64::MAX)
+                hummock.min_uncommitted_object_id().await
             } else {
-                u64::MAX
-            };
+                None
+            }
+            .unwrap_or_else(|| u64::MAX.into());
         Ok(Response::new(GetMinUncommittedObjectIdResponse {
             min_uncommitted_object_id,
         }))

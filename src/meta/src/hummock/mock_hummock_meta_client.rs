@@ -30,7 +30,8 @@ use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::vector_index::VectorIndexDelta;
 use risingwave_hummock_sdk::version::HummockVersion;
 use risingwave_hummock_sdk::{
-    HummockContextId, HummockEpoch, HummockVersionId, LocalSstableInfo, ObjectIdRange, SyncResult,
+    CompactionGroupId, HummockContextId, HummockEpoch, HummockVersionId, LocalSstableInfo,
+    ObjectIdRange, SyncResult,
 };
 use risingwave_pb::common::{HostAddress, WorkerType};
 use risingwave_pb::hummock::compact_task::{TaskStatus, TaskType};
@@ -95,7 +96,7 @@ impl MockHummockMetaClient {
     pub async fn get_compact_task(&self) -> Option<CompactTask> {
         self.hummock_manager
             .get_compact_task(
-                StaticCompactionGroupId::StateDefault.into(),
+                StaticCompactionGroupId::StateDefault,
                 &mut default_compaction_selector(),
             )
             .await
@@ -226,7 +227,7 @@ impl HummockMetaClient for MockHummockMetaClient {
 
     async fn trigger_manual_compaction(
         &self,
-        _compaction_group_id: u64,
+        _compaction_group_id: CompactionGroupId,
         _table_id: JobId,
         _level: u32,
         _sst_ids: Vec<HummockSstableId>,

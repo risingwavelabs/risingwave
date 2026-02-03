@@ -208,7 +208,7 @@ mod tests {
                             table_id,
                             StateTableInfo {
                                 committed_epoch,
-                                compaction_group_id: 0,
+                                compaction_group_id: 0.into(),
                             },
                         )
                     },

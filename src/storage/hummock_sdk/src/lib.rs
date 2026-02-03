@@ -55,8 +55,8 @@ use risingwave_common::catalog::TableId;
 use risingwave_pb::hummock::hummock_version_checkpoint::PbStaleObjects;
 use risingwave_pb::hummock::{PbVectorIndexObjectType, VectorIndexObjectType};
 pub use risingwave_pb::id::{
-    HummockHnswGraphFileId, HummockRawObjectId, HummockSstableId, HummockSstableObjectId,
-    HummockVectorFileId, HummockVersionId,
+    CompactionGroupId, HummockHnswGraphFileId, HummockRawObjectId, HummockSstableId,
+    HummockSstableObjectId, HummockVectorFileId, HummockVersionId,
 };
 
 use crate::table_watermark::TableWatermarks;
@@ -66,7 +66,6 @@ pub type HummockRefCount = u64;
 pub type HummockContextId = risingwave_common::id::WorkerId;
 pub type HummockEpoch = u64;
 pub type HummockCompactionTaskId = u64;
-pub type CompactionGroupId = u64;
 
 pub const INVALID_VERSION_ID: HummockVersionId = HummockVersionId::new(0);
 pub const FIRST_VERSION_ID: HummockVersionId = HummockVersionId::new(1);

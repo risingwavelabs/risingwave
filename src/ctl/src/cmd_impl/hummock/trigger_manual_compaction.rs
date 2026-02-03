@@ -13,20 +13,19 @@
 // limitations under the License.
 
 use risingwave_hummock_sdk::HummockSstableId;
-use risingwave_pb::id::JobId;
+use risingwave_pb::id::{CompactionGroupId, JobId};
 use risingwave_rpc_client::HummockMetaClient;
 
 use crate::CtlContext;
 
 pub async fn trigger_manual_compaction(
     context: &CtlContext,
-    compaction_group_id: u64,
+    compaction_group_id: CompactionGroupId,
     table_id: JobId,
     level: u32,
-    sst_ids: Vec<u64>,
+    sst_ids: Vec<HummockSstableId>,
 ) -> anyhow::Result<()> {
     let meta_client = context.meta_client().await?;
-    let sst_ids: Vec<HummockSstableId> = sst_ids.into_iter().map(HummockSstableId::new).collect();
     let result = meta_client
         .trigger_manual_compaction(compaction_group_id, table_id, level, sst_ids)
         .await;

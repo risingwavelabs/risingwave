@@ -14,7 +14,7 @@
 
 use risingwave_common::types::Fields;
 use risingwave_frontend_macro::system_catalog;
-use risingwave_pb::id::HummockSstableObjectId;
+use risingwave_pb::id::{CompactionGroupId, HummockSstableObjectId};
 
 use crate::catalog::system_catalog::SysCatalogReaderImpl;
 use crate::error::Result;
@@ -23,7 +23,7 @@ use crate::error::Result;
 #[primary_key(object_id, compaction_group_id)]
 struct RwHummockBranchedObject {
     object_id: HummockSstableObjectId,
-    compaction_group_id: i64,
+    compaction_group_id: CompactionGroupId,
     sst_id: Vec<i64>,
 }
 
@@ -35,7 +35,7 @@ async fn read(reader: &SysCatalogReaderImpl) -> Result<Vec<RwHummockBranchedObje
         .map(|o| RwHummockBranchedObject {
             object_id: o.object_id,
             sst_id: o.sst_id.into_iter().map(|id| id.as_raw_id() as _).collect(),
-            compaction_group_id: o.compaction_group_id as _,
+            compaction_group_id: o.compaction_group_id,
         })
         .collect();
     Ok(rows)

@@ -20,6 +20,7 @@ use futures::future::Either;
 use futures::stream::BoxStream;
 use futures::{FutureExt, StreamExt};
 use itertools::Itertools;
+use risingwave_hummock_sdk::CompactionGroupId;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::get_compaction_group_ids;
 use risingwave_pb::hummock::compact_task::{self, TaskStatus};
 use risingwave_pb::hummock::level_handler::RunningCompactTask;
@@ -509,7 +510,7 @@ impl HummockManager {
             let c = self.get_compaction_group_map().await;
             (g, c)
         };
-        let mut slowdown_groups: HashMap<u64, u64> = HashMap::default();
+        let mut slowdown_groups: HashMap<CompactionGroupId, u64> = HashMap::default();
         {
             for (group_id, l0_file_size) in groups {
                 let group = &configs[&group_id];
@@ -524,7 +525,8 @@ impl HummockManager {
         if slowdown_groups.is_empty() {
             return;
         }
-        let mut pending_tasks: HashMap<u64, (u64, usize, RunningCompactTask)> = HashMap::default();
+        let mut pending_tasks: HashMap<u64, (CompactionGroupId, usize, RunningCompactTask)> =
+            HashMap::default();
         {
             let compaction_guard = self.compaction.read().await;
             for group_id in slowdown_groups.keys() {
@@ -554,7 +556,7 @@ impl HummockManager {
                 warn!(
                     "COMPACTION SLOW: the task-{} of group-{}(size: {}MB) level-{} has not finished after {:?}, {}, it may cause pending sstable files({:?}) blocking other task.",
                     task_id,
-                    *group_id,
+                    group_id.as_raw_id(),
                     group_size / 1024 / 1024,
                     *level_id,
                     compact_time,

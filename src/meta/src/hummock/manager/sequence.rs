@@ -17,7 +17,7 @@ use std::fmt::Display;
 use std::sync::LazyLock;
 
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
-use risingwave_hummock_sdk::{HummockRawObjectId, HummockSstableId};
+use risingwave_hummock_sdk::{CompactionGroupId, HummockRawObjectId, HummockSstableId};
 use risingwave_meta_model::hummock_sequence;
 use risingwave_meta_model::hummock_sequence::{
     COMPACTION_GROUP_ID, COMPACTION_TASK_ID, META_BACKUP_ID, SSTABLE_OBJECT_ID,
@@ -33,7 +33,7 @@ use crate::manager::MetaSrvEnv;
 static SEQ_INIT: LazyLock<HashMap<String, i64>> = LazyLock::new(|| {
     maplit::hashmap! {
         COMPACTION_TASK_ID.into() => 1,
-        COMPACTION_GROUP_ID.into() => StaticCompactionGroupId::End as i64 + 1,
+        COMPACTION_GROUP_ID.into() => StaticCompactionGroupId::End.as_i64_id() + 1,
         SSTABLE_OBJECT_ID.into() => 1,
         META_BACKUP_ID.into() => 1,
     }
@@ -102,8 +102,12 @@ pub async fn next_meta_backup_id(env: &MetaSrvEnv) -> Result<u64> {
     env.hummock_seq.next_interval(META_BACKUP_ID, 1).await
 }
 
-pub async fn next_compaction_group_id(env: &MetaSrvEnv) -> Result<u64> {
-    env.hummock_seq.next_interval(COMPACTION_GROUP_ID, 1).await
+pub async fn next_compaction_group_id(env: &MetaSrvEnv) -> Result<CompactionGroupId> {
+    Ok(env
+        .hummock_seq
+        .next_interval(COMPACTION_GROUP_ID, 1)
+        .await?
+        .into())
 }
 
 pub async fn next_sstable_id(

@@ -77,9 +77,8 @@ pub type TransactionId = i32;
 pub type PrivilegeId = i32;
 pub type DefaultPrivilegeId = i32;
 
-pub use risingwave_pb::id::{HummockSstableObjectId, HummockVersionId};
+pub use risingwave_pb::id::{CompactionGroupId, HummockSstableObjectId, HummockVersionId};
 pub type Epoch = i64;
-pub type CompactionGroupId = i64;
 pub type CompactionTaskId = i64;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, EnumIter, DeriveActiveEnum, Serialize, Deserialize)]

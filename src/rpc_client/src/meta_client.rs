@@ -1675,7 +1675,7 @@ impl MetaClient {
         Ok(resp.branched_objects)
     }
 
-    pub async fn list_active_write_limit(&self) -> Result<HashMap<u64, WriteLimit>> {
+    pub async fn list_active_write_limit(&self) -> Result<HashMap<CompactionGroupId, WriteLimit>> {
         let req = ListActiveWriteLimitRequest {};
         let resp = self.inner.list_active_write_limit(req).await?;
         Ok(resp.write_limits)
@@ -1982,7 +1982,7 @@ impl HummockMetaClient for MetaClient {
 
     async fn trigger_manual_compaction(
         &self,
-        compaction_group_id: u64,
+        compaction_group_id: CompactionGroupId,
         table_id: JobId,
         level: u32,
         sst_ids: Vec<HummockSstableId>,

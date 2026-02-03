@@ -32,10 +32,10 @@ pub use emergency_selector::EmergencySelector;
 pub use level_selector::{DynamicLevelSelector, DynamicLevelSelectorCore};
 pub use manual_selector::{ManualCompactionOption, ManualCompactionSelector};
 use risingwave_common::catalog::{TableId, TableOption};
-use risingwave_hummock_sdk::HummockCompactionTaskId;
 use risingwave_hummock_sdk::level::Levels;
 use risingwave_hummock_sdk::table_watermark::TableWatermarks;
 use risingwave_hummock_sdk::version::HummockVersionStateTableInfo;
+use risingwave_hummock_sdk::{CompactionGroupId, HummockCompactionTaskId};
 use risingwave_pb::hummock::compact_task;
 pub use space_reclaim_selector::SpaceReclaimCompactionSelector;
 pub use tombstone_compaction_selector::TombstoneCompactionSelector;
@@ -87,9 +87,14 @@ pub struct LocalSelectorStatistic {
 }
 
 impl LocalSelectorStatistic {
-    pub fn report_to_metrics(&self, group_id: u64, metrics: &MetaMetrics) {
+    pub fn report_to_metrics(&self, group_id: CompactionGroupId, metrics: &MetaMetrics) {
         for (start_level, target_level, stats) in &self.skip_picker {
-            let level_label = format!("cg{}-{}-to-{}", group_id, start_level, target_level);
+            let level_label = format!(
+                "cg{}-{}-to-{}",
+                group_id.as_raw_id(),
+                start_level,
+                target_level
+            );
             if stats.skip_by_write_amp_limit > 0 {
                 metrics
                     .compact_skip_frequency
