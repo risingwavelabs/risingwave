@@ -153,28 +153,28 @@ where
         self.inner()
             .state_store
             .as_deref()
-            .unwrap_or(default::STATE_STORE.as_str())
+            .unwrap_or_else(|| default::STATE_STORE.as_str())
     }
 
     fn data_directory(&self) -> &str {
         self.inner()
             .data_directory
             .as_deref()
-            .unwrap_or(default::DATA_DIRECTORY.as_str())
+            .unwrap_or_else(|| default::DATA_DIRECTORY.as_str())
     }
 
     fn backup_storage_url(&self) -> &str {
         self.inner()
             .backup_storage_url
             .as_deref()
-            .unwrap_or(default::BACKUP_STORAGE_URL.as_str())
+            .unwrap_or_else(|| default::BACKUP_STORAGE_URL.as_str())
     }
 
     fn backup_storage_directory(&self) -> &str {
         self.inner()
             .backup_storage_directory
             .as_deref()
-            .unwrap_or(default::BACKUP_STORAGE_DIRECTORY.as_str())
+            .unwrap_or_else(|| default::BACKUP_STORAGE_DIRECTORY.as_str())
     }
 
     fn max_concurrent_creating_streaming_jobs(&self) -> u32 {
@@ -198,7 +198,7 @@ where
     fn use_new_object_prefix_strategy(&self) -> bool {
         self.inner()
             .use_new_object_prefix_strategy
-            .unwrap_or(*default::USE_NEW_OBJECT_PREFIX_STRATEGY)
+            .unwrap_or_else(|| *default::USE_NEW_OBJECT_PREFIX_STRATEGY)
     }
 
     fn license_key(&self) -> LicenseKeyRef<'_> {
