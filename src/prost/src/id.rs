@@ -279,7 +279,7 @@ macro_rules! impl_sea_orm_for_typed_id {
                 Self: UniqueTypedIdDeclaration,
             {
                 fn try_from_u64(n: u64) -> Result<Self, DbErr> {
-                    Ok(Self::[< from_ $signed >](n as $signed))
+                    Ok(Self::[< from_ $signed >](<$signed as sea_orm::TryFromU64>::try_from_u64(n)?))
                 }
             }
         }

@@ -309,14 +309,14 @@ impl LoadedFragmentContext {
         let fragment_source_ids = self
             .fragment_source_ids
             .iter()
-            .filter(|(fragment_id, _)| fragment_ids.contains(&**fragment_id))
+            .filter(|(fragment_id, _)| fragment_ids.contains(*fragment_id))
             .map(|(fragment_id, source_id)| (*fragment_id, *source_id))
             .collect();
 
         let fragment_splits = self
             .fragment_splits
             .iter()
-            .filter(|(fragment_id, _)| fragment_ids.contains(&**fragment_id))
+            .filter(|(fragment_id, _)| fragment_ids.contains(*fragment_id))
             .map(|(fragment_id, splits)| (*fragment_id, splits.clone()))
             .collect();
 
