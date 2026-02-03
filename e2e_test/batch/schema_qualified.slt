@@ -99,8 +99,8 @@ create table s1.a(id int, a int);
 statement ok
 create table s2.a(id int, b int);
 
-statement ok
-select a, b from s1.a join s2.a on s1.a.id = s2.a.id;
+statement error
+select a, b from s1.a AS a1 join s2.a AS a2 on s1.a.id = s2.a.id;
 
 statement ok
 DROP TABLE s1.a;
@@ -113,6 +113,22 @@ DROP SCHEMA s1;
 
 statement ok
 DROP SCHEMA s2;
+
+# Test on use schema-qualified to refer the column, but the table has alias
+statement ok
+CREATE SCHEMA s;
+
+statement ok
+CREATE TABLE s.t(v int);
+
+statement error
+SELECT s.t.v FROM s.t AS tt;
+
+statement ok
+DROP TABLE s.t;
+
+statement ok
+DROP SCHEMA s;
 
 
 
