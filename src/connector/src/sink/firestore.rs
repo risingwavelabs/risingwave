@@ -96,8 +96,7 @@ impl EnforceSecret for FirestoreConfig {
 impl FirestoreConfig {
     pub async fn build_client(&self) -> Result<FirestoreDb> {
         let options = if let Some(ref database_id) = self.database_id {
-            FirestoreDbOptions::new(self.project_id.clone())
-                .with_database_id(database_id.clone())
+            FirestoreDbOptions::new(self.project_id.clone()).with_database_id(database_id.clone())
         } else {
             FirestoreDbOptions::new(self.project_id.clone())
         };
@@ -106,7 +105,7 @@ impl FirestoreConfig {
             // Use JSON credentials string with gcloud-sdk's TokenSourceType
             // firestore internally uses gcloud-sdk, so we use TokenSourceType::Json
             use gcloud_sdk::{GCP_DEFAULT_SCOPES, TokenSourceType};
-            
+
             FirestoreDb::with_options_token_source(
                 options,
                 GCP_DEFAULT_SCOPES.clone(),
@@ -407,9 +406,8 @@ fn format_datum(datum: Option<ScalarRefImpl<'_>>, data_type: &DataType) -> Resul
         | DataType::Timestamptz => JsonValue::String(scalar.to_text_with_type(data_type)),
         DataType::Varchar => JsonValue::String(scalar.into_utf8().to_string()),
         DataType::Bytea => {
-            use base64::Engine;
             let bytes = scalar.into_bytea();
-            JsonValue::String(base64::engine::general_purpose::STANDARD.encode(bytes))
+            JsonValue::String(String::from_utf8_lossy(bytes).to_string())
         }
         DataType::Jsonb => {
             let jsonb = scalar.into_jsonb();
