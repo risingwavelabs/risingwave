@@ -1131,9 +1131,9 @@ dependencies = [
 
 [[package]]
 name = "aws-msk-iam-sasl-signer"
-version = "1.0.0"
+version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7036b8409ffe698dfdc5ae08722999d960092aeb738026ea99c3071c94831668"
+checksum = "e62f2c07adf3f0bd1ad40414dd30fcf34c595d5f613e36011d5b62eeff14f490"
 dependencies = [
  "aws-config",
  "aws-credential-types",
