@@ -275,14 +275,20 @@ impl<S: StateStore> SnapshotBackfillExecutor<S> {
                         let barrier = receive_next_barrier(&mut self.barrier_rx).await?;
                         assert_eq!(barrier_epoch.curr, barrier.epoch.prev);
                         let is_finished = upstream_buffer.consumed_epoch(barrier.epoch).await?;
-                        {
-                            // we must call `next_epoch` after `consumed_epoch`, and otherwise in `next_epoch`
-                            // we may block the upstream, and the upstream never get a chance to finish the `next_epoch`
-                            let next_prev_epoch = upstream_buffer
-                                .run_future(self.upstream_table.next_epoch(barrier_epoch.prev))
-                                .await?;
-                            assert_eq!(next_prev_epoch, barrier.epoch.prev);
-                        }
+                        // Disable calling next_epoch, because, if barrier_epoch.prev is a checkpoint epoch,
+                        // next_epoch(barrier_epoch.prev) is actually waiting for the committed epoch.
+                        // However, upstream_buffer's is_polling_epoch_data can be false, since just received
+                        // the checkpoint barrier_epoch.prev. And then the upstream_buffer may stop polling upstream
+                        // when the max_pending_epoch_lag is small. When upstream is not polled, the barrier of the next
+                        // committed epoch cannot be collected.
+                        // {
+                        //     // we must call `next_epoch` after `consumed_epoch`, and otherwise in `next_epoch`
+                        //     // we may block the upstream, and the upstream never get a chance to finish the `next_epoch`
+                        //     let next_prev_epoch = upstream_buffer
+                        //         .run_future(self.upstream_table.next_epoch(barrier_epoch.prev))
+                        //         .await?;
+                        //     assert_eq!(next_prev_epoch, barrier.epoch.prev);
+                        // }
                         barrier_epoch = barrier.epoch;
                         trace!(?barrier_epoch, kind = ?barrier.kind, "start consume epoch change log");
                         // use `upstream_buffer.run_future` to poll upstream concurrently so that we won't have back-pressure
@@ -543,8 +549,8 @@ struct UpstreamBuffer<'a, S> {
     consumed_epoch: u64,
     /// Barriers received from upstream but not yet received the barrier from local barrier worker.
     upstream_pending_barriers: PendingBarriers,
-    /// Whether we have started polling any upstream data before the next barrier.
-    /// When `true`, we should continue polling until the next barrier, because
+    /// Whether we have started polling any upstream data before the next checkpoint barrier.
+    /// When `true`, we should continue polling until the next checkpoint barrier, because
     /// some data in this epoch have been discarded and data in this epoch
     /// must be read from log store
     is_polling_epoch_data: bool,
@@ -608,17 +614,7 @@ impl<'a> UpstreamBuffer<'a, ConsumingSnapshot> {
 
 impl<S> UpstreamBuffer<'_, S> {
     fn can_consume_upstream(&self) -> bool {
-        // Always consume if no checkpoint is buffered yet. This prevents a deadlock where:
-        // 1. Creating job stops consuming (pending) because pending_epoch_lag >= max_pending_epoch_lag
-        // 2. Channel fills up with non-checkpoint barriers
-        // 3. Checkpoint barrier is blocked from being sent by main graph
-        // 4. Checkpoint never collected/committed, next_epoch() waits forever
-        //
-        // By ensuring we always consume until we have a checkpoint, the main graph can always
-        // send and collect the checkpoint barrier, allowing the epoch to be committed.
-        !self.upstream_pending_barriers.has_checkpoint_epoch()
-            || self.is_polling_epoch_data
-            || self.pending_epoch_lag() < self.max_pending_epoch_lag
+        self.is_polling_epoch_data || self.pending_epoch_lag() < self.max_pending_epoch_lag
     }
 
     async fn concurrently_consume_upstream(&mut self) -> StreamExecutorError {
