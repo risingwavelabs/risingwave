@@ -85,6 +85,18 @@ def _(outer_panels: Panels):
     poll_duration_expr = (
         f"{poll_duration_rate_expr} / on(fragment_id) {actor_count_expr}"
     )
+    zero_mv_expr = f"0 * max by (materialized_view_id) ({metric('table_info')})"
+    def _coalesce_mv(expr: str) -> str:
+        return f"(({expr}) or on(materialized_view_id) {zero_mv_expr})"
+
+    kv_log_store_buffer_usage_by_fragment_expr = (
+        f"sum({metric('kv_log_store_buffer_memory_bytes')}"
+        f"  * on(actor_id) group_left(fragment_id) {metric('actor_info')})"
+        f" by (fragment_id)"
+    )
+    sync_kv_log_store_buffer_usage_by_fragment_expr = (
+        f"sum({metric('sync_kv_log_store_buffer_memory_bytes')}) by (fragment_id)"
+    )
     executor_cache_usage_expr = (
         f"sum({metric('stream_memory_usage')} * on(table_id) group_left(materialized_view_id) "
         f"{metric('table_info')}) by (materialized_view_id)"
@@ -92,10 +104,22 @@ def _(outer_panels: Panels):
     shared_buffer_usage_expr = _sum_fragment_metric_by_mv(
         metric("state_store_per_table_imm_size")
     )
-    total_memory_usage_expr = (
-        f"({executor_cache_usage_expr} + on(materialized_view_id) group_left {shared_buffer_usage_expr}) "
-        f"or {executor_cache_usage_expr} "
-        f"or {shared_buffer_usage_expr}"
+    kv_log_store_buffer_usage_expr = _sum_fragment_metric_by_mv(
+        kv_log_store_buffer_usage_by_fragment_expr
+    )
+    sync_kv_log_store_buffer_usage_expr = _sum_fragment_metric_by_mv(
+        sync_kv_log_store_buffer_usage_by_fragment_expr
+    )
+    total_memory_usage_expr = " + ".join(
+        map(
+            _coalesce_mv,
+            [
+                executor_cache_usage_expr,
+                shared_buffer_usage_expr,
+                kv_log_store_buffer_usage_expr,
+                sync_kv_log_store_buffer_usage_expr,
+            ],
+        )
     )
     return [
         outer_panels.row_collapsed(
@@ -227,7 +251,7 @@ def _(outer_panels: Panels):
                 panels.subheader("Memory Usage By Relation"),
                 panels.timeseries_bytes(
                     "Total Memory Usage",
-                    "Sum of executor cache and shared buffer imm size",
+                    "Sum of executor cache, shared buffer imm size, and log store buffer memory",
                     [
                         panels.target(
                             _relation_metric_with_metadata(
