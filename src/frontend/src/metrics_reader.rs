@@ -51,11 +51,10 @@ impl MetricsReader for MetricsReaderImpl {
     ) -> Result<HashMap<ChannelKey, ChannelDeltaStats>> {
         let time_offset = time_offset.unwrap_or(DEFAULT_TIME_OFFSET_SECONDS);
 
-        // Check if Prometheus client is available
-        let prometheus_client = self
-            .prometheus_client
-            .as_ref()
-            .ok_or_else(|| anyhow!("Prometheus endpoint is not set"))?;
+        // Return empty result if Prometheus client is not configured
+        let Some(prometheus_client) = self.prometheus_client.as_ref() else {
+            return Ok(HashMap::new());
+        };
 
         // Query channel delta stats: throughput and backpressure rate
         let channel_input_throughput_query = format!(
@@ -189,10 +188,10 @@ impl MetricsReader for MetricsReaderImpl {
     }
 
     async fn get_kafka_source_metrics(&self) -> Result<Vec<KafkaPartitionMetrics>> {
-        let prometheus_client = self
-            .prometheus_client
-            .as_ref()
-            .ok_or_else(|| anyhow!("Prometheus endpoint is not set"))?;
+        // Return empty result if Prometheus client is not configured
+        let Some(prometheus_client) = self.prometheus_client.as_ref() else {
+            return Ok(vec![]);
+        };
 
         let high_watermark_query = format!(
             "max(source_kafka_high_watermark{{{}}}) by (source_id, partition)",
