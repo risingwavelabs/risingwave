@@ -60,7 +60,7 @@ use risingwave_frontend_macro::system_catalog;
                         when bs.partition_id is not null and not coalesce(bs.is_finished, false) then bs.backfill_offset
                         else m.latest_offset
                     end
-                ),
+                ) - 1,
                 0
             )
             else null
