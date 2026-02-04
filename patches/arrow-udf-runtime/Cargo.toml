@@ -56,7 +56,7 @@ reqwest = { version = "0.12", features = ["json"], optional = true }
 serde_json = { version = "1", optional = true }
 
 arrow-flight = { version = "54", optional = true }
-tonic = { version = "0.13", optional = true }
+tonic = { version = "0.12", optional = true }
 tracing = { version = "0.1", optional = true }
 
 [build-dependencies]
