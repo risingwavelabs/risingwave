@@ -1,24 +1,27 @@
----
-description:
-globs:
-alwaysApply: true
----
-# Build, Run, Test
+# Coding Agent Instructions for RisingWave
+
+## Coding Style
+
+- Always write code comments in English.
+- Write simple, easy-to-read and easy-to-maintain code.
+- Use `cargo fmt` to format the code if needed.
+
+## Build, Run, Test
 
 You may need to learn how to build and test RisingWave when implementing features or fixing bugs.
 
-## Build & Check
+### Build & Check
 
 - Use `./risedev b` to build the project.
 - Use `./risedev c` to check if the code follow rust-clippy rules, coding styles, etc.
 
-## Unit Test
+### Unit Test
 
 - Integration tests and unit tests are valid Rust/Tokio tests, you can locate and run those related in a standard Rust way.
 - Parser tests: use `./risedev update-parser-test` to regenerate expected output.
 - Planner tests: use `./risedev run-planner-test [name]` to run and `./risedev do-apply-planner-test` (or `./risedev dapt`) to update expected output.
 
-## End-to-End Test
+### End-to-End Test
 
 - Use `./risedev d` to run a RisingWave instance in the background via tmux.
   * It builds RisingWave binaries if necessary. The build process can take up to 10 minutes, depending on the incremental build results. Use a large timeout for this step, and be patient.
@@ -35,12 +38,7 @@ You may need to learn how to build and test RisingWave when implementing feature
 - The preferred way to write tests is to write tests in SQLLogicTest format.
 - Tests are put in `./e2e_test` folder.
 
-## Misc
-
-- `./risedev` command is safe to run automatically.
-- Never run `git` mutation command (`git add`, `git rebase`, `git commit`, `git push`, etc) unless user explicitly asks for it.
-
-## Sandbox escalation
+### Sandbox escalation
 
 When sandboxing is enabled, these commands need `require_escalated` because they bind or connect to local TCP sockets:
 

@@ -12,7 +12,7 @@ RisingWave is a Postgres-compatible streaming database.
 
 ## Build, Run, Test
 
-@.cursor/rules/build-run-test.mdc
+@AGENTS.md
 
 ### Develop Connectors
 @docs/dev/src/connector/intro.md
