@@ -35,7 +35,7 @@ use risingwave_common::catalog::{
 use risingwave_common::config::{MAX_CONNECTION_WINDOW_SIZE, MetaConfig};
 use risingwave_common::hash::WorkerSlotMapping;
 use risingwave_common::id::{
-    ConnectionId, DatabaseId, JobId, SchemaId, SinkId, SubscriptionId, ViewId, WorkerId,
+    ConnectionId, DatabaseId, JobId, SchemaId, SinkId, SubscriptionId, UserId, ViewId, WorkerId,
 };
 use risingwave_common::monitor::EndpointExt;
 use risingwave_common::system_param::reader::SystemParamsReader;
@@ -190,7 +190,7 @@ impl MetaClient {
         connection_name: String,
         database_id: DatabaseId,
         schema_id: SchemaId,
-        owner_id: u32,
+        owner_id: UserId,
         req: create_connection_request::Payload,
     ) -> Result<WaitVersion> {
         let request = CreateConnectionRequest {
@@ -211,7 +211,7 @@ impl MetaClient {
         secret_name: String,
         database_id: DatabaseId,
         schema_id: SchemaId,
-        owner_id: u32,
+        owner_id: UserId,
         value: Vec<u8>,
     ) -> Result<WaitVersion> {
         let request = CreateSecretRequest {
@@ -559,7 +559,7 @@ impl MetaClient {
             .ok_or_else(|| anyhow!("wait version not set"))?)
     }
 
-    pub async fn alter_owner(&self, object: Object, owner_id: u32) -> Result<WaitVersion> {
+    pub async fn alter_owner(&self, object: Object, owner_id: UserId) -> Result<WaitVersion> {
         let request = AlterOwnerRequest {
             object: Some(object),
             owner_id,
@@ -726,7 +726,7 @@ impl MetaClient {
         secret_name: String,
         database_id: DatabaseId,
         schema_id: SchemaId,
-        owner_id: u32,
+        owner_id: UserId,
         value: Vec<u8>,
     ) -> Result<WaitVersion> {
         let request = AlterSecretRequest {
@@ -928,7 +928,7 @@ impl MetaClient {
         Ok(resp.version)
     }
 
-    pub async fn drop_user(&self, user_id: u32) -> Result<u64> {
+    pub async fn drop_user(&self, user_id: UserId) -> Result<u64> {
         let request = DropUserRequest { user_id };
         let resp = self.inner.drop_user(request).await?;
         Ok(resp.version)
@@ -952,10 +952,10 @@ impl MetaClient {
 
     pub async fn grant_privilege(
         &self,
-        user_ids: Vec<u32>,
+        user_ids: Vec<UserId>,
         privileges: Vec<GrantPrivilege>,
         with_grant_option: bool,
-        granted_by: u32,
+        granted_by: UserId,
     ) -> Result<u64> {
         let request = GrantPrivilegeRequest {
             user_ids,
@@ -969,10 +969,10 @@ impl MetaClient {
 
     pub async fn revoke_privilege(
         &self,
-        user_ids: Vec<u32>,
+        user_ids: Vec<UserId>,
         privileges: Vec<GrantPrivilege>,
-        granted_by: u32,
-        revoke_by: u32,
+        granted_by: UserId,
+        revoke_by: UserId,
         revoke_grant_option: bool,
         cascade: bool,
     ) -> Result<u64> {
@@ -990,11 +990,11 @@ impl MetaClient {
 
     pub async fn alter_default_privilege(
         &self,
-        user_ids: Vec<u32>,
+        user_ids: Vec<UserId>,
         database_id: DatabaseId,
         schema_ids: Vec<SchemaId>,
         operation: AlterDefaultPrivilegeOperation,
-        granted_by: u32,
+        granted_by: UserId,
     ) -> Result<()> {
         let request = AlterDefaultPrivilegeRequest {
             user_ids,
@@ -1161,10 +1161,15 @@ impl MetaClient {
         Ok(resp.states)
     }
 
-    pub async fn list_fragment_distributions(&self) -> Result<Vec<FragmentDistribution>> {
+    pub async fn list_fragment_distributions(
+        &self,
+        include_node: bool,
+    ) -> Result<Vec<FragmentDistribution>> {
         let resp = self
             .inner
-            .list_fragment_distribution(ListFragmentDistributionRequest {})
+            .list_fragment_distribution(ListFragmentDistributionRequest {
+                include_node: Some(include_node),
+            })
             .await?;
         Ok(resp.distributions)
     }
@@ -1172,7 +1177,9 @@ impl MetaClient {
     pub async fn list_creating_fragment_distribution(&self) -> Result<Vec<FragmentDistribution>> {
         let resp = self
             .inner
-            .list_creating_fragment_distribution(ListCreatingFragmentDistributionRequest {})
+            .list_creating_fragment_distribution(ListCreatingFragmentDistributionRequest {
+                include_node: Some(true),
+            })
             .await?;
         Ok(resp.distributions)
     }
@@ -1866,6 +1873,14 @@ impl MetaClient {
         Ok(resp.states)
     }
 
+    pub async fn list_sink_log_store_tables(
+        &self,
+    ) -> Result<Vec<list_sink_log_store_tables_response::SinkLogStoreTable>> {
+        let request = ListSinkLogStoreTablesRequest {};
+        let resp = self.inner.list_sink_log_store_tables(request).await?;
+        Ok(resp.tables)
+    }
+
     pub async fn create_iceberg_table(
         &self,
         table_job_info: PbTableJobInfo,
@@ -2511,6 +2526,7 @@ macro_rules! for_all_meta_rpc {
             ,{ stream_client, list_streaming_job_states, ListStreamingJobStatesRequest, ListStreamingJobStatesResponse }
             ,{ stream_client, list_fragment_distribution, ListFragmentDistributionRequest, ListFragmentDistributionResponse }
             ,{ stream_client, list_creating_fragment_distribution, ListCreatingFragmentDistributionRequest, ListCreatingFragmentDistributionResponse }
+            ,{ stream_client, list_sink_log_store_tables, ListSinkLogStoreTablesRequest, ListSinkLogStoreTablesResponse }
             ,{ stream_client, list_actor_states, ListActorStatesRequest, ListActorStatesResponse }
             ,{ stream_client, list_actor_splits, ListActorSplitsRequest, ListActorSplitsResponse }
             ,{ stream_client, list_object_dependencies, ListObjectDependenciesRequest, ListObjectDependenciesResponse }

@@ -156,7 +156,7 @@ pub trait CatalogWriter: Send + Sync {
         connection_name: String,
         database_id: DatabaseId,
         schema_id: SchemaId,
-        owner_id: u32,
+        owner_id: UserId,
         connection: create_connection_request::Payload,
     ) -> Result<()>;
 
@@ -165,7 +165,7 @@ pub trait CatalogWriter: Send + Sync {
         secret_name: String,
         database_id: DatabaseId,
         schema_id: SchemaId,
-        owner_id: u32,
+        owner_id: UserId,
         payload: Vec<u8>,
     ) -> Result<()>;
 
@@ -209,7 +209,7 @@ pub trait CatalogWriter: Send + Sync {
         secret_name: String,
         database_id: DatabaseId,
         schema_id: SchemaId,
-        owner_id: u32,
+        owner_id: UserId,
         payload: Vec<u8>,
     ) -> Result<()>;
 
@@ -219,7 +219,11 @@ pub trait CatalogWriter: Send + Sync {
         object_name: &str,
     ) -> Result<()>;
 
-    async fn alter_owner(&self, object: alter_owner_request::Object, owner_id: u32) -> Result<()>;
+    async fn alter_owner(
+        &self,
+        object: alter_owner_request::Object,
+        owner_id: UserId,
+    ) -> Result<()>;
 
     /// Replace the source in the catalog.
     async fn alter_source(&self, source: PbSource) -> Result<()>;
@@ -468,7 +472,7 @@ impl CatalogWriter for CatalogWriterImpl {
         connection_name: String,
         database_id: DatabaseId,
         schema_id: SchemaId,
-        owner_id: u32,
+        owner_id: UserId,
         connection: create_connection_request::Payload,
     ) -> Result<()> {
         let version = self
@@ -489,7 +493,7 @@ impl CatalogWriter for CatalogWriterImpl {
         secret_name: String,
         database_id: DatabaseId,
         schema_id: SchemaId,
-        owner_id: u32,
+        owner_id: UserId,
         payload: Vec<u8>,
     ) -> Result<()> {
         let version = self
@@ -599,7 +603,11 @@ impl CatalogWriter for CatalogWriterImpl {
         self.wait_version(version).await
     }
 
-    async fn alter_owner(&self, object: alter_owner_request::Object, owner_id: u32) -> Result<()> {
+    async fn alter_owner(
+        &self,
+        object: alter_owner_request::Object,
+        owner_id: UserId,
+    ) -> Result<()> {
         let version = self.meta_client.alter_owner(object, owner_id).await?;
         self.wait_version(version).await
     }
@@ -656,7 +664,7 @@ impl CatalogWriter for CatalogWriterImpl {
         secret_name: String,
         database_id: DatabaseId,
         schema_id: SchemaId,
-        owner_id: u32,
+        owner_id: UserId,
         payload: Vec<u8>,
     ) -> Result<()> {
         let version = self
