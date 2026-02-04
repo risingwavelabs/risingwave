@@ -141,7 +141,7 @@ impl LdapTlsConfig {
             let client_key_bytes = fs::read(key).map_err(|e| {
                 PsqlError::StartupError(anyhow!(e).context("Failed to read client key").into())
             })?;
-            let client_certs: Vec<CertificateDer<'static>> =
+            let client_certs =
                 CertificateDer::pem_slice_iter(&client_cert_bytes)
                     .collect::<Result<Vec<_>, _>>()
                     .map_err(|e| {
