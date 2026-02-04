@@ -215,18 +215,17 @@ impl MetricsReader for MetricsReaderImpl {
                 if let (Some(source_id_str), Some(partition_id)) = (
                     sample.metric().get("source_id"),
                     sample.metric().get("partition"),
-                ) {
-                    if let Ok(source_id) = source_id_str.parse::<u32>() {
-                        let entry = metrics
-                            .entry((source_id, partition_id.to_owned()))
-                            .or_insert_with(|| KafkaPartitionMetrics {
-                                source_id,
-                                partition_id: partition_id.to_owned(),
-                                high_watermark: None,
-                                latest_offset: None,
-                            });
-                        entry.high_watermark = Some(sample.sample().value().round() as i64);
-                    }
+                ) && let Ok(source_id) = source_id_str.parse::<u32>()
+                {
+                    let entry = metrics
+                        .entry((source_id, partition_id.to_owned()))
+                        .or_insert_with(|| KafkaPartitionMetrics {
+                            source_id,
+                            partition_id: partition_id.to_owned(),
+                            high_watermark: None,
+                            latest_offset: None,
+                        });
+                    entry.high_watermark = Some(sample.sample().value().round() as i64);
                 }
             }
         }
@@ -236,18 +235,17 @@ impl MetricsReader for MetricsReaderImpl {
                 if let (Some(source_id_str), Some(partition_id)) = (
                     sample.metric().get("source_id"),
                     sample.metric().get("partition"),
-                ) {
-                    if let Ok(source_id) = source_id_str.parse::<u32>() {
-                        let entry = metrics
-                            .entry((source_id, partition_id.to_owned()))
-                            .or_insert_with(|| KafkaPartitionMetrics {
-                                source_id,
-                                partition_id: partition_id.to_owned(),
-                                high_watermark: None,
-                                latest_offset: None,
-                            });
-                        entry.latest_offset = Some(sample.sample().value().round() as i64);
-                    }
+                ) && let Ok(source_id) = source_id_str.parse::<u32>()
+                {
+                    let entry = metrics
+                        .entry((source_id, partition_id.to_owned()))
+                        .or_insert_with(|| KafkaPartitionMetrics {
+                            source_id,
+                            partition_id: partition_id.to_owned(),
+                            high_watermark: None,
+                            latest_offset: None,
+                        });
+                    entry.latest_offset = Some(sample.sample().value().round() as i64);
                 }
             }
         }

@@ -69,7 +69,7 @@ pub trait MetricsReader: Send + Sync {
 
     /// Fetch Kafka source lag related metrics from Prometheus.
     ///
-    /// Returns one row per (source_id, partition_id) with optional high watermark and
+    /// Returns one row per (`source_id`, `partition_id`) with optional high watermark and
     /// latest consumed offset.
     async fn get_kafka_source_metrics(&self) -> Result<Vec<KafkaPartitionMetrics>>;
 }
