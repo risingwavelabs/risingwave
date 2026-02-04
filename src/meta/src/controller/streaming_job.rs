@@ -614,10 +614,17 @@ impl CatalogController {
         // frontend receiving duplicate notifications if the frontend restarts right in this gap. We
         // need to either forward the notification or filter catalogs without any fragments in the metastore.
         if !objects_to_notify.is_empty() {
+            let dependency_object_ids = HashSet::from([job_id.as_object_id()]);
+
+            let dependencies = self
+                .list_object_dependencies_by_object_ids(&dependency_object_ids)
+                .await?;
+
             self.notify_frontend(
                 Operation::Add,
                 Info::ObjectGroup(PbObjectGroup {
                     objects: objects_to_notify,
+                    dependencies,
                 }),
             )
             .await;
@@ -1071,7 +1078,10 @@ impl CatalogController {
         let mut version = self
             .notify_frontend(
                 notification_op,
-                NotificationInfo::ObjectGroup(PbObjectGroup { objects }),
+                NotificationInfo::ObjectGroup(PbObjectGroup {
+                    objects,
+                    dependencies: vec![],
+                }),
             )
             .await;
 
@@ -1329,7 +1339,10 @@ impl CatalogController {
         let mut version = self
             .notify_frontend(
                 NotificationOperation::Update,
-                NotificationInfo::ObjectGroup(PbObjectGroup { objects }),
+                NotificationInfo::ObjectGroup(PbObjectGroup {
+                    objects,
+                    dependencies: vec![],
+                }),
             )
             .await;
 
@@ -1800,6 +1813,7 @@ impl CatalogController {
                     objects: vec![PbObject {
                         object_info: Some(relation_info),
                     }],
+                    dependencies: vec![],
                 }),
             )
             .await;
@@ -2277,6 +2291,7 @@ impl CatalogController {
             NotificationOperation::Update,
             NotificationInfo::ObjectGroup(PbObjectGroup {
                 objects: to_update_objs,
+                dependencies: vec![],
             }),
         )
         .await;
@@ -2341,6 +2356,7 @@ impl CatalogController {
                 NotificationOperation::Update,
                 NotificationInfo::ObjectGroup(PbObjectGroup {
                     objects: relation_infos,
+                    dependencies: vec![],
                 }),
             )
             .await;
@@ -2461,6 +2477,7 @@ impl CatalogController {
                 NotificationOperation::Update,
                 NotificationInfo::ObjectGroup(PbObjectGroup {
                     objects: relation_infos,
+                    dependencies: vec![],
                 }),
             )
             .await;
@@ -2892,6 +2909,7 @@ impl CatalogController {
                 NotificationOperation::Update,
                 NotificationInfo::ObjectGroup(PbObjectGroup {
                     objects: updated_objects,
+                    dependencies: vec![],
                 }),
             )
             .await;

@@ -35,7 +35,6 @@ use risingwave_pb::meta::list_actor_splits_response::ActorSplit;
 use risingwave_pb::meta::list_actor_states_response::ActorState;
 use risingwave_pb::meta::list_cdc_progress_response::PbCdcProgress;
 use risingwave_pb::meta::list_iceberg_tables_response::IcebergTable;
-use risingwave_pb::meta::list_object_dependencies_response::PbObjectDependencies;
 use risingwave_pb::meta::list_rate_limits_response::RateLimitInfo;
 use risingwave_pb::meta::list_refresh_table_states_response::RefreshTableState;
 use risingwave_pb::meta::list_streaming_job_states_response::StreamingJobState;
@@ -84,8 +83,6 @@ pub trait FrontendMetaClient: Send + Sync {
     async fn list_actor_states(&self) -> Result<Vec<ActorState>>;
 
     async fn list_actor_splits(&self) -> Result<Vec<ActorSplit>>;
-
-    async fn list_object_dependencies(&self) -> Result<Vec<PbObjectDependencies>>;
 
     async fn list_meta_snapshots(&self) -> Result<Vec<MetaSnapshotMetadata>>;
 
@@ -275,10 +272,6 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
 
     async fn list_actor_splits(&self) -> Result<Vec<ActorSplit>> {
         self.0.list_actor_splits().await
-    }
-
-    async fn list_object_dependencies(&self) -> Result<Vec<PbObjectDependencies>> {
-        self.0.list_object_dependencies().await
     }
 
     async fn list_meta_snapshots(&self) -> Result<Vec<MetaSnapshotMetadata>> {

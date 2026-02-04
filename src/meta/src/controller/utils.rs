@@ -1762,7 +1762,10 @@ pub(crate) fn build_object_group_for_delete(
             }),
         }
     }
-    NotificationInfo::ObjectGroup(PbObjectGroup { objects })
+    NotificationInfo::ObjectGroup(PbObjectGroup {
+        objects,
+        dependencies: vec![],
+    })
 }
 
 pub fn extract_external_table_name_from_definition(table_definition: &str) -> Option<String> {

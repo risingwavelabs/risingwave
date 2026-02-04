@@ -13,10 +13,29 @@
 // limitations under the License.
 
 use risingwave_common::catalog::FragmentTypeMask;
+use risingwave_pb::common::PbObjectType;
+use risingwave_pb::meta::ObjectDependency as PbObjectDependency;
+use sea_orm::sea_query::Alias;
 
 use super::*;
 use crate::controller::fragment::FragmentTypeMaskExt;
 use crate::controller::utils::load_streaming_jobs_by_ids;
+
+fn to_pb_object_type(obj_type: ObjectType) -> PbObjectType {
+    match obj_type {
+        ObjectType::Database => PbObjectType::Database,
+        ObjectType::Schema => PbObjectType::Schema,
+        ObjectType::Table => PbObjectType::Table,
+        ObjectType::Source => PbObjectType::Source,
+        ObjectType::Sink => PbObjectType::Sink,
+        ObjectType::View => PbObjectType::View,
+        ObjectType::Index => PbObjectType::Index,
+        ObjectType::Function => PbObjectType::Function,
+        ObjectType::Connection => PbObjectType::Connection,
+        ObjectType::Subscription => PbObjectType::Subscription,
+        ObjectType::Secret => PbObjectType::Secret,
+    }
+}
 
 pub(crate) async fn update_internal_tables(
     txn: &DatabaseTransaction,
@@ -128,10 +147,11 @@ impl CatalogController {
     pub(crate) async fn list_object_dependencies(
         &self,
         include_creating: bool,
-    ) -> MetaResult<Vec<PbObjectDependencies>> {
+    ) -> MetaResult<Vec<PbObjectDependency>> {
         let inner = self.inner.read().await;
 
-        let dependencies: Vec<(ObjectId, ObjectId)> = {
+        let referenced_alias = Alias::new("referenced_obj");
+        let dependencies: Vec<(ObjectId, ObjectId, ObjectType)> = {
             let filter = if include_creating {
                 Expr::value(true)
             } else {
@@ -143,9 +163,18 @@ impl CatalogController {
                     object_dependency::Column::Oid,
                     object_dependency::Column::UsedBy,
                 ])
+                .column_as(
+                    Expr::col((referenced_alias.clone(), object::Column::ObjType)),
+                    "referenced_obj_type",
+                )
                 .join(
                     JoinType::InnerJoin,
                     object_dependency::Relation::Object1.def(),
+                )
+                .join_as(
+                    JoinType::InnerJoin,
+                    object_dependency::Relation::Object2.def(),
+                    referenced_alias.clone(),
                 )
                 .join(JoinType::InnerJoin, object::Relation::StreamingJob.def())
                 .filter(filter)
@@ -153,35 +182,47 @@ impl CatalogController {
                 .all(&inner.db)
                 .await?
         };
-        let mut obj_dependencies = dependencies
+        let mut obj_dependencies: Vec<PbObjectDependency> = dependencies
             .into_iter()
-            .map(|(oid, used_by)| PbObjectDependencies {
+            .map(|(oid, used_by, referenced_type)| PbObjectDependency {
                 object_id: used_by,
                 referenced_object_id: oid,
+                referenced_object_type: to_pb_object_type(referenced_type) as i32,
             })
             .collect_vec();
 
-        let view_dependencies: Vec<(ObjectId, ObjectId)> = ObjectDependency::find()
+        let view_referenced_alias = Alias::new("view_referenced_obj");
+        let view_dependencies: Vec<(ObjectId, ObjectId, ObjectType)> = ObjectDependency::find()
             .select_only()
             .columns([
                 object_dependency::Column::Oid,
                 object_dependency::Column::UsedBy,
             ])
+            .column_as(
+                Expr::col((view_referenced_alias.clone(), object::Column::ObjType)),
+                "referenced_obj_type",
+            )
             .join(
                 JoinType::InnerJoin,
                 object_dependency::Relation::Object1.def(),
+            )
+            .join_as(
+                JoinType::InnerJoin,
+                object_dependency::Relation::Object2.def(),
+                view_referenced_alias.clone(),
             )
             .join(JoinType::InnerJoin, object::Relation::View.def())
             .into_tuple()
             .all(&inner.db)
             .await?;
 
-        obj_dependencies.extend(view_dependencies.into_iter().map(|(view_id, table_id)| {
-            PbObjectDependencies {
-                object_id: table_id,
-                referenced_object_id: view_id,
-            }
-        }));
+        obj_dependencies.extend(view_dependencies.into_iter().map(
+            |(oid, used_by, referenced_type)| PbObjectDependency {
+                object_id: used_by,
+                referenced_object_id: oid,
+                referenced_object_type: to_pb_object_type(referenced_type) as i32,
+            },
+        ));
 
         let sink_dependencies: Vec<(SinkId, TableId)> = {
             let filter = if include_creating {
@@ -202,9 +243,10 @@ impl CatalogController {
                 .await?
         };
         obj_dependencies.extend(sink_dependencies.into_iter().map(|(sink_id, table_id)| {
-            PbObjectDependencies {
+            PbObjectDependency {
                 object_id: table_id.into(),
                 referenced_object_id: sink_id.into(),
+                referenced_object_type: PbObjectType::Sink as i32,
             }
         }));
 
@@ -229,9 +271,94 @@ impl CatalogController {
                 .await?
         };
         obj_dependencies.extend(subscription_dependencies.into_iter().map(
-            |(subscription_id, table_id)| PbObjectDependencies {
+            |(subscription_id, table_id)| PbObjectDependency {
                 object_id: subscription_id.into(),
                 referenced_object_id: table_id.into(),
+                referenced_object_type: PbObjectType::Table as i32,
+            },
+        ));
+
+        Ok(obj_dependencies)
+    }
+
+    pub(crate) async fn list_object_dependencies_by_object_ids(
+        &self,
+        object_ids: &HashSet<ObjectId>,
+    ) -> MetaResult<Vec<PbObjectDependency>> {
+        if object_ids.is_empty() {
+            return Ok(vec![]);
+        }
+
+        let inner = self.inner.read().await;
+        let referenced_alias = Alias::new("referenced_obj");
+
+        let mut obj_dependencies: Vec<PbObjectDependency> = ObjectDependency::find()
+            .select_only()
+            .columns([
+                object_dependency::Column::Oid,
+                object_dependency::Column::UsedBy,
+            ])
+            .column_as(
+                Expr::col((referenced_alias.clone(), object::Column::ObjType)),
+                "referenced_obj_type",
+            )
+            .join(
+                JoinType::InnerJoin,
+                object_dependency::Relation::Object1.def(),
+            )
+            .join_as(
+                JoinType::InnerJoin,
+                object_dependency::Relation::Object2.def(),
+                referenced_alias.clone(),
+            )
+            .filter(object_dependency::Column::UsedBy.is_in(object_ids.iter().copied()))
+            .into_tuple()
+            .all(&inner.db)
+            .await?
+            .into_iter()
+            .map(|(oid, used_by, referenced_type)| PbObjectDependency {
+                object_id: used_by,
+                referenced_object_id: oid,
+                referenced_object_type: to_pb_object_type(referenced_type) as i32,
+            })
+            .collect();
+
+        let sink_dependencies: Vec<(SinkId, TableId)> = Sink::find()
+            .select_only()
+            .columns([sink::Column::SinkId, sink::Column::TargetTable])
+            .filter(
+                sink::Column::TargetTable.is_not_null().and(
+                    sink::Column::SinkId
+                        .is_in(object_ids.iter().copied())
+                        .or(sink::Column::TargetTable.is_in(object_ids.iter().copied())),
+                ),
+            )
+            .into_tuple()
+            .all(&inner.db)
+            .await?;
+        obj_dependencies.extend(sink_dependencies.into_iter().map(|(sink_id, table_id)| {
+            PbObjectDependency {
+                object_id: table_id.into(),
+                referenced_object_id: sink_id.into(),
+                referenced_object_type: PbObjectType::Sink as i32,
+            }
+        }));
+
+        let subscription_dependencies: Vec<(SubscriptionId, TableId)> = Subscription::find()
+            .select_only()
+            .columns([
+                subscription::Column::SubscriptionId,
+                subscription::Column::DependentTableId,
+            ])
+            .filter(subscription::Column::SubscriptionId.is_in(object_ids.iter().copied()))
+            .into_tuple()
+            .all(&inner.db)
+            .await?;
+        obj_dependencies.extend(subscription_dependencies.into_iter().map(
+            |(subscription_id, table_id)| PbObjectDependency {
+                object_id: subscription_id.into(),
+                referenced_object_id: table_id.into(),
+                referenced_object_type: PbObjectType::Table as i32,
             },
         ));
 

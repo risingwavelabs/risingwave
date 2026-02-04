@@ -55,7 +55,6 @@ use risingwave_pb::catalog::{
     PbSubscription, PbTable, PbView,
 };
 use risingwave_pb::meta::cancel_creating_jobs_request::PbCreatingJobInfo;
-use risingwave_pb::meta::list_object_dependencies_response::PbObjectDependencies;
 use risingwave_pb::meta::object::PbObjectInfo;
 use risingwave_pb::meta::subscribe_response::{
     Info as NotificationInfo, Info, Operation as NotificationOperation, Operation,
@@ -266,6 +265,11 @@ impl CatalogController {
             .await?
             .ok_or_else(|| MetaError::catalog_id_not_found("subscription", subscription_id))?;
 
+        let dependency_object_ids = HashSet::from([subscription_id.into()]);
+        let dependencies = self
+            .list_object_dependencies_by_object_ids(&dependency_object_ids)
+            .await?;
+
         let mut version = self
             .notify_frontend(
                 NotificationOperation::Add,
@@ -276,6 +280,7 @@ impl CatalogController {
                         )
                         .into(),
                     }],
+                    dependencies,
                 }),
             )
             .await;
@@ -664,7 +669,10 @@ impl CatalogController {
                 object_info: Some(PbObjectInfo::Table(t)),
             })
             .collect();
-        let group = NotificationInfo::ObjectGroup(PbObjectGroup { objects });
+        let group = NotificationInfo::ObjectGroup(PbObjectGroup {
+            objects,
+            dependencies: vec![],
+        });
         self.env
             .notification_manager()
             .notify_hummock(NotificationOperation::Delete, group.clone())

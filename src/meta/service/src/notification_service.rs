@@ -249,6 +249,11 @@ impl NotificationServiceImpl {
             users,
             catalog_version,
         ) = self.get_catalog_snapshot().await?;
+        let object_dependencies = self
+            .metadata_manager
+            .catalog_controller
+            .list_all_object_dependencies()
+            .await?;
 
         // Use the plain text secret value for frontend. The secret value will be masked in frontend handle.
         let decrypted_secrets = self.decrypt_secrets(secrets)?;
@@ -311,6 +316,7 @@ impl NotificationServiceImpl {
             serving_worker_slot_mappings,
             streaming_worker_slot_mappings,
             session_params,
+            object_dependencies,
             cluster_resource: Some(cluster_resource),
             ..Default::default()
         })

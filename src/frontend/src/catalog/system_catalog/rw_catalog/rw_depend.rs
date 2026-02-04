@@ -30,9 +30,9 @@ struct RwDepend {
 
 #[system_catalog(table, "rw_catalog.rw_depend")]
 async fn read_rw_depend(reader: &SysCatalogReaderImpl) -> Result<Vec<RwDepend>> {
-    let dependencies = reader.meta_client.list_object_dependencies().await?;
-    Ok(dependencies
-        .into_iter()
+    let catalog_guard = reader.catalog_reader.read_guard();
+    Ok(catalog_guard
+        .iter_object_dependencies()
         .map(|depend| RwDepend {
             objid: depend.object_id.as_i32_id(),
             refobjid: depend.referenced_object_id.as_i32_id(),

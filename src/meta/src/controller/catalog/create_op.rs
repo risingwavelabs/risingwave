@@ -279,7 +279,13 @@ impl CatalogController {
 
         for (job_id, (op, objects, user_info)) in job_notifications {
             let mut version = self
-                .notify_frontend(op, NotificationInfo::ObjectGroup(PbObjectGroup { objects }))
+                .notify_frontend(
+                    op,
+                    NotificationInfo::ObjectGroup(PbObjectGroup {
+                        objects,
+                        dependencies: vec![],
+                    }),
+                )
                 .await;
             if !user_info.is_empty() {
                 version = self.notify_users_update(user_info).await;
@@ -542,8 +548,20 @@ impl CatalogController {
 
         txn.commit().await?;
 
+        let dependency_object_ids = HashSet::from([view_obj.oid]);
+        let dependencies = self
+            .list_object_dependencies_by_object_ids(&dependency_object_ids)
+            .await?;
         let mut version = self
-            .notify_frontend_relation_info(NotificationOperation::Add, PbObjectInfo::View(pb_view))
+            .notify_frontend(
+                NotificationOperation::Add,
+                NotificationInfo::ObjectGroup(PbObjectGroup {
+                    objects: vec![PbObject {
+                        object_info: Some(PbObjectInfo::View(pb_view)),
+                    }],
+                    dependencies,
+                }),
+            )
             .await;
 
         // notify default privileges for views
