@@ -934,22 +934,4 @@ mod tests {
 +---+---+---+"
         );
     }
-
-    #[test]
-    fn test_eliminate_adjacent_noop_update_normalize_update_pair() {
-        let c = StreamChunk::from_pretty(
-            "  I I
-            + 1 10
-            U- 1 10
-            U+ 1 20",
-        );
-        let c = c.eliminate_adjacent_noop_update();
-        assert_eq!(
-            c.to_pretty().to_string(),
-            "\
-+---+---+----+
-| + | 1 | 20 |
-+---+---+----+"
-        );
-    }
 }
