@@ -20,6 +20,7 @@ use futures::{StreamExt, pin_mut};
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::bitmap::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
+use risingwave_common::config::StreamingConfig;
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::row::{self, OwnedRow};
 use risingwave_common::types::{DataType, ScalarImpl};
@@ -1873,12 +1874,14 @@ async fn test_state_table_with_vnode_stats() {
         }
         builder.finish()
     };
+    let mut config = StreamingConfig::default();
+    config.developer.enable_state_table_vnode_stats_prunning = true;
     let mut state_table: StateTable<HummockStorage> = StateTableBuilder::new(
         &table,
         test_env.storage.clone(),
         Some(Arc::new(vnode_bitmap)),
     )
-    .enable_vnode_key_pruning(true)
+    .enable_vnode_key_stats(true, &Arc::new(config))
     .with_metrics(metrics)
     .forbid_preload_all_rows()
     .build()
@@ -2124,7 +2127,7 @@ async fn test_state_table_pruned_key_range_with_two_pk_columns() {
         test_env.storage.clone(),
         Some(Arc::new(vnode_bitmap)),
     )
-    .enable_vnode_key_pruning(true)
+    .enable_vnode_key_stats(true, &Arc::new(config))
     .with_metrics(metrics)
     .forbid_preload_all_rows()
     .build()

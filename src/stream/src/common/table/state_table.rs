@@ -350,6 +350,10 @@ struct StateTableRowStore<LS: LocalStateStore, SD: ValueRowSerde> {
 
     // Per-vnode min/max key statistics for pruning
     vnode_stats: Option<HashMap<VirtualNode, VnodeStatistics>>,
+    /// When true, vnode stats pruning is in dry-run mode:
+    /// we maintain stats and verify pruning correctness but don't actually apply pruning.
+    /// Reads still go to cache/storage even when pruning would indicate no results.
+    enable_state_table_vnode_stats_prunning: bool,
     // Optional metrics for state table operations
     pub metrics: Option<StateTableMetrics>,
 }
@@ -572,7 +576,10 @@ pub struct StateTableBuilder<'a, S, SD, const IS_REPLICATED: bool, PreloadAllRow
     op_consistency_level: Option<StateTableOpConsistencyLevel>,
     output_column_ids: Option<Vec<ColumnId>>,
     preload_all_rows: PreloadAllRow,
-    enable_vnode_key_pruning: Option<bool>,
+    enable_vnode_key_stats: Option<bool>,
+    /// When true, vnode stats pruning is in dry-run mode:
+    /// we maintain stats and verify pruning correctness but don't actually apply pruning.
+    enable_state_table_vnode_stats_prunning: bool,
     metrics: Option<StateTableMetrics>,
 
     _serde: PhantomData<SD>,
@@ -589,7 +596,8 @@ impl<'a, S: StateStore, SD: ValueRowSerde, const IS_REPLICATED: bool>
             op_consistency_level: None,
             output_column_ids: None,
             preload_all_rows: (),
-            enable_vnode_key_pruning: None,
+            enable_vnode_key_stats: None,
+            enable_state_table_vnode_stats_prunning: false,
             metrics: None,
             _serde: Default::default(),
         }
@@ -606,7 +614,8 @@ impl<'a, S: StateStore, SD: ValueRowSerde, const IS_REPLICATED: bool>
             op_consistency_level: self.op_consistency_level,
             output_column_ids: self.output_column_ids,
             preload_all_rows,
-            enable_vnode_key_pruning: self.enable_vnode_key_pruning,
+            enable_vnode_key_stats: self.enable_vnode_key_stats,
+            enable_state_table_vnode_stats_prunning: self.enable_state_table_vnode_stats_prunning,
             metrics: self.metrics,
             _serde: Default::default(),
         }
@@ -650,8 +659,10 @@ impl<'a, S: StateStore, SD: ValueRowSerde, const IS_REPLICATED: bool, PreloadAll
         self
     }
 
-    pub fn enable_vnode_key_pruning(mut self, enable: bool) -> Self {
-        self.enable_vnode_key_pruning = Some(enable);
+    pub fn enable_vnode_key_stats(mut self, enable: bool, config: &StreamingConfig) -> Self {
+        self.enable_vnode_key_stats = Some(enable);
+        self.enable_state_table_vnode_stats_prunning =
+            enable && config.developer.enable_state_table_vnode_stats_prunning;
         self
     }
 
@@ -674,13 +685,13 @@ impl<'a, S: StateStore, SD: ValueRowSerde, const IS_REPLICATED: bool>
             preload_all_rows = false;
         }
 
-        let should_enable_vnode_key_pruning = if preload_all_rows
-            && let Some(enable_vnode_key_pruning) = self.enable_vnode_key_pruning
-            && enable_vnode_key_pruning
+        let should_enable_vnode_key_stats = if preload_all_rows
+            && let Some(enable_vnode_key_stats) = self.enable_vnode_key_stats
+            && enable_vnode_key_stats
         {
             false
         } else {
-            self.enable_vnode_key_pruning.unwrap_or(false)
+            self.enable_vnode_key_stats.unwrap_or(false)
         };
 
         StateTableInner::from_table_catalog_inner(
@@ -691,7 +702,8 @@ impl<'a, S: StateStore, SD: ValueRowSerde, const IS_REPLICATED: bool>
                 .unwrap_or(StateTableOpConsistencyLevel::ConsistentOldValue),
             self.output_column_ids.unwrap_or_default(),
             preload_all_rows,
-            should_enable_vnode_key_pruning,
+            should_enable_vnode_key_stats,
+            self.enable_state_table_vnode_stats_prunning,
             self.metrics,
         )
         .await
@@ -744,7 +756,8 @@ where
         op_consistency_level: StateTableOpConsistencyLevel,
         output_column_ids: Vec<ColumnId>,
         preload_all_rows: bool,
-        enable_vnode_key_pruning: bool,
+        enable_vnode_key_stats: bool,
+        enable_state_table_vnode_stats_prunning: bool,
         metrics: Option<StateTableMetrics>,
     ) -> Self {
         let table_id = table_catalog.id;
@@ -960,7 +973,8 @@ where
                 pk_serde: pk_serde.clone(),
                 table_id,
                 // Need to maintain vnode min/max key stats when vnode key pruning is enabled
-                vnode_stats: enable_vnode_key_pruning.then(HashMap::new),
+                vnode_stats: enable_vnode_key_stats.then(HashMap::new),
+                enable_state_table_vnode_stats_prunning,
                 metrics,
             },
             store,
@@ -1135,7 +1149,7 @@ impl<LS: LocalStateStore, SD: ValueRowSerde> StateTableRowStore<LS, SD> {
         }
 
         // Try to prune using vnode statistics
-        if let Some(stats) = &self.vnode_stats
+        let should_prune = if let Some(stats) = &self.vnode_stats
             && let (vnode, key) = key_bytes.split_vnode_bytes()
             && let Some(vnode_stat) = stats.get(&vnode)
             && vnode_stat.can_prune(&key)
@@ -1143,6 +1157,13 @@ impl<LS: LocalStateStore, SD: ValueRowSerde> StateTableRowStore<LS, SD> {
             if let Some(m) = &self.metrics {
                 m.get_vnode_pruned_count.inc();
             }
+            true
+        } else {
+            false
+        };
+
+        // In dry-run mode, we verify pruning correctness but don't apply it
+        if should_prune && self.enable_state_table_vnode_stats_prunning {
             return Ok(None);
         }
 
@@ -1152,13 +1173,24 @@ impl<LS: LocalStateStore, SD: ValueRowSerde> StateTableRowStore<LS, SD> {
             ..Default::default()
         };
 
-        self.state_store
+        let result = self
+            .state_store
             .on_key_value(key_bytes, read_options, move |_, value| {
                 let row = self.row_serde.deserialize(value)?;
                 Ok(OwnedRow::new(row))
             })
             .await
-            .map_err(Into::into)
+            .map_err(Into::<StreamExecutorError>::into)?;
+
+        // In dry-run mode, verify that pruning would have been correct
+        if should_prune && result.is_some() {
+            tracing::warn!(
+                table_id = %self.table_id,
+                "vnode stats pruning dry run fails for get. This will not affect correctness."
+            );
+        }
+
+        Ok(result)
     }
 
     async fn exists(
@@ -1175,7 +1207,7 @@ impl<LS: LocalStateStore, SD: ValueRowSerde> StateTableRowStore<LS, SD> {
         }
 
         // Try to prune using vnode statistics
-        if let Some(stats) = &self.vnode_stats
+        let should_prune = if let Some(stats) = &self.vnode_stats
             && let (vnode, key) = key_bytes.split_vnode_bytes()
             && let Some(vnode_stat) = stats.get(&vnode)
             && vnode_stat.can_prune(&key)
@@ -1183,6 +1215,13 @@ impl<LS: LocalStateStore, SD: ValueRowSerde> StateTableRowStore<LS, SD> {
             if let Some(m) = &self.metrics {
                 m.get_vnode_pruned_count.inc();
             }
+            true
+        } else {
+            false
+        };
+
+        // In dry-run mode, we verify pruning correctness but don't apply it
+        if should_prune && self.enable_state_table_vnode_stats_prunning {
             return Ok(false);
         }
 
@@ -1195,7 +1234,17 @@ impl<LS: LocalStateStore, SD: ValueRowSerde> StateTableRowStore<LS, SD> {
             .state_store
             .on_key_value(key_bytes, read_options, move |_, _| Ok(()))
             .await?;
-        Ok(result.is_some())
+        let exists = result.is_some();
+
+        // In dry-run mode, verify that pruning would have been correct
+        if should_prune && exists {
+            tracing::warn!(
+                table_id = %self.table_id,
+                "vnode stats pruning dry run fails for exists. This will not affect correctness."
+            );
+        }
+
+        Ok(exists)
     }
 }
 
@@ -1710,32 +1759,60 @@ impl<LS: LocalStateStore, SD: ValueRowSerde> StateTableRowStore<LS, SD> {
             m.iter_count.inc();
         }
         // Check if we can prune the entire range using vnode statistics
-        let (pruned_start, pruned_end) = if let Some(stats) = &self.vnode_stats
+        let (pruned_start, pruned_end, should_prune_entirely) = if let Some(stats) =
+            &self.vnode_stats
             && let Some(vnode_stat) = stats.get(&vnode)
         {
             match vnode_stat.pruned_key_range(&start, &end) {
-                Some((new_start, new_end)) => (new_start, new_end),
+                Some((new_start, new_end)) => {
+                    if self.enable_state_table_vnode_stats_prunning {
+                        (new_start, new_end, false)
+                    } else {
+                        // In dry-run mode, we don't apply pruning but verify correctness
+                        (start, end, false)
+                    }
+                }
                 None => {
                     if let Some(m) = &self.metrics {
                         m.iter_vnode_pruned_count.inc();
                     }
-                    return Ok(futures::future::Either::Left(futures::stream::empty()));
+                    // Mark that we should prune entirely, but handle dry-run below
+                    (start.clone(), end.clone(), true)
                 }
             }
         } else {
-            (start, end)
+            (start, end, false)
+        };
+
+        // In dry-run mode, we don't apply entire range pruning but verify correctness
+        if should_prune_entirely && self.enable_state_table_vnode_stats_prunning {
+            return Ok(futures::future::Either::Left(futures::stream::empty()));
+        }
+
+        let table_id = self.table_id;
+        let inspect_fn = move |result: &StreamExecutorResult<(K, OwnedRow)>| {
+            // Only log error when in dry-run mode and we would have pruned but got results
+            if should_prune_entirely && result.is_ok() {
+                tracing::error!(
+                    table_id = %table_id,
+                    "vnode stats pruning dry run fails for iter. This will not affect correctness."
+                );
+            }
         };
 
         if let Some(rows) = &self.all_rows {
             return Ok(futures::future::Either::Right(
-                futures::future::Either::Left(futures::stream::iter(
-                    rows.get(&vnode)
-                        .expect("covered vnode")
-                        .range((pruned_start, pruned_end))
-                        .map(move |(key, value)| {
-                            Ok((K::from_vnode_bytes(vnode, key), value.clone()))
-                        }),
-                )),
+                futures::future::Either::Left(
+                    futures::stream::iter(
+                        rows.get(&vnode)
+                            .expect("covered vnode")
+                            .range((pruned_start, pruned_end))
+                            .map(move |(key, value)| {
+                                Ok((K::from_vnode_bytes(vnode, key), value.clone()))
+                            }),
+                    )
+                    .inspect(inspect_fn),
+                ),
             ));
         }
         let read_options = ReadOptions {
@@ -1745,15 +1822,18 @@ impl<LS: LocalStateStore, SD: ValueRowSerde> StateTableRowStore<LS, SD> {
         };
 
         Ok(futures::future::Either::Right(
-            futures::future::Either::Right(deserialize_keyed_row_stream(
-                self.state_store
-                    .iter(
-                        prefixed_range_with_vnode((pruned_start, pruned_end), vnode),
-                        read_options,
-                    )
-                    .await?,
-                &*self.row_serde,
-            )),
+            futures::future::Either::Right(
+                deserialize_keyed_row_stream(
+                    self.state_store
+                        .iter(
+                            prefixed_range_with_vnode((pruned_start, pruned_end), vnode),
+                            read_options,
+                        )
+                        .await?,
+                    &*self.row_serde,
+                )
+                .inspect(inspect_fn),
+            ),
         ))
     }
 
@@ -1768,33 +1848,61 @@ impl<LS: LocalStateStore, SD: ValueRowSerde> StateTableRowStore<LS, SD> {
             m.iter_count.inc();
         }
         // Check if we can prune the entire range using vnode statistics
-        let (pruned_start, pruned_end) = if let Some(stats) = &self.vnode_stats
+        let (pruned_start, pruned_end, should_prune_entirely) = if let Some(stats) =
+            &self.vnode_stats
             && let Some(vnode_stat) = stats.get(&vnode)
         {
             match vnode_stat.pruned_key_range(&start, &end) {
-                Some((new_start, new_end)) => (new_start, new_end),
+                Some((new_start, new_end)) => {
+                    if self.enable_state_table_vnode_stats_prunning {
+                        (new_start, new_end, false)
+                    } else {
+                        // In dry-run mode, we don't apply pruning but verify correctness
+                        (start, end, false)
+                    }
+                }
                 None => {
                     if let Some(m) = &self.metrics {
                         m.iter_vnode_pruned_count.inc();
                     }
-                    return Ok(futures::future::Either::Left(futures::stream::empty()));
+                    // Mark that we should prune entirely, but handle dry-run below
+                    (start, end, true)
                 }
             }
         } else {
-            (start, end)
+            (start, end, false)
+        };
+
+        // In dry-run mode, we don't apply entire range pruning but verify correctness
+        if should_prune_entirely && self.enable_state_table_vnode_stats_prunning {
+            return Ok(futures::future::Either::Left(futures::stream::empty()));
+        }
+
+        let table_id = self.table_id;
+        let inspect_fn = move |result: &StreamExecutorResult<(K, OwnedRow)>| {
+            // Only log error when in dry-run mode and we would have pruned but got results
+            if should_prune_entirely && result.is_ok() {
+                tracing::error!(
+                    table_id = %table_id,
+                    "vnode stats pruning dry run fails for rev_iter. This will not affect correctness."
+                );
+            }
         };
 
         if let Some(rows) = &self.all_rows {
             return Ok(futures::future::Either::Right(
-                futures::future::Either::Left(futures::stream::iter(
-                    rows.get(&vnode)
-                        .expect("covered vnode")
-                        .range((pruned_start, pruned_end))
-                        .rev()
-                        .map(move |(key, value)| {
-                            Ok((K::from_vnode_bytes(vnode, key), value.clone()))
-                        }),
-                )),
+                futures::future::Either::Left(
+                    futures::stream::iter(
+                        rows.get(&vnode)
+                            .expect("covered vnode")
+                            .range((pruned_start, pruned_end))
+                            .rev()
+                            .map(move |(key, value)| {
+                                Ok((K::from_vnode_bytes(vnode, key), value.clone()))
+                            }),
+                    )
+                    .inspect(inspect_fn),
+                ),
             ));
         }
         let read_options = ReadOptions {
@@ -1804,15 +1912,18 @@ impl<LS: LocalStateStore, SD: ValueRowSerde> StateTableRowStore<LS, SD> {
         };
 
         Ok(futures::future::Either::Right(
-            futures::future::Either::Right(deserialize_keyed_row_stream(
-                self.state_store
-                    .rev_iter(
-                        prefixed_range_with_vnode((pruned_start, pruned_end), vnode),
-                        read_options,
-                    )
-                    .await?,
-                &*self.row_serde,
-            )),
+            futures::future::Either::Right(
+                deserialize_keyed_row_stream(
+                    self.state_store
+                        .rev_iter(
+                            prefixed_range_with_vnode((pruned_start, pruned_end), vnode),
+                            read_options,
+                        )
+                        .await?,
+                    &*self.row_serde,
+                )
+                .inspect(inspect_fn),
+            ),
         ))
     }
 }
