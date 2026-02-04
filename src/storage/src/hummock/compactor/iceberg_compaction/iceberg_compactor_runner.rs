@@ -17,7 +17,9 @@ use std::fmt::Debug;
 use std::sync::{Arc, LazyLock};
 
 use derive_builder::Builder;
-use iceberg::spec::MAIN_BRANCH;
+use iceberg::expr::BoundPredicate;
+use iceberg::scan::FileScanTask;
+use iceberg::spec::{DataContentType, DataFileFormat, MAIN_BRANCH, Schema};
 use iceberg::{Catalog, TableIdent};
 use iceberg_compaction_core::compaction::{
     CommitConsistencyParams, CommitManagerRetryConfig, CompactionBuilder, CompactionPlan,
@@ -28,6 +30,7 @@ use iceberg_compaction_core::config::{
     FullCompactionConfigBuilder, GroupFilters, SmallFilesConfigBuilder,
 };
 use iceberg_compaction_core::executor::RewriteFilesStat;
+use iceberg_compaction_core::file_selection::strategy::FileGroup;
 use mixtrics::registry::prometheus::PrometheusMetricsRegistry;
 use parquet::basic::Compression;
 use parquet::file::properties::WriterProperties;
@@ -40,14 +43,149 @@ use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 use risingwave_connector::sink::iceberg::{
     IcebergConfig, IcebergWriteMode, commit_branch, should_enable_iceberg_cow,
 };
-use risingwave_pb::iceberg_compaction::IcebergCompactionTask;
+use risingwave_pb::iceberg_compaction::file_scan_task::{FileContent, FileFormat};
 use risingwave_pb::iceberg_compaction::iceberg_compaction_task::TaskType;
+use risingwave_pb::iceberg_compaction::{
+    FileGroup as PbFileGroup, FileScanTask as PbFileScanTask, IcebergCompactionTask, Plan as PbPlan,
+};
+use serde_json;
 use thiserror_ext::AsReport;
 use tokio::sync::oneshot::Receiver;
 
 use super::IcebergTaskMeta;
 use crate::hummock::{HummockError, HummockResult};
 use crate::monitor::CompactorMetrics;
+
+pub async fn create_plan_runner_from_plan(
+    task_id: u64,
+    plan_index: usize,
+    plan: PbPlan,
+    config: IcebergCompactorRunnerConfig,
+    metrics: Arc<CompactorMetrics>,
+) -> HummockResult<IcebergCompactionPlanRunner> {
+    let iceberg_config = IcebergConfig::from_btreemap(BTreeMap::from_iter(plan.props.into_iter()))
+        .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
+    let catalog = iceberg_config
+        .create_catalog()
+        .await
+        .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
+    let table_ident = iceberg_config
+        .full_table_name()
+        .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
+
+    let file_group = decode_file_group(
+        plan.file_group
+            .ok_or_else(|| HummockError::compaction_executor("Missing file group in plan"))?,
+    )?;
+    let compaction_plan = CompactionPlan {
+        file_group,
+        to_branch: plan.to_branch.into(),
+        snapshot_id: plan.snapshot_id,
+    };
+
+    let task_type = TaskType::try_from(plan.task_type)
+        .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
+
+    Ok(IcebergCompactionPlanRunner {
+        task_id,
+        plan_index,
+        catalog,
+        table_ident,
+        iceberg_config,
+        config,
+        metrics,
+        task_type,
+        branch: compaction_plan.to_branch.clone().into_owned(),
+        compaction_plan,
+    })
+}
+
+fn decode_file_group(file_group: PbFileGroup) -> HummockResult<FileGroup> {
+    let data_files = file_group
+        .data_files
+        .iter()
+        .map(decode_file_scan_task)
+        .collect::<HummockResult<Vec<_>>>()?;
+    let position_delete_files = file_group
+        .position_delete_files
+        .iter()
+        .map(decode_file_scan_task)
+        .collect::<HummockResult<Vec<_>>>()?;
+    let equality_delete_files = file_group
+        .equality_delete_files
+        .iter()
+        .map(decode_file_scan_task)
+        .collect::<HummockResult<Vec<_>>>()?;
+
+    let total_size = data_files.iter().map(|task| task.length).sum();
+    let data_file_count = data_files.len();
+
+    Ok(FileGroup {
+        data_files,
+        position_delete_files,
+        equality_delete_files,
+        total_size,
+        data_file_count,
+        executor_parallelism: file_group.executor_parallelism as usize,
+        output_parallelism: file_group.output_parallelism as usize,
+    })
+}
+
+fn decode_file_scan_task(task: &PbFileScanTask) -> HummockResult<FileScanTask> {
+    let schema: Schema = serde_json::from_slice(&task.schema_json)
+        .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
+    let predicate: Option<BoundPredicate> = if task.has_predicate {
+        Some(
+            serde_json::from_slice(&task.predicate_json)
+                .map_err(|e| HummockError::compaction_executor(e.as_report()))?,
+        )
+    } else {
+        None
+    };
+    let equality_ids = if task.has_equality_ids {
+        Some(task.equality_ids.clone())
+    } else {
+        None
+    };
+
+    Ok(FileScanTask {
+        start: task.start,
+        length: task.length,
+        record_count: task.record_count,
+        data_file_path: task.data_file_path.clone(),
+        data_file_content: decode_content_type(task.data_file_content),
+        data_file_format: decode_file_format(task.data_file_format),
+        schema: Arc::new(schema),
+        project_field_ids: task.project_field_ids.clone(),
+        predicate,
+        sequence_number: task.sequence_number,
+        equality_ids,
+        file_size_in_bytes: task.file_size_in_bytes,
+        deletes: Vec::new(),
+        partition: None,
+        partition_spec: None,
+        name_mapping: None,
+    })
+}
+
+fn decode_content_type(content: i32) -> DataContentType {
+    match FileContent::try_from(content).ok() {
+        Some(FileContent::Data) => DataContentType::Data,
+        Some(FileContent::PositionDeletes) => DataContentType::PositionDeletes,
+        Some(FileContent::EqualityDeletes) => DataContentType::EqualityDeletes,
+        _ => DataContentType::Data,
+    }
+}
+
+fn decode_file_format(format: i32) -> DataFileFormat {
+    match FileFormat::try_from(format).ok() {
+        Some(FileFormat::Parquet) => DataFileFormat::Parquet,
+        Some(FileFormat::Avro) => DataFileFormat::Avro,
+        Some(FileFormat::Orc) => DataFileFormat::Orc,
+        Some(FileFormat::Puffin) => DataFileFormat::Puffin,
+        _ => DataFileFormat::Parquet,
+    }
+}
 
 static ICEBERG_COMPACTION_METRICS_REGISTRY: LazyLock<Box<PrometheusMetricsRegistry>> =
     LazyLock::new(|| {

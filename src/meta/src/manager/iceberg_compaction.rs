@@ -12,13 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use std::time::Instant;
 
 use anyhow::anyhow;
-use iceberg::spec::Operation;
+use iceberg::scan::FileScanTask;
+use iceberg::spec::{DataContentType, DataFileFormat, Operation};
 use iceberg::transaction::{ApplyTransactionAction, Transaction};
+use iceberg_compaction_core::compaction::{CompactionPlan, CompactionPlanner};
+use iceberg_compaction_core::config::{
+    CompactionPlanningConfig, FilesWithDeletesConfigBuilder, FullCompactionConfigBuilder,
+    GroupFilters, SmallFilesConfigBuilder,
+};
 use itertools::Itertools;
 use parking_lot::RwLock;
 use risingwave_common::id::WorkerId;
@@ -28,9 +34,12 @@ use risingwave_connector::sink::iceberg::{
     CompactionType, IcebergConfig, commit_branch, should_enable_iceberg_cow,
 };
 use risingwave_connector::sink::{SinkError, SinkParam};
+use risingwave_pb::iceberg_compaction::file_scan_task::{FileContent, FileFormat};
 use risingwave_pb::iceberg_compaction::iceberg_compaction_task::TaskType;
+use risingwave_pb::iceberg_compaction::subscribe_iceberg_compaction_event_request::ReportPlan;
 use risingwave_pb::iceberg_compaction::{
-    IcebergCompactionTask, SubscribeIcebergCompactionEventRequest,
+    FileGroup, FileScanTask as PbFileScanTask, Plan, PlanKey,
+    SubscribeIcebergCompactionEventRequest, subscribe_iceberg_compaction_event_response,
 };
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
@@ -202,31 +211,86 @@ impl IcebergCompactionHandle {
         }
     }
 
-    pub async fn send_compact_task(
-        mut self,
-        compactor: Arc<IcebergCompactor>,
+    pub(crate) async fn build_plan_tasks(
+        &self,
         task_id: u64,
-    ) -> MetaResult<()> {
-        use risingwave_pb::iceberg_compaction::subscribe_iceberg_compaction_event_response::Event as IcebergResponseEvent;
+        attempt: u32,
+    ) -> MetaResult<Vec<subscribe_iceberg_compaction_event_response::PlanTask>> {
         let Some(prost_sink_catalog) = self
             .metadata_manager
             .catalog_controller
             .get_sink_by_id(self.sink_id)
             .await?
         else {
-            // The sink may be deleted, just return Ok.
             tracing::warn!("Sink not found: {}", self.sink_id);
-            return Ok(());
+            return Err(anyhow!("Sink not found: {}", self.sink_id).into());
         };
         let sink_catalog = SinkCatalog::from(prost_sink_catalog);
         let param = SinkParam::try_from_sink_catalog(sink_catalog)?;
+        let iceberg_config = IcebergConfig::from_btreemap(param.properties.clone())?;
+        let catalog = iceberg_config
+            .create_catalog()
+            .await
+            .map_err(|e| SinkError::Iceberg(e.into()))?;
+        let table_ident = iceberg_config.full_table_name()?;
 
-        let result =
-            compactor.send_event(IcebergResponseEvent::CompactTask(IcebergCompactionTask {
-                task_id,
-                props: param.properties,
-                task_type: self.task_type as i32,
-            }));
+        let planning_config = build_planning_config(&iceberg_config, self.task_type)?;
+        let planner = CompactionPlanner::new(planning_config);
+        let to_branch = commit_branch(iceberg_config.r#type.as_str(), iceberg_config.write_mode);
+        let table = catalog
+            .load_table(&table_ident)
+            .await
+            .map_err(|e| SinkError::Iceberg(e.into()))?;
+        let compaction_plans = planner
+            .plan_compaction_with_branch(&table, &to_branch)
+            .await
+            .map_err(|e| SinkError::Iceberg(e.into()))?;
+
+        if compaction_plans.is_empty() {
+            return Ok(vec![]);
+        }
+
+        let mut plan_tasks = Vec::with_capacity(compaction_plans.len());
+        for (plan_index, plan) in compaction_plans.into_iter().enumerate() {
+            let plan_pb = encode_compaction_plan(
+                plan,
+                param.properties.clone(),
+                table_ident.to_string(),
+                self.task_type as i32,
+            )?;
+            plan_tasks.push(subscribe_iceberg_compaction_event_response::PlanTask {
+                key: Some(PlanKey {
+                    task_id,
+                    plan_index: plan_index as u32,
+                }),
+                required_parallelism: plan_pb
+                    .file_group
+                    .as_ref()
+                    .map(|fg| fg.executor_parallelism)
+                    .unwrap_or(1),
+                plan: Some(plan_pb),
+                attempt,
+            });
+        }
+
+        Ok(plan_tasks)
+    }
+
+    pub async fn send_compact_task(
+        mut self,
+        compactor: Arc<IcebergCompactor>,
+        task_id: u64,
+    ) -> MetaResult<()> {
+        use risingwave_pb::iceberg_compaction::subscribe_iceberg_compaction_event_response::Event as IcebergResponseEvent;
+        let plan_tasks = self.build_plan_tasks(task_id, 0).await?;
+
+        let mut result = Ok(());
+        for plan_task in plan_tasks {
+            result = compactor.send_event(IcebergResponseEvent::PlanTask(plan_task));
+            if result.is_err() {
+                break;
+            }
+        }
 
         if result.is_ok() {
             self.handle_success = true;
@@ -260,6 +324,8 @@ impl Drop for IcebergCompactionHandle {
 
 struct IcebergCompactionManagerInner {
     pub sink_schedules: HashMap<SinkId, CompactionTrack>,
+    pub pending_plans: VecDeque<PlanAssignment>,
+    pub in_flight_plans: HashMap<(u64, u32), PlanAssignment>,
 }
 
 pub struct IcebergCompactionManager {
@@ -288,6 +354,8 @@ impl IcebergCompactionManager {
                 env,
                 inner: Arc::new(RwLock::new(IcebergCompactionManagerInner {
                     sink_schedules: HashMap::default(),
+                    pending_plans: VecDeque::default(),
+                    in_flight_plans: HashMap::default(),
                 })),
                 metadata_manager,
                 iceberg_compactor_manager,
@@ -550,6 +618,108 @@ impl IcebergCompactionManager {
             .unwrap();
     }
 
+    pub async fn report_plan(&self, report_plan: ReportPlan) -> MetaResult<()> {
+        let Some(key) = report_plan.key.as_ref() else {
+            tracing::warn!("Received iceberg plan report without key");
+            return Ok(());
+        };
+        let key_tuple = (key.task_id, key.plan_index);
+        let attempt = report_plan.attempt;
+
+        let mut guard = self.inner.write();
+        match guard.in_flight_plans.get(&key_tuple) {
+            Some(plan) if plan.attempt == attempt => {
+                guard.in_flight_plans.remove(&key_tuple);
+                tracing::info!(
+                    task_id = key.task_id,
+                    plan_index = key.plan_index,
+                    status = report_plan.status,
+                    "Accepted iceberg plan report"
+                );
+            }
+            Some(plan) => {
+                tracing::info!(
+                    task_id = key.task_id,
+                    plan_index = key.plan_index,
+                    expected_attempt = plan.attempt,
+                    got_attempt = attempt,
+                    "Ignored stale iceberg plan report"
+                );
+            }
+            None => {
+                tracing::info!(
+                    task_id = key.task_id,
+                    plan_index = key.plan_index,
+                    "Ignored unknown iceberg plan report"
+                );
+            }
+        }
+        Ok(())
+    }
+
+    pub(crate) fn requeue_expired_plans(&self, now: Instant) {
+        const ICEBERG_PLAN_TIMEOUT_SECS: u64 = 300;
+        let mut guard = self.inner.write();
+        let timeout = std::time::Duration::from_secs(ICEBERG_PLAN_TIMEOUT_SECS);
+        let mut expired_keys = Vec::new();
+        for (key, plan) in &guard.in_flight_plans {
+            if let Some(assigned_at) = plan.assigned_at
+                && now.duration_since(assigned_at) > timeout
+            {
+                expired_keys.push(*key);
+            }
+        }
+
+        for key in expired_keys {
+            if let Some(mut plan) = guard.in_flight_plans.remove(&key) {
+                plan.attempt = plan.attempt.saturating_add(1);
+                plan.plan_task.attempt = plan.attempt;
+                plan.assigned_at = None;
+                guard.pending_plans.push_back(plan);
+            }
+        }
+    }
+
+    pub(crate) fn enqueue_plan(
+        &self,
+        plan_task: subscribe_iceberg_compaction_event_response::PlanTask,
+    ) {
+        let Some(key) = plan_task.key.as_ref() else {
+            return;
+        };
+        let plan = PlanAssignment {
+            key: (key.task_id, key.plan_index),
+            attempt: plan_task.attempt,
+            plan_task,
+            assigned_at: None,
+        };
+        let mut guard = self.inner.write();
+        guard.pending_plans.push_back(plan);
+    }
+
+    pub(crate) fn take_next_plans(
+        &self,
+        count: usize,
+    ) -> Vec<subscribe_iceberg_compaction_event_response::PlanTask> {
+        let mut guard = self.inner.write();
+        let mut ret = Vec::with_capacity(count);
+        for _ in 0..count {
+            if let Some(mut plan) = guard.pending_plans.pop_front() {
+                plan.assigned_at = Some(Instant::now());
+                guard.in_flight_plans.insert(plan.key, plan.clone());
+                ret.push(plan.plan_task);
+            } else {
+                break;
+            }
+        }
+        ret
+    }
+
+    pub(crate) fn is_pending_empty(&self) -> bool {
+        let guard = self.inner.read();
+        guard.pending_plans.is_empty()
+    }
+
     pub fn iceberg_compaction_event_loop(
         iceberg_compaction_manager: Arc<Self>,
         compactor_streams_change_rx: UnboundedReceiver<(
@@ -640,12 +810,47 @@ impl IcebergCompactionManager {
             .await?;
 
         let sink_param = self.get_sink_param(sink_id).await?;
+        let iceberg_config = IcebergConfig::from_btreemap(sink_param.properties.clone())?;
+        let catalog = iceberg_config
+            .create_catalog()
+            .await
+            .map_err(|e| SinkError::Iceberg(e.into()))?;
+        let table_ident = iceberg_config.full_table_name()?;
+        let planning_config = build_planning_config(&iceberg_config, TaskType::Full)?;
+        let planner = CompactionPlanner::new(planning_config);
+        let to_branch = commit_branch(iceberg_config.r#type.as_str(), iceberg_config.write_mode);
+        let table = catalog
+            .load_table(&table_ident)
+            .await
+            .map_err(|e| SinkError::Iceberg(e.into()))?;
+        let compaction_plans = planner
+            .plan_compaction_with_branch(&table, &to_branch)
+            .await
+            .map_err(|e| SinkError::Iceberg(e.into()))?;
 
-        compactor.send_event(IcebergResponseEvent::CompactTask(IcebergCompactionTask {
-            task_id,
-            props: sink_param.properties,
-            task_type: TaskType::Full as i32, // default to full compaction
-        }))?;
+        for (plan_index, plan) in compaction_plans.into_iter().enumerate() {
+            let plan_pb = encode_compaction_plan(
+                plan,
+                sink_param.properties.clone(),
+                table_ident.to_string(),
+                TaskType::Full as i32,
+            )?;
+            compactor.send_event(IcebergResponseEvent::PlanTask(
+                subscribe_iceberg_compaction_event_response::PlanTask {
+                    key: Some(PlanKey {
+                        task_id,
+                        plan_index: plan_index as u32,
+                    }),
+                    required_parallelism: plan_pb
+                        .file_group
+                        .as_ref()
+                        .map(|fg| fg.executor_parallelism)
+                        .unwrap_or(1),
+                    plan: Some(plan_pb),
+                    attempt: 0,
+                },
+            ))?;
+        }
 
         tracing::info!(
             "Manual compaction triggered for sink {} with task ID {}, waiting for completion...",
@@ -913,4 +1118,166 @@ impl IcebergCompactionManager {
 
         Ok(())
     }
+}
+
+fn build_planning_config(
+    iceberg_config: &IcebergConfig,
+    task_type: TaskType,
+) -> MetaResult<CompactionPlanningConfig> {
+    // TODO: wire real config from meta/cluster settings.
+    let max_parallelism = 4usize;
+    let min_size_per_partition = 1024u64 * 1024 * 1024;
+    let max_file_count_per_partition = 32usize;
+    let target_file_size_bytes = iceberg_config.target_file_size_mb() * 1024 * 1024;
+
+    let group_filters = None::<GroupFilters>;
+
+    let planning_config = match task_type {
+        TaskType::SmallFiles => {
+            let mut builder = SmallFilesConfigBuilder::default();
+            builder
+                .max_parallelism(max_parallelism)
+                .min_size_per_partition(min_size_per_partition)
+                .max_file_count_per_partition(max_file_count_per_partition)
+                .target_file_size_bytes(target_file_size_bytes)
+                .enable_heuristic_output_parallelism(true)
+                .small_file_threshold_bytes(
+                    iceberg_config.small_files_threshold_mb() * 1024 * 1024,
+                );
+            if let Some(filters) = group_filters {
+                builder.group_filters(filters);
+            }
+            let config = builder.build().map_err(|e| SinkError::Iceberg(e.into()))?;
+            CompactionPlanningConfig::SmallFiles(config)
+        }
+        TaskType::Full => {
+            let config = FullCompactionConfigBuilder::default()
+                .max_parallelism(max_parallelism)
+                .min_size_per_partition(min_size_per_partition)
+                .max_file_count_per_partition(max_file_count_per_partition)
+                .target_file_size_bytes(target_file_size_bytes)
+                .enable_heuristic_output_parallelism(true)
+                .build()
+                .map_err(|e| SinkError::Iceberg(e.into()))?;
+            CompactionPlanningConfig::Full(config)
+        }
+        TaskType::FilesWithDelete => {
+            let config = FilesWithDeletesConfigBuilder::default()
+                .max_parallelism(max_parallelism)
+                .min_size_per_partition(min_size_per_partition)
+                .max_file_count_per_partition(max_file_count_per_partition)
+                .target_file_size_bytes(target_file_size_bytes)
+                .enable_heuristic_output_parallelism(true)
+                .min_delete_file_count_threshold(iceberg_config.delete_files_count_threshold())
+                .build()
+                .map_err(|e| SinkError::Iceberg(e.into()))?;
+            CompactionPlanningConfig::FilesWithDeletes(config)
+        }
+        _ => {
+            return Err(anyhow!("Unsupported iceberg task type: {:?}", task_type).into());
+        }
+    };
+
+    Ok(planning_config)
+}
+
+fn encode_compaction_plan(
+    plan: CompactionPlan,
+    props: std::collections::BTreeMap<String, String>,
+    table_ident: String,
+    task_type: i32,
+) -> MetaResult<Plan> {
+    let file_group = plan.file_group;
+    let data_files = file_group
+        .data_files
+        .iter()
+        .map(encode_file_scan_task)
+        .collect::<MetaResult<Vec<_>>>()?;
+    let position_delete_files = file_group
+        .position_delete_files
+        .iter()
+        .map(encode_file_scan_task)
+        .collect::<MetaResult<Vec<_>>>()?;
+    let equality_delete_files = file_group
+        .equality_delete_files
+        .iter()
+        .map(encode_file_scan_task)
+        .collect::<MetaResult<Vec<_>>>()?;
+
+    let props = props
+        .into_iter()
+        .collect::<std::collections::HashMap<_, _>>();
+    Ok(Plan {
+        props,
+        table_ident,
+        task_type,
+        to_branch: plan.to_branch.into_owned(),
+        snapshot_id: plan.snapshot_id,
+        file_group: Some(FileGroup {
+            data_files,
+            position_delete_files,
+            equality_delete_files,
+            executor_parallelism: file_group.executor_parallelism as u32,
+            output_parallelism: file_group.output_parallelism as u32,
+        }),
+    })
+}
+
+fn encode_file_scan_task(task: &FileScanTask) -> MetaResult<PbFileScanTask> {
+    let schema_json =
+        serde_json::to_vec(task.schema()).map_err(|e| SinkError::Iceberg(e.into()))?;
+    let (predicate_json, has_predicate) = match task.predicate() {
+        Some(pred) => (
+            serde_json::to_vec(pred).map_err(|e| SinkError::Iceberg(e.into()))?,
+            true,
+        ),
+        None => (vec![], false),
+    };
+
+    let (equality_ids, has_equality_ids) = match &task.equality_ids {
+        Some(ids) => (ids.clone(), true),
+        None => (vec![], false),
+    };
+
+    Ok(PbFileScanTask {
+        start: task.start,
+        length: task.length,
+        record_count: task.record_count,
+        data_file_path: task.data_file_path.clone(),
+        data_file_content: map_content_type(task.data_file_content) as i32,
+        data_file_format: map_file_format(task.data_file_format) as i32,
+        schema_json,
+        project_field_ids: task.project_field_ids.clone(),
+        predicate_json,
+        has_predicate,
+        sequence_number: task.sequence_number,
+        equality_ids,
+        has_equality_ids,
+        file_size_in_bytes: task.file_size_in_bytes,
+    })
+}
+
+fn map_content_type(content: DataContentType) -> FileContent {
+    match content {
+        DataContentType::Data => FileContent::Data,
+        DataContentType::PositionDeletes => FileContent::PositionDeletes,
+        DataContentType::EqualityDeletes => FileContent::EqualityDeletes,
+    }
+}
+
+fn map_file_format(format: DataFileFormat) -> FileFormat {
+    match format {
+        DataFileFormat::Parquet => FileFormat::Parquet,
+        DataFileFormat::Avro => FileFormat::Avro,
+        DataFileFormat::Orc => FileFormat::Orc,
+        DataFileFormat::Puffin => FileFormat::Puffin,
+    }
+}
+
+#[derive(Debug, Clone)]
+struct PlanAssignment {
+    key: (u64, u32),
+    plan_task: subscribe_iceberg_compaction_event_response::PlanTask,
+    attempt: u32,
+    assigned_at: Option<Instant>,
 }
