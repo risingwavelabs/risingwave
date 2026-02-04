@@ -14,7 +14,7 @@
 
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use futures::FutureExt;
 use futures::stream::BoxStream;
@@ -23,14 +23,18 @@ use risingwave_pb::stream_service::streaming_control_stream_request::InitRequest
 use risingwave_pb::stream_service::{
     StreamingControlStreamRequest, StreamingControlStreamResponse,
 };
+use tokio::spawn;
 use tokio::sync::mpsc::{UnboundedSender, unbounded_channel};
 use tokio::task::JoinHandle;
+use tokio::time::sleep;
 use tonic::Status;
 
 use crate::error::StreamResult;
 use crate::executor::ActorContextRef;
 use crate::executor::exchange::permit::Receiver;
 use crate::executor::monitor::StreamingMetrics;
+use crate::is_print_actor_trace;
+use crate::task::await_tree_key::Actor;
 use crate::task::barrier_worker::{
     ControlStreamHandle, EventSender, LocalActorOperation, LocalBarrierWorker, TakeReceiverRequest,
 };
@@ -101,6 +105,27 @@ impl LocalStreamManager {
         }
 
         let await_tree_reg = await_tree_config.map(await_tree::Registry::new);
+
+        {
+            let await_tree_reg = await_tree_reg.clone();
+            let _join_handle = spawn(async move {
+                loop {
+                    sleep(Duration::from_secs(30)).await;
+                    if is_print_actor_trace()
+                        && let Some(reg) = &await_tree_reg
+                    {
+                        use std::fmt::Write;
+                        let mut s = String::new();
+                        writeln!(s, "--- Actor Traces ---").unwrap();
+                        for (actor, trace) in reg.collect::<Actor>() {
+                            writeln!(s, ">> Actor {}", actor.0).unwrap();
+                            writeln!(s, "{trace}").unwrap();
+                        }
+                        error!("actor trace when stuck: {s}");
+                    }
+                }
+            });
+        }
 
         let (actor_op_tx, actor_op_rx) = unbounded_channel();
 

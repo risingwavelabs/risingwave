@@ -36,7 +36,9 @@ use risingwave_storage::table::ChangeLogRow;
 use risingwave_storage::table::batch_table::BatchTable;
 use tokio::select;
 use tokio::sync::mpsc::UnboundedReceiver;
+use tokio::time::sleep;
 
+use crate::enable_print_actor_trace;
 use crate::executor::backfill::snapshot_backfill::receive_next_barrier;
 use crate::executor::backfill::snapshot_backfill::state::{
     BackfillState, EpochBackfillProgress, VnodeBackfillProgress,
@@ -465,6 +467,7 @@ impl<S: StateStore> Execute for SnapshotBackfillExecutor<S> {
 struct ConsumingSnapshot;
 struct ConsumingLogStore;
 
+#[derive(Debug)]
 struct PendingBarriers {
     first_upstream_barrier_epoch: EpochPair,
 
@@ -623,6 +626,9 @@ impl<S> UpstreamBuffer<'_, S> {
                 if let Err(e) = try {
                     if !self.can_consume_upstream() {
                         // pause the future to block consuming upstream
+                        sleep(Duration::from_secs(30)).await;
+                        warn!(pending_barrier = ?self.upstream_pending_barriers, "not polling upstream but timeout");
+                        let _guard = enable_print_actor_trace();
                         return pending().await;
                     }
                     self.consume_until_next_checkpoint_barrier().await?;
@@ -667,6 +673,7 @@ impl<S> UpstreamBuffer<'_, S> {
 }
 
 impl UpstreamBuffer<'_, ConsumingLogStore> {
+    #[await_tree::instrument("consumed_epoch: {:?}", epoch)]
     async fn consumed_epoch(&mut self, epoch: EpochPair) -> StreamExecutorResult<bool> {
         assert!(!self.is_finished());
         if !self.upstream_pending_barriers.has_checkpoint_epoch() {
@@ -749,6 +756,7 @@ impl<S> UpstreamBuffer<'_, S> {
     }
 }
 
+#[await_tree::instrument("make_log_stream: {prev_epoch}")]
 async fn make_log_stream(
     upstream_table: &BatchTable<impl StateStore>,
     prev_epoch: u64,

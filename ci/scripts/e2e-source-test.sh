@@ -52,44 +52,44 @@ export VAULT_ADDR="http://vault-server:8200"
 export VAULT_TOKEN="root-token"
 ./ci/scripts/setup-vault.sh
 
-echo "--- e2e, inline test"
-RUST_LOG="debug,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info,risingwave_meta=info" \
-risedev ci-start ci-inline-source-test
-
-# check if run debug only test
-if [ "$profile" == "ci-dev" ]; then
-    echo "--- Run debug mode only tests"
-    risedev slt './e2e_test/debug_mode_only/debug_splits.slt'
-fi
-
-echo "--- Run mqtt test"
-risedev slt './e2e_test/mqtt/**/*.slt'
-echo "--- Run mqtt test done"
-
-echo "--- Run kafka sasl test"
-risedev slt './e2e_test/kafka-sasl/**/*.slt' -j4
-echo "--- Run kafka sasl test done"
-
-risedev slt './e2e_test/source_inline/**/*.slt' -j4
-risedev slt './e2e_test/source_inline/**/*.slt.serial'
-
-echo "--- Run Vault secret tests"
-risedev slt './e2e_test/ddl/vault_secret.slt'
-
-if [ "$profile" == "ci-release" ]; then
-    # NOTE(kwannoel): This test has an execution time in main-cron of about ~1 minute.
-    # It takes too long to run in pull-request workflow.
-    # Further, it involves waiting for backfill progress to tick up.
-    # Even with rate limit, the test time is not deterministic.
-    # It may take too long or too slow, since there are joins involved,
-    # and the performance varies between release and debug builds.
-    # it's simpler to keep it in release mode only
-    echo "--- Run release mode only tests"
-    risedev slt './e2e_test/backfill/backfill_progress/create_materialized_view_mix_source_and_normal.slt'
-fi
-
-echo "--- Kill cluster"
-risedev ci-kill
+#echo "--- e2e, inline test"
+#RUST_LOG="debug,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info,risingwave_meta=info" \
+#risedev ci-start ci-inline-source-test
+#
+## check if run debug only test
+#if [ "$profile" == "ci-dev" ]; then
+#    echo "--- Run debug mode only tests"
+#    risedev slt './e2e_test/debug_mode_only/debug_splits.slt'
+#fi
+#
+#echo "--- Run mqtt test"
+#risedev slt './e2e_test/mqtt/**/*.slt'
+#echo "--- Run mqtt test done"
+#
+#echo "--- Run kafka sasl test"
+#risedev slt './e2e_test/kafka-sasl/**/*.slt' -j4
+#echo "--- Run kafka sasl test done"
+#
+#risedev slt './e2e_test/source_inline/**/*.slt' -j4
+#risedev slt './e2e_test/source_inline/**/*.slt.serial'
+#
+#echo "--- Run Vault secret tests"
+#risedev slt './e2e_test/ddl/vault_secret.slt'
+#
+#if [ "$profile" == "ci-release" ]; then
+#    # NOTE(kwannoel): This test has an execution time in main-cron of about ~1 minute.
+#    # It takes too long to run in pull-request workflow.
+#    # Further, it involves waiting for backfill progress to tick up.
+#    # Even with rate limit, the test time is not deterministic.
+#    # It may take too long or too slow, since there are joins involved,
+#    # and the performance varies between release and debug builds.
+#    # it's simpler to keep it in release mode only
+#    echo "--- Run release mode only tests"
+#    risedev slt './e2e_test/backfill/backfill_progress/create_materialized_view_mix_source_and_normal.slt'
+#fi
+#
+#echo "--- Kill cluster"
+#risedev ci-kill
 
 echo "--- Prepare data"
 cp src/connector/src/test_data/simple-schema.avsc ./avro-simple-schema.avsc

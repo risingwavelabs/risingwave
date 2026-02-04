@@ -539,11 +539,29 @@ impl StreamConsumer for DispatchExecutor {
                     }
                     MessageBatch::BarrierBatch(barrier_batch) => {
                         assert!(!barrier_batch.is_empty());
+                        let is_multiple = barrier_batch.len() > 1;
+                        if is_multiple {
+                            let barriers = barrier_batch
+                                .iter()
+                                .map(|barrier| (barrier.epoch, barrier.kind))
+                                .collect_vec();
+                            warn!(
+                                ?barriers,
+                                actor_id = %self.inner.actor_id,
+                                "dispatch multiple barriers in batch"
+                            );
+                        }
                         self.inner
                             .dispatch(MessageBatch::BarrierBatch(barrier_batch.clone()))
                             .instrument(tracing::info_span!("dispatch_barrier_batch"))
                             .instrument_await("dispatch_barrier_batch")
                             .await?;
+                        if is_multiple {
+                            warn!(
+                                actor_id = %self.inner.actor_id,
+                                "finish dispatch multiple barriers in batch"
+                            );
+                        }
                         self.inner
                             .metrics
                             .metrics
@@ -551,6 +569,12 @@ impl StreamConsumer for DispatchExecutor {
                             .observe(barrier_batch.len() as f64);
                         for barrier in barrier_batch {
                             yield barrier;
+                        }
+                        if is_multiple {
+                            warn!(
+                                actor_id = %self.inner.actor_id,
+                                "finish yielding multiple barriers"
+                            );
                         }
                     }
                     watermark @ MessageBatch::Watermark(_) => {
