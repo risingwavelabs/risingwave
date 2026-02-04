@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::id::{FragmentId, JobId};
 use risingwave_common::types::{Fields, JsonbVal};
 use risingwave_frontend_macro::system_catalog;
 use serde_json::json;
@@ -23,8 +24,8 @@ use crate::error::Result;
 #[derive(Fields)]
 struct RwFragmentInfo {
     #[primary_key]
-    fragment_id: i32,
-    table_id: i32,
+    fragment_id: FragmentId,
+    table_id: JobId,
     distribution_type: String,
     state_table_ids: Vec<i32>,
     upstream_fragment_ids: Vec<i32>,
@@ -42,8 +43,8 @@ async fn read_rw_fragment_infos(reader: &SysCatalogReaderImpl) -> Result<Vec<RwF
     Ok(distributions
         .into_iter()
         .map(|distribution| RwFragmentInfo {
-            fragment_id: distribution.fragment_id.as_i32_id(),
-            table_id: distribution.table_id.as_i32_id(),
+            fragment_id: distribution.fragment_id,
+            table_id: distribution.table_id,
             distribution_type: distribution.distribution_type().as_str_name().into(),
             state_table_ids: distribution
                 .state_table_ids

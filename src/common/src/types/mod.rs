@@ -78,6 +78,7 @@ mod with_data_type;
 
 pub use fields::Fields;
 pub use risingwave_fields_derive::Fields;
+use risingwave_pb::id::TypedId;
 
 pub use self::cow::DatumCow;
 pub use self::datetime::{Date, Time, Timestamp};
@@ -786,6 +787,12 @@ impl<T: Into<ScalarImpl>> ToOwnedDatum for Option<T> {
     #[inline(always)]
     fn to_owned_datum(self) -> Datum {
         self.map(Into::into)
+    }
+}
+
+impl<const N: usize> From<TypedId<N, u32>> for ScalarImpl {
+    fn from(value: TypedId<N, u32>) -> Self {
+        value.as_i32_id().into()
     }
 }
 

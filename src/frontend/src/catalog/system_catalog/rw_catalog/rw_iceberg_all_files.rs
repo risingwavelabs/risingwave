@@ -18,6 +18,7 @@ use std::ops::Deref;
 use anyhow::anyhow;
 use futures::StreamExt;
 use iceberg::table::Table;
+use risingwave_common::id::SourceId;
 use risingwave_common::types::Fields;
 use risingwave_connector::WithPropertiesExt;
 use risingwave_connector::source::ConnectorProperties;
@@ -29,7 +30,7 @@ use crate::error::Result;
 #[derive(Fields)]
 struct RwIcebergFiles {
     #[primary_key]
-    source_id: i32,
+    source_id: SourceId,
     schema_name: String,
     source_name: String,
     /// Type of content stored by the data file: data, equality deletes,
@@ -106,7 +107,7 @@ async fn read(reader: &SysCatalogReaderImpl) -> Result<Vec<RwIcebergFiles>> {
                 while let Some(manifest_entry) = manifest_entries_stream.next().await {
                     let file = manifest_entry.data_file();
                     result.push(RwIcebergFiles {
-                        source_id: source.id.as_i32_id(),
+                        source_id: source.id,
                         schema_name: schema_name.clone(),
                         source_name: source.name.clone(),
                         content: file.content_type() as i32,
