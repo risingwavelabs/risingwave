@@ -458,10 +458,7 @@ impl CatalogController {
 
                 if !index_ids.is_empty() || !table_ids.is_empty() {
                     Object::update_many()
-                        .col_expr(
-                            object::Column::OwnerId,
-                            SimpleExpr::Value(Value::Int(Some(new_owner))),
-                        )
+                        .col_expr(object::Column::OwnerId, SimpleExpr::Value(new_owner.into()))
                         .filter(
                             object::Column::Oid.is_in::<ObjectId, _>(
                                 index_ids
@@ -532,7 +529,7 @@ impl CatalogController {
                         &txn,
                         object_id,
                         object::Column::OwnerId,
-                        Value::Int(Some(new_owner)),
+                        new_owner,
                         &mut objects,
                     )
                     .await?;
@@ -555,7 +552,7 @@ impl CatalogController {
                     &txn,
                     object_id,
                     object::Column::OwnerId,
-                    Value::Int(Some(new_owner)),
+                    new_owner,
                     &mut objects,
                 )
                 .await?;
@@ -800,7 +797,7 @@ impl CatalogController {
                         &txn,
                         object_id,
                         object::Column::SchemaId,
-                        new_schema.into(),
+                        new_schema,
                         &mut objects,
                     )
                     .await?;
@@ -824,7 +821,7 @@ impl CatalogController {
                     &txn,
                     object_id,
                     object::Column::SchemaId,
-                    new_schema.into(),
+                    new_schema,
                     &mut objects,
                 )
                 .await?;

@@ -14,6 +14,7 @@
 
 use prost::Message;
 use risingwave_common::config::MetaBackend;
+use risingwave_common::id::TableId;
 use risingwave_common::telemetry::pb_compatible::TelemetryToProtobuf;
 use risingwave_common::telemetry::report::{TelemetryInfoFetcher, TelemetryReportCreator};
 use risingwave_common::telemetry::{
@@ -75,7 +76,7 @@ pub enum PlanOptimization {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct MetaTelemetryJobDesc {
-    pub table_id: i32,
+    pub table_id: TableId,
     pub connector: Option<String>,
     pub optimization: Vec<PlanOptimization>,
 }
@@ -100,7 +101,7 @@ pub struct MetaTelemetryReport {
 impl From<MetaTelemetryJobDesc> for risingwave_pb::telemetry::StreamJobDesc {
     fn from(val: MetaTelemetryJobDesc) -> Self {
         risingwave_pb::telemetry::StreamJobDesc {
-            table_id: val.table_id,
+            table_id: val.table_id.as_i32_id(),
             connector_name: val.connector,
             plan_optimizations: val
                 .optimization
