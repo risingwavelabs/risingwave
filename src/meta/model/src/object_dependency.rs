@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,7 +15,7 @@
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
 
-use crate::{ObjectId, UserId};
+use crate::ObjectId;
 
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq, Serialize, Deserialize)]
 #[sea_orm(table_name = "object_dependency")]
@@ -23,7 +23,7 @@ pub struct Model {
     #[sea_orm(primary_key)]
     pub id: i32,
     pub oid: ObjectId,
-    pub used_by: UserId,
+    pub used_by: ObjectId,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

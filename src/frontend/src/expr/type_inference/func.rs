@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -765,7 +765,7 @@ fn infer_type_for_special(
         }
         ExprType::JsonbBuildArray => Ok(Some(DataType::Jsonb)),
         ExprType::JsonbBuildObject => {
-            if inputs.len() % 2 != 0 {
+            if !inputs.len().is_multiple_of(2) {
                 return Err(ErrorCode::BindError(
                     "argument list must have even number of elements".into(),
                 )

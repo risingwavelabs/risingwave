@@ -17,13 +17,8 @@ disable-publish = true
 [lib]
 path = "src/lib.rs"
 
-[features]
-default = ["std"]
-std = []
-
 [dependencies]
 itertools = { workspace = true }
-serde = { workspace = true, optional = true }
 task-local = "0.1"
 thiserror = { workspace = true }
 tracing = "0.1"
@@ -35,7 +30,7 @@ workspace-hack = { path = "../workspace-hack" }
 
 [dev-dependencies]
 anyhow = "1"
-console = "0.15"
+console = "0.16"
 libtest-mimic = "0.8"
 matches = "0.1"
 serde = { workspace = true }

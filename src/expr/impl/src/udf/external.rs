@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -258,8 +258,8 @@ impl ExternalFunction {
                     tracing::error!(?backoff, error = %err.as_report(), "UDF tonic error. retry...");
                 }
                 ret => {
-                    if ret.is_err() {
-                        tracing::error!(error = %ret.as_ref().unwrap_err().as_report(), "UDF error. exiting...");
+                    if let Err(e) = &ret {
+                        tracing::error!(error = %e.as_report(), "UDF error. exiting...");
                     }
                     return ret;
                 }

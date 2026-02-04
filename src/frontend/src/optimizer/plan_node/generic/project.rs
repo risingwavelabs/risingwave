@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -46,6 +46,10 @@ fn check_expr_type(expr: &ExprImpl) -> std::result::Result<(), &'static str> {
     }
     Ok(())
 }
+
+/// The name of the vnode column added by [`Project::with_vnode_col`], used as the group key for
+/// local phase of aggregation or top-n under two-phase optimization.
+pub const LOCAL_PHASE_VNODE_COLUMN_NAME: &str = "_vnode";
 
 /// [`Project`] computes a set of expressions from its input relation.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -223,7 +227,8 @@ impl<PlanRef: GenericPlanRef> Project<PlanRef> {
         let vnode_expr_idx = new_exprs.len() - 1;
 
         let mut new = Self::new(new_exprs, input);
-        new.field_names.insert(vnode_expr_idx, "_vnode".to_owned());
+        new.field_names
+            .insert(vnode_expr_idx, LOCAL_PHASE_VNODE_COLUMN_NAME.to_owned());
         new
     }
 

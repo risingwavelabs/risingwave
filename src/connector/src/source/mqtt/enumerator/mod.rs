@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -117,8 +117,9 @@ impl SplitEnumerator for MqttSplitEnumerator {
                     Ok(Op::Nop)
                 } else {
                     tracing::debug!("build new mqtt client for {}", broker_url);
-                    let (new_client, event_loop) =
-                        properties.common.build_client(context.info.source_id, 0)?;
+                    let (new_client, event_loop) = properties
+                        .common
+                        .build_client(0.into(), context.info.source_id.as_raw_id())?;
                     let new_connection_check = Arc::new(MqttConnectionCheck::new(
                         new_client,
                         event_loop,

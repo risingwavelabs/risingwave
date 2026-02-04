@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![feature(let_chains)]
 #![allow(clippy::derive_partial_eq_without_eq)]
 
 //! Data-driven tests.
@@ -609,7 +608,7 @@ impl TestCase {
         let mut ret = TestCaseResult::default();
 
         let bound = {
-            let mut binder = Binder::new(&session);
+            let mut binder = Binder::new_for_batch(&session);
             match binder.bind(stmt.clone()) {
                 Ok(bound) => bound,
                 Err(err) => {
@@ -863,7 +862,7 @@ impl TestCase {
 
         'sink: {
             if self.expected_outputs.contains(&TestType::SinkPlan) {
-                let plan_root = plan_root.clone();
+                let plan_root = plan_root;
                 let sink_name = "sink_test";
                 let mut options = BTreeMap::new();
                 options.insert("connector".to_owned(), "blackhole".to_owned());
@@ -884,6 +883,7 @@ impl TestCase {
                     None,
                     false,
                     None,
+                    true,
                 ) {
                     Ok(sink_plan) => {
                         ret.sink_plan = Some(explain_plan(&sink_plan.into()));

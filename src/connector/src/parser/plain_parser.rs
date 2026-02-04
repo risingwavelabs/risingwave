@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,7 +15,9 @@
 use risingwave_common::bail;
 use thiserror_ext::AsReport;
 
-use super::unified::json::{TimeHandling, TimestampHandling, TimestamptzHandling};
+use super::unified::json::{
+    BigintUnsignedHandlingMode, TimeHandling, TimestampHandling, TimestamptzHandling,
+};
 use super::unified::kv_event::KvEvent;
 use super::{
     AccessBuilderImpl, ByteStreamSourceParser, EncodingProperties, SourceStreamChunkRowWriter,
@@ -74,6 +76,7 @@ impl PlainParser {
                 TimestamptzHandling::GuessNumberUnit,
                 TimestampHandling::GuessNumberUnit,
                 TimeHandling::Micro,
+                BigintUnsignedHandlingMode::Long,
                 false,
             )?,
         ));
@@ -133,7 +136,7 @@ impl PlainParser {
 
                     return match parse_schema_change(
                         &accessor,
-                        self.source_ctx.source_id.into(),
+                        self.source_ctx.source_id,
                         &self.source_ctx.source_name,
                         &self.source_ctx.connector_props,
                     ) {
@@ -171,7 +174,7 @@ impl PlainParser {
                                 }
                             };
                             self.source_ctx.on_cdc_auto_schema_change_failure(
-                                self.source_ctx.source_id.table_id,
+                                self.source_ctx.source_id,
                                 table_name,
                                 cdc_table_id,
                                 "".to_owned(), // upstream_ddl is not available in this context
@@ -261,7 +264,7 @@ mod tests {
     use futures_async_stream::try_stream;
     use itertools::Itertools;
     use risingwave_common::catalog::ColumnCatalog;
-    use risingwave_pb::connector_service::cdc_message;
+    use risingwave_pb::connector_service::{SourceType, cdc_message};
 
     use super::*;
     use crate::parser::{MessageMeta, SourceStreamChunkBuilder, TransactionControl};
@@ -385,6 +388,7 @@ mod tests {
                         } else {
                             cdc_message::CdcMessageType::Data
                         },
+                        SourceType::Unspecified,
                     )),
                     split_id: SplitId::from("1001"),
                     offset: "0".into(),
@@ -399,6 +403,7 @@ mod tests {
                         "orders".to_owned(),
                         0,
                         cdc_message::CdcMessageType::Data,
+                        SourceType::Unspecified,
                     )),
                     split_id: SplitId::from("1001"),
                     offset: "0".into(),
@@ -417,6 +422,7 @@ mod tests {
                         } else {
                             cdc_message::CdcMessageType::Data
                         },
+                        SourceType::Unspecified,
                     )),
                     split_id: SplitId::from("1001"),
                     offset: "0".into(),
@@ -459,6 +465,7 @@ mod tests {
             "orders".to_owned(),
             0,
             cdc_message::CdcMessageType::TransactionMeta,
+            SourceType::Unspecified,
         ));
         let msg_meta = MessageMeta {
             source_meta: &cdc_meta,
@@ -526,6 +533,7 @@ mod tests {
             "mydb.test".to_owned(),
             0,
             cdc_message::CdcMessageType::SchemaChange,
+            SourceType::Mysql,
         ));
         let msg_meta = MessageMeta {
             source_meta: &cdc_meta,

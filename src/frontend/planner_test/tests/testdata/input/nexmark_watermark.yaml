@@ -141,7 +141,7 @@
   - stream_dist_plan
   # - batch_plan
   - stream_plan
-  - eowc_stream_plan
+  - eowc_stream_error
 - id: nexmark_q7
   before:
   - create_sources
@@ -230,7 +230,7 @@
   - optimized_logical_plan_for_batch
   - stream_plan
   - stream_dist_plan
-  - eowc_stream_plan
+  - eowc_stream_error
   - batch_plan
 - id: nexmark_q10
   before:
@@ -398,7 +398,7 @@
     WHERE rank_number <= 1;
   expected_outputs:
   - logical_plan
-  - eowc_stream_plan
+  - eowc_stream_error
   - stream_dist_plan
   - batch_plan
   - stream_plan
@@ -413,7 +413,7 @@
   expected_outputs:
   - stream_dist_plan
   - batch_plan
-  - eowc_stream_plan
+  - eowc_stream_error
   - stream_plan
   - logical_plan
 - id: nexmark_q19
@@ -617,3 +617,32 @@
   - stream_dist_plan
   - batch_plan
   - eowc_stream_error
+- id: nexmark_q107
+  before:
+  - create_sources
+  sql: |
+    SELECT
+        auction,
+        bidder,
+        date_time,
+        price,
+        AVG(price) OVER (
+            PARTITION BY auction
+            ORDER BY date_time
+            ROWS BETWEEN 10 PRECEDING AND CURRENT ROW
+        ) AS avg_price_10,
+        MAX(price) OVER (
+            PARTITION BY auction
+            ORDER BY date_time
+            ROWS BETWEEN 10 PRECEDING AND CURRENT ROW
+        ) AS max_price_10
+    FROM
+        bid
+    WHERE
+        auction % 100 = 0;
+  expected_outputs:
+  - stream_dist_plan
+  - batch_plan
+  - eowc_stream_plan
+  - stream_plan
+  - logical_plan

@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -37,7 +37,7 @@ impl From<Model> for CompactTaskAssignment {
     fn from(value: Model) -> Self {
         Self {
             compact_task: Some(value.task.to_protobuf()),
-            context_id: value.context_id as _,
+            context_id: value.context_id,
         }
     }
 }

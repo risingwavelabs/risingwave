@@ -93,12 +93,18 @@ impl<T: UpstreamTable, S: StateStore> UpstreamTableExecutor<T, S> {
         let mut finish_reported = false;
         let mut prev_reported_row_count = 0;
         let mut upstream_table = self.upstream_table;
+        let snapshot_rebuild_interval = self
+            .actor_ctx
+            .config
+            .developer
+            .snapshot_iter_rebuild_interval();
         let mut stream = ConsumeUpstreamStream::new(
             progress_state.latest_progress(),
             &upstream_table,
             self.snapshot_epoch,
             self.chunk_size,
             self.rate_limiter.rate_limit(),
+            snapshot_rebuild_interval,
         );
 
         'on_new_stream: loop {
@@ -182,7 +188,7 @@ impl<T: UpstreamTable, S: StateStore> UpstreamTableExecutor<T, S> {
                     post_commit.post_yield_barrier(update_vnode_bitmap).await?
                 {
                     drop(stream);
-                    upstream_table.update_vnode_bitmap(new_vnode_bitmap.clone());
+                    upstream_table.update_vnode_bitmap(new_vnode_bitmap);
                     // recreate the stream on update vnode bitmap
                     stream = ConsumeUpstreamStream::new(
                         progress_state.latest_progress(),
@@ -190,6 +196,7 @@ impl<T: UpstreamTable, S: StateStore> UpstreamTableExecutor<T, S> {
                         self.snapshot_epoch,
                         self.chunk_size,
                         self.rate_limiter.rate_limit(),
+                        snapshot_rebuild_interval,
                     );
                     continue 'on_new_stream;
                 }

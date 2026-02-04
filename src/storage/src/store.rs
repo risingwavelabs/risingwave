@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -22,11 +22,11 @@ use bytes::Bytes;
 use futures::{Stream, TryStreamExt};
 use futures_async_stream::try_stream;
 use prost::Message;
-use risingwave_common::array::Op;
+use risingwave_common::array::{Op, VectorRef};
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_common::hash::VirtualNode;
-use risingwave_common::util::epoch::{Epoch, EpochPair};
+use risingwave_common::util::epoch::{Epoch, EpochPair, MAX_EPOCH};
 use risingwave_common::vector::distance::DistanceMeasurement;
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_hummock_sdk::key::{FullKey, TableKey, TableKeyRange};
@@ -37,12 +37,15 @@ use risingwave_hummock_trace::{
     TracedInitOptions, TracedNewLocalOptions, TracedOpConsistencyLevel, TracedPrefetchOptions,
     TracedReadOptions, TracedSealCurrentEpochOptions, TracedTryWaitEpochOptions,
 };
-use risingwave_pb::hummock::PbVnodeWatermark;
+use risingwave_pb::hummock::{PbVnodeWatermark, PbWatermarkSerdeType};
 
 use crate::error::{StorageError, StorageResult};
 use crate::hummock::CachePolicy;
 use crate::monitor::{MonitoredStateStore, MonitoredStorageMetrics};
 pub(crate) use crate::vector::{OnNearestItem, Vector};
+
+mod auto_rebuild;
+pub use auto_rebuild::{AutoRebuildStateStoreReadIter, timeout_auto_rebuild};
 
 pub trait StaticSendSync = Send + Sync + 'static;
 
@@ -257,16 +260,16 @@ pub trait StateStoreReadLog: StaticSendSync {
     ) -> impl StorageFuture<'_, Self::ChangeLogIter>;
 }
 
-pub trait KeyValueFn<O> =
-    for<'kv> FnOnce(FullKey<&'kv [u8]>, &'kv [u8]) -> StorageResult<O> + Send + 'static;
+pub trait KeyValueFn<'a, O> =
+    for<'kv> FnOnce(FullKey<&'kv [u8]>, &'kv [u8]) -> StorageResult<O> + Send + 'a;
 
 pub trait StateStoreGet: StaticSendSync {
-    fn on_key_value<O: Send + 'static>(
-        &self,
+    fn on_key_value<'a, O: Send + 'a>(
+        &'a self,
         key: TableKey<Bytes>,
         read_options: ReadOptions,
-        on_key_value_fn: impl KeyValueFn<O>,
-    ) -> impl StorageFuture<'_, Option<O>>;
+        on_key_value_fn: impl KeyValueFn<'a, O>,
+    ) -> impl StorageFuture<'a, Option<O>>;
 }
 
 pub trait StateStoreRead: StateStoreGet + StaticSendSync {
@@ -322,6 +325,7 @@ impl From<TryWaitEpochOptions> for TracedTryWaitEpochOptions {
 #[derive(Clone, Copy)]
 pub struct NewReadSnapshotOptions {
     pub table_id: TableId,
+    pub table_option: TableOption,
 }
 
 #[derive(Clone)]
@@ -428,7 +432,7 @@ pub trait StateStoreWriteEpochControl: StaticSendSync {
 }
 
 pub trait StateStoreWriteVector: StateStoreWriteEpochControl + StaticSendSync {
-    fn insert(&mut self, vec: Vector, info: Bytes) -> StorageResult<()>;
+    fn insert(&mut self, vec: VectorRef<'_>, info: Bytes) -> StorageResult<()>;
 }
 
 pub struct VectorNearestOptions {
@@ -437,15 +441,15 @@ pub struct VectorNearestOptions {
     pub hnsw_ef_search: usize,
 }
 
-pub trait OnNearestItemFn<O> = OnNearestItem<O> + Send + Sync + 'static;
+pub trait OnNearestItemFn<'a, O> = OnNearestItem<O> + Send + Sync + 'a;
 
 pub trait StateStoreReadVector: StaticSendSync {
-    fn nearest<O: Send + 'static>(
-        &self,
-        vec: Vector,
+    fn nearest<'a, O: Send + 'a>(
+        &'a self,
+        vec: VectorRef<'a>,
         options: VectorNearestOptions,
-        on_nearest_item_fn: impl OnNearestItemFn<O>,
-    ) -> impl StorageFuture<'_, Vec<O>>;
+        on_nearest_item_fn: impl OnNearestItemFn<'a, O>,
+    ) -> impl StorageFuture<'a, Vec<O>>;
 }
 
 /// If `prefetch` is true, prefetch will be enabled. Prefetching may increase the memory
@@ -507,8 +511,6 @@ pub struct ReadOptions {
     pub prefix_hint: Option<Bytes>,
     pub prefetch_options: PrefetchOptions,
     pub cache_policy: CachePolicy,
-
-    pub retention_seconds: Option<u32>,
 }
 
 impl From<TracedReadOptions> for ReadOptions {
@@ -517,7 +519,6 @@ impl From<TracedReadOptions> for ReadOptions {
             prefix_hint: value.prefix_hint.map(|b| b.into()),
             prefetch_options: value.prefetch_options.into(),
             cache_policy: value.cache_policy.into(),
-            retention_seconds: value.retention_seconds,
         }
     }
 }
@@ -527,6 +528,7 @@ impl ReadOptions {
         self,
         table_id: TableId,
         epoch: Option<HummockReadEpoch>,
+        table_option: TableOption,
     ) -> TracedReadOptions {
         let value = self;
         let (read_version_from_backup, read_committed) = match epoch {
@@ -540,7 +542,7 @@ impl ReadOptions {
             prefix_hint: value.prefix_hint.map(|b| b.into()),
             prefetch_options: value.prefetch_options.into(),
             cache_policy: value.cache_policy.into(),
-            retention_seconds: value.retention_seconds,
+            retention_seconds: table_option.retention_seconds,
             table_id: table_id.into(),
             read_version_from_backup,
             read_committed,
@@ -548,12 +550,14 @@ impl ReadOptions {
     }
 }
 
-pub fn gen_min_epoch(base_epoch: u64, retention_seconds: Option<&u32>) -> u64 {
-    let base_epoch = Epoch(base_epoch);
+pub fn gen_min_epoch(base_epoch: u64, retention_seconds: Option<u32>) -> u64 {
     match retention_seconds {
         Some(retention_seconds_u32) => {
-            base_epoch
-                .subtract_ms(*retention_seconds_u32 as u64 * 1000)
+            if base_epoch == MAX_EPOCH {
+                panic!("generate min epoch for MAX_EPOCH");
+            }
+            Epoch(base_epoch)
+                .subtract_ms(retention_seconds_u32 as u64 * 1000)
                 .0
         }
         None => 0,
@@ -785,10 +789,7 @@ impl From<SealCurrentEpochOptions> for TracedSealCurrentEpochOptions {
                                 Message::encode_to_vec(&pb_watermark)
                             })
                             .collect(),
-                        match watermark_type {
-                            WatermarkSerdeType::NonPkPrefix => true,
-                            WatermarkSerdeType::PkPrefix => false,
-                        },
+                        PbWatermarkSerdeType::from(watermark_type) as i32,
                     )
                 },
             ),
@@ -803,7 +804,7 @@ impl From<TracedSealCurrentEpochOptions> for SealCurrentEpochOptions {
     fn from(value: TracedSealCurrentEpochOptions) -> SealCurrentEpochOptions {
         SealCurrentEpochOptions {
             table_watermarks: value.table_watermarks.map(
-                |(is_ascending, watermarks, is_non_pk_prefix)| {
+                |(is_ascending, watermarks, watermark_serde_type)| {
                     (
                         if is_ascending {
                             WatermarkDirection::Ascending
@@ -818,10 +819,11 @@ impl From<TracedSealCurrentEpochOptions> for SealCurrentEpochOptions {
                                     .expect("should not failed")
                             })
                             .collect(),
-                        if is_non_pk_prefix {
-                            WatermarkSerdeType::NonPkPrefix
-                        } else {
-                            WatermarkSerdeType::PkPrefix
+                        match PbWatermarkSerdeType::try_from(watermark_serde_type).unwrap() {
+                            PbWatermarkSerdeType::TypeUnspecified => unreachable!(),
+                            PbWatermarkSerdeType::PkPrefix => WatermarkSerdeType::PkPrefix,
+                            PbWatermarkSerdeType::NonPkPrefix => WatermarkSerdeType::NonPkPrefix,
+                            PbWatermarkSerdeType::Value => WatermarkSerdeType::Value,
                         },
                     )
                 },

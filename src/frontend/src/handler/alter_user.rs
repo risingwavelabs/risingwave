@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -48,9 +48,10 @@ fn alter_prost_user_info(
             .iter()
             .any(|option| matches!(option, UserOption::Admin | UserOption::NoAdmin));
     if !change_self_password_only && require_admin && !session_user.is_admin {
-        return Err(PermissionDenied(
-            format!("{} cannot be altered with admin option", user_info.name).to_owned(),
-        )
+        return Err(PermissionDenied(format!(
+            "{} cannot be altered with admin option",
+            user_info.name
+        ))
         .into());
     }
 
@@ -183,15 +184,17 @@ fn alter_rename_prost_user_info(
 
     let new_name = Binder::resolve_user_name(new_name)?;
     if is_reserved_admin_user(&new_name) {
-        return Err(PermissionDenied(
-            format!("{} is reserved for admin", DEFAULT_SUPER_USER_FOR_ADMIN).to_owned(),
-        )
+        return Err(PermissionDenied(format!(
+            "{} is reserved for admin",
+            DEFAULT_SUPER_USER_FOR_ADMIN
+        ))
         .into());
     }
     if is_reserved_admin_user(&user_info.name) {
-        return Err(PermissionDenied(
-            format!("{} cannot be renamed", DEFAULT_SUPER_USER_FOR_ADMIN).to_owned(),
-        )
+        return Err(PermissionDenied(format!(
+            "{} cannot be renamed",
+            DEFAULT_SUPER_USER_FOR_ADMIN
+        ))
         .into());
     }
 
@@ -211,12 +214,12 @@ pub async fn handle_alter_user(
 
         let old_info = user_reader
             .get_user_by_name(&user_name)
-            .ok_or(CatalogError::NotFound("user", user_name))?
+            .ok_or(CatalogError::not_found("user", user_name))?
             .to_prost();
 
         let session_user = user_reader
             .get_user_by_name(&session.user_name())
-            .ok_or_else(|| CatalogError::NotFound("user", session.user_name().to_owned()))?;
+            .ok_or_else(|| CatalogError::not_found("user", session.user_name()))?;
 
         match stmt.mode {
             risingwave_sqlparser::ast::AlterUserMode::Options(options) => {

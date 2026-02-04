@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -86,16 +86,14 @@ pub struct TracedTableId {
 impl From<TableId> for TracedTableId {
     fn from(value: TableId) -> Self {
         Self {
-            table_id: value.table_id,
+            table_id: value.as_raw_id(),
         }
     }
 }
 
 impl From<TracedTableId> for TableId {
     fn from(value: TracedTableId) -> Self {
-        Self {
-            table_id: value.table_id,
-        }
+        Self::new(value.table_id)
     }
 }
 
@@ -259,7 +257,7 @@ pub struct TracedInitOptions {
 #[derive(Debug, Clone, PartialEq, Eq, Decode, Encode)]
 pub struct TracedSealCurrentEpochOptions {
     // The watermark is serialized into protobuf
-    pub table_watermarks: Option<(bool, Vec<Vec<u8>>, bool)>,
+    pub table_watermarks: Option<(bool, Vec<Vec<u8>>, i32)>,
     pub switch_op_consistency_level: Option<bool>,
 }
 

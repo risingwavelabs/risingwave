@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,7 +17,7 @@ use prometheus::{HistogramVec, IntCounterVec};
 
 use crate::{
     LabelGuardedHistogramVec, LabelGuardedIntCounterVec, LabelGuardedIntGaugeVec,
-    LabelGuardedMetric, LabelGuardedMetricVec, MetricLevel,
+    LabelGuardedMetric, LabelGuardedMetricVec, LazyLabelGuardedMetrics, MetricLevel,
 };
 
 /// For all `Relabeled*Vec` below,
@@ -81,6 +81,22 @@ impl<M> RelabeledMetricVec<M> {
             relabel_num,
         }
     }
+
+    fn relabel_impl<V: AsRef<str> + std::fmt::Debug>(&self, vals: &[V]) -> Option<Vec<String>> {
+        if self.metric_level > self.relabel_threshold {
+            // relabel first n labels to empty string
+            let mut relabeled_vals = vals
+                .iter()
+                .map(|v| v.as_ref().to_owned())
+                .collect::<Vec<_>>();
+            for label in relabeled_vals.iter_mut().take(self.relabel_num) {
+                *label = String::new();
+            }
+            Some(relabeled_vals)
+        } else {
+            None
+        }
+    }
 }
 
 #[easy_ext::ext(MetricVecRelabelExt)]
@@ -126,15 +142,7 @@ where
 
 impl<T: MetricVecBuilder> RelabeledMetricVec<MetricVec<T>> {
     pub fn with_label_values<V: AsRef<str> + std::fmt::Debug>(&self, vals: &[V]) -> T::M {
-        if self.metric_level > self.relabel_threshold {
-            // relabel first n labels to empty string
-            let mut relabeled_vals = vals
-                .iter()
-                .map(|v| v.as_ref().to_owned())
-                .collect::<Vec<_>>();
-            for label in relabeled_vals.iter_mut().take(self.relabel_num) {
-                *label = String::new();
-            }
+        if let Some(relabeled_vals) = self.relabel_impl(vals) {
             return self.metric.with_label_values(&relabeled_vals);
         }
         self.metric.with_label_values(vals)
@@ -146,18 +154,17 @@ impl<T: MetricVecBuilder> RelabeledMetricVec<LabelGuardedMetricVec<T>> {
         &self,
         vals: &[V],
     ) -> LabelGuardedMetric<T::M> {
-        if self.metric_level > self.relabel_threshold {
-            // relabel first n labels to empty string
-            let mut relabeled_vals = vals
-                .iter()
-                .map(|v| v.as_ref().to_owned())
-                .collect::<Vec<_>>();
-            for label in relabeled_vals.iter_mut().take(self.relabel_num) {
-                *label = String::new();
-            }
+        if let Some(relabeled_vals) = self.relabel_impl(vals) {
             return self.metric.with_guarded_label_values(&relabeled_vals);
         }
         self.metric.with_guarded_label_values(vals)
+    }
+
+    pub fn lazy_guarded_metrics(&self, labels: Vec<String>) -> LazyLabelGuardedMetrics<T> {
+        if let Some(relabeled_vals) = self.relabel_impl(labels.as_slice()) {
+            return self.metric.clone().lazy_guarded_metrics(relabeled_vals);
+        }
+        self.metric.clone().lazy_guarded_metrics(labels)
     }
 }
 

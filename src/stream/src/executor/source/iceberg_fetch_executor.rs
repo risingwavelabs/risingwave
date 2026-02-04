@@ -23,14 +23,15 @@ use risingwave_common::array::{DataChunk, Op, SerialArray};
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{
     ColumnId, ICEBERG_FILE_PATH_COLUMN_NAME, ICEBERG_FILE_POS_COLUMN_NAME, ROW_ID_COLUMN_NAME,
-    TableId,
 };
 use risingwave_common::config::StreamingConfig;
 use risingwave_common::hash::VnodeBitmapExt;
+use risingwave_common::id::SourceId;
 use risingwave_common::types::{JsonbVal, ScalarRef, Serial, ToOwnedDatum};
-use risingwave_connector::source::iceberg::{IcebergScanOpts, scan_task_to_chunk};
+use risingwave_connector::source::iceberg::{IcebergScanOpts, scan_task_to_chunk_with_deletes};
 use risingwave_connector::source::reader::desc::SourceDesc;
 use risingwave_connector::source::{SourceContext, SourceCtrlOpts};
+use risingwave_pb::common::ThrottleType;
 use risingwave_storage::store::PrefetchOptions;
 use thiserror_ext::AsReport;
 
@@ -65,16 +66,16 @@ pub struct IcebergFetchExecutor<S: StateStore> {
 ///
 /// Currently 1 `FileScanTask` -> 1 `ChunksWithState`.
 /// Later after we support reading part of a file, we will support 1 `FileScanTask` -> n `ChunksWithState`.
-struct ChunksWithState {
+pub(crate) struct ChunksWithState {
     /// The actual data chunks read from the file
-    chunks: Vec<StreamChunk>,
+    pub chunks: Vec<StreamChunk>,
 
     /// Path to the data file, used for checkpointing and error reporting.
-    data_file_path: String,
+    pub data_file_path: String,
 
     /// The last read position in the file, used for checkpointing.
     #[expect(dead_code)]
-    last_read_pos: Datum,
+    pub last_read_pos: Datum,
 }
 
 pub(super) use state::PersistedFileScanTask;
@@ -130,7 +131,7 @@ mod state {
         /// sequence number
         pub sequence_number: i64,
         /// equality ids
-        pub equality_ids: Vec<i32>,
+        pub equality_ids: Option<Vec<i32>>,
 
         pub file_size_in_bytes: u64,
     }
@@ -185,6 +186,9 @@ mod state {
                 sequence_number,
                 equality_ids,
                 file_size_in_bytes,
+                partition: None,
+                partition_spec: None,
+                name_mapping: None,
             }
         }
 
@@ -204,6 +208,7 @@ mod state {
                 sequence_number,
                 equality_ids,
                 file_size_in_bytes,
+                ..
             }: FileScanTask,
         ) -> Self {
             Self {
@@ -357,13 +362,15 @@ impl<S: StateStore> IcebergFetchExecutor<S> {
         for task in batch {
             let mut chunks = vec![];
             #[for_await]
-            for chunk in scan_task_to_chunk(
+            for chunk in scan_task_to_chunk_with_deletes(
                 table.clone(),
                 task,
                 IcebergScanOpts {
                     chunk_size: streaming_config.developer.chunk_size,
-                    need_seq_num: true, /* TODO: this column is not needed. But need to support col pruning in frontend to remove it. */
+                    need_seq_num: true, /* Although this column is unnecessary, we still keep it for potential usage in the future */
                     need_file_path_and_pos: true,
+                    handle_delete_files: table.metadata().format_version()
+                        >= iceberg::spec::FormatVersion::V3,
                 },
                 None,
             ) {
@@ -393,7 +400,7 @@ impl<S: StateStore> IcebergFetchExecutor<S> {
     fn build_source_ctx(
         &self,
         source_desc: &SourceDesc,
-        source_id: TableId,
+        source_id: SourceId,
         source_name: &str,
     ) -> SourceContext {
         SourceContext::new(
@@ -498,17 +505,18 @@ impl<S: StateStore> IcebergFetchExecutor<S> {
                                         match mutation {
                                             Mutation::Pause => stream.pause_stream(),
                                             Mutation::Resume => stream.resume_stream(),
-                                            Mutation::Throttle(actor_to_apply) => {
-                                                if let Some(new_rate_limit) =
-                                                    actor_to_apply.get(&self.actor_ctx.id)
-                                                    && *new_rate_limit != self.rate_limit_rps
+                                            Mutation::Throttle(fragment_to_apply) => {
+                                                if let Some(entry) = fragment_to_apply
+                                                    .get(&self.actor_ctx.fragment_id)
+                                                    && entry.throttle_type() == ThrottleType::Source
+                                                    && entry.rate_limit != self.rate_limit_rps
                                                 {
                                                     tracing::debug!(
                                                         "updating rate limit from {:?} to {:?}",
                                                         self.rate_limit_rps,
-                                                        *new_rate_limit
+                                                        entry.rate_limit
                                                     );
-                                                    self.rate_limit_rps = *new_rate_limit;
+                                                    self.rate_limit_rps = entry.rate_limit;
                                                     need_rebuild_reader = true;
                                                 }
                                             }
@@ -525,13 +533,15 @@ impl<S: StateStore> IcebergFetchExecutor<S> {
                                     // Propagate the barrier.
                                     yield Message::Barrier(barrier);
 
-                                    if let Some((_, cache_may_stale)) =
-                                        post_commit.post_yield_barrier(update_vnode_bitmap).await?
+                                    if post_commit
+                                        .post_yield_barrier(update_vnode_bitmap)
+                                        .await?
+                                        .is_some()
                                     {
-                                        // if cache_may_stale, we must rebuild the stream to adjust vnode mappings
-                                        if cache_may_stale {
-                                            splits_on_fetch = 0;
-                                        }
+                                        // Vnode bitmap update changes which file assignments this executor
+                                        // should read. Rebuild the reader to avoid reading splits that no
+                                        // longer belong to this actor (e.g., during scale-out).
+                                        splits_on_fetch = 0;
                                     }
 
                                     if splits_on_fetch == 0 || need_rebuild_reader {
@@ -585,8 +595,7 @@ impl<S: StateStore> IcebergFetchExecutor<S> {
                             for chunk in &chunks {
                                 let chunk = prune_additional_cols(
                                     chunk,
-                                    file_path_idx,
-                                    file_pos_idx,
+                                    &[file_path_idx, file_pos_idx],
                                     &source_desc.columns,
                                 );
                                 // pad row_id
@@ -597,7 +606,7 @@ impl<S: StateStore> IcebergFetchExecutor<S> {
                                     Arc::new(
                                         SerialArray::from_iter_bitmap(
                                             itertools::repeat_n(Serial::from(0), columns[0].len()),
-                                            Bitmap::ones(columns[0].len()),
+                                            Bitmap::zeros(columns[0].len()),
                                         )
                                         .into(),
                                     ),

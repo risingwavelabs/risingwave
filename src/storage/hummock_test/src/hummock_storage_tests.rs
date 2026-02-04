@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -33,7 +33,7 @@ use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::sstable_info::{SstableInfo, SstableInfoInner};
 use risingwave_hummock_sdk::table_stats::TableStats;
 use risingwave_hummock_sdk::table_watermark::{
-    PkPrefixTableWatermarksIndex, VnodeWatermark, WatermarkDirection, WatermarkSerdeType,
+    TableWatermarksIndex, VnodeWatermark, WatermarkDirection, WatermarkSerdeType,
 };
 use risingwave_hummock_sdk::{EpochWithGap, LocalSstableInfo};
 use risingwave_meta::hummock::test_utils::get_compaction_group_id_by_table_id;
@@ -51,7 +51,7 @@ use crate::test_utils::{TestIngestBatch, gen_key_from_str, prepare_hummock_test_
 
 #[tokio::test]
 async fn test_storage_basic() {
-    const TEST_TABLE_ID: TableId = TableId { table_id: 233 };
+    const TEST_TABLE_ID: TableId = TableId::new(233);
     let test_env = prepare_hummock_test_env().await;
     test_env.register_table_id(TEST_TABLE_ID).await;
     let mut hummock_storage = test_env
@@ -435,7 +435,7 @@ async fn test_storage_basic() {
 
 #[tokio::test]
 async fn test_state_store_sync() {
-    const TEST_TABLE_ID: TableId = TableId { table_id: 233 };
+    const TEST_TABLE_ID: TableId = TableId::new(233);
     let table_id_set = HashSet::from_iter([TEST_TABLE_ID]);
     let test_env = prepare_hummock_test_env().await;
     test_env.register_table_id(TEST_TABLE_ID).await;
@@ -780,8 +780,90 @@ async fn test_state_store_sync() {
 }
 
 #[tokio::test]
+async fn test_snapshot_read_ignores_uninitialized_local() {
+    const TEST_TABLE_ID: TableId = TableId::new(233);
+    let test_env = prepare_hummock_test_env().await;
+    test_env.register_table_id(TEST_TABLE_ID).await;
+    let mut local = test_env
+        .storage
+        .new_local(NewLocalOptions::for_test(TEST_TABLE_ID))
+        .await;
+
+    let epoch1 = test_epoch(1);
+    test_env
+        .storage
+        .start_epoch(epoch1, HashSet::from_iter([TEST_TABLE_ID]));
+    local.init_for_test(epoch1).await.unwrap();
+
+    let user_key = gen_key_from_str(VirtualNode::ZERO, "dup-vnode");
+    let batch = vec![(user_key.clone(), StorageValue::new_put("value"))];
+    let read_options = ReadOptions {
+        table_id: TEST_TABLE_ID,
+        cache_policy: CachePolicy::Fill(Hint::Normal),
+        ..Default::default()
+    };
+
+    local.ingest_batch(batch).await.unwrap();
+
+    // The first snapshot read should pick up the uncommitted data.
+    let value = test_env
+        .storage
+        .get(user_key.clone(), epoch1, read_options.clone())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(value, Bytes::from("value"));
+
+    // Create another local store with the same vnode bitmap but leave it uninitialized.
+    let mut second_local = test_env
+        .storage
+        .new_local(NewLocalOptions::for_test(TEST_TABLE_ID))
+        .await;
+
+    // We should still be able to read the uncommitted data without hitting duplicated vnode errors.
+    let value = test_env
+        .storage
+        .get(user_key, epoch1, read_options.clone())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(value, Bytes::from("value"));
+
+    let epoch2 = epoch1.next_epoch();
+    test_env
+        .storage
+        .start_epoch(epoch2, HashSet::from_iter([TEST_TABLE_ID]));
+    local.seal_current_epoch(epoch2, SealCurrentEpochOptions::for_test());
+    test_env.commit_epoch(epoch1).await;
+    drop(local);
+    test_env.storage.flush_events_for_test().await;
+    second_local.init_for_test(epoch2).await.unwrap();
+
+    let epoch2_key = gen_key_from_str(VirtualNode::ZERO, "epoch2-key");
+    second_local
+        .ingest_batch(vec![(epoch2_key.clone(), StorageValue::new_put("value2"))])
+        .await
+        .unwrap();
+
+    let value = test_env
+        .storage
+        .get(epoch2_key.clone(), epoch2, read_options.clone())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(value, Bytes::from("value2"));
+
+    // Local reads should also observe its own write.
+    let value = second_local
+        .get(epoch2_key, Default::default())
+        .await
+        .unwrap();
+    assert_eq!(value.unwrap(), Bytes::from("value2"));
+}
+
+#[tokio::test]
 async fn test_state_store_multiple_flush_no_upload() {
-    const TEST_TABLE_ID: TableId = TableId { table_id: 233 };
+    const TEST_TABLE_ID: TableId = TableId::new(233);
     let table_id_set = HashSet::from_iter([TEST_TABLE_ID]);
     let test_env = prepare_hummock_test_env().await;
     test_env.register_table_id(TEST_TABLE_ID).await;
@@ -973,7 +1055,7 @@ async fn test_state_store_multiple_flush_no_upload() {
 
 #[tokio::test]
 async fn test_delete_get() {
-    const TEST_TABLE_ID: TableId = TableId { table_id: 233 };
+    const TEST_TABLE_ID: TableId = TableId::new(233);
     let table_id_set = HashSet::from_iter([TEST_TABLE_ID]);
     let test_env = prepare_hummock_test_env().await;
     test_env.register_table_id(TEST_TABLE_ID).await;
@@ -1060,7 +1142,7 @@ async fn test_delete_get() {
 
 #[tokio::test]
 async fn test_multiple_epoch_sync() {
-    const TEST_TABLE_ID: TableId = TableId { table_id: 233 };
+    const TEST_TABLE_ID: TableId = TableId::new(233);
     let table_id_set = HashSet::from_iter([TEST_TABLE_ID]);
     let test_env = prepare_hummock_test_env().await;
     test_env.register_table_id(TEST_TABLE_ID).await;
@@ -1223,7 +1305,7 @@ async fn test_multiple_epoch_sync() {
 
 #[tokio::test]
 async fn test_iter_with_min_epoch() {
-    const TEST_TABLE_ID: TableId = TableId { table_id: 233 };
+    const TEST_TABLE_ID: TableId = TableId::new(233);
     let table_id_set = HashSet::from_iter([TEST_TABLE_ID]);
     let test_env = prepare_hummock_test_env().await;
     test_env.register_table_id(TEST_TABLE_ID).await;
@@ -1470,7 +1552,7 @@ async fn test_iter_with_min_epoch() {
 #[tokio::test]
 async fn test_hummock_version_reader() {
     use risingwave_storage::store::ReadOptions;
-    const TEST_TABLE_ID: TableId = TableId { table_id: 233 };
+    const TEST_TABLE_ID: TableId = TableId::new(233);
     let table_id_set = HashSet::from_iter([TEST_TABLE_ID]);
     let test_env = prepare_hummock_test_env().await;
     test_env.register_table_id(TEST_TABLE_ID).await;
@@ -1479,6 +1561,10 @@ async fn test_hummock_version_reader() {
         .new_local(NewLocalOptions::for_test(TEST_TABLE_ID))
         .await;
     let hummock_version_reader = test_env.storage.version_reader();
+    let default_table_option = TableOption::default();
+    let zero_ttl_table_option = TableOption {
+        retention_seconds: Some(0),
+    };
 
     let epoch1 = (31 * 1000) << 16;
     test_env
@@ -1560,6 +1646,7 @@ async fn test_hummock_version_reader() {
                         ),
                         epoch1,
                         TEST_TABLE_ID,
+                        default_table_option,
                         ReadOptions {
                             prefetch_options: PrefetchOptions::default(),
                             cache_policy: CachePolicy::Fill(Hint::Normal),
@@ -1595,6 +1682,7 @@ async fn test_hummock_version_reader() {
                         ),
                         epoch2,
                         TEST_TABLE_ID,
+                        default_table_option,
                         ReadOptions {
                             prefetch_options: PrefetchOptions::default(),
                             cache_policy: CachePolicy::Fill(Hint::Normal),
@@ -1630,8 +1718,8 @@ async fn test_hummock_version_reader() {
                         ),
                         epoch2,
                         TEST_TABLE_ID,
+                        zero_ttl_table_option,
                         ReadOptions {
-                            retention_seconds: Some(0),
                             prefetch_options: PrefetchOptions::default(),
                             cache_policy: CachePolicy::Fill(Hint::Normal),
                             ..Default::default()
@@ -1703,6 +1791,7 @@ async fn test_hummock_version_reader() {
                         ),
                         epoch1,
                         TEST_TABLE_ID,
+                        default_table_option,
                         ReadOptions {
                             prefetch_options: PrefetchOptions::default(),
                             cache_policy: CachePolicy::Fill(Hint::Normal),
@@ -1751,6 +1840,7 @@ async fn test_hummock_version_reader() {
                         ),
                         epoch2,
                         TEST_TABLE_ID,
+                        default_table_option,
                         ReadOptions {
                             prefetch_options: PrefetchOptions::default(),
                             cache_policy: CachePolicy::Fill(Hint::Normal),
@@ -1786,8 +1876,8 @@ async fn test_hummock_version_reader() {
                         ),
                         epoch2,
                         TEST_TABLE_ID,
+                        zero_ttl_table_option,
                         ReadOptions {
-                            retention_seconds: Some(0),
                             prefetch_options: PrefetchOptions::default(),
                             cache_policy: CachePolicy::Fill(Hint::Normal),
                             ..Default::default()
@@ -1822,6 +1912,7 @@ async fn test_hummock_version_reader() {
                         ),
                         epoch3,
                         TEST_TABLE_ID,
+                        default_table_option,
                         ReadOptions {
                             prefetch_options: PrefetchOptions::default(),
                             cache_policy: CachePolicy::Fill(Hint::Normal),
@@ -1860,6 +1951,7 @@ async fn test_hummock_version_reader() {
                             key_range.clone(),
                             epoch2,
                             TEST_TABLE_ID,
+                            default_table_option,
                             ReadOptions {
                                 prefetch_options: PrefetchOptions::default(),
                                 cache_policy: CachePolicy::Fill(Hint::Normal),
@@ -1892,6 +1984,7 @@ async fn test_hummock_version_reader() {
                             key_range.clone(),
                             epoch3,
                             TEST_TABLE_ID,
+                            default_table_option,
                             ReadOptions {
                                 prefetch_options: PrefetchOptions::default(),
                                 cache_policy: CachePolicy::Fill(Hint::Normal),
@@ -1913,7 +2006,7 @@ async fn test_hummock_version_reader() {
 
 #[tokio::test]
 async fn test_get_with_min_epoch() {
-    const TEST_TABLE_ID: TableId = TableId { table_id: 233 };
+    const TEST_TABLE_ID: TableId = TableId::new(233);
     let table_id_set = HashSet::from_iter([TEST_TABLE_ID]);
     let test_env = prepare_hummock_test_env().await;
     test_env.register_table_id(TEST_TABLE_ID).await;
@@ -1969,7 +2062,7 @@ async fn test_get_with_min_epoch() {
         let k = gen_key(0);
         let prefix_hint = {
             let mut ret = Vec::with_capacity(TABLE_PREFIX_LEN + k.len());
-            ret.put_u32(TEST_TABLE_ID.table_id());
+            ret.put_u32(TEST_TABLE_ID.as_raw_id());
             ret.put_slice(k.as_ref());
             ret
         };
@@ -2075,7 +2168,7 @@ async fn test_get_with_min_epoch() {
     let k = gen_key(0);
     let prefix_hint = {
         let mut ret = Vec::with_capacity(TABLE_PREFIX_LEN + k.len());
-        ret.put_u32(TEST_TABLE_ID.table_id());
+        ret.put_u32(TEST_TABLE_ID.as_raw_id());
         ret.put_slice(k.as_ref());
         ret
     };
@@ -2160,7 +2253,7 @@ async fn test_get_with_min_epoch() {
 
 #[tokio::test]
 async fn test_table_watermark() {
-    const TEST_TABLE_ID: TableId = TableId { table_id: 233 };
+    const TEST_TABLE_ID: TableId = TableId::new(233);
     let test_env = prepare_hummock_test_env().await;
     test_env.register_table_id(TEST_TABLE_ID).await;
     let mut local1 = test_env
@@ -2472,13 +2565,14 @@ async fn test_table_watermark() {
             .get(&TEST_TABLE_ID)
             .unwrap()
             .committed_epoch;
-        let table_watermarks = PkPrefixTableWatermarksIndex::new_committed(
+        let table_watermarks = TableWatermarksIndex::new_committed(
             version
                 .table_watermarks
                 .get(&TEST_TABLE_ID)
                 .unwrap()
                 .clone(),
             epoch,
+            WatermarkSerdeType::PkPrefix,
         );
         assert_eq!(WatermarkDirection::Ascending, table_watermarks.direction());
         assert_eq!(
@@ -2682,7 +2776,7 @@ async fn test_commit_multi_epoch() {
         SstableInfoInner {
             sst_id: 11.into(),
             object_id: 1.into(),
-            table_ids: vec![existing_table_id.table_id],
+            table_ids: vec![existing_table_id],
             file_size: 100,
             sst_size: 100,
             key_range: KeyRange {
@@ -2710,8 +2804,7 @@ async fn test_commit_multi_epoch() {
     .await;
 
     let cg_id =
-        get_compaction_group_id_by_table_id(test_env.manager.clone(), existing_table_id.table_id())
-            .await;
+        get_compaction_group_id_by_table_id(test_env.manager.clone(), existing_table_id).await;
 
     {
         let version = test_env.manager.get_current_version().await;
@@ -2738,7 +2831,7 @@ async fn test_commit_multi_epoch() {
         SstableInfoInner {
             sst_id: 22.into(),
             object_id: 2.into(),
-            table_ids: vec![existing_table_id.table_id],
+            table_ids: vec![existing_table_id],
             file_size: 100,
             sst_size: 100,
             key_range: KeyRange {
@@ -2786,7 +2879,7 @@ async fn test_commit_multi_epoch() {
         SstableInfoInner {
             sst_id: 33.into(),
             object_id: 3.into(),
-            table_ids: vec![new_table_id.table_id],
+            table_ids: vec![new_table_id],
             file_size: 100,
             sst_size: 100,
             key_range: KeyRange {
@@ -2816,8 +2909,7 @@ async fn test_commit_multi_epoch() {
     let new_cg_id = {
         let version = test_env.manager.get_current_version().await;
         let new_cg_id =
-            get_compaction_group_id_by_table_id(test_env.manager.clone(), new_table_id.table_id())
-                .await;
+            get_compaction_group_id_by_table_id(test_env.manager.clone(), new_table_id).await;
 
         let new_cg = version.levels.get(&new_cg_id).unwrap();
         let sub_levels = &new_cg.l0.sub_levels;
@@ -2839,7 +2931,7 @@ async fn test_commit_multi_epoch() {
         SstableInfoInner {
             sst_id: 44.into(),
             object_id: 4.into(),
-            table_ids: vec![new_table_id.table_id],
+            table_ids: vec![new_table_id],
             file_size: 100,
             sst_size: 100,
             key_range: KeyRange {
@@ -2884,7 +2976,7 @@ async fn test_commit_multi_epoch() {
         SstableInfoInner {
             sst_id: 55.into(),
             object_id: 5.into(),
-            table_ids: vec![existing_table_id.table_id, new_table_id.table_id],
+            table_ids: vec![existing_table_id, new_table_id],
             file_size: 100,
             sst_size: 100,
             key_range: KeyRange {
@@ -3007,7 +3099,7 @@ async fn test_commit_with_large_size() {
     let sst1_epoch1: SstableInfo = SstableInfoInner {
         sst_id: 11.into(),
         object_id: 1.into(),
-        table_ids: vec![existing_table_id.table_id],
+        table_ids: vec![existing_table_id],
         file_size: 512 << 20,
         sst_size: 512 << 20,
         ..Default::default()
@@ -3017,7 +3109,7 @@ async fn test_commit_with_large_size() {
     let sst1_epoch2: SstableInfo = SstableInfoInner {
         sst_id: 12.into(),
         object_id: 2.into(),
-        table_ids: vec![existing_table_id.table_id],
+        table_ids: vec![existing_table_id],
         file_size: 512 << 20,
         sst_size: 512 << 20,
         ..Default::default()
@@ -3027,7 +3119,7 @@ async fn test_commit_with_large_size() {
     let sst1_epoch3: SstableInfo = SstableInfoInner {
         sst_id: 13.into(),
         object_id: 3.into(),
-        table_ids: vec![existing_table_id.table_id],
+        table_ids: vec![existing_table_id],
         file_size: 512 << 20,
         sst_size: 512 << 20,
         ..Default::default()
@@ -3049,8 +3141,7 @@ async fn test_commit_with_large_size() {
     .await;
 
     let cg_id =
-        get_compaction_group_id_by_table_id(test_env.manager.clone(), existing_table_id.table_id())
-            .await;
+        get_compaction_group_id_by_table_id(test_env.manager.clone(), existing_table_id).await;
 
     let l0_sub_levels = test_env
         .manager
@@ -3144,7 +3235,7 @@ async fn test_commit_with_truncate_tables() {
     let sst1_table1: SstableInfo = SstableInfoInner {
         sst_id: 11.into(),
         object_id: 1.into(),
-        table_ids: vec![table_id_1.table_id],
+        table_ids: vec![table_id_1],
         file_size: 100,
         sst_size: 100,
         ..Default::default()
@@ -3154,7 +3245,7 @@ async fn test_commit_with_truncate_tables() {
     let sst1_table2: SstableInfo = SstableInfoInner {
         sst_id: 12.into(),
         object_id: 2.into(),
-        table_ids: vec![table_id_2.table_id],
+        table_ids: vec![table_id_2],
         file_size: 100,
         sst_size: 100,
         ..Default::default()
@@ -3164,7 +3255,7 @@ async fn test_commit_with_truncate_tables() {
     let sst1_table3: SstableInfo = SstableInfoInner {
         sst_id: 13.into(),
         object_id: 3.into(),
-        table_ids: vec![table_id_3.table_id],
+        table_ids: vec![table_id_3],
         file_size: 100,
         sst_size: 100,
         ..Default::default()
@@ -3195,12 +3286,9 @@ async fn test_commit_with_truncate_tables() {
     )
     .await;
 
-    let cg_id_1 =
-        get_compaction_group_id_by_table_id(test_env.manager.clone(), table_id_1.table_id()).await;
-    let cg_id_2 =
-        get_compaction_group_id_by_table_id(test_env.manager.clone(), table_id_2.table_id()).await;
-    let cg_id_3 =
-        get_compaction_group_id_by_table_id(test_env.manager.clone(), table_id_3.table_id()).await;
+    let cg_id_1 = get_compaction_group_id_by_table_id(test_env.manager.clone(), table_id_1).await;
+    let cg_id_2 = get_compaction_group_id_by_table_id(test_env.manager.clone(), table_id_2).await;
+    let cg_id_3 = get_compaction_group_id_by_table_id(test_env.manager.clone(), table_id_3).await;
 
     // Verify all tables exist in version after epoch1
     {
@@ -3234,7 +3322,7 @@ async fn test_commit_with_truncate_tables() {
     let sst2_table1: SstableInfo = SstableInfoInner {
         sst_id: 21.into(),
         object_id: 4.into(),
-        table_ids: vec![table_id_1.table_id],
+        table_ids: vec![table_id_1],
         file_size: 100,
         sst_size: 100,
         ..Default::default()
@@ -3244,7 +3332,7 @@ async fn test_commit_with_truncate_tables() {
     let sst2_table2: SstableInfo = SstableInfoInner {
         sst_id: 22.into(),
         object_id: 5.into(),
-        table_ids: vec![table_id_2.table_id],
+        table_ids: vec![table_id_2],
         file_size: 100,
         sst_size: 100,
         ..Default::default()
@@ -3254,7 +3342,7 @@ async fn test_commit_with_truncate_tables() {
     let sst2_table3: SstableInfo = SstableInfoInner {
         sst_id: 23.into(),
         object_id: 6.into(),
-        table_ids: vec![table_id_3.table_id],
+        table_ids: vec![table_id_3],
         file_size: 100,
         sst_size: 100,
         ..Default::default()
@@ -3305,7 +3393,7 @@ async fn test_commit_with_truncate_tables() {
     let sst3_table1: SstableInfo = SstableInfoInner {
         sst_id: 31.into(),
         object_id: 7.into(),
-        table_ids: vec![table_id_1.table_id],
+        table_ids: vec![table_id_1],
         file_size: 100,
         sst_size: 100,
         ..Default::default()
@@ -3315,7 +3403,7 @@ async fn test_commit_with_truncate_tables() {
     let sst3_table2: SstableInfo = SstableInfoInner {
         sst_id: 32.into(),
         object_id: 8.into(),
-        table_ids: vec![table_id_2.table_id],
+        table_ids: vec![table_id_2],
         file_size: 100,
         sst_size: 100,
         ..Default::default()
@@ -3325,7 +3413,7 @@ async fn test_commit_with_truncate_tables() {
     let sst3_table3: SstableInfo = SstableInfoInner {
         sst_id: 33.into(),
         object_id: 9.into(),
-        table_ids: vec![table_id_3.table_id],
+        table_ids: vec![table_id_3],
         file_size: 100,
         sst_size: 100,
         ..Default::default()
@@ -3424,7 +3512,7 @@ async fn test_commit_with_truncate_tables() {
         for sub_level in &cg1.l0.sub_levels {
             for sst_info in &sub_level.table_infos {
                 assert!(
-                    !sst_info.table_ids.contains(&table_id_1.table_id),
+                    !sst_info.table_ids.contains(&table_id_1),
                     "SST {} should not contain table_id_1 after truncation",
                     sst_info.object_id
                 );
@@ -3442,7 +3530,7 @@ async fn test_commit_with_truncate_tables() {
         let mut found_table2_ssts = 0;
         for sub_level in &cg2.l0.sub_levels {
             for sst_info in &sub_level.table_infos {
-                if sst_info.table_ids.contains(&table_id_2.table_id) {
+                if sst_info.table_ids.contains(&table_id_2) {
                     found_table2_ssts += 1;
                 }
             }
@@ -3457,7 +3545,7 @@ async fn test_commit_with_truncate_tables() {
         for sub_level in &cg3.l0.sub_levels {
             for sst_info in &sub_level.table_infos {
                 assert!(
-                    !sst_info.table_ids.contains(&table_id_3.table_id),
+                    !sst_info.table_ids.contains(&table_id_3),
                     "SST {} should not contain table_id_3 after truncation",
                     sst_info.object_id
                 );
@@ -3489,7 +3577,7 @@ async fn test_commit_with_truncate_tables() {
     let sst5_table1: SstableInfo = SstableInfoInner {
         sst_id: 51.into(),
         object_id: 10.into(),
-        table_ids: vec![table_id_1.table_id],
+        table_ids: vec![table_id_1],
         file_size: 100,
         sst_size: 100,
         ..Default::default()
@@ -3499,7 +3587,7 @@ async fn test_commit_with_truncate_tables() {
     let sst5_table3: SstableInfo = SstableInfoInner {
         sst_id: 53.into(),
         object_id: 11.into(),
-        table_ids: vec![table_id_3.table_id],
+        table_ids: vec![table_id_3],
         file_size: 100,
         sst_size: 100,
         ..Default::default()
@@ -3529,7 +3617,7 @@ async fn test_commit_with_truncate_tables() {
         assert_eq!(last_sub_level_ssts.len(), 1);
         assert_eq!(last_sst.object_id, sst5_table1.object_id);
         assert!(
-            last_sst.table_ids.contains(&table_id_1.table_id),
+            last_sst.table_ids.contains(&table_id_1),
             "New SST should contain table_id_1"
         );
 
@@ -3561,7 +3649,7 @@ async fn test_commit_with_truncate_tables() {
         assert_eq!(last_sub_level_ssts.len(), 1);
         assert_eq!(last_sst.object_id, sst5_table3.object_id);
         assert!(
-            last_sst.table_ids.contains(&table_id_3.table_id),
+            last_sst.table_ids.contains(&table_id_3),
             "New SST should contain table_id_3"
         );
 
@@ -3601,7 +3689,7 @@ async fn test_commit_with_truncate_tables() {
             for sub_level in &cg.l0.sub_levels {
                 for sst_info in &sub_level.table_infos {
                     assert!(
-                        !sst_info.table_ids.contains(&table_id.table_id),
+                        !sst_info.table_ids.contains(&table_id),
                         "SST {} should not contain table_id {:?} after truncation",
                         sst_info.object_id,
                         table_id

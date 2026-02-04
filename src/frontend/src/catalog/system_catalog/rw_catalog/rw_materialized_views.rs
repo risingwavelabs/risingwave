@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,9 +13,9 @@
 // limitations under the License.
 
 use risingwave_common::catalog::CreateType;
+use risingwave_common::id::{SchemaId, TableId, UserId};
 use risingwave_common::types::{Fields, Timestamptz};
 use risingwave_frontend_macro::system_catalog;
-use risingwave_pb::user::grant_privilege::Object;
 
 use crate::catalog::system_catalog::{SysCatalogReaderImpl, get_acl_items};
 use crate::error::Result;
@@ -23,10 +23,10 @@ use crate::error::Result;
 #[derive(Fields)]
 struct RwMaterializedView {
     #[primary_key]
-    id: i32,
+    id: TableId,
     name: String,
-    schema_id: i32,
-    owner: i32,
+    schema_id: SchemaId,
+    owner: UserId,
     definition: String,
     append_only: bool,
     acl: Vec<String>,
@@ -35,6 +35,7 @@ struct RwMaterializedView {
     initialized_at_cluster_version: Option<String>,
     created_at_cluster_version: Option<String>,
     background_ddl: bool,
+    status: String,
 }
 
 #[system_catalog(table, "rw_catalog.rw_materialized_views")]
@@ -53,23 +54,19 @@ fn read_rw_materialized_views(reader: &SysCatalogReaderImpl) -> Result<Vec<RwMat
             schema
                 .iter_all_mvs_with_acl(current_user)
                 .map(|table| RwMaterializedView {
-                    id: table.id.table_id as i32,
+                    id: table.id,
                     name: table.name().into(),
-                    schema_id: schema.id() as i32,
-                    owner: table.owner as i32,
+                    schema_id: schema.id(),
+                    owner: table.owner,
                     definition: table.create_sql(),
                     append_only: table.append_only,
-                    acl: get_acl_items(
-                        &Object::TableId(table.id.table_id),
-                        true,
-                        &users,
-                        username_map,
-                    ),
+                    acl: get_acl_items(table.id, true, &users, username_map),
                     initialized_at: table.initialized_at_epoch.map(|e| e.as_timestamptz()),
                     created_at: table.created_at_epoch.map(|e| e.as_timestamptz()),
                     initialized_at_cluster_version: table.initialized_at_cluster_version.clone(),
                     created_at_cluster_version: table.created_at_cluster_version.clone(),
                     background_ddl: table.create_type == CreateType::Background,
+                    status: table.stream_job_status.to_string(),
                 })
         })
         .collect())

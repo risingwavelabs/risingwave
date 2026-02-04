@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -85,6 +85,16 @@ impl LogicalValues {
         Self::new(rows, schema, ctx).into()
     }
 
+    /// Create a [`LogicalValues`] node with a single empty row, as a dummy input for `Project` or `ProjectSet`.
+    pub fn create_empty_scalar(ctx: OptimizerContextRef) -> PlanRef {
+        Self::new(vec![vec![]], Schema::new(vec![]), ctx).into()
+    }
+
+    /// Check whether this is an empty scalar, typically created by [`LogicalValues::create_empty_scalar`].
+    pub fn is_empty_scalar(&self) -> bool {
+        self.schema().is_empty() && self.rows.len() == 1 && self.rows[0].is_empty()
+    }
+
     /// Get a reference to the logical values' rows.
     pub fn rows(&self) -> &[Vec<ExprImpl>] {
         self.rows.as_ref()
@@ -152,7 +162,7 @@ impl ColPrunable for LogicalValues {
             .iter()
             .map(|i| self.schema().fields[*i].clone())
             .collect();
-        Self::new(rows, Schema { fields }, self.base.ctx().clone()).into()
+        Self::new(rows, Schema { fields }, self.base.ctx()).into()
     }
 }
 

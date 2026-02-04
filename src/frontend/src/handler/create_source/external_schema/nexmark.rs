@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -54,7 +54,7 @@ pub fn check_nexmark_schema(
         .map(|c| {
             (
                 c.column_desc.name.to_ascii_lowercase(),
-                c.column_desc.data_type.to_owned(),
+                c.column_desc.data_type.clone(),
             )
         })
         .collect_vec();

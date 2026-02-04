@@ -24,7 +24,7 @@ const KEY_100: &str = "eyJhbGciOiJSUzUxMiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJwYWlkLXRl
 
 #[tokio::test]
 async fn test_license_cpu_limit() -> Result<()> {
-    // Now 8 * 3 = 24 cores in total.
+    // Now 8 * 3 + 3 = 27 cores in total.
     let mut cluster = Cluster::start(Configuration {
         compute_nodes: 3,
         compute_node_cores: 8,
@@ -66,7 +66,7 @@ async fn test_license_cpu_limit() -> Result<()> {
     let error = test_feature!().unwrap_err().to_report_string();
     assert!(error.contains("currently not effective"), "{error}");
 
-    // Kill a compute node, the total cores will be reduced to 16, which is under the limit.
+    // Kill a compute node, the total cores will be reduced to 19, which is under the limit.
     // The paid-tier features should be available again.
     cluster.simple_kill_nodes(["compute-2"]).await;
     tokio::time::sleep(std::time::Duration::from_secs(100)).await;
@@ -81,6 +81,53 @@ async fn test_license_cpu_limit() -> Result<()> {
     // Set a license key with CPU limit 100, it should work again.
     set_license_key!(KEY_100);
     test_feature!().unwrap().assert_result_eq("t");
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_license_cpu_limit_non_compute_node_exit() -> Result<()> {
+    // 9 * 2 + 1 (meta) + 1 (frontend) + 1 (compactor) = 21 cores in total.
+    // Killing the compactor node should reduce it to 20, under the limit.
+    let mut cluster = Cluster::start(Configuration {
+        compute_nodes: 2,
+        compute_node_cores: 9,
+        ..Default::default()
+    })
+    .await?;
+
+    let mut session = cluster.start_session();
+
+    macro_rules! set_license_key {
+        ($key:expr) => {
+            session
+                .run(format!("ALTER SYSTEM SET license_key TO '{}';", $key))
+                .await?;
+            tokio::time::sleep(std::time::Duration::from_secs(10)).await;
+        };
+    }
+
+    macro_rules! test_feature {
+        () => {
+            session.run("SELECT rw_test_feature('TestDummy');").await
+        };
+    }
+
+    set_license_key!(KEY_20);
+    let error = test_feature!().unwrap_err().to_report_string();
+    assert!(error.contains("currently not effective"), "{error}");
+
+    // Kill a non-compute node, the total cores will be reduced to 20, which is under the limit.
+    // The paid-tier features should be available again.
+    cluster.simple_kill_nodes(["compactor-1"]).await;
+    tokio::time::sleep(std::time::Duration::from_secs(100)).await;
+    test_feature!().unwrap().assert_result_eq("t");
+
+    // Add it back, will be unavailable again.
+    cluster.simple_restart_nodes(["compactor-1"]).await;
+    tokio::time::sleep(std::time::Duration::from_secs(100)).await;
+    let error = test_feature!().unwrap_err().to_report_string();
+    assert!(error.contains("currently not effective"), "{error}");
 
     Ok(())
 }

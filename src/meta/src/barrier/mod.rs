@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,21 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use anyhow::anyhow;
 use risingwave_common::catalog::{DatabaseId, TableId};
-use risingwave_connector::source::SplitImpl;
 use risingwave_pb::catalog::Database;
-use risingwave_pb::ddl_service::DdlProgress;
 use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::meta::PbRecoveryStatus;
 use tokio::sync::oneshot::Sender;
 
 use self::notifier::Notifier;
-use crate::barrier::info::{BarrierInfo, InflightStreamingJobInfo};
+use crate::barrier::info::BarrierInfo;
 use crate::manager::ActiveStreamingWorkerNodes;
-use crate::model::{ActorId, FragmentDownstreamRelation, StreamActor, StreamJobFragments};
+use crate::model::{ActorId, BackfillUpstreamType, FragmentId, StreamActor, SubscriptionId};
 use crate::{MetaError, MetaResult};
 
 mod backfill_order_control;
@@ -34,7 +32,7 @@ pub mod cdc_progress;
 mod checkpoint;
 mod command;
 mod complete_task;
-mod context;
+pub(super) mod context;
 mod edge_builder;
 mod info;
 mod manager;
@@ -49,16 +47,21 @@ mod utils;
 mod worker;
 
 pub use backfill_order_control::{BackfillNode, BackfillOrderState};
-use risingwave_connector::source::cdc::CdcTableSnapshotSplitAssignmentWithGeneration;
+use risingwave_common::id::JobId;
+use risingwave_pb::ddl_service::PbBackfillType;
 
 pub use self::command::{
     BarrierKind, Command, CreateStreamingJobCommandInfo, CreateStreamingJobType,
-    ReplaceStreamJobPlan, Reschedule, SnapshotBackfillInfo,
+    ReplaceStreamJobPlan, Reschedule, ResumeBackfillTarget, SnapshotBackfillInfo,
 };
-pub(crate) use self::info::{InflightSubscriptionInfo, SharedActorInfos, SharedFragmentInfo};
+pub(crate) use self::info::{SharedActorInfos, SharedFragmentInfo};
 pub use self::manager::{BarrierManagerRef, GlobalBarrierManager};
 pub use self::schedule::BarrierScheduler;
 pub use self::trace::TracedEpoch;
+use crate::barrier::cdc_progress::CdcProgress;
+use crate::barrier::context::recovery::LoadedRecoveryContext;
+use crate::controller::fragment::InflightFragmentInfo;
+use crate::stream::cdc::CdcTableSnapshotSplits;
 
 /// The reason why the cluster is recovering.
 enum RecoveryReason {
@@ -101,44 +104,60 @@ impl From<&BarrierManagerStatus> for PbRecoveryStatus {
     }
 }
 
+pub(crate) struct BackfillProgress {
+    pub(crate) progress: String,
+    pub(crate) backfill_type: PbBackfillType,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct FragmentBackfillProgress {
+    pub(crate) job_id: JobId,
+    pub(crate) fragment_id: FragmentId,
+    pub(crate) consumed_rows: u64,
+    pub(crate) done: bool,
+    pub(crate) upstream_type: BackfillUpstreamType,
+}
+
+pub(crate) struct UpdateDatabaseBarrierRequest {
+    pub database_id: DatabaseId,
+    pub barrier_interval_ms: Option<u32>,
+    pub checkpoint_frequency: Option<u64>,
+    pub sender: Sender<()>,
+}
+
 pub(crate) enum BarrierManagerRequest {
-    GetDdlProgress(Sender<HashMap<u32, DdlProgress>>),
+    GetBackfillProgress(Sender<MetaResult<HashMap<JobId, BackfillProgress>>>),
+    GetFragmentBackfillProgress(Sender<MetaResult<Vec<FragmentBackfillProgress>>>),
+    GetCdcProgress(Sender<MetaResult<HashMap<JobId, CdcProgress>>>),
     AdhocRecovery(Sender<()>),
-    UpdateDatabaseBarrier {
-        database_id: DatabaseId,
-        barrier_interval_ms: Option<u32>,
-        checkpoint_frequency: Option<u64>,
-        sender: Sender<()>,
-    },
+    UpdateDatabaseBarrier(UpdateDatabaseBarrierRequest),
+    MayHaveSnapshotBackfillingJob(Sender<bool>),
 }
 
 #[derive(Debug)]
 struct BarrierWorkerRuntimeInfoSnapshot {
     active_streaming_nodes: ActiveStreamingWorkerNodes,
-    database_job_infos: HashMap<DatabaseId, HashMap<TableId, InflightStreamingJobInfo>>,
+    recovery_context: LoadedRecoveryContext,
     state_table_committed_epochs: HashMap<TableId, u64>,
     /// `table_id` -> (`Vec<non-checkpoint epoch>`, checkpoint epoch)
     state_table_log_epochs: HashMap<TableId, Vec<(Vec<u64>, u64)>>,
-    subscription_infos: HashMap<DatabaseId, InflightSubscriptionInfo>,
-    stream_actors: HashMap<ActorId, StreamActor>,
-    fragment_relations: FragmentDownstreamRelation,
-    source_splits: HashMap<ActorId, Vec<SplitImpl>>,
-    background_jobs: HashMap<TableId, (String, StreamJobFragments)>,
+    mv_depended_subscriptions: HashMap<TableId, HashMap<SubscriptionId, u64>>,
+    background_jobs: HashSet<JobId>,
     hummock_version_stats: HummockVersionStats,
     database_infos: Vec<Database>,
-    cdc_table_snapshot_split_assignment: CdcTableSnapshotSplitAssignmentWithGeneration,
+    cdc_table_snapshot_splits: HashMap<JobId, CdcTableSnapshotSplits>,
 }
 
 impl BarrierWorkerRuntimeInfoSnapshot {
     fn validate_database_info(
         database_id: DatabaseId,
-        database_jobs: &HashMap<TableId, InflightStreamingJobInfo>,
+        database_jobs: &HashMap<JobId, HashMap<FragmentId, InflightFragmentInfo>>,
         active_streaming_nodes: &ActiveStreamingWorkerNodes,
         stream_actors: &HashMap<ActorId, StreamActor>,
         state_table_committed_epochs: &HashMap<TableId, u64>,
     ) -> MetaResult<()> {
         {
-            for fragment in database_jobs.values().flat_map(|job| job.fragment_infos()) {
+            for fragment in database_jobs.values().flat_map(|job| job.values()) {
                 for (actor_id, actor) in &fragment.actors {
                     if !active_streaming_nodes
                         .current()
@@ -165,15 +184,16 @@ impl BarrierWorkerRuntimeInfoSnapshot {
                     }
                 }
             }
-            for (job_id, job) in database_jobs {
-                let mut committed_epochs = job.existing_table_ids().map(|table_id| {
-                    (
-                        table_id,
-                        *state_table_committed_epochs
-                            .get(&table_id)
-                            .expect("checked exist"),
-                    )
-                });
+            for (job_id, fragments) in database_jobs {
+                let mut committed_epochs =
+                    InflightFragmentInfo::existing_table_ids(fragments.values()).map(|table_id| {
+                        (
+                            table_id,
+                            *state_table_committed_epochs
+                                .get(&table_id)
+                                .expect("checked exist"),
+                        )
+                    });
                 let (first_table, first_epoch) = committed_epochs.next().ok_or_else(|| {
                     anyhow!(
                         "job {} in database {} has no state table after recovery",
@@ -199,47 +219,15 @@ impl BarrierWorkerRuntimeInfoSnapshot {
         }
         Ok(())
     }
-
-    fn validate(&self) -> MetaResult<()> {
-        for (database_id, job_infos) in &self.database_job_infos {
-            Self::validate_database_info(
-                *database_id,
-                job_infos,
-                &self.active_streaming_nodes,
-                &self.stream_actors,
-                &self.state_table_committed_epochs,
-            )?
-        }
-        Ok(())
-    }
 }
 
 #[derive(Debug)]
 struct DatabaseRuntimeInfoSnapshot {
-    job_infos: HashMap<TableId, InflightStreamingJobInfo>,
+    recovery_context: LoadedRecoveryContext,
     state_table_committed_epochs: HashMap<TableId, u64>,
     /// `table_id` -> (`Vec<non-checkpoint epoch>`, checkpoint epoch)
     state_table_log_epochs: HashMap<TableId, Vec<(Vec<u64>, u64)>>,
-    subscription_info: InflightSubscriptionInfo,
-    stream_actors: HashMap<ActorId, StreamActor>,
-    fragment_relations: FragmentDownstreamRelation,
-    source_splits: HashMap<ActorId, Vec<SplitImpl>>,
-    background_jobs: HashMap<TableId, (String, StreamJobFragments)>,
-    cdc_table_snapshot_split_assignment: CdcTableSnapshotSplitAssignmentWithGeneration,
-}
-
-impl DatabaseRuntimeInfoSnapshot {
-    fn validate(
-        &self,
-        database_id: DatabaseId,
-        active_streaming_nodes: &ActiveStreamingWorkerNodes,
-    ) -> MetaResult<()> {
-        BarrierWorkerRuntimeInfoSnapshot::validate_database_info(
-            database_id,
-            &self.job_infos,
-            active_streaming_nodes,
-            &self.stream_actors,
-            &self.state_table_committed_epochs,
-        )
-    }
+    mv_depended_subscriptions: HashMap<TableId, HashMap<SubscriptionId, u64>>,
+    background_jobs: HashSet<JobId>,
+    cdc_table_snapshot_splits: HashMap<JobId, CdcTableSnapshotSplits>,
 }

@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,9 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::types::Fields;
+use risingwave_common::id::{SchemaId, UserId, ViewId};
+use risingwave_common::types::{Fields, Timestamptz};
 use risingwave_frontend_macro::system_catalog;
-use risingwave_pb::user::grant_privilege::Object;
 
 use crate::catalog::system_catalog::{SysCatalogReaderImpl, get_acl_items};
 use crate::error::Result;
@@ -22,12 +22,14 @@ use crate::error::Result;
 #[derive(Fields)]
 struct RwView {
     #[primary_key]
-    id: i32,
+    id: ViewId,
     name: String,
-    schema_id: i32,
-    owner: i32,
+    schema_id: SchemaId,
+    owner: UserId,
     definition: String,
     acl: Vec<String>,
+    created_at: Option<Timestamptz>,
+    created_at_cluster_version: Option<String>,
 }
 
 #[system_catalog(table, "rw_catalog.rw_views")]
@@ -44,12 +46,14 @@ fn read_rw_view_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwView>> {
     Ok(schemas
         .flat_map(|schema| {
             schema.iter_view_with_acl(current_user).map(|view| RwView {
-                id: view.id as i32,
+                id: view.id,
                 name: view.name().to_owned(),
-                schema_id: schema.id() as i32,
-                owner: view.owner as i32,
+                schema_id: schema.id(),
+                owner: view.owner,
                 definition: view.create_sql(schema.name()),
-                acl: get_acl_items(&Object::ViewId(view.id), false, &users, username_map),
+                acl: get_acl_items(view.id, false, &users, username_map),
+                created_at: view.created_at_epoch.map(|e| e.as_timestamptz()),
+                created_at_cluster_version: view.created_at_cluster_version.clone(),
             })
         })
         .collect())

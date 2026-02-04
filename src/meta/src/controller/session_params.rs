@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -21,7 +21,7 @@ use risingwave_meta_model::session_parameter;
 use risingwave_pb::meta::SetSessionParamRequest;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use sea_orm::ActiveValue::Set;
-use sea_orm::{ActiveModelTrait, DatabaseConnection, EntityTrait, TransactionTrait};
+use sea_orm::{DatabaseConnection, EntityTrait, TransactionTrait};
 use thiserror_ext::AsReport;
 use tokio::sync::RwLock;
 use tracing::info;
@@ -121,7 +121,7 @@ impl SessionParamsController {
 
         let mut param: session_parameter::ActiveModel = param.into();
         param.value = Set(new_param.clone());
-        param.update(&self.db).await?;
+        SessionParameter::update(param).exec(&self.db).await?;
         let new_batch_parallelism = params_guard.batch_parallelism();
         self.notify_workers(name.clone(), new_param.clone());
         if old_batch_parallelism != new_batch_parallelism {
@@ -181,8 +181,8 @@ mod tests {
             value: Set("foo".into()),
             description: Set(None),
         };
-        deprecated_param
-            .insert(&session_param_ctl.db)
+        SessionParameter::insert(deprecated_param)
+            .exec(&session_param_ctl.db)
             .await
             .unwrap();
 

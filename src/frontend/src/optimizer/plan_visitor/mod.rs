@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -40,11 +40,22 @@ pub use cardinality_visitor::*;
 mod jsonb_stream_key_checker;
 pub use jsonb_stream_key_checker::*;
 mod distributed_dml_visitor;
-mod read_storage_table_visitor;
+mod locality_provider_counter;
 mod rw_timestamp_validator;
+mod sole_sys_table_visitor;
 pub use distributed_dml_visitor::*;
-pub use read_storage_table_visitor::*;
+pub use locality_provider_counter::*;
 pub use rw_timestamp_validator::*;
+pub use sole_sys_table_visitor::*;
+
+#[cfg(feature = "datafusion")]
+mod datafusion_execute_checker;
+#[cfg(feature = "datafusion")]
+pub use datafusion_execute_checker::*;
+#[cfg(feature = "datafusion")]
+mod datafusion_plan_converter;
+#[cfg(feature = "datafusion")]
+pub use datafusion_plan_converter::*;
 
 use crate::for_each_convention_all_plan_nodes;
 use crate::optimizer::plan_node::*;
@@ -98,7 +109,7 @@ macro_rules! def_visitor {
                 /// The visitor for plan nodes. visit all inputs and return the ret value of the left most input,
                 /// and leaf node returns `R::default()`
                 pub trait [<$convention  PlanVisitor>] {
-                    type Result: Default;
+                    type Result;
                     type DefaultBehavior: DefaultBehavior<Self::Result>;
 
                     /// The behavior for the default implementations of `visit_xxx`.

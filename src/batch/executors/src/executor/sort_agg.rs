@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -123,7 +123,7 @@ impl SortAggExecutor {
 
         #[for_await]
         for child_chunk in self.child.execute() {
-            let child_chunk = StreamChunk::from(child_chunk?.compact());
+            let child_chunk = StreamChunk::from(child_chunk?.compact_vis());
             let mut group_columns = Vec::with_capacity(self.group_key.len());
             for expr in &mut self.group_key {
                 self.shutdown_rx.check()?;

@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -36,7 +36,7 @@ impl Bitmap {
     /// the bitmap.
     pub fn vnode_ranges(&self) -> impl Iterator<Item = RangeInclusive<VirtualNode>> + '_ {
         self.high_ranges()
-            .map(|r| (VirtualNode::from_index(*r.start())..=VirtualNode::from_index(*r.end())))
+            .map(|r| VirtualNode::from_index(*r.start())..=VirtualNode::from_index(*r.end()))
     }
 
     /// Returns whether only the [`SINGLETON_VNODE`] is set in the bitmap.

@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,9 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::id::{SchemaId, TableId, UserId};
 use risingwave_common::types::Fields;
 use risingwave_frontend_macro::system_catalog;
-use risingwave_pb::user::grant_privilege::Object;
 
 use crate::catalog::system_catalog::{SysCatalogReaderImpl, get_acl_items};
 use crate::error::Result;
@@ -23,10 +23,10 @@ use crate::error::Result;
 #[derive(Fields)]
 struct SystemTable {
     #[primary_key]
-    id: i32,
+    id: TableId,
     name: String,
-    schema_id: i32,
-    owner: i32,
+    schema_id: SchemaId,
+    owner: UserId,
     definition: Option<String>,
     acl: Vec<String>,
 }
@@ -42,17 +42,12 @@ fn read_system_table_info(reader: &SysCatalogReaderImpl) -> Result<Vec<SystemTab
     Ok(schemas
         .flat_map(|schema| {
             schema.iter_system_tables().map(|table| SystemTable {
-                id: table.id.table_id as i32,
+                id: table.id,
                 name: table.name().to_owned(),
-                schema_id: schema.id() as i32,
-                owner: table.owner as i32,
+                schema_id: schema.id(),
+                owner: table.owner,
                 definition: None,
-                acl: get_acl_items(
-                    &Object::TableId(table.id.table_id),
-                    false,
-                    &users,
-                    username_map,
-                ),
+                acl: get_acl_items(table.id, false, &users, username_map),
             })
         })
         .collect())

@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,7 +16,7 @@ use either::Either;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::{ArrayRef, DataChunk};
-use risingwave_common::catalog::{Field, Schema};
+use risingwave_common::catalog::{Field, PROJECTED_ROW_ID_COLUMN_NAME, Schema};
 use risingwave_common::types::{DataType, DatumRef};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::iter_util::ZipEqFast;
@@ -154,7 +154,10 @@ impl BoxedExecutorBuilder for ProjectSetExecutor {
             })
             .try_collect()?;
 
-        let mut fields = vec![Field::with_name(DataType::Int64, "projected_row_id")];
+        let mut fields = vec![Field::with_name(
+            DataType::Int64,
+            PROJECTED_ROW_ID_COLUMN_NAME,
+        )];
         fields.extend(
             select_list
                 .iter()

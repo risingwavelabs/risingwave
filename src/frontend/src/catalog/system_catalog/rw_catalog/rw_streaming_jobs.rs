@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::id::{DatabaseId, JobId};
 use risingwave_common::types::Fields;
 use risingwave_frontend_macro::system_catalog;
 
@@ -21,9 +22,9 @@ use crate::error::Result;
 #[derive(Fields)]
 struct RwStreamingJob {
     #[primary_key]
-    id: i32,
+    id: JobId,
     name: String,
-    database_id: i32,
+    database_id: DatabaseId,
     status: String,
     parallelism: String,
     max_parallelism: i32,
@@ -39,10 +40,10 @@ async fn read_rw_streaming_jobs(reader: &SysCatalogReaderImpl) -> Result<Vec<RwS
         .map(|state| {
             let parallelism = extract_parallelism_from_table_state(&state);
             RwStreamingJob {
-                id: state.table_id as i32,
+                id: state.table_id,
                 status: state.state().as_str_name().into(),
                 name: state.name,
-                database_id: state.database_id as i32,
+                database_id: state.database_id,
                 parallelism: parallelism.to_uppercase(),
                 max_parallelism: state.max_parallelism as i32,
                 resource_group: state.resource_group,

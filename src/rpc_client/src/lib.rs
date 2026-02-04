@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -21,7 +21,6 @@
 #![feature(coroutines)]
 #![feature(iterator_try_collect)]
 #![feature(try_blocks)]
-#![feature(let_chains)]
 #![feature(impl_trait_in_assoc_type)]
 #![feature(error_generic_member_access)]
 #![feature(panic_update_hook)]
@@ -49,6 +48,7 @@ pub use hummock_meta_client::{
 };
 pub use meta_client::{MetaClient, SinkCoordinationRpcClient};
 use moka::future::Cache;
+pub use monitor_client::{MonitorClient, MonitorClientPool, MonitorClientPoolRef};
 use rand::prelude::IndexedRandom;
 use risingwave_common::config::RpcClientConfig;
 use risingwave_common::util::addr::HostAddr;
@@ -71,6 +71,7 @@ mod connector_client;
 mod frontend_client;
 mod hummock_meta_client;
 mod meta_client;
+mod monitor_client;
 mod sink_coordinate_client;
 mod stream_client;
 

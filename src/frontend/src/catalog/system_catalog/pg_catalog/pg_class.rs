@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,20 +14,21 @@
 
 use risingwave_common::types::Fields;
 use risingwave_frontend_macro::system_catalog;
+use risingwave_pb::id::{ObjectId, SchemaId, UserId};
 
 use crate::catalog::OwnedByUserCatalog;
 use crate::catalog::system_catalog::SysCatalogReaderImpl;
 use crate::error::Result;
 
 /// The catalog `pg_class` catalogs tables and most everything else that has columns or is otherwise
-/// similar to a table. Ref: [`https://www.postgresql.org/docs/current/catalog-pg-class.html`]
+/// similar to a table. Ref: `https://www.postgresql.org/docs/current/catalog-pg-class.html`
 #[derive(Fields)]
 struct PgClass {
     #[primary_key]
-    oid: i32,
+    oid: ObjectId,
     relname: String,
-    relnamespace: i32,
-    relowner: i32,
+    relnamespace: SchemaId,
+    relowner: UserId,
     // p = permanent table, u = unlogged table, t = temporary table
     relpersistence: String,
     // r = ordinary table, i = index, S = sequence, t = TOAST table, v = view, m = materialized view,
@@ -52,10 +53,10 @@ fn read_pg_class_info(reader: &SysCatalogReaderImpl) -> Result<Vec<PgClass>> {
             schema
                 .iter_user_table()
                 .map(|table| PgClass {
-                    oid: table.id.table_id as i32,
+                    oid: table.id.as_object_id(),
                     relname: table.name.clone(),
-                    relnamespace: table.schema_id as i32,
-                    relowner: table.owner as i32,
+                    relnamespace: table.schema_id,
+                    relowner: table.owner,
                     relpersistence: "p".to_owned(),
                     relkind: "r".to_owned(),
                     relpages: 0,
@@ -66,10 +67,10 @@ fn read_pg_class_info(reader: &SysCatalogReaderImpl) -> Result<Vec<PgClass>> {
                     relpartbound: None,
                 })
                 .chain(schema.iter_all_mvs().map(|mview| PgClass {
-                    oid: mview.id.table_id as i32,
+                    oid: mview.id.as_object_id(),
                     relname: mview.name.clone(),
-                    relnamespace: mview.schema_id as i32,
-                    relowner: mview.owner as i32,
+                    relnamespace: mview.schema_id,
+                    relowner: mview.owner,
                     relpersistence: "p".to_owned(),
                     relkind: "m".to_owned(),
                     relpages: 0,
@@ -80,10 +81,10 @@ fn read_pg_class_info(reader: &SysCatalogReaderImpl) -> Result<Vec<PgClass>> {
                     relpartbound: None,
                 }))
                 .chain(schema.iter_system_tables().map(|table| PgClass {
-                    oid: table.id.table_id as i32,
+                    oid: table.id.as_object_id(),
                     relname: table.name.clone(),
-                    relnamespace: schema.id() as i32,
-                    relowner: table.owner as i32,
+                    relnamespace: schema.id(),
+                    relowner: table.owner,
                     relpersistence: "p".to_owned(),
                     relkind: "r".to_owned(),
                     relpages: 0,
@@ -94,10 +95,10 @@ fn read_pg_class_info(reader: &SysCatalogReaderImpl) -> Result<Vec<PgClass>> {
                     relpartbound: None,
                 }))
                 .chain(schema.iter_index().map(|index| PgClass {
-                    oid: index.id.index_id as i32,
+                    oid: index.id.as_object_id(),
                     relname: index.name.clone(),
-                    relnamespace: schema.id() as i32,
-                    relowner: index.owner() as i32,
+                    relnamespace: schema.id(),
+                    relowner: index.owner(),
                     relpersistence: "p".to_owned(),
                     relkind: "i".to_owned(),
                     relpages: 0,
@@ -108,10 +109,10 @@ fn read_pg_class_info(reader: &SysCatalogReaderImpl) -> Result<Vec<PgClass>> {
                     relpartbound: None,
                 }))
                 .chain(schema.iter_view().map(|view| PgClass {
-                    oid: view.id as i32,
+                    oid: view.id.as_object_id(),
                     relname: view.name.clone(),
-                    relnamespace: schema.id() as i32,
-                    relowner: view.owner as i32,
+                    relnamespace: schema.id(),
+                    relowner: view.owner,
                     relpersistence: "p".to_owned(),
                     relkind: "v".to_owned(),
                     relpages: 0,
@@ -122,10 +123,10 @@ fn read_pg_class_info(reader: &SysCatalogReaderImpl) -> Result<Vec<PgClass>> {
                     relpartbound: None,
                 }))
                 .chain(schema.iter_source().map(|source| PgClass {
-                    oid: source.id as i32,
+                    oid: source.id.as_object_id(),
                     relname: source.name.clone(),
-                    relnamespace: schema.id() as i32,
-                    relowner: source.owner as i32,
+                    relnamespace: schema.id(),
+                    relowner: source.owner,
                     relpersistence: "p".to_owned(),
                     relkind: "s".to_owned(), // s for the source in rw.
                     relpages: 0,
@@ -136,10 +137,10 @@ fn read_pg_class_info(reader: &SysCatalogReaderImpl) -> Result<Vec<PgClass>> {
                     relpartbound: None,
                 }))
                 .chain(schema.iter_sink().map(|sink| PgClass {
-                    oid: sink.id.sink_id as i32,
+                    oid: sink.id.as_object_id(),
                     relname: sink.name.clone(),
-                    relnamespace: schema.id() as i32,
-                    relowner: sink.owner.user_id as i32,
+                    relnamespace: schema.id(),
+                    relowner: sink.owner,
                     relpersistence: "p".to_owned(),
                     relkind: "k".to_owned(), // k for the sink in rw.
                     relpages: 0,
@@ -150,10 +151,10 @@ fn read_pg_class_info(reader: &SysCatalogReaderImpl) -> Result<Vec<PgClass>> {
                     relpartbound: None,
                 }))
                 .chain(schema.iter_subscription().map(|subscription| PgClass {
-                    oid: subscription.id.subscription_id as i32,
+                    oid: subscription.id.as_object_id(),
                     relname: subscription.name.clone(),
-                    relnamespace: schema.id() as i32,
-                    relowner: subscription.owner.user_id as i32,
+                    relnamespace: schema.id(),
+                    relowner: subscription.owner,
                     relpersistence: "p".to_owned(),
                     relkind: "u".to_owned(), // u for the subscription in rw.
                     relpages: 0,
@@ -164,10 +165,10 @@ fn read_pg_class_info(reader: &SysCatalogReaderImpl) -> Result<Vec<PgClass>> {
                     relpartbound: None,
                 }))
                 .chain(schema.iter_connections().map(|connection| PgClass {
-                    oid: connection.id as i32,
+                    oid: connection.id.as_object_id(),
                     relname: connection.name.clone(),
-                    relnamespace: schema.id() as i32,
-                    relowner: connection.owner as i32,
+                    relnamespace: schema.id(),
+                    relowner: connection.owner,
                     relpersistence: "p".to_owned(),
                     relkind: "c".to_owned(), // c for the connection in rw.
                     relpages: 0,

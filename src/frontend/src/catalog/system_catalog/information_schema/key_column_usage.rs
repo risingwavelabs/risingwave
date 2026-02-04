@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,7 +16,7 @@ use risingwave_common::types::Fields;
 use risingwave_frontend_macro::system_catalog;
 
 /// The view `key_column_usage` contains all constraints belonging to tables that the current user owns or has some privilege other than SELECT on.
-/// Ref: [`https://www.postgresql.org/docs/current/infoschema-key-column-usage.html`]
+/// Ref: `https://www.postgresql.org/docs/current/infoschema-key-column-usage.html`
 /// Limitation:
 /// This view assume the constraint schema is the same as the table schema, since `pg_catalog`.`pg_constraint` only support primary key.
 #[system_catalog(

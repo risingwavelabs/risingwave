@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -51,6 +51,7 @@ impl MergeExecutorBuilder {
                         actor_context.fragment_id,
                         upstream_actor,
                         upstream_fragment_id,
+                        actor_context.config.clone(),
                     )
                 }),
         )
@@ -70,12 +71,15 @@ impl MergeExecutorBuilder {
         let upstreams = if always_single_input {
             MergeExecutorUpstream::Singleton(inputs.into_iter().exactly_one().unwrap())
         } else {
-            MergeExecutorUpstream::Merge(MergeExecutor::new_select_receiver(
+            MergeExecutorUpstream::Merge(MergeExecutor::new_merge_upstream(
                 inputs,
                 &executor_stats,
                 &actor_context,
+                chunk_size,
+                info.schema.clone(),
             ))
         };
+
         Ok(MergeExecutorInput::new(
             upstreams,
             actor_context,
@@ -83,7 +87,6 @@ impl MergeExecutorBuilder {
             local_barrier_manager,
             executor_stats,
             info,
-            chunk_size,
         ))
     }
 }
@@ -105,7 +108,7 @@ impl ExecutorBuilder for MergeExecutorBuilder {
             params.actor_context,
             params.info,
             node,
-            params.env.config().developer.chunk_size,
+            params.config.developer.chunk_size,
         )
         .await?
         .into_executor(barrier_rx))

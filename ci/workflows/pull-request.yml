@@ -9,12 +9,12 @@ anchors:
           limit: 3
   - plugins:
     - cargo-cache: &cargo-cache
-        nienbo/cache#v2.4.20:
+        nienbo/cache#v2.4.21:
           id: cargo
-          key: "v1-cache-{{ id }}-{{ runner.os }}-{{ checksum 'Cargo.lock' }}"
+          key: "v1-cache-cargo-{{ runner.os }}-{{ checksum 'Cargo.lock' }}"
           restore-keys:
-            - "v1-cache-{{ id }}-{{ runner.os }}-"
-            - "v1-cache-{{ id }}-"
+            - "v1-cache-cargo-{{ runner.os }}-"
+            - "v1-cache-cargo-"
           backend: s3
           s3:
             bucket: rw-ci-cache-bucket
@@ -23,12 +23,27 @@ anchors:
             - ".cargo/registry/index"
             - ".cargo/registry/cache"
             - ".cargo/git"
+    - maven-cache: &maven-cache
+        nienbo/cache#v2.4.21:
+          id: maven
+          key: >-
+            v1-cache-maven-{{ runner.os }}-{{ checksum 'ci/scripts/build-other.sh' }}-{{ checksum 'java/pom.xml' }}-{{ checksum 'e2e_test/udf/remote_java/pom.xml' }}
+          restore-keys:
+            - "v1-cache-maven-{{ runner.os }}-"
+            - "v1-cache-maven-"
+          backend: s3
+          s3:
+            bucket: rw-ci-cache-bucket
+            args: "--no-progress"
+          paths:
+            - ".m2/repository"
     # we need to override args, so didn't include image here in the anchor
     - docker-compose: &docker-compose
         run: rw-build-env
         config: ci/docker-compose.yml
         mount-buildkite-agent: true
         propagate-environment: true
+        upload-container-logs: always
 
 other-sql-backend: &other-sql-backend
   matrix:
@@ -82,6 +97,7 @@ steps:
     key: "build-other"
     plugins:
       - *cargo-cache
+      - *maven-cache
       - seek-oss/aws-sm#v2.3.2:
           env:
             GITHUB_TOKEN: github-token
@@ -89,7 +105,7 @@ steps:
           <<: *docker-compose
           environment:
           - GITHUB_TOKEN
-    timeout_in_minutes: 15
+    timeout_in_minutes: 20
     retry: *auto-retry
 
   - label: "build (deterministic simulation)"
@@ -210,7 +226,6 @@ steps:
       - docker-compose#v5.5.0:
           <<: *docker-compose
           run: source-test-env
-          upload-container-logs: always
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 25
     parallelism: 2
@@ -246,8 +261,8 @@ steps:
     matrix:
       setup:
         java_version:
-          - "11"
           - "17"
+          - "21"
     timeout_in_minutes: 10
     retry: *auto-retry
 
@@ -522,7 +537,8 @@ steps:
       - docker-compose#v5.5.0: *docker-compose
       # Only upload zipped files, otherwise the logs is too much.
       - ./ci/plugins/upload-failure-logs-zipped
-    timeout_in_minutes: 22
+    timeout_in_minutes: 30
+    parallelism: 4
     retry: *auto-retry
 
   - label: "end-to-end test (deterministic simulation)"
@@ -653,7 +669,7 @@ steps:
     plugins:
       - docker-compose#v5.5.0:
           <<: *docker-compose
-          run: source-test-env
+          run: backward-compatibility-test-env
           environment:
           - BUILDKITE_BRANCH
       - ./ci/plugins/upload-failure-logs
@@ -696,7 +712,7 @@ steps:
           <<: *docker-compose
           run: source-test-env
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 30
+    timeout_in_minutes: 35
 
   - label: "e2e standalone binary test"
     command: "ci/scripts/e2e-test-serial.sh -p ci-dev -m standalone"
@@ -707,6 +723,7 @@ steps:
       - docker-compose#v5.5.0: *docker-compose
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 40
+    parallelism: 4
     retry: *auto-retry
 
   - label: "e2e single-node binary test"
@@ -718,6 +735,7 @@ steps:
       - docker-compose#v5.5.0: *docker-compose
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 30
+    parallelism: 4
     retry: *auto-retry
 
   - label: "end-to-end test ({{matrix.label}} backend)"
@@ -732,7 +750,7 @@ steps:
           run: ci-standard-env
           propagate-environment: true
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 37
+    timeout_in_minutes: 60
     retry: *auto-retry
 
   # FIXME(kwannoel): Let the github PR labeller label it, if sqlsmith source files has changes.

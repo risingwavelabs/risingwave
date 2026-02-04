@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::id::{ActorId, FragmentId, SourceId};
 use risingwave_common::types::Fields;
 use risingwave_frontend_macro::system_catalog;
 use risingwave_pb::meta::list_actor_splits_response::{ActorSplit, FragmentType};
@@ -22,20 +23,20 @@ use crate::error::Result;
 #[derive(Fields)]
 #[primary_key(actor_id, split_id, source_id)]
 struct RwActorSplit {
-    actor_id: i32,
+    actor_id: ActorId,
     split_id: String,
-    source_id: i32,
-    fragment_id: i32,
+    source_id: SourceId,
+    fragment_id: FragmentId,
     fragment_type: String,
 }
 
 impl From<ActorSplit> for RwActorSplit {
     fn from(actor_split: ActorSplit) -> Self {
         Self {
-            actor_id: actor_split.actor_id as _,
+            actor_id: actor_split.actor_id,
             split_id: actor_split.split_id,
-            source_id: actor_split.source_id as _,
-            fragment_id: actor_split.fragment_id as _,
+            source_id: actor_split.source_id,
+            fragment_id: actor_split.fragment_id,
             fragment_type: FragmentType::try_from(actor_split.fragment_type)
                 .unwrap_or(FragmentType::Unspecified)
                 .as_str_name()

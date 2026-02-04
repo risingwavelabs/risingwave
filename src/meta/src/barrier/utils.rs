@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,11 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
 
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
+use risingwave_common::util::stream_graph_visitor::visit_stream_node_cont;
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::table_stats::from_prost_table_stats_map;
 use risingwave_hummock_sdk::table_watermark::{
@@ -25,22 +25,28 @@ use risingwave_hummock_sdk::table_watermark::{
 use risingwave_hummock_sdk::vector_index::{VectorIndexAdd, VectorIndexDelta};
 use risingwave_hummock_sdk::{HummockSstableObjectId, LocalSstableInfo};
 use risingwave_meta_model::WorkerId;
+use risingwave_pb::catalog::PbTable;
+use risingwave_pb::catalog::table::PbTableType;
+use risingwave_pb::hummock::vector_index_delta::PbVectorIndexInit;
+use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_service::BarrierCompleteResponse;
 
+use crate::barrier::CreateStreamingJobCommandInfo;
+use crate::barrier::context::CreateSnapshotBackfillJobCommandInfo;
 use crate::hummock::{CommitEpochInfo, NewTableFragmentInfo};
 
 #[expect(clippy::type_complexity)]
 pub(super) fn collect_resp_info(
     resps: Vec<BarrierCompleteResponse>,
 ) -> (
-    HashMap<HummockSstableObjectId, u32>,
+    HashMap<HummockSstableObjectId, WorkerId>,
     Vec<LocalSstableInfo>,
     HashMap<TableId, TableWatermarks>,
     Vec<SstableInfo>,
     HashMap<TableId, Vec<VectorIndexAdd>>,
     HashSet<TableId>,
 ) {
-    let mut sst_to_worker: HashMap<HummockSstableObjectId, u32> = HashMap::new();
+    let mut sst_to_worker: HashMap<HummockSstableObjectId, _> = HashMap::new();
     let mut synced_ssts: Vec<LocalSstableInfo> = vec![];
     let mut table_watermarks = Vec::with_capacity(resps.len());
     let mut old_value_ssts = Vec::with_capacity(resps.len());
@@ -61,7 +67,6 @@ pub(super) fn collect_resp_info(
         table_watermarks.push(resp.table_watermarks);
         old_value_ssts.extend(resp.old_value_sstables.into_iter().map(|s| s.into()));
         for (table_id, vector_index_add) in resp.vector_index_adds {
-            let table_id = TableId::new(table_id);
             vector_index_adds
                 .try_insert(
                     table_id,
@@ -73,7 +78,7 @@ pub(super) fn collect_resp_info(
                 )
                 .expect("non-duplicate");
         }
-        truncate_tables.extend(resp.truncate_tables.into_iter().map(TableId::new));
+        truncate_tables.extend(resp.truncate_tables);
     }
 
     (
@@ -86,7 +91,7 @@ pub(super) fn collect_resp_info(
                     watermarks
                         .into_iter()
                         .map(|(table_id, watermarks)| {
-                            (TableId::new(table_id), TableWatermarks::from(&watermarks))
+                            (table_id, TableWatermarks::from(&watermarks))
                         })
                         .collect()
                 })
@@ -98,12 +103,34 @@ pub(super) fn collect_resp_info(
     )
 }
 
+pub(super) fn collect_new_vector_index_info(
+    info: &CreateStreamingJobCommandInfo,
+) -> Option<&PbTable> {
+    let mut vector_index_table = None;
+    {
+        for fragment in info.stream_job_fragments.fragments.values() {
+            visit_stream_node_cont(&fragment.nodes, |node| {
+                match node.node_body.as_ref().unwrap() {
+                    NodeBody::VectorIndexWrite(vector_index_write) => {
+                        let index_table = vector_index_write.table.as_ref().unwrap();
+                        assert_eq!(index_table.table_type, PbTableType::VectorIndex as i32);
+                        vector_index_table = Some(index_table);
+                        false
+                    }
+                    _ => true,
+                }
+            })
+        }
+        vector_index_table
+    }
+}
+
 pub(super) fn collect_creating_job_commit_epoch_info(
     commit_info: &mut CommitEpochInfo,
     epoch: u64,
     resps: Vec<BarrierCompleteResponse>,
     tables_to_commit: impl Iterator<Item = TableId>,
-    is_first_time: bool,
+    create_info: Option<&CreateSnapshotBackfillJobCommandInfo>,
 ) {
     let (
         sst_to_context,
@@ -133,29 +160,30 @@ pub(super) fn collect_creating_job_commit_epoch_info(
             .try_insert(*table_id, epoch)
             .expect("non duplicate");
     });
-    if is_first_time {
+    if let Some(info) = create_info {
         commit_info
             .new_table_fragment_infos
             .push(NewTableFragmentInfo {
                 table_ids: tables_to_commit,
             });
+        if let Some(index_table) = collect_new_vector_index_info(&info.info) {
+            commit_info
+                .vector_index_delta
+                .try_insert(
+                    index_table.id,
+                    VectorIndexDelta::Init(PbVectorIndexInit {
+                        info: Some(index_table.vector_index_info.unwrap()),
+                    }),
+                )
+                .expect("non-duplicate");
+        }
     };
 }
 
-pub(super) type NodeToCollect = HashMap<WorkerId, bool>;
+pub(super) type NodeToCollect = HashSet<WorkerId>;
 pub(super) fn is_valid_after_worker_err(
-    node_to_collect: &mut NodeToCollect,
+    node_to_collect: &NodeToCollect,
     worker_id: WorkerId,
 ) -> bool {
-    match node_to_collect.entry(worker_id) {
-        Entry::Occupied(entry) => {
-            if *entry.get() {
-                entry.remove();
-                true
-            } else {
-                false
-            }
-        }
-        Entry::Vacant(_) => true,
-    }
+    !node_to_collect.contains(&worker_id)
 }

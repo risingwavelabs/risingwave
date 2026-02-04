@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,7 +18,7 @@ use std::time::Instant;
 
 use futures::FutureExt;
 use futures::stream::BoxStream;
-use risingwave_common::catalog::DatabaseId;
+use risingwave_pb::id::PartialGraphId;
 use risingwave_pb::stream_service::streaming_control_stream_request::InitRequest;
 use risingwave_pb::stream_service::{
     StreamingControlStreamRequest, StreamingControlStreamResponse,
@@ -32,7 +32,7 @@ use crate::executor::ActorContextRef;
 use crate::executor::exchange::permit::Receiver;
 use crate::executor::monitor::StreamingMetrics;
 use crate::task::barrier_worker::{
-    ControlStreamHandle, EventSender, LocalActorOperation, LocalBarrierWorker,
+    ControlStreamHandle, EventSender, LocalActorOperation, LocalBarrierWorker, TakeReceiverRequest,
 };
 use crate::task::{StreamEnvironment, UpDownActorIds};
 
@@ -56,7 +56,7 @@ pub mod await_tree_key {
     }
 }
 
-/// `LocalStreamManager` directly handles public API for streaming, e.g., `StreamService`, `ExchangeService`.
+/// `LocalStreamManager` directly handles public API for streaming, e.g., `StreamService`, `StreamExchangeService`.
 ///
 /// Interacts with meta, and sends [`LocalActorOperation`] events to [`LocalBarrierWorker`].
 /// Note: barriers are handled by [`ControlStreamHandle`]. The control stream is established in [`Self::handle_new_control_stream`],
@@ -94,13 +94,13 @@ impl LocalStreamManager {
         await_tree_config: Option<await_tree::Config>,
         watermark_epoch: AtomicU64Ref,
     ) -> Self {
-        if !env.config().unsafe_enable_strict_consistency {
+        if env.global_config().unsafe_disable_strict_consistency {
             // If strict consistency is disabled, should disable storage sanity check.
             // Since this is a special config, we have to check it here.
             risingwave_storage::hummock::utils::disable_sanity_check();
         }
 
-        let await_tree_reg = await_tree_config.clone().map(await_tree::Registry::new);
+        let await_tree_reg = await_tree_config.map(await_tree::Registry::new);
 
         let (actor_op_tx, actor_op_rx) = unbounded_channel();
 
@@ -140,16 +140,16 @@ impl LocalStreamManager {
 
     pub async fn take_receiver(
         &self,
-        database_id: DatabaseId,
+        partial_graph_id: PartialGraphId,
         term_id: String,
         ids: UpDownActorIds,
     ) -> StreamResult<Receiver> {
         self.actor_op_tx
             .send_and_await(|result_sender| LocalActorOperation::TakeReceiver {
-                database_id,
+                partial_graph_id,
                 term_id,
                 ids,
-                result_sender,
+                request: TakeReceiverRequest::Remote(result_sender),
             })
             .await?
     }
@@ -178,17 +178,20 @@ impl LocalStreamManager {
 
 #[cfg(test)]
 pub mod test_utils {
+    use risingwave_common::id::ActorId;
     use risingwave_pb::common::{ActorInfo, HostAddress};
 
     use super::*;
+    use crate::task::TEST_PARTIAL_GRAPH_ID;
 
-    pub fn helper_make_local_actor(actor_id: u32) -> ActorInfo {
+    pub fn helper_make_local_actor(actor_id: ActorId) -> ActorInfo {
         ActorInfo {
             actor_id,
             host: Some(HostAddress {
                 host: LOCAL_TEST_ADDR.host.clone(),
                 port: LOCAL_TEST_ADDR.port as i32,
             }),
+            partial_graph_id: TEST_PARTIAL_GRAPH_ID,
         }
     }
 }

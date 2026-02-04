@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -22,6 +22,7 @@ use parking_lot::RwLock;
 use parking_lot::lock_api::RwLockReadGuard;
 use prost::Message;
 use risingwave_pb::catalog::PbSecret;
+use risingwave_pb::id::WorkerId;
 use risingwave_pb::secret::PbSecretRef;
 use risingwave_pb::secret::secret_ref::RefAsType;
 use thiserror_ext::AsReport;
@@ -37,7 +38,7 @@ static INSTANCE: std::sync::OnceLock<LocalSecretManager> = std::sync::OnceLock::
 #[derive(Debug)]
 pub struct LocalSecretManager {
     secrets: RwLock<HashMap<SecretId, Vec<u8>>>,
-    /// The local directory used to write secrets into file, so that it can be passed into some libararies
+    /// The local directory used to write secrets into file, so that it can be passed into some libraries
     secret_file_dir: PathBuf,
 }
 
@@ -45,7 +46,7 @@ impl LocalSecretManager {
     /// Initialize the secret manager with the given temp file path, cluster id, and encryption key.
     /// # Panics
     /// Panics if fail to create the secret file directory.
-    pub fn init(temp_file_dir: String, cluster_id: String, worker_id: u32) {
+    pub fn init(temp_file_dir: String, cluster_id: String, worker_id: WorkerId) {
         // use `get_or_init` to handle concurrent initialization in single node mode.
         INSTANCE.get_or_init(|| {
             let secret_file_dir = PathBuf::from(temp_file_dir)
@@ -71,7 +72,7 @@ impl LocalSecretManager {
     pub fn global() -> &'static LocalSecretManager {
         // Initialize the secret manager for unit tests.
         #[cfg(debug_assertions)]
-        LocalSecretManager::init("./tmp".to_owned(), "test_cluster".to_owned(), 0);
+        LocalSecretManager::init("./tmp".to_owned(), "test_cluster".to_owned(), 0.into());
 
         INSTANCE.get().unwrap()
     }
@@ -80,7 +81,7 @@ impl LocalSecretManager {
         let mut secret_guard = self.secrets.write();
         if secret_guard.insert(secret_id, secret).is_some() {
             tracing::error!(
-                secret_id = secret_id,
+                secret_id = %secret_id,
                 "adding a secret but it already exists, overwriting it"
             );
         };
@@ -90,7 +91,7 @@ impl LocalSecretManager {
         let mut secret_guard = self.secrets.write();
         if secret_guard.insert(secret_id, secret).is_none() {
             tracing::error!(
-                secret_id = secret_id,
+                secret_id = %secret_id,
                 "updating a secret but it does not exist, adding it"
             );
         }
@@ -145,7 +146,7 @@ impl LocalSecretManager {
     }
 
     pub fn fill_secret(&self, secret_ref: PbSecretRef) -> SecretResult<String> {
-        let secret_guard: RwLockReadGuard<'_, parking_lot::RawRwLock, HashMap<u32, Vec<u8>>> =
+        let secret_guard: RwLockReadGuard<'_, parking_lot::RawRwLock, HashMap<SecretId, Vec<u8>>> =
             self.secrets.read();
         self.fill_secret_inner(secret_ref, &secret_guard)
     }
@@ -153,7 +154,7 @@ impl LocalSecretManager {
     fn fill_secret_inner(
         &self,
         secret_ref: PbSecretRef,
-        secret_guard: &RwLockReadGuard<'_, parking_lot::RawRwLock, HashMap<u32, Vec<u8>>>,
+        secret_guard: &RwLockReadGuard<'_, parking_lot::RawRwLock, HashMap<SecretId, Vec<u8>>>,
     ) -> SecretResult<String> {
         let secret_id = secret_ref.secret_id;
         let pb_secret_bytes = secret_guard
@@ -164,11 +165,10 @@ impl LocalSecretManager {
             RefAsType::Text => {
                 // We converted the secret string from sql to bytes using `as_bytes` in frontend.
                 // So use `from_utf8` here to convert it back to string.
-                Ok(String::from_utf8(secret_value_bytes.clone())?)
+                Ok(String::from_utf8(secret_value_bytes)?)
             }
             RefAsType::File => {
-                let path_str =
-                    self.get_or_init_secret_file(secret_id, secret_value_bytes.clone())?;
+                let path_str = self.get_or_init_secret_file(secret_id, secret_value_bytes)?;
                 Ok(path_str)
             }
             RefAsType::Unspecified => Err(SecretError::UnspecifiedRefType(secret_id)),
@@ -209,7 +209,7 @@ impl LocalSecretManager {
     #[cfg_or_panic::cfg_or_panic(not(madsim))]
     fn get_secret_value(pb_secret_bytes: &[u8]) -> SecretResult<Vec<u8>> {
         let secret_value = match Self::get_pb_secret_backend(pb_secret_bytes)? {
-            risingwave_pb::secret::secret::SecretBackend::Meta(backend) => backend.value.clone(),
+            risingwave_pb::secret::secret::SecretBackend::Meta(backend) => backend.value,
             risingwave_pb::secret::secret::SecretBackend::HashicorpVault(vault_backend) => {
                 let config = HashiCorpVaultConfig::from_protobuf(&vault_backend)?;
                 let client = HashiCorpVaultClient::new(config)?;

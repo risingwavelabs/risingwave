@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -36,11 +36,11 @@ pub struct BoundWatermark {
 impl RewriteExprsRecursive for BoundWatermark {
     fn rewrite_exprs_recursive(&mut self, rewriter: &mut impl crate::expr::ExprRewriter) {
         self.input.rewrite_exprs_recursive(rewriter);
-        let new_agrs = std::mem::take(&mut self.args)
+        let new_args = std::mem::take(&mut self.args)
             .into_iter()
             .map(|expr| rewriter.rewrite_expr(expr))
             .collect::<Vec<_>>();
-        self.args = new_agrs;
+        self.args = new_args;
     }
 }
 

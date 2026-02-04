@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -25,6 +25,7 @@ use risingwave_common::util::resource_util::memory::system_memory_available_byte
 use thiserror_ext::AsReport;
 use tracing::error;
 
+use crate::opendal_schema_history::*;
 use crate::{call_method, call_static_method};
 
 /// Use 10% of compute total memory by default. Compute node uses 0.7 * system memory by default.

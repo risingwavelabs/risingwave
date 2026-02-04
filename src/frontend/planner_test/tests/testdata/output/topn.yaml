@@ -61,6 +61,7 @@
                     └─LogicalValues { rows: [[1:Int32, 'foo':Varchar], [2:Int32, 'bar':Varchar]], schema: Schema { fields: [*VALUES*_0.column_0:Int32, *VALUES*_0.column_1:Varchar] } }
   optimized_logical_plan_for_batch: |-
     LogicalAgg { aggs: [count] }
-    └─LogicalTopN { order: [1:Int32 ASC], limit: 1, offset: 0, group_key: [*VALUES*_0.column_0] }
-      └─LogicalProject { exprs: [*VALUES*_0.column_0, 1:Int32] }
-        └─LogicalValues { rows: [[1:Int32], [2:Int32]], schema: Schema { fields: [*VALUES*_0.column_0:Int32] } }
+    └─LogicalFilter { predicate: (row_number <= 1:Int32) }
+      └─LogicalOverWindow { window_functions: [row_number() OVER(PARTITION BY *VALUES*_0.column_0 ORDER BY 1:Int32 ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
+        └─LogicalProject { exprs: [*VALUES*_0.column_0, 1:Int32] }
+          └─LogicalValues { rows: [[1:Int32], [2:Int32]], schema: Schema { fields: [*VALUES*_0.column_0:Int32] } }

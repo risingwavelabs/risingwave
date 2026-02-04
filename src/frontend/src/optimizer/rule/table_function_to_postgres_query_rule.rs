@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -32,7 +32,7 @@ impl Rule<Logical> for TableFunctionToPostgresQueryRule {
         assert!(!logical_table_function.with_ordinality);
         let table_function_return_type = logical_table_function.table_function().return_type();
 
-        if let DataType::Struct(st) = table_function_return_type.clone() {
+        if let DataType::Struct(st) = table_function_return_type {
             let fields = st
                 .iter()
                 .map(|(name, data_type)| Field::with_name(data_type.clone(), name.to_owned()))
@@ -40,7 +40,7 @@ impl Rule<Logical> for TableFunctionToPostgresQueryRule {
 
             let schema = Schema::new(fields);
 
-            assert_eq!(logical_table_function.table_function().args.len(), 6);
+            assert!(logical_table_function.table_function().args.len() >= 6);
             let mut eval_args = vec![];
             for arg in &logical_table_function.table_function().args {
                 assert_eq!(arg.return_type(), DataType::Varchar);
@@ -60,6 +60,8 @@ impl Rule<Logical> for TableFunctionToPostgresQueryRule {
             let password = eval_args[3].clone();
             let database = eval_args[4].clone();
             let query = eval_args[5].clone();
+            let ssl_mode = eval_args.get(6).cloned();
+            let ssl_root_cert = eval_args.get(7).cloned();
 
             Some(
                 LogicalPostgresQuery::new(
@@ -71,6 +73,8 @@ impl Rule<Logical> for TableFunctionToPostgresQueryRule {
                     password,
                     database,
                     query,
+                    ssl_mode,
+                    ssl_root_cert,
                 )
                 .into(),
             )

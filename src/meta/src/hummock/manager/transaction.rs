@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::ops::{Deref, DerefMut};
 
 use parking_lot::Mutex;
@@ -123,7 +123,7 @@ impl<'a> HummockVersionTransaction<'a> {
         new_table_watermarks: HashMap<TableId, TableWatermarks>,
         change_log_delta: HashMap<TableId, ChangeLogDelta>,
         vector_index_delta: HashMap<TableId, VectorIndexDelta>,
-        group_id_to_truncate_tables: HashMap<CompactionGroupId, Vec<TableId>>,
+        group_id_to_truncate_tables: HashMap<CompactionGroupId, HashSet<TableId>>,
     ) -> HummockVersionDelta {
         let mut new_version_delta = self.new_delta();
         new_version_delta.new_table_watermarks = new_table_watermarks;
@@ -169,9 +169,7 @@ impl<'a> HummockVersionTransaction<'a> {
                 .or_default()
                 .group_deltas;
 
-            group_deltas.push(GroupDelta::TruncateTables(
-                table_ids.into_iter().map(|id| id.into()).collect(),
-            ));
+            group_deltas.push(GroupDelta::TruncateTables(table_ids.into_iter().collect()));
         }
 
         // update state table info

@@ -29,6 +29,27 @@ IcebergConnection:
   - name: s3.secret.key
     field_type: String
     required: false
+  - name: s3.iam_role_arn
+    field_type: String
+    required: false
+  - name: glue.access.key
+    field_type: String
+    required: false
+  - name: glue.secret.key
+    field_type: String
+    required: false
+  - name: glue.iam_role_arn
+    field_type: String
+    required: false
+  - name: glue.region
+    field_type: String
+    required: false
+  - name: glue.id
+    field_type: String
+    comments: |-
+      AWS Client id, can be omitted for storage catalog or when
+      caller's AWS account ID matches glue id
+    required: false
   - name: gcs.credential
     field_type: String
     required: false
@@ -41,15 +62,18 @@ IcebergConnection:
   - name: azblob.endpoint_url
     field_type: String
     required: false
+  - name: adlsgen2.account_name
+    field_type: String
+    required: false
+  - name: adlsgen2.account_key
+    field_type: String
+    required: false
+  - name: adlsgen2.endpoint
+    field_type: String
+    required: false
   - name: warehouse.path
     field_type: String
     comments: Path of iceberg warehouse.
-    required: false
-  - name: glue.id
-    field_type: String
-    comments: |-
-      Catalog id, can be omitted for storage catalog or when
-      caller's AWS account ID matches glue id
     required: false
   - name: catalog.name
     field_type: String
@@ -100,12 +124,6 @@ IcebergConnection:
     field_type: bool
     required: false
     default: Default::default
-  - name: catalog.jdbc.user
-    field_type: String
-    required: false
-  - name: catalog.jdbc.password
-    field_type: String
-    required: false
   - name: enable_config_load
     field_type: bool
     comments: Enable config load. This parameter set to true will load warehouse credentials from the environment. Only allowed to be used in a self-hosted environment.
@@ -125,6 +143,43 @@ IcebergConnection:
       explain the format of the header:
       - Each header is a key-value pair, separated by an '='.
       - Multiple headers can be specified, separated by a ';'.
+    required: false
+  - name: vended_credentials
+    field_type: bool
+    comments: Enable vended credentials for iceberg REST catalog.
+    required: false
+    default: Default::default
+  - name: catalog.security
+    field_type: String
+    comments: |-
+      Security type for REST catalog authentication.
+      Supported values: `none`, `oauth2`, `google`.
+      When set to `google`, uses Iceberg's `GoogleAuthManager` (requires Iceberg 1.10+)
+      for authentication using Google Application Default Credentials (ADC).
+    required: false
+  - name: gcp.auth.scopes
+    field_type: String
+    comments: |-
+      OAuth-based scopes for Google authentication.
+      Comma-separated list of OAuth-based scopes to request.
+      Only applicable when `catalog.security` is set to `google`.
+      Default: <https://www.googleapis.com/auth/cloud-platform>
+    required: false
+  - name: catalog.io_impl
+    field_type: String
+    comments: |-
+      Custom `FileIO` implementation class for the Iceberg catalog.
+      Allows specifying a custom `FileIO` implementation instead of the default.
+      Examples:
+      - `org.apache.iceberg.aws.s3.S3FileIO` for Amazon S3 (default)
+      - `org.apache.iceberg.gcp.gcs.GCSFileIO` for Google Cloud Storage
+      - `org.apache.iceberg.azure.adlsv2.ADLSFileIO` for Azure Data Lake Storage Gen2
+    required: false
+  - name: catalog.jdbc.user
+    field_type: String
+    required: false
+  - name: catalog.jdbc.password
+    field_type: String
     required: false
 KafkaConnection:
   fields:

@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,7 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use criterion::{BatchSize, BenchmarkId, Criterion, black_box};
+use std::hint::black_box;
+
+use criterion::{BatchSize, BenchmarkId, Criterion};
 use futures::StreamExt;
 use risingwave_batch_executors::test_utils::{MockExecutor, gen_data};
 use risingwave_batch_executors::{BoxedExecutor, JoinType};

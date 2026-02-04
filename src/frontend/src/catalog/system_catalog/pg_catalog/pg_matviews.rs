@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,7 +17,7 @@ use risingwave_frontend_macro::system_catalog;
 
 /// The view `pg_matviews` provides access to useful information about each materialized view in the
 /// database.
-/// Ref: [`https://www.postgresql.org/docs/current/view-pg-matviews.html`]
+/// Ref: `https://www.postgresql.org/docs/current/view-pg-matviews.html`
 #[system_catalog(
     view,
     "pg_catalog.pg_matviews",

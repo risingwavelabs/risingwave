@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::id::JobId;
 use risingwave_common::types::Fields;
 use risingwave_frontend_macro::system_catalog;
 
@@ -21,7 +22,7 @@ use crate::error::Result;
 #[derive(Fields)]
 struct RwCdcProgress {
     #[primary_key]
-    job_id: i32,
+    job_id: JobId,
     split_total_count: i64,
     split_backfilled_count: i64,
     split_completed_count: i64,
@@ -34,7 +35,7 @@ async fn read_rw_cdc_progress(reader: &SysCatalogReaderImpl) -> Result<Vec<RwCdc
     Ok(progress
         .into_iter()
         .map(|(job_id, p)| RwCdcProgress {
-            job_id: job_id as _,
+            job_id,
             split_total_count: p.split_total_count as _,
             split_backfilled_count: p.split_backfilled_count as _,
             split_completed_count: p.split_completed_count as _,

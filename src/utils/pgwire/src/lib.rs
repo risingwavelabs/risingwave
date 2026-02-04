@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,15 +16,16 @@
 #![feature(iterator_try_collect)]
 #![feature(trusted_len)]
 #![feature(buf_read_has_data_left)]
-#![feature(round_char_boundary)]
 #![feature(never_type)]
-#![feature(let_chains)]
 #![feature(error_generic_member_access)]
 #![feature(str_as_str)]
+#![feature(register_tool)]
+#![register_tool(rw)]
 #![expect(clippy::doc_markdown, reason = "FIXME: later")]
 
 pub mod error;
 pub mod error_or_notice;
+pub mod ldap_auth;
 pub mod memory_manager;
 pub mod net;
 pub mod pg_extended;

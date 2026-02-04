@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -186,7 +186,7 @@ impl<W: SinkWriter<CommitMetadata = ()>> LogSinker for LogSinkerOf<W> {
                         sink_writer.barrier(true).await?;
                         metrics
                             .sink_commit_duration
-                            .observe(start_time.elapsed().as_millis() as f64);
+                            .observe(start_time.elapsed().as_secs_f64());
                         log_reader.truncate(TruncateOffset::Barrier { epoch })?;
                     } else {
                         assert!(new_vnode_bitmap.is_none());

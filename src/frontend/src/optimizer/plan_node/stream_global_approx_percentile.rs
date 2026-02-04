@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -11,6 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+
 use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::DataType;
@@ -27,7 +28,9 @@ use crate::optimizer::plan_node::utils::{Distill, TableCatalogBuilder, childless
 use crate::optimizer::plan_node::{
     ExprRewritable, PlanAggCall, PlanBase, PlanTreeNodeUnary, Stream, StreamNode,
 };
-use crate::optimizer::property::{Distribution, FunctionalDependencySet, WatermarkColumns};
+use crate::optimizer::property::{
+    Distribution, FunctionalDependencySet, MonotonicityMap, StreamKind, WatermarkColumns,
+};
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -42,22 +45,25 @@ pub struct StreamGlobalApproxPercentile {
 
 impl StreamGlobalApproxPercentile {
     pub fn new(input: PlanRef, approx_percentile_agg_call: &PlanAggCall) -> Self {
+        assert!(
+            input.stream_kind().is_append_only(),
+            "the input of GlobalApproxPercentile must be the local phase, which is append-only"
+        );
         let schema = Schema::new(vec![Field::with_name(
             DataType::Float64,
             "approx_percentile",
         )]);
-        let functional_dependency = FunctionalDependencySet::with_key(1, &[]);
-        let watermark_columns = WatermarkColumns::new();
+
         let base = PlanBase::new_stream(
             input.ctx(),
             schema,
             Some(vec![]),
-            functional_dependency,
+            FunctionalDependencySet::new(1),
             Distribution::Single,
-            input.stream_kind(),
+            StreamKind::Retract,
             input.emit_on_window_close(),
-            watermark_columns,
-            input.columns_monotonicity().clone(),
+            WatermarkColumns::new(),
+            MonotonicityMap::new(),
         );
         Self {
             base,

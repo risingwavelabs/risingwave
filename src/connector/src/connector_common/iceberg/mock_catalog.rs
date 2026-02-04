@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -44,6 +44,7 @@ impl MockCatalog {
             partition_spec: Some(partition_spec),
             sort_order: None,
             properties: HashMap::new(),
+            format_version: iceberg::spec::FormatVersion::V2,
         };
         Table::builder()
             .identifier(TableIdent::new(
@@ -243,5 +244,20 @@ impl CatalogV2 for MockCatalog {
     /// Update a table to the catalog.
     async fn update_table(&self, _commit: TableCommit) -> iceberg::Result<Table> {
         todo!()
+    }
+
+    #[expect(
+        clippy::disallowed_types,
+        reason = "iceberg catalog trait requires returning iceberg::Error"
+    )]
+    async fn register_table(
+        &self,
+        _table_ident: &TableIdent,
+        _metadata_location: String,
+    ) -> iceberg::Result<Table> {
+        Err(iceberg::Error::new(
+            iceberg::ErrorKind::Unexpected,
+            "register_table is not supported in mock catalog",
+        ))
     }
 }

@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,7 +18,7 @@ use prost::Message;
 use risingwave_common::license::Feature;
 use risingwave_common::secret::LocalSecretManager;
 use risingwave_pb::secret::secret;
-use risingwave_sqlparser::ast::{AlterSecretOperation, ObjectName, SqlOption};
+use risingwave_sqlparser::ast::{ObjectName, SqlOption, Value};
 
 use super::create_secret::{get_secret_payload, secret_to_str};
 use super::drop_secret::fetch_secret_catalog_with_db_schema_id;
@@ -30,7 +30,7 @@ pub async fn handle_alter_secret(
     handler_args: HandlerArgs,
     secret_name: ObjectName,
     sql_options: Vec<SqlOption>,
-    operation: AlterSecretOperation,
+    credential: Value,
 ) -> Result<RwPgResponse> {
     Feature::SecretManagement.check_available()?;
 
@@ -39,9 +39,7 @@ pub async fn handle_alter_secret(
     if let Some((secret_catalog, _, _)) =
         fetch_secret_catalog_with_db_schema_id(&session, &secret_name, false)?
     {
-        let AlterSecretOperation::ChangeCredential { new_credential } = operation;
-
-        let secret_id = secret_catalog.id.secret_id();
+        let secret_id = secret_catalog.id;
         let secret_payload = if sql_options.is_empty() {
             let original_pb_secret_bytes = LocalSecretManager::global()
                 .get_secret(secret_id)
@@ -53,8 +51,7 @@ pub async fn handle_alter_secret(
                 LocalSecretManager::get_pb_secret_backend(&original_pb_secret_bytes)?;
             match original_secret_backend {
                 secret::SecretBackend::Meta(_) => {
-                    let new_secret_value_bytes =
-                        secret_to_str(&new_credential)?.as_bytes().to_vec();
+                    let new_secret_value_bytes = secret_to_str(&credential)?.as_bytes().to_vec();
                     let secret_payload = risingwave_pb::secret::Secret {
                         secret_backend: Some(risingwave_pb::secret::secret::SecretBackend::Meta(
                             risingwave_pb::secret::SecretMetaBackend {
@@ -73,7 +70,7 @@ pub async fn handle_alter_secret(
             }
         } else {
             let with_options = WithOptions::try_from(sql_options.as_ref() as &[SqlOption])?;
-            get_secret_payload(new_credential, with_options).await?
+            get_secret_payload(credential, with_options).await?
         };
 
         let catalog_writer = session.catalog_writer()?;

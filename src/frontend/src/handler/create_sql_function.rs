@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -157,7 +157,7 @@ pub async fn handle_create_sql_function(
 
     // Create the actual function, will be stored in function catalog
     let function = PbFunction {
-        id: FunctionId::placeholder().0,
+        id: FunctionId::placeholder(),
         schema_id,
         database_id,
         name: function_name,

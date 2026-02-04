@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -86,6 +86,7 @@ pub async fn mock_sstable_store() -> SstableStoreRef {
         recent_filter: Arc::new(NoneRecentFilter::default().into()),
         state_store_metrics: Arc::new(global_hummock_state_store_metrics(MetricLevel::Disabled)),
         use_new_object_prefix_strategy: true,
+        skip_bloom_filter_in_serde: false,
 
         meta_cache,
         block_cache,
@@ -373,7 +374,7 @@ fn bench_merge_iterator_compactor(c: &mut Criterion) {
         b.to_async(&runtime).iter(|| {
             let sub_iters = vec![
                 ConcatSstableIterator::new(
-                    vec![0],
+                    vec![0.into()],
                     level1.clone(),
                     KeyRange::inf(),
                     sstable_store.clone(),
@@ -381,7 +382,7 @@ fn bench_merge_iterator_compactor(c: &mut Criterion) {
                     0,
                 ),
                 ConcatSstableIterator::new(
-                    vec![0],
+                    vec![0.into()],
                     level2.clone(),
                     KeyRange::inf(),
                     sstable_store.clone(),
@@ -464,13 +465,13 @@ fn bench_drop_column_compaction_impl(c: &mut Criterion, column_num: usize) {
 
     let mut task_config_schema = task_config_no_schema.clone();
     task_config_schema.table_schemas.insert(
-        10,
+        10.into(),
         PbTableSchema {
             column_ids: (0..column_num as i32).collect(),
         },
     );
     task_config_schema.table_schemas.insert(
-        11,
+        11.into(),
         PbTableSchema {
             column_ids: (0..column_num as i32).collect(),
         },
@@ -478,13 +479,13 @@ fn bench_drop_column_compaction_impl(c: &mut Criterion, column_num: usize) {
 
     let mut task_config_schema_cause_drop = task_config_no_schema.clone();
     task_config_schema_cause_drop.table_schemas.insert(
-        10,
+        10.into(),
         PbTableSchema {
             column_ids: (0..column_num as i32 / 2).collect(),
         },
     );
     task_config_schema_cause_drop.table_schemas.insert(
-        11,
+        11.into(),
         PbTableSchema {
             column_ids: (0..column_num as i32 / 2).collect(),
         },
@@ -493,7 +494,7 @@ fn bench_drop_column_compaction_impl(c: &mut Criterion, column_num: usize) {
     let get_iter = || {
         let sub_iters = vec![
             ConcatSstableIterator::new(
-                vec![10, 11],
+                vec![10.into(), 11.into()],
                 level1.clone(),
                 KeyRange::inf(),
                 sstable_store.clone(),
@@ -501,7 +502,7 @@ fn bench_drop_column_compaction_impl(c: &mut Criterion, column_num: usize) {
                 0,
             ),
             ConcatSstableIterator::new(
-                vec![10, 11],
+                vec![10.into(), 11.into()],
                 level2.clone(),
                 KeyRange::inf(),
                 sstable_store.clone(),

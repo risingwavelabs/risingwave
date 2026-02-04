@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -67,7 +67,7 @@ impl BoxedExecutorBuilder for SysRowSeqScanExecutorBuilder {
         )?;
         let sys_catalog_reader = source.context().catalog_reader();
 
-        let table_id = seq_scan_node.get_table_id().into();
+        let table_id = seq_scan_node.get_table_id();
 
         let column_indices = seq_scan_node
             .column_descs

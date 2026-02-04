@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -472,7 +472,7 @@ mod tests {
         let row4_bytes = serialize_pk_to_cache_key(row4.clone(), &cache_key_serde);
         let row5_bytes = serialize_pk_to_cache_key(row5.clone(), &cache_key_serde);
         let rows = [row1, row2, row3, row4, row5];
-        let ordered_rows = vec![row1_bytes, row2_bytes, row3_bytes, row4_bytes, row5_bytes];
+        let ordered_rows = [row1_bytes, row2_bytes, row3_bytes, row4_bytes, row5_bytes];
 
         let mut cache = TopNCache::<false>::new(1, 1, data_types);
 

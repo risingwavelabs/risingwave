@@ -9,9 +9,8 @@ option optimize_for = SPEED;
 
 message GetTableReplacePlanRequest {
   uint32 database_id = 1;
-  uint32 owner = 2;
-  string table_name = 3;
-  ddl_service.TableSchemaChange table_change = 4;
+  uint32 table_id = 2;
+  ddl_service.TableSchemaChange cdc_table_change = 3;
 }
 
 message GetTableReplacePlanResponse {

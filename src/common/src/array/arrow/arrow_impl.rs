@@ -1,10 +1,10 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -71,9 +71,9 @@ pub trait ToArrow {
         chunk: &DataChunk,
     ) -> Result<arrow_array::RecordBatch, ArrayError> {
         // compact the chunk if it's not compacted
-        if !chunk.is_compacted() {
+        if !chunk.is_vis_compacted() {
             let c = chunk.clone();
-            return self.to_record_batch(schema, &c.compact());
+            return self.to_record_batch(schema, &c.compact_vis());
         }
 
         // convert each column to arrow array
@@ -562,6 +562,7 @@ pub trait FromArrow {
             Timestamp(Nanosecond, Some(_)) => DataType::Timestamptz,
             Interval(MonthDayNano) => DataType::Interval,
             Utf8 => DataType::Varchar,
+            Utf8View => DataType::Varchar,
             Binary => DataType::Bytea,
             LargeUtf8 => self.from_large_utf8()?,
             LargeBinary => self.from_large_binary()?,
@@ -620,6 +621,26 @@ pub trait FromArrow {
         if let Some(type_name) = field.metadata().get("ARROW:extension:name") {
             return self.from_extension_array(type_name, array);
         }
+
+        // Struct projection for file source (Parquet): allow Arrow struct to be a superset of the
+        // expected struct fields. We align fields by name and ignore extra fields.
+        //
+        // Only use projection when Arrow struct differs from expected (superset, reordered, or
+        // different field names). If they match exactly, fall through to the normal path to
+        // avoid unnecessary overhead and potential issues with UDF/other paths.
+        if let (
+            arrow_schema::DataType::Struct(expected_fields),
+            arrow_schema::DataType::Struct(actual_fields),
+        ) = (field.data_type(), array.data_type())
+        {
+            let dominated = Self::struct_fields_dominated(expected_fields, actual_fields);
+            if dominated {
+                let struct_array: &arrow_array::StructArray =
+                    array.as_any().downcast_ref().unwrap();
+                return self.from_struct_array_projected(expected_fields, struct_array);
+            }
+            // else: fields match exactly, fall through to normal Struct(_) path below
+        }
         match array.data_type() {
             Boolean => self.from_bool_array(array.as_any().downcast_ref().unwrap()),
             Int8 => self.from_int8_array(array.as_any().downcast_ref().unwrap()),
@@ -666,6 +687,7 @@ pub trait FromArrow {
                 self.from_interval_array(array.as_any().downcast_ref().unwrap())
             }
             Utf8 => self.from_utf8_array(array.as_any().downcast_ref().unwrap()),
+            Utf8View => self.from_utf8_view_array(array.as_any().downcast_ref().unwrap()),
             Binary => self.from_binary_array(array.as_any().downcast_ref().unwrap()),
             LargeUtf8 => self.from_large_utf8_array(array.as_any().downcast_ref().unwrap()),
             LargeBinary => self.from_large_binary_array(array.as_any().downcast_ref().unwrap()),
@@ -857,6 +879,13 @@ pub trait FromArrow {
         Ok(ArrayImpl::Utf8(array.into()))
     }
 
+    fn from_utf8_view_array(
+        &self,
+        array: &arrow_array::StringViewArray,
+    ) -> Result<ArrayImpl, ArrayError> {
+        Ok(ArrayImpl::Utf8(array.into()))
+    }
+
     fn from_binary_array(&self, array: &arrow_array::BinaryArray) -> Result<ArrayImpl, ArrayError> {
         Ok(ArrayImpl::Bytea(array.into()))
     }
@@ -904,6 +933,81 @@ pub trait FromArrow {
                 .map(|(array, field)| self.from_array(field, array).map(Arc::new))
                 .try_collect()?,
             (0..array.len()).map(|i| array.is_valid(i)).collect(),
+        )))
+    }
+
+    /// Returns `true` if all expected fields are present in `actual_fields`, and `actual_fields`
+    /// has more fields or has them in a different order.
+    ///
+    /// This is used to decide whether to use `from_struct_array_projected` (projection needed)
+    /// or fall back to the normal `from_struct_array` path (exact match).
+    fn struct_fields_dominated(
+        expected_fields: &arrow_schema::Fields,
+        actual_fields: &arrow_schema::Fields,
+    ) -> bool {
+        // Fast path: if lengths are equal and names match in order, no projection needed
+        if expected_fields.len() == actual_fields.len() {
+            let all_match = expected_fields
+                .iter()
+                .zip_eq_fast(actual_fields.iter())
+                .all(|(e, a)| e.name() == a.name());
+            if all_match {
+                return false; // exact match, use normal path
+            }
+        }
+        // Check that all expected fields exist in actual (by name)
+        let actual_names: std::collections::HashSet<&str> =
+            actual_fields.iter().map(|f| f.name().as_str()).collect();
+        expected_fields
+            .iter()
+            .all(|e| actual_names.contains(e.name().as_str()))
+    }
+
+    /// Converts Arrow `StructArray` to RisingWave `StructArray` according to the expected fields.
+    ///
+    /// This is mainly used for Parquet file source, where the upstream struct may contain extra
+    /// fields. The conversion aligns fields by name, ignores extra fields, and keeps the expected
+    /// field order.
+    fn from_struct_array_projected(
+        &self,
+        expected_fields: &arrow_schema::Fields,
+        array: &arrow_array::StructArray,
+    ) -> Result<ArrayImpl, ArrayError> {
+        use std::collections::HashMap;
+
+        use arrow_array::Array;
+
+        let arrow_schema::DataType::Struct(actual_fields) = array.data_type() else {
+            panic!("nested field types cannot be determined.");
+        };
+
+        let actual_name_to_index: HashMap<&str, usize> = actual_fields
+            .iter()
+            .enumerate()
+            .map(|(idx, f)| (f.name().as_str(), idx))
+            .collect();
+
+        let len = array.len();
+        let projected_columns = expected_fields
+            .iter()
+            .map(|expected_field| {
+                if let Some(&idx) = actual_name_to_index.get(expected_field.name().as_str()) {
+                    let child = array.columns()[idx].clone();
+                    self.from_array(expected_field, &child).map(Arc::new)
+                } else {
+                    // Field missing in Arrow struct. Fill SQL NULL with the expected RW type.
+                    let rw_ty = self.from_field(expected_field)?;
+                    let mut builder = ArrayBuilderImpl::with_type(len, rw_ty);
+                    builder.append_n(len, Datum::None);
+                    Ok(Arc::new(builder.finish()))
+                }
+            })
+            .try_collect()?;
+
+        Ok(ArrayImpl::Struct(StructArray::new(
+            self.from_fields(expected_fields)?,
+            projected_columns,
+            (0..len).map(|i| array.is_valid(i)).collect(),
         )))
     }
 
@@ -1061,6 +1165,7 @@ converts!(BytesArray, arrow_array::BinaryArray);
 converts!(BytesArray, arrow_array::LargeBinaryArray);
 converts!(Utf8Array, arrow_array::StringArray);
 converts!(Utf8Array, arrow_array::LargeStringArray);
+converts!(Utf8Array, arrow_array::StringViewArray);
 converts!(DateArray, arrow_array::Date32Array, @map);
 converts!(TimeArray, arrow_array::Time64MicrosecondArray, @map);
 converts!(IntervalArray, arrow_array::IntervalMonthDayNanoArray, @map);
@@ -1267,16 +1372,23 @@ impl TryFrom<&arrow_array::Decimal128Array> for DecimalArray {
         if array.scale() < 0 {
             bail!("support negative scale for arrow decimal")
         }
+
+        // Calculate the max value based on the Arrow decimal's precision
+        // When writing Inf to Arrow Decimal128(precision, scale), we use 10^precision - 1
+        let precision = array.precision();
+        let max_value = 10_i128.pow(precision as u32) - 1;
+
         let from_arrow = |value| {
             const NAN: i128 = i128::MIN + 1;
             let res = match value {
+                // Check for special values using Arrow Decimal's max value, not i128::MAX
                 NAN => Decimal::NaN,
-                i128::MAX => Decimal::PositiveInf,
-                i128::MIN => Decimal::NegativeInf,
-                _ => Decimal::Normalized(
-                    rust_decimal::Decimal::try_from_i128_with_scale(value, array.scale() as u32)
-                        .map_err(ArrayError::internal)?,
-                ),
+                v if v == max_value => Decimal::PositiveInf,
+                v if v == -max_value => Decimal::NegativeInf,
+                i128::MAX => Decimal::PositiveInf, // Fallback for old data
+                i128::MIN => Decimal::NegativeInf, // Fallback for old data
+                _ => Decimal::truncated_i128_and_scale(value, array.scale() as u32)
+                    .ok_or_else(|| ArrayError::from_arrow("decimal overflow"))?,
             };
             Ok(res)
         };
@@ -1486,7 +1598,7 @@ impl From<&arrow_array::Decimal256Array> for Int256Array {
 /// - Arrow's `Float16` matches with RisingWave's `Float32`.
 ///
 /// Nested data type matching:
-/// - Struct: Arrow's `Struct` type matches with RisingWave's `Struct` type recursively, requiring the same field names and types.
+/// - Struct: Arrow's `Struct` type matches with RisingWave's `Struct` type recursively, requiring that all expected fields exist and match by name and type. Extra Arrow fields are allowed.
 /// - List: Arrow's `List` type matches with RisingWave's `List` type recursively, requiring the same element type.
 /// - Map: Arrow's `Map` type matches with RisingWave's `Map` type recursively, requiring the key and value types to match, and the inner struct must have exactly two fields named "key" and "value".
 pub fn is_parquet_schema_match_source_schema(
@@ -1516,16 +1628,16 @@ pub fn is_parquet_schema_match_source_schema(
         | (ArrowType::Binary | ArrowType::LargeBinary, RwType::Bytea) => true,
 
         // Struct type recursive matching
-        // Arrow's Struct matches RisingWave's Struct if all field names and types match recursively
+        // Arrow's Struct matches RisingWave's Struct if all expected field names exist and types
+        // match recursively. Extra Arrow fields are allowed and field order is ignored.
         (ArrowType::Struct(arrow_fields), RwType::Struct(rw_struct)) => {
-            if arrow_fields.len() != rw_struct.len() {
+            if arrow_fields.len() < rw_struct.len() {
                 return false;
             }
-            for (arrow_field, (rw_name, rw_ty)) in arrow_fields.iter().zip_eq_fast(rw_struct.iter())
-            {
-                if arrow_field.name() != rw_name {
+            for (rw_name, rw_ty) in rw_struct.iter() {
+                let Some(arrow_field) = arrow_fields.iter().find(|f| f.name() == rw_name) else {
                     return false;
-                }
+                };
                 if !is_parquet_schema_match_source_schema(arrow_field.data_type(), rw_ty) {
                     return false;
                 }
@@ -1590,6 +1702,33 @@ mod tests {
             &rw_struct
         ));
 
+        // Arrow is a superset of RW struct fields.
+        let arrow_struct_superset = ArrowType::Struct(
+            vec![
+                ArrowField::new("f1", ArrowType::Float64, true),
+                ArrowField::new("f2", ArrowType::Utf8, true),
+                ArrowField::new("f3", ArrowType::Int32, true),
+            ]
+            .into(),
+        );
+        assert!(is_parquet_schema_match_source_schema(
+            &arrow_struct_superset,
+            &rw_struct
+        ));
+
+        // Field order is ignored for struct matching.
+        let arrow_struct_reordered = ArrowType::Struct(
+            vec![
+                ArrowField::new("f2", ArrowType::Utf8, true),
+                ArrowField::new("f1", ArrowType::Float64, true),
+            ]
+            .into(),
+        );
+        assert!(is_parquet_schema_match_source_schema(
+            &arrow_struct_reordered,
+            &rw_struct
+        ));
+
         // Field names do not match
         let arrow_struct2 = ArrowType::Struct(
             vec![
@@ -1602,6 +1741,76 @@ mod tests {
             &arrow_struct2,
             &rw_struct
         ));
+    }
+
+    #[test]
+    fn test_struct_projection_from_arrow() {
+        use std::sync::Arc;
+
+        use itertools::Itertools;
+
+        struct Dummy;
+        impl FromArrow for Dummy {}
+
+        // Actual Arrow struct: struct<foo:int32, bar:utf8, baz:int32>
+        let actual_fields: arrow_schema::Fields = vec![
+            ArrowField::new("foo", ArrowType::Int32, true),
+            ArrowField::new("bar", ArrowType::Utf8, true),
+            ArrowField::new("baz", ArrowType::Int32, true),
+        ]
+        .into();
+        let foo: arrow_array::ArrayRef =
+            Arc::new(arrow_array::Int32Array::from(vec![Some(10), Some(20)]));
+        let bar: arrow_array::ArrayRef =
+            Arc::new(arrow_array::StringArray::from(vec![Some("a"), Some("b")]));
+        let baz: arrow_array::ArrayRef =
+            Arc::new(arrow_array::Int32Array::from(vec![Some(100), Some(200)]));
+        let actual_struct = arrow_array::StructArray::new(actual_fields, vec![foo, bar, baz], None);
+        let actual_struct_ref: arrow_array::ArrayRef = Arc::new(actual_struct);
+
+        // Expected struct in RW schema (via to_arrow_field): struct<foo:int32, bar:utf8>
+        let expected_field = ArrowField::new(
+            "s",
+            ArrowType::Struct(
+                vec![
+                    ArrowField::new("foo", ArrowType::Int32, true),
+                    ArrowField::new("bar", ArrowType::Utf8, true),
+                ]
+                .into(),
+            ),
+            true,
+        );
+
+        let array_impl = Dummy
+            .from_array(&expected_field, &actual_struct_ref)
+            .unwrap();
+
+        let ArrayImpl::Struct(s) = array_impl else {
+            panic!("expected RW StructArray");
+        };
+
+        let DataType::Struct(st) = s.data_type() else {
+            panic!("expected RW struct type");
+        };
+        assert_eq!(st.len(), 2);
+        assert_eq!(st.iter().map(|(n, _)| n).collect_vec(), vec!["foo", "bar"]);
+
+        let v0 = s.value_at(0).unwrap().to_owned_scalar();
+        let v1 = s.value_at(1).unwrap().to_owned_scalar();
+        assert_eq!(
+            v0,
+            StructValue::new(vec![
+                Some(ScalarImpl::Int32(10)),
+                Some(ScalarImpl::Utf8("a".into()))
+            ])
+        );
+        assert_eq!(
+            v1,
+            StructValue::new(vec![
+                Some(ScalarImpl::Int32(20)),
+                Some(ScalarImpl::Utf8("b".into()))
+            ])
+        );
     }
 
     #[test]

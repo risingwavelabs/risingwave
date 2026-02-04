@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -27,6 +27,7 @@ use crate::handler::create_table::{
     ColumnIdGenerator, CreateTableProps, gen_create_table_plan_without_source,
 };
 use crate::handler::query::handle_query;
+use crate::handler::util::{LongRunningNotificationAction, execute_with_long_running_notification};
 use crate::stream_fragmenter::GraphJobType;
 use crate::{Binder, OptimizerContext, build_graph};
 
@@ -66,7 +67,7 @@ pub async fn handle_create_as(
 
     // Generate catalog descs from query
     let mut columns: Vec<_> = {
-        let mut binder = Binder::new(&session);
+        let mut binder = Binder::new_for_batch(&session);
         let bound = binder.bind(Statement::Query(query.clone()))?;
         if let BoundStatement::Query(query) = bound {
             // Create ColumnCatelog by Field
@@ -96,7 +97,7 @@ pub async fn handle_create_as(
         .into());
     }
 
-    // Override column name if it specified in creaet statement.
+    // Override column name if it specified in create statement.
     column_defs.iter().enumerate().for_each(|(idx, column)| {
         columns[idx].column_desc.name = column.name.real_value();
     });
@@ -141,16 +142,20 @@ pub async fn handle_create_as(
     );
 
     let catalog_writer = session.catalog_writer()?;
-    catalog_writer
-        .create_table(
+    execute_with_long_running_notification(
+        catalog_writer.create_table(
             source,
             table.to_prost(),
             graph,
             TableJobType::Unspecified,
             if_not_exists,
             HashSet::default(),
-        )
-        .await?;
+        ),
+        &session,
+        "CREATE TABLE AS",
+        LongRunningNotificationAction::DiagnoseBarrierLatency,
+    )
+    .await?;
 
     // Generate insert
     let insert = Statement::Insert {

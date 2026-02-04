@@ -24,6 +24,7 @@ message HostAddress {
 message ActorInfo {
   uint32 actor_id = 1;
   HostAddress host = 2;
+  uint64 partial_graph_id = 3;
 }
 
 enum WorkerType {
@@ -64,11 +65,17 @@ message WorkerNode {
 
     // resource group for scheduling
     optional string resource_group = 7;
+
+    // Whether this is an iceberg compactor (only applicable for Compactor worker type)
+    bool is_iceberg_compactor = 8;
   }
   message Resource {
     string rw_version = 1;
     uint64 total_memory_bytes = 2;
     uint64 total_cpu_cores = 3;
+    // The host name reported by `gethostname()`.
+    // Not to be confused with `host` field in `WorkerNode`.
+    string hostname = 4;
   }
   uint32 id = 1;
   WorkerType type = 2;
@@ -94,6 +101,11 @@ message WorkerNode {
   // Moved to `Property` message.
   reserved 10;
   reserved "parallelism";
+}
+
+message ClusterResource {
+  uint64 total_memory_bytes = 1;
+  uint64 total_cpu_cores = 2;
 }
 
 message Buffer {
@@ -182,4 +194,12 @@ enum DistanceType {
   DISTANCE_TYPE_L2_SQR = 2;
   DISTANCE_TYPE_COSINE = 3;
   DISTANCE_TYPE_INNER_PRODUCT = 4;
+}
+
+enum ThrottleType {
+  THROTTLE_TYPE_UNSPECIFIED = 0;
+  THROTTLE_TYPE_DML = 1;
+  THROTTLE_TYPE_BACKFILL = 2;
+  THROTTLE_TYPE_SOURCE = 3;
+  THROTTLE_TYPE_SINK = 4;
 }

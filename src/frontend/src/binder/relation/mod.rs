@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,7 +15,6 @@
 use std::collections::hash_map::Entry;
 use std::ops::Deref;
 
-use either::Either;
 use itertools::{EitherOrBoth, Itertools};
 use risingwave_common::bail;
 use risingwave_common::catalog::{Field, TableId};
@@ -33,7 +32,7 @@ use crate::binder::bind_context::{BindingCte, BindingCteState};
 use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{ExprImpl, InputRef};
 
-mod cte_ref;
+mod gap_fill;
 mod join;
 mod share;
 mod subquery;
@@ -42,7 +41,7 @@ mod table_or_source;
 mod watermark;
 mod window_table_function;
 
-pub use cte_ref::BoundBackCteRef;
+pub use gap_fill::BoundGapFill;
 pub use join::BoundJoin;
 pub use share::{BoundShare, BoundShareInput};
 pub use subquery::BoundSubquery;
@@ -69,9 +68,8 @@ pub enum Relation {
         with_ordinality: bool,
     },
     Watermark(Box<BoundWatermark>),
-    /// rcte is implicitly included in share
     Share(Box<BoundShare>),
-    BackCteRef(Box<BoundBackCteRef>),
+    GapFill(Box<BoundGapFill>),
 }
 
 impl RewriteExprsRecursive for Relation {
@@ -86,7 +84,6 @@ impl RewriteExprsRecursive for Relation {
             Relation::TableFunction { expr: inner, .. } => {
                 *inner = rewriter.rewrite_expr(inner.take())
             }
-            Relation::BackCteRef(inner) => inner.rewrite_exprs_recursive(rewriter),
             _ => {}
         }
     }
@@ -151,11 +148,9 @@ impl Relation {
             } => table_function
                 .collect_correlated_indices_by_depth_and_assign_id(depth + 1, correlated_id),
             Relation::Share(share) => match &mut share.input {
-                BoundShareInput::Query(query) => match query {
-                    Either::Left(query) => query
-                        .collect_correlated_indices_by_depth_and_assign_id(depth, correlated_id),
-                    Either::Right(_) => vec![],
-                },
+                BoundShareInput::Query(query) => {
+                    query.collect_correlated_indices_by_depth_and_assign_id(depth, correlated_id)
+                }
                 BoundShareInput::ChangeLog(change_log) => change_log
                     .collect_correlated_indices_by_depth_and_assign_id(depth, correlated_id),
             },
@@ -458,37 +453,18 @@ impl Binder {
             }
 
             match cte_state {
-                BindingCteState::Init => {
-                    Err(ErrorCode::BindError("Base term of recursive CTE not found, consider writing it to left side of the `UNION ALL` operator".to_owned()).into())
-                }
-                BindingCteState::BaseResolved { base } => {
-                    self.bind_table_to_context(
-                        base.schema().fields.iter().map(|f| (false, f.clone())),
-                        table_name,
-                        Some(&original_alias),
-                    )?;
-                    Ok(Relation::BackCteRef(Box::new(BoundBackCteRef { share_id, base })))
-                }
                 BindingCteState::Bound { query } => {
                     let input = BoundShareInput::Query(query);
-                    self.bind_table_to_context(
-                        input.fields()?,
-                        table_name,
-                        Some(&original_alias),
-                    )?;
+                    self.bind_table_to_context(input.fields()?, table_name, Some(&original_alias))?;
                     // we could always share the cte,
                     // no matter it's recursive or not.
-                    Ok(Relation::Share(Box::new(BoundShare { share_id, input})))
+                    Ok(Relation::Share(Box::new(BoundShare { share_id, input })))
                 }
                 BindingCteState::ChangeLog { table } => {
                     let input = BoundShareInput::ChangeLog(table);
-                    self.bind_table_to_context(
-                        input.fields()?,
-                        table_name,
-                        Some(&original_alias),
-                    )?;
+                    self.bind_table_to_context(input.fields()?, table_name, Some(&original_alias))?;
                     Ok(Relation::Share(Box::new(BoundShare { share_id, input })))
-                },
+                }
             }
         } else {
             self.bind_catalog_relation_by_name(

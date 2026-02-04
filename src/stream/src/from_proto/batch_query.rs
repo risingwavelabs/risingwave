@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -56,7 +56,7 @@ impl ExecutorBuilder for BatchQueryExecutorBuilder {
 
         let exec = BatchQueryExecutor::new(
             table,
-            params.env.config().developer.chunk_size,
+            params.config.developer.chunk_size,
             params.info.schema.clone(),
         );
         Ok((params.info, exec).into())

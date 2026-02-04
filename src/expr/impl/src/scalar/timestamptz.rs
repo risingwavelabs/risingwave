@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -11,8 +11,6 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-
-use std::fmt::Write;
 
 use chrono::LocalResult;
 use chrono_tz::Tz;
@@ -93,7 +91,7 @@ pub fn timestamp_at_time_zone_internal(input: Timestamp, time_zone: Tz) -> Resul
 pub fn timestamptz_to_string(
     elem: Timestamptz,
     time_zone: &str,
-    writer: &mut impl Write,
+    writer: &mut impl std::fmt::Write,
 ) -> Result<()> {
     let time_zone = Timestamptz::lookup_time_zone(time_zone).map_err(time_zone_err)?;
     let instant_local = elem.to_datetime_in_zone(time_zone);

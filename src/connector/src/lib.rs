@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,13 +14,11 @@
 
 #![allow(clippy::derive_partial_eq_without_eq)]
 #![warn(clippy::large_futures, clippy::large_stack_frames)]
-#![feature(array_chunks)]
 #![feature(coroutines)]
 #![feature(proc_macro_hygiene)]
 #![feature(stmt_expr_attributes)]
 #![feature(box_patterns)]
 #![feature(trait_alias)]
-#![feature(let_chains)]
 #![feature(box_into_inner)]
 #![feature(type_alias_impl_trait)]
 #![feature(associated_type_defaults)]
@@ -39,6 +37,7 @@
 #![recursion_limit = "256"]
 #![feature(min_specialization)]
 #![feature(custom_inner_attributes)]
+#![feature(iter_array_chunks)]
 
 use std::time::Duration;
 
@@ -47,7 +46,6 @@ use serde::de;
 
 pub mod aws_utils;
 
-#[rustfmt::skip]
 pub mod allow_alter_on_fly_fields;
 
 mod enforce_secret;
@@ -172,6 +170,24 @@ where
         de::Unexpected::Str(&s),
         &"The String value unit support for one of:[“y”,“mon”,“w”,“d”,“h”,“m”,“s”, “ms”, “µs”, “ns”]",
     ))
+}
+
+pub(crate) fn deserialize_optional_duration_from_string<'de, D>(
+    deserializer: D,
+) -> Result<Option<Duration>, D::Error>
+where
+    D: de::Deserializer<'de>,
+{
+    let s: Option<String> = de::Deserialize::deserialize(deserializer)?;
+    if let Some(s) = s {
+        let duration = parse_std(&s).map_err(|_| de::Error::invalid_value(
+            de::Unexpected::Str(&s),
+            &"The String value unit support for one of:[“y”,“mon”,“w”,“d”,“h”,“m”,“s”, “ms”, “µs”, “ns”]",
+        ))?;
+        Ok(Some(duration))
+    } else {
+        Ok(None)
+    }
 }
 
 #[cfg(test)]

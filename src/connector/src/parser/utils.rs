@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -11,13 +11,14 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+
 use std::collections::BTreeMap;
 
 use anyhow::Context;
 use bytes::Bytes;
 use reqwest::Url;
 use risingwave_common::bail;
-use risingwave_common::types::{Datum, DatumCow, DatumRef};
+use risingwave_common::types::{Datum, DatumCow, DatumRef, ScalarRefImpl};
 use risingwave_pb::data::DataType as PbDataType;
 
 use crate::aws_utils::load_file_descriptor_from_s3;
@@ -27,7 +28,7 @@ use crate::source::SourceMeta;
 
 macro_rules! log_error {
     ($name:expr, $err:expr, $message:expr) => {
-        if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
+        if let Ok(suppressed_count) = LOG_SUPPRESSOR.check() {
             tracing::error!(
                 column = $name,
                 error = %$err.as_report(),
@@ -133,7 +134,9 @@ pub fn extract_cdc_meta_column<'a>(
     match column_type {
         ColumnType::Timestamp(_) => Ok(cdc_meta.extract_timestamp()),
         ColumnType::DatabaseName(_) => Ok(cdc_meta.extract_database_name()),
-        ColumnType::TableName(_) => Ok(cdc_meta.extract_table_name()),
+        // `table_name` in additional columns should be the object name only, not the routing key
+        // (which can be `schema.table` or `db.table` depending on the connector).
+        ColumnType::TableName(_) => Ok(cdc_meta.extract_table_name_only()),
         _ => Err(AccessError::UnsupportedAdditionalColumn {
             name: column_name.to_owned(),
         }),
@@ -143,6 +146,16 @@ pub fn extract_cdc_meta_column<'a>(
 pub fn extract_headers_from_meta(meta: &SourceMeta) -> Option<Datum> {
     match meta {
         SourceMeta::Kafka(kafka_meta) => kafka_meta.extract_headers(), /* expect output of type `array[struct<varchar, bytea>]` */
+        _ => None,
+    }
+}
+
+pub fn extract_pulsar_message_id_data_from_meta(meta: &SourceMeta) -> Option<DatumRef<'_>> {
+    match meta {
+        SourceMeta::Pulsar(pulsar_meta) => pulsar_meta
+            .ack_message_id
+            .as_ref()
+            .map(|message_id| Some(ScalarRefImpl::Bytea(message_id))),
         _ => None,
     }
 }

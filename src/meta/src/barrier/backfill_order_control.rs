@@ -14,13 +14,12 @@
 
 use std::collections::{HashMap, HashSet};
 
-use risingwave_common::catalog::FragmentTypeFlag;
+use risingwave_common::catalog::{FragmentTypeFlag, TableId};
+pub use risingwave_common::id::ActorId;
 
+use crate::controller::fragment::InflightFragmentInfo;
 use crate::model::{FragmentId, StreamJobFragments};
-
-/// This is the "global" `fragment_id`.
-/// The local `fragment_id` is namespaced by the `fragment_id`.
-pub type ActorId = u32;
+use crate::stream::ExtendedFragmentBackfillOrder;
 
 #[derive(Clone, Debug, Default)]
 pub struct BackfillNode {
@@ -45,12 +44,14 @@ pub struct BackfillOrderState {
     remaining_backfill_nodes: HashMap<FragmentId, BackfillNode>,
     // The mapping between actors and fragment_ids
     actor_to_fragment_id: HashMap<ActorId, FragmentId>,
+    // The mapping between fragment_ids and table_ids of locality provider fragments
+    locality_fragment_state_table_mapping: HashMap<FragmentId, Vec<TableId>>,
 }
 
 /// Get nodes with some dependencies.
 /// These should initially be paused until their dependencies are done.
 pub fn get_nodes_with_backfill_dependencies(
-    backfill_orders: &HashMap<FragmentId, Vec<FragmentId>>,
+    backfill_orders: &ExtendedFragmentBackfillOrder,
 ) -> HashSet<FragmentId> {
     backfill_orders.values().flatten().copied().collect()
 }
@@ -58,8 +59,9 @@ pub fn get_nodes_with_backfill_dependencies(
 // constructor
 impl BackfillOrderState {
     pub fn new(
-        backfill_orders: HashMap<FragmentId, Vec<FragmentId>>,
+        backfill_orders: &ExtendedFragmentBackfillOrder,
         stream_job_fragments: &StreamJobFragments,
+        locality_fragment_state_table_mapping: HashMap<FragmentId, Vec<TableId>>,
     ) -> Self {
         tracing::debug!(?backfill_orders, "initialize backfill order state");
         let actor_to_fragment_id = stream_job_fragments.actor_fragment_mapping();
@@ -67,10 +69,11 @@ impl BackfillOrderState {
         let mut backfill_nodes: HashMap<FragmentId, BackfillNode> = HashMap::new();
 
         for fragment in stream_job_fragments.fragments() {
-            if fragment
-                .fragment_type_mask
-                .contains_any([FragmentTypeFlag::StreamScan, FragmentTypeFlag::SourceScan])
-            {
+            if fragment.fragment_type_mask.contains_any([
+                FragmentTypeFlag::StreamScan,
+                FragmentTypeFlag::SourceScan,
+                FragmentTypeFlag::LocalityProvider,
+            ]) {
                 let fragment_id = fragment.fragment_id;
                 backfill_nodes.insert(
                     fragment_id,
@@ -91,10 +94,10 @@ impl BackfillOrderState {
             }
         }
 
-        for (fragment_id, children) in backfill_orders {
-            for child in &children {
+        for (fragment_id, children) in backfill_orders.iter() {
+            for child in children {
                 let child_node = backfill_nodes.get_mut(child).unwrap();
-                child_node.remaining_dependencies.insert(fragment_id);
+                child_node.remaining_dependencies.insert(*fragment_id);
             }
         }
 
@@ -112,6 +115,74 @@ impl BackfillOrderState {
             current_backfill_nodes,
             remaining_backfill_nodes,
             actor_to_fragment_id,
+            locality_fragment_state_table_mapping,
+        }
+    }
+
+    pub fn recover_from_fragment_infos(
+        backfill_orders: &ExtendedFragmentBackfillOrder,
+        fragment_infos: &HashMap<FragmentId, InflightFragmentInfo>,
+        locality_fragment_state_table_mapping: HashMap<FragmentId, Vec<TableId>>,
+    ) -> Self {
+        tracing::debug!(
+            ?backfill_orders,
+            "initialize backfill order state from recovery"
+        );
+        let actor_to_fragment_id = fragment_infos
+            .iter()
+            .flat_map(|(fragment_id, fragment)| {
+                fragment
+                    .actors
+                    .keys()
+                    .map(|actor_id| (*actor_id, *fragment_id))
+            })
+            .collect();
+
+        let mut backfill_nodes: HashMap<FragmentId, BackfillNode> = HashMap::new();
+
+        for (fragment_id, fragment) in fragment_infos {
+            if fragment.fragment_type_mask.contains_any([
+                FragmentTypeFlag::StreamScan,
+                FragmentTypeFlag::SourceScan,
+                FragmentTypeFlag::LocalityProvider,
+            ]) {
+                backfill_nodes.insert(
+                    *fragment_id,
+                    BackfillNode {
+                        fragment_id: *fragment_id,
+                        remaining_actors: fragment.actors.keys().copied().collect(),
+                        remaining_dependencies: Default::default(),
+                        children: backfill_orders
+                            .get(fragment_id)
+                            .cloned()
+                            .unwrap_or_else(Vec::new),
+                    },
+                );
+            }
+        }
+
+        for (fragment_id, children) in backfill_orders.iter() {
+            for child in children {
+                let child_node = backfill_nodes.get_mut(child).unwrap();
+                child_node.remaining_dependencies.insert(*fragment_id);
+            }
+        }
+
+        let mut current_backfill_nodes = HashMap::new();
+        let mut remaining_backfill_nodes = HashMap::new();
+        for (fragment_id, node) in backfill_nodes {
+            if node.remaining_dependencies.is_empty() {
+                current_backfill_nodes.insert(fragment_id, node);
+            } else {
+                remaining_backfill_nodes.insert(fragment_id, node);
+            }
+        }
+
+        Self {
+            current_backfill_nodes,
+            remaining_backfill_nodes,
+            actor_to_fragment_id,
+            locality_fragment_state_table_mapping,
         }
     }
 }
@@ -120,7 +191,7 @@ impl BackfillOrderState {
 impl BackfillOrderState {
     pub fn finish_actor(&mut self, actor_id: ActorId) -> Vec<FragmentId> {
         let Some(fragment_id) = self.actor_to_fragment_id.get(&actor_id) else {
-            tracing::error!(actor_id, "fragment not found for actor");
+            tracing::error!(%actor_id, "fragment not found for actor");
             return vec![];
         };
         // NOTE(kwannoel):
@@ -138,8 +209,8 @@ impl BackfillOrderState {
             None => {
                 let Some(node) = self.remaining_backfill_nodes.get_mut(fragment_id) else {
                     tracing::error!(
-                        fragment_id,
-                        actor_id,
+                        %fragment_id,
+                        %actor_id,
                         "fragment not found in current_backfill_nodes or remaining_backfill_nodes"
                     );
                     return vec![];
@@ -150,9 +221,9 @@ impl BackfillOrderState {
 
         assert!(node.remaining_actors.remove(&actor_id), "missing actor");
         tracing::debug!(
-            actor_id,
+            %actor_id,
             remaining_actors = node.remaining_actors.len(),
-            fragment_id,
+            %fragment_id,
             "finish_backfilling_actor"
         );
         if node.remaining_actors.is_empty() && is_in_order {
@@ -175,10 +246,15 @@ impl BackfillOrderState {
                         "missing dependency"
                     );
                     if child.remaining_dependencies.is_empty() {
-                        tracing::debug!(fragment_id = ?child_id, "schedule next backfill node");
+                        let should_schedule = !child.remaining_actors.is_empty();
+                        if should_schedule {
+                            tracing::debug!(fragment_id = ?child_id, "schedule next backfill node");
+                        }
                         self.current_backfill_nodes
                             .insert(child.fragment_id, child.clone());
-                        newly_scheduled.push(child.fragment_id);
+                        if should_schedule {
+                            newly_scheduled.push(child.fragment_id);
+                        }
                         child.remaining_actors.is_empty()
                     } else {
                         false
@@ -189,8 +265,54 @@ impl BackfillOrderState {
                 }
             }
         } else {
-            tracing::error!(fragment_id, "fragment not found in current_backfill_nodes");
+            tracing::error!(%fragment_id, "fragment not found in current_backfill_nodes");
             return vec![];
+        }
+        newly_scheduled
+    }
+
+    pub fn current_backfill_node_fragment_ids(&self) -> Vec<FragmentId> {
+        self.current_backfill_nodes.keys().copied().collect()
+    }
+
+    pub fn get_locality_fragment_state_table_mapping(&self) -> &HashMap<FragmentId, Vec<TableId>> {
+        &self.locality_fragment_state_table_mapping
+    }
+
+    /// Refresh actor mapping after reschedule and return newly scheduled fragments.
+    pub fn refresh_actors(
+        &mut self,
+        fragment_actors: &HashMap<FragmentId, HashSet<ActorId>>,
+    ) -> Vec<FragmentId> {
+        self.actor_to_fragment_id = fragment_actors
+            .iter()
+            .flat_map(|(fragment_id, actors)| {
+                actors.iter().map(|actor_id| (*actor_id, *fragment_id))
+            })
+            .collect();
+
+        for node in self
+            .current_backfill_nodes
+            .values_mut()
+            .chain(self.remaining_backfill_nodes.values_mut())
+        {
+            if let Some(actors) = fragment_actors.get(&node.fragment_id) {
+                node.remaining_actors = actors.iter().copied().collect();
+            } else {
+                node.remaining_actors.clear();
+            }
+        }
+
+        let finished_fragments: Vec<_> = self
+            .current_backfill_nodes
+            .iter()
+            .filter(|(_, node)| node.remaining_actors.is_empty())
+            .map(|(fragment_id, _)| *fragment_id)
+            .collect();
+
+        let mut newly_scheduled = vec![];
+        for fragment_id in finished_fragments {
+            newly_scheduled.extend(self.finish_fragment(fragment_id));
         }
         newly_scheduled
     }

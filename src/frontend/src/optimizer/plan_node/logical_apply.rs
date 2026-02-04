@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -168,7 +168,11 @@ impl LogicalApply {
     }
 
     pub fn correlated_indices(&self) -> Vec<usize> {
-        self.correlated_indices.to_owned()
+        self.correlated_indices.clone()
+    }
+
+    pub fn on_condition(&self) -> &Condition {
+        &self.on
     }
 
     pub fn translated(&self) -> bool {

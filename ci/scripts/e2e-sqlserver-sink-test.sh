@@ -4,7 +4,7 @@
 set -euo pipefail
 
 source ci/scripts/common.sh
-
+export CONNECTOR_LIBS_PATH="./connector-node/libs"
 while getopts 'p:' opt; do
     case ${opt} in
         p )
@@ -22,6 +22,11 @@ done
 shift $((OPTIND -1))
 
 download_and_prepare_rw "$profile" source
+
+echo "--- download connector node package"
+buildkite-agent artifact download risingwave-connector.tar.gz ./
+mkdir ./connector-node
+tar xf ./risingwave-connector.tar.gz -C ./connector-node
 
 echo "--- starting risingwave cluster"
 risedev ci-start ci-sink-test

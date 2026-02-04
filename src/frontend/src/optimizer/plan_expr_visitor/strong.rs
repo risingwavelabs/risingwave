@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -115,6 +115,7 @@ impl Strong {
             | ExprType::VecConcat
             | ExprType::L2Norm
             | ExprType::L2Normalize
+            | ExprType::Subvector
             | ExprType::Greatest
             | ExprType::Least => self.any_null(func_call),
             // ALL: This kind of expression is null if and only if all of its arguments are null.
@@ -226,6 +227,8 @@ impl Strong {
             | ExprType::Scale
             | ExprType::MinScale
             | ExprType::TrimScale
+            | ExprType::Gamma
+            | ExprType::Lgamma
             | ExprType::Encode
             | ExprType::Decode
             | ExprType::Sha1
@@ -233,6 +236,11 @@ impl Strong {
             | ExprType::Sha256
             | ExprType::Sha384
             | ExprType::Sha512
+            | ExprType::GetBit
+            | ExprType::GetByte
+            | ExprType::SetBit
+            | ExprType::SetByte
+            | ExprType::BitCount
             | ExprType::Hmac
             | ExprType::SecureCompare
             | ExprType::Left
@@ -271,6 +279,7 @@ impl Strong {
             | ExprType::ArrayMax
             | ExprType::ArraySum
             | ExprType::ArraySort
+            | ExprType::ArrayReverse
             | ExprType::ArrayContains
             | ExprType::ArrayContained
             | ExprType::ArrayFlatten
@@ -340,6 +349,9 @@ impl Strong {
             | ExprType::PgIsInRecovery
             | ExprType::PgTableIsVisible
             | ExprType::RwRecoveryStatus
+            | ExprType::RwClusterId
+            | ExprType::RwFragmentVnodes
+            | ExprType::RwActorVnodes
             | ExprType::IcebergTransform
             | ExprType::HasTablePrivilege
             | ExprType::HasFunctionPrivilege

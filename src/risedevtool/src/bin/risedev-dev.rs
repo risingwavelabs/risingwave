@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -142,7 +142,7 @@ fn task_main(
                     let mut service = MinioService::new(c.clone())?;
                     service.execute(&mut ctx)?;
 
-                    let mut task = risedev::ConfigureMinioTask::new(c.clone())?;
+                    let mut task = risedev::ConfigureMinioTask::new(c)?;
                     task.execute(&mut ctx)?;
                 }
                 ServiceConfig::Sqlite(c) => {
@@ -165,7 +165,7 @@ fn task_main(
                     std::fs::create_dir_all(&file_dir)?;
                     let file_path = file_dir.join(&c.file);
 
-                    ctx.service(&SqliteService(c.clone()));
+                    ctx.service(&SqliteService(c));
                     ctx.complete_spin();
                     ctx.pb
                         .set_message(format!("using local sqlite: {:?}", file_path));

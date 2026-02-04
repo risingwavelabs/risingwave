@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -45,6 +45,10 @@ pub enum AccessError {
 
     #[error("Fail to convert protobuf Any into jsonb: {0}")]
     ProtobufAnyToJson(#[source] serde_json::Error),
+
+    /// Parquet parser specific errors
+    #[error("Parquet parser error: {message}")]
+    ParquetParser { message: String },
 
     /// Errors that are not categorized into variants above.
     #[error("{message}")]

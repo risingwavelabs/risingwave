@@ -126,13 +126,16 @@ impl<S: StateStore> SortExecutor<S> {
                     yield Message::Barrier(barrier);
 
                     // Update the vnode bitmap for state tables of all agg calls if asked.
-                    if let Some((_, cache_may_stale)) =
-                        post_commit.post_yield_barrier(update_vnode_bitmap).await?
+                    if post_commit
+                        .post_yield_barrier(update_vnode_bitmap)
+                        .await?
+                        .is_some()
                     {
-                        // Manipulate the cache if necessary.
-                        if cache_may_stale {
-                            vars.buffer.refill_cache(None, &this.buffer_table).await?;
-                        }
+                        // `SortBuffer` may output data directly from its in-memory cache without
+                        // checking current vnode ownership. Therefore, we must rebuild the cache
+                        // whenever the vnode bitmap is updated to avoid emitting rows that no
+                        // longer belong to this actor.
+                        vars.buffer.refill_cache(None, &this.buffer_table).await?;
                     }
                 }
             }
@@ -160,7 +163,7 @@ mod tests {
             Field::unnamed(DataType::Int64), // pk
             Field::unnamed(DataType::Int64),
         ]);
-        let input_pk_indices = vec![0];
+        let input_stream_key = vec![0];
 
         // state table schema = input schema
         let table_columns = vec![
@@ -185,7 +188,7 @@ mod tests {
         .await;
 
         let (tx, source) = MockSource::channel();
-        let source = source.into_executor(input_schema, input_pk_indices);
+        let source = source.into_executor(input_schema, input_stream_key);
         let sort_executor = SortExecutor::new(SortExecutorArgs {
             actor_ctx: ActorContext::for_test(123),
             schema: source.schema().clone(),

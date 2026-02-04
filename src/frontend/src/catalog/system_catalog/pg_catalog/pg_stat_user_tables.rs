@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,7 +17,7 @@ use risingwave_frontend_macro::system_catalog;
 
 /// The `pg_stat_user_tables` view will contain one row for each user table in the current database,
 /// showing statistics about accesses to that specific table.
-/// Ref: [`https://www.postgresql.org/docs/current/monitoring-stats.html#MONITORING-PG-STAT-ALL-TABLES-VIEW`]
+/// Ref: `https://www.postgresql.org/docs/current/monitoring-stats.html#MONITORING-PG-STAT-ALL-TABLES-VIEW`
 #[system_catalog(
     view,
     "pg_catalog.pg_stat_user_tables",

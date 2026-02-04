@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,6 +20,7 @@ use risingwave_common::util::epoch::Epoch;
 use risingwave_pb::catalog::PbFunction;
 use risingwave_pb::catalog::function::PbKind;
 use risingwave_pb::expr::{PbUdfExprVersion, PbUserDefinedFunctionMetadata};
+use risingwave_pb::id::UserId;
 
 use crate::catalog::OwnedByUserCatalog;
 
@@ -27,7 +28,7 @@ use crate::catalog::OwnedByUserCatalog;
 pub struct FunctionCatalog {
     pub id: FunctionId,
     pub name: String,
-    pub owner: u32,
+    pub owner: UserId,
     pub kind: FunctionKind,
     pub arg_names: Vec<String>,
     pub arg_types: Vec<DataType>,
@@ -67,7 +68,7 @@ impl From<&PbKind> for FunctionKind {
 impl From<&PbFunction> for FunctionCatalog {
     fn from(prost: &PbFunction) -> Self {
         FunctionCatalog {
-            id: prost.id.into(),
+            id: prost.id,
             name: prost.name.clone(),
             owner: prost.owner,
             kind: prost.kind.as_ref().unwrap().into(),
@@ -102,12 +103,14 @@ impl From<&FunctionCatalog> for PbUserDefinedFunctionMetadata {
             body: c.body.clone(),
             compressed_binary: c.compressed_binary.clone(),
             version: PbUdfExprVersion::LATEST as _,
+            is_async: c.is_async,
+            is_batched: c.is_batched,
         }
     }
 }
 
 impl OwnedByUserCatalog for FunctionCatalog {
-    fn owner(&self) -> u32 {
+    fn owner(&self) -> UserId {
         self.owner
     }
 }

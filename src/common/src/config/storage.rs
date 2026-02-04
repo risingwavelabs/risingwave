@@ -19,6 +19,7 @@ use foyer::{
 use super::*;
 
 /// The section `[storage]` in `risingwave.toml`.
+#[serde_with::apply(Option => #[serde(with = "none_as_empty_string")])]
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde, ConfigDoc)]
 pub struct StorageConfig {
     /// parallelism while syncing share buffers into L0 SST. Should NOT be 0.
@@ -119,6 +120,12 @@ pub struct StorageConfig {
     #[config_doc(nested)]
     pub meta_file_cache: FileCacheConfig,
 
+    /// sst serde happens when a sst meta is written to meta disk cache.
+    /// excluding bloom filter from serde can reduce the meta disk cache entry size
+    /// and reduce the disk io throughput at the cost of making the bloom filter useless
+    #[serde(default = "default::storage::sst_skip_bloom_filter_in_serde")]
+    pub sst_skip_bloom_filter_in_serde: bool,
+
     #[serde(default)]
     #[config_doc(nested)]
     pub cache_refill: CacheRefillConfig,
@@ -155,6 +162,13 @@ pub struct StorageConfig {
     pub compactor_fast_max_compact_task_size: u64,
     #[serde(default = "default::storage::compactor_iter_max_io_retry_times")]
     pub compactor_iter_max_io_retry_times: usize,
+
+    /// If set, block metadata keys will be shortened when their length exceeds this threshold.
+    /// This reduces `SSTable` metadata size by storing only the minimal distinguishing prefix.
+    /// - `None`: Disabled (default)
+    /// - `Some(n)`: Only shorten keys with length >= n bytes
+    #[serde(default = "default::storage::shorten_block_meta_key_threshold")]
+    pub shorten_block_meta_key_threshold: Option<usize>,
 
     /// Deprecated: The window size of table info statistic history.
     #[serde(default = "default::storage::table_info_statistic_history_times")]
@@ -196,8 +210,6 @@ pub struct StorageConfig {
     pub time_travel_version_cache_capacity: u64,
 
     // iceberg compaction
-    #[serde(default = "default::storage::iceberg_compaction_target_file_size_mb")]
-    pub iceberg_compaction_target_file_size_mb: u32,
     #[serde(default = "default::storage::iceberg_compaction_enable_validate")]
     pub iceberg_compaction_enable_validate: bool,
     #[serde(default = "default::storage::iceberg_compaction_max_record_batch_rows")]
@@ -224,16 +236,24 @@ pub struct StorageConfig {
     /// The smoothing factor for size estimation in iceberg compaction.(default: 0.3)
     #[serde(default = "default::storage::iceberg_compaction_size_estimation_smoothing_factor")]
     pub iceberg_compaction_size_estimation_smoothing_factor: f64,
-    // For Small File Compaction
-    /// The threshold for small file compaction in MB.
-    #[serde(default = "default::storage::iceberg_compaction_small_file_threshold_mb")]
-    pub iceberg_compaction_small_file_threshold_mb: u32,
-    /// The maximum total size of tasks in small file compaction in MB.
-    #[serde(default = "default::storage::iceberg_compaction_max_task_total_size_mb")]
-    pub iceberg_compaction_max_task_total_size_mb: u32,
+    /// Multiplier for pending waiting parallelism budget for iceberg compaction task queue.
+    /// Effective pending budget = `ceil(max_task_parallelism * multiplier)`. Default 4.0.
+    /// Set < 1.0 to reduce buffering (may increase `PullTask` RPC frequency); set higher to batch more tasks.
+    #[serde(
+        default = "default::storage::iceberg_compaction_pending_parallelism_budget_multiplier"
+    )]
+    pub iceberg_compaction_pending_parallelism_budget_multiplier: f32,
+
+    #[serde(default = "default::storage::iceberg_compaction_target_binpack_group_size_mb")]
+    pub iceberg_compaction_target_binpack_group_size_mb: Option<u64>,
+    #[serde(default = "default::storage::iceberg_compaction_min_group_size_mb")]
+    pub iceberg_compaction_min_group_size_mb: Option<u64>,
+    #[serde(default = "default::storage::iceberg_compaction_min_group_file_count")]
+    pub iceberg_compaction_min_group_file_count: Option<usize>,
 }
 
 /// the section `[storage.cache]` in `risingwave.toml`.
+#[serde_with::apply(Option => #[serde(with = "none_as_empty_string")])]
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde, ConfigDoc)]
 pub struct CacheConfig {
     /// Configure the capacity of the block cache in MB explicitly.
@@ -312,6 +332,7 @@ impl Default for CacheEvictionConfig {
     }
 }
 
+#[serde_with::apply(Option => #[serde(with = "none_as_empty_string")])]
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde, ConfigDoc)]
 pub struct CacheRefillConfig {
     /// `SSTable` levels to refill.
@@ -362,6 +383,7 @@ pub struct CacheRefillConfig {
 /// The subsection `[storage.data_file_cache]` and `[storage.meta_file_cache]` in `risingwave.toml`.
 ///
 /// It's put at [`StorageConfig::data_file_cache`] and  [`StorageConfig::meta_file_cache`].
+#[serde_with::apply(Option => #[serde(with = "none_as_empty_string")])]
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde, ConfigDoc)]
 pub struct FileCacheConfig {
     #[serde(default = "default::file_cache::dir")]
@@ -436,6 +458,7 @@ pub struct FileCacheConfig {
 }
 
 /// The subsections `[storage.object_store]`.
+#[serde_with::apply(Option => #[serde(with = "none_as_empty_string")])]
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde)]
 pub struct ObjectStoreConfig {
     // alias is for backward compatibility
@@ -474,6 +497,7 @@ impl ObjectStoreConfig {
 }
 
 /// The subsections `[storage.object_store.s3]`.
+#[serde_with::apply(Option => #[serde(with = "none_as_empty_string")])]
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde)]
 pub struct S3ObjectStoreConfig {
     // alias is for backward compatibility
@@ -507,6 +531,7 @@ pub struct S3ObjectStoreConfig {
 }
 
 /// The subsections `[storage.object_store.s3.developer]`.
+#[serde_with::apply(Option => #[serde(with = "none_as_empty_string")])]
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde)]
 pub struct S3ObjectStoreDeveloperConfig {
     /// Whether to retry s3 sdk error from which no error metadata is provided.
@@ -528,6 +553,7 @@ pub struct S3ObjectStoreDeveloperConfig {
     pub use_opendal: bool,
 }
 
+#[serde_with::apply(Option => #[serde(with = "none_as_empty_string")])]
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde)]
 pub struct ObjectStoreRetryConfig {
     // A retry strategy driven by exponential back-off.
@@ -941,6 +967,10 @@ pub mod default {
             8
         }
 
+        pub fn shorten_block_meta_key_threshold() -> Option<usize> {
+            None
+        }
+
         pub fn compactor_max_sst_size() -> u64 {
             512 * 1024 * 1024 // 512m
         }
@@ -1022,8 +1052,8 @@ pub mod default {
             10
         }
 
-        pub fn iceberg_compaction_target_file_size_mb() -> u32 {
-            1024
+        pub fn sst_skip_bloom_filter_in_serde() -> bool {
+            false
         }
 
         pub fn iceberg_compaction_enable_validate() -> bool {
@@ -1066,12 +1096,20 @@ pub mod default {
             0.3
         }
 
-        pub fn iceberg_compaction_small_file_threshold_mb() -> u32 {
-            32
+        pub fn iceberg_compaction_pending_parallelism_budget_multiplier() -> f32 {
+            4.0
         }
 
-        pub fn iceberg_compaction_max_task_total_size_mb() -> u32 {
-            50 * 1024 // 50GB
+        pub fn iceberg_compaction_target_binpack_group_size_mb() -> Option<u64> {
+            Some(100 * 1024) // 100GB
+        }
+
+        pub fn iceberg_compaction_min_group_size_mb() -> Option<u64> {
+            None
+        }
+
+        pub fn iceberg_compaction_min_group_file_count() -> Option<usize> {
+            None
         }
     }
 

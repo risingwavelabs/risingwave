@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -38,7 +38,7 @@ impl LoaderV2 {
 #[async_trait::async_trait]
 impl Loader<MetadataV2> for LoaderV2 {
     async fn load(&self, target_id: MetaSnapshotId) -> BackupResult<MetaSnapshot<MetadataV2>> {
-        let snapshot_list = &self.backup_store.manifest().snapshot_metadata;
+        let snapshot_list = &self.backup_store.manifest().await.snapshot_metadata;
         let mut target_snapshot: MetaSnapshotV2 = self.backup_store.get(target_id).await?;
         tracing::debug!(
             "snapshot {} before rewrite:\n{}",
@@ -142,7 +142,6 @@ impl Writer<MetadataV2> for WriterModelV2ToMetaStoreV2 {
         insert_models(metadata.schemas.clone(), db).await?;
         insert_models(metadata.streaming_jobs.clone(), db).await?;
         insert_models(metadata.fragments.clone(), db).await?;
-        insert_models(metadata.actors.clone(), db).await?;
         insert_models(metadata.fragment_relation.clone(), db).await?;
         insert_models(metadata.connections.clone(), db).await?;
         insert_models(metadata.sources.clone(), db).await?;
@@ -160,6 +159,10 @@ impl Writer<MetadataV2> for WriterModelV2ToMetaStoreV2 {
         insert_models(metadata.iceberg_tables.clone(), db).await?;
         insert_models(metadata.iceberg_namespace_properties.clone(), db).await?;
         insert_models(metadata.user_default_privilege.clone(), db).await?;
+        insert_models(metadata.fragment_splits.clone(), db).await?;
+        insert_models(metadata.pending_sink_state.clone(), db).await?;
+        insert_models(metadata.refresh_jobs.clone(), db).await?;
+        insert_models(metadata.cdc_table_snapshot_splits.clone(), db).await?;
         // update_auto_inc must be called last.
         update_auto_inc(&metadata, db).await?;
         Ok(())
@@ -172,7 +175,6 @@ impl Writer<MetadataV2> for WriterModelV2ToMetaStoreV2 {
         new_backup_url: &str,
         new_backup_dir: &str,
     ) -> BackupResult<()> {
-        use sea_orm::ActiveModelTrait;
         let kvs = [
             ("state_store", new_storage_url),
             ("data_directory", new_storage_dir),
@@ -191,7 +193,10 @@ impl Writer<MetadataV2> for WriterModelV2ToMetaStoreV2 {
             };
             let mut kv: risingwave_meta_model::system_parameter::ActiveModel = model.into();
             kv.value = sea_orm::ActiveValue::Set(v.to_owned());
-            kv.update(&self.meta_store.conn).await.map_err(map_db_err)?;
+            risingwave_meta_model::system_parameter::Entity::update(kv)
+                .exec(&self.meta_store.conn)
+                .await
+                .map_err(map_db_err)?;
         }
         Ok(())
     }
@@ -209,7 +214,6 @@ macro_rules! for_all_auto_increment {
             {"object", objects, oid},
             {"user", users, user_id},
             {"user_privilege", user_privileges, id},
-            {"actor", actors, actor_id},
             {"fragment", fragments, fragment_id},
             {"object_dependency", object_dependencies, id}
         )

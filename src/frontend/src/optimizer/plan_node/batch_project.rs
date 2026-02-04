@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -48,6 +48,10 @@ impl BatchProject {
 
         let base = PlanBase::new_batch_with_core(&core, distribution, order);
         BatchProject { base, core }
+    }
+
+    pub fn core(&self) -> &generic::Project<PlanRef> {
+        &self.core
     }
 
     pub fn exprs(&self) -> &Vec<ExprImpl> {

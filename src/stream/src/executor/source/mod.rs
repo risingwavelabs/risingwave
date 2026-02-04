@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -48,7 +48,8 @@ mod iceberg_list_executor;
 pub use iceberg_list_executor::*;
 mod iceberg_fetch_executor;
 pub use iceberg_fetch_executor::*;
-
+mod batch_source; // For refreshable batch source executors
+pub use batch_source::*;
 mod source_backfill_state_table;
 pub(crate) use source_backfill_state_table::BackfillStateTableHandler;
 
@@ -85,11 +86,13 @@ pub fn get_split_offset_mapping_from_chunk(
     Some(split_offset_mapping)
 }
 
+/// Get the indices of the split, offset, and pulsar message id columns.
 pub fn get_split_offset_col_idx(
     column_descs: &[SourceColumnDesc],
-) -> (Option<usize>, Option<usize>) {
+) -> (Option<usize>, Option<usize>, Option<usize>) {
     let mut split_idx = None;
     let mut offset_idx = None;
+    let mut pulsar_message_id_idx = None;
     for (idx, column) in column_descs.iter().enumerate() {
         match column.additional_column {
             AdditionalColumn {
@@ -102,23 +105,25 @@ pub fn get_split_offset_col_idx(
             } => {
                 offset_idx = Some(idx);
             }
+            AdditionalColumn {
+                column_type: Some(ColumnType::PulsarMessageIdData(_)),
+            } => {
+                pulsar_message_id_idx = Some(idx);
+            }
             _ => (),
         }
     }
-    (split_idx, offset_idx)
+    (split_idx, offset_idx, pulsar_message_id_idx)
 }
 
 pub fn prune_additional_cols(
     chunk: &StreamChunk,
-    split_idx: usize,
-    offset_idx: usize,
+    to_prune_indices: &[usize],
     column_descs: &[SourceColumnDesc],
 ) -> StreamChunk {
     chunk.project(
         &(0..chunk.dimension())
-            .filter(|&idx| {
-                (idx != split_idx && idx != offset_idx) || column_descs[idx].is_visible()
-            })
+            .filter(|&idx| !to_prune_indices.contains(&idx) || column_descs[idx].is_visible())
             .collect_vec(),
     )
 }
@@ -189,7 +194,7 @@ async fn process_chunk(
     }
 
     let limit = rate_limit_rps.unwrap() as u64;
-    let required_permits = chunk.compute_rate_limit_chunk_permits();
+    let required_permits = chunk.rate_limit_permits();
     if required_permits > limit {
         // This should not happen after the mentioned PR.
         tracing::error!(

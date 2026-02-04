@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,10 +18,13 @@ use std::sync::Arc;
 
 use educe::Educe;
 use itertools::Itertools;
-use risingwave_common::catalog::{Field, IndexId, Schema};
+use risingwave_common::catalog::{ColumnDesc, CreateType, Field, IndexId, Schema};
+use risingwave_common::session_config::SessionConfig;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_common::util::sort_util::ColumnOrder;
-use risingwave_pb::catalog::{PbIndex, PbIndexColumnProperties, PbVectorIndexInfo};
+use risingwave_pb::catalog::{
+    PbCreateType, PbIndex, PbIndexColumnProperties, PbVectorIndexInfo, vector_index_info,
+};
 
 use crate::catalog::table_catalog::TableType;
 use crate::catalog::{OwnedByUserCatalog, TableCatalog};
@@ -68,6 +71,22 @@ pub struct VectorIndex {
     pub vector_index_info: PbVectorIndexInfo,
 }
 
+impl VectorIndex {
+    pub fn info_column_desc(&self) -> Vec<ColumnDesc> {
+        self.index_table.columns[1..=self.included_info_columns.len()]
+            .iter()
+            .map(|col| col.column_desc.clone())
+            .collect()
+    }
+
+    pub fn resolve_hnsw_ef_search(&self, config: &SessionConfig) -> Option<usize> {
+        match self.vector_index_info.config.as_ref().unwrap() {
+            vector_index_info::Config::Flat(_) => None,
+            vector_index_info::Config::HnswFlat(_) => Some(config.batch_hnsw_ef_search()),
+        }
+    }
+}
+
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
 pub enum IndexType {
     Table(Arc<TableIndex>),
@@ -90,6 +109,9 @@ pub struct IndexCatalog {
 
     pub primary_table: Arc<TableCatalog>,
 
+    /// Indicate whether to create index in background or foreground.
+    pub create_type: CreateType,
+
     pub created_at_epoch: Option<Epoch>,
 
     pub initialized_at_epoch: Option<Epoch>,
@@ -111,6 +133,10 @@ impl IndexCatalog {
             .map(|expr| ExprImpl::from_expr_proto(expr).unwrap())
             .map(|expr| item_rewriter::CompositeCastEliminator.rewrite_expr(expr))
             .collect();
+
+        let create_type = index_prost
+            .get_create_type()
+            .unwrap_or(PbCreateType::Foreground);
 
         let index_type = match index_table.table_type {
             TableType::Index => {
@@ -188,7 +214,7 @@ impl IndexCatalog {
         };
 
         IndexCatalog {
-            id: index_prost.id.into(),
+            id: index_prost.id,
             name: index_prost.name.clone(),
             index_item,
             index_type,
@@ -197,6 +223,7 @@ impl IndexCatalog {
             initialized_at_epoch: index_prost.initialized_at_epoch.map(Epoch::from),
             created_at_cluster_version: index_prost.created_at_cluster_version.clone(),
             initialized_at_cluster_version: index_prost.initialized_at_cluster_version.clone(),
+            create_type: CreateType::from_proto(create_type),
         }
     }
 }

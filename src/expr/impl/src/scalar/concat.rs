@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -11,8 +11,6 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-
-use std::fmt::Write;
 
 use risingwave_common::row::Row;
 use risingwave_common::types::ToText;
@@ -34,7 +32,7 @@ use risingwave_expr::function;
 /// abcde222
 /// ```
 #[function("concat(variadic anyarray) -> varchar")]
-fn concat(vals: impl Row, writer: &mut impl Write) {
+fn concat(vals: impl Row, writer: &mut impl std::fmt::Write) {
     for string in vals.iter().flatten() {
         string.write(writer).unwrap();
     }

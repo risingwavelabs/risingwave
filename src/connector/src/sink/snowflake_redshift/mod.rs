@@ -11,6 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+
 use std::fmt::Write;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -18,10 +19,12 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use bytes::BytesMut;
 use opendal::Operator;
 use risingwave_common::array::{ArrayImpl, DataChunk, Op, PrimitiveArray, StreamChunk, Utf8Array};
-use risingwave_common::catalog::Schema;
+use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema};
 use risingwave_common::row::Row;
+use risingwave_common::types::DataType;
 use serde_json::{Map, Value};
 use thiserror_ext::AsReport;
+use uuid::Uuid;
 
 use crate::sink::encoder::{
     JsonEncoder, JsonbHandlingMode, RowEncoder, TimeHandlingMode, TimestampHandlingMode,
@@ -29,7 +32,9 @@ use crate::sink::encoder::{
 };
 use crate::sink::file_sink::opendal_sink::FileSink;
 use crate::sink::file_sink::s3::{S3Common, S3Sink};
-use crate::sink::{Result, SinkError, SinkWriterParam};
+use crate::sink::remote::CoordinatedRemoteSinkWriter;
+use crate::sink::writer::SinkWriter;
+use crate::sink::{Result, SinkError, SinkParam, SinkWriterMetrics, SinkWriterParam};
 
 pub mod redshift;
 pub mod snowflake;
@@ -148,38 +153,7 @@ pub struct SnowflakeRedshiftSinkS3Writer {
     s3_operator: Operator,
     augmented_row: AugmentedRow,
     opendal_writer_path: Option<(opendal::Writer, String)>,
-    executor_id: u64,
-    target_table_name: Option<String>,
-}
-
-pub async fn build_opendal_writer_path(
-    s3_config: &S3Common,
-    executor_id: u64,
-    operator: &Operator,
-    target_table_name: &Option<String>,
-) -> Result<(opendal::Writer, String)> {
-    let mut base_path = s3_config.path.clone().unwrap_or("".to_owned());
-    if !base_path.ends_with('/') {
-        base_path.push('/');
-    }
-    if let Some(table_name) = &target_table_name {
-        base_path.push_str(&format!("{}/", table_name));
-    }
-    let create_time = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("Time went backwards");
-    let object_name = format!(
-        "{}{}_{}.{}",
-        base_path,
-        executor_id,
-        create_time.as_secs(),
-        "json",
-    );
-    let all_path = format!("s3://{}/{}", s3_config.bucket_name, object_name);
-    Ok((
-        operator.writer_with(&object_name).concurrent(8).await?,
-        all_path,
-    ))
+    target_table_name: String,
 }
 
 impl SnowflakeRedshiftSinkS3Writer {
@@ -187,15 +161,13 @@ impl SnowflakeRedshiftSinkS3Writer {
         s3_config: S3Common,
         schema: Schema,
         is_append_only: bool,
-        executor_id: u64,
-        target_table_name: Option<String>,
+        target_table_name: String,
     ) -> Result<Self> {
         let s3_operator = FileSink::<S3Sink>::new_s3_sink(&s3_config)?;
         Ok(Self {
             s3_config,
             s3_operator,
             opendal_writer_path: None,
-            executor_id,
             augmented_row: AugmentedRow::new(0, is_append_only, schema),
             target_table_name,
         })
@@ -210,8 +182,8 @@ impl SnowflakeRedshiftSinkS3Writer {
         if self.opendal_writer_path.is_none() {
             let opendal_writer_path = build_opendal_writer_path(
                 &self.s3_config,
-                self.executor_id,
                 &self.s3_operator,
+                None,
                 &self.target_table_name,
             )
             .await?;
@@ -241,5 +213,123 @@ impl SnowflakeRedshiftSinkS3Writer {
         } else {
             Ok(None)
         }
+    }
+}
+
+pub async fn build_opendal_writer_path(
+    s3_config: &S3Common,
+    operator: &Operator,
+    dir: Option<&str>,
+    target_table_name: &str,
+) -> Result<(opendal::Writer, String)> {
+    let mut base_path = s3_config.path.clone().unwrap_or("".to_owned());
+    if !base_path.ends_with('/') {
+        base_path.push('/');
+    }
+    base_path.push_str(&format!("{}/", target_table_name));
+    if let Some(dir) = dir {
+        base_path.push_str(&format!("{}/", dir));
+    }
+    let create_time = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("Time went backwards");
+    let object_name = format!(
+        "{}{}_{}.{}",
+        base_path,
+        Uuid::new_v4(),
+        create_time.as_millis(),
+        "json",
+    );
+    let all_path = format!("s3://{}/{}", s3_config.bucket_name, object_name);
+    Ok((
+        operator.writer_with(&object_name).concurrent(8).await?,
+        all_path,
+    ))
+}
+
+/// Generic JDBC writer for both Redshift and Snowflake sinks
+pub struct SnowflakeRedshiftSinkJdbcWriter {
+    augmented_row: AugmentedChunk,
+    jdbc_sink_writer: CoordinatedRemoteSinkWriter,
+}
+
+impl SnowflakeRedshiftSinkJdbcWriter {
+    pub async fn new(
+        is_append_only: bool,
+        writer_param: SinkWriterParam,
+        mut param: SinkParam,
+        full_table_name: String,
+    ) -> Result<Self> {
+        let metrics = SinkWriterMetrics::new(&writer_param);
+        let column_descs = &mut param.columns;
+
+        // Build full table name based on connector type
+        if !is_append_only {
+            // Add CDC-specific columns for upsert mode
+            let max_column_id = column_descs
+                .iter()
+                .map(|column| column.column_id.get_id())
+                .max()
+                .unwrap_or(0);
+
+            (*column_descs).push(ColumnDesc::named(
+                __ROW_ID,
+                ColumnId::new(max_column_id + 1),
+                DataType::Varchar,
+            ));
+            (*column_descs).push(ColumnDesc::named(
+                __OP,
+                ColumnId::new(max_column_id + 2),
+                DataType::Int32,
+            ));
+        };
+
+        if let Some(schema_name) = param.properties.remove("schema") {
+            param
+                .properties
+                .insert("schema.name".to_owned(), schema_name);
+        }
+        if let Some(database_name) = param.properties.remove("database") {
+            param
+                .properties
+                .insert("database.name".to_owned(), database_name);
+        }
+        param
+            .properties
+            .insert("table.name".to_owned(), full_table_name.clone());
+        param
+            .properties
+            .insert("type".to_owned(), "append-only".to_owned());
+
+        let jdbc_sink_writer =
+            CoordinatedRemoteSinkWriter::new(param.clone(), metrics.clone()).await?;
+
+        Ok(Self {
+            augmented_row: AugmentedChunk::new(0, is_append_only),
+            jdbc_sink_writer,
+        })
+    }
+
+    pub async fn begin_epoch(&mut self, epoch: u64) -> Result<()> {
+        self.augmented_row.reset_epoch(epoch);
+        self.jdbc_sink_writer.begin_epoch(epoch).await?;
+        Ok(())
+    }
+
+    pub async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()> {
+        let chunk = self.augmented_row.augmented_chunk(chunk)?;
+        self.jdbc_sink_writer.write_batch(chunk).await?;
+        Ok(())
+    }
+
+    pub async fn barrier(&mut self, is_checkpoint: bool) -> Result<()> {
+        self.jdbc_sink_writer.barrier(is_checkpoint).await?;
+        Ok(())
+    }
+
+    pub async fn abort(&mut self) -> Result<()> {
+        // TODO: abort should clean up all the data written in this epoch
+        self.jdbc_sink_writer.abort().await?;
+        Ok(())
     }
 }

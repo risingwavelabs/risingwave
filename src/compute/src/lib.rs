@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,7 +15,6 @@
 #![feature(trait_alias)]
 #![feature(coroutines)]
 #![feature(type_alias_impl_trait)]
-#![feature(let_chains)]
 #![feature(impl_trait_in_assoc_type)]
 #![feature(coverage_attribute)]
 #![warn(clippy::large_futures, clippy::large_stack_frames)]

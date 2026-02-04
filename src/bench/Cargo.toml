@@ -24,7 +24,6 @@ plotters = { version = "0.3.5", default-features = false, features = [
 risingwave_common = { workspace = true }
 risingwave_connector = { workspace = true }
 risingwave_stream = { workspace = true, features = ["test"] }
-sea-orm  = { workspace = true }
 serde = { workspace = true }
 serde_yaml = "0.9"
 thiserror-ext = { workspace = true }
@@ -42,7 +41,7 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
 workspace-hack = { path = "../workspace-hack" }
 
 [target.'cfg(target_os = "linux")'.dependencies]
-nix = { version = "0.30", features = ["fs", "mman"] }
+nix = { version = "0.31", features = ["fs", "mman"] }
 
 [[bin]]
 name = "sink-bench"

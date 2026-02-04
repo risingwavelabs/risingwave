@@ -57,7 +57,7 @@ echo "--- preparing postgresql"
 prepare_pg
 
 echo "--- starting risingwave cluster: ci-1cn-1fe-switch-to-pg-native"
-risedev ci-start ci-1cn-1fe-jdbc-to-native
+RUST_LOG="await_tree::future=error" risedev ci-start ci-1cn-1fe-jdbc-to-native
 
 echo "--- test sink: jdbc:postgres switch to postgres native"
 # check sink destination postgres
@@ -72,7 +72,7 @@ risedev ci-kill
 echo "--- starting risingwave cluster"
 # Use ci-inline-source-test since it will configure ports, db, host etc... env vars via risedev-env.
 # These are required for cli tools like psql have env vars correctly configured.
-risedev ci-start ci-inline-source-test
+RUST_LOG="await_tree::future=error" risedev ci-start ci-inline-source-test
 
 echo "--- check connectivity for postgres"
 PGPASSWORD='post\tgres' psql -h db -U postgres -d postgres -p 5432 -c "SELECT 1;"
@@ -96,6 +96,8 @@ risedev slt './e2e_test/sink/license.slt'
 risedev slt './e2e_test/sink/rate_limit.slt'
 risedev slt './e2e_test/sink/auto_schema_change.slt'
 risedev slt './e2e_test/sink/sink_vector_columns.slt'
+risedev slt './e2e_test/sink/force_compaction_sink.slt'
+risedev slt './e2e_test/sink/bug_fixes/**/*.slt'
 sleep 1
 
 echo "--- preparing postgresql"
@@ -159,7 +161,7 @@ echo "--- Kill cluster"
 risedev ci-kill
 
 echo "--- e2e, ci-1cn-1fe, nexmark endless"
-RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
+RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info,await_tree::future=error" \
 risedev ci-start ci-1cn-1fe
 risedev slt './e2e_test/sink/nexmark_endless_mvs/*.slt'
 risedev slt './e2e_test/sink/nexmark_endless_sinks/*.slt'

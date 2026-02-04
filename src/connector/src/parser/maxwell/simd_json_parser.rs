@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -40,6 +40,7 @@ mod tests {
                 timestamptz_handling: None,
                 timestamp_handling: None,
                 time_handling: None,
+                bigint_unsigned_handling: None,
                 handle_toast_columns: false,
             }),
             protocol_config: ProtocolProperties::Maxwell,

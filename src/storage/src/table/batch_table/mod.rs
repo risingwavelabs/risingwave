@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,6 +16,7 @@ use std::future::Future;
 use std::ops::Bound::{self, Excluded, Included, Unbounded};
 use std::ops::RangeBounds;
 use std::sync::Arc;
+use std::time::Duration;
 
 use await_tree::{InstrumentAwait, SpanExt};
 use bytes::{Bytes, BytesMut};
@@ -42,6 +43,8 @@ use risingwave_hummock_sdk::key::{
 };
 use risingwave_pb::plan_common::StorageTableDesc;
 use tracing::trace;
+mod vector_index_reader;
+pub use vector_index_reader::VectorIndexReader;
 
 use crate::StateStore;
 use crate::error::{StorageError, StorageResult};
@@ -49,6 +52,7 @@ use crate::hummock::CachePolicy;
 use crate::row_serde::row_serde_util::{serialize_pk, serialize_pk_with_vnode};
 use crate::row_serde::value_serde::{ValueRowSerde, ValueRowSerdeNew};
 use crate::row_serde::{ColumnMapping, find_columns_by_ids};
+use crate::store::timeout_auto_rebuild::iter_with_timeout_rebuild;
 use crate::store::{
     NewReadSnapshotOptions, NextEpochOptions, PrefetchOptions, ReadLogOptions, ReadOptions,
     StateStoreGet, StateStoreIter, StateStoreIterExt, StateStoreRead, TryWaitEpochOptions,
@@ -135,9 +139,7 @@ impl<S: StateStore> BatchTableInner<S, EitherSerde> {
         vnodes: Option<Arc<Bitmap>>,
         table_desc: &StorageTableDesc,
     ) -> Self {
-        let table_id = TableId {
-            table_id: table_desc.table_id,
-        };
+        let table_id = table_desc.table_id;
         let column_descs = table_desc
             .columns
             .iter()
@@ -394,7 +396,6 @@ impl<S: StateStore, SD: ValueRowSerde> BatchTableInner<S, SD> {
 
         let read_options = ReadOptions {
             prefix_hint,
-            retention_seconds: self.table_option.retention_seconds,
             cache_policy: CachePolicy::Fill(Hint::Normal),
             ..Default::default()
         };
@@ -404,14 +405,13 @@ impl<S: StateStore, SD: ValueRowSerde> BatchTableInner<S, SD> {
                 wait_epoch,
                 NewReadSnapshotOptions {
                     table_id: self.table_id,
+                    table_option: self.table_option,
                 },
             )
             .await?;
-        // TODO: may avoid the clone here when making the `on_key_value_fn` non-static
-        let row_serde = self.row_serde.clone();
         match read_snapshot
             .on_key_value(serialized_pk, read_options, move |key, value| {
-                let row = row_serde.deserialize(value)?;
+                let row = self.row_serde.deserialize(value)?;
                 Ok((key.epoch_with_gap.pure_epoch(), row))
             })
             .await?
@@ -628,6 +628,7 @@ impl<S: StateStore, SD: ValueRowSerde> BatchTableInner<S, SD> {
                 wait_epoch,
                 NewReadSnapshotOptions {
                     table_id: self.table_id,
+                    table_option: self.table_option,
                 },
             )
             .await?;
@@ -666,6 +667,20 @@ impl<S: StateStore, SD: ValueRowSerde> BatchTableInner<S, SD> {
         prefetch_options: PrefetchOptions,
     ) -> StorageResult<impl Stream<Item = StorageResult<(K, OwnedRow)>> + Send + use<K, S, SD>>
     {
+        let (table_key_range, read_options, pk_serializer) =
+            self.vnode_read_context(prefix_hint, encoded_key_range, vnode, prefetch_options);
+
+        let iter = read_snapshot.iter(table_key_range, read_options).await?;
+        Ok(self.iter_stream_from_state_store_iter::<K, _>(iter, pk_serializer))
+    }
+
+    fn vnode_read_context(
+        &self,
+        prefix_hint: Option<Bytes>,
+        encoded_key_range: (Bound<&Bytes>, Bound<&Bytes>),
+        vnode: VirtualNode,
+        prefetch_options: PrefetchOptions,
+    ) -> (TableKeyRange, ReadOptions, Option<Arc<OrderedRowSerde>>) {
         let cache_policy = match &encoded_key_range {
             // To prevent unbounded range scan queries from polluting the block cache, use the
             // low priority fill policy.
@@ -674,13 +689,10 @@ impl<S: StateStore, SD: ValueRowSerde> BatchTableInner<S, SD> {
         };
 
         let table_key_range = prefixed_range_with_vnode::<&Bytes>(encoded_key_range, vnode);
-
         {
-            let prefix_hint = prefix_hint.clone();
             {
                 let read_options = ReadOptions {
                     prefix_hint,
-                    retention_seconds: self.table_option.retention_seconds,
                     prefetch_options,
                     cache_policy,
                 };
@@ -688,24 +700,29 @@ impl<S: StateStore, SD: ValueRowSerde> BatchTableInner<S, SD> {
                     true => None,
                     false => Some(Arc::new(self.pk_serializer.clone())),
                 };
-                let iter = BatchTableInnerIterInner::new(
-                    read_snapshot,
-                    self.mapping.clone(),
-                    self.epoch_idx,
-                    pk_serializer,
-                    self.output_indices.clone(),
-                    self.key_output_indices.clone(),
-                    self.value_output_indices.clone(),
-                    self.output_row_in_key_indices.clone(),
-                    self.row_serde.clone(),
-                    table_key_range,
-                    read_options,
-                )
-                .await?
-                .into_stream::<K>();
-                Ok(iter)
+
+                (table_key_range, read_options, pk_serializer)
             }
         }
+    }
+
+    fn iter_stream_from_state_store_iter<K: CopyFromSlice, SI: StateStoreIter + Send>(
+        &self,
+        iter: SI,
+        pk_serializer: Option<Arc<OrderedRowSerde>>,
+    ) -> impl Stream<Item = StorageResult<(K, OwnedRow)>> + Send + use<K, SI, S, SD> {
+        BatchTableInnerIterInner {
+            iter,
+            mapping: self.mapping.clone(),
+            epoch_idx: self.epoch_idx,
+            row_deserializer: self.row_serde.clone(),
+            pk_serializer,
+            output_indices: self.output_indices.clone(),
+            key_output_indices: self.key_output_indices.clone(),
+            value_output_indices: self.value_output_indices.clone(),
+            output_row_in_key_indices: self.output_row_in_key_indices.clone(),
+        }
+        .into_stream::<K>()
     }
 
     // TODO: directly use `prefixed_range`.
@@ -904,41 +921,58 @@ impl<S: StateStore, SD: ValueRowSerde> BatchTableInner<S, SD> {
             .await
     }
 
-    pub async fn batch_iter_vnode(
-        &self,
-        epoch: HummockReadEpoch,
-        start_pk: Option<&OwnedRow>,
-        vnode: VirtualNode,
-        prefetch_options: PrefetchOptions,
-    ) -> StorageResult<impl Stream<Item = StorageResult<OwnedRow>> + Send + 'static + use<S, SD>>
-    {
-        let start_bound = if let Some(start_pk) = start_pk {
+    fn start_bound_from_pk(&self, start_pk: Option<&OwnedRow>) -> Bound<Bytes> {
+        if let Some(start_pk) = start_pk {
             let mut bytes = BytesMut::new();
             self.pk_serializer.serialize(start_pk, &mut bytes);
             let bytes = bytes.freeze();
             Included(bytes)
         } else {
             Unbounded
-        };
-        let read_snapshot = self
-            .store
-            .new_read_snapshot(
-                epoch,
-                NewReadSnapshotOptions {
-                    table_id: self.table_id,
-                },
-            )
-            .await?;
-        Ok(self
-            .iter_vnode_with_encoded_key_range::<()>(
-                &read_snapshot,
-                None,
-                (start_bound.as_ref(), Unbounded),
-                vnode,
-                prefetch_options,
-            )
-            .await?
-            .map_ok(|(_, row)| row))
+        }
+    }
+
+    pub async fn batch_iter_vnode(
+        &self,
+        epoch: HummockReadEpoch,
+        start_pk: Option<&OwnedRow>,
+        vnode: VirtualNode,
+        prefetch_options: PrefetchOptions,
+        rebuild_interval: Duration,
+    ) -> StorageResult<impl Stream<Item = StorageResult<OwnedRow>> + Send + 'static + use<S, SD>>
+    {
+        assert!(
+            !rebuild_interval.is_zero(),
+            "rebuild_interval should be positive"
+        );
+        let start_bound = self.start_bound_from_pk(start_pk);
+        let snapshot = Arc::new(
+            self.store
+                .new_read_snapshot(
+                    epoch,
+                    NewReadSnapshotOptions {
+                        table_id: self.table_id,
+                        table_option: self.table_option,
+                    },
+                )
+                .await?,
+        );
+        let (table_key_range, read_options, pk_serializer) = self.vnode_read_context(
+            None,
+            (start_bound.as_ref(), Unbounded),
+            vnode,
+            prefetch_options,
+        );
+        let iter = iter_with_timeout_rebuild(
+            snapshot,
+            table_key_range,
+            self.table_id,
+            read_options,
+            rebuild_interval,
+        )
+        .await?;
+        let iter = self.iter_stream_from_state_store_iter::<(), _>(iter, pk_serializer);
+        Ok(iter.map_ok(|(_, row)| row))
     }
 
     pub async fn next_epoch(&self, epoch: u64) -> StorageResult<u64> {
@@ -960,14 +994,7 @@ impl<S: StateStore, SD: ValueRowSerde> BatchTableInner<S, SD> {
         vnode: VirtualNode,
     ) -> StorageResult<impl Stream<Item = StorageResult<ChangeLogRow>> + Send + 'static + use<S, SD>>
     {
-        let start_bound = if let Some(start_pk) = start_pk {
-            let mut bytes = BytesMut::new();
-            self.pk_serializer.serialize(start_pk, &mut bytes);
-            let bytes = bytes.freeze();
-            Included(bytes)
-        } else {
-            Unbounded
-        };
+        let start_bound = self.start_bound_from_pk(start_pk);
         let stream = self
             .batch_iter_log_inner::<()>(
                 start_epoch,
@@ -1097,39 +1124,6 @@ struct BatchTableInnerIterInner<SI: StateStoreIter, SD: ValueRowSerde> {
 }
 
 impl<SI: StateStoreIter, SD: ValueRowSerde> BatchTableInnerIterInner<SI, SD> {
-    /// If `wait_epoch` is true, it will wait for the given epoch to be committed before iteration.
-    #[allow(clippy::too_many_arguments)]
-    async fn new<S>(
-        store: &S,
-        mapping: Arc<ColumnMapping>,
-        epoch_idx: Option<usize>,
-        pk_serializer: Option<Arc<OrderedRowSerde>>,
-        output_indices: Vec<usize>,
-        key_output_indices: Option<Vec<usize>>,
-        value_output_indices: Vec<usize>,
-        output_row_in_key_indices: Vec<usize>,
-        row_deserializer: Arc<SD>,
-        table_key_range: TableKeyRange,
-        read_options: ReadOptions,
-    ) -> StorageResult<Self>
-    where
-        S: StateStoreRead<Iter = SI>,
-    {
-        let iter = store.iter(table_key_range, read_options).await?;
-        let iter = Self {
-            iter,
-            mapping,
-            epoch_idx,
-            row_deserializer,
-            pk_serializer,
-            output_indices,
-            key_output_indices,
-            value_output_indices,
-            output_row_in_key_indices,
-        };
-        Ok(iter)
-    }
-
     /// Yield a row with its primary key.
     #[try_stream(ok = (K, OwnedRow), error = StorageError)]
     async fn into_stream<K: CopyFromSlice>(mut self) {

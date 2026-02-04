@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -98,7 +98,7 @@ impl StreamNode for StreamDml {
         use risingwave_pb::stream_plan::*;
 
         PbNodeBody::Dml(Box::new(DmlNode {
-            table_id: 0,                                // Meta will fill this table id.
+            table_id: 0.into(),                         // Meta will fill this table id.
             table_version_id: INITIAL_TABLE_VERSION_ID, // Meta will fill this version id.
             column_descs: self.column_descs.iter().map(Into::into).collect(),
             rate_limit: self.base.ctx().overwrite_options().dml_rate_limit,

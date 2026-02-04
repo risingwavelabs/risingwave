@@ -51,14 +51,14 @@ kill_cluster() {
 
 host_args=(-h localhost -p 4565 -h localhost -p 4566 -h localhost -p 4567)
 
+export RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info,risingwave_storage::hummock::compactor=error,risingwave_hummock_sdk::compaction_group::hummock_version_ext=error,risingwave_storage::hummock::event_handler::hummock_event_handler=error"
+
 echo "--- e2e, $mode, streaming"
-RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info,risingwave_storage::hummock::compactor::compactor_runner=warn" \
 start_cluster
 risedev slt "${host_args[@]}" -d dev './e2e_test/streaming/**/*.slt' -j 16 --junit "parallel-streaming-${profile}" --label "parallel"
 kill_cluster
 
 echo "--- e2e, $mode, batch"
-RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info,risingwave_storage::hummock::compactor::compactor_runner=warn" \
 start_cluster
 # Exclude files that contain ALTER SYSTEM commands
 find ./e2e_test/ddl -name "*.slt" -type f -exec grep -L "ALTER SYSTEM" {} \; | xargs -r risedev slt "${host_args[@]}" -d dev --junit "parallel-batch-ddl-${profile}" --label "parallel"
@@ -66,14 +66,12 @@ risedev slt "${host_args[@]}" -d dev './e2e_test/visibility_mode/*.slt' -j 16 --
 kill_cluster
 
 echo "--- e2e, $mode, udf"
-RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info,risingwave_storage::hummock::compactor::compactor_runner=warn" \
 start_cluster
 python3 -m pip install --break-system-packages -r ./e2e_test/udf/remote_python/requirements.txt
 risedev slt "${host_args[@]}" -d dev './e2e_test/udf/tests/**/*.slt' -j 16 --junit "parallel-udf-${profile}" --label "parallel"
 kill_cluster
 
 echo "--- e2e, $mode, generated"
-RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info,risingwave_storage::hummock::compactor::compactor_runner=warn" \
 start_cluster
 risedev slt "${host_args[@]}" -d dev './e2e_test/generated/**/*.slt' -j 16 --junit "parallel-generated-${profile}" --label "parallel"
 kill_cluster

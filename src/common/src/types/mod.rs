@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -78,6 +78,7 @@ mod with_data_type;
 
 pub use fields::Fields;
 pub use risingwave_fields_derive::Fields;
+use risingwave_pb::id::TypedId;
 
 pub use self::cow::DatumCow;
 pub use self::datetime::{Date, Time, Timestamp};
@@ -789,8 +790,14 @@ impl<T: Into<ScalarImpl>> ToOwnedDatum for Option<T> {
     }
 }
 
+impl<const N: usize> From<TypedId<N, u32>> for ScalarImpl {
+    fn from(value: TypedId<N, u32>) -> Self {
+        value.as_i32_id().into()
+    }
+}
+
 #[auto_impl::auto_impl(&)]
-pub trait ToDatumRef: PartialEq + Eq + Debug {
+pub trait ToDatumRef: PartialEq + Eq + Debug + Send + Sync {
     /// Convert the datum to [`DatumRef`].
     fn to_datum_ref(&self) -> DatumRef<'_>;
 }
@@ -1091,7 +1098,11 @@ impl ScalarImpl {
             DataType::List(_) => ListValue::from_str(s, data_type)?.into(),
             DataType::Struct(st) => StructValue::from_str(s, st)?.into(),
             DataType::Jsonb => JsonbVal::from_str(s)?.into(),
-            DataType::Bytea => str_to_bytea(s)?.into(),
+            DataType::Bytea => {
+                let mut buf = Vec::new();
+                str_to_bytea(s, &mut buf)?;
+                buf.into()
+            }
             DataType::Vector(size) => VectorVal::from_text(s, *size)?.into(),
             DataType::Map(_m) => return Err("map from text is not supported".into()),
         })
@@ -1277,20 +1288,70 @@ impl ScalarImpl {
 /// Returns whether the `literal` matches the `data_type`.
 pub fn literal_type_match(data_type: &DataType, literal: Option<&ScalarImpl>) -> bool {
     match literal {
-        Some(scalar) => {
+        None => true,
+        Some(scalar) => scalar_ref_type_match(data_type, scalar.as_scalar_ref_impl()),
+    }
+}
+
+/// Returns whether the scalar ref matches the `data_type`.
+///
+/// This is a lightweight "shape check" intended for callers that need to avoid panics on
+/// malformed input. For nested types, it checks element/field types recursively.
+pub fn scalar_ref_type_match(data_type: &DataType, scalar: ScalarRefImpl<'_>) -> bool {
+    match (data_type, scalar) {
+        (DataType::List(list_type), ScalarRefImpl::List(v)) => {
+            v.elem_type().equals_datatype(list_type.elem())
+        }
+        (DataType::Map(map_type), ScalarRefImpl::Map(v)) => v
+            .inner()
+            .elem_type()
+            .equals_datatype(&map_type.clone().into_struct()),
+        (DataType::Vector(size), ScalarRefImpl::Vector(v)) => v.dimension() == *size,
+        (DataType::Struct(struct_type), ScalarRefImpl::Struct(v)) => {
+            struct_ref_type_match(struct_type, v)
+        }
+
+        _ => {
             macro_rules! matches {
                 ($( { $data_type:ident, $variant_name:ident, $suffix_name:ident, $scalar:ty, $scalar_ref:ty, $array:ty, $builder:ty }),*) => {
                     match (data_type, scalar) {
                         $(
-                            (DataType::$data_type { .. }, ScalarImpl::$variant_name(_)) => true,
-                            (DataType::$data_type { .. }, _) => false, // so that we won't forget to match a new logical type
+                            (DataType::$data_type { .. }, ScalarRefImpl::$variant_name(_)) => true,
+                            (DataType::$data_type { .. }, _) => false, // keep exhaustive over DataType variants
                         )*
                     }
                 }
             }
             for_all_variants! { matches }
         }
+    }
+}
+
+/// Returns whether the `datum` matches the `data_type`.
+#[inline(always)]
+pub fn datum_ref_type_match(data_type: &DataType, datum: DatumRef<'_>) -> bool {
+    match datum {
         None => true,
+        Some(scalar) => scalar_ref_type_match(data_type, scalar),
+    }
+}
+
+fn struct_ref_type_match(expected: &StructType, value: StructRef<'_>) -> bool {
+    match value {
+        StructRef::Indexed { arr, .. } => {
+            // `StructRef::Indexed` comes with a `StructArray`, whose type can be compared directly.
+            crate::array::Array::data_type(arr).equals_datatype(&DataType::Struct(expected.clone()))
+        }
+        StructRef::ValueRef { val } => {
+            let fields = val.fields();
+            if fields.len() != expected.len() {
+                return false;
+            }
+            expected
+                .types()
+                .zip_eq_fast(fields.iter())
+                .all(|(ty, datum)| datum_ref_type_match(ty, datum.to_datum_ref()))
+        }
     }
 }
 

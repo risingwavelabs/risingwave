@@ -135,6 +135,13 @@ message VnodeWatermark {
   common.Buffer vnode_bitmap = 2;
 }
 
+enum WatermarkSerdeType {
+  TYPE_UNSPECIFIED = 0;
+  PK_PREFIX = 1;
+  NON_PK_PREFIX = 2;
+  VALUE = 3;
+}
+
 // Table watermark is a lighter weight range delete introduced in
 // https://github.com/risingwavelabs/risingwave/issues/13148
 // It means the lowest (or highest when `is_ascending` is false) visible
@@ -154,7 +161,10 @@ message TableWatermarks {
   bool is_ascending = 2;
 
   // The table watermark is non-pk prefix table watermark.
-  bool is_non_pk_prefix = 3;
+  // Deprecated. use WatermarkSerdeType instead;
+  bool is_non_pk_prefix = 3 [deprecated = true];
+
+  WatermarkSerdeType raw_watermark_serde_type = 4;
 }
 
 message EpochNewChangeLog {
@@ -483,6 +493,9 @@ message CompactTask {
   uint32 max_sub_compaction = 26;
   // The compaction group id when the compaction task is created.
   uint64 compaction_group_version_id = 27;
+  // The maximum key-value count threshold for using Xor16 filter.
+  // When the number of keys exceeds this threshold, a BlockedXor16 filter will be used.
+  optional uint64 max_kv_count_for_xor16 = 28;
 }
 
 message LevelHandler {
@@ -783,6 +796,9 @@ message RiseCtlUpdateCompactionConfigRequest {
       uint32 sst_allowed_trivial_move_max_count = 29;
       // Enable the optimization of the interval selection for the level0 compaction
       bool enable_optimize_l0_interval_selection = 30;
+      uint64 vnode_aligned_level_size_threshold = 31;
+      // The maximum key-value count threshold for using Xor16 filter
+      uint64 max_kv_count_for_xor16 = 32;
     }
   }
   repeated uint64 compaction_group_ids = 1;
@@ -1006,6 +1022,24 @@ message CompactionConfig {
 
   // Enable the optimization of the interval selection for the level0 compaction
   optional bool enable_optimize_l0_interval_selection = 30;
+
+  // Enable strict one-vnode-per-SST for levels that meet the size threshold.
+  // Only effective when both conditions are met:
+  //   1. target_level > base_level (deeper levels only)
+  //   2. level.total_file_size >= this threshold
+  //
+  // This prevents generating too many small SSTs when level size is small.
+  // Each SST will contain exactly one vnode, enabling precise query pruning.
+  //
+  // Typical value: 50GB.
+  optional uint64 vnode_aligned_level_size_threshold = 31;
+
+  // The maximum key-value count threshold for using Xor16 filter instead of BlockedXor16 filter.
+  // When the number of keys in a compaction task or SST exceeds this threshold,
+  // a BlockedXor16 filter will be used instead of a single Xor16 filter.
+  //
+  // Typical value: 256 * 1024 (256K keys).
+  optional uint64 max_kv_count_for_xor16 = 32;
 }
 
 message TableStats {

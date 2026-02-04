@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::id::JobId;
 use risingwave_common::types::Fields;
 use risingwave_frontend_macro::system_catalog;
 
@@ -21,7 +22,7 @@ use crate::error::Result;
 #[derive(Fields)]
 struct RwTableFragment {
     #[primary_key]
-    table_id: i32,
+    table_id: JobId,
     status: String,
     parallelism: String,
     max_parallelism: i32,
@@ -38,7 +39,7 @@ async fn read_rw_table_fragments_info(
         .map(|state| {
             let parallelism = extract_parallelism_from_table_state(&state);
             RwTableFragment {
-                table_id: state.table_id as i32,
+                table_id: state.table_id,
                 status: state.state().as_str_name().into(),
                 parallelism: parallelism.to_uppercase(),
                 max_parallelism: state.max_parallelism as i32,

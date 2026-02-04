@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -42,7 +42,7 @@ fn pg_relation_size_impl(catalog: &CatalogReader, oid: i32, fork: &str) -> Resul
         }),
     }
     let catalog = catalog.read_guard();
-    if let Some(stats) = catalog.table_stats().table_stats.get(&(oid as u32)) {
+    if let Some(stats) = catalog.table_stats().table_stats.get(&(oid as u32).into()) {
         Ok(stats.total_key_size + stats.total_value_size)
     } else {
         Ok(0)

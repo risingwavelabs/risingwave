@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -33,6 +33,7 @@ use risingwave_common_service::{MetricsManager, ObserverManager};
 use risingwave_object_store::object::build_remote_object_store;
 use risingwave_object_store::object::object_metrics::GLOBAL_OBJECT_STORE_METRICS;
 use risingwave_pb::common::WorkerType;
+use risingwave_pb::common::worker_node::Property;
 use risingwave_pb::compactor::compactor_service_server::CompactorServiceServer;
 use risingwave_pb::monitor_service::monitor_service_server::MonitorServiceServer;
 use risingwave_rpc_client::{GrpcCompactorProxyClient, MetaClient};
@@ -56,7 +57,10 @@ use tracing::info;
 use super::compactor_observer::observer_manager::CompactorObserverNode;
 use crate::rpc::{CompactorServiceImpl, MonitorServiceImpl};
 use crate::telemetry::CompactorTelemetryCreator;
-use crate::{CompactorMode, CompactorOpts};
+use crate::{
+    CompactorMode, CompactorOpts, default_rpc_max_decoding_message_size_bytes,
+    default_rpc_max_encoding_message_size_bytes,
+};
 
 pub async fn prepare_start_parameters(
     compactor_opts: &CompactorOpts,
@@ -195,12 +199,30 @@ pub async fn compactor_serve(
         if cfg!(debug_assertions) { "on" } else { "off" }
     );
     info!("> version: {} ({})", RW_VERSION, GIT_SHA);
+
+    let is_iceberg_compactor = matches!(
+        compactor_mode,
+        CompactorMode::DedicatedIceberg | CompactorMode::SharedIceberg
+    );
+
+    let compaction_executor = Arc::new(CompactionExecutor::new(
+        opts.compaction_worker_threads_number,
+    ));
+
+    let max_task_parallelism: u32 = (compaction_executor.worker_num() as f32
+        * config.storage.compactor_max_task_multiplier)
+        .ceil() as u32;
+
     // Register to the cluster.
     let (meta_client, system_params_reader) = MetaClient::register_new(
         opts.meta_address.clone(),
         WorkerType::Compactor,
         &advertise_addr,
-        Default::default(),
+        Property {
+            is_iceberg_compactor,
+            parallelism: max_task_parallelism,
+            ..Default::default()
+        },
         Arc::new(config.meta.clone()),
     )
     .await;
@@ -245,10 +267,6 @@ pub async fn compactor_serve(
     let object_id_manager = Arc::new(ObjectIdManager::new(
         hummock_meta_client.clone(),
         storage_opts.sstable_id_remote_fetch_number,
-    ));
-
-    let compaction_executor = Arc::new(CompactionExecutor::new(
-        opts.compaction_worker_threads_number,
     ));
 
     let compactor_context = CompactorContext {
@@ -299,7 +317,7 @@ pub async fn compactor_serve(
     }
 
     let compactor_srv = CompactorServiceImpl::default();
-    let monitor_srv = MonitorServiceImpl::new(await_tree_reg);
+    let monitor_srv = MonitorServiceImpl::new(await_tree_reg, config.server.clone());
     let server = tonic::transport::Server::builder()
         .add_service(CompactorServiceServer::new(compactor_srv))
         .add_service(MonitorServiceServer::new(monitor_srv))
@@ -363,7 +381,7 @@ pub async fn shared_compactor_serve(
     let (sender, receiver) = mpsc::unbounded_channel();
     let compactor_srv: CompactorServiceImpl = CompactorServiceImpl::new(sender);
 
-    let monitor_srv = MonitorServiceImpl::new(await_tree_reg.clone());
+    let monitor_srv = MonitorServiceImpl::new(await_tree_reg.clone(), config.server.clone());
 
     // Run a background heap profiler
     heap_profiler.start();
@@ -390,8 +408,20 @@ pub async fn shared_compactor_serve(
         compactor_context,
     );
 
+    let rpc_max_encoding_message_size_bytes = opts
+        .rpc_max_encoding_message_size_bytes
+        .unwrap_or(default_rpc_max_encoding_message_size_bytes());
+
+    let rpc_max_decoding_message_size_bytes = opts
+        .rpc_max_decoding_message_size_bytes
+        .unwrap_or(default_rpc_max_decoding_message_size_bytes());
+
     let server = tonic::transport::Server::builder()
-        .add_service(CompactorServiceServer::new(compactor_srv))
+        .add_service(
+            CompactorServiceServer::new(compactor_srv)
+                .max_decoding_message_size(rpc_max_decoding_message_size_bytes)
+                .max_encoding_message_size(rpc_max_encoding_message_size_bytes),
+        )
         .add_service(MonitorServiceServer::new(monitor_srv))
         .monitored_serve_with_shutdown(
             listen_addr,

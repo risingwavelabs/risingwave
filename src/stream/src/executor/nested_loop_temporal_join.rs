@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -111,13 +111,13 @@ impl<S: StateStore, const T: JoinTypePrimitive> NestedLoopTemporalJoinExecutor<S
     ) -> Self {
         let _metrics_info = MetricsInfo::new(
             metrics.clone(),
-            table.table_id().table_id,
+            table.table_id(),
             ctx.id,
             "nested loop temporal join",
         );
 
         Self {
-            ctx: ctx.clone(),
+            ctx,
             info,
             left,
             right,
@@ -257,7 +257,7 @@ impl<S: StateStore, const T: JoinTypePrimitive> NestedLoopTemporalJoinExecutor<S
                 InternalMessage::Barrier(chunk, barrier) => {
                     assert!(chunk.is_empty());
                     if let Some(vnodes) = barrier.as_update_vnode_bitmap(self.ctx.id) {
-                        let _vnodes = self.right_table.source.update_vnode_bitmap(vnodes.clone());
+                        let _vnodes = self.right_table.source.update_vnode_bitmap(vnodes);
                     }
                     prev_epoch = Some(barrier.epoch.curr);
                     yield Message::Barrier(barrier)

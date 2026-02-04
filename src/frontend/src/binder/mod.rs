@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -34,6 +34,7 @@ mod delete;
 mod expr;
 pub mod fetch_cursor;
 mod for_system;
+mod gap_fill_binder;
 mod insert;
 mod query;
 mod relation;
@@ -48,14 +49,18 @@ pub use bind_context::{BindContext, Clause, LateralBindContext};
 pub use create_view::BoundCreateView;
 pub use delete::BoundDelete;
 pub use expr::bind_data_type;
+pub use gap_fill_binder::BoundFillStrategy;
 pub use insert::BoundInsert;
 use pgwire::pg_server::{Session, SessionId};
 pub use query::BoundQuery;
 pub use relation::{
-    BoundBackCteRef, BoundBaseTable, BoundJoin, BoundShare, BoundShareInput, BoundSource,
+    BoundBaseTable, BoundGapFill, BoundJoin, BoundShare, BoundShareInput, BoundSource,
     BoundSystemTable, BoundWatermark, BoundWindowTableFunction, Relation,
     ResolveQualifiedNameError, WindowTableFunctionKind,
 };
+// Re-export common types
+pub use risingwave_common::gap_fill::FillStrategy;
+use risingwave_common::id::ObjectId;
 pub use select::{BoundDistinct, BoundSelect};
 pub use set_expr::*;
 pub use statement::BoundStatement;
@@ -65,9 +70,9 @@ pub use values::BoundValues;
 use crate::catalog::catalog_service::CatalogReadGuard;
 use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::schema_catalog::SchemaCatalog;
-use crate::catalog::{CatalogResult, DatabaseId, TableId, ViewId};
+use crate::catalog::{CatalogResult, DatabaseId, ViewId};
 use crate::error::ErrorCode;
-use crate::session::{AuthContext, SessionImpl, TemporarySourceManager};
+use crate::session::{AuthContext, SessionImpl, StagingCatalogManager, TemporarySourceManager};
 use crate::user::user_service::UserInfoReadGuard;
 
 pub type ShareId = usize;
@@ -123,7 +128,7 @@ pub struct Binder {
     shared_views: HashMap<ViewId, ShareId>,
 
     /// The included relations while binding a query.
-    included_relations: HashSet<TableId>,
+    included_relations: HashSet<ObjectId>,
 
     /// The included user-defined functions while binding a query.
     included_udfs: HashSet<FunctionId>,
@@ -132,6 +137,9 @@ pub struct Binder {
 
     /// The temporary sources that will be used during binding phase
     temporary_source_manager: TemporarySourceManager,
+
+    /// The staging catalogs that will be used during binding phase
+    staging_catalog_manager: StagingCatalogManager,
 
     /// Information for `secure_compare` function. It's ONLY available when binding the
     /// `VALIDATE` clause of Webhook source i.e. `VALIDATE SECRET ... AS SECURE_COMPARE(...)`.
@@ -228,11 +236,7 @@ impl ParameterTypes {
 }
 
 impl Binder {
-    fn new_inner(
-        session: &SessionImpl,
-        bind_for: BindFor,
-        param_types: Vec<Option<DataType>>,
-    ) -> Binder {
+    fn new(session: &SessionImpl, bind_for: BindFor) -> Binder {
         Binder {
             catalog: session.env().catalog_reader().read_guard(),
             user: session.env().user_info_reader().read_guard(),
@@ -252,42 +256,39 @@ impl Binder {
             shared_views: HashMap::new(),
             included_relations: HashSet::new(),
             included_udfs: HashSet::new(),
-            param_types: ParameterTypes::new(param_types),
+            param_types: ParameterTypes::new(vec![]),
             temporary_source_manager: session.temporary_source_manager(),
+            staging_catalog_manager: session.staging_catalog_manager(),
             secure_compare_context: None,
         }
     }
 
-    pub fn new(session: &SessionImpl) -> Binder {
-        Self::new_inner(session, BindFor::Batch, vec![])
-    }
-
-    pub fn new_with_param_types(
-        session: &SessionImpl,
-        param_types: Vec<Option<DataType>>,
-    ) -> Binder {
-        Self::new_inner(session, BindFor::Batch, param_types)
+    pub fn new_for_batch(session: &SessionImpl) -> Binder {
+        Self::new(session, BindFor::Batch)
     }
 
     pub fn new_for_stream(session: &SessionImpl) -> Binder {
-        Self::new_inner(session, BindFor::Stream, vec![])
+        Self::new(session, BindFor::Stream)
     }
 
     pub fn new_for_ddl(session: &SessionImpl) -> Binder {
-        Self::new_inner(session, BindFor::Ddl, vec![])
-    }
-
-    pub fn new_for_ddl_with_secure_compare(
-        session: &SessionImpl,
-        ctx: SecureCompareContext,
-    ) -> Binder {
-        let mut binder = Self::new_inner(session, BindFor::Ddl, vec![]);
-        binder.secure_compare_context = Some(ctx);
-        binder
+        Self::new(session, BindFor::Ddl)
     }
 
     pub fn new_for_system(session: &SessionImpl) -> Binder {
-        Self::new_inner(session, BindFor::System, vec![])
+        Self::new(session, BindFor::System)
+    }
+
+    /// Set the specified parameter types.
+    pub fn with_specified_params_types(mut self, param_types: Vec<Option<DataType>>) -> Self {
+        self.param_types = ParameterTypes::new(param_types);
+        self
+    }
+
+    /// Set the secure compare context.
+    pub fn with_secure_compare(mut self, ctx: SecureCompareContext) -> Self {
+        self.secure_compare_context = Some(ctx);
+        self
     }
 
     fn is_for_stream(&self) -> bool {
@@ -317,7 +318,7 @@ impl Binder {
     /// After the plan is built, the referenced relations may be changed. We cannot rely on the
     /// collection result of plan, because we still need to record the dependencies that have been
     /// optimised away.
-    pub fn included_relations(&self) -> &HashSet<TableId> {
+    pub fn included_relations(&self) -> &HashSet<ObjectId> {
         &self.included_relations
     }
 
@@ -447,14 +448,12 @@ pub mod test_utils {
     use super::Binder;
     use crate::session::SessionImpl;
 
-    #[cfg(test)]
     pub fn mock_binder() -> Binder {
-        Binder::new(&SessionImpl::mock())
+        mock_binder_with_param_types(vec![])
     }
 
-    #[cfg(test)]
     pub fn mock_binder_with_param_types(param_types: Vec<Option<DataType>>) -> Binder {
-        Binder::new_with_param_types(&SessionImpl::mock(), param_types)
+        Binder::new_for_batch(&SessionImpl::mock()).with_specified_params_types(param_types)
     }
 }
 
@@ -463,229 +462,6 @@ mod tests {
     use expect_test::expect;
 
     use super::test_utils::*;
-
-    #[tokio::test]
-    async fn test_rcte() {
-        let stmt = risingwave_sqlparser::parser::Parser::parse_sql(
-            "WITH RECURSIVE t1 AS (SELECT 1 AS a UNION ALL SELECT a + 1 FROM t1 WHERE a < 10) SELECT * FROM t1",
-        ).unwrap().into_iter().next().unwrap();
-        let mut binder = mock_binder();
-        let bound = binder.bind(stmt).unwrap();
-
-        let expected = expect![[r#"
-            Query(
-                BoundQuery {
-                    body: Select(
-                        BoundSelect {
-                            distinct: All,
-                            select_items: [
-                                InputRef(
-                                    InputRef {
-                                        index: 0,
-                                        data_type: Int32,
-                                    },
-                                ),
-                            ],
-                            aliases: [
-                                Some(
-                                    "a",
-                                ),
-                            ],
-                            from: Some(
-                                Share(
-                                    BoundShare {
-                                        share_id: 0,
-                                        input: Query(
-                                            Right(
-                                                RecursiveUnion {
-                                                    all: true,
-                                                    base: Select(
-                                                        BoundSelect {
-                                                            distinct: All,
-                                                            select_items: [
-                                                                Literal(
-                                                                    Literal {
-                                                                        data: Some(
-                                                                            Int32(
-                                                                                1,
-                                                                            ),
-                                                                        ),
-                                                                        data_type: Some(
-                                                                            Int32,
-                                                                        ),
-                                                                    },
-                                                                ),
-                                                            ],
-                                                            aliases: [
-                                                                Some(
-                                                                    "a",
-                                                                ),
-                                                            ],
-                                                            from: None,
-                                                            where_clause: None,
-                                                            group_by: GroupKey(
-                                                                [],
-                                                            ),
-                                                            having: None,
-                                                            window: {},
-                                                            schema: Schema {
-                                                                fields: [
-                                                                    a:Int32,
-                                                                ],
-                                                            },
-                                                        },
-                                                    ),
-                                                    recursive: Select(
-                                                        BoundSelect {
-                                                            distinct: All,
-                                                            select_items: [
-                                                                FunctionCall(
-                                                                    FunctionCall {
-                                                                        func_type: Add,
-                                                                        return_type: Int32,
-                                                                        inputs: [
-                                                                            InputRef(
-                                                                                InputRef {
-                                                                                    index: 0,
-                                                                                    data_type: Int32,
-                                                                                },
-                                                                            ),
-                                                                            Literal(
-                                                                                Literal {
-                                                                                    data: Some(
-                                                                                        Int32(
-                                                                                            1,
-                                                                                        ),
-                                                                                    ),
-                                                                                    data_type: Some(
-                                                                                        Int32,
-                                                                                    ),
-                                                                                },
-                                                                            ),
-                                                                        ],
-                                                                    },
-                                                                ),
-                                                            ],
-                                                            aliases: [
-                                                                None,
-                                                            ],
-                                                            from: Some(
-                                                                BackCteRef(
-                                                                    BoundBackCteRef {
-                                                                        share_id: 0,
-                                                                        base: Select(
-                                                                            BoundSelect {
-                                                                                distinct: All,
-                                                                                select_items: [
-                                                                                    Literal(
-                                                                                        Literal {
-                                                                                            data: Some(
-                                                                                                Int32(
-                                                                                                    1,
-                                                                                                ),
-                                                                                            ),
-                                                                                            data_type: Some(
-                                                                                                Int32,
-                                                                                            ),
-                                                                                        },
-                                                                                    ),
-                                                                                ],
-                                                                                aliases: [
-                                                                                    Some(
-                                                                                        "a",
-                                                                                    ),
-                                                                                ],
-                                                                                from: None,
-                                                                                where_clause: None,
-                                                                                group_by: GroupKey(
-                                                                                    [],
-                                                                                ),
-                                                                                having: None,
-                                                                                window: {},
-                                                                                schema: Schema {
-                                                                                    fields: [
-                                                                                        a:Int32,
-                                                                                    ],
-                                                                                },
-                                                                            },
-                                                                        ),
-                                                                    },
-                                                                ),
-                                                            ),
-                                                            where_clause: Some(
-                                                                FunctionCall(
-                                                                    FunctionCall {
-                                                                        func_type: LessThan,
-                                                                        return_type: Boolean,
-                                                                        inputs: [
-                                                                            InputRef(
-                                                                                InputRef {
-                                                                                    index: 0,
-                                                                                    data_type: Int32,
-                                                                                },
-                                                                            ),
-                                                                            Literal(
-                                                                                Literal {
-                                                                                    data: Some(
-                                                                                        Int32(
-                                                                                            10,
-                                                                                        ),
-                                                                                    ),
-                                                                                    data_type: Some(
-                                                                                        Int32,
-                                                                                    ),
-                                                                                },
-                                                                            ),
-                                                                        ],
-                                                                    },
-                                                                ),
-                                                            ),
-                                                            group_by: GroupKey(
-                                                                [],
-                                                            ),
-                                                            having: None,
-                                                            window: {},
-                                                            schema: Schema {
-                                                                fields: [
-                                                                    ?column?:Int32,
-                                                                ],
-                                                            },
-                                                        },
-                                                    ),
-                                                    schema: Schema {
-                                                        fields: [
-                                                            a:Int32,
-                                                        ],
-                                                    },
-                                                },
-                                            ),
-                                        ),
-                                    },
-                                ),
-                            ),
-                            where_clause: None,
-                            group_by: GroupKey(
-                                [],
-                            ),
-                            having: None,
-                            window: {},
-                            schema: Schema {
-                                fields: [
-                                    a:Int32,
-                                ],
-                            },
-                        },
-                    ),
-                    order: [],
-                    limit: None,
-                    offset: None,
-                    with_ties: false,
-                    extra_order_exprs: [],
-                },
-            )"#]];
-
-        expected.assert_eq(&format!("{:#?}", bound));
-    }
 
     #[tokio::test]
     async fn test_bind_approx_percentile() {

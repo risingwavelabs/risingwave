@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,6 +17,7 @@ use core::time::Duration;
 use std::collections::{BTreeMap, HashMap, VecDeque};
 
 use anyhow::{Context, anyhow};
+use async_trait::async_trait;
 use base64::Engine;
 use base64::prelude::BASE64_STANDARD;
 use futures::future::pending;
@@ -31,7 +32,7 @@ use gcp_bigquery_client::model::table_field_schema::TableFieldSchema;
 use gcp_bigquery_client::model::table_schema::TableSchema;
 use google_cloud_bigquery::grpc::apiv1::conn_pool::ConnectionManager;
 use google_cloud_gax::conn::{ConnectionOptions, Environment};
-use google_cloud_gax::grpc::Request;
+use google_cloud_gax::grpc::{Request, Response, Status};
 use google_cloud_googleapis::cloud::bigquery::storage::v1::append_rows_request::{
     MissingValueInterpretation, ProtoData, Rows as AppendRowsRequestRows,
 };
@@ -41,11 +42,14 @@ use google_cloud_googleapis::cloud::bigquery::storage::v1::{
 use google_cloud_pubsub::client::google_cloud_auth;
 use google_cloud_pubsub::client::google_cloud_auth::credentials::CredentialsFile;
 use phf::{Set, phf_set};
+use prost::Message;
+use prost_014::Message as Message014;
 use prost_reflect::{FieldDescriptor, MessageDescriptor};
 use prost_types::{
     DescriptorProto, FieldDescriptorProto, FileDescriptorProto, FileDescriptorSet,
     field_descriptor_proto,
 };
+use prost_types_014::DescriptorProto as DescriptorProto014;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::DataType;
@@ -53,7 +57,6 @@ use serde::Deserialize;
 use serde_with::{DisplayFromStr, serde_as};
 use simd_json::prelude::ArrayTrait;
 use tokio::sync::mpsc;
-use tonic::{Response, Status, async_trait};
 use url::Url;
 use uuid::Uuid;
 use with_options::WithOptions;
@@ -608,13 +611,9 @@ impl TryFrom<SinkParam> for BigQuerySink {
 
     fn try_from(param: SinkParam) -> std::result::Result<Self, Self::Error> {
         let schema = param.schema();
+        let pk_indices = param.downstream_pk_or_empty();
         let config = BigQueryConfig::from_btreemap(param.properties)?;
-        BigQuerySink::new(
-            config,
-            schema,
-            param.downstream_pk,
-            param.sink_type.is_append_only(),
-        )
+        BigQuerySink::new(config, schema, pk_indices, param.sink_type.is_append_only())
     }
 }
 
@@ -687,7 +686,7 @@ impl BigQuerySinkWriter {
                 message_descriptor,
                 proto_field,
                 writer_pb_schema: ProtoSchema {
-                    proto_descriptor: Some(descriptor_proto),
+                    proto_descriptor: Some(to_gcloud_descriptor(&descriptor_proto)?),
                 },
             },
             resp_stream,
@@ -865,7 +864,7 @@ impl StorageWriterClient {
 
     pub fn append_rows(&mut self, row: AppendRowsRequestRows, write_stream: String) -> Result<()> {
         let append_req = AppendRowsRequest {
-            write_stream: write_stream.clone(),
+            write_stream,
             offset: None,
             trace_id: Uuid::new_v4().hyphenated().to_string(),
             missing_value_interpretations: HashMap::default(),
@@ -900,6 +899,13 @@ fn build_protobuf_descriptor_pool(desc: &DescriptorProto) -> Result<prost_reflec
     })
     .context("failed to build descriptor pool")
     .map_err(SinkError::BigQuery)
+}
+
+fn to_gcloud_descriptor(desc: &DescriptorProto) -> Result<DescriptorProto014> {
+    let bytes = Message::encode_to_vec(desc);
+    Message014::decode(bytes.as_slice())
+        .context("failed to convert descriptor proto")
+        .map_err(SinkError::BigQuery)
 }
 
 fn build_protobuf_schema<'a>(
@@ -959,7 +965,7 @@ fn build_protobuf_field(
             return Ok((field, Some(sub_proto)));
         }
         DataType::List(l) => {
-            let (mut field, proto) = build_protobuf_field(l.elem(), index, name.clone())?;
+            let (mut field, proto) = build_protobuf_field(l.elem(), index, name)?;
             field.label = Some(field_descriptor_proto::Label::Repeated.into());
             return Ok((field, proto));
         }

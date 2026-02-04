@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -29,6 +29,7 @@ use serde_json::Value;
 use serde_with::{DisplayFromStr, serde_as};
 use thiserror_ext::AsReport;
 use url::form_urlencoded;
+use uuid::Uuid;
 use with_options::WithOptions;
 
 use super::decouple_checkpoint_log_sink::DEFAULT_COMMIT_CHECKPOINT_INTERVAL_WITH_SINK_DECOUPLE;
@@ -43,14 +44,15 @@ use super::{
 };
 use crate::enforce_secret::EnforceSecret;
 use crate::sink::decouple_checkpoint_log_sink::DecoupleCheckpointLogSinkerOf;
-use crate::sink::{Result, Sink, SinkWriter, SinkWriterParam};
+use crate::sink::writer::SinkWriter;
+use crate::sink::{Result, Sink, SinkWriterParam};
 
 pub const STARROCKS_SINK: &str = "starrocks";
 const STARROCK_MYSQL_PREFER_SOCKET: &str = "false";
 const STARROCK_MYSQL_MAX_ALLOWED_PACKET: usize = 1024;
 const STARROCK_MYSQL_WAIT_TIMEOUT: usize = 28800;
 
-const fn _default_stream_load_http_timeout_ms() -> u64 {
+pub const fn _default_stream_load_http_timeout_ms() -> u64 {
     30 * 1000
 }
 
@@ -108,6 +110,7 @@ pub struct StarrocksConfig {
         default = "_default_stream_load_http_timeout_ms"
     )]
     #[serde_as(as = "DisplayFromStr")]
+    #[with_option(allow_alter_on_fly)]
     pub stream_load_http_timeout_ms: u64,
 
     /// Set this option to a positive integer n, RisingWave will try to commit data
@@ -180,7 +183,7 @@ impl EnforceSecret for StarrocksSink {
 
 impl StarrocksSink {
     pub fn new(param: SinkParam, config: StarrocksConfig, schema: Schema) -> Result<Self> {
-        let pk_indices = param.downstream_pk.clone();
+        let pk_indices = param.downstream_pk_or_empty();
         let is_append_only = param.sink_type.is_append_only();
         Ok(Self {
             config,
@@ -347,7 +350,6 @@ impl Sink for StarrocksSink {
             self.schema.clone(),
             self.pk_indices.clone(),
             self.is_append_only,
-            writer_param.executor_id,
         )?;
 
         let metrics = SinkWriterMetrics::new(&writer_param);
@@ -370,7 +372,6 @@ pub struct StarrocksSinkWriter {
     client: Option<StarrocksClient>,
     txn_client: Arc<StarrocksTxnClient>,
     row_encoder: JsonEncoder,
-    executor_id: u64,
     curr_txn_label: Option<String>,
 }
 
@@ -390,7 +391,6 @@ impl StarrocksSinkWriter {
         schema: Schema,
         pk_indices: Vec<usize>,
         is_append_only: bool,
-        executor_id: u64,
     ) -> Result<Self> {
         let mut field_names = schema.names_str();
         if !is_append_only {
@@ -433,7 +433,6 @@ impl StarrocksSinkWriter {
             client: None,
             txn_client: Arc::new(StarrocksTxnClient::new(txn_request_builder)),
             row_encoder: JsonEncoder::new_with_starrocks(schema, None),
-            executor_id,
             curr_txn_label: None,
         })
     }
@@ -518,7 +517,7 @@ impl StarrocksSinkWriter {
     fn new_txn_label(&self) -> String {
         format!(
             "rw-txn-{}-{}",
-            self.executor_id,
+            Uuid::new_v4(),
             chrono::Utc::now().timestamp_micros()
         )
     }

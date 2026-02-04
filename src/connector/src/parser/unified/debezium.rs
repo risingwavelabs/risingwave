@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,6 +16,7 @@ use std::str::FromStr;
 
 use itertools::Itertools;
 use risingwave_common::catalog::{ColumnCatalog, ColumnDesc, ColumnId};
+use risingwave_common::id::SourceId;
 use risingwave_common::types::{
     DataType, Datum, DatumCow, Int256, ListValue, Scalar, ScalarImpl, ScalarRefImpl, StructValue,
     Timestamp, Timestamptz, ToDatumRef, ToOwnedDatum,
@@ -190,7 +191,7 @@ macro_rules! jsonb_access_field {
 /// <https://debezium.io/documentation/reference/2.6/connectors/mysql.html#mysql-schema-change-topic>
 pub fn parse_schema_change(
     accessor: &impl Access,
-    source_id: u32,
+    source_id: SourceId,
     source_name: &str,
     connector_props: &ConnectorProperties,
 ) -> AccessResult<SchemaChangeEnvelope> {
@@ -575,7 +576,7 @@ pub fn extract_bson_id(id_type: &DataType, bson_doc: &serde_json::Value) -> Acce
         DataType::Varchar => match id_field {
             serde_json::Value::String(s) => Some(ScalarImpl::Utf8(s.clone().into())),
             serde_json::Value::Object(obj) if obj.contains_key("$oid") => Some(ScalarImpl::Utf8(
-                obj["$oid"].as_str().to_owned().unwrap_or_default().into(),
+                obj["$oid"].as_str().unwrap_or_default().into(),
             )),
             _ => return Err(type_error()),
         },

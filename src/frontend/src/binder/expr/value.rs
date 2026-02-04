@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use itertools::Itertools;
 use risingwave_common::bail_not_implemented;
 use risingwave_common::types::{
     DataType, DateTimeField, Decimal, Interval, MapType, ScalarImpl, StructType,
@@ -281,8 +280,7 @@ impl Binder {
             .iter()
             .map(|e| self.bind_expr_inner(e))
             .collect::<Result<Vec<ExprImpl>>>()?;
-        let data_type =
-            StructType::unnamed(exprs.iter().map(|e| e.return_type()).collect_vec()).into();
+        let data_type = StructType::row_expr_type(exprs.iter().map(|e| e.return_type())).into();
         let expr: ExprImpl = FunctionCall::new_unchecked(ExprType::Row, exprs, data_type).into();
         Ok(expr)
     }
@@ -452,7 +450,7 @@ mod tests {
             "2 minutes",
             "1 month",
         ];
-        let data = vec![
+        let data = [
             Literal::new(
                 Some(ScalarImpl::Interval(Interval::from_minutes(60))),
                 DataType::Interval,

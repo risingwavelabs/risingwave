@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,7 +18,7 @@ use risingwave_frontend_macro::system_catalog;
 /// The view tables contains all tables and views defined in the current database. Only those tables
 /// and views are shown that the current user has access to (by way of being the owner or having
 /// some privilege).
-/// Ref: [`https://www.postgresql.org/docs/current/infoschema-tables.html`]
+/// Ref: `https://www.postgresql.org/docs/current/infoschema-tables.html`
 ///
 /// In RisingWave, `tables` contains all relations.
 #[system_catalog(

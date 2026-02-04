@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -61,7 +61,6 @@ impl TaskService for BatchServiceImpl {
         let CreateTaskRequest {
             task_id,
             plan,
-            epoch,
             tracing_context,
             expr_context,
         } = request.into_inner();
@@ -73,7 +72,6 @@ impl TaskService for BatchServiceImpl {
             .fire_task(
                 task_id.as_ref().expect("no task id found"),
                 plan.expect("no plan found").clone(),
-                epoch.expect("no epoch found"),
                 ComputeNodeContext::create(self.env.clone()),
                 state_reporter,
                 TracingContext::from_protobuf(&tracing_context),
@@ -151,14 +149,12 @@ impl BatchServiceImpl {
         let ExecuteRequest {
             task_id,
             plan,
-            epoch,
             tracing_context,
             expr_context,
         } = req;
 
         let task_id = task_id.expect("no task id found");
         let plan = plan.expect("no plan found").clone();
-        let epoch = epoch.expect("no epoch found");
         let tracing_context = TracingContext::from_protobuf(&tracing_context);
         let expr_context = expr_context.expect("no expression context found");
 
@@ -167,7 +163,7 @@ impl BatchServiceImpl {
             "local execute request: plan:{:?} with task id:{:?}",
             plan, task_id
         );
-        let task = BatchTaskExecution::new(&task_id, plan, context, epoch, mgr.runtime())?;
+        let task = BatchTaskExecution::new(&task_id, plan, context, mgr.runtime())?;
         let task = Arc::new(task);
         let (tx, rx) = tokio::sync::mpsc::channel(mgr.config().developer.local_execute_buffer_size);
         if let Err(e) = task
@@ -217,7 +213,6 @@ impl BatchServiceImpl {
             .await?;
         if wait_for_persistence {
             dispatch_state_store!(self.env.state_store(), store, {
-                use risingwave_common::catalog::TableId;
                 use risingwave_hummock_sdk::HummockReadEpoch;
                 use risingwave_storage::StateStore;
                 use risingwave_storage::store::TryWaitEpochOptions;
@@ -225,9 +220,7 @@ impl BatchServiceImpl {
                 store
                     .try_wait_epoch(
                         HummockReadEpoch::Committed(epoch.0),
-                        TryWaitEpochOptions {
-                            table_id: TableId::new(table_id),
-                        },
+                        TryWaitEpochOptions { table_id },
                     )
                     .await
                     .map_err(BatchError::from)?;

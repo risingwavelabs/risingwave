@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -24,7 +24,7 @@ use risingwave_storage::compaction_catalog_manager::CompactionCatalogAgent;
 use risingwave_storage::hummock::iterator::{
     Forward, HummockIterator, HummockIteratorUnion, MergeIterator,
     NonPkPrefixSkipWatermarkIterator, NonPkPrefixSkipWatermarkState, PkPrefixSkipWatermarkIterator,
-    PkPrefixSkipWatermarkState,
+    PkPrefixSkipWatermarkState, ValueSkipWatermarkIterator, ValueSkipWatermarkState,
 };
 use risingwave_storage::hummock::shared_buffer::shared_buffer_batch::{
     SharedBufferBatch, SharedBufferBatchIterator, SharedBufferValue,
@@ -130,6 +130,35 @@ fn criterion_benchmark(c: &mut Criterion) {
     let merge_iter = RefCell::new(combine_iter);
     c.bench_with_input(
         BenchmarkId::new("bench-merge-iter-skip-empty-watermark", "unordered"),
+        &merge_iter,
+        |b, iter_ref| {
+            b.iter(|| {
+                run_iter(iter_ref, 100 * 10000);
+            });
+        },
+    );
+
+    let combine_iter = {
+        let iter = PkPrefixSkipWatermarkIterator::new(
+            MergeIterator::new(gen_interleave_shared_buffer_batch_iter(10000, 100)),
+            PkPrefixSkipWatermarkState::new(BTreeMap::new()),
+        );
+
+        NonPkPrefixSkipWatermarkIterator::new(
+            iter,
+            NonPkPrefixSkipWatermarkState::new(
+                BTreeMap::new(),
+                Arc::new(CompactionCatalogAgent::dummy()),
+            ),
+        )
+    };
+    let combine_3_iter = ValueSkipWatermarkIterator::new(
+        combine_iter,
+        ValueSkipWatermarkState::new(BTreeMap::new(), Arc::new(CompactionCatalogAgent::dummy())),
+    );
+    let merge_iter = RefCell::new(combine_3_iter);
+    c.bench_with_input(
+        BenchmarkId::new("bench-merge-iter-skip-empty-watermark-3-iter", "unordered"),
         &merge_iter,
         |b, iter_ref| {
             b.iter(|| {

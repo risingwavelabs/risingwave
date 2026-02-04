@@ -76,13 +76,16 @@ ENV ENABLE_BUILD_DASHBOARD=1
 ENV OPENSSL_STATIC=1
 
 RUN cargo fetch && \
-  cargo build -p risingwave_cmd_all --profile ${CARGO_PROFILE} --features "rw-static-link" --features udf && \
+  cargo build -p risingwave_cmd_all --profile ${CARGO_PROFILE} --features "rw-static-link" --features udf --features datafusion && \
   mkdir -p /risingwave/bin && \
   mv /risingwave/target/${CARGO_PROFILE}/risingwave /risingwave/bin/ && \
   mv /risingwave/target/${CARGO_PROFILE}/risingwave.dwp /risingwave/bin/ && \
   cp ./target/${CARGO_PROFILE}/build/tikv-jemalloc-sys-*/out/build/bin/jeprof /risingwave/bin/ && \
   chmod +x /risingwave/bin/jeprof && \
-  mkdir -p /risingwave/lib && cargo clean
+  mkdir -p /risingwave/lib/adbc && \
+  # Download ADBC Snowflake driver shared library for runtime (avoid invoking risedev/cargo-make here).
+  DEST_DIR="/risingwave/lib/adbc" TMP_DIR="/tmp" bash ./src/risedevtool/scripts/download_adbc_snowflake_driver.sh && \
+  cargo clean
 
 FROM base AS java-planner
 
@@ -142,11 +145,17 @@ COPY --from=rust-builder /risingwave/bin/jeprof /usr/local/bin/jeprof
 COPY --from=rust-base /root/.cargo/bin/flamegraph /usr/local/bin/flamegraph
 COPY --from=rust-base /root/.cargo/bin/addr2line /usr/local/bin/addr2line
 
+COPY --from=rust-builder /risingwave/lib/adbc /risingwave/lib/adbc
+
 # Set default playground mode to docker-playground profile
 ENV PLAYGROUND_PROFILE docker-playground
 # Set default connector libs path
 ENV CONNECTOR_LIBS_PATH /risingwave/bin/connector-node/libs
 ENV IN_CONTAINER=1
+
+# Runtime dynamic library search path for ADBC (Linux containers use LD_LIBRARY_PATH).
+ENV ADBC_DRIVER_PATH /risingwave/lib/adbc
+ENV LD_LIBRARY_PATH /risingwave/lib/adbc:${LD_LIBRARY_PATH}
 
 ENTRYPOINT [ "/risingwave/bin/risingwave" ]
 CMD [ "single_node" ]

@@ -1,16 +1,18 @@
-// Copyright 2025 RisingWave Labs
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+/*
+ * Copyright 2023 RisingWave Labs
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 
 package com.risingwave.java.binding;
 
@@ -42,6 +44,25 @@ public class Binding {
     static native long iteratorNewStreamChunk(long pointer);
 
     static native boolean iteratorNext(long pointer);
+
+    /**
+     * Initialize object store configuration for integration tests. Must be called before any
+     * putObject/getObject operations if compute node is not running.
+     *
+     * @param stateStoreUrl State store URL (e.g., "hummock+memory")
+     * @param dataDirectory Data directory for schema history files
+     */
+    public static native void initObjectStoreForTest(String stateStoreUrl, String dataDirectory);
+
+    public static native void putObject(String object, byte[] data);
+
+    public static native String getObjectStoreType();
+
+    public static native void deleteObjects(String dir);
+
+    public static native byte[] getObject(String object);
+
+    public static native String[] listObject(String dir);
 
     static native void iteratorClose(long pointer);
 

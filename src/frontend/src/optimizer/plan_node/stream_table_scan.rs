@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -392,14 +392,14 @@ impl StreamTableScan {
                 PbStreamNode {
                     node_body: Some(PbNodeBody::Merge(Default::default())),
                     identity: "Upstream".into(),
-                    fields: upstream_schema.clone(),
+                    fields: upstream_schema,
                     stream_key: vec![], // not used
                     ..Default::default()
                 },
                 // Snapshot read
                 PbStreamNode {
                     node_body: Some(PbNodeBody::BatchPlan(Box::new(batch_plan_node))),
-                    operator_id: self.batch_plan_id.0 as u64,
+                    operator_id: self.batch_plan_id.to_stream_node_operator_id(),
                     identity: "BatchPlanNode".into(),
                     fields: snapshot_schema,
                     stream_key: vec![], // not used
@@ -410,7 +410,7 @@ impl StreamTableScan {
         };
 
         let node_body = PbNodeBody::StreamScan(Box::new(StreamScanNode {
-            table_id: self.core.table_catalog.id.table_id,
+            table_id: self.core.table_catalog.id,
             stream_scan_type: self.stream_scan_type as i32,
             // The column indices need to be forwarded to the downstream
             output_indices,
@@ -428,7 +428,7 @@ impl StreamTableScan {
             input,
             node_body: Some(node_body),
             stream_key,
-            operator_id: self.base.id().0 as u64,
+            operator_id: self.base.id().to_stream_node_operator_id(),
             identity: self.distill_to_string(),
             stream_kind: self.stream_kind().to_protobuf() as i32,
         })

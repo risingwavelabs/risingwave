@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -21,8 +21,8 @@ mod common;
 pub use common::{
     AwsAuthProps, AwsPrivateLinkItem, DISABLE_DEFAULT_CREDENTIAL, KafkaCommon,
     KafkaConnectionProps, KafkaPrivateLinkCommon, KinesisCommon, MongodbCommon, NatsCommon,
-    PRIVATE_LINK_BROKER_REWRITE_MAP_KEY, PRIVATE_LINK_TARGETS_KEY, PulsarCommon, PulsarOauthCommon,
-    RdKafkaPropertiesCommon,
+    NatsConnectionProps, PRIVATE_LINK_BROKER_REWRITE_MAP_KEY, PRIVATE_LINK_TARGETS_KEY,
+    PulsarCommon, PulsarOauthCommon, RdKafkaPropertiesCommon, SHARED_NATS_CLIENT,
 };
 mod connection;
 pub use connection::{
@@ -36,7 +36,7 @@ mod iceberg;
 mod maybe_tls_connector;
 pub mod postgres;
 
-pub use iceberg::IcebergCommon;
+pub use iceberg::{IcebergCommon, IcebergTableIdentifier};
 pub use postgres::{PostgresExternalTable, SslMode, create_pg_client};
 
 #[cfg(test)]

@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -21,7 +21,8 @@ use either::Either;
 use futures::stream::{PollNext, select_with_strategy};
 use itertools::Itertools;
 use risingwave_common::bitmap::BitmapBuilder;
-use risingwave_common::catalog::{ColumnId, TableId};
+use risingwave_common::catalog::ColumnId;
+use risingwave_common::id::SourceId;
 use risingwave_common::metrics::{GLOBAL_ERROR_METRICS, LabelGuardedIntCounter};
 use risingwave_common::system_param::local_manager::SystemParamsReaderRef;
 use risingwave_common::system_param::reader::SystemParamsRead;
@@ -33,6 +34,7 @@ use risingwave_connector::source::{
     SplitMetaData,
 };
 use risingwave_hummock_sdk::HummockReadEpoch;
+use risingwave_pb::common::ThrottleType;
 use risingwave_storage::store::TryWaitEpochOptions;
 use serde::{Deserialize, Serialize};
 use thiserror_ext::AsReport;
@@ -90,7 +92,7 @@ pub struct SourceBackfillExecutorInner<S: StateStore> {
     info: ExecutorInfo,
 
     /// Streaming source for external
-    source_id: TableId,
+    source_id: SourceId,
     source_name: String,
     column_ids: Vec<ColumnId>,
     source_desc_builder: Option<SourceDescBuilder>,
@@ -140,8 +142,7 @@ impl BackfillStage {
 
     fn debug_assert_consistent(&self) {
         if cfg!(debug_assertions) {
-            let all_splits: HashSet<_> =
-                self.splits.iter().map(|split| split.id().clone()).collect();
+            let all_splits: HashSet<_> = self.splits.iter().map(|split| split.id()).collect();
             assert_eq!(
                 self.states.keys().cloned().collect::<HashSet<_>>(),
                 all_splits
@@ -359,7 +360,9 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
         let mut source_desc = source_desc_builder
             .build()
             .map_err(StreamExecutorError::connector_error)?;
-        let (Some(split_idx), Some(offset_idx)) = get_split_offset_col_idx(&source_desc.columns)
+
+        // source backfill only applies to kafka, so we don't need to get pulsar's `message_id_data_idx`.
+        let (Some(split_idx), Some(offset_idx), _) = get_split_offset_col_idx(&source_desc.columns)
         else {
             unreachable!("Partition and offset columns must be set.");
         };
@@ -470,7 +473,7 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
             .state_store()
             .state_store()
             .clone();
-        let table_id = self.backfill_state_store.state_store().table_id().into();
+        let table_id = self.backfill_state_store.state_store().table_id();
         let mut state_table_initialized = false;
         {
             let source_backfill_row_count = self
@@ -505,7 +508,7 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                             GLOBAL_ERROR_METRICS.user_source_error.report([
                                 "SourceReaderError".to_owned(),
                                 self.source_id.to_string(),
-                                self.source_name.to_owned(),
+                                self.source_name.clone(),
                                 self.actor_ctx.fragment_id.to_string(),
                             ]);
 
@@ -582,7 +585,7 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                                         }
                                         Mutation::ConnectorPropsChange(maybe_mutation) => {
                                             if let Some(props_plaintext) =
-                                                maybe_mutation.get(&self.source_id.table_id())
+                                                maybe_mutation.get(&self.source_id.as_raw_id())
                                             {
                                                 source_desc
                                                     .update_reader(props_plaintext.clone())?;
@@ -592,17 +595,18 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                                                 );
                                             }
                                         }
-                                        Mutation::Throttle(actor_to_apply) => {
-                                            if let Some(new_rate_limit) =
-                                                actor_to_apply.get(&self.actor_ctx.id)
-                                                && *new_rate_limit != self.rate_limit_rps
+                                        Mutation::Throttle(fragment_to_apply) => {
+                                            if let Some(entry) =
+                                                fragment_to_apply.get(&self.actor_ctx.fragment_id)
+                                                && entry.throttle_type() == ThrottleType::Backfill
+                                                && entry.rate_limit != self.rate_limit_rps
                                             {
                                                 tracing::info!(
                                                     "updating rate limit from {:?} to {:?}",
                                                     self.rate_limit_rps,
-                                                    *new_rate_limit
+                                                    entry.rate_limit
                                                 );
-                                                self.rate_limit_rps = *new_rate_limit;
+                                                self.rate_limit_rps = entry.rate_limit;
                                                 // rebuild reader
                                                 let (reader, _backfill_info) = self
                                                     .build_stream_source_reader(
@@ -1058,10 +1062,8 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
         states: &mut BackfillStates,
         should_trim_state: bool,
     ) -> StreamExecutorResult<()> {
-        let target_splits: HashSet<SplitId> = target_splits
-            .into_iter()
-            .map(|split| (split.id()))
-            .collect();
+        let target_splits: HashSet<SplitId> =
+            target_splits.into_iter().map(|split| split.id()).collect();
 
         let mut split_changed = false;
         let mut newly_added_splits = vec![];
@@ -1174,7 +1176,7 @@ impl<S: StateStore> Debug for SourceBackfillExecutorInner<S> {
         f.debug_struct("SourceBackfillExecutor")
             .field("source_id", &self.source_id)
             .field("column_ids", &self.column_ids)
-            .field("pk_indices", &self.info.pk_indices)
+            .field("stream_key", &self.info.stream_key)
             .finish()
     }
 }

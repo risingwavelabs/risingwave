@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,7 +17,7 @@ use risingwave_frontend_macro::system_catalog;
 
 /// The `pg_stat_activity` view will have one row per server process, showing information related to
 /// the current activity of that process.
-/// Ref: [`https://www.postgresql.org/docs/current/monitoring-stats.html#MONITORING-PG-STAT-ACTIVITY-VIEW`]
+/// Ref: `https://www.postgresql.org/docs/current/monitoring-stats.html#MONITORING-PG-STAT-ACTIVITY-VIEW`
 #[system_catalog(view, "pg_catalog.pg_stat_activity")]
 #[derive(Fields)]
 struct PgStatActivity {

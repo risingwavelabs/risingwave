@@ -1,0 +1,4 @@
+statement ok
+set query_mode = distributed;
+
+include vector_index.slt.part

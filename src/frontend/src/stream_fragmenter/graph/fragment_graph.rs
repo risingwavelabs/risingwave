@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,6 +16,7 @@ use std::collections::HashMap;
 use std::rc::Rc;
 
 use risingwave_common::catalog::FragmentTypeMask;
+use risingwave_pb::id::FragmentId;
 use risingwave_pb::stream_plan::stream_fragment_graph::{
     StreamFragment as StreamFragmentProto, StreamFragmentEdge as StreamFragmentEdgeProto,
 };
@@ -24,7 +25,7 @@ use risingwave_pb::stream_plan::{
 };
 use thiserror_ext::AsReport;
 
-pub type LocalFragmentId = u32;
+pub type LocalFragmentId = FragmentId;
 
 /// [`StreamFragment`] represent a fragment node in fragment DAG.
 #[derive(Clone, Debug)]
@@ -40,12 +41,6 @@ pub struct StreamFragment {
 
     /// Mark whether this fragment requires exactly one actor.
     pub requires_singleton: bool,
-
-    /// Number of table ids (stateful states) for this fragment.
-    pub table_ids_cnt: u32,
-
-    /// Mark the upstream table ids of this fragment.
-    pub upstream_table_ids: Vec<u32>,
 }
 
 /// An edge between the nodes in the fragment graph.
@@ -67,8 +62,6 @@ impl StreamFragment {
             fragment_type_mask: FragmentTypeMask::empty(),
             requires_singleton: false,
             node: None,
-            table_ids_cnt: 0,
-            upstream_table_ids: vec![],
         }
     }
 
@@ -78,8 +71,6 @@ impl StreamFragment {
             node: self.node.clone().map(|n| *n),
             fragment_type_mask: self.fragment_type_mask.into(),
             requires_singleton: self.requires_singleton,
-            table_ids_cnt: self.table_ids_cnt,
-            upstream_table_ids: self.upstream_table_ids.clone(),
         }
     }
 }
@@ -110,6 +101,7 @@ impl StreamFragmentGraph {
             table_ids_cnt: 0,
             parallelism: None,
             max_parallelism: 0,
+            backfill_parallelism: None,
             backfill_order: Default::default(),
         }
     }

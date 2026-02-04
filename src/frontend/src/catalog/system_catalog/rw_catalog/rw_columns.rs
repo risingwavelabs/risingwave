@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,6 +14,7 @@
 
 use risingwave_common::types::Fields;
 use risingwave_frontend_macro::system_catalog;
+use risingwave_pb::id::RelationId;
 
 use crate::catalog::schema_catalog::SchemaCatalog;
 use crate::catalog::system_catalog::SysCatalogReaderImpl;
@@ -24,7 +25,7 @@ use crate::user::user_catalog::UserCatalog;
 #[derive(Fields)]
 #[primary_key(relation_id, name)]
 struct RwColumn {
-    relation_id: i32,
+    relation_id: RelationId,
     // belonged relation id
     name: String,
     // column name
@@ -62,14 +63,14 @@ fn read_rw_columns_in_schema(current_user: &UserCatalog, schema: &SchemaCatalog)
             .iter()
             .enumerate()
             .map(|(index, column)| RwColumn {
-                relation_id: view.id as i32,
+                relation_id: view.id.as_relation_id(),
                 name: column.name.clone(),
                 position: index as i32 + 1,
                 is_hidden: false,
                 is_primary_key: false,
                 is_distribution_key: false,
                 is_generated: false,
-                is_nullable: false,
+                is_nullable: true,
                 generation_expression: None,
                 data_type: column.data_type().to_string(),
                 type_oid: column.data_type().to_oid(),
@@ -83,11 +84,13 @@ fn read_rw_columns_in_schema(current_user: &UserCatalog, schema: &SchemaCatalog)
             .iter()
             .enumerate()
             .map(|(index, column)| RwColumn {
-                relation_id: sink.id.sink_id as i32,
+                relation_id: sink.id.as_relation_id(),
                 name: column.name().into(),
                 position: index as i32 + 1,
                 is_hidden: column.is_hidden,
-                is_primary_key: sink.downstream_pk.contains(&index),
+                is_primary_key: (sink.downstream_pk.as_ref())
+                    .map(|pk| pk.contains(&index))
+                    .unwrap_or(false),
                 is_distribution_key: sink.distribution_key.contains(&index),
                 is_generated: false,
                 is_nullable: column.nullable(),
@@ -105,7 +108,7 @@ fn read_rw_columns_in_schema(current_user: &UserCatalog, schema: &SchemaCatalog)
             .iter()
             .enumerate()
             .map(move |(index, column)| RwColumn {
-                relation_id: table.id.table_id as i32,
+                relation_id: table.id.as_relation_id(),
                 name: column.name().into(),
                 position: index as i32 + 1,
                 is_hidden: column.is_hidden,
@@ -130,7 +133,7 @@ fn read_rw_columns_in_schema(current_user: &UserCatalog, schema: &SchemaCatalog)
                 .iter()
                 .enumerate()
                 .map(move |(index, column)| RwColumn {
-                    relation_id: table.id.table_id as i32,
+                    relation_id: table.id.as_relation_id(),
                     name: column.name().into(),
                     position: index as i32 + 1,
                     is_hidden: column.is_hidden,
@@ -162,7 +165,7 @@ fn read_rw_columns_in_schema(current_user: &UserCatalog, schema: &SchemaCatalog)
                 .iter()
                 .enumerate()
                 .map(move |(index, column)| RwColumn {
-                    relation_id: source.id as i32,
+                    relation_id: source.id.as_relation_id(),
                     name: column.name().into(),
                     position: index as i32 + 1,
                     is_hidden: column.is_hidden,

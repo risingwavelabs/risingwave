@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -35,11 +35,11 @@ use risingwave_pb::catalog::{
 };
 use risingwave_pb::plan_common::ColumnDescVersion;
 pub use schema::{Field, FieldDisplay, FieldLike, Schema, test_utils as schema_test_utils};
-use serde::{Deserialize, Serialize};
 
 use crate::array::DataChunk;
 pub use crate::constants::hummock;
 use crate::error::BoxedError;
+pub use crate::id::*;
 
 /// The global version of the catalog.
 pub type CatalogVersion = u64;
@@ -60,21 +60,21 @@ pub const INFORMATION_SCHEMA_SCHEMA_NAME: &str = "information_schema";
 pub const RW_CATALOG_SCHEMA_NAME: &str = "rw_catalog";
 pub const RESERVED_PG_SCHEMA_PREFIX: &str = "pg_";
 pub const DEFAULT_SUPER_USER: &str = "root";
-pub const DEFAULT_SUPER_USER_ID: u32 = 1;
+pub const DEFAULT_SUPER_USER_ID: UserId = UserId::new(1);
 // This is for compatibility with customized utils for PostgreSQL.
 pub const DEFAULT_SUPER_USER_FOR_PG: &str = "postgres";
 pub const DEFAULT_SUPER_USER_FOR_PG_ID: u32 = 2;
 
 // This is the default superuser for admin, which is used only for cloud control plane.
 pub const DEFAULT_SUPER_USER_FOR_ADMIN: &str = "rwadmin";
-pub const DEFAULT_SUPER_USER_FOR_ADMIN_ID: u32 = 3;
+pub const DEFAULT_SUPER_USER_FOR_ADMIN_ID: UserId = UserId::new(3);
 
-pub const NON_RESERVED_USER_ID: i32 = 11;
+pub const NON_RESERVED_USER_ID: UserId = UserId::new(11);
 
 pub const MAX_SYS_CATALOG_NUM: i32 = 5000;
 pub const SYS_CATALOG_START_ID: i32 = i32::MAX - MAX_SYS_CATALOG_NUM;
 
-pub const OBJECT_ID_PLACEHOLDER: u32 = u32::MAX - 1;
+pub use risingwave_pb::id::OBJECT_ID_PLACEHOLDER;
 
 pub const SYSTEM_SCHEMAS: [&str; 3] = [
     PG_CATALOG_SCHEMA_NAME,
@@ -127,6 +127,10 @@ pub const USER_COLUMN_ID_OFFSET: i32 = ROW_ID_COLUMN_ID.next().get_id();
 pub const RW_TIMESTAMP_COLUMN_NAME: &str = "_rw_timestamp";
 pub const RW_TIMESTAMP_COLUMN_ID: ColumnId = ColumnId::new(-1);
 
+/// The column name for the projected row ID in `ProjectSet`.
+/// This is a hidden column used to track row indices when expanding set-returning functions.
+pub const PROJECTED_ROW_ID_COLUMN_NAME: &str = "_rw_projected_row_id";
+
 pub const ICEBERG_SEQUENCE_NUM_COLUMN_NAME: &str = "_iceberg_sequence_number";
 pub const ICEBERG_FILE_PATH_COLUMN_NAME: &str = "_iceberg_file_path";
 pub const ICEBERG_FILE_POS_COLUMN_NAME: &str = "_iceberg_file_pos";
@@ -137,6 +141,9 @@ pub const CDC_OFFSET_COLUMN_NAME: &str = "_rw_offset";
 pub const CDC_SOURCE_COLUMN_NUM: u32 = 3;
 pub const CDC_TABLE_NAME_COLUMN_NAME: &str = "_rw_table_name";
 
+pub const ICEBERG_SOURCE_PREFIX: &str = "__iceberg_source_";
+pub const ICEBERG_SINK_PREFIX: &str = "__iceberg_sink_";
+
 /// The local system catalog reader in the frontend node.
 pub trait SysCatalogReader: Sync + Send + 'static {
     /// Reads the data of the system catalog table.
@@ -144,134 +151,6 @@ pub trait SysCatalogReader: Sync + Send + 'static {
 }
 
 pub type SysCatalogReaderRef = Arc<dyn SysCatalogReader>;
-
-pub type ObjectId = u32;
-
-#[derive(Clone, Debug, Default, Display, Hash, PartialOrd, PartialEq, Eq, Copy)]
-#[display("{database_id}")]
-pub struct DatabaseId {
-    pub database_id: u32,
-}
-
-impl DatabaseId {
-    pub const fn new(database_id: u32) -> Self {
-        DatabaseId { database_id }
-    }
-
-    pub fn placeholder() -> Self {
-        DatabaseId {
-            database_id: OBJECT_ID_PLACEHOLDER,
-        }
-    }
-}
-
-impl From<u32> for DatabaseId {
-    fn from(id: u32) -> Self {
-        Self::new(id)
-    }
-}
-
-impl From<&u32> for DatabaseId {
-    fn from(id: &u32) -> Self {
-        Self::new(*id)
-    }
-}
-
-impl From<DatabaseId> for u32 {
-    fn from(id: DatabaseId) -> Self {
-        id.database_id
-    }
-}
-
-#[derive(Clone, Debug, Default, Display, Hash, PartialOrd, PartialEq, Eq)]
-#[display("{schema_id}")]
-pub struct SchemaId {
-    pub schema_id: u32,
-}
-
-impl SchemaId {
-    pub fn new(schema_id: u32) -> Self {
-        SchemaId { schema_id }
-    }
-
-    pub fn placeholder() -> Self {
-        SchemaId {
-            schema_id: OBJECT_ID_PLACEHOLDER,
-        }
-    }
-}
-
-impl From<u32> for SchemaId {
-    fn from(id: u32) -> Self {
-        Self::new(id)
-    }
-}
-
-impl From<&u32> for SchemaId {
-    fn from(id: &u32) -> Self {
-        Self::new(*id)
-    }
-}
-
-impl From<SchemaId> for u32 {
-    fn from(id: SchemaId) -> Self {
-        id.schema_id
-    }
-}
-
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    Display,
-    Default,
-    Hash,
-    PartialOrd,
-    PartialEq,
-    Eq,
-    Ord,
-    Serialize,
-    Deserialize,
-)]
-#[display("{table_id}")]
-pub struct TableId {
-    pub table_id: u32,
-}
-
-impl TableId {
-    pub const fn new(table_id: u32) -> Self {
-        TableId { table_id }
-    }
-
-    /// Sometimes the id field is filled later, we use this value for better debugging.
-    pub const fn placeholder() -> Self {
-        TableId {
-            table_id: OBJECT_ID_PLACEHOLDER,
-        }
-    }
-
-    pub fn table_id(&self) -> u32 {
-        self.table_id
-    }
-}
-
-impl From<u32> for TableId {
-    fn from(id: u32) -> Self {
-        Self::new(id)
-    }
-}
-
-impl From<&u32> for TableId {
-    fn from(id: &u32) -> Self {
-        Self::new(*id)
-    }
-}
-
-impl From<TableId> for u32 {
-    fn from(id: TableId) -> Self {
-        id.table_id
-    }
-}
 
 #[derive(Clone, Debug, PartialEq, Default, Copy)]
 pub struct TableOption {
@@ -298,181 +177,6 @@ impl TableOption {
     pub fn new(retention_seconds: Option<u32>) -> Self {
         // now we only support ttl for TableOption
         TableOption { retention_seconds }
-    }
-}
-
-#[derive(Clone, Copy, Debug, Display, Default, Hash, PartialOrd, PartialEq, Eq)]
-#[display("{index_id}")]
-pub struct IndexId {
-    pub index_id: u32,
-}
-
-impl IndexId {
-    pub const fn new(index_id: u32) -> Self {
-        IndexId { index_id }
-    }
-
-    /// Sometimes the id field is filled later, we use this value for better debugging.
-    pub const fn placeholder() -> Self {
-        IndexId {
-            index_id: OBJECT_ID_PLACEHOLDER,
-        }
-    }
-
-    pub fn index_id(&self) -> u32 {
-        self.index_id
-    }
-}
-
-impl From<u32> for IndexId {
-    fn from(id: u32) -> Self {
-        Self::new(id)
-    }
-}
-impl From<IndexId> for u32 {
-    fn from(id: IndexId) -> Self {
-        id.index_id
-    }
-}
-
-#[derive(Clone, Copy, Debug, Display, Default, Hash, PartialOrd, PartialEq, Eq, Ord)]
-pub struct FunctionId(pub u32);
-
-impl FunctionId {
-    pub const fn new(id: u32) -> Self {
-        FunctionId(id)
-    }
-
-    pub const fn placeholder() -> Self {
-        FunctionId(OBJECT_ID_PLACEHOLDER)
-    }
-
-    pub fn function_id(&self) -> u32 {
-        self.0
-    }
-}
-
-impl From<u32> for FunctionId {
-    fn from(id: u32) -> Self {
-        Self::new(id)
-    }
-}
-
-impl From<&u32> for FunctionId {
-    fn from(id: &u32) -> Self {
-        Self::new(*id)
-    }
-}
-
-impl From<FunctionId> for u32 {
-    fn from(id: FunctionId) -> Self {
-        id.0
-    }
-}
-
-#[derive(Clone, Copy, Debug, Display, Default, Hash, PartialOrd, PartialEq, Eq, Ord)]
-#[display("{user_id}")]
-pub struct UserId {
-    pub user_id: u32,
-}
-
-impl UserId {
-    pub const fn new(user_id: u32) -> Self {
-        UserId { user_id }
-    }
-
-    pub const fn placeholder() -> Self {
-        UserId {
-            user_id: OBJECT_ID_PLACEHOLDER,
-        }
-    }
-}
-
-impl From<u32> for UserId {
-    fn from(id: u32) -> Self {
-        Self::new(id)
-    }
-}
-
-impl From<&u32> for UserId {
-    fn from(id: &u32) -> Self {
-        Self::new(*id)
-    }
-}
-
-impl From<UserId> for u32 {
-    fn from(id: UserId) -> Self {
-        id.user_id
-    }
-}
-
-#[derive(Clone, Copy, Debug, Display, Default, Hash, PartialOrd, PartialEq, Eq, Ord)]
-pub struct ConnectionId(pub u32);
-
-impl ConnectionId {
-    pub const fn new(id: u32) -> Self {
-        ConnectionId(id)
-    }
-
-    pub const fn placeholder() -> Self {
-        ConnectionId(OBJECT_ID_PLACEHOLDER)
-    }
-
-    pub fn connection_id(&self) -> u32 {
-        self.0
-    }
-}
-
-impl From<u32> for ConnectionId {
-    fn from(id: u32) -> Self {
-        Self::new(id)
-    }
-}
-
-impl From<&u32> for ConnectionId {
-    fn from(id: &u32) -> Self {
-        Self::new(*id)
-    }
-}
-
-impl From<ConnectionId> for u32 {
-    fn from(id: ConnectionId) -> Self {
-        id.0
-    }
-}
-
-#[derive(Clone, Copy, Debug, Display, Default, Hash, PartialOrd, PartialEq, Eq, Ord)]
-pub struct SecretId(pub u32);
-
-impl SecretId {
-    pub const fn new(id: u32) -> Self {
-        SecretId(id)
-    }
-
-    pub const fn placeholder() -> Self {
-        SecretId(OBJECT_ID_PLACEHOLDER)
-    }
-
-    pub fn secret_id(&self) -> u32 {
-        self.0
-    }
-}
-
-impl From<u32> for SecretId {
-    fn from(id: u32) -> Self {
-        Self::new(id)
-    }
-}
-
-impl From<&u32> for SecretId {
-    fn from(id: &u32) -> Self {
-        Self::new(*id)
-    }
-}
-
-impl From<SecretId> for u32 {
-    fn from(id: SecretId) -> Self {
-        id.0
     }
 }
 
@@ -581,16 +285,11 @@ impl StreamJobStatus {
     }
 }
 
-#[derive(Clone, Copy, Debug, Display, Hash, PartialOrd, PartialEq, Eq, Ord)]
+#[derive(Clone, Copy, Debug, Display, Hash, PartialOrd, PartialEq, Eq, Ord, Default)]
 pub enum CreateType {
+    #[default]
     Foreground,
     Background,
-}
-
-impl Default for CreateType {
-    fn default() -> Self {
-        Self::Foreground
-    }
 }
 
 impl CreateType {
@@ -637,7 +336,8 @@ macro_rules! for_all_fragment_type_flags {
                 CrossDbSnapshotBackfillStreamScan,
                 StreamCdcScan,
                 VectorIndexWrite,
-                UpstreamSinkUnion
+                UpstreamSinkUnion,
+                LocalityProvider
             },
             {},
             0
@@ -891,6 +591,11 @@ mod tests {
                     UpstreamSinkUnion,
                     65536,
                     "UPSTREAM_SINK_UNION",
+                ),
+                (
+                    LocalityProvider,
+                    131072,
+                    "LOCALITY_PROVIDER",
                 ),
             ]
         "#]]

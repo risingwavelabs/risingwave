@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -63,7 +63,7 @@ impl LogicalKafkaScan {
         };
 
         if let Some(exprs) = &logical_source.output_exprs {
-            LogicalProject::create(kafka_scan.into(), exprs.to_vec())
+            LogicalProject::create(kafka_scan.into(), exprs.clone())
         } else {
             kafka_scan.into()
         }

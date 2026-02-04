@@ -1,17 +1,17 @@
-//  Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
-//  Licensed under the Apache License, Version 2.0 (the "License");
-//  you may not use this file except in compliance with the License.
-//  You may obtain a copy of the License at
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
 //
-//  http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
-//  Unless required by applicable law or agreed to in writing, software
-//  distributed under the License is distributed on an "AS IS" BASIS,
-//  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-//  See the License for the specific language governing permissions and
-//  limitations under the License.
-//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 // Copyright (c) 2011-present, Facebook, Inc.  All rights reserved.
 // This source code is licensed under both the GPLv2 (found in the
 // COPYING file in the root directory) and Apache 2.0 License
@@ -945,17 +945,13 @@ impl<K: LruKey + Clone + 'static, T: LruValue + 'static> Drop for CleanCacheGuar
 /// `lookup_with_request_dedup` which will return a `LookupResponse` which contains
 /// `Receiver<CacheableEntry<K, T>>` or `JoinHandle<Result<CacheableEntry<K, T>, E>>` when cache hit
 /// does not happen.
+#[derive(Default)]
 pub enum LookupResponse<K: LruKey + Clone + 'static, T: LruValue + 'static, E> {
+    #[default]
     Invalid,
     Cached(CacheableEntry<K, T>),
     WaitPendingRequest(Receiver<CacheableEntry<K, T>>),
     Miss(JoinHandle<Result<CacheableEntry<K, T>, E>>),
-}
-
-impl<K: LruKey + Clone + 'static, T: LruValue + 'static, E> Default for LookupResponse<K, T, E> {
-    fn default() -> Self {
-        Self::Invalid
-    }
 }
 
 impl<K: LruKey + Clone + 'static, T: LruValue + 'static, E: From<RecvError>> Future

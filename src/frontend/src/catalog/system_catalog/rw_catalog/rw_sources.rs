@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,10 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::catalog::SecretId;
+use risingwave_common::id::{ConnectionId, SchemaId, SourceId, TableId, UserId};
 use risingwave_common::types::{Fields, JsonbVal, Timestamptz};
 use risingwave_frontend_macro::system_catalog;
-use risingwave_pb::user::grant_privilege::Object;
 use serde_json::{Map as JsonMap, json};
 
 use crate::WithOptionsSecResolved;
@@ -27,17 +26,17 @@ use crate::handler::create_source::UPSTREAM_SOURCE_KEY;
 #[derive(Fields)]
 struct RwSource {
     #[primary_key]
-    id: i32,
+    id: SourceId,
     name: String,
-    schema_id: i32,
-    owner: i32,
+    schema_id: SchemaId,
+    owner: UserId,
     connector: String,
     columns: Vec<String>,
     format: Option<String>,
     row_encode: Option<String>,
     append_only: bool,
-    associated_table_id: Option<i32>,
-    connection_id: Option<i32>,
+    associated_table_id: Option<TableId>,
+    connection_id: Option<ConnectionId>,
     definition: String,
     acl: Vec<String>,
     initialized_at: Option<Timestamptz>,
@@ -67,10 +66,10 @@ fn read_rw_sources_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwSource>> 
                     source.info.format_encode_secret_refs.clone(),
                 );
                 RwSource {
-                    id: source.id as i32,
+                    id: source.id,
                     name: source.name.clone(),
-                    schema_id: schema.id() as i32,
-                    owner: source.owner as i32,
+                    schema_id: schema.id(),
+                    owner: source.owner,
                     connector: source
                         .with_properties
                         .get(UPSTREAM_SOURCE_KEY)
@@ -89,10 +88,10 @@ fn read_rw_sources_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwSource>> 
                         .ok()
                         .map(|row_encode| row_encode.as_str_name().into()),
                     append_only: source.append_only,
-                    associated_table_id: source.associated_table_id.map(|id| id.table_id as i32),
-                    connection_id: source.connection_id.map(|id| id as i32),
+                    associated_table_id: source.associated_table_id,
+                    connection_id: source.connection_id,
                     definition: source.create_sql_purified(),
-                    acl: get_acl_items(&Object::SourceId(source.id), false, &users, username_map),
+                    acl: get_acl_items(source.id, false, &users, username_map),
                     initialized_at: source.initialized_at_epoch.map(|e| e.as_timestamptz()),
                     created_at: source.created_at_epoch.map(|e| e.as_timestamptz()),
                     initialized_at_cluster_version: source.initialized_at_cluster_version.clone(),
@@ -134,9 +133,9 @@ pub fn serialize_props_with_secret(
         let secret = catalog_reader
             .iter_schemas(db_name)
             .unwrap()
-            .find_map(|schema| schema.get_secret_by_id(&SecretId(v.secret_id)));
+            .find_map(|schema| schema.get_secret_by_id(v.secret_id));
         let secret_name = secret
-            .map(|s| s.name.to_owned())
+            .map(|s| s.name.clone())
             .unwrap_or("not found".to_owned());
         result.insert(
             k,

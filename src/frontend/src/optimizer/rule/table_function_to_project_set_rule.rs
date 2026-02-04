@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use itertools::Itertools;
-use risingwave_common::catalog::Schema;
 use risingwave_common::types::DataType;
 
 use super::prelude::{PlanRef, *};
@@ -48,11 +47,7 @@ impl Rule<Logical> for TableFunctionToProjectSetRule {
         let table_function =
             ExprImpl::TableFunction(logical_table_function.table_function().clone().into());
         let table_function_return_type = table_function.return_type();
-        let logical_values = LogicalValues::create(
-            vec![vec![]],
-            Schema::new(vec![]),
-            logical_table_function.base.ctx().clone(),
-        );
+        let logical_values = LogicalValues::create_empty_scalar(logical_table_function.base.ctx());
         let logical_project_set = LogicalProjectSet::create(logical_values, vec![table_function]);
         // We need a project to align schema type because
         // 1. `LogicalProjectSet` has a hidden column `projected_row_id` (0-th col)

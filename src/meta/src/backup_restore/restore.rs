@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -146,7 +146,7 @@ async fn restore_impl(
         Some(b) => b,
     };
     let target_id = opts.meta_snapshot_id;
-    let snapshot_list = &backup_store.manifest().snapshot_metadata;
+    let snapshot_list = &backup_store.manifest().await.snapshot_metadata;
     let snapshot = match snapshot_list.iter().find(|m| m.id == target_id) {
         None => {
             return Err(BackupError::Other(anyhow::anyhow!(
@@ -177,7 +177,7 @@ async fn restore_impl(
             target_id,
             &opts,
             LoaderV2::new(backup_store),
-            WriterModelV2ToMetaStoreV2::new(meta_store.to_owned()),
+            WriterModelV2ToMetaStoreV2::new(meta_store),
         )
         .await?;
     }
@@ -201,6 +201,25 @@ async fn dispatch<L: Loader<S>, W: Writer<S>, S: Metadata>(
 
     // Restore meta store.
     let target_snapshot = loader.load(target_id).await?;
+    if !opts.overwrite_hummock_storage_endpoint {
+        let storage_url = target_snapshot.metadata.storage_url()?;
+        if storage_url != opts.hummock_storage_url {
+            return Err(BackupError::Other(anyhow::anyhow!(
+                "storage_url mismatch: {} {}",
+                storage_url,
+                opts.hummock_storage_url
+            )));
+        }
+        let storage_directory = target_snapshot.metadata.storage_directory()?;
+        if storage_directory != opts.hummock_storage_directory {
+            return Err(BackupError::Other(anyhow::anyhow!(
+                "storage_directory mismatch: {} {}",
+                storage_directory,
+                opts.hummock_storage_directory
+            )));
+        }
+    }
+
     if opts.dry_run {
         tracing::info!("Complete dry run.");
         return Ok(());

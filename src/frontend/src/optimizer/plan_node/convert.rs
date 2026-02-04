@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -61,6 +61,22 @@ pub trait ToStream {
     }
 }
 
+/// Try to enforce the locality requirement on the given columns.
+/// If a better plan can be found, return the better plan.
+/// If no better plan can be found, and locality backfill is enabled, wrap the plan
+/// with `LogicalLocalityProvider`.
+/// Otherwise, return the plan as is.
+pub fn try_enforce_locality_requirement(plan: LogicalPlanRef, columns: &[usize]) -> LogicalPlanRef {
+    assert!(!columns.is_empty());
+    if let Some(better_plan) = plan.try_better_locality(columns) {
+        better_plan
+    } else if plan.ctx().session_ctx().config().enable_locality_backfill() {
+        LogicalLocalityProvider::new(plan, columns.to_owned()).into()
+    } else {
+        plan
+    }
+}
+
 pub fn stream_enforce_eowc_requirement(
     ctx: OptimizerContextRef,
     plan: StreamPlanRef,
@@ -117,31 +133,47 @@ impl RewriteStreamContext {
     }
 }
 
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub enum BackfillType {
+    UpstreamOnly,
+    Backfill,
+    ArrangementBackfill,
+    SnapshotBackfill,
+}
+
+impl BackfillType {
+    pub fn to_stream_scan_type(self) -> StreamScanType {
+        match self {
+            BackfillType::UpstreamOnly => StreamScanType::UpstreamOnly,
+            BackfillType::Backfill => StreamScanType::Backfill,
+            BackfillType::ArrangementBackfill => StreamScanType::ArrangementBackfill,
+            BackfillType::SnapshotBackfill => StreamScanType::SnapshotBackfill,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct ToStreamContext {
     share_to_stream_map: HashMap<PlanNodeId, StreamPlanRef>,
     emit_on_window_close: bool,
-    stream_scan_type: StreamScanType,
+    backfill_type: BackfillType,
 }
 
 impl ToStreamContext {
     pub fn new(emit_on_window_close: bool) -> Self {
-        Self::new_with_stream_scan_type(emit_on_window_close, StreamScanType::Backfill)
+        Self::new_with_backfill_type(emit_on_window_close, BackfillType::Backfill)
     }
 
-    pub fn new_with_stream_scan_type(
-        emit_on_window_close: bool,
-        stream_scan_type: StreamScanType,
-    ) -> Self {
+    pub fn new_with_backfill_type(emit_on_window_close: bool, backfill_type: BackfillType) -> Self {
         Self {
             share_to_stream_map: HashMap::new(),
             emit_on_window_close,
-            stream_scan_type,
+            backfill_type,
         }
     }
 
-    pub fn stream_scan_type(&self) -> StreamScanType {
-        self.stream_scan_type
+    pub fn backfill_type(&self) -> BackfillType {
+        self.backfill_type
     }
 
     pub fn add_to_stream_result(&mut self, plan_node_id: PlanNodeId, plan_ref: StreamPlanRef) {

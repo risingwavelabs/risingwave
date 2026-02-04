@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,9 +16,13 @@ use std::rc::Rc;
 
 use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::bail;
-use risingwave_common::catalog::ColumnCatalog;
+use risingwave_common::catalog::{
+    ColumnCatalog, ICEBERG_FILE_PATH_COLUMN_NAME, ICEBERG_FILE_POS_COLUMN_NAME,
+    ICEBERG_SEQUENCE_NUM_COLUMN_NAME, ROW_ID_COLUMN_NAME,
+};
 use risingwave_pb::plan_common::GeneratedColumnDesc;
 use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
+use risingwave_pb::plan_common::source_refresh_mode::RefreshMode;
 use risingwave_sqlparser::ast::AsOf;
 
 use super::generic::{GenericPlanRef, SourceNodeKind};
@@ -181,18 +185,19 @@ impl LogicalSource {
         let mut plan;
         if core.is_new_fs_connector() {
             plan = Self::create_list_plan(core.clone(), true)?;
-            plan = StreamFsFetch::new(plan, core.clone()).into();
-        } else if core.is_iceberg_connector() {
+            plan = StreamFsFetch::new(plan, core).into();
+        } else if core.is_iceberg_connector() || core.is_batch_connector() {
             plan = Self::create_list_plan(core.clone(), false)?;
-            plan = StreamFsFetch::new(plan, core.clone()).into();
+            plan = StreamFsFetch::new(plan, core).into();
         } else {
-            plan = StreamSource::new(core.clone()).into()
+            plan = StreamSource::new(core).into()
         }
         Ok(plan)
     }
 
     /// `StreamSource` (list) -> shuffle -> (optional) `StreamDedup`
     fn create_list_plan(core: generic::Source, dedup: bool) -> Result<StreamPlanRef> {
+        let downstream_columns = core.column_catalog.clone();
         let logical_source = generic::Source::file_list_node(core);
         let mut list_plan: StreamPlanRef = StreamSource {
             base: PlanBase::new_stream_with_core(
@@ -204,6 +209,7 @@ impl LogicalSource {
                 MonotonicityMap::new(),
             ),
             core: logical_source,
+            downstream_columns: Some(downstream_columns),
         }
         .into();
         list_plan = RequiredDist::shard_by_key(list_plan.schema().len(), &[0])
@@ -237,6 +243,103 @@ impl LogicalSource {
             as_of,
         )
     }
+
+    fn prune_col_for_iceberg_source(&self, required_cols: &[usize]) -> PlanRef {
+        assert!(self.core.is_iceberg_connector());
+        // Iceberg source supports column pruning at source level
+        // Schema invariant: [table columns] + [_iceberg_sequence_number, _iceberg_file_path, _iceberg_file_pos, _row_id]
+        // The last 4 columns are always: 3 iceberg hidden columns + _row_id
+
+        let schema_len = self.schema().len();
+        assert!(
+            schema_len >= 4,
+            "Iceberg source must have at least 4 columns (3 iceberg hidden + 1 row_id)"
+        );
+
+        assert_eq!(
+            self.core.column_catalog[schema_len - 4].name(),
+            ICEBERG_SEQUENCE_NUM_COLUMN_NAME
+        );
+        assert_eq!(
+            self.core.column_catalog[schema_len - 3].name(),
+            ICEBERG_FILE_PATH_COLUMN_NAME
+        );
+        assert_eq!(
+            self.core.column_catalog[schema_len - 2].name(),
+            ICEBERG_FILE_POS_COLUMN_NAME
+        );
+        assert_eq!(
+            self.core.column_catalog[schema_len - 1].name(),
+            ROW_ID_COLUMN_NAME
+        );
+        assert_eq!(self.output_row_id_index, Some(self.schema().len() - 1));
+
+        let iceberg_start_idx = schema_len - 4;
+        let row_id_idx = schema_len - 1;
+
+        // Build source_cols: table columns from required_cols + always keep last 4 columns
+        let mut source_cols = Vec::new();
+
+        // Collect table columns (before the last 4 columns) from required_cols
+        for &idx in required_cols {
+            if idx < iceberg_start_idx {
+                // Regular table column
+                source_cols.push(idx);
+            }
+        }
+
+        // Always append the last 4 columns: [_iceberg_sequence_number, _iceberg_file_path, _iceberg_file_pos, _row_id]
+        source_cols.extend([
+            iceberg_start_idx,
+            iceberg_start_idx + 1,
+            iceberg_start_idx + 2,
+            row_id_idx,
+        ]);
+
+        // Clone with pruned columns - source_cols is never empty (always has last 4 columns)
+        let mut core = self.core.clone();
+        core.column_catalog = source_cols
+            .iter()
+            .map(|idx| core.column_catalog[*idx].clone())
+            .collect();
+        // row_id is always at the last position in the pruned schema
+        core.row_id_index = Some(source_cols.len() - 1);
+
+        let base = PlanBase::new_logical_with_core(&core);
+        let output_exprs =
+            Self::derive_output_exprs_from_generated_columns(&core.column_catalog).unwrap();
+        let (core, _) = core.exclude_generated_columns();
+
+        let pruned_source = LogicalSource {
+            base,
+            core,
+            output_exprs,
+            output_row_id_index: Some(source_cols.len() - 1),
+        };
+
+        // Build mapping from original schema indices to pruned schema indices
+        let mut old_to_new = vec![None; self.schema().len()];
+        for (new_idx, &old_idx) in source_cols.iter().enumerate() {
+            old_to_new[old_idx] = Some(new_idx);
+        }
+
+        // Map required_cols to indices in the pruned schema
+        let new_required: Vec<_> = required_cols
+            .iter()
+            .map(|&old_idx| old_to_new[old_idx].unwrap())
+            .collect();
+
+        let mapping =
+            ColIndexMapping::with_remaining_columns(&new_required, pruned_source.schema().len());
+        LogicalProject::with_mapping(pruned_source.into(), mapping).into()
+    }
+
+    pub fn is_shared_source(&self) -> bool {
+        // Create MV on source.
+        // We only check streaming_use_shared_source is true when `CREATE SOURCE`.
+        // The value does not affect the behavior of `CREATE MATERIALIZED VIEW` here.
+        self.source_catalog().is_some_and(|c| c.info.is_shared())
+    }
 }
 
 impl_plan_tree_node_for_leaf! { Logical, LogicalSource}
@@ -246,6 +349,7 @@ impl Distill for LogicalSource {
             let src = Pretty::from(catalog.name.clone());
             let mut fields = vec![
                 ("source", src),
+                ("is_shared", Pretty::debug(&catalog.info.is_shared())),
                 ("columns", column_names_pretty(self.schema())),
             ];
             if let Some(as_of) = &self.core.as_of {
@@ -261,9 +365,20 @@ impl Distill for LogicalSource {
 
 impl ColPrunable for LogicalSource {
     fn prune_col(&self, required_cols: &[usize], _ctx: &mut ColumnPruningContext) -> PlanRef {
-        // TODO: iceberg source can prune columns
-        let mapping = ColIndexMapping::with_remaining_columns(required_cols, self.schema().len());
-        LogicalProject::with_mapping(self.clone().into(), mapping).into()
+        let is_refreshable_iceberg = self.source_catalog().is_some_and(|catalog| {
+            catalog.refresh_mode.is_some_and(|refresh_mode| {
+                matches!(refresh_mode.refresh_mode, Some(RefreshMode::FullReload(_)))
+            })
+        }); // for refreshable iceberg table, we does not expose iceberg hidden columns to the user
+
+        if self.core.is_iceberg_connector() && !is_refreshable_iceberg {
+            self.prune_col_for_iceberg_source(required_cols)
+        } else {
+            // For other sources, use a LogicalProject to prune columns
+            let mapping =
+                ColIndexMapping::with_remaining_columns(required_cols, self.schema().len());
+            LogicalProject::with_mapping(self.clone().into(), mapping).into()
+        }
     }
 }
 
@@ -319,7 +434,7 @@ impl ToBatch for LogicalSource {
         let mut plan = BatchSource::new(self.core.clone()).into();
 
         if let Some(exprs) = &self.output_exprs {
-            let logical_project = generic::Project::new(exprs.to_vec(), plan);
+            let logical_project = generic::Project::new(exprs.clone(), plan);
             plan = BatchProject::new(logical_project).into();
         }
 
@@ -341,11 +456,7 @@ impl ToStream for LogicalSource {
                 plan = Self::create_non_shared_source_plan(self.core.clone())?;
             }
             SourceNodeKind::CreateMViewOrBatch => {
-                // Create MV on source.
-                // We only check streaming_use_shared_source is true when `CREATE SOURCE`.
-                // The value does not affect the behavior of `CREATE MATERIALIZED VIEW` here.
-                let use_shared_source = self.source_catalog().is_some_and(|c| c.info.is_shared());
-                if use_shared_source {
+                if self.is_shared_source() {
                     plan = StreamSourceScan::new(self.core.clone()).into();
                 } else {
                     // non-shared source
@@ -353,7 +464,7 @@ impl ToStream for LogicalSource {
                 }
 
                 if let Some(exprs) = &self.output_exprs {
-                    let logical_project = generic::Project::new(exprs.to_vec(), plan);
+                    let logical_project = generic::Project::new(exprs.clone(), plan);
                     plan = StreamProject::new(logical_project).into();
                 }
 

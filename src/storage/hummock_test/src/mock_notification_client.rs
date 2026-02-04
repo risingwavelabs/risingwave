@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,6 +15,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use risingwave_common::id::WorkerId;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common_service::{Channel, NotificationClient, ObserverError};
 use risingwave_meta::controller::cluster::ClusterControllerRef;
@@ -67,6 +68,7 @@ impl NotificationClient for MockNotificationClient {
             hummock_write_limits: Some(WriteLimits {
                 write_limits: HashMap::new(),
             }),
+            cluster_resource: Some(Default::default()),
             ..Default::default()
         };
 
@@ -81,7 +83,7 @@ pub async fn get_notification_client_for_test(
     env: MetaSrvEnv,
     hummock_manager_ref: Arc<HummockManager>,
     cluster_controller_ref: ClusterControllerRef,
-    worker_id: i32,
+    worker_id: WorkerId,
 ) -> MockNotificationClient {
     let worker_node = cluster_controller_ref
         .get_worker_by_id(worker_id)

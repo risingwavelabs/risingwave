@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -64,6 +64,18 @@ impl Binder {
             }
             return Ok(Relation::WindowTableFunction(Box::new(
                 self.bind_window_table_function(alias, kind, args)?,
+            )));
+        }
+        // gap_fill
+        if func_name.eq_ignore_ascii_case("gap_fill") {
+            if with_ordinality {
+                return Err(ErrorCode::InvalidInputSyntax(
+                    "WITH ORDINALITY for gap_fill".to_owned(),
+                )
+                .into());
+            }
+            return Ok(Relation::GapFill(Box::new(
+                self.bind_gap_fill(alias, args)?,
             )));
         }
         // watermark

@@ -46,6 +46,11 @@ primary key id NULL NULL
 distribution key id NULL NULL
 table description rw_customers NULL NULL
 
+query IT retry 4 backoff 1s
+select id,name from rw_customers order by id;
+----
+1 John
+2 Doe
 
 # add column
 system ok
@@ -55,10 +60,9 @@ mysql -e "
   ALTER TABLE customers ADD COLUMN v2 double(5,2) DEFAULT 88.9;
 "
 
-sleep 3s
 
 # Name, Type, Is Hidden, Description
-query TTTT
+query TTTT retry 4 backoff 1s
 describe rw_customers;
 ----
 id bigint false NULL
@@ -86,10 +90,9 @@ mysql -e "
   ALTER TABLE customers CHANGE COLUMN v2 v22 decimal(5,2);
 "
 
-sleep 3s
 
 # table schema unchanges, since we reject rename column
-query TTTT
+query TTTT retry 4 backoff 1s
 describe rw_customers;
 ----
 id bigint false NULL
@@ -120,10 +123,9 @@ mysql -e "
   ALTER TABLE customers DROP COLUMN v2;
 "
 
-sleep 3s
 
 # modified column should be dropped
-query TTTT
+query TTTT retry 4 backoff 1s
 describe rw_customers;
 ----
 id bigint false NULL

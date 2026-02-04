@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,7 +16,6 @@ use std::rc::Rc;
 
 use either::Either;
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_common::catalog::UserId;
 use risingwave_sqlparser::ast::CreateSubscriptionStatement;
 
 use super::{HandlerArgs, RwPgResponse};
@@ -39,9 +38,9 @@ pub fn create_subscription_catalog(
     let (table_schema_name, subscription_from_table_name) =
         Binder::resolve_schema_qualified_name(db_name, &stmt.subscription_from)?;
     let (table_database_id, table_schema_id) =
-        session.get_database_and_schema_id_for_create(table_schema_name.clone())?;
+        session.get_database_and_schema_id_for_create(table_schema_name)?;
     let (subscription_database_id, subscription_schema_id) =
-        session.get_database_and_schema_id_for_create(subscription_schema_name.clone())?;
+        session.get_database_and_schema_id_for_create(subscription_schema_name)?;
     let definition = context.normalized_sql().to_owned();
     let dependent_table_id = session
         .get_table_by_name(
@@ -59,7 +58,7 @@ pub fn create_subscription_catalog(
         database_id: subscription_database_id,
         schema_id: subscription_schema_id,
         dependent_table_id,
-        owner: UserId::new(session.user_id()),
+        owner: session.user_id(),
         initialized_at_epoch: None,
         created_at_epoch: None,
         created_at_cluster_version: None,
@@ -87,7 +86,7 @@ pub async fn handle_create_subscription(
     };
     let subscription_catalog = {
         let context = Rc::new(OptimizerContext::from_handler_args(handle_args));
-        create_subscription_catalog(&session, context.clone(), stmt)?
+        create_subscription_catalog(&session, context, stmt)?
     };
 
     let _job_guard =

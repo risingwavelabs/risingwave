@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -24,18 +24,17 @@
 #![feature(type_changing_struct_update)]
 #![test_runner(risingwave_test_runner::test_runner::run_failpont_tests)]
 #![feature(assert_matches)]
-#![feature(btree_extract_if)]
 #![feature(exact_size_is_empty)]
 #![feature(coverage_attribute)]
 #![recursion_limit = "256"]
 #![feature(error_generic_member_access)]
-#![feature(let_chains)]
 #![feature(impl_trait_in_assoc_type)]
 #![feature(maybe_uninit_array_assume_init)]
 #![feature(iter_from_coroutine)]
 #![feature(get_mut_unchecked)]
 #![feature(portable_simd)]
 #![feature(map_try_insert)]
+#![feature(never_type)]
 
 pub mod hummock;
 pub mod memory;

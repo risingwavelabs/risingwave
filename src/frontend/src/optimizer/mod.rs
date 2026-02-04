@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -31,10 +31,12 @@ mod plan_rewriter;
 
 mod plan_visitor;
 
+#[cfg(feature = "datafusion")]
+pub use plan_visitor::DataFusionExecuteCheckerExt;
 pub use plan_visitor::{
-    ExecutionModeDecider, PlanVisitor, ReadStorageTableVisitor, RelationCollectorVisitor,
-    SysTableVisitor,
+    ExecutionModeDecider, PlanVisitor, RelationCollectorVisitor, SysTableVisitor,
 };
+use risingwave_pb::plan_common::source_refresh_mode::RefreshMode;
 
 pub mod backfill_order_strategy;
 mod logical_optimization;
@@ -82,11 +84,13 @@ use crate::expr::TimestamptzExprFinder;
 use crate::handler::create_table::{CreateTableInfo, CreateTableProps};
 use crate::optimizer::plan_node::generic::{GenericPlanRef, SourceNodeKind, Union};
 use crate::optimizer::plan_node::{
-    Batch, BatchExchange, BatchPlanNodeType, BatchPlanRef, ConventionMarker, PlanTreeNode, Stream,
-    StreamExchange, StreamPlanRef, StreamUnion, StreamUpstreamSinkUnion, StreamVectorIndexWrite,
-    ToStream, VisitExprsRecursive,
+    BackfillType, Batch, BatchExchange, BatchPlanNodeType, BatchPlanRef, ConventionMarker,
+    PlanTreeNode, Stream, StreamExchange, StreamPlanRef, StreamUnion, StreamUpstreamSinkUnion,
+    StreamVectorIndexWrite, ToStream, VisitExprsRecursive,
 };
-use crate::optimizer::plan_visitor::{RwTimestampValidator, TemporalJoinValidator};
+use crate::optimizer::plan_visitor::{
+    LocalityProviderCounter, RwTimestampValidator, TemporalJoinValidator,
+};
 use crate::optimizer::property::Distribution;
 use crate::utils::{ColIndexMappingRewriteExt, WithOptionsSecResolved};
 
@@ -362,8 +366,9 @@ impl BatchOptimizedLogicalPlanRoot {
 
         #[cfg(debug_assertions)]
         InputRefValidator.validate(plan.clone());
-        assert!(
-            *plan.distribution() == Distribution::Single,
+        assert_eq!(
+            *plan.distribution(),
+            Distribution::Single,
             "{}",
             plan.explain_to_string()
         );
@@ -381,6 +386,62 @@ impl BatchOptimizedLogicalPlanRoot {
 
         Ok(self.into_phase(plan))
     }
+
+    #[cfg(feature = "datafusion")]
+    pub fn gen_datafusion_logical_plan(self) -> Result<Arc<datafusion::logical_expr::LogicalPlan>> {
+        use datafusion::logical_expr::{Expr as DFExpr, LogicalPlan, Projection, Sort};
+        use datafusion_common::Column;
+        use plan_visitor::LogicalPlanToDataFusionExt;
+
+        use crate::datafusion::{InputColumns, convert_column_order};
+
+        tracing::debug!(
+            "Converting RisingWave logical plan to DataFusion plan:\nRisingWave Plan: {:?}",
+            self.plan
+        );
+
+        let ctx = self.plan.ctx();
+        // Inline session timezone mainly for rewriting now()
+        let mut plan = inline_session_timezone_in_exprs(ctx, self.plan.clone())?;
+        plan = const_eval_exprs(plan)?;
+
+        let mut df_plan = plan.to_datafusion_logical_plan()?;
+
+        if !self.required_order.is_any() {
+            let input_columns = InputColumns::new(df_plan.schema().as_ref(), plan.schema());
+            let expr = self
+                .required_order
+                .column_orders
+                .iter()
+                .map(|column_order| convert_column_order(column_order, &input_columns))
+                .collect_vec();
+            df_plan = Arc::new(LogicalPlan::Sort(Sort {
+                expr,
+                input: df_plan,
+                fetch: None,
+            }));
+        }
+
+        if self.out_names.len() < df_plan.schema().fields().len() {
+            let df_schema = df_plan.schema().as_ref();
+            let projection_exprs = self
+                .out_fields
+                .ones()
+                .zip_eq_debug(self.out_names.iter())
+                .map(|(i, name)| {
+                    DFExpr::Column(Column::from(df_schema.qualified_field(i))).alias(name)
+                })
+                .collect_vec();
+            df_plan = Arc::new(LogicalPlan::Projection(Projection::try_new(
+                projection_exprs,
+                df_plan,
+            )?));
+        }
+
+        tracing::debug!("Converted DataFusion plan:\nDataFusion Plan: {:?}", df_plan);
+
+        Ok(df_plan)
+    }
 }
 
 impl BatchPlanRoot {
@@ -392,12 +453,6 @@ impl BatchPlanRoot {
         // Convert to distributed plan
         plan = plan.to_distributed_with_required(&self.required_order, &self.required_dist)?;
 
-        // Add Project if the any position of `self.out_fields` is set to zero.
-        if self.out_fields.count_ones(..) != self.out_fields.len() {
-            plan =
-                BatchProject::new(generic::Project::with_out_fields(plan, &self.out_fields)).into();
-        }
-
         let ctx = plan.ctx();
         if ctx.is_explain_trace() {
             ctx.trace("To Batch Distributed Plan:");
@@ -408,24 +463,16 @@ impl BatchPlanRoot {
                 BatchExchange::new(plan, self.required_order.clone(), Distribution::Single).into();
         }
 
+        // Add Project if the any position of `self.out_fields` is set to zero.
+        if self.out_fields.count_ones(..) != self.out_fields.len() {
+            plan =
+                BatchProject::new(generic::Project::with_out_fields(plan, &self.out_fields)).into();
+        }
+
         // Both two phase limit and topn could generate limit on top of the scan, so we push limit here.
         let plan = plan.optimize_by_rules(&OptimizationStage::new(
             "Push Limit To Scan",
             vec![BatchPushLimitToScanRule::create()],
-            ApplyOrder::BottomUp,
-        ))?;
-
-        let plan = plan.optimize_by_rules(&OptimizationStage::new(
-            "Iceberg Count Star",
-            vec![BatchIcebergCountStar::create()],
-            ApplyOrder::TopDown,
-        ))?;
-
-        // For iceberg scan, we do iceberg predicate pushdown
-        // BatchFilter -> BatchIcebergScan
-        let plan = plan.optimize_by_rules(&OptimizationStage::new(
-            "Iceberg Predicate Pushdown",
-            vec![BatchIcebergPredicatePushDownRule::create()],
             ApplyOrder::BottomUp,
         ))?;
 
@@ -469,11 +516,6 @@ impl BatchPlanRoot {
             ApplyOrder::BottomUp,
         ))?;
 
-        let plan = plan.optimize_by_rules(&OptimizationStage::new(
-            "Iceberg Count Star",
-            vec![BatchIcebergCountStar::create()],
-            ApplyOrder::TopDown,
-        ))?;
         Ok(plan)
     }
 }
@@ -485,25 +527,25 @@ impl LogicalPlanRoot {
         emit_on_window_close: bool,
         allow_snapshot_backfill: bool,
     ) -> Result<StreamOptimizedLogicalPlanRoot> {
-        let stream_scan_type = if allow_snapshot_backfill && self.should_use_snapshot_backfill() {
-            StreamScanType::SnapshotBackfill
+        let backfill_type = if allow_snapshot_backfill && self.should_use_snapshot_backfill() {
+            BackfillType::SnapshotBackfill
         } else if self.should_use_arrangement_backfill() {
-            StreamScanType::ArrangementBackfill
+            BackfillType::ArrangementBackfill
         } else {
-            StreamScanType::Backfill
+            BackfillType::Backfill
         };
-        self.gen_optimized_stream_plan_inner(emit_on_window_close, stream_scan_type)
+        self.gen_optimized_stream_plan_inner(emit_on_window_close, backfill_type)
     }
 
     fn gen_optimized_stream_plan_inner(
         self,
         emit_on_window_close: bool,
-        stream_scan_type: StreamScanType,
+        backfill_type: BackfillType,
     ) -> Result<StreamOptimizedLogicalPlanRoot> {
         let ctx = self.plan.ctx();
         let _explain_trace = ctx.is_explain_trace();
 
-        let optimized_plan = self.gen_stream_plan(emit_on_window_close, stream_scan_type)?;
+        let optimized_plan = self.gen_stream_plan(emit_on_window_close, backfill_type)?;
 
         let mut plan = optimized_plan
             .plan
@@ -581,6 +623,12 @@ impl LogicalPlanRoot {
             ).into());
         }
 
+        if ctx.session_ctx().config().enable_locality_backfill()
+            && LocalityProviderCounter::count(plan.clone()) > 5
+        {
+            risingwave_common::license::Feature::LocalityBackfill.check_available()?
+        }
+
         Ok(optimized_plan.into_phase(plan))
     }
 
@@ -588,7 +636,7 @@ impl LogicalPlanRoot {
     fn gen_stream_plan(
         self,
         emit_on_window_close: bool,
-        stream_scan_type: StreamScanType,
+        backfill_type: BackfillType,
     ) -> Result<StreamOptimizedLogicalPlanRoot> {
         let ctx = self.plan.ctx();
         let explain_trace = ctx.is_explain_trace();
@@ -653,9 +701,9 @@ impl LogicalPlanRoot {
                     out_col_change.rewrite_bitset(&optimized_plan.out_fields);
                 let mut plan = plan.to_stream_with_dist_required(
                     &optimized_plan.required_dist,
-                    &mut ToStreamContext::new_with_stream_scan_type(
+                    &mut ToStreamContext::new_with_backfill_type(
                         emit_on_window_close,
-                        stream_scan_type,
+                        backfill_type,
                     ),
                 )?;
                 plan = stream_enforce_eowc_requirement(ctx.clone(), plan, emit_on_window_close)?;
@@ -880,6 +928,12 @@ impl LogicalPlanRoot {
         )
         .into();
 
+        let ttl_watermark_indices = watermark_descs
+            .iter()
+            .filter(|d| d.with_ttl)
+            .map(|d| d.watermark_idx as usize)
+            .collect_vec();
+
         // Add WatermarkFilter node.
         if !watermark_descs.is_empty() {
             stream_plan = StreamWatermarkFilter::new(stream_plan, watermark_descs).into();
@@ -932,7 +986,17 @@ impl LogicalPlanRoot {
         // Determine if the table should be refreshable based on the connector type
         let refreshable = source_catalog
             .as_ref()
-            .map(|catalog| catalog.with_properties.is_batch_connector())
+            .map(|catalog| {
+                catalog.with_properties.is_batch_connector() || {
+                    matches!(
+                        catalog
+                            .refresh_mode
+                            .as_ref()
+                            .map(|refresh_mode| refresh_mode.refresh_mode),
+                        Some(Some(RefreshMode::FullReload(_)))
+                    )
+                }
+            })
             .unwrap_or(false);
 
         // Validate that refreshable tables have a user-defined primary key (i.e., does not have rowid)
@@ -956,6 +1020,7 @@ impl LogicalPlanRoot {
             conflict_behavior,
             version_column_indices,
             pk_column_indices,
+            ttl_watermark_indices,
             row_id_index,
             version,
             retention_seconds,
@@ -1037,7 +1102,7 @@ impl LogicalPlanRoot {
     }
 
     /// Optimize and generate a create sink plan.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub fn gen_sink_plan(
         self,
         sink_name: String,
@@ -1052,28 +1117,43 @@ impl LogicalPlanRoot {
         partition_info: Option<PartitionComputeInfo>,
         user_specified_columns: bool,
         auto_refresh_schema_from_table: Option<Arc<TableCatalog>>,
+        allow_snapshot_backfill: bool,
     ) -> Result<StreamSink> {
-        let stream_scan_type = if without_backfill {
-            StreamScanType::UpstreamOnly
-        } else if target_table.is_none() && self.should_use_snapshot_backfill() {
+        let backfill_type = if without_backfill {
+            BackfillType::UpstreamOnly
+        } else if allow_snapshot_backfill
+            && self.should_use_snapshot_backfill()
+            && {
+                if auto_refresh_schema_from_table.is_some() {
+                    self.plan.ctx().session_ctx().notice_to_user("Auto schema change only support for ArrangementBackfill. Switched to use ArrangementBackfill");
+                    false
+                } else {
+                    true
+                }
+            }
+        {
+            assert!(
+                target_table.is_none(),
+                "should not allow snapshot backfill for sink-into-table"
+            );
             // Snapshot backfill on sink-into-table is not allowed
-            StreamScanType::SnapshotBackfill
+            BackfillType::SnapshotBackfill
         } else if self.should_use_arrangement_backfill() {
-            StreamScanType::ArrangementBackfill
+            BackfillType::ArrangementBackfill
         } else {
-            StreamScanType::Backfill
+            BackfillType::Backfill
         };
         if auto_refresh_schema_from_table.is_some()
-            && stream_scan_type != StreamScanType::ArrangementBackfill
+            && backfill_type != BackfillType::ArrangementBackfill
         {
             return Err(ErrorCode::InvalidInputSyntax(format!(
                 "auto schema change only support for ArrangementBackfill, but got: {:?}",
-                stream_scan_type
+                backfill_type
             ))
             .into());
         }
         let stream_plan =
-            self.gen_optimized_stream_plan_inner(emit_on_window_close, stream_scan_type)?;
+            self.gen_optimized_stream_plan_inner(emit_on_window_close, backfill_type)?;
         let target_columns_to_plan_mapping = target_table.as_ref().map(|t| {
             let columns = t.columns_without_rw_timestamp();
             stream_plan.target_columns_to_plan_mapping(&columns, user_specified_columns)
@@ -1093,9 +1173,7 @@ impl LogicalPlanRoot {
             auto_refresh_schema_from_table,
         )
     }
-}
 
-impl<P: PlanPhase> PlanRoot<P> {
     pub fn should_use_arrangement_backfill(&self) -> bool {
         let ctx = self.plan.ctx();
         let session_ctx = ctx.session_ctx();
@@ -1108,13 +1186,28 @@ impl<P: PlanPhase> PlanRoot<P> {
     }
 
     pub fn should_use_snapshot_backfill(&self) -> bool {
-        self.plan
-            .ctx()
-            .session_ctx()
-            .config()
-            .streaming_use_snapshot_backfill()
+        let ctx = self.plan.ctx();
+        let session_ctx = ctx.session_ctx();
+        let use_snapshot_backfill = session_ctx
+            .env()
+            .streaming_config()
+            .developer
+            .enable_snapshot_backfill
+            && session_ctx.config().streaming_use_snapshot_backfill();
+        if use_snapshot_backfill {
+            if let Some(warning_msg) = self.plan.forbid_snapshot_backfill() {
+                self.plan.ctx().session_ctx().notice_to_user(warning_msg);
+                false
+            } else {
+                true
+            }
+        } else {
+            false
+        }
     }
+}
 
+impl<P: PlanPhase> PlanRoot<P> {
     /// used when the plan has a target relation such as DML and sink into table, return the mapping from table's columns to the plan's schema
     pub fn target_columns_to_plan_mapping(
         &self,
@@ -1223,69 +1316,55 @@ fn exist_and_no_exchange_before(
             .any(|input| exist_and_no_exchange_before(input, is_candidate))
 }
 
+impl BatchPlanRef {
+    fn is_user_table_scan(&self) -> bool {
+        self.node_type() == BatchPlanNodeType::BatchSeqScan
+            || self.node_type() == BatchPlanNodeType::BatchLogSeqScan
+            || self.node_type() == BatchPlanNodeType::BatchVectorSearch
+    }
+
+    fn is_source_scan(&self) -> bool {
+        self.node_type() == BatchPlanNodeType::BatchSource
+            || self.node_type() == BatchPlanNodeType::BatchKafkaScan
+            || self.node_type() == BatchPlanNodeType::BatchIcebergScan
+    }
+
+    fn is_insert(&self) -> bool {
+        self.node_type() == BatchPlanNodeType::BatchInsert
+    }
+
+    fn is_update(&self) -> bool {
+        self.node_type() == BatchPlanNodeType::BatchUpdate
+    }
+
+    fn is_delete(&self) -> bool {
+        self.node_type() == BatchPlanNodeType::BatchDelete
+    }
+}
+
 /// As we always run the root stage locally, for some plan in root stage which need to execute in
 /// compute node we insert an additional exhchange before it to avoid to include it in the root
 /// stage.
 ///
 /// Returns `true` if we must insert an additional exchange to ensure this.
 fn require_additional_exchange_on_root_in_distributed_mode(plan: BatchPlanRef) -> bool {
-    fn is_user_table(plan: &BatchPlanRef) -> bool {
-        plan.node_type() == BatchPlanNodeType::BatchSeqScan
-    }
-
-    fn is_log_table(plan: &BatchPlanRef) -> bool {
-        plan.node_type() == BatchPlanNodeType::BatchLogSeqScan
-    }
-
-    fn is_source(plan: &BatchPlanRef) -> bool {
-        plan.node_type() == BatchPlanNodeType::BatchSource
-            || plan.node_type() == BatchPlanNodeType::BatchKafkaScan
-            || plan.node_type() == BatchPlanNodeType::BatchIcebergScan
-    }
-
-    fn is_insert(plan: &BatchPlanRef) -> bool {
-        plan.node_type() == BatchPlanNodeType::BatchInsert
-    }
-
-    fn is_update(plan: &BatchPlanRef) -> bool {
-        plan.node_type() == BatchPlanNodeType::BatchUpdate
-    }
-
-    fn is_delete(plan: &BatchPlanRef) -> bool {
-        plan.node_type() == BatchPlanNodeType::BatchDelete
-    }
-
     assert_eq!(plan.distribution(), &Distribution::Single);
-    exist_and_no_exchange_before(&plan, is_user_table)
-        || exist_and_no_exchange_before(&plan, is_source)
-        || exist_and_no_exchange_before(&plan, is_insert)
-        || exist_and_no_exchange_before(&plan, is_update)
-        || exist_and_no_exchange_before(&plan, is_delete)
-        || exist_and_no_exchange_before(&plan, is_log_table)
+    exist_and_no_exchange_before(&plan, |plan| {
+        plan.is_user_table_scan()
+            || plan.is_source_scan()
+            || plan.is_insert()
+            || plan.is_update()
+            || plan.is_delete()
+    })
 }
 
 /// The purpose is same as `require_additional_exchange_on_root_in_distributed_mode`. We separate
 /// them for the different requirement of plan node in different execute mode.
 fn require_additional_exchange_on_root_in_local_mode(plan: BatchPlanRef) -> bool {
-    fn is_user_table(plan: &BatchPlanRef) -> bool {
-        plan.node_type() == BatchPlanNodeType::BatchSeqScan
-            || plan.node_type() == BatchPlanNodeType::BatchVectorSearch
-    }
-
-    fn is_source(plan: &BatchPlanRef) -> bool {
-        plan.node_type() == BatchPlanNodeType::BatchSource
-            || plan.node_type() == BatchPlanNodeType::BatchKafkaScan
-            || plan.node_type() == BatchPlanNodeType::BatchIcebergScan
-    }
-
-    fn is_insert(plan: &BatchPlanRef) -> bool {
-        plan.node_type() == BatchPlanNodeType::BatchInsert
-    }
-
     assert_eq!(plan.distribution(), &Distribution::Single);
-    exist_and_no_exchange_before(&plan, is_user_table)
-        || exist_and_no_exchange_before(&plan, is_source)
-        || exist_and_no_exchange_before(&plan, is_insert)
+    exist_and_no_exchange_before(&plan, |plan| {
+        plan.is_user_table_scan() || plan.is_source_scan() || plan.is_insert()
+    })
 }
 
 #[cfg(test)]

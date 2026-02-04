@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -35,6 +35,7 @@ use pgwire::pg_server::{
     UserAuthenticator,
 };
 use pgwire::types::{Format, FormatIterator};
+use prometheus_http_query::Client as PrometheusClient;
 use rand::RngCore;
 use risingwave_batch::monitor::{BatchSpillMetrics, GLOBAL_BATCH_SPILL_METRICS};
 use risingwave_batch::spill::spill_op::SpillOp;
@@ -48,8 +49,10 @@ use risingwave_common::catalog::{
     DEFAULT_DATABASE_NAME, DEFAULT_SUPER_USER, DEFAULT_SUPER_USER_ID,
 };
 use risingwave_common::config::{
-    BatchConfig, FrontendConfig, MetaConfig, MetricLevel, StreamingConfig, UdfConfig, load_config,
+    AuthMethod, BatchConfig, ConnectionType, FrontendConfig, MetaConfig, MetricLevel,
+    RpcClientConfig, StreamingConfig, UdfConfig, load_config,
 };
+use risingwave_common::id::WorkerId;
 use risingwave_common::memory::MemoryContext;
 use risingwave_common::secret::LocalSecretManager;
 use risingwave_common::session_config::{ConfigReporter, SessionConfig, VisibilityMode};
@@ -73,21 +76,22 @@ use risingwave_pb::common::WorkerType;
 use risingwave_pb::common::worker_node::Property as AddWorkerNodeProperty;
 use risingwave_pb::frontend_service::frontend_service_server::FrontendServiceServer;
 use risingwave_pb::health::health_server::HealthServer;
+use risingwave_pb::monitor_service::monitor_service_server::MonitorServiceServer;
 use risingwave_pb::user::auth_info::EncryptionType;
-use risingwave_pb::user::grant_privilege::Object;
 use risingwave_rpc_client::{
     ComputeClientPool, ComputeClientPoolRef, FrontendClientPool, FrontendClientPoolRef, MetaClient,
+    MonitorClientPool, MonitorClientPoolRef,
 };
 use risingwave_sqlparser::ast::{ObjectName, Statement};
 use risingwave_sqlparser::parser::Parser;
 use thiserror::Error;
+use thiserror_ext::AsReport;
 use tokio::runtime::Builder;
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 use tokio::sync::oneshot::Sender;
 use tokio::sync::watch;
 use tokio::task::JoinHandle;
-use tracing::info;
-use tracing::log::error;
+use tracing::{error, info};
 
 use self::cursor_manager::CursorManager;
 use crate::binder::{Binder, BoundStatement, ResolveQualifiedNameError};
@@ -98,9 +102,12 @@ use crate::catalog::secret_catalog::SecretCatalog;
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::catalog::subscription_catalog::SubscriptionCatalog;
 use crate::catalog::{
-    CatalogError, DatabaseId, OwnedByUserCatalog, SchemaId, TableId, check_schema_writable,
+    CatalogError, CatalogErrorInner, DatabaseId, OwnedByUserCatalog, SchemaId, TableId,
+    check_schema_writable,
 };
-use crate::error::{ErrorCode, Result, RwError};
+use crate::error::{
+    ErrorCode, Result, RwError, bail_catalog_error, bail_permission_denied, bail_protocol_error,
+};
 use crate::handler::describe::infer_describe;
 use crate::handler::extended_handle::{
     Portal, PrepareStatement, handle_bind, handle_execute, handle_parse,
@@ -114,7 +121,7 @@ use crate::health_service::HealthServiceImpl;
 use crate::meta_client::{FrontendMetaClient, FrontendMetaClientImpl};
 use crate::monitor::{CursorMetrics, FrontendMetrics, GLOBAL_FRONTEND_METRICS};
 use crate::observer::FrontendObserverNode;
-use crate::rpc::FrontendServiceImpl;
+use crate::rpc::{FrontendServiceImpl, MonitorServiceImpl};
 use crate::scheduler::streaming_manager::{StreamingJobTracker, StreamingJobTrackerRef};
 use crate::scheduler::{
     DistributedQueryMetrics, GLOBAL_DISTRIBUTED_QUERY_METRICS, HummockSnapshotManager,
@@ -150,6 +157,7 @@ pub(crate) struct FrontendEnv {
     server_addr: HostAddr,
     client_pool: ComputeClientPoolRef,
     frontend_client_pool: FrontendClientPoolRef,
+    monitor_client_pool: MonitorClientPoolRef,
 
     /// Each session is identified by (`process_id`,
     /// `secret_key`). When Cancel Request received, find corresponding session and cancel all
@@ -185,6 +193,12 @@ pub(crate) struct FrontendEnv {
 
     /// address of the serverless backfill controller.
     serverless_backfill_controller_addr: String,
+
+    /// Prometheus client for querying metrics.
+    prometheus_client: Option<PrometheusClient>,
+
+    /// The additional selector used when querying Prometheus.
+    prometheus_selector: String,
 }
 
 /// Session map identified by `(process_id, secret_key)`
@@ -212,6 +226,7 @@ impl FrontendEnv {
         let system_params_manager = Arc::new(LocalSystemParamsManager::for_test());
         let compute_client_pool = Arc::new(ComputeClientPool::for_test());
         let frontend_client_pool = Arc::new(FrontendClientPool::for_test());
+        let monitor_client_pool = Arc::new(MonitorClientPool::for_test());
         let query_manager = QueryManager::new(
             worker_node_manager.clone(),
             compute_client_pool,
@@ -254,7 +269,8 @@ impl FrontendEnv {
             server_addr,
             client_pool,
             frontend_client_pool,
-            sessions_map: sessions_map.clone(),
+            monitor_client_pool,
+            sessions_map,
             frontend_metrics: Arc::new(FrontendMetrics::for_test()),
             cursor_metrics: Arc::new(CursorMetrics::for_test()),
             batch_config: BatchConfig::default(),
@@ -268,6 +284,8 @@ impl FrontendEnv {
             compute_runtime,
             mem_context: MemoryContext::none(),
             serverless_backfill_controller_addr: Default::default(),
+            prometheus_client: None,
+            prometheus_selector: String::new(),
         }
     }
 
@@ -344,6 +362,7 @@ impl FrontendEnv {
             1,
             config.batch.developer.frontend_client_config.clone(),
         ));
+        let monitor_client_pool = Arc::new(MonitorClientPool::new(1, RpcClientConfig::default()));
         let query_manager = QueryManager::new(
             worker_node_manager.clone(),
             compute_client_pool.clone(),
@@ -402,6 +421,7 @@ impl FrontendEnv {
 
         let health_srv = HealthServiceImpl::new();
         let frontend_srv = FrontendServiceImpl::new(sessions_map.clone());
+        let monitor_srv = MonitorServiceImpl::new(config.server.clone());
         let frontend_rpc_addr = opts.frontend_rpc_listener_addr.parse().unwrap();
 
         let telemetry_manager = TelemetryManager::new(
@@ -423,6 +443,7 @@ impl FrontendEnv {
             tonic::transport::Server::builder()
                 .add_service(HealthServer::new(health_srv))
                 .add_service(FrontendServiceServer::new(frontend_srv))
+                .add_service(MonitorServiceServer::new(monitor_srv))
                 .serve(frontend_rpc_addr)
                 .await
                 .unwrap();
@@ -486,6 +507,28 @@ impl FrontendEnv {
             batch_memory_limit as u64,
         );
 
+        // Initialize Prometheus client if endpoint is provided
+        let prometheus_client = if let Some(ref endpoint) = opts.prometheus_endpoint {
+            match PrometheusClient::try_from(endpoint.as_str()) {
+                Ok(client) => {
+                    info!("Prometheus client initialized with endpoint: {}", endpoint);
+                    Some(client)
+                }
+                Err(e) => {
+                    error!(
+                        error = %e.as_report(),
+                        "failed to initialize Prometheus client",
+                    );
+                    None
+                }
+            }
+        } else {
+            None
+        };
+
+        // Initialize Prometheus selector
+        let prometheus_selector = opts.prometheus_selector.unwrap_or_default();
+
         info!(
             "Frontend  total_memory: {} batch_memory: {}",
             convert(total_memory_bytes as _),
@@ -507,6 +550,7 @@ impl FrontendEnv {
                 server_addr: frontend_address,
                 client_pool: compute_client_pool,
                 frontend_client_pool,
+                monitor_client_pool,
                 frontend_metrics,
                 cursor_metrics,
                 spill_metrics,
@@ -521,6 +565,8 @@ impl FrontendEnv {
                 creating_streaming_job_tracker,
                 compute_runtime,
                 mem_context,
+                prometheus_client,
+                prometheus_selector,
             },
             join_handles,
             shutdown_senders,
@@ -585,6 +631,16 @@ impl FrontendEnv {
         &self.serverless_backfill_controller_addr
     }
 
+    /// Get a reference to the Prometheus client if available.
+    pub fn prometheus_client(&self) -> Option<&PrometheusClient> {
+        self.prometheus_client.as_ref()
+    }
+
+    /// Get the Prometheus selector string.
+    pub fn prometheus_selector(&self) -> &str {
+        &self.prometheus_selector
+    }
+
     pub fn server_address(&self) -> &HostAddr {
         &self.server_addr
     }
@@ -595,6 +651,10 @@ impl FrontendEnv {
 
     pub fn frontend_client_pool(&self) -> FrontendClientPoolRef {
         self.frontend_client_pool.clone()
+    }
+
+    pub fn monitor_client_pool(&self) -> MonitorClientPoolRef {
+        self.monitor_client_pool.clone()
     }
 
     pub fn batch_config(&self) -> &BatchConfig {
@@ -705,6 +765,9 @@ pub struct SessionImpl {
 
     /// temporary sources for the current session
     temporary_source_manager: Arc<Mutex<TemporarySourceManager>>,
+
+    /// staging catalogs for the current session
+    staging_catalog_manager: Arc<Mutex<StagingCatalogManager>>,
 }
 
 /// If TEMPORARY or TEMP is specified, the source is created as a temporary source.
@@ -741,6 +804,33 @@ impl TemporarySourceManager {
 
     pub fn keys(&self) -> Vec<String> {
         self.sources.keys().cloned().collect()
+    }
+}
+
+/// Staging catalog manager is used to manage the tables creating in the current session.
+#[derive(Default, Clone)]
+pub struct StagingCatalogManager {
+    // staging tables creating in the current session.
+    tables: HashMap<String, TableCatalog>,
+}
+
+impl StagingCatalogManager {
+    pub fn new() -> Self {
+        Self {
+            tables: HashMap::new(),
+        }
+    }
+
+    pub fn create_table(&mut self, name: String, table: TableCatalog) {
+        self.tables.insert(name, table);
+    }
+
+    pub fn drop_table(&mut self, name: &str) {
+        self.tables.remove(name);
+    }
+
+    pub fn get_table(&self, name: &str) -> Option<&TableCatalog> {
+        self.tables.get(name)
     }
 }
 
@@ -788,6 +878,7 @@ impl SessionImpl {
             last_idle_instant: Default::default(),
             cursor_manager: Arc::new(CursorManager::new(cursor_metrics)),
             temporary_source_manager: Default::default(),
+            staging_catalog_manager: Default::default(),
         }
     }
 
@@ -818,8 +909,9 @@ impl SessionImpl {
             ))
             .into(),
             last_idle_instant: Default::default(),
-            cursor_manager: Arc::new(CursorManager::new(env.cursor_metrics.clone())),
+            cursor_manager: Arc::new(CursorManager::new(env.cursor_metrics)),
             temporary_source_manager: Default::default(),
+            staging_catalog_manager: Default::default(),
         }
     }
 
@@ -956,30 +1048,39 @@ impl SessionImpl {
             (schema_name, relation_name)
         };
         match catalog_reader.check_relation_name_duplicated(db_name, &schema_name, &relation_name) {
-            Err(CatalogError::Duplicated(_, name, is_creating)) if if_not_exists => {
-                // If relation is created, return directly.
-                // Otherwise, the job status is `is_creating`. Since frontend receives the catalog asynchronously, We can't
-                // determine the real status of the meta at this time. We regard it as `not_exists` and delay the check to meta.
-                // Only the type in StreamingJob (defined in streaming_job.rs) and Subscription may be `is_creating`.
-                if !is_creating {
-                    Ok(Either::Right(
-                        PgResponse::builder(stmt_type)
-                            .notice(format!("relation \"{}\" already exists, skipping", name))
-                            .into(),
-                    ))
-                } else if stmt_type == StatementType::CREATE_SUBSCRIPTION {
-                    // For now, when a Subscription is creating, we return directly with an additional message.
-                    // TODO: Subscription should also be processed in the same way as StreamingJob.
-                    Ok(Either::Right(
-                        PgResponse::builder(stmt_type)
-                            .notice(format!(
-                                "relation \"{}\" already exists but still creating, skipping",
-                                name
-                            ))
-                            .into(),
-                    ))
+            Err(e) if if_not_exists => {
+                if let CatalogErrorInner::Duplicated {
+                    name,
+                    under_creation,
+                    ..
+                } = e.inner()
+                {
+                    // If relation is created, return directly.
+                    // Otherwise, the job status is `is_creating`. Since frontend receives the catalog asynchronously, we can't
+                    // determine the real status of the meta at this time. We regard it as `not_exists` and delay the check to meta.
+                    // Only the type in StreamingJob (defined in streaming_job.rs) and Subscription may be `is_creating`.
+                    if !*under_creation {
+                        Ok(Either::Right(
+                            PgResponse::builder(stmt_type)
+                                .notice(format!("relation \"{}\" already exists, skipping", name))
+                                .into(),
+                        ))
+                    } else if stmt_type == StatementType::CREATE_SUBSCRIPTION {
+                        // For now, when a Subscription is creating, we return directly with an additional message.
+                        // TODO: Subscription should also be processed in the same way as StreamingJob.
+                        Ok(Either::Right(
+                            PgResponse::builder(stmt_type)
+                                .notice(format!(
+                                    "relation \"{}\" already exists but still creating, skipping",
+                                    name
+                                ))
+                                .into(),
+                        ))
+                    } else {
+                        Ok(Either::Left(()))
+                    }
                 } else {
-                    Ok(Either::Left(()))
+                    Err(e.into())
                 }
             }
             Err(e) => Err(e.into()),
@@ -1041,7 +1142,7 @@ impl SessionImpl {
 
         let catalog_reader = self.env().catalog_reader().read_guard();
         if catalog_reader
-            .get_schema_by_id(&database_id, &schema_id)?
+            .get_schema_by_id(database_id, schema_id)?
             .get_function_by_name_args(&function_name, arg_types)
             .is_some()
         {
@@ -1088,7 +1189,7 @@ impl SessionImpl {
             schema.owner(),
             AclMode::Create,
             schema_name,
-            Object::SchemaId(schema.id()),
+            schema.id(),
         )])?;
 
         let db_id = catalog_reader.get_database_by_name(db_name)?.id();
@@ -1113,7 +1214,7 @@ impl SessionImpl {
             connection.owner(),
             AclMode::Usage,
             connection.name.clone(),
-            Object::ConnectionId(connection.id),
+            connection.id,
         )])?;
 
         Ok(connection.clone())
@@ -1128,7 +1229,7 @@ impl SessionImpl {
 
         let catalog_reader = self.env().catalog_reader().read_guard();
         let db_id = catalog_reader.get_database_by_name(db_name)?.id();
-        let schema = catalog_reader.get_schema_by_id(&db_id, &schema_id)?;
+        let schema = catalog_reader.get_schema_by_id(db_id, schema_id)?;
         let subscription = schema
             .get_subscription_by_name(subscription_name)
             .ok_or_else(|| {
@@ -1156,7 +1257,7 @@ impl SessionImpl {
         Ok(subscription.clone())
     }
 
-    pub fn get_table_by_id(&self, table_id: &TableId) -> Result<Arc<TableCatalog>> {
+    pub fn get_table_by_id(&self, table_id: TableId) -> Result<Arc<TableCatalog>> {
         let catalog_reader = self.env().catalog_reader().read_guard();
         Ok(catalog_reader.get_any_table_by_id(table_id)?.clone())
     }
@@ -1164,12 +1265,12 @@ impl SessionImpl {
     pub fn get_table_by_name(
         &self,
         table_name: &str,
-        db_id: u32,
-        schema_id: u32,
+        db_id: DatabaseId,
+        schema_id: SchemaId,
     ) -> Result<Arc<TableCatalog>> {
         let catalog_reader = self.env().catalog_reader().read_guard();
         let table = catalog_reader
-            .get_schema_by_id(&DatabaseId::from(db_id), &SchemaId::from(schema_id))?
+            .get_schema_by_id(db_id, schema_id)?
             .get_created_table_by_name(table_name)
             .ok_or_else(|| {
                 Error::new(
@@ -1182,7 +1283,7 @@ impl SessionImpl {
             table.owner(),
             AclMode::Select,
             table_name.to_owned(),
-            Object::TableId(table.id.table_id()),
+            table.id,
         )])?;
 
         Ok(table.clone())
@@ -1205,7 +1306,7 @@ impl SessionImpl {
             secret.owner(),
             AclMode::Usage,
             secret.name.clone(),
-            Object::SecretId(secret.id.secret_id()),
+            secret.id,
         )])?;
 
         Ok(secret.clone())
@@ -1213,7 +1314,7 @@ impl SessionImpl {
 
     pub fn list_change_log_epochs(
         &self,
-        table_id: u32,
+        table_id: TableId,
         min_epoch: u64,
         max_count: u32,
     ) -> Result<Vec<u64>> {
@@ -1296,10 +1397,10 @@ impl SessionImpl {
     }
 
     pub fn statement_timeout(&self) -> Duration {
-        if self.config().statement_timeout() == 0 {
+        if self.config().statement_timeout().millis() == 0 {
             Duration::from_secs(self.env.batch_config.statement_timeout_in_sec as u64)
         } else {
-            Duration::from_secs(self.config().statement_timeout() as u64)
+            Duration::from_millis(self.config().statement_timeout().millis() as u64)
         }
     }
 
@@ -1322,6 +1423,20 @@ impl SessionImpl {
 
     pub fn temporary_source_manager(&self) -> TemporarySourceManager {
         self.temporary_source_manager.lock().clone()
+    }
+
+    pub fn create_staging_table(&self, table: TableCatalog) {
+        self.staging_catalog_manager
+            .lock()
+            .create_table(table.name.clone(), table);
+    }
+
+    pub fn drop_staging_table(&self, name: &str) {
+        self.staging_catalog_manager.lock().drop_table(name);
+    }
+
+    pub fn staging_catalog_manager(&self) -> StagingCatalogManager {
+        self.staging_catalog_manager.lock().clone()
     }
 
     pub async fn check_cluster_limits(&self) -> Result<()> {
@@ -1391,27 +1506,22 @@ pub struct SessionManagerImpl {
 }
 
 impl SessionManager for SessionManagerImpl {
+    type Error = RwError;
     type Session = SessionImpl;
 
-    fn create_dummy_session(
-        &self,
-        database_id: u32,
-        user_id: u32,
-    ) -> std::result::Result<Arc<Self::Session>, BoxedError> {
+    fn create_dummy_session(&self, database_id: DatabaseId) -> Result<Arc<Self::Session>> {
         let dummy_addr = Address::Tcp(SocketAddr::new(
             IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)),
             5691, // port of meta
         ));
-        let user_reader = self.env.user_info_reader();
-        let reader = user_reader.read_guard();
-        if let Some(user_name) = reader.get_user_name_by_id(user_id) {
-            self.connect_inner(database_id, user_name.as_str(), Arc::new(dummy_addr))
-        } else {
-            Err(Box::new(Error::new(
-                ErrorKind::InvalidInput,
-                format!("Role id {} does not exist", user_id),
-            )))
-        }
+
+        // Always use the built-in super user for dummy sessions.
+        // This avoids permission checks tied to a specific user_id.
+        self.connect_inner(
+            database_id,
+            risingwave_common::catalog::DEFAULT_SUPER_USER,
+            Arc::new(dummy_addr),
+        )
     }
 
     fn connect(
@@ -1419,18 +1529,10 @@ impl SessionManager for SessionManagerImpl {
         database: &str,
         user_name: &str,
         peer_addr: AddressRef,
-    ) -> std::result::Result<Arc<Self::Session>, BoxedError> {
+    ) -> Result<Arc<Self::Session>> {
         let catalog_reader = self.env.catalog_reader();
         let reader = catalog_reader.read_guard();
-        let database_id = reader
-            .get_database_by_name(database)
-            .map_err(|_| {
-                Box::new(Error::new(
-                    ErrorKind::InvalidInput,
-                    format!("database \"{}\" does not exist", database),
-                ))
-            })?
-            .id();
+        let database_id = reader.get_database_by_name(database)?.id();
 
         self.connect_inner(database_id, user_name, peer_addr)
     }
@@ -1498,19 +1600,14 @@ impl SessionManagerImpl {
 
     fn connect_inner(
         &self,
-        database_id: u32,
+        database_id: DatabaseId,
         user_name: &str,
         peer_addr: AddressRef,
-    ) -> std::result::Result<Arc<SessionImpl>, BoxedError> {
+    ) -> Result<Arc<SessionImpl>> {
         let catalog_reader = self.env.catalog_reader();
         let reader = catalog_reader.read_guard();
         let (database_name, database_owner) = {
-            let db = reader.get_database_by_id(&database_id).map_err(|_| {
-                Box::new(Error::new(
-                    ErrorKind::InvalidInput,
-                    format!("database \"{}\" does not exist", database_id),
-                ))
-            })?;
+            let db = reader.get_database_by_id(database_id)?;
             (db.name(), db.owner())
         };
 
@@ -1518,43 +1615,94 @@ impl SessionManagerImpl {
         let reader = user_reader.read_guard();
         if let Some(user) = reader.get_user_by_name(user_name) {
             if !user.can_login {
-                return Err(Box::new(Error::new(
-                    ErrorKind::InvalidInput,
-                    format!("User {} is not allowed to login", user_name),
-                )));
+                bail_permission_denied!("User {} is not allowed to login", user_name);
             }
-            let has_privilege =
-                user.has_privilege(&Object::DatabaseId(database_id), AclMode::Connect);
+            let has_privilege = user.has_privilege(database_id, AclMode::Connect);
             if !user.is_super && database_owner != user.id && !has_privilege {
-                return Err(Box::new(Error::new(
-                    ErrorKind::PermissionDenied,
-                    "User does not have CONNECT privilege.",
-                )));
+                bail_permission_denied!("User does not have CONNECT privilege.");
             }
-            let user_authenticator = match &user.auth_info {
-                None => UserAuthenticator::None,
-                Some(auth_info) => {
-                    if auth_info.encryption_type == EncryptionType::Plaintext as i32 {
-                        UserAuthenticator::ClearText(auth_info.encrypted_value.clone())
-                    } else if auth_info.encryption_type == EncryptionType::Md5 as i32 {
-                        let mut salt = [0; 4];
-                        let mut rng = rand::rng();
-                        rng.fill_bytes(&mut salt);
-                        UserAuthenticator::Md5WithSalt {
-                            encrypted_password: md5_hash_with_salt(
-                                &auth_info.encrypted_value,
-                                &salt,
-                            ),
-                            salt,
+
+            // Check HBA configuration for LDAP authentication
+            let (connection_type, client_addr) = match peer_addr.as_ref() {
+                Address::Tcp(socket_addr) => (ConnectionType::Host, Some(&socket_addr.ip())),
+                Address::Unix(_) => (ConnectionType::Local, None),
+            };
+            tracing::debug!(
+                "receive connection: type={:?}, client_addr={:?}",
+                connection_type,
+                client_addr
+            );
+
+            let hba_entry_opt = self.env.frontend_config().hba_config.find_matching_entry(
+                &connection_type,
+                database_name,
+                user_name,
+                client_addr,
+            );
+
+            // TODO: adding `FATAL` message support for no matching HBA entry.
+            let Some(hba_entry_opt) = hba_entry_opt else {
+                bail_permission_denied!(
+                    "no pg_hba.conf entry for host \"{peer_addr}\", user \"{user_name}\", database \"{database_name}\""
+                );
+            };
+
+            // Determine the user authenticator based on the user's auth info.
+            let authenticator_by_info = || -> Result<UserAuthenticator> {
+                let authenticator = match &user.auth_info {
+                    None => UserAuthenticator::None,
+                    Some(auth_info) => match auth_info.encryption_type() {
+                        EncryptionType::Plaintext => {
+                            UserAuthenticator::ClearText(auth_info.encrypted_value.clone())
                         }
-                    } else if auth_info.encryption_type == EncryptionType::Oauth as i32 {
-                        UserAuthenticator::OAuth(auth_info.metadata.clone())
-                    } else {
-                        return Err(Box::new(Error::new(
-                            ErrorKind::Unsupported,
-                            format!("Unsupported auth type: {}", auth_info.encryption_type),
-                        )));
-                    }
+                        EncryptionType::Md5 => {
+                            let mut salt = [0; 4];
+                            let mut rng = rand::rng();
+                            rng.fill_bytes(&mut salt);
+                            UserAuthenticator::Md5WithSalt {
+                                encrypted_password: md5_hash_with_salt(
+                                    &auth_info.encrypted_value,
+                                    &salt,
+                                ),
+                                salt,
+                            }
+                        }
+                        EncryptionType::Oauth => UserAuthenticator::OAuth {
+                            metadata: auth_info.metadata.clone(),
+                            cluster_id: self.env.meta_client().cluster_id().to_owned(),
+                        },
+                        _ => {
+                            bail_protocol_error!(
+                                "Unsupported auth type: {}",
+                                auth_info.encryption_type().as_str_name()
+                            );
+                        }
+                    },
+                };
+                Ok(authenticator)
+            };
+
+            let user_authenticator = match (&hba_entry_opt.auth_method, &user.auth_info) {
+                (AuthMethod::Trust, _) => UserAuthenticator::None,
+                // For backward compatibility, we allow password auth method to work with any auth info.
+                (AuthMethod::Password, _) => authenticator_by_info()?,
+                (AuthMethod::Md5, Some(auth_info))
+                    if auth_info.encryption_type() == EncryptionType::Md5 =>
+                {
+                    authenticator_by_info()?
+                }
+                (AuthMethod::OAuth, Some(auth_info))
+                    if auth_info.encryption_type() == EncryptionType::Oauth =>
+                {
+                    authenticator_by_info()?
+                }
+                (AuthMethod::Ldap, _) => {
+                    UserAuthenticator::Ldap(user_name.to_owned(), hba_entry_opt.clone())
+                }
+                _ => {
+                    bail_permission_denied!(
+                        "password authentication failed for user \"{user_name}\""
+                    );
                 }
             };
 
@@ -1578,15 +1726,13 @@ impl SessionManagerImpl {
 
             Ok(session_impl)
         } else {
-            Err(Box::new(Error::new(
-                ErrorKind::InvalidInput,
-                format!("Role {} does not exist", user_name),
-            )))
+            bail_catalog_error!("Role {} does not exist", user_name);
         }
     }
 }
 
 impl Session for SessionImpl {
+    type Error = RwError;
     type Portal = Portal;
     type PreparedStatement = PrepareStatement;
     type ValuesStream = PgResponseStream;
@@ -1597,7 +1743,7 @@ impl Session for SessionImpl {
         self: Arc<Self>,
         stmt: Statement,
         format: Format,
-    ) -> std::result::Result<PgResponse<PgResponseStream>, BoxedError> {
+    ) -> Result<PgResponse<PgResponseStream>> {
         let string = stmt.to_string();
         let sql_str = string.as_str();
         let sql: Arc<str> = Arc::from(sql_str);
@@ -1619,7 +1765,7 @@ impl Session for SessionImpl {
         self: Arc<Self>,
         statement: Option<Statement>,
         params_types: Vec<Option<DataType>>,
-    ) -> std::result::Result<PrepareStatement, BoxedError> {
+    ) -> Result<PrepareStatement> {
         Ok(if let Some(statement) = statement {
             handle_parse(self, statement, params_types).await?
         } else {
@@ -1633,19 +1779,11 @@ impl Session for SessionImpl {
         params: Vec<Option<Bytes>>,
         param_formats: Vec<Format>,
         result_formats: Vec<Format>,
-    ) -> std::result::Result<Portal, BoxedError> {
-        Ok(handle_bind(
-            prepare_statement,
-            params,
-            param_formats,
-            result_formats,
-        )?)
+    ) -> Result<Portal> {
+        handle_bind(prepare_statement, params, param_formats, result_formats)
     }
 
-    async fn execute(
-        self: Arc<Self>,
-        portal: Portal,
-    ) -> std::result::Result<PgResponse<PgResponseStream>, BoxedError> {
+    async fn execute(self: Arc<Self>, portal: Portal) -> Result<PgResponse<PgResponseStream>> {
         let rsp = handle_execute(self, portal).await?;
         Ok(rsp)
     }
@@ -1653,7 +1791,7 @@ impl Session for SessionImpl {
     fn describe_statement(
         self: Arc<Self>,
         prepare_statement: PrepareStatement,
-    ) -> std::result::Result<(Vec<DataType>, Vec<PgFieldDescriptor>), BoxedError> {
+    ) -> Result<(Vec<DataType>, Vec<PgFieldDescriptor>)> {
         Ok(match prepare_statement {
             PrepareStatement::Empty => (vec![], vec![]),
             PrepareStatement::Prepared(prepare_statement) => (
@@ -1667,15 +1805,13 @@ impl Session for SessionImpl {
         })
     }
 
-    fn describe_portal(
-        self: Arc<Self>,
-        portal: Portal,
-    ) -> std::result::Result<Vec<PgFieldDescriptor>, BoxedError> {
+    fn describe_portal(self: Arc<Self>, portal: Portal) -> Result<Vec<PgFieldDescriptor>> {
         match portal {
             Portal::Empty => Ok(vec![]),
             Portal::Portal(portal) => {
                 let mut columns = infer(Some(portal.bound_result.bound), portal.statement)?;
-                let formats = FormatIterator::new(&portal.result_formats, columns.len())?;
+                let formats = FormatIterator::new(&portal.result_formats, columns.len())
+                    .map_err(|e| RwError::from(ErrorCode::ProtocolError(e)))?;
                 columns.iter_mut().zip_eq_fast(formats).for_each(|(c, f)| {
                     if f == Format::Binary {
                         c.set_to_binary()
@@ -1687,12 +1823,12 @@ impl Session for SessionImpl {
         }
     }
 
-    fn get_config(&self, key: &str) -> std::result::Result<String, BoxedError> {
+    fn get_config(&self, key: &str) -> Result<String> {
         self.config().get(key).map_err(Into::into)
     }
 
-    fn set_config(&self, key: &str, value: String) -> std::result::Result<String, BoxedError> {
-        Self::set_config(self, key, value).map_err(Into::into)
+    fn set_config(&self, key: &str, value: String) -> Result<String> {
+        Self::set_config(self, key, value)
     }
 
     async fn next_notice(self: &Arc<Self>) -> String {
@@ -1788,12 +1924,12 @@ fn infer(bound: Option<BoundStatement>, stmt: Statement) -> Result<Vec<PgFieldDe
 }
 
 pub struct WorkerProcessId {
-    pub worker_id: u32,
+    pub worker_id: WorkerId,
     pub process_id: i32,
 }
 
 impl WorkerProcessId {
-    pub fn new(worker_id: u32, process_id: i32) -> Self {
+    pub fn new(worker_id: WorkerId, process_id: i32) -> Self {
         Self {
             worker_id,
             process_id,
@@ -1822,7 +1958,7 @@ impl TryFrom<String> for WorkerProcessId {
         let Ok(process_id) = splits[1].parse::<i32>() else {
             return Err(INVALID.to_owned());
         };
-        Ok(WorkerProcessId::new(worker_id, process_id))
+        Ok(WorkerProcessId::new(worker_id.into(), process_id))
     }
 }
 

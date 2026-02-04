@@ -28,6 +28,10 @@ message SinkParam {
   string sink_from_name = 6;
   catalog.SinkFormatDesc format_desc = 7;
   string sink_name = 8;
+  // Backward-compatible replacement for `SINK_TYPE_FORCE_APPEND_ONLY`.
+  //
+  // Should not directly access this field. Use method `ignore_delete()` instead.
+  bool raw_ignore_delete = 9;
 }
 
 message SinkWriterStreamRequest {
@@ -166,6 +170,10 @@ message CdcMessage {
 
   // The key of the Debezium message, which only used by `mongodb-cdc` connector.
   string key = 7;
+
+  // The CDC source type of this message. This is required to disambiguate the parsing logic for
+  // `full_table_name` (e.g. `db.table` in MySQL vs `schema.table` in Postgres/SQL Server).
+  SourceType source_type = 8;
 }
 
 enum SourceType {
@@ -228,7 +236,7 @@ message CoordinateRequest {
   message CommitRequest {
     uint64 epoch = 1;
     SinkMetadata metadata = 2;
-    stream_plan.SinkAddColumns add_columns = 3;
+    stream_plan.SinkSchemaChange schema_change = 3;
   }
 
   message UpdateVnodeBitmapRequest {

@@ -75,8 +75,8 @@ struct ExecutorInner<K: HashKey, S: StateStore> {
     actor_ctx: ActorContextRef,
     info: ExecutorInfo,
 
-    /// Pk indices from input. Only used by `AggNodeVersion` before `ISSUE_13465`.
-    input_pk_indices: Vec<usize>,
+    /// Stream key indices from input. Only used by `AggNodeVersion` before `ISSUE_13465`.
+    input_stream_key: Vec<usize>,
 
     /// Schema from input.
     input_schema: Schema,
@@ -213,7 +213,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                 version: args.version,
                 actor_ctx: args.actor_ctx,
                 info: args.info,
-                input_pk_indices: input_info.pk_indices,
+                input_stream_key: input_info.stream_key,
                 input_schema: input_info.schema,
                 group_key_indices: args.extra.group_key_indices,
                 group_key_table_pk_projection: group_key_table_pk_projection.to_vec().into(),
@@ -300,7 +300,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                                 &this.agg_funcs,
                                 &this.storages,
                                 &this.intermediate_state_table,
-                                &this.input_pk_indices,
+                                &this.input_stream_key,
                                 this.row_count_index,
                                 this.emit_on_window_close,
                                 this.extreme_cache_size,
@@ -453,7 +453,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                         &this.agg_funcs,
                         &this.storages,
                         &inter_states,
-                        &this.input_pk_indices,
+                        &this.input_stream_key,
                         this.row_count_index,
                         this.emit_on_window_close,
                         this.extreme_cache_size,
@@ -676,7 +676,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                     yield Message::Barrier(barrier);
 
                     // Update the vnode bitmap for state tables of all agg calls if asked.
-                    if let Some(cache_may_stale) =
+                    if let Some(keyed_cache_may_stale) =
                         try_join_all(post_commits.into_iter().map(|post_commit| {
                             post_commit.post_yield_barrier(update_vnode_bitmap.clone())
                         }))
@@ -685,8 +685,18 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                         .expect("should have at least one table")
                         .map(|(_, cache_may_stale)| cache_may_stale)
                     {
+                        if emit_on_window_close {
+                            // `SortBuffer` may output data directly from its in-memory cache without
+                            // checking current vnode ownership. Therefore, we must rebuild the cache
+                            // whenever the vnode bitmap is updated to avoid emitting rows that no
+                            // longer belong to this actor.
+                            vars.buffer
+                                .refill_cache(None, &this.intermediate_state_table)
+                                .await?;
+                        }
+
                         // Manipulate the cache if necessary.
-                        if cache_may_stale {
+                        if keyed_cache_may_stale {
                             vars.agg_group_cache.clear();
                             vars.distinct_dedup.dedup_caches_mut().for_each(|cache| {
                                 cache.clear();

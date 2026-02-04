@@ -54,15 +54,11 @@ message StopMutation {
   repeated uint32 dropped_sink_fragments = 2;
 }
 
-message SinkAddColumns {
-  repeated plan_common.Field fields = 1;
-}
-
 message UpdateMutation {
   message DispatcherUpdate {
     // Dispatcher can be uniquely identified by a combination of actor id and dispatcher id.
     uint32 actor_id = 1;
-    uint64 dispatcher_id = 2;
+    uint32 dispatcher_id = 2;
     // The hash mapping for consistent hash.
     // For dispatcher types other than HASH, this is ignored.
     ActorMapping hash_mapping = 3;
@@ -101,7 +97,8 @@ message UpdateMutation {
   map<uint32, Dispatchers> actor_new_dispatchers = 6;
   // CDC table snapshot splits
   source.CdcTableSnapshotSplitsWithGeneration actor_cdc_table_snapshot_splits = 7;
-  map<uint32, SinkAddColumns> sink_add_columns = 8;
+  map<uint32, SinkSchemaChange> sink_schema_change = 8;
+  repeated SubscriptionUpstreamInfo subscriptions_to_drop = 9;
 }
 
 message SourceChangeSplitMutation {
@@ -114,15 +111,12 @@ message PauseMutation {}
 message ResumeMutation {}
 
 message ThrottleMutation {
-  message RateLimit {
+  message ThrottleConfig {
     optional uint32 rate_limit = 1;
+    common.ThrottleType throttle_type = 2;
   }
 
-  map<uint32, RateLimit> actor_throttle = 1;
-}
-
-message CombinedMutation {
-  repeated BarrierMutation mutations = 1;
+  map<uint32, ThrottleConfig> fragment_throttle = 1;
 }
 
 message SubscriptionUpstreamInfo {
@@ -152,9 +146,18 @@ message RefreshStartMutation {
   // Associated source ID for this refresh operation.
   uint32 associated_source_id = 2;
 }
+message ListFinishMutation {
+  // Associated source ID for this list operation.
+  uint32 associated_source_id = 1;
+}
 message LoadFinishMutation {
   // Associated source ID for this load operation.
   uint32 associated_source_id = 1;
+}
+
+message ResetSourceMutation {
+  // Source ID to reset
+  uint32 source_id = 1;
 }
 
 message BarrierMutation {
@@ -172,7 +175,7 @@ message BarrierMutation {
     PauseMutation pause = 7;
     // Resume the dataflow of the whole streaming graph, only used for scaling.
     ResumeMutation resume = 8;
-    // Throttle specific source exec or backfill exec.
+    // Alter the RateLimit of some specific executors
     ThrottleMutation throttle = 10;
     // Drop subscription on mv
     DropSubscriptionsMutation drop_subscriptions = 12;
@@ -188,9 +191,10 @@ message BarrierMutation {
     RefreshStartMutation refresh_start = 15;
     // Load finish signal for refreshing tables
     LoadFinishMutation load_finish = 16;
-    // Combined mutation.
-    // Currently, it can only be Add & Update, which is for sink into table.
-    CombinedMutation combined = 100;
+    // List finish signal for refreshing tables
+    ListFinishMutation list_finish = 17;
+    // Reset CDC source offset to latest
+    ResetSourceMutation reset_source = 18;
   }
 }
 
@@ -214,9 +218,6 @@ message Barrier {
   map<string, string> tracing_context = 2;
   // The kind of the barrier.
   BarrierKind kind = 9;
-
-  // Record the actors that the barrier has passed. Only used for debugging.
-  repeated uint32 passed_actors = 255;
 }
 
 message Watermark {
@@ -251,6 +252,10 @@ message ActorMapping {
   repeated uint32 data = 2;
 }
 
+message Columns {
+  repeated plan_common.ColumnCatalog columns = 1;
+}
+
 message StreamSource {
   uint32 source_id = 1;
   catalog.Table state_table = 2;
@@ -264,6 +269,10 @@ message StreamSource {
   // Source rate limit
   optional uint32 rate_limit = 9;
   map<string, secret.SecretRef> secret_refs = 10;
+  // Downstream columns are used by list node to know which columns are needed.
+  optional Columns downstream_columns = 11;
+  plan_common.SourceRefreshMode refresh_mode = 12;
+  optional uint32 associated_table_id = 13;
 }
 
 // copy contents from StreamSource to prevent compatibility issues in the future
@@ -280,6 +289,8 @@ message StreamFsFetch {
   // Source rate limit
   optional uint32 rate_limit = 9;
   map<string, secret.SecretRef> secret_refs = 10;
+  plan_common.SourceRefreshMode refresh_mode = 11;
+  optional uint32 associated_table_id = 12;
 }
 
 // The executor only for receiving barrier from the meta service. It always resides in the leaves
@@ -335,6 +346,10 @@ message SinkDesc {
   optional uint32 target_table = 14;
   optional uint64 extra_partition_col_idx = 15;
   map<string, secret.SecretRef> secret_refs = 16;
+  // Backward-compatible replacement for `SINK_TYPE_FORCE_APPEND_ONLY`.
+  //
+  // Should not directly access this field. Use method `ignore_delete()` instead.
+  bool raw_ignore_delete = 17;
 }
 
 enum SinkLogStoreType {
@@ -372,6 +387,7 @@ message FilterNode {
 message ChangeLogNode {
   // Whether or not there is an op in the final output.
   bool need_op = 1;
+  repeated uint32 distribution_keys = 2;
 }
 
 message CdcFilterNode {
@@ -425,6 +441,9 @@ message MaterializeNode {
   // Usage: Persists across refresh operations for resumability
   // Note: Stage info is now tracked in MaterializeExecutor memory for simplicity
   optional catalog.Table refresh_progress_table = 6;
+
+  // Whether the table can clean itself by TTL watermark, i.e., is defined with `WATERMARK ... WITH TTL`.
+  bool cleaned_by_ttl_watermark = 7;
 }
 
 message AggCallState {
@@ -515,6 +534,7 @@ message DeltaExpression {
   expr.ExprNode delta = 2;
 }
 
+// Deprecated: Use InequalityPairV2 instead.
 message InequalityPair {
   // Input index of greater side of inequality.
   uint32 key_required_larger = 1;
@@ -524,6 +544,27 @@ message InequalityPair {
   bool clean_state = 3;
   // greater >= less + delta_expression, if `None`, it represents that greater >= less
   DeltaExpression delta_expression = 4;
+}
+
+enum InequalityType {
+  INEQUALITY_TYPE_UNSPECIFIED = 0;
+  INEQUALITY_TYPE_LESS_THAN = 1;
+  INEQUALITY_TYPE_LESS_THAN_OR_EQUAL = 2;
+  INEQUALITY_TYPE_GREATER_THAN = 3;
+  INEQUALITY_TYPE_GREATER_THAN_OR_EQUAL = 4;
+}
+
+message InequalityPairV2 {
+  // Index of the left side of the inequality (from left input).
+  uint32 left_idx = 1;
+  // Index of the right side of the inequality (from right input, NOT offset by left_cols_num).
+  uint32 right_idx = 2;
+  // Whether this condition is used to clean left state table of `HashJoinExecutor`.
+  bool clean_left_state = 3;
+  // Whether this condition is used to clean right state table of `HashJoinExecutor`.
+  bool clean_right_state = 4;
+  // Comparison operator: left_col `<op>` right_col (e.g., <, <=, >, >=).
+  InequalityType op = 5;
 }
 
 enum JoinEncodingType {
@@ -565,7 +606,11 @@ message HashJoinNode {
   bool is_append_only = 14;
 
   // Which encoding will be used to encode join rows in operator cache.
-  JoinEncodingType join_encoding_type = 15;
+  // Deprecated. Use the one from `StreamingDeveloperConfig` instead.
+  JoinEncodingType join_encoding_type = 15 [deprecated = true];
+
+  // New inequality pairs with clearer semantics. Takes precedence over `inequality_pairs` if non-empty.
+  repeated InequalityPairV2 inequality_pairs_v2 = 16;
 }
 
 message AsOfJoinNode {
@@ -589,7 +634,8 @@ message AsOfJoinNode {
   repeated bool null_safe = 9;
   optional plan_common.AsOfJoinDesc asof_desc = 10;
   // Which encoding will be used to encode join rows in operator cache.
-  JoinEncodingType join_encoding_type = 11;
+  // Deprecated. Use the one from `StreamingDeveloperConfig` instead.
+  JoinEncodingType join_encoding_type = 11 [deprecated = true];
 }
 
 message TemporalJoinNode {
@@ -625,6 +671,8 @@ message DynamicFilterNode {
   // If this is false, we need to store RHS records which match the condition in the internal table.
   // When the condition changes, we will tell downstream to delete the LHS records which now no longer match the condition.
   bool condition_always_relax = 5 [deprecated = true];
+  // Whether the dynamic filter can clean its left state table by watermark.
+  bool cleaned_by_watermark = 6;
 }
 
 // Delta join with two indexes. This is a pseudo plan node generated on frontend. On meta
@@ -954,7 +1002,8 @@ message OverWindowNode {
   repeated uint32 partition_by = 2;
   repeated common.ColumnOrder order_by = 3;
   catalog.Table state_table = 4;
-  OverWindowCachePolicy cache_policy = 5;
+  // Deprecated. Use the one from `StreamingDeveloperConfig` instead.
+  OverWindowCachePolicy cache_policy = 5 [deprecated = true];
 }
 
 message LocalApproxPercentileNode {
@@ -976,8 +1025,10 @@ message RowMergeNode {
 
 message SyncLogStoreNode {
   catalog.Table log_store_table = 1;
-  uint32 pause_duration_ms = 2;
-  uint32 buffer_size = 3;
+  // Deprecated. Use the one from `StreamingDeveloperConfig` instead.
+  optional uint32 pause_duration_ms = 2 [deprecated = true];
+  // Deprecated. Use the one from `StreamingDeveloperConfig` instead.
+  optional uint32 buffer_size = 3 [deprecated = true];
   bool aligned = 4;
 }
 
@@ -991,10 +1042,41 @@ message VectorIndexWriteNode {
   catalog.Table table = 1;
 }
 
+message VectorIndexLookupJoinNode {
+  plan_common.VectorIndexReaderDesc reader_desc = 1;
+  uint32 vector_column_idx = 2;
+}
+
 message UpstreamSinkUnionNode {
   // It is always empty in the persisted metadata, and get filled before we spawn the actors.
   // The actual upstream info may be added and removed dynamically at runtime.
   repeated UpstreamSinkInfo init_upstreams = 1;
+}
+
+message LocalityProviderNode {
+  // Column indices that define locality
+  repeated uint32 locality_columns = 1;
+  // State table for buffering input data
+  optional catalog.Table state_table = 2;
+  // Progress table for tracking backfill progress
+  optional catalog.Table progress_table = 3;
+}
+
+message EowcGapFillNode {
+  uint32 time_column_index = 1;
+  expr.ExprNode interval = 2;
+  repeated uint32 fill_columns = 3;
+  repeated string fill_strategies = 4;
+  catalog.Table buffer_table = 5;
+  catalog.Table prev_row_table = 6;
+}
+
+message GapFillNode {
+  uint32 time_column_index = 1;
+  expr.ExprNode interval = 2;
+  repeated uint32 fill_columns = 3;
+  repeated string fill_strategies = 4;
+  catalog.Table state_table = 5;
 }
 
 message StreamNode {
@@ -1059,6 +1141,10 @@ message StreamNode {
     MaterializedExprsNode materialized_exprs = 149;
     VectorIndexWriteNode vector_index_write = 150;
     UpstreamSinkUnionNode upstream_sink_union = 151;
+    LocalityProviderNode locality_provider = 152;
+    EowcGapFillNode eowc_gap_fill = 153;
+    GapFillNode gap_fill = 154;
+    VectorIndexLookupJoinNode vector_index_lookup_join = 155;
   }
   // The id for the operator. This is local per mview.
   // TODO: should better be a uint32.
@@ -1138,7 +1224,7 @@ message Dispatcher {
   ActorMapping hash_mapping = 3;
   // Dispatcher can be uniquely identified by a combination of actor id and dispatcher id.
   // This is exactly the same as its downstream fragment id.
-  uint64 dispatcher_id = 4;
+  uint32 dispatcher_id = 4;
   // Number of downstreams decides how many endpoints a dispatcher should dispatch.
   repeated uint32 downstream_actor_id = 5;
 }
@@ -1158,12 +1244,18 @@ message StreamActor {
   string mview_definition = 9;
   // Provide the necessary context, e.g. session info like time zone, for the actor.
   plan_common.ExprContext expr_context = 10;
+  // The config override for this actor.
+  string config_override = 11;
 }
 
 // The streaming context associated with a stream plan
 message StreamContext {
   // The timezone associated with the streaming plan. Only applies to MV for now.
   string timezone = 1;
+  // The partial config of this job to override the global config.
+  string config_override = 2;
+  // The adaptive parallelism strategy for this streaming job, if explicitly set.
+  string adaptive_parallelism_strategy = 3;
 }
 
 message BackfillOrder {
@@ -1176,6 +1268,9 @@ message BackfillOrder {
 // For the persisted form, see `TableFragments`.
 message StreamFragmentGraph {
   message StreamFragment {
+    reserved 5, 6;
+    reserved "table_ids_cnt", "upstream_table_ids";
+
     // 0-based on frontend, and will be rewritten to global id on meta.
     uint32 fragment_id = 1;
     // root stream node in this fragment.
@@ -1186,10 +1281,6 @@ message StreamFragmentGraph {
     // Note: if this is `false`, the fragment may still be a singleton according to the scheduler.
     // One should check `meta.Fragment.distribution_type` for the final result.
     bool requires_singleton = 4;
-    // Number of table ids (stateful states) for this fragment.
-    uint32 table_ids_cnt = 5;
-    // Mark the upstream table ids of this fragment, Used for fragments with `StreamScan`s.
-    repeated uint32 upstream_table_ids = 6;
   }
 
   message StreamFragmentEdge {
@@ -1220,6 +1311,8 @@ message StreamFragmentGraph {
   StreamContext ctx = 5;
   // If none, default parallelism will be applied.
   Parallelism parallelism = 6;
+  // Parallelism to use during backfill. Falls back to `parallelism` if unset.
+  Parallelism backfill_parallelism = 9;
 
   // Specified max parallelism, i.e., expected vnode count for the graph.
   //
@@ -1234,4 +1327,36 @@ message StreamFragmentGraph {
 
   // The backfill order strategy for the fragments.
   BackfillOrder backfill_order = 8;
+}
+
+// Schema change operation for sink
+message SinkSchemaChange {
+  // Original schema before this change.
+  // Used for validation and conflict detection.
+  repeated plan_common.Field original_schema = 1;
+
+  // Schema change operation (mutually exclusive)
+  oneof op {
+    // Add new columns to the schema
+    SinkAddColumnsOp add_columns = 2;
+
+    // Drop columns from the schema
+    SinkDropColumnsOp drop_columns = 3;
+
+    // Future operations can be added here...
+    // RenameColumnsOp rename_columns = 4;
+    // AlterColumnTypeOp alter_column_type = 5;
+  }
+}
+
+// Add columns operation
+message SinkAddColumnsOp {
+  // Columns to add
+  repeated plan_common.Field fields = 1;
+}
+
+// Drop columns operation
+message SinkDropColumnsOp {
+  // Column names to drop
+  repeated string column_names = 1;
 }

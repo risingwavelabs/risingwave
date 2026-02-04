@@ -719,24 +719,25 @@
     └─BatchHashJoin { type: LeftSemi, predicate: t1.x IS NOT DISTINCT FROM t2.x, output: all }
       ├─BatchExchange { order: [], dist: HashShard(t1.x) }
       │ └─BatchScan { table: t1, columns: [t1.x, t1.y], distribution: SomeShard }
-      └─BatchProject { exprs: [t2.x] }
-        └─BatchGroupTopN { order: [t2.x ASC], limit: 1, offset: 0, group_key: [t2.x] }
-          └─BatchExchange { order: [], dist: HashShard(t2.x) }
-            └─BatchProject { exprs: [t2.x, t2.x] }
-              └─BatchFilter { predicate: IsNotNull(t2.x) }
-                └─BatchScan { table: t2, columns: [t2.x], distribution: SomeShard }
+      └─BatchExchange { order: [], dist: HashShard(t2.x) }
+        └─BatchProject { exprs: [t2.x] }
+          └─BatchGroupTopN { order: [t2.x ASC], limit: 1, offset: 0, group_key: [t2.x] }
+            └─BatchExchange { order: [], dist: HashShard(t2.x) }
+              └─BatchProject { exprs: [t2.x, t2.x] }
+                └─BatchFilter { predicate: IsNotNull(t2.x) }
+                  └─BatchScan { table: t2, columns: [t2.x], distribution: SomeShard }
   stream_plan: |-
     StreamMaterialize { columns: [x, y, t1._row_id(hidden)], stream_key: [t1._row_id, x], pk_columns: [t1._row_id, x], pk_conflict: NoCheck }
     └─StreamExchange { dist: HashShard(t1.x, t1._row_id) }
       └─StreamHashJoin { type: LeftSemi, predicate: t1.x IS NOT DISTINCT FROM t2.x, output: all }
         ├─StreamExchange { dist: HashShard(t1.x) }
-        │ └─StreamTableScan { table: t1, columns: [t1.x, t1.y, t1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
+        │ └─StreamTableScan { table: t1, columns: [t1.x, t1.y, t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
         └─StreamProject { exprs: [t2.x] }
           └─StreamGroupTopN { order: [t2.x ASC], limit: 1, offset: 0, group_key: [t2.x] }
             └─StreamExchange { dist: HashShard(t2.x) }
               └─StreamProject { exprs: [t2.x, t2.x, t2._row_id] }
                 └─StreamFilter { predicate: IsNotNull(t2.x) }
-                  └─StreamTableScan { table: t2, columns: [t2.x, t2._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t2._row_id], pk: [_row_id], dist: UpstreamHashShard(t2._row_id) }
+                  └─StreamTableScan { table: t2, columns: [t2.x, t2._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t2._row_id], pk: [_row_id], dist: UpstreamHashShard(t2._row_id) }
 - sql: |
     create table t1(x int, y int);
     create table t2(x int, y int);
@@ -898,12 +899,13 @@
     └─StreamExchange { dist: HashShard(t1.v1, t1.k1, t1._row_id) }
       └─StreamHashJoin { type: LeftSemi, predicate: t1.v1 = t2.v2 AND t1.k1 IS NOT DISTINCT FROM t2.k2, output: all }
         ├─StreamExchange { dist: HashShard(t1.k1) }
-        │ └─StreamTableScan { table: t1, columns: [t1.v1, t1.k1, t1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
-        └─StreamGroupTopN { order: [t2.v2 ASC], limit: 1, offset: 0, group_key: [t2.k2] }
-          └─StreamExchange { dist: HashShard(t2.k2) }
-            └─StreamProject { exprs: [t2.k2, t2.v2, t2._row_id] }
-              └─StreamFilter { predicate: IsNotNull(t2.k2) }
-                └─StreamTableScan { table: t2, columns: [t2.v2, t2.k2, t2._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t2._row_id], pk: [_row_id], dist: UpstreamHashShard(t2._row_id) }
+        │ └─StreamTableScan { table: t1, columns: [t1.v1, t1.k1, t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
+        └─StreamProject { exprs: [t2.k2, t2.v2] }
+          └─StreamGroupTopN { order: [t2.v2 ASC], limit: 1, offset: 0, group_key: [t2.k2] }
+            └─StreamExchange { dist: HashShard(t2.k2) }
+              └─StreamProject { exprs: [t2.k2, t2.v2, t2._row_id] }
+                └─StreamFilter { predicate: IsNotNull(t2.k2) }
+                  └─StreamTableScan { table: t2, columns: [t2.v2, t2.k2, t2._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t2._row_id], pk: [_row_id], dist: UpstreamHashShard(t2._row_id) }
 - name: test ApplyTopNTransposeRule case 2
   sql: |
     create table t1 (v1 int, k1 int);
@@ -924,14 +926,14 @@
     └─StreamExchange { dist: HashShard(t1.v1, t1._row_id) }
       └─StreamHashJoin { type: LeftSemi, predicate: t1.v1 = t2.v2, output: all }
         ├─StreamExchange { dist: HashShard(t1.v1) }
-        │ └─StreamTableScan { table: t1, columns: [t1.v1, t1.k1, t1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
+        │ └─StreamTableScan { table: t1, columns: [t1.v1, t1.k1, t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
         └─StreamExchange { dist: HashShard(t2.v2) }
-          └─StreamProject { exprs: [t2.v2, t2._row_id] }
+          └─StreamProject { exprs: [t2.v2] }
             └─StreamTopN { order: [t2.v2 ASC], limit: 1, offset: 0 }
               └─StreamExchange { dist: Single }
                 └─StreamGroupTopN { order: [t2.v2 ASC], limit: 1, offset: 0, group_key: [_vnode] }
                   └─StreamProject { exprs: [t2.v2, t2._row_id, Vnode(t2._row_id) as _vnode] }
-                    └─StreamTableScan { table: t2, columns: [t2.v2, t2._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t2._row_id], pk: [_row_id], dist: UpstreamHashShard(t2._row_id) }
+                    └─StreamTableScan { table: t2, columns: [t2.v2, t2._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t2._row_id], pk: [_row_id], dist: UpstreamHashShard(t2._row_id) }
 - name: test ApplyLimitTransposeRule case 1
   sql: |
     create table t1 (v1 int, k1 int);
@@ -952,12 +954,13 @@
     └─StreamExchange { dist: HashShard(t1.v1, t1.k1, t1._row_id) }
       └─StreamHashJoin { type: LeftSemi, predicate: t1.v1 = t2.v2 AND t1.k1 IS NOT DISTINCT FROM t2.k2, output: all }
         ├─StreamExchange { dist: HashShard(t1.k1) }
-        │ └─StreamTableScan { table: t1, columns: [t1.v1, t1.k1, t1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
-        └─StreamGroupTopN { order: [t2.k2 ASC], limit: 1, offset: 0, group_key: [t2.k2] }
-          └─StreamExchange { dist: HashShard(t2.k2) }
-            └─StreamProject { exprs: [t2.k2, t2.v2, t2._row_id] }
-              └─StreamFilter { predicate: IsNotNull(t2.k2) }
-                └─StreamTableScan { table: t2, columns: [t2.v2, t2.k2, t2._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t2._row_id], pk: [_row_id], dist: UpstreamHashShard(t2._row_id) }
+        │ └─StreamTableScan { table: t1, columns: [t1.v1, t1.k1, t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
+        └─StreamProject { exprs: [t2.k2, t2.v2] }
+          └─StreamGroupTopN { order: [t2.k2 ASC], limit: 1, offset: 0, group_key: [t2.k2] }
+            └─StreamExchange { dist: HashShard(t2.k2) }
+              └─StreamProject { exprs: [t2.k2, t2.v2, t2._row_id] }
+                └─StreamFilter { predicate: IsNotNull(t2.k2) }
+                  └─StreamTableScan { table: t2, columns: [t2.v2, t2.k2, t2._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t2._row_id], pk: [_row_id], dist: UpstreamHashShard(t2._row_id) }
 - name: test correlated input ref predicate and share operator
   sql: |
     create table t (a int, b int, c int);
@@ -1013,18 +1016,18 @@
     └─StreamExchange { dist: HashShard(t1._row_id, t1.b) }
       └─StreamHashJoin { type: LeftOuter, predicate: t1.b IS NOT DISTINCT FROM t1.b, output: [$expr1, t1._row_id, t1.b, t1.b] }
         ├─StreamExchange { dist: HashShard(t1.b) }
-        │ └─StreamTableScan { table: t1, columns: [t1.b, t1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
+        │ └─StreamTableScan { table: t1, columns: [t1.b, t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
         └─StreamProject { exprs: [t1.b, Coalesce(array_agg(t2.c) filter(IsNotNull(1:Int32)), ARRAY[]:List(Int32)) as $expr1] }
           └─StreamHashAgg { group_key: [t1.b], aggs: [array_agg(t2.c) filter(IsNotNull(1:Int32)), count] }
             └─StreamHashJoin { type: LeftOuter, predicate: t1.b IS NOT DISTINCT FROM t2.d, output: [t1.b, t2.c, 1:Int32, t2._row_id] }
               ├─StreamProject { exprs: [t1.b], noop_update_hint: true }
               │ └─StreamHashAgg { group_key: [t1.b], aggs: [count] }
               │   └─StreamExchange { dist: HashShard(t1.b) }
-              │     └─StreamTableScan { table: t1, columns: [t1.b, t1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
+              │     └─StreamTableScan { table: t1, columns: [t1.b, t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
               └─StreamExchange { dist: HashShard(t2.d) }
                 └─StreamProject { exprs: [t2.d, t2.c, 1:Int32, t2._row_id] }
                   └─StreamFilter { predicate: IsNotNull(t2.d) }
-                    └─StreamTableScan { table: t2, columns: [t2.c, t2.d, t2._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t2._row_id], pk: [_row_id], dist: UpstreamHashShard(t2._row_id) }
+                    └─StreamTableScan { table: t2, columns: [t2.c, t2.d, t2._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t2._row_id], pk: [_row_id], dist: UpstreamHashShard(t2._row_id) }
 - name: correlated array subquery \du
   sql: |
     SELECT r.rolname, r.rolsuper, r.rolinherit,
@@ -1123,18 +1126,18 @@
         └─StreamHashJoin { type: Inner, predicate: t.b IS NOT DISTINCT FROM t.b, output: all }
           ├─StreamExchange { dist: HashShard(t.b) }
           │ └─StreamProject { exprs: [t.a, t.b, t.a::Int64 as $expr1, t._row_id] }
-          │   └─StreamTableScan { table: t, columns: [t.a, t.b, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+          │   └─StreamTableScan { table: t, columns: [t.a, t.b, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
           └─StreamProject { exprs: [t.b, count(1:Int32)] }
             └─StreamHashAgg { group_key: [t.b], aggs: [count(1:Int32), count] }
               └─StreamHashJoin { type: LeftOuter, predicate: t.b IS NOT DISTINCT FROM t2.d, output: [t.b, 1:Int32, t2._row_id] }
                 ├─StreamProject { exprs: [t.b], noop_update_hint: true }
                 │ └─StreamHashAgg { group_key: [t.b], aggs: [count] }
                 │   └─StreamExchange { dist: HashShard(t.b) }
-                │     └─StreamTableScan { table: t, columns: [t.b, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+                │     └─StreamTableScan { table: t, columns: [t.b, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
                 └─StreamExchange { dist: HashShard(t2.d) }
                   └─StreamProject { exprs: [t2.d, 1:Int32, t2._row_id] }
                     └─StreamFilter { predicate: IsNotNull(t2.d) }
-                      └─StreamTableScan { table: t2, columns: [t2.d, t2._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t2._row_id], pk: [_row_id], dist: UpstreamHashShard(t2._row_id) }
+                      └─StreamTableScan { table: t2, columns: [t2.d, t2._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t2._row_id], pk: [_row_id], dist: UpstreamHashShard(t2._row_id) }
 - name: a case could be optimized by PullUpCorrelatedPredicateAggRule
   sql: |
     CREATE TABLE T (A INT, B INT);
@@ -1159,11 +1162,11 @@
         └─StreamHashJoin { type: Inner, predicate: t.b = t2.d, output: all }
           ├─StreamExchange { dist: HashShard(t.b) }
           │ └─StreamProject { exprs: [t.a, t.b, t.a::Decimal as $expr1, t._row_id] }
-          │   └─StreamTableScan { table: t, columns: [t.a, t.b, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+          │   └─StreamTableScan { table: t, columns: [t.a, t.b, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
           └─StreamProject { exprs: [(sum(t2.c)::Decimal / count(t2.c)::Decimal) as $expr2, t2.d] }
             └─StreamHashAgg { group_key: [t2.d], aggs: [sum(t2.c), count(t2.c), count] }
               └─StreamExchange { dist: HashShard(t2.d) }
-                └─StreamTableScan { table: t2, columns: [t2.c, t2.d, t2._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t2._row_id], pk: [_row_id], dist: UpstreamHashShard(t2._row_id) }
+                └─StreamTableScan { table: t2, columns: [t2.c, t2.d, t2._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t2._row_id], pk: [_row_id], dist: UpstreamHashShard(t2._row_id) }
 - name: a case can't be optimized by PullUpCorrelatedPredicateAggRule
   sql: |
     CREATE TABLE T (A INT, B INT);
@@ -1194,18 +1197,18 @@
         └─StreamHashJoin { type: Inner, predicate: t.b IS NOT DISTINCT FROM t.b, output: all }
           ├─StreamExchange { dist: HashShard(t.b) }
           │ └─StreamProject { exprs: [t.a, t.b, t.a::Decimal as $expr1, t._row_id] }
-          │   └─StreamTableScan { table: t, columns: [t.a, t.b, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+          │   └─StreamTableScan { table: t, columns: [t.a, t.b, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
           └─StreamProject { exprs: [t.b, Coalesce((sum(t2.c)::Decimal / count(t2.c)::Decimal), 114514:Decimal) as $expr2] }
             └─StreamHashAgg { group_key: [t.b], aggs: [sum(t2.c), count(t2.c), count] }
               └─StreamHashJoin { type: LeftOuter, predicate: t.b IS NOT DISTINCT FROM t2.d, output: [t.b, t2.c, t2._row_id] }
                 ├─StreamProject { exprs: [t.b], noop_update_hint: true }
                 │ └─StreamHashAgg { group_key: [t.b], aggs: [count] }
                 │   └─StreamExchange { dist: HashShard(t.b) }
-                │     └─StreamTableScan { table: t, columns: [t.b, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+                │     └─StreamTableScan { table: t, columns: [t.b, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
                 └─StreamExchange { dist: HashShard(t2.d) }
                   └─StreamProject { exprs: [t2.d, t2.c, t2._row_id] }
                     └─StreamFilter { predicate: IsNotNull(t2.d) }
-                      └─StreamTableScan { table: t2, columns: [t2.c, t2.d, t2._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t2._row_id], pk: [_row_id], dist: UpstreamHashShard(t2._row_id) }
+                      └─StreamTableScan { table: t2, columns: [t2.c, t2.d, t2._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t2._row_id], pk: [_row_id], dist: UpstreamHashShard(t2._row_id) }
 - name: a case can't be optimized by PullUpCorrelatedPredicateAggRule
   sql: |
     CREATE TABLE T (A INT, B INT);
@@ -1233,12 +1236,12 @@
           ├─StreamExchange { dist: HashShard(t.b) }
           │ └─StreamProject { exprs: [t.a, t.b, t.a::Decimal as $expr1, t._row_id] }
           │   └─StreamFilter { predicate: null:Boolean }
-          │     └─StreamTableScan { table: t, columns: [t.a, t.b, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+          │     └─StreamTableScan { table: t, columns: [t.a, t.b, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
           └─StreamProject { exprs: [Coalesce((sum(t2.c)::Decimal / count(t2.c)::Decimal), 114514:Decimal) as $expr2, t2.d] }
             └─StreamHashAgg { group_key: [t2.d], aggs: [sum(t2.c), count(t2.c), count] }
               └─StreamExchange { dist: HashShard(t2.d) }
                 └─StreamFilter { predicate: null:Boolean }
-                  └─StreamTableScan { table: t2, columns: [t2.c, t2.d, t2._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t2._row_id], pk: [_row_id], dist: UpstreamHashShard(t2._row_id) }
+                  └─StreamTableScan { table: t2, columns: [t2.c, t2.d, t2._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t2._row_id], pk: [_row_id], dist: UpstreamHashShard(t2._row_id) }
 - name: improve multi scalar subqueries optimization time. issue 16952. case 1.
   sql: |
     create table t1(a int, b int);
@@ -1438,7 +1441,7 @@
     └─StreamProject { exprs: [Coalesce(t1.b, 0:Int32) as $expr1, Coalesce(t1.b, 0:Int32) as $expr2, Coalesce(t1.b, 0:Int32) as $expr3, Coalesce(t1.b, 0:Int32) as $expr4, Coalesce(t1.b, 0:Int32) as $expr5, Coalesce(t1.b, 0:Int32) as $expr6, Coalesce(t1.b, 0:Int32) as $expr7, Coalesce(t1.b, 0:Int32) as $expr8, Coalesce(t1.b, 0:Int32) as $expr9, Coalesce(t1.b, 0:Int32) as $expr10, Coalesce(t1.b, 0:Int32) as $expr11, Coalesce(t1.b, 0:Int32) as $expr12, Coalesce(t1.b, 0:Int32) as $expr13, Coalesce(t1.b, 0:Int32) as $expr14, Coalesce(t1.b, 0:Int32) as $expr15, Coalesce(t1.b, 0:Int32) as $expr16, Coalesce(t1.b, 0:Int32) as $expr17, Coalesce(t1.b, 0:Int32) as $expr18, t1._row_id, t1.b, t1.a, t1.b, t1.b, t1.a, t1.b, t1.b, t1.a, t1.b, t1.b, t1.a, t1.b, t1.b, t1.a, t1.b, t1.b, t1.a, t1.b, t1.b, t1.a, t1.b, t1.b, t1.a, t1.b, t1.b, t1.a, t1.b, t1.b, t1.a, t1.b, t1.b, t1.a, t1.b, t1.b, t1.a, t1.b, t1.b, t1.a, t1.b, t1.b, t1.a, t1.b, t1.b, t1.a, t1.b, t1.b, t1.a, t1.b, t1.b, t1.a, t1.b, t1.b, t1.a, t1.b] }
       └─StreamHashJoin { type: LeftOuter, predicate: t1.a IS NOT DISTINCT FROM t1.a AND t1.b IS NOT DISTINCT FROM t1.b, output: [t1.b, t1.b, t1.b, t1.b, t1.b, t1.b, t1.b, t1.b, t1.b, t1.b, t1.b, t1.b, t1.b, t1.b, t1.b, t1.b, t1.b, t1.b, t1._row_id, t1.a, t1.b, t1.a, t1.a, t1.b, t1.b, t1.a, t1.b, t1.a, t1.b, t1.a, t1.b, t1.a, t1.b, t1.a, t1.b, t1.a, t1.b, t1.a, t1.b, t1.a, t1.b, t1.a, t1.b, t1.a, t1.b, t1.a, t1.b, t1.a, t1.b, t1.a, t1.b, t1.a, t1.b, t1.a, t1.b, t1.a, t1.b] }
         ├─StreamExchange { dist: HashShard(t1.a, t1.b) }
-        │ └─StreamTableScan { table: t1, columns: [t1.a, t1.b, t1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
+        │ └─StreamTableScan { table: t1, columns: [t1.a, t1.b, t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
         └─StreamExchange { dist: HashShard(t1.a, t1.b) }
           └─StreamFilter { predicate: ((((((IsNotNull(t1.a) OR IsNotNull(t1.b)) OR (IsNotNull(t1.a) OR IsNotNull(t1.b))) OR ((IsNotNull(t1.b) OR IsNotNull(t1.b)) OR (IsNotNull(t1.a) OR IsNotNull(t1.b)))) OR (((IsNotNull(t1.b) OR IsNotNull(t1.a)) OR (IsNotNull(t1.b) OR IsNotNull(t1.b))) OR ((IsNotNull(t1.a) OR IsNotNull(t1.b)) OR (IsNotNull(t1.b) OR IsNotNull(t1.a))))) OR ((((IsNotNull(t1.b) OR IsNotNull(t1.b)) OR (IsNotNull(t1.a) OR IsNotNull(t1.b))) OR ((IsNotNull(t1.b) OR IsNotNull(t1.a)) OR (IsNotNull(t1.b) OR IsNotNull(t1.b)))) OR (((IsNotNull(t1.a) OR IsNotNull(t1.b)) OR (IsNotNull(t1.b) OR IsNotNull(t1.a))) OR ((IsNotNull(t1.b) OR IsNotNull(t1.b)) OR (IsNotNull(t1.a) OR IsNotNull(t1.b)))))) OR (((((IsNotNull(t1.b) OR IsNotNull(t1.a)) OR (IsNotNull(t1.b) OR IsNotNull(t1.b))) OR ((IsNotNull(t1.a) OR IsNotNull(t1.b)) OR (IsNotNull(t1.b) OR IsNotNull(t1.a)))) OR (((IsNotNull(t1.b) OR IsNotNull(t1.b)) OR (IsNotNull(t1.a) OR IsNotNull(t1.b))) OR ((IsNotNull(t1.b) OR IsNotNull(t1.a)) OR (IsNotNull(t1.b) OR IsNotNull(t1.b))))) OR (((IsNotNull(t1.a) OR IsNotNull(t1.b)) OR (IsNotNull(t1.b) OR IsNotNull(t1.a))) OR IsNotNull(t1.b)))) }
             └─StreamHashJoin { type: FullOuter, predicate: t1.a IS NOT DISTINCT FROM t1.a AND t1.b IS NOT DISTINCT FROM t1.b, output: [t1.a, t1.b, t1.b, t1.b, t1.b, t1.b, t1.b, t1.b, t1.b, t1.b, t1.b, t1.b, t1.b, t1.b, t1.b, t1.b, t1.b, t1.b, t1.b, t1.b, t1.a, t1.b, t1.a, t1.b, t1.a, t1.b, t1.a, t1.b, t1.a, t1.b, t1.a, t1.b, t1.a, t1.b, t1.a, t1.b, t1.a, t1.b, t1.a, t1.b, t1.a, t1.b, t1.a, t1.b, t1.a, t1.b, t1.a, t1.b, t1.a, t1.b, t1.a, t1.b, t1.a, t1.b] }
@@ -1496,162 +1499,162 @@
               │     │     │     │     │     │     │     │     │     │     │     │     │     │     │     │     │   │ └─StreamProject { exprs: [t1.a, t1.b], noop_update_hint: true }
               │     │     │     │     │     │     │     │     │     │     │     │     │     │     │     │     │   │   └─StreamHashAgg { group_key: [t1.a, t1.b], aggs: [count] }
               │     │     │     │     │     │     │     │     │     │     │     │     │     │     │     │     │   │     └─StreamExchange { dist: HashShard(t1.a, t1.b) }
-              │     │     │     │     │     │     │     │     │     │     │     │     │     │     │     │     │   │       └─StreamTableScan { table: t1, columns: [t1.a, t1.b, t1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
+              │     │     │     │     │     │     │     │     │     │     │     │     │     │     │     │     │   │       └─StreamTableScan { table: t1, columns: [t1.a, t1.b, t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
               │     │     │     │     │     │     │     │     │     │     │     │     │     │     │     │     │   └─StreamExchange { dist: HashShard(t2.c) }
-              │     │     │     │     │     │     │     │     │     │     │     │     │     │     │     │     │     └─StreamTableScan { table: t2, columns: [t2.c], stream_scan_type: ArrangementBackfill, stream_key: [t2.c], pk: [c], dist: UpstreamHashShard(t2.c) }
+              │     │     │     │     │     │     │     │     │     │     │     │     │     │     │     │     │     └─StreamTableScan { table: t2, columns: [t2.c], stream_scan_type: SnapshotBackfill, stream_key: [t2.c], pk: [c], dist: UpstreamHashShard(t2.c) }
               │     │     │     │     │     │     │     │     │     │     │     │     │     │     │     │     └─StreamProject { exprs: [t1.a, t1.b, t1.b] }
               │     │     │     │     │     │     │     │     │     │     │     │     │     │     │     │       └─StreamHashJoin { type: Inner, predicate: t1.a = t2.c, output: all }
               │     │     │     │     │     │     │     │     │     │     │     │     │     │     │     │         ├─StreamExchange { dist: HashShard(t1.a) }
               │     │     │     │     │     │     │     │     │     │     │     │     │     │     │     │         │ └─StreamProject { exprs: [t1.a, t1.b], noop_update_hint: true }
               │     │     │     │     │     │     │     │     │     │     │     │     │     │     │     │         │   └─StreamHashAgg { group_key: [t1.a, t1.b], aggs: [count] }
               │     │     │     │     │     │     │     │     │     │     │     │     │     │     │     │         │     └─StreamExchange { dist: HashShard(t1.a, t1.b) }
-              │     │     │     │     │     │     │     │     │     │     │     │     │     │     │     │         │       └─StreamTableScan { table: t1, columns: [t1.a, t1.b, t1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
+              │     │     │     │     │     │     │     │     │     │     │     │     │     │     │     │         │       └─StreamTableScan { table: t1, columns: [t1.a, t1.b, t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
               │     │     │     │     │     │     │     │     │     │     │     │     │     │     │     │         └─StreamExchange { dist: HashShard(t2.c) }
-              │     │     │     │     │     │     │     │     │     │     │     │     │     │     │     │           └─StreamTableScan { table: t2, columns: [t2.c], stream_scan_type: ArrangementBackfill, stream_key: [t2.c], pk: [c], dist: UpstreamHashShard(t2.c) }
+              │     │     │     │     │     │     │     │     │     │     │     │     │     │     │     │           └─StreamTableScan { table: t2, columns: [t2.c], stream_scan_type: SnapshotBackfill, stream_key: [t2.c], pk: [c], dist: UpstreamHashShard(t2.c) }
               │     │     │     │     │     │     │     │     │     │     │     │     │     │     │     └─StreamProject { exprs: [t1.a, t1.b, t1.b] }
               │     │     │     │     │     │     │     │     │     │     │     │     │     │     │       └─StreamHashJoin { type: Inner, predicate: t1.a = t2.c, output: all }
               │     │     │     │     │     │     │     │     │     │     │     │     │     │     │         ├─StreamExchange { dist: HashShard(t1.a) }
               │     │     │     │     │     │     │     │     │     │     │     │     │     │     │         │ └─StreamProject { exprs: [t1.a, t1.b], noop_update_hint: true }
               │     │     │     │     │     │     │     │     │     │     │     │     │     │     │         │   └─StreamHashAgg { group_key: [t1.a, t1.b], aggs: [count] }
               │     │     │     │     │     │     │     │     │     │     │     │     │     │     │         │     └─StreamExchange { dist: HashShard(t1.a, t1.b) }
-              │     │     │     │     │     │     │     │     │     │     │     │     │     │     │         │       └─StreamTableScan { table: t1, columns: [t1.a, t1.b, t1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
+              │     │     │     │     │     │     │     │     │     │     │     │     │     │     │         │       └─StreamTableScan { table: t1, columns: [t1.a, t1.b, t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
               │     │     │     │     │     │     │     │     │     │     │     │     │     │     │         └─StreamExchange { dist: HashShard(t2.c) }
-              │     │     │     │     │     │     │     │     │     │     │     │     │     │     │           └─StreamTableScan { table: t2, columns: [t2.c], stream_scan_type: ArrangementBackfill, stream_key: [t2.c], pk: [c], dist: UpstreamHashShard(t2.c) }
+              │     │     │     │     │     │     │     │     │     │     │     │     │     │     │           └─StreamTableScan { table: t2, columns: [t2.c], stream_scan_type: SnapshotBackfill, stream_key: [t2.c], pk: [c], dist: UpstreamHashShard(t2.c) }
               │     │     │     │     │     │     │     │     │     │     │     │     │     │     └─StreamProject { exprs: [t1.a, t1.b, t1.b] }
               │     │     │     │     │     │     │     │     │     │     │     │     │     │       └─StreamHashJoin { type: Inner, predicate: t1.a = t2.c, output: all }
               │     │     │     │     │     │     │     │     │     │     │     │     │     │         ├─StreamExchange { dist: HashShard(t1.a) }
               │     │     │     │     │     │     │     │     │     │     │     │     │     │         │ └─StreamProject { exprs: [t1.a, t1.b], noop_update_hint: true }
               │     │     │     │     │     │     │     │     │     │     │     │     │     │         │   └─StreamHashAgg { group_key: [t1.a, t1.b], aggs: [count] }
               │     │     │     │     │     │     │     │     │     │     │     │     │     │         │     └─StreamExchange { dist: HashShard(t1.a, t1.b) }
-              │     │     │     │     │     │     │     │     │     │     │     │     │     │         │       └─StreamTableScan { table: t1, columns: [t1.a, t1.b, t1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
+              │     │     │     │     │     │     │     │     │     │     │     │     │     │         │       └─StreamTableScan { table: t1, columns: [t1.a, t1.b, t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
               │     │     │     │     │     │     │     │     │     │     │     │     │     │         └─StreamExchange { dist: HashShard(t2.c) }
-              │     │     │     │     │     │     │     │     │     │     │     │     │     │           └─StreamTableScan { table: t2, columns: [t2.c], stream_scan_type: ArrangementBackfill, stream_key: [t2.c], pk: [c], dist: UpstreamHashShard(t2.c) }
+              │     │     │     │     │     │     │     │     │     │     │     │     │     │           └─StreamTableScan { table: t2, columns: [t2.c], stream_scan_type: SnapshotBackfill, stream_key: [t2.c], pk: [c], dist: UpstreamHashShard(t2.c) }
               │     │     │     │     │     │     │     │     │     │     │     │     │     └─StreamProject { exprs: [t1.a, t1.b, t1.b] }
               │     │     │     │     │     │     │     │     │     │     │     │     │       └─StreamHashJoin { type: Inner, predicate: t1.a = t2.c, output: all }
               │     │     │     │     │     │     │     │     │     │     │     │     │         ├─StreamExchange { dist: HashShard(t1.a) }
               │     │     │     │     │     │     │     │     │     │     │     │     │         │ └─StreamProject { exprs: [t1.a, t1.b], noop_update_hint: true }
               │     │     │     │     │     │     │     │     │     │     │     │     │         │   └─StreamHashAgg { group_key: [t1.a, t1.b], aggs: [count] }
               │     │     │     │     │     │     │     │     │     │     │     │     │         │     └─StreamExchange { dist: HashShard(t1.a, t1.b) }
-              │     │     │     │     │     │     │     │     │     │     │     │     │         │       └─StreamTableScan { table: t1, columns: [t1.a, t1.b, t1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
+              │     │     │     │     │     │     │     │     │     │     │     │     │         │       └─StreamTableScan { table: t1, columns: [t1.a, t1.b, t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
               │     │     │     │     │     │     │     │     │     │     │     │     │         └─StreamExchange { dist: HashShard(t2.c) }
-              │     │     │     │     │     │     │     │     │     │     │     │     │           └─StreamTableScan { table: t2, columns: [t2.c], stream_scan_type: ArrangementBackfill, stream_key: [t2.c], pk: [c], dist: UpstreamHashShard(t2.c) }
+              │     │     │     │     │     │     │     │     │     │     │     │     │           └─StreamTableScan { table: t2, columns: [t2.c], stream_scan_type: SnapshotBackfill, stream_key: [t2.c], pk: [c], dist: UpstreamHashShard(t2.c) }
               │     │     │     │     │     │     │     │     │     │     │     │     └─StreamProject { exprs: [t1.a, t1.b, t1.b] }
               │     │     │     │     │     │     │     │     │     │     │     │       └─StreamHashJoin { type: Inner, predicate: t1.a = t2.c, output: all }
               │     │     │     │     │     │     │     │     │     │     │     │         ├─StreamExchange { dist: HashShard(t1.a) }
               │     │     │     │     │     │     │     │     │     │     │     │         │ └─StreamProject { exprs: [t1.a, t1.b], noop_update_hint: true }
               │     │     │     │     │     │     │     │     │     │     │     │         │   └─StreamHashAgg { group_key: [t1.a, t1.b], aggs: [count] }
               │     │     │     │     │     │     │     │     │     │     │     │         │     └─StreamExchange { dist: HashShard(t1.a, t1.b) }
-              │     │     │     │     │     │     │     │     │     │     │     │         │       └─StreamTableScan { table: t1, columns: [t1.a, t1.b, t1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
+              │     │     │     │     │     │     │     │     │     │     │     │         │       └─StreamTableScan { table: t1, columns: [t1.a, t1.b, t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
               │     │     │     │     │     │     │     │     │     │     │     │         └─StreamExchange { dist: HashShard(t2.c) }
-              │     │     │     │     │     │     │     │     │     │     │     │           └─StreamTableScan { table: t2, columns: [t2.c], stream_scan_type: ArrangementBackfill, stream_key: [t2.c], pk: [c], dist: UpstreamHashShard(t2.c) }
+              │     │     │     │     │     │     │     │     │     │     │     │           └─StreamTableScan { table: t2, columns: [t2.c], stream_scan_type: SnapshotBackfill, stream_key: [t2.c], pk: [c], dist: UpstreamHashShard(t2.c) }
               │     │     │     │     │     │     │     │     │     │     │     └─StreamProject { exprs: [t1.a, t1.b, t1.b] }
               │     │     │     │     │     │     │     │     │     │     │       └─StreamHashJoin { type: Inner, predicate: t1.a = t2.c, output: all }
               │     │     │     │     │     │     │     │     │     │     │         ├─StreamExchange { dist: HashShard(t1.a) }
               │     │     │     │     │     │     │     │     │     │     │         │ └─StreamProject { exprs: [t1.a, t1.b], noop_update_hint: true }
               │     │     │     │     │     │     │     │     │     │     │         │   └─StreamHashAgg { group_key: [t1.a, t1.b], aggs: [count] }
               │     │     │     │     │     │     │     │     │     │     │         │     └─StreamExchange { dist: HashShard(t1.a, t1.b) }
-              │     │     │     │     │     │     │     │     │     │     │         │       └─StreamTableScan { table: t1, columns: [t1.a, t1.b, t1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
+              │     │     │     │     │     │     │     │     │     │     │         │       └─StreamTableScan { table: t1, columns: [t1.a, t1.b, t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
               │     │     │     │     │     │     │     │     │     │     │         └─StreamExchange { dist: HashShard(t2.c) }
-              │     │     │     │     │     │     │     │     │     │     │           └─StreamTableScan { table: t2, columns: [t2.c], stream_scan_type: ArrangementBackfill, stream_key: [t2.c], pk: [c], dist: UpstreamHashShard(t2.c) }
+              │     │     │     │     │     │     │     │     │     │     │           └─StreamTableScan { table: t2, columns: [t2.c], stream_scan_type: SnapshotBackfill, stream_key: [t2.c], pk: [c], dist: UpstreamHashShard(t2.c) }
               │     │     │     │     │     │     │     │     │     │     └─StreamProject { exprs: [t1.a, t1.b, t1.b] }
               │     │     │     │     │     │     │     │     │     │       └─StreamHashJoin { type: Inner, predicate: t1.a = t2.c, output: all }
               │     │     │     │     │     │     │     │     │     │         ├─StreamExchange { dist: HashShard(t1.a) }
               │     │     │     │     │     │     │     │     │     │         │ └─StreamProject { exprs: [t1.a, t1.b], noop_update_hint: true }
               │     │     │     │     │     │     │     │     │     │         │   └─StreamHashAgg { group_key: [t1.a, t1.b], aggs: [count] }
               │     │     │     │     │     │     │     │     │     │         │     └─StreamExchange { dist: HashShard(t1.a, t1.b) }
-              │     │     │     │     │     │     │     │     │     │         │       └─StreamTableScan { table: t1, columns: [t1.a, t1.b, t1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
+              │     │     │     │     │     │     │     │     │     │         │       └─StreamTableScan { table: t1, columns: [t1.a, t1.b, t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
               │     │     │     │     │     │     │     │     │     │         └─StreamExchange { dist: HashShard(t2.c) }
-              │     │     │     │     │     │     │     │     │     │           └─StreamTableScan { table: t2, columns: [t2.c], stream_scan_type: ArrangementBackfill, stream_key: [t2.c], pk: [c], dist: UpstreamHashShard(t2.c) }
+              │     │     │     │     │     │     │     │     │     │           └─StreamTableScan { table: t2, columns: [t2.c], stream_scan_type: SnapshotBackfill, stream_key: [t2.c], pk: [c], dist: UpstreamHashShard(t2.c) }
               │     │     │     │     │     │     │     │     │     └─StreamProject { exprs: [t1.a, t1.b, t1.b] }
               │     │     │     │     │     │     │     │     │       └─StreamHashJoin { type: Inner, predicate: t1.a = t2.c, output: all }
               │     │     │     │     │     │     │     │     │         ├─StreamExchange { dist: HashShard(t1.a) }
               │     │     │     │     │     │     │     │     │         │ └─StreamProject { exprs: [t1.a, t1.b], noop_update_hint: true }
               │     │     │     │     │     │     │     │     │         │   └─StreamHashAgg { group_key: [t1.a, t1.b], aggs: [count] }
               │     │     │     │     │     │     │     │     │         │     └─StreamExchange { dist: HashShard(t1.a, t1.b) }
-              │     │     │     │     │     │     │     │     │         │       └─StreamTableScan { table: t1, columns: [t1.a, t1.b, t1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
+              │     │     │     │     │     │     │     │     │         │       └─StreamTableScan { table: t1, columns: [t1.a, t1.b, t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
               │     │     │     │     │     │     │     │     │         └─StreamExchange { dist: HashShard(t2.c) }
-              │     │     │     │     │     │     │     │     │           └─StreamTableScan { table: t2, columns: [t2.c], stream_scan_type: ArrangementBackfill, stream_key: [t2.c], pk: [c], dist: UpstreamHashShard(t2.c) }
+              │     │     │     │     │     │     │     │     │           └─StreamTableScan { table: t2, columns: [t2.c], stream_scan_type: SnapshotBackfill, stream_key: [t2.c], pk: [c], dist: UpstreamHashShard(t2.c) }
               │     │     │     │     │     │     │     │     └─StreamProject { exprs: [t1.a, t1.b, t1.b] }
               │     │     │     │     │     │     │     │       └─StreamHashJoin { type: Inner, predicate: t1.a = t2.c, output: all }
               │     │     │     │     │     │     │     │         ├─StreamExchange { dist: HashShard(t1.a) }
               │     │     │     │     │     │     │     │         │ └─StreamProject { exprs: [t1.a, t1.b], noop_update_hint: true }
               │     │     │     │     │     │     │     │         │   └─StreamHashAgg { group_key: [t1.a, t1.b], aggs: [count] }
               │     │     │     │     │     │     │     │         │     └─StreamExchange { dist: HashShard(t1.a, t1.b) }
-              │     │     │     │     │     │     │     │         │       └─StreamTableScan { table: t1, columns: [t1.a, t1.b, t1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
+              │     │     │     │     │     │     │     │         │       └─StreamTableScan { table: t1, columns: [t1.a, t1.b, t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
               │     │     │     │     │     │     │     │         └─StreamExchange { dist: HashShard(t2.c) }
-              │     │     │     │     │     │     │     │           └─StreamTableScan { table: t2, columns: [t2.c], stream_scan_type: ArrangementBackfill, stream_key: [t2.c], pk: [c], dist: UpstreamHashShard(t2.c) }
+              │     │     │     │     │     │     │     │           └─StreamTableScan { table: t2, columns: [t2.c], stream_scan_type: SnapshotBackfill, stream_key: [t2.c], pk: [c], dist: UpstreamHashShard(t2.c) }
               │     │     │     │     │     │     │     └─StreamProject { exprs: [t1.a, t1.b, t1.b] }
               │     │     │     │     │     │     │       └─StreamHashJoin { type: Inner, predicate: t1.a = t2.c, output: all }
               │     │     │     │     │     │     │         ├─StreamExchange { dist: HashShard(t1.a) }
               │     │     │     │     │     │     │         │ └─StreamProject { exprs: [t1.a, t1.b], noop_update_hint: true }
               │     │     │     │     │     │     │         │   └─StreamHashAgg { group_key: [t1.a, t1.b], aggs: [count] }
               │     │     │     │     │     │     │         │     └─StreamExchange { dist: HashShard(t1.a, t1.b) }
-              │     │     │     │     │     │     │         │       └─StreamTableScan { table: t1, columns: [t1.a, t1.b, t1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
+              │     │     │     │     │     │     │         │       └─StreamTableScan { table: t1, columns: [t1.a, t1.b, t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
               │     │     │     │     │     │     │         └─StreamExchange { dist: HashShard(t2.c) }
-              │     │     │     │     │     │     │           └─StreamTableScan { table: t2, columns: [t2.c], stream_scan_type: ArrangementBackfill, stream_key: [t2.c], pk: [c], dist: UpstreamHashShard(t2.c) }
+              │     │     │     │     │     │     │           └─StreamTableScan { table: t2, columns: [t2.c], stream_scan_type: SnapshotBackfill, stream_key: [t2.c], pk: [c], dist: UpstreamHashShard(t2.c) }
               │     │     │     │     │     │     └─StreamProject { exprs: [t1.a, t1.b, t1.b] }
               │     │     │     │     │     │       └─StreamHashJoin { type: Inner, predicate: t1.a = t2.c, output: all }
               │     │     │     │     │     │         ├─StreamExchange { dist: HashShard(t1.a) }
               │     │     │     │     │     │         │ └─StreamProject { exprs: [t1.a, t1.b], noop_update_hint: true }
               │     │     │     │     │     │         │   └─StreamHashAgg { group_key: [t1.a, t1.b], aggs: [count] }
               │     │     │     │     │     │         │     └─StreamExchange { dist: HashShard(t1.a, t1.b) }
-              │     │     │     │     │     │         │       └─StreamTableScan { table: t1, columns: [t1.a, t1.b, t1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
+              │     │     │     │     │     │         │       └─StreamTableScan { table: t1, columns: [t1.a, t1.b, t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
               │     │     │     │     │     │         └─StreamExchange { dist: HashShard(t2.c) }
-              │     │     │     │     │     │           └─StreamTableScan { table: t2, columns: [t2.c], stream_scan_type: ArrangementBackfill, stream_key: [t2.c], pk: [c], dist: UpstreamHashShard(t2.c) }
+              │     │     │     │     │     │           └─StreamTableScan { table: t2, columns: [t2.c], stream_scan_type: SnapshotBackfill, stream_key: [t2.c], pk: [c], dist: UpstreamHashShard(t2.c) }
               │     │     │     │     │     └─StreamProject { exprs: [t1.a, t1.b, t1.b] }
               │     │     │     │     │       └─StreamHashJoin { type: Inner, predicate: t1.a = t2.c, output: all }
               │     │     │     │     │         ├─StreamExchange { dist: HashShard(t1.a) }
               │     │     │     │     │         │ └─StreamProject { exprs: [t1.a, t1.b], noop_update_hint: true }
               │     │     │     │     │         │   └─StreamHashAgg { group_key: [t1.a, t1.b], aggs: [count] }
               │     │     │     │     │         │     └─StreamExchange { dist: HashShard(t1.a, t1.b) }
-              │     │     │     │     │         │       └─StreamTableScan { table: t1, columns: [t1.a, t1.b, t1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
+              │     │     │     │     │         │       └─StreamTableScan { table: t1, columns: [t1.a, t1.b, t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
               │     │     │     │     │         └─StreamExchange { dist: HashShard(t2.c) }
-              │     │     │     │     │           └─StreamTableScan { table: t2, columns: [t2.c], stream_scan_type: ArrangementBackfill, stream_key: [t2.c], pk: [c], dist: UpstreamHashShard(t2.c) }
+              │     │     │     │     │           └─StreamTableScan { table: t2, columns: [t2.c], stream_scan_type: SnapshotBackfill, stream_key: [t2.c], pk: [c], dist: UpstreamHashShard(t2.c) }
               │     │     │     │     └─StreamProject { exprs: [t1.a, t1.b, t1.b] }
               │     │     │     │       └─StreamHashJoin { type: Inner, predicate: t1.a = t2.c, output: all }
               │     │     │     │         ├─StreamExchange { dist: HashShard(t1.a) }
               │     │     │     │         │ └─StreamProject { exprs: [t1.a, t1.b], noop_update_hint: true }
               │     │     │     │         │   └─StreamHashAgg { group_key: [t1.a, t1.b], aggs: [count] }
               │     │     │     │         │     └─StreamExchange { dist: HashShard(t1.a, t1.b) }
-              │     │     │     │         │       └─StreamTableScan { table: t1, columns: [t1.a, t1.b, t1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
+              │     │     │     │         │       └─StreamTableScan { table: t1, columns: [t1.a, t1.b, t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
               │     │     │     │         └─StreamExchange { dist: HashShard(t2.c) }
-              │     │     │     │           └─StreamTableScan { table: t2, columns: [t2.c], stream_scan_type: ArrangementBackfill, stream_key: [t2.c], pk: [c], dist: UpstreamHashShard(t2.c) }
+              │     │     │     │           └─StreamTableScan { table: t2, columns: [t2.c], stream_scan_type: SnapshotBackfill, stream_key: [t2.c], pk: [c], dist: UpstreamHashShard(t2.c) }
               │     │     │     └─StreamProject { exprs: [t1.a, t1.b, t1.b] }
               │     │     │       └─StreamHashJoin { type: Inner, predicate: t1.a = t2.c, output: all }
               │     │     │         ├─StreamExchange { dist: HashShard(t1.a) }
               │     │     │         │ └─StreamProject { exprs: [t1.a, t1.b], noop_update_hint: true }
               │     │     │         │   └─StreamHashAgg { group_key: [t1.a, t1.b], aggs: [count] }
               │     │     │         │     └─StreamExchange { dist: HashShard(t1.a, t1.b) }
-              │     │     │         │       └─StreamTableScan { table: t1, columns: [t1.a, t1.b, t1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
+              │     │     │         │       └─StreamTableScan { table: t1, columns: [t1.a, t1.b, t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
               │     │     │         └─StreamExchange { dist: HashShard(t2.c) }
-              │     │     │           └─StreamTableScan { table: t2, columns: [t2.c], stream_scan_type: ArrangementBackfill, stream_key: [t2.c], pk: [c], dist: UpstreamHashShard(t2.c) }
+              │     │     │           └─StreamTableScan { table: t2, columns: [t2.c], stream_scan_type: SnapshotBackfill, stream_key: [t2.c], pk: [c], dist: UpstreamHashShard(t2.c) }
               │     │     └─StreamProject { exprs: [t1.a, t1.b, t1.b] }
               │     │       └─StreamHashJoin { type: Inner, predicate: t1.a = t2.c, output: all }
               │     │         ├─StreamExchange { dist: HashShard(t1.a) }
               │     │         │ └─StreamProject { exprs: [t1.a, t1.b], noop_update_hint: true }
               │     │         │   └─StreamHashAgg { group_key: [t1.a, t1.b], aggs: [count] }
               │     │         │     └─StreamExchange { dist: HashShard(t1.a, t1.b) }
-              │     │         │       └─StreamTableScan { table: t1, columns: [t1.a, t1.b, t1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
+              │     │         │       └─StreamTableScan { table: t1, columns: [t1.a, t1.b, t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
               │     │         └─StreamExchange { dist: HashShard(t2.c) }
-              │     │           └─StreamTableScan { table: t2, columns: [t2.c], stream_scan_type: ArrangementBackfill, stream_key: [t2.c], pk: [c], dist: UpstreamHashShard(t2.c) }
+              │     │           └─StreamTableScan { table: t2, columns: [t2.c], stream_scan_type: SnapshotBackfill, stream_key: [t2.c], pk: [c], dist: UpstreamHashShard(t2.c) }
               │     └─StreamProject { exprs: [t1.a, t1.b, t1.b] }
               │       └─StreamHashJoin { type: Inner, predicate: t1.a = t2.c, output: all }
               │         ├─StreamExchange { dist: HashShard(t1.a) }
               │         │ └─StreamProject { exprs: [t1.a, t1.b], noop_update_hint: true }
               │         │   └─StreamHashAgg { group_key: [t1.a, t1.b], aggs: [count] }
               │         │     └─StreamExchange { dist: HashShard(t1.a, t1.b) }
-              │         │       └─StreamTableScan { table: t1, columns: [t1.a, t1.b, t1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
+              │         │       └─StreamTableScan { table: t1, columns: [t1.a, t1.b, t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
               │         └─StreamExchange { dist: HashShard(t2.c) }
-              │           └─StreamTableScan { table: t2, columns: [t2.c], stream_scan_type: ArrangementBackfill, stream_key: [t2.c], pk: [c], dist: UpstreamHashShard(t2.c) }
+              │           └─StreamTableScan { table: t2, columns: [t2.c], stream_scan_type: SnapshotBackfill, stream_key: [t2.c], pk: [c], dist: UpstreamHashShard(t2.c) }
               └─StreamProject { exprs: [t1.a, t1.b, t1.b] }
                 └─StreamHashJoin { type: Inner, predicate: t1.a = t2.c, output: all }
                   ├─StreamExchange { dist: HashShard(t1.a) }
                   │ └─StreamProject { exprs: [t1.a, t1.b], noop_update_hint: true }
                   │   └─StreamHashAgg { group_key: [t1.a, t1.b], aggs: [count] }
                   │     └─StreamExchange { dist: HashShard(t1.a, t1.b) }
-                  │       └─StreamTableScan { table: t1, columns: [t1.a, t1.b, t1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
+                  │       └─StreamTableScan { table: t1, columns: [t1.a, t1.b, t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
                   └─StreamExchange { dist: HashShard(t2.c) }
-                    └─StreamTableScan { table: t2, columns: [t2.c], stream_scan_type: ArrangementBackfill, stream_key: [t2.c], pk: [c], dist: UpstreamHashShard(t2.c) }
+                    └─StreamTableScan { table: t2, columns: [t2.c], stream_scan_type: SnapshotBackfill, stream_key: [t2.c], pk: [c], dist: UpstreamHashShard(t2.c) }
 - name: improve multi scalar subqueries optimization time. issue 16952. case 2.
   sql: |
     create table t1(a int, b int);
@@ -1959,7 +1962,7 @@
     └─StreamProject { exprs: [Coalesce(sum(t2.d), 0:Int64) as $expr1, Coalesce(sum(t2.d), 0:Int64) as $expr2, Coalesce(sum(t2.d), 0:Int64) as $expr3, Coalesce(sum(t2.d), 0:Int64) as $expr4, Coalesce(sum(t2.d), 0:Int64) as $expr5, Coalesce(sum(t2.d), 0:Int64) as $expr6, t1._row_id, t1.a, t1.b, t1.a, t1.b, t1.a, t1.b, t1.a, t1.b, t1.a, t1.b, t1.a, t1.b] }
       └─StreamHashJoin { type: LeftOuter, predicate: t1.a IS NOT DISTINCT FROM t1.a AND t1.b IS NOT DISTINCT FROM t1.b, output: [sum(t2.d), sum(t2.d), sum(t2.d), sum(t2.d), sum(t2.d), sum(t2.d), t1._row_id, t1.a, t1.b, t1.a, t1.b, t1.a, t1.b, t1.a, t1.b, t1.a, t1.b, t1.a, t1.b, t1.a, t1.b] }
         ├─StreamExchange { dist: HashShard(t1.a, t1.b) }
-        │ └─StreamTableScan { table: t1, columns: [t1.a, t1.b, t1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
+        │ └─StreamTableScan { table: t1, columns: [t1.a, t1.b, t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
         └─StreamExchange { dist: HashShard(t1.a, t1.b) }
           └─StreamFilter { predicate: ((((IsNotNull(t1.a) OR IsNotNull(t1.b)) OR (IsNotNull(t1.a) OR IsNotNull(t1.b))) OR ((IsNotNull(t1.a) OR IsNotNull(t1.b)) OR (IsNotNull(t1.a) OR IsNotNull(t1.b)))) OR ((IsNotNull(t1.a) OR IsNotNull(t1.b)) OR (IsNotNull(t1.a) OR IsNotNull(t1.b)))) }
             └─StreamHashJoin { type: FullOuter, predicate: t1.a IS NOT DISTINCT FROM t1.a AND t1.b IS NOT DISTINCT FROM t1.b, output: [t1.a, t1.b, sum(t2.d), sum(t2.d), sum(t2.d), sum(t2.d), sum(t2.d), sum(t2.d), t1.a, t1.b, t1.a, t1.b, t1.a, t1.b, t1.a, t1.b, t1.a, t1.b] }
@@ -1982,7 +1985,7 @@
               │     │     │     │     │     │ └─StreamProject { exprs: [t1.a, t1.b], noop_update_hint: true }
               │     │     │     │     │     │   └─StreamHashAgg { group_key: [t1.a, t1.b], aggs: [count] }
               │     │     │     │     │     │     └─StreamExchange { dist: HashShard(t1.a, t1.b) }
-              │     │     │     │     │     │       └─StreamTableScan { table: t1, columns: [t1.a, t1.b, t1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
+              │     │     │     │     │     │       └─StreamTableScan { table: t1, columns: [t1.a, t1.b, t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
               │     │     │     │     │     └─StreamHashJoin { type: LeftSemi, predicate: t5.j = t6.k AND t1.a IS NOT DISTINCT FROM t1.a AND t1.b IS NOT DISTINCT FROM t1.b, output: [t1.a, t1.b, t2.d, t3._row_id, t2.c, t4._row_id, t5._row_id, t5.j] }
               │     │     │     │     │       ├─StreamExchange { dist: HashShard(t1.b) }
               │     │     │     │     │       │ └─StreamHashJoin { type: LeftOuter, predicate: t2.c = t5.j AND t1.a IS NOT DISTINCT FROM t1.a AND t1.b IS NOT DISTINCT FROM t1.b, output: [t1.a, t1.b, t2.d, t5.j, t3._row_id, t2.c, t4._row_id, t1.a, t1.b, t5._row_id] }
@@ -1993,41 +1996,41 @@
               │     │     │     │     │       │   │ │ │ │ └─StreamProject { exprs: [t1.a, t1.b], noop_update_hint: true }
               │     │     │     │     │       │   │ │ │ │   └─StreamHashAgg { group_key: [t1.a, t1.b], aggs: [count] }
               │     │     │     │     │       │   │ │ │ │     └─StreamExchange { dist: HashShard(t1.a, t1.b) }
-              │     │     │     │     │       │   │ │ │ │       └─StreamTableScan { table: t1, columns: [t1.a, t1.b, t1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
+              │     │     │     │     │       │   │ │ │ │       └─StreamTableScan { table: t1, columns: [t1.a, t1.b, t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
               │     │     │     │     │       │   │ │ │ └─StreamExchange { dist: HashShard(t2.c) }
-              │     │     │     │     │       │   │ │ │   └─StreamTableScan { table: t2, columns: [t2.c, t2.d], stream_scan_type: ArrangementBackfill, stream_key: [t2.c], pk: [c], dist: UpstreamHashShard(t2.c) }
+              │     │     │     │     │       │   │ │ │   └─StreamTableScan { table: t2, columns: [t2.c, t2.d], stream_scan_type: SnapshotBackfill, stream_key: [t2.c], pk: [c], dist: UpstreamHashShard(t2.c) }
               │     │     │     │     │       │   │ │ └─StreamHashJoin { type: Inner, predicate: t1.a = t3.e, output: [t1.a, t1.b, t3.f, t3._row_id] }
               │     │     │     │     │       │   │ │   ├─StreamExchange { dist: HashShard(t1.a) }
               │     │     │     │     │       │   │ │   │ └─StreamProject { exprs: [t1.a, t1.b], noop_update_hint: true }
               │     │     │     │     │       │   │ │   │   └─StreamHashAgg { group_key: [t1.a, t1.b], aggs: [count] }
               │     │     │     │     │       │   │ │   │     └─StreamExchange { dist: HashShard(t1.a, t1.b) }
-              │     │     │     │     │       │   │ │   │       └─StreamTableScan { table: t1, columns: [t1.a, t1.b, t1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
+              │     │     │     │     │       │   │ │   │       └─StreamTableScan { table: t1, columns: [t1.a, t1.b, t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
               │     │     │     │     │       │   │ │   └─StreamExchange { dist: HashShard(t3.e) }
-              │     │     │     │     │       │   │ │     └─StreamTableScan { table: t3, columns: [t3.e, t3.f, t3._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t3._row_id], pk: [_row_id], dist: UpstreamHashShard(t3._row_id) }
+              │     │     │     │     │       │   │ │     └─StreamTableScan { table: t3, columns: [t3.e, t3.f, t3._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t3._row_id], pk: [_row_id], dist: UpstreamHashShard(t3._row_id) }
               │     │     │     │     │       │   │ └─StreamHashJoin { type: Inner, predicate: t1.a = t4.g, output: [t1.a, t1.b, t4.h, t4._row_id] }
               │     │     │     │     │       │   │   ├─StreamExchange { dist: HashShard(t1.a) }
               │     │     │     │     │       │   │   │ └─StreamProject { exprs: [t1.a, t1.b], noop_update_hint: true }
               │     │     │     │     │       │   │   │   └─StreamHashAgg { group_key: [t1.a, t1.b], aggs: [count] }
               │     │     │     │     │       │   │   │     └─StreamExchange { dist: HashShard(t1.a, t1.b) }
-              │     │     │     │     │       │   │   │       └─StreamTableScan { table: t1, columns: [t1.a, t1.b, t1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
+              │     │     │     │     │       │   │   │       └─StreamTableScan { table: t1, columns: [t1.a, t1.b, t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
               │     │     │     │     │       │   │   └─StreamExchange { dist: HashShard(t4.g) }
-              │     │     │     │     │       │   │     └─StreamTableScan { table: t4, columns: [t4.g, t4.h, t4._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t4._row_id], pk: [_row_id], dist: UpstreamHashShard(t4._row_id) }
+              │     │     │     │     │       │   │     └─StreamTableScan { table: t4, columns: [t4.g, t4.h, t4._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t4._row_id], pk: [_row_id], dist: UpstreamHashShard(t4._row_id) }
               │     │     │     │     │       │   └─StreamHashJoin { type: Inner, predicate: t1.a = t5.i, output: [t1.a, t1.b, t5.j, t5._row_id] }
               │     │     │     │     │       │     ├─StreamExchange { dist: HashShard(t1.a) }
               │     │     │     │     │       │     │ └─StreamProject { exprs: [t1.a, t1.b], noop_update_hint: true }
               │     │     │     │     │       │     │   └─StreamHashAgg { group_key: [t1.a, t1.b], aggs: [count] }
               │     │     │     │     │       │     │     └─StreamExchange { dist: HashShard(t1.a, t1.b) }
-              │     │     │     │     │       │     │       └─StreamTableScan { table: t1, columns: [t1.a, t1.b, t1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
+              │     │     │     │     │       │     │       └─StreamTableScan { table: t1, columns: [t1.a, t1.b, t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
               │     │     │     │     │       │     └─StreamExchange { dist: HashShard(t5.i) }
-              │     │     │     │     │       │       └─StreamTableScan { table: t5, columns: [t5.i, t5.j, t5._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t5._row_id], pk: [_row_id], dist: UpstreamHashShard(t5._row_id) }
+              │     │     │     │     │       │       └─StreamTableScan { table: t5, columns: [t5.i, t5.j, t5._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t5._row_id], pk: [_row_id], dist: UpstreamHashShard(t5._row_id) }
               │     │     │     │     │       └─StreamHashJoin { type: Inner, predicate: t1.b = t6.l, output: [t1.a, t1.b, t6.k, t6._row_id] }
               │     │     │     │     │         ├─StreamExchange { dist: HashShard(t1.b) }
               │     │     │     │     │         │ └─StreamProject { exprs: [t1.a, t1.b], noop_update_hint: true }
               │     │     │     │     │         │   └─StreamHashAgg { group_key: [t1.a, t1.b], aggs: [count] }
               │     │     │     │     │         │     └─StreamExchange { dist: HashShard(t1.a, t1.b) }
-              │     │     │     │     │         │       └─StreamTableScan { table: t1, columns: [t1.a, t1.b, t1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
+              │     │     │     │     │         │       └─StreamTableScan { table: t1, columns: [t1.a, t1.b, t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
               │     │     │     │     │         └─StreamExchange { dist: HashShard(t6.l) }
-              │     │     │     │     │           └─StreamTableScan { table: t6, columns: [t6.k, t6.l, t6._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t6._row_id], pk: [_row_id], dist: UpstreamHashShard(t6._row_id) }
+              │     │     │     │     │           └─StreamTableScan { table: t6, columns: [t6.k, t6.l, t6._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t6._row_id], pk: [_row_id], dist: UpstreamHashShard(t6._row_id) }
               │     │     │     │     └─StreamProject { exprs: [t1.a, t1.b, sum(t2.d)] }
               │     │     │     │       └─StreamHashAgg { group_key: [t1.a, t1.b], aggs: [sum(t2.d), count] }
               │     │     │     │         └─StreamHashJoin { type: LeftOuter, predicate: t1.a IS NOT DISTINCT FROM t1.a AND t1.b IS NOT DISTINCT FROM t1.b, output: [t1.a, t1.b, t2.d, t1.a, t1.b, t3._row_id, t2.c, t4._row_id, t5._row_id, t5.j] }
@@ -2035,7 +2038,7 @@
               │     │     │     │           │ └─StreamProject { exprs: [t1.a, t1.b], noop_update_hint: true }
               │     │     │     │           │   └─StreamHashAgg { group_key: [t1.a, t1.b], aggs: [count] }
               │     │     │     │           │     └─StreamExchange { dist: HashShard(t1.a, t1.b) }
-              │     │     │     │           │       └─StreamTableScan { table: t1, columns: [t1.a, t1.b, t1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
+              │     │     │     │           │       └─StreamTableScan { table: t1, columns: [t1.a, t1.b, t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
               │     │     │     │           └─StreamHashJoin { type: LeftSemi, predicate: t5.j = t6.k AND t1.a IS NOT DISTINCT FROM t1.a AND t1.b IS NOT DISTINCT FROM t1.b, output: [t1.a, t1.b, t2.d, t3._row_id, t2.c, t4._row_id, t5._row_id, t5.j] }
               │     │     │     │             ├─StreamExchange { dist: HashShard(t1.b) }
               │     │     │     │             │ └─StreamHashJoin { type: LeftOuter, predicate: t2.c = t5.j AND t1.a IS NOT DISTINCT FROM t1.a AND t1.b IS NOT DISTINCT FROM t1.b, output: [t1.a, t1.b, t2.d, t5.j, t3._row_id, t2.c, t4._row_id, t1.a, t1.b, t5._row_id] }
@@ -2046,41 +2049,41 @@
               │     │     │     │             │   │ │ │ │ └─StreamProject { exprs: [t1.a, t1.b], noop_update_hint: true }
               │     │     │     │             │   │ │ │ │   └─StreamHashAgg { group_key: [t1.a, t1.b], aggs: [count] }
               │     │     │     │             │   │ │ │ │     └─StreamExchange { dist: HashShard(t1.a, t1.b) }
-              │     │     │     │             │   │ │ │ │       └─StreamTableScan { table: t1, columns: [t1.a, t1.b, t1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
+              │     │     │     │             │   │ │ │ │       └─StreamTableScan { table: t1, columns: [t1.a, t1.b, t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
               │     │     │     │             │   │ │ │ └─StreamExchange { dist: HashShard(t2.c) }
-              │     │     │     │             │   │ │ │   └─StreamTableScan { table: t2, columns: [t2.c, t2.d], stream_scan_type: ArrangementBackfill, stream_key: [t2.c], pk: [c], dist: UpstreamHashShard(t2.c) }
+              │     │     │     │             │   │ │ │   └─StreamTableScan { table: t2, columns: [t2.c, t2.d], stream_scan_type: SnapshotBackfill, stream_key: [t2.c], pk: [c], dist: UpstreamHashShard(t2.c) }
               │     │     │     │             │   │ │ └─StreamHashJoin { type: Inner, predicate: t1.a = t3.e, output: [t1.a, t1.b, t3.f, t3._row_id] }
               │     │     │     │             │   │ │   ├─StreamExchange { dist: HashShard(t1.a) }
               │     │     │     │             │   │ │   │ └─StreamProject { exprs: [t1.a, t1.b], noop_update_hint: true }
               │     │     │     │             │   │ │   │   └─StreamHashAgg { group_key: [t1.a, t1.b], aggs: [count] }
               │     │     │     │             │   │ │   │     └─StreamExchange { dist: HashShard(t1.a, t1.b) }
-              │     │     │     │             │   │ │   │       └─StreamTableScan { table: t1, columns: [t1.a, t1.b, t1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
+              │     │     │     │             │   │ │   │       └─StreamTableScan { table: t1, columns: [t1.a, t1.b, t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
               │     │     │     │             │   │ │   └─StreamExchange { dist: HashShard(t3.e) }
-              │     │     │     │             │   │ │     └─StreamTableScan { table: t3, columns: [t3.e, t3.f, t3._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t3._row_id], pk: [_row_id], dist: UpstreamHashShard(t3._row_id) }
+              │     │     │     │             │   │ │     └─StreamTableScan { table: t3, columns: [t3.e, t3.f, t3._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t3._row_id], pk: [_row_id], dist: UpstreamHashShard(t3._row_id) }
               │     │     │     │             │   │ └─StreamHashJoin { type: Inner, predicate: t1.a = t4.g, output: [t1.a, t1.b, t4.h, t4._row_id] }
               │     │     │     │             │   │   ├─StreamExchange { dist: HashShard(t1.a) }
               │     │     │     │             │   │   │ └─StreamProject { exprs: [t1.a, t1.b], noop_update_hint: true }
               │     │     │     │             │   │   │   └─StreamHashAgg { group_key: [t1.a, t1.b], aggs: [count] }
               │     │     │     │             │   │   │     └─StreamExchange { dist: HashShard(t1.a, t1.b) }
-              │     │     │     │             │   │   │       └─StreamTableScan { table: t1, columns: [t1.a, t1.b, t1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
+              │     │     │     │             │   │   │       └─StreamTableScan { table: t1, columns: [t1.a, t1.b, t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
               │     │     │     │             │   │   └─StreamExchange { dist: HashShard(t4.g) }
-              │     │     │     │             │   │     └─StreamTableScan { table: t4, columns: [t4.g, t4.h, t4._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t4._row_id], pk: [_row_id], dist: UpstreamHashShard(t4._row_id) }
+              │     │     │     │             │   │     └─StreamTableScan { table: t4, columns: [t4.g, t4.h, t4._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t4._row_id], pk: [_row_id], dist: UpstreamHashShard(t4._row_id) }
               │     │     │     │             │   └─StreamHashJoin { type: Inner, predicate: t1.a = t5.i, output: [t1.a, t1.b, t5.j, t5._row_id] }
               │     │     │     │             │     ├─StreamExchange { dist: HashShard(t1.a) }
               │     │     │     │             │     │ └─StreamProject { exprs: [t1.a, t1.b], noop_update_hint: true }
               │     │     │     │             │     │   └─StreamHashAgg { group_key: [t1.a, t1.b], aggs: [count] }
               │     │     │     │             │     │     └─StreamExchange { dist: HashShard(t1.a, t1.b) }
-              │     │     │     │             │     │       └─StreamTableScan { table: t1, columns: [t1.a, t1.b, t1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
+              │     │     │     │             │     │       └─StreamTableScan { table: t1, columns: [t1.a, t1.b, t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
               │     │     │     │             │     └─StreamExchange { dist: HashShard(t5.i) }
-              │     │     │     │             │       └─StreamTableScan { table: t5, columns: [t5.i, t5.j, t5._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t5._row_id], pk: [_row_id], dist: UpstreamHashShard(t5._row_id) }
+              │     │     │     │             │       └─StreamTableScan { table: t5, columns: [t5.i, t5.j, t5._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t5._row_id], pk: [_row_id], dist: UpstreamHashShard(t5._row_id) }
               │     │     │     │             └─StreamHashJoin { type: Inner, predicate: t1.b = t6.l, output: [t1.a, t1.b, t6.k, t6._row_id] }
               │     │     │     │               ├─StreamExchange { dist: HashShard(t1.b) }
               │     │     │     │               │ └─StreamProject { exprs: [t1.a, t1.b], noop_update_hint: true }
               │     │     │     │               │   └─StreamHashAgg { group_key: [t1.a, t1.b], aggs: [count] }
               │     │     │     │               │     └─StreamExchange { dist: HashShard(t1.a, t1.b) }
-              │     │     │     │               │       └─StreamTableScan { table: t1, columns: [t1.a, t1.b, t1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
+              │     │     │     │               │       └─StreamTableScan { table: t1, columns: [t1.a, t1.b, t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
               │     │     │     │               └─StreamExchange { dist: HashShard(t6.l) }
-              │     │     │     │                 └─StreamTableScan { table: t6, columns: [t6.k, t6.l, t6._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t6._row_id], pk: [_row_id], dist: UpstreamHashShard(t6._row_id) }
+              │     │     │     │                 └─StreamTableScan { table: t6, columns: [t6.k, t6.l, t6._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t6._row_id], pk: [_row_id], dist: UpstreamHashShard(t6._row_id) }
               │     │     │     └─StreamProject { exprs: [t1.a, t1.b, sum(t2.d)] }
               │     │     │       └─StreamHashAgg { group_key: [t1.a, t1.b], aggs: [sum(t2.d), count] }
               │     │     │         └─StreamHashJoin { type: LeftOuter, predicate: t1.a IS NOT DISTINCT FROM t1.a AND t1.b IS NOT DISTINCT FROM t1.b, output: [t1.a, t1.b, t2.d, t1.a, t1.b, t3._row_id, t2.c, t4._row_id, t5._row_id, t5.j] }
@@ -2088,7 +2091,7 @@
               │     │     │           │ └─StreamProject { exprs: [t1.a, t1.b], noop_update_hint: true }
               │     │     │           │   └─StreamHashAgg { group_key: [t1.a, t1.b], aggs: [count] }
               │     │     │           │     └─StreamExchange { dist: HashShard(t1.a, t1.b) }
-              │     │     │           │       └─StreamTableScan { table: t1, columns: [t1.a, t1.b, t1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
+              │     │     │           │       └─StreamTableScan { table: t1, columns: [t1.a, t1.b, t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
               │     │     │           └─StreamHashJoin { type: LeftSemi, predicate: t5.j = t6.k AND t1.a IS NOT DISTINCT FROM t1.a AND t1.b IS NOT DISTINCT FROM t1.b, output: [t1.a, t1.b, t2.d, t3._row_id, t2.c, t4._row_id, t5._row_id, t5.j] }
               │     │     │             ├─StreamExchange { dist: HashShard(t1.b) }
               │     │     │             │ └─StreamHashJoin { type: LeftOuter, predicate: t2.c = t5.j AND t1.a IS NOT DISTINCT FROM t1.a AND t1.b IS NOT DISTINCT FROM t1.b, output: [t1.a, t1.b, t2.d, t5.j, t3._row_id, t2.c, t4._row_id, t1.a, t1.b, t5._row_id] }
@@ -2099,41 +2102,41 @@
               │     │     │             │   │ │ │ │ └─StreamProject { exprs: [t1.a, t1.b], noop_update_hint: true }
               │     │     │             │   │ │ │ │   └─StreamHashAgg { group_key: [t1.a, t1.b], aggs: [count] }
               │     │     │             │   │ │ │ │     └─StreamExchange { dist: HashShard(t1.a, t1.b) }
-              │     │     │             │   │ │ │ │       └─StreamTableScan { table: t1, columns: [t1.a, t1.b, t1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
+              │     │     │             │   │ │ │ │       └─StreamTableScan { table: t1, columns: [t1.a, t1.b, t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
               │     │     │             │   │ │ │ └─StreamExchange { dist: HashShard(t2.c) }
-              │     │     │             │   │ │ │   └─StreamTableScan { table: t2, columns: [t2.c, t2.d], stream_scan_type: ArrangementBackfill, stream_key: [t2.c], pk: [c], dist: UpstreamHashShard(t2.c) }
+              │     │     │             │   │ │ │   └─StreamTableScan { table: t2, columns: [t2.c, t2.d], stream_scan_type: SnapshotBackfill, stream_key: [t2.c], pk: [c], dist: UpstreamHashShard(t2.c) }
               │     │     │             │   │ │ └─StreamHashJoin { type: Inner, predicate: t1.a = t3.e, output: [t1.a, t1.b, t3.f, t3._row_id] }
               │     │     │             │   │ │   ├─StreamExchange { dist: HashShard(t1.a) }
               │     │     │             │   │ │   │ └─StreamProject { exprs: [t1.a, t1.b], noop_update_hint: true }
               │     │     │             │   │ │   │   └─StreamHashAgg { group_key: [t1.a, t1.b], aggs: [count] }
               │     │     │             │   │ │   │     └─StreamExchange { dist: HashShard(t1.a, t1.b) }
-              │     │     │             │   │ │   │       └─StreamTableScan { table: t1, columns: [t1.a, t1.b, t1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
+              │     │     │             │   │ │   │       └─StreamTableScan { table: t1, columns: [t1.a, t1.b, t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
               │     │     │             │   │ │   └─StreamExchange { dist: HashShard(t3.e) }
-              │     │     │             │   │ │     └─StreamTableScan { table: t3, columns: [t3.e, t3.f, t3._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t3._row_id], pk: [_row_id], dist: UpstreamHashShard(t3._row_id) }
+              │     │     │             │   │ │     └─StreamTableScan { table: t3, columns: [t3.e, t3.f, t3._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t3._row_id], pk: [_row_id], dist: UpstreamHashShard(t3._row_id) }
               │     │     │             │   │ └─StreamHashJoin { type: Inner, predicate: t1.a = t4.g, output: [t1.a, t1.b, t4.h, t4._row_id] }
               │     │     │             │   │   ├─StreamExchange { dist: HashShard(t1.a) }
               │     │     │             │   │   │ └─StreamProject { exprs: [t1.a, t1.b], noop_update_hint: true }
               │     │     │             │   │   │   └─StreamHashAgg { group_key: [t1.a, t1.b], aggs: [count] }
               │     │     │             │   │   │     └─StreamExchange { dist: HashShard(t1.a, t1.b) }
-              │     │     │             │   │   │       └─StreamTableScan { table: t1, columns: [t1.a, t1.b, t1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
+              │     │     │             │   │   │       └─StreamTableScan { table: t1, columns: [t1.a, t1.b, t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
               │     │     │             │   │   └─StreamExchange { dist: HashShard(t4.g) }
-              │     │     │             │   │     └─StreamTableScan { table: t4, columns: [t4.g, t4.h, t4._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t4._row_id], pk: [_row_id], dist: UpstreamHashShard(t4._row_id) }
+              │     │     │             │   │     └─StreamTableScan { table: t4, columns: [t4.g, t4.h, t4._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t4._row_id], pk: [_row_id], dist: UpstreamHashShard(t4._row_id) }
               │     │     │             │   └─StreamHashJoin { type: Inner, predicate: t1.a = t5.i, output: [t1.a, t1.b, t5.j, t5._row_id] }
               │     │     │             │     ├─StreamExchange { dist: HashShard(t1.a) }
               │     │     │             │     │ └─StreamProject { exprs: [t1.a, t1.b], noop_update_hint: true }
               │     │     │             │     │   └─StreamHashAgg { group_key: [t1.a, t1.b], aggs: [count] }
               │     │     │             │     │     └─StreamExchange { dist: HashShard(t1.a, t1.b) }
-              │     │     │             │     │       └─StreamTableScan { table: t1, columns: [t1.a, t1.b, t1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
+              │     │     │             │     │       └─StreamTableScan { table: t1, columns: [t1.a, t1.b, t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
               │     │     │             │     └─StreamExchange { dist: HashShard(t5.i) }
-              │     │     │             │       └─StreamTableScan { table: t5, columns: [t5.i, t5.j, t5._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t5._row_id], pk: [_row_id], dist: UpstreamHashShard(t5._row_id) }
+              │     │     │             │       └─StreamTableScan { table: t5, columns: [t5.i, t5.j, t5._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t5._row_id], pk: [_row_id], dist: UpstreamHashShard(t5._row_id) }
               │     │     │             └─StreamHashJoin { type: Inner, predicate: t1.b = t6.l, output: [t1.a, t1.b, t6.k, t6._row_id] }
               │     │     │               ├─StreamExchange { dist: HashShard(t1.b) }
               │     │     │               │ └─StreamProject { exprs: [t1.a, t1.b], noop_update_hint: true }
               │     │     │               │   └─StreamHashAgg { group_key: [t1.a, t1.b], aggs: [count] }
               │     │     │               │     └─StreamExchange { dist: HashShard(t1.a, t1.b) }
-              │     │     │               │       └─StreamTableScan { table: t1, columns: [t1.a, t1.b, t1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
+              │     │     │               │       └─StreamTableScan { table: t1, columns: [t1.a, t1.b, t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
               │     │     │               └─StreamExchange { dist: HashShard(t6.l) }
-              │     │     │                 └─StreamTableScan { table: t6, columns: [t6.k, t6.l, t6._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t6._row_id], pk: [_row_id], dist: UpstreamHashShard(t6._row_id) }
+              │     │     │                 └─StreamTableScan { table: t6, columns: [t6.k, t6.l, t6._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t6._row_id], pk: [_row_id], dist: UpstreamHashShard(t6._row_id) }
               │     │     └─StreamProject { exprs: [t1.a, t1.b, sum(t2.d)] }
               │     │       └─StreamHashAgg { group_key: [t1.a, t1.b], aggs: [sum(t2.d), count] }
               │     │         └─StreamHashJoin { type: LeftOuter, predicate: t1.a IS NOT DISTINCT FROM t1.a AND t1.b IS NOT DISTINCT FROM t1.b, output: [t1.a, t1.b, t2.d, t1.a, t1.b, t3._row_id, t2.c, t4._row_id, t5._row_id, t5.j] }
@@ -2141,7 +2144,7 @@
               │     │           │ └─StreamProject { exprs: [t1.a, t1.b], noop_update_hint: true }
               │     │           │   └─StreamHashAgg { group_key: [t1.a, t1.b], aggs: [count] }
               │     │           │     └─StreamExchange { dist: HashShard(t1.a, t1.b) }
-              │     │           │       └─StreamTableScan { table: t1, columns: [t1.a, t1.b, t1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
+              │     │           │       └─StreamTableScan { table: t1, columns: [t1.a, t1.b, t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
               │     │           └─StreamHashJoin { type: LeftSemi, predicate: t5.j = t6.k AND t1.a IS NOT DISTINCT FROM t1.a AND t1.b IS NOT DISTINCT FROM t1.b, output: [t1.a, t1.b, t2.d, t3._row_id, t2.c, t4._row_id, t5._row_id, t5.j] }
               │     │             ├─StreamExchange { dist: HashShard(t1.b) }
               │     │             │ └─StreamHashJoin { type: LeftOuter, predicate: t2.c = t5.j AND t1.a IS NOT DISTINCT FROM t1.a AND t1.b IS NOT DISTINCT FROM t1.b, output: [t1.a, t1.b, t2.d, t5.j, t3._row_id, t2.c, t4._row_id, t1.a, t1.b, t5._row_id] }
@@ -2152,41 +2155,41 @@
               │     │             │   │ │ │ │ └─StreamProject { exprs: [t1.a, t1.b], noop_update_hint: true }
               │     │             │   │ │ │ │   └─StreamHashAgg { group_key: [t1.a, t1.b], aggs: [count] }
               │     │             │   │ │ │ │     └─StreamExchange { dist: HashShard(t1.a, t1.b) }
-              │     │             │   │ │ │ │       └─StreamTableScan { table: t1, columns: [t1.a, t1.b, t1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
+              │     │             │   │ │ │ │       └─StreamTableScan { table: t1, columns: [t1.a, t1.b, t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
               │     │             │   │ │ │ └─StreamExchange { dist: HashShard(t2.c) }
-              │     │             │   │ │ │   └─StreamTableScan { table: t2, columns: [t2.c, t2.d], stream_scan_type: ArrangementBackfill, stream_key: [t2.c], pk: [c], dist: UpstreamHashShard(t2.c) }
+              │     │             │   │ │ │   └─StreamTableScan { table: t2, columns: [t2.c, t2.d], stream_scan_type: SnapshotBackfill, stream_key: [t2.c], pk: [c], dist: UpstreamHashShard(t2.c) }
               │     │             │   │ │ └─StreamHashJoin { type: Inner, predicate: t1.a = t3.e, output: [t1.a, t1.b, t3.f, t3._row_id] }
               │     │             │   │ │   ├─StreamExchange { dist: HashShard(t1.a) }
               │     │             │   │ │   │ └─StreamProject { exprs: [t1.a, t1.b], noop_update_hint: true }
               │     │             │   │ │   │   └─StreamHashAgg { group_key: [t1.a, t1.b], aggs: [count] }
               │     │             │   │ │   │     └─StreamExchange { dist: HashShard(t1.a, t1.b) }
-              │     │             │   │ │   │       └─StreamTableScan { table: t1, columns: [t1.a, t1.b, t1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
+              │     │             │   │ │   │       └─StreamTableScan { table: t1, columns: [t1.a, t1.b, t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
               │     │             │   │ │   └─StreamExchange { dist: HashShard(t3.e) }
-              │     │             │   │ │     └─StreamTableScan { table: t3, columns: [t3.e, t3.f, t3._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t3._row_id], pk: [_row_id], dist: UpstreamHashShard(t3._row_id) }
+              │     │             │   │ │     └─StreamTableScan { table: t3, columns: [t3.e, t3.f, t3._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t3._row_id], pk: [_row_id], dist: UpstreamHashShard(t3._row_id) }
               │     │             │   │ └─StreamHashJoin { type: Inner, predicate: t1.a = t4.g, output: [t1.a, t1.b, t4.h, t4._row_id] }
               │     │             │   │   ├─StreamExchange { dist: HashShard(t1.a) }
               │     │             │   │   │ └─StreamProject { exprs: [t1.a, t1.b], noop_update_hint: true }
               │     │             │   │   │   └─StreamHashAgg { group_key: [t1.a, t1.b], aggs: [count] }
               │     │             │   │   │     └─StreamExchange { dist: HashShard(t1.a, t1.b) }
-              │     │             │   │   │       └─StreamTableScan { table: t1, columns: [t1.a, t1.b, t1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
+              │     │             │   │   │       └─StreamTableScan { table: t1, columns: [t1.a, t1.b, t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
               │     │             │   │   └─StreamExchange { dist: HashShard(t4.g) }
-              │     │             │   │     └─StreamTableScan { table: t4, columns: [t4.g, t4.h, t4._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t4._row_id], pk: [_row_id], dist: UpstreamHashShard(t4._row_id) }
+              │     │             │   │     └─StreamTableScan { table: t4, columns: [t4.g, t4.h, t4._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t4._row_id], pk: [_row_id], dist: UpstreamHashShard(t4._row_id) }
               │     │             │   └─StreamHashJoin { type: Inner, predicate: t1.a = t5.i, output: [t1.a, t1.b, t5.j, t5._row_id] }
               │     │             │     ├─StreamExchange { dist: HashShard(t1.a) }
               │     │             │     │ └─StreamProject { exprs: [t1.a, t1.b], noop_update_hint: true }
               │     │             │     │   └─StreamHashAgg { group_key: [t1.a, t1.b], aggs: [count] }
               │     │             │     │     └─StreamExchange { dist: HashShard(t1.a, t1.b) }
-              │     │             │     │       └─StreamTableScan { table: t1, columns: [t1.a, t1.b, t1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
+              │     │             │     │       └─StreamTableScan { table: t1, columns: [t1.a, t1.b, t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
               │     │             │     └─StreamExchange { dist: HashShard(t5.i) }
-              │     │             │       └─StreamTableScan { table: t5, columns: [t5.i, t5.j, t5._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t5._row_id], pk: [_row_id], dist: UpstreamHashShard(t5._row_id) }
+              │     │             │       └─StreamTableScan { table: t5, columns: [t5.i, t5.j, t5._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t5._row_id], pk: [_row_id], dist: UpstreamHashShard(t5._row_id) }
               │     │             └─StreamHashJoin { type: Inner, predicate: t1.b = t6.l, output: [t1.a, t1.b, t6.k, t6._row_id] }
               │     │               ├─StreamExchange { dist: HashShard(t1.b) }
               │     │               │ └─StreamProject { exprs: [t1.a, t1.b], noop_update_hint: true }
               │     │               │   └─StreamHashAgg { group_key: [t1.a, t1.b], aggs: [count] }
               │     │               │     └─StreamExchange { dist: HashShard(t1.a, t1.b) }
-              │     │               │       └─StreamTableScan { table: t1, columns: [t1.a, t1.b, t1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
+              │     │               │       └─StreamTableScan { table: t1, columns: [t1.a, t1.b, t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
               │     │               └─StreamExchange { dist: HashShard(t6.l) }
-              │     │                 └─StreamTableScan { table: t6, columns: [t6.k, t6.l, t6._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t6._row_id], pk: [_row_id], dist: UpstreamHashShard(t6._row_id) }
+              │     │                 └─StreamTableScan { table: t6, columns: [t6.k, t6.l, t6._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t6._row_id], pk: [_row_id], dist: UpstreamHashShard(t6._row_id) }
               │     └─StreamProject { exprs: [t1.a, t1.b, sum(t2.d)] }
               │       └─StreamHashAgg { group_key: [t1.a, t1.b], aggs: [sum(t2.d), count] }
               │         └─StreamHashJoin { type: LeftOuter, predicate: t1.a IS NOT DISTINCT FROM t1.a AND t1.b IS NOT DISTINCT FROM t1.b, output: [t1.a, t1.b, t2.d, t1.a, t1.b, t3._row_id, t2.c, t4._row_id, t5._row_id, t5.j] }
@@ -2194,7 +2197,7 @@
               │           │ └─StreamProject { exprs: [t1.a, t1.b], noop_update_hint: true }
               │           │   └─StreamHashAgg { group_key: [t1.a, t1.b], aggs: [count] }
               │           │     └─StreamExchange { dist: HashShard(t1.a, t1.b) }
-              │           │       └─StreamTableScan { table: t1, columns: [t1.a, t1.b, t1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
+              │           │       └─StreamTableScan { table: t1, columns: [t1.a, t1.b, t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
               │           └─StreamHashJoin { type: LeftSemi, predicate: t5.j = t6.k AND t1.a IS NOT DISTINCT FROM t1.a AND t1.b IS NOT DISTINCT FROM t1.b, output: [t1.a, t1.b, t2.d, t3._row_id, t2.c, t4._row_id, t5._row_id, t5.j] }
               │             ├─StreamExchange { dist: HashShard(t1.b) }
               │             │ └─StreamHashJoin { type: LeftOuter, predicate: t2.c = t5.j AND t1.a IS NOT DISTINCT FROM t1.a AND t1.b IS NOT DISTINCT FROM t1.b, output: [t1.a, t1.b, t2.d, t5.j, t3._row_id, t2.c, t4._row_id, t1.a, t1.b, t5._row_id] }
@@ -2205,41 +2208,41 @@
               │             │   │ │ │ │ └─StreamProject { exprs: [t1.a, t1.b], noop_update_hint: true }
               │             │   │ │ │ │   └─StreamHashAgg { group_key: [t1.a, t1.b], aggs: [count] }
               │             │   │ │ │ │     └─StreamExchange { dist: HashShard(t1.a, t1.b) }
-              │             │   │ │ │ │       └─StreamTableScan { table: t1, columns: [t1.a, t1.b, t1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
+              │             │   │ │ │ │       └─StreamTableScan { table: t1, columns: [t1.a, t1.b, t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
               │             │   │ │ │ └─StreamExchange { dist: HashShard(t2.c) }
-              │             │   │ │ │   └─StreamTableScan { table: t2, columns: [t2.c, t2.d], stream_scan_type: ArrangementBackfill, stream_key: [t2.c], pk: [c], dist: UpstreamHashShard(t2.c) }
+              │             │   │ │ │   └─StreamTableScan { table: t2, columns: [t2.c, t2.d], stream_scan_type: SnapshotBackfill, stream_key: [t2.c], pk: [c], dist: UpstreamHashShard(t2.c) }
               │             │   │ │ └─StreamHashJoin { type: Inner, predicate: t1.a = t3.e, output: [t1.a, t1.b, t3.f, t3._row_id] }
               │             │   │ │   ├─StreamExchange { dist: HashShard(t1.a) }
               │             │   │ │   │ └─StreamProject { exprs: [t1.a, t1.b], noop_update_hint: true }
               │             │   │ │   │   └─StreamHashAgg { group_key: [t1.a, t1.b], aggs: [count] }
               │             │   │ │   │     └─StreamExchange { dist: HashShard(t1.a, t1.b) }
-              │             │   │ │   │       └─StreamTableScan { table: t1, columns: [t1.a, t1.b, t1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
+              │             │   │ │   │       └─StreamTableScan { table: t1, columns: [t1.a, t1.b, t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
               │             │   │ │   └─StreamExchange { dist: HashShard(t3.e) }
-              │             │   │ │     └─StreamTableScan { table: t3, columns: [t3.e, t3.f, t3._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t3._row_id], pk: [_row_id], dist: UpstreamHashShard(t3._row_id) }
+              │             │   │ │     └─StreamTableScan { table: t3, columns: [t3.e, t3.f, t3._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t3._row_id], pk: [_row_id], dist: UpstreamHashShard(t3._row_id) }
               │             │   │ └─StreamHashJoin { type: Inner, predicate: t1.a = t4.g, output: [t1.a, t1.b, t4.h, t4._row_id] }
               │             │   │   ├─StreamExchange { dist: HashShard(t1.a) }
               │             │   │   │ └─StreamProject { exprs: [t1.a, t1.b], noop_update_hint: true }
               │             │   │   │   └─StreamHashAgg { group_key: [t1.a, t1.b], aggs: [count] }
               │             │   │   │     └─StreamExchange { dist: HashShard(t1.a, t1.b) }
-              │             │   │   │       └─StreamTableScan { table: t1, columns: [t1.a, t1.b, t1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
+              │             │   │   │       └─StreamTableScan { table: t1, columns: [t1.a, t1.b, t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
               │             │   │   └─StreamExchange { dist: HashShard(t4.g) }
-              │             │   │     └─StreamTableScan { table: t4, columns: [t4.g, t4.h, t4._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t4._row_id], pk: [_row_id], dist: UpstreamHashShard(t4._row_id) }
+              │             │   │     └─StreamTableScan { table: t4, columns: [t4.g, t4.h, t4._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t4._row_id], pk: [_row_id], dist: UpstreamHashShard(t4._row_id) }
               │             │   └─StreamHashJoin { type: Inner, predicate: t1.a = t5.i, output: [t1.a, t1.b, t5.j, t5._row_id] }
               │             │     ├─StreamExchange { dist: HashShard(t1.a) }
               │             │     │ └─StreamProject { exprs: [t1.a, t1.b], noop_update_hint: true }
               │             │     │   └─StreamHashAgg { group_key: [t1.a, t1.b], aggs: [count] }
               │             │     │     └─StreamExchange { dist: HashShard(t1.a, t1.b) }
-              │             │     │       └─StreamTableScan { table: t1, columns: [t1.a, t1.b, t1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
+              │             │     │       └─StreamTableScan { table: t1, columns: [t1.a, t1.b, t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
               │             │     └─StreamExchange { dist: HashShard(t5.i) }
-              │             │       └─StreamTableScan { table: t5, columns: [t5.i, t5.j, t5._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t5._row_id], pk: [_row_id], dist: UpstreamHashShard(t5._row_id) }
+              │             │       └─StreamTableScan { table: t5, columns: [t5.i, t5.j, t5._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t5._row_id], pk: [_row_id], dist: UpstreamHashShard(t5._row_id) }
               │             └─StreamHashJoin { type: Inner, predicate: t1.b = t6.l, output: [t1.a, t1.b, t6.k, t6._row_id] }
               │               ├─StreamExchange { dist: HashShard(t1.b) }
               │               │ └─StreamProject { exprs: [t1.a, t1.b], noop_update_hint: true }
               │               │   └─StreamHashAgg { group_key: [t1.a, t1.b], aggs: [count] }
               │               │     └─StreamExchange { dist: HashShard(t1.a, t1.b) }
-              │               │       └─StreamTableScan { table: t1, columns: [t1.a, t1.b, t1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
+              │               │       └─StreamTableScan { table: t1, columns: [t1.a, t1.b, t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
               │               └─StreamExchange { dist: HashShard(t6.l) }
-              │                 └─StreamTableScan { table: t6, columns: [t6.k, t6.l, t6._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t6._row_id], pk: [_row_id], dist: UpstreamHashShard(t6._row_id) }
+              │                 └─StreamTableScan { table: t6, columns: [t6.k, t6.l, t6._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t6._row_id], pk: [_row_id], dist: UpstreamHashShard(t6._row_id) }
               └─StreamProject { exprs: [t1.a, t1.b, sum(t2.d)] }
                 └─StreamHashAgg { group_key: [t1.a, t1.b], aggs: [sum(t2.d), count] }
                   └─StreamHashJoin { type: LeftOuter, predicate: t1.a IS NOT DISTINCT FROM t1.a AND t1.b IS NOT DISTINCT FROM t1.b, output: [t1.a, t1.b, t2.d, t1.a, t1.b, t3._row_id, t2.c, t4._row_id, t5._row_id, t5.j] }
@@ -2247,7 +2250,7 @@
                     │ └─StreamProject { exprs: [t1.a, t1.b], noop_update_hint: true }
                     │   └─StreamHashAgg { group_key: [t1.a, t1.b], aggs: [count] }
                     │     └─StreamExchange { dist: HashShard(t1.a, t1.b) }
-                    │       └─StreamTableScan { table: t1, columns: [t1.a, t1.b, t1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
+                    │       └─StreamTableScan { table: t1, columns: [t1.a, t1.b, t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
                     └─StreamHashJoin { type: LeftSemi, predicate: t5.j = t6.k AND t1.a IS NOT DISTINCT FROM t1.a AND t1.b IS NOT DISTINCT FROM t1.b, output: [t1.a, t1.b, t2.d, t3._row_id, t2.c, t4._row_id, t5._row_id, t5.j] }
                       ├─StreamExchange { dist: HashShard(t1.b) }
                       │ └─StreamHashJoin { type: LeftOuter, predicate: t2.c = t5.j AND t1.a IS NOT DISTINCT FROM t1.a AND t1.b IS NOT DISTINCT FROM t1.b, output: [t1.a, t1.b, t2.d, t5.j, t3._row_id, t2.c, t4._row_id, t1.a, t1.b, t5._row_id] }
@@ -2258,41 +2261,41 @@
                       │   │ │ │ │ └─StreamProject { exprs: [t1.a, t1.b], noop_update_hint: true }
                       │   │ │ │ │   └─StreamHashAgg { group_key: [t1.a, t1.b], aggs: [count] }
                       │   │ │ │ │     └─StreamExchange { dist: HashShard(t1.a, t1.b) }
-                      │   │ │ │ │       └─StreamTableScan { table: t1, columns: [t1.a, t1.b, t1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
+                      │   │ │ │ │       └─StreamTableScan { table: t1, columns: [t1.a, t1.b, t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
                       │   │ │ │ └─StreamExchange { dist: HashShard(t2.c) }
-                      │   │ │ │   └─StreamTableScan { table: t2, columns: [t2.c, t2.d], stream_scan_type: ArrangementBackfill, stream_key: [t2.c], pk: [c], dist: UpstreamHashShard(t2.c) }
+                      │   │ │ │   └─StreamTableScan { table: t2, columns: [t2.c, t2.d], stream_scan_type: SnapshotBackfill, stream_key: [t2.c], pk: [c], dist: UpstreamHashShard(t2.c) }
                       │   │ │ └─StreamHashJoin { type: Inner, predicate: t1.a = t3.e, output: [t1.a, t1.b, t3.f, t3._row_id] }
                       │   │ │   ├─StreamExchange { dist: HashShard(t1.a) }
                       │   │ │   │ └─StreamProject { exprs: [t1.a, t1.b], noop_update_hint: true }
                       │   │ │   │   └─StreamHashAgg { group_key: [t1.a, t1.b], aggs: [count] }
                       │   │ │   │     └─StreamExchange { dist: HashShard(t1.a, t1.b) }
-                      │   │ │   │       └─StreamTableScan { table: t1, columns: [t1.a, t1.b, t1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
+                      │   │ │   │       └─StreamTableScan { table: t1, columns: [t1.a, t1.b, t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
                       │   │ │   └─StreamExchange { dist: HashShard(t3.e) }
-                      │   │ │     └─StreamTableScan { table: t3, columns: [t3.e, t3.f, t3._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t3._row_id], pk: [_row_id], dist: UpstreamHashShard(t3._row_id) }
+                      │   │ │     └─StreamTableScan { table: t3, columns: [t3.e, t3.f, t3._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t3._row_id], pk: [_row_id], dist: UpstreamHashShard(t3._row_id) }
                       │   │ └─StreamHashJoin { type: Inner, predicate: t1.a = t4.g, output: [t1.a, t1.b, t4.h, t4._row_id] }
                       │   │   ├─StreamExchange { dist: HashShard(t1.a) }
                       │   │   │ └─StreamProject { exprs: [t1.a, t1.b], noop_update_hint: true }
                       │   │   │   └─StreamHashAgg { group_key: [t1.a, t1.b], aggs: [count] }
                       │   │   │     └─StreamExchange { dist: HashShard(t1.a, t1.b) }
-                      │   │   │       └─StreamTableScan { table: t1, columns: [t1.a, t1.b, t1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
+                      │   │   │       └─StreamTableScan { table: t1, columns: [t1.a, t1.b, t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
                       │   │   └─StreamExchange { dist: HashShard(t4.g) }
-                      │   │     └─StreamTableScan { table: t4, columns: [t4.g, t4.h, t4._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t4._row_id], pk: [_row_id], dist: UpstreamHashShard(t4._row_id) }
+                      │   │     └─StreamTableScan { table: t4, columns: [t4.g, t4.h, t4._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t4._row_id], pk: [_row_id], dist: UpstreamHashShard(t4._row_id) }
                       │   └─StreamHashJoin { type: Inner, predicate: t1.a = t5.i, output: [t1.a, t1.b, t5.j, t5._row_id] }
                       │     ├─StreamExchange { dist: HashShard(t1.a) }
                       │     │ └─StreamProject { exprs: [t1.a, t1.b], noop_update_hint: true }
                       │     │   └─StreamHashAgg { group_key: [t1.a, t1.b], aggs: [count] }
                       │     │     └─StreamExchange { dist: HashShard(t1.a, t1.b) }
-                      │     │       └─StreamTableScan { table: t1, columns: [t1.a, t1.b, t1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
+                      │     │       └─StreamTableScan { table: t1, columns: [t1.a, t1.b, t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
                       │     └─StreamExchange { dist: HashShard(t5.i) }
-                      │       └─StreamTableScan { table: t5, columns: [t5.i, t5.j, t5._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t5._row_id], pk: [_row_id], dist: UpstreamHashShard(t5._row_id) }
+                      │       └─StreamTableScan { table: t5, columns: [t5.i, t5.j, t5._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t5._row_id], pk: [_row_id], dist: UpstreamHashShard(t5._row_id) }
                       └─StreamHashJoin { type: Inner, predicate: t1.b = t6.l, output: [t1.a, t1.b, t6.k, t6._row_id] }
                         ├─StreamExchange { dist: HashShard(t1.b) }
                         │ └─StreamProject { exprs: [t1.a, t1.b], noop_update_hint: true }
                         │   └─StreamHashAgg { group_key: [t1.a, t1.b], aggs: [count] }
                         │     └─StreamExchange { dist: HashShard(t1.a, t1.b) }
-                        │       └─StreamTableScan { table: t1, columns: [t1.a, t1.b, t1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
+                        │       └─StreamTableScan { table: t1, columns: [t1.a, t1.b, t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
                         └─StreamExchange { dist: HashShard(t6.l) }
-                          └─StreamTableScan { table: t6, columns: [t6.k, t6.l, t6._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t6._row_id], pk: [_row_id], dist: UpstreamHashShard(t6._row_id) }
+                          └─StreamTableScan { table: t6, columns: [t6.k, t6.l, t6._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t6._row_id], pk: [_row_id], dist: UpstreamHashShard(t6._row_id) }
 - name: improve join transpose rule to handle join with output indices
   sql: |
     with rawdata as (
@@ -2322,21 +2325,21 @@
       ) as kv
     from rawdata
   optimized_logical_plan_for_batch: |-
-    LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom('{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb, '{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb), output: [$expr6] }
+    LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom('{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb, '{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb), output: [$expr5] }
     ├─LogicalValues { rows: [['{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb], ['{"x": {"value": 456}, "y": {"value": [7, 8, 9]}, "z": {"value": [{"a": 0, "b": 1}, {"a": 2, "b": 3}]}}':Jsonb]], schema: Schema { fields: ['{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb:Jsonb] } }
-    └─LogicalProject { exprs: ['{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb, Coalesce(array_agg($expr5) filter(IsNotNull(1:Int32)), ARRAY[]:List(List(Int32))) as $expr6] }
-      └─LogicalAgg { group_key: ['{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb], aggs: [array_agg($expr5) filter(IsNotNull(1:Int32))] }
-        └─LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom('{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb, '{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb), output: ['{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb, $expr5, 1:Int32] }
+    └─LogicalProject { exprs: ['{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb, Coalesce(array_agg($expr4) filter(IsNotNull(1:Int32)), ARRAY[]:List(List(Int32))) as $expr5] }
+      └─LogicalAgg { group_key: ['{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb], aggs: [array_agg($expr4) filter(IsNotNull(1:Int32))] }
+        └─LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom('{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb, '{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb), output: ['{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb, $expr4, 1:Int32] }
           ├─LogicalAgg { group_key: ['{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb], aggs: [] }
           │ └─LogicalValues { rows: [['{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb], ['{"x": {"value": 456}, "y": {"value": [7, 8, 9]}, "z": {"value": [{"a": 0, "b": 1}, {"a": 2, "b": 3}]}}':Jsonb]], schema: Schema { fields: ['{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb:Jsonb] } }
-          └─LogicalProject { exprs: ['{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb, $expr5, 1:Int32] }
-            └─LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom($expr1, $expr2) AND IsNotDistinctFrom('{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb, '{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb), output: ['{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb, $expr5] }
+          └─LogicalProject { exprs: ['{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb, $expr4, 1:Int32] }
+            └─LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom($expr1, $expr2) AND IsNotDistinctFrom('{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb, '{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb), output: ['{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb, $expr4] }
               ├─LogicalProject { exprs: ['{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb, Field(JsonbEach($0), 1:Int32) as $expr1] }
               │ └─LogicalFilter { predicate: (JsonbTypeof(Field(JsonbEach($0), 1:Int32)) = 'object':Varchar) AND JsonbExists(Field(JsonbEach($0), 1:Int32), 'value':Varchar) }
               │   └─LogicalProjectSet { select_list: [$0, JsonbEach($0)] }
               │     └─LogicalAgg { group_key: ['{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb], aggs: [] }
               │       └─LogicalValues { rows: [['{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb], ['{"x": {"value": 456}, "y": {"value": [7, 8, 9]}, "z": {"value": [{"a": 0, "b": 1}, {"a": 2, "b": 3}]}}':Jsonb]], schema: Schema { fields: ['{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb:Jsonb] } }
-              └─LogicalProject { exprs: ['{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb, $expr2, Coalesce(array_agg(1:Int32) filter(IsNotNull(1:Int32)), ARRAY[]:List(Int32)) as $expr5] }
+              └─LogicalProject { exprs: ['{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb, $expr2, Coalesce(array_agg(1:Int32) filter(IsNotNull(1:Int32)), ARRAY[]:List(Int32)) as $expr4] }
                 └─LogicalAgg { group_key: ['{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb, $expr2], aggs: [array_agg(1:Int32) filter(IsNotNull(1:Int32))] }
                   └─LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom($expr2, $expr3) AND IsNotDistinctFrom('{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb, '{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb), output: ['{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb, $expr2, 1:Int32, 1:Int32] }
                     ├─LogicalAgg { group_key: ['{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb, $expr2], aggs: [] }
@@ -2346,23 +2349,15 @@
                     │       └─LogicalAgg { group_key: ['{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb], aggs: [] }
                     │         └─LogicalValues { rows: [['{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb], ['{"x": {"value": 456}, "y": {"value": [7, 8, 9]}, "z": {"value": [{"a": 0, "b": 1}, {"a": 2, "b": 3}]}}':Jsonb]], schema: Schema { fields: ['{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb:Jsonb] } }
                     └─LogicalProject { exprs: ['{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb, $expr3, 1:Int32, 1:Int32] }
-                      └─LogicalJoin { type: Inner, on: IsNotDistinctFrom(JsonbArrayElements(Case((JsonbTypeof(JsonbAccess($1, 'value':Varchar)) = 'array':Varchar), JsonbAccess($1, 'value':Varchar), '[]':Jsonb)), JsonbArrayElements(Case((JsonbTypeof(JsonbAccess($1, 'value':Varchar)) = 'array':Varchar), JsonbAccess($1, 'value':Varchar), '[]':Jsonb))) AND IsNotDistinctFrom($expr3, $expr4) AND IsNotDistinctFrom('{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb, '{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb), output: ['{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb, $expr3] }
-                        ├─LogicalProjectSet { select_list: [$0, $1, JsonbArrayElements(Case((JsonbTypeof(JsonbAccess($1, 'value':Varchar)) = 'array':Varchar), JsonbAccess($1, 'value':Varchar), '[]':Jsonb))] }
-                        │ └─LogicalAgg { group_key: ['{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb, $expr3], aggs: [] }
-                        │   └─LogicalProject { exprs: ['{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb, Field(JsonbEach($0), 1:Int32) as $expr3] }
-                        │     └─LogicalFilter { predicate: (JsonbTypeof(Field(JsonbEach($0), 1:Int32)) = 'object':Varchar) AND JsonbExists(Field(JsonbEach($0), 1:Int32), 'value':Varchar) }
-                        │       └─LogicalProjectSet { select_list: [$0, JsonbEach($0)] }
-                        │         └─LogicalAgg { group_key: ['{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb], aggs: [] }
-                        │           └─LogicalValues { rows: [['{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb], ['{"x": {"value": 456}, "y": {"value": [7, 8, 9]}, "z": {"value": [{"a": 0, "b": 1}, {"a": 2, "b": 3}]}}':Jsonb]], schema: Schema { fields: ['{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb:Jsonb] } }
-                        └─LogicalProjectSet { select_list: [$0, $1, $2, JsonbEach(Case((JsonbTypeof($2) = 'object':Varchar), $2, '{}':Jsonb))] }
-                          └─LogicalAgg { group_key: ['{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb, $expr4, JsonbArrayElements(Case((JsonbTypeof(JsonbAccess($1, 'value':Varchar)) = 'array':Varchar), JsonbAccess($1, 'value':Varchar), '[]':Jsonb))], aggs: [] }
-                            └─LogicalProjectSet { select_list: [$0, $1, JsonbArrayElements(Case((JsonbTypeof(JsonbAccess($1, 'value':Varchar)) = 'array':Varchar), JsonbAccess($1, 'value':Varchar), '[]':Jsonb))] }
-                              └─LogicalAgg { group_key: ['{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb, $expr4], aggs: [] }
-                                └─LogicalProject { exprs: ['{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb, Field(JsonbEach($0), 1:Int32) as $expr4] }
-                                  └─LogicalFilter { predicate: (JsonbTypeof(Field(JsonbEach($0), 1:Int32)) = 'object':Varchar) AND JsonbExists(Field(JsonbEach($0), 1:Int32), 'value':Varchar) }
-                                    └─LogicalProjectSet { select_list: [$0, JsonbEach($0)] }
-                                      └─LogicalAgg { group_key: ['{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb], aggs: [] }
-                                        └─LogicalValues { rows: [['{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb], ['{"x": {"value": 456}, "y": {"value": [7, 8, 9]}, "z": {"value": [{"a": 0, "b": 1}, {"a": 2, "b": 3}]}}':Jsonb]], schema: Schema { fields: ['{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb:Jsonb] } }
+                      └─LogicalProjectSet { select_list: [$0, $1, JsonbEach(Case((JsonbTypeof($2) = 'object':Varchar), $2, '{}':Jsonb))] }
+                        └─LogicalProject { exprs: ['{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb, $expr3, JsonbArrayElements(Case((JsonbTypeof(JsonbAccess($1, 'value':Varchar)) = 'array':Varchar), JsonbAccess($1, 'value':Varchar), '[]':Jsonb))] }
+                          └─LogicalProjectSet { select_list: [$0, $1, JsonbArrayElements(Case((JsonbTypeof(JsonbAccess($1, 'value':Varchar)) = 'array':Varchar), JsonbAccess($1, 'value':Varchar), '[]':Jsonb))] }
+                            └─LogicalAgg { group_key: ['{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb, $expr3], aggs: [] }
+                              └─LogicalProject { exprs: ['{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb, Field(JsonbEach($0), 1:Int32) as $expr3] }
+                                └─LogicalFilter { predicate: (JsonbTypeof(Field(JsonbEach($0), 1:Int32)) = 'object':Varchar) AND JsonbExists(Field(JsonbEach($0), 1:Int32), 'value':Varchar) }
+                                  └─LogicalProjectSet { select_list: [$0, JsonbEach($0)] }
+                                    └─LogicalAgg { group_key: ['{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb], aggs: [] }
+                                      └─LogicalValues { rows: [['{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb], ['{"x": {"value": 456}, "y": {"value": [7, 8, 9]}, "z": {"value": [{"a": 0, "b": 1}, {"a": 2, "b": 3}]}}':Jsonb]], schema: Schema { fields: ['{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb:Jsonb] } }
 - name: subquery with CTE
   sql: |
     create table t1(x int, y int);
@@ -2383,12 +2378,13 @@
     └─StreamExchange { dist: HashShard(t1.x, t1.y, t1._row_id) }
       └─StreamHashJoin { type: Inner, predicate: t1.y IS NOT DISTINCT FROM t2.y AND t1.x = t2.x, output: [t1.x, t1.y, t1._row_id, t2.y] }
         ├─StreamExchange { dist: HashShard(t1.y) }
-        │ └─StreamTableScan { table: t1, columns: [t1.x, t1.y, t1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
-        └─StreamGroupTopN { order: [t2.y ASC], limit: 1, offset: 0, group_key: [t2.y] }
-          └─StreamExchange { dist: HashShard(t2.y) }
-            └─StreamProject { exprs: [t2.y, t2.x, t2._row_id] }
-              └─StreamFilter { predicate: IsNotNull(t2.y) }
-                └─StreamTableScan { table: t2, columns: [t2.x, t2.y, t2._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t2._row_id], pk: [_row_id], dist: UpstreamHashShard(t2._row_id) }
+        │ └─StreamTableScan { table: t1, columns: [t1.x, t1.y, t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
+        └─StreamProject { exprs: [t2.y, t2.x] }
+          └─StreamGroupTopN { order: [t2.y ASC], limit: 1, offset: 0, group_key: [t2.y] }
+            └─StreamExchange { dist: HashShard(t2.y) }
+              └─StreamProject { exprs: [t2.y, t2.x, t2._row_id] }
+                └─StreamFilter { predicate: IsNotNull(t2.y) }
+                  └─StreamTableScan { table: t2, columns: [t2.x, t2.y, t2._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t2._row_id], pk: [_row_id], dist: UpstreamHashShard(t2._row_id) }
 - name: subqueries in case when exprs
   sql: "WITH input AS (\n    SELECT\n        'Empty JSON item' AS test_case,\n        ('{}'::JSONB) AS item\n)\n\nSELECT\n    test_case,\n\n    CASE\n\t    WHEN JSONB_PATH_QUERY_FIRST(JSONB_PATH_QUERY_FIRST(item, '$.binary_set_attribute'), '$.BS') IS NULL THEN NULL\n        ELSE ARRAY(\n            SELECT parsed_item\n            FROM (\n                SELECT DECODE(((nested_item) #>> '{}'), 'base64') AS parsed_item\n                FROM (\n                    SELECT nested_item\n                    FROM JSONB_ARRAY_ELEMENTS(JSONB_PATH_QUERY_FIRST((JSONB_PATH_QUERY_FIRST(item, '$.binary_set_attribute')), '$.BS'))\n                    AS t(nested_item)\n                )\n            )\n            ORDER BY parsed_item\n        )\n    END AS binary_set_attribute,\n\n    CASE\n        WHEN JSONB_PATH_QUERY_FIRST(JSONB_PATH_QUERY_FIRST(item, '$.number_set_attribute'), '$.NS') IS NULL THEN NULL\n        ELSE ARRAY(\n            SELECT parsed_item\n            FROM (\n                SELECT CAST(nested_item #>> '{}' AS BIGINT) AS parsed_item\n                FROM (\n    \t\t\t\tSELECT nested_item\n    \t\t\t\tFROM JSONB_ARRAY_ELEMENTS(JSONB_PATH_QUERY_FIRST((JSONB_PATH_QUERY_FIRST(item, '$.number_set_attribute')), '$.NS'))\n    \t\t\t\tAS t(nested_item)\n\t\t\t\t)\n            )\n            ORDER BY parsed_item\n        )\n    END AS number_set_attribute,\n\n    CASE\n\t    WHEN JSONB_PATH_QUERY_FIRST((JSONB_PATH_QUERY_FIRST(item, '$.float_set_attribute')), '$.NS') IS NULL THEN NULL\n        ELSE ARRAY(\n            SELECT parsed_item\n            FROM (\n                SELECT CAST(nested_item #>> '{}' AS FLOAT)\n                AS parsed_item\n                FROM (\n    \t\t\t\tSELECT nested_item\n\t\t\t\t    FROM JSONB_ARRAY_ELEMENTS(JSONB_PATH_QUERY_FIRST((JSONB_PATH_QUERY_FIRST(item, '$.float_set_attribute')), '$.NS'))\n    \t\t\t\tAS t(nested_item)\n\t\t\t\t)\n            )\n            ORDER BY parsed_item\n        )\n    END AS float_set_attribute,\n\n    CASE\n\t    WHEN JSONB_PATH_QUERY_FIRST((JSONB_PATH_QUERY_FIRST(item, '$.string_set_attribute')), '$.SS') IS NULL THEN NULL\n        ELSE ARRAY(\n            SELECT parsed_item\n            FROM (\n                SELECT nested_item #>> '{}' AS parsed_item\n                FROM (\n    \t\t\t\tSELECT nested_item\n    \t\t\t\tFROM JSONB_ARRAY_ELEMENTS(JSONB_PATH_QUERY_FIRST((JSONB_PATH_QUERY_FIRST(item, '$.string_set_attribute')), '$.SS'))\n    \t\t\t\tAS t(nested_item)\n\t\t\t\t)\n            )\n            ORDER BY parsed_item\n        )\n    END AS string_set_attribute\nFROM input\n"
   batch_plan: |-
@@ -2465,62 +2461,62 @@
               │     │   └─StreamHashJoin { type: FullOuter, predicate: '{}':Jsonb IS NOT DISTINCT FROM '{}':Jsonb, output: ['{}':Jsonb, $expr2, $expr4, '{}':Jsonb] }
               │     │     ├─StreamProject { exprs: ['{}':Jsonb, Coalesce(array_agg($expr1 order_by($expr1 ASC)) filter(IsNotNull(1:Int32)), ARRAY[]:List(Bytea)) as $expr2] }
               │     │     │ └─StreamHashAgg { group_key: ['{}':Jsonb], aggs: [array_agg($expr1 order_by($expr1 ASC)) filter(IsNotNull(1:Int32)), count] }
-              │     │     │   └─StreamHashJoin { type: LeftOuter, predicate: '{}':Jsonb IS NOT DISTINCT FROM '{}':Jsonb, output: ['{}':Jsonb, $expr1, 1:Int32, '{}':Jsonb, projected_row_id] }
-              │     │     │     ├─StreamAppendOnlyDedup { dedup_cols: ['{}':Jsonb] }
-              │     │     │     │ └─StreamExchange { dist: HashShard('{}':Jsonb) }
-              │     │     │     │   └─StreamProject { exprs: ['{}':Jsonb] }
+              │     │     │   └─StreamHashJoin { type: LeftOuter, predicate: '{}':Jsonb IS NOT DISTINCT FROM '{}':Jsonb, output: ['{}':Jsonb, $expr1, 1:Int32, '{}':Jsonb, _rw_projected_row_id] }
+              │     │     │     ├─StreamProject { exprs: ['{}':Jsonb] }
+              │     │     │     │ └─StreamAppendOnlyDedup { dedup_cols: ['{}':Jsonb] }
+              │     │     │     │   └─StreamExchange { dist: HashShard('{}':Jsonb) }
               │     │     │     │     └─StreamShare { id: 1 }
               │     │     │     │       └─StreamValues { rows: [['Empty JSON item':Varchar, '{}':Jsonb, 0:Int64]] }
-              │     │     │     └─StreamProject { exprs: ['{}':Jsonb, Decode(JsonbExtractPathTextVariadic(JsonbArrayElements(JsonbPathQueryFirst(JsonbPathQueryFirst($0, '$.binary_set_attribute':Varchar), '$.BS':Varchar)), ARRAY[]:List(Varchar)), 'base64':Varchar) as $expr1, 1:Int32, projected_row_id] }
+              │     │     │     └─StreamProject { exprs: ['{}':Jsonb, Decode(JsonbExtractPathTextVariadic(JsonbArrayElements(JsonbPathQueryFirst(JsonbPathQueryFirst($0, '$.binary_set_attribute':Varchar), '$.BS':Varchar)), ARRAY[]:List(Varchar)), 'base64':Varchar) as $expr1, 1:Int32, _rw_projected_row_id] }
               │     │     │       └─StreamProjectSet { select_list: [$0, JsonbArrayElements(JsonbPathQueryFirst(JsonbPathQueryFirst($0, '$.binary_set_attribute':Varchar), '$.BS':Varchar))] }
-              │     │     │         └─StreamAppendOnlyDedup { dedup_cols: ['{}':Jsonb] }
-              │     │     │           └─StreamExchange { dist: HashShard('{}':Jsonb) }
-              │     │     │             └─StreamProject { exprs: ['{}':Jsonb] }
+              │     │     │         └─StreamProject { exprs: ['{}':Jsonb] }
+              │     │     │           └─StreamAppendOnlyDedup { dedup_cols: ['{}':Jsonb] }
+              │     │     │             └─StreamExchange { dist: HashShard('{}':Jsonb) }
               │     │     │               └─StreamShare { id: 1 }
               │     │     │                 └─StreamValues { rows: [['Empty JSON item':Varchar, '{}':Jsonb, 0:Int64]] }
               │     │     └─StreamProject { exprs: ['{}':Jsonb, Coalesce(array_agg($expr3 order_by($expr3 ASC)) filter(IsNotNull(1:Int32)), ARRAY[]:List(Int64)) as $expr4] }
               │     │       └─StreamHashAgg { group_key: ['{}':Jsonb], aggs: [array_agg($expr3 order_by($expr3 ASC)) filter(IsNotNull(1:Int32)), count] }
-              │     │         └─StreamHashJoin { type: LeftOuter, predicate: '{}':Jsonb IS NOT DISTINCT FROM '{}':Jsonb, output: ['{}':Jsonb, $expr3, 1:Int32, '{}':Jsonb, projected_row_id] }
-              │     │           ├─StreamAppendOnlyDedup { dedup_cols: ['{}':Jsonb] }
-              │     │           │ └─StreamExchange { dist: HashShard('{}':Jsonb) }
-              │     │           │   └─StreamProject { exprs: ['{}':Jsonb] }
+              │     │         └─StreamHashJoin { type: LeftOuter, predicate: '{}':Jsonb IS NOT DISTINCT FROM '{}':Jsonb, output: ['{}':Jsonb, $expr3, 1:Int32, '{}':Jsonb, _rw_projected_row_id] }
+              │     │           ├─StreamProject { exprs: ['{}':Jsonb] }
+              │     │           │ └─StreamAppendOnlyDedup { dedup_cols: ['{}':Jsonb] }
+              │     │           │   └─StreamExchange { dist: HashShard('{}':Jsonb) }
               │     │           │     └─StreamShare { id: 1 }
               │     │           │       └─StreamValues { rows: [['Empty JSON item':Varchar, '{}':Jsonb, 0:Int64]] }
-              │     │           └─StreamProject { exprs: ['{}':Jsonb, JsonbExtractPathTextVariadic(JsonbArrayElements(JsonbPathQueryFirst(JsonbPathQueryFirst($0, '$.number_set_attribute':Varchar), '$.NS':Varchar)), ARRAY[]:List(Varchar))::Int64 as $expr3, 1:Int32, projected_row_id] }
+              │     │           └─StreamProject { exprs: ['{}':Jsonb, JsonbExtractPathTextVariadic(JsonbArrayElements(JsonbPathQueryFirst(JsonbPathQueryFirst($0, '$.number_set_attribute':Varchar), '$.NS':Varchar)), ARRAY[]:List(Varchar))::Int64 as $expr3, 1:Int32, _rw_projected_row_id] }
               │     │             └─StreamProjectSet { select_list: [$0, JsonbArrayElements(JsonbPathQueryFirst(JsonbPathQueryFirst($0, '$.number_set_attribute':Varchar), '$.NS':Varchar))] }
-              │     │               └─StreamAppendOnlyDedup { dedup_cols: ['{}':Jsonb] }
-              │     │                 └─StreamExchange { dist: HashShard('{}':Jsonb) }
-              │     │                   └─StreamProject { exprs: ['{}':Jsonb] }
+              │     │               └─StreamProject { exprs: ['{}':Jsonb] }
+              │     │                 └─StreamAppendOnlyDedup { dedup_cols: ['{}':Jsonb] }
+              │     │                   └─StreamExchange { dist: HashShard('{}':Jsonb) }
               │     │                     └─StreamShare { id: 1 }
               │     │                       └─StreamValues { rows: [['Empty JSON item':Varchar, '{}':Jsonb, 0:Int64]] }
               │     └─StreamProject { exprs: ['{}':Jsonb, Coalesce(array_agg($expr5 order_by($expr5 ASC)) filter(IsNotNull(1:Int32)), ARRAY[]:List(Float64)) as $expr6] }
               │       └─StreamHashAgg { group_key: ['{}':Jsonb], aggs: [array_agg($expr5 order_by($expr5 ASC)) filter(IsNotNull(1:Int32)), count] }
-              │         └─StreamHashJoin { type: LeftOuter, predicate: '{}':Jsonb IS NOT DISTINCT FROM '{}':Jsonb, output: ['{}':Jsonb, $expr5, 1:Int32, '{}':Jsonb, projected_row_id] }
-              │           ├─StreamAppendOnlyDedup { dedup_cols: ['{}':Jsonb] }
-              │           │ └─StreamExchange { dist: HashShard('{}':Jsonb) }
-              │           │   └─StreamProject { exprs: ['{}':Jsonb] }
+              │         └─StreamHashJoin { type: LeftOuter, predicate: '{}':Jsonb IS NOT DISTINCT FROM '{}':Jsonb, output: ['{}':Jsonb, $expr5, 1:Int32, '{}':Jsonb, _rw_projected_row_id] }
+              │           ├─StreamProject { exprs: ['{}':Jsonb] }
+              │           │ └─StreamAppendOnlyDedup { dedup_cols: ['{}':Jsonb] }
+              │           │   └─StreamExchange { dist: HashShard('{}':Jsonb) }
               │           │     └─StreamShare { id: 1 }
               │           │       └─StreamValues { rows: [['Empty JSON item':Varchar, '{}':Jsonb, 0:Int64]] }
-              │           └─StreamProject { exprs: ['{}':Jsonb, JsonbExtractPathTextVariadic(JsonbArrayElements(JsonbPathQueryFirst(JsonbPathQueryFirst($0, '$.float_set_attribute':Varchar), '$.NS':Varchar)), ARRAY[]:List(Varchar))::Float64 as $expr5, 1:Int32, projected_row_id] }
+              │           └─StreamProject { exprs: ['{}':Jsonb, JsonbExtractPathTextVariadic(JsonbArrayElements(JsonbPathQueryFirst(JsonbPathQueryFirst($0, '$.float_set_attribute':Varchar), '$.NS':Varchar)), ARRAY[]:List(Varchar))::Float64 as $expr5, 1:Int32, _rw_projected_row_id] }
               │             └─StreamProjectSet { select_list: [$0, JsonbArrayElements(JsonbPathQueryFirst(JsonbPathQueryFirst($0, '$.float_set_attribute':Varchar), '$.NS':Varchar))] }
-              │               └─StreamAppendOnlyDedup { dedup_cols: ['{}':Jsonb] }
-              │                 └─StreamExchange { dist: HashShard('{}':Jsonb) }
-              │                   └─StreamProject { exprs: ['{}':Jsonb] }
+              │               └─StreamProject { exprs: ['{}':Jsonb] }
+              │                 └─StreamAppendOnlyDedup { dedup_cols: ['{}':Jsonb] }
+              │                   └─StreamExchange { dist: HashShard('{}':Jsonb) }
               │                     └─StreamShare { id: 1 }
               │                       └─StreamValues { rows: [['Empty JSON item':Varchar, '{}':Jsonb, 0:Int64]] }
               └─StreamProject { exprs: ['{}':Jsonb, Coalesce(array_agg($expr7 order_by($expr7 ASC)) filter(IsNotNull(1:Int32)), ARRAY[]:List(Varchar)) as $expr8] }
                 └─StreamHashAgg { group_key: ['{}':Jsonb], aggs: [array_agg($expr7 order_by($expr7 ASC)) filter(IsNotNull(1:Int32)), count] }
-                  └─StreamHashJoin { type: LeftOuter, predicate: '{}':Jsonb IS NOT DISTINCT FROM '{}':Jsonb, output: ['{}':Jsonb, $expr7, 1:Int32, '{}':Jsonb, projected_row_id] }
-                    ├─StreamAppendOnlyDedup { dedup_cols: ['{}':Jsonb] }
-                    │ └─StreamExchange { dist: HashShard('{}':Jsonb) }
-                    │   └─StreamProject { exprs: ['{}':Jsonb] }
+                  └─StreamHashJoin { type: LeftOuter, predicate: '{}':Jsonb IS NOT DISTINCT FROM '{}':Jsonb, output: ['{}':Jsonb, $expr7, 1:Int32, '{}':Jsonb, _rw_projected_row_id] }
+                    ├─StreamProject { exprs: ['{}':Jsonb] }
+                    │ └─StreamAppendOnlyDedup { dedup_cols: ['{}':Jsonb] }
+                    │   └─StreamExchange { dist: HashShard('{}':Jsonb) }
                     │     └─StreamShare { id: 1 }
                     │       └─StreamValues { rows: [['Empty JSON item':Varchar, '{}':Jsonb, 0:Int64]] }
-                    └─StreamProject { exprs: ['{}':Jsonb, JsonbExtractPathTextVariadic(JsonbArrayElements(JsonbPathQueryFirst(JsonbPathQueryFirst($0, '$.string_set_attribute':Varchar), '$.SS':Varchar)), ARRAY[]:List(Varchar)) as $expr7, 1:Int32, projected_row_id], noop_update_hint: true }
+                    └─StreamProject { exprs: ['{}':Jsonb, JsonbExtractPathTextVariadic(JsonbArrayElements(JsonbPathQueryFirst(JsonbPathQueryFirst($0, '$.string_set_attribute':Varchar), '$.SS':Varchar)), ARRAY[]:List(Varchar)) as $expr7, 1:Int32, _rw_projected_row_id], noop_update_hint: true }
                       └─StreamProjectSet { select_list: [$0, JsonbArrayElements(JsonbPathQueryFirst(JsonbPathQueryFirst($0, '$.string_set_attribute':Varchar), '$.SS':Varchar))] }
-                        └─StreamAppendOnlyDedup { dedup_cols: ['{}':Jsonb] }
-                          └─StreamExchange { dist: HashShard('{}':Jsonb) }
-                            └─StreamProject { exprs: ['{}':Jsonb] }
+                        └─StreamProject { exprs: ['{}':Jsonb] }
+                          └─StreamAppendOnlyDedup { dedup_cols: ['{}':Jsonb] }
+                            └─StreamExchange { dist: HashShard('{}':Jsonb) }
                               └─StreamShare { id: 1 }
                                 └─StreamValues { rows: [['Empty JSON item':Varchar, '{}':Jsonb, 0:Int64]] }
 - name: test case for PullUpCorrelatedProjectValueRule
@@ -2534,4 +2530,4 @@
   stream_plan: |-
     StreamMaterialize { columns: [c, t._row_id(hidden)], stream_key: [t._row_id], pk_columns: [t._row_id], pk_conflict: NoCheck }
     └─StreamProject { exprs: [(t.a + t.b) as $expr1, t._row_id] }
-      └─StreamTableScan { table: t, columns: [t.a, t.b, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+      └─StreamTableScan { table: t, columns: [t.a, t.b, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }

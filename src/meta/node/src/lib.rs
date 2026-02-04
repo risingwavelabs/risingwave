@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![feature(let_chains)]
 #![feature(coverage_attribute)]
 
 mod server;
@@ -327,7 +326,7 @@ pub fn start(
             });
 
         let add_info = AddressInfo {
-            advertise_addr: opts.advertise_addr.to_owned(),
+            advertise_addr: opts.advertise_addr.clone(),
             listen_addr,
             prometheus_addr,
             dashboard_addr,
@@ -336,7 +335,7 @@ pub fn start(
         const MIN_TIMEOUT_INTERVAL_SEC: u64 = 20;
         let compaction_task_max_progress_interval_secs = {
             let retry_config = &config.storage.object_store.retry;
-            let max_streming_read_timeout_ms = (retry_config.streaming_read_attempt_timeout_ms
+            let max_streaming_read_timeout_ms = (retry_config.streaming_read_attempt_timeout_ms
                 + retry_config.req_backoff_max_delay_ms)
                 * retry_config.streaming_read_retry_attempts as u64;
             let max_streaming_upload_timeout_ms = (retry_config
@@ -349,7 +348,7 @@ pub fn start(
             let max_read_timeout_ms = (retry_config.read_attempt_timeout_ms
                 + retry_config.req_backoff_max_delay_ms)
                 * retry_config.read_retry_attempts as u64;
-            let max_timeout_ms = max_streming_read_timeout_ms
+            let max_timeout_ms = max_streaming_read_timeout_ms
                 .max(max_upload_timeout_ms)
                 .max(max_streaming_upload_timeout_ms)
                 .max(max_read_timeout_ms)
@@ -362,6 +361,7 @@ pub fn start(
             backend,
             max_heartbeat_interval,
             config.meta.meta_leader_lease_secs,
+            config.server.clone(),
             MetaOpts {
                 enable_recovery: !config.meta.disable_recovery,
                 disable_automatic_parallelism_control: config
@@ -383,7 +383,12 @@ pub fn start(
                     .meta
                     .developer
                     .time_travel_vacuum_interval_sec,
+                time_travel_vacuum_max_version_count: config
+                    .meta
+                    .developer
+                    .time_travel_vacuum_max_version_count,
                 vacuum_spin_interval_ms: config.meta.vacuum_spin_interval_ms,
+                iceberg_gc_interval_sec: config.meta.iceberg_gc_interval_sec,
                 hummock_version_checkpoint_interval_sec: config
                     .meta
                     .hummock_version_checkpoint_interval_sec,
@@ -498,6 +503,10 @@ pub fn start(
                     .enable_check_task_level_overlap,
                 enable_dropped_column_reclaim: config.meta.enable_dropped_column_reclaim,
                 split_group_size_ratio: config.meta.split_group_size_ratio,
+                refresh_scheduler_interval_sec: config
+                    .streaming
+                    .developer
+                    .refresh_scheduler_interval_sec,
                 table_stat_high_write_throughput_ratio_for_split: config
                     .meta
                     .table_stat_high_write_throughput_ratio_for_split,
@@ -546,6 +555,9 @@ pub fn start(
                 cdc_table_split_init_insert_batch_size: config
                     .meta
                     .cdc_table_split_init_insert_batch_size,
+
+                enable_legacy_table_migration: config.meta.enable_legacy_table_migration,
+                pause_on_next_bootstrap_offline: config.meta.pause_on_next_bootstrap_offline,
             },
             config.system.into_init_system_params(),
             Default::default(),

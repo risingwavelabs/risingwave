@@ -216,6 +216,19 @@ class Panels:
             **self.common_options,
         )
 
+    def timeseries_latency_ns(self, title, description, targets, legendCols=["mean"]):
+        gridPos = self.layout.next_one_third_width_graph()
+        return TimeSeries(
+            title=title,
+            dataSource=self.datasource,
+            description=description,
+            targets=targets,
+            gridPos=gridPos,
+            unit="ns",
+            legendCalcs=legendCols,
+            **self.common_options,
+        )
+
     def timeseries_actor_latency(
         self, title, description, targets, legendCols=["mean"]
     ):
@@ -473,18 +486,32 @@ class Panels:
         targets,
         columns,
         excludeByName=dict.fromkeys(["Time", "Value"], True),
+        renameByName=None,
+        unitByName=None,
     ):
         gridPos = self.layout.next_one_third_width_graph()
         column_indices = {column: index for index, column in enumerate(columns)}
+        organize_options = {
+            "indexByName": column_indices,
+            "excludeByName": excludeByName,
+        }
+        if renameByName:
+            organize_options["renameByName"] = renameByName
         transformations = [
             {
                 "id": "organize",
-                "options": {
-                    "indexByName": column_indices,
-                    "excludeByName": excludeByName,
-                },
+                "options": organize_options,
             }
         ]
+        overrides = []
+        if unitByName:
+            for name, unit_value in unitByName.items():
+                overrides.append(
+                    {
+                        "matcher": {"id": "byName", "options": name},
+                        "properties": [{"id": "unit", "value": unit_value}],
+                    }
+                )
         return Table(
             title=title,
             dataSource=self.datasource,
@@ -494,11 +521,15 @@ class Panels:
             showHeader=True,
             filterable=True,
             transformations=transformations,
+            overrides=overrides,
         )
 
     def subheader(self, title="", content="", height=1):
         gridPos = self.layout.next_row()
+        # Keep layout state consistent with the actual panel height, otherwise the next panel may overlap
+        # when callers use a custom `height`.
         gridPos.h = height
+        self.layout.h = height
         return Text(
             title=title,
             gridPos=gridPos,

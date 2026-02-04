@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -65,40 +65,6 @@ macro_rules! assert_count_range_scan {
             )
             .await
             .unwrap();
-        let mut count = 0;
-        loop {
-            match it.try_next().await.unwrap() {
-                Some(_) => count += 1,
-                None => break,
-            }
-        }
-        assert_eq!(count, $expect_count);
-    }};
-}
-
-#[allow(unused_macros)]
-macro_rules! assert_count_backward_range_scan {
-    ($storage:expr, $range:expr, $expect_count:expr, $epoch:expr) => {{
-        use std::ops::RangeBounds;
-        let range = $range;
-        let bounds: (Bound<Vec<u8>>, Bound<Vec<u8>>) = (
-            range.start_bound().map(|x: &Bytes| x.to_vec()),
-            range.end_bound().map(|x: &Bytes| x.to_vec()),
-        );
-        let it = $storage
-            .backward_iter(
-                bounds,
-                ReadOptions {
-                    ignore_range_tombstone: false,
-                    epoch: $epoch,
-                    table_id: Default::default(),
-                    retention_seconds: None,
-                    read_version_from_backup: false,
-                },
-            )
-            .await
-            .unwrap();
-        futures::pin_mut!(it);
         let mut count = 0;
         loop {
             match it.try_next().await.unwrap() {

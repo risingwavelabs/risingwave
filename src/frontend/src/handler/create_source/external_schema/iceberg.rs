@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -43,6 +43,8 @@ pub async fn extract_iceberg_columns(
             })
             .collect();
         columns.extend(ColumnCatalog::iceberg_hidden_cols());
+
+        tracing::info!("iceberg columns: {:?}", columns);
 
         Ok(columns)
     } else {

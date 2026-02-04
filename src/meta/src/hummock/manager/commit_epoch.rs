@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -199,13 +199,13 @@ impl HummockManager {
             rewrite_commit_sstables_to_sub_level(commit_sstables, &group_id_to_config);
 
         // build group_id to truncate tables
-        let mut group_id_to_truncate_tables: HashMap<u64, Vec<TableId>> = HashMap::new();
+        let mut group_id_to_truncate_tables: HashMap<u64, HashSet<TableId>> = HashMap::new();
         for table_id in &truncate_tables {
             if let Some(compaction_group_id) = table_compaction_group_mapping.get(table_id) {
                 group_id_to_truncate_tables
                     .entry(*compaction_group_id)
                     .or_default()
-                    .push(*table_id);
+                    .insert(*table_id);
             } else {
                 bail!(
                     "table {} doesn't belong to any compaction group, skip truncating",
@@ -236,7 +236,11 @@ impl HummockManager {
             self.env.notification_manager(),
         );
         add_prost_table_stats_map(&mut version_stats.table_stats, &table_stats_change);
-        if purge_prost_table_stats(&mut version_stats.table_stats, version.latest_version()) {
+        if purge_prost_table_stats(
+            &mut version_stats.table_stats,
+            version.latest_version(),
+            &truncate_tables,
+        ) {
             self.metrics.version_stats.reset();
             versioning.local_metrics.clear();
         }
@@ -288,7 +292,6 @@ impl HummockManager {
             .await
             .map_err(|e| Error::Internal(e.into()))?
             .into_iter()
-            .map(|id| id.try_into().unwrap())
             .collect();
         let mut txn = self.env.meta_store_ref().conn.begin().await?;
         let version_snapshot_sst_ids = self
@@ -374,9 +377,9 @@ impl HummockManager {
         let mut sst_to_cg_vec = Vec::with_capacity(sstables.len());
         let commit_object_id_vec = sstables.iter().map(|s| s.sst_info.object_id).collect_vec();
         for commit_sst in sstables {
-            let mut group_table_ids: BTreeMap<u64, Vec<u32>> = BTreeMap::new();
+            let mut group_table_ids: BTreeMap<u64, Vec<TableId>> = BTreeMap::new();
             for table_id in &commit_sst.sst_info.table_ids {
-                match table_compaction_group_mapping.get(&TableId::new(*table_id)) {
+                match table_compaction_group_mapping.get(table_id) {
                     Some(cg_id_from_meta) => {
                         group_table_ids
                             .entry(*cg_id_from_meta)
@@ -385,7 +388,7 @@ impl HummockManager {
                     }
                     None => {
                         tracing::warn!(
-                            table_id = *table_id,
+                            %table_id,
                             object_id = %commit_sst.sst_info.object_id,
                             "table doesn't belong to any compaction group",
                         );
@@ -488,7 +491,7 @@ fn on_handle_add_new_table(
         if let Some(info) = state_table_info.info().get(table_id) {
             return Err(Error::CompactionGroup(format!(
                 "table {} already exist {:?}",
-                table_id.table_id, info,
+                table_id, info,
             )));
         }
         table_compaction_group_mapping.insert(*table_id, compaction_group_id);

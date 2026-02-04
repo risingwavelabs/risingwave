@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,7 +17,7 @@ use risingwave_frontend_macro::system_catalog;
 
 /// The catalog `pg_locks` provides access to information about the locks held by active processes
 /// within the database server.
-/// Reference: [`https://www.postgresql.org/docs/current/view-pg-locks.html`].
+/// Reference: `https://www.postgresql.org/docs/current/view-pg-locks.html`.
 /// Currently, we don't have any type of lock.
 #[system_catalog(view, "pg_catalog.pg_locks")]
 #[derive(Fields)]
