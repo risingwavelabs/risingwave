@@ -91,7 +91,7 @@ impl SubscriptionCatalog {
             schema_id: self.schema_id,
             initialized_at_epoch: self.initialized_at_epoch.map(|e| e.0),
             created_at_epoch: self.created_at_epoch.map(|e| e.0),
-            owner: self.owner.into(),
+            owner: self.owner,
             initialized_at_cluster_version: self.initialized_at_cluster_version.clone(),
             created_at_cluster_version: self.created_at_cluster_version.clone(),
             dependent_table_id: self.dependent_table_id,
@@ -113,7 +113,7 @@ impl From<&PbSubscription> for SubscriptionCatalog {
             database_id: prost.database_id,
             schema_id: prost.schema_id,
             dependent_table_id: prost.dependent_table_id,
-            owner: prost.owner.into(),
+            owner: prost.owner,
             created_at_epoch: prost.created_at_epoch.map(Epoch::from),
             initialized_at_epoch: prost.initialized_at_epoch.map(Epoch::from),
             created_at_cluster_version: prost.created_at_cluster_version.clone(),
@@ -130,7 +130,7 @@ impl From<&PbSubscription> for SubscriptionCatalog {
 }
 
 impl OwnedByUserCatalog for SubscriptionCatalog {
-    fn owner(&self) -> u32 {
-        self.owner.user_id
+    fn owner(&self) -> UserId {
+        self.owner
     }
 }

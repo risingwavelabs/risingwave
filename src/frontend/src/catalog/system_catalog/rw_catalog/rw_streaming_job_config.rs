@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::id::{DatabaseId, JobId};
 use risingwave_common::types::Fields;
 use risingwave_frontend_macro::system_catalog;
 use risingwave_pb::meta::list_streaming_job_states_response::PbStreamingJobState;
@@ -23,9 +24,9 @@ use crate::session::current::notice_to_user;
 #[derive(Fields)]
 #[primary_key(id, key)]
 struct RwStreamingJobConfig {
-    id: i32,
+    id: JobId,
     name: String,
-    database_id: i32,
+    database_id: DatabaseId,
     key: String, // dot-separated key, e.g., `streaming.developer.chunk_size`
     value: String,
 }
@@ -76,9 +77,9 @@ async fn read_rw_streaming_job_config(
     Ok(states
         .into_iter()
         .flat_map(|state| {
-            let id = state.table_id.as_i32_id();
+            let id = state.table_id;
             let name = state.name.clone();
-            let database_id = state.database_id.as_i32_id();
+            let database_id = state.database_id;
 
             collect_config_kv(&state)
                 .into_iter()
