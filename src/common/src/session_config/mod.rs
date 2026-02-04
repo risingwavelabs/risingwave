@@ -71,7 +71,8 @@ const DISABLE_SINK_RATE_LIMIT: i32 = -1;
 const DEFAULT_TABLE_PARALLELISM_BOUND: std::num::NonZeroU64 = std::num::NonZeroU64::new(4).unwrap();
 
 /// Default parallelism bound for sources
-const DEFAULT_SOURCE_PARALLELISM_BOUND: std::num::NonZeroU64 = std::num::NonZeroU64::new(4).unwrap();
+const DEFAULT_SOURCE_PARALLELISM_BOUND: std::num::NonZeroU64 =
+    std::num::NonZeroU64::new(4).unwrap();
 
 /// Default to bypass cluster limits iff in debug mode.
 const BYPASS_CLUSTER_LIMITS: bool = cfg!(debug_assertions);
