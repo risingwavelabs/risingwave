@@ -608,7 +608,17 @@ impl<'a> UpstreamBuffer<'a, ConsumingSnapshot> {
 
 impl<S> UpstreamBuffer<'_, S> {
     fn can_consume_upstream(&self) -> bool {
-        self.is_polling_epoch_data || self.pending_epoch_lag() < self.max_pending_epoch_lag
+        // Always consume if no checkpoint is buffered yet. This prevents a deadlock where:
+        // 1. Creating job stops consuming (pending) because pending_epoch_lag >= max_pending_epoch_lag
+        // 2. Channel fills up with non-checkpoint barriers
+        // 3. Checkpoint barrier is blocked from being sent by main graph
+        // 4. Checkpoint never collected/committed, next_epoch() waits forever
+        //
+        // By ensuring we always consume until we have a checkpoint, the main graph can always
+        // send and collect the checkpoint barrier, allowing the epoch to be committed.
+        !self.upstream_pending_barriers.has_checkpoint_epoch()
+            || self.is_polling_epoch_data
+            || self.pending_epoch_lag() < self.max_pending_epoch_lag
     }
 
     async fn concurrently_consume_upstream(&mut self) -> StreamExecutorError {
