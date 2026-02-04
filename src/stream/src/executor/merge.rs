@@ -1,10 +1,10 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -481,9 +481,9 @@ mod tests {
     use crate::executor::exchange::input::{ActorInput, LocalInput, RemoteInput};
     use crate::executor::exchange::permit::channel_for_test;
     use crate::executor::{BarrierInner as Barrier, MessageInner as Message};
-    use crate::task::NewOutputRequest;
     use crate::task::barrier_test_utils::LocalBarrierTestEnv;
     use crate::task::test_utils::helper_make_local_actor;
+    use crate::task::{NewOutputRequest, TEST_PARTIAL_GRAPH_ID};
 
     fn build_test_chunk(size: u64) -> StreamChunk {
         let ops = vec![Op::Insert; size as usize];
@@ -929,6 +929,7 @@ mod tests {
             RemoteInput::new(
                 &test_env.local_barrier_manager,
                 addr.into(),
+                TEST_PARTIAL_GRAPH_ID,
                 (0.into(), 0.into()),
                 (0.into(), 0.into()),
                 Arc::new(StreamingMetrics::unused()),

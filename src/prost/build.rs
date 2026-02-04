@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -86,14 +86,17 @@ for_all_wrapped_id_fields! (
             id: ConnectionId,
             schema_id: SchemaId,
             database_id: DatabaseId,
+            owner: UserId,
         }
         Database {
             id: DatabaseId,
+            owner: UserId,
         }
         Function {
             id: FunctionId,
             schema_id: SchemaId,
             database_id: DatabaseId,
+            owner: UserId,
         }
         Index {
             id: IndexId,
@@ -101,15 +104,18 @@ for_all_wrapped_id_fields! (
             primary_table_id: TableId,
             schema_id: SchemaId,
             database_id: DatabaseId,
+            owner: UserId,
         }
         Schema {
             id: SchemaId,
             database_id: DatabaseId,
+            owner: UserId,
         }
         Secret {
             id: SecretId,
             schema_id: SchemaId,
             database_id: DatabaseId,
+            owner: UserId,
         }
         Sink {
             id: SinkId,
@@ -118,6 +124,7 @@ for_all_wrapped_id_fields! (
             target_table: TableId,
             auto_refresh_schema_from_table: TableId,
             connection_id: ConnectionId,
+            owner: UserId,
         }
         SinkFormatDesc {
             connection_id: ConnectionId,
@@ -127,6 +134,7 @@ for_all_wrapped_id_fields! (
             schema_id: SchemaId,
             database_id: DatabaseId,
             connection_id: ConnectionId,
+            owner: UserId,
         }
         StreamSourceInfo {
             connection_id: ConnectionId,
@@ -136,6 +144,7 @@ for_all_wrapped_id_fields! (
             dependent_table_id: TableId,
             schema_id: SchemaId,
             database_id: DatabaseId,
+            owner: UserId,
         }
         Table {
             id: TableId,
@@ -145,16 +154,19 @@ for_all_wrapped_id_fields! (
             database_id: DatabaseId,
             fragment_id: FragmentId,
             dml_fragment_id: FragmentId,
+            owner: UserId,
         }
         View {
             id: ViewId,
             schema_id: SchemaId,
             database_id: DatabaseId,
+            owner: UserId,
         }
     }
     common {
         ActorInfo {
             actor_id: ActorId,
+            partial_graph_id: PartialGraphId,
         }
         ActorLocation {
             worker_node_id: WorkerId,
@@ -178,6 +190,9 @@ for_all_wrapped_id_fields! (
         AlterFragmentParallelismRequest {
             fragment_ids: FragmentId,
         }
+        AlterOwnerRequest {
+            owner_id: UserId,
+        }
         AlterParallelismRequest {
             table_id: JobId,
         }
@@ -188,6 +203,7 @@ for_all_wrapped_id_fields! (
             database_id: DatabaseId,
             schema_id: SchemaId,
             secret_id: SecretId,
+            owner_id: UserId,
         }
         AlterSetSchemaRequest {
             new_schema_id: SchemaId,
@@ -205,16 +221,20 @@ for_all_wrapped_id_fields! (
         CreateConnectionRequest {
             database_id: DatabaseId,
             schema_id: SchemaId,
+            owner_id: UserId,
         }
         CreateMaterializedViewRequest {
             dependencies: ObjectId,
+            owner_id: UserId,
         }
         CreateSecretRequest {
             database_id: DatabaseId,
             schema_id: SchemaId,
+            owner_id: UserId,
         }
         CreateSinkRequest {
             dependencies: ObjectId,
+            owner_id: UserId,
         }
         CreateTableRequest {
             dependencies: ObjectId,
@@ -266,6 +286,9 @@ for_all_wrapped_id_fields! (
         }
         GetTablesResponse {
             tables: TableId,
+        }
+        ResetSourceRequest {
+            source_id: SourceId,
         }
     }
     frontend_service {
@@ -493,6 +516,7 @@ for_all_wrapped_id_fields! (
         }
         ListTableFragmentsResponse.ActorInfo {
             id: ActorId,
+            partial_graph_id: PartialGraphId,
         }
         ListTableFragmentsResponse.FragmentInfo {
             id: FragmentId,
@@ -542,6 +566,7 @@ for_all_wrapped_id_fields! (
         StackTraceResponse {
             barrier_worker_state: WorkerId,
             jvm_stack_traces: WorkerId,
+            node_errors: WorkerId,
         }
     }
     plan_common {
@@ -584,6 +609,9 @@ for_all_wrapped_id_fields! (
             added_actors: ActorId,
             actor_splits: ActorId,
             actor_dispatchers: ActorId,
+        }
+        BackfillOrder {
+            order: RelationId,
         }
         CdcFilterNode {
             upstream_source_id: SourceId,
@@ -668,7 +696,7 @@ for_all_wrapped_id_fields! (
             upstream_mv_table_id: TableId,
         }
         ThrottleMutation {
-            actor_throttle: ActorId,
+            fragment_throttle: FragmentId,
         }
         UpdateMutation {
             dropped_actors: ActorId,
@@ -702,7 +730,6 @@ for_all_wrapped_id_fields! (
     }
     stream_service {
         BarrierCompleteResponse {
-            database_id: DatabaseId,
             truncate_tables: TableId,
             refresh_finished_tables: TableId,
             table_watermarks: TableId,
@@ -710,6 +737,7 @@ for_all_wrapped_id_fields! (
             worker_id: WorkerId,
             list_finished_source_ids: SourceId,
             load_finished_source_ids: SourceId,
+            partial_graph_id: PartialGraphId,
         }
         BarrierCompleteResponse.CdcTableBackfillProgress {
             fragment_id: FragmentId,
@@ -733,9 +761,9 @@ for_all_wrapped_id_fields! (
             table_stats_map: TableId,
         }
         InjectBarrierRequest {
-            database_id: DatabaseId,
             table_ids_to_sync: TableId,
             actor_ids_to_collect: ActorId,
+            partial_graph_id: PartialGraphId,
         }
         InjectBarrierRequest.BuildActorInfo {
             fragment_upstreams: FragmentId,
@@ -746,19 +774,19 @@ for_all_wrapped_id_fields! (
             fragment_id: FragmentId,
         }
         StreamingControlStreamRequest.CreatePartialGraphRequest {
-            database_id: DatabaseId,
+            partial_graph_id: PartialGraphId,
         }
         StreamingControlStreamRequest.RemovePartialGraphRequest {
-            database_id: DatabaseId,
+            partial_graph_ids: PartialGraphId,
         }
-        StreamingControlStreamRequest.ResetDatabaseRequest {
-            database_id: DatabaseId,
+        StreamingControlStreamRequest.ResetPartialGraphsRequest {
+            partial_graph_ids: PartialGraphId,
         }
-        StreamingControlStreamResponse.ReportDatabaseFailureResponse {
-            database_id: DatabaseId,
+        StreamingControlStreamResponse.ReportPartialGraphFailureResponse {
+            partial_graph_id: PartialGraphId,
         }
-        StreamingControlStreamResponse.ResetDatabaseResponse {
-            database_id: DatabaseId,
+        StreamingControlStreamResponse.ResetPartialGraphResponse {
+            partial_graph_id: PartialGraphId,
         }
     }
     task_service {
@@ -766,7 +794,7 @@ for_all_wrapped_id_fields! (
             table_id: TableId,
         }
         GetStreamRequest.Get {
-            database_id: DatabaseId,
+            up_partial_graph_id: PartialGraphId,
             up_fragment_id: FragmentId,
             down_fragment_id: FragmentId,
             up_actor_id: ActorId,
@@ -777,6 +805,32 @@ for_all_wrapped_id_fields! (
         AlterDefaultPrivilegeRequest {
             database_id: DatabaseId,
             schema_ids: SchemaId,
+            user_ids: UserId,
+            granted_by: UserId,
+        }
+        AlterDefaultPrivilegeRequest.GrantPrivilege {
+            grantees: UserId,
+        }
+        AlterDefaultPrivilegeRequest.RevokePrivilege {
+            grantees: UserId,
+        }
+        DropUserRequest {
+            user_id: UserId,
+        }
+        GrantPrivilege.ActionWithGrantOption {
+            granted_by: UserId,
+        }
+        GrantPrivilegeRequest {
+            user_ids: UserId,
+            granted_by: UserId,
+        }
+        RevokePrivilegeRequest {
+            user_ids: UserId,
+            granted_by: UserId,
+            revoke_by: UserId,
+        }
+        UserInfo {
+            id: UserId,
         }
     }
 );

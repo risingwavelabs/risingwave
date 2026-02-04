@@ -15,7 +15,7 @@
 use std::sync::Arc;
 
 use datafusion::config::ConfigOptions;
-use datafusion::physical_plan::execute_stream;
+use datafusion::physical_plan::{ExecutionPlan, execute_stream};
 use datafusion::prelude::{SessionConfig as DFSessionConfig, SessionContext as DFSessionContext};
 use futures_async_stream::for_await;
 use pgwire::pg_field_descriptor::PgFieldDescriptor;
@@ -35,23 +35,23 @@ use crate::handler::util::{DataChunkToRowSetAdapter, to_pg_field};
 use crate::scheduler::SchedulerError;
 use crate::session::SessionImpl;
 
+#[derive(Clone)]
 pub struct DfBatchQueryPlanResult {
     pub(crate) plan: Arc<datafusion::logical_expr::LogicalPlan>,
     pub(crate) schema: RwSchema,
     pub(crate) stmt_type: StatementType,
 }
 
-pub async fn execute_datafusion_plan(
-    session: Arc<SessionImpl>,
-    plan: DfBatchQueryPlanResult,
-    formats: Vec<Format>,
-) -> RwResult<RwPgResponse> {
-    let df_config = create_config(session.as_ref());
-    let ctx = DFSessionContext::new_with_config(df_config);
-    let state = ctx.state();
+pub fn create_datafusion_context(session: &SessionImpl) -> DFSessionContext {
+    let df_config = create_config(session);
+    DFSessionContext::new_with_config(df_config)
+}
 
-    let pg_descs: Vec<PgFieldDescriptor> = plan.schema.fields().iter().map(to_pg_field).collect();
-    let column_types = plan.schema.fields().iter().map(|f| f.data_type()).collect();
+pub async fn build_datafusion_physical_plan(
+    ctx: &DFSessionContext,
+    plan: &DfBatchQueryPlanResult,
+) -> RwResult<Arc<dyn ExecutionPlan>> {
+    let state = ctx.state();
 
     // TODO: some optimizing rules will cause inconsistency, need to investigate later
     // Currently we disable all optimizing rules to ensure correctness
@@ -65,6 +65,20 @@ pub async fn execute_datafusion_plan(
         .query_planner()
         .create_physical_plan(&df_plan, &state)
         .await?;
+    Ok(physical_plan)
+}
+
+pub async fn execute_datafusion_plan(
+    session: Arc<SessionImpl>,
+    plan: DfBatchQueryPlanResult,
+    formats: Vec<Format>,
+) -> RwResult<RwPgResponse> {
+    let ctx = create_datafusion_context(session.as_ref());
+
+    let pg_descs: Vec<PgFieldDescriptor> = plan.schema.fields().iter().map(to_pg_field).collect();
+    let column_types = plan.schema.fields().iter().map(|f| f.data_type()).collect();
+
+    let physical_plan = build_datafusion_physical_plan(&ctx, &plan).await?;
     let data_stream = execute_stream(physical_plan, ctx.task_ctx())?;
 
     let compute_runtime = session.env().compute_runtime();
@@ -104,7 +118,7 @@ pub async fn execute_datafusion_plan(
                 return;
             }
             tracing::error!(
-                "Datafusion query execution timeout after {} seconds",
+                "DataFusion query execution timeout after {} seconds",
                 timeout.as_secs()
             );
             if sender1

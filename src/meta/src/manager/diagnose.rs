@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -244,6 +244,7 @@ impl DiagnoseCommand {
             let mut row = Row::new();
             row.add_cell("id".into());
             row.add_cell("host".into());
+            row.add_cell("hostname".into());
             row.add_cell("type".into());
             row.add_cell("state".into());
             row.add_cell("parallelism".into());
@@ -267,6 +268,10 @@ impl DiagnoseCommand {
                     .host
                     .as_ref()
                     .map(|h| format!("{}:{}", h.host, h.port)),
+            );
+            try_add_cell(
+                &mut row,
+                worker_node.resource.as_ref().map(|r| r.hostname.clone()),
             );
             try_add_cell(
                 &mut row,

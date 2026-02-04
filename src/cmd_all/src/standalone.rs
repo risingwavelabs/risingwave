@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,7 +18,8 @@ use std::future::Future;
 use std::path::Path;
 
 use clap::Parser;
-use risingwave_common::config::MetaBackend;
+use risingwave_common::config::{MetaBackend, load_config};
+use risingwave_common::license::LicenseManager;
 use risingwave_common::util::env_var::env_var_is_true;
 use risingwave_common::util::meta_addr::MetaAddressStrategy;
 use risingwave_common::util::runtime::BackgroundShutdownRuntime;
@@ -248,6 +249,27 @@ pub async fn standalone(
     shutdown: CancellationToken,
 ) {
     tracing::info!("launching Risingwave in standalone mode");
+
+    // Skip license resource limit checks for single-node deployments
+    // (standalone with local meta backend (sqlite/mem)).
+    if let Some(opts) = meta_opts.as_ref() {
+        let config = load_config(&opts.config_path, opts);
+        let is_local_meta_backend =
+            matches!(config.meta.backend, MetaBackend::Mem | MetaBackend::Sqlite)
+                || (matches!(config.meta.backend, MetaBackend::Sql)
+                    && opts
+                        .sql_endpoint
+                        .as_ref()
+                        .map(|endpoint| endpoint.expose_secret().starts_with("sqlite:"))
+                        .unwrap_or(false));
+        if is_local_meta_backend {
+            LicenseManager::get().set_ignore_resource_limit(true);
+            tracing::info!(
+                "standalone meta backend {:?}; ignore license resource limits",
+                config.meta.backend
+            );
+        }
+    }
 
     let (meta, is_in_memory) = if let Some(opts) = meta_opts.clone() {
         let is_in_memory = matches!(opts.backend, Some(MetaBackend::Mem));

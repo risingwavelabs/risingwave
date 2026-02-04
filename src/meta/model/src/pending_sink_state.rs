@@ -36,7 +36,7 @@ pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub epoch: Epoch,
     pub sink_state: SinkState,
-    pub metadata: Vec<u8>,
+    pub metadata: Option<Vec<u8>>,
     pub schema_change: Option<SinkSchemachange>,
 }
 

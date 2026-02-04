@@ -18,7 +18,7 @@ verify_iceberg_source() {
     local expected_file
     local actual_file
     local retry_count=0
-    local max_retries=3
+    local max_retries=4
 
     shift
     expected=$(cat)
@@ -136,7 +136,7 @@ CREATE SINK s1 from t WITH (
     primary_key = 'id',
     force_append_only='true',
     auto.schema.change = 'true',
-    is_exactly_once = 'false',
+    is_exactly_once = 'true',
 );"
 
 
@@ -155,6 +155,9 @@ WITH (
     table.name = 't',
 );"
 
+# Wait for data to be synced to Iceberg
+echo "Waiting for data to sync to Iceberg..."
+sleep 5
 
 echo "Verifying initial data in iceberg_s1..."
 risedev psql -c "select * from iceberg_s1 ORDER BY id;"
@@ -197,6 +200,10 @@ WITH (
     table.name = 't',
 );"
 
+
+echo "Waiting for data to sync to Iceberg..."
+sleep 5
+
 echo "Verifying data after first schema change..."
 risedev psql -c "select * from iceberg_s2 ORDER BY id;"
 verify_iceberg_source iceberg_s2 <<'EOF'
@@ -231,6 +238,10 @@ WITH (
     table.name = 't',
 );"
 sleep 5
+
+echo "Waiting for data to sync to Iceberg..."
+sleep 5
+
 
 echo "Verifying data after second schema change..."
 risedev psql -c "select * from iceberg_s3 ORDER BY id";

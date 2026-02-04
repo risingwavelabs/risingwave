@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,10 +14,12 @@
 
 use risingwave_common::util::StackTraceResponseExt;
 use risingwave_pb::common::WorkerType;
+use risingwave_pb::id::WorkerId;
 use risingwave_pb::monitor_service::StackTraceRequest;
 use risingwave_pb::monitor_service::stack_trace_request::ActorTracesFormat;
-use risingwave_rpc_client::ComputeClientPool;
+use risingwave_rpc_client::MonitorClientPool;
 use rw_diagnose_tools::await_tree::AnalyzeSummary;
+use thiserror_ext::AsReport as _;
 
 use crate::CtlContext;
 
@@ -62,17 +64,43 @@ async fn bottleneck_detect_real_time(context: &CtlContext) -> anyhow::Result<Ana
     let compute_nodes = meta_client
         .list_worker_nodes(Some(WorkerType::ComputeNode))
         .await?;
-    let clients = ComputeClientPool::adhoc();
+    let clients = MonitorClientPool::adhoc();
 
     // request for json actor traces
     let req = StackTraceRequest::default();
 
     let mut summary = AnalyzeSummary::new();
+    let mut errors: Vec<(WorkerId, String)> = Vec::new();
     for cn in compute_nodes {
-        let client = clients.get(&cn).await?;
-        let response = client.stack_trace(req).await?;
+        let worker_id = cn.id;
+
+        let client = match clients.get(&cn).await {
+            Ok(client) => client,
+            Err(e) => {
+                errors.push((worker_id, format!("failed to connect: {}", e.as_report())));
+                continue;
+            }
+        };
+
+        let response = match client.await_tree(req).await {
+            Ok(resp) => resp,
+            Err(e) => {
+                errors.push((
+                    worker_id,
+                    format!("failed to collect stack trace: {}", e.as_report()),
+                ));
+                continue;
+            }
+        };
+
         let partial_summary = AnalyzeSummary::from_traces(&response.actor_traces)?;
         summary.merge_other(&partial_summary);
+    }
+    if !errors.is_empty() {
+        eprintln!("Some compute nodes failed to dump await tree:");
+        for (worker_id, err) in errors {
+            eprintln!("  - worker {worker_id}: {err}");
+        }
     }
     Ok(summary)
 }

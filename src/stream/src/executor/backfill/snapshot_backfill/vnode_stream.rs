@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -24,9 +24,11 @@ use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::row::{OwnedRow, Row, RowExt};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
+use risingwave_common_rate_limit::RateLimit;
 use risingwave_storage::table::ChangeLogRow;
 
 use crate::executor::StreamExecutorResult;
+use crate::executor::backfill::utils::create_builder;
 
 pub(super) trait ChangeLogRowStream =
     Stream<Item = StreamExecutorResult<ChangeLogRow>> + Sized + 'static;
@@ -140,6 +142,15 @@ impl<St: ChangeLogRowStream> VnodeStream<St> {
             );
             StreamChunk::from_parts(ops, chunk)
         })
+    }
+
+    pub(super) fn update_rate_limiter(&mut self, new_rate_limit: RateLimit, chunk_size: usize) {
+        assert!(self.data_chunk_builder.is_empty());
+        self.data_chunk_builder = create_builder(
+            new_rate_limit,
+            chunk_size,
+            self.data_chunk_builder.data_types(),
+        );
     }
 
     pub(super) async fn for_vnode_pk_progress(

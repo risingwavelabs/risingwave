@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,6 +14,7 @@
 
 use risingwave_common::types::Fields;
 use risingwave_frontend_macro::system_catalog;
+use risingwave_pb::id::SchemaId;
 
 use crate::catalog::system_catalog::SysCatalogReaderImpl;
 use crate::catalog::system_catalog::rw_catalog::rw_types::read_rw_types;
@@ -63,7 +64,7 @@ struct PgType {
     typtypmod: i32,
     typcollation: i32,
     typlen: i32,
-    typnamespace: i32,
+    typnamespace: SchemaId,
     typtype: char,
     typdelim: char,
     typrelid: i32,
@@ -77,8 +78,7 @@ fn read_pg_type(reader: &SysCatalogReaderImpl) -> Result<Vec<PgType>> {
     let catalog_reader = reader.catalog_reader.read_guard();
     let pg_catalog_id = catalog_reader
         .get_schema_by_name(&reader.auth_context.database, "pg_catalog")?
-        .id()
-        .as_i32_id();
+        .id();
 
     let rw_types = read_rw_types(reader)?;
 

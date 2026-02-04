@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -29,7 +29,7 @@ use serde_json::Value;
 use serde_with::{DisplayFromStr, serde_as};
 use thiserror_ext::AsReport;
 use url::form_urlencoded;
-use risingwave_pb::id::ExecutorId;
+use uuid::Uuid;
 use with_options::WithOptions;
 
 use super::decouple_checkpoint_log_sink::DEFAULT_COMMIT_CHECKPOINT_INTERVAL_WITH_SINK_DECOUPLE;
@@ -350,7 +350,6 @@ impl Sink for StarrocksSink {
             self.schema.clone(),
             self.pk_indices.clone(),
             self.is_append_only,
-            writer_param.executor_id,
         )?;
 
         let metrics = SinkWriterMetrics::new(&writer_param);
@@ -373,7 +372,6 @@ pub struct StarrocksSinkWriter {
     client: Option<StarrocksClient>,
     txn_client: Arc<StarrocksTxnClient>,
     row_encoder: JsonEncoder,
-    executor_id: ExecutorId,
     curr_txn_label: Option<String>,
 }
 
@@ -393,7 +391,6 @@ impl StarrocksSinkWriter {
         schema: Schema,
         pk_indices: Vec<usize>,
         is_append_only: bool,
-        executor_id: ExecutorId,
     ) -> Result<Self> {
         let mut field_names = schema.names_str();
         if !is_append_only {
@@ -436,7 +433,6 @@ impl StarrocksSinkWriter {
             client: None,
             txn_client: Arc::new(StarrocksTxnClient::new(txn_request_builder)),
             row_encoder: JsonEncoder::new_with_starrocks(schema, None),
-            executor_id,
             curr_txn_label: None,
         })
     }
@@ -521,7 +517,7 @@ impl StarrocksSinkWriter {
     fn new_txn_label(&self) -> String {
         format!(
             "rw-txn-{}-{}",
-            self.executor_id,
+            Uuid::new_v4(),
             chrono::Utc::now().timestamp_micros()
         )
     }

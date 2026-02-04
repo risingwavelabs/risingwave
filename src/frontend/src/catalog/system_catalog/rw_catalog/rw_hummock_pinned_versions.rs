@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::id::WorkerId;
 use risingwave_common::types::Fields;
 use risingwave_frontend_macro::system_catalog;
 
@@ -21,7 +22,7 @@ use crate::error::Result;
 #[derive(Fields)]
 struct RwHummockPinnedVersion {
     #[primary_key]
-    worker_node_id: i32,
+    worker_node_id: WorkerId,
     min_pinned_version_id: i64,
 }
 
@@ -33,7 +34,7 @@ async fn read(reader: &SysCatalogReaderImpl) -> Result<Vec<RwHummockPinnedVersio
         .await?
         .into_iter()
         .map(|s| RwHummockPinnedVersion {
-            worker_node_id: s.0.as_i32_id(),
+            worker_node_id: s.0,
             min_pinned_version_id: s.1 as _,
         })
         .collect();

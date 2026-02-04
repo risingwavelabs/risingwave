@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -48,6 +48,7 @@ use risingwave_pb::stream_plan::add_mutation::PbNewUpstreamSink;
 use risingwave_pb::stream_plan::barrier::BarrierKind;
 use risingwave_pb::stream_plan::barrier_mutation::Mutation as PbMutation;
 use risingwave_pb::stream_plan::stream_node::PbStreamKind;
+use risingwave_pb::stream_plan::throttle_mutation::ThrottleConfig;
 use risingwave_pb::stream_plan::update_mutation::{DispatcherUpdate, MergeUpdate};
 use risingwave_pb::stream_plan::{
     PbBarrier, PbBarrierMutation, PbDispatcher, PbSinkSchemaChange, PbStreamMessageBatch,
@@ -144,7 +145,7 @@ pub use batch_query::BatchQueryExecutor;
 pub use chain::ChainExecutor;
 pub use changelog::ChangeLogExecutor;
 pub use dedup::AppendOnlyDedupExecutor;
-pub use dispatch::{DispatchExecutor, DispatcherImpl};
+pub use dispatch::DispatchExecutor;
 pub use dynamic_filter::DynamicFilterExecutor;
 pub use error::{StreamExecutorError, StreamExecutorResult};
 pub use expand::ExpandExecutor;
@@ -180,7 +181,7 @@ pub use upstream_sink_union::{UpstreamFragmentInfo, UpstreamSinkUnionExecutor};
 pub use utils::DummyExecutor;
 pub use values::ValuesExecutor;
 pub use vector::*;
-pub use watermark_filter::WatermarkFilterExecutor;
+pub use watermark_filter::{UpsertWatermarkFilterExecutor, WatermarkFilterExecutor};
 pub use wrapper::WrapperExecutor;
 
 use self::barrier_align::AlignedMessageStream;
@@ -364,7 +365,7 @@ pub enum Mutation {
     SourceChangeSplit(SplitAssignments),
     Pause,
     Resume,
-    Throttle(HashMap<ActorId, Option<u32>>),
+    Throttle(HashMap<FragmentId, ThrottleConfig>),
     ConnectorPropsChange(HashMap<u32, HashMap<String, String>>),
     DropSubscriptions {
         /// `subscriber` -> `upstream_mv_table_id`
@@ -382,6 +383,9 @@ pub enum Mutation {
     },
     LoadFinish {
         associated_source_id: SourceId,
+    },
+    ResetSource {
+        source_id: SourceId,
     },
 }
 
@@ -555,13 +559,14 @@ impl Barrier {
             | Mutation::Pause
             | Mutation::Resume
             | Mutation::SourceChangeSplit(_)
-            | Mutation::Throttle(_)
+            | Mutation::Throttle { .. }
             | Mutation::DropSubscriptions { .. }
             | Mutation::ConnectorPropsChange(_)
             | Mutation::StartFragmentBackfill { .. }
             | Mutation::RefreshStart { .. }
             | Mutation::ListFinish { .. }
-            | Mutation::LoadFinish { .. } => false,
+            | Mutation::LoadFinish { .. }
+            | Mutation::ResetSource { .. } => false,
         }
     }
 
@@ -732,7 +737,6 @@ impl Mutation {
             ConnectorSplit, ConnectorSplits, PbCdcTableSnapshotSplitsWithGeneration,
         };
         use risingwave_pb::stream_plan::connector_props_change_mutation::ConnectorPropsInfo;
-        use risingwave_pb::stream_plan::throttle_mutation::RateLimit;
         use risingwave_pb::stream_plan::{
             PbAddMutation, PbConnectorPropsChangeMutation, PbDispatchers,
             PbDropSubscriptionsMutation, PbPauseMutation, PbResumeMutation,
@@ -872,11 +876,8 @@ impl Mutation {
             }
             Mutation::Pause => PbMutation::Pause(PbPauseMutation {}),
             Mutation::Resume => PbMutation::Resume(PbResumeMutation {}),
-            Mutation::Throttle(changes) => PbMutation::Throttle(PbThrottleMutation {
-                actor_throttle: changes
-                    .iter()
-                    .map(|(actor_id, limit)| (*actor_id, RateLimit { rate_limit: *limit }))
-                    .collect(),
+            Mutation::Throttle (changes) => PbMutation::Throttle(PbThrottleMutation {
+                fragment_throttle: changes.clone(),
             }),
             Mutation::DropSubscriptions {
                 subscriptions_to_drop,
@@ -923,6 +924,11 @@ impl Mutation {
             } => PbMutation::LoadFinish(risingwave_pb::stream_plan::LoadFinishMutation {
                 associated_source_id: *associated_source_id,
             }),
+            Mutation::ResetSource { source_id } => {
+                PbMutation::ResetSource(risingwave_pb::stream_plan::ResetSourceMutation {
+                    source_id: source_id.as_raw_id(),
+                })
+            }
         }
     }
 
@@ -1051,13 +1057,7 @@ impl Mutation {
             }
             PbMutation::Pause(_) => Mutation::Pause,
             PbMutation::Resume(_) => Mutation::Resume,
-            PbMutation::Throttle(changes) => Mutation::Throttle(
-                changes
-                    .actor_throttle
-                    .iter()
-                    .map(|(actor_id, limit)| (*actor_id, limit.rate_limit))
-                    .collect(),
-            ),
+            PbMutation::Throttle(changes) => Mutation::Throttle(changes.fragment_throttle.clone()),
             PbMutation::DropSubscriptions(drop) => Mutation::DropSubscriptions {
                 subscriptions_to_drop: drop.info.clone(),
             },
@@ -1097,6 +1097,9 @@ impl Mutation {
             },
             PbMutation::LoadFinish(load_finish) => Mutation::LoadFinish {
                 associated_source_id: load_finish.associated_source_id,
+            },
+            PbMutation::ResetSource(reset_source) => Mutation::ResetSource {
+                source_id: SourceId::from(reset_source.source_id),
             },
         };
         Ok(mutation)

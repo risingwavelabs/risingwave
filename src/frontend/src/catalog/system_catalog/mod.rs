@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -59,7 +59,7 @@ pub struct SystemTableCatalog {
     pub pk: Vec<usize>,
 
     // owner of table, should always be default super user, keep it for compatibility.
-    pub owner: u32,
+    pub owner: UserId,
 
     /// description of table, set by `comment on`.
     pub description: Option<String>,

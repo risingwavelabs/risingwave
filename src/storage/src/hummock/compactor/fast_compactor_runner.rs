@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -40,6 +40,7 @@ use crate::hummock::compactor::{
 };
 use crate::hummock::iterator::{
     NonPkPrefixSkipWatermarkState, PkPrefixSkipWatermarkState, SkipWatermarkState,
+    ValueSkipWatermarkState,
 };
 use crate::hummock::multi_builder::{CapacitySplitTableBuilder, TableBuilderFactory};
 use crate::hummock::sstable_store::SstableStoreRef;
@@ -433,11 +434,15 @@ impl<C: CompactionFilter> CompactorRunner<C> {
         ));
 
         // Can not consume the watermarks because the watermarks may be used by `check_compact_result`.
-        let state = PkPrefixSkipWatermarkState::from_safe_epoch_watermarks(
+        let pk_prefix_state = PkPrefixSkipWatermarkState::from_safe_epoch_watermarks(
             task.pk_prefix_table_watermarks.clone(),
         );
         let non_pk_prefix_state = NonPkPrefixSkipWatermarkState::from_safe_epoch_watermarks(
             task.non_pk_prefix_table_watermarks.clone(),
+            compaction_catalog_agent_ref.clone(),
+        );
+        let value_skip_watermark_state = ValueSkipWatermarkState::from_safe_epoch_watermarks(
+            task.value_table_watermarks.clone(),
             compaction_catalog_agent_ref,
         );
 
@@ -446,8 +451,9 @@ impl<C: CompactionFilter> CompactorRunner<C> {
                 sst_builder,
                 task_config,
                 task_progress,
-                state,
+                pk_prefix_state,
                 non_pk_prefix_state,
+                value_skip_watermark_state,
                 compaction_filter,
             ),
             left,
@@ -640,10 +646,11 @@ pub struct CompactTaskExecutor<F: TableBuilderFactory, C: CompactionFilter> {
     builder: CapacitySplitTableBuilder<F>,
     task_config: TaskConfig,
     task_progress: Arc<TaskProgress>,
-    skip_watermark_state: PkPrefixSkipWatermarkState,
+    pk_prefix_skip_watermark_state: PkPrefixSkipWatermarkState,
     last_key_is_delete: bool,
     progress_key_num: u32,
     non_pk_prefix_skip_watermark_state: NonPkPrefixSkipWatermarkState,
+    value_skip_watermark_state: ValueSkipWatermarkState,
     compaction_filter: C,
 }
 
@@ -652,8 +659,9 @@ impl<F: TableBuilderFactory, C: CompactionFilter> CompactTaskExecutor<F, C> {
         builder: CapacitySplitTableBuilder<F>,
         task_config: TaskConfig,
         task_progress: Arc<TaskProgress>,
-        skip_watermark_state: PkPrefixSkipWatermarkState,
+        pk_prefix_skip_watermark_state: PkPrefixSkipWatermarkState,
         non_pk_prefix_skip_watermark_state: NonPkPrefixSkipWatermarkState,
+        value_skip_watermark_state: ValueSkipWatermarkState,
         compaction_filter: C,
     ) -> Self {
         Self {
@@ -665,9 +673,10 @@ impl<F: TableBuilderFactory, C: CompactionFilter> CompactTaskExecutor<F, C> {
             last_table_id: None,
             last_table_stats: TableStats::default(),
             task_progress,
-            skip_watermark_state,
+            pk_prefix_skip_watermark_state,
             progress_key_num: 0,
             non_pk_prefix_skip_watermark_state,
+            value_skip_watermark_state,
             compaction_filter,
         }
     }
@@ -704,7 +713,7 @@ impl<F: TableBuilderFactory, C: CompactionFilter> CompactTaskExecutor<F, C> {
         iter: &mut BlockIterator,
         target_key: FullKey<&[u8]>,
     ) -> HummockResult<()> {
-        self.skip_watermark_state.reset_watermark();
+        self.pk_prefix_skip_watermark_state.reset_watermark();
         self.non_pk_prefix_skip_watermark_state.reset_watermark();
 
         while iter.is_valid() && iter.key().le(&target_key) {
@@ -736,7 +745,7 @@ impl<F: TableBuilderFactory, C: CompactionFilter> CompactTaskExecutor<F, C> {
                 drop = true;
             }
 
-            if !drop && self.watermark_should_delete(&iter.key()) {
+            if !drop && self.watermark_should_delete(&iter.key(), value) {
                 drop = true;
                 self.last_key_is_delete = true;
             }
@@ -782,7 +791,7 @@ impl<F: TableBuilderFactory, C: CompactionFilter> CompactTaskExecutor<F, C> {
             return false;
         }
 
-        if self.watermark_should_delete(smallest_key) {
+        if self.watermark_may_delete(smallest_key) {
             return false;
         }
 
@@ -794,9 +803,43 @@ impl<F: TableBuilderFactory, C: CompactionFilter> CompactTaskExecutor<F, C> {
         true
     }
 
-    fn watermark_should_delete(&mut self, key: &FullKey<&[u8]>) -> bool {
-        (self.skip_watermark_state.has_watermark() && self.skip_watermark_state.should_delete(key))
+    fn watermark_may_delete(&mut self, key: &FullKey<&[u8]>) -> bool {
+        // Correctness requires the assumption that these PkPrefixSkipWatermarkState and NonPkPrefixSkipWatermarkState never use the `unused_put`.
+        let pk_prefix_has_watermark = self.pk_prefix_skip_watermark_state.has_watermark();
+        let non_pk_prefix_has_watermark = self.non_pk_prefix_skip_watermark_state.has_watermark();
+        if pk_prefix_has_watermark || non_pk_prefix_has_watermark {
+            let unused = vec![];
+            let unused_put = HummockValue::Put(unused.as_slice());
+            if (pk_prefix_has_watermark
+                && self
+                    .pk_prefix_skip_watermark_state
+                    .should_delete(key, unused_put))
+                || (non_pk_prefix_has_watermark
+                    && self
+                        .non_pk_prefix_skip_watermark_state
+                        .should_delete(key, unused_put))
+            {
+                return true;
+            }
+        }
+        self.value_skip_watermark_state.has_watermark()
+            && self.value_skip_watermark_state.may_delete(key)
+    }
+
+    fn watermark_should_delete(
+        &mut self,
+        key: &FullKey<&[u8]>,
+        value: HummockValue<&[u8]>,
+    ) -> bool {
+        (self.pk_prefix_skip_watermark_state.has_watermark()
+            && self
+                .pk_prefix_skip_watermark_state
+                .should_delete(key, value))
             || (self.non_pk_prefix_skip_watermark_state.has_watermark()
-                && self.non_pk_prefix_skip_watermark_state.should_delete(key))
+                && self
+                    .non_pk_prefix_skip_watermark_state
+                    .should_delete(key, value))
+            || (self.value_skip_watermark_state.has_watermark()
+                && self.value_skip_watermark_state.should_delete(key, value))
     }
 }

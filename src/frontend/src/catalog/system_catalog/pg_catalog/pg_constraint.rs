@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,6 +14,7 @@
 
 use risingwave_common::types::Fields;
 use risingwave_frontend_macro::system_catalog;
+use risingwave_pb::id::{ObjectId, RelationId, SchemaId};
 
 use crate::TableCatalog;
 use crate::catalog::schema_catalog::SchemaCatalog;
@@ -26,15 +27,15 @@ use crate::error::Result;
 #[derive(Fields)]
 struct PgConstraint {
     #[primary_key]
-    oid: i32,
+    oid: ObjectId,
     conname: String,
-    connamespace: i32,
+    connamespace: SchemaId,
     contype: String,
     condeferrable: bool,
     convalidated: bool,
-    conrelid: i32,
+    conrelid: RelationId,
     contypid: i32,
-    conindid: i32,
+    conindid: RelationId,
     conparentid: i32,
     confrelid: i32,
     confupdtype: String,
@@ -58,16 +59,16 @@ impl PgConstraint {
         // List of the constrained columns. First column starts from 1.
         let conkey: Vec<_> = table.pk.iter().map(|i| (*i + 1) as i16).collect();
         PgConstraint {
-            oid: table.id.as_i32_id(), // Use table_id as a mock oid of constraint here.
+            oid: table.id.as_object_id(), // Use table_id as a mock oid of constraint here.
             conname: format!("{}_pkey", &table.name),
-            connamespace: schema.id().as_i32_id(),
+            connamespace: schema.id(),
             contype: "p".to_owned(), // p = primary key constraint
             condeferrable: false,
             convalidated: true,
-            conrelid: table.id.as_i32_id(),
+            conrelid: table.id.as_relation_id(),
             contypid: 0,
             // Use table_id as a mock index oid of constraint here.
-            conindid: table.id.as_i32_id(),
+            conindid: table.id.as_relation_id(),
             conparentid: 0,
             confrelid: 0,
             confupdtype: " ".to_owned(),
@@ -95,16 +96,16 @@ impl PgConstraint {
             .map(|i| (i.column_index + 1) as i16)
             .collect();
         PgConstraint {
-            oid: table.id.as_i32_id(), // Use table_id as a mock oid of constraint here.
+            oid: table.id.as_object_id(), // Use table_id as a mock oid of constraint here.
             conname: format!("{}_pkey", &table.name),
-            connamespace: schema.id().as_i32_id(),
+            connamespace: schema.id(),
             contype: "p".to_owned(), // p = primary key constraint
             condeferrable: false,
             convalidated: true,
-            conrelid: table.id.as_i32_id(),
+            conrelid: table.id.as_relation_id(),
             contypid: 0,
             // Use table_id as a mock index oid of constraint here.
-            conindid: table.id.as_i32_id(),
+            conindid: table.id.as_relation_id(),
             conparentid: 0,
             confrelid: 0,
             confupdtype: " ".to_owned(),

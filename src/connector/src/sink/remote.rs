@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -46,7 +46,6 @@ use risingwave_pb::connector_service::{
     ValidateSinkResponse, sink_coordinator_stream_request, sink_coordinator_stream_response,
     sink_writer_stream_response,
 };
-use risingwave_pb::stream_plan::PbSinkSchemaChange;
 use risingwave_rpc_client::error::RpcError;
 use risingwave_rpc_client::{
     BidiStreamReceiver, BidiStreamSender, DEFAULT_BUFFER_SIZE, SinkCoordinatorStreamHandle,
@@ -382,7 +381,7 @@ impl LogSinker for RemoteLogSinker {
                 {
                     sink_writer_metrics
                         .sink_commit_duration
-                        .observe(start_time.elapsed().as_millis() as f64);
+                        .observe(start_time.elapsed().as_secs_f64());
                 }
 
                 log_reader.truncate(persisted_offset)?;
@@ -694,19 +693,7 @@ impl SinglePhaseCommitCoordinator for RemoteCoordinator {
         Ok(())
     }
 
-    async fn commit(
-        &mut self,
-        epoch: u64,
-        metadata: Vec<SinkMetadata>,
-        schema_change: Option<PbSinkSchemaChange>,
-    ) -> Result<()> {
-        if let Some(schema_change) = schema_change {
-            return Err(anyhow!(
-                "remote coordinator not support schema change, but got: {:?}",
-                schema_change
-            )
-            .into());
-        }
+    async fn commit_data(&mut self, epoch: u64, metadata: Vec<SinkMetadata>) -> Result<()> {
         Ok(self.stream_handle.commit(epoch, metadata).await?)
     }
 }

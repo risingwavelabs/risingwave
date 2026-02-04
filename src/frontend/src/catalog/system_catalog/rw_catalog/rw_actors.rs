@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::id::{ActorId, FragmentId, WorkerId};
 use risingwave_common::types::Fields;
 use risingwave_frontend_macro::system_catalog;
 
@@ -21,9 +22,9 @@ use crate::error::Result;
 #[derive(Fields)]
 struct RwActor {
     #[primary_key]
-    actor_id: i32,
-    fragment_id: i32,
-    worker_id: i32,
+    actor_id: ActorId,
+    fragment_id: FragmentId,
+    worker_id: WorkerId,
     state: String,
 }
 
@@ -34,9 +35,9 @@ async fn read_rw_actors(reader: &SysCatalogReaderImpl) -> Result<Vec<RwActor>> {
     Ok(states
         .into_iter()
         .map(|state| RwActor {
-            actor_id: state.actor_id.as_i32_id(),
-            fragment_id: state.fragment_id.as_i32_id(),
-            worker_id: state.worker_id.as_i32_id(),
+            actor_id: state.actor_id,
+            fragment_id: state.fragment_id,
+            worker_id: state.worker_id,
             state: "RUNNING".into(),
         })
         .collect())

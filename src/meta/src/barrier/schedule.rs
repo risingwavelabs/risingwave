@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -854,9 +854,9 @@ mod tests {
             unimplemented!()
         }
 
-        async fn post_collect_command<'a>(
-            &'a self,
-            _command: &'a crate::barrier::command::CommandContext,
+        async fn post_collect_command(
+            &self,
+            _command: crate::barrier::command::PostCollectCommand,
         ) -> MetaResult<()> {
             unimplemented!()
         }
@@ -889,7 +889,7 @@ mod tests {
         async fn reload_database_runtime_info(
             &self,
             _database_id: DatabaseId,
-        ) -> MetaResult<Option<crate::barrier::DatabaseRuntimeInfoSnapshot>> {
+        ) -> MetaResult<crate::barrier::DatabaseRuntimeInfoSnapshot> {
             unimplemented!()
         }
 

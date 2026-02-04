@@ -63,7 +63,7 @@ statement ok
 create table t1(v1 int);
 
 statement ok
-insert into t1 select * from generate_series(1, 10);
+insert into t1 select * from generate_series(1, 50);
 
 statement ok
 flush;

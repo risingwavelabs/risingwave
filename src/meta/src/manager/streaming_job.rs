@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,7 +16,7 @@ use std::collections::HashSet;
 
 use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::TableVersionId;
-use risingwave_common::id::{ConnectionId, DatabaseId, JobId, SchemaId, SecretId};
+use risingwave_common::id::{ConnectionId, DatabaseId, JobId, SchemaId, SecretId, UserId};
 use risingwave_meta_model::object::ObjectType;
 use risingwave_meta_model::prelude::{SourceModel, TableModel};
 use risingwave_meta_model::{TableVersion, source, table};
@@ -168,7 +168,7 @@ impl StreamingJob {
         }
     }
 
-    pub fn owner(&self) -> u32 {
+    pub fn owner(&self) -> UserId {
         match self {
             StreamingJob::MaterializedView(mv) => mv.owner,
             StreamingJob::Sink(sink) => sink.owner,

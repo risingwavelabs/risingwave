@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -231,8 +231,13 @@ pub fn validate_compatibility(
             props.insert("schema.name".into(), "public".into());
         }
         if !props.contains_key("publication.name") {
-            // Default publication name is "rw_publication"
-            props.insert("publication.name".into(), "rw_publication".into());
+            // Build a random publication name with UUID to avoid conflicts between sources
+            // e.g. "rw_publication_f9a3567e6dd54bf5900444c8b1c03815"
+            let uuid = uuid::Uuid::new_v4();
+            props.insert(
+                "publication.name".into(),
+                format!("rw_publication_{}", uuid.simple()),
+            );
         }
         if !props.contains_key("publication.create.enable") {
             // Default auto create publication if doesn't exist

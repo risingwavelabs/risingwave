@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,7 +19,7 @@ use std::ops::{Deref, DerefMut};
 use std::time::Duration;
 
 use anyhow::anyhow;
-use futures::{FutureExt, TryStreamExt};
+use futures::FutureExt;
 use itertools::Itertools;
 use risingwave_common::array::Op;
 use risingwave_common::bitmap::BitmapBuilder;
@@ -31,7 +31,9 @@ use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_pb::stream_plan::update_mutation::PbDispatcherUpdate;
 use risingwave_pb::stream_plan::{self, PbDispatcher};
 use smallvec::{SmallVec, smallvec};
+use thiserror_ext::AsReport;
 use tokio::sync::mpsc::UnboundedReceiver;
+use tokio::task::consume_budget;
 use tokio::time::Instant;
 use tokio_stream::StreamExt;
 use tokio_stream::adapters::Peekable;
@@ -49,6 +51,8 @@ use crate::task::{DispatcherId, NewOutputRequest};
 mod output_mapping;
 pub use output_mapping::DispatchOutputMapping;
 use risingwave_common::id::FragmentId;
+
+use crate::error::StreamError;
 
 /// [`DispatchExecutor`] consumes messages and send them into downstream actors. Usually,
 /// data chunks will be dispatched with some specified policy, while control message
@@ -99,7 +103,7 @@ impl DispatchExecutorMetrics {
                 .with_guarded_label_values(&[
                     self.actor_id_str.as_str(),
                     self.fragment_id_str.as_str(),
-                    dispatcher.dispatcher_id_str(),
+                    dispatcher.dispatcher_id().to_string().as_str(),
                 ]),
             dispatcher,
         }
@@ -157,33 +161,41 @@ impl DispatchExecutorInner {
     }
 
     async fn dispatch(&mut self, msg: MessageBatch) -> StreamResult<()> {
-        macro_rules! await_with_metrics {
-            ($fut:expr, $metrics:expr) => {{
-                let mut start_time = Instant::now();
-                let interval_duration = Duration::from_secs(15);
-                let mut interval =
-                    tokio::time::interval_at(start_time + interval_duration, interval_duration);
-
-                let mut fut = std::pin::pin!($fut);
-
-                loop {
-                    tokio::select! {
-                        biased;
-                        res = &mut fut => {
-                            res?;
-                            let ns = start_time.elapsed().as_nanos() as u64;
-                            $metrics.inc_by(ns);
-                            break;
-                        }
-                        _ = interval.tick() => {
-                            start_time = Instant::now();
-                            $metrics.inc_by(interval_duration.as_nanos() as u64);
-                        }
-                    };
-                }
-                StreamResult::Ok(())
-            }};
+        if self.dispatchers.is_empty() {
+            // Our dispatcher internal implementation calls tokio method, which already involves cooperative scheduling
+            // with tokio runtime.
+            //
+            // When there is no dispatcher, we should do the cooperative scheduling together.
+            consume_budget().await;
         }
+        async fn await_with_metrics(
+            future: impl Future<Output = ()>,
+            metrics: &LabelGuardedIntCounter,
+        ) {
+            let mut start_time = Instant::now();
+            let interval_duration = Duration::from_secs(15);
+            let mut interval =
+                tokio::time::interval_at(start_time + interval_duration, interval_duration);
+
+            let mut fut = pin!(future);
+
+            loop {
+                tokio::select! {
+                    biased;
+                    _res = &mut fut => {
+                        let ns = start_time.elapsed().as_nanos() as u64;
+                        metrics.inc_by(ns);
+                        break;
+                    }
+                    _ = interval.tick() => {
+                        start_time = Instant::now();
+                        metrics.inc_by(interval_duration.as_nanos() as u64);
+                    }
+                };
+            }
+        }
+
+        use futures::StreamExt;
 
         let limit = self.actor_config.developer.exchange_concurrent_dispatchers;
         // Only barrier can be batched for now.
@@ -196,8 +208,7 @@ impl DispatchExecutorInner {
                 let mutation = barrier_batch[0].mutation.clone();
                 self.pre_mutate_dispatchers(&mutation).await?;
                 futures::stream::iter(self.dispatchers.iter_mut())
-                    .map(Ok)
-                    .try_for_each_concurrent(limit, |dispatcher| async {
+                    .for_each_concurrent(limit, |dispatcher| async {
                         let metrics = &dispatcher.actor_output_buffer_blocking_duration_ns;
                         let dispatcher_output = &mut dispatcher.dispatcher;
                         let fut = dispatcher_output.dispatch_barriers(
@@ -207,38 +218,43 @@ impl DispatchExecutorInner {
                                 .map(|b| b.into_dispatcher())
                                 .collect(),
                         );
-                        await_with_metrics!(std::pin::pin!(fut), metrics)
+                        await_with_metrics(fut, metrics).await;
                     })
-                    .await?;
+                    .await;
                 self.post_mutate_dispatchers(&mutation)?;
             }
             MessageBatch::Watermark(watermark) => {
                 futures::stream::iter(self.dispatchers.iter_mut())
-                    .map(Ok)
-                    .try_for_each_concurrent(limit, |dispatcher| async {
+                    .for_each_concurrent(limit, |dispatcher| async {
                         let metrics = &dispatcher.actor_output_buffer_blocking_duration_ns;
                         let dispatcher_output = &mut dispatcher.dispatcher;
                         let fut = dispatcher_output.dispatch_watermark(watermark.clone());
-                        await_with_metrics!(std::pin::pin!(fut), metrics)
+                        await_with_metrics(fut, metrics).await;
                     })
-                    .await?;
+                    .await;
             }
             MessageBatch::Chunk(chunk) => {
                 futures::stream::iter(self.dispatchers.iter_mut())
-                    .map(Ok)
-                    .try_for_each_concurrent(limit, |dispatcher| async {
+                    .for_each_concurrent(limit, |dispatcher| async {
                         let metrics = &dispatcher.actor_output_buffer_blocking_duration_ns;
                         let dispatcher_output = &mut dispatcher.dispatcher;
                         let fut = dispatcher_output.dispatch_data(chunk.clone());
-                        await_with_metrics!(std::pin::pin!(fut), metrics)
+                        await_with_metrics(fut, metrics).await;
                     })
-                    .await?;
+                    .await;
 
                 self.metrics
                     .actor_out_record_cnt
                     .inc_by(chunk.cardinality() as _);
             }
         }
+        self.dispatchers.retain(|dispatcher| match &**dispatcher {
+            DispatcherImpl::Failed(dispatcher_id, e) => {
+                warn!(%dispatcher_id, err = %e.as_report(), actor_id = %self.actor_id, "dispatch fail");
+                false
+            }
+            _ => true,
+        });
         Ok(())
     }
 
@@ -268,11 +284,11 @@ impl DispatchExecutorInner {
         Ok(())
     }
 
-    fn find_dispatcher(&mut self, dispatcher_id: DispatcherId) -> &mut DispatcherImpl {
+    fn find_dispatcher(&mut self, dispatcher_id: DispatcherId) -> Option<&mut DispatcherImpl> {
         self.dispatchers
             .iter_mut()
             .find(|d| d.dispatcher_id() == dispatcher_id)
-            .unwrap_or_else(|| panic!("dispatcher {}:{} not found", self.actor_id, dispatcher_id))
+            .map(DerefMut::deref_mut)
     }
 
     /// Update the dispatcher BEFORE we actually dispatch this barrier. We'll only add the new
@@ -282,7 +298,10 @@ impl DispatchExecutorInner {
             .collect_outputs(&update.added_downstream_actor_id)
             .await?;
 
-        let dispatcher = self.find_dispatcher(update.dispatcher_id);
+        let Some(dispatcher) = self.find_dispatcher(update.dispatcher_id) else {
+            warn!(dispatcher_id = %update.dispatcher_id, added = ?update.added_downstream_actor_id, removed = ?update.removed_downstream_actor_id, actor_id = %self.actor_id, "ignore dispatcher update");
+            return Ok(());
+        };
         dispatcher.add_outputs(outputs);
 
         Ok(())
@@ -293,7 +312,10 @@ impl DispatchExecutorInner {
     fn post_update_dispatcher(&mut self, update: &PbDispatcherUpdate) -> StreamResult<()> {
         let ids = update.removed_downstream_actor_id.iter().copied().collect();
 
-        let dispatcher = self.find_dispatcher(update.dispatcher_id);
+        let Some(dispatcher) = self.find_dispatcher(update.dispatcher_id) else {
+            warn!(dispatcher_id = %update.dispatcher_id, added = ?update.added_downstream_actor_id, removed = ?update.removed_downstream_actor_id, actor_id = %self.actor_id, "ignore dispatcher update");
+            return Ok(());
+        };
         dispatcher.remove_outputs(&ids);
 
         // The hash mapping is only used by the hash dispatcher.
@@ -602,11 +624,15 @@ async fn try_batch_barriers(
 }
 
 #[derive(Debug)]
-pub enum DispatcherImpl {
+pub(crate) enum DispatcherImpl {
     Hash(HashDataDispatcher),
     Broadcast(BroadcastDispatcher),
     Simple(SimpleDispatcher),
+    #[cfg_attr(not(test), expect(dead_code))]
     RoundRobin(RoundRobinDataDispatcher),
+    /// The dispatcher has failed to dispatch to downstream and gets pending
+    /// Should be clean up later.
+    Failed(DispatcherId, StreamError),
 }
 
 impl DispatcherImpl {
@@ -658,51 +684,58 @@ impl DispatcherImpl {
 macro_rules! impl_dispatcher {
     ($( { $variant_name:ident } ),*) => {
         impl DispatcherImpl {
-            pub async fn dispatch_data(&mut self, chunk: StreamChunk) -> StreamResult<()> {
-                match self {
+            pub async fn dispatch_data(&mut self, chunk: StreamChunk) {
+                if let Err(e) = match self {
                     $( Self::$variant_name(inner) => inner.dispatch_data(chunk).await, )*
+                    Self::Failed(..) => unreachable!(),
+                } {
+                    *self = Self::Failed(self.dispatcher_id(), e);
                 }
             }
 
-            pub async fn dispatch_barriers(&mut self, barriers: DispatcherBarriers) -> StreamResult<()> {
-                match self {
+            pub async fn dispatch_barriers(&mut self, barriers: DispatcherBarriers) {
+                if let Err(e) = match self {
                     $( Self::$variant_name(inner) => inner.dispatch_barriers(barriers).await, )*
+                    Self::Failed(..) => unreachable!(),
+                } {
+                    *self = Self::Failed(self.dispatcher_id(), e);
                 }
             }
 
-            pub async fn dispatch_watermark(&mut self, watermark: Watermark) -> StreamResult<()> {
-                match self {
+            pub async fn dispatch_watermark(&mut self, watermark: Watermark) {
+                if let Err(e) = match self {
                     $( Self::$variant_name(inner) => inner.dispatch_watermark(watermark).await, )*
+                    Self::Failed(..) => unreachable!(),
+                } {
+                    *self = Self::Failed(self.dispatcher_id(), e);
                 }
             }
 
             pub fn add_outputs(&mut self, outputs: impl IntoIterator<Item = Output>) {
                 match self {
                     $(Self::$variant_name(inner) => inner.add_outputs(outputs), )*
+                    Self::Failed(..) => {},
                 }
             }
 
             pub fn remove_outputs(&mut self, actor_ids: &HashSet<ActorId>) {
                 match self {
                     $(Self::$variant_name(inner) => inner.remove_outputs(actor_ids), )*
+                    Self::Failed(..) => {},
                 }
             }
 
             pub fn dispatcher_id(&self) -> DispatcherId {
                 match self {
                     $(Self::$variant_name(inner) => inner.dispatcher_id(), )*
-                }
-            }
-
-            pub fn dispatcher_id_str(&self) -> &str {
-                match self {
-                    $(Self::$variant_name(inner) => inner.dispatcher_id_str(), )*
+                    Self::Failed(dispatcher_id, ..) => *dispatcher_id,
                 }
             }
 
             pub fn is_empty(&self) -> bool {
                 match self {
                     $(Self::$variant_name(inner) => inner.is_empty(), )*
+                    Self::Failed(..) => true,
                 }
             }
         }
@@ -724,7 +757,7 @@ for_all_dispatcher_variants! { impl_dispatcher }
 
 pub trait DispatchFuture<'a> = Future<Output = StreamResult<()>> + Send;
 
-pub trait Dispatcher: Debug + 'static {
+trait Dispatcher: Debug + 'static {
     /// Dispatch a data chunk to downstream actors.
     fn dispatch_data(&mut self, chunk: StreamChunk) -> impl DispatchFuture<'_>;
     /// Dispatch barriers to downstream actors, generally by broadcasting it.
@@ -743,9 +776,6 @@ pub trait Dispatcher: Debug + 'static {
     /// Note that the dispatcher id is always equal to the downstream fragment id.
     /// See also `proto/stream_plan.proto`.
     fn dispatcher_id(&self) -> DispatcherId;
-
-    /// Dispatcher id in string. See [`Dispatcher::dispatcher_id`].
-    fn dispatcher_id_str(&self) -> &str;
 
     /// Whether the dispatcher has no outputs. If so, it'll be cleaned up from the
     /// [`DispatchExecutor`].
@@ -775,10 +805,10 @@ pub struct RoundRobinDataDispatcher {
     output_mapping: DispatchOutputMapping,
     cur: usize,
     dispatcher_id: DispatcherId,
-    dispatcher_id_str: String,
 }
 
 impl RoundRobinDataDispatcher {
+    #[cfg_attr(not(test), expect(dead_code))]
     pub fn new(
         outputs: Vec<Output>,
         output_mapping: DispatchOutputMapping,
@@ -789,7 +819,6 @@ impl RoundRobinDataDispatcher {
             output_mapping,
             cur: 0,
             dispatcher_id,
-            dispatcher_id_str: dispatcher_id.to_string(),
         }
     }
 }
@@ -842,10 +871,6 @@ impl Dispatcher for RoundRobinDataDispatcher {
         self.dispatcher_id
     }
 
-    fn dispatcher_id_str(&self) -> &str {
-        &self.dispatcher_id_str
-    }
-
     fn is_empty(&self) -> bool {
         self.outputs.is_empty()
     }
@@ -859,7 +884,6 @@ pub struct HashDataDispatcher {
     /// different downstream actors.
     hash_mapping: ExpandedActorMapping,
     dispatcher_id: DispatcherId,
-    dispatcher_id_str: String,
 }
 
 impl Debug for HashDataDispatcher {
@@ -886,7 +910,6 @@ impl HashDataDispatcher {
             output_mapping,
             hash_mapping,
             dispatcher_id,
-            dispatcher_id_str: dispatcher_id.to_string(),
         }
     }
 }
@@ -963,7 +986,6 @@ impl Dispatcher for HashDataDispatcher {
                 let delete_row_idx = last_update_delete_row_idx
                     .take()
                     .expect("missing U- before U+");
-                assert!(delete_row_idx + 1 == row_idx, "U- and U+ are not adjacent");
 
                 // Check if any distribution key column value changed
                 let dist_key_changed = chunk.row_at(delete_row_idx).1.project(&self.keys)
@@ -984,7 +1006,10 @@ impl Dispatcher for HashDataDispatcher {
 
         let ops = new_ops;
         // Apply output mapping after calculating the vnode and new visibility maps.
+        // The output mapping may project columns and eliminate noop updates.
         let chunk = self.output_mapping.apply(chunk);
+        // Get the visibility after noop update elimination to incorporate into the final visibility.
+        let chunk_vis = chunk.visibility();
 
         // individually output StreamChunk integrated with vis_map
         futures::future::try_join_all(
@@ -993,9 +1018,16 @@ impl Dispatcher for HashDataDispatcher {
                 .zip_eq_fast(self.outputs.iter_mut())
                 .map(|(vis_map, output)| async {
                     let vis_map = vis_map.finish();
-                    // columns is not changed in this function
-                    let new_stream_chunk =
-                        StreamChunk::with_visibility(ops.clone(), chunk.columns().into(), vis_map);
+                    // Combine hash routing visibility with noop update elimination visibility.
+                    // A row is visible only if it passes BOTH:
+                    // 1. Hash routing (the row should go to this output)
+                    // 2. Noop update elimination (the row was not eliminated as a noop)
+                    let combined_vis = &vis_map & chunk_vis;
+                    let new_stream_chunk = StreamChunk::with_visibility(
+                        ops.clone(),
+                        chunk.columns().into(),
+                        combined_vis,
+                    );
                     if new_stream_chunk.cardinality() > 0 {
                         event!(
                             tracing::Level::TRACE,
@@ -1026,10 +1058,6 @@ impl Dispatcher for HashDataDispatcher {
         self.dispatcher_id
     }
 
-    fn dispatcher_id_str(&self) -> &str {
-        &self.dispatcher_id_str
-    }
-
     fn is_empty(&self) -> bool {
         self.outputs.is_empty()
     }
@@ -1041,7 +1069,6 @@ pub struct BroadcastDispatcher {
     outputs: HashMap<ActorId, Output>,
     output_mapping: DispatchOutputMapping,
     dispatcher_id: DispatcherId,
-    dispatcher_id_str: String,
 }
 
 impl BroadcastDispatcher {
@@ -1054,7 +1081,6 @@ impl BroadcastDispatcher {
             outputs: Self::into_pairs(outputs).collect(),
             output_mapping,
             dispatcher_id,
-            dispatcher_id_str: dispatcher_id.to_string(),
         }
     }
 
@@ -1112,10 +1138,6 @@ impl Dispatcher for BroadcastDispatcher {
         self.dispatcher_id
     }
 
-    fn dispatcher_id_str(&self) -> &str {
-        &self.dispatcher_id_str
-    }
-
     fn is_empty(&self) -> bool {
         self.outputs.is_empty()
     }
@@ -1140,7 +1162,6 @@ pub struct SimpleDispatcher {
     output: SmallVec<[Output; 2]>,
     output_mapping: DispatchOutputMapping,
     dispatcher_id: DispatcherId,
-    dispatcher_id_str: String,
 }
 
 impl SimpleDispatcher {
@@ -1153,7 +1174,6 @@ impl SimpleDispatcher {
             output: smallvec![output],
             output_mapping,
             dispatcher_id,
-            dispatcher_id_str: dispatcher_id.to_string(),
         }
     }
 }
@@ -1209,10 +1229,6 @@ impl Dispatcher for SimpleDispatcher {
         self.dispatcher_id
     }
 
-    fn dispatcher_id_str(&self) -> &str {
-        &self.dispatcher_id_str
-    }
-
     fn is_empty(&self) -> bool {
         self.output.is_empty()
     }
@@ -1223,18 +1239,24 @@ mod tests {
     use std::hash::{BuildHasher, Hasher};
 
     use futures::pin_mut;
+    use multimap::MultiMap;
     use risingwave_common::array::stream_chunk::StreamChunkTestExt;
     use risingwave_common::array::{Array, ArrayBuilder, I32ArrayBuilder};
+    use risingwave_common::catalog::{Field, Schema};
+    use risingwave_common::types::DataType;
     use risingwave_common::util::epoch::test_epoch;
     use risingwave_common::util::hash_util::Crc32FastBuilder;
+    use risingwave_expr::expr::{InputRefExpression, NonStrictExpression};
     use risingwave_pb::stream_plan::{DispatcherType, PbDispatchOutputMapping};
     use tokio::sync::mpsc::unbounded_channel;
 
     use super::*;
     use crate::executor::exchange::output::Output;
     use crate::executor::exchange::permit::channel_for_test;
+    use crate::executor::project::ProjectExecutor;
     use crate::executor::receiver::ReceiverExecutor;
-    use crate::executor::{BarrierInner as Barrier, MessageInner as Message};
+    use crate::executor::test_utils::{MockSource, StreamExecutorTestExt};
+    use crate::executor::{ActorContext, BarrierInner as Barrier, MessageInner as Message};
     use crate::task::barrier_test_utils::LocalBarrierTestEnv;
 
     #[tokio::test]
@@ -1593,5 +1615,128 @@ mod tests {
                     });
             }
         }
+    }
+
+    #[tokio::test]
+    async fn test_hash_dispatcher_non_adjacent_update_after_project() {
+        // This test only works when vnode count is 256.
+        assert_eq!(VirtualNode::COUNT_FOR_TEST, 256);
+
+        let schema = Schema {
+            fields: vec![
+                Field::unnamed(DataType::Int64),
+                Field::unnamed(DataType::Int64),
+            ],
+        };
+        let (mut tx, source) = MockSource::channel();
+        let source = source.into_executor(schema, vec![0]);
+
+        let proj = ProjectExecutor::new(
+            ActorContext::for_test(123),
+            source,
+            vec![
+                NonStrictExpression::for_test(InputRefExpression::new(DataType::Int64, 0)),
+                NonStrictExpression::for_test(InputRefExpression::new(DataType::Int64, 1)),
+            ],
+            MultiMap::new(),
+            vec![],
+            true,
+        );
+        let mut proj = proj.boxed().execute();
+
+        tx.push_barrier(test_epoch(1), false);
+        proj.expect_barrier().await;
+
+        tx.push_chunk(StreamChunk::from_pretty(
+            "  I I
+            U- 1 1
+            U+ 1 2
+            U- 1 2
+            U+ 1 3",
+        ));
+
+        let projected = proj.expect_chunk().await;
+        assert_eq!(
+            projected,
+            StreamChunk::from_pretty(
+                "  I I
+                - 1 1
+                U+ 1 2 D
+                U- 1 2 D
+                + 1 3",
+            )
+        );
+
+        let (output_tx, _output_rx) = channel_for_test();
+        let outputs = vec![Output::new(ActorId::new(1), output_tx)];
+        let hash_mapping = vec![ActorId::new(1); VirtualNode::COUNT_FOR_TEST];
+        let mut hash_dispatcher = HashDataDispatcher::new(
+            outputs,
+            vec![0],
+            DispatchOutputMapping::Simple(vec![0]),
+            hash_mapping,
+            0.into(),
+        );
+
+        hash_dispatcher.dispatch_data(projected).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_hash_dispatcher_missing_update_delete_after_project() {
+        let schema = Schema {
+            fields: vec![
+                Field::unnamed(DataType::Int64),
+                Field::unnamed(DataType::Int64),
+            ],
+        };
+        let (mut tx, source) = MockSource::channel();
+        let source = source.into_executor(schema, vec![0]);
+
+        let proj = ProjectExecutor::new(
+            ActorContext::for_test(123),
+            source,
+            vec![NonStrictExpression::for_test(InputRefExpression::new(
+                DataType::Int64,
+                0,
+            ))],
+            MultiMap::new(),
+            vec![],
+            true,
+        );
+        let mut proj = proj.boxed().execute();
+
+        tx.push_barrier(test_epoch(1), false);
+        proj.expect_barrier().await;
+
+        tx.push_chunk(StreamChunk::from_pretty(
+            "  I I
+            + 1 10
+            U- 1 10
+            U+ 1 30",
+        ));
+
+        let projected = proj.expect_chunk().await;
+        assert_eq!(
+            projected,
+            StreamChunk::from_pretty(
+                "  I
+                + 1 D
+                U- 1 D
+                + 1",
+            )
+        );
+
+        let (output_tx, _output_rx) = channel_for_test();
+        let outputs = vec![Output::new(ActorId::new(1), output_tx)];
+        let hash_mapping = vec![ActorId::new(1); VirtualNode::COUNT_FOR_TEST];
+        let mut hash_dispatcher = HashDataDispatcher::new(
+            outputs,
+            vec![0],
+            DispatchOutputMapping::Simple(vec![0]),
+            hash_mapping,
+            0.into(),
+        );
+
+        hash_dispatcher.dispatch_data(projected).await.unwrap();
     }
 }

@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -206,7 +206,7 @@ pub trait OwnedByUserCatalog {
 
 impl OwnedByUserCatalog for SinkCatalog {
     fn owner(&self) -> UserId {
-        self.owner.user_id
+        self.owner
     }
 }
 

@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,9 +16,10 @@ use std::sync::{Arc, OnceLock};
 
 use prometheus::core::{AtomicU64, Collector, Desc, GenericCounter};
 use prometheus::{
-    Gauge, Histogram, HistogramVec, IntGauge, Opts, Registry, exponential_buckets, histogram_opts,
-    proto, register_histogram_vec_with_registry, register_histogram_with_registry,
-    register_int_counter_vec_with_registry, register_int_gauge_with_registry,
+    Gauge, Histogram, HistogramVec, IntGauge, IntGaugeVec, Opts, Registry, exponential_buckets,
+    histogram_opts, proto, register_histogram_vec_with_registry, register_histogram_with_registry,
+    register_int_counter_vec_with_registry, register_int_gauge_vec_with_registry,
+    register_int_gauge_with_registry,
 };
 use risingwave_common::config::MetricLevel;
 use risingwave_common::metrics::{
@@ -61,23 +62,14 @@ pub struct HummockStateStoreMetrics {
     pub read_req_positive_but_non_exist_counts: RelabeledGuardedIntCounterVec,
     pub read_req_check_bloom_filter_counts: RelabeledGuardedIntCounterVec,
 
-    pub write_batch_tuple_counts: RelabeledCounterVec,
-    pub write_batch_duration: RelabeledHistogramVec,
-    pub write_batch_size: RelabeledHistogramVec,
-
-    // finished task counts
-    pub merge_imm_task_counts: RelabeledCounterVec,
-    // merge imm ops
-    pub merge_imm_batch_memory_sz: RelabeledCounterVec,
+    pub write_batch_tuple_counts: RelabeledGuardedIntCounterVec,
+    pub write_batch_duration: RelabeledGuardedHistogramVec,
+    pub write_batch_size: RelabeledGuardedHistogramVec,
 
     // spill task counts from unsealed
     pub spill_task_counts_from_unsealed: GenericCounter<AtomicU64>,
     // spill task size from unsealed
     pub spill_task_size_from_unsealed: GenericCounter<AtomicU64>,
-    // spill task counts from sealed
-    pub spill_task_counts_from_sealed: GenericCounter<AtomicU64>,
-    // spill task size from sealed
-    pub spill_task_size_from_sealed: GenericCounter<AtomicU64>,
 
     // uploading task
     pub uploader_uploading_task_size: UintGauge,
@@ -86,15 +78,19 @@ pub struct HummockStateStoreMetrics {
     pub uploader_upload_task_latency: Histogram,
     pub uploader_syncing_epoch_count: IntGauge,
     pub uploader_wait_poll_latency: Histogram,
+    pub uploader_per_table_imm_size: RelabeledGuardedIntGaugeVec,
+    pub uploader_per_table_imm_count: RelabeledGuardedIntGaugeVec,
 
     // memory
-    pub mem_table_spill_counts: RelabeledCounterVec,
-    pub old_value_size: IntGauge,
+    pub per_table_imm_size: RelabeledGuardedIntGaugeVec,
+    pub per_table_imm_count: RelabeledGuardedIntGaugeVec,
+    pub mem_table_spill_counts: RelabeledGuardedIntCounterVec,
+    pub old_value_size: RelabeledGuardedIntGaugeVec,
 
     // block statistics
     pub block_efficiency_histogram: Histogram,
 
-    pub event_handler_pending_event: IntGauge,
+    pub event_handler_pending_event: IntGaugeVec,
     pub event_handler_latency: HistogramVec,
 
     pub safe_version_hit: GenericCounter<AtomicU64>,
@@ -309,14 +305,14 @@ impl HummockStateStoreMetrics {
         );
 
         // ----- write_batch -----
-        let write_batch_tuple_counts = register_int_counter_vec_with_registry!(
+        let write_batch_tuple_counts = register_guarded_int_counter_vec_with_registry!(
             "state_store_write_batch_tuple_counts",
             "Total number of batched write kv pairs requests that have been issued to state store",
             &["table_id"],
             registry
         )
         .unwrap();
-        let write_batch_tuple_counts = RelabeledCounterVec::with_metric_level(
+        let write_batch_tuple_counts = RelabeledGuardedIntCounterVec::with_metric_level(
             MetricLevel::Debug,
             write_batch_tuple_counts,
             metric_level,
@@ -328,8 +324,8 @@ impl HummockStateStoreMetrics {
             time_buckets.clone()
         );
         let write_batch_duration =
-            register_histogram_vec_with_registry!(opts, &["table_id"], registry).unwrap();
-        let write_batch_duration = RelabeledHistogramVec::with_metric_level(
+            register_guarded_histogram_vec_with_registry!(opts, &["table_id"], registry).unwrap();
+        let write_batch_duration = RelabeledGuardedHistogramVec::with_metric_level(
             MetricLevel::Debug,
             write_batch_duration,
             metric_level,
@@ -341,36 +337,10 @@ impl HummockStateStoreMetrics {
             exponential_buckets(256.0, 16.0, 7).unwrap() // min 256B ~ max 4GB
         );
         let write_batch_size =
-            register_histogram_vec_with_registry!(opts, &["table_id"], registry).unwrap();
-        let write_batch_size = RelabeledHistogramVec::with_metric_level(
+            register_guarded_histogram_vec_with_registry!(opts, &["table_id"], registry).unwrap();
+        let write_batch_size = RelabeledGuardedHistogramVec::with_metric_level(
             MetricLevel::Debug,
             write_batch_size,
-            metric_level,
-        );
-
-        let merge_imm_task_counts = register_int_counter_vec_with_registry!(
-            "state_store_merge_imm_task_counts",
-            "Total number of merge imm task that have been finished",
-            &["table_id"],
-            registry
-        )
-        .unwrap();
-        let merge_imm_task_counts = RelabeledCounterVec::with_metric_level(
-            MetricLevel::Debug,
-            merge_imm_task_counts,
-            metric_level,
-        );
-
-        let merge_imm_batch_memory_sz = register_int_counter_vec_with_registry!(
-            "state_store_merge_imm_memory_sz",
-            "Number of imm batches that have been merged by a merge task",
-            &["table_id"],
-            registry
-        )
-        .unwrap();
-        let merge_imm_batch_memory_sz = RelabeledCounterVec::with_metric_level(
-            MetricLevel::Debug,
-            merge_imm_batch_memory_sz,
             metric_level,
         );
 
@@ -439,6 +409,62 @@ impl HummockStateStoreMetrics {
         )
         .unwrap();
 
+        let uploader_per_table_imm_size = register_guarded_int_gauge_vec_with_registry!(
+            "state_store_uploader_per_table_imm_size",
+            "Total uploader-tracked imm size per table",
+            &["table_id"],
+            registry
+        )
+        .unwrap();
+
+        let uploader_per_table_imm_size = RelabeledGuardedIntGaugeVec::with_metric_level(
+            MetricLevel::Debug,
+            uploader_per_table_imm_size,
+            metric_level,
+        );
+
+        let uploader_per_table_imm_count = register_guarded_int_gauge_vec_with_registry!(
+            "state_store_uploader_per_table_imm_count",
+            "Total uploader-tracked imm count per table",
+            &["table_id"],
+            registry
+        )
+        .unwrap();
+
+        let uploader_per_table_imm_count = RelabeledGuardedIntGaugeVec::with_metric_level(
+            MetricLevel::Debug,
+            uploader_per_table_imm_count,
+            metric_level,
+        );
+
+        let per_table_imm_size = register_guarded_int_gauge_vec_with_registry!(
+            "state_store_per_table_imm_size",
+            "Total imm size per table",
+            &["table_id"],
+            registry
+        )
+        .unwrap();
+
+        let per_table_imm_size = RelabeledGuardedIntGaugeVec::with_metric_level(
+            MetricLevel::Debug,
+            per_table_imm_size,
+            metric_level,
+        );
+
+        let per_table_imm_count = register_guarded_int_gauge_vec_with_registry!(
+            "state_store_per_table_imm_count",
+            "Total imm count per table",
+            &["table_id"],
+            registry
+        )
+        .unwrap();
+
+        let per_table_imm_count = RelabeledGuardedIntGaugeVec::with_metric_level(
+            MetricLevel::Debug,
+            per_table_imm_count,
+            metric_level,
+        );
+
         let read_req_bloom_filter_positive_counts = register_guarded_int_counter_vec_with_registry!(
             "state_store_read_req_bloom_filter_positive_counts",
             "Total number of read request with at least one SST bloom filter check returns positive",
@@ -482,7 +508,7 @@ impl HummockStateStoreMetrics {
             metric_level,
         );
 
-        let mem_table_spill_counts = register_int_counter_vec_with_registry!(
+        let mem_table_spill_counts = register_guarded_int_counter_vec_with_registry!(
             "state_store_mem_table_spill_counts",
             "Total number of mem table spill occurs for one table",
             &["table_id"],
@@ -490,18 +516,25 @@ impl HummockStateStoreMetrics {
         )
         .unwrap();
 
-        let mem_table_spill_counts = RelabeledCounterVec::with_metric_level(
+        let mem_table_spill_counts = RelabeledGuardedIntCounterVec::with_metric_level(
             MetricLevel::Info,
             mem_table_spill_counts,
             metric_level,
         );
 
-        let old_value_size = register_int_gauge_with_registry!(
+        let old_value_size = register_guarded_int_gauge_vec_with_registry!(
             "state_store_old_value_size",
             "The size of old value",
+            &["table_id"],
             registry
         )
         .unwrap();
+
+        let old_value_size = RelabeledGuardedIntGaugeVec::with_metric_level(
+            MetricLevel::Info,
+            old_value_size,
+            metric_level,
+        );
 
         let opts = histogram_opts!(
             "block_efficiency_histogram",
@@ -510,9 +543,10 @@ impl HummockStateStoreMetrics {
         );
         let block_efficiency_histogram = register_histogram_with_registry!(opts, registry).unwrap();
 
-        let event_handler_pending_event = register_int_gauge_with_registry!(
+        let event_handler_pending_event = register_int_gauge_vec_with_registry!(
             "state_store_event_handler_pending_event",
             "The number of sent but unhandled events",
+            &["event_type"],
             registry,
         )
         .unwrap();
@@ -566,11 +600,7 @@ impl HummockStateStoreMetrics {
             write_batch_tuple_counts,
             write_batch_duration,
             write_batch_size,
-            merge_imm_task_counts,
-            merge_imm_batch_memory_sz,
-            spill_task_counts_from_sealed: spill_task_counts.with_label_values(&["sealed"]),
             spill_task_counts_from_unsealed: spill_task_counts.with_label_values(&["unsealed"]),
-            spill_task_size_from_sealed: spill_task_size.with_label_values(&["sealed"]),
             spill_task_size_from_unsealed: spill_task_size.with_label_values(&["unsealed"]),
             uploader_uploading_task_size,
             uploader_uploading_task_count,
@@ -578,6 +608,10 @@ impl HummockStateStoreMetrics {
             uploader_upload_task_latency,
             uploader_syncing_epoch_count,
             uploader_wait_poll_latency,
+            uploader_per_table_imm_size,
+            uploader_per_table_imm_count,
+            per_table_imm_size,
+            per_table_imm_count,
             mem_table_spill_counts,
             old_value_size,
 

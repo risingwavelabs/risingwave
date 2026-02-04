@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,6 +16,7 @@ use std::collections::HashMap;
 use std::collections::hash_map::Entry;
 
 use itertools::Itertools;
+use risingwave_common::id::TableId;
 use risingwave_common::types::{Fields, JsonbVal};
 use risingwave_frontend_macro::system_catalog;
 use risingwave_hummock_sdk::version::HummockVersion;
@@ -148,7 +149,7 @@ fn version_to_sstable_rows(version: HummockVersion) -> Vec<RwHummockSstable> {
 #[derive(Fields)]
 struct RwHummockTableWatermark {
     #[primary_key]
-    table_id: i32,
+    table_id: TableId,
     #[primary_key]
     vnode_id: i16,
     epoch: i64,
@@ -195,7 +196,7 @@ async fn read_hummock_table_watermarks(
             vnode_watermark_map
                 .into_iter()
                 .map(move |(vnode, (epoch, watermark))| RwHummockTableWatermark {
-                    table_id: table_id.as_i32_id(),
+                    table_id,
                     vnode_id: vnode as _,
                     epoch: epoch as _,
                     watermark,
@@ -208,7 +209,7 @@ async fn read_hummock_table_watermarks(
 #[derive(Fields)]
 struct RwHummockSnapshot {
     #[primary_key]
-    table_id: i32,
+    table_id: TableId,
     committed_epoch: i64,
 }
 
@@ -222,7 +223,7 @@ async fn read_hummock_snapshot_groups(
         .info()
         .iter()
         .map(|(table_id, info)| RwHummockSnapshot {
-            table_id: table_id.as_i32_id(),
+            table_id: *table_id,
             committed_epoch: info.committed_epoch as _,
         })
         .collect())
@@ -231,7 +232,7 @@ async fn read_hummock_snapshot_groups(
 #[derive(Fields)]
 struct RwHummockTableChangeLog {
     #[primary_key]
-    table_id: i32,
+    table_id: TableId,
     change_log: JsonbVal,
 }
 
@@ -246,7 +247,7 @@ async fn read_hummock_table_change_log(
         .table_change_log
         .iter()
         .map(|(table_id, change_log)| RwHummockTableChangeLog {
-            table_id: table_id.as_i32_id(),
+            table_id: *table_id,
             change_log: json!(change_log.to_protobuf()).into(),
         })
         .collect())

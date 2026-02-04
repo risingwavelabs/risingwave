@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -27,7 +27,7 @@ use iceberg::io::{
     GCS_DISABLE_CONFIG_LOAD, S3_ACCESS_KEY_ID, S3_DISABLE_CONFIG_LOAD, S3_ENDPOINT,
     S3_PATH_STYLE_ACCESS, S3_REGION, S3_SECRET_ACCESS_KEY,
 };
-use iceberg::spec::{TableMetadata, TableMetadataBuilder};
+use iceberg::spec::{TableMetadata, TableMetadataBuilder, TableProperties};
 use iceberg::table::Table;
 use iceberg::{
     Catalog, Error, ErrorKind, Namespace, NamespaceIdent, Result, TableCommit, TableCreation,
@@ -275,10 +275,16 @@ impl Catalog for StorageCatalog {
     async fn create_table(
         &self,
         namespace: &NamespaceIdent,
-        creation: TableCreation,
+        mut creation: TableCreation,
     ) -> iceberg::Result<Table> {
         let table_ident = TableIdent::new(namespace.clone(), creation.name.clone());
         let table_path = self.table_path(&table_ident);
+
+        // Remove format-version from properties if exists, because TableMetadataBuilder doesn't allow this field in properties.
+        // But we still allow users to set this field in TableCreation properties for other catalog like jdbc.
+        creation
+            .properties
+            .remove(TableProperties::PROPERTY_FORMAT_VERSION);
 
         // Create the metadata directory
         let metadata_path = format!("{table_path}/metadata");

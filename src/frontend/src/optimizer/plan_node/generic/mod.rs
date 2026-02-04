@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -79,10 +79,6 @@ mod limit;
 pub use limit::*;
 mod max_one_row;
 pub use max_one_row::*;
-mod cte_ref;
-pub use cte_ref::*;
-mod recursive_union;
-pub use recursive_union::*;
 mod changelog;
 pub use changelog::*;
 mod now;

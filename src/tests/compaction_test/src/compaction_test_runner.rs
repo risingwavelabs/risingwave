@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -24,6 +24,7 @@ use anyhow::anyhow;
 use bytes::{BufMut, Bytes, BytesMut};
 use clap::Parser;
 use foyer::Hint;
+use risingwave_common::catalog::TableOption;
 use risingwave_common::config::{
     MetaConfig, NoOverride, extract_storage_memory_config, load_config,
 };
@@ -633,7 +634,10 @@ async fn open_hummock_iters(
         let snapshot = hummock
             .new_read_snapshot(
                 HummockReadEpoch::NoWait(epoch),
-                NewReadSnapshotOptions { table_id },
+                NewReadSnapshotOptions {
+                    table_id,
+                    table_option: TableOption::default(),
+                },
             )
             .await?;
         let iter = snapshot

@@ -19,6 +19,7 @@ use foyer::{
 use super::*;
 
 /// The section `[storage]` in `risingwave.toml`.
+#[serde_with::apply(Option => #[serde(with = "none_as_empty_string")])]
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde, ConfigDoc)]
 pub struct StorageConfig {
     /// parallelism while syncing share buffers into L0 SST. Should NOT be 0.
@@ -162,6 +163,13 @@ pub struct StorageConfig {
     #[serde(default = "default::storage::compactor_iter_max_io_retry_times")]
     pub compactor_iter_max_io_retry_times: usize,
 
+    /// If set, block metadata keys will be shortened when their length exceeds this threshold.
+    /// This reduces `SSTable` metadata size by storing only the minimal distinguishing prefix.
+    /// - `None`: Disabled (default)
+    /// - `Some(n)`: Only shorten keys with length >= n bytes
+    #[serde(default = "default::storage::shorten_block_meta_key_threshold")]
+    pub shorten_block_meta_key_threshold: Option<usize>,
+
     /// Deprecated: The window size of table info statistic history.
     #[serde(default = "default::storage::table_info_statistic_history_times")]
     #[deprecated]
@@ -245,6 +253,7 @@ pub struct StorageConfig {
 }
 
 /// the section `[storage.cache]` in `risingwave.toml`.
+#[serde_with::apply(Option => #[serde(with = "none_as_empty_string")])]
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde, ConfigDoc)]
 pub struct CacheConfig {
     /// Configure the capacity of the block cache in MB explicitly.
@@ -323,6 +332,7 @@ impl Default for CacheEvictionConfig {
     }
 }
 
+#[serde_with::apply(Option => #[serde(with = "none_as_empty_string")])]
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde, ConfigDoc)]
 pub struct CacheRefillConfig {
     /// `SSTable` levels to refill.
@@ -373,6 +383,7 @@ pub struct CacheRefillConfig {
 /// The subsection `[storage.data_file_cache]` and `[storage.meta_file_cache]` in `risingwave.toml`.
 ///
 /// It's put at [`StorageConfig::data_file_cache`] and  [`StorageConfig::meta_file_cache`].
+#[serde_with::apply(Option => #[serde(with = "none_as_empty_string")])]
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde, ConfigDoc)]
 pub struct FileCacheConfig {
     #[serde(default = "default::file_cache::dir")]
@@ -447,6 +458,7 @@ pub struct FileCacheConfig {
 }
 
 /// The subsections `[storage.object_store]`.
+#[serde_with::apply(Option => #[serde(with = "none_as_empty_string")])]
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde)]
 pub struct ObjectStoreConfig {
     // alias is for backward compatibility
@@ -485,6 +497,7 @@ impl ObjectStoreConfig {
 }
 
 /// The subsections `[storage.object_store.s3]`.
+#[serde_with::apply(Option => #[serde(with = "none_as_empty_string")])]
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde)]
 pub struct S3ObjectStoreConfig {
     // alias is for backward compatibility
@@ -518,6 +531,7 @@ pub struct S3ObjectStoreConfig {
 }
 
 /// The subsections `[storage.object_store.s3.developer]`.
+#[serde_with::apply(Option => #[serde(with = "none_as_empty_string")])]
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde)]
 pub struct S3ObjectStoreDeveloperConfig {
     /// Whether to retry s3 sdk error from which no error metadata is provided.
@@ -539,6 +553,7 @@ pub struct S3ObjectStoreDeveloperConfig {
     pub use_opendal: bool,
 }
 
+#[serde_with::apply(Option => #[serde(with = "none_as_empty_string")])]
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde)]
 pub struct ObjectStoreRetryConfig {
     // A retry strategy driven by exponential back-off.
@@ -950,6 +965,10 @@ pub mod default {
 
         pub fn compactor_iter_max_io_retry_times() -> usize {
             8
+        }
+
+        pub fn shorten_block_meta_key_threshold() -> Option<usize> {
+            None
         }
 
         pub fn compactor_max_sst_size() -> u64 {

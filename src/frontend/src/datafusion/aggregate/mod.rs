@@ -189,6 +189,7 @@
 
 use std::sync::Arc;
 
+use datafusion::functions_aggregate::array_agg::array_agg_udaf;
 use datafusion::functions_aggregate::average::avg_udaf;
 use datafusion::functions_aggregate::bit_and_or_xor::{bit_and_udaf, bit_or_udaf, bit_xor_udaf};
 use datafusion::functions_aggregate::bool_and_or::{bool_and_udaf, bool_or_udaf};
@@ -303,9 +304,17 @@ fn is_datafusion_native_agg_type(agg_type: &AggType) -> bool {
                 | PbAggKind::BoolOr
                 | PbAggKind::FirstValue
                 | PbAggKind::LastValue
+                | PbAggKind::ArrayAgg
         );
     }
     false
+}
+
+/// Convert an `AggType` to a DataFusion `AggregateUDF`.
+///
+/// This function is used for window functions that use aggregate functions.
+pub fn convert_agg_type_to_udaf(agg_type: &AggType) -> RwResult<Arc<AggregateUDF>> {
+    convert_datafusion_native_agg_func(agg_type)
 }
 
 fn convert_datafusion_native_agg_func(agg_type: &AggType) -> RwResult<Arc<AggregateUDF>> {
@@ -329,6 +338,7 @@ fn convert_datafusion_native_agg_func(agg_type: &AggType) -> RwResult<Arc<Aggreg
         PbAggKind::BoolOr => Ok(bool_or_udaf()),
         PbAggKind::FirstValue => Ok(first_value_udaf()),
         PbAggKind::LastValue => Ok(last_value_udaf()),
+        PbAggKind::ArrayAgg => Ok(array_agg_udaf()),
         _ => bail_not_implemented!(
             "Agg {:?} is not supported to convert to datafusion native impl yet",
             kind

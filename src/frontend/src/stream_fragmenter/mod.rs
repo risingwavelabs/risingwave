@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -29,7 +29,10 @@ use std::rc::Rc;
 use educe::Educe;
 use risingwave_common::catalog::{FragmentTypeFlag, TableId};
 use risingwave_common::session_config::SessionConfig;
-use risingwave_common::session_config::parallelism::ConfigParallelism;
+use risingwave_common::session_config::parallelism::{
+    ConfigAdaptiveParallelismStrategy, ConfigParallelism,
+};
+use risingwave_common::system_param::AdaptiveParallelismStrategy;
 use risingwave_connector::source::cdc::CdcScanOptions;
 use risingwave_pb::id::{LocalOperatorId, StreamNodeLocalOperatorId};
 use risingwave_pb::plan_common::JoinType;
@@ -45,7 +48,7 @@ use crate::error::ErrorCode::NotSupported;
 use crate::error::{Result, RwError};
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{StreamPlanRef as PlanRef, reorganize_elements_id};
-use crate::stream_fragmenter::parallelism::derive_parallelism;
+use crate::stream_fragmenter::parallelism::{derive_parallelism, derive_parallelism_strategy};
 
 /// The mutable state when building fragment graph.
 #[derive(Educe)]
@@ -158,6 +161,21 @@ impl GraphJobType {
             GraphJobType::Index => config.streaming_parallelism_for_index(),
         }
     }
+
+    pub fn to_parallelism_strategy(
+        &self,
+        config: &SessionConfig,
+    ) -> ConfigAdaptiveParallelismStrategy {
+        match self {
+            GraphJobType::Table => config.streaming_parallelism_strategy_for_table(),
+            GraphJobType::MaterializedView => {
+                config.streaming_parallelism_strategy_for_materialized_view()
+            }
+            GraphJobType::Source => config.streaming_parallelism_strategy_for_source(),
+            GraphJobType::Sink => config.streaming_parallelism_strategy_for_sink(),
+            GraphJobType::Index => config.streaming_parallelism_strategy_for_index(),
+        }
+    }
 }
 
 pub fn build_graph(
@@ -203,13 +221,11 @@ pub fn build_graph_with_strategy(
     fragment_graph.table_ids_cnt = state.next_table_id;
 
     // Set parallelism and vnode count.
-    {
+    let parallelism_strategy = {
         let config = ctx.session_ctx().config();
         let streaming_parallelism = config.streaming_parallelism();
-        let normal_parallelism = derive_parallelism(
-            job_type.map(|t| t.to_parallelism(config.deref())),
-            streaming_parallelism,
-        );
+        let job_parallelism = job_type.as_ref().map(|t| t.to_parallelism(config.deref()));
+        let normal_parallelism = derive_parallelism(job_parallelism, streaming_parallelism);
         let backfill_parallelism = if state.has_any_backfill {
             match config.streaming_parallelism_for_backfill() {
                 ConfigParallelism::Default => None,
@@ -224,7 +240,12 @@ pub fn build_graph_with_strategy(
         fragment_graph.parallelism = normal_parallelism;
         fragment_graph.backfill_parallelism = backfill_parallelism;
         fragment_graph.max_parallelism = config.streaming_max_parallelism() as _;
-    }
+
+        let job_strategy = job_type
+            .as_ref()
+            .map(|t| t.to_parallelism_strategy(config.deref()));
+        derive_parallelism_strategy(job_strategy, config.streaming_parallelism_strategy())
+    };
 
     // Set context for this streaming job.
     let config_override = ctx
@@ -232,9 +253,14 @@ pub fn build_graph_with_strategy(
         .config()
         .to_initial_streaming_config_override()
         .context("invalid initial streaming config override")?;
+    let adaptive_parallelism_strategy = parallelism_strategy
+        .as_ref()
+        .map(AdaptiveParallelismStrategy::to_string)
+        .unwrap_or_default();
     fragment_graph.ctx = Some(StreamContext {
         timezone: ctx.get_session_timezone(),
         config_override,
+        adaptive_parallelism_strategy,
     });
 
     fragment_graph.backfill_order = backfill_order;

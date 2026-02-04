@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -35,7 +35,7 @@ use risingwave_common::catalog::{
 use risingwave_common::config::{MAX_CONNECTION_WINDOW_SIZE, MetaConfig};
 use risingwave_common::hash::WorkerSlotMapping;
 use risingwave_common::id::{
-    ConnectionId, DatabaseId, JobId, SchemaId, SinkId, SubscriptionId, ViewId, WorkerId,
+    ConnectionId, DatabaseId, JobId, SchemaId, SinkId, SubscriptionId, UserId, ViewId, WorkerId,
 };
 use risingwave_common::monitor::EndpointExt;
 use risingwave_common::system_param::reader::SystemParamsReader;
@@ -64,7 +64,6 @@ use risingwave_pb::common::{HostAddress, OptionalUint32, OptionalUint64, WorkerN
 use risingwave_pb::connector_service::sink_coordination_service_client::SinkCoordinationServiceClient;
 use risingwave_pb::ddl_service::alter_owner_request::Object;
 use risingwave_pb::ddl_service::create_iceberg_table_request::{PbSinkJobInfo, PbTableJobInfo};
-use risingwave_pb::ddl_service::create_materialized_view_request::PbBackfillType;
 use risingwave_pb::ddl_service::ddl_service_client::DdlServiceClient;
 use risingwave_pb::ddl_service::*;
 use risingwave_pb::hummock::compact_task::TaskStatus;
@@ -191,7 +190,7 @@ impl MetaClient {
         connection_name: String,
         database_id: DatabaseId,
         schema_id: SchemaId,
-        owner_id: u32,
+        owner_id: UserId,
         req: create_connection_request::Payload,
     ) -> Result<WaitVersion> {
         let request = CreateConnectionRequest {
@@ -212,7 +211,7 @@ impl MetaClient {
         secret_name: String,
         database_id: DatabaseId,
         schema_id: SchemaId,
-        owner_id: u32,
+        owner_id: UserId,
         value: Vec<u8>,
     ) -> Result<WaitVersion> {
         let request = CreateSecretRequest {
@@ -420,15 +419,16 @@ impl MetaClient {
         table: PbTable,
         graph: StreamFragmentGraph,
         dependencies: HashSet<ObjectId>,
-        specific_resource_group: Option<String>,
+        resource_type: streaming_job_resource_type::ResourceType,
         if_not_exists: bool,
     ) -> Result<WaitVersion> {
         let request = CreateMaterializedViewRequest {
             materialized_view: Some(table),
             fragment_graph: Some(graph),
-            backfill: PbBackfillType::Regular as _,
+            resource_type: Some(PbStreamingJobResourceType {
+                resource_type: Some(resource_type),
+            }),
             dependencies: dependencies.into_iter().collect(),
-            specific_resource_group,
             if_not_exists,
         };
         let resp = self.inner.create_materialized_view(request).await?;
@@ -559,7 +559,7 @@ impl MetaClient {
             .ok_or_else(|| anyhow!("wait version not set"))?)
     }
 
-    pub async fn alter_owner(&self, object: Object, owner_id: u32) -> Result<WaitVersion> {
+    pub async fn alter_owner(&self, object: Object, owner_id: UserId) -> Result<WaitVersion> {
         let request = AlterOwnerRequest {
             object: Some(object),
             owner_id,
@@ -726,7 +726,7 @@ impl MetaClient {
         secret_name: String,
         database_id: DatabaseId,
         schema_id: SchemaId,
-        owner_id: u32,
+        owner_id: UserId,
         value: Vec<u8>,
     ) -> Result<WaitVersion> {
         let request = AlterSecretRequest {
@@ -851,6 +851,14 @@ impl MetaClient {
             .ok_or_else(|| anyhow!("wait version not set"))?)
     }
 
+    pub async fn reset_source(&self, source_id: SourceId) -> Result<WaitVersion> {
+        let request = ResetSourceRequest { source_id };
+        let resp = self.inner.reset_source(request).await?;
+        Ok(resp
+            .version
+            .ok_or_else(|| anyhow!("wait version not set"))?)
+    }
+
     pub async fn drop_sink(&self, sink_id: SinkId, cascade: bool) -> Result<WaitVersion> {
         let request = DropSinkRequest { sink_id, cascade };
         let resp = self.inner.drop_sink(request).await?;
@@ -920,7 +928,7 @@ impl MetaClient {
         Ok(resp.version)
     }
 
-    pub async fn drop_user(&self, user_id: u32) -> Result<u64> {
+    pub async fn drop_user(&self, user_id: UserId) -> Result<u64> {
         let request = DropUserRequest { user_id };
         let resp = self.inner.drop_user(request).await?;
         Ok(resp.version)
@@ -944,10 +952,10 @@ impl MetaClient {
 
     pub async fn grant_privilege(
         &self,
-        user_ids: Vec<u32>,
+        user_ids: Vec<UserId>,
         privileges: Vec<GrantPrivilege>,
         with_grant_option: bool,
-        granted_by: u32,
+        granted_by: UserId,
     ) -> Result<u64> {
         let request = GrantPrivilegeRequest {
             user_ids,
@@ -961,10 +969,10 @@ impl MetaClient {
 
     pub async fn revoke_privilege(
         &self,
-        user_ids: Vec<u32>,
+        user_ids: Vec<UserId>,
         privileges: Vec<GrantPrivilege>,
-        granted_by: u32,
-        revoke_by: u32,
+        granted_by: UserId,
+        revoke_by: UserId,
         revoke_grant_option: bool,
         cascade: bool,
     ) -> Result<u64> {
@@ -982,11 +990,11 @@ impl MetaClient {
 
     pub async fn alter_default_privilege(
         &self,
-        user_ids: Vec<u32>,
+        user_ids: Vec<UserId>,
         database_id: DatabaseId,
         schema_ids: Vec<SchemaId>,
         operation: AlterDefaultPrivilegeOperation,
-        granted_by: u32,
+        granted_by: UserId,
     ) -> Result<()> {
         let request = AlterDefaultPrivilegeRequest {
             user_ids,
@@ -1102,6 +1110,14 @@ impl MetaClient {
         Ok(resp.tables)
     }
 
+    pub async fn risectl_resume_backfill(
+        &self,
+        request: RisectlResumeBackfillRequest,
+    ) -> Result<()> {
+        self.inner.risectl_resume_backfill(request).await?;
+        Ok(())
+    }
+
     pub async fn flush(&self, database_id: DatabaseId) -> Result<HummockVersionId> {
         let request = FlushRequest { database_id };
         let resp = self.inner.flush(request).await?;
@@ -1145,10 +1161,15 @@ impl MetaClient {
         Ok(resp.states)
     }
 
-    pub async fn list_fragment_distributions(&self) -> Result<Vec<FragmentDistribution>> {
+    pub async fn list_fragment_distributions(
+        &self,
+        include_node: bool,
+    ) -> Result<Vec<FragmentDistribution>> {
         let resp = self
             .inner
-            .list_fragment_distribution(ListFragmentDistributionRequest {})
+            .list_fragment_distribution(ListFragmentDistributionRequest {
+                include_node: Some(include_node),
+            })
             .await?;
         Ok(resp.distributions)
     }
@@ -1156,7 +1177,9 @@ impl MetaClient {
     pub async fn list_creating_fragment_distribution(&self) -> Result<Vec<FragmentDistribution>> {
         let resp = self
             .inner
-            .list_creating_fragment_distribution(ListCreatingFragmentDistributionRequest {})
+            .list_creating_fragment_distribution(ListCreatingFragmentDistributionRequest {
+                include_node: Some(true),
+            })
             .await?;
         Ok(resp.distributions)
     }
@@ -1234,12 +1257,14 @@ impl MetaClient {
 
     pub async fn apply_throttle(
         &self,
-        kind: PbThrottleTarget,
+        throttle_target: PbThrottleTarget,
+        throttle_type: risingwave_pb::common::PbThrottleType,
         id: u32,
         rate: Option<u32>,
     ) -> Result<ApplyThrottleResponse> {
         let request = ApplyThrottleRequest {
-            kind: kind as i32,
+            throttle_target: throttle_target as i32,
+            throttle_type: throttle_type as i32,
             id,
             rate,
         };
@@ -1846,6 +1871,14 @@ impl MetaClient {
         let request = ListRefreshTableStatesRequest {};
         let resp = self.inner.list_refresh_table_states(request).await?;
         Ok(resp.states)
+    }
+
+    pub async fn list_sink_log_store_tables(
+        &self,
+    ) -> Result<Vec<list_sink_log_store_tables_response::SinkLogStoreTable>> {
+        let request = ListSinkLogStoreTablesRequest {};
+        let resp = self.inner.list_sink_log_store_tables(request).await?;
+        Ok(resp.tables)
     }
 
     pub async fn create_iceberg_table(
@@ -2493,6 +2526,7 @@ macro_rules! for_all_meta_rpc {
             ,{ stream_client, list_streaming_job_states, ListStreamingJobStatesRequest, ListStreamingJobStatesResponse }
             ,{ stream_client, list_fragment_distribution, ListFragmentDistributionRequest, ListFragmentDistributionResponse }
             ,{ stream_client, list_creating_fragment_distribution, ListCreatingFragmentDistributionRequest, ListCreatingFragmentDistributionResponse }
+            ,{ stream_client, list_sink_log_store_tables, ListSinkLogStoreTablesRequest, ListSinkLogStoreTablesResponse }
             ,{ stream_client, list_actor_states, ListActorStatesRequest, ListActorStatesResponse }
             ,{ stream_client, list_actor_splits, ListActorSplitsRequest, ListActorSplitsResponse }
             ,{ stream_client, list_object_dependencies, ListObjectDependenciesRequest, ListObjectDependenciesResponse }
@@ -2531,6 +2565,7 @@ macro_rules! for_all_meta_rpc {
             ,{ ddl_client, drop_materialized_view, DropMaterializedViewRequest, DropMaterializedViewResponse }
             ,{ ddl_client, drop_view, DropViewRequest, DropViewResponse }
             ,{ ddl_client, drop_source, DropSourceRequest, DropSourceResponse }
+            ,{ ddl_client, reset_source, ResetSourceRequest, ResetSourceResponse }
             ,{ ddl_client, drop_secret, DropSecretRequest, DropSecretResponse}
             ,{ ddl_client, drop_sink, DropSinkRequest, DropSinkResponse }
             ,{ ddl_client, drop_subscription, DropSubscriptionRequest, DropSubscriptionResponse }
@@ -2541,6 +2576,7 @@ macro_rules! for_all_meta_rpc {
             ,{ ddl_client, replace_job_plan, ReplaceJobPlanRequest, ReplaceJobPlanResponse }
             ,{ ddl_client, alter_source, AlterSourceRequest, AlterSourceResponse }
             ,{ ddl_client, risectl_list_state_tables, RisectlListStateTablesRequest, RisectlListStateTablesResponse }
+            ,{ ddl_client, risectl_resume_backfill, RisectlResumeBackfillRequest, RisectlResumeBackfillResponse }
             ,{ ddl_client, get_ddl_progress, GetDdlProgressRequest, GetDdlProgressResponse }
             ,{ ddl_client, create_connection, CreateConnectionRequest, CreateConnectionResponse }
             ,{ ddl_client, list_connections, ListConnectionsRequest, ListConnectionsResponse }

@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -48,7 +48,7 @@ use risingwave_pb::ddl_service::alter_owner_request::Object;
 use risingwave_pb::ddl_service::create_iceberg_table_request::{PbSinkJobInfo, PbTableJobInfo};
 use risingwave_pb::ddl_service::{
     DdlProgress, PbTableJobType, TableJobType, alter_name_request, alter_set_schema_request,
-    alter_swap_rename_request, create_connection_request,
+    alter_swap_rename_request, create_connection_request, streaming_job_resource_type,
 };
 use risingwave_pb::hummock::write_limits::WriteLimit;
 use risingwave_pb::hummock::{
@@ -67,7 +67,7 @@ use risingwave_pb::meta::list_streaming_job_states_response::StreamingJobState;
 use risingwave_pb::meta::list_table_fragments_response::TableFragmentInfo;
 use risingwave_pb::meta::{
     EventLog, FragmentDistribution, PbTableParallelism, PbThrottleTarget, RecoveryStatus,
-    RefreshRequest, RefreshResponse, SystemParams,
+    RefreshRequest, RefreshResponse, SystemParams, list_sink_log_store_tables_response,
 };
 use risingwave_pb::secret::PbSecretRef;
 use risingwave_pb::stream_plan::StreamFragmentGraph;
@@ -103,7 +103,6 @@ impl SessionManager for LocalFrontend {
     fn create_dummy_session(
         &self,
         _database_id: DatabaseId,
-        _user_name: u32,
     ) -> std::result::Result<Arc<Self::Session>, Self::Error> {
         unreachable!()
     }
@@ -301,7 +300,7 @@ impl CatalogWriter for MockCatalogWriter {
         mut table: PbTable,
         _graph: StreamFragmentGraph,
         _dependencies: HashSet<ObjectId>,
-        _specific_resource_group: Option<String>,
+        _resource_type: streaming_job_resource_type::ResourceType,
         _if_not_exists: bool,
     ) -> Result<()> {
         table.id = self.gen_id();
@@ -344,8 +343,14 @@ impl CatalogWriter for MockCatalogWriter {
             let source_id = self.create_source_inner(source)?;
             table.optional_associated_source_id = Some(source_id.into());
         }
-        self.create_materialized_view(table, graph, HashSet::new(), None, if_not_exists)
-            .await?;
+        self.create_materialized_view(
+            table,
+            graph,
+            HashSet::new(),
+            streaming_job_resource_type::ResourceType::Regular(true),
+            if_not_exists,
+        )
+        .await?;
         Ok(())
     }
 
@@ -422,7 +427,7 @@ impl CatalogWriter for MockCatalogWriter {
         _connection_name: String,
         _database_id: DatabaseId,
         _schema_id: SchemaId,
-        _owner_id: u32,
+        _owner_id: UserId,
         _connection: create_connection_request::Payload,
     ) -> Result<()> {
         unreachable!()
@@ -433,7 +438,7 @@ impl CatalogWriter for MockCatalogWriter {
         _secret_name: String,
         _database_id: DatabaseId,
         _schema_id: SchemaId,
-        _owner_id: u32,
+        _owner_id: UserId,
         _payload: Vec<u8>,
     ) -> Result<()> {
         unreachable!()
@@ -516,6 +521,10 @@ impl CatalogWriter for MockCatalogWriter {
         self.catalog
             .write()
             .drop_source(database_id, schema_id, source_id);
+        Ok(())
+    }
+
+    async fn reset_source(&self, _source_id: SourceId) -> Result<()> {
         Ok(())
     }
 
@@ -634,7 +643,7 @@ impl CatalogWriter for MockCatalogWriter {
         Ok(())
     }
 
-    async fn alter_owner(&self, object: Object, owner_id: u32) -> Result<()> {
+    async fn alter_owner(&self, object: Object, owner_id: UserId) -> Result<()> {
         for database in self.catalog.read().iter_databases() {
             for schema in database.iter_schemas() {
                 match object {
@@ -706,7 +715,7 @@ impl CatalogWriter for MockCatalogWriter {
         _secret_name: String,
         _database_id: DatabaseId,
         _schema_id: SchemaId,
-        _owner_id: u32,
+        _owner_id: UserId,
         _payload: Vec<u8>,
     ) -> Result<()> {
         unreachable!()
@@ -925,7 +934,7 @@ pub struct MockUserInfoWriter {
 impl UserInfoWriter for MockUserInfoWriter {
     async fn create_user(&self, user: UserInfo) -> Result<()> {
         let mut user = user;
-        user.id = self.gen_id();
+        user.id = self.gen_id().into();
         self.user_info.write().create_user(user);
         Ok(())
     }
@@ -1040,7 +1049,7 @@ impl MockUserInfoWriter {
         });
         Self {
             user_info,
-            id: AtomicU32::new(NON_RESERVED_USER_ID as u32),
+            id: AtomicU32::new(NON_RESERVED_USER_ID.as_raw_id()),
         }
     }
 
@@ -1078,7 +1087,10 @@ impl FrontendMetaClient for MockFrontendMetaClient {
         Ok(vec![])
     }
 
-    async fn list_fragment_distribution(&self) -> RpcResult<Vec<FragmentDistribution>> {
+    async fn list_fragment_distribution(
+        &self,
+        _include_node: bool,
+    ) -> RpcResult<Vec<FragmentDistribution>> {
         Ok(vec![])
     }
 
@@ -1099,6 +1111,12 @@ impl FrontendMetaClient for MockFrontendMetaClient {
     }
 
     async fn list_meta_snapshots(&self) -> RpcResult<Vec<MetaSnapshotMetadata>> {
+        Ok(vec![])
+    }
+
+    async fn list_sink_log_store_tables(
+        &self,
+    ) -> RpcResult<Vec<list_sink_log_store_tables_response::SinkLogStoreTable>> {
         Ok(vec![])
     }
 
@@ -1188,7 +1206,8 @@ impl FrontendMetaClient for MockFrontendMetaClient {
 
     async fn apply_throttle(
         &self,
-        _kind: PbThrottleTarget,
+        _throttle_target: PbThrottleTarget,
+        _throttle_type: risingwave_pb::common::PbThrottleType,
         _id: u32,
         _rate_limit: Option<u32>,
     ) -> RpcResult<()> {

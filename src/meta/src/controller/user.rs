@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -769,7 +769,7 @@ mod tests {
     use crate::manager::MetaSrvEnv;
 
     const TEST_DATABASE_ID: DatabaseId = DatabaseId::new(1);
-    const TEST_ROOT_USER_ID: UserId = 1;
+    const TEST_ROOT_USER_ID: UserId = UserId::new(1);
 
     fn make_test_user(name: &str) -> PbUserInfo {
         PbUserInfo {
@@ -868,7 +868,7 @@ mod tests {
             privilege_1
                 .iter()
                 .all(|gp| gp.object == Some(TEST_DATABASE_ID.into())
-                    && gp.action_with_opts[0].granted_by == TEST_ROOT_USER_ID as u32)
+                    && gp.action_with_opts[0].granted_by == TEST_ROOT_USER_ID)
         );
 
         let privilege_2 = get_user_privilege(user_2.user_id, &mgr.inner.read().await.db).await?;
@@ -877,7 +877,7 @@ mod tests {
             privilege_2
                 .iter()
                 .all(|gp| gp.object == Some(TEST_DATABASE_ID.into())
-                    && gp.action_with_opts[0].granted_by == user_1.user_id as u32
+                    && gp.action_with_opts[0].granted_by == user_1.user_id
                     && gp.action_with_opts[0].with_grant_option)
         );
 

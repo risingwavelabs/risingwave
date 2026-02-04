@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_expr::{Result, capture_context, function};
+use risingwave_expr::{ExprError, Result, capture_context, function};
 
 use super::context::USER_INFO_READER;
 use crate::user::user_service::UserInfoReader;
@@ -24,8 +24,12 @@ fn pg_get_userbyid(oid: i32) -> Result<Option<Box<str>>> {
 
 #[capture_context(USER_INFO_READER)]
 fn pg_get_userbyid_impl(reader: &UserInfoReader, oid: i32) -> Result<Option<Box<str>>> {
+    let oid: u32 = oid.try_into().map_err(|_| ExprError::InvalidParam {
+        name: "pg_get_userbyid",
+        reason: format!("invalid oid {oid}").into_boxed_str(),
+    })?;
     Ok(reader
         .read_guard()
-        .get_user_name_by_id(oid as u32)
+        .get_user_name_by_id(oid.into())
         .map(|s| s.into_boxed_str()))
 }

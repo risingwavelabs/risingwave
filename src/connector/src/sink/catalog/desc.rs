@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -64,6 +64,9 @@ pub struct SinkDesc {
     // options in `properties`.
     pub sink_type: SinkType,
 
+    /// Whether to drop DELETE and convert UPDATE to INSERT in the sink executor.
+    pub ignore_delete: bool,
+
     // The format and encode of the sink.
     pub format_desc: Option<SinkFormatDesc>,
 
@@ -110,6 +113,7 @@ impl SinkDesc {
             properties: self.properties,
             secret_refs: self.secret_refs,
             sink_type: self.sink_type,
+            ignore_delete: self.ignore_delete,
             format_desc: self.format_desc,
             connection_id,
             created_at_epoch: None,
@@ -142,6 +146,7 @@ impl SinkDesc {
             distribution_key: self.distribution_key.iter().map(|k| *k as _).collect_vec(),
             properties: self.properties.clone().into_iter().collect(),
             sink_type: self.sink_type.to_proto() as i32,
+            raw_ignore_delete: self.ignore_delete,
             format_desc: self.format_desc.as_ref().map(|f| f.to_proto()),
             db_name: self.db_name.clone(),
             sink_from_name: self.sink_from_name.clone(),

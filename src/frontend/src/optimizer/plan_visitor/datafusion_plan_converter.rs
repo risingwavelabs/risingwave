@@ -29,14 +29,18 @@ use risingwave_common::bail_not_implemented;
 
 use crate::datafusion::{
     ColumnTrait, ConcatColumns, IcebergTableProvider, InputColumns, convert_agg_call,
-    convert_column_order, convert_expr, convert_join_type,
+    convert_column_order, convert_expr, convert_join_type, convert_window_expr,
 };
 use crate::error::{ErrorCode, Result as RwResult};
 use crate::optimizer::plan_node::generic::{GenericPlanRef, TopNLimit};
-use crate::optimizer::plan_node::{PlanTreeNodeBinary, PlanTreeNodeUnary};
+use crate::optimizer::plan_node::{PlanTreeNode, PlanTreeNodeBinary, PlanTreeNodeUnary};
 use crate::optimizer::plan_visitor::{DefaultBehavior, LogicalPlanVisitor};
 use crate::optimizer::{LogicalPlanRef, PlanVisitor};
 
+/// Visitor to convert RisingWave logical plan to DataFusion logical plan.
+///
+/// Returns an error if the plan contains unsupported nodes or expressions.
+// When you add a new plan node here, please also update `DataFusionExecuteChecker`.
 #[derive(Debug, Clone, Copy)]
 pub struct DataFusionPlanConverter;
 
@@ -55,6 +59,12 @@ impl LogicalPlanVisitor for DataFusionPlanConverter {
         // TODO: support grouping sets, rollup, cube
         // Risingwave will convert it to logical expand first, then aggregate
         // But datafusion doesn't have logical expand node, so we need to use other way to implement it
+        if !plan.grouping_sets().is_empty() {
+            bail_not_implemented!(
+                "DataFusionPlanConverter: LogicalAgg with grouping sets is not supported"
+            );
+        }
+
         let rw_input = plan.input();
         let df_input = self.visit(plan.input())?;
         let input_columns = InputColumns::new(df_input.schema().as_ref(), rw_input.schema());
@@ -317,12 +327,91 @@ impl LogicalPlanVisitor for DataFusionPlanConverter {
         Ok(result)
     }
 
+    fn visit_logical_union(
+        &mut self,
+        plan: &crate::optimizer::plan_node::LogicalUnion,
+    ) -> Self::Result {
+        let inputs = plan
+            .inputs()
+            .iter()
+            .map(|input| self.visit(input.clone()))
+            .collect::<RwResult<Vec<_>>>()?;
+
+        let mut res = Arc::new(LogicalPlan::Union(
+            datafusion::logical_expr::Union::try_new_with_loose_types(inputs)?,
+        ));
+        if !plan.all() {
+            res = Arc::new(LogicalPlan::Distinct(
+                datafusion::logical_expr::Distinct::All(res),
+            ));
+        }
+        Ok(res)
+    }
+
+    fn visit_logical_over_window(
+        &mut self,
+        plan: &crate::optimizer::plan_node::LogicalOverWindow,
+    ) -> Self::Result {
+        let rw_input = plan.input();
+        let df_input = self.visit(rw_input.clone())?;
+
+        let input_columns = InputColumns::new(df_input.schema().as_ref(), rw_input.schema());
+        let df_exprs = plan
+            .window_functions()
+            .iter()
+            .map(|wf| convert_window_expr(wf, &input_columns))
+            .collect::<RwResult<Vec<_>>>()?;
+
+        let window_plan = datafusion::logical_expr::Window::try_new(df_exprs, df_input)?;
+        Ok(Arc::new(LogicalPlan::Window(window_plan)))
+    }
+
+    fn visit_logical_dedup(
+        &mut self,
+        plan: &crate::optimizer::plan_node::LogicalDedup,
+    ) -> Self::Result {
+        let rw_input = plan.input();
+        let df_input = self.visit(rw_input.clone())?;
+
+        let input_columns = InputColumns::new(df_input.schema().as_ref(), rw_input.schema());
+        let on_exprs = plan
+            .dedup_cols()
+            .iter()
+            .map(|index| DFExpr::Column(input_columns.column(*index)))
+            .collect_vec();
+        let select_exprs = (0..input_columns.len())
+            .map(|index| DFExpr::Column(input_columns.column(index)))
+            .collect_vec();
+
+        let distinct_on =
+            datafusion::logical_expr::DistinctOn::try_new(on_exprs, select_exprs, None, df_input)?;
+        let distinct_plan = datafusion::logical_expr::Distinct::On(distinct_on);
+        Ok(Arc::new(LogicalPlan::Distinct(distinct_plan)))
+    }
+
     fn visit_logical_iceberg_scan(
         &mut self,
         plan: &crate::optimizer::plan_node::LogicalIcebergScan,
     ) -> Self::Result {
-        // DataFusion requires unique table names for each scan, so we can't use actual table name here.
-        let table_name = format!("iceberg_scan#{}", plan.base.id().0);
+        let mut raw_table_name = plan
+            .core
+            .catalog
+            .as_ref()
+            .ok_or_else(|| {
+                ErrorCode::InternalError(
+                    "DataFusionPlanConverter: Iceberg table scan cannot find catalog info"
+                        .to_owned(),
+                )
+            })?
+            .name
+            .as_str();
+        // remove prefix __iceberg_source_
+        if raw_table_name.starts_with("__iceberg_source_") {
+            raw_table_name = &raw_table_name["__iceberg_source_".len()..];
+        }
+
+        // DataFusion requires unique table names for each scan, so we append the plan id to the table name.
+        let table_name = format!("{}#{}", raw_table_name, plan.base.id().0);
         let table_source =
             provider_as_source(Arc::new(IcebergTableProvider::from_logical_plan(plan)?));
         let table_scan = TableScan::try_new(table_name, table_source, None, vec![], None)?;
