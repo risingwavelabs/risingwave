@@ -439,3 +439,7 @@ prost = { git = "https://github.com/risingwavelabs/prost.git", package = "prost"
 prost-derive = { git = "https://github.com/risingwavelabs/prost.git", package = "prost-derive", rev = "4a442caf7c0a43feb4aea64bde6aea4488d9917f" }
 prost-build = { git = "https://github.com/risingwavelabs/prost.git", package = "prost-build", rev = "4a442caf7c0a43feb4aea64bde6aea4488d9917f" }
 prost-types = { git = "https://github.com/risingwavelabs/prost.git", package = "prost-types", rev = "4a442caf7c0a43feb4aea64bde6aea4488d9917f" }
+
+# Patch arrow-udf-runtime to address RUSTSEC-2025-0118: Unsound API access to a WebAssembly shared linear memory
+# Updated wasmtime dependency from 27.0.0 to 36.0.3 which includes the security fix
+arrow-udf-runtime = { path = "patches/arrow-udf-runtime" }
