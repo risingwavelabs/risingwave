@@ -8,7 +8,7 @@
     └─BatchScan { table: t, columns: [t.v3], distribution: SomeShard }
   stream_plan: |-
     StreamMaterialize { columns: [v3, t._row_id(hidden)], stream_key: [t._row_id], pk_columns: [t._row_id], pk_conflict: NoCheck }
-    └─StreamTableScan { table: t, columns: [t.v3, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+    └─StreamTableScan { table: t, columns: [t.v3, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - name: test multiple except
   sql: |
     create table t (v1 int, v2 int, v3 int);
@@ -20,7 +20,7 @@
   stream_plan: |-
     StreamMaterialize { columns: [v3, v1, v2, t._row_id(hidden)], stream_key: [t._row_id], pk_columns: [t._row_id], pk_conflict: NoCheck }
     └─StreamProject { exprs: [t.v3, t.v1, t.v2, t._row_id] }
-      └─StreamTableScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+      └─StreamTableScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - name: except on join
   sql: |
     create table t (v1 int, v2 int, v3 int);
@@ -37,9 +37,9 @@
     └─StreamExchange { dist: HashShard(t.v1, t._row_id, t._row_id) }
       └─StreamHashJoin { type: Inner, predicate: t.v1 = t.v1, output: [t.v1, t.v3, t.v2, t._row_id, t._row_id] }
         ├─StreamExchange { dist: HashShard(t.v1) }
-        │ └─StreamTableScan { table: t, columns: [t.v1, t.v3, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+        │ └─StreamTableScan { table: t, columns: [t.v1, t.v3, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
         └─StreamExchange { dist: HashShard(t.v1) }
-          └─StreamTableScan { table: t, columns: [t.v1, t.v2, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+          └─StreamTableScan { table: t, columns: [t.v1, t.v2, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - name: qualified wildcard
   sql: |
     create table t (v1 int, v2 int, v3 int);
@@ -56,9 +56,9 @@
     └─StreamExchange { dist: HashShard(t.v1, t._row_id, t._row_id) }
       └─StreamHashJoin { type: Inner, predicate: t.v1 = t.v1, output: [t.v1, t.v2, t.v3, t._row_id, t._row_id] }
         ├─StreamExchange { dist: HashShard(t.v1) }
-        │ └─StreamTableScan { table: t, columns: [t.v1, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+        │ └─StreamTableScan { table: t, columns: [t.v1, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
         └─StreamExchange { dist: HashShard(t.v1) }
-          └─StreamTableScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+          └─StreamTableScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - name: except with unknown column
   sql: |
     create table t (v1 int, v2 int, v3 int);

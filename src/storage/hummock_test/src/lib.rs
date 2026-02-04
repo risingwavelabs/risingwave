@@ -18,6 +18,8 @@
 #![feature(type_alias_impl_trait)]
 
 #[cfg(test)]
+mod auto_rebuild_iter_tests;
+#[cfg(test)]
 mod compactor_tests;
 #[cfg(all(test, feature = "failpoints"))]
 mod failpoint_tests;

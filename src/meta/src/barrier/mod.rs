@@ -16,7 +16,6 @@ use std::collections::{HashMap, HashSet};
 
 use anyhow::anyhow;
 use risingwave_common::catalog::{DatabaseId, TableId};
-use risingwave_connector::source::SplitImpl;
 use risingwave_pb::catalog::Database;
 use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::meta::PbRecoveryStatus;
@@ -25,7 +24,7 @@ use tokio::sync::oneshot::Sender;
 use self::notifier::Notifier;
 use crate::barrier::info::BarrierInfo;
 use crate::manager::ActiveStreamingWorkerNodes;
-use crate::model::{ActorId, FragmentDownstreamRelation, FragmentId, StreamActor, SubscriptionId};
+use crate::model::{ActorId, BackfillUpstreamType, FragmentId, StreamActor, SubscriptionId};
 use crate::{MetaError, MetaResult};
 
 mod backfill_order_control;
@@ -33,7 +32,7 @@ pub mod cdc_progress;
 mod checkpoint;
 mod command;
 mod complete_task;
-mod context;
+pub(super) mod context;
 mod edge_builder;
 mod info;
 mod manager;
@@ -53,13 +52,14 @@ use risingwave_pb::ddl_service::PbBackfillType;
 
 pub use self::command::{
     BarrierKind, Command, CreateStreamingJobCommandInfo, CreateStreamingJobType,
-    ReplaceStreamJobPlan, Reschedule, SnapshotBackfillInfo,
+    ReplaceStreamJobPlan, Reschedule, ResumeBackfillTarget, SnapshotBackfillInfo,
 };
 pub(crate) use self::info::{SharedActorInfos, SharedFragmentInfo};
 pub use self::manager::{BarrierManagerRef, GlobalBarrierManager};
 pub use self::schedule::BarrierScheduler;
 pub use self::trace::TracedEpoch;
 use crate::barrier::cdc_progress::CdcProgress;
+use crate::barrier::context::recovery::LoadedRecoveryContext;
 use crate::controller::fragment::InflightFragmentInfo;
 use crate::stream::cdc::CdcTableSnapshotSplits;
 
@@ -109,6 +109,15 @@ pub(crate) struct BackfillProgress {
     pub(crate) backfill_type: PbBackfillType,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct FragmentBackfillProgress {
+    pub(crate) job_id: JobId,
+    pub(crate) fragment_id: FragmentId,
+    pub(crate) consumed_rows: u64,
+    pub(crate) done: bool,
+    pub(crate) upstream_type: BackfillUpstreamType,
+}
+
 pub(crate) struct UpdateDatabaseBarrierRequest {
     pub database_id: DatabaseId,
     pub barrier_interval_ms: Option<u32>,
@@ -118,24 +127,21 @@ pub(crate) struct UpdateDatabaseBarrierRequest {
 
 pub(crate) enum BarrierManagerRequest {
     GetBackfillProgress(Sender<MetaResult<HashMap<JobId, BackfillProgress>>>),
+    GetFragmentBackfillProgress(Sender<MetaResult<Vec<FragmentBackfillProgress>>>),
     GetCdcProgress(Sender<MetaResult<HashMap<JobId, CdcProgress>>>),
     AdhocRecovery(Sender<()>),
     UpdateDatabaseBarrier(UpdateDatabaseBarrierRequest),
+    MayHaveSnapshotBackfillingJob(Sender<bool>),
 }
 
 #[derive(Debug)]
 struct BarrierWorkerRuntimeInfoSnapshot {
     active_streaming_nodes: ActiveStreamingWorkerNodes,
-    database_job_infos:
-        HashMap<DatabaseId, HashMap<JobId, HashMap<FragmentId, InflightFragmentInfo>>>,
-    backfill_orders: HashMap<JobId, HashMap<FragmentId, Vec<FragmentId>>>,
+    recovery_context: LoadedRecoveryContext,
     state_table_committed_epochs: HashMap<TableId, u64>,
     /// `table_id` -> (`Vec<non-checkpoint epoch>`, checkpoint epoch)
     state_table_log_epochs: HashMap<TableId, Vec<(Vec<u64>, u64)>>,
     mv_depended_subscriptions: HashMap<TableId, HashMap<SubscriptionId, u64>>,
-    stream_actors: HashMap<ActorId, StreamActor>,
-    fragment_relations: FragmentDownstreamRelation,
-    source_splits: HashMap<ActorId, Vec<SplitImpl>>,
     background_jobs: HashSet<JobId>,
     hummock_version_stats: HummockVersionStats,
     database_infos: Vec<Database>,
@@ -213,48 +219,15 @@ impl BarrierWorkerRuntimeInfoSnapshot {
         }
         Ok(())
     }
-
-    fn validate(&self) -> MetaResult<()> {
-        for (database_id, job_infos) in &self.database_job_infos {
-            Self::validate_database_info(
-                *database_id,
-                job_infos,
-                &self.active_streaming_nodes,
-                &self.stream_actors,
-                &self.state_table_committed_epochs,
-            )?
-        }
-        Ok(())
-    }
 }
 
 #[derive(Debug)]
 struct DatabaseRuntimeInfoSnapshot {
-    job_infos: HashMap<JobId, HashMap<FragmentId, InflightFragmentInfo>>,
-    backfill_orders: HashMap<JobId, HashMap<FragmentId, Vec<FragmentId>>>,
+    recovery_context: LoadedRecoveryContext,
     state_table_committed_epochs: HashMap<TableId, u64>,
     /// `table_id` -> (`Vec<non-checkpoint epoch>`, checkpoint epoch)
     state_table_log_epochs: HashMap<TableId, Vec<(Vec<u64>, u64)>>,
     mv_depended_subscriptions: HashMap<TableId, HashMap<SubscriptionId, u64>>,
-    stream_actors: HashMap<ActorId, StreamActor>,
-    fragment_relations: FragmentDownstreamRelation,
-    source_splits: HashMap<ActorId, Vec<SplitImpl>>,
     background_jobs: HashSet<JobId>,
     cdc_table_snapshot_splits: HashMap<JobId, CdcTableSnapshotSplits>,
-}
-
-impl DatabaseRuntimeInfoSnapshot {
-    fn validate(
-        &self,
-        database_id: DatabaseId,
-        active_streaming_nodes: &ActiveStreamingWorkerNodes,
-    ) -> MetaResult<()> {
-        BarrierWorkerRuntimeInfoSnapshot::validate_database_info(
-            database_id,
-            &self.job_infos,
-            active_streaming_nodes,
-            &self.stream_actors,
-            &self.state_table_committed_epochs,
-        )
-    }
 }

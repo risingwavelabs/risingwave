@@ -47,7 +47,7 @@ use crate::barrier::schedule::{NewBarrier, PeriodicBarriers};
 use crate::barrier::utils::{
     NodeToCollect, collect_creating_job_commit_epoch_info, is_valid_after_worker_err,
 };
-use crate::barrier::{BackfillProgress, Command, CreateStreamingJobType};
+use crate::barrier::{BackfillProgress, Command, CreateStreamingJobType, FragmentBackfillProgress};
 use crate::manager::MetaSrvEnv;
 use crate::rpc::metrics::GLOBAL_META_METRICS;
 use crate::{MetaError, MetaResult};
@@ -167,6 +167,12 @@ impl CheckpointControl {
         })
     }
 
+    pub(crate) fn may_have_snapshot_backfilling_jobs(&self) -> bool {
+        self.databases
+            .values()
+            .any(|database| database.may_have_snapshot_backfilling_jobs())
+    }
+
     /// return Some(failed `database_id` -> `err`)
     pub(crate) fn handle_new_barrier(
         &mut self,
@@ -268,7 +274,8 @@ impl CheckpointControl {
                     | Command::Refresh { .. }
                     | Command::ListFinish { .. }
                     | Command::LoadFinish { .. }
-                    | Command::ResetSource { .. } => {
+                    | Command::ResetSource { .. }
+                    | Command::ResumeBackfill { .. } => {
                         if cfg!(debug_assertions) {
                             panic!(
                                 "new database graph info can only be created for normal creating streaming job, but get command: {} {:?}",
@@ -344,6 +351,27 @@ impl CheckpointControl {
                 .values()
             {
                 progress.extend([(creating_job.job_id, creating_job.gen_backfill_progress())]);
+            }
+        }
+        progress
+    }
+
+    pub(crate) fn gen_fragment_backfill_progress(&self) -> Vec<FragmentBackfillProgress> {
+        let mut progress = Vec::new();
+        for status in self.databases.values() {
+            let Some(database_checkpoint_control) = status.running_state() else {
+                continue;
+            };
+            progress.extend(
+                database_checkpoint_control
+                    .database_info
+                    .gen_fragment_backfill_progress(),
+            );
+            for creating_job in database_checkpoint_control
+                .creating_streaming_job_controls
+                .values()
+            {
+                progress.extend(creating_job.gen_fragment_backfill_progress());
             }
         }
         progress
@@ -526,6 +554,12 @@ impl DatabaseCheckpointControlStatus {
             DatabaseCheckpointControlStatus::Running(state) => Some(state),
             DatabaseCheckpointControlStatus::Recovering(_) => None,
         }
+    }
+
+    fn may_have_snapshot_backfilling_jobs(&self) -> bool {
+        self.running_state()
+            .map(|database| !database.creating_streaming_job_controls.is_empty())
+            .unwrap_or(true) // there can be snapshot backfilling jobs when the database is recovering.
     }
 
     fn database_state(

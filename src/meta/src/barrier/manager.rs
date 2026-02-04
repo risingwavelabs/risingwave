@@ -31,11 +31,12 @@ use tokio::task::JoinHandle;
 use tracing::warn;
 
 use crate::MetaResult;
+use crate::barrier::BarrierManagerRequest::MayHaveSnapshotBackfillingJob;
 use crate::barrier::cdc_progress::CdcProgress;
 use crate::barrier::worker::GlobalBarrierWorker;
 use crate::barrier::{
-    BackfillProgress, BarrierManagerRequest, BarrierManagerStatus, RecoveryReason,
-    UpdateDatabaseBarrierRequest, schedule,
+    BackfillProgress, BarrierManagerRequest, BarrierManagerStatus, FragmentBackfillProgress,
+    RecoveryReason, UpdateDatabaseBarrierRequest, schedule,
 };
 use crate::hummock::HummockManagerRef;
 use crate::manager::sink_coordination::SinkCoordinatorManager;
@@ -102,6 +103,17 @@ impl GlobalBarrierManager {
             .collect())
     }
 
+    pub(crate) async fn get_fragment_backfill_progress(
+        &self,
+    ) -> MetaResult<Vec<FragmentBackfillProgress>> {
+        let (tx, rx) = oneshot::channel();
+        self.request_tx
+            .send(BarrierManagerRequest::GetFragmentBackfillProgress(tx))
+            .context("failed to send get fragment backfill progress request")?;
+        rx.await
+            .context("failed to receive get fragment backfill progress")?
+    }
+
     pub async fn get_cdc_progress(&self) -> MetaResult<HashMap<JobId, CdcProgress>> {
         let (tx, rx) = oneshot::channel();
         self.request_tx
@@ -138,6 +150,16 @@ impl GlobalBarrierManager {
             .context("failed to send update database barrier request")?;
         rx.await.context("failed to wait update database barrier")?;
         Ok(())
+    }
+
+    pub async fn may_snapshot_backfilling_job(&self) -> MetaResult<bool> {
+        let (tx, rx) = oneshot::channel();
+        self.request_tx
+            .send(MayHaveSnapshotBackfillingJob(tx))
+            .context("failed to send has snapshot backfilling job request")?;
+        Ok(rx
+            .await
+            .context("failed to wait has snapshot backfilling job")?)
     }
 
     pub async fn get_hummock_version_id(&self) -> HummockVersionId {

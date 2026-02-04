@@ -19,6 +19,7 @@ pub use risingwave_common::id::ActorId;
 
 use crate::controller::fragment::InflightFragmentInfo;
 use crate::model::{FragmentId, StreamJobFragments};
+use crate::stream::ExtendedFragmentBackfillOrder;
 
 #[derive(Clone, Debug, Default)]
 pub struct BackfillNode {
@@ -50,7 +51,7 @@ pub struct BackfillOrderState {
 /// Get nodes with some dependencies.
 /// These should initially be paused until their dependencies are done.
 pub fn get_nodes_with_backfill_dependencies(
-    backfill_orders: &HashMap<FragmentId, Vec<FragmentId>>,
+    backfill_orders: &ExtendedFragmentBackfillOrder,
 ) -> HashSet<FragmentId> {
     backfill_orders.values().flatten().copied().collect()
 }
@@ -58,7 +59,7 @@ pub fn get_nodes_with_backfill_dependencies(
 // constructor
 impl BackfillOrderState {
     pub fn new(
-        backfill_orders: &HashMap<FragmentId, Vec<FragmentId>>,
+        backfill_orders: &ExtendedFragmentBackfillOrder,
         stream_job_fragments: &StreamJobFragments,
         locality_fragment_state_table_mapping: HashMap<FragmentId, Vec<TableId>>,
     ) -> Self {
@@ -93,7 +94,7 @@ impl BackfillOrderState {
             }
         }
 
-        for (fragment_id, children) in backfill_orders {
+        for (fragment_id, children) in backfill_orders.iter() {
             for child in children {
                 let child_node = backfill_nodes.get_mut(child).unwrap();
                 child_node.remaining_dependencies.insert(*fragment_id);
@@ -119,7 +120,7 @@ impl BackfillOrderState {
     }
 
     pub fn recover_from_fragment_infos(
-        backfill_orders: &HashMap<FragmentId, Vec<FragmentId>>,
+        backfill_orders: &ExtendedFragmentBackfillOrder,
         fragment_infos: &HashMap<FragmentId, InflightFragmentInfo>,
         locality_fragment_state_table_mapping: HashMap<FragmentId, Vec<TableId>>,
     ) -> Self {
@@ -160,7 +161,7 @@ impl BackfillOrderState {
             }
         }
 
-        for (fragment_id, children) in backfill_orders {
+        for (fragment_id, children) in backfill_orders.iter() {
             for child in children {
                 let child_node = backfill_nodes.get_mut(child).unwrap();
                 child_node.remaining_dependencies.insert(*fragment_id);
@@ -245,10 +246,15 @@ impl BackfillOrderState {
                         "missing dependency"
                     );
                     if child.remaining_dependencies.is_empty() {
-                        tracing::debug!(fragment_id = ?child_id, "schedule next backfill node");
+                        let should_schedule = !child.remaining_actors.is_empty();
+                        if should_schedule {
+                            tracing::debug!(fragment_id = ?child_id, "schedule next backfill node");
+                        }
                         self.current_backfill_nodes
                             .insert(child.fragment_id, child.clone());
-                        newly_scheduled.push(child.fragment_id);
+                        if should_schedule {
+                            newly_scheduled.push(child.fragment_id);
+                        }
                         child.remaining_actors.is_empty()
                     } else {
                         false
