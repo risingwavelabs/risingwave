@@ -12041,7 +12041,6 @@ dependencies = [
  "bytes",
  "hex",
  "itertools 0.14.0",
- "parse-display",
  "risingwave_common",
  "risingwave_common_estimate_size",
  "risingwave_pb",
