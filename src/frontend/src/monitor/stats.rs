@@ -27,6 +27,7 @@ use risingwave_common::metrics::TrAdderGauge;
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 use tokio::task::JoinHandle;
 
+#[cfg(feature = "datafusion")]
 use crate::datafusion::DataFusionMetrics;
 use crate::session::SessionMapRef;
 
@@ -34,6 +35,7 @@ use crate::session::SessionMapRef;
 pub struct FrontendMetrics {
     pub query_counter_local_execution: GenericCounter<AtomicU64>,
     pub latency_local_execution: Histogram,
+    #[cfg(feature = "datafusion")]
     pub datafusion: DataFusionMetrics,
     pub active_sessions: IntGauge,
     pub batch_total_mem: TrAdderGauge,
@@ -58,6 +60,7 @@ impl FrontendMetrics {
         );
         let latency_local_execution = register_histogram_with_registry!(opts, registry).unwrap();
 
+        #[cfg(feature = "datafusion")]
         let datafusion = DataFusionMetrics::new(registry);
 
         let active_sessions = register_int_gauge_with_registry!(
@@ -80,6 +83,7 @@ impl FrontendMetrics {
         Self {
             query_counter_local_execution,
             latency_local_execution,
+            #[cfg(feature = "datafusion")]
             datafusion,
             active_sessions,
             batch_total_mem,
