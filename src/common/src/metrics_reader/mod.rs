@@ -16,6 +16,15 @@ use std::collections::HashMap;
 
 use anyhow::Result;
 
+/// Kafka metrics for a single source partition.
+#[derive(Debug, Clone)]
+pub struct KafkaPartitionMetrics {
+    pub source_id: u32,
+    pub partition_id: String,
+    pub high_watermark: Option<i64>,
+    pub latest_offset: Option<i64>,
+}
+
 /// Key for identifying a channel between fragments.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ChannelKey {
@@ -57,4 +66,10 @@ pub trait MetricsReader: Send + Sync {
         at: Option<i64>,
         time_offset: Option<i64>,
     ) -> Result<HashMap<ChannelKey, ChannelDeltaStats>>;
+
+    /// Fetch Kafka source lag related metrics from Prometheus.
+    ///
+    /// Returns one row per (source_id, partition_id) with optional high watermark and
+    /// latest consumed offset.
+    async fn get_kafka_source_metrics(&self) -> Result<Vec<KafkaPartitionMetrics>>;
 }
