@@ -238,6 +238,7 @@ join_encoding_type = "memory_optimized"
 sync_log_store_pause_duration_ms = 64
 sync_log_store_buffer_size = 2048
 over_window_cache_policy = "full"
+enable_state_table_vnode_stats_prunning = false
 
 [streaming.developer.compute_client_config]
 connect_timeout_secs = 5
