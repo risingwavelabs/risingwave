@@ -350,7 +350,7 @@ struct StateTableRowStore<LS: LocalStateStore, SD: ValueRowSerde> {
 
     // Per-vnode min/max key statistics for pruning
     vnode_stats: Option<HashMap<VirtualNode, VnodeStatistics>>,
-    /// When true, vnode stats pruning is in dry-run mode:
+    /// When false, vnode stats pruning is in dry-run mode:
     /// we maintain stats and verify pruning correctness but don't actually apply pruning.
     /// Reads still go to cache/storage even when pruning would indicate no results.
     enable_state_table_vnode_stats_prunning: bool,
@@ -577,7 +577,7 @@ pub struct StateTableBuilder<'a, S, SD, const IS_REPLICATED: bool, PreloadAllRow
     output_column_ids: Option<Vec<ColumnId>>,
     preload_all_rows: PreloadAllRow,
     enable_vnode_key_stats: Option<bool>,
-    /// When true, vnode stats pruning is in dry-run mode:
+    /// When false, vnode stats pruning is in dry-run mode:
     /// we maintain stats and verify pruning correctness but don't actually apply pruning.
     enable_state_table_vnode_stats_prunning: bool,
     metrics: Option<StateTableMetrics>,
