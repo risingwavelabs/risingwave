@@ -141,10 +141,17 @@ message FileScanTask {
   uint64 file_size_in_bytes = 14;
 }
 
+message SerializedDataFile {
+  // JSON serialized iceberg::spec::manifest::SerializedDataFile.
+  bytes json = 1;
+  // Partition spec id for decoding.
+  int32 partition_spec_id = 2;
+}
+
 message PlanResult {
-  repeated FileScanTask added_data_files = 1;
-  repeated FileScanTask added_position_delete_files = 2;
-  repeated FileScanTask added_equality_delete_files = 3;
+  repeated SerializedDataFile added_data_files = 1;
+  repeated SerializedDataFile added_position_delete_files = 2;
+  repeated SerializedDataFile added_equality_delete_files = 3;
 
   message RewriteStats {
     int64 input_data_files = 1;

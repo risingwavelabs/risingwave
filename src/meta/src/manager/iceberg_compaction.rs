@@ -12,15 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::sync::Arc;
 use std::time::Instant;
 
 use anyhow::anyhow;
 use iceberg::scan::FileScanTask;
-use iceberg::spec::{DataContentType, DataFileFormat, Operation};
+use iceberg::spec::{DataContentType, DataFile, DataFileBuilder, DataFileFormat, Operation, SerializedDataFile, Struct, MAIN_BRANCH};
+use iceberg::table::Table;
 use iceberg::transaction::{ApplyTransactionAction, Transaction};
-use iceberg_compaction_core::compaction::{CompactionPlan, CompactionPlanner};
+use iceberg_compaction_core::compaction::{
+    CommitConsistencyParams, CommitManagerRetryConfig, CompactionBuilder, CompactionPlan,
+    CompactionPlanner,
+};
 use iceberg_compaction_core::config::{
     CompactionPlanningConfig, FilesWithDeletesConfigBuilder, FullCompactionConfigBuilder,
     GroupFilters, SmallFilesConfigBuilder,
@@ -38,7 +42,7 @@ use risingwave_pb::iceberg_compaction::file_scan_task::{FileContent, FileFormat}
 use risingwave_pb::iceberg_compaction::iceberg_compaction_task::TaskType;
 use risingwave_pb::iceberg_compaction::subscribe_iceberg_compaction_event_request::ReportPlan;
 use risingwave_pb::iceberg_compaction::{
-    FileGroup, FileScanTask as PbFileScanTask, Plan, PlanKey,
+    FileGroup, FileScanTask as PbFileScanTask, Plan, PlanKey, SerializedDataFile as PbSerializedDataFile,
     SubscribeIcebergCompactionEventRequest, subscribe_iceberg_compaction_event_response,
 };
 use thiserror_ext::AsReport;
@@ -626,32 +630,48 @@ impl IcebergCompactionManager {
         let key_tuple = (key.task_id, key.plan_index);
         let attempt = report_plan.attempt;
 
-        let mut guard = self.inner.write();
-        match guard.in_flight_plans.get(&key_tuple) {
-            Some(plan) if plan.attempt == attempt => {
-                guard.in_flight_plans.remove(&key_tuple);
-                tracing::info!(
-                    task_id = key.task_id,
-                    plan_index = key.plan_index,
-                    status = report_plan.status,
-                    "Accepted iceberg plan report"
-                );
+        let plan_task = {
+            let mut guard = self.inner.write();
+            match guard.in_flight_plans.get(&key_tuple) {
+                Some(plan) if plan.attempt == attempt => {
+                    let plan_task = plan.plan_task.clone();
+                    guard.in_flight_plans.remove(&key_tuple);
+                    Some(plan_task)
+                }
+                Some(plan) => {
+                    tracing::info!(
+                        task_id = key.task_id,
+                        plan_index = key.plan_index,
+                        expected_attempt = plan.attempt,
+                        got_attempt = attempt,
+                        "Ignored stale iceberg plan report"
+                    );
+                    None
+                }
+                None => {
+                    tracing::info!(
+                        task_id = key.task_id,
+                        plan_index = key.plan_index,
+                        "Ignored unknown iceberg plan report"
+                    );
+                    None
+                }
             }
-            Some(plan) => {
-                tracing::info!(
-                    task_id = key.task_id,
-                    plan_index = key.plan_index,
-                    expected_attempt = plan.attempt,
-                    got_attempt = attempt,
-                    "Ignored stale iceberg plan report"
-                );
-            }
-            None => {
-                tracing::info!(
-                    task_id = key.task_id,
-                    plan_index = key.plan_index,
-                    "Ignored unknown iceberg plan report"
-                );
+        };
+
+        if let Some(plan_task) = plan_task {
+            tracing::info!(
+                task_id = key.task_id,
+                plan_index = key.plan_index,
+                status = report_plan.status,
+                "Accepted iceberg plan report"
+            );
+            if report_plan.status
+                == risingwave_pb::iceberg_compaction::subscribe_iceberg_compaction_event_request::report_plan::Status::Success as i32
+            {
+                if let Some(result) = report_plan.result {
+                    self.commit_plan(plan_task, result).await?;
+                }
             }
         }
         Ok(())
@@ -718,6 +738,65 @@ impl IcebergCompactionManager {
     pub(crate) fn is_pending_empty(&self) -> bool {
         let guard = self.inner.read();
         guard.pending_plans.is_empty()
+    }
+
+    async fn commit_plan(
+        &self,
+        plan_task: subscribe_iceberg_compaction_event_response::PlanTask,
+        result: risingwave_pb::iceberg_compaction::PlanResult,
+    ) -> MetaResult<()> {
+        let Some(plan) = plan_task.plan else {
+            return Ok(());
+        };
+        let iceberg_config = IcebergConfig::from_btreemap(BTreeMap::from_iter(
+            plan.props.clone().into_iter(),
+        ))?;
+        let catalog = iceberg_config
+            .create_catalog()
+            .await
+            .map_err(|e| SinkError::Iceberg(e.into()))?;
+        let table_ident = iceberg_config.full_table_name()?;
+        let table = catalog
+            .load_table(&table_ident)
+            .await
+            .map_err(|e| SinkError::Iceberg(e.into()))?;
+
+        let added_data_files =
+            decode_serialized_data_files(&result.added_data_files, &table)?;
+
+        let rewritten_data_files = match plan.file_group {
+            Some(file_group) => build_rewritten_data_files(file_group, &table)?,
+            None => vec![],
+        };
+
+        let consistency_params = CommitConsistencyParams {
+            starting_snapshot_id: plan.snapshot_id,
+            use_starting_sequence_number: true,
+            basic_schema_id: table.metadata().current_schema().schema_id(),
+        };
+
+        let compaction = CompactionBuilder::new(catalog.clone(), table_ident.clone())
+            .with_catalog_name(iceberg_config.catalog_name())
+            .with_executor_type(iceberg_compaction_core::executor::ExecutorType::DataFusion)
+            .with_retry_config(CommitManagerRetryConfig::default())
+            .with_to_branch(plan.to_branch.clone())
+            .build();
+        let commit_manager = compaction.build_commit_manager(consistency_params);
+
+        if should_enable_iceberg_cow(iceberg_config.r#type.as_str(), iceberg_config.write_mode) {
+            let input_files = collect_main_branch_data_files(&table).await?;
+            commit_manager
+                .overwrite_files(added_data_files, input_files, MAIN_BRANCH)
+                .await
+                .map_err(|e| SinkError::Iceberg(e.into()))?;
+        } else {
+            commit_manager
+                .rewrite_files(added_data_files, rewritten_data_files, &plan.to_branch)
+                .await
+                .map_err(|e| SinkError::Iceberg(e.into()))?;
+        }
+
+        Ok(())
     }
 
     pub fn iceberg_compaction_event_loop(
@@ -1272,6 +1351,108 @@ fn map_file_format(format: DataFileFormat) -> FileFormat {
         DataFileFormat::Orc => FileFormat::Orc,
         DataFileFormat::Puffin => FileFormat::Puffin,
     }
+}
+
+fn build_rewritten_data_files(
+    file_group: FileGroup,
+    table: &Table,
+) -> MetaResult<Vec<DataFile>> {
+    let spec_id = table.metadata().default_partition_spec_id();
+    let mut files = Vec::new();
+    for task in file_group
+        .data_files
+        .iter()
+        .chain(file_group.position_delete_files.iter())
+        .chain(file_group.equality_delete_files.iter())
+    {
+        files.push(build_data_file_from_scan_task(task, spec_id)?);
+    }
+    Ok(files)
+}
+
+fn build_data_file_from_scan_task(
+    task: &PbFileScanTask,
+    partition_spec_id: i32,
+) -> MetaResult<DataFile> {
+    let content = match FileContent::try_from(task.data_file_content) {
+        Ok(FileContent::Data) => DataContentType::Data,
+        Ok(FileContent::PositionDeletes) => DataContentType::PositionDeletes,
+        Ok(FileContent::EqualityDeletes) => DataContentType::EqualityDeletes,
+        _ => DataContentType::Data,
+    };
+    let format = match FileFormat::try_from(task.data_file_format) {
+        Ok(FileFormat::Parquet) => DataFileFormat::Parquet,
+        Ok(FileFormat::Avro) => DataFileFormat::Avro,
+        Ok(FileFormat::Orc) => DataFileFormat::Orc,
+        Ok(FileFormat::Puffin) => DataFileFormat::Puffin,
+        _ => DataFileFormat::Parquet,
+    };
+
+    let mut builder = DataFileBuilder::default();
+    builder
+        .content(content)
+        .file_path(task.data_file_path.clone())
+        .file_format(format)
+        .file_size_in_bytes(task.file_size_in_bytes)
+        .record_count(task.record_count.unwrap_or(0))
+        .partition_spec_id(partition_spec_id)
+        .partition(Struct::empty());
+
+    if task.has_equality_ids {
+        builder.equality_ids(Some(task.equality_ids.clone()));
+    }
+
+    builder.build().map_err(|e| SinkError::Iceberg(e.into()).into())
+}
+
+fn decode_serialized_data_files(
+    files: &[PbSerializedDataFile],
+    table: &Table,
+) -> MetaResult<Vec<DataFile>> {
+    let schema = table.metadata().current_schema();
+    let partition_spec = table.metadata().default_partition_spec();
+    let partition_type = partition_spec
+        .partition_type(schema.as_ref())
+        .map_err(|e| SinkError::Iceberg(e.into()))?;
+
+    let mut decoded = Vec::with_capacity(files.len());
+    for file in files {
+        let serialized: SerializedDataFile = serde_json::from_slice(&file.json)
+            .map_err(|e: serde_json::Error| SinkError::Iceberg(e.into()))?;
+        let data_file = serialized
+            .try_into(file.partition_spec_id, &partition_type, schema.as_ref())
+            .map_err(|e: iceberg::Error| SinkError::Iceberg(e.into()))?;
+        decoded.push(data_file);
+    }
+    Ok(decoded)
+}
+
+async fn collect_main_branch_data_files(table: &Table) -> MetaResult<Vec<DataFile>> {
+    let mut input_files = vec![];
+    if let Some(snapshot) = table.metadata().snapshot_for_ref(MAIN_BRANCH) {
+        let manifest_list = snapshot
+            .load_manifest_list(table.file_io(), table.metadata())
+            .await
+            .map_err(|e: iceberg::Error| SinkError::Iceberg(e.into()))?;
+
+        for manifest_file in manifest_list
+            .entries()
+            .iter()
+            .filter(|entry| entry.has_added_files() || entry.has_existing_files())
+        {
+            let manifest = manifest_file
+                .load_manifest(table.file_io())
+                .await
+                .map_err(|e: iceberg::Error| SinkError::Iceberg(e.into()))?;
+            let (entry, _) = manifest.into_parts();
+            for i in entry {
+                if matches!(i.content_type(), iceberg::spec::DataContentType::Data) {
+                    input_files.push(i.data_file().clone());
+                }
+            }
+        }
+    }
+    Ok(input_files)
 }
 
 #[derive(Debug, Clone)]

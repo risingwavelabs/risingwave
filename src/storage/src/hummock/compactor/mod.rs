@@ -26,7 +26,7 @@ use risingwave_pb::hummock::report_compaction_task_request::{
     ReportTask as ReportSharedTask,
 };
 use risingwave_pb::iceberg_compaction::{
-    PlanKey, PlanResult, SubscribeIcebergCompactionEventRequest,
+    PlanKey, PlanResult, SerializedDataFile, SubscribeIcebergCompactionEventRequest,
     SubscribeIcebergCompactionEventResponse, subscribe_iceberg_compaction_event_request,
 };
 use risingwave_rpc_client::GrpcCompactorProxyClient;
@@ -59,7 +59,7 @@ pub use context::{
 use futures::{StreamExt, pin_mut};
 // Import iceberg compactor runner types from the local `iceberg_compaction` module.
 use iceberg_compaction::iceberg_compactor_runner::{
-    IcebergCompactorRunnerConfigBuilder, create_plan_runner_from_plan,
+    IcebergCompactorRunnerConfigBuilder, PlanExecutionOutput, create_plan_runner_from_plan,
 };
 use iceberg_compaction::{IcebergTaskQueue, PushResult};
 pub use iterator::{ConcatSstableIterator, SstableStreamIterator};
@@ -380,7 +380,7 @@ pub fn start_iceberg_compactor(
             tokio::sync::mpsc::unbounded_channel::<TaskKey>();
         // Channel for task result reporting to meta
         let (task_report_tx, mut task_report_rx) =
-            tokio::sync::mpsc::unbounded_channel::<(TaskKey, Result<(), String>)>();
+            tokio::sync::mpsc::unbounded_channel::<(TaskKey, Result<PlanExecutionOutput, String>)>();
         // Map from internal task key to reported plan key and attempt.
         let report_key_map: Arc<Mutex<HashMap<TaskKey, (PlanKey, u32)>>> =
             Arc::new(Mutex::new(HashMap::new()));
@@ -462,23 +462,46 @@ pub fn start_iceberg_compactor(
                                 )
                             })
                         };
+                        let (status, error_message, result) = match report_result {
+                            Ok(output) => {
+                                let added_data_files = output
+                                    .added_data_files
+                                    .into_iter()
+                                    .map(|info| SerializedDataFile {
+                                        json: info.json,
+                                        partition_spec_id: info.partition_spec_id,
+                                    })
+                                    .collect();
+                                let stats = risingwave_pb::iceberg_compaction::plan_result::RewriteStats {
+                                    input_data_files: output.stats.input_data_file_count as i64,
+                                    input_delete_files: (output.stats.input_position_delete_file_count
+                                        + output.stats.input_equality_delete_file_count) as i64,
+                                    output_files: output.stats.output_files_count as i64,
+                                    output_bytes: output.stats.output_total_bytes as i64,
+                                };
+                                (
+                                    subscribe_iceberg_compaction_event_request::report_plan::Status::Success,
+                                    String::new(),
+                                    Some(PlanResult {
+                                        added_data_files,
+                                        added_position_delete_files: vec![],
+                                        added_equality_delete_files: vec![],
+                                        stats: Some(stats),
+                                    }),
+                                )
+                            }
+                            Err(err) => (
+                                subscribe_iceberg_compaction_event_request::report_plan::Status::Failed,
+                                err,
+                                None,
+                            ),
+                        };
+
                         let report = subscribe_iceberg_compaction_event_request::ReportPlan {
                             key: Some(report_key),
-                            status: match report_result {
-                                Ok(()) => {
-                                    subscribe_iceberg_compaction_event_request::report_plan::Status::Success
-                                }
-                                Err(_) => {
-                                    subscribe_iceberg_compaction_event_request::report_plan::Status::Failed
-                                }
-                            } as i32,
-                            error_message: report_result.err().unwrap_or_default(),
-                            result: Some(PlanResult {
-                                added_data_files: vec![],
-                                added_position_delete_files: vec![],
-                                added_equality_delete_files: vec![],
-                                stats: None,
-                            }),
+                            status: status as i32,
+                            error_message,
+                            result,
                             attempt,
                         };
 
@@ -1222,7 +1245,7 @@ fn schedule_queued_tasks(
     compactor_context: &CompactorContext,
     shutdown_map: &Arc<Mutex<HashMap<TaskKey, Sender<()>>>>,
     task_completion_tx: &tokio::sync::mpsc::UnboundedSender<TaskKey>,
-    task_report_tx: &tokio::sync::mpsc::UnboundedSender<(TaskKey, Result<(), String>)>,
+    task_report_tx: &tokio::sync::mpsc::UnboundedSender<(TaskKey, Result<PlanExecutionOutput, String>)>,
 ) {
     while let Some(popped_task) = task_queue.pop() {
         let task_id = popped_task.meta.task_id;
@@ -1278,8 +1301,8 @@ fn schedule_queued_tasks(
             );
 
             match runner.compact(rx).await {
-                Ok(_) => {
-                    let _ = report_tx_clone.send((task_key, Ok(())));
+                Ok(output) => {
+                    let _ = report_tx_clone.send((task_key, Ok(output)));
                 }
                 Err(e) => {
                     let err_msg = e.as_report().to_string();

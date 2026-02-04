@@ -19,11 +19,10 @@ use std::sync::{Arc, LazyLock};
 use derive_builder::Builder;
 use iceberg::expr::BoundPredicate;
 use iceberg::scan::FileScanTask;
-use iceberg::spec::{DataContentType, DataFileFormat, MAIN_BRANCH, Schema};
+use iceberg::spec::{DataContentType, DataFileFormat, DataFile, Schema, SerializedDataFile, StructType};
 use iceberg::{Catalog, TableIdent};
 use iceberg_compaction_core::compaction::{
-    CommitConsistencyParams, CommitManagerRetryConfig, CompactionBuilder, CompactionPlan,
-    CompactionPlanner, CompactionResult,
+    CommitManagerRetryConfig, CompactionBuilder, CompactionPlan, CompactionPlanner,
 };
 use iceberg_compaction_core::config::{
     CompactionExecutionConfigBuilder, CompactionPlanningConfig, FilesWithDeletesConfigBuilder,
@@ -40,9 +39,7 @@ use risingwave_common::config::storage::default::storage::{
     iceberg_compaction_max_concurrent_closes, iceberg_compaction_size_estimation_smoothing_factor,
 };
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
-use risingwave_connector::sink::iceberg::{
-    IcebergConfig, IcebergWriteMode, commit_branch, should_enable_iceberg_cow,
-};
+use risingwave_connector::sink::iceberg::{IcebergConfig, IcebergWriteMode, commit_branch};
 use risingwave_pb::iceberg_compaction::file_scan_task::{FileContent, FileFormat};
 use risingwave_pb::iceberg_compaction::iceberg_compaction_task::TaskType;
 use risingwave_pb::iceberg_compaction::{
@@ -240,6 +237,18 @@ pub struct IcebergCompactionTaskStatistics {
     pub total_eq_del_file_count: u32,
 }
 
+#[derive(Debug, Clone)]
+pub struct SerializedDataFileInfo {
+    pub json: Vec<u8>,
+    pub partition_spec_id: i32,
+}
+
+#[derive(Debug, Clone)]
+pub struct PlanExecutionOutput {
+    pub added_data_files: Vec<SerializedDataFileInfo>,
+    pub stats: RewriteFilesStat,
+}
+
 impl Debug for IcebergCompactionTaskStatistics {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("IcebergCompactionTaskStatistics")
@@ -320,7 +329,7 @@ impl IcebergCompactionPlanRunner {
         }
     }
 
-    pub async fn compact(self, shutdown_rx: Receiver<()>) -> HummockResult<RewriteFilesStat> {
+    pub async fn compact(self, shutdown_rx: Receiver<()>) -> HummockResult<PlanExecutionOutput> {
         let task_id = self.task_id;
         let unique_ident = self.unique_ident();
         let now = std::time::Instant::now();
@@ -383,7 +392,7 @@ impl IcebergCompactionPlanRunner {
         task_type: TaskType,
         branch: String,
         compaction_plan: CompactionPlan,
-    ) -> HummockResult<RewriteFilesStat> {
+    ) -> HummockResult<PlanExecutionOutput> {
         let statistics = analyze_task_statistics(&compaction_plan);
 
         let compaction_execution_config = CompactionExecutionConfigBuilder::default()
@@ -436,88 +445,22 @@ impl IcebergCompactionPlanRunner {
             },
         );
 
-        let CompactionResult {
-            data_files,
-            stats,
-            table,
-        } = compaction
-            .compact_with_plan(compaction_plan, &compaction_execution_config)
+        let table = catalog
+            .load_table(&table_ident)
             .await
-            .map_err(|e| HummockError::compaction_executor(e.as_report()))?
-            .unwrap();
+            .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
+        let rewrite_result = compaction
+            .rewrite_plan(compaction_plan, &compaction_execution_config, &table)
+            .await
+            .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
 
-        if let Some(committed_table) = table
-            && should_enable_iceberg_cow(iceberg_config.r#type.as_str(), iceberg_config.write_mode)
-        {
-            let ingestion_branch =
-                commit_branch(iceberg_config.r#type.as_str(), iceberg_config.write_mode);
+        let serialized_files =
+            serialize_data_files(rewrite_result.output_data_files, table.metadata())?;
 
-            // Overwrite Main branch
-            let consistency_params = CommitConsistencyParams {
-                starting_snapshot_id: committed_table
-                    .metadata()
-                    .snapshot_for_ref(ingestion_branch.as_str())
-                    .ok_or(HummockError::compaction_executor(anyhow::anyhow!(
-                        "Don't find current_snapshot for ingestion_branch {}",
-                        ingestion_branch
-                    )))?
-                    .snapshot_id(),
-                use_starting_sequence_number: true,
-                basic_schema_id: committed_table.metadata().current_schema().schema_id(),
-            };
-
-            let commit_manager = compaction.build_commit_manager(consistency_params);
-
-            let input_files = {
-                let mut input_files = vec![];
-                if let Some(snapshot) = committed_table.metadata().snapshot_for_ref(MAIN_BRANCH) {
-                    let manifest_list = snapshot
-                        .load_manifest_list(committed_table.file_io(), committed_table.metadata())
-                        .await
-                        .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
-
-                    for manifest_file in manifest_list
-                        .entries()
-                        .iter()
-                        .filter(|entry| entry.has_added_files() || entry.has_existing_files())
-                    {
-                        let manifest = manifest_file
-                            .load_manifest(committed_table.file_io())
-                            .await
-                            .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
-                        let (entry, _) = manifest.into_parts();
-                        for i in entry {
-                            match i.content_type() {
-                                iceberg::spec::DataContentType::Data => {
-                                    input_files.push(i.data_file().clone());
-                                }
-                                iceberg::spec::DataContentType::EqualityDeletes => {
-                                    unreachable!(
-                                        "Equality deletes are not supported in main branch"
-                                    );
-                                }
-                                iceberg::spec::DataContentType::PositionDeletes => {
-                                    unreachable!(
-                                        "Position deletes are not supported in main branch"
-                                    );
-                                }
-                            }
-                        }
-                    }
-
-                    input_files
-                } else {
-                    vec![]
-                }
-            };
-
-            let _new_table = commit_manager
-                .overwrite_files(data_files, input_files, MAIN_BRANCH)
-                .await
-                .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
-        }
-
-        Ok(stats)
+        Ok(PlanExecutionOutput {
+            added_data_files: serialized_files,
+            stats: rewrite_result.stats,
+        })
     }
 }
 
@@ -552,6 +495,37 @@ fn analyze_task_statistics(plan: &CompactionPlan) -> IcebergCompactionTaskStatis
         total_eq_del_file_size,
         total_eq_del_file_count,
     }
+}
+
+fn serialize_data_files(
+    data_files: Vec<DataFile>,
+    metadata: &iceberg::spec::TableMetadata,
+) -> HummockResult<Vec<SerializedDataFileInfo>> {
+    let schema = metadata.current_schema();
+    let partition_spec = metadata.default_partition_spec();
+    let partition_type: StructType = partition_spec
+        .partition_type(schema.as_ref())
+        .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
+    let format_version = metadata.format_version();
+
+    data_files
+        .into_iter()
+        .map(|data_file| {
+            let partition_spec_id = data_file.partition_spec_id();
+            let serialized = SerializedDataFile::try_from(
+                data_file,
+                &partition_type,
+                format_version,
+            )
+            .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
+            let json = serde_json::to_vec(&serialized)
+                .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
+            Ok(SerializedDataFileInfo {
+                json,
+                partition_spec_id,
+            })
+        })
+        .collect()
 }
 
 /// Creates plan runners from an iceberg compaction task.
