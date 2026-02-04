@@ -2122,6 +2122,8 @@ async fn test_state_table_pruned_key_range_with_two_pk_columns() {
         }
         builder.finish()
     };
+    let mut config = StreamingConfig::default();
+    config.developer.enable_state_table_vnode_stats_prunning = true;
     let mut state_table: StateTable<HummockStorage> = StateTableBuilder::new(
         &table,
         test_env.storage.clone(),
