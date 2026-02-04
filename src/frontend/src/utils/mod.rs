@@ -40,6 +40,8 @@ pub use group_by::*;
 pub use overwrite_options::*;
 mod iceberg_predicate;
 pub use iceberg_predicate::*;
+mod drop_guard;
+pub use drop_guard::DropGuard;
 
 use crate::expr::{Expr, ExprImpl, ExprRewriter, InputRef};
 
