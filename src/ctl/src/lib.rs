@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,7 +15,7 @@
 #![warn(clippy::large_futures, clippy::large_stack_frames)]
 
 use anyhow::Result;
-use clap::{Args, Parser, Subcommand};
+use clap::{ArgGroup, Args, Parser, Subcommand};
 use cmd_impl::bench::BenchCommands;
 use cmd_impl::hummock::SstDumpArgs;
 use itertools::Itertools;
@@ -29,6 +29,7 @@ use thiserror_ext::AsReport;
 use crate::cmd_impl::hummock::{
     build_compaction_config_vec, list_pinned_versions, migrate_legacy_object,
 };
+use crate::cmd_impl::profile::ProfileWorkerType;
 use crate::cmd_impl::scale::set_cdc_table_backfill_parallelism;
 use crate::cmd_impl::throttle::apply_throttle;
 use crate::common::CtlContext;
@@ -75,8 +76,7 @@ enum Commands {
     #[clap(subcommand)]
     #[clap(visible_alias("trace"))]
     AwaitTree(AwaitTreeCommands),
-    // TODO(yuhao): profile other nodes
-    /// Commands for profilng the compute nodes
+    /// Commands for profiling nodes
     #[clap(subcommand)]
     Profile(ProfileCommands),
     #[clap(subcommand)]
@@ -370,6 +370,20 @@ enum MetaCommands {
     Pause,
     /// resume the stream graph
     Resume,
+    /// force resume backfill for troubleshooting
+    #[clap(
+        group(
+            ArgGroup::new("resume_backfill_target")
+                .required(true)
+                .args(&["job_id", "fragment_id"])
+        )
+    )]
+    ResumeBackfill {
+        #[clap(long)]
+        job_id: Option<u32>,
+        #[clap(long)]
+        fragment_id: Option<u32>,
+    },
     /// get cluster info
     ClusterInfo,
     /// get source split info
@@ -508,12 +522,28 @@ enum TestCommands {
 enum ThrottleCommands {
     Source(ThrottleCommandArgs),
     Mv(ThrottleCommandArgs),
+    Sink(ThrottleCommandArgs),
+}
+
+#[derive(Clone, Debug, clap::ValueEnum)]
+pub enum ThrottleTypeArg {
+    Dml,
+    Backfill,
+    Source,
+    Sink,
 }
 
 #[derive(Clone, Debug, Args)]
 pub struct ThrottleCommandArgs {
+    /// The ID of the object to throttle
+    #[clap(long, required = true)]
     id: u32,
+    /// The rate limit to apply
+    #[clap(long)]
     rate: Option<u32>,
+    /// The type of throttle to apply
+    #[clap(long, value_enum, required = true)]
+    throttle_type: ThrottleTypeArg,
 }
 
 #[derive(Subcommand, Clone, Debug)]
@@ -523,12 +553,18 @@ pub enum ProfileCommands {
         /// The time to active profiling for (in seconds)
         #[clap(short, long = "sleep")]
         sleep: u64,
+        /// Target worker types. Repeatable. Defaults to frontend, compute-node, and compactor.
+        #[clap(long = "worker-type", value_name = "TYPE")]
+        worker_types: Vec<ProfileWorkerType>,
     },
     /// Heap profile
     Heap {
         /// The output directory of the dumped file
         #[clap(long = "dir")]
         dir: Option<String>,
+        /// Target worker types. Repeatable. Defaults to frontend, compute-node, and compactor.
+        #[clap(long = "worker-type", value_name = "TYPE")]
+        worker_types: Vec<ProfileWorkerType>,
     },
 }
 
@@ -849,6 +885,10 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
         Commands::Bench(cmd) => cmd_impl::bench::do_bench(context, cmd).await?,
         Commands::Meta(MetaCommands::Pause) => cmd_impl::meta::pause(context).await?,
         Commands::Meta(MetaCommands::Resume) => cmd_impl::meta::resume(context).await?,
+        Commands::Meta(MetaCommands::ResumeBackfill {
+            job_id,
+            fragment_id,
+        }) => cmd_impl::meta::resume_backfill(context, job_id, fragment_id).await?,
         Commands::Meta(MetaCommands::ClusterInfo) => cmd_impl::meta::cluster_info(context).await?,
         Commands::Meta(MetaCommands::SourceSplitInfo { ignore_id }) => {
             cmd_impl::meta::source_split_info(context, ignore_id).await?
@@ -905,11 +945,12 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
         Commands::AwaitTree(AwaitTreeCommands::Transcribe { path }) => {
             rw_diagnose_tools::await_tree::transcribe(path)?
         }
-        Commands::Profile(ProfileCommands::Cpu { sleep }) => {
-            cmd_impl::profile::cpu_profile(context, sleep).await?
-        }
-        Commands::Profile(ProfileCommands::Heap { dir }) => {
-            cmd_impl::profile::heap_profile(context, dir).await?
+        Commands::Profile(ProfileCommands::Cpu {
+            sleep,
+            worker_types,
+        }) => cmd_impl::profile::cpu_profile(context, sleep, worker_types).await?,
+        Commands::Profile(ProfileCommands::Heap { dir, worker_types }) => {
+            cmd_impl::profile::heap_profile(context, dir, worker_types).await?
         }
         Commands::Scale(ScaleCommands::Cordon { workers }) => {
             cmd_impl::scale::update_schedulability(context, workers, Schedulability::Unschedulable)
@@ -924,6 +965,9 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
         }
         Commands::Throttle(ThrottleCommands::Mv(args)) => {
             apply_throttle(context, risingwave_pb::meta::PbThrottleTarget::Mv, args).await?;
+        }
+        Commands::Throttle(ThrottleCommands::Sink(args)) => {
+            apply_throttle(context, risingwave_pb::meta::PbThrottleTarget::Sink, args).await?;
         }
         Commands::Meta(MetaCommands::SetCdcTableBackfillParallelism {
             table_id,

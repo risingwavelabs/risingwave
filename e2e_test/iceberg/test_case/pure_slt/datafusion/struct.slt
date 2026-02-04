@@ -1,0 +1,108 @@
+statement ok
+set enable_datafusion_engine = true;
+
+statement ok
+create secret my_secret with (
+  backend = 'meta'
+) as 'hummockadmin';
+
+statement ok
+create connection my_conn
+with (
+    type = 'iceberg',
+    warehouse.path = 's3://hummock001/iceberg_connection',
+    s3.access.key = secret my_secret,
+    s3.secret.key = secret my_secret,
+    s3.endpoint = 'http://127.0.0.1:9301',
+    s3.region = 'us-west-2',
+    catalog.type = 'storage',
+);
+
+statement ok
+set iceberg_engine_connection = 'public.my_conn';
+
+# ==================== Struct Table ====================
+
+statement ok
+CREATE TABLE struct_t (
+    id int,
+    v_struct struct<a int, b int>,
+    v_nested struct<x int, "inner" struct<y int, z varchar>>
+) with(commit_checkpoint_interval = 1) engine = iceberg;
+
+statement ok
+INSERT INTO struct_t VALUES
+(1, ROW(10, 20), ROW(100, ROW(200, 'hello'))),
+(2, ROW(30, 40), ROW(300, ROW(400, 'world'))),
+(3, ROW(null, 60), ROW(null, ROW(600, null)));
+
+statement ok
+FLUSH;
+
+sleep 5s
+
+# Test basic struct field access using dot notation
+query II rowsort
+SELECT id, (v_struct).a FROM struct_t;
+----
+1 10
+2 30
+3 NULL
+
+query II rowsort
+SELECT id, (v_struct).b FROM struct_t;
+----
+1 20
+2 40
+3 60
+
+# Test nested struct field access
+query II rowsort
+SELECT id, (v_nested).x FROM struct_t;
+----
+1 100
+2 300
+3 NULL
+
+query II rowsort
+SELECT id, ((v_nested)."inner").y FROM struct_t;
+----
+1 200
+2 400
+3 600
+
+query IT rowsort
+SELECT id, ((v_nested)."inner").z FROM struct_t;
+----
+1 hello
+2 world
+3 NULL
+
+# Test struct field access in expressions
+query II rowsort
+SELECT id, (v_struct).a + (v_struct).b FROM struct_t WHERE (v_struct).a IS NOT NULL;
+----
+1 30
+2 70
+
+# Test struct field access with comparison
+query II rowsort
+SELECT id, (v_struct).a FROM struct_t WHERE (v_struct).a > 20;
+----
+2 30
+
+# Test row construction (creates anonymous struct)
+query I? rowsort
+SELECT id, row((v_struct).a * 2, (v_struct).b * 2) FROM struct_t WHERE (v_struct).a IS NOT NULL;
+----
+1 (20,40)
+2 (60,80)
+
+statement ok
+DROP TABLE struct_t;
+
+statement ok
+DROP CONNECTION my_conn;
+
+statement ok
+DROP SECRET my_secret;

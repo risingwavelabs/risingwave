@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -366,6 +366,7 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
             column_orders: vec![make_column_order(1), make_column_order(2)],
             staging_table: None,
             refresh_progress_table: None,
+            cleaned_by_ttl_watermark: false,
         }))),
         fields: vec![], // TODO: fill this later
         operator_id: 7.into(),
@@ -417,6 +418,7 @@ fn make_stream_graph() -> StreamFragmentGraphProto {
         dependent_table_ids: vec![],
         table_ids_cnt: 3,
         parallelism: None,
+        backfill_parallelism: None,
         max_parallelism: VirtualNode::COUNT_FOR_TEST as _,
         backfill_order: Default::default(),
     }

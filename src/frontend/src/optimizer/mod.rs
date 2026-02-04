@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -32,10 +32,9 @@ mod plan_rewriter;
 mod plan_visitor;
 
 #[cfg(feature = "datafusion")]
-pub use plan_visitor::LogicalPlanToDataFusionExt;
+pub use plan_visitor::DataFusionExecuteCheckerExt;
 pub use plan_visitor::{
-    ExecutionModeDecider, LogicalIcebergScanExt, PlanVisitor, RelationCollectorVisitor,
-    SysTableVisitor,
+    ExecutionModeDecider, PlanVisitor, RelationCollectorVisitor, SysTableVisitor,
 };
 use risingwave_pb::plan_common::source_refresh_mode::RefreshMode;
 
@@ -387,6 +386,62 @@ impl BatchOptimizedLogicalPlanRoot {
 
         Ok(self.into_phase(plan))
     }
+
+    #[cfg(feature = "datafusion")]
+    pub fn gen_datafusion_logical_plan(self) -> Result<Arc<datafusion::logical_expr::LogicalPlan>> {
+        use datafusion::logical_expr::{Expr as DFExpr, LogicalPlan, Projection, Sort};
+        use datafusion_common::Column;
+        use plan_visitor::LogicalPlanToDataFusionExt;
+
+        use crate::datafusion::{InputColumns, convert_column_order};
+
+        tracing::debug!(
+            "Converting RisingWave logical plan to DataFusion plan:\nRisingWave Plan: {:?}",
+            self.plan
+        );
+
+        let ctx = self.plan.ctx();
+        // Inline session timezone mainly for rewriting now()
+        let mut plan = inline_session_timezone_in_exprs(ctx, self.plan.clone())?;
+        plan = const_eval_exprs(plan)?;
+
+        let mut df_plan = plan.to_datafusion_logical_plan()?;
+
+        if !self.required_order.is_any() {
+            let input_columns = InputColumns::new(df_plan.schema().as_ref(), plan.schema());
+            let expr = self
+                .required_order
+                .column_orders
+                .iter()
+                .map(|column_order| convert_column_order(column_order, &input_columns))
+                .collect_vec();
+            df_plan = Arc::new(LogicalPlan::Sort(Sort {
+                expr,
+                input: df_plan,
+                fetch: None,
+            }));
+        }
+
+        if self.out_names.len() < df_plan.schema().fields().len() {
+            let df_schema = df_plan.schema().as_ref();
+            let projection_exprs = self
+                .out_fields
+                .ones()
+                .zip_eq_debug(self.out_names.iter())
+                .map(|(i, name)| {
+                    DFExpr::Column(Column::from(df_schema.qualified_field(i))).alias(name)
+                })
+                .collect_vec();
+            df_plan = Arc::new(LogicalPlan::Projection(Projection::try_new(
+                projection_exprs,
+                df_plan,
+            )?));
+        }
+
+        tracing::debug!("Converted DataFusion plan:\nDataFusion Plan: {:?}", df_plan);
+
+        Ok(df_plan)
+    }
 }
 
 impl BatchPlanRoot {
@@ -418,20 +473,6 @@ impl BatchPlanRoot {
         let plan = plan.optimize_by_rules(&OptimizationStage::new(
             "Push Limit To Scan",
             vec![BatchPushLimitToScanRule::create()],
-            ApplyOrder::BottomUp,
-        ))?;
-
-        let plan = plan.optimize_by_rules(&OptimizationStage::new(
-            "Iceberg Count Star",
-            vec![BatchIcebergCountStar::create()],
-            ApplyOrder::TopDown,
-        ))?;
-
-        // For iceberg scan, we do iceberg predicate pushdown
-        // BatchFilter -> BatchIcebergScan
-        let plan = plan.optimize_by_rules(&OptimizationStage::new(
-            "Iceberg Predicate Pushdown",
-            vec![BatchIcebergPredicatePushDownRule::create()],
             ApplyOrder::BottomUp,
         ))?;
 
@@ -475,11 +516,6 @@ impl BatchPlanRoot {
             ApplyOrder::BottomUp,
         ))?;
 
-        let plan = plan.optimize_by_rules(&OptimizationStage::new(
-            "Iceberg Count Star",
-            vec![BatchIcebergCountStar::create()],
-            ApplyOrder::TopDown,
-        ))?;
         Ok(plan)
     }
 }
@@ -892,6 +928,12 @@ impl LogicalPlanRoot {
         )
         .into();
 
+        let ttl_watermark_indices = watermark_descs
+            .iter()
+            .filter(|d| d.with_ttl)
+            .map(|d| d.watermark_idx as usize)
+            .collect_vec();
+
         // Add WatermarkFilter node.
         if !watermark_descs.is_empty() {
             stream_plan = StreamWatermarkFilter::new(stream_plan, watermark_descs).into();
@@ -978,6 +1020,7 @@ impl LogicalPlanRoot {
             conflict_behavior,
             version_column_indices,
             pk_column_indices,
+            ttl_watermark_indices,
             row_id_index,
             version,
             retention_seconds,
@@ -1059,7 +1102,7 @@ impl LogicalPlanRoot {
     }
 
     /// Optimize and generate a create sink plan.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub fn gen_sink_plan(
         self,
         sink_name: String,
@@ -1074,10 +1117,25 @@ impl LogicalPlanRoot {
         partition_info: Option<PartitionComputeInfo>,
         user_specified_columns: bool,
         auto_refresh_schema_from_table: Option<Arc<TableCatalog>>,
+        allow_snapshot_backfill: bool,
     ) -> Result<StreamSink> {
         let backfill_type = if without_backfill {
             BackfillType::UpstreamOnly
-        } else if target_table.is_none() && self.should_use_snapshot_backfill() {
+        } else if allow_snapshot_backfill
+            && self.should_use_snapshot_backfill()
+            && {
+                if auto_refresh_schema_from_table.is_some() {
+                    self.plan.ctx().session_ctx().notice_to_user("Auto schema change only support for ArrangementBackfill. Switched to use ArrangementBackfill");
+                    false
+                } else {
+                    true
+                }
+            }
+        {
+            assert!(
+                target_table.is_none(),
+                "should not allow snapshot backfill for sink-into-table"
+            );
             // Snapshot backfill on sink-into-table is not allowed
             BackfillType::SnapshotBackfill
         } else if self.should_use_arrangement_backfill() {
@@ -1115,9 +1173,7 @@ impl LogicalPlanRoot {
             auto_refresh_schema_from_table,
         )
     }
-}
 
-impl<P: PlanPhase> PlanRoot<P> {
     pub fn should_use_arrangement_backfill(&self) -> bool {
         let ctx = self.plan.ctx();
         let session_ctx = ctx.session_ctx();
@@ -1130,13 +1186,28 @@ impl<P: PlanPhase> PlanRoot<P> {
     }
 
     pub fn should_use_snapshot_backfill(&self) -> bool {
-        self.plan
-            .ctx()
-            .session_ctx()
-            .config()
-            .streaming_use_snapshot_backfill()
+        let ctx = self.plan.ctx();
+        let session_ctx = ctx.session_ctx();
+        let use_snapshot_backfill = session_ctx
+            .env()
+            .streaming_config()
+            .developer
+            .enable_snapshot_backfill
+            && session_ctx.config().streaming_use_snapshot_backfill();
+        if use_snapshot_backfill {
+            if let Some(warning_msg) = self.plan.forbid_snapshot_backfill() {
+                self.plan.ctx().session_ctx().notice_to_user(warning_msg);
+                false
+            } else {
+                true
+            }
+        } else {
+            false
+        }
     }
+}
 
+impl<P: PlanPhase> PlanRoot<P> {
     /// used when the plan has a target relation such as DML and sink into table, return the mapping from table's columns to the plan's schema
     pub fn target_columns_to_plan_mapping(
         &self,

@@ -189,6 +189,7 @@
 
 use std::sync::Arc;
 
+use datafusion::functions_aggregate::array_agg::array_agg_udaf;
 use datafusion::functions_aggregate::average::avg_udaf;
 use datafusion::functions_aggregate::bit_and_or_xor::{bit_and_udaf, bit_or_udaf, bit_xor_udaf};
 use datafusion::functions_aggregate::bool_and_or::{bool_and_udaf, bool_or_udaf};
@@ -201,15 +202,17 @@ use datafusion::functions_aggregate::variance::{var_pop_udaf, var_samp_udaf};
 use datafusion::logical_expr::expr::{
     AggregateFunction as DFAggregateFunction, AggregateFunctionParams as DFAggregateFunctionParams,
 };
-use datafusion::logical_expr::{AggregateUDF, Signature, SortExpr, TypeSignature, Volatility};
-use datafusion::prelude::Expr as DFExpr;
+use datafusion::logical_expr::{AggregateUDF, Signature, TypeSignature, Volatility};
+use datafusion::prelude::{Expr as DFExpr, lit};
 use risingwave_common::bail_not_implemented;
 use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_expr::aggregate::{AggArgs, AggType, BoxedAggregateFunction, PbAggKind};
 use risingwave_expr::expr::LiteralExpression;
 
 use crate::datafusion::aggregate::orderby::ProjectionOrderBy;
-use crate::datafusion::{CastExecutor, ColumnTrait, RwDataTypeDataFusionExt, convert_expr};
+use crate::datafusion::{
+    CastExecutor, ColumnTrait, RwDataTypeDataFusionExt, convert_column_order, convert_expr,
+};
 use crate::error::Result as RwResult;
 use crate::expr::Expr;
 use crate::optimizer::plan_node::PlanAggCall;
@@ -225,17 +228,25 @@ pub fn convert_agg_call(
     agg: &PlanAggCall,
     input_columns: &impl ColumnTrait,
 ) -> RwResult<DFAggregateFunction> {
-    let func: Arc<AggregateUDF> = if is_datafusion_native_agg(agg, input_columns) {
+    let native_agg = is_datafusion_native_agg(agg, input_columns);
+    let func: Arc<AggregateUDF> = if native_agg {
         convert_datafusion_native_agg_func(&agg.agg_type)?
     } else {
         convert_agg_func_fallback(agg, input_columns)?
     };
 
-    let df_args = agg
+    let mut df_args: Vec<_> = agg
         .inputs
         .iter()
         .map(|input_ref| DFExpr::Column(input_columns.column(input_ref.index)))
         .collect();
+    if native_agg
+        && df_args.is_empty()
+        && matches!(agg.agg_type, AggType::Builtin(PbAggKind::Count))
+    {
+        // DataFusion will take COUNT(*) as COUNT(1)
+        df_args.push(lit(1));
+    }
     let filter = match agg.filter.as_expr_unless_true() {
         None => None,
         Some(expr) => Some(Box::new(convert_expr(&expr, input_columns)?)),
@@ -243,15 +254,8 @@ pub fn convert_agg_call(
     let order_by = agg
         .order_by
         .iter()
-        .map(|order| {
-            let expr = DFExpr::Column(input_columns.column(order.column_index));
-            Ok(SortExpr::new(
-                expr,
-                order.order_type.is_ascending(),
-                order.order_type.nulls_are_first(),
-            ))
-        })
-        .collect::<RwResult<Vec<_>>>()?;
+        .map(|order| convert_column_order(order, input_columns))
+        .collect::<Vec<_>>();
     Ok(DFAggregateFunction {
         func,
         params: DFAggregateFunctionParams {
@@ -300,9 +304,17 @@ fn is_datafusion_native_agg_type(agg_type: &AggType) -> bool {
                 | PbAggKind::BoolOr
                 | PbAggKind::FirstValue
                 | PbAggKind::LastValue
+                | PbAggKind::ArrayAgg
         );
     }
     false
+}
+
+/// Convert an `AggType` to a DataFusion `AggregateUDF`.
+///
+/// This function is used for window functions that use aggregate functions.
+pub fn convert_agg_type_to_udaf(agg_type: &AggType) -> RwResult<Arc<AggregateUDF>> {
+    convert_datafusion_native_agg_func(agg_type)
 }
 
 fn convert_datafusion_native_agg_func(agg_type: &AggType) -> RwResult<Arc<AggregateUDF>> {
@@ -326,6 +338,7 @@ fn convert_datafusion_native_agg_func(agg_type: &AggType) -> RwResult<Arc<Aggreg
         PbAggKind::BoolOr => Ok(bool_or_udaf()),
         PbAggKind::FirstValue => Ok(first_value_udaf()),
         PbAggKind::LastValue => Ok(last_value_udaf()),
+        PbAggKind::ArrayAgg => Ok(array_agg_udaf()),
         _ => bail_not_implemented!(
             "Agg {:?} is not supported to convert to datafusion native impl yet",
             kind

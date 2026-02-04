@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -29,6 +29,8 @@ pub struct PostgresQuery {
     pub password: String,
     pub database: String,
     pub query: String,
+    pub ssl_mode: Option<String>,
+    pub ssl_root_cert: Option<String>,
 
     #[educe(PartialEq(ignore))]
     #[educe(Hash(ignore))]

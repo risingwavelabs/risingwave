@@ -54,6 +54,7 @@ pub use crate::ast::ddl::{
 };
 use crate::keywords::Keyword;
 use crate::parser::{IncludeOption, IncludeOptionItem, Parser, ParserError, StrError};
+pub use crate::quote_ident::QuoteIdent;
 use crate::tokenizer::Tokenizer;
 
 pub type RedactSqlOptionKeywordsRef = Arc<HashSet<String>>;
@@ -172,14 +173,9 @@ impl Ident {
     }
 
     /// Convert a real value back to Ident. Behaves the same as SQL function `quote_ident` or
-    /// `QuoteIdent` wrapper in `common` crate.
+    /// [`QuoteIdent`] wrapper.
     pub fn from_real_value(value: &str) -> Self {
-        let needs_quotes = value
-            .chars()
-            .any(|c| !matches!(c, 'a'..='z' | '0'..='9' | '_'))
-            // Also need quotes if the identifier starts with a digit, as it would be
-            // tokenized as a number instead of an identifier (e.g., "2000000")
-            || value.chars().next().is_some_and(|c| c.is_ascii_digit());
+        let needs_quotes = QuoteIdent::needs_quotes(value);
 
         if needs_quotes {
             Self::with_quote_unchecked('"', value.replace('"', "\"\""))
@@ -1488,7 +1484,6 @@ pub enum Statement {
     AlterSecret {
         /// Secret name
         name: ObjectName,
-        with_options: Vec<SqlOption>,
         operation: AlterSecretOperation,
     },
     /// ALTER FRAGMENT
@@ -2110,13 +2105,15 @@ impl Statement {
                     write!(f, " FROM {}", info.source_name)?;
                     write!(f, " TABLE '{}'", info.external_table_name)?;
                 }
-                if let Some(info) = webhook_info {
+                if let Some(info) = webhook_info
+                    && let Some(signature_expr) = &info.signature_expr
+                {
                     if let Some(secret) = &info.secret_ref {
                         write!(f, " VALIDATE SECRET {}", secret.secret_name)?;
                     } else {
                         write!(f, " VALIDATE")?;
                     }
-                    write!(f, " AS {}", info.signature_expr)?;
+                    write!(f, " AS {}", signature_expr)?;
                 }
                 match engine {
                     Engine::Hummock => {}
@@ -2224,16 +2221,9 @@ impl Statement {
             Statement::AlterConnection { name, operation } => {
                 write!(f, "ALTER CONNECTION {} {}", name, operation)
             }
-            Statement::AlterSecret {
-                name,
-                with_options,
-                operation,
-            } => {
+            Statement::AlterSecret { name, operation } => {
                 write!(f, "ALTER SECRET {}", name)?;
-                if !with_options.is_empty() {
-                    write!(f, " WITH ({})", display_comma_separated(with_options))?;
-                }
-                write!(f, " {}", operation)
+                write!(f, "{}", operation)
             }
             Statement::Discard(t) => write!(f, "DISCARD {}", t),
             Statement::Drop(stmt) => write!(f, "DROP {}", stmt),

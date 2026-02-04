@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -35,6 +35,7 @@
 #![feature(register_tool)]
 #![feature(btree_cursors)]
 #![feature(assert_matches)]
+#![feature(float_gamma)]
 #![feature(anonymous_lifetime_in_impl_trait)]
 #![feature(vec_into_raw_parts)]
 #![feature(exact_div)]

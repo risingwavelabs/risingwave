@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -55,7 +55,6 @@ pub trait SessionManager: Send + Sync + 'static {
     fn create_dummy_session(
         &self,
         database_id: DatabaseId,
-        user_id: u32,
     ) -> Result<Arc<Self::Session>, Self::Error>;
 
     fn connect(
@@ -408,7 +407,6 @@ mod tests {
         fn create_dummy_session(
             &self,
             _database_id: DatabaseId,
-            _user_name: u32,
         ) -> Result<Arc<Self::Session>, Self::Error> {
             unimplemented!()
         }

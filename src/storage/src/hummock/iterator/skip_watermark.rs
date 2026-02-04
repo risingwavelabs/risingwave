@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -29,7 +29,7 @@ use risingwave_hummock_sdk::table_watermark::{
 };
 
 use super::SkipWatermarkState;
-use crate::compaction_catalog_manager::CompactionCatalogAgentRef;
+use crate::compaction_catalog_manager::{CompactionCatalogAgentRef, ValueWatermarkColumnSerdeRef};
 use crate::hummock::HummockResult;
 use crate::hummock::iterator::{Forward, HummockIterator, ValueMeta};
 use crate::hummock::value::HummockValue;
@@ -75,7 +75,10 @@ impl<I: HummockIterator<Direction = Forward>, S: SkipWatermarkState> SkipWaterma
         // advance key and watermark in an interleave manner until nothing
         // changed after the method is called.
         while self.inner.is_valid() {
-            if !self.state.should_delete(&self.inner.key()) {
+            if !self
+                .state
+                .should_delete(&self.inner.key(), self.inner.value())
+            {
                 break;
             }
 
@@ -178,7 +181,7 @@ impl SkipWatermarkState for PkPrefixSkipWatermarkState {
         !self.remain_watermarks.is_empty()
     }
 
-    fn should_delete(&mut self, key: &FullKey<&[u8]>) -> bool {
+    fn should_delete(&mut self, key: &FullKey<&[u8]>, value: HummockValue<&[u8]>) -> bool {
         if let Some((table_id, vnode, direction, watermark)) = self.remain_watermarks.front() {
             let key_table_id = key.user_key.table_id;
             let (key_vnode, inner_key) = key.user_key.table_key.split_vnode();
@@ -192,7 +195,7 @@ impl SkipWatermarkState for PkPrefixSkipWatermarkState {
                 Ordering::Greater => {
                     // The current key has advanced over the watermark.
                     // We may advance the watermark before advancing the key.
-                    return self.advance_watermark(key);
+                    return self.advance_watermark(key, value);
                 }
             }
         }
@@ -223,7 +226,7 @@ impl SkipWatermarkState for PkPrefixSkipWatermarkState {
     /// filter out the current or future key.
     ///
     /// Return a flag indicating whether the current key will be filtered by the current watermark.
-    fn advance_watermark(&mut self, key: &FullKey<&[u8]>) -> bool {
+    fn advance_watermark(&mut self, key: &FullKey<&[u8]>, _value: HummockValue<&[u8]>) -> bool {
         let key_table_id = key.user_key.table_id;
         let (key_vnode, inner_key) = key.user_key.table_key.split_vnode();
         while let Some((table_id, vnode, direction, watermark)) = self.remain_watermarks.front() {
@@ -338,7 +341,7 @@ impl SkipWatermarkState for NonPkPrefixSkipWatermarkState {
         !self.remain_watermarks.is_empty()
     }
 
-    fn should_delete(&mut self, key: &FullKey<&[u8]>) -> bool {
+    fn should_delete(&mut self, key: &FullKey<&[u8]>, value: HummockValue<&[u8]>) -> bool {
         if let Some((table_id, vnode, direction, watermark)) = self.remain_watermarks.front() {
             let key_table_id = key.user_key.table_id;
             {
@@ -374,7 +377,7 @@ impl SkipWatermarkState for NonPkPrefixSkipWatermarkState {
                 Ordering::Greater => {
                     // The current key has advanced over the watermark.
                     // We may advance the watermark before advancing the key.
-                    return self.advance_watermark(key);
+                    return self.advance_watermark(key, value);
                 }
             }
         }
@@ -411,7 +414,7 @@ impl SkipWatermarkState for NonPkPrefixSkipWatermarkState {
             .collect();
     }
 
-    fn advance_watermark(&mut self, key: &FullKey<&[u8]>) -> bool {
+    fn advance_watermark(&mut self, key: &FullKey<&[u8]>, _value: HummockValue<&[u8]>) -> bool {
         let key_table_id = key.user_key.table_id;
         let (key_vnode, inner_key) = key.user_key.table_key.split_vnode();
         while let Some((table_id, vnode, direction, watermark)) = self.remain_watermarks.front() {
@@ -450,6 +453,169 @@ pub type PkPrefixSkipWatermarkIterator<I> = SkipWatermarkIterator<I, PkPrefixSki
 
 pub type NonPkPrefixSkipWatermarkIterator<I> =
     SkipWatermarkIterator<I, NonPkPrefixSkipWatermarkState>;
+
+pub type ValueSkipWatermarkIterator<I> = SkipWatermarkIterator<I, ValueSkipWatermarkState>;
+
+pub struct ValueSkipWatermarkState {
+    pub watermarks: BTreeMap<TableId, ReadTableWatermark>,
+    remain_watermarks: VecDeque<(TableId, VirtualNode, WatermarkDirection, Bytes)>,
+    compaction_catalog_agent_ref: CompactionCatalogAgentRef,
+    last_serde: Option<ValueWatermarkColumnSerdeRef>,
+    last_table_id: Option<TableId>,
+}
+
+impl ValueSkipWatermarkState {
+    pub fn new(
+        watermarks: BTreeMap<TableId, ReadTableWatermark>,
+        compaction_catalog_agent_ref: CompactionCatalogAgentRef,
+    ) -> Self {
+        Self {
+            remain_watermarks: VecDeque::new(),
+            watermarks,
+            compaction_catalog_agent_ref,
+            last_serde: None,
+            last_table_id: None,
+        }
+    }
+
+    pub fn from_safe_epoch_watermarks(
+        safe_epoch_watermarks: BTreeMap<TableId, TableWatermarks>,
+        compaction_catalog_agent_ref: CompactionCatalogAgentRef,
+    ) -> Self {
+        let watermarks = safe_epoch_read_table_watermarks_impl(safe_epoch_watermarks);
+        Self::new(watermarks, compaction_catalog_agent_ref)
+    }
+
+    pub fn may_delete(&self, key: &FullKey<&[u8]>) -> bool {
+        let table_id = key.user_key.table_id;
+        self.watermarks.contains_key(&table_id)
+    }
+}
+
+impl SkipWatermarkState for ValueSkipWatermarkState {
+    #[inline(always)]
+    fn has_watermark(&self) -> bool {
+        !self.remain_watermarks.is_empty()
+    }
+
+    fn should_delete(&mut self, key: &FullKey<&[u8]>, value: HummockValue<&[u8]>) -> bool {
+        if let Some((table_id, vnode, direction, watermark)) = self.remain_watermarks.front() {
+            let key_table_id = key.user_key.table_id;
+            let key_vnode = key.user_key.table_key.vnode_part();
+            if self
+                .last_table_id
+                .is_none_or(|last_table_id| last_table_id != key_table_id)
+            {
+                self.last_table_id = Some(key_table_id);
+                self.last_serde = self
+                    .compaction_catalog_agent_ref
+                    .value_watermark_serde(*table_id);
+            }
+            match (&key_table_id, &key_vnode).cmp(&(table_id, vnode)) {
+                Ordering::Less => {
+                    return false;
+                }
+                Ordering::Equal => {
+                    let HummockValue::Put(value) = value else {
+                        return false;
+                    };
+                    let Some(ref last_serde) = self.last_serde else {
+                        return false;
+                    };
+                    let Ok(watermark_column_value) = last_serde.deserialize(value) else {
+                        tracing::error!(
+                            ?table_id,
+                            ?vnode,
+                            ?value,
+                            "Failed to deserialize watermark column"
+                        );
+                        return false;
+                    };
+                    let Some(watermark_column_value) = watermark_column_value else {
+                        tracing::debug!(
+                            ?table_id,
+                            ?vnode,
+                            ?value,
+                            "The specified watermark column was not found in the value, likely due to the use of a non-current catalog. Restarting the compactor should resolve this issue."
+                        );
+                        return false;
+                    };
+                    return direction.key_filter_by_watermark(&watermark_column_value, watermark);
+                }
+                Ordering::Greater => {
+                    // The current key has advanced over the watermark.
+                    // We may advance the watermark before advancing the key.
+                    return self.advance_watermark(key, value);
+                }
+            }
+        }
+        false
+    }
+
+    fn reset_watermark(&mut self) {
+        self.remain_watermarks = self
+            .watermarks
+            .iter()
+            .flat_map(|(table_id, read_watermarks)| {
+                read_watermarks
+                    .vnode_watermarks
+                    .iter()
+                    .map(|(vnode, watermarks)| {
+                        (
+                            *table_id,
+                            *vnode,
+                            read_watermarks.direction,
+                            watermarks.clone(),
+                        )
+                    })
+            })
+            .collect();
+    }
+
+    fn advance_watermark(&mut self, key: &FullKey<&[u8]>, value: HummockValue<&[u8]>) -> bool {
+        let key_table_id = key.user_key.table_id;
+        let key_vnode = key.user_key.table_key.vnode_part();
+        while let Some((table_id, vnode, direction, watermark)) = self.remain_watermarks.front() {
+            match (table_id, vnode).cmp(&(&key_table_id, &key_vnode)) {
+                Ordering::Less => {
+                    self.remain_watermarks.pop_front();
+                    continue;
+                }
+                Ordering::Equal => {
+                    let HummockValue::Put(value) = value else {
+                        return false;
+                    };
+                    let Some(ref last_serde) = self.last_serde else {
+                        return false;
+                    };
+                    let Ok(watermark_column_value) = last_serde.deserialize(value) else {
+                        tracing::error!(
+                            ?table_id,
+                            ?vnode,
+                            ?value,
+                            "Failed to deserialize watermark column."
+                        );
+                        return false;
+                    };
+                    let Some(watermark_column_value) = watermark_column_value else {
+                        tracing::warn!(
+                            ?table_id,
+                            ?vnode,
+                            ?value,
+                            "The specified watermark column was not found in the value, likely due to the use of a non-current catalog. Restarting the compactor should resolve this issue."
+                        );
+                        return false;
+                    };
+                    return direction.key_filter_by_watermark(&watermark_column_value, watermark);
+                }
+                Ordering::Greater => {
+                    return false;
+                }
+            }
+        }
+        false
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -774,6 +940,7 @@ mod tests {
                     full_key_filter_key_extractor,
                     table_id_to_vnode,
                     table_id_to_watermark_serde,
+                    HashMap::default(),
                 ));
 
                 let mut iter = NonPkPrefixSkipWatermarkIterator::new(
@@ -839,6 +1006,7 @@ mod tests {
                     full_key_filter_key_extractor,
                     table_id_to_vnode,
                     table_id_to_watermark_serde,
+                    HashMap::default(),
                 ));
 
                 let mut iter = NonPkPrefixSkipWatermarkIterator::new(
@@ -900,6 +1068,7 @@ mod tests {
                     full_key_filter_key_extractor,
                     table_id_to_vnode,
                     table_id_to_watermark_serde,
+                    HashMap::default(),
                 ));
 
                 let mut iter = NonPkPrefixSkipWatermarkIterator::new(
@@ -961,6 +1130,7 @@ mod tests {
                     full_key_filter_key_extractor,
                     table_id_to_vnode,
                     table_id_to_watermark_serde,
+                    HashMap::default(),
                 ));
 
                 let mut iter = NonPkPrefixSkipWatermarkIterator::new(
@@ -1135,6 +1305,7 @@ mod tests {
                 full_key_filter_key_extractor,
                 table_id_to_vnode,
                 table_id_to_watermark_serde,
+                HashMap::default(),
             ));
 
             let mut iter = NonPkPrefixSkipWatermarkIterator::new(
@@ -1236,6 +1407,7 @@ mod tests {
                 full_key_filter_key_extractor,
                 table_id_to_vnode,
                 table_id_to_watermark_serde,
+                HashMap::default(),
             ));
 
             let non_pk_prefix_iter = NonPkPrefixSkipWatermarkIterator::new(

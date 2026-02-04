@@ -49,6 +49,7 @@ use risingwave_connector::source::test_source::{
 };
 use risingwave_pb::connector_service::SinkMetadata;
 use risingwave_pb::connector_service::sink_metadata::{Metadata, SerializedMetadata};
+use risingwave_pb::stream_plan::PbSinkSchemaChange;
 use risingwave_simulation::cluster::{Cluster, ConfigPath, Configuration};
 use sea_orm::{
     ColumnTrait, DatabaseConnection, EntityTrait, Order, PaginatorTrait, QueryFilter, QueryOrder,
@@ -364,8 +365,8 @@ impl TwoPhaseCommitCoordinator for SimulationTestIcebergCommitter {
         &mut self,
         epoch: u64,
         metadatas: Vec<SinkMetadata>,
-        _add_columns: Option<Vec<Field>>,
-    ) -> risingwave_connector::sink::Result<Vec<u8>> {
+        _schema_change: Option<PbSinkSchemaChange>,
+    ) -> risingwave_connector::sink::Result<Option<Vec<u8>>> {
         if thread_rng().random_ratio(self.err_rate_vec[1].load(Relaxed), u32::MAX) {
             println!("Error injection point 1 -- Error occur before pre commit to meta store.");
             self.store.inc_err();
@@ -375,12 +376,16 @@ impl TwoPhaseCommitCoordinator for SimulationTestIcebergCommitter {
             )));
         }
 
+        if metadatas.is_empty() {
+            tracing::debug!(?epoch, "no data to pre commit");
+            return Ok(None);
+        }
+
         let snapshot_id = generate_unique_snapshot_id();
 
         let mut pre_commit_metadata_bytes = Vec::new();
         for metadata in metadatas {
             let Metadata::Serialized(serialized) = metadata.metadata.unwrap();
-
             pre_commit_metadata_bytes.push(serialized.metadata);
         }
 
@@ -389,10 +394,10 @@ impl TwoPhaseCommitCoordinator for SimulationTestIcebergCommitter {
 
         let pre_commit_metadata_bytes: Vec<u8> = serialize_metadata(pre_commit_metadata_bytes);
 
-        Ok(pre_commit_metadata_bytes)
+        Ok(Some(pre_commit_metadata_bytes))
     }
 
-    async fn commit(
+    async fn commit_data(
         &mut self,
         epoch: u64,
         commit_metadata: Vec<u8>,

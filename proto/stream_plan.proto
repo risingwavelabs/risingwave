@@ -54,10 +54,6 @@ message StopMutation {
   repeated uint32 dropped_sink_fragments = 2;
 }
 
-message SinkAddColumns {
-  repeated plan_common.Field fields = 1;
-}
-
 message UpdateMutation {
   message DispatcherUpdate {
     // Dispatcher can be uniquely identified by a combination of actor id and dispatcher id.
@@ -101,7 +97,7 @@ message UpdateMutation {
   map<uint32, Dispatchers> actor_new_dispatchers = 6;
   // CDC table snapshot splits
   source.CdcTableSnapshotSplitsWithGeneration actor_cdc_table_snapshot_splits = 7;
-  map<uint32, SinkAddColumns> sink_add_columns = 8;
+  map<uint32, SinkSchemaChange> sink_schema_change = 8;
   repeated SubscriptionUpstreamInfo subscriptions_to_drop = 9;
 }
 
@@ -115,11 +111,12 @@ message PauseMutation {}
 message ResumeMutation {}
 
 message ThrottleMutation {
-  message RateLimit {
+  message ThrottleConfig {
     optional uint32 rate_limit = 1;
+    common.ThrottleType throttle_type = 2;
   }
 
-  map<uint32, RateLimit> actor_throttle = 1;
+  map<uint32, ThrottleConfig> fragment_throttle = 1;
 }
 
 message SubscriptionUpstreamInfo {
@@ -158,6 +155,11 @@ message LoadFinishMutation {
   uint32 associated_source_id = 1;
 }
 
+message ResetSourceMutation {
+  // Source ID to reset
+  uint32 source_id = 1;
+}
+
 message BarrierMutation {
   oneof mutation {
     // Add new dispatchers to some actors, used for creating materialized views.
@@ -173,7 +175,7 @@ message BarrierMutation {
     PauseMutation pause = 7;
     // Resume the dataflow of the whole streaming graph, only used for scaling.
     ResumeMutation resume = 8;
-    // Throttle specific source exec or backfill exec.
+    // Alter the RateLimit of some specific executors
     ThrottleMutation throttle = 10;
     // Drop subscription on mv
     DropSubscriptionsMutation drop_subscriptions = 12;
@@ -191,6 +193,8 @@ message BarrierMutation {
     LoadFinishMutation load_finish = 16;
     // List finish signal for refreshing tables
     ListFinishMutation list_finish = 17;
+    // Reset CDC source offset to latest
+    ResetSourceMutation reset_source = 18;
   }
 }
 
@@ -342,6 +346,10 @@ message SinkDesc {
   optional uint32 target_table = 14;
   optional uint64 extra_partition_col_idx = 15;
   map<string, secret.SecretRef> secret_refs = 16;
+  // Backward-compatible replacement for `SINK_TYPE_FORCE_APPEND_ONLY`.
+  //
+  // Should not directly access this field. Use method `ignore_delete()` instead.
+  bool raw_ignore_delete = 17;
 }
 
 enum SinkLogStoreType {
@@ -433,6 +441,9 @@ message MaterializeNode {
   // Usage: Persists across refresh operations for resumability
   // Note: Stage info is now tracked in MaterializeExecutor memory for simplicity
   optional catalog.Table refresh_progress_table = 6;
+
+  // Whether the table can clean itself by TTL watermark, i.e., is defined with `WATERMARK ... WITH TTL`.
+  bool cleaned_by_ttl_watermark = 7;
 }
 
 message AggCallState {
@@ -523,6 +534,7 @@ message DeltaExpression {
   expr.ExprNode delta = 2;
 }
 
+// Deprecated: Use InequalityPairV2 instead.
 message InequalityPair {
   // Input index of greater side of inequality.
   uint32 key_required_larger = 1;
@@ -532,6 +544,27 @@ message InequalityPair {
   bool clean_state = 3;
   // greater >= less + delta_expression, if `None`, it represents that greater >= less
   DeltaExpression delta_expression = 4;
+}
+
+enum InequalityType {
+  INEQUALITY_TYPE_UNSPECIFIED = 0;
+  INEQUALITY_TYPE_LESS_THAN = 1;
+  INEQUALITY_TYPE_LESS_THAN_OR_EQUAL = 2;
+  INEQUALITY_TYPE_GREATER_THAN = 3;
+  INEQUALITY_TYPE_GREATER_THAN_OR_EQUAL = 4;
+}
+
+message InequalityPairV2 {
+  // Index of the left side of the inequality (from left input).
+  uint32 left_idx = 1;
+  // Index of the right side of the inequality (from right input, NOT offset by left_cols_num).
+  uint32 right_idx = 2;
+  // Whether this condition is used to clean left state table of `HashJoinExecutor`.
+  bool clean_left_state = 3;
+  // Whether this condition is used to clean right state table of `HashJoinExecutor`.
+  bool clean_right_state = 4;
+  // Comparison operator: left_col `<op>` right_col (e.g., <, <=, >, >=).
+  InequalityType op = 5;
 }
 
 enum JoinEncodingType {
@@ -575,6 +608,9 @@ message HashJoinNode {
   // Which encoding will be used to encode join rows in operator cache.
   // Deprecated. Use the one from `StreamingDeveloperConfig` instead.
   JoinEncodingType join_encoding_type = 15 [deprecated = true];
+
+  // New inequality pairs with clearer semantics. Takes precedence over `inequality_pairs` if non-empty.
+  repeated InequalityPairV2 inequality_pairs_v2 = 16;
 }
 
 message AsOfJoinNode {
@@ -635,6 +671,8 @@ message DynamicFilterNode {
   // If this is false, we need to store RHS records which match the condition in the internal table.
   // When the condition changes, we will tell downstream to delete the LHS records which now no longer match the condition.
   bool condition_always_relax = 5 [deprecated = true];
+  // Whether the dynamic filter can clean its left state table by watermark.
+  bool cleaned_by_watermark = 6;
 }
 
 // Delta join with two indexes. This is a pseudo plan node generated on frontend. On meta
@@ -1216,6 +1254,8 @@ message StreamContext {
   string timezone = 1;
   // The partial config of this job to override the global config.
   string config_override = 2;
+  // The adaptive parallelism strategy for this streaming job, if explicitly set.
+  string adaptive_parallelism_strategy = 3;
 }
 
 message BackfillOrder {
@@ -1271,6 +1311,8 @@ message StreamFragmentGraph {
   StreamContext ctx = 5;
   // If none, default parallelism will be applied.
   Parallelism parallelism = 6;
+  // Parallelism to use during backfill. Falls back to `parallelism` if unset.
+  Parallelism backfill_parallelism = 9;
 
   // Specified max parallelism, i.e., expected vnode count for the graph.
   //
@@ -1289,18 +1331,17 @@ message StreamFragmentGraph {
 
 // Schema change operation for sink
 message SinkSchemaChange {
-  // Original schema before this change (optional, can be empty)
-  // Used for validation and conflict detection
-  // For current stage, this can be left empty
+  // Original schema before this change.
+  // Used for validation and conflict detection.
   repeated plan_common.Field original_schema = 1;
 
   // Schema change operation (mutually exclusive)
   oneof op {
     // Add new columns to the schema
-    AddColumnsOp add_columns = 2;
+    SinkAddColumnsOp add_columns = 2;
 
     // Drop columns from the schema
-    DropColumnsOp drop_columns = 3;
+    SinkDropColumnsOp drop_columns = 3;
 
     // Future operations can be added here...
     // RenameColumnsOp rename_columns = 4;
@@ -1309,13 +1350,13 @@ message SinkSchemaChange {
 }
 
 // Add columns operation
-message AddColumnsOp {
+message SinkAddColumnsOp {
   // Columns to add
   repeated plan_common.Field fields = 1;
 }
 
 // Drop columns operation
-message DropColumnsOp {
+message SinkDropColumnsOp {
   // Column names to drop
   repeated string column_names = 1;
 }

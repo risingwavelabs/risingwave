@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -36,6 +36,7 @@ pub struct ValuesExecutor {
 }
 
 impl ValuesExecutor {
+    #[cfg(test)]
     pub(crate) fn new(
         rows: Vec<Vec<BoxedExpression>>,
         schema: Schema,

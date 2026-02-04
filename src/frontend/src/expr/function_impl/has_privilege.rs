@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,6 +17,7 @@ use std::collections::HashSet;
 use risingwave_common::id::{FunctionId, ObjectId};
 use risingwave_common::session_config::SearchPath;
 use risingwave_expr::{ExprError, Result, capture_context, function};
+use risingwave_pb::id::UserId;
 use risingwave_pb::user::Action;
 use risingwave_sqlparser::parser::Parser;
 use thiserror_ext::AsReport;
@@ -95,7 +96,7 @@ fn has_database_privilege_impl(
         user_name,
         &OwnedGrantObject {
             object: database_oid.into(),
-            owner: database_owner as u32,
+            owner: database_owner,
         },
         &actions,
     )
@@ -142,7 +143,7 @@ fn has_schema_privilege_impl(
         user_name,
         &OwnedGrantObject {
             object: schema_oid.into(),
-            owner: schema_owner as u32,
+            owner: schema_owner,
         },
         &actions,
     )
@@ -233,9 +234,13 @@ fn has_privilege_impl(
 
 #[capture_context(USER_INFO_READER)]
 fn get_user_name_by_id(user_info_reader: &UserInfoReader, user_id: i32) -> Result<String> {
+    let user_id: u32 = user_id.try_into().map_err(|_| ExprError::InvalidParam {
+        name: "get_user_name_by_id",
+        reason: format!("invalid user_id {user_id}").into_boxed_str(),
+    })?;
     let user_info = &user_info_reader.read_guard();
     user_info
-        .get_user_name_by_id(user_id as u32)
+        .get_user_name_by_id(user_id.into())
         .ok_or(user_not_found_err(
             format!("User {} not found", user_id).as_str(),
         ))
@@ -277,7 +282,7 @@ fn get_database_id_by_name(catalog_reader: &CatalogReader, db_name: &str) -> Res
 fn get_database_owner_by_id(
     catalog_reader: &CatalogReader,
     database_id: DatabaseId,
-) -> Result<i32> {
+) -> Result<UserId> {
     let reader = &catalog_reader.read_guard();
     let database = reader
         .get_database_by_id(database_id)
@@ -285,7 +290,7 @@ fn get_database_owner_by_id(
             name: "database",
             reason: e.to_report_string().into(),
         })?;
-    Ok(database.owner as i32)
+    Ok(database.owner)
 }
 
 #[capture_context(CATALOG_READER, DB_NAME)]
@@ -293,7 +298,7 @@ fn get_schema_owner_by_id(
     catalog_reader: &CatalogReader,
     db_name: &str,
     schema_id: SchemaId,
-) -> Result<i32> {
+) -> Result<UserId> {
     let reader = &catalog_reader.read_guard();
     let db_id = reader
         .get_database_by_name(db_name)
@@ -308,7 +313,7 @@ fn get_schema_owner_by_id(
             name: "schema",
             reason: e.to_report_string().into(),
         })?
-        .owner as i32)
+        .owner)
 }
 
 #[capture_context(CATALOG_READER, DB_NAME)]

@@ -9,7 +9,7 @@
       └─BatchScan { table: t, columns: [t.v1, t.v2], distribution: SomeShard }
   stream_plan: |-
     StreamMaterialize { columns: [v1, v2, t._row_id(hidden)], stream_key: [t._row_id], pk_columns: [v1, t._row_id], pk_conflict: NoCheck }
-    └─StreamTableScan { table: t, columns: [t.v1, t.v2, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+    └─StreamTableScan { table: t, columns: [t.v1, t.v2, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - name: output names are not qualified after table names
   sql: |
     create table t (v1 bigint, v2 double precision);
@@ -41,6 +41,17 @@
     BatchExchange { order: [t.v1 ASC], dist: Single }
     └─BatchSort { order: [t.v1 ASC] }
       └─BatchScan { table: t, columns: [t.v1], distribution: SomeShard }
+- name: order by identifier matches aliased output
+  sql: |
+    create table t (a int, b int);
+    select a as x from t order by a;
+  batch_plan: |-
+    BatchExchange { order: [t.a ASC], dist: Single }
+    └─BatchSort { order: [t.a ASC] }
+      └─BatchScan { table: t, columns: [t.a], distribution: SomeShard }
+  stream_plan: |-
+    StreamMaterialize { columns: [x, t._row_id(hidden)], stream_key: [t._row_id], pk_columns: [x, t._row_id], pk_conflict: NoCheck }
+    └─StreamTableScan { table: t, columns: [t.a, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - name: order by ambiguous
   sql: |
     create table t (v1 bigint, v2 double precision);
@@ -66,7 +77,7 @@
   stream_plan: |-
     StreamMaterialize { columns: [v1, v2, 2:Int32(hidden), t._row_id(hidden)], stream_key: [t._row_id], pk_columns: [2:Int32, t._row_id], pk_conflict: NoCheck }
     └─StreamProject { exprs: [t.v1, t.v2, 2:Int32, t._row_id] }
-      └─StreamTableScan { table: t, columns: [t.v1, t.v2, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+      └─StreamTableScan { table: t, columns: [t.v1, t.v2, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - sql: |
     create table t (v1 bigint, v2 double precision);
     select * from t order by v;
@@ -90,7 +101,7 @@
         └─StreamExchange { dist: Single }
           └─StreamGroupTopN { order: [t.v1 DESC], limit: 5, offset: 0, group_key: [_vnode] }
             └─StreamProject { exprs: [t.v1, t.v2, t._row_id, Vnode(t._row_id) as _vnode] }
-              └─StreamTableScan { table: t, columns: [t.v1, t.v2, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+              └─StreamTableScan { table: t, columns: [t.v1, t.v2, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - sql: |
     create table t (v1 bigint, v2 double precision);
     select * from t limit 3 offset 4;
@@ -122,7 +133,7 @@
         └─StreamExchange { dist: Single }
           └─StreamGroupTopN { order: [t.v1 DESC], limit: 12, offset: 0, group_key: [_vnode] }
             └─StreamProject { exprs: [t.v1, t.v2, t._row_id, Vnode(t._row_id) as _vnode] }
-              └─StreamTableScan { table: t, columns: [t.v1, t.v2, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+              └─StreamTableScan { table: t, columns: [t.v1, t.v2, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - name: order by expression that would be valid in select list
   sql: |
     create table t (x int, y int, z int);
@@ -139,7 +150,7 @@
   stream_plan: |-
     StreamMaterialize { columns: [x, y, $expr1(hidden), t.z(hidden), t._row_id(hidden)], stream_key: [t._row_id], pk_columns: [$expr1, t.z, t._row_id], pk_conflict: NoCheck }
     └─StreamProject { exprs: [t.x, t.y, (t.x + t.y) as $expr1, t.z, t._row_id] }
-      └─StreamTableScan { table: t, columns: [t.x, t.y, t.z, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+      └─StreamTableScan { table: t, columns: [t.x, t.y, t.z, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - name: order by the number of an output column
   sql: |
     create table t (x int, y int);
@@ -168,6 +179,40 @@
     create table t (x int, y int);
     select distinct x from t order by y;
   planner_error: 'Invalid input syntax: for SELECT DISTINCT, ORDER BY expressions must appear in select list'
+- name: select distinct on order by column reuse
+  sql: |
+    create table t (x int);
+    select distinct on (x) x as y from t order by x;
+  batch_plan: |-
+    BatchExchange { order: [t.x ASC], dist: Single }
+    └─BatchSort { order: [t.x ASC] }
+      └─BatchGroupTopN { order: [t.x ASC], limit: 1, offset: 0, group_key: [t.x] }
+        └─BatchExchange { order: [], dist: HashShard(t.x) }
+          └─BatchScan { table: t, columns: [t.x], distribution: SomeShard }
+  stream_plan: |-
+    StreamMaterialize { columns: [y], stream_key: [y], pk_columns: [y], pk_conflict: NoCheck }
+    └─StreamProject { exprs: [t.x] }
+      └─StreamGroupTopN { order: [t.x ASC], limit: 1, offset: 0, group_key: [t.x] }
+        └─StreamExchange { dist: HashShard(t.x) }
+          └─StreamTableScan { table: t, columns: [t.x, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+- name: select distinct order by expression reuse
+  sql: |
+    create table t (x int);
+    select distinct x + 1 as y from t order by x + 1;
+  batch_plan: |-
+    BatchExchange { order: [$expr1 ASC], dist: Single }
+    └─BatchSort { order: [$expr1 ASC] }
+      └─BatchHashAgg { group_key: [$expr1], aggs: [] }
+        └─BatchExchange { order: [], dist: HashShard($expr1) }
+          └─BatchProject { exprs: [(t.x + 1:Int32) as $expr1] }
+            └─BatchScan { table: t, columns: [t.x], distribution: SomeShard }
+  stream_plan: |-
+    StreamMaterialize { columns: [y], stream_key: [y], pk_columns: [y], pk_conflict: NoCheck }
+    └─StreamProject { exprs: [$expr1], noop_update_hint: true }
+      └─StreamHashAgg { group_key: [$expr1], aggs: [count] }
+        └─StreamExchange { dist: HashShard($expr1) }
+          └─StreamProject { exprs: [(t.x + 1:Int32) as $expr1, t._row_id] }
+            └─StreamTableScan { table: t, columns: [t.x, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - name: No BatchSort needed, when input is already sorted
   sql: |
     create table t(v int);

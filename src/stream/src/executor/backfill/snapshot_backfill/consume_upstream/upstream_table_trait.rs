@@ -14,6 +14,7 @@
 
 use std::future::Future;
 use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::anyhow;
 use futures::TryStreamExt;
@@ -45,6 +46,7 @@ pub trait UpstreamTable: Send + Sync + 'static {
         vnode: VirtualNode,
         epoch: u64,
         start_pk: Option<OwnedRow>,
+        rebuild_interval: Duration,
     ) -> impl Future<Output = StreamExecutorResult<Self::SnapshotStream>> + Send + '_;
     fn change_log_stream(
         &self,
@@ -82,6 +84,7 @@ impl<S: StateStore> UpstreamTable for BatchTable<S> {
         vnode: VirtualNode,
         epoch: u64,
         start_pk: Option<OwnedRow>,
+        rebuild_interval: Duration,
     ) -> StreamExecutorResult<Self::SnapshotStream> {
         let stream = self
             .batch_iter_vnode(
@@ -89,6 +92,7 @@ impl<S: StateStore> UpstreamTable for BatchTable<S> {
                 start_pk.as_ref(),
                 vnode,
                 PrefetchOptions::prefetch_for_large_range_scan(),
+                rebuild_interval,
             )
             .await?;
         Ok(stream.map_err(Into::into))

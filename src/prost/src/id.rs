@@ -66,10 +66,7 @@ impl<const N: usize, P: FromStr> FromStr for TypedId<N, P> {
     }
 }
 
-impl<const N: usize, P> TypedId<N, P>
-where
-    Self: UniqueTypedIdDeclaration,
-{
+impl<const N: usize, P> TypedId<N, P> {
     pub const fn new(inner: P) -> Self {
         TypedId(inner)
     }
@@ -112,10 +109,7 @@ where
 
 type TypedU32Id<const N: usize> = TypedId<N, u32>;
 
-impl<const N: usize> TypedU32Id<N>
-where
-    Self: UniqueTypedIdDeclaration,
-{
+impl<const N: usize> TypedU32Id<N> {
     pub const fn placeholder() -> Self {
         Self(OBJECT_ID_PLACEHOLDER)
     }
@@ -312,12 +306,20 @@ declare_id_types!(
     ConnectionId,
     SecretId,
     SubscriberId,
-    LocalOperatorId
+    LocalOperatorId,
+    UserId,
+    RelationId
 );
 
 declare_id_type!(ObjectId, u32, 256);
 
-declare_id_types!(u64, GlobalOperatorId, StreamNodeLocalOperatorId, ExecutorId);
+declare_id_types!(
+    u64,
+    GlobalOperatorId,
+    StreamNodeLocalOperatorId,
+    ExecutorId,
+    PartialGraphId
+);
 
 macro_rules! impl_as {
     (@func $target_id_name:ident, $alias_name:ident) => {
@@ -448,7 +450,9 @@ impl_into_object!(
     SourceId,
     SubscriptionId,
     ViewId,
-    ConnectionId
+    ConnectionId,
+    FunctionId,
+    SecretId
 );
 
 impl_into_object!(
@@ -523,3 +527,17 @@ impl_object_id_conversion!(
     ConnectionId,
     SecretId
 );
+
+macro_rules! declare_relation {
+    ($($id_name:ident),+) => {
+        $(
+            impl $id_name {
+                pub fn as_relation_id(self) -> RelationId {
+                    RelationId::new(self.0)
+                }
+            }
+        )+
+    };
+}
+
+declare_relation!(TableId, SourceId, SinkId, IndexId, ViewId, SubscriptionId);

@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -216,7 +216,7 @@ impl CatalogController {
             .all(&txn)
             .await?
             .into_iter()
-            .map(|(sink, obj)| ObjectModel(sink, obj.unwrap()).into())
+            .map(|(sink, obj)| ObjectModel(sink, obj.unwrap(), None).into())
             .collect();
 
         let removed_streaming_job_ids: Vec<JobId> = StreamingJob::find()
@@ -369,7 +369,7 @@ impl CatalogController {
             .all(&txn)
             .await?
             .into_iter()
-            .map(|(table, obj)| PbTable::from(ObjectModel(table, obj.unwrap())));
+            .map(|(table, obj)| PbTable::from(ObjectModel(table, obj.unwrap(), None)));
         // delete all in to_drop_objects.
         let res = Object::delete_many()
             .filter(object::Column::Oid.is_in(removed_objects.keys().cloned()))

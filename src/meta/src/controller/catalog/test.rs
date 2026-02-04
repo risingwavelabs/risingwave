@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,7 +20,7 @@ mod tests {
 
     const TEST_DATABASE_ID: DatabaseId = DatabaseId::new(1);
     const TEST_SCHEMA_ID: SchemaId = SchemaId::new(2);
-    const TEST_OWNER_ID: UserId = 1;
+    const TEST_OWNER_ID: UserId = UserId::new(1);
 
     #[tokio::test]
     async fn test_database_func() -> MetaResult<()> {

@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,9 +17,8 @@ use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::rc::Rc;
 
-use either::Either;
 use parse_display::Display;
-use risingwave_common::catalog::{Field, Schema};
+use risingwave_common::catalog::Field;
 use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{TableAlias, WindowSpec};
 
@@ -29,8 +28,6 @@ use crate::expr::ExprImpl;
 
 type LiteResult<T> = std::result::Result<T, ErrorCode>;
 
-use super::BoundSetExpr;
-use super::statement::RewriteExprsRecursive;
 use crate::binder::{BoundQuery, COLUMN_GROUP_PREFIX, ShareId};
 
 #[derive(Debug, Clone)]
@@ -73,66 +70,16 @@ pub struct LateralBindContext {
     pub context: BindContext,
 }
 
-/// For recursive CTE, we may need to store it in `cte_to_relation` first,
-/// and then bind it *step by step*.
-///
-/// note: the below sql example is to illustrate when we get the
-/// corresponding binding state when handling a recursive CTE like this.
-///
-/// ```sql
-/// WITH RECURSIVE t(n) AS (
-/// # -------------^ => Init
-///     VALUES (1)
-///   UNION ALL
-///     SELECT n + 1 FROM t WHERE n < 100
-/// # --------------------^ => BaseResolved (after binding the base term, this relation will be bound to `Relation::BackCteRef`)
-/// )
-/// SELECT sum(n) FROM t;
-/// # -----------------^ => Bound (we know exactly what the entire `RecursiveUnion` looks like, and this relation will be bound to `Relation::Share`)
-/// ```
-#[derive(Default, Debug, Clone)]
+#[derive(Debug, Clone)]
 pub enum BindingCteState {
-    /// We know nothing about the CTE before resolving the body.
-    #[default]
-    Init,
-    /// We know the schema form after the base term resolved.
-    BaseResolved {
-        base: BoundSetExpr,
-    },
-    /// We get the whole bound result of the (recursive) CTE.
+    /// We get the whole bound result of the CTE.
     Bound {
-        query: Either<BoundQuery, RecursiveUnion>,
+        query: BoundQuery,
     },
 
     ChangeLog {
         table: Relation,
     },
-}
-
-/// the entire `RecursiveUnion` represents a *bound* recursive cte.
-/// reference: <https://github.com/risingwavelabs/risingwave/pull/15522/files#r1524367781>
-#[derive(Debug, Clone)]
-pub struct RecursiveUnion {
-    /// currently this *must* be true,
-    /// otherwise binding will fail.
-    #[allow(dead_code)]
-    pub all: bool,
-    /// lhs part of the `UNION ALL` operator
-    pub base: Box<BoundSetExpr>,
-    /// rhs part of the `UNION ALL` operator
-    pub recursive: Box<BoundSetExpr>,
-    /// the aligned schema for this union
-    /// will be the *same* schema as recursive's
-    /// this is just for a better readability
-    pub schema: Schema,
-}
-
-impl RewriteExprsRecursive for RecursiveUnion {
-    fn rewrite_exprs_recursive(&mut self, rewriter: &mut impl crate::expr::ExprRewriter) {
-        // rewrite `base` and `recursive` separately
-        self.base.rewrite_exprs_recursive(rewriter);
-        self.recursive.rewrite_exprs_recursive(rewriter);
-    }
 }
 
 #[derive(Clone, Debug)]

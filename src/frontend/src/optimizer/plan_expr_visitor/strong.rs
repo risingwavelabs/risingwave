@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -227,6 +227,8 @@ impl Strong {
             | ExprType::Scale
             | ExprType::MinScale
             | ExprType::TrimScale
+            | ExprType::Gamma
+            | ExprType::Lgamma
             | ExprType::Encode
             | ExprType::Decode
             | ExprType::Sha1
@@ -277,6 +279,7 @@ impl Strong {
             | ExprType::ArrayMax
             | ExprType::ArraySum
             | ExprType::ArraySort
+            | ExprType::ArrayReverse
             | ExprType::ArrayContains
             | ExprType::ArrayContained
             | ExprType::ArrayFlatten

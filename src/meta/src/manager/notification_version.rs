@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,7 +16,7 @@ use risingwave_meta_model::catalog_version;
 use risingwave_meta_model::catalog_version::VersionCategory;
 use risingwave_meta_model::prelude::CatalogVersion;
 use sea_orm::ActiveValue::Set;
-use sea_orm::{ActiveModelTrait, DatabaseConnection, EntityTrait, TransactionTrait};
+use sea_orm::{DatabaseConnection, EntityTrait, TransactionTrait};
 
 use crate::MetaResult;
 use crate::controller::SqlMetaStore;
@@ -55,11 +55,11 @@ impl NotificationVersionGenerator {
     }
 
     pub async fn increase_version(&mut self) {
-        catalog_version::ActiveModel {
+        CatalogVersion::update(catalog_version::ActiveModel {
             name: Set(VersionCategory::Notification),
             version: Set((self.current_version + 1) as i64),
-        }
-        .update(&self.conn)
+        })
+        .exec(&self.conn)
         .await
         .unwrap();
         self.current_version += 1;

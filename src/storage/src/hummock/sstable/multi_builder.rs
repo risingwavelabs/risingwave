@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -619,6 +619,7 @@ mod tests {
                 FilterKeyExtractorImpl::FullKey(FullKeyFilterKeyExtractor),
                 table_id_to_vnode,
                 table_id_to_watermark_serde,
+                HashMap::default(),
             ));
 
             let mut builder = CapacitySplitTableBuilder::new(

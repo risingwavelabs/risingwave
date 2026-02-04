@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -118,7 +118,8 @@ impl<'a> MessageMeta<'a> {
                     CDC_TABLE_NAME_COLUMN_NAME,
                     "unexpected cdc meta column name"
                 );
-                Some(cdc_meta.full_table_name.as_str().into())
+                // For CDC sources, extract_table_name() strips the database prefix:
+                cdc_meta.extract_table_name()
             }
 
             // For other cases, return `None`.

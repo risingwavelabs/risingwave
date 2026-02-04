@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -38,26 +38,21 @@ use crate::utils::ColIndexMappingRewriteExt;
 pub struct BatchHashJoin {
     pub base: PlanBase<Batch>,
     core: generic::Join<PlanRef>,
-    /// The join condition must be equivalent to `logical.on`, but separated into equal and
-    /// non-equal parts to facilitate execution later
-    eq_join_predicate: EqJoinPredicate,
     /// `AsOf` desc
     asof_desc: Option<AsOfJoinDesc>,
 }
 
 impl BatchHashJoin {
-    pub fn new(
-        core: generic::Join<PlanRef>,
-        eq_join_predicate: EqJoinPredicate,
-        asof_desc: Option<AsOfJoinDesc>,
-    ) -> Self {
+    pub fn new(core: generic::Join<PlanRef>, asof_desc: Option<AsOfJoinDesc>) -> Self {
+        core.on
+            .as_eq_predicate_ref()
+            .expect("BatchHashJoin requires JoinOn::EqPredicate in core");
         let dist = Self::derive_dist(core.left.distribution(), core.right.distribution(), &core);
         let base = PlanBase::new_batch_with_core(&core, dist, Order::any());
 
         Self {
             base,
             core,
-            eq_join_predicate,
             asof_desc,
         }
     }
@@ -99,7 +94,10 @@ impl BatchHashJoin {
 
     /// Get a reference to the batch hash join's eq join predicate.
     pub fn eq_join_predicate(&self) -> &EqJoinPredicate {
-        &self.eq_join_predicate
+        self.core
+            .on
+            .as_eq_predicate_ref()
+            .expect("BatchHashJoin should store predicate as EqJoinPredicate")
     }
 }
 
@@ -138,7 +136,7 @@ impl PlanTreeNodeBinary<Batch> for BatchHashJoin {
         let mut core = self.core.clone();
         core.left = left;
         core.right = right;
-        Self::new(core, self.eq_join_predicate.clone(), self.asof_desc)
+        Self::new(core, self.asof_desc)
     }
 }
 
@@ -205,23 +203,24 @@ impl ToDistributedBatch for BatchHashJoin {
 
 impl ToBatchPb for BatchHashJoin {
     fn to_batch_prost_body(&self) -> NodeBody {
+        let eq_join_predicate = self.eq_join_predicate();
         NodeBody::HashJoin(HashJoinNode {
             join_type: self.core.join_type as i32,
             left_key: self
-                .eq_join_predicate
+                .eq_join_predicate()
                 .left_eq_indexes()
                 .into_iter()
                 .map(|a| a as i32)
                 .collect(),
             right_key: self
-                .eq_join_predicate
+                .eq_join_predicate()
                 .right_eq_indexes()
                 .into_iter()
                 .map(|a| a as i32)
                 .collect(),
-            null_safe: self.eq_join_predicate.null_safes().into_iter().collect(),
+            null_safe: eq_join_predicate.null_safes().into_iter().collect(),
             condition: self
-                .eq_join_predicate
+                .eq_join_predicate()
                 .other_cond()
                 .as_expr_unless_true()
                 .map(|x| x.to_expr_proto()),
@@ -250,7 +249,10 @@ impl ExprRewritable<Batch> for BatchHashJoin {
     fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
         let mut core = self.core.clone();
         core.rewrite_exprs(r);
-        let eq_join_predicate = self.eq_join_predicate.rewrite_exprs(r);
+        let eq_join_predicate = core
+            .on
+            .as_eq_predicate_ref()
+            .expect("BatchHashJoin should store predicate as EqJoinPredicate");
         let desc = self.asof_desc.map(|_| {
             LogicalJoin::get_inequality_desc_from_predicate(
                 eq_join_predicate.other_cond().clone(),
@@ -258,7 +260,7 @@ impl ExprRewritable<Batch> for BatchHashJoin {
             )
             .unwrap()
         });
-        Self::new(core, eq_join_predicate, desc).into()
+        Self::new(core, desc).into()
     }
 }
 

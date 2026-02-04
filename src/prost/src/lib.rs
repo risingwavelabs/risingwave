@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -36,6 +36,7 @@ use risingwave_error::tonic::ToTonicStatus;
 use thiserror::Error;
 
 use crate::common::WorkerType;
+use crate::ddl_service::streaming_job_resource_type;
 use crate::id::{FragmentId, SourceId, WorkerId};
 use crate::meta::event_log::event_recovery;
 use crate::stream_plan::PbStreamScanType;
@@ -527,12 +528,47 @@ impl catalog::Sink {
         // TODO: use a more unique name
         format!("{}", self.id)
     }
+
+    /// Get `ignore_delete` with backward compatibility.
+    ///
+    /// Historically we use `sink_type == ForceAppendOnly` to represent this behavior.
+    #[allow(deprecated)]
+    pub fn ignore_delete(&self) -> bool {
+        self.raw_ignore_delete || self.sink_type() == catalog::SinkType::ForceAppendOnly
+    }
+}
+
+impl stream_plan::SinkDesc {
+    /// Get `ignore_delete` with backward compatibility.
+    ///
+    /// Historically we use `sink_type == ForceAppendOnly` to represent this behavior.
+    #[allow(deprecated)]
+    pub fn ignore_delete(&self) -> bool {
+        self.raw_ignore_delete || self.sink_type() == catalog::SinkType::ForceAppendOnly
+    }
+}
+
+impl connector_service::SinkParam {
+    /// Get `ignore_delete` with backward compatibility.
+    ///
+    /// Historically we use `sink_type == ForceAppendOnly` to represent this behavior.
+    #[allow(deprecated)]
+    pub fn ignore_delete(&self) -> bool {
+        self.raw_ignore_delete || self.sink_type() == catalog::SinkType::ForceAppendOnly
+    }
 }
 
 impl catalog::Table {
     /// Get clean watermark column indices with backward compatibility.
+    ///
     /// Returns the new `clean_watermark_indices` if set, otherwise derives it from the old
     /// `clean_watermark_index_in_pk` by converting PK index to column index.
+    ///
+    /// Note: a non-empty slice does not imply that the executor **SHOULD** clean this table
+    /// by watermark, but that the storage **CAN** clean this table by watermark. It's actually
+    /// the executor's responsibility to decide whether state cleaning is correct on semantics.
+    /// Besides, due to historical reasons, this method may return `[pk[0]]` even if the table
+    /// has nothing to do with watermark.
     #[expect(deprecated)]
     pub fn get_clean_watermark_column_indices(&self) -> Vec<u32> {
         if !self.clean_watermark_indices.is_empty() {
@@ -560,7 +596,15 @@ impl catalog::Table {
 
     /// Convert clean watermark column indices to PK indices and return the minimum.
     /// Returns None if no clean watermark is configured.
+    ///
     /// This is a backward-compatible method to replace the deprecated `clean_watermark_index_in_pk` field.
+    ///
+    /// Note: a `Some` return value does not imply that the executor **SHOULD** clean this table
+    /// by watermark, but that the storage **CAN** clean this table by watermark. It's actually
+    /// the executor's responsibility to decide whether state cleaning is correct on semantics.
+    /// Besides, due to historical reasons, this method may return `Some(pk[0])` even if the table
+    /// has nothing to do with watermark.
+    ///
     /// TODO: remove this method after totally deprecating `clean_watermark_index_in_pk`.
     pub fn get_clean_watermark_index_in_pk_compat(&self) -> Option<usize> {
         let clean_watermark_column_indices = self.get_clean_watermark_column_indices();
@@ -729,6 +773,18 @@ impl expr::UserDefinedFunctionMetadata {
         } else {
             // after `PbUdfExprVersion::NameInRuntime`, `identifier` means `name_in_runtime`
             self.identifier.as_deref()
+        }
+    }
+}
+
+impl streaming_job_resource_type::ResourceType {
+    pub fn resource_group(&self) -> Option<String> {
+        match self {
+            streaming_job_resource_type::ResourceType::Regular(_) => None,
+            streaming_job_resource_type::ResourceType::SpecificResourceGroup(group)
+            | streaming_job_resource_type::ResourceType::ServerlessBackfillResourceGroup(group) => {
+                Some(group.clone())
+            }
         }
     }
 }

@@ -72,9 +72,11 @@
     └─LogicalOverWindow { window_functions: [first_value(t.x) OVER(ROWS BETWEEN 1 PRECEDING AND 1 PRECEDING)] }
       └─LogicalProject { exprs: [t.x, t._row_id, t._rw_timestamp] }
         └─LogicalScan { table: t, columns: [t.x, t._row_id, t._rw_timestamp] }
-  batch_error: |-
-    Feature is not yet implemented: Window function with empty PARTITION BY is not supported because of potential bad performance. If you really need this, please workaround with something like `PARTITION BY 1::int`.
-    Tracking issue: https://github.com/risingwavelabs/risingwave/issues/11505
+  batch_plan: |-
+    BatchProject { exprs: [first_value] }
+    └─BatchOverWindow { window_functions: [first_value(t.x) OVER(ROWS BETWEEN 1 PRECEDING AND 1 PRECEDING)] }
+      └─BatchExchange { order: [], dist: Single }
+        └─BatchScan { table: t, columns: [t.x], distribution: SomeShard }
   stream_error: |-
     Feature is not yet implemented: Window function with empty PARTITION BY is not supported because of potential bad performance. If you really need this, please workaround with something like `PARTITION BY 1::int`.
     Tracking issue: https://github.com/risingwavelabs/risingwave/issues/11505
@@ -87,9 +89,11 @@
     └─LogicalOverWindow { window_functions: [first_value(t.x) OVER(ROWS BETWEEN 2 FOLLOWING AND 2 FOLLOWING)] }
       └─LogicalProject { exprs: [t.x, t._row_id, t._rw_timestamp, 2:Int32] }
         └─LogicalScan { table: t, columns: [t.x, t._row_id, t._rw_timestamp] }
-  batch_error: |-
-    Feature is not yet implemented: Window function with empty PARTITION BY is not supported because of potential bad performance. If you really need this, please workaround with something like `PARTITION BY 1::int`.
-    Tracking issue: https://github.com/risingwavelabs/risingwave/issues/11505
+  batch_plan: |-
+    BatchProject { exprs: [first_value] }
+    └─BatchOverWindow { window_functions: [first_value(t.x) OVER(ROWS BETWEEN 2 FOLLOWING AND 2 FOLLOWING)] }
+      └─BatchExchange { order: [], dist: Single }
+        └─BatchScan { table: t, columns: [t.x], distribution: SomeShard }
   stream_error: |-
     Feature is not yet implemented: Window function with empty PARTITION BY is not supported because of potential bad performance. If you really need this, please workaround with something like `PARTITION BY 1::int`.
     Tracking issue: https://github.com/risingwavelabs/risingwave/issues/11505
@@ -122,7 +126,7 @@
     StreamMaterialize { columns: [x, y, t._row_id(hidden), lag], stream_key: [t._row_id, y], pk_columns: [t._row_id, y], pk_conflict: NoCheck }
     └─StreamOverWindow { window_functions: [first_value(t.x) OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN 1 PRECEDING AND 1 PRECEDING)] }
       └─StreamExchange { dist: HashShard(t.y) }
-        └─StreamTableScan { table: t, columns: [t.x, t.y, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+        └─StreamTableScan { table: t, columns: [t.x, t.y, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - id: lag with over clause, ignoring frame definition
   sql: |
     create table t(x int, y int);
@@ -142,7 +146,7 @@
     StreamMaterialize { columns: [x, y, t._row_id(hidden), lag], stream_key: [t._row_id, y], pk_columns: [t._row_id, y], pk_conflict: NoCheck }
     └─StreamOverWindow { window_functions: [first_value(t.x) OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN 1 PRECEDING AND 1 PRECEDING)] }
       └─StreamExchange { dist: HashShard(t.y) }
-        └─StreamTableScan { table: t, columns: [t.x, t.y, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+        └─StreamTableScan { table: t, columns: [t.x, t.y, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - id: aggregate with empty over clause
   sql: |
     create table t(x int);
@@ -189,12 +193,12 @@
       └─StreamHashJoin { type: Inner, predicate: t.y IS NOT DISTINCT FROM t.y, output: [t.x, t.y, sum(t.x), max(t.x), min(t.w), t._row_id, t.y] }
         ├─StreamExchange { dist: HashShard(t.y) }
         │ └─StreamShare { id: 1 }
-        │   └─StreamTableScan { table: t, columns: [t.x, t.y, t.w, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+        │   └─StreamTableScan { table: t, columns: [t.x, t.y, t.w, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
         └─StreamProject { exprs: [t.y, sum(t.x), max(t.x), min(t.w)] }
           └─StreamHashAgg { group_key: [t.y], aggs: [sum(t.x), max(t.x), min(t.w), count] }
             └─StreamExchange { dist: HashShard(t.y) }
               └─StreamShare { id: 1 }
-                └─StreamTableScan { table: t, columns: [t.x, t.y, t.w, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+                └─StreamTableScan { table: t, columns: [t.x, t.y, t.w, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - id: aggregate with over clause, rows frame definition with implicit current row, without ORDER BY
   sql: |
     create table t(x int, y int);
@@ -214,7 +218,7 @@
     StreamMaterialize { columns: [x, y, t._row_id(hidden), min], stream_key: [t._row_id, y], pk_columns: [t._row_id, y], pk_conflict: NoCheck }
     └─StreamOverWindow { window_functions: [min(t.x) OVER(PARTITION BY t.y ROWS BETWEEN 10 PRECEDING AND CURRENT ROW)] }
       └─StreamExchange { dist: HashShard(t.y) }
-        └─StreamTableScan { table: t, columns: [t.x, t.y, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+        └─StreamTableScan { table: t, columns: [t.x, t.y, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - id: aggregate with over clause, rows frame definition with between, without ORDER BY
   sql: |
     create table t(x int, y int);
@@ -234,7 +238,7 @@
     StreamMaterialize { columns: [x, y, t._row_id(hidden), min], stream_key: [t._row_id, y], pk_columns: [t._row_id, y], pk_conflict: NoCheck }
     └─StreamOverWindow { window_functions: [min(t.x) OVER(PARTITION BY t.y ROWS BETWEEN 1 PRECEDING AND 2 FOLLOWING)] }
       └─StreamExchange { dist: HashShard(t.y) }
-        └─StreamTableScan { table: t, columns: [t.x, t.y, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+        └─StreamTableScan { table: t, columns: [t.x, t.y, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - id: aggregate with over clause, invalid frame definition case 1
   sql: |
     create table t(x int, y int);
@@ -274,7 +278,7 @@
     StreamMaterialize { columns: [x, y, t._row_id(hidden), max], stream_key: [t._row_id, y], pk_columns: [t._row_id, y], pk_conflict: NoCheck }
     └─StreamOverWindow { window_functions: [max(t.x) OVER(PARTITION BY t.y ORDER BY t.x ASC RANGE BETWEEN 100 PRECEDING AND CURRENT ROW)] }
       └─StreamExchange { dist: HashShard(t.y) }
-        └─StreamTableScan { table: t, columns: [t.x, t.y, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+        └─StreamTableScan { table: t, columns: [t.x, t.y, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - id: aggregate with over clause, range frame definition with between
   sql: |
     create table t(x int, y int);
@@ -294,7 +298,7 @@
     StreamMaterialize { columns: [x, y, t._row_id(hidden), max], stream_key: [t._row_id, y], pk_columns: [t._row_id, y], pk_conflict: NoCheck }
     └─StreamOverWindow { window_functions: [max(t.x) OVER(PARTITION BY t.y ORDER BY t.x ASC RANGE BETWEEN 100 PRECEDING AND UNBOUNDED FOLLOWING)] }
       └─StreamExchange { dist: HashShard(t.y) }
-        └─StreamTableScan { table: t, columns: [t.x, t.y, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+        └─StreamTableScan { table: t, columns: [t.x, t.y, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - id: aggregate with over clause, unbounded range, with ORDER BY
   sql: |
     create table t(x int, y int);
@@ -314,7 +318,7 @@
     StreamMaterialize { columns: [x, y, t._row_id(hidden), first_value], stream_key: [t._row_id, y], pk_columns: [t._row_id, y], pk_conflict: NoCheck }
     └─StreamOverWindow { window_functions: [first_value(t.x) OVER(PARTITION BY t.y ORDER BY t.x DESC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
       └─StreamExchange { dist: HashShard(t.y) }
-        └─StreamTableScan { table: t, columns: [t.x, t.y, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+        └─StreamTableScan { table: t, columns: [t.x, t.y, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - id: more aggregate functions
   sql: |
     create table t(x int, y int, z int, w int);
@@ -349,7 +353,7 @@
             └─StreamProject { exprs: [t.x, t.y, t.z, ($expr1 * $expr1) as $expr2, $expr1, (t.x * t.x) as $expr3, t._row_id] }
               └─StreamProject { exprs: [t.x, t.y, t.z, (t.x - t.y) as $expr1, t._row_id] }
                 └─StreamFilter { predicate: (t.z > 0:Int32) }
-                  └─StreamTableScan { table: t, columns: [t.x, t.y, t.z, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+                  └─StreamTableScan { table: t, columns: [t.x, t.y, t.z, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - id: aggregate with expression in func arguments and over clause
   sql: |
     create table t(x int, y int, z int, w int);
@@ -386,7 +390,7 @@
         └─StreamOverWindow { window_functions: [sum($expr1) OVER(PARTITION BY $expr2 ORDER BY $expr3 ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW), count($expr1) OVER(PARTITION BY $expr2 ORDER BY $expr3 ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
           └─StreamExchange { dist: HashShard($expr2) }
             └─StreamProject { exprs: [t.x, t.y, t.z, (t.z * t.z) as $expr1, (t.y + 1:Int32) as $expr2, Abs(t.w) as $expr3, t._row_id] }
-              └─StreamTableScan { table: t, columns: [t.x, t.y, t.z, t.w, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+              └─StreamTableScan { table: t, columns: [t.x, t.y, t.z, t.w, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - id: row_number with empty over clause
   sql: |
     create table t(x int);
@@ -417,7 +421,7 @@
     └─StreamProject { exprs: [row_number, rank, dense_rank, t._row_id, t.x] }
       └─StreamOverWindow { window_functions: [row_number() OVER(PARTITION BY t.x ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW), rank() OVER(PARTITION BY t.x ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW), dense_rank() OVER(PARTITION BY t.x ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
         └─StreamExchange { dist: HashShard(t.x) }
-          └─StreamTableScan { table: t, columns: [t.x, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+          └─StreamTableScan { table: t, columns: [t.x, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - id: row_number with valid over clause
   sql: |
     create table t(x int, y int);
@@ -439,7 +443,7 @@
     └─StreamProject { exprs: [row_number, t._row_id, t.x] }
       └─StreamOverWindow { window_functions: [row_number() OVER(PARTITION BY t.x ORDER BY t.y ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
         └─StreamExchange { dist: HashShard(t.x) }
-          └─StreamTableScan { table: t, columns: [t.x, t.y, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+          └─StreamTableScan { table: t, columns: [t.x, t.y, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - id: TopN by row_number with rank output
   sql: |
     create table t(x int);
@@ -455,17 +459,45 @@
             └─LogicalScan { table: t, columns: [t.x, t._row_id, t._rw_timestamp] }
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchOverWindow { window_functions: [row_number() OVER(PARTITION BY t.x ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
-      └─BatchSort { order: [t.x ASC, t.x ASC] }
-        └─BatchGroupTopN { order: [t.x ASC], limit: 2, offset: 0, group_key: [t.x] }
-          └─BatchExchange { order: [], dist: HashShard(t.x) }
+    └─BatchFilter { predicate: (row_number < 3:Int32) }
+      └─BatchOverWindow { window_functions: [row_number() OVER(PARTITION BY t.x ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
+        └─BatchExchange { order: [t.x ASC, t.x ASC], dist: HashShard(t.x) }
+          └─BatchSort { order: [t.x ASC, t.x ASC] }
             └─BatchScan { table: t, columns: [t.x], distribution: SomeShard }
   stream_plan: |-
     StreamMaterialize { columns: [x, t._row_id(hidden), rank], stream_key: [x, t._row_id], pk_columns: [x, t._row_id], pk_conflict: NoCheck }
     └─StreamOverWindow { window_functions: [row_number() OVER(PARTITION BY t.x ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
       └─StreamGroupTopN { order: [t.x ASC], limit: 2, offset: 0, group_key: [t.x] }
         └─StreamExchange { dist: HashShard(t.x) }
-          └─StreamTableScan { table: t, columns: [t.x, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+          └─StreamTableScan { table: t, columns: [t.x, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+- id: TopN by row_number with rank output and offset
+  sql: |
+    create table t(x int, y int);
+    select x, y, rank from
+      (select *, row_number() over(PARTITION BY x ORDER BY y) rank from t)
+    where rank = 2;
+  logical_plan: |-
+    LogicalProject { exprs: [t.x, t.y, row_number] }
+    └─LogicalFilter { predicate: (row_number = 2:Int32) }
+      └─LogicalProject { exprs: [t.x, t.y, row_number] }
+        └─LogicalOverWindow { window_functions: [row_number() OVER(PARTITION BY t.x ORDER BY t.y ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
+          └─LogicalProject { exprs: [t.x, t.y, t._row_id, t._rw_timestamp] }
+            └─LogicalScan { table: t, columns: [t.x, t.y, t._row_id, t._rw_timestamp] }
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchFilter { predicate: (row_number = 2:Int32) }
+      └─BatchOverWindow { window_functions: [row_number() OVER(PARTITION BY t.x ORDER BY t.y ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
+        └─BatchExchange { order: [t.x ASC, t.y ASC], dist: HashShard(t.x) }
+          └─BatchSort { order: [t.x ASC, t.y ASC] }
+            └─BatchScan { table: t, columns: [t.x, t.y], distribution: SomeShard }
+  stream_plan: |-
+    StreamMaterialize { columns: [x, y, rank], stream_key: [x], pk_columns: [x], pk_conflict: NoCheck }
+    └─StreamProject { exprs: [t.x, t.y, (row_number + 1:Int64) as $expr1] }
+      └─StreamOverWindow { window_functions: [row_number() OVER(PARTITION BY t.x ORDER BY t.y ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
+        └─StreamProject { exprs: [t.x, t.y] }
+          └─StreamGroupTopN { order: [t.y ASC], limit: 1, offset: 1, group_key: [t.x] }
+            └─StreamExchange { dist: HashShard(t.x) }
+              └─StreamTableScan { table: t, columns: [t.x, t.y, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - id: TopN by row_number without rank output, 1
   sql: |
     create table t(x int, y int);
@@ -480,18 +512,23 @@
           └─LogicalProject { exprs: [t.x, t.y, t._row_id, t._rw_timestamp] }
             └─LogicalScan { table: t, columns: [t.x, t.y, t._row_id, t._rw_timestamp] }
   optimized_logical_plan_for_batch: |-
-    LogicalTopN { order: [t.x ASC], limit: 3, offset: 0, group_key: [t.y] }
-    └─LogicalScan { table: t, columns: [t.x, t.y] }
+    LogicalProject { exprs: [t.x, t.y] }
+    └─LogicalFilter { predicate: (row_number <= 3:Int32) }
+      └─LogicalOverWindow { window_functions: [row_number() OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
+        └─LogicalScan { table: t, columns: [t.x, t.y] }
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchGroupTopN { order: [t.x ASC], limit: 3, offset: 0, group_key: [t.y] }
-      └─BatchExchange { order: [], dist: HashShard(t.y) }
-        └─BatchScan { table: t, columns: [t.x, t.y], distribution: SomeShard }
+    └─BatchProject { exprs: [t.x, t.y] }
+      └─BatchFilter { predicate: (row_number <= 3:Int32) }
+        └─BatchOverWindow { window_functions: [row_number() OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
+          └─BatchExchange { order: [t.y ASC, t.x ASC], dist: HashShard(t.y) }
+            └─BatchSort { order: [t.y ASC, t.x ASC] }
+              └─BatchScan { table: t, columns: [t.x, t.y], distribution: SomeShard }
   stream_plan: |-
     StreamMaterialize { columns: [x, y, t._row_id(hidden)], stream_key: [y, t._row_id], pk_columns: [y, t._row_id], pk_conflict: NoCheck }
     └─StreamGroupTopN { order: [t.x ASC], limit: 3, offset: 0, group_key: [t.y] }
       └─StreamExchange { dist: HashShard(t.y) }
-        └─StreamTableScan { table: t, columns: [t.x, t.y, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+        └─StreamTableScan { table: t, columns: [t.x, t.y, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - id: TopN by row_number without rank output, 2
   sql: |
     create table t(x int, y int);
@@ -506,21 +543,24 @@
           └─LogicalProject { exprs: [t.x, t.y, t._row_id, t._rw_timestamp] }
             └─LogicalScan { table: t, columns: [t.x, t.y, t._row_id, t._rw_timestamp] }
   optimized_logical_plan_for_batch: |-
-    LogicalFilter { predicate: (t.x > t.y) }
-    └─LogicalTopN { order: [t.x ASC], limit: 2, offset: 0, group_key: [t.y] }
-      └─LogicalScan { table: t, columns: [t.x, t.y] }
+    LogicalProject { exprs: [t.x, t.y] }
+    └─LogicalFilter { predicate: (row_number < 3:Int32) AND (t.x > t.y) }
+      └─LogicalOverWindow { window_functions: [row_number() OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
+        └─LogicalScan { table: t, columns: [t.x, t.y] }
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchFilter { predicate: (t.x > t.y) }
-      └─BatchGroupTopN { order: [t.x ASC], limit: 2, offset: 0, group_key: [t.y] }
-        └─BatchExchange { order: [], dist: HashShard(t.y) }
-          └─BatchScan { table: t, columns: [t.x, t.y], distribution: SomeShard }
+    └─BatchProject { exprs: [t.x, t.y] }
+      └─BatchFilter { predicate: (row_number < 3:Int32) AND (t.x > t.y) }
+        └─BatchOverWindow { window_functions: [row_number() OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
+          └─BatchExchange { order: [t.y ASC, t.x ASC], dist: HashShard(t.y) }
+            └─BatchSort { order: [t.y ASC, t.x ASC] }
+              └─BatchScan { table: t, columns: [t.x, t.y], distribution: SomeShard }
   stream_plan: |-
     StreamMaterialize { columns: [x, y, t._row_id(hidden)], stream_key: [y, t._row_id], pk_columns: [y, t._row_id], pk_conflict: NoCheck }
     └─StreamFilter { predicate: (t.x > t.y) }
       └─StreamGroupTopN { order: [t.x ASC], limit: 2, offset: 0, group_key: [t.y] }
         └─StreamExchange { dist: HashShard(t.y) }
-          └─StreamTableScan { table: t, columns: [t.x, t.y, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+          └─StreamTableScan { table: t, columns: [t.x, t.y, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - id: TopN by rank without rank output
   sql: |
     create table t(x int, y int);
@@ -535,18 +575,23 @@
           └─LogicalProject { exprs: [t.x, t.y, t._row_id, t._rw_timestamp] }
             └─LogicalScan { table: t, columns: [t.x, t.y, t._row_id, t._rw_timestamp] }
   optimized_logical_plan_for_batch: |-
-    LogicalTopN { order: [t.x ASC], limit: 3, offset: 0, with_ties: true, group_key: [t.y] }
-    └─LogicalScan { table: t, columns: [t.x, t.y] }
+    LogicalProject { exprs: [t.x, t.y] }
+    └─LogicalFilter { predicate: (rank <= 3:Int32) }
+      └─LogicalOverWindow { window_functions: [rank() OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
+        └─LogicalScan { table: t, columns: [t.x, t.y] }
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchGroupTopN { order: [t.x ASC], limit: 3, offset: 0, with_ties: true, group_key: [t.y] }
-      └─BatchExchange { order: [], dist: HashShard(t.y) }
-        └─BatchScan { table: t, columns: [t.x, t.y], distribution: SomeShard }
+    └─BatchProject { exprs: [t.x, t.y] }
+      └─BatchFilter { predicate: (rank <= 3:Int32) }
+        └─BatchOverWindow { window_functions: [rank() OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
+          └─BatchExchange { order: [t.y ASC, t.x ASC], dist: HashShard(t.y) }
+            └─BatchSort { order: [t.y ASC, t.x ASC] }
+              └─BatchScan { table: t, columns: [t.x, t.y], distribution: SomeShard }
   stream_plan: |-
     StreamMaterialize { columns: [x, y, t._row_id(hidden)], stream_key: [y, t._row_id], pk_columns: [y, t._row_id], pk_conflict: NoCheck }
     └─StreamGroupTopN { order: [t.x ASC], limit: 3, offset: 0, with_ties: true, group_key: [t.y] }
       └─StreamExchange { dist: HashShard(t.y) }
-        └─StreamTableScan { table: t, columns: [t.x, t.y, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+        └─StreamTableScan { table: t, columns: [t.x, t.y, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - id: TopN by rank, with offset
   sql: |
     create table t(x int, y int);
@@ -575,79 +620,97 @@
       └─StreamFilter { predicate: (rank <= 3:Int32) AND (rank > 1:Int32) }
         └─StreamOverWindow { window_functions: [rank() OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
           └─StreamExchange { dist: HashShard(t.y) }
-            └─StreamTableScan { table: t, columns: [t.x, t.y, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+            └─StreamTableScan { table: t, columns: [t.x, t.y, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - sql: |
     create table t(x int, y int);
     select x, y from
       (select *, row_number() over(PARTITION BY y ORDER BY x) rank from t)
     where rank > 3;
   optimized_logical_plan_for_batch: |-
-    LogicalTopN { order: [t.x ASC], limit: 9223372036854775807, offset: 3, group_key: [t.y] }
-    └─LogicalScan { table: t, columns: [t.x, t.y] }
+    LogicalProject { exprs: [t.x, t.y] }
+    └─LogicalFilter { predicate: (row_number > 3:Int32) }
+      └─LogicalOverWindow { window_functions: [row_number() OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
+        └─LogicalScan { table: t, columns: [t.x, t.y] }
 - sql: |
     create table t(x int, y int);
     select x, y from
       (select *, row_number() over(PARTITION BY y ORDER BY x) rank from t)
     where rank >= 3;
   optimized_logical_plan_for_batch: |-
-    LogicalTopN { order: [t.x ASC], limit: 9223372036854775807, offset: 2, group_key: [t.y] }
-    └─LogicalScan { table: t, columns: [t.x, t.y] }
+    LogicalProject { exprs: [t.x, t.y] }
+    └─LogicalFilter { predicate: (row_number >= 3:Int32) }
+      └─LogicalOverWindow { window_functions: [row_number() OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
+        └─LogicalScan { table: t, columns: [t.x, t.y] }
 - sql: |
     create table t(x int, y int);
     select x, y from
       (select *, row_number() over(PARTITION BY y ORDER BY x) rank from t)
     where 3 <= rank AND rank <= 5;
   optimized_logical_plan_for_batch: |-
-    LogicalTopN { order: [t.x ASC], limit: 3, offset: 2, group_key: [t.y] }
-    └─LogicalScan { table: t, columns: [t.x, t.y] }
+    LogicalProject { exprs: [t.x, t.y] }
+    └─LogicalFilter { predicate: (3:Int32 <= row_number) AND (row_number <= 5:Int32) }
+      └─LogicalOverWindow { window_functions: [row_number() OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
+        └─LogicalScan { table: t, columns: [t.x, t.y] }
 - sql: |
     create table t(x int, y int);
     select x, y from
       (select *, row_number() over(PARTITION BY y ORDER BY x) rank from t)
     where rank BETWEEN 3 AND 5;
   optimized_logical_plan_for_batch: |-
-    LogicalTopN { order: [t.x ASC], limit: 3, offset: 2, group_key: [t.y] }
-    └─LogicalScan { table: t, columns: [t.x, t.y] }
+    LogicalProject { exprs: [t.x, t.y] }
+    └─LogicalFilter { predicate: (row_number >= 3:Int32) AND (row_number <= 5:Int32) }
+      └─LogicalOverWindow { window_functions: [row_number() OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
+        └─LogicalScan { table: t, columns: [t.x, t.y] }
 - sql: |
     create table t(x int, y int);
     select x, y from
       (select *, row_number() over(PARTITION BY y ORDER BY x) rank from t)
     where 3 < rank AND rank <= 5;
   optimized_logical_plan_for_batch: |-
-    LogicalTopN { order: [t.x ASC], limit: 2, offset: 3, group_key: [t.y] }
-    └─LogicalScan { table: t, columns: [t.x, t.y] }
+    LogicalProject { exprs: [t.x, t.y] }
+    └─LogicalFilter { predicate: (3:Int32 < row_number) AND (row_number <= 5:Int32) }
+      └─LogicalOverWindow { window_functions: [row_number() OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
+        └─LogicalScan { table: t, columns: [t.x, t.y] }
 - sql: |
     create table t(x int, y int);
     select x, y from
       (select *, row_number() over(PARTITION BY y ORDER BY x) rank from t)
     where 3 <= rank AND rank < 5;
   optimized_logical_plan_for_batch: |-
-    LogicalTopN { order: [t.x ASC], limit: 2, offset: 2, group_key: [t.y] }
-    └─LogicalScan { table: t, columns: [t.x, t.y] }
+    LogicalProject { exprs: [t.x, t.y] }
+    └─LogicalFilter { predicate: (3:Int32 <= row_number) AND (row_number < 5:Int32) }
+      └─LogicalOverWindow { window_functions: [row_number() OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
+        └─LogicalScan { table: t, columns: [t.x, t.y] }
 - sql: |
     create table t(x int, y int);
     select x, y from
       (select *, row_number() over(PARTITION BY y ORDER BY x) rank from t)
     where 3 < rank AND rank < 5;
   optimized_logical_plan_for_batch: |-
-    LogicalTopN { order: [t.x ASC], limit: 1, offset: 3, group_key: [t.y] }
-    └─LogicalScan { table: t, columns: [t.x, t.y] }
+    LogicalProject { exprs: [t.x, t.y] }
+    └─LogicalFilter { predicate: (3:Int32 < row_number) AND (row_number < 5:Int32) }
+      └─LogicalOverWindow { window_functions: [row_number() OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
+        └─LogicalScan { table: t, columns: [t.x, t.y] }
 - sql: |
     create table t(x int, y int);
     select x, y from
       (select *, row_number() over(PARTITION BY y ORDER BY x) rank from t)
     where 3 < rank AND rank < 6 AND rank >= 4 AND rank < 5;
   optimized_logical_plan_for_batch: |-
-    LogicalTopN { order: [t.x ASC], limit: 1, offset: 3, group_key: [t.y] }
-    └─LogicalScan { table: t, columns: [t.x, t.y] }
+    LogicalProject { exprs: [t.x, t.y] }
+    └─LogicalFilter { predicate: (3:Int32 < row_number) AND (row_number < 6:Int32) AND (row_number >= 4:Int32) AND (row_number < 5:Int32) }
+      └─LogicalOverWindow { window_functions: [row_number() OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
+        └─LogicalScan { table: t, columns: [t.x, t.y] }
 - sql: |
     create table t(x int, y int);
     select x, y from
       (select *, row_number() over(PARTITION BY y ORDER BY x) rank from t)
     where 3 < rank AND rank = 4 AND rank <= 5;
   optimized_logical_plan_for_batch: |-
-    LogicalTopN { order: [t.x ASC], limit: 1, offset: 3, group_key: [t.y] }
-    └─LogicalScan { table: t, columns: [t.x, t.y] }
+    LogicalProject { exprs: [t.x, t.y] }
+    └─LogicalFilter { predicate: (3:Int32 < row_number) AND (row_number = 4:Int32) AND (row_number <= 5:Int32) }
+      └─LogicalOverWindow { window_functions: [row_number() OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
+        └─LogicalScan { table: t, columns: [t.x, t.y] }
 - sql: |
     create table t(x int, y int);
     select x, y from
@@ -674,7 +737,7 @@
       └─StreamFilter { predicate: (3:Int32 < row_number) AND (row_number = 6:Int32) AND (row_number <= 5:Int32) }
         └─StreamOverWindow { window_functions: [row_number() OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
           └─StreamExchange { dist: HashShard(t.y) }
-            └─StreamTableScan { table: t, columns: [t.x, t.y, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+            └─StreamTableScan { table: t, columns: [t.x, t.y, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - id: Deduplication (Top1) by row_number
   sql: |
     create table t(x int, y int);
@@ -689,19 +752,24 @@
           └─LogicalProject { exprs: [t.x, t.y, t._row_id, t._rw_timestamp] }
             └─LogicalScan { table: t, columns: [t.x, t.y, t._row_id, t._rw_timestamp] }
   optimized_logical_plan_for_batch: |-
-    LogicalTopN { order: [t.y ASC], limit: 1, offset: 0, group_key: [t.x] }
-    └─LogicalScan { table: t, columns: [t.x, t.y] }
+    LogicalProject { exprs: [t.x, t.y] }
+    └─LogicalFilter { predicate: (row_number = 1:Int32) }
+      └─LogicalOverWindow { window_functions: [row_number() OVER(PARTITION BY t.x ORDER BY t.y ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
+        └─LogicalScan { table: t, columns: [t.x, t.y] }
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchGroupTopN { order: [t.y ASC], limit: 1, offset: 0, group_key: [t.x] }
-      └─BatchExchange { order: [], dist: HashShard(t.x) }
-        └─BatchScan { table: t, columns: [t.x, t.y], distribution: SomeShard }
+    └─BatchProject { exprs: [t.x, t.y] }
+      └─BatchFilter { predicate: (row_number = 1:Int32) }
+        └─BatchOverWindow { window_functions: [row_number() OVER(PARTITION BY t.x ORDER BY t.y ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
+          └─BatchExchange { order: [t.x ASC, t.y ASC], dist: HashShard(t.x) }
+            └─BatchSort { order: [t.x ASC, t.y ASC] }
+              └─BatchScan { table: t, columns: [t.x, t.y], distribution: SomeShard }
   stream_plan: |-
     StreamMaterialize { columns: [x, y], stream_key: [x], pk_columns: [x], pk_conflict: NoCheck }
     └─StreamProject { exprs: [t.x, t.y] }
       └─StreamGroupTopN { order: [t.y ASC], limit: 1, offset: 0, group_key: [t.x] }
         └─StreamExchange { dist: HashShard(t.x) }
-          └─StreamTableScan { table: t, columns: [t.x, t.y, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+          └─StreamTableScan { table: t, columns: [t.x, t.y, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - id: TopN with intersected partition key and order key
   sql: |
     create table t (x int, y int, z int);
@@ -718,20 +786,23 @@
             └─LogicalScan { table: t, columns: [t.x, t.y, t.z, t._row_id, t._rw_timestamp] }
   optimized_logical_plan_for_batch: |-
     LogicalProject { exprs: [t.z] }
-    └─LogicalTopN { order: [t.x ASC], limit: 1, offset: 0, group_key: [t.x, t.y] }
-      └─LogicalScan { table: t, columns: [t.x, t.y, t.z] }
+    └─LogicalFilter { predicate: (row_number <= 1:Int32) }
+      └─LogicalOverWindow { window_functions: [row_number() OVER(PARTITION BY t.x, t.y ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
+        └─LogicalScan { table: t, columns: [t.x, t.y, t.z] }
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
     └─BatchProject { exprs: [t.z] }
-      └─BatchGroupTopN { order: [t.x ASC], limit: 1, offset: 0, group_key: [t.x, t.y] }
-        └─BatchExchange { order: [], dist: HashShard(t.x, t.y) }
-          └─BatchScan { table: t, columns: [t.x, t.y, t.z], distribution: SomeShard }
+      └─BatchFilter { predicate: (row_number <= 1:Int32) }
+        └─BatchOverWindow { window_functions: [row_number() OVER(PARTITION BY t.x, t.y ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
+          └─BatchExchange { order: [t.x ASC, t.y ASC, t.x ASC], dist: HashShard(t.x, t.y) }
+            └─BatchSort { order: [t.x ASC, t.y ASC, t.x ASC] }
+              └─BatchScan { table: t, columns: [t.x, t.y, t.z], distribution: SomeShard }
   stream_plan: |-
     StreamMaterialize { columns: [z, t.x(hidden), t.y(hidden)], stream_key: [t.x, t.y], pk_columns: [t.x, t.y], pk_conflict: NoCheck }
     └─StreamProject { exprs: [t.z, t.x, t.y] }
       └─StreamGroupTopN { order: [t.x ASC], limit: 1, offset: 0, group_key: [t.x, t.y] }
         └─StreamExchange { dist: HashShard(t.x, t.y) }
-          └─StreamTableScan { table: t, columns: [t.x, t.y, t.z, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+          └─StreamTableScan { table: t, columns: [t.x, t.y, t.z, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [z, t.x(hidden), t.y(hidden)], stream_key: [t.x, t.y], pk_columns: [t.x, t.y], pk_conflict: NoCheck }
@@ -740,7 +811,7 @@
             └── StreamExchange Hash([0, 1]) from 1
 
     Fragment 1
-    StreamTableScan { table: t, columns: [t.x, t.y, t.z, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+    StreamTableScan { table: t, columns: [t.x, t.y, t.z, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
     ├── tables: [ StreamScan: 1 ]
     ├── Upstream
     └── BatchPlanNode
@@ -753,9 +824,9 @@
     └── read pk prefix len hint: 2
 
     Table 1
-    ├── columns: [ vnode, _row_id, backfill_finished, row_count, _rw_timestamp ]
+    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, _row_id, _rw_timestamp ]
     ├── primary key: [ $0 ASC ]
-    ├── value indices: [ 1, 2, 3 ]
+    ├── value indices: [ 1, 2, 3, 4 ]
     ├── distribution key: [ 0 ]
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
@@ -792,15 +863,13 @@
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
     └─BatchProject { exprs: [row_number] }
-      └─BatchFilter { predicate: (row_number < 10:Int32) AND (row_number < 10:Int32) }
-        └─BatchGroupTopN { order: [t.z ASC], limit: 9, offset: 0, with_ties: true, group_key: [t.x, t.y] }
-          └─BatchExchange { order: [], dist: HashShard(t.x, t.y) }
-            └─BatchOverWindow { window_functions: [row_number() OVER(PARTITION BY t.x, t.y ORDER BY t.z ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
-              └─BatchSort { order: [t.x ASC, t.y ASC, t.z ASC] }
-                └─BatchOverWindow { window_functions: [row_number() OVER(PARTITION BY t.x ORDER BY t.y ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
-                  └─BatchExchange { order: [t.x ASC, t.y ASC], dist: HashShard(t.x) }
-                    └─BatchSort { order: [t.x ASC, t.y ASC] }
-                      └─BatchScan { table: t, columns: [t.x, t.y, t.z], distribution: SomeShard }
+      └─BatchFilter { predicate: (row_number < 10:Int32) AND (row_number < 10:Int32) AND (rank < 10:Int32) }
+        └─BatchOverWindow { window_functions: [row_number() OVER(PARTITION BY t.x, t.y ORDER BY t.z ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW), rank() OVER(PARTITION BY t.x, t.y ORDER BY t.z ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
+          └─BatchSort { order: [t.x ASC, t.y ASC, t.z ASC] }
+            └─BatchOverWindow { window_functions: [row_number() OVER(PARTITION BY t.x ORDER BY t.y ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
+              └─BatchExchange { order: [t.x ASC, t.y ASC], dist: HashShard(t.x) }
+                └─BatchSort { order: [t.x ASC, t.y ASC] }
+                  └─BatchScan { table: t, columns: [t.x, t.y, t.z], distribution: SomeShard }
   stream_plan: |-
     StreamMaterialize { columns: [r1, t.x(hidden), t.y(hidden), t._row_id(hidden)], stream_key: [t.x, t.y, t._row_id], pk_columns: [t.x, t.y, t._row_id], pk_conflict: NoCheck }
     └─StreamProject { exprs: [row_number, t.x, t.y, t._row_id] }
@@ -809,7 +878,7 @@
           └─StreamOverWindow { window_functions: [row_number() OVER(PARTITION BY t.x, t.y ORDER BY t.z ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
             └─StreamOverWindow { window_functions: [row_number() OVER(PARTITION BY t.x ORDER BY t.y ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
               └─StreamExchange { dist: HashShard(t.x) }
-                └─StreamTableScan { table: t, columns: [t.x, t.y, t.z, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+                └─StreamTableScan { table: t, columns: [t.x, t.y, t.z, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - id: TopN among multiple window function calls, some not TopN
   sql: |
     create table t (x int, y int, z int);
@@ -853,7 +922,7 @@
         └─StreamOverWindow { window_functions: [row_number() OVER(PARTITION BY t.x, t.y ORDER BY t.z ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW), rank() OVER(PARTITION BY t.x, t.y ORDER BY t.z ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
           └─StreamOverWindow { window_functions: [row_number() OVER(PARTITION BY t.x ORDER BY t.y ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
             └─StreamExchange { dist: HashShard(t.x) }
-              └─StreamTableScan { table: t, columns: [t.x, t.y, t.z, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+              └─StreamTableScan { table: t, columns: [t.x, t.y, t.z, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - name: test ibis window function optimization
   sql: |
     CREATE TABLE t (a INT, b INT, c INT);
@@ -873,8 +942,10 @@
           └─LogicalProject { exprs: [t.a, t.b, t.c, t._row_id, t._rw_timestamp] }
             └─LogicalScan { table: t, columns: [t.a, t.b, t.c, t._row_id, t._rw_timestamp] }
   optimized_logical_plan_for_batch: |-
-    LogicalTopN { order: [t.b ASC], limit: 10, offset: 0, group_key: [t.a] }
-    └─LogicalScan { table: t, columns: [t.a, t.b, t.c] }
+    LogicalProject { exprs: [t.a, t.b, t.c] }
+    └─LogicalFilter { predicate: ((row_number - 1:Int32) < 10:Int32) }
+      └─LogicalOverWindow { window_functions: [row_number() OVER(PARTITION BY t.a ORDER BY t.b ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
+        └─LogicalScan { table: t, columns: [t.a, t.b, t.c] }
   optimized_logical_plan_for_stream: |-
     LogicalTopN { order: [t.b ASC], limit: 10, offset: 0, group_key: [t.a] }
     └─LogicalScan { table: t, columns: [t.a, t.b, t.c] }
@@ -897,8 +968,10 @@
           └─LogicalProject { exprs: [t.a, t.b, t.c, t._row_id, t._rw_timestamp] }
             └─LogicalScan { table: t, columns: [t.a, t.b, t.c, t._row_id, t._rw_timestamp] }
   optimized_logical_plan_for_batch: |-
-    LogicalTopN { order: [t.b ASC], limit: 1, offset: 0, group_key: [t.a] }
-    └─LogicalScan { table: t, columns: [t.a, t.b, t.c] }
+    LogicalProject { exprs: [t.a, t.b, t.c] }
+    └─LogicalFilter { predicate: ((row_number + 5:Int32) = 6:Int32) }
+      └─LogicalOverWindow { window_functions: [row_number() OVER(PARTITION BY t.a ORDER BY t.b ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
+        └─LogicalScan { table: t, columns: [t.a, t.b, t.c] }
   optimized_logical_plan_for_stream: |-
     LogicalTopN { order: [t.b ASC], limit: 1, offset: 0, group_key: [t.a] }
     └─LogicalScan { table: t, columns: [t.a, t.b, t.c] }
@@ -922,8 +995,8 @@
             └─LogicalScan { table: t, columns: [t.a, t.b, t.c, t._row_id, t._rw_timestamp] }
   optimized_logical_plan_for_batch: |-
     LogicalProject { exprs: [t.a, t.b, t.c, (row_number + 1:Int32) as $expr1] }
-    └─LogicalOverWindow { window_functions: [row_number() OVER(PARTITION BY t.a ORDER BY t.b ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
-      └─LogicalTopN { order: [t.b ASC], limit: 1, offset: 0, group_key: [t.a] }
+    └─LogicalFilter { predicate: ((row_number + 1:Int32) = 2:Int32) }
+      └─LogicalOverWindow { window_functions: [row_number() OVER(PARTITION BY t.a ORDER BY t.b ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
         └─LogicalScan { table: t, columns: [t.a, t.b, t.c] }
   optimized_logical_plan_for_stream: |-
     LogicalProject { exprs: [t.a, t.b, t.c, (row_number + 1:Int32) as $expr1] }
@@ -1010,7 +1083,7 @@
           └─StreamExchange { dist: HashShard($expr1, $expr2, bid.supplier_id) }
             └─StreamProject { exprs: [$expr1, ($expr1 + '00:10:00':Interval) as $expr2, bid.supplier_id, bid.price, bid._row_id] }
               └─StreamProject { exprs: [bid.bidtime, bid.price, bid.supplier_id, TumbleStart(bid.bidtime, '00:10:00':Interval) as $expr1, bid._row_id] }
-                └─StreamTableScan { table: bid, columns: [bid.bidtime, bid.price, bid.supplier_id, bid._row_id], stream_scan_type: ArrangementBackfill, stream_key: [bid._row_id], pk: [_row_id], dist: UpstreamHashShard(bid._row_id) }
+                └─StreamTableScan { table: bid, columns: [bid.bidtime, bid.price, bid.supplier_id, bid._row_id], stream_scan_type: SnapshotBackfill, stream_key: [bid._row_id], pk: [_row_id], dist: UpstreamHashShard(bid._row_id) }
 - before:
   - create_bid
   sql: |
@@ -1029,7 +1102,7 @@
         └─StreamExchange { dist: HashShard($expr1, $expr2) }
           └─StreamProject { exprs: [bid.price, bid.supplier_id, $expr1, ($expr1 + '00:10:00':Interval) as $expr2, bid._row_id] }
             └─StreamProject { exprs: [bid.bidtime, bid.price, bid.supplier_id, TumbleStart(bid.bidtime, '00:10:00':Interval) as $expr1, bid._row_id] }
-              └─StreamTableScan { table: bid, columns: [bid.bidtime, bid.price, bid.supplier_id, bid._row_id], stream_scan_type: ArrangementBackfill, stream_key: [bid._row_id], pk: [_row_id], dist: UpstreamHashShard(bid._row_id) }
+              └─StreamTableScan { table: bid, columns: [bid.bidtime, bid.price, bid.supplier_id, bid._row_id], stream_scan_type: SnapshotBackfill, stream_key: [bid._row_id], pk: [_row_id], dist: UpstreamHashShard(bid._row_id) }
 - id: cte1
   sql: |
     create table t (x int, y int, z int);
@@ -1050,15 +1123,17 @@
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
     └─BatchProject { exprs: [t.z] }
-      └─BatchGroupTopN { order: [t.y ASC], limit: 3, offset: 0, group_key: [t.x] }
-        └─BatchExchange { order: [], dist: HashShard(t.x) }
-          └─BatchScan { table: t, columns: [t.x, t.y, t.z], distribution: SomeShard }
+      └─BatchFilter { predicate: (row_number <= 3:Int32) }
+        └─BatchOverWindow { window_functions: [row_number() OVER(PARTITION BY t.x ORDER BY t.y ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
+          └─BatchExchange { order: [t.x ASC, t.y ASC], dist: HashShard(t.x) }
+            └─BatchSort { order: [t.x ASC, t.y ASC] }
+              └─BatchScan { table: t, columns: [t.x, t.y, t.z], distribution: SomeShard }
   stream_plan: |-
     StreamMaterialize { columns: [z, t.x(hidden), t._row_id(hidden)], stream_key: [t.x, t._row_id], pk_columns: [t.x, t._row_id], pk_conflict: NoCheck }
     └─StreamProject { exprs: [t.z, t.x, t._row_id] }
       └─StreamGroupTopN { order: [t.y ASC], limit: 3, offset: 0, group_key: [t.x] }
         └─StreamExchange { dist: HashShard(t.x) }
-          └─StreamTableScan { table: t, columns: [t.x, t.y, t.z, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+          └─StreamTableScan { table: t, columns: [t.x, t.y, t.z, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - id: cte2
   sql: |
     create table t (x int, y int, z int);
@@ -1085,9 +1160,11 @@
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
     └─BatchHashJoin { type: Inner, predicate: t.x = t.x, output: [t.x, t.x, t.z, t.y, t.z] }
-      ├─BatchGroupTopN { order: [t.y ASC], limit: 1, offset: 0, group_key: [t.x] }
-      │ └─BatchExchange { order: [], dist: HashShard(t.x) }
-      │   └─BatchScan { table: t, columns: [t.x, t.y, t.z], distribution: SomeShard }
+      ├─BatchFilter { predicate: (row_number = 1:Int32) }
+      │ └─BatchOverWindow { window_functions: [row_number() OVER(PARTITION BY t.x ORDER BY t.y ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
+      │   └─BatchExchange { order: [t.x ASC, t.y ASC], dist: HashShard(t.x) }
+      │     └─BatchSort { order: [t.x ASC, t.y ASC] }
+      │       └─BatchScan { table: t, columns: [t.x, t.y, t.z], distribution: SomeShard }
       └─BatchExchange { order: [], dist: HashShard(t.x) }
         └─BatchScan { table: t, columns: [t.x, t.y, t.z], distribution: SomeShard }
   stream_plan: |-
@@ -1097,9 +1174,9 @@
         ├─StreamProject { exprs: [t.x, t.y, t.z] }
         │ └─StreamGroupTopN { order: [t.y ASC], limit: 1, offset: 0, group_key: [t.x] }
         │   └─StreamExchange { dist: HashShard(t.x) }
-        │     └─StreamTableScan { table: t, columns: [t.x, t.y, t.z, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+        │     └─StreamTableScan { table: t, columns: [t.x, t.y, t.z, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
         └─StreamExchange { dist: HashShard(t.x) }
-          └─StreamTableScan { table: t, columns: [t.x, t.y, t.z, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+          └─StreamTableScan { table: t, columns: [t.x, t.y, t.z, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - id: split calls with different ORDER BY or PARTITION BY
   sql: |
     create table t(x int, y int, z int);
@@ -1146,7 +1223,7 @@
               └─StreamExchange { dist: HashShard(t.z) }
                 └─StreamOverWindow { window_functions: [rank() OVER(PARTITION BY t.x ORDER BY t.y ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
                   └─StreamExchange { dist: HashShard(t.x) }
-                    └─StreamTableScan { table: t, columns: [t.x, t.y, t.z, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+                    └─StreamTableScan { table: t, columns: [t.x, t.y, t.z, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - sql: |
     create table t (id int, cat varchar, rule varchar, at timestamptz);
     select * from (select cat, rule, at, lag(rule) over (partition by cat order by at) as prev_rule from t) as with_prev
@@ -1303,7 +1380,7 @@
                           └─StreamOverWindow { window_functions: [count() OVER(PARTITION BY 1:Int32 ORDER BY t.i ASC RANGE BETWEEN 1 PRECEDING AND CURRENT ROW)] }
                             └─StreamExchange { dist: HashShard(1:Int32) }
                               └─StreamProject { exprs: [t.i, t.bi, t.d, t.f, t.ts, t.tstz, 1:Int32, t._row_id] }
-                                └─StreamTableScan { table: t, columns: [t.i, t.bi, t.d, t.f, t.ts, t.tstz, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+                                └─StreamTableScan { table: t, columns: [t.i, t.bi, t.d, t.f, t.ts, t.tstz, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - sql: |
     create table t (i int, bi bigint, d decimal, f float, da date, t time, ts timestamp, tstz timestamptz, itv interval);
     select
@@ -1415,7 +1492,7 @@
       └─StreamEowcOverWindow { window_functions: [first_value(t.i) OVER(PARTITION BY t.bi ORDER BY t.ts ASC SESSION WITH GAP 00:10:00), last_value(t.i) OVER(PARTITION BY t.bi ORDER BY t.ts ASC SESSION WITH GAP 00:10:00)] }
         └─StreamEowcSort { sort_column: t.ts }
           └─StreamExchange { dist: HashShard(t.bi) }
-            └─StreamTableScan { table: t, columns: [t.i, t.bi, t.ts, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+            └─StreamTableScan { table: t, columns: [t.i, t.bi, t.ts, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - sql: |
     create table t (i int, bi bigint, d decimal, f float, da date, t time, ts timestamp, tstz timestamptz, itv interval);
     select
@@ -1473,7 +1550,7 @@
       └─StreamOverWindow { window_functions: [first_value(t.val IGNORE NULLS) OVER(PARTITION BY 1:Int32 ORDER BY t.ts ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
         └─StreamExchange { dist: HashShard(1:Int32) }
           └─StreamProject { exprs: [t.ts, t.val, 1:Int32, t._row_id] }
-            └─StreamTableScan { table: t, columns: [t.ts, t.val, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+            └─StreamTableScan { table: t, columns: [t.ts, t.val, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - sql: |
     create table t (ts timestamptz, val int);
     select
@@ -1498,7 +1575,7 @@
       └─StreamOverWindow { window_functions: [last_value(t.val IGNORE NULLS) OVER(PARTITION BY 1:Int32 ORDER BY t.ts ASC ROWS BETWEEN 1 PRECEDING AND 1 FOLLOWING)] }
         └─StreamExchange { dist: HashShard(1:Int32) }
           └─StreamProject { exprs: [t.ts, t.val, 1:Int32, t._row_id] }
-            └─StreamTableScan { table: t, columns: [t.ts, t.val, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+            └─StreamTableScan { table: t, columns: [t.ts, t.val, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - sql: |
     create table t (ts timestamptz, val int);
     select

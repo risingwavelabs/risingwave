@@ -12,12 +12,17 @@ chrono = { workspace = true, features = [
     "clock",
     "std",
 ] }
+itertools = { workspace = true }
 parking_lot = { workspace = true }
+pprof = { version = "0.15", features = ["flamegraph"] }
 risingwave_common = { workspace = true }
+risingwave_pb = { workspace = true }
+risingwave_rpc_client = { workspace = true }
 thiserror = { workspace = true }
 thiserror-ext = { workspace = true }
 tikv-jemalloc-ctl = { workspace = true }
 tokio = { version = "0.2", package = "madsim-tokio" }
+tonic = { workspace = true }
 tracing = "0.1"
 
 [lints]

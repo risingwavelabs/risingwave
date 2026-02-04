@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use pretty_xmlish::{Pretty, Str, XmlNode};
-use risingwave_common::catalog::{Field, Schema};
+use risingwave_common::catalog::{Field, PROJECTED_ROW_ID_COLUMN_NAME, Schema};
 use risingwave_common::types::DataType;
 
 use super::{DistillUnit, GenericPlanNode, GenericPlanRef};
@@ -78,7 +78,10 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for ProjectSet<PlanRef> {
     fn schema(&self) -> Schema {
         let input_schema = self.input.schema();
         let o2i = self.o2i_col_mapping();
-        let mut fields = vec![Field::with_name(DataType::Int64, "projected_row_id")];
+        let mut fields = vec![Field::with_name(
+            DataType::Int64,
+            PROJECTED_ROW_ID_COLUMN_NAME,
+        )];
         fields.extend(self.select_list.iter().enumerate().map(|(idx, expr)| {
             let idx = idx + 1;
             // Get field info from o2i.

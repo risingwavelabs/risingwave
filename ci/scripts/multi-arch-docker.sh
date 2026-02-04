@@ -117,6 +117,17 @@ if [ "${BUILDKITE_SOURCE}" == "schedule" ]; then
   pushDockerhub "${TAG}"
 fi
 
+# Add a semver tag for non-release branches
+if [ "$BUILDKITE_BRANCH" != "main" ] && [[ ! "$BUILDKITE_BRANCH" =~ "^release-.*" ]]; then
+  postfix=$(echo ${BUILDKITE_BRANCH} | md5sum | cut -c1-8)
+  pip install toml-cli
+  TAG="v$(toml get --toml-path Cargo.toml workspace.package.version)-${postfix}"
+  pushGchr "${TAG}"
+  if [[ "${PUSH_DOCKERHUB:-false}" == "true" ]]; then
+    pushDockerhub "${TAG}"
+  fi
+fi
+
 if [[ -n "${IMAGE_TAG+x}" ]]; then
   # Tag the image with the $IMAGE_TAG.
   TAG="${IMAGE_TAG}"

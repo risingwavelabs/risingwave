@@ -205,13 +205,11 @@ impl StreamMaterializedExprs {
 
         if let Some(idx) = clean_wtmk_in_pk {
             catalog.clean_watermark_index_in_pk = Some(idx);
-            catalog.cleaned_by_watermark = true;
         }
 
         // Also populate the new clean_watermark_indices field
         if let Some(col_idx) = self.state_clean_col_idx {
             catalog.clean_watermark_indices = vec![col_idx];
-            catalog.cleaned_by_watermark = true;
         }
 
         catalog
@@ -231,6 +229,8 @@ impl_plan_tree_node_for_unary! { Stream, StreamMaterializedExprs }
 
 impl StreamNode for StreamMaterializedExprs {
     fn to_stream_prost_body(&self, state: &mut BuildFragmentGraphState) -> PbNodeBody {
+        // `StreamMaterializedExprs` is specifically used to safely evaluate impure expressions by
+        // materializing results into state. So we don't need to check for pureness here.
         PbNodeBody::MaterializedExprs(Box::new(MaterializedExprsNode {
             exprs: self.exprs.iter().map(|expr| expr.to_expr_proto()).collect(),
             state_table: Some(

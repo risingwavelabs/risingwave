@@ -20,8 +20,9 @@ mod execute;
 mod iceberg_executor;
 mod iceberg_table_provider;
 mod scalar_function;
+mod window_function;
 
-pub use aggregate::convert_agg_call;
+pub use aggregate::{convert_agg_call, convert_agg_type_to_udaf};
 pub use cast_executor::CastExecutor;
 pub use convert::*;
 pub use error::to_datafusion_error;
@@ -29,3 +30,4 @@ pub use execute::*;
 pub use iceberg_executor::IcebergScan;
 pub use iceberg_table_provider::IcebergTableProvider;
 pub use scalar_function::*;
+pub use window_function::convert_window_expr;

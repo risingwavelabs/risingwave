@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -575,6 +575,17 @@ impl<T: One> One for OrderedFloat<T> {
     #[inline]
     fn one() -> Self {
         OrderedFloat(T::one())
+    }
+}
+
+impl OrderedFloat<f64> {
+    pub fn gamma(self) -> Self {
+        OrderedFloat(self.0.gamma())
+    }
+
+    pub fn ln_gamma(self) -> (Self, i32) {
+        let (result, sign) = self.0.ln_gamma();
+        (OrderedFloat(result), sign)
     }
 }
 

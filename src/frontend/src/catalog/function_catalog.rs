@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,6 +20,7 @@ use risingwave_common::util::epoch::Epoch;
 use risingwave_pb::catalog::PbFunction;
 use risingwave_pb::catalog::function::PbKind;
 use risingwave_pb::expr::{PbUdfExprVersion, PbUserDefinedFunctionMetadata};
+use risingwave_pb::id::UserId;
 
 use crate::catalog::OwnedByUserCatalog;
 
@@ -27,7 +28,7 @@ use crate::catalog::OwnedByUserCatalog;
 pub struct FunctionCatalog {
     pub id: FunctionId,
     pub name: String,
-    pub owner: u32,
+    pub owner: UserId,
     pub kind: FunctionKind,
     pub arg_names: Vec<String>,
     pub arg_types: Vec<DataType>,
@@ -109,7 +110,7 @@ impl From<&FunctionCatalog> for PbUserDefinedFunctionMetadata {
 }
 
 impl OwnedByUserCatalog for FunctionCatalog {
-    fn owner(&self) -> u32 {
+    fn owner(&self) -> UserId {
         self.owner
     }
 }

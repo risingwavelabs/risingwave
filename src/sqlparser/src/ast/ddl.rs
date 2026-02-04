@@ -228,6 +228,9 @@ pub enum AlterSinkOperation {
     SetSinkRateLimit {
         rate_limit: i32,
     },
+    SetBackfillRateLimit {
+        rate_limit: i32,
+    },
     AlterConnectorProps {
         alter_props: Vec<SqlOption>,
     },
@@ -281,6 +284,8 @@ pub enum AlterSourceOperation {
     ResetConfig {
         keys: Vec<ObjectName>,
     },
+    /// `RESET` - Reset CDC source offset to latest
+    ResetSource,
     AlterConnectorProps {
         alter_props: Vec<SqlOption>,
     },
@@ -289,6 +294,7 @@ pub enum AlterSourceOperation {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum AlterFunctionOperation {
     SetSchema { new_schema_name: ObjectName },
+    ChangeOwner { new_owner_name: Ident },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -300,7 +306,13 @@ pub enum AlterConnectionOperation {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum AlterSecretOperation {
-    ChangeCredential { new_credential: Value },
+    ChangeCredential {
+        with_options: Vec<SqlOption>,
+        new_credential: Value,
+    },
+    ChangeOwner {
+        new_owner_name: Ident,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -561,6 +573,9 @@ impl fmt::Display for AlterSinkOperation {
             AlterSinkOperation::SetSinkRateLimit { rate_limit } => {
                 write!(f, "SET SINK_RATE_LIMIT TO {}", rate_limit)
             }
+            AlterSinkOperation::SetBackfillRateLimit { rate_limit } => {
+                write!(f, "SET BACKFILL_RATE_LIMIT TO {}", rate_limit)
+            }
             AlterSinkOperation::AlterConnectorProps {
                 alter_props: changed_props,
             } => {
@@ -642,6 +657,9 @@ impl fmt::Display for AlterSourceOperation {
             AlterSourceOperation::ResetConfig { keys } => {
                 write!(f, "RESET CONFIG ({})", display_comma_separated(keys))
             }
+            AlterSourceOperation::ResetSource => {
+                write!(f, "RESET")
+            }
             AlterSourceOperation::AlterConnectorProps { alter_props } => {
                 write!(
                     f,
@@ -658,6 +676,9 @@ impl fmt::Display for AlterFunctionOperation {
         match self {
             AlterFunctionOperation::SetSchema { new_schema_name } => {
                 write!(f, "SET SCHEMA {new_schema_name}")
+            }
+            AlterFunctionOperation::ChangeOwner { new_owner_name } => {
+                write!(f, "OWNER TO {new_owner_name}")
             }
         }
     }
@@ -686,8 +707,19 @@ impl fmt::Display for AlterConnectionOperation {
 impl fmt::Display for AlterSecretOperation {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            AlterSecretOperation::ChangeCredential { new_credential } => {
-                write!(f, "AS {new_credential}")
+            AlterSecretOperation::ChangeCredential {
+                new_credential,
+                with_options,
+            } => {
+                write!(
+                    f,
+                    "WITH ({}) AS {}",
+                    display_comma_separated(with_options),
+                    new_credential
+                )
+            }
+            AlterSecretOperation::ChangeOwner { new_owner_name } => {
+                write!(f, "OWNER TO {new_owner_name}")
             }
         }
     }
@@ -753,11 +785,17 @@ impl fmt::Display for AlterFragmentOperation {
 pub struct SourceWatermark {
     pub column: Ident,
     pub expr: Expr,
+    /// Whether `WITH TTL` is specified.
+    pub with_ttl: bool,
 }
 
 impl fmt::Display for SourceWatermark {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "WATERMARK FOR {} AS {}", self.column, self.expr,)
+        write!(f, "WATERMARK FOR {} AS {}", self.column, self.expr,)?;
+        if self.with_ttl {
+            write!(f, " WITH TTL")?;
+        }
+        Ok(())
     }
 }
 
@@ -1042,7 +1080,7 @@ impl fmt::Display for ReferentialAction {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct WebhookSourceInfo {
     pub secret_ref: Option<SecretRefValue>,
-    pub signature_expr: Expr,
+    pub signature_expr: Option<Expr>,
     pub wait_for_persistence: bool,
     pub is_batched: bool,
 }

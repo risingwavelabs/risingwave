@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -324,6 +324,14 @@ impl fmt::Display for SslMode {
             SslMode::VerifyCa => "verify-ca",
             SslMode::VerifyFull => "verify-full",
         })
+    }
+}
+
+impl std::str::FromStr for SslMode {
+    type Err = serde_json::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        serde_json::from_value(serde_json::Value::String(s.to_owned()))
     }
 }
 

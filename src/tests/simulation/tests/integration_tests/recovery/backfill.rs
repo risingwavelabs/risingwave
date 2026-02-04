@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -29,12 +29,15 @@ const SHOW_INTERNAL_TABLES: &str = "SHOW INTERNAL TABLES;";
 
 static EXPECTED_NO_BACKFILL: LazyLock<String> = LazyLock::new(|| {
     (0..=255)
-        .map(|vnode| format!("{} NULL t 0", vnode))
+        .map(|vnode| format!("{} NULL t", vnode))
         .join("\n")
 });
 
 fn select_all(table: impl AsRef<str>) -> String {
-    format!("SELECT * FROM {} ORDER BY vnode", table.as_ref())
+    format!(
+        "SELECT vnode, _row_id, is_epoch_finished FROM {} ORDER BY vnode",
+        table.as_ref()
+    )
 }
 
 async fn test_no_backfill_state(session: &mut Session) -> Result<()> {

@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -836,7 +836,11 @@ impl HummockManager {
                 // split if the accumulated size is greater than half of the group size
                 // avoid split a small table to dedicated compaction group and trigger multiple merge
                 assert!(table_ids.is_sorted());
-                if accumulated_size * 2 > group_max_size {
+                let remaining_size = group.group_size.saturating_sub(accumulated_size);
+                if accumulated_size > group_max_size / 2
+                    && remaining_size > 0
+                    && table_ids.len() < group.table_statistic.len()
+                {
                     let ret = self
                         .move_state_tables_to_dedicated_compaction_group(
                             group.group_id,

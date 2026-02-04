@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -56,7 +56,7 @@ use crate::hummock::compactor::{
 use crate::hummock::iterator::{
     Forward, HummockIterator, MergeIterator, NonPkPrefixSkipWatermarkIterator,
     NonPkPrefixSkipWatermarkState, PkPrefixSkipWatermarkIterator, PkPrefixSkipWatermarkState,
-    ValueMeta,
+    ValueMeta, ValueSkipWatermarkIterator, ValueSkipWatermarkState,
 };
 use crate::hummock::multi_builder::{CapacitySplitTableBuilder, TableBuilderFactory};
 use crate::hummock::utils::MemoryTracker;
@@ -235,6 +235,8 @@ impl CompactorRunner {
             }
         }
 
+        // // The `SkipWatermarkIterator` is used to handle the table watermark state cleaning introduced
+        // // in https://github.com/risingwavelabs/risingwave/issues/13148
         // The `Pk/NonPkPrefixSkipWatermarkIterator` is used to handle the table watermark state cleaning introduced
         // in https://github.com/risingwavelabs/risingwave/issues/13148
         let combine_iter = {
@@ -248,10 +250,18 @@ impl CompactorRunner {
                 ),
             );
 
-            NonPkPrefixSkipWatermarkIterator::new(
+            let pk_skip_watermark_iter = NonPkPrefixSkipWatermarkIterator::new(
                 skip_watermark_iter,
                 NonPkPrefixSkipWatermarkState::from_safe_epoch_watermarks(
                     self.compact_task.non_pk_prefix_table_watermarks.clone(),
+                    compaction_catalog_agent_ref.clone(),
+                ),
+            );
+
+            ValueSkipWatermarkIterator::new(
+                pk_skip_watermark_iter,
+                ValueSkipWatermarkState::from_safe_epoch_watermarks(
+                    self.compact_task.value_table_watermarks.clone(),
                     compaction_catalog_agent_ref,
                 ),
             )
