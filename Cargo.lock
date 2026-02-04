@@ -5942,8 +5942,7 @@ dependencies = [
 [[package]]
 name = "ginepro"
 version = "0.8.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1a71e958d6edde3a87f7341c81c978fccc013950257d49a8e2da2a2361946924"
+source = "git+https://github.com/risingwavelabs/ginepro.git?rev=109c6f48f1db0926f4783548250f3e31680ff98c#109c6f48f1db0926f4783548250f3e31680ff98c"
 dependencies = [
  "anyhow",
  "async-trait",
