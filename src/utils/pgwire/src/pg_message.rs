@@ -23,7 +23,7 @@ use bytes::{Buf, BufMut, Bytes, BytesMut};
 use peekable::tokio::AsyncPeekable;
 use tokio::io::{AsyncRead, AsyncReadExt};
 
-use crate::error_or_notice::ErrorOrNoticeMessage;
+use crate::error_or_notice::{ErrorOrNoticeMessage, Severity};
 use crate::pg_field_descriptor::PgFieldDescriptor;
 use crate::pg_response::StatementType;
 use crate::types::{Format, Row};
@@ -445,6 +445,7 @@ pub enum BeMessage<'a> {
     ErrorResponse {
         error: &'a (dyn std::error::Error + Send + Sync + 'static),
         pretty: bool,
+        severity: Option<Severity>,
     },
     CloseComplete,
 
@@ -716,11 +717,21 @@ impl BeMessage<'_> {
                 buf.put_i32(4);
             }
 
-            BeMessage::ErrorResponse { error, pretty } => {
+            BeMessage::ErrorResponse {
+                error,
+                pretty,
+                severity,
+            } => {
                 // 'E' signalizes ErrorResponse messages
                 buf.put_u8(b'E');
                 // Format the error as a pretty report.
-                write_err_or_notice(buf, &ErrorOrNoticeMessage::error(error, pretty))?;
+                let error_message = match severity {
+                    Some(severity) => {
+                        ErrorOrNoticeMessage::error_with_severity(error, pretty, severity)
+                    }
+                    None => ErrorOrNoticeMessage::error(error, pretty),
+                };
+                write_err_or_notice(buf, &error_message)?;
             }
 
             BeMessage::BackendKeyData((process_id, secret_key)) => {
