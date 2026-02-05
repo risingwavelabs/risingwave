@@ -5,85 +5,10 @@ from . import section
 @section
 def _(outer_panels: Panels):
     panels = outer_panels.sub_panel()
-    meta_miss_filter = "type='meta_miss'"
-    meta_total_filter = "type='meta_total'"
-    data_miss_filter = "type='data_miss'"
-    data_total_filter = "type='data_total'"
-    file_cache_get_filter = "op='get'"
-
     return [
         outer_panels.row_collapsed(
             "Hummock (Read)",
-            [
-                panels.subheader("Cache"),
-                panels.timeseries_ops(
-                    "Cache Ops",
-                    "",
-                    [
-                        panels.target(
-                            f"sum(rate({table_metric('state_store_sst_store_block_request_counts')}[$__rate_interval])) by ({COMPONENT_LABEL}, {NODE_LABEL}, table_id, type)",
-                            "{{table_id}} @ {{type}} - {{%s}} @ {{%s}}"
-                            % (COMPONENT_LABEL, NODE_LABEL),
-                        ),
-                        panels.target(
-                            f"sum(rate({metric('state_store_sst_store_block_request_counts', meta_miss_filter)}[$__rate_interval])) by ({COMPONENT_LABEL}, {NODE_LABEL}, type)",
-                            "total_meta_miss_count - {{%s}} @ {{%s}}"
-                            % (COMPONENT_LABEL, NODE_LABEL),
-                        ),
-                    ],
-                ),
-                panels.timeseries_bytes(
-                    "Cache Size",
-                    "Hummock has three parts of memory usage: 1. Meta Cache 2. Block Cache"
-                    "This metric shows the real memory usage of each of these three caches.",
-                    [
-                        panels.target(
-                            f"avg({metric('state_store_meta_cache_size')}) by ({COMPONENT_LABEL}, {NODE_LABEL})",
-                            "meta cache - {{%s}} @ {{%s}}"
-                            % (COMPONENT_LABEL, NODE_LABEL),
-                        ),
-                        panels.target(
-                            f"avg({metric('state_store_block_cache_size')}) by ({COMPONENT_LABEL}, {NODE_LABEL})",
-                            "data cache - {{%s}} @ {{%s}}"
-                            % (COMPONENT_LABEL, NODE_LABEL),
-                        ),
-                        panels.target(
-                            f"avg({metric('state_store_prefetch_memory_size')}) by ({COMPONENT_LABEL}, {NODE_LABEL})",
-                            "prefetch cache - {{%s}} @ {{%s}}"
-                            % (COMPONENT_LABEL, NODE_LABEL),
-                        ),
-                    ],
-                ),
-                panels.timeseries_percentage(
-                    "Cache Miss Ratio",
-                    "",
-                    [
-                        panels.target(
-                            f"(sum(rate({table_metric('state_store_sst_store_block_request_counts', meta_miss_filter)}[$__rate_interval])) by ({COMPONENT_LABEL},{NODE_LABEL},table_id)) / (sum(rate({table_metric('state_store_sst_store_block_request_counts', meta_total_filter)}[$__rate_interval])) by ({COMPONENT_LABEL},{NODE_LABEL},table_id)) >= 0",
-                            "meta cache miss ratio - {{table_id}} @ {{%s}} @ {{%s}}"
-                            % (COMPONENT_LABEL, NODE_LABEL),
-                        ),
-                        panels.target(
-                            f"(sum(rate({table_metric('state_store_sst_store_block_request_counts', data_miss_filter)}[$__rate_interval])) by ({COMPONENT_LABEL},{NODE_LABEL},table_id)) / (sum(rate({table_metric('state_store_sst_store_block_request_counts', data_total_filter)}[$__rate_interval])) by ({COMPONENT_LABEL},{NODE_LABEL},table_id)) >= 0",
-                            "block cache miss ratio - {{table_id}} @ {{%s}} @ {{%s}}"
-                            % (COMPONENT_LABEL, NODE_LABEL),
-                        ),
-                    ],
-                ),
-                panels.timeseries_percentage(
-                    "Block Cache Efficiency",
-                    "Histogram of the estimated hit ratio of a block while in the block cache.",
-                    [
-                        *quantile(
-                            lambda quantile, legend: panels.target(
-                                f"clamp_max(histogram_quantile({quantile}, sum(rate({metric('block_efficiency_histogram_bucket')}[$__rate_interval])) by (le,{COMPONENT_LABEL},{NODE_LABEL})), 1)",
-                                f"block cache efficiency - p{legend}"
-                                + " - {{%s}} @ {{%s}}" % (COMPONENT_LABEL, NODE_LABEL),
-                            ),
-                            [10, 25, 50, 75, 90, 100],
-                        ),
-                    ],
-                ),
+            [   
                 panels.subheader("Read"),
                 panels.timeseries_ops(
                     "Iterator Key Flow",
