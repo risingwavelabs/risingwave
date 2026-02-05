@@ -57,6 +57,20 @@ async fn wait_jobs_finished(session: &mut risingwave_simulation::cluster::Sessio
     bail!("jobs are still running after waiting");
 }
 
+async fn wait_jobs_contains(
+    session: &mut risingwave_simulation::cluster::Session,
+    expected: &[&str],
+) -> Result<()> {
+    for _ in 0..(MAX_HEARTBEAT_INTERVAL_SECS_CONFIG_FOR_AUTO_SCALE * 10) {
+        let res = session.run("show jobs;").await?;
+        if expected.iter().all(|name| res.contains(name)) {
+            return Ok(());
+        }
+        sleep(Duration::from_millis(200)).await;
+    }
+    bail!("jobs did not contain all expected entries: {:?}", expected);
+}
+
 #[tokio::test]
 async fn test_backfill_parallelism_switches_to_normal_after_completion() -> Result<()> {
     let config = Configuration::for_background_ddl();
@@ -225,6 +239,46 @@ async fn test_backfill_parallelism_prefers_backfill_override_over_mview_override
         .run("select distinct parallelism from rw_fragment_parallelism where name = 'm2' order by parallelism;")
         .await?
         .assert_result_eq("2");
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_concurrent_backfill_parallelism_restores_after_finish() -> Result<()> {
+    // Regression test for issue 24687.
+    let config = Configuration::for_background_ddl();
+    let mut cluster = Cluster::start(config).await?;
+    let mut session = cluster.start_session();
+
+    session.run("set streaming_parallelism = 3;").await?;
+    session
+        .run("set streaming_parallelism_for_backfill = 2;")
+        .await?;
+    session.run("create table t(v int);").await?;
+    session
+        .run("insert into t select * from generate_series(1, 200);")
+        .await?;
+    session.run("set backfill_rate_limit = 1;").await?;
+    session.run("set background_ddl = true;").await?;
+
+    session
+        .run("create materialized view m1 as select * from t;")
+        .await?;
+    session
+        .run("create materialized view m2 as select * from t;")
+        .await?;
+
+    // Ensure both backfill jobs are running concurrently.
+    wait_jobs_contains(&mut session, &["m1", "m2"]).await?;
+
+    // Backfill should use the override parallelism.
+    wait_parallelism(&mut session, "m1", "2").await?;
+    wait_parallelism(&mut session, "m2", "2").await?;
+
+    // After both jobs finish, parallelism should restore to the normal value.
+    wait_jobs_finished(&mut session).await?;
+    wait_parallelism(&mut session, "m1", "3").await?;
+    wait_parallelism(&mut session, "m2", "3").await?;
 
     Ok(())
 }
