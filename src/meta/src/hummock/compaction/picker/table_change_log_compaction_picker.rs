@@ -338,7 +338,7 @@ mod tests {
             dirty_second.checkpoint_epoch,
         );
 
-        for max_compaction_size_dirty_part in vec![1, 5, 9] {
+        for max_compaction_size_dirty_part in [1, 5, 9] {
             let picker =
                 TableChangeLogCompactionPicker::new(0.1, 1, max_compaction_size_dirty_part, 4, 20);
             let task = picker

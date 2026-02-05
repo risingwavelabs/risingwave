@@ -345,6 +345,7 @@ pub async fn compact_with_agent(
     if compact_task.is_table_change_log_task() {
         return compact_table_change_log(
             compactor_context,
+            compaction_catalog_agent_ref,
             compact_task,
             shutdown_rx,
             object_id_getter,
@@ -780,12 +781,9 @@ where
         .collect();
     while iter.is_valid() {
         compaction_statistics.iter_total_key_counts += 1;
-
+        // IMPORTANT: Because of memtable spill, there may be several versions of the same user-key share the same `pure_epoch`.
         let is_new_user_key = full_key_tracker.observe(iter.key());
         let mut drop = false;
-
-        // CRITICAL WARN: Because of memtable spill, there may be several versions of the same user-key share the same `pure_epoch`. Do not change this code unless necessary.
-
         let ValueMeta {
             object_id,
             block_id,
@@ -816,7 +814,6 @@ where
                 Some((key, value)) => (key.to_ref(), value.as_slice()),
                 None => (iter.key(), iter.value()),
             };
-
         if is_new_user_key {
             if !max_key.is_empty() && iter_key >= max_key {
                 break;

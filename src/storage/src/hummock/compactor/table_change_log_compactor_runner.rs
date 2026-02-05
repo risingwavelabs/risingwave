@@ -33,11 +33,11 @@ use tokio::sync::oneshot::Receiver;
 use super::TaskConfig;
 use super::iterator::MonitoredCompactorIterator;
 use super::task_progress::TaskProgress;
-use crate::compaction_catalog_manager::CompactionCatalogAgent;
+use crate::compaction_catalog_manager::CompactionCatalogAgentRef;
 use crate::hummock::compactor::iterator::ConcatSstableIterator;
 use crate::hummock::compactor::task_progress::TaskProgressGuard;
 use crate::hummock::compactor::{
-    CompactOutput, Compactor, CompactorContext, MultiCompactionFilter, await_tree_key,
+    CompactOutput, Compactor, CompactorContext, DummyCompactionFilter, await_tree_key,
 };
 use crate::hummock::iterator::{Forward, HummockIterator, MergeIterator};
 use crate::hummock::utils::MemoryTracker;
@@ -48,6 +48,7 @@ use crate::hummock::{
 
 pub(crate) async fn compact_table_change_log(
     context: CompactorContext,
+    compaction_catalog_agent_ref: CompactionCatalogAgentRef,
     compact_task: CompactTask,
     mut shutdown_rx: Receiver<()>,
     object_id_getter: Arc<dyn GetObjectId>,
@@ -137,6 +138,7 @@ pub(crate) async fn compact_table_change_log(
         let runner = TableChangeLogCompactorRunner::new(
             split_index,
             context.clone(),
+            compaction_catalog_agent_ref.clone(),
             compact_task.clone(),
             object_id_getter.clone(),
             estimated_output_capacity,
@@ -262,12 +264,14 @@ pub struct TableChangeLogCompactorRunner {
     sstable_store: SstableStoreRef,
     key_range: KeyRange,
     split_index: usize,
+    compaction_catalog_agent_ref: CompactionCatalogAgentRef,
 }
 
 impl TableChangeLogCompactorRunner {
     pub fn new(
         split_index: usize,
         context: CompactorContext,
+        compaction_catalog_agent_ref: CompactionCatalogAgentRef,
         task: CompactTask,
         object_id_getter: Arc<dyn GetObjectId>,
         estimated_output_capacity: usize,
@@ -321,6 +325,7 @@ impl TableChangeLogCompactorRunner {
             compact_task: task,
             sstable_store: context.sstable_store,
             key_range,
+            compaction_catalog_agent_ref,
         }
     }
 
@@ -328,8 +333,7 @@ impl TableChangeLogCompactorRunner {
         &self,
         task_progress: Arc<TaskProgress>,
     ) -> HummockResult<(CompactOutput, CompactOutput)> {
-        let empty_catalog_agent = Arc::new(CompactionCatalogAgent::dummy());
-        let empty_compaction_filter = MultiCompactionFilter::default();
+        let empty_compaction_filter = DummyCompactionFilter {};
 
         let (clean_part, dirty_part) = self
             .compact_task
@@ -345,7 +349,7 @@ impl TableChangeLogCompactorRunner {
                 .compact_key_range(
                     new_value_iter,
                     empty_compaction_filter.clone(),
-                    empty_catalog_agent.clone(),
+                    self.compaction_catalog_agent_ref.clone(),
                     Some(task_progress.clone()),
                     Some(self.compact_task.task_id),
                     Some(self.split_index),
@@ -360,7 +364,7 @@ impl TableChangeLogCompactorRunner {
                 .compact_key_range(
                     old_value_iter,
                     empty_compaction_filter,
-                    empty_catalog_agent,
+                    self.compaction_catalog_agent_ref.clone(),
                     Some(task_progress),
                     Some(self.compact_task.task_id),
                     Some(self.split_index),
@@ -497,4 +501,199 @@ fn seal_table_change_log_compaction_task(
     // This is necessary because ReportTask lacks a task type field.
     assert!(compact_task.table_change_log_output.is_some());
     (compact_task, table_stats_map, object_timestamps)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use risingwave_common::util::epoch::test_epoch;
+    use risingwave_hummock_sdk::key::{FullKey, UserKey};
+    use risingwave_pb::id::TableId;
+
+    use crate::compaction_catalog_manager::CompactionCatalogAgent;
+    use crate::hummock::compactor::compactor_runner::compact_and_build_sst;
+    use crate::hummock::compactor::{DummyCompactionFilter, TaskConfig};
+    use crate::hummock::iterator::test_utils::mock_sstable_store;
+    use crate::hummock::iterator::{Forward, HummockIterator, ValueMeta};
+    use crate::hummock::multi_builder::{CapacitySplitTableBuilder, LocalTableBuilderFactory};
+    use crate::hummock::value::HummockValue;
+    use crate::hummock::{
+        DEFAULT_RESTART_INTERVAL, HummockResult, SstableBuilderOptions, SstableIterator,
+        SstableIteratorReadOptions,
+    };
+    use crate::monitor::{CompactorMetrics, StoreLocalStatistic};
+
+    struct MockHummockIterator {
+        data: Vec<(FullKey<Vec<u8>>, HummockValue<Vec<u8>>)>,
+        index: usize,
+    }
+
+    impl MockHummockIterator {
+        pub fn new(data: Vec<(FullKey<Vec<u8>>, HummockValue<Vec<u8>>)>) -> Self {
+            Self { data, index: 0 }
+        }
+    }
+
+    impl HummockIterator for MockHummockIterator {
+        type Direction = Forward;
+
+        async fn next(&mut self) -> HummockResult<()> {
+            self.index += 1;
+            Ok(())
+        }
+
+        fn key(&self) -> FullKey<&[u8]> {
+            self.data[self.index].0.to_ref()
+        }
+
+        fn value(&self) -> HummockValue<&[u8]> {
+            self.data[self.index].1.as_slice()
+        }
+
+        fn is_valid(&self) -> bool {
+            self.index < self.data.len()
+        }
+
+        async fn rewind(&mut self) -> HummockResult<()> {
+            self.index = 0;
+            Ok(())
+        }
+
+        async fn seek(&mut self, key: FullKey<&[u8]>) -> HummockResult<()> {
+            self.index = self
+                .data
+                .iter()
+                .position(|(k, _)| k.to_ref() >= key)
+                .unwrap_or(self.data.len());
+            Ok(())
+        }
+
+        fn collect_local_statistic(&self, _stats: &mut crate::monitor::StoreLocalStatistic) {}
+
+        fn value_meta(&self) -> ValueMeta {
+            ValueMeta {
+                object_id: None,
+                block_id: None,
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn test_preserve_earliest_key_version() {
+        let table_id: risingwave_pb::id::TypedId<_, u32> = TableId::new(11);
+        let user_key_1 = UserKey::for_test(table_id, b"001".to_vec());
+        let user_key_2 = UserKey::for_test(table_id, b"002".to_vec());
+        let user_key_3 = UserKey::for_test(table_id, b"003".to_vec());
+        let user_key_4 = UserKey::for_test(table_id, b"004".to_vec());
+
+        let block_size = 1 << 10;
+        let table_capacity = 4 * block_size;
+        let opts = SstableBuilderOptions {
+            capacity: table_capacity,
+            block_capacity: block_size,
+            restart_interval: DEFAULT_RESTART_INTERVAL,
+            bloom_false_positive: 0.1,
+            ..Default::default()
+        };
+        let mock_store = mock_sstable_store().await;
+        let builder_factory = LocalTableBuilderFactory::new(1001, mock_store.clone(), opts);
+        let compaction_catalog_agent_ref = CompactionCatalogAgent::for_test(vec![table_id]);
+        let mut sst_builder =
+            CapacitySplitTableBuilder::for_test(builder_factory, compaction_catalog_agent_ref);
+        let task_config = TaskConfig {
+            preserve_earliest_key_version: true,
+            ..TaskConfig::default()
+        };
+        let compactor_metrics = Arc::new(CompactorMetrics::unused());
+
+        let iter = MockHummockIterator::new(vec![
+            (
+                FullKey::from_user_key(user_key_1.clone(), test_epoch(101)),
+                HummockValue::put("key1_101".to_owned().into_bytes()),
+            ),
+            (
+                FullKey::from_user_key(user_key_1.clone(), test_epoch(100)),
+                HummockValue::put("key1_100".to_owned().into_bytes()),
+            ),
+            (
+                FullKey::from_user_key(user_key_2.clone(), test_epoch(105)),
+                HummockValue::put("key2_105".to_owned().into_bytes()),
+            ),
+            (
+                FullKey::from_user_key(user_key_2.clone(), test_epoch(104)),
+                HummockValue::delete(),
+            ),
+            (
+                FullKey::from_user_key(user_key_3.clone(), test_epoch(103)),
+                HummockValue::delete(),
+            ),
+            (
+                FullKey::from_user_key(user_key_3.clone(), test_epoch(102)),
+                HummockValue::put("key3_102".to_owned().into_bytes()),
+            ),
+            (
+                FullKey::from_user_key(user_key_4.clone(), test_epoch(111)),
+                HummockValue::put("key4_111".to_owned().into_bytes()),
+            ),
+        ]);
+        let compaction_filter = DummyCompactionFilter {};
+        let _ = compact_and_build_sst(
+            &mut sst_builder,
+            &task_config,
+            compactor_metrics,
+            iter,
+            compaction_filter,
+        )
+        .await
+        .unwrap();
+        let ssts = sst_builder.finish().await.unwrap();
+        let opts = Arc::new(SstableIteratorReadOptions::default());
+        assert_eq!(
+            ssts.iter()
+                .map(|sst| sst.sst_info.sst_id)
+                .collect::<Vec<_>>(),
+            vec![1001]
+        );
+        let table_holder = mock_store
+            .sstable(&ssts[0].sst_info, &mut StoreLocalStatistic::default())
+            .await
+            .unwrap();
+        let mut iter = SstableIterator::new(table_holder, mock_store, opts, &ssts[0].sst_info);
+        iter.rewind().await.unwrap();
+        assert_eq!(
+            iter.key(),
+            FullKey::from_user_key(user_key_1, test_epoch(100)).to_ref()
+        );
+        assert_eq!(
+            iter.value(),
+            HummockValue::put("key1_100".to_owned().into_bytes()).as_slice()
+        );
+        iter.next().await.unwrap();
+        assert_eq!(
+            iter.key(),
+            FullKey::from_user_key(user_key_2, test_epoch(104)).to_ref()
+        );
+        assert_eq!(iter.value(), HummockValue::delete());
+        iter.next().await.unwrap();
+        assert_eq!(
+            iter.key(),
+            FullKey::from_user_key(user_key_3, test_epoch(102)).to_ref()
+        );
+        assert_eq!(
+            iter.value(),
+            HummockValue::put("key3_102".to_owned().into_bytes()).as_slice()
+        );
+        iter.next().await.unwrap();
+        assert_eq!(
+            iter.key(),
+            FullKey::from_user_key(user_key_4, test_epoch(111)).to_ref()
+        );
+        assert_eq!(
+            iter.value(),
+            HummockValue::put("key4_111".to_owned().into_bytes()).as_slice()
+        );
+        iter.next().await.unwrap();
+        assert!(!iter.is_valid());
+    }
 }
