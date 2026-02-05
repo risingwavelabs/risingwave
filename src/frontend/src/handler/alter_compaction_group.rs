@@ -60,7 +60,7 @@ pub async fn handle_alter_compaction_group(
         .update_compaction_config(group_ids.clone(), configs)
         .await?;
 
-    Ok(RwPgResponse::builder(StatementType::ALTER_SYSTEM)
+    Ok(RwPgResponse::builder(StatementType::ALTER_COMPACTION_GROUP)
         .notice(format!(
             "Compaction group(s) {:?} config updated successfully",
             group_ids
