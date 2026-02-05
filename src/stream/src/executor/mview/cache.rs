@@ -128,24 +128,25 @@ impl MaterializeCache {
 
         let pks = {
             let mut pks = vec![vec![]; data_chunk.capacity()];
-            key_chunk
-                .rows_with_holes()
-                .zip_eq_fast(pks.iter_mut())
-                .for_each(|(r, vnode_and_pk)| {
+            std::iter::Iterator::for_each(
+                key_chunk.rows_with_holes().zip_eq_fast(pks.iter_mut()),
+                |(r, vnode_and_pk)| {
                     if let Some(r) = r {
                         table.pk_serde().serialize(r, vnode_and_pk);
                     }
-                });
+                },
+            );
             pks
         };
         let (_, vis) = key_chunk.into_parts();
-        let row_ops = ops
-            .iter()
-            .zip_eq_fast(pks.into_iter())
-            .zip_eq_fast(values.into_iter())
-            .zip_eq_fast(vis.iter())
-            .filter_map(|(((op, k), v), vis)| vis.then_some((*op, k, v)))
-            .collect_vec();
+        let row_ops = std::iter::Iterator::filter_map(
+            ops.iter()
+                .zip_eq_fast(pks.into_iter())
+                .zip_eq_fast(values.into_iter())
+                .zip_eq_fast(vis.iter()),
+            |(((op, k), v), vis)| vis.then_some((*op, k, v)),
+        )
+        .collect_vec();
 
         self.handle_inner(row_ops, table).await
     }

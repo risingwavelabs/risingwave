@@ -22,6 +22,7 @@ use either::Either;
 use futures::TryStreamExt;
 use futures::stream::{self, StreamExt};
 use futures_async_stream::try_stream;
+use pin_project::pin_project;
 use risingwave_common::catalog::ColumnId;
 use risingwave_common::hash::VnodeBitmapExt;
 use risingwave_common::id::SourceId;
@@ -54,11 +55,25 @@ const RETRY_BASE_BACKOFF: Duration = Duration::from_millis(200);
 
 type SplitBatch = Option<Vec<SplitImpl>>;
 
+struct ReplaceReaderArgs<'a, S: StateStore, const BIASED: bool> {
+    splits_on_fetch: &'a mut usize,
+    state_store_handler: &'a SourceStateTableHandler<S>,
+    dirty_splits: &'a HashSet<Arc<str>>,
+    column_ids: Vec<ColumnId>,
+    source_ctx: SourceContext,
+    source_desc: &'a SourceDesc,
+    stream: &'a mut StreamReaderWithPause<BIASED, Option<StreamChunk>>,
+    rate_limit_rps: Option<u32>,
+    reading_file: Arc<Mutex<Option<Arc<str>>>>,
+}
+
 /// A stream wrapper that sets `reading_file` before polling the underlying stream for the first time.
 ///
 /// This helps attribute errors that happen before the first chunk is produced (e.g., invalid UTF-8)
 /// to the corresponding split.
+#[pin_project]
 struct SetReadingFileOnPoll<S> {
+    #[pin]
     inner: S,
     reading_file: Arc<Mutex<Option<Arc<str>>>>,
     split_id: Arc<str>,
@@ -74,13 +89,6 @@ impl<S> SetReadingFileOnPoll<S> {
             is_set: false,
         }
     }
-
-    fn set_if_needed(&mut self) {
-        if !self.is_set {
-            *self.reading_file.lock().expect("mutex poisoned") = Some(self.split_id.clone());
-            self.is_set = true;
-        }
-    }
 }
 
 impl<S> futures::Stream for SetReadingFileOnPoll<S>
@@ -93,11 +101,12 @@ where
         self: std::pin::Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Option<Self::Item>> {
-        // SAFETY: We never move `inner` out of `self`. We only mutate fields in place.
-        let this = unsafe { self.get_unchecked_mut() };
-        this.set_if_needed();
-        // SAFETY: We do not move `inner` after pinning.
-        unsafe { std::pin::Pin::new_unchecked(&mut this.inner) }.poll_next(cx)
+        let this = self.project();
+        if !*this.is_set {
+            *this.reading_file.lock().expect("mutex poisoned") = Some(this.split_id.clone());
+            *this.is_set = true;
+        }
+        this.inner.poll_next(cx)
     }
 }
 
@@ -133,16 +142,19 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
     }
 
     async fn replace_with_new_batch_reader<const BIASED: bool>(
-        splits_on_fetch: &mut usize,
-        state_store_handler: &SourceStateTableHandler<S>,
-        dirty_splits: &HashSet<Arc<str>>,
-        column_ids: Vec<ColumnId>,
-        source_ctx: SourceContext,
-        source_desc: &SourceDesc,
-        stream: &mut StreamReaderWithPause<BIASED, Option<StreamChunk>>,
-        rate_limit_rps: Option<u32>,
-        reading_file: Arc<Mutex<Option<Arc<str>>>>,
+        args: ReplaceReaderArgs<'_, S, BIASED>,
     ) -> StreamExecutorResult<()> {
+        let ReplaceReaderArgs {
+            splits_on_fetch,
+            state_store_handler,
+            dirty_splits,
+            column_ids,
+            source_ctx,
+            source_desc,
+            stream,
+            rate_limit_rps,
+            reading_file,
+        } = args;
         let mut batch = Vec::with_capacity(SPLIT_BATCH_SIZE);
         let state_table = state_store_handler.state_table();
         'vnodes: for vnode in state_table.vnodes().iter_vnodes() {
@@ -318,17 +330,17 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
         // If it is a recovery startup,
         // there can be file assignments in the state table.
         // Hence we try building a reader first.
-        Self::replace_with_new_batch_reader(
-            &mut splits_on_fetch,
-            &state_store_handler, // move into the function
-            &dirty_splits,
-            core.column_ids.clone(),
-            self.build_source_ctx(&source_desc, core.source_id, &core.source_name),
-            &source_desc,
-            &mut stream,
-            self.rate_limit_rps,
-            reading_file.clone(),
-        )
+        Self::replace_with_new_batch_reader(ReplaceReaderArgs {
+            splits_on_fetch: &mut splits_on_fetch,
+            state_store_handler: &state_store_handler,
+            dirty_splits: &dirty_splits,
+            column_ids: core.column_ids.clone(),
+            source_ctx: self.build_source_ctx(&source_desc, core.source_id, &core.source_name),
+            source_desc: &source_desc,
+            stream: &mut stream,
+            rate_limit_rps: self.rate_limit_rps,
+            reading_file: reading_file.clone(),
+        })
         .await?;
 
         while let Some(msg) = stream.next().await {
@@ -387,17 +399,21 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                     // Clear current reading file and rebuild reader to continue with other splits.
                     *reading_file.lock().expect("mutex poisoned") = None;
                     splits_on_fetch = 0;
-                    Self::replace_with_new_batch_reader(
-                        &mut splits_on_fetch,
-                        &state_store_handler,
-                        &dirty_splits,
-                        core.column_ids.clone(),
-                        self.build_source_ctx(&source_desc, core.source_id, &core.source_name),
-                        &source_desc,
-                        &mut stream,
-                        self.rate_limit_rps,
-                        reading_file.clone(),
-                    )
+                    Self::replace_with_new_batch_reader(ReplaceReaderArgs {
+                        splits_on_fetch: &mut splits_on_fetch,
+                        state_store_handler: &state_store_handler,
+                        dirty_splits: &dirty_splits,
+                        column_ids: core.column_ids.clone(),
+                        source_ctx: self.build_source_ctx(
+                            &source_desc,
+                            core.source_id,
+                            &core.source_name,
+                        ),
+                        source_desc: &source_desc,
+                        stream: &mut stream,
+                        rate_limit_rps: self.rate_limit_rps,
+                        reading_file: reading_file.clone(),
+                    })
                     .await?;
                     continue;
                 }
@@ -454,21 +470,21 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                                     }
 
                                     if splits_on_fetch == 0 {
-                                        Self::replace_with_new_batch_reader(
-                                            &mut splits_on_fetch,
-                                            &state_store_handler,
-                                            &dirty_splits,
-                                            core.column_ids.clone(),
-                                            self.build_source_ctx(
+                                        Self::replace_with_new_batch_reader(ReplaceReaderArgs {
+                                            splits_on_fetch: &mut splits_on_fetch,
+                                            state_store_handler: &state_store_handler,
+                                            dirty_splits: &dirty_splits,
+                                            column_ids: core.column_ids.clone(),
+                                            source_ctx: self.build_source_ctx(
                                                 &source_desc,
                                                 core.source_id,
                                                 &core.source_name,
                                             ),
-                                            &source_desc,
-                                            &mut stream,
-                                            self.rate_limit_rps,
-                                            reading_file.clone(),
-                                        )
+                                            source_desc: &source_desc,
+                                            stream: &mut stream,
+                                            rate_limit_rps: self.rate_limit_rps,
+                                            reading_file: reading_file.clone(),
+                                        })
                                         .await?;
                                     }
                                 }
