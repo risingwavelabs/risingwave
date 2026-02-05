@@ -217,6 +217,7 @@ impl ProjectSetExec {
     }
 }
 
+// TODO: improve display info with select items
 impl DisplayAs for ProjectSetExec {
     fn fmt_as(
         &self,
@@ -224,12 +225,10 @@ impl DisplayAs for ProjectSetExec {
         f: &mut std::fmt::Formatter<'_>,
     ) -> std::fmt::Result {
         if format_type == DisplayFormatType::TreeRender {
-            writeln!(f, "select_items={:?}", self.select_items)?;
             return Ok(());
         }
 
-        write!(f, "ProjectSetExec: ")?;
-        write!(f, "select_items={:?}", self.select_items)?;
+        write!(f, "ProjectSetExec")?;
         Ok(())
     }
 }
