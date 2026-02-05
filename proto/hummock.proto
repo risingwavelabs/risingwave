@@ -507,7 +507,7 @@ message CompactTask {
     repeated SstableInfo sorted_old_values_ssts = 9;
     repeated SstableInfo sorted_new_values_ssts = 10;
   }
-  TableChangeLogCompactionInput table_change_log_input= 29;
+  TableChangeLogCompactionInput table_change_log_input = 29;
   TableChangeLogCompactionOutput table_change_log_output = 30;
 }
 
