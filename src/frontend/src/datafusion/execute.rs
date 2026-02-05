@@ -15,6 +15,8 @@
 use std::sync::Arc;
 
 use datafusion::config::ConfigOptions;
+use datafusion::execution::SessionStateBuilder;
+use datafusion::execution::runtime_env::RuntimeEnv;
 use datafusion::physical_plan::{ExecutionPlan, execute_stream};
 use datafusion::prelude::{SessionConfig as DFSessionConfig, SessionContext as DFSessionContext};
 use futures_async_stream::for_await;
@@ -28,7 +30,7 @@ use risingwave_common::error::BoxedError;
 use tokio::sync::mpsc;
 
 use crate::PgResponseStream;
-use crate::datafusion::CastExecutor;
+use crate::datafusion::{CastExecutor, ProjectSetQueryPlanner};
 use crate::error::Result as RwResult;
 use crate::handler::RwPgResponse;
 use crate::handler::util::{DataChunkToRowSetAdapter, to_pg_field};
@@ -44,7 +46,14 @@ pub struct DfBatchQueryPlanResult {
 
 pub fn create_datafusion_context(session: &SessionImpl) -> DFSessionContext {
     let df_config = create_config(session);
-    DFSessionContext::new_with_config(df_config)
+    let runtime = Arc::new(RuntimeEnv::default());
+    let state = SessionStateBuilder::new()
+        .with_config(df_config)
+        .with_runtime_env(runtime)
+        .with_default_features()
+        .with_query_planner(Arc::new(ProjectSetQueryPlanner))
+        .build();
+    DFSessionContext::new_with_state(state)
 }
 
 pub async fn build_datafusion_physical_plan(
