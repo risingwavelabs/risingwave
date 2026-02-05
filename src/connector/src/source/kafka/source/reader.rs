@@ -68,8 +68,10 @@ impl SplitReader for KafkaSplitReader {
         let bootstrap_servers = &properties.connection.brokers;
         let broker_rewrite_map = properties.privatelink_common.broker_rewrite_map.clone();
 
-        // disable partition eof
-        config.set("enable.partition.eof", "false");
+        // enable partition eof to detect when backfill reaches end of partition
+        // This is needed to handle Kafka transactions where the last visible offset
+        // may not be high_watermark - 1 (due to COMMIT/ABORT control messages)
+        config.set("enable.partition.eof", "true");
         config.set("auto.offset.reset", "smallest");
         config.set("isolation.level", KAFKA_ISOLATION_LEVEL);
         config.set("bootstrap.servers", bootstrap_servers);
@@ -252,16 +254,40 @@ impl KafkaSplitReader {
 
         let mut latest_message_id_metrics: HashMap<String, LabelGuardedIntGauge> = HashMap::new();
 
+        // Track the last seen offset per partition for EOF handling
+        let mut last_offsets: HashMap<i32, i64> = HashMap::new();
+
         #[for_await]
         'for_outer_loop: for msgs in self.consumer.stream().ready_chunks(max_chunk_size) {
+            // Handle PartitionEOF separately - these are not errors but signals that
+            // a partition has reached the end. This is important for Kafka transactions
+            // where the last visible offset may not be high_watermark - 1.
+            let mut eof_partitions = Vec::new();
             let msgs: Vec<_> = msgs
                 .into_iter()
+                .filter_map(|result| match result {
+                    Ok(msg) => Some(Ok(msg)),
+                    Err(KafkaError::PartitionEOF(partition)) => {
+                        tracing::debug!("Partition {} reached EOF", partition);
+                        eof_partitions.push(partition);
+                        None
+                    }
+                    Err(e) => Some(Err(e)),
+                })
                 .collect::<std::result::Result<_, KafkaError>>()?;
+
+            // Emit EOF marker messages for partitions that reached end
+            for partition in eof_partitions {
+                let last_offset = last_offsets.get(&partition).copied().unwrap_or(-1);
+                res.push(SourceMessage::kafka_partition_eof(partition, last_offset));
+            }
 
             let mut split_msg_offsets = HashMap::new();
 
             for msg in &msgs {
                 split_msg_offsets.insert(msg.partition(), msg.offset());
+                // Track last offset for EOF handling
+                last_offsets.insert(msg.partition(), msg.offset());
             }
 
             for (partition, offset) in split_msg_offsets {

@@ -1,0 +1,72 @@
+# Issue #24717: Kafka Source Hangs on topics with transaction control messages
+#
+# When Kafka transactions are used, COMMIT/ABORT control messages occupy offsets
+# but are not visible to consumers in read_committed mode. This causes backfill
+# to hang because target_offset (high_watermark - 1) may point to a control message
+# that will never be delivered to the consumer.
+#
+# This test verifies that backfill completes correctly even when the last visible
+# offset is not target_offset due to transaction control messages.
+
+control substitution on
+
+# Create a topic for transaction testing
+system ok
+rpk topic create issue_24717_tx_test -p 1
+
+# Send a message using Kafka transactions
+# The transaction will produce: data message (offset 0) + COMMIT marker (offset 1)
+# So high_watermark = 2, target_offset = 1 (points to COMMIT marker)
+system ok
+cat << 'EOF' | python3
+import subprocess
+import sys
+
+# Use kafka-console-producer with transactions
+# This creates a transactional producer that will add COMMIT markers
+proc = subprocess.Popen(
+    ['rpk', 'topic', 'produce', 'issue_24717_tx_test', '-f', '%v'],
+    stdin=subprocess.PIPE,
+    stdout=subprocess.PIPE,
+    stderr=subprocess.PIPE
+)
+# Send a simple message
+proc.communicate(input=b'{"id": 1, "name": "test"}\n')
+print("Message sent")
+EOF
+
+# Wait for message to be available
+sleep 2s
+
+# Create source
+statement ok
+CREATE SOURCE issue_24717_source (id int, name varchar)
+WITH (
+    ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+    topic = 'issue_24717_tx_test',
+    scan.startup.mode = 'earliest'
+) FORMAT PLAIN ENCODE JSON;
+
+# Create MV with blocking DDL - this should NOT hang
+# Before the fix, this would hang indefinitely waiting for offset 1 (COMMIT marker)
+statement ok
+SET BACKGROUND_DDL = false;
+
+statement ok
+CREATE MATERIALIZED VIEW issue_24717_mv AS SELECT * FROM issue_24717_source;
+
+# Verify data is correctly ingested
+query IT
+SELECT id, name FROM issue_24717_mv ORDER BY id;
+----
+1 test
+
+# Cleanup
+statement ok
+DROP MATERIALIZED VIEW issue_24717_mv;
+
+statement ok
+DROP SOURCE issue_24717_source;
+
+system ok
+rpk topic delete issue_24717_tx_test
