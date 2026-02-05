@@ -6,18 +6,88 @@ from . import section
 def _(outer_panels: Panels):
     successful_compaction_filter = "result='SUCCESS'"
     failed_compaction_filter = "result!='SUCCESS'"
+    sublevel_filter = "level_index=~'cg.*l0.*'"
+    level_sst_count_filter = "level_index=~'cg.*L.*'"
     panels = outer_panels.sub_panel()
     return [
         outer_panels.row_collapsed(
             "Compaction",
             [
+                panels.subheader("Highlights"),
+                panels.timeseries_count(
+                    "Compaction Failure Rate",
+                    "The rate of compactions from one level to another level that have completed or failed",
+                    [
+                        panels.target(
+                            f"sum(rate({metric('storage_level_compact_frequency', failed_compaction_filter)}[$__rate_interval])) by (compactor, group, task_type, result)",
+                            "{{task_type}} - {{result}} - group-{{group}} @ {{compactor}}",
+                        ),
+                    ],
+                ),
+                panels.timeseries_count(
+                    "Compaction Success Rate",
+                    "The rate of compactions from one level to another level that have completed or failed",
+                    [
+                        panels.target(
+                            f"sum(rate({metric('storage_level_compact_frequency', successful_compaction_filter)}[$__rate_interval])) by (compactor, group, task_type, result)",
+                            "{{task_type}} - {{result}} - group-{{group}} @ {{compactor}}",
+                        ),
+                    ],
+                ),
+                panels.timeseries_count(
+                    "Compaction Skip Rate",
+                    "The rate of compactions from one level to another level that have been skipped.",
+                    [
+                        panels.target(
+                            f"sum(rate({metric('storage_skip_compact_frequency')}[$__rate_interval])) by (level, type)",
+                            "{{level}}-{{type}}",
+                        ),
+                    ],
+                ),
+                panels.timeseries_count(
+                    "Compactor Running Task Count",
+                    "The number of compactions from one level to another level that are running.",
+                    [
+                        panels.target(
+                            f"avg({metric('storage_compact_task_pending_num')}) by({COMPONENT_LABEL}, {NODE_LABEL})",
+                            "compactor_task_count - {{%s}} @ {{%s}}"
+                            % (COMPONENT_LABEL, NODE_LABEL),
+                        ),
+                        panels.target(
+                            f"avg({metric('storage_compact_task_pending_parallelism')}) by({COMPONENT_LABEL}, {NODE_LABEL})",
+                            "compactor_task_pending_parallelism - {{%s}} @ {{%s}}"
+                            % (COMPONENT_LABEL, NODE_LABEL),
+                        ),
+                    ],
+                ),
+                panels.timeseries_bytes(
+                    "LSM Compact Pending Bytes",
+                    "bytes of Lsm tree needed to reach balance",
+                    [
+                        panels.target(
+                            f"sum({metric('storage_compact_pending_bytes')}) by ({NODE_LABEL}, group)",
+                            "compact pending bytes - {{group}} @ {{%s}} " % NODE_LABEL,
+                        ),
+                    ],
+                ),
+                panels.timeseries_count(
+                    "L0 Sub-level Count",
+                    "The number of L0 sub-levels for each compaction group",
+                    [
+                        panels.target(
+                            f"sum({metric('storage_level_sst_num', sublevel_filter)}) by ({NODE_LABEL}, level_index)",
+                            "L{{level_index}}",
+                        ),
+                    ],
+                ),
+
                 panels.subheader("SSTables"),
                 panels.timeseries_count(
                     "SSTable Count",
                     "The number of SSTables at each level",
                     [
                         panels.target(
-                            f"sum({metric('storage_level_sst_num')}) by ({NODE_LABEL}, level_index)",
+                            f"sum({metric('storage_level_sst_num', level_sst_count_filter)}) by ({NODE_LABEL}, level_index)",
                             "L{{level_index}}",
                         ),
                     ],
@@ -40,36 +110,6 @@ def _(outer_panels: Panels):
                         panels.target(
                             f"sum(rate({metric('storage_commit_write_throughput')}[$__rate_interval])) by (table_id)",
                             "write - {{table_id}}",
-                        ),
-                    ],
-                ),
-                panels.timeseries_count(
-                    "Compaction Failure Count",
-                    "The number of compactions from one level to another level that have completed or failed",
-                    [
-                        panels.target(
-                            f"sum({metric('storage_level_compact_frequency', failed_compaction_filter)}) by (compactor, group, task_type, result)",
-                            "{{task_type}} - {{result}} - group-{{group}} @ {{compactor}}",
-                        ),
-                    ],
-                ),
-                panels.timeseries_count(
-                    "Compaction Success Count",
-                    "The number of compactions from one level to another level that have completed or failed",
-                    [
-                        panels.target(
-                            f"sum({metric('storage_level_compact_frequency', successful_compaction_filter)}) by (compactor, group, task_type, result)",
-                            "{{task_type}} - {{result}} - group-{{group}} @ {{compactor}}",
-                        ),
-                    ],
-                ),
-                panels.timeseries_count(
-                    "Compaction Skip Count",
-                    "The number of compactions from one level to another level that have been skipped.",
-                    [
-                        panels.target(
-                            f"sum(rate({metric('storage_skip_compact_frequency')}[$__rate_interval])) by (level, type)",
-                            "{{level}}-{{type}}",
                         ),
                     ],
                 ),
@@ -106,22 +146,7 @@ def _(outer_panels: Panels):
                         ),
                     ],
                 ),
-                panels.timeseries_count(
-                    "Compactor Running Task Count",
-                    "The number of compactions from one level to another level that are running.",
-                    [
-                        panels.target(
-                            f"avg({metric('storage_compact_task_pending_num')}) by({COMPONENT_LABEL}, {NODE_LABEL})",
-                            "compactor_task_count - {{%s}} @ {{%s}}"
-                            % (COMPONENT_LABEL, NODE_LABEL),
-                        ),
-                        panels.target(
-                            f"avg({metric('storage_compact_task_pending_parallelism')}) by({COMPONENT_LABEL}, {NODE_LABEL})",
-                            "compactor_task_pending_parallelism - {{%s}} @ {{%s}}"
-                            % (COMPONENT_LABEL, NODE_LABEL),
-                        ),
-                    ],
-                ),
+                
                 panels.subheader("Performance"),
                 panels.timeseries_latency(
                     "Compaction Duration",
@@ -365,16 +390,6 @@ def _(outer_panels: Panels):
                         panels.target(
                             f"sum(rate({metric('compactor_iter_scan_key_counts')}[$__rate_interval])) by ({NODE_LABEL}, type)",
                             "iter keys flow - {{type}} @ {{%s}} " % NODE_LABEL,
-                        ),
-                    ],
-                ),
-                panels.timeseries_bytes(
-                    "LSM Compact Pending Bytes",
-                    "bytes of Lsm tree needed to reach balance",
-                    [
-                        panels.target(
-                            f"sum({metric('storage_compact_pending_bytes')}) by ({NODE_LABEL}, group)",
-                            "compact pending bytes - {{group}} @ {{%s}} " % NODE_LABEL,
                         ),
                     ],
                 ),
