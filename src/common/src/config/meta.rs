@@ -115,7 +115,7 @@ pub struct MetaConfig {
     #[serde(default = "default::meta::periodic_compaction_interval_sec")]
     pub periodic_compaction_interval_sec: u64,
 
-    /// Schedule table change log compaction for all compaction groups with this interval.
+    /// Schedule table change log compaction periodically with this interval. 0 means disabled.
     #[serde(default = "default::meta::periodic_table_change_log_compaction_interval_sec")]
     pub periodic_table_change_log_compaction_interval_sec: u64,
 

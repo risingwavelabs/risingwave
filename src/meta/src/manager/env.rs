@@ -156,7 +156,7 @@ pub struct MetaOpts {
     pub enable_committed_sst_sanity_check: bool,
     /// Schedule compaction for all compaction groups with this interval.
     pub periodic_compaction_interval_sec: u64,
-    /// Schedule table change log compaction for all compaction groups with this interval.
+    /// Schedule table change log compaction periodically with this interval. 0 means disabled.
     pub periodic_table_change_log_compaction_interval_sec: u64,
     /// Interval of reporting the number of nodes in the cluster.
     pub node_num_monitor_interval_sec: u64,
