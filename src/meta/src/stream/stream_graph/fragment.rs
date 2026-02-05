@@ -37,7 +37,7 @@ use risingwave_meta_model::WorkerId;
 use risingwave_meta_model::streaming_job::BackfillOrders;
 use risingwave_pb::catalog::{PbSink, PbTable, Table};
 use risingwave_pb::ddl_service::TableJobType;
-use risingwave_pb::id::StreamNodeLocalOperatorId;
+use risingwave_pb::id::{RelationId, StreamNodeLocalOperatorId};
 use risingwave_pb::plan_common::{PbColumnCatalog, PbColumnDesc};
 use risingwave_pb::stream_plan::dispatch_output_mapping::TypePair;
 use risingwave_pb::stream_plan::stream_fragment_graph::{
@@ -1072,7 +1072,7 @@ impl StreamFragmentGraph {
     /// Collect the mapping from table / `source_id` -> `fragment_id`
     pub fn collect_backfill_mapping(
         fragments: impl Iterator<Item = (FragmentId, FragmentTypeMask, &PbStreamNode)>,
-    ) -> HashMap<u32, Vec<FragmentId>> {
+    ) -> HashMap<RelationId, Vec<FragmentId>> {
         let mut mapping = HashMap::new();
         for (fragment_id, fragment_type_mask, node) in fragments {
             let has_some_scan = fragment_type_mask
@@ -1083,7 +1083,7 @@ impl StreamFragmentGraph {
                         Some(NodeBody::StreamScan(stream_scan)) => {
                             let table_id = stream_scan.table_id;
                             let fragments: &mut Vec<_> =
-                                mapping.entry(table_id.as_raw_id()).or_default();
+                                mapping.entry(table_id.as_relation_id()).or_default();
                             fragments.push(fragment_id);
                             // each fragment should have only 1 scan node.
                             false
@@ -1091,7 +1091,7 @@ impl StreamFragmentGraph {
                         Some(NodeBody::SourceBackfill(source_backfill)) => {
                             let source_id = source_backfill.upstream_source_id;
                             let fragments: &mut Vec<_> =
-                                mapping.entry(source_id.as_raw_id()).or_default();
+                                mapping.entry(source_id.as_relation_id()).or_default();
                             fragments.push(fragment_id);
                             // each fragment should have only 1 scan node.
                             false
@@ -1125,7 +1125,9 @@ impl StreamFragmentGraph {
                 let downstream_fragment_ids = downstream_rel_ids
                     .data
                     .iter()
-                    .flat_map(|downstream_rel_id| mapping.get(downstream_rel_id).unwrap().iter())
+                    .flat_map(|&downstream_rel_id| {
+                        mapping.get(&downstream_rel_id.into()).unwrap().iter()
+                    })
                     .copied()
                     .collect();
                 fragment_ordering.insert(*fragment_id, downstream_fragment_ids);

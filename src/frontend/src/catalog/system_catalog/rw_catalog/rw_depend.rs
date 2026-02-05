@@ -14,6 +14,7 @@
 
 use risingwave_common::types::Fields;
 use risingwave_frontend_macro::system_catalog;
+use risingwave_pb::id::ObjectId;
 
 use crate::catalog::system_catalog::SysCatalogReaderImpl;
 use crate::error::Result;
@@ -23,9 +24,9 @@ use crate::error::Result;
 #[primary_key(objid, refobjid)]
 struct RwDepend {
     /// The OID of the specific dependent object
-    objid: i32,
+    objid: ObjectId,
     /// The OID of the specific referenced object
-    refobjid: i32,
+    refobjid: ObjectId,
 }
 
 #[system_catalog(table, "rw_catalog.rw_depend")]
@@ -34,8 +35,8 @@ async fn read_rw_depend(reader: &SysCatalogReaderImpl) -> Result<Vec<RwDepend>> 
     Ok(dependencies
         .into_iter()
         .map(|depend| RwDepend {
-            objid: depend.object_id.as_i32_id(),
-            refobjid: depend.referenced_object_id.as_i32_id(),
+            objid: depend.object_id,
+            refobjid: depend.referenced_object_id,
         })
         .collect())
 }

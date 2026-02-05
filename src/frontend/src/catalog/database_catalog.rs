@@ -29,7 +29,7 @@ pub struct DatabaseCatalog {
     pub name: String,
     schema_by_name: HashMap<String, SchemaCatalog>,
     schema_name_by_id: HashMap<SchemaId, String>,
-    pub owner: u32,
+    pub owner: UserId,
     pub resource_group: String,
     pub barrier_interval_ms: Option<u32>,
     pub checkpoint_frequency: Option<u64>,

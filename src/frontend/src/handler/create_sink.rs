@@ -24,7 +24,7 @@ use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::array::arrow::IcebergArrowConvert;
 use risingwave_common::array::arrow::arrow_schema_iceberg::DataType as ArrowDataType;
 use risingwave_common::bail;
-use risingwave_common::catalog::{ColumnCatalog, ICEBERG_SINK_PREFIX, ObjectId, Schema, UserId};
+use risingwave_common::catalog::{ColumnCatalog, ICEBERG_SINK_PREFIX, ObjectId, Schema};
 use risingwave_common::license::Feature;
 use risingwave_common::secret::LocalSecretManager;
 use risingwave_common::system_param::reader::SystemParamsRead;
@@ -431,7 +431,7 @@ pub async fn gen_sink_plan(
     let sink_catalog = sink_desc.into_catalog(
         sink_schema_id,
         sink_database_id,
-        UserId::new(session.user_id()),
+        session.user_id(),
         connector_conn_ref,
     );
 

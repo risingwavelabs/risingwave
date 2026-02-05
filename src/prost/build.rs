@@ -86,14 +86,17 @@ for_all_wrapped_id_fields! (
             id: ConnectionId,
             schema_id: SchemaId,
             database_id: DatabaseId,
+            owner: UserId,
         }
         Database {
             id: DatabaseId,
+            owner: UserId,
         }
         Function {
             id: FunctionId,
             schema_id: SchemaId,
             database_id: DatabaseId,
+            owner: UserId,
         }
         Index {
             id: IndexId,
@@ -101,15 +104,18 @@ for_all_wrapped_id_fields! (
             primary_table_id: TableId,
             schema_id: SchemaId,
             database_id: DatabaseId,
+            owner: UserId,
         }
         Schema {
             id: SchemaId,
             database_id: DatabaseId,
+            owner: UserId,
         }
         Secret {
             id: SecretId,
             schema_id: SchemaId,
             database_id: DatabaseId,
+            owner: UserId,
         }
         Sink {
             id: SinkId,
@@ -118,6 +124,7 @@ for_all_wrapped_id_fields! (
             target_table: TableId,
             auto_refresh_schema_from_table: TableId,
             connection_id: ConnectionId,
+            owner: UserId,
         }
         SinkFormatDesc {
             connection_id: ConnectionId,
@@ -127,6 +134,7 @@ for_all_wrapped_id_fields! (
             schema_id: SchemaId,
             database_id: DatabaseId,
             connection_id: ConnectionId,
+            owner: UserId,
         }
         StreamSourceInfo {
             connection_id: ConnectionId,
@@ -136,6 +144,7 @@ for_all_wrapped_id_fields! (
             dependent_table_id: TableId,
             schema_id: SchemaId,
             database_id: DatabaseId,
+            owner: UserId,
         }
         Table {
             id: TableId,
@@ -145,11 +154,13 @@ for_all_wrapped_id_fields! (
             database_id: DatabaseId,
             fragment_id: FragmentId,
             dml_fragment_id: FragmentId,
+            owner: UserId,
         }
         View {
             id: ViewId,
             schema_id: SchemaId,
             database_id: DatabaseId,
+            owner: UserId,
         }
     }
     common {
@@ -179,6 +190,9 @@ for_all_wrapped_id_fields! (
         AlterFragmentParallelismRequest {
             fragment_ids: FragmentId,
         }
+        AlterOwnerRequest {
+            owner_id: UserId,
+        }
         AlterParallelismRequest {
             table_id: JobId,
         }
@@ -189,6 +203,7 @@ for_all_wrapped_id_fields! (
             database_id: DatabaseId,
             schema_id: SchemaId,
             secret_id: SecretId,
+            owner_id: UserId,
         }
         AlterSetSchemaRequest {
             new_schema_id: SchemaId,
@@ -206,16 +221,20 @@ for_all_wrapped_id_fields! (
         CreateConnectionRequest {
             database_id: DatabaseId,
             schema_id: SchemaId,
+            owner_id: UserId,
         }
         CreateMaterializedViewRequest {
             dependencies: ObjectId,
+            owner_id: UserId,
         }
         CreateSecretRequest {
             database_id: DatabaseId,
             schema_id: SchemaId,
+            owner_id: UserId,
         }
         CreateSinkRequest {
             dependencies: ObjectId,
+            owner_id: UserId,
         }
         CreateTableRequest {
             dependencies: ObjectId,
@@ -591,6 +610,9 @@ for_all_wrapped_id_fields! (
             actor_splits: ActorId,
             actor_dispatchers: ActorId,
         }
+        BackfillOrder {
+            order: RelationId,
+        }
         CdcFilterNode {
             upstream_source_id: SourceId,
         }
@@ -783,6 +805,32 @@ for_all_wrapped_id_fields! (
         AlterDefaultPrivilegeRequest {
             database_id: DatabaseId,
             schema_ids: SchemaId,
+            user_ids: UserId,
+            granted_by: UserId,
+        }
+        AlterDefaultPrivilegeRequest.GrantPrivilege {
+            grantees: UserId,
+        }
+        AlterDefaultPrivilegeRequest.RevokePrivilege {
+            grantees: UserId,
+        }
+        DropUserRequest {
+            user_id: UserId,
+        }
+        GrantPrivilege.ActionWithGrantOption {
+            granted_by: UserId,
+        }
+        GrantPrivilegeRequest {
+            user_ids: UserId,
+            granted_by: UserId,
+        }
+        RevokePrivilegeRequest {
+            user_ids: UserId,
+            granted_by: UserId,
+            revoke_by: UserId,
+        }
+        UserInfo {
+            id: UserId,
         }
     }
 );

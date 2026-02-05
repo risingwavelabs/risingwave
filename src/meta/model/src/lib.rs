@@ -74,7 +74,6 @@ pub mod worker_property;
 
 pub type TransactionId = i32;
 
-pub type UserId = i32;
 pub type PrivilegeId = i32;
 pub type DefaultPrivilegeId = i32;
 

@@ -22,14 +22,14 @@ pub(crate) async fn update_internal_tables(
     txn: &DatabaseTransaction,
     object_id: ObjectId,
     column: object::Column,
-    new_value: Value,
+    new_value: impl Into<Value>,
     objects_to_notify: &mut Vec<PbObjectInfo>,
 ) -> MetaResult<()> {
     let internal_tables = get_internal_tables_by_id(object_id.as_job_id(), txn).await?;
 
     if !internal_tables.is_empty() {
         Object::update_many()
-            .col_expr(column, SimpleExpr::Value(new_value))
+            .col_expr(column, SimpleExpr::Value(new_value.into()))
             .filter(object::Column::Oid.is_in(internal_tables.clone()))
             .exec(txn)
             .await?;
