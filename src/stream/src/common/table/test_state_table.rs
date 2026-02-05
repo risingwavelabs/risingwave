@@ -1875,7 +1875,7 @@ async fn test_state_table_with_vnode_stats() {
         builder.finish()
     };
     let mut config = StreamingConfig::default();
-    config.developer.enable_state_table_vnode_stats_prunning = true;
+    config.developer.enable_state_table_vnode_stats_pruning = true;
     let mut state_table: StateTable<HummockStorage> = StateTableBuilder::new(
         &table,
         test_env.storage.clone(),
@@ -1984,6 +1984,48 @@ async fn test_state_table_with_vnode_stats() {
     assert_eq!(
         state_table.metrics().unwrap().get_vnode_pruned_count.get(),
         2
+    );
+
+    // Test exists() for existing rows
+    let exists1 = state_table
+        .exists(OwnedRow::new(vec![Some(1_i32.into())]))
+        .await
+        .unwrap();
+    assert!(exists1);
+
+    let exists5 = state_table
+        .exists(OwnedRow::new(vec![Some(5_i32.into())]))
+        .await
+        .unwrap();
+    assert!(exists5);
+
+    let exists9 = state_table
+        .exists(OwnedRow::new(vec![Some(9_i32.into())]))
+        .await
+        .unwrap();
+    assert!(exists9);
+
+    // Test exists() for non-existent rows with pruning
+    // Key 0 is less than min key (1) - should be pruned
+    let exists0 = state_table
+        .exists(OwnedRow::new(vec![Some(0_i32.into())]))
+        .await
+        .unwrap();
+    assert!(!exists0);
+    assert_eq!(
+        state_table.metrics().unwrap().get_vnode_pruned_count.get(),
+        3
+    );
+
+    // Key 10 is greater than max key (9) - should be pruned
+    let exists10 = state_table
+        .exists(OwnedRow::new(vec![Some(10_i32.into())]))
+        .await
+        .unwrap();
+    assert!(!exists10);
+    assert_eq!(
+        state_table.metrics().unwrap().get_vnode_pruned_count.get(),
+        4
     );
 
     // Test update and delete operations
@@ -2123,7 +2165,7 @@ async fn test_state_table_pruned_key_range_with_two_pk_columns() {
         builder.finish()
     };
     let mut config = StreamingConfig::default();
-    config.developer.enable_state_table_vnode_stats_prunning = true;
+    config.developer.enable_state_table_vnode_stats_pruning = true;
     let mut state_table: StateTable<HummockStorage> = StateTableBuilder::new(
         &table,
         test_env.storage.clone(),
@@ -2387,4 +2429,60 @@ async fn test_state_table_pruned_key_range_with_two_pk_columns() {
         }
     }
     assert_eq!(count, 3);
+
+    // Test 7: exists() for existing rows with two-column PKs
+    let exists_1_10 = state_table
+        .exists(OwnedRow::new(vec![Some(1_i32.into()), Some(10_i32.into())]))
+        .await
+        .unwrap();
+    assert!(exists_1_10);
+
+    let exists_5_50 = state_table
+        .exists(OwnedRow::new(vec![Some(5_i32.into()), Some(50_i32.into())]))
+        .await
+        .unwrap();
+    assert!(exists_5_50);
+
+    let exists_9_90 = state_table
+        .exists(OwnedRow::new(vec![Some(9_i32.into()), Some(90_i32.into())]))
+        .await
+        .unwrap();
+    assert!(exists_9_90);
+
+    // Test 8: exists() for non-existent row within range (should not be pruned)
+    let exists_1_15 = state_table
+        .exists(OwnedRow::new(vec![Some(1_i32.into()), Some(15_i32.into())]))
+        .await
+        .unwrap();
+    assert!(!exists_1_15);
+    // This should NOT increment pruned count since (1, 15) is within the range
+    assert_eq!(
+        state_table.metrics().unwrap().get_vnode_pruned_count.get(),
+        0
+    );
+
+    // Test 9: exists() for key before min key - should be pruned
+    let exists_before_min = state_table
+        .exists(OwnedRow::new(vec![Some(0_i32.into()), Some(5_i32.into())]))
+        .await
+        .unwrap();
+    assert!(!exists_before_min);
+    assert_eq!(
+        state_table.metrics().unwrap().get_vnode_pruned_count.get(),
+        1
+    );
+
+    // Test 10: exists() for key after max key - should be pruned
+    let exists_after_max = state_table
+        .exists(OwnedRow::new(vec![
+            Some(100_i32.into()),
+            Some(0_i32.into()),
+        ]))
+        .await
+        .unwrap();
+    assert!(!exists_after_max);
+    assert_eq!(
+        state_table.metrics().unwrap().get_vnode_pruned_count.get(),
+        2
+    );
 }

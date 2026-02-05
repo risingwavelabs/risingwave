@@ -283,8 +283,8 @@ pub struct StreamingDeveloperConfig {
     /// but we don't actually use the pruning results - we still use cache and storage to
     /// fulfill the read. This is useful for validating the correctness of vnode stats pruning
     /// before enabling it in production.
-    #[serde(default = "default::developer::enable_state_table_vnode_stats_prunning")]
-    pub enable_state_table_vnode_stats_prunning: bool,
+    #[serde(default = "default::developer::enable_state_table_vnode_stats_pruning")]
+    pub enable_state_table_vnode_stats_pruning: bool,
 
     #[serde(default, flatten)]
     #[serde_prefix_all(skip)]

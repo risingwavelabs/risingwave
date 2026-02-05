@@ -421,7 +421,7 @@ pub mod default {
             2048
         }
 
-        pub fn enable_state_table_vnode_stats_prunning() -> bool {
+        pub fn enable_state_table_vnode_stats_pruning() -> bool {
             false
         }
     }
