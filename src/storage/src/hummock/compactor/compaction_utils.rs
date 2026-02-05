@@ -139,6 +139,9 @@ pub struct TaskConfig {
     pub table_schemas: HashMap<TableId, PbTableSchema>,
     /// `disable_drop_column_optimization` should only be set in benchmark.
     pub disable_drop_column_optimization: bool,
+    /// When `retain_multiple_version` is false, this flag controls whether to keep the earliest (rather than the latest) version of each key during compaction.
+    /// This is only used for table change log compaction's old value part.
+    pub preserve_earliest_key_version: bool,
 }
 
 pub fn build_multi_compaction_filter(compact_task: &CompactTask) -> MultiCompactionFilter {

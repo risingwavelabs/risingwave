@@ -27,7 +27,8 @@ use risingwave_pb::hummock::*;
 use tracing::warn;
 
 use crate::change_log::{
-    ChangeLogDeltaCommon, EpochNewChangeLogCommon, TableChangeLog, TableChangeLogCommon,
+    ChangeLogDelta, ChangeLogDeltaCommon, EpochNewChangeLogCommon, TableChangeLog,
+    TableChangeLogCommon,
 };
 use crate::compaction_group::StaticCompactionGroupId;
 use crate::compaction_group::hummock_version_ext::build_initial_compaction_group_levels;
@@ -223,6 +224,7 @@ pub struct HummockVersionCommon<T, L = T> {
     pub table_change_log: HashMap<TableId, TableChangeLogCommon<L>>,
     pub state_table_info: HummockVersionStateTableInfo,
     pub vector_indexes: HashMap<TableId, VectorIndex>,
+    pub compacted_table_change_logs: HashMap<TableId, TableChangeLogCommon<L>>,
 }
 
 pub type HummockVersion = HummockVersionCommon<SstableInfo>;
@@ -327,6 +329,13 @@ where
                 .iter()
                 .map(|(table_id, index)| (*table_id, index.clone().into()))
                 .collect(),
+            compacted_table_change_logs: pb_version
+                .compacted_table_change_logs
+                .iter()
+                .map(|(table_id, change_log)| {
+                    (*table_id, TableChangeLogCommon::from_protobuf(change_log))
+                })
+                .collect(),
         }
     }
 }
@@ -360,6 +369,11 @@ where
                 .vector_indexes
                 .iter()
                 .map(|(table_id, index)| (*table_id, index.clone().into()))
+                .collect(),
+            compacted_table_change_logs: version
+                .compacted_table_change_logs
+                .iter()
+                .map(|(table_id, change_log)| (*table_id, change_log.to_protobuf()))
                 .collect(),
         }
     }
@@ -395,6 +409,11 @@ where
                 .vector_indexes
                 .into_iter()
                 .map(|(table_id, index)| (table_id, index.into()))
+                .collect(),
+            compacted_table_change_logs: version
+                .compacted_table_change_logs
+                .into_iter()
+                .map(|(table_id, change_log)| (table_id, change_log.to_protobuf()))
                 .collect(),
         }
     }
@@ -452,6 +471,7 @@ impl HummockVersion {
             table_change_log: HashMap::new(),
             state_table_info: HummockVersionStateTableInfo::empty(),
             vector_indexes: Default::default(),
+            compacted_table_change_logs: HashMap::new(),
         };
         for group_id in [
             StaticCompactionGroupId::StateDefault as CompactionGroupId,
@@ -478,6 +498,7 @@ impl HummockVersion {
             change_log_delta: HashMap::new(),
             state_table_info_delta: Default::default(),
             vector_index_delta: Default::default(),
+            change_log_compaction_delta: Default::default(),
         }
     }
 
@@ -527,6 +548,7 @@ pub struct HummockVersionDeltaCommon<T, L = T> {
     pub change_log_delta: HashMap<TableId, ChangeLogDeltaCommon<L>>,
     pub state_table_info_delta: HashMap<TableId, StateTableInfoDelta>,
     pub vector_index_delta: HashMap<TableId, VectorIndexDelta>,
+    pub change_log_compaction_delta: HashMap<TableId, ChangeLogDeltaCommon<L>>,
 }
 
 pub type HummockVersionDelta = HummockVersionDeltaCommon<SstableInfo>;
@@ -689,15 +711,7 @@ where
             change_log_delta: pb_version_delta
                 .change_log_delta
                 .iter()
-                .map(|(table_id, log_delta)| {
-                    (
-                        *table_id,
-                        ChangeLogDeltaCommon {
-                            truncate_epoch: log_delta.truncate_epoch,
-                            new_log: log_delta.new_log.as_ref().unwrap().into(),
-                        },
-                    )
-                })
+                .map(|(table_id, log_delta)| (*table_id, ChangeLogDeltaCommon::from(log_delta)))
                 .collect(),
 
             state_table_info_delta: pb_version_delta
@@ -709,6 +723,11 @@ where
                 .vector_index_delta
                 .iter()
                 .map(|(table_id, delta)| (*table_id, delta.clone().into()))
+                .collect(),
+            change_log_compaction_delta: pb_version_delta
+                .change_log_compaction_delta
+                .iter()
+                .map(|(table_id, log_delta)| (*table_id, ChangeLogDeltaCommon::from(log_delta)))
                 .collect(),
         }
     }
@@ -747,6 +766,11 @@ where
                 .iter()
                 .map(|(table_id, delta)| (*table_id, delta.clone().into()))
                 .collect(),
+            change_log_compaction_delta: version_delta
+                .change_log_compaction_delta
+                .iter()
+                .map(|(table_id, log_delta)| (*table_id, log_delta.into()))
+                .collect(),
         }
     }
 }
@@ -784,6 +808,11 @@ where
                 .into_iter()
                 .map(|(table_id, delta)| (table_id, delta.into()))
                 .collect(),
+            change_log_compaction_delta: version_delta
+                .change_log_compaction_delta
+                .into_iter()
+                .map(|(table_id, log_delta)| (table_id, log_delta.into()))
+                .collect(),
         }
     }
 }
@@ -812,16 +841,8 @@ where
             removed_table_ids: pb_version_delta.removed_table_ids.into_iter().collect(),
             change_log_delta: pb_version_delta
                 .change_log_delta
-                .iter()
-                .map(|(table_id, log_delta)| {
-                    (
-                        *table_id,
-                        ChangeLogDeltaCommon {
-                            new_log: log_delta.new_log.clone().unwrap().into(),
-                            truncate_epoch: log_delta.truncate_epoch,
-                        },
-                    )
-                })
+                .into_iter()
+                .map(|(table_id, log_delta)| (table_id, ChangeLogDeltaCommon::from(log_delta)))
                 .collect(),
             state_table_info_delta: pb_version_delta
                 .state_table_info_delta
@@ -832,6 +853,11 @@ where
                 .vector_index_delta
                 .into_iter()
                 .map(|(table_id, delta)| (table_id, delta.into()))
+                .collect(),
+            change_log_compaction_delta: pb_version_delta
+                .change_log_compaction_delta
+                .into_iter()
+                .map(|(table_id, log_delta)| (table_id, ChangeLogDeltaCommon::from(log_delta)))
                 .collect(),
         }
     }
@@ -1216,16 +1242,8 @@ where
 impl From<HummockVersionDelta> for LocalHummockVersionDelta {
     #[expect(deprecated)]
     fn from(delta: HummockVersionDelta) -> Self {
-        Self {
-            id: delta.id,
-            prev_id: delta.prev_id,
-            group_deltas: delta.group_deltas,
-            max_committed_epoch: delta.max_committed_epoch,
-            trivial_move: delta.trivial_move,
-            new_table_watermarks: delta.new_table_watermarks,
-            removed_table_ids: delta.removed_table_ids,
-            change_log_delta: delta
-                .change_log_delta
+        let strip_change_log_delta = |log_delta: HashMap<TableId, ChangeLogDelta>| {
+            log_delta
                 .into_iter()
                 .map(|(k, v)| {
                     (
@@ -1241,9 +1259,20 @@ impl From<HummockVersionDelta> for LocalHummockVersionDelta {
                         },
                     )
                 })
-                .collect(),
+                .collect()
+        };
+        Self {
+            id: delta.id,
+            prev_id: delta.prev_id,
+            group_deltas: delta.group_deltas,
+            max_committed_epoch: delta.max_committed_epoch,
+            trivial_move: delta.trivial_move,
+            new_table_watermarks: delta.new_table_watermarks,
+            removed_table_ids: delta.removed_table_ids,
+            change_log_delta: strip_change_log_delta(delta.change_log_delta),
             state_table_info_delta: delta.state_table_info_delta,
             vector_index_delta: delta.vector_index_delta,
+            change_log_compaction_delta: strip_change_log_delta(delta.change_log_compaction_delta),
         }
     }
 }
@@ -1251,6 +1280,18 @@ impl From<HummockVersionDelta> for LocalHummockVersionDelta {
 impl From<HummockVersion> for LocalHummockVersion {
     #[expect(deprecated)]
     fn from(version: HummockVersion) -> Self {
+        fn strip_change_log(
+            change_log: TableChangeLogCommon<SstableInfo>,
+        ) -> TableChangeLogCommon<()> {
+            TableChangeLogCommon::new(change_log.change_log_into_iter().map(
+                |epoch_new_change_log| EpochNewChangeLogCommon {
+                    new_value: Vec::new(),
+                    old_value: Vec::new(),
+                    non_checkpoint_epochs: epoch_new_change_log.non_checkpoint_epochs,
+                    checkpoint_epoch: epoch_new_change_log.checkpoint_epoch,
+                },
+            ))
+        }
         Self {
             id: version.id,
             levels: version.levels,
@@ -1259,21 +1300,15 @@ impl From<HummockVersion> for LocalHummockVersion {
             table_change_log: version
                 .table_change_log
                 .into_iter()
-                .map(|(k, v)| {
-                    let epoch_new_change_logs: Vec<EpochNewChangeLogCommon<()>> = v
-                        .change_log_into_iter()
-                        .map(|epoch_new_change_log| EpochNewChangeLogCommon {
-                            new_value: Vec::new(),
-                            old_value: Vec::new(),
-                            non_checkpoint_epochs: epoch_new_change_log.non_checkpoint_epochs,
-                            checkpoint_epoch: epoch_new_change_log.checkpoint_epoch,
-                        })
-                        .collect();
-                    (k, TableChangeLogCommon::new(epoch_new_change_logs))
-                })
+                .map(|(k, v)| (k, strip_change_log(v)))
                 .collect(),
             state_table_info: version.state_table_info,
             vector_indexes: version.vector_indexes,
+            compacted_table_change_logs: version
+                .compacted_table_change_logs
+                .into_iter()
+                .map(|(k, v)| (k, strip_change_log(v)))
+                .collect(),
         }
     }
 }
