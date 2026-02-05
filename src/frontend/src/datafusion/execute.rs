@@ -12,13 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 
+use async_trait::async_trait;
 use datafusion::config::ConfigOptions;
-use datafusion::execution::SessionStateBuilder;
+use datafusion::execution::context::QueryPlanner;
 use datafusion::execution::runtime_env::RuntimeEnv;
+use datafusion::execution::{SessionState, SessionStateBuilder};
+use datafusion::logical_expr::LogicalPlan;
 use datafusion::physical_plan::{ExecutionPlan, execute_stream};
+use datafusion::physical_planner::{DefaultPhysicalPlanner, PhysicalPlanner};
 use datafusion::prelude::{SessionConfig as DFSessionConfig, SessionContext as DFSessionContext};
+use datafusion_common::Result as DFResult;
 use futures_async_stream::for_await;
 use pgwire::pg_field_descriptor::PgFieldDescriptor;
 use pgwire::pg_response::{PgResponse, StatementType};
@@ -30,7 +35,7 @@ use risingwave_common::error::BoxedError;
 use tokio::sync::mpsc;
 
 use crate::PgResponseStream;
-use crate::datafusion::{CastExecutor, ProjectSetQueryPlanner};
+use crate::datafusion::{CastExecutor, ProjectSetPlanner};
 use crate::error::Result as RwResult;
 use crate::handler::RwPgResponse;
 use crate::handler::util::{DataChunkToRowSetAdapter, to_pg_field};
@@ -51,7 +56,7 @@ pub fn create_datafusion_context(session: &SessionImpl) -> DFSessionContext {
         .with_config(df_config)
         .with_runtime_env(runtime)
         .with_default_features()
-        .with_query_planner(Arc::new(ProjectSetQueryPlanner))
+        .with_query_planner(Arc::new(RwCustomQueryPlanner))
         .build();
     DFSessionContext::new_with_state(state)
 }
@@ -171,4 +176,27 @@ fn create_config(session: &SessionImpl) -> DFSessionConfig {
     df_config = df_config.with_batch_size(session.env().batch_config().developer.chunk_size);
 
     df_config
+}
+
+#[derive(Debug)]
+pub struct RwCustomQueryPlanner;
+
+#[async_trait]
+impl QueryPlanner for RwCustomQueryPlanner {
+    async fn create_physical_plan(
+        &self,
+        logical_plan: &LogicalPlan,
+        session_state: &SessionState,
+    ) -> DFResult<Arc<dyn ExecutionPlan>> {
+        static PLANNER: LazyLock<Arc<DefaultPhysicalPlanner>> = LazyLock::new(|| {
+            Arc::new(DefaultPhysicalPlanner::with_extension_planners(vec![
+                Arc::new(ProjectSetPlanner),
+            ]))
+        });
+
+        let planner = PLANNER.clone();
+        planner
+            .create_physical_plan(logical_plan, session_state)
+            .await
+    }
 }

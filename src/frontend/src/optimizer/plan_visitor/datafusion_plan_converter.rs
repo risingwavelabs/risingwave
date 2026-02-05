@@ -29,8 +29,8 @@ use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::Schema as RwSchema;
 
 use crate::datafusion::{
-    ColumnTrait, ConcatColumns, IcebergTableProvider, InputColumns, ProjectSetLogicalPlan,
-    convert_agg_call, convert_column_order, convert_expr, convert_join_type, convert_window_expr,
+    ColumnTrait, ConcatColumns, IcebergTableProvider, InputColumns, ProjectSet, convert_agg_call,
+    convert_column_order, convert_expr, convert_join_type, convert_window_expr,
 };
 use crate::error::{ErrorCode, Result as RwResult};
 use crate::optimizer::plan_node::generic::{GenericPlanRef, TopNLimit};
@@ -146,7 +146,7 @@ impl LogicalPlanVisitor for DataFusionPlanConverter {
         let df_schema = convert_schema(rw_schema)?;
 
         let project_set =
-            ProjectSetLogicalPlan::new(df_input, plan.select_list().clone(), Arc::new(df_schema));
+            ProjectSet::new(df_input, plan.select_list().clone(), Arc::new(df_schema));
 
         Ok(Arc::new(LogicalPlan::Extension(Extension {
             node: Arc::new(project_set),

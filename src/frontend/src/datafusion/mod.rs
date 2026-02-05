@@ -30,6 +30,6 @@ pub use error::to_datafusion_error;
 pub use execute::*;
 pub use iceberg_executor::IcebergScan;
 pub use iceberg_table_provider::IcebergTableProvider;
-pub use project_set::{ProjectSetLogicalPlan, ProjectSetQueryPlanner};
+pub use project_set::{ProjectSet, ProjectSetPlanner};
 pub use scalar_function::*;
 pub use window_function::convert_window_expr;

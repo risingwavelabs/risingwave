@@ -14,12 +14,11 @@
 
 use std::any::Any;
 use std::cmp::Ordering;
-use std::sync::{Arc, LazyLock};
+use std::sync::Arc;
 
 use async_trait::async_trait;
 use datafusion::arrow::datatypes::SchemaRef as ArrowSchemaRef;
 use datafusion::arrow::record_batch::RecordBatch;
-use datafusion::execution::context::QueryPlanner;
 use datafusion::execution::session_state::SessionState;
 use datafusion::execution::{SendableRecordBatchStream, TaskContext};
 use datafusion::logical_expr::{Expr as DFExpr, LogicalPlan, UserDefinedLogicalNodeCore};
@@ -28,7 +27,7 @@ use datafusion::physical_plan::stream::RecordBatchStreamAdapter;
 use datafusion::physical_plan::{
     DisplayAs, DisplayFormatType, ExecutionPlan, ExecutionPlanProperties, PlanProperties,
 };
-use datafusion::physical_planner::{DefaultPhysicalPlanner, ExtensionPlanner, PhysicalPlanner};
+use datafusion::physical_planner::{ExtensionPlanner, PhysicalPlanner};
 use datafusion_common::{DFSchemaRef, Result as DFResult, exec_datafusion_err, exec_err};
 use either::Either;
 use futures_async_stream::try_stream;
@@ -45,13 +44,13 @@ use crate::datafusion::to_datafusion_error;
 use crate::expr::ExprImpl;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct ProjectSetLogicalPlan {
+pub struct ProjectSet {
     input: Arc<LogicalPlan>,
     select_list: Vec<ExprImpl>,
     schema: DFSchemaRef,
 }
 
-impl ProjectSetLogicalPlan {
+impl ProjectSet {
     pub fn new(input: Arc<LogicalPlan>, select_list: Vec<ExprImpl>, schema: DFSchemaRef) -> Self {
         Self {
             input,
@@ -65,7 +64,7 @@ impl ProjectSetLogicalPlan {
     }
 }
 
-impl PartialOrd for ProjectSetLogicalPlan {
+impl PartialOrd for ProjectSet {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         match self.input.partial_cmp(&other.input) {
             Some(Ordering::Equal) => {}
@@ -80,7 +79,7 @@ impl PartialOrd for ProjectSetLogicalPlan {
     }
 }
 
-impl UserDefinedLogicalNodeCore for ProjectSetLogicalPlan {
+impl UserDefinedLogicalNodeCore for ProjectSet {
     fn name(&self) -> &str {
         "ProjectSet"
     }
@@ -383,7 +382,7 @@ impl ExtensionPlanner for ProjectSetPlanner {
         physical_inputs: &[Arc<dyn ExecutionPlan>],
         session_state: &SessionState,
     ) -> DFResult<Option<Arc<dyn ExecutionPlan>>> {
-        let Some(project_set) = node.as_any().downcast_ref::<ProjectSetLogicalPlan>() else {
+        let Some(project_set) = node.as_any().downcast_ref::<ProjectSet>() else {
             return Ok(None);
         };
         if physical_inputs.len() != 1 {
@@ -397,28 +396,5 @@ impl ExtensionPlanner for ProjectSetPlanner {
             select_list,
             schema,
         ))))
-    }
-}
-
-#[derive(Debug)]
-pub struct ProjectSetQueryPlanner;
-
-#[async_trait]
-impl QueryPlanner for ProjectSetQueryPlanner {
-    async fn create_physical_plan(
-        &self,
-        logical_plan: &LogicalPlan,
-        session_state: &SessionState,
-    ) -> DFResult<Arc<dyn ExecutionPlan>> {
-        static PLANNER: LazyLock<Arc<DefaultPhysicalPlanner>> = LazyLock::new(|| {
-            Arc::new(DefaultPhysicalPlanner::with_extension_planners(vec![
-                Arc::new(ProjectSetPlanner),
-            ]))
-        });
-
-        let planner = PLANNER.clone();
-        planner
-            .create_physical_plan(logical_plan, session_state)
-            .await
     }
 }
