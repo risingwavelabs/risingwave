@@ -10080,23 +10080,13 @@ dependencies = [
 
 [[package]]
 name = "prost-reflect"
-version = "0.15.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "134584672a2f89128da60df70d4b9d2eddfeb3ab00ab9c854ee7ee360ea7a7fc"
-dependencies = [
- "logos",
- "miette",
- "prost 0.13.5",
- "prost-types 0.13.5",
-]
-
-[[package]]
-name = "prost-reflect"
 version = "0.16.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b89455ef41ed200cafc47c76c552ee7792370ac420497e551f16123a9135f76e"
 dependencies = [
  "base64 0.22.1",
+ "logos",
+ "miette",
  "prost 0.14.3",
  "prost-types 0.14.3",
  "serde",
@@ -10151,28 +10141,28 @@ dependencies = [
 
 [[package]]
 name = "protox"
-version = "0.8.0"
+version = "0.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "424c2bd294b69c49b949f3619362bc3c5d28298cd1163b6d1a62df37c16461aa"
+checksum = "4f25a07a73c6717f0b9bbbd685918f5df9815f7efba450b83d9c9dea41f0e3a1"
 dependencies = [
  "bytes",
  "miette",
- "prost 0.13.5",
- "prost-reflect 0.15.1",
- "prost-types 0.13.5",
+ "prost 0.14.3",
+ "prost-reflect",
+ "prost-types 0.14.3",
  "protox-parse",
  "thiserror 2.0.17",
 ]
 
 [[package]]
 name = "protox-parse"
-version = "0.8.0"
+version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "57927f9dbeeffcce7192404deee6157a640cbb3fe8ac11eabbe571565949ab75"
+checksum = "072eee358134396a4643dff81cfff1c255c9fbd3fb296be14bdb6a26f9156366"
 dependencies = [
  "logos",
  "miette",
- "prost-types 0.13.5",
+ "prost-types 0.14.3",
  "thiserror 2.0.17",
 ]
 
@@ -11664,7 +11654,7 @@ dependencies = [
  "prometheus",
  "prost 0.11.9",
  "prost 0.14.3",
- "prost-reflect 0.16.3",
+ "prost-reflect",
  "prost-types 0.14.3",
  "pulsar",
  "quote",
@@ -11738,7 +11728,7 @@ dependencies = [
  "num-bigint",
  "prost 0.14.3",
  "prost-build 0.14.3",
- "prost-reflect 0.16.3",
+ "prost-reflect",
  "prost-types 0.14.3",
  "protox",
  "reqwest 0.12.25",

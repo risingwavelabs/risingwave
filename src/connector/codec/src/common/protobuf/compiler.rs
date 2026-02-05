@@ -14,7 +14,6 @@
 
 use std::collections::HashMap;
 
-use prost::Message as _;
 use prost_types::FileDescriptorSet;
 use protox::Error;
 use protox::file::{ChainFileResolver, File, FileResolver, GoogleFileResolver};
@@ -60,8 +59,5 @@ pub fn compile_pb(
         .open_file(&main_file_name)?
         .file_descriptor_set();
 
-    // `protox` still depends on an older `prost-types`, but the rest of the workspace is on
-    // `prost-types` 0.14. Convert by encoding and decoding the descriptor set.
-    let bytes = protox::prost::Message::encode_to_vec(&fd);
-    FileDescriptorSet::decode(bytes.as_slice()).map_err(Error::new)
+    Ok(fd)
 }
