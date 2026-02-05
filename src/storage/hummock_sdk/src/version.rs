@@ -40,6 +40,8 @@ use crate::{
     HummockSstableObjectId, HummockVersionId,
 };
 
+pub const MAX_HUMMOCK_VERSION_ID: HummockVersionId = HummockVersionId::new(i64::MAX as _);
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct HummockVersionStateTableInfo {
     state_table_info: HashMap<TableId, PbStateTableInfo>,

@@ -23,7 +23,9 @@ use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
 };
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::table_stats::{PbTableStatsMap, add_prost_table_stats_map};
-use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
+use risingwave_hummock_sdk::version::{
+    HummockVersion, HummockVersionDelta, MAX_HUMMOCK_VERSION_ID,
+};
 use risingwave_hummock_sdk::{
     CompactionGroupId, HummockContextId, HummockObjectId, HummockSstableId, HummockSstableObjectId,
     HummockVersionId, get_stale_object_ids,
@@ -68,7 +70,7 @@ pub struct Versioning {
 
 impl ContextInfo {
     pub fn min_pinned_version_id(&self) -> HummockVersionId {
-        let mut min_pinned_version_id = HummockVersionId::MAX;
+        let mut min_pinned_version_id = MAX_HUMMOCK_VERSION_ID;
         for id in self
             .pinned_versions
             .values()
@@ -375,7 +377,7 @@ mod tests {
     use risingwave_hummock_sdk::key_range::KeyRange;
     use risingwave_hummock_sdk::level::{Level, Levels};
     use risingwave_hummock_sdk::sstable_info::SstableInfoInner;
-    use risingwave_hummock_sdk::version::HummockVersion;
+    use risingwave_hummock_sdk::version::{HummockVersion, MAX_HUMMOCK_VERSION_ID};
     use risingwave_hummock_sdk::{CompactionGroupId, HummockVersionId};
     use risingwave_pb::hummock::write_limits::WriteLimit;
     use risingwave_pb::hummock::{HummockPinnedVersion, HummockVersionStats};
@@ -390,7 +392,7 @@ mod tests {
     #[test]
     fn test_min_pinned_version_id() {
         let mut context_info = ContextInfo::default();
-        assert_eq!(context_info.min_pinned_version_id(), HummockVersionId::MAX);
+        assert_eq!(context_info.min_pinned_version_id(), MAX_HUMMOCK_VERSION_ID);
         context_info.pinned_versions.insert(
             1.into(),
             HummockPinnedVersion {
@@ -406,7 +408,7 @@ mod tests {
         context_info.version_safe_points.clear();
         assert_eq!(context_info.min_pinned_version_id(), 10);
         context_info.pinned_versions.clear();
-        assert_eq!(context_info.min_pinned_version_id(), HummockVersionId::MAX);
+        assert_eq!(context_info.min_pinned_version_id(), MAX_HUMMOCK_VERSION_ID);
     }
 
     #[test]

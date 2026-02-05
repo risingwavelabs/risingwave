@@ -31,10 +31,10 @@ use risingwave_hummock_sdk::key::{FullKey, gen_key_from_str};
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::sstable_info::{SstableInfo, SstableInfoInner};
 use risingwave_hummock_sdk::table_stats::{TableStats, TableStatsMap, to_prost_table_stats_map};
-use risingwave_hummock_sdk::version::HummockVersion;
+use risingwave_hummock_sdk::version::{HummockVersion, MAX_HUMMOCK_VERSION_ID};
 use risingwave_hummock_sdk::{
     CompactionGroupId, FIRST_VERSION_ID, HummockEpoch, HummockObjectId, HummockSstableId,
-    HummockSstableObjectId, HummockVersionId, LocalSstableInfo, SyncResult,
+    HummockSstableObjectId, LocalSstableInfo, SyncResult,
 };
 use risingwave_pb::common::worker_node::Property;
 use risingwave_pb::common::{HostAddress, WorkerType};
@@ -531,16 +531,16 @@ async fn test_hummock_manager_basic() {
     // min pinned version id if no clients
     assert_eq!(
         hummock_manager.get_min_pinned_version_id().await,
-        HummockVersionId::MAX
+        MAX_HUMMOCK_VERSION_ID
     );
     for _ in 0..2 {
         hummock_manager
-            .unpin_version_before(context_id_1, HummockVersionId::MAX)
+            .unpin_version_before(context_id_1, MAX_HUMMOCK_VERSION_ID)
             .await
             .unwrap();
         assert_eq!(
             hummock_manager.get_min_pinned_version_id().await,
-            HummockVersionId::MAX
+            MAX_HUMMOCK_VERSION_ID
         );
 
         // should pin latest because u64::MAX
@@ -582,7 +582,7 @@ async fn test_hummock_manager_basic() {
         (commit_log_count + register_log_count) as usize
     );
     hummock_manager
-        .unpin_version_before(context_id_1, HummockVersionId::MAX)
+        .unpin_version_before(context_id_1, MAX_HUMMOCK_VERSION_ID)
         .await
         .unwrap();
     assert_eq!(
@@ -590,12 +590,12 @@ async fn test_hummock_manager_basic() {
         init_version_id + commit_log_count + register_log_count
     );
     hummock_manager
-        .unpin_version_before(context_id_2, HummockVersionId::MAX)
+        .unpin_version_before(context_id_2, MAX_HUMMOCK_VERSION_ID)
         .await
         .unwrap();
     assert_eq!(
         hummock_manager.get_min_pinned_version_id().await,
-        HummockVersionId::MAX
+        MAX_HUMMOCK_VERSION_ID
     );
 }
 
@@ -2183,7 +2183,7 @@ async fn test_gc_stats() {
 
     assert_eq_gc_stats(0, 0, 6, 3, 2, 4);
     hummock_manager
-        .unpin_version_before(context_id, HummockVersionId::MAX)
+        .unpin_version_before(context_id, MAX_HUMMOCK_VERSION_ID)
         .await
         .unwrap();
 
@@ -2607,7 +2607,7 @@ async fn test_vacuum() {
     assert_eq!(hummock_manager.delete_version_deltas().await.unwrap(), 0);
 
     hummock_manager
-        .unpin_version_before(context_id, HummockVersionId::MAX)
+        .unpin_version_before(context_id, MAX_HUMMOCK_VERSION_ID)
         .await
         .unwrap();
     hummock_manager.create_version_checkpoint(0).await.unwrap();

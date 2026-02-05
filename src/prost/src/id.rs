@@ -81,20 +81,6 @@ impl<const N: usize, P> TypedId<N, P> {
     }
 }
 
-impl<const N: usize> TypedId<N, u64>
-where
-    Self: UniqueTypedIdDeclaration,
-{
-    pub const MAX: Self = TypedId(u64::MAX);
-}
-
-impl<const N: usize> TypedId<N, u32>
-where
-    Self: UniqueTypedIdDeclaration,
-{
-    pub const MAX: Self = TypedId(u32::MAX);
-}
-
 impl<const N: usize, P> TypedId<N, P>
 where
     Self: UniqueTypedIdDeclaration,
