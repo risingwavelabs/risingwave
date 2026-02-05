@@ -258,17 +258,17 @@ impl CatalogController {
         subscription_id: SubscriptionId,
     ) -> MetaResult<NotificationVersion> {
         let inner = self.inner.read().await;
+        let txn = inner.db.begin().await?;
         let (subscription, obj) = Subscription::find_by_id(subscription_id)
             .find_also_related(Object)
             .filter(subscription::Column::SubscriptionState.eq(SubscriptionState::Created as i32))
-            .one(&inner.db)
+            .one(&txn)
             .await?
             .ok_or_else(|| MetaError::catalog_id_not_found("subscription", subscription_id))?;
 
-        let dependency_object_ids = HashSet::from([subscription_id.into()]);
-        let dependencies = self
-            .list_object_dependencies_by_object_ids(&dependency_object_ids)
-            .await?;
+        let dependencies =
+            list_object_dependencies_by_object_id(&txn, subscription_id.into()).await?;
+        txn.commit().await?;
 
         let mut version = self
             .notify_frontend(

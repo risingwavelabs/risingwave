@@ -264,7 +264,7 @@ impl FrontendObserverNode {
                 _ => panic!("receive an unsupported notify {:?}", resp),
             },
             Info::ObjectGroup(object_group) => {
-                if resp.operation() == Operation::Add && !object_group.dependencies.is_empty() {
+                if !object_group.dependencies.is_empty() {
                     catalog_guard.insert_object_dependencies(object_group.dependencies.clone());
                 }
                 for object in &object_group.objects {

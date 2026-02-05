@@ -172,11 +172,19 @@ impl CatalogController {
     }
 
     pub async fn list_all_object_dependencies(&self) -> MetaResult<Vec<PbObjectDependency>> {
-        self.list_object_dependencies(true).await
+        let inner = self.inner.read().await;
+        let txn = inner.db.begin().await?;
+        let dependencies = list_object_dependencies(&txn, true).await?;
+        txn.commit().await?;
+        Ok(dependencies)
     }
 
     pub async fn list_created_object_dependencies(&self) -> MetaResult<Vec<PbObjectDependency>> {
-        self.list_object_dependencies(false).await
+        let inner = self.inner.read().await;
+        let txn = inner.db.begin().await?;
+        let dependencies = list_object_dependencies(&txn, false).await?;
+        txn.commit().await?;
+        Ok(dependencies)
     }
 
     pub async fn list_schemas(&self) -> MetaResult<Vec<PbSchema>> {

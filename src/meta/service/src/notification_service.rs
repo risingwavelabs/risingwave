@@ -252,7 +252,7 @@ impl NotificationServiceImpl {
         let object_dependencies = self
             .metadata_manager
             .catalog_controller
-            .list_all_object_dependencies()
+            .list_created_object_dependencies()
             .await?;
 
         // Use the plain text secret value for frontend. The secret value will be masked in frontend handle.
