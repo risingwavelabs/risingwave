@@ -187,7 +187,7 @@ jsonbb = { version = "0.2.3", features = ["float_roundtrip"] }
 jsonwebtoken = { version = "10", features = ["aws_lc_rs"] }
 linkme = { version = "0.3.32", features = ["used_linker"] }
 lru = "0.16"
-madsim = { git = "https://github.com/madsim-rs/madsim", rev = "b7a8882d160214f0a10ab7d151c12f664a0243d5" }
+madsim = { git = "https://github.com/madsim-rs/madsim", rev = "356666437468f4860377466ae0b8bfc245e01c36" }
 mixtrics = { version = "0.2", features = ["prometheus"] }
 mysql_async = { version = "0.36", features = [
     "native-tls-tls",
@@ -197,20 +197,20 @@ opendal = "0.53"
 opentelemetry = "0.31"
 opentelemetry-otlp = { version = "0.31", features = ["grpc-tonic"] }
 opentelemetry-semantic-conventions = "0.16"
-opentelemetry_sdk = { version = "0.31", default-features = false }
-otlp-embedded = { git = "https://github.com/risingwavelabs/otlp-embedded", rev = "422819a30806a7b4b90563dc5452a7b17ca60fc1" }
+opentelemetry_sdk = { version = "0.31", default-features = false, features = ["trace"] }
+otlp-embedded = { git = "https://github.com/risingwavelabs/otlp-embedded", rev = "105651e3029974be402f5794c738566d3a08d7c6" }
 parking_lot = { version = "0.12", features = [
     "arc_lock",
     "deadlock_detection",
 ] }
 parquet = { version = "56", features = ["async"] }
 pin-project-lite = "0.2"
-prost = { version = "=0.13.4" }
-prost-build = { version = "=0.13.4" }
-prost-derive = { version = "=0.13.4" }
-prost-types = { version = "=0.13.4" }
+prost = { version = "=0.14.3" }
+prost-build = { version = "=0.14.3" }
+prost-derive = { version = "=0.14.3" }
+prost-types = { version = "=0.14.3" }
 rand = { version = "0.9", features = ["small_rng"] }
-rdkafka = { package = "madsim-rdkafka", git = "https://github.com/madsim-rs/madsim", rev = "b7a8882d160214f0a10ab7d151c12f664a0243d5", features = [
+rdkafka = { package = "madsim-rdkafka", git = "https://github.com/madsim-rs/madsim", rev = "356666437468f4860377466ae0b8bfc245e01c36", features = [
     "cmake-build",
 ] }
 redis = { version = "1.0" }
@@ -300,8 +300,8 @@ tokio-stream = { git = "https://github.com/madsim-rs/tokio.git", rev = "0dd1055"
 ] }
 tokio-util = "0.7"
 toml = "0.9"
-tonic = { package = "madsim-tonic", git = "https://github.com/madsim-rs/madsim", rev = "b7a8882d160214f0a10ab7d151c12f664a0243d5" }
-tonic-build = { package = "madsim-tonic-build", git = "https://github.com/madsim-rs/madsim", rev = "b7a8882d160214f0a10ab7d151c12f664a0243d5" }
+tonic = { package = "madsim-tonic", git = "https://github.com/madsim-rs/madsim", rev = "356666437468f4860377466ae0b8bfc245e01c36" }
+tonic-build = { package = "madsim-tonic-build", git = "https://github.com/madsim-rs/madsim", rev = "356666437468f4860377466ae0b8bfc245e01c36" }
 tracing-opentelemetry = "0.32.1"
 
 [workspace.lints.rust]
@@ -418,11 +418,11 @@ opt-level = 2
 [patch.crates-io]
 faiss = { git = "https://github.com/risingwavelabs/faiss-rs.git", rev = "f6f0acb" }
 # Pin the whole madsim family to a single prerelease revision for compatibility testing.
-madsim = { git = "https://github.com/madsim-rs/madsim", rev = "b7a8882d160214f0a10ab7d151c12f664a0243d5" }
-madsim-tokio = { git = "https://github.com/madsim-rs/madsim", rev = "b7a8882d160214f0a10ab7d151c12f664a0243d5" }
-madsim-rdkafka = { git = "https://github.com/madsim-rs/madsim", rev = "b7a8882d160214f0a10ab7d151c12f664a0243d5" }
-madsim-tonic = { git = "https://github.com/madsim-rs/madsim", rev = "b7a8882d160214f0a10ab7d151c12f664a0243d5" }
-madsim-tonic-build = { git = "https://github.com/madsim-rs/madsim", rev = "b7a8882d160214f0a10ab7d151c12f664a0243d5" }
+madsim = { git = "https://github.com/madsim-rs/madsim", rev = "356666437468f4860377466ae0b8bfc245e01c36" }
+madsim-tokio = { git = "https://github.com/madsim-rs/madsim", rev = "356666437468f4860377466ae0b8bfc245e01c36" }
+madsim-rdkafka = { git = "https://github.com/madsim-rs/madsim", rev = "356666437468f4860377466ae0b8bfc245e01c36" }
+madsim-tonic = { git = "https://github.com/madsim-rs/madsim", rev = "356666437468f4860377466ae0b8bfc245e01c36" }
+madsim-tonic-build = { git = "https://github.com/madsim-rs/madsim", rev = "356666437468f4860377466ae0b8bfc245e01c36" }
 # Patch third-party crates for deterministic simulation.
 getrandom = { git = "https://github.com/madsim-rs/getrandom.git", rev = "6c9d9e9" }
 # Don't patch `tokio-stream`, but only use the madsim version for **direct** dependencies.
@@ -443,7 +443,8 @@ bson = { git = "https://github.com/risingwavelabs/bson-rust", tag = "v2.14.0-jso
 # in the last release v4.8.0+2.3.0, the zstd-sys requirement is 2.0.6 < 2.0.13, and the release does not contain zstd related changes
 rdkafka-sys = { git = "https://github.com/risingwavelabs/rust-rdkafka", package = "rdkafka-sys", branch = "downgrade-zstd" }
 
-prost = { git = "https://github.com/risingwavelabs/prost.git", package = "prost", rev = "d7baf5f4d4c12d82987bd86a91a8663005881bdd" }
-prost-derive = { git = "https://github.com/risingwavelabs/prost.git", package = "prost-derive", rev = "d7baf5f4d4c12d82987bd86a91a8663005881bdd" }
-prost-build = { git = "https://github.com/risingwavelabs/prost.git", package = "prost-build", rev = "d7baf5f4d4c12d82987bd86a91a8663005881bdd" }
-prost-types = { git = "https://github.com/risingwavelabs/prost.git", package = "prost-types", rev = "d7baf5f4d4c12d82987bd86a91a8663005881bdd" }
+# Keep prost aligned with tonic-build 0.14.x used by madsim-tonic-build.
+prost = { git = "https://github.com/risingwavelabs/prost.git", package = "prost", rev = "040a192409e45069158300baec4f402ad1fe101a" }
+prost-derive = { git = "https://github.com/risingwavelabs/prost.git", package = "prost-derive", rev = "040a192409e45069158300baec4f402ad1fe101a" }
+prost-build = { git = "https://github.com/risingwavelabs/prost.git", package = "prost-build", rev = "040a192409e45069158300baec4f402ad1fe101a" }
+prost-types = { git = "https://github.com/risingwavelabs/prost.git", package = "prost-types", rev = "040a192409e45069158300baec4f402ad1fe101a" }
