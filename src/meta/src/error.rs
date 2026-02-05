@@ -107,6 +107,9 @@ pub enum MetaErrorInner {
         SessionConfigError,
     ),
 
+    #[error("cannot reschedule when creating streaming job with snapshot backfill")]
+    RescheduleBlockedBySnapshotBackfill,
+
     #[error(transparent)]
     Connector(
         #[from]

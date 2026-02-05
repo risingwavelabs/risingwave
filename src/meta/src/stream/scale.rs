@@ -32,13 +32,14 @@ use tokio::sync::oneshot::Receiver;
 use tokio::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard, oneshot};
 use tokio::task::JoinHandle;
 use tokio::time::{Instant, MissedTickBehavior};
+use tokio_retry::strategy::{ExponentialBackoff, jitter};
 
 use crate::barrier::{Command, Reschedule, SharedFragmentInfo};
 use crate::controller::scale::{
     FragmentRenderMap, NoShuffleEnsemble, RenderedGraph, find_fragment_no_shuffle_dags_detailed,
     render_fragments, render_jobs,
 };
-use crate::error::bail_invalid_parameter;
+use crate::error::{MetaErrorInner, bail_invalid_parameter};
 use crate::manager::{ActiveStreamingWorkerNodes, LocalNotification, MetaSrvEnv, MetadataManager};
 use crate::model::{ActorId, FragmentId, StreamActor, StreamActorWithDispatchers};
 use crate::stream::{GlobalStreamManager, SourceManagerRef};
@@ -765,6 +766,37 @@ pub enum ReschedulePolicy {
     Both(ParallelismPolicy, ResourceGroupPolicy),
 }
 
+const POST_BACKFILL_RETRY_BASE_DELAY: Duration = Duration::from_millis(200);
+const POST_BACKFILL_RETRY_MAX_DELAY: Duration = Duration::from_secs(5);
+const POST_BACKFILL_RETRY_MAX_ATTEMPTS: usize = 60;
+const POST_BACKFILL_RETRY_TICK_INTERVAL: Duration = Duration::from_millis(200);
+struct PostBackfillRetryState {
+    attempts: usize,
+    backoff: ExponentialBackoff,
+    next_attempt_at: Instant,
+}
+
+impl PostBackfillRetryState {
+    fn new(now: Instant) -> Self {
+        let mut backoff =
+            ExponentialBackoff::from_millis(POST_BACKFILL_RETRY_BASE_DELAY.as_millis() as u64)
+                .factor(2)
+                .max_delay(POST_BACKFILL_RETRY_MAX_DELAY);
+        let delay = backoff.next().unwrap_or(POST_BACKFILL_RETRY_MAX_DELAY);
+        let next_attempt_at = now + jitter(delay);
+        Self {
+            attempts: 0,
+            backoff,
+            next_attempt_at,
+        }
+    }
+
+    fn schedule_next(&mut self, now: Instant) {
+        let delay = self.backoff.next().unwrap_or(POST_BACKFILL_RETRY_MAX_DELAY);
+        self.next_attempt_at = now + jitter(delay);
+    }
+}
+
 impl GlobalStreamManager {
     #[await_tree::instrument("acquire_reschedule_read_guard")]
     pub async fn reschedule_lock_read_guard(&self) -> RwLockReadGuard<'_, ()> {
@@ -915,6 +947,11 @@ impl GlobalStreamManager {
         let mut previous_adaptive_parallelism_strategy = AdaptiveParallelismStrategy::default();
 
         let mut should_trigger = false;
+        let mut pending_post_backfill_retries: HashMap<JobId, PostBackfillRetryState> =
+            HashMap::new();
+
+        let mut retry_ticker = tokio::time::interval(POST_BACKFILL_RETRY_TICK_INTERVAL);
+        retry_ticker.set_missed_tick_behavior(MissedTickBehavior::Skip);
 
         loop {
             tokio::select! {
@@ -943,6 +980,10 @@ impl GlobalStreamManager {
                             ticker.reset();
                         }
                     }
+                }
+
+                _ = retry_ticker.tick() => {
+                    self.process_post_backfill_retries(&mut pending_post_backfill_retries).await;
                 }
 
                 notification = local_notification_rx.recv() => {
@@ -1009,12 +1050,110 @@ impl GlobalStreamManager {
                         LocalNotification::StreamingJobBackfillFinished(job_id) => {
                             tracing::debug!(job_id = %job_id, "received backfill finished notification");
                             if let Err(e) = self.apply_post_backfill_parallelism(job_id).await {
-                                tracing::warn!(job_id = %job_id, error = %e.as_report(), "failed to restore parallelism after backfill");
+                                if Self::is_post_backfill_reschedule_blocked(&e) {
+                                    Self::schedule_post_backfill_retry(
+                                        &mut pending_post_backfill_retries,
+                                        job_id,
+                                    );
+                                    tracing::warn!(
+                                        job_id = %job_id,
+                                        error = %e.as_report(),
+                                        "post-backfill reschedule blocked; will retry"
+                                    );
+                                } else {
+                                    tracing::warn!(
+                                        job_id = %job_id,
+                                        error = %e.as_report(),
+                                        "failed to restore parallelism after backfill"
+                                    );
+                                }
                             }
                         }
 
                         _ => {}
                     }
+                }
+            }
+        }
+    }
+
+    fn is_post_backfill_reschedule_blocked(err: &MetaError) -> bool {
+        matches!(
+            err.inner(),
+            MetaErrorInner::RescheduleBlockedBySnapshotBackfill
+        )
+    }
+
+    fn schedule_post_backfill_retry(
+        pending: &mut HashMap<JobId, PostBackfillRetryState>,
+        job_id: JobId,
+    ) {
+        if pending.contains_key(&job_id) {
+            return;
+        }
+        let now = Instant::now();
+        pending.insert(job_id, PostBackfillRetryState::new(now));
+    }
+
+    async fn process_post_backfill_retries(
+        &self,
+        pending: &mut HashMap<JobId, PostBackfillRetryState>,
+    ) {
+        if pending.is_empty() {
+            return;
+        }
+
+        let now = Instant::now();
+        let due_jobs = pending
+            .iter()
+            .filter(|(_, state)| state.next_attempt_at <= now)
+            .map(|(job_id, _)| *job_id)
+            .collect_vec();
+
+        for job_id in due_jobs {
+            let mut state = match pending.remove(&job_id) {
+                Some(state) => state,
+                None => continue,
+            };
+
+            state.attempts += 1;
+
+            match self.apply_post_backfill_parallelism(job_id).await {
+                Ok(()) => {
+                    tracing::info!(
+                        job_id = %job_id,
+                        attempts = state.attempts,
+                        "post-backfill reschedule succeeded after retry"
+                    );
+                }
+                Err(e) => {
+                    if !Self::is_post_backfill_reschedule_blocked(&e) {
+                        tracing::warn!(
+                            job_id = %job_id,
+                            error = %e.as_report(),
+                            "post-backfill reschedule failed with non-retryable error"
+                        );
+                        continue;
+                    }
+
+                    if state.attempts >= POST_BACKFILL_RETRY_MAX_ATTEMPTS {
+                        tracing::warn!(
+                            job_id = %job_id,
+                            attempts = state.attempts,
+                            error = %e.as_report(),
+                            "post-backfill reschedule retry limit reached; giving up"
+                        );
+                        continue;
+                    }
+
+                    state.schedule_next(Instant::now());
+                    tracing::debug!(
+                        job_id = %job_id,
+                        attempts = state.attempts,
+                        next_retry_at = ?state.next_attempt_at,
+                        "post-backfill reschedule retry scheduled"
+                    );
+                    pending.insert(job_id, state);
                 }
             }
         }
@@ -1068,10 +1207,7 @@ impl GlobalStreamManager {
         let policy = ReschedulePolicy::Parallelism(ParallelismPolicy {
             parallelism: target,
         });
-        if let Err(e) = self.reschedule_streaming_job(job_id, policy, false).await {
-            tracing::warn!(job_id = %job_id, error = %e.as_report(), "reschedule after backfill failed");
-            return Err(e);
-        }
+        self.reschedule_streaming_job(job_id, policy, false).await?;
 
         tracing::info!(job_id = %job_id, "parallelism reschedule after backfill submitted");
         Ok(())
