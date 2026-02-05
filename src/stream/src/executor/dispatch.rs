@@ -539,15 +539,27 @@ impl StreamConsumer for DispatchExecutor {
                     }
                     MessageBatch::BarrierBatch(barrier_batch) => {
                         assert!(!barrier_batch.is_empty());
-                        // Yield barriers before dispatch.
-                        //
-                        // Assume that there are more than 1 barriers in the batch(let's call their epochs E1, E2, ...),
-                        // and we do the actual dispatch before yielding the barriers, When downstream receive E1, and start
-                        // processing it, it may wait for E1 committed. However, E2 is not received,
-                        // the actual dispatch may not return, which blocks the yielding of E1 and subsequently
-                        // block E1 committed, which causes deadlock.
-                        for barrier in &barrier_batch {
-                            yield barrier.clone();
+                        let stop_barrier = if barrier_batch[0].is_stop(self.inner.actor_id) {
+                            assert_eq!(
+                                barrier_batch.len(),
+                                1,
+                                "stop barrier with mutation must be handled singly"
+                            );
+                            Some(barrier_batch[0].clone())
+                        } else {
+                            None
+                        };
+                        if stop_barrier.is_none() {
+                            // Yield barriers before dispatch. Unless it's a stop barrier.
+                            //
+                            // Assume that there are more than 1 barriers in the batch(let's call their epochs E1, E2, ...),
+                            // and we do the actual dispatch before yielding the barriers, When downstream receive E1, and start
+                            // processing it, it may wait for E1 committed. However, E2 is not received,
+                            // the actual dispatch may not return, which blocks the yielding of E1 and subsequently
+                            // block E1 committed, which causes deadlock.
+                            for barrier in &barrier_batch {
+                                yield barrier.clone();
+                            }
                         }
                         let barrier_batch_len = barrier_batch.len();
                         self.inner
@@ -560,6 +572,12 @@ impl StreamConsumer for DispatchExecutor {
                             .metrics
                             .barrier_batch_size
                             .observe(barrier_batch_len as f64);
+                        if let Some(stop_barrier) = stop_barrier {
+                            // For stop barrier, we yield it after dispatch to downstream,
+                            // because after yielding the stop barrier, the executor will have stopped,
+                            // and the subsequent dispatch won't be handled.
+                            yield stop_barrier;
+                        }
                     }
                     watermark @ MessageBatch::Watermark(_) => {
                         self.inner
