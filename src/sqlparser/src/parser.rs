@@ -3059,12 +3059,49 @@ impl Parser<'_> {
     // <config_param> { TO | = } { <value> | DEFAULT }
     // <config_param> is not a keyword, but an identifier
     pub fn parse_config_param(&mut self) -> ModalResult<ConfigParam> {
+        self.parse_config_param_inner(Self::parse_set_variable)
+    }
+
+    fn parse_config_param_inner(
+        &mut self,
+        parse_value: fn(&mut Self) -> ModalResult<SetVariableValue>,
+    ) -> ModalResult<ConfigParam> {
         let param = self.parse_identifier()?;
         if !self.consume_token(&Token::Eq) && !self.parse_keyword(Keyword::TO) {
             return self.expected("'=' or 'TO' after config parameter");
         }
-        let value = self.parse_set_variable()?;
+        let value = parse_value(self)?;
         Ok(ConfigParam { param, value })
+    }
+
+    /// Parse a single-value config param.
+    ///
+    /// This differs from [`parse_config_param`] in that it does **not** allow a comma-separated
+    /// list on the RHS, so it can be safely used in constructs where comma separates multiple
+    /// assignments (e.g. `... SET a = 1, b = 2`).
+    fn parse_config_param_no_list(&mut self) -> ModalResult<ConfigParam> {
+        self.parse_config_param_inner(Self::parse_set_variable_no_list)
+    }
+
+    fn parse_set_variable_no_list(&mut self) -> ModalResult<SetVariableValue> {
+        alt((
+            Keyword::DEFAULT.value(SetVariableValue::Default),
+            alt((
+                Self::ensure_parse_value.map(SetVariableValueSingle::Literal),
+                |parser: &mut Self| {
+                    let checkpoint = *parser;
+                    let ident = parser.parse_identifier()?;
+                    if ident.value == "default" {
+                        *parser = checkpoint;
+                        return parser.expected("parameter list value").map_err(|e| e.cut());
+                    }
+                    Ok(SetVariableValueSingle::Ident(ident))
+                },
+                fail.expect("parameter value"),
+            ))
+            .map(|single: SetVariableValueSingle| SetVariableValue::Single(single)),
+        ))
+        .parse_next(self)
     }
 
     pub fn parse_since(&mut self) -> ModalResult<Since> {
@@ -3932,7 +3969,10 @@ impl Parser<'_> {
         if !self.parse_keyword(Keyword::SET) {
             return self.expected("SET after ALTER COMPACTION GROUP <id>");
         }
-        let configs = self.parse_comma_separated(Parser::parse_sql_option)?;
+        // NOTE: use the `no_list` variant here, because `parse_set_variable` allows comma-separated
+        // lists (e.g., `SET foo = 1,2,3`), which would conflict with our use of comma to separate
+        // multiple config assignments.
+        let configs = self.parse_comma_separated(Parser::parse_config_param_no_list)?;
         let operation = AlterCompactionGroupOperation::Set { configs };
         Ok(Statement::AlterCompactionGroup {
             group_ids,

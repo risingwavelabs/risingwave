@@ -4201,7 +4201,7 @@ fn parse_alter_fragment_set_parallelism() {
 
 #[test]
 fn parse_alter_compaction_group() {
-    use risingwave_sqlparser::ast::{AlterCompactionGroupOperation, SqlOptionValue};
+    use risingwave_sqlparser::ast::AlterCompactionGroupOperation;
 
     // Single group with single config
     match verified_stmt("ALTER COMPACTION GROUP 2 SET max_bytes_for_level_base = 1073741824") {
@@ -4213,10 +4213,12 @@ fn parse_alter_compaction_group() {
             match operation {
                 AlterCompactionGroupOperation::Set { configs } => {
                     assert_eq!(configs.len(), 1);
-                    assert_eq!(configs[0].name.real_value(), "max_bytes_for_level_base");
+                    assert_eq!(configs[0].param.real_value(), "max_bytes_for_level_base");
                     assert_eq!(
                         configs[0].value,
-                        SqlOptionValue::Value(Value::Number("1073741824".into()))
+                        SetVariableValue::Single(SetVariableValueSingle::Literal(Value::Number(
+                            "1073741824".into()
+                        )))
                     );
                 }
             }
@@ -4236,8 +4238,8 @@ fn parse_alter_compaction_group() {
             match operation {
                 AlterCompactionGroupOperation::Set { configs } => {
                     assert_eq!(configs.len(), 2);
-                    assert_eq!(configs[0].name.real_value(), "max_bytes_for_level_base");
-                    assert_eq!(configs[1].name.real_value(), "target_file_size_base");
+                    assert_eq!(configs[0].param.real_value(), "max_bytes_for_level_base");
+                    assert_eq!(configs[1].param.real_value(), "target_file_size_base");
                 }
             }
         }
@@ -4271,10 +4273,12 @@ fn parse_alter_compaction_group() {
             match operation {
                 AlterCompactionGroupOperation::Set { configs } => {
                     assert_eq!(configs.len(), 1);
-                    assert_eq!(configs[0].name.real_value(), "enable_emergency_picker");
+                    assert_eq!(configs[0].param.real_value(), "enable_emergency_picker");
                     assert_eq!(
                         configs[0].value,
-                        SqlOptionValue::Value(Value::Boolean(true))
+                        SetVariableValue::Single(SetVariableValueSingle::Literal(Value::Boolean(
+                            true
+                        )))
                     );
                 }
             }
@@ -4292,10 +4296,12 @@ fn parse_alter_compaction_group() {
             match operation {
                 AlterCompactionGroupOperation::Set { configs } => {
                     assert_eq!(configs.len(), 1);
-                    assert_eq!(configs[0].name.real_value(), "compression_algorithm");
+                    assert_eq!(configs[0].param.real_value(), "compression_algorithm");
                     assert_eq!(
                         configs[0].value,
-                        SqlOptionValue::Value(Value::SingleQuotedString("6:lz4".into()))
+                        SetVariableValue::Single(SetVariableValueSingle::Literal(
+                            Value::SingleQuotedString("6:lz4".into())
+                        ))
                     );
                 }
             }
