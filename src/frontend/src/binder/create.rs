@@ -38,6 +38,6 @@ impl Binder {
     ) -> Result<usize> {
         Ok(self
             .context
-            .get_column_binding_index(&Some(table_name), column_name)?)
+            .get_column_binding_index(&None, &Some(table_name), column_name)?)
     }
 }
