@@ -656,7 +656,7 @@ pub(crate) async fn wait_for_update(
 
                 let backtrace = backtrace
                     .as_ref()
-                    .map(|bt| ShortBacktrace { bt, limit: 20 })
+                    .map(|bt| ShortBacktrace { bt, limit: 30 })
                     .map(tracing::field::display);
 
                 struct ShortBacktrace<'a> {

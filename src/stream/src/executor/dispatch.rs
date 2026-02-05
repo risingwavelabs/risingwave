@@ -539,43 +539,27 @@ impl StreamConsumer for DispatchExecutor {
                     }
                     MessageBatch::BarrierBatch(barrier_batch) => {
                         assert!(!barrier_batch.is_empty());
-                        let is_multiple = barrier_batch.len() > 1;
-                        if is_multiple {
-                            let barriers = barrier_batch
-                                .iter()
-                                .map(|barrier| (barrier.epoch, barrier.kind))
-                                .collect_vec();
-                            warn!(
-                                ?barriers,
-                                actor_id = %self.inner.actor_id,
-                                "dispatch multiple barriers in batch"
-                            );
+                        // Yield barriers before dispatch.
+                        //
+                        // Assume that there are more than 1 barriers in the batch(let's call their epochs E1, E2, ...),
+                        // and we do the actual dispatch before yielding the barriers, When downstream receive E1, and start
+                        // processing it, it may wait for E1 committed. However, E2 is not received,
+                        // the actual dispatch may not return, which blocks the yielding of E1 and subsequently
+                        // block E1 committed, which causes deadlock.
+                        for barrier in &barrier_batch {
+                            yield barrier.clone();
                         }
+                        let barrier_batch_len = barrier_batch.len();
                         self.inner
-                            .dispatch(MessageBatch::BarrierBatch(barrier_batch.clone()))
+                            .dispatch(MessageBatch::BarrierBatch(barrier_batch))
                             .instrument(tracing::info_span!("dispatch_barrier_batch"))
                             .instrument_await("dispatch_barrier_batch")
                             .await?;
-                        if is_multiple {
-                            warn!(
-                                actor_id = %self.inner.actor_id,
-                                "finish dispatch multiple barriers in batch"
-                            );
-                        }
                         self.inner
                             .metrics
                             .metrics
                             .barrier_batch_size
-                            .observe(barrier_batch.len() as f64);
-                        for barrier in barrier_batch {
-                            yield barrier;
-                        }
-                        if is_multiple {
-                            warn!(
-                                actor_id = %self.inner.actor_id,
-                                "finish yielding multiple barriers"
-                            );
-                        }
+                            .observe(barrier_batch_len as f64);
                     }
                     watermark @ MessageBatch::Watermark(_) => {
                         self.inner

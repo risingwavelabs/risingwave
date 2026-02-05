@@ -35,9 +35,7 @@
 #![feature(assert_matches)]
 #![feature(try_blocks)]
 
-use std::sync::atomic::AtomicUsize;
-use std::sync::atomic::Ordering::Relaxed;
-use std::sync::{Arc, LazyLock};
+use std::sync::Arc;
 
 use risingwave_common::config::StreamingConfig;
 
@@ -126,22 +124,4 @@ mod consistency {
         };
     }
     pub(crate) use consistency_panic;
-}
-
-static PRINT_ACTOR_TRACE: LazyLock<AtomicUsize> = LazyLock::new(|| AtomicUsize::new(0));
-
-fn is_print_actor_trace() -> bool {
-    PRINT_ACTOR_TRACE.load(Relaxed) > 0
-}
-
-struct ActorTraceGuard;
-fn enable_print_actor_trace() -> ActorTraceGuard {
-    PRINT_ACTOR_TRACE.fetch_add(1, Relaxed);
-    ActorTraceGuard
-}
-
-impl Drop for ActorTraceGuard {
-    fn drop(&mut self) {
-        PRINT_ACTOR_TRACE.fetch_sub(1, Relaxed);
-    }
 }
