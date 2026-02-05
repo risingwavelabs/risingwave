@@ -349,8 +349,12 @@ impl BindContext {
             .get(column_name)
             .ok_or_else(|| ErrorCode::ItemNotFound(format!("Invalid column: {}", column_name)))?;
         match column_indexes.iter().find(|column_index| {
-            self.columns[**column_index].table_name == *table_name
-                && self.columns[**column_index].schema_name == *schema_name
+            let column = &self.columns[**column_index];
+
+            column.table_name == *table_name
+                && schema_name
+                    .as_deref()
+                    .is_none_or(|s| column.schema_name.as_deref() == Some(s))
         }) {
             Some(column_index) => Ok(*column_index),
             None => Err(ErrorCode::ItemNotFound(format!(
