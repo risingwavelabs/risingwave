@@ -24,18 +24,7 @@ use tokio::time::sleep;
 const DATABASE_RECOVERY_START: &str = "DATABASE_RECOVERY_START";
 const DATABASE_RECOVERY_SUCCESS: &str = "DATABASE_RECOVERY_SUCCESS";
 
-async fn assert_no_expected_global_recovery(session: &mut Session) -> Result<()> {
-    let global_recovery_events = global_recovery_events(session).await?;
-
-    assert!(
-        global_recovery_events
-            .iter()
-            .all(|(_, reason)| ["adhoc recovery", "bootstrap"].contains(&&**reason)),
-        "unexpected recovery reason: {:?}",
-        global_recovery_events
-    );
-    Ok(())
-}
+const GLOBAL_RECOVERY_REASON_BOOTSTRAP: &str = "bootstrap";
 
 const MAX_HEARTBEAT_INTERVAL_SEC: u64 = 10;
 
@@ -90,7 +79,13 @@ async fn test_isolation_simple_two_databases() -> Result<()> {
         ])
     );
 
-    assert_no_expected_global_recovery(&mut session).await?;
+    let global_recovery_events = global_recovery_events(&mut session).await?;
+
+    assert!(
+        !global_recovery_events
+            .iter()
+            .any(|(_, reason)| reason != GLOBAL_RECOVERY_REASON_BOOTSTRAP)
+    );
 
     Ok(())
 }
@@ -153,7 +148,7 @@ order by timestamp;",
     let events = events
         .lines()
         .map(|line| {
-            let (event_type, reason) = line.split_once(' ').unwrap();
+            let (event_type, reason) = line.rsplit_once(' ').unwrap();
             (event_type.to_owned(), reason.to_owned())
         })
         .collect_vec();
@@ -214,13 +209,6 @@ async fn test_isolation_simple_two_databases_join() -> Result<()> {
     wait_until(&mut session, "select max(v) from t2", "120").await?;
     wait_until(&mut session, "select count(*) from mv_join;", "100").await?;
 
-    // Wait until the killed compute node is removed from `rw_worker_nodes`.
-    let wait_worker_unregister_sql = "select count(*) from rw_catalog.rw_worker_nodes \
-where host = '192.168.3.1';";
-    wait_until(&mut session, wait_worker_unregister_sql, "0").await?;
-
-    session.run("recover").await?;
-
     cluster.simple_restart_nodes(["compute-1"]).await;
 
     sleep(Duration::from_secs(MAX_HEARTBEAT_INTERVAL_SEC * 2)).await;
@@ -249,7 +237,13 @@ where host = '192.168.3.1';";
         ])
     );
 
-    assert_no_expected_global_recovery(&mut session).await?;
+    let global_recovery_events = global_recovery_events(&mut session).await?;
+
+    assert!(
+        !global_recovery_events
+            .iter()
+            .any(|(_, reason)| reason != GLOBAL_RECOVERY_REASON_BOOTSTRAP)
+    );
 
     Ok(())
 }
@@ -348,7 +342,13 @@ async fn test_isolation_simple_two_databases_join_in_other() -> Result<()> {
         ])
     );
 
-    assert_no_expected_global_recovery(&mut session).await?;
+    let global_recovery_events = global_recovery_events(&mut session).await?;
+
+    assert!(
+        !global_recovery_events
+            .iter()
+            .any(|(_, reason)| reason != GLOBAL_RECOVERY_REASON_BOOTSTRAP)
+    );
 
     Ok(())
 }

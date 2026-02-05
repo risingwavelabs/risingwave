@@ -1147,7 +1147,7 @@ impl DdlController {
             _ => {}
         }
 
-        let backfill_orders = ctx.fragment_backfill_ordering.to_meta_model();
+        let backfill_orders = ctx.fragment_backfill_ordering.clone().into();
         self.metadata_manager
             .catalog_controller
             .prepare_stream_job_fragments(
