@@ -13,7 +13,7 @@
 // limitations under the License.
 
 mod context_impl;
-pub(crate) mod recovery;
+mod recovery;
 
 use std::future::Future;
 use std::sync::Arc;
@@ -102,7 +102,7 @@ pub(super) trait GlobalBarrierWorkerContext: Send + Sync + 'static {
     async fn reload_database_runtime_info(
         &self,
         database_id: DatabaseId,
-    ) -> MetaResult<DatabaseRuntimeInfoSnapshot>;
+    ) -> MetaResult<Option<DatabaseRuntimeInfoSnapshot>>;
 
     fn handle_list_finished_source_ids(
         &self,

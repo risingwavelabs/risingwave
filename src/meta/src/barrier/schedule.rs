@@ -889,7 +889,7 @@ mod tests {
         async fn reload_database_runtime_info(
             &self,
             _database_id: DatabaseId,
-        ) -> MetaResult<crate::barrier::DatabaseRuntimeInfoSnapshot> {
+        ) -> MetaResult<Option<crate::barrier::DatabaseRuntimeInfoSnapshot>> {
             unimplemented!()
         }
 

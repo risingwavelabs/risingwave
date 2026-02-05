@@ -14,6 +14,7 @@
 
 use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::num::NonZeroUsize;
 use std::sync::Arc;
 
 use anyhow::{Context, anyhow};
@@ -68,7 +69,7 @@ use serde::{Deserialize, Serialize};
 use crate::barrier::{SharedActorInfos, SharedFragmentInfo, SnapshotBackfillInfo};
 use crate::controller::catalog::CatalogController;
 use crate::controller::scale::{
-    FragmentRenderMap, LoadedFragmentContext, NoShuffleEnsemble, RenderedGraph,
+    FragmentRenderMap, LoadedFragmentContext, NoShuffleEnsemble, RenderedGraph, WorkerInfo,
     find_fragment_no_shuffle_dags_detailed, load_fragment_context_for_jobs,
     render_actor_assignments, resolve_streaming_job_definition,
 };
@@ -1488,9 +1489,24 @@ impl CatalogController {
             system_params_reader.adaptive_parallelism_strategy()
         };
 
+        let available_workers: BTreeMap<_, _> = worker_nodes
+            .current()
+            .values()
+            .filter(|worker| worker.is_streaming_schedulable())
+            .map(|worker| {
+                (
+                    worker.id,
+                    WorkerInfo {
+                        parallelism: NonZeroUsize::new(worker.compute_node_parallelism()).unwrap(),
+                        resource_group: worker.resource_group(),
+                    },
+                )
+            })
+            .collect();
+
         let RenderedGraph { fragments, .. } = render_actor_assignments(
             self.env.actor_id_generator(),
-            worker_nodes.current(),
+            &available_workers,
             adaptive_parallelism_strategy,
             &loaded,
         )?;
