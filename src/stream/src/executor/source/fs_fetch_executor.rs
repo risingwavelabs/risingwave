@@ -12,9 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::{HashMap, HashSet};
 use std::marker::PhantomData;
 use std::ops::Bound;
-use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -26,7 +26,6 @@ use risingwave_common::catalog::ColumnId;
 use risingwave_common::hash::VnodeBitmapExt;
 use risingwave_common::id::SourceId;
 use risingwave_common::metrics::GLOBAL_ERROR_METRICS;
-use risingwave_common::types::JsonbVal;
 use risingwave_common::types::ScalarRef;
 use risingwave_connector::source::filesystem::OpendalFsSplit;
 use risingwave_connector::source::filesystem::opendal_source::{
@@ -50,7 +49,6 @@ use crate::executor::prelude::*;
 use crate::executor::stream_reader::StreamReaderWithPause;
 
 const SPLIT_BATCH_SIZE: usize = 1000;
-const DIRTY_FIELD: &str = "__rw_fs_fetch_dirty";
 const MAX_RETRIES_PER_SPLIT: u32 = 3;
 const RETRY_BASE_BACKOFF: Duration = Duration::from_millis(200);
 
@@ -119,37 +117,6 @@ pub struct FsFetchExecutor<S: StateStore, Src: OpendalSource> {
 }
 
 impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
-    async fn mark_split_dirty(
-        state_store_handler: &mut SourceStateTableHandler<S>,
-        split_id: &str,
-    ) -> StreamExecutorResult<()> {
-        // Persist dirty mark on the **same key** as the split to ensure vnode locality.
-        //
-        // NOTE: retry count stays in memory (方案 B).
-        let row = state_store_handler
-            .get(split_id)
-            .await?
-            .unwrap_or_else(|| panic!("split_id {split_id:?} should exist in state table"));
-        let jsonb = match row.datum_at(1) {
-            Some(ScalarRefImpl::Jsonb(jsonb_ref)) => jsonb_ref.to_owned_scalar(),
-            _ => unreachable!(),
-        };
-        let mut v = jsonb.take();
-        match v {
-            serde_json::Value::Object(ref mut map) => {
-                map.insert(DIRTY_FIELD.to_owned(), serde_json::Value::Bool(true));
-            }
-            other => {
-                // Fallback: wrap the original value.
-                v = serde_json::json!({ DIRTY_FIELD: true, "split": other });
-            }
-        }
-        state_store_handler.set(split_id, JsonbVal::from(v)).await?;
-        // Best-effort flush; commit still happens on barrier.
-        state_store_handler.try_flush().await?;
-        Ok(())
-    }
-
     pub fn new(
         actor_ctx: ActorContextRef,
         stream_source_core: StreamSourceCore<S>,
@@ -168,6 +135,7 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
     async fn replace_with_new_batch_reader<const BIASED: bool>(
         splits_on_fetch: &mut usize,
         state_store_handler: &SourceStateTableHandler<S>,
+        dirty_splits: &HashSet<Arc<str>>,
         column_ids: Vec<ColumnId>,
         source_ctx: SourceContext,
         source_desc: &SourceDesc,
@@ -187,19 +155,10 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                 )
                 .await?;
             pin_mut!(table_iter);
-            let properties = source_desc.source.config.clone();
             while let Some(item) = table_iter.next().await {
                 let row = item?;
                 let split = match row.datum_at(1) {
-                    Some(ScalarRefImpl::Jsonb(jsonb_ref)) => match properties {
-                        // Skip dirty splits (persisted in the split's own jsonb value).
-                        _ if jsonb_ref
-                            .access_object_field(DIRTY_FIELD)
-                            .and_then(|v| v.as_bool().ok())
-                            .unwrap_or(false) =>
-                        {
-                            continue;
-                        }
+                    Some(ScalarRefImpl::Jsonb(jsonb_ref)) => match &source_desc.source.config {
                         risingwave_connector::source::ConnectorProperties::Gcs(_) => {
                             let split: OpendalFsSplit<OpendalGcs> =
                                 OpendalFsSplit::restore_from_json(jsonb_ref.to_owned_scalar())?;
@@ -224,6 +183,10 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                     },
                     _ => unreachable!(),
                 };
+                let split_id = split.id();
+                if dirty_splits.contains(&split_id) {
+                    continue;
+                }
                 batch.push(split);
 
                 if batch.len() >= SPLIT_BATCH_SIZE {
@@ -341,6 +304,7 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
 
         let reading_file: Arc<Mutex<Option<Arc<str>>>> = Arc::new(Mutex::new(None));
         let mut retry_counts: HashMap<Arc<str>, u32> = HashMap::new();
+        let mut dirty_splits: HashSet<Arc<str>> = HashSet::new();
 
         let mut splits_on_fetch: usize = 0;
         let mut stream = StreamReaderWithPause::<true, Option<StreamChunk>>::new(
@@ -357,6 +321,7 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
         Self::replace_with_new_batch_reader(
             &mut splits_on_fetch,
             &state_store_handler, // move into the function
+            &dirty_splits,
             core.column_ids.clone(),
             self.build_source_ctx(&source_desc, core.source_id, &core.source_name),
             &source_desc,
@@ -399,8 +364,8 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                         );
                         tokio::time::sleep(backoff).await;
                     } else {
-                        // Exceeded max retries: persist dirty mark and skip this split afterwards.
-                        Self::mark_split_dirty(&mut state_store_handler, split_id.as_ref()).await?;
+                        // Exceeded max retries: mark dirty in memory and skip this split afterwards.
+                        dirty_splits.insert(split_id.clone());
                         retry_counts.remove(&split_id);
                         tracing::error!(
                             source_id = %core.source_id,
@@ -425,6 +390,7 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                     Self::replace_with_new_batch_reader(
                         &mut splits_on_fetch,
                         &state_store_handler,
+                        &dirty_splits,
                         core.column_ids.clone(),
                         self.build_source_ctx(&source_desc, core.source_id, &core.source_name),
                         &source_desc,
@@ -491,6 +457,7 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                                         Self::replace_with_new_batch_reader(
                                             &mut splits_on_fetch,
                                             &state_store_handler,
+                                            &dirty_splits,
                                             core.column_ids.clone(),
                                             self.build_source_ctx(
                                                 &source_desc,
@@ -528,26 +495,7 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                                         })
                                         .collect();
 
-                                    // Do not overwrite dirty marks.
-                                    let mut to_set = Vec::with_capacity(file_assignment.len());
-                                    for split in file_assignment {
-                                        let split_id = split.id();
-                                        let is_dirty = state_store_handler
-                                            .get(&split_id)
-                                            .await?
-                                            .and_then(|row| match row.datum_at(1) {
-                                                Some(ScalarRefImpl::Jsonb(jsonb_ref)) => jsonb_ref
-                                                    .access_object_field(DIRTY_FIELD)
-                                                    .and_then(|v| v.as_bool().ok()),
-                                                _ => None,
-                                            })
-                                            .unwrap_or(false);
-                                        if !is_dirty {
-                                            to_set.push(split);
-                                        }
-                                    }
-
-                                    state_store_handler.set_states(to_set).await?;
+                                    state_store_handler.set_states(file_assignment).await?;
                                     state_store_handler.try_flush().await?;
                                 }
                                 Message::Watermark(_) => unreachable!(),
