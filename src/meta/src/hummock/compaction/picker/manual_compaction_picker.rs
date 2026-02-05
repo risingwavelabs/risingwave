@@ -322,7 +322,6 @@ pub mod tests {
     use std::collections::{BTreeSet, HashMap};
 
     use bytes::Bytes;
-    use risingwave_hummock_sdk::change_log::TableChangeLog;
     use risingwave_hummock_sdk::key_range::KeyRange;
     use risingwave_hummock_sdk::version::HummockVersionStateTableInfo;
     use risingwave_pb::hummock::compact_task;
