@@ -218,20 +218,7 @@ impl CatalogController {
             .copied()
             .map_into()
             .chain(connection_ids.iter().copied().map_into());
-        let dependencies = secret_ids
-            .iter()
-            .map(|id| PbObjectDependency {
-                object_id: source_id.as_object_id(),
-                referenced_object_id: id.as_object_id(),
-                referenced_object_type: PbObjectType::Secret as _,
-            })
-            .chain(connection_ids.iter().map(|id| PbObjectDependency {
-                object_id: source_id.as_object_id(),
-                referenced_object_id: id.as_object_id(),
-                referenced_object_type: PbObjectType::Connection as _,
-            }))
-            .collect_vec();
-        if !secret_ids.is_empty() || !connection_ids.is_empty() {
+        let dependencies = if !secret_ids.is_empty() || !connection_ids.is_empty() {
             ObjectDependency::insert_many(dep_relation_ids.map(|id| {
                 object_dependency::ActiveModel {
                     oid: Set(id),
@@ -241,7 +228,22 @@ impl CatalogController {
             }))
             .exec(&txn)
             .await?;
-        }
+            secret_ids
+                .iter()
+                .map(|id| PbObjectDependency {
+                    object_id: source_id.as_object_id(),
+                    referenced_object_id: id.as_object_id(),
+                    referenced_object_type: PbObjectType::Secret as _,
+                })
+                .chain(connection_ids.iter().map(|id| PbObjectDependency {
+                    object_id: source_id.as_object_id(),
+                    referenced_object_id: id.as_object_id(),
+                    referenced_object_type: PbObjectType::Connection as _,
+                }))
+                .collect_vec()
+        } else {
+            vec![]
+        };
 
         let mut job_notifications = vec![];
         let mut updated_user_info = vec![];
@@ -567,18 +569,22 @@ impl CatalogController {
         let view: view::ActiveModel = pb_view.clone().into();
         View::insert(view).exec(&txn).await?;
 
-        ObjectDependency::insert_many(dependencies.into_iter().map(|obj_id| {
-            object_dependency::ActiveModel {
-                oid: Set(obj_id),
-                used_by: Set(view_obj.oid),
-                ..Default::default()
-            }
-        }))
-        .exec(&txn)
-        .await?;
+        let dependencies = if !dependencies.is_empty() {
+            ObjectDependency::insert_many(dependencies.into_iter().map(|obj_id| {
+                object_dependency::ActiveModel {
+                    oid: Set(obj_id),
+                    used_by: Set(view_obj.oid),
+                    ..Default::default()
+                }
+            }))
+            .exec(&txn)
+            .await?;
+            list_object_dependencies_by_object_id(&txn, view_obj.oid).await?
+        } else {
+            vec![]
+        };
 
         let updated_user_info = grant_default_privileges_automatically(&txn, view_obj.oid).await?;
-        let dependencies = list_object_dependencies_by_object_id(&txn, view_obj.oid).await?;
 
         txn.commit().await?;
         let mut version = self

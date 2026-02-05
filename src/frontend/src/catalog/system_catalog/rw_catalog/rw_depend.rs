@@ -29,7 +29,7 @@ struct RwDepend {
 }
 
 #[system_catalog(table, "rw_catalog.rw_depend")]
-async fn read_rw_depend(reader: &SysCatalogReaderImpl) -> Result<Vec<RwDepend>> {
+fn read_rw_depend(reader: &SysCatalogReaderImpl) -> Result<Vec<RwDepend>> {
     let catalog_guard = reader.catalog_reader.read_guard();
     Ok(catalog_guard
         .iter_object_dependencies()
