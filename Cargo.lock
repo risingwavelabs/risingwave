@@ -539,8 +539,8 @@ dependencies = [
  "base64 0.22.1",
  "bytes",
  "futures",
- "prost 0.13.4",
- "prost-types 0.13.4",
+ "prost 0.13.5",
+ "prost-types 0.13.5",
  "tonic 0.12.3",
 ]
 
@@ -2675,8 +2675,8 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e8599749b6667e2f0c910c1d0dff6901163ff698a52d5a39720f61b5be4b20d3"
 dependencies = [
  "futures-core",
- "prost 0.14.1",
- "prost-types 0.14.1",
+ "prost 0.14.3",
+ "prost-types 0.14.3",
  "tonic 0.14.2",
  "tonic-prost",
  "tracing-core",
@@ -2695,8 +2695,8 @@ dependencies = [
  "hdrhistogram",
  "humantime",
  "hyper-util",
- "prost 0.14.1",
- "prost-types 0.14.1",
+ "prost 0.14.3",
+ "prost-types 0.14.3",
  "serde",
  "serde_json",
  "thread_local",
@@ -4040,7 +4040,7 @@ dependencies = [
  "datafusion-expr",
  "datafusion-proto-common",
  "object_store",
- "prost 0.13.4",
+ "prost 0.13.5",
 ]
 
 [[package]]
@@ -4051,7 +4051,7 @@ checksum = "b4b14f288ca4ef77743d9672cafecf3adfffff0b9b04af9af79ecbeaaf736901"
 dependencies = [
  "arrow",
  "datafusion-common",
- "prost 0.13.4",
+ "prost 0.13.5",
 ]
 
 [[package]]
@@ -5728,7 +5728,7 @@ dependencies = [
  "gcloud-gax",
  "gcloud-googleapis",
  "num-bigint",
- "prost-types 0.14.1",
+ "prost-types 0.14.3",
  "reqwest 0.12.25",
  "reqwest-middleware",
  "serde",
@@ -5762,8 +5762,8 @@ version = "1.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d79fc4ec36213a21b734a2ce204176eb39c439fa528f9a388c9a1349ca344b0d"
 dependencies = [
- "prost 0.14.1",
- "prost-types 0.14.1",
+ "prost 0.14.3",
+ "prost-types 0.14.3",
  "tonic 0.14.2",
  "tonic-prost",
 ]
@@ -5790,7 +5790,7 @@ dependencies = [
  "gcloud-auth",
  "gcloud-gax",
  "gcloud-googleapis",
- "prost-types 0.14.1",
+ "prost-types 0.14.3",
  "thiserror 2.0.17",
  "token-source",
  "tokio",
@@ -7677,7 +7677,7 @@ dependencies = [
 [[package]]
 name = "madsim"
 version = "0.2.34"
-source = "git+https://github.com/madsim-rs/madsim?rev=b7a8882d160214f0a10ab7d151c12f664a0243d5#b7a8882d160214f0a10ab7d151c12f664a0243d5"
+source = "git+https://github.com/madsim-rs/madsim?rev=356666437468f4860377466ae0b8bfc245e01c36#356666437468f4860377466ae0b8bfc245e01c36"
 dependencies = [
  "ahash 0.8.11",
  "async-channel 2.5.0",
@@ -7726,7 +7726,7 @@ dependencies = [
 [[package]]
 name = "madsim-macros"
 version = "0.2.12"
-source = "git+https://github.com/madsim-rs/madsim?rev=b7a8882d160214f0a10ab7d151c12f664a0243d5#b7a8882d160214f0a10ab7d151c12f664a0243d5"
+source = "git+https://github.com/madsim-rs/madsim?rev=356666437468f4860377466ae0b8bfc245e01c36#356666437468f4860377466ae0b8bfc245e01c36"
 dependencies = [
  "darling 0.14.4",
  "proc-macro2",
@@ -7737,7 +7737,7 @@ dependencies = [
 [[package]]
 name = "madsim-rdkafka"
 version = "0.4.4+0.34.0"
-source = "git+https://github.com/madsim-rs/madsim?rev=b7a8882d160214f0a10ab7d151c12f664a0243d5#b7a8882d160214f0a10ab7d151c12f664a0243d5"
+source = "git+https://github.com/madsim-rs/madsim?rev=356666437468f4860377466ae0b8bfc245e01c36#356666437468f4860377466ae0b8bfc245e01c36"
 dependencies = [
  "async-channel 1.9.0",
  "async-trait",
@@ -7760,7 +7760,7 @@ dependencies = [
 [[package]]
 name = "madsim-tokio"
 version = "0.2.30"
-source = "git+https://github.com/madsim-rs/madsim?rev=b7a8882d160214f0a10ab7d151c12f664a0243d5#b7a8882d160214f0a10ab7d151c12f664a0243d5"
+source = "git+https://github.com/madsim-rs/madsim?rev=356666437468f4860377466ae0b8bfc245e01c36#356666437468f4860377466ae0b8bfc245e01c36"
 dependencies = [
  "madsim",
  "spin 0.9.8",
@@ -7769,30 +7769,31 @@ dependencies = [
 
 [[package]]
 name = "madsim-tonic"
-version = "0.6.0+0.13"
-source = "git+https://github.com/madsim-rs/madsim?rev=b7a8882d160214f0a10ab7d151c12f664a0243d5#b7a8882d160214f0a10ab7d151c12f664a0243d5"
+version = "0.6.0+0.14"
+source = "git+https://github.com/madsim-rs/madsim?rev=356666437468f4860377466ae0b8bfc245e01c36#356666437468f4860377466ae0b8bfc245e01c36"
 dependencies = [
  "async-stream",
  "chrono",
  "futures-util",
  "madsim",
  "tokio",
- "tonic 0.13.1",
+ "tonic 0.14.2",
  "tower 0.5.2",
  "tracing",
 ]
 
 [[package]]
 name = "madsim-tonic-build"
-version = "0.6.0+0.13"
-source = "git+https://github.com/madsim-rs/madsim?rev=b7a8882d160214f0a10ab7d151c12f664a0243d5#b7a8882d160214f0a10ab7d151c12f664a0243d5"
+version = "0.6.0+0.14"
+source = "git+https://github.com/madsim-rs/madsim?rev=356666437468f4860377466ae0b8bfc245e01c36#356666437468f4860377466ae0b8bfc245e01c36"
 dependencies = [
  "prettyplease 0.2.15",
  "proc-macro2",
- "prost-build 0.13.4",
+ "prost-build 0.14.3",
  "quote",
  "syn 2.0.111",
  "tonic-build",
+ "tonic-prost-build",
 ]
 
 [[package]]
@@ -8846,7 +8847,7 @@ dependencies = [
  "opentelemetry-http",
  "opentelemetry-proto",
  "opentelemetry_sdk",
- "prost 0.14.1",
+ "prost 0.14.3",
  "reqwest 0.12.25",
  "thiserror 2.0.17",
  "tokio",
@@ -8862,7 +8863,7 @@ checksum = "a7175df06de5eaee9909d4805a3d07e28bb752c34cab57fa9cff549da596b30f"
 dependencies = [
  "opentelemetry",
  "opentelemetry_sdk",
- "prost 0.14.1",
+ "prost 0.14.3",
  "tonic 0.14.2",
  "tonic-prost",
 ]
@@ -8946,20 +8947,21 @@ dependencies = [
 [[package]]
 name = "otlp-embedded"
 version = "0.0.1"
-source = "git+https://github.com/risingwavelabs/otlp-embedded?rev=422819a30806a7b4b90563dc5452a7b17ca60fc1#422819a30806a7b4b90563dc5452a7b17ca60fc1"
+source = "git+https://github.com/risingwavelabs/otlp-embedded?rev=105651e3029974be402f5794c738566d3a08d7c6#105651e3029974be402f5794c738566d3a08d7c6"
 dependencies = [
  "axum 0.8.8",
  "datasize",
  "hex",
- "itertools 0.13.0",
- "prost 0.13.4",
+ "itertools 0.14.0",
+ "prost 0.14.3",
  "rust-embed",
  "schnellru",
  "serde",
  "serde_json",
  "tokio",
- "tonic 0.13.1",
- "tonic-build",
+ "tonic 0.14.2",
+ "tonic-prost",
+ "tonic-prost-build",
 ]
 
 [[package]]
@@ -9219,8 +9221,8 @@ checksum = "2ed4d5c6ae95e08ac768883c8401cf0e8deb4e6e1d6a4e1fd3d2ec4f0ec63200"
 dependencies = [
  "heck 0.5.0",
  "itertools 0.14.0",
- "prost 0.14.1",
- "prost-types 0.14.1",
+ "prost 0.14.3",
+ "prost-types 0.14.3",
 ]
 
 [[package]]
@@ -9970,21 +9972,21 @@ dependencies = [
 
 [[package]]
 name = "prost"
-version = "0.13.4"
-source = "git+https://github.com/risingwavelabs/prost.git?rev=d7baf5f4d4c12d82987bd86a91a8663005881bdd#d7baf5f4d4c12d82987bd86a91a8663005881bdd"
+version = "0.13.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2796faa41db3ec313a31f7624d9286acf277b52de526150b7e69f3debf891ee5"
 dependencies = [
  "bytes",
- "prost-derive 0.13.4",
+ "prost-derive 0.13.5",
 ]
 
 [[package]]
 name = "prost"
-version = "0.14.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7231bd9b3d3d33c86b58adbac74b5ec0ad9f496b19d22801d773636feaa95f3d"
+version = "0.14.3"
+source = "git+https://github.com/risingwavelabs/prost.git?rev=040a192409e45069158300baec4f402ad1fe101a#040a192409e45069158300baec4f402ad1fe101a"
 dependencies = [
  "bytes",
- "prost-derive 0.14.1",
+ "prost-derive 0.14.3",
 ]
 
 [[package]]
@@ -10011,18 +10013,19 @@ dependencies = [
 
 [[package]]
 name = "prost-build"
-version = "0.13.4"
-source = "git+https://github.com/risingwavelabs/prost.git?rev=d7baf5f4d4c12d82987bd86a91a8663005881bdd#d7baf5f4d4c12d82987bd86a91a8663005881bdd"
+version = "0.14.3"
+source = "git+https://github.com/risingwavelabs/prost.git?rev=040a192409e45069158300baec4f402ad1fe101a#040a192409e45069158300baec4f402ad1fe101a"
 dependencies = [
  "heck 0.5.0",
- "itertools 0.13.0",
+ "itertools 0.14.0",
  "log",
  "multimap 0.10.0",
- "once_cell",
- "petgraph 0.6.5",
+ "petgraph 0.8.3",
  "prettyplease 0.2.15",
- "prost 0.13.4",
- "prost-types 0.13.4",
+ "prost 0.14.3",
+ "prost-types 0.14.3",
+ "pulldown-cmark",
+ "pulldown-cmark-to-cmark",
  "regex",
  "syn 2.0.111",
  "tempfile",
@@ -10043,11 +10046,12 @@ dependencies = [
 
 [[package]]
 name = "prost-derive"
-version = "0.13.4"
-source = "git+https://github.com/risingwavelabs/prost.git?rev=d7baf5f4d4c12d82987bd86a91a8663005881bdd#d7baf5f4d4c12d82987bd86a91a8663005881bdd"
+version = "0.13.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8a56d757972c98b346a9b766e3f02746cde6dd1cd1d1d563472929fdd74bec4d"
 dependencies = [
  "anyhow",
- "itertools 0.13.0",
+ "itertools 0.14.0",
  "proc-macro2",
  "quote",
  "syn 2.0.111",
@@ -10055,9 +10059,8 @@ dependencies = [
 
 [[package]]
 name = "prost-derive"
-version = "0.14.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9120690fafc389a67ba3803df527d0ec9cbbc9cc45e4cc20b332996dfb672425"
+version = "0.14.3"
+source = "git+https://github.com/risingwavelabs/prost.git?rev=040a192409e45069158300baec4f402ad1fe101a#040a192409e45069158300baec4f402ad1fe101a"
 dependencies = [
  "anyhow",
  "itertools 0.14.0",
@@ -10081,11 +10084,21 @@ version = "0.15.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "134584672a2f89128da60df70d4b9d2eddfeb3ab00ab9c854ee7ee360ea7a7fc"
 dependencies = [
- "base64 0.22.1",
  "logos",
  "miette",
- "prost 0.13.4",
- "prost-types 0.13.4",
+ "prost 0.13.5",
+ "prost-types 0.13.5",
+]
+
+[[package]]
+name = "prost-reflect"
+version = "0.16.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b89455ef41ed200cafc47c76c552ee7792370ac420497e551f16123a9135f76e"
+dependencies = [
+ "base64 0.22.1",
+ "prost 0.14.3",
+ "prost-types 0.14.3",
  "serde",
  "serde-value",
 ]
@@ -10101,19 +10114,19 @@ dependencies = [
 
 [[package]]
 name = "prost-types"
-version = "0.13.4"
-source = "git+https://github.com/risingwavelabs/prost.git?rev=d7baf5f4d4c12d82987bd86a91a8663005881bdd#d7baf5f4d4c12d82987bd86a91a8663005881bdd"
+version = "0.13.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "52c2c1bf36ddb1a1c396b3601a3cec27c2462e45f07c386894ec3ccf5332bd16"
 dependencies = [
- "prost 0.13.4",
+ "prost 0.13.5",
 ]
 
 [[package]]
 name = "prost-types"
-version = "0.14.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b9b4db3d6da204ed77bb26ba83b6122a73aeb2e87e25fbf7ad2e84c4ccbf8f72"
+version = "0.14.3"
+source = "git+https://github.com/risingwavelabs/prost.git?rev=040a192409e45069158300baec4f402ad1fe101a#040a192409e45069158300baec4f402ad1fe101a"
 dependencies = [
- "prost 0.14.1",
+ "prost 0.14.3",
 ]
 
 [[package]]
@@ -10144,9 +10157,9 @@ checksum = "424c2bd294b69c49b949f3619362bc3c5d28298cd1163b6d1a62df37c16461aa"
 dependencies = [
  "bytes",
  "miette",
- "prost 0.13.4",
- "prost-reflect",
- "prost-types 0.13.4",
+ "prost 0.13.5",
+ "prost-reflect 0.15.1",
+ "prost-types 0.13.5",
  "protox-parse",
  "thiserror 2.0.17",
 ]
@@ -10159,7 +10172,7 @@ checksum = "57927f9dbeeffcce7192404deee6157a640cbb3fe8ac11eabbe571565949ab75"
 dependencies = [
  "logos",
  "miette",
- "prost-types 0.13.4",
+ "prost-types 0.13.5",
  "thiserror 2.0.17",
 ]
 
@@ -10190,6 +10203,26 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 1.0.109",
+]
+
+[[package]]
+name = "pulldown-cmark"
+version = "0.13.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1e8bbe1a966bd2f362681a44f6edce3c2310ac21e4d5067a6e7ec396297a6ea0"
+dependencies = [
+ "bitflags 2.10.0",
+ "memchr",
+ "unicase",
+]
+
+[[package]]
+name = "pulldown-cmark-to-cmark"
+version = "22.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "50793def1b900256624a709439404384204a5dc3a6ec580281bfaac35e882e90"
+dependencies = [
+ "pulldown-cmark",
 ]
 
 [[package]]
@@ -11008,7 +11041,7 @@ dependencies = [
  "bytes",
  "itertools 0.14.0",
  "madsim-tokio",
- "prost 0.13.4",
+ "prost 0.14.3",
  "risingwave_common",
  "risingwave_hummock_sdk",
  "risingwave_meta_model",
@@ -11252,7 +11285,7 @@ dependencies = [
  "postgres-types",
  "pretty_assertions",
  "prometheus",
- "prost 0.13.4",
+ "prost 0.14.3",
  "rand 0.9.2",
  "regex",
  "reqwest 0.12.25",
@@ -11422,7 +11455,7 @@ dependencies = [
  "madsim-tokio",
  "moka",
  "parking_lot 0.12.5",
- "prost 0.13.4",
+ "prost 0.14.3",
  "reqwest 0.12.25",
  "risingwave_pb",
  "serde",
@@ -11489,7 +11522,7 @@ dependencies = [
  "jsonbb",
  "madsim-tokio",
  "madsim-tonic",
- "prost 0.13.4",
+ "prost 0.14.3",
  "risingwave_common",
  "risingwave_common_heap_profiling",
  "risingwave_common_service",
@@ -11521,7 +11554,7 @@ dependencies = [
  "madsim-tonic",
  "maplit",
  "prometheus",
- "prost 0.13.4",
+ "prost 0.14.3",
  "rand 0.9.2",
  "risingwave_batch",
  "risingwave_batch_executors",
@@ -11630,11 +11663,9 @@ dependencies = [
  "proc-macro2",
  "prometheus",
  "prost 0.11.9",
- "prost 0.13.4",
- "prost 0.14.1",
- "prost-reflect",
- "prost-types 0.13.4",
- "prost-types 0.14.1",
+ "prost 0.14.3",
+ "prost-reflect 0.16.3",
+ "prost-types 0.14.3",
  "pulsar",
  "quote",
  "rand 0.9.2",
@@ -11705,10 +11736,10 @@ dependencies = [
  "jsonschema-transpiler",
  "madsim-tokio",
  "num-bigint",
- "prost 0.13.4",
- "prost-build 0.13.4",
- "prost-reflect",
- "prost-types 0.13.4",
+ "prost 0.14.3",
+ "prost-build 0.14.3",
+ "prost-reflect 0.16.3",
+ "prost-types 0.14.3",
  "protox",
  "reqwest 0.12.25",
  "risingwave_common",
@@ -11739,7 +11770,7 @@ dependencies = [
  "itertools 0.14.0",
  "madsim-tokio",
  "madsim-tonic",
- "prost 0.13.4",
+ "prost 0.14.3",
  "regex",
  "risingwave_common",
  "risingwave_connector",
@@ -11973,7 +12004,7 @@ dependencies = [
  "pretty_assertions",
  "prometheus",
  "prometheus-http-query",
- "prost 0.13.4",
+ "prost 0.14.3",
  "quick-xml 0.39.0",
  "rand 0.9.2",
  "risingwave_batch",
@@ -12087,7 +12118,7 @@ dependencies = [
  "madsim-tokio",
  "mockall",
  "parking_lot 0.12.5",
- "prost 0.13.4",
+ "prost 0.14.3",
  "risingwave_common",
  "risingwave_hummock_sdk",
  "risingwave_pb",
@@ -12106,7 +12137,7 @@ dependencies = [
  "futures",
  "jni",
  "madsim-tokio",
- "prost 0.13.4",
+ "prost 0.14.3",
  "risingwave_common",
  "risingwave_expr",
  "risingwave_hummock_sdk",
@@ -12135,7 +12166,7 @@ dependencies = [
  "linkme",
  "madsim-tokio",
  "paste",
- "prost 0.13.4",
+ "prost 0.14.3",
  "risingwave_common",
  "risingwave_object_store",
  "risingwave_pb",
@@ -12213,7 +12244,7 @@ dependencies = [
  "pretty_assertions",
  "prometheus",
  "prometheus-http-query",
- "prost 0.13.4",
+ "prost 0.14.3",
  "rand 0.9.2",
  "risingwave_backup",
  "risingwave_common",
@@ -12276,7 +12307,7 @@ dependencies = [
 name = "risingwave_meta_model"
 version = "2.9.0-alpha"
 dependencies = [
- "prost 0.13.4",
+ "prost 0.14.3",
  "risingwave_common",
  "risingwave_pb",
  "sea-orm",
@@ -12406,8 +12437,8 @@ dependencies = [
  "paste",
  "pbjson",
  "pbjson-build",
- "prost 0.13.4",
- "prost-build 0.13.4",
+ "prost 0.14.3",
+ "prost-build 0.14.3",
  "prost-helpers",
  "risingwave_error",
  "sea-orm",
@@ -12416,6 +12447,7 @@ dependencies = [
  "strum 0.27.2",
  "thiserror 2.0.17",
  "thiserror-ext",
+ "tonic-prost",
  "tracing",
  "walkdir",
  "workspace-hack",
@@ -12681,7 +12713,7 @@ dependencies = [
  "parking_lot 0.12.5",
  "parquet",
  "prometheus",
- "prost 0.13.4",
+ "prost 0.14.3",
  "rand 0.9.2",
  "risingwave_backup",
  "risingwave_common",
@@ -12754,7 +12786,7 @@ dependencies = [
  "pin-project",
  "pretty_assertions",
  "prometheus",
- "prost 0.13.4",
+ "prost 0.14.3",
  "rand 0.9.2",
  "risingwave_common",
  "risingwave_common_estimate_size",
@@ -12794,7 +12826,7 @@ version = "2.9.0-alpha"
 dependencies = [
  "jsonbb",
  "madsim-tokio",
- "prost 0.13.4",
+ "prost 0.14.3",
  "reqwest 0.12.25",
  "risingwave_common_log",
  "risingwave_pb",
@@ -15524,42 +15556,13 @@ dependencies = [
  "hyper-util",
  "percent-encoding",
  "pin-project",
- "prost 0.13.4",
+ "prost 0.13.5",
  "rustls-pemfile 2.2.0",
  "socket2 0.5.10",
  "tokio",
  "tokio-rustls 0.26.4",
  "tokio-stream 0.1.17",
  "tower 0.4.13",
- "tower-layer",
- "tower-service",
- "tracing",
-]
-
-[[package]]
-name = "tonic"
-version = "0.13.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7e581ba15a835f4d9ea06c55ab1bd4dce26fc53752c69a04aac00703bfb49ba9"
-dependencies = [
- "async-trait",
- "axum 0.8.8",
- "base64 0.22.1",
- "bytes",
- "h2 0.4.12",
- "http 1.4.0",
- "http-body 1.0.0",
- "http-body-util",
- "hyper 1.6.0",
- "hyper-timeout",
- "hyper-util",
- "percent-encoding",
- "pin-project",
- "prost 0.13.4",
- "socket2 0.5.10",
- "tokio",
- "tokio-stream 0.1.17",
- "tower 0.5.2",
  "tower-layer",
  "tower-service",
  "tracing",
@@ -15599,14 +15602,12 @@ dependencies = [
 
 [[package]]
 name = "tonic-build"
-version = "0.13.1"
+version = "0.14.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "eac6f67be712d12f0b41328db3137e0d0757645d8904b4cb7d51cd9c2279e847"
+checksum = "27aac809edf60b741e2d7db6367214d078856b8a5bff0087e94ff330fb97b6fc"
 dependencies = [
  "prettyplease 0.2.15",
  "proc-macro2",
- "prost-build 0.13.4",
- "prost-types 0.13.4",
  "quote",
  "syn 2.0.111",
 ]
@@ -15618,8 +15619,24 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "66bd50ad6ce1252d87ef024b3d64fe4c3cf54a86fb9ef4c631fdd0ded7aeaa67"
 dependencies = [
  "bytes",
- "prost 0.14.1",
+ "prost 0.14.3",
  "tonic 0.14.2",
+]
+
+[[package]]
+name = "tonic-prost-build"
+version = "0.14.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a4556786613791cfef4ed134aa670b61a85cfcacf71543ef33e8d801abae988f"
+dependencies = [
+ "prettyplease 0.2.15",
+ "proc-macro2",
+ "prost-build 0.14.3",
+ "prost-types 0.14.3",
+ "quote",
+ "syn 2.0.111",
+ "tempfile",
+ "tonic-build",
 ]
 
 [[package]]

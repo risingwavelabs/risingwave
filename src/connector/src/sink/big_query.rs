@@ -43,13 +43,13 @@ use google_cloud_pubsub::client::google_cloud_auth;
 use google_cloud_pubsub::client::google_cloud_auth::credentials::CredentialsFile;
 use phf::{Set, phf_set};
 use prost::Message;
-use prost_014::Message as Message014;
+use prost::Message as Message014;
 use prost_reflect::{FieldDescriptor, MessageDescriptor};
 use prost_types::{
     DescriptorProto, FieldDescriptorProto, FileDescriptorProto, FileDescriptorSet,
     field_descriptor_proto,
 };
-use prost_types_014::DescriptorProto as DescriptorProto014;
+use prost_types::DescriptorProto as DescriptorProto014;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::DataType;
