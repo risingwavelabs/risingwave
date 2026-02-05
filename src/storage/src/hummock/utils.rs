@@ -18,8 +18,8 @@ use std::collections::VecDeque;
 use std::fmt::{Debug, Formatter};
 use std::ops::Bound::{Excluded, Included, Unbounded};
 use std::ops::{Bound, RangeBounds};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering as AtomicOrdering};
+use std::sync::{Arc, LazyLock};
 use std::time::{Duration, Instant};
 
 use bytes::Bytes;
@@ -28,6 +28,7 @@ use futures::{Stream, StreamExt, pin_mut};
 use parking_lot::Mutex;
 use risingwave_common::catalog::TableId;
 use risingwave_common::config::StorageMemoryConfig;
+use risingwave_common::log::LogSuppressor;
 use risingwave_expr::codegen::try_stream;
 use risingwave_hummock_sdk::can_concat;
 use risingwave_hummock_sdk::compaction_group::StateTableId;
@@ -651,26 +652,31 @@ pub(crate) async fn wait_for_update(
     loop {
         match tokio::time::timeout(Duration::from_secs(30), receiver.changed()).await {
             Err(_) => {
-                // Provide backtrace iff in debug mode for observability.
-                let backtrace = cfg!(debug_assertions)
-                    .then(Backtrace::capture)
-                    .map(tracing::field::display);
+                static LOG_SUPPRESSOR: LazyLock<LogSuppressor> =
+                    LazyLock::new(|| LogSuppressor::per_minute(1));
+                if let Ok(suppressed_count) = LOG_SUPPRESSOR.check() {
+                    // Provide backtrace iff in debug mode for observability.
+                    let backtrace = cfg!(debug_assertions)
+                        .then(Backtrace::capture)
+                        .map(tracing::field::display);
 
-                // The reason that we need to retry here is batch scan in
-                // chain/rearrange_chain is waiting for an
-                // uncommitted epoch carried by the CreateMV barrier, which
-                // can take unbounded time to become committed and propagate
-                // to the CN. We should consider removing the retry as well as wait_epoch
-                // for chain/rearrange_chain if we enforce
-                // chain/rearrange_chain to be scheduled on the same
-                // CN with the same distribution as the upstream MV.
-                // See #3845 for more details.
-                tracing::warn!(
-                    info = periodic_debug_info(),
-                    elapsed = ?start_time.elapsed(),
-                    backtrace,
-                    "timeout when waiting for version update",
-                );
+                    // The reason that we need to retry here is batch scan in
+                    // chain/rearrange_chain is waiting for an
+                    // uncommitted epoch carried by the CreateMV barrier, which
+                    // can take unbounded time to become committed and propagate
+                    // to the CN. We should consider removing the retry as well as wait_epoch
+                    // for chain/rearrange_chain if we enforce
+                    // chain/rearrange_chain to be scheduled on the same
+                    // CN with the same distribution as the upstream MV.
+                    // See #3845 for more details.
+                    tracing::warn!(
+                        info = periodic_debug_info(),
+                        elapsed = ?start_time.elapsed(),
+                        suppressed_count,
+                        backtrace,
+                        "timeout when waiting for version update",
+                    );
+                }
                 continue;
             }
             Ok(Err(_)) => {
