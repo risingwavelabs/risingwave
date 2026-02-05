@@ -12,14 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fmt::Debug;
 use std::sync::{Arc, LazyLock};
 
 use derive_builder::Builder;
 use iceberg::expr::BoundPredicate;
 use iceberg::scan::FileScanTask;
-use iceberg::spec::{DataContentType, DataFileFormat, DataFile, Schema, SerializedDataFile, StructType};
+use iceberg::spec::{
+    DataContentType, DataFile, DataFileFormat, Schema, SerializedDataFile, StructType,
+};
 use iceberg::{Catalog, TableIdent};
 use iceberg_compaction_core::compaction::{
     CommitManagerRetryConfig, CompactionBuilder, CompactionPlan, CompactionPlanner,
@@ -219,6 +221,7 @@ pub fn default_writer_properties() -> WriterProperties {
 }
 
 #[derive(Builder, Debug, Clone)]
+#[allow(dead_code)]
 pub struct IcebergCompactorRunnerConfig {
     #[builder(default = "4")]
     pub max_parallelism: u32,
@@ -530,11 +533,8 @@ fn serialize_data_files_by_content(
     Vec<SerializedDataFileInfo>,
 )> {
     let schema = metadata.current_schema();
-    let partition_spec = metadata.default_partition_spec();
-    let partition_type: StructType = partition_spec
-        .partition_type(schema.as_ref())
-        .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
     let format_version = metadata.format_version();
+    let mut partition_types: HashMap<i32, StructType> = HashMap::new();
 
     let mut added_data_files = Vec::new();
     let mut added_position_delete_files = Vec::new();
@@ -543,7 +543,25 @@ fn serialize_data_files_by_content(
     for data_file in data_files {
         let content_type = data_file.content_type();
         let partition_spec_id = data_file.partition_spec_id();
-        let serialized = SerializedDataFile::try_from(data_file, &partition_type, format_version)
+        let partition_type = match partition_types.get(&partition_spec_id) {
+            Some(partition_type) => partition_type,
+            None => {
+                let Some(partition_spec) = metadata.partition_spec_by_id(partition_spec_id) else {
+                    return Err(HummockError::compaction_executor(format!(
+                        "Can't find partition spec by id {}",
+                        partition_spec_id
+                    )));
+                };
+                let partition_type: StructType = partition_spec
+                    .partition_type(schema.as_ref())
+                    .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
+                partition_types.insert(partition_spec_id, partition_type);
+                partition_types
+                    .get(&partition_spec_id)
+                    .expect("just inserted partition type")
+            }
+        };
+        let serialized = SerializedDataFile::try_from(data_file, partition_type, format_version)
             .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
         let json = serde_json::to_vec(&serialized)
             .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
@@ -567,6 +585,7 @@ fn serialize_data_files_by_content(
 }
 
 /// Creates plan runners from an iceberg compaction task.
+#[allow(dead_code)]
 pub async fn create_plan_runners(
     iceberg_compaction_task: IcebergCompactionTask,
     config: IcebergCompactorRunnerConfig,

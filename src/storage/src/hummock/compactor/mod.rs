@@ -380,7 +380,8 @@ pub fn start_iceberg_compactor(
             tokio::sync::mpsc::unbounded_channel::<TaskKey>();
         // Channel for task result reporting to meta
         let (task_report_tx, mut task_report_rx) =
-            tokio::sync::mpsc::unbounded_channel::<(TaskKey, Result<PlanExecutionOutput, String>)>();
+            tokio::sync::mpsc::unbounded_channel::<(TaskKey, Result<PlanExecutionOutput, String>)>(
+            );
         // Map from internal task key to reported plan key and attempt.
         let report_key_map: Arc<Mutex<HashMap<TaskKey, (PlanKey, u32)>>> =
             Arc::new(Mutex::new(HashMap::new()));
@@ -452,15 +453,13 @@ pub fn start_iceberg_compactor(
                     Some((task_key, report_result)) = task_report_rx.recv() => {
                         let (report_key, attempt) = {
                             let mut guard = report_key_map.lock().unwrap();
-                            guard.remove(&task_key).unwrap_or_else(|| {
-                                (
-                                    PlanKey {
-                                        task_id: task_key.0,
-                                        plan_index: task_key.1 as u32,
-                                    },
-                                    0,
-                                )
-                            })
+                            guard.remove(&task_key).unwrap_or((
+                                PlanKey {
+                                    task_id: task_key.0,
+                                    plan_index: task_key.1 as u32,
+                                },
+                                0,
+                            ))
                         };
                         let (status, error_message, result) = match report_result {
                             Ok(output) => {
@@ -694,13 +693,14 @@ pub fn start_iceberg_compactor(
                                 let meta = runner.to_meta();
                                 let required_parallelism = runner.required_parallelism();
                                 let push_result = task_queue.push(meta.clone(), Some(runner));
-                                {
-                                    let mut guard = report_key_map_clone.lock().unwrap();
-                                    guard.insert((meta.task_id, meta.plan_index), (key.clone(), attempt));
-                                }
 
                                 match push_result {
                                     PushResult::Added => {
+                                        {
+                                            let mut guard = report_key_map_clone.lock().unwrap();
+                                            guard
+                                                .insert((meta.task_id, meta.plan_index), (key, attempt));
+                                        }
                                         tracing::debug!(
                                             task_id = task_id,
                                             plan_index = meta.plan_index,
@@ -715,6 +715,33 @@ pub fn start_iceberg_compactor(
                                             pending_budget = pending_parallelism_budget,
                                             "Iceberg plan runner rejected - queue capacity exceeded"
                                         );
+                                        let report = subscribe_iceberg_compaction_event_request::ReportPlan {
+                                            key: Some(key),
+                                            status: subscribe_iceberg_compaction_event_request::report_plan::Status::Failed as i32,
+                                            error_message: "RejectedCapacity: queue capacity exceeded".to_owned(),
+                                            result: None,
+                                            attempt,
+                                        };
+                                        if let Err(e) = request_sender.send(
+                                            SubscribeIcebergCompactionEventRequest {
+                                                event: Some(
+                                                    subscribe_iceberg_compaction_event_request::Event::ReportPlan(report),
+                                                ),
+                                                create_at: SystemTime::now()
+                                                    .duration_since(std::time::UNIX_EPOCH)
+                                                    .expect("Clock may have gone backwards")
+                                                    .as_millis()
+                                                    as u64,
+                                            },
+                                        ) {
+                                            tracing::warn!(
+                                                error = %e.as_report(),
+                                                task_id = task_id,
+                                                plan_index = meta.plan_index,
+                                                "Failed to report rejected iceberg plan"
+                                            );
+                                            continue 'start_stream;
+                                        }
                                     },
                                     PushResult::RejectedTooLarge => {
                                         tracing::error!(
@@ -723,6 +750,33 @@ pub fn start_iceberg_compactor(
                                             max_parallelism = max_task_parallelism,
                                             "Iceberg plan runner rejected - parallelism exceeds max"
                                         );
+                                        let report = subscribe_iceberg_compaction_event_request::ReportPlan {
+                                            key: Some(key),
+                                            status: subscribe_iceberg_compaction_event_request::report_plan::Status::Failed as i32,
+                                            error_message: "RejectedTooLarge: parallelism exceeds max".to_owned(),
+                                            result: None,
+                                            attempt,
+                                        };
+                                        if let Err(e) = request_sender.send(
+                                            SubscribeIcebergCompactionEventRequest {
+                                                event: Some(
+                                                    subscribe_iceberg_compaction_event_request::Event::ReportPlan(report),
+                                                ),
+                                                create_at: SystemTime::now()
+                                                    .duration_since(std::time::UNIX_EPOCH)
+                                                    .expect("Clock may have gone backwards")
+                                                    .as_millis()
+                                                    as u64,
+                                            },
+                                        ) {
+                                            tracing::warn!(
+                                                error = %e.as_report(),
+                                                task_id = task_id,
+                                                plan_index = meta.plan_index,
+                                                "Failed to report rejected iceberg plan"
+                                            );
+                                            continue 'start_stream;
+                                        }
                                     },
                                     PushResult::RejectedInvalidParallelism => {
                                         tracing::error!(
@@ -730,6 +784,33 @@ pub fn start_iceberg_compactor(
                                             required_parallelism = required_parallelism,
                                             "Iceberg plan runner rejected - invalid parallelism"
                                         );
+                                        let report = subscribe_iceberg_compaction_event_request::ReportPlan {
+                                            key: Some(key),
+                                            status: subscribe_iceberg_compaction_event_request::report_plan::Status::Failed as i32,
+                                            error_message: "RejectedInvalidParallelism: invalid parallelism".to_owned(),
+                                            result: None,
+                                            attempt,
+                                        };
+                                        if let Err(e) = request_sender.send(
+                                            SubscribeIcebergCompactionEventRequest {
+                                                event: Some(
+                                                    subscribe_iceberg_compaction_event_request::Event::ReportPlan(report),
+                                                ),
+                                                create_at: SystemTime::now()
+                                                    .duration_since(std::time::UNIX_EPOCH)
+                                                    .expect("Clock may have gone backwards")
+                                                    .as_millis()
+                                                    as u64,
+                                            },
+                                        ) {
+                                            tracing::warn!(
+                                                error = %e.as_report(),
+                                                task_id = task_id,
+                                                plan_index = meta.plan_index,
+                                                "Failed to report rejected iceberg plan"
+                                            );
+                                            continue 'start_stream;
+                                        }
                                     },
                                     PushResult::RejectedDuplicate => {
                                         tracing::error!(
@@ -737,6 +818,33 @@ pub fn start_iceberg_compactor(
                                             plan_index = meta.plan_index,
                                             "Iceberg plan runner rejected - duplicate (task_id, plan_index)"
                                         );
+                                        let report = subscribe_iceberg_compaction_event_request::ReportPlan {
+                                            key: Some(key),
+                                            status: subscribe_iceberg_compaction_event_request::report_plan::Status::Failed as i32,
+                                            error_message: "RejectedDuplicate: duplicate (task_id, plan_index)".to_owned(),
+                                            result: None,
+                                            attempt,
+                                        };
+                                        if let Err(e) = request_sender.send(
+                                            SubscribeIcebergCompactionEventRequest {
+                                                event: Some(
+                                                    subscribe_iceberg_compaction_event_request::Event::ReportPlan(report),
+                                                ),
+                                                create_at: SystemTime::now()
+                                                    .duration_since(std::time::UNIX_EPOCH)
+                                                    .expect("Clock may have gone backwards")
+                                                    .as_millis()
+                                                    as u64,
+                                            },
+                                        ) {
+                                            tracing::warn!(
+                                                error = %e.as_report(),
+                                                task_id = task_id,
+                                                plan_index = meta.plan_index,
+                                                "Failed to report rejected iceberg plan"
+                                            );
+                                            continue 'start_stream;
+                                        }
                                     }
                                 }
                             },
@@ -1300,7 +1408,10 @@ fn schedule_queued_tasks(
     compactor_context: &CompactorContext,
     shutdown_map: &Arc<Mutex<HashMap<TaskKey, Sender<()>>>>,
     task_completion_tx: &tokio::sync::mpsc::UnboundedSender<TaskKey>,
-    task_report_tx: &tokio::sync::mpsc::UnboundedSender<(TaskKey, Result<PlanExecutionOutput, String>)>,
+    task_report_tx: &tokio::sync::mpsc::UnboundedSender<(
+        TaskKey,
+        Result<PlanExecutionOutput, String>,
+    )>,
 ) {
     while let Some(popped_task) = task_queue.pop() {
         let task_id = popped_task.meta.task_id;
