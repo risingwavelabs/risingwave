@@ -464,8 +464,42 @@ pub fn start_iceberg_compactor(
                         };
                         let (status, error_message, result) = match report_result {
                             Ok(output) => {
+                                tracing::info!(
+                                    task_id = task_key.0,
+                                    plan_index = task_key.1,
+                                    attempt = attempt,
+                                    added_data_files = output.added_data_files.len(),
+                                    added_position_delete_files =
+                                        output.added_position_delete_files.len(),
+                                    added_equality_delete_files =
+                                        output.added_equality_delete_files.len(),
+                                    input_data_files = output.stats.input_data_file_count,
+                                    input_position_delete_files =
+                                        output.stats.input_position_delete_file_count,
+                                    input_equality_delete_files =
+                                        output.stats.input_equality_delete_file_count,
+                                    output_files = output.stats.output_files_count,
+                                    output_bytes = output.stats.output_total_bytes,
+                                    "【iceberg compaction】task execution finished, reporting success"
+                                );
                                 let added_data_files = output
                                     .added_data_files
+                                    .into_iter()
+                                    .map(|info| SerializedDataFile {
+                                        json: info.json,
+                                        partition_spec_id: info.partition_spec_id,
+                                    })
+                                    .collect();
+                                let added_position_delete_files = output
+                                    .added_position_delete_files
+                                    .into_iter()
+                                    .map(|info| SerializedDataFile {
+                                        json: info.json,
+                                        partition_spec_id: info.partition_spec_id,
+                                    })
+                                    .collect();
+                                let added_equality_delete_files = output
+                                    .added_equality_delete_files
                                     .into_iter()
                                     .map(|info| SerializedDataFile {
                                         json: info.json,
@@ -484,8 +518,8 @@ pub fn start_iceberg_compactor(
                                     String::new(),
                                     Some(PlanResult {
                                         added_data_files,
-                                        added_position_delete_files: vec![],
-                                        added_equality_delete_files: vec![],
+                                        added_position_delete_files,
+                                        added_equality_delete_files,
                                         stats: Some(stats),
                                     }),
                                 )
@@ -496,6 +530,18 @@ pub fn start_iceberg_compactor(
                                 None,
                             ),
                         };
+
+                        if status
+                            == subscribe_iceberg_compaction_event_request::report_plan::Status::Failed
+                        {
+                            tracing::warn!(
+                                task_id = task_key.0,
+                                plan_index = task_key.1,
+                                attempt = attempt,
+                                error_message = %error_message,
+                                "【iceberg compaction】task execution failed, reporting failure"
+                            );
+                        }
 
                         let report = subscribe_iceberg_compaction_event_request::ReportPlan {
                             key: Some(report_key),
@@ -577,6 +623,15 @@ pub fn start_iceberg_compactor(
                                     tracing::warn!(task_id = key.task_id, plan_index = key.plan_index, "Iceberg plan task missing plan");
                                     continue 'consume_stream;
                                 };
+                                tracing::info!(
+                                    task_id = key.task_id,
+                                    plan_index = key.plan_index,
+                                    attempt = plan_task.attempt,
+                                    required_parallelism = plan_task.required_parallelism,
+                                    snapshot_id = plan.snapshot_id,
+                                    to_branch = %plan.to_branch,
+                                    "【iceberg compaction】received plan task from meta"
+                                );
                                 let task_id = key.task_id;
                                 let attempt = plan_task.attempt;
                                 let report_key_map_clone = report_key_map.clone();
@@ -1275,7 +1330,7 @@ fn schedule_queued_tasks(
             plan_index = plan_index,
             unique_ident = ?unique_ident,
             required_parallelism = popped_task.meta.required_parallelism,
-            "Starting iceberg compaction task from queue"
+            "【iceberg compaction】starting iceberg compaction task from queue"
         );
 
         executor.spawn(async move {

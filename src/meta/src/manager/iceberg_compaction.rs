@@ -68,6 +68,8 @@ type CompactorChangeTx =
 type CompactorChangeRx =
     UnboundedReceiver<(WorkerId, Streaming<SubscribeIcebergCompactionEventRequest>)>;
 
+const ICEBERG_PLAN_MAX_RETRY_TIMES: u32 = 3;
+
 /// Snapshot for restoring track state on failure
 #[derive(Debug, Clone)]
 struct CompactionTrackSnapshot {
@@ -251,8 +253,28 @@ impl IcebergCompactionHandle {
             .map_err(|e| SinkError::Iceberg(e.into()))?;
 
         if compaction_plans.is_empty() {
+            tracing::info!(
+                sink_id = %self.sink_id,
+                task_id = task_id,
+                attempt = attempt,
+                task_type = ?self.task_type,
+                table = %table_ident,
+                to_branch = %to_branch,
+                "【iceberg compaction】planner returned empty plan list"
+            );
             return Ok(vec![]);
         }
+
+        tracing::info!(
+            sink_id = %self.sink_id,
+            task_id = task_id,
+            attempt = attempt,
+            task_type = ?self.task_type,
+            table = %table_ident,
+            to_branch = %to_branch,
+            plan_count = compaction_plans.len(),
+            "【iceberg compaction】planner generated plans"
+        );
 
         let mut plan_tasks = Vec::with_capacity(compaction_plans.len());
         for (plan_index, plan) in compaction_plans.into_iter().enumerate() {
@@ -262,6 +284,18 @@ impl IcebergCompactionHandle {
                 table_ident.to_string(),
                 self.task_type as i32,
             )?;
+            tracing::debug!(
+                sink_id = %self.sink_id,
+                task_id = task_id,
+                plan_index = plan_index,
+                attempt = attempt,
+                required_parallelism = plan_pb
+                    .file_group
+                    .as_ref()
+                    .map(|fg| fg.executor_parallelism)
+                    .unwrap_or(1),
+                "【iceberg compaction】encoded plan task"
+            );
             plan_tasks.push(subscribe_iceberg_compaction_event_response::PlanTask {
                 key: Some(PlanKey {
                     task_id,
@@ -287,9 +321,43 @@ impl IcebergCompactionHandle {
     ) -> MetaResult<()> {
         use risingwave_pb::iceberg_compaction::subscribe_iceberg_compaction_event_response::Event as IcebergResponseEvent;
         let plan_tasks = self.build_plan_tasks(task_id, 0).await?;
+        if !plan_tasks.is_empty() {
+            let mut guard = self.inner.write();
+            let assigned_at = Instant::now();
+            for plan_task in &plan_tasks {
+                let Some(key) = plan_task.key.as_ref() else {
+                    continue;
+                };
+                let assignment = PlanAssignment {
+                    key: (key.task_id, key.plan_index),
+                    attempt: plan_task.attempt,
+                    plan_task: plan_task.clone(),
+                    assigned_at: Some(assigned_at),
+                };
+                guard.in_flight_plans.insert(assignment.key, assignment);
+                tracing::info!(
+                    sink_id = %self.sink_id,
+                    task_id = key.task_id,
+                    plan_index = key.plan_index,
+                    attempt = plan_task.attempt,
+                    in_flight_count = guard.in_flight_plans.len(),
+                    "【iceberg compaction】registered plan task in in_flight_plans"
+                );
+            }
+        }
 
         let mut result = Ok(());
         for plan_task in plan_tasks {
+            if let Some(key) = plan_task.key.as_ref() {
+                tracing::info!(
+                    sink_id = %self.sink_id,
+                    task_id = key.task_id,
+                    plan_index = key.plan_index,
+                    attempt = plan_task.attempt,
+                    required_parallelism = plan_task.required_parallelism,
+                    "【iceberg compaction】sending plan task to compactor"
+                );
+            }
             result = compactor.send_event(IcebergResponseEvent::PlanTask(plan_task));
             if result.is_err() {
                 break;
@@ -630,6 +698,25 @@ impl IcebergCompactionManager {
         let key_tuple = (key.task_id, key.plan_index);
         let attempt = report_plan.attempt;
 
+        if report_plan.status
+            == risingwave_pb::iceberg_compaction::subscribe_iceberg_compaction_event_request::report_plan::Status::Failed as i32
+        {
+            tracing::warn!(
+                task_id = key.task_id,
+                plan_index = key.plan_index,
+                attempt = attempt,
+                error_message = %report_plan.error_message,
+                "【iceberg compaction】received failed plan report"
+            );
+        } else {
+            tracing::info!(
+                task_id = key.task_id,
+                plan_index = key.plan_index,
+                attempt = attempt,
+                "【iceberg compaction】received plan report"
+            );
+        }
+
         let plan_task = {
             let mut guard = self.inner.write();
             match guard.in_flight_plans.get(&key_tuple) {
@@ -670,8 +757,60 @@ impl IcebergCompactionManager {
                 == risingwave_pb::iceberg_compaction::subscribe_iceberg_compaction_event_request::report_plan::Status::Success as i32
             {
                 if let Some(result) = report_plan.result {
+                    if let Some(stats) = result.stats.as_ref() {
+                        tracing::info!(
+                            task_id = key.task_id,
+                            plan_index = key.plan_index,
+                            attempt = attempt,
+                            input_data_files = stats.input_data_files,
+                            input_delete_files = stats.input_delete_files,
+                            output_files = stats.output_files,
+                            output_bytes = stats.output_bytes,
+                            added_data_files = result.added_data_files.len(),
+                            "【iceberg compaction】accepted success report, start committing"
+                        );
+                    } else {
+                        tracing::info!(
+                            task_id = key.task_id,
+                            plan_index = key.plan_index,
+                            attempt = attempt,
+                            added_data_files = result.added_data_files.len(),
+                            "【iceberg compaction】accepted success report (no stats), start committing"
+                        );
+                    }
                     self.commit_plan(plan_task, result).await?;
                 }
+            } else {
+                let next_attempt = attempt.saturating_add(1);
+                if next_attempt >= ICEBERG_PLAN_MAX_RETRY_TIMES {
+                    tracing::warn!(
+                        task_id = key.task_id,
+                        plan_index = key.plan_index,
+                        attempt = attempt,
+                        max_retry_times = ICEBERG_PLAN_MAX_RETRY_TIMES,
+                        error_message = %report_plan.error_message,
+                        "【iceberg compaction】plan failed, retry limit reached, dropping"
+                    );
+                    return Ok(());
+                }
+                let mut requeued = PlanAssignment {
+                    key: (key.task_id, key.plan_index),
+                    attempt: next_attempt,
+                    plan_task,
+                    assigned_at: None,
+                };
+                requeued.plan_task.attempt = requeued.attempt;
+                let mut guard = self.inner.write();
+                guard.pending_plans.push_back(requeued);
+                tracing::warn!(
+                    task_id = key.task_id,
+                    plan_index = key.plan_index,
+                    old_attempt = attempt,
+                    new_attempt = next_attempt,
+                    max_retry_times = ICEBERG_PLAN_MAX_RETRY_TIMES,
+                    error_message = %report_plan.error_message,
+                    "【iceberg compaction】plan failed, requeued"
+                );
             }
         }
         Ok(())
@@ -692,7 +831,26 @@ impl IcebergCompactionManager {
 
         for key in expired_keys {
             if let Some(mut plan) = guard.in_flight_plans.remove(&key) {
-                plan.attempt = plan.attempt.saturating_add(1);
+                let next_attempt = plan.attempt.saturating_add(1);
+                if next_attempt >= ICEBERG_PLAN_MAX_RETRY_TIMES {
+                    tracing::warn!(
+                        task_id = key.0,
+                        plan_index = key.1,
+                        attempt = plan.attempt,
+                        max_retry_times = ICEBERG_PLAN_MAX_RETRY_TIMES,
+                        "【iceberg compaction】plan timed out, retry limit reached, dropping"
+                    );
+                    continue;
+                }
+                tracing::warn!(
+                    task_id = key.0,
+                    plan_index = key.1,
+                    old_attempt = plan.attempt,
+                    new_attempt = next_attempt,
+                    max_retry_times = ICEBERG_PLAN_MAX_RETRY_TIMES,
+                    "【iceberg compaction】plan timed out, requeueing"
+                );
+                plan.attempt = next_attempt;
                 plan.plan_task.attempt = plan.attempt;
                 plan.assigned_at = None;
                 guard.pending_plans.push_back(plan);
@@ -707,6 +865,13 @@ impl IcebergCompactionManager {
         let Some(key) = plan_task.key.as_ref() else {
             return;
         };
+        tracing::debug!(
+            task_id = key.task_id,
+            plan_index = key.plan_index,
+            attempt = plan_task.attempt,
+            required_parallelism = plan_task.required_parallelism,
+            "【iceberg compaction】enqueue plan"
+        );
         let plan = PlanAssignment {
             key: (key.task_id, key.plan_index),
             attempt: plan_task.attempt,
@@ -727,6 +892,13 @@ impl IcebergCompactionManager {
             if let Some(mut plan) = guard.pending_plans.pop_front() {
                 plan.assigned_at = Some(Instant::now());
                 guard.in_flight_plans.insert(plan.key, plan.clone());
+                tracing::info!(
+                    task_id = plan.key.0,
+                    plan_index = plan.key.1,
+                    attempt = plan.attempt,
+                    required_parallelism = plan.plan_task.required_parallelism,
+                    "【iceberg compaction】assigned plan to compactor (moved pending -> in_flight)"
+                );
                 ret.push(plan.plan_task);
             } else {
                 break;
@@ -763,6 +935,18 @@ impl IcebergCompactionManager {
 
         let added_data_files =
             decode_serialized_data_files(&result.added_data_files, &table)?;
+        let added_position_delete_files =
+            decode_serialized_data_files(&result.added_position_delete_files, &table)?;
+        let added_equality_delete_files =
+            decode_serialized_data_files(&result.added_equality_delete_files, &table)?;
+        let mut added_files = Vec::with_capacity(
+            added_data_files.len()
+                + added_position_delete_files.len()
+                + added_equality_delete_files.len(),
+        );
+        added_files.extend(added_data_files);
+        added_files.extend(added_position_delete_files);
+        added_files.extend(added_equality_delete_files);
 
         let rewritten_data_files = match plan.file_group {
             Some(file_group) => build_rewritten_data_files(file_group, &table)?,
@@ -783,18 +967,59 @@ impl IcebergCompactionManager {
             .build();
         let commit_manager = compaction.build_commit_manager(consistency_params);
 
+        let cow =
+            should_enable_iceberg_cow(iceberg_config.r#type.as_str(), iceberg_config.write_mode);
+        tracing::info!(
+            task_id = plan_task
+                .key
+                .as_ref()
+                .map(|k| k.task_id)
+                .unwrap_or_default(),
+            plan_index = plan_task
+                .key
+                .as_ref()
+                .map(|k| k.plan_index)
+                .unwrap_or_default(),
+            attempt = plan_task.attempt,
+            table = %table_ident,
+            cow = cow,
+            to_branch = %plan.to_branch,
+            snapshot_id = plan.snapshot_id,
+            added_files = added_files.len(),
+            added_position_delete_files = result.added_position_delete_files.len(),
+            added_equality_delete_files = result.added_equality_delete_files.len(),
+            rewritten_data_files = rewritten_data_files.len(),
+            "【iceberg compaction】start committing plan result"
+        );
+
         if should_enable_iceberg_cow(iceberg_config.r#type.as_str(), iceberg_config.write_mode) {
             let input_files = collect_main_branch_data_files(&table).await?;
             commit_manager
-                .overwrite_files(added_data_files, input_files, MAIN_BRANCH)
+                .overwrite_files(added_files, input_files, MAIN_BRANCH)
                 .await
                 .map_err(|e| SinkError::Iceberg(e.into()))?;
         } else {
             commit_manager
-                .rewrite_files(added_data_files, rewritten_data_files, &plan.to_branch)
+                .rewrite_files(added_files, rewritten_data_files, &plan.to_branch)
                 .await
                 .map_err(|e| SinkError::Iceberg(e.into()))?;
         }
+
+        tracing::info!(
+            task_id = plan_task
+                .key
+                .as_ref()
+                .map(|k| k.task_id)
+                .unwrap_or_default(),
+            plan_index = plan_task
+                .key
+                .as_ref()
+                .map(|k| k.plan_index)
+                .unwrap_or_default(),
+            attempt = plan_task.attempt,
+            table = %table_ident,
+            "【iceberg compaction】commit finished"
+        );
 
         Ok(())
     }
@@ -907,6 +1132,19 @@ impl IcebergCompactionManager {
             .await
             .map_err(|e| SinkError::Iceberg(e.into()))?;
 
+        if compaction_plans.is_empty() {
+            tracing::info!(
+                sink_id = %sink_id,
+                task_id = task_id,
+                task_type = ?TaskType::Full,
+                table = %table_ident,
+                to_branch = %to_branch,
+                "【iceberg compaction】manual planner returned empty plan list"
+            );
+            return Ok(task_id);
+        }
+
+        let mut plan_tasks = Vec::with_capacity(compaction_plans.len());
         for (plan_index, plan) in compaction_plans.into_iter().enumerate() {
             let plan_pb = encode_compaction_plan(
                 plan,
@@ -914,21 +1152,58 @@ impl IcebergCompactionManager {
                 table_ident.to_string(),
                 TaskType::Full as i32,
             )?;
-            compactor.send_event(IcebergResponseEvent::PlanTask(
-                subscribe_iceberg_compaction_event_response::PlanTask {
-                    key: Some(PlanKey {
-                        task_id,
-                        plan_index: plan_index as u32,
-                    }),
-                    required_parallelism: plan_pb
-                        .file_group
-                        .as_ref()
-                        .map(|fg| fg.executor_parallelism)
-                        .unwrap_or(1),
-                    plan: Some(plan_pb),
-                    attempt: 0,
-                },
-            ))?;
+            plan_tasks.push(subscribe_iceberg_compaction_event_response::PlanTask {
+                key: Some(PlanKey {
+                    task_id,
+                    plan_index: plan_index as u32,
+                }),
+                required_parallelism: plan_pb
+                    .file_group
+                    .as_ref()
+                    .map(|fg| fg.executor_parallelism)
+                    .unwrap_or(1),
+                plan: Some(plan_pb),
+                attempt: 0,
+            });
+        }
+
+        if !plan_tasks.is_empty() {
+            let mut guard = self.inner.write();
+            let assigned_at = Instant::now();
+            for plan_task in &plan_tasks {
+                let Some(key) = plan_task.key.as_ref() else {
+                    continue;
+                };
+                let assignment = PlanAssignment {
+                    key: (key.task_id, key.plan_index),
+                    attempt: plan_task.attempt,
+                    plan_task: plan_task.clone(),
+                    assigned_at: Some(assigned_at),
+                };
+                guard.in_flight_plans.insert(assignment.key, assignment);
+                tracing::info!(
+                    sink_id = %sink_id,
+                    task_id = key.task_id,
+                    plan_index = key.plan_index,
+                    attempt = plan_task.attempt,
+                    in_flight_count = guard.in_flight_plans.len(),
+                    "【iceberg compaction】registered manual plan task in in_flight_plans"
+                );
+            }
+        }
+
+        for plan_task in plan_tasks {
+            if let Some(key) = plan_task.key.as_ref() {
+                tracing::info!(
+                    sink_id = %sink_id,
+                    task_id = key.task_id,
+                    plan_index = key.plan_index,
+                    attempt = plan_task.attempt,
+                    required_parallelism = plan_task.required_parallelism,
+                    "【iceberg compaction】sending manual plan task to compactor"
+                );
+            }
+            compactor.send_event(IcebergResponseEvent::PlanTask(plan_task))?;
         }
 
         tracing::info!(
@@ -1359,12 +1634,7 @@ fn build_rewritten_data_files(
 ) -> MetaResult<Vec<DataFile>> {
     let spec_id = table.metadata().default_partition_spec_id();
     let mut files = Vec::new();
-    for task in file_group
-        .data_files
-        .iter()
-        .chain(file_group.position_delete_files.iter())
-        .chain(file_group.equality_delete_files.iter())
-    {
+    for task in file_group.data_files.iter() {
         files.push(build_data_file_from_scan_task(task, spec_id)?);
     }
     Ok(files)

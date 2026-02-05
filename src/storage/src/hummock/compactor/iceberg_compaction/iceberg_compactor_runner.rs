@@ -60,6 +60,15 @@ pub async fn create_plan_runner_from_plan(
     config: IcebergCompactorRunnerConfig,
     metrics: Arc<CompactorMetrics>,
 ) -> HummockResult<IcebergCompactionPlanRunner> {
+    tracing::info!(
+        task_id = task_id,
+        plan_index = plan_index,
+        snapshot_id = plan.snapshot_id,
+        to_branch = %plan.to_branch,
+        task_type = plan.task_type,
+        has_file_group = plan.file_group.is_some(),
+        "【iceberg compaction】create plan runner from pb plan"
+    );
     let iceberg_config = IcebergConfig::from_btreemap(BTreeMap::from_iter(plan.props.into_iter()))
         .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
     let catalog = iceberg_config
@@ -74,6 +83,17 @@ pub async fn create_plan_runner_from_plan(
         plan.file_group
             .ok_or_else(|| HummockError::compaction_executor("Missing file group in plan"))?,
     )?;
+    tracing::info!(
+        task_id = task_id,
+        plan_index = plan_index,
+        data_files = file_group.data_files.len(),
+        position_delete_files = file_group.position_delete_files.len(),
+        equality_delete_files = file_group.equality_delete_files.len(),
+        total_size = file_group.total_size,
+        executor_parallelism = file_group.executor_parallelism,
+        output_parallelism = file_group.output_parallelism,
+        "【iceberg compaction】decoded file group for plan"
+    );
     let compaction_plan = CompactionPlan {
         file_group,
         to_branch: plan.to_branch.into(),
@@ -246,6 +266,8 @@ pub struct SerializedDataFileInfo {
 #[derive(Debug, Clone)]
 pub struct PlanExecutionOutput {
     pub added_data_files: Vec<SerializedDataFileInfo>,
+    pub added_position_delete_files: Vec<SerializedDataFileInfo>,
+    pub added_equality_delete_files: Vec<SerializedDataFileInfo>,
     pub stats: RewriteFilesStat,
 }
 
@@ -454,11 +476,13 @@ impl IcebergCompactionPlanRunner {
             .await
             .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
 
-        let serialized_files =
-            serialize_data_files(rewrite_result.output_data_files, table.metadata())?;
+        let (added_data_files, added_position_delete_files, added_equality_delete_files) =
+            serialize_data_files_by_content(rewrite_result.output_data_files, table.metadata())?;
 
         Ok(PlanExecutionOutput {
-            added_data_files: serialized_files,
+            added_data_files,
+            added_position_delete_files,
+            added_equality_delete_files,
             stats: rewrite_result.stats,
         })
     }
@@ -497,10 +521,14 @@ fn analyze_task_statistics(plan: &CompactionPlan) -> IcebergCompactionTaskStatis
     }
 }
 
-fn serialize_data_files(
+fn serialize_data_files_by_content(
     data_files: Vec<DataFile>,
     metadata: &iceberg::spec::TableMetadata,
-) -> HummockResult<Vec<SerializedDataFileInfo>> {
+) -> HummockResult<(
+    Vec<SerializedDataFileInfo>,
+    Vec<SerializedDataFileInfo>,
+    Vec<SerializedDataFileInfo>,
+)> {
     let schema = metadata.current_schema();
     let partition_spec = metadata.default_partition_spec();
     let partition_type: StructType = partition_spec
@@ -508,24 +536,34 @@ fn serialize_data_files(
         .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
     let format_version = metadata.format_version();
 
-    data_files
-        .into_iter()
-        .map(|data_file| {
-            let partition_spec_id = data_file.partition_spec_id();
-            let serialized = SerializedDataFile::try_from(
-                data_file,
-                &partition_type,
-                format_version,
-            )
+    let mut added_data_files = Vec::new();
+    let mut added_position_delete_files = Vec::new();
+    let mut added_equality_delete_files = Vec::new();
+
+    for data_file in data_files {
+        let content_type = data_file.content_type();
+        let partition_spec_id = data_file.partition_spec_id();
+        let serialized = SerializedDataFile::try_from(data_file, &partition_type, format_version)
             .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
-            let json = serde_json::to_vec(&serialized)
-                .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
-            Ok(SerializedDataFileInfo {
-                json,
-                partition_spec_id,
-            })
-        })
-        .collect()
+        let json = serde_json::to_vec(&serialized)
+            .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
+        let info = SerializedDataFileInfo {
+            json,
+            partition_spec_id,
+        };
+
+        match content_type {
+            DataContentType::Data => added_data_files.push(info),
+            DataContentType::PositionDeletes => added_position_delete_files.push(info),
+            DataContentType::EqualityDeletes => added_equality_delete_files.push(info),
+        }
+    }
+
+    Ok((
+        added_data_files,
+        added_position_delete_files,
+        added_equality_delete_files,
+    ))
 }
 
 /// Creates plan runners from an iceberg compaction task.
