@@ -70,7 +70,13 @@ echo "--- Run kafka sasl test"
 risedev slt './e2e_test/kafka-sasl/**/*.slt' -j4
 echo "--- Run kafka sasl test done"
 
-risedev slt './e2e_test/source_inline/**/*.slt' -j4
+if [ "$profile" == "ci-dev" ]; then
+    # In pull-request CI, skip cron_only tests (runs only in main-cron)
+    risedev slt './e2e_test/source_inline/**/*.slt' --skip 'cron_only' -j4
+else
+    # In main-cron CI, run all tests including cron_only tests
+    risedev slt './e2e_test/source_inline/**/*.slt' -j4
+fi
 risedev slt './e2e_test/source_inline/**/*.slt.serial'
 
 echo "--- Run Vault secret tests"
