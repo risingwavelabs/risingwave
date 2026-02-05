@@ -206,7 +206,7 @@ mod tests {
     }
 
     #[test]
-    fn picks_clean_and_dirty_segments() {
+    fn test_basic() {
         let table_id: TableId = 1.into();
         let compacted = TableChangeLog::new(vec![
             build_log(1, 5, 4, table_id),
@@ -219,11 +219,11 @@ mod tests {
             build_log(4, 12, 2, table_id),
         ]);
 
+        // Pick from both clean and dirty parts.
         let picker = TableChangeLogCompactionPicker::new(0.3, 1, 20, 10, 20);
         let task = picker
             .pick_compaction(table_id, &full, &compacted)
             .expect("should pick task");
-
         assert_eq!(task.input.input_table_change_logs_table_id, table_id);
         let clean_part = task.input.input_table_change_logs_clean_part;
         assert_eq!(
@@ -241,10 +241,26 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![11, 12]
         );
+
+        // Pick no tasks due to min_compaction_size_dirty_part.
+        let picker = TableChangeLogCompactionPicker::new(0.3, 1000, 20, 10, 20);
+        assert!(
+            picker
+                .pick_compaction(table_id, &full, &compacted)
+                .is_none()
+        );
+
+        // Pick only from dirty part due to max_compaction_size_clean_part.
+        let picker = TableChangeLogCompactionPicker::new(0.3, 1, 20, 10, 1);
+        let task = picker
+            .pick_compaction(table_id, &full, &compacted)
+            .expect("should pick task");
+        assert!(task.input.input_table_change_logs_clean_part.is_empty());
+        assert_eq!(task.input.input_table_change_logs_dirty_part.len(), 2);
     }
 
     #[test]
-    fn skips_when_dirty_ratio_not_reached() {
+    fn test_dirty_ratio() {
         let table_id: TableId = 1.into();
         let compacted = TableChangeLog::new(vec![
             build_log(1, 5, 100, table_id),
@@ -274,7 +290,7 @@ mod tests {
     }
 
     #[test]
-    fn respects_dirty_limits() {
+    fn test_limit_dirty_part() {
         let table_id: TableId = 1.into();
         let compacted = TableChangeLog::new(vec![build_log(1, 5, 2, table_id)]);
         let dirty_first = EpochNewChangeLog {
@@ -321,5 +337,16 @@ mod tests {
             dirty_part[1].checkpoint_epoch,
             dirty_second.checkpoint_epoch,
         );
+
+        for max_compaction_size_dirty_part in vec![1, 5, 9] {
+            let picker =
+                TableChangeLogCompactionPicker::new(0.1, 1, max_compaction_size_dirty_part, 4, 20);
+            let task = picker
+                .pick_compaction(table_id, &full, &compacted)
+                .expect("should pick task");
+            let dirty_part = task.input.input_table_change_logs_dirty_part;
+            assert_eq!(dirty_part.len(), 1);
+            assert_eq!(dirty_part[0].checkpoint_epoch, dirty_first.checkpoint_epoch,);
+        }
     }
 }
