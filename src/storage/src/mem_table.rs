@@ -315,6 +315,7 @@ impl MemTable {
                 match old_op {
                     KeyOp::Insert(old_op_new_value) => {
                         if sanity_check_enabled() && !value_checker(old_op_new_value, &old_value) {
+                            self.kv_size.add_val(old_op);
                             return Err(Box::new(MemTableError::InconsistentOperation {
                                 table_id: self.table_id,
                                 key: e.key().clone(),
@@ -330,6 +331,7 @@ impl MemTable {
                     }
                     KeyOp::Update((old_op_old_value, old_op_new_value)) => {
                         if sanity_check_enabled() && !value_checker(old_op_new_value, &old_value) {
+                            self.kv_size.add_val(old_op);
                             return Err(Box::new(MemTableError::InconsistentOperation {
                                 table_id: self.table_id,
                                 key: e.key().clone(),
@@ -343,25 +345,34 @@ impl MemTable {
                         e.insert(new_op);
                         Ok(())
                     }
-                    KeyOp::Delete(_) => {
-                        let new_op = KeyOp::Update((old_value, new_value));
-                        let err = MemTableError::InconsistentOperation {
-                            table_id: self.table_id,
-                            key: e.key().clone(),
-                            prev: e.get().clone(),
-                            new: new_op.clone(),
-                        };
-
-                        if sanity_check_enabled() {
-                            Err(err.into())
-                        } else {
-                            tracing::error!(
-                                error = %err.as_report(),
-                                "update on deleted, ignoring because sanity check is disabled"
-                            );
+                    KeyOp::Delete(deleted_val) => {
+                        if value_checker(deleted_val, &old_value) {
+                            let new_op = KeyOp::Insert(new_value);
                             self.kv_size.add_val(&new_op);
                             e.insert(new_op);
                             Ok(())
+                        } else {
+                            let new_op = KeyOp::Update((old_value, new_value));
+                            let err = MemTableError::InconsistentOperation {
+                                table_id: self.table_id,
+                                key: e.key().clone(),
+                                prev: e.get().clone(),
+                                new: new_op.clone(),
+                            };
+
+                            if sanity_check_enabled() {
+                                // Restore statistics before returning error
+                                self.kv_size.add_val(e.get());
+                                Err(err.into())
+                            } else {
+                                tracing::error!(
+                                    error = %err.as_report(),
+                                    "update on deleted, ignoring because sanity check is disabled"
+                                );
+                                self.kv_size.add_val(&new_op);
+                                e.insert(new_op);
+                                Ok(())
+                            }
                         }
                     }
                 }
@@ -880,5 +891,39 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(iter.key().user_key.table_key, get_key(10001).to_ref());
+    }
+
+    #[tokio::test]
+    async fn test_mem_table_delete_then_update() {
+        let mut mem_table = MemTable::new(
+            233.into(),
+            OpConsistencyLevel::ConsistentOldValue {
+                check_old_value: CHECK_BYTES_EQUAL.clone(),
+                is_log_store: false,
+            },
+        );
+
+        let key: TableKey<Bytes> = TableKey("key".into());
+        let val = Bytes::from("val");
+        let next_val = Bytes::from("next_val");
+
+        mem_table.delete(key.clone(), val.clone()).unwrap();
+
+        // 1. Update with consistent old value should succeed and result in Insert.
+        mem_table
+            .update(key.clone(), val.clone(), next_val.clone())
+            .expect("should allow update after delete");
+
+        let iter = mem_table.iter(..).next().unwrap();
+        if let KeyOp::Insert(v) = iter.1 {
+            assert_eq!(v, &next_val);
+        } else {
+            panic!("Expected Insert op, got {:?}", iter.1);
+        }
+
+        // 2. Update with inconsistent old value should fail.
+        let val_mismatch = Bytes::from("mismatch");
+        let result_mismatch = mem_table.update(key.clone(), val_mismatch, next_val.clone());
+        assert!(result_mismatch.is_err());
     }
 }
