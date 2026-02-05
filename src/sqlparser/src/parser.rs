@@ -3152,7 +3152,7 @@ impl Parser<'_> {
             self.parse_alter_secret()
         } else if self.parse_word("FRAGMENT") {
             self.parse_alter_fragment()
-        } else if self.parse_word("COMPACTION") {
+        } else if self.parse_keyword(Keyword::COMPACTION) {
             self.parse_alter_compaction_group()
         } else if self.parse_keywords(&[Keyword::DEFAULT, Keyword::PRIVILEGES]) {
             self.parse_alter_default_privileges()

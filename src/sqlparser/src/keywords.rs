@@ -136,6 +136,7 @@ define_keywords!(
     COMMENT,
     COMMIT,
     COMMITTED,
+    COMPACTION,
     CONCURRENTLY,
     CONDITION,
     CONFIG,
