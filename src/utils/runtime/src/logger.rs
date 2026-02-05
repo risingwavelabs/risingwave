@@ -19,7 +19,7 @@ use std::path::PathBuf;
 use either::Either;
 use fastrace_opentelemetry::OpenTelemetryReporter;
 use opentelemetry::InstrumentationScope;
-use opentelemetry::trace::{SpanKind, TracerProvider};
+use opentelemetry::trace::TracerProvider;
 use opentelemetry_otlp::SpanExporter;
 use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::trace::TracerProviderBuilder;
@@ -526,7 +526,6 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
         // ```
         let reporter = OpenTelemetryReporter::new(
             exporter,
-            SpanKind::Server,
             Cow::Owned(
                 Resource::builder()
                     .with_service_name(format!("fastrace-{id}"))
