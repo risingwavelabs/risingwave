@@ -71,7 +71,7 @@ impl TableChangeLogCompactionPicker {
 
     pub fn pick_compaction(
         &self,
-        table_ids: Vec<TableId>,
+        table_id: TableId,
         table_change_log: &TableChangeLog,
         compacted_table_change_log: &TableChangeLog,
     ) -> Option<CompactionTask> {
@@ -144,7 +144,7 @@ impl TableChangeLogCompactionPicker {
             input: CompactionInput {
                 input_table_change_logs_clean_part,
                 input_table_change_logs_dirty_part,
-                input_table_change_logs_table_ids: table_ids,
+                input_table_change_logs_table_id: table_id,
                 ..Default::default()
             },
             compaction_task_type: compact_task::TaskType::TableChangeLog,
@@ -166,4 +166,160 @@ fn part_file_size(part: impl Iterator<Item = &EpochNewChangeLog> + Clone) -> u64
             .sum::<u64>()
     })
     .sum::<u64>()
+}
+
+#[cfg(test)]
+mod tests {
+    use risingwave_common::catalog::TableId;
+    use risingwave_hummock_sdk::change_log::TableChangeLog;
+    use risingwave_hummock_sdk::key_range::KeyRange;
+    use risingwave_hummock_sdk::sstable_info::{SstableInfo, SstableInfoInner};
+
+    use super::*;
+
+    fn build_sstable(id: u64, size: u64, table_id: TableId) -> SstableInfo {
+        SstableInfoInner {
+            object_id: id.into(),
+            sst_id: id.into(),
+            key_range: KeyRange::inf(),
+            file_size: size,
+            table_ids: vec![table_id],
+            uncompressed_file_size: size,
+            sst_size: size,
+            ..Default::default()
+        }
+        .into()
+    }
+
+    fn build_log(
+        id: u64,
+        checkpoint_epoch: u64,
+        size: u64,
+        table_id: TableId,
+    ) -> EpochNewChangeLog {
+        EpochNewChangeLog {
+            new_value: vec![build_sstable(id, size, table_id)],
+            old_value: vec![],
+            non_checkpoint_epochs: vec![],
+            checkpoint_epoch,
+        }
+    }
+
+    #[test]
+    fn picks_clean_and_dirty_segments() {
+        let table_id: TableId = 1.into();
+        let compacted = TableChangeLog::new(vec![
+            build_log(1, 5, 4, table_id),
+            build_log(2, 10, 6, table_id),
+        ]);
+        let full = TableChangeLog::new(vec![
+            build_log(1, 5, 4, table_id),
+            build_log(2, 10, 6, table_id),
+            build_log(3, 11, 3, table_id),
+            build_log(4, 12, 2, table_id),
+        ]);
+
+        let picker = TableChangeLogCompactionPicker::new(0.3, 1, 20, 10, 20);
+        let task = picker
+            .pick_compaction(table_id, &full, &compacted)
+            .expect("should pick task");
+
+        assert_eq!(task.input.input_table_change_logs_table_id, table_id);
+        let clean_part = task.input.input_table_change_logs_clean_part;
+        assert_eq!(
+            clean_part
+                .iter()
+                .map(|log| log.checkpoint_epoch)
+                .collect::<Vec<_>>(),
+            vec![5, 10]
+        );
+        let dirty_part = task.input.input_table_change_logs_dirty_part;
+        assert_eq!(
+            dirty_part
+                .iter()
+                .map(|log| log.checkpoint_epoch)
+                .collect::<Vec<_>>(),
+            vec![11, 12]
+        );
+    }
+
+    #[test]
+    fn skips_when_dirty_ratio_not_reached() {
+        let table_id: TableId = 1.into();
+        let compacted = TableChangeLog::new(vec![
+            build_log(1, 5, 100, table_id),
+            build_log(2, 10, 100, table_id),
+        ]);
+        let full = TableChangeLog::new(vec![
+            build_log(1, 5, 100, table_id),
+            build_log(2, 10, 100, table_id),
+            build_log(3, 11, 1, table_id),
+        ]);
+
+        // dirty_ratio = 1 / (1 + 200) which is below 0.005
+        let picker = TableChangeLogCompactionPicker::new(0.005, 1, 200, 10, 300);
+        assert!(
+            picker
+                .pick_compaction(table_id, &full, &compacted)
+                .is_none()
+        );
+
+        // dirty_ratio = 1 / (1 + 200) which is above 0.005
+        let picker = TableChangeLogCompactionPicker::new(0.004, 1, 200, 10, 300);
+        assert!(
+            picker
+                .pick_compaction(table_id, &full, &compacted)
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn respects_dirty_limits() {
+        let table_id: TableId = 1.into();
+        let compacted = TableChangeLog::new(vec![build_log(1, 5, 2, table_id)]);
+        let dirty_first = EpochNewChangeLog {
+            new_value: vec![build_sstable(11, 4, table_id)],
+            old_value: vec![build_sstable(12, 1, table_id)],
+            non_checkpoint_epochs: vec![],
+            checkpoint_epoch: 6,
+        };
+        let dirty_second = EpochNewChangeLog {
+            new_value: vec![build_sstable(13, 4, table_id)],
+            old_value: vec![build_sstable(14, 1, table_id)],
+            non_checkpoint_epochs: vec![],
+            checkpoint_epoch: 7,
+        };
+        let full = TableChangeLog::new(vec![
+            build_log(1, 5, 2, table_id),
+            dirty_first.clone(),
+            dirty_second.clone(),
+        ]);
+
+        for max_compaction_sst_count_dirty_part in 1..=3 {
+            let picker = TableChangeLogCompactionPicker::new(
+                0.1,
+                1,
+                20,
+                max_compaction_sst_count_dirty_part,
+                20,
+            );
+            let task = picker
+                .pick_compaction(table_id, &full, &compacted)
+                .expect("should pick task");
+            let dirty_part = task.input.input_table_change_logs_dirty_part;
+            assert_eq!(dirty_part.len(), 1);
+            assert_eq!(dirty_part[0].checkpoint_epoch, dirty_first.checkpoint_epoch,);
+        }
+
+        let picker = TableChangeLogCompactionPicker::new(0.1, 1, 20, 4, 20);
+        let task = picker
+            .pick_compaction(table_id, &full, &compacted)
+            .expect("should pick task");
+        let dirty_part = task.input.input_table_change_logs_dirty_part;
+        assert_eq!(dirty_part.len(), 2);
+        assert_eq!(
+            dirty_part[1].checkpoint_epoch,
+            dirty_second.checkpoint_epoch,
+        );
+    }
 }

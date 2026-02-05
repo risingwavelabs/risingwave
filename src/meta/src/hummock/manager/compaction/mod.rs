@@ -1518,8 +1518,8 @@ impl HummockManager {
                 clean_part: compact_task.input.input_table_change_logs_clean_part,
                 dirty_part: compact_task.input.input_table_change_logs_dirty_part,
             }),
-            // Reuse the existing table ids for table change log compaction.
-            existing_table_ids: compact_task.input.input_table_change_logs_table_ids,
+            // Table change log compaction works for each table individually.
+            existing_table_ids: vec![compact_task.input.input_table_change_logs_table_id],
             ..Default::default()
         };
         stats.report_to_metrics(compaction_group_id, self.metrics.as_ref());

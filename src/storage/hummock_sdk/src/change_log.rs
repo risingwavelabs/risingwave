@@ -83,7 +83,7 @@ impl<T> TableChangeLogCommon<T> {
         impl Iterator<Item = &EpochNewChangeLogCommon<T>> + Clone,
     ) {
         let split_point = self.0.partition_point(|epoch_change_log| {
-            epoch_change_log.checkpoint_epoch < checkpoint_epoch
+            epoch_change_log.checkpoint_epoch <= checkpoint_epoch
         });
         let clean_part = self.0.iter().take(split_point).rev();
         let dirty_part = self.0.iter().skip(split_point);

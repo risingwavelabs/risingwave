@@ -69,7 +69,7 @@ pub struct CompactionInput {
     pub vnode_partition_count: u32,
     pub input_table_change_logs_clean_part: Vec<EpochNewChangeLog>,
     pub input_table_change_logs_dirty_part: Vec<EpochNewChangeLog>,
-    pub input_table_change_logs_table_ids: Vec<TableId>,
+    pub input_table_change_logs_table_id: TableId,
 }
 
 impl CompactionInput {

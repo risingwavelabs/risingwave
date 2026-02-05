@@ -60,8 +60,7 @@ impl CompactionSelector for TableChangeLogCompactionSelector {
                 continue;
             }
             let task = picker.pick_compaction(
-                // TODO(ZW): support multiple tables.
-                vec![*table_id],
+                *table_id,
                 table_change_log,
                 compacted_table_change_logs
                     .get(table_id)
