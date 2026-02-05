@@ -67,7 +67,7 @@ impl Binder {
 
         match self
             .context
-            .get_column_binding_indices(&table_name, &column_name)
+            .get_column_binding_indices(&schema_name, &table_name, &column_name)
         {
             Ok(mut indices) => {
                 match indices.len() {
@@ -126,7 +126,7 @@ impl Binder {
                 }
                 // input ref from lateral context `depth` starts from 1.
                 let depth = i + 1;
-                match context.get_column_binding_index(&table_name, &column_name) {
+                match context.get_column_binding_index(&schema_name, &table_name, &column_name) {
                     Ok(index) => {
                         let column = &context.columns[index];
                         return Ok(CorrelatedInputRef::new(
@@ -151,7 +151,7 @@ impl Binder {
             }
             // `depth` starts from 1.
             let depth = i + 1;
-            match context.get_column_binding_index(&table_name, &column_name) {
+            match context.get_column_binding_index(&schema_name, &table_name, &column_name) {
                 Ok(index) => {
                     let column = &context.columns[index];
                     return Ok(CorrelatedInputRef::new(
@@ -174,7 +174,8 @@ impl Binder {
                     }
                     // correlated input ref from lateral context `depth` starts from 1.
                     let depth = i + j + 1;
-                    match context.get_column_binding_index(&table_name, &column_name) {
+                    match context.get_column_binding_index(&schema_name, &table_name, &column_name)
+                    {
                         Ok(index) => {
                             let column = &context.columns[index];
                             return Ok(CorrelatedInputRef::new(

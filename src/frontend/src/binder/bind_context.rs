@@ -156,10 +156,11 @@ pub struct ColumnGroup {
 impl BindContext {
     pub fn get_column_binding_index(
         &self,
+        schema_name: &Option<String>,
         table_name: &Option<String>,
         column_name: &String,
     ) -> LiteResult<usize> {
-        match &self.get_column_binding_indices(table_name, column_name)?[..] {
+        match &self.get_column_binding_indices(schema_name, table_name, column_name)?[..] {
             [] => unreachable!(),
             [idx] => Ok(*idx),
             _ => Err(ErrorCode::InternalError(format!(
@@ -174,6 +175,7 @@ impl BindContext {
     /// handled in downstream as a `COALESCE` expression
     pub fn get_column_binding_indices(
         &self,
+        schema_name: &Option<String>,
         table_name: &Option<String>,
         column_name: &String,
     ) -> LiteResult<Vec<usize>> {
@@ -184,9 +186,11 @@ impl BindContext {
                         format!("Could not parse {:?} as virtual table name `{COLUMN_GROUP_PREFIX}[group_id]`", table_name)))?;
                     self.get_indices_with_group_id(group_id, column_name)
                 } else {
-                    Ok(vec![
-                        self.get_index_with_table_name(column_name, table_name)?,
-                    ])
+                    Ok(vec![self.get_index_with_table_name(
+                        column_name,
+                        table_name,
+                        schema_name,
+                    )?])
                 }
             }
             None => self.get_unqualified_indices(column_name),
@@ -338,15 +342,16 @@ impl BindContext {
         &self,
         column_name: &String,
         table_name: &String,
+        schema_name: &Option<String>,
     ) -> LiteResult<usize> {
         let column_indexes = self
             .indices_of
             .get(column_name)
             .ok_or_else(|| ErrorCode::ItemNotFound(format!("Invalid column: {}", column_name)))?;
-        match column_indexes
-            .iter()
-            .find(|column_index| self.columns[**column_index].table_name == *table_name)
-        {
+        match column_indexes.iter().find(|column_index| {
+            self.columns[**column_index].table_name == *table_name
+                && self.columns[**column_index].schema_name == *schema_name
+        }) {
             Some(column_index) => Ok(*column_index),
             None => Err(ErrorCode::ItemNotFound(format!(
                 "missing FROM-clause entry for table \"{}\"",
