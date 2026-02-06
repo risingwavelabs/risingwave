@@ -796,7 +796,7 @@ impl GlobalStreamManager {
 
         let unreschedulable_jobs = self
             .metadata_manager
-            .collect_unreschedulable_backfill_jobs(&background_streaming_jobs)
+            .collect_unreschedulable_backfill_jobs(&background_streaming_jobs, true)
             .await?;
 
         let database_objects: HashMap<risingwave_meta_model::DatabaseId, Vec<JobId>> = self

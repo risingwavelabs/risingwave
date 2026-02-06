@@ -742,7 +742,7 @@ impl GlobalStreamManager {
         if !background_jobs.is_empty() {
             let unreschedulable = self
                 .metadata_manager
-                .collect_unreschedulable_backfill_jobs(&background_jobs)
+                .collect_unreschedulable_backfill_jobs(&background_jobs, !deferred)
                 .await?;
 
             if unreschedulable.contains(&job_id) {
