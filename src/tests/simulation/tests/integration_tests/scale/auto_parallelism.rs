@@ -37,7 +37,7 @@ async fn test_passive_online_and_offline() -> Result<()> {
     let mut cluster = Cluster::start(config.clone()).await?;
     let mut session = cluster.start_session();
     session
-        .run("set streaming_parallelism_strategy_for_table = 'DEFAULT'")
+        .run("set streaming_parallelism_strategy_for_table = 'SYSTEM'")
         .await?;
 
     session.run("create table t (v1 int);").await?;
@@ -220,7 +220,7 @@ async fn test_active_online() -> Result<()> {
 
     let mut session = cluster.start_session();
     session
-        .run("set streaming_parallelism_strategy_for_table = 'DEFAULT'")
+        .run("set streaming_parallelism_strategy_for_table = 'SYSTEM'")
         .await?;
 
     session.run("create table t (v1 int);").await?;
@@ -308,7 +308,7 @@ async fn test_auto_parallelism_control_with_fixed_and_auto_helper(
 
     let mut session = cluster.start_session();
     session
-        .run("set streaming_parallelism_strategy_for_table = 'DEFAULT'")
+        .run("set streaming_parallelism_strategy_for_table = 'SYSTEM'")
         .await?;
 
     session.run("create table t (v1 int);").await?;

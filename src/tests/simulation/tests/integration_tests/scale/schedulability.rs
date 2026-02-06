@@ -24,7 +24,7 @@ async fn test_cordon_normal() -> Result<()> {
     let mut cluster = Cluster::start(Configuration::for_scale()).await?;
     let mut session = cluster.start_session();
     session
-        .run("set streaming_parallelism_strategy_for_table = 'DEFAULT'")
+        .run("set streaming_parallelism_strategy_for_table = 'SYSTEM'")
         .await?;
 
     let mut workers: Vec<WorkerNode> = cluster
@@ -80,7 +80,7 @@ async fn test_cordon_no_shuffle_failed() -> Result<()> {
     let mut cluster = Cluster::start(Configuration::for_scale()).await?;
     let mut session = cluster.start_session();
     session
-        .run("set streaming_parallelism_strategy_for_table = 'DEFAULT'")
+        .run("set streaming_parallelism_strategy_for_table = 'SYSTEM'")
         .await?;
 
     let mut workers: Vec<WorkerNode> = cluster
