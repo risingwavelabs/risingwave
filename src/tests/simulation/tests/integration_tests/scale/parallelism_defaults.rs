@@ -128,6 +128,7 @@ async fn test_source_respects_default_parallelism_bound() -> Result<()> {
 async fn test_default_strategy_fallback_chain() -> Result<()> {
     // Test that the default strategy fallback chain works correctly:
     // object-specific strategy -> session strategy -> system strategy
+    // max_heartbeat_interval_secs=10, enable_auto_parallelism=true
     let mut cluster = Cluster::start(Configuration::for_auto_parallelism(10, true)).await?;
     let mut session = cluster.start_session();
 
