@@ -14,6 +14,7 @@
 
 use std::fmt::Debug;
 use std::sync::Arc;
+
 use risingwave_common::metrics::LabelGuardedIntGauge;
 use risingwave_pb::id::TableId;
 
