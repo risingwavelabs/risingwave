@@ -1109,10 +1109,11 @@ impl HummockManager {
         compaction_group: CompactionGroupId,
         task_type: compact_task::TaskType,
     ) -> bool {
-        match self
-            .compaction_state
-            .try_sched_compaction(compaction_group, task_type)
-        {
+        match self.compaction_state.try_sched_compaction(
+            compaction_group,
+            task_type,
+            ScheduleTrigger::NewData,
+        ) {
             Ok(_) => true,
             Err(e) => {
                 tracing::error!(
@@ -1344,6 +1345,19 @@ impl HummockManager {
     }
 }
 
+/// Indicates what triggered the compaction schedule request.
+///
+/// This affects how the scheduler handles cooldown:
+/// - `NewData`: New data arrived (from `commit_epoch`). Clears cooldown for the group.
+/// - `Periodic`: Triggered by the periodic timer. Respects cooldown for Dynamic type.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ScheduleTrigger {
+    /// New data arrived - clears cooldown and records the time.
+    NewData,
+    /// Periodic trigger - respects cooldown for Dynamic type.
+    Periodic,
+}
+
 /// A point-in-time snapshot of the compaction schedule state.
 ///
 /// The `snapshot_time` is essential for solving the cooldown race condition:
@@ -1468,39 +1482,34 @@ impl CompactionState {
         }
     }
 
-    /// Enqueues only if the target is not yet in queue.
-    /// Used by `commit_epoch` - clears cooldown since the group has new data.
+    /// Enqueues a compaction request if the target is not yet in queue.
+    ///
+    /// Behavior depends on `trigger`:
+    /// - `NewData`: Clears cooldown and records the time (new data arrived).
+    /// - `Periodic`: Respects cooldown - skips groups in cooldown for Dynamic type.
     pub fn try_sched_compaction(
         &self,
         compaction_group: CompactionGroupId,
         task_type: TaskType,
+        trigger: ScheduleTrigger,
     ) -> std::result::Result<bool, SendError<CompactionRequestChannelItem>> {
         let mut guard = self.inner.lock();
         if task_type == TaskType::Dynamic {
-            // Clear cooldown and record the time - group has new data
-            guard.dynamic_cooldown.remove(&compaction_group);
-            guard
-                .last_new_data_time
-                .insert(compaction_group, Instant::now());
-        }
-        let key = (compaction_group, task_type);
-        if guard.scheduled.contains(&key) {
-            return Ok(false);
-        }
-        guard.scheduled.insert(key);
-        Ok(true)
-    }
-
-    /// Used by periodic timer - respects cooldown for Dynamic type.
-    pub fn try_sched_compaction_for_periodic(
-        &self,
-        compaction_group: CompactionGroupId,
-        task_type: TaskType,
-    ) -> std::result::Result<bool, SendError<CompactionRequestChannelItem>> {
-        let mut guard = self.inner.lock();
-        // Skip groups in cooldown for Dynamic type
-        if task_type == TaskType::Dynamic && guard.dynamic_cooldown.contains(&compaction_group) {
-            return Ok(false);
+            match trigger {
+                ScheduleTrigger::NewData => {
+                    // Clear cooldown and record the time - group has new data
+                    guard.dynamic_cooldown.remove(&compaction_group);
+                    guard
+                        .last_new_data_time
+                        .insert(compaction_group, Instant::now());
+                }
+                ScheduleTrigger::Periodic => {
+                    // Skip groups in cooldown
+                    if guard.dynamic_cooldown.contains(&compaction_group) {
+                        return Ok(false);
+                    }
+                }
+            }
         }
         let key = (compaction_group, task_type);
         if guard.scheduled.contains(&key) {
