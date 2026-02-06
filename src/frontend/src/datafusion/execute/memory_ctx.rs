@@ -19,6 +19,7 @@ use datafusion_common::{DataFusionError, Result as DFResult, resources_datafusio
 use prometheus::core::Atomic;
 use risingwave_common::memory::MemoryContext;
 use risingwave_common::metrics::TrAdderAtomic;
+use thiserror_ext::AsReport;
 
 pub struct RwMemoryPool {
     ctx: MemoryContext,
@@ -30,11 +31,17 @@ impl RwMemoryPool {
         let ctx = MemoryContext::new(Some(parent), counter);
         Self { ctx }
     }
+
+    fn available(&self) -> usize {
+        let limit = self.ctx.mem_limit().try_into().unwrap_or(usize::MAX);
+        let used = self.reserved();
+        limit.saturating_sub(used)
+    }
 }
 
 impl std::fmt::Debug for RwMemoryPool {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "DFMemoryPool")
+        write!(f, "RwMemoryPool")
     }
 }
 
@@ -43,11 +50,11 @@ impl MemoryPool for RwMemoryPool {
         let success = self.ctx.add(additional as i64);
         if !success {
             tracing::warn!(
-                info = %insufficient_capacity_err(
+                error = %insufficient_capacity_err(
                     reservation,
                     additional,
-                    self.ctx.mem_limit() as usize - self.reserved(),
-                )
+                    self.available()
+                ).as_report()
             )
         }
     }
@@ -63,7 +70,7 @@ impl MemoryPool for RwMemoryPool {
             Err(insufficient_capacity_err(
                 reservation,
                 additional,
-                self.ctx.mem_limit() as usize - self.reserved(),
+                self.available(),
             ))
         }
     }
@@ -72,10 +79,8 @@ impl MemoryPool for RwMemoryPool {
         let bytes_used = self.ctx.get_bytes_used();
         if bytes_used <= 0 {
             0
-        } else if let Ok(v) = usize::try_from(bytes_used) {
-            v
         } else {
-            usize::MAX
+            bytes_used.try_into().unwrap_or(usize::MAX)
         }
     }
 
