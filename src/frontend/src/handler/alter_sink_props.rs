@@ -26,6 +26,7 @@ pub async fn handle_alter_sink_props(
     handler_args: HandlerArgs,
     sink_name: ObjectName,
     changed_props: Vec<SqlOption>,
+    force: bool,
 ) -> Result<RwPgResponse> {
     let session = handler_args.session;
     let user_name = &session.user_name();
@@ -78,6 +79,7 @@ pub async fn handle_alter_sink_props(
             changed_props,
             changed_secret_refs,
             connector_conn_ref, // always None, keep the interface for future extension
+            force,
         )
         .await?;
 

@@ -167,6 +167,7 @@ pub trait FrontendMetaClient: Send + Sync {
         changed_props: BTreeMap<String, String>,
         changed_secret_refs: BTreeMap<String, PbSecretRef>,
         connector_conn_ref: Option<ConnectionId>,
+        force: bool,
     ) -> Result<()>;
 
     async fn alter_iceberg_table_props(
@@ -177,6 +178,7 @@ pub trait FrontendMetaClient: Send + Sync {
         changed_props: BTreeMap<String, String>,
         changed_secret_refs: BTreeMap<String, PbSecretRef>,
         connector_conn_ref: Option<ConnectionId>,
+        force: bool,
     ) -> Result<()>;
 
     async fn alter_source_connector_props(
@@ -439,6 +441,7 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
         changed_props: BTreeMap<String, String>,
         changed_secret_refs: BTreeMap<String, PbSecretRef>,
         connector_conn_ref: Option<ConnectionId>,
+        force: bool,
     ) -> Result<()> {
         self.0
             .alter_sink_props(
@@ -446,6 +449,7 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
                 changed_props,
                 changed_secret_refs,
                 connector_conn_ref,
+                force,
             )
             .await
     }
@@ -458,6 +462,7 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
         changed_props: BTreeMap<String, String>,
         changed_secret_refs: BTreeMap<String, PbSecretRef>,
         connector_conn_ref: Option<ConnectionId>,
+        force: bool,
     ) -> Result<()> {
         self.0
             .alter_iceberg_table_props(
@@ -467,6 +472,7 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
                 changed_props,
                 changed_secret_refs,
                 connector_conn_ref,
+                force,
             )
             .await
     }

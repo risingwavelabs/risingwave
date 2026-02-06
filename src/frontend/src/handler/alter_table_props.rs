@@ -28,6 +28,7 @@ pub async fn handle_alter_table_props(
     handler_args: HandlerArgs,
     table_name: ObjectName,
     changed_props: Vec<SqlOption>,
+    force: bool,
 ) -> Result<RwPgResponse> {
     let session = handler_args.session.clone();
     let (original_table, _) = fetch_table_catalog_for_alter(session.as_ref(), &table_name)?;
@@ -36,7 +37,7 @@ pub async fn handle_alter_table_props(
             handle_alter_table_connector_props(handler_args, table_name, changed_props).await
         }
         risingwave_common::catalog::Engine::Iceberg => {
-            handle_alter_iceberg_table_props(handler_args, table_name, changed_props).await
+            handle_alter_iceberg_table_props(handler_args, table_name, changed_props, force).await
         }
     }
 }
@@ -45,6 +46,7 @@ pub async fn handle_alter_iceberg_table_props(
     handler_args: HandlerArgs,
     table_name: ObjectName,
     changed_props: Vec<SqlOption>,
+    force: bool,
 ) -> Result<RwPgResponse> {
     let session = handler_args.session.clone();
     let db_name = &session.database();
@@ -104,6 +106,7 @@ pub async fn handle_alter_iceberg_table_props(
             changed_props,
             changed_secret_refs,
             connector_conn_ref,
+            force,
         )
         .await?;
 

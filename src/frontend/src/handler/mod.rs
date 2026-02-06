@@ -912,8 +912,8 @@ pub async fn handle(
                 )
                 .await
             }
-            AlterTableOperation::AlterConnectorProps { alter_props } => {
-                alter_table_props::handle_alter_table_props(handler_args, name, alter_props).await
+            AlterTableOperation::AlterConnectorProps { alter_props, force } => {
+                alter_table_props::handle_alter_table_props(handler_args, name, alter_props, force).await
             }
             AlterTableOperation::AddConstraint { .. }
             | AlterTableOperation::DropConstraint { .. }
@@ -1108,7 +1108,8 @@ pub async fn handle(
         Statement::AlterSink { name, operation } => match operation {
             AlterSinkOperation::AlterConnectorProps {
                 alter_props: changed_props,
-            } => alter_sink_props::handle_alter_sink_props(handler_args, name, changed_props).await,
+                force,
+            } => alter_sink_props::handle_alter_sink_props(handler_args, name, changed_props, force).await,
             AlterSinkOperation::RenameSink { sink_name } => {
                 alter_rename::handle_rename_sink(handler_args, name, sink_name).await
             }
