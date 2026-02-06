@@ -507,14 +507,19 @@ impl catalog::StreamSourceInfo {
 }
 
 impl stream_plan::PbStreamScanType {
-    pub fn is_reschedulable(&self) -> bool {
+    pub fn is_reschedulable(&self, is_online: bool) -> bool {
         match self {
+            PbStreamScanType::Unspecified => {
+                unreachable!()
+            }
             // todo: should this be true?
             PbStreamScanType::UpstreamOnly => false,
             PbStreamScanType::ArrangementBackfill => true,
             PbStreamScanType::CrossDbSnapshotBackfill => true,
-            PbStreamScanType::SnapshotBackfill => true,
-            _ => false,
+            PbStreamScanType::SnapshotBackfill => !is_online,
+            PbStreamScanType::Chain | PbStreamScanType::Rearrange | PbStreamScanType::Backfill => {
+                false
+            }
         }
     }
 }
