@@ -215,12 +215,6 @@ pub struct StreamingMetrics {
 
     // Gap Fill
     pub gap_fill_generated_rows_count: RelabeledGuardedIntCounterVec,
-
-    // State Table
-    pub state_table_iter_count: RelabeledGuardedIntCounterVec,
-    pub state_table_get_count: RelabeledGuardedIntCounterVec,
-    pub state_table_iter_vnode_pruned_count: RelabeledGuardedIntCounterVec,
-    pub state_table_get_vnode_pruned_count: RelabeledGuardedIntCounterVec,
 }
 
 pub static GLOBAL_STREAMING_METRICS: OnceLock<StreamingMetrics> = OnceLock::new();
@@ -1186,42 +1180,6 @@ impl StreamingMetrics {
         .unwrap()
         .relabel_debug_1(level);
 
-        let state_table_iter_count = register_guarded_int_counter_vec_with_registry!(
-            "state_table_iter_count",
-            "Total number of state table iter operations",
-            &["actor_id", "fragment_id", "table_id"],
-            registry
-        )
-        .unwrap()
-        .relabel_debug_1(level);
-
-        let state_table_get_count = register_guarded_int_counter_vec_with_registry!(
-            "state_table_get_count",
-            "Total number of state table get operations",
-            &["actor_id", "fragment_id", "table_id"],
-            registry
-        )
-        .unwrap()
-        .relabel_debug_1(level);
-
-        let state_table_iter_vnode_pruned_count = register_guarded_int_counter_vec_with_registry!(
-            "state_table_iter_vnode_pruned_count",
-            "Total number of state table iter operations pruned by vnode statistics",
-            &["actor_id", "fragment_id", "table_id"],
-            registry
-        )
-        .unwrap()
-        .relabel_debug_1(level);
-
-        let state_table_get_vnode_pruned_count = register_guarded_int_counter_vec_with_registry!(
-            "state_table_get_vnode_pruned_count",
-            "Total number of state table get operations pruned by vnode statistics",
-            &["actor_id", "fragment_id", "table_id"],
-            registry
-        )
-        .unwrap()
-        .relabel_debug_1(level);
-
         Self {
             level,
             executor_row_count,
@@ -1338,10 +1296,6 @@ impl StreamingMetrics {
             pg_cdc_state_table_lsn,
             pg_cdc_jni_commit_offset_lsn,
             gap_fill_generated_rows_count,
-            state_table_iter_count,
-            state_table_get_count,
-            state_table_iter_vnode_pruned_count,
-            state_table_get_vnode_pruned_count,
         }
     }
 
@@ -1690,33 +1644,6 @@ impl StreamingMetrics {
                 .with_guarded_label_values(label_list),
         }
     }
-
-    pub fn new_state_table_metrics(
-        &self,
-        table_id: TableId,
-        actor_id: ActorId,
-        fragment_id: FragmentId,
-    ) -> StateTableMetrics {
-        let label_list: &[&str; 3] = &[
-            &actor_id.to_string(),
-            &fragment_id.to_string(),
-            &table_id.to_string(),
-        ];
-        StateTableMetrics {
-            iter_count: self
-                .state_table_iter_count
-                .with_guarded_label_values(label_list),
-            get_count: self
-                .state_table_get_count
-                .with_guarded_label_values(label_list),
-            iter_vnode_pruned_count: self
-                .state_table_iter_vnode_pruned_count
-                .with_guarded_label_values(label_list),
-            get_vnode_pruned_count: self
-                .state_table_get_vnode_pruned_count
-                .with_guarded_label_values(label_list),
-        }
-    }
 }
 
 pub(crate) struct ActorInputMetrics {
@@ -1806,11 +1733,4 @@ pub struct OverWindowMetrics {
     pub over_window_accessed_entry_count: LabelGuardedIntCounter,
     pub over_window_compute_count: LabelGuardedIntCounter,
     pub over_window_same_output_count: LabelGuardedIntCounter,
-}
-
-pub struct StateTableMetrics {
-    pub iter_count: LabelGuardedIntCounter,
-    pub get_count: LabelGuardedIntCounter,
-    pub iter_vnode_pruned_count: LabelGuardedIntCounter,
-    pub get_vnode_pruned_count: LabelGuardedIntCounter,
 }
