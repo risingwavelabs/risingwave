@@ -789,6 +789,17 @@ impl<T: Into<ScalarImpl>> ToOwnedDatum for Option<T> {
     }
 }
 
+impl<const N: usize> From<TypedId<N, u32>> for ScalarImpl {
+    fn from(value: TypedId<N, u32>) -> Self {
+        value.as_i32_id().into()
+    }
+}
+
+impl<const N: usize> From<TypedId<N, u64>> for ScalarImpl {
+    fn from(value: TypedId<N, u64>) -> Self {
+        value.as_i64_id().into()
+    }
+}
 #[auto_impl::auto_impl(&)]
 pub trait ToDatumRef: PartialEq + Eq + Debug + Send + Sync {
     /// Convert the datum to [`DatumRef`].
