@@ -1366,23 +1366,62 @@ impl HummockManager {
 }
 
 #[derive(Debug, Default)]
+/// Tracks which (`compaction_group`, `task_type`) pairs are scheduled for compaction.
+///
+/// For `Dynamic` type, a cooldown mechanism is used to avoid repeatedly scheduling
+/// groups that have no compaction work:
+/// - When `unschedule` is called for `Dynamic` (meaning no task was found), the group
+///   enters cooldown and will be skipped by periodic triggers.
+/// - When `commit_epoch` triggers a group (via `try_sched_compaction`), the cooldown
+///   is cleared since new data arrived.
+/// - Other task types (`Ttl`, `SpaceReclaim`, `Tombstone`) are not affected by cooldown.
 pub struct CompactionState {
     scheduled: Mutex<HashSet<(CompactionGroupId, compact_task::TaskType)>>,
+    /// Groups in cooldown will be skipped by periodic Dynamic trigger.
+    /// Cleared when `commit_epoch` triggers the group.
+    dynamic_cooldown: Mutex<HashSet<CompactionGroupId>>,
 }
 
 impl CompactionState {
     pub fn new() -> Self {
         Self {
             scheduled: Default::default(),
+            dynamic_cooldown: Default::default(),
         }
     }
 
     /// Enqueues only if the target is not yet in queue.
+    /// Used by `commit_epoch` - clears cooldown since the group has new data.
     pub fn try_sched_compaction(
         &self,
         compaction_group: CompactionGroupId,
         task_type: TaskType,
     ) -> std::result::Result<bool, SendError<CompactionRequestChannelItem>> {
+        // Clear cooldown when commit_epoch triggers (group has new data)
+        if task_type == TaskType::Dynamic {
+            self.dynamic_cooldown.lock().remove(&compaction_group);
+        }
+        let mut guard = self.scheduled.lock();
+        let key = (compaction_group, task_type);
+        if guard.contains(&key) {
+            return Ok(false);
+        }
+        guard.insert(key);
+        Ok(true)
+    }
+
+    /// Used by periodic timer - respects cooldown for Dynamic type.
+    pub fn try_sched_compaction_for_periodic(
+        &self,
+        compaction_group: CompactionGroupId,
+        task_type: TaskType,
+    ) -> std::result::Result<bool, SendError<CompactionRequestChannelItem>> {
+        // Skip groups in cooldown for Dynamic type
+        if task_type == TaskType::Dynamic
+            && self.dynamic_cooldown.lock().contains(&compaction_group)
+        {
+            return Ok(false);
+        }
         let mut guard = self.scheduled.lock();
         let key = (compaction_group, task_type);
         if guard.contains(&key) {
@@ -1398,6 +1437,10 @@ impl CompactionState {
         task_type: compact_task::TaskType,
     ) {
         self.scheduled.lock().remove(&(compaction_group, task_type));
+        // Add to cooldown when Dynamic task finds no work
+        if task_type == TaskType::Dynamic {
+            self.dynamic_cooldown.lock().insert(compaction_group);
+        }
     }
 
     /// Take a snapshot of the scheduled set to reduce lock contention.
