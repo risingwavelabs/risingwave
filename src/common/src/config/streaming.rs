@@ -278,11 +278,11 @@ pub struct StreamingDeveloperConfig {
     #[serde(default)]
     pub over_window_cache_policy: OverWindowCachePolicy,
 
-    /// When enabled, vnode stats pruning is in dry-run mode.
-    /// In this mode, we still maintain vnode stats and verify that pruning would be correct,
-    /// but we don't actually use the pruning results - we still use cache and storage to
-    /// fulfill the read. This is useful for validating the correctness of vnode stats pruning
-    /// before enabling it in production.
+    /// When enabled, vnode stats pruning is applied in production.
+    /// When disabled, vnode stats pruning is in dry-run mode: we still maintain vnode stats
+    /// and verify that pruning would be correct, but we don't actually use the pruning
+    /// results — we still use cache and storage to fulfill the read. This is useful for
+    /// validating the correctness of vnode stats pruning before enabling it in production.
     #[serde(default = "default::developer::enable_state_table_vnode_stats_pruning")]
     pub enable_state_table_vnode_stats_pruning: bool,
 
