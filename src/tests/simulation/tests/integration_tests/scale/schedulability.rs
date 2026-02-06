@@ -23,9 +23,6 @@ use risingwave_simulation::cluster::{Cluster, Configuration};
 async fn test_cordon_normal() -> Result<()> {
     let mut cluster = Cluster::start(Configuration::for_scale()).await?;
     let mut session = cluster.start_session();
-    session
-        .run("set streaming_parallelism_strategy_for_table = 'DEFAULT'")
-        .await?;
 
     let mut workers: Vec<WorkerNode> = cluster
         .get_cluster_info()
@@ -79,9 +76,6 @@ async fn test_cordon_normal() -> Result<()> {
 async fn test_cordon_no_shuffle_failed() -> Result<()> {
     let mut cluster = Cluster::start(Configuration::for_scale()).await?;
     let mut session = cluster.start_session();
-    session
-        .run("set streaming_parallelism_strategy_for_table = 'DEFAULT'")
-        .await?;
 
     let mut workers: Vec<WorkerNode> = cluster
         .get_cluster_info()

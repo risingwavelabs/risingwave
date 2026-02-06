@@ -22,10 +22,7 @@ use risingwave_simulation::utils::AssertResult;
 
 #[tokio::test]
 async fn test_alter_fragment_no_shuffle() -> Result<()> {
-    let mut configuration = Configuration::for_scale_no_shuffle();
-    let mut per_session_queries = (*configuration.per_session_queries).clone();
-    per_session_queries.push("set streaming_parallelism_strategy_for_table = 'DEFAULT'".into());
-    configuration.per_session_queries = per_session_queries.into();
+    let configuration = Configuration::for_scale_no_shuffle();
     let mut cluster = Cluster::start(configuration).await?;
     let default_parallelism = cluster.config().compute_nodes * cluster.config().compute_node_cores;
     cluster.run("create table t1 (c1 int, c2 int);").await?;
@@ -80,9 +77,7 @@ async fn test_alter_fragment_no_shuffle() -> Result<()> {
 
 #[tokio::test]
 async fn test_alter_fragment() -> Result<()> {
-    let mut configuration = Configuration::for_scale();
-    configuration.per_session_queries =
-        vec!["set streaming_parallelism_strategy_for_table = 'DEFAULT'".into()].into();
+    let configuration = Configuration::for_scale();
     let mut cluster = Cluster::start(configuration).await?;
     let default_parallelism = cluster.config().compute_nodes * cluster.config().compute_node_cores;
     cluster.run("create table t1 (c1 int, c2 int);").await?;
