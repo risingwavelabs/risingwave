@@ -35,8 +35,8 @@ pub struct StreamSyncLogStore {
 }
 
 impl StreamSyncLogStore {
-    pub const TARGET_UNALIGNED_HASH_JOIN: &'static str = "unaligned_hash_join";
     pub const TARGET_SINK_INTO_TABLE: &'static str = "sink-into-table";
+    pub const TARGET_UNALIGNED_HASH_JOIN: &'static str = "unaligned_hash_join";
 
     pub fn new(input: PlanRef) -> Self {
         Self::new_with_target(input, Self::TARGET_UNALIGNED_HASH_JOIN)
