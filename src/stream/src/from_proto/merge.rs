@@ -75,6 +75,7 @@ impl MergeExecutorBuilder {
                 inputs,
                 &executor_stats,
                 &actor_context,
+                upstream_fragment_id,
                 chunk_size,
                 info.schema.clone(),
             ))

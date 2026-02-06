@@ -89,6 +89,9 @@ pub struct StreamingMetrics {
     pub actor_output_buffer_blocking_duration_ns: RelabeledGuardedIntCounterVec,
     actor_input_buffer_blocking_duration_ns: RelabeledGuardedIntCounterVec,
 
+    // Channel Buffer Size
+    actor_input_buffer_size_bytes: RelabeledGuardedIntGaugeVec,
+
     // Streaming Join
     pub join_lookup_miss_count: LabelGuardedIntCounterVec,
     pub join_lookup_total_count: LabelGuardedIntCounterVec,
@@ -368,6 +371,14 @@ impl StreamingMetrics {
             .unwrap()
             // mask the first label `actor_id` if the level is less verbose than `Debug`
             .relabel_debug_1(level);
+        let actor_input_buffer_size_bytes = register_guarded_int_gauge_vec_with_registry!(
+            "stream_actor_input_buffer_size_bytes",
+            "Current buffered bytes in merge input buffer",
+            &["actor_id", "fragment_id", "upstream_fragment_id"],
+            registry
+        )
+        .unwrap()
+        .relabel_debug_1(level);
 
         let exchange_frag_recv_size = register_guarded_int_counter_vec_with_registry!(
             "stream_exchange_frag_recv_size",
@@ -1264,6 +1275,7 @@ impl StreamingMetrics {
             merge_barrier_align_duration,
             actor_output_buffer_blocking_duration_ns,
             actor_input_buffer_blocking_duration_ns,
+            actor_input_buffer_size_bytes,
             join_lookup_miss_count,
             join_lookup_total_count,
             join_insert_cache_miss_count,
@@ -1412,6 +1424,13 @@ impl StreamingMetrics {
             ]),
             actor_input_buffer_blocking_duration_ns: self
                 .actor_input_buffer_blocking_duration_ns
+                .with_guarded_label_values(&[
+                    &actor_id_str,
+                    &fragment_id_str,
+                    &upstream_fragment_id_str,
+                ]),
+            actor_input_buffer_size_bytes: self
+                .actor_input_buffer_size_bytes
                 .with_guarded_label_values(&[
                     &actor_id_str,
                     &fragment_id_str,
@@ -1756,6 +1775,7 @@ impl StreamingMetrics {
 pub(crate) struct ActorInputMetrics {
     pub(crate) actor_in_record_cnt: LabelGuardedIntCounter,
     pub(crate) actor_input_buffer_blocking_duration_ns: LabelGuardedIntCounter,
+    pub(crate) actor_input_buffer_size_bytes: LabelGuardedIntGauge,
 }
 
 /// Tokio metrics for actors

@@ -12,6 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::mem::size_of;
+
+use risingwave_common_estimate_size::EstimateSize;
+
 use crate::array::stream_record::Record;
 use crate::array::{ArrayBuilderImpl, Op, StreamChunk};
 use crate::bitmap::BitmapBuilder;

@@ -302,6 +302,21 @@ def _(outer_panels: Panels):
                         ),
                     ],
                 ),
+                panels.subheader("Memory Usage by Fragment"),
+                panels.timeseries_bytes(
+                    "Actor Input Buffer Size (bytes)",
+                    "Buffered bytes in merge input buffer.",
+                    [
+                        panels.target(
+                            f"sum({metric('stream_actor_input_buffer_size_bytes')}) by (fragment_id, upstream_fragment_id)",
+                            "fragment total {{fragment_id}}<-{{upstream_fragment_id}}",
+                        ),
+                        panels.target_hidden(
+                            f"{metric('stream_actor_input_buffer_size_bytes', actor_level_filter)}",
+                            "actor {{actor_id}}",
+                        ),
+                    ],
+                ),
                 panels.subheader("Current Epoch of Actors"),
                 panels.timeseries_epoch(
                     "Current Epoch of Actors",

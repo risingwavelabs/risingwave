@@ -519,6 +519,7 @@ impl UpstreamSinkBarrierManager {
             inputs,
             &ctx.executor_stats,
             &ctx.actor_context,
+            upstream_fragment_id,
             ctx.chunk_size,
             schema,
         );

@@ -16,6 +16,8 @@ use std::collections::VecDeque;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
+use risingwave_common::metrics::LabelGuardedIntGauge;
+use risingwave_common_estimate_size::EstimateSize;
 use risingwave_common::array::StreamChunkBuilder;
 use tokio::sync::mpsc;
 
@@ -225,6 +227,7 @@ impl MergeExecutor {
 
         let metrics = StreamingMetrics::unused();
         let actor_ctx = ActorContext::for_test(actor_id);
+        let upstream_fragment_id: FragmentId = 1919.into();
         let upstream = Self::new_merge_upstream(
             inputs
                 .into_iter()
@@ -233,6 +236,7 @@ impl MergeExecutor {
                 .collect(),
             &metrics,
             &actor_ctx,
+            upstream_fragment_id,
             chunk_size,
             schema,
         );
@@ -240,7 +244,7 @@ impl MergeExecutor {
         Self::new(
             actor_ctx,
             514.into(),
-            1919.into(),
+            upstream_fragment_id,
             upstream,
             local_barrier_manager,
             metrics.into(),
@@ -248,10 +252,11 @@ impl MergeExecutor {
         )
     }
 
-    pub(crate) fn new_merge_upstream(
+pub(crate) fn new_merge_upstream(
         upstreams: Vec<BoxedActorInput>,
         metrics: &StreamingMetrics,
         actor_context: &ActorContext,
+        upstream_fragment_id: FragmentId,
         chunk_size: usize,
         schema: Schema,
     ) -> MergeUpstream {
@@ -264,11 +269,18 @@ impl MergeExecutor {
                 ]),
         );
 
+        let actor_input_metrics = metrics.new_actor_input_metrics(
+            actor_context.id,
+            actor_context.fragment_id,
+            upstream_fragment_id,
+        );
+
         BufferChunks::new(
             // Futures of all active upstreams.
             SelectReceivers::new(upstreams, None, merge_barrier_align_duration),
             chunk_size,
             schema,
+            Some(actor_input_metrics.actor_input_buffer_size_bytes),
         )
     }
 }
@@ -383,16 +395,46 @@ pub struct BufferChunks<S: Stream> {
 
     /// The items to be emitted. Whenever there's something here, we should return a `Poll::Ready` immediately.
     pending_items: VecDeque<S::Item>,
+
+    buffered_bytes_metrics: Option<LabelGuardedIntGauge>,
 }
 
 impl<S: Stream> BufferChunks<S> {
-    pub(super) fn new(inner: S, chunk_size: usize, schema: Schema) -> Self {
+    pub(super) fn new(
+        inner: S,
+        chunk_size: usize,
+        schema: Schema,
+        buffered_bytes_metrics: Option<LabelGuardedIntGauge>,
+    ) -> Self {
         assert!(chunk_size > 0);
         let chunk_builder = StreamChunkBuilder::new(chunk_size, schema.data_types());
         Self {
             inner,
             chunk_builder,
             pending_items: VecDeque::new(),
+            buffered_bytes_metrics,
+        }
+    }
+
+    fn estimated_buffered_bytes(&self) -> usize
+    where
+        S: Stream<Item = DispatcherMessageStreamItem>,
+    {
+        let mut size: usize = 0;
+        for item in &self.pending_items {
+            if let Ok(MessageInner::Chunk(chunk)) = item {
+                size += chunk.estimated_heap_size();
+            }
+        }
+        size
+    }
+
+    fn update_buffered_bytes_metrics(&self)
+    where
+        S: Stream<Item = DispatcherMessageStreamItem>,
+    {
+        if let Some(metrics) = &self.buffered_bytes_metrics {
+            metrics.set(self.estimated_buffered_bytes() as i64);
         }
     }
 }
@@ -420,13 +462,15 @@ where
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         loop {
             if let Some(item) = self.pending_items.pop_front() {
+                self.update_buffered_bytes_metrics();
                 return Poll::Ready(Some(item));
             }
 
             match self.inner.poll_next_unpin(cx) {
                 Poll::Pending => {
                     return if let Some(chunk_out) = self.chunk_builder.take() {
-                        Poll::Ready(Some(Ok(MessageInner::Chunk(chunk_out))))
+                        let result = Poll::Ready(Some(Ok(MessageInner::Chunk(chunk_out))));
+                        result
                     } else {
                         Poll::Pending
                     };
@@ -440,12 +484,16 @@ where
                                     .push_back(Ok(MessageInner::Chunk(chunk_out)));
                             }
                         }
+                        self.update_buffered_bytes_metrics();
                     } else {
                         return if let Some(chunk_out) = self.chunk_builder.take() {
                             self.pending_items.push_back(result);
-                            Poll::Ready(Some(Ok(MessageInner::Chunk(chunk_out))))
+                            let result = Poll::Ready(Some(Ok(MessageInner::Chunk(chunk_out))));
+                            self.update_buffered_bytes_metrics();
+                            result
                         } else {
-                            Poll::Ready(Some(result))
+                            let result = Poll::Ready(Some(result));
+                            result
                         };
                     }
                 }
@@ -496,7 +544,7 @@ mod tests {
 
         let (tx, rx) = channel_for_test();
         let input = LocalInput::new(rx, 1.into()).boxed_input();
-        let mut buffer = BufferChunks::new(input, 100, Schema::new(vec![]));
+        let mut buffer = BufferChunks::new(input, 100, Schema::new(vec![]), None);
 
         // Send a chunk
         tx.send(Message::Chunk(build_test_chunk(10)).into())
@@ -756,6 +804,7 @@ mod tests {
             inputs,
             &metrics,
             &actor_ctx,
+            upstream_fragment_id,
             100,
             Schema::empty().clone(),
         );
