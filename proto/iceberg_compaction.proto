@@ -74,73 +74,6 @@ message IcebergCompactionTask {
   TaskType task_type = 3;
 }
 
-// Plan is the minimum unit to execute.
-message Plan {
-  // Enough to let compactor construct IcebergConfig/catalog + file IO.
-  map<string, string> props = 1;
-
-  // Optional, for logging/debug.
-  string table_ident = 2;
-
-  // Compaction task type.
-  IcebergCompactionTask.TaskType task_type = 3;
-
-  // Target branch for committing the compaction result.
-  string to_branch = 4;
-
-  // Snapshot ID from which files were selected.
-  int64 snapshot_id = 5;
-
-  // A plan corresponds to one file group to rewrite.
-  FileGroup file_group = 6;
-}
-
-message FileGroup {
-  repeated FileScanTask data_files = 1;
-  repeated FileScanTask position_delete_files = 2;
-  repeated FileScanTask equality_delete_files = 3;
-  uint32 executor_parallelism = 4;
-  uint32 output_parallelism = 5;
-}
-
-message FileScanTask {
-  uint64 start = 1;
-  uint64 length = 2;
-  optional uint64 record_count = 3;
-  string data_file_path = 4;
-
-  enum FileContent {
-    FILE_CONTENT_UNSPECIFIED = 0;
-    DATA = 1;
-    POSITION_DELETES = 2;
-    EQUALITY_DELETES = 3;
-  }
-  FileContent data_file_content = 5;
-
-  enum FileFormat {
-    FILE_FORMAT_UNSPECIFIED = 0;
-    PARQUET = 1;
-    AVRO = 2;
-    ORC = 3;
-    PUFFIN = 4;
-  }
-  FileFormat data_file_format = 6;
-
-  // Serialized iceberg Schema (JSON).
-  bytes schema_json = 7;
-  repeated int32 project_field_ids = 8;
-
-  // Serialized BoundPredicate (JSON).
-  bytes predicate_json = 9;
-  bool has_predicate = 10;
-
-  int64 sequence_number = 11;
-  repeated int32 equality_ids = 12;
-  bool has_equality_ids = 13;
-
-  uint64 file_size_in_bytes = 14;
-}
-
 message SerializedDataFile {
   // JSON serialized iceberg::spec::manifest::SerializedDataFile.
   bytes json = 1;
@@ -167,17 +100,8 @@ message SubscribeIcebergCompactionEventResponse {
   // The Compactor receives the PullTaskAck and remakes its state and tries to initiate the next PullTask.
   message PullTaskAck {}
 
-  // PlanTask is a single plan to execute.
-  message PlanTask {
-    PlanKey key = 1;
-    uint32 required_parallelism = 2;
-    Plan plan = 3;
-    // Attempt number for deduplication on meta.
-    uint32 attempt = 4;
-  }
-
   oneof event {
-    PlanTask plan_task = 1;
+    IcebergCompactionTask compact_task = 1;
     PullTaskAck pull_task_ack = 2;
   }
 

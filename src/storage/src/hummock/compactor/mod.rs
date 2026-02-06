@@ -26,8 +26,8 @@ use risingwave_pb::hummock::report_compaction_task_request::{
     ReportTask as ReportSharedTask,
 };
 use risingwave_pb::iceberg_compaction::{
-    PlanKey, PlanResult, SerializedDataFile, SubscribeIcebergCompactionEventRequest,
-    SubscribeIcebergCompactionEventResponse, subscribe_iceberg_compaction_event_request,
+    SubscribeIcebergCompactionEventRequest, SubscribeIcebergCompactionEventResponse,
+    subscribe_iceberg_compaction_event_request,
 };
 use risingwave_rpc_client::GrpcCompactorProxyClient;
 use thiserror_ext::AsReport;
@@ -59,7 +59,7 @@ pub use context::{
 use futures::{StreamExt, pin_mut};
 // Import iceberg compactor runner types from the local `iceberg_compaction` module.
 use iceberg_compaction::iceberg_compactor_runner::{
-    IcebergCompactorRunnerConfigBuilder, PlanExecutionOutput, create_plan_runner_from_plan,
+    IcebergCompactorRunnerConfigBuilder, create_plan_runners,
 };
 use iceberg_compaction::{IcebergTaskQueue, PushResult};
 pub use iterator::{ConcatSstableIterator, SstableStreamIterator};
@@ -378,13 +378,8 @@ pub fn start_iceberg_compactor(
         // Channel for task completion notifications
         let (task_completion_tx, mut task_completion_rx) =
             tokio::sync::mpsc::unbounded_channel::<TaskKey>();
-        // Channel for task result reporting to meta
         let (task_report_tx, mut task_report_rx) =
-            tokio::sync::mpsc::unbounded_channel::<(TaskKey, Result<PlanExecutionOutput, String>)>(
-            );
-        // Map from internal task key to reported plan key and attempt.
-        let report_key_map: Arc<Mutex<HashMap<TaskKey, (PlanKey, u32)>>> =
-            Arc::new(Mutex::new(HashMap::new()));
+            tokio::sync::mpsc::unbounded_channel::<(TaskKey, Result<(), String>)>();
 
         let mut min_interval = tokio::time::interval(stream_retry_interval);
         let mut periodic_event_interval = tokio::time::interval(periodic_event_update_interval);
@@ -451,105 +446,26 @@ pub fn start_iceberg_compactor(
                         continue 'consume_stream;
                     }
                     Some((task_key, report_result)) = task_report_rx.recv() => {
-                        let (report_key, attempt) = {
-                            let mut guard = report_key_map.lock().unwrap();
-                            guard.remove(&task_key).unwrap_or((
-                                PlanKey {
-                                    task_id: task_key.0,
-                                    plan_index: task_key.1 as u32,
-                                },
-                                0,
-                            ))
-                        };
-                        let (status, error_message, result) = match report_result {
-                            Ok(output) => {
-                                tracing::info!(
-                                    task_id = task_key.0,
-                                    plan_index = task_key.1,
-                                    attempt = attempt,
-                                    added_data_files = output.added_data_files.len(),
-                                    added_position_delete_files =
-                                        output.added_position_delete_files.len(),
-                                    added_equality_delete_files =
-                                        output.added_equality_delete_files.len(),
-                                    input_data_files = output.stats.input_data_file_count,
-                                    input_position_delete_files =
-                                        output.stats.input_position_delete_file_count,
-                                    input_equality_delete_files =
-                                        output.stats.input_equality_delete_file_count,
-                                    output_files = output.stats.output_files_count,
-                                    output_bytes = output.stats.output_total_bytes,
-                                    "【iceberg compaction】task execution finished, reporting success"
-                                );
-                                let added_data_files = output
-                                    .added_data_files
-                                    .into_iter()
-                                    .map(|info| SerializedDataFile {
-                                        json: info.json,
-                                        partition_spec_id: info.partition_spec_id,
-                                    })
-                                    .collect();
-                                let added_position_delete_files = output
-                                    .added_position_delete_files
-                                    .into_iter()
-                                    .map(|info| SerializedDataFile {
-                                        json: info.json,
-                                        partition_spec_id: info.partition_spec_id,
-                                    })
-                                    .collect();
-                                let added_equality_delete_files = output
-                                    .added_equality_delete_files
-                                    .into_iter()
-                                    .map(|info| SerializedDataFile {
-                                        json: info.json,
-                                        partition_spec_id: info.partition_spec_id,
-                                    })
-                                    .collect();
-                                let stats = risingwave_pb::iceberg_compaction::plan_result::RewriteStats {
-                                    input_data_files: output.stats.input_data_file_count as i64,
-                                    input_delete_files: (output.stats.input_position_delete_file_count
-                                        + output.stats.input_equality_delete_file_count) as i64,
-                                    output_files: output.stats.output_files_count as i64,
-                                    output_bytes: output.stats.output_total_bytes as i64,
-                                };
-                                (
-                                    subscribe_iceberg_compaction_event_request::report_plan::Status::Success,
-                                    String::new(),
-                                    Some(PlanResult {
-                                        added_data_files,
-                                        added_position_delete_files,
-                                        added_equality_delete_files,
-                                        stats: Some(stats),
-                                    }),
-                                )
-                            }
+                        let (status, error_message) = match report_result {
+                            Ok(()) => (
+                                subscribe_iceberg_compaction_event_request::report_plan::Status::Success,
+                                String::new(),
+                            ),
                             Err(err) => (
                                 subscribe_iceberg_compaction_event_request::report_plan::Status::Failed,
                                 err,
-                                None,
                             ),
                         };
-
-                        if status
-                            == subscribe_iceberg_compaction_event_request::report_plan::Status::Failed
-                        {
-                            tracing::warn!(
-                                task_id = task_key.0,
-                                plan_index = task_key.1,
-                                attempt = attempt,
-                                error_message = %error_message,
-                                "【iceberg compaction】task execution failed, reporting failure"
-                            );
-                        }
-
                         let report = subscribe_iceberg_compaction_event_request::ReportPlan {
-                            key: Some(report_key),
+                            key: Some(risingwave_pb::iceberg_compaction::PlanKey {
+                                task_id: task_key.0,
+                                plan_index: task_key.1 as u32,
+                            }),
                             status: status as i32,
                             error_message,
-                            result,
-                            attempt,
+                            result: None,
+                            attempt: 0,
                         };
-
                         if let Err(e) = request_sender.send(SubscribeIcebergCompactionEventRequest {
                             event: Some(subscribe_iceberg_compaction_event_request::Event::ReportPlan(report)),
                             create_at: SystemTime::now()
@@ -560,7 +476,6 @@ pub fn start_iceberg_compactor(
                             tracing::warn!(error = %e.as_report(), task_id = task_key.0, plan_index = task_key.1, "Failed to report iceberg plan result");
                             continue 'start_stream;
                         }
-
                         continue 'consume_stream;
                     }
 
@@ -613,28 +528,9 @@ pub fn start_iceberg_compactor(
                         };
 
                         match event {
-                            risingwave_pb::iceberg_compaction::subscribe_iceberg_compaction_event_response::Event::PlanTask(plan_task) => {
-                                let Some(key) = plan_task.key else {
-                                    tracing::warn!("Iceberg plan task missing key");
-                                    continue 'consume_stream;
-                                };
-                                let Some(plan) = plan_task.plan else {
-                                    tracing::warn!(task_id = key.task_id, plan_index = key.plan_index, "Iceberg plan task missing plan");
-                                    continue 'consume_stream;
-                                };
-                                tracing::info!(
-                                    task_id = key.task_id,
-                                    plan_index = key.plan_index,
-                                    attempt = plan_task.attempt,
-                                    required_parallelism = plan_task.required_parallelism,
-                                    snapshot_id = plan.snapshot_id,
-                                    to_branch = %plan.to_branch,
-                                    "【iceberg compaction】received plan task from meta"
-                                );
-                                let task_id = key.task_id;
-                                let attempt = plan_task.attempt;
-                                let report_key_map_clone = report_key_map.clone();
-                                let write_parquet_properties = WriterProperties::builder()
+                            risingwave_pb::iceberg_compaction::subscribe_iceberg_compaction_event_response::Event::CompactTask(iceberg_compaction_task) => {
+                                let task_id = iceberg_compaction_task.task_id;
+                                 let write_parquet_properties = WriterProperties::builder()
                                         .set_created_by(concat!(
                                             "risingwave version ",
                                             env!("CARGO_PKG_VERSION")
@@ -674,179 +570,88 @@ pub fn start_iceberg_compactor(
                                     }
                                 };
 
-                                let runner = match create_plan_runner_from_plan(
-                                    key.task_id,
-                                    key.plan_index as usize,
-                                    plan,
+                                // Create multiple plan runners from the task
+                                let plan_runners = match create_plan_runners(
+                                    iceberg_compaction_task,
                                     compactor_runner_config,
                                     compactor_context.compactor_metrics.clone(),
-                                )
-                                .await
-                                {
-                                    Ok(runner) => runner,
+                                ).await {
+                                    Ok(runners) => runners,
                                     Err(e) => {
-                                        tracing::warn!(error = %e.as_report(), task_id, "Failed to build plan runner");
+                                        tracing::warn!(error = %e.as_report(), task_id, "Failed to create plan runners");
                                         continue 'consume_stream;
                                     }
                                 };
 
-                                let meta = runner.to_meta();
-                                let required_parallelism = runner.required_parallelism();
-                                let push_result = task_queue.push(meta.clone(), Some(runner));
+                                if plan_runners.is_empty() {
+                                    tracing::info!(task_id, "No plans to execute");
+                                    continue 'consume_stream;
+                                }
 
-                                match push_result {
-                                    PushResult::Added => {
-                                        {
-                                            let mut guard = report_key_map_clone.lock().unwrap();
-                                            guard
-                                                .insert((meta.task_id, meta.plan_index), (key, attempt));
-                                        }
-                                        tracing::debug!(
-                                            task_id = task_id,
-                                            plan_index = meta.plan_index,
-                                            required_parallelism = required_parallelism,
-                                            "Iceberg plan runner added to queue"
-                                        );
-                                    },
-                                    PushResult::RejectedCapacity => {
-                                        tracing::warn!(
-                                            task_id = task_id,
-                                            required_parallelism = required_parallelism,
-                                            pending_budget = pending_parallelism_budget,
-                                            "Iceberg plan runner rejected - queue capacity exceeded"
-                                        );
-                                        let report = subscribe_iceberg_compaction_event_request::ReportPlan {
-                                            key: Some(key),
-                                            status: subscribe_iceberg_compaction_event_request::report_plan::Status::Failed as i32,
-                                            error_message: "RejectedCapacity: queue capacity exceeded".to_owned(),
-                                            result: None,
-                                            attempt,
-                                        };
-                                        if let Err(e) = request_sender.send(
-                                            SubscribeIcebergCompactionEventRequest {
-                                                event: Some(
-                                                    subscribe_iceberg_compaction_event_request::Event::ReportPlan(report),
-                                                ),
-                                                create_at: SystemTime::now()
-                                                    .duration_since(std::time::UNIX_EPOCH)
-                                                    .expect("Clock may have gone backwards")
-                                                    .as_millis()
-                                                    as u64,
-                                            },
-                                        ) {
+                                // Enqueue each plan runner independently
+                                let total_plans = plan_runners.len();
+                                let mut enqueued_count = 0;
+
+                                for runner in plan_runners {
+                                    let meta = runner.to_meta();
+                                    let required_parallelism = runner.required_parallelism();
+                                    let push_result = task_queue.push(meta.clone(), Some(runner));
+
+                                    match push_result {
+                                        PushResult::Added => {
+                                            enqueued_count += 1;
+                                            tracing::debug!(
+                                                task_id = task_id,
+                                                plan_index = enqueued_count - 1,
+                                                required_parallelism = required_parallelism,
+                                                "Iceberg plan runner added to queue"
+                                            );
+                                        },
+                                        PushResult::RejectedCapacity => {
                                             tracing::warn!(
-                                                error = %e.as_report(),
+                                                task_id = task_id,
+                                                required_parallelism = required_parallelism,
+                                                pending_budget = pending_parallelism_budget,
+                                                enqueued_count = enqueued_count,
+                                                total_plans = total_plans,
+                                                "Iceberg plan runner rejected - queue capacity exceeded"
+                                            );
+                                            // Stop enqueuing remaining plans
+                                            break;
+                                        },
+                                        PushResult::RejectedTooLarge => {
+                                            tracing::error!(
+                                                task_id = task_id,
+                                                required_parallelism = required_parallelism,
+                                                max_parallelism = max_task_parallelism,
+                                                "Iceberg plan runner rejected - parallelism exceeds max"
+                                            );
+                                        },
+                                        PushResult::RejectedInvalidParallelism => {
+                                            tracing::error!(
+                                                task_id = task_id,
+                                                required_parallelism = required_parallelism,
+                                                "Iceberg plan runner rejected - invalid parallelism"
+                                            );
+                                        },
+                                        PushResult::RejectedDuplicate => {
+                                            tracing::error!(
                                                 task_id = task_id,
                                                 plan_index = meta.plan_index,
-                                                "Failed to report rejected iceberg plan"
+                                                "Iceberg plan runner rejected - duplicate (task_id, plan_index)"
                                             );
-                                            continue 'start_stream;
-                                        }
-                                    },
-                                    PushResult::RejectedTooLarge => {
-                                        tracing::error!(
-                                            task_id = task_id,
-                                            required_parallelism = required_parallelism,
-                                            max_parallelism = max_task_parallelism,
-                                            "Iceberg plan runner rejected - parallelism exceeds max"
-                                        );
-                                        let report = subscribe_iceberg_compaction_event_request::ReportPlan {
-                                            key: Some(key),
-                                            status: subscribe_iceberg_compaction_event_request::report_plan::Status::Failed as i32,
-                                            error_message: "RejectedTooLarge: parallelism exceeds max".to_owned(),
-                                            result: None,
-                                            attempt,
-                                        };
-                                        if let Err(e) = request_sender.send(
-                                            SubscribeIcebergCompactionEventRequest {
-                                                event: Some(
-                                                    subscribe_iceberg_compaction_event_request::Event::ReportPlan(report),
-                                                ),
-                                                create_at: SystemTime::now()
-                                                    .duration_since(std::time::UNIX_EPOCH)
-                                                    .expect("Clock may have gone backwards")
-                                                    .as_millis()
-                                                    as u64,
-                                            },
-                                        ) {
-                                            tracing::warn!(
-                                                error = %e.as_report(),
-                                                task_id = task_id,
-                                                plan_index = meta.plan_index,
-                                                "Failed to report rejected iceberg plan"
-                                            );
-                                            continue 'start_stream;
-                                        }
-                                    },
-                                    PushResult::RejectedInvalidParallelism => {
-                                        tracing::error!(
-                                            task_id = task_id,
-                                            required_parallelism = required_parallelism,
-                                            "Iceberg plan runner rejected - invalid parallelism"
-                                        );
-                                        let report = subscribe_iceberg_compaction_event_request::ReportPlan {
-                                            key: Some(key),
-                                            status: subscribe_iceberg_compaction_event_request::report_plan::Status::Failed as i32,
-                                            error_message: "RejectedInvalidParallelism: invalid parallelism".to_owned(),
-                                            result: None,
-                                            attempt,
-                                        };
-                                        if let Err(e) = request_sender.send(
-                                            SubscribeIcebergCompactionEventRequest {
-                                                event: Some(
-                                                    subscribe_iceberg_compaction_event_request::Event::ReportPlan(report),
-                                                ),
-                                                create_at: SystemTime::now()
-                                                    .duration_since(std::time::UNIX_EPOCH)
-                                                    .expect("Clock may have gone backwards")
-                                                    .as_millis()
-                                                    as u64,
-                                            },
-                                        ) {
-                                            tracing::warn!(
-                                                error = %e.as_report(),
-                                                task_id = task_id,
-                                                plan_index = meta.plan_index,
-                                                "Failed to report rejected iceberg plan"
-                                            );
-                                            continue 'start_stream;
-                                        }
-                                    },
-                                    PushResult::RejectedDuplicate => {
-                                        tracing::error!(
-                                            task_id = task_id,
-                                            plan_index = meta.plan_index,
-                                            "Iceberg plan runner rejected - duplicate (task_id, plan_index)"
-                                        );
-                                        let report = subscribe_iceberg_compaction_event_request::ReportPlan {
-                                            key: Some(key),
-                                            status: subscribe_iceberg_compaction_event_request::report_plan::Status::Failed as i32,
-                                            error_message: "RejectedDuplicate: duplicate (task_id, plan_index)".to_owned(),
-                                            result: None,
-                                            attempt,
-                                        };
-                                        if let Err(e) = request_sender.send(
-                                            SubscribeIcebergCompactionEventRequest {
-                                                event: Some(
-                                                    subscribe_iceberg_compaction_event_request::Event::ReportPlan(report),
-                                                ),
-                                                create_at: SystemTime::now()
-                                                    .duration_since(std::time::UNIX_EPOCH)
-                                                    .expect("Clock may have gone backwards")
-                                                    .as_millis()
-                                                    as u64,
-                                            },
-                                        ) {
-                                            tracing::warn!(
-                                                error = %e.as_report(),
-                                                task_id = task_id,
-                                                plan_index = meta.plan_index,
-                                                "Failed to report rejected iceberg plan"
-                                            );
-                                            continue 'start_stream;
                                         }
                                     }
                                 }
+
+                                tracing::info!(
+                                    task_id = task_id,
+                                    total_plans = total_plans,
+                                    enqueued_count = enqueued_count,
+                                    "Enqueued {} of {} Iceberg plan runners",
+                                    enqueued_count,
+                                    total_plans
+                                );
                             },
                             risingwave_pb::iceberg_compaction::subscribe_iceberg_compaction_event_response::Event::PullTaskAck(_) => {
                                 // set flag
@@ -1408,10 +1213,7 @@ fn schedule_queued_tasks(
     compactor_context: &CompactorContext,
     shutdown_map: &Arc<Mutex<HashMap<TaskKey, Sender<()>>>>,
     task_completion_tx: &tokio::sync::mpsc::UnboundedSender<TaskKey>,
-    task_report_tx: &tokio::sync::mpsc::UnboundedSender<(
-        TaskKey,
-        Result<PlanExecutionOutput, String>,
-    )>,
+    task_report_tx: &tokio::sync::mpsc::UnboundedSender<(TaskKey, Result<(), String>)>,
 ) {
     while let Some(popped_task) = task_queue.pop() {
         let task_id = popped_task.meta.task_id;
@@ -1441,7 +1243,7 @@ fn schedule_queued_tasks(
             plan_index = plan_index,
             unique_ident = ?unique_ident,
             required_parallelism = popped_task.meta.required_parallelism,
-            "【iceberg compaction】starting iceberg compaction task from queue"
+            "Starting iceberg compaction task from queue"
         );
 
         executor.spawn(async move {
@@ -1466,15 +1268,15 @@ fn schedule_queued_tasks(
                 },
             );
 
-            match runner.compact(rx).await {
-                Ok(output) => {
-                    let _ = report_tx_clone.send((task_key, Ok(output)));
-                }
+            let report_result = match runner.compact(rx).await {
+                Ok(_) => Ok(()),
                 Err(e) => {
-                    let err_msg = e.as_report().to_string();
-                    let _ = report_tx_clone.send((task_key, Err(err_msg)));
                     tracing::warn!(error = %e.as_report(), task_id = task_key.0, plan_index = task_key.1, "Failed to compact iceberg runner");
+                    Err(e.as_report().to_string())
                 }
+            };
+            if report_tx_clone.send((task_key, report_result)).is_err() {
+                tracing::warn!(task_id = task_key.0, plan_index = task_key.1, "Failed to send iceberg plan report");
             }
         });
     }
