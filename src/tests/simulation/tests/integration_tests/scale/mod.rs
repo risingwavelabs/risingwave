@@ -32,3 +32,5 @@ mod singleton_migration;
 mod sink;
 mod streaming_parallelism;
 mod table;
+
+const DEFAULT_TABLE_PARALLELISM_BOUND: usize = 4;

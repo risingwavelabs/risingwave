@@ -20,6 +20,8 @@ use risingwave_simulation::cluster::{Cluster, Configuration};
 use risingwave_simulation::ctl_ext::predicate::identity_contains;
 use risingwave_simulation::utils::AssertResult;
 
+use super::DEFAULT_TABLE_PARALLELISM_BOUND;
+
 #[tokio::test]
 async fn test_alter_fragment_no_shuffle() -> Result<()> {
     let mut cluster = Cluster::start(Configuration::for_scale_no_shuffle()).await?;
@@ -78,6 +80,7 @@ async fn test_alter_fragment_no_shuffle() -> Result<()> {
 async fn test_alter_fragment() -> Result<()> {
     let mut cluster = Cluster::start(Configuration::for_scale()).await?;
     let default_parallelism = cluster.config().compute_nodes * cluster.config().compute_node_cores;
+    let expected_parallelism = default_parallelism.min(DEFAULT_TABLE_PARALLELISM_BOUND);
     cluster.run("create table t1 (c1 int, c2 int);").await?;
     let materialize_fragment = cluster
         .locate_one_fragment([identity_contains("materialize")])
@@ -89,7 +92,7 @@ async fn test_alter_fragment() -> Result<()> {
             "select parallelism from rw_fragment_parallelism where fragment_id = {fragment_id};"
         ))
         .await?
-        .assert_result_eq(format!("{default_parallelism}"));
+        .assert_result_eq(format!("{expected_parallelism}"));
 
     let new_parallelism = default_parallelism + 1;
 

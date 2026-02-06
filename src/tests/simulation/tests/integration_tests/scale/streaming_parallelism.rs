@@ -21,17 +21,22 @@ use risingwave_simulation::cluster::{Cluster, Configuration};
 use risingwave_simulation::ctl_ext::predicate::identity_contains;
 use risingwave_simulation::utils::AssertResult;
 
+use super::DEFAULT_TABLE_PARALLELISM_BOUND;
 use crate::scale::auto_parallelism::MAX_HEARTBEAT_INTERVAL_SECS_CONFIG_FOR_AUTO_SCALE;
 
 #[tokio::test]
 async fn test_streaming_parallelism_default() -> Result<()> {
     let mut cluster = Cluster::start(Configuration::for_scale()).await?;
     let default_parallelism = cluster.config().compute_nodes * cluster.config().compute_node_cores;
+    let expected_parallelism = default_parallelism.min(DEFAULT_TABLE_PARALLELISM_BOUND);
     cluster.run("create table t1 (c1 int, c2 int);").await?;
     let materialize_fragment = cluster
         .locate_one_fragment([identity_contains("materialize")])
         .await?;
-    assert_eq!(materialize_fragment.inner.actors.len(), default_parallelism);
+    assert_eq!(
+        materialize_fragment.inner.actors.len(),
+        expected_parallelism
+    );
     Ok(())
 }
 
@@ -59,6 +64,7 @@ async fn test_streaming_parallelism_set_some() -> Result<()> {
 async fn test_streaming_parallelism_set_zero() -> Result<()> {
     let mut cluster = Cluster::start(Configuration::for_scale()).await?;
     let default_parallelism = cluster.config().compute_nodes * cluster.config().compute_node_cores;
+    let expected_parallelism = default_parallelism.min(DEFAULT_TABLE_PARALLELISM_BOUND);
 
     let mut session = cluster.start_session();
     session.run("set streaming_parallelism=0;").await?;
@@ -67,7 +73,10 @@ async fn test_streaming_parallelism_set_zero() -> Result<()> {
     let materialize_fragment = cluster
         .locate_one_fragment([identity_contains("materialize")])
         .await?;
-    assert_eq!(materialize_fragment.inner.actors.len(), default_parallelism);
+    assert_eq!(
+        materialize_fragment.inner.actors.len(),
+        expected_parallelism
+    );
     Ok(())
 }
 
@@ -161,6 +170,9 @@ async fn test_parallelism_exceed_virtual_node_max_create() -> Result<()> {
     .await;
 
     let mut session = cluster.start_session();
+    session
+        .run("set streaming_parallelism_strategy_for_table = 'AUTO'")
+        .await?;
     session.run("create table t(v int)").await?;
     session
         .run("select parallelism from rw_streaming_parallelism where name = 't'")
@@ -234,6 +246,9 @@ async fn test_parallelism_exceed_virtual_node_max_alter_adaptive() -> Result<()>
     configuration.compute_node_cores = vnode_max + 100;
     let mut cluster = Cluster::start(configuration).await?;
     let mut session = cluster.start_session();
+    session
+        .run("set streaming_parallelism_strategy_for_table = 'AUTO'")
+        .await?;
     session.run("set streaming_parallelism = 1").await?;
     session.run("create table t(v int)").await?;
     session
