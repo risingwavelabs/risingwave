@@ -30,7 +30,7 @@ use risingwave_hummock_sdk::{CompactionGroupId, can_concat};
 use risingwave_pb::hummock::compact_task::TaskStatus;
 use risingwave_pb::hummock::rise_ctl_update_compaction_config_request::mutable_config::MutableConfig;
 use risingwave_pb::hummock::{
-    CompatibilityVersion, PbGroupConstruct, PbGroupMerge, PbStateTableInfoDelta,
+    CompactionConfig, CompatibilityVersion, PbGroupConstruct, PbGroupMerge, PbStateTableInfoDelta,
 };
 use thiserror_ext::AsReport;
 
@@ -931,6 +931,25 @@ impl HummockManager {
 struct GroupMergeValidator {}
 
 impl GroupMergeValidator {
+    fn merge_compatibility_config(group: &CompactionGroupStatistic) -> CompactionConfig {
+        let mut config = group
+            .compaction_group_config
+            .compaction_config
+            .as_ref()
+            .clone();
+        // Ignore per-table split behavior when validating merge compatibility.
+        // After merge, the hybrid group will reset this field to default(0).
+        config.split_weight_by_vnode = 0;
+        config
+    }
+
+    fn is_merge_compatible_by_semantics(
+        group: &CompactionGroupStatistic,
+        next_group: &CompactionGroupStatistic,
+    ) -> bool {
+        Self::merge_compatibility_config(group) == Self::merge_compatibility_config(next_group)
+    }
+
     /// Check if the table is high write throughput with the given threshold and ratio.
     pub fn is_table_high_write_throughput(
         table_throughput: impl Iterator<Item = &TableWriteThroughputStatistic>,
@@ -1076,34 +1095,22 @@ impl GroupMergeValidator {
             )));
         }
 
-        // Do not merge compaction groups with different compaction configs.
-        // Different configs lead to different max_estimated_group_size calculations,
-        // which can cause scheduling conflicts (continuous split/merge cycles).
-        // The following fields in CompactionConfig affect max_estimated_group_size:
-        //   - max_bytes_for_level_base
-        //   - max_bytes_for_level_multiplier
-        //   - max_compaction_bytes
-        //   - sub_level_max_compaction_bytes
-        // If any of these fields differ, the groups may have incompatible scheduling.
-        if group.compaction_group_config.compaction_config
-            != next_group.compaction_group_config.compaction_config
-        {
-            let left_config = group.compaction_group_config.compaction_config.as_ref();
-            let right_config = next_group
-                .compaction_group_config
-                .compaction_config
-                .as_ref();
+        // Keep merge compatibility as a feature, but ignore split_weight_by_vnode, because it is
+        // only used for per-table split behavior and will be reset after merge.
+        if !Self::is_merge_compatible_by_semantics(group, next_group) {
+            let left_config = Self::merge_compatibility_config(group);
+            let right_config = Self::merge_compatibility_config(next_group);
 
             tracing::warn!(
                 group_id = %group.group_id,
                 next_group_id = %next_group.group_id,
                 left_config = ?left_config,
                 right_config = ?right_config,
-                "compaction config mismatch detected while merging compaction groups"
+                "compaction config semantic mismatch detected while merging compaction groups"
             );
 
             return Err(Error::CompactionGroup(format!(
-                "Cannot merge group {} and next_group {} with different compaction configs. left_config: {:?}, right_config: {:?}",
+                "Cannot merge group {} and next_group {} with different merge-related compaction semantics. left_config: {:?}, right_config: {:?}",
                 group.group_id, next_group.group_id, left_config, right_config
             )));
         }
