@@ -590,11 +590,11 @@ impl HummockManager {
 
     async fn on_handle_trigger_multi_group(&self, task_type: compact_task::TaskType) {
         for cg_id in self.compaction_group_ids().await {
-            // Use periodic version which respects cooldown for Dynamic type
-            if let Err(e) = self
-                .compaction_state
-                .try_sched_compaction_for_periodic(cg_id, task_type)
-            {
+            if let Err(e) = self.compaction_state.try_sched_compaction(
+                cg_id,
+                task_type,
+                super::compaction::ScheduleTrigger::Periodic,
+            ) {
                 tracing::error!(
                     error = %e.as_report(),
                     "Failed to schedule {:?} compaction for compaction group {}",
