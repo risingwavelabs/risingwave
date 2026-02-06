@@ -35,6 +35,7 @@ pub struct Model {
     pub adaptive_parallelism_strategy: Option<String>,
     pub parallelism: StreamingParallelism,
     pub backfill_parallelism: Option<StreamingParallelism>,
+    pub backfill_rate_limit: Option<i32>,
     #[sea_orm(column_type = "JsonBinary", nullable)]
     pub backfill_orders: Option<BackfillOrders>,
     pub max_parallelism: i32,

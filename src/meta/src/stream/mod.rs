@@ -13,6 +13,7 @@
 // limitations under the License.
 
 pub(crate) mod cdc;
+mod creating_job_tracker;
 mod refresh_manager;
 mod scale;
 mod sink;
@@ -22,6 +23,7 @@ mod stream_manager;
 #[cfg(test)]
 mod test_fragmenter;
 
+pub(crate) use creating_job_tracker::CreatingJobTracker;
 pub use refresh_manager::*;
 pub use scale::*;
 pub use sink::*;

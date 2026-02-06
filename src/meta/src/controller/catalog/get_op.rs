@@ -598,6 +598,21 @@ impl CatalogController {
         Ok((job_parallelism, backfill_parallelism))
     }
 
+    pub async fn get_job_backfill_rate_limit(
+        &self,
+        streaming_job_id: JobId,
+    ) -> MetaResult<Option<i32>> {
+        let inner = self.inner.read().await;
+        let backfill_rate_limit: Option<i32> = StreamingJob::find_by_id(streaming_job_id)
+            .select_only()
+            .column(streaming_job::Column::BackfillRateLimit)
+            .into_tuple()
+            .one(&inner.db)
+            .await?
+            .ok_or_else(|| MetaError::catalog_id_not_found("streaming job", streaming_job_id))?;
+        Ok(backfill_rate_limit)
+    }
+
     pub async fn get_fragment_streaming_job_id(
         &self,
         fragment_id: FragmentId,
