@@ -1368,7 +1368,6 @@ pub struct CompactionScheduleSnapshot {
 
 impl CompactionScheduleSnapshot {
     /// Returns the time when this snapshot was taken.
-    /// Used by `unschedule()` to detect if new data arrived during processing.
     pub fn snapshot_time(&self) -> Instant {
         self.snapshot_time
     }
@@ -1458,11 +1457,7 @@ struct CompactionStateInner {
     scheduled: HashSet<(CompactionGroupId, compact_task::TaskType)>,
     /// Groups in cooldown will be skipped by periodic Dynamic trigger.
     dynamic_cooldown: HashSet<CompactionGroupId>,
-    /// Last time new data arrived for each group (via `commit_epoch`).
-    /// Used to determine if cooldown should be skipped:
-    /// - When `unschedule` is called with a `snapshot_time`, compare with this timestamp.
-    /// - If `last_new_data_time > snapshot_time`, new data arrived during processing,
-    ///   so don't add to cooldown.
+    /// Last time new data arrived for each group. Used for cooldown race condition check.
     last_new_data_time: HashMap<CompactionGroupId, Instant>,
 }
 
