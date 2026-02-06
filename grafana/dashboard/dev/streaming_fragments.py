@@ -52,9 +52,9 @@ def _(outer_panels: Panels):
     scheduled_duration_expr = (
         f"{scheduled_duration_rate_expr} / on(fragment_id) {actor_count_expr}"
     )
-    zero_fragment_expr = f"0 * sum({metric('stream_actor_count')}) by (fragment_id)"
+    zero_for_all_fragments_expr = f"0 * sum({metric('stream_actor_count')}) by (fragment_id)"
     def _coalesce_fragment(expr: str) -> str:
-        return f"(({expr}) or on(fragment_id) {zero_fragment_expr})"
+        return f"(({expr}) or on(fragment_id) {zero_for_all_fragments_expr})"
 
     executor_cache_usage_expr = (
         f"sum("
