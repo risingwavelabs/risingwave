@@ -369,7 +369,7 @@ pub async fn do_handle_explain(
     // Use explain_datafusion_plan here to avoid `Rc` across `await` point.
     #[cfg(feature = "datafusion")]
     if let Some((plan, explain_format, explain_verbose)) = datafusion_physical_plan_request {
-        let df_ctx = create_datafusion_context(session.as_ref());
+        let df_ctx = create_datafusion_context(session.as_ref())?;
         let physical_plan = build_datafusion_physical_plan(&df_ctx, &plan).await?;
         explain_datafusion_plan(
             physical_plan.as_ref(),
