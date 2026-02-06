@@ -309,6 +309,10 @@ impl HummockManager {
                 );
             }
 
+            // clean up compaction schedule state for the merged group
+            self.compaction_state
+                .remove_compaction_group(right_group_id);
+
             // clear `partition_vnode_count` for the hybrid group
             {
                 if let Err(err) = compaction_groups_txn.update_compaction_config(

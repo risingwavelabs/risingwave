@@ -1548,6 +1548,17 @@ impl CompactionState {
             snapshot_time,
         }
     }
+
+    /// Remove all state associated with a compaction group.
+    /// Called when a group is deleted or merged.
+    pub fn remove_compaction_group(&self, compaction_group: CompactionGroupId) {
+        let mut guard = self.inner.lock();
+        guard
+            .scheduled
+            .retain(|(group, _)| *group != compaction_group);
+        guard.dynamic_cooldown.remove(&compaction_group);
+        guard.last_new_data_time.remove(&compaction_group);
+    }
 }
 
 impl Compaction {
