@@ -5,7 +5,7 @@
     select * from t1;
   stream_plan: |-
     StreamMaterialize { columns: [v1, t1._row_id(hidden)], stream_key: [t1._row_id], pk_columns: [t1._row_id], pk_conflict: NoCheck }
-    └─StreamTableScan { table: t1, columns: [t1.v1, t1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
+    └─StreamTableScan { table: t1, columns: [t1.v1, t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
   backfill_order_plan: |
     digraph G {
     }
@@ -15,7 +15,7 @@
     select * from t1;
   stream_plan: |-
     StreamMaterialize { columns: [v1, t1._row_id(hidden)], stream_key: [t1._row_id], pk_columns: [t1._row_id], pk_conflict: NoCheck }
-    └─StreamTableScan { table: t1, columns: [t1.v1, t1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
+    └─StreamTableScan { table: t1, columns: [t1.v1, t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
   backfill_order_plan: |
     digraph G {
     }
@@ -29,9 +29,9 @@
     └─StreamExchange { dist: HashShard(t1.v1, t1._row_id, t2._row_id) }
       └─StreamHashJoin { type: Inner, predicate: t1.v1 = t2.v2, output: [t1.v1, t2.v2, t1._row_id, t2._row_id] }
         ├─StreamExchange { dist: HashShard(t1.v1) }
-        │ └─StreamTableScan { table: t1, columns: [t1.v1, t1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
+        │ └─StreamTableScan { table: t1, columns: [t1.v1, t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
         └─StreamExchange { dist: HashShard(t2.v2) }
-          └─StreamTableScan { table: t2, columns: [t2.v2, t2._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t2._row_id], pk: [_row_id], dist: UpstreamHashShard(t2._row_id) }
+          └─StreamTableScan { table: t2, columns: [t2.v2, t2._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t2._row_id], pk: [_row_id], dist: UpstreamHashShard(t2._row_id) }
   backfill_order_plan: |
     digraph G {
       "public.t2" -> "public.t1";
@@ -46,9 +46,9 @@
     └─StreamExchange { dist: HashShard(t1.v1, t1._row_id, t2._row_id) }
       └─StreamHashJoin { type: Inner, predicate: t1.v1 = t2.v2, output: [t1.v1, t2.v2, t1._row_id, t2._row_id] }
         ├─StreamExchange { dist: HashShard(t1.v1) }
-        │ └─StreamTableScan { table: t1, columns: [t1.v1, t1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
+        │ └─StreamTableScan { table: t1, columns: [t1.v1, t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
         └─StreamExchange { dist: HashShard(t2.v2) }
-          └─StreamTableScan { table: t2, columns: [t2.v2, t2._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t2._row_id], pk: [_row_id], dist: UpstreamHashShard(t2._row_id) }
+          └─StreamTableScan { table: t2, columns: [t2.v2, t2._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t2._row_id], pk: [_row_id], dist: UpstreamHashShard(t2._row_id) }
   backfill_order_plan: |
     digraph G {
       "public.t2" -> "public.t1";
@@ -79,25 +79,25 @@
         ├─StreamHashJoin { type: LeftOuter, predicate: fact1.v1 = fact2.v1, output: [fact1.v1, fact1._row_id, dim1._row_id, fact2._row_id, dim2._row_id, fact2.v1] }
         │ ├─StreamHashJoin { type: LeftOuter, predicate: fact1.v1 = dim1.v1, output: [fact1.v1, fact1._row_id, dim1._row_id] }
         │ │ ├─StreamExchange { dist: HashShard(fact1.v1) }
-        │ │ │ └─StreamTableScan { table: fact1, columns: [fact1.v1, fact1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [fact1._row_id], pk: [_row_id], dist: UpstreamHashShard(fact1._row_id) }
+        │ │ │ └─StreamTableScan { table: fact1, columns: [fact1.v1, fact1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [fact1._row_id], pk: [_row_id], dist: UpstreamHashShard(fact1._row_id) }
         │ │ └─StreamExchange { dist: HashShard(dim1.v1) }
-        │ │   └─StreamTableScan { table: dim1, columns: [dim1.v1, dim1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [dim1._row_id], pk: [_row_id], dist: UpstreamHashShard(dim1._row_id) }
+        │ │   └─StreamTableScan { table: dim1, columns: [dim1.v1, dim1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [dim1._row_id], pk: [_row_id], dist: UpstreamHashShard(dim1._row_id) }
         │ └─StreamHashJoin { type: LeftOuter, predicate: fact2.v1 = dim2.v1, output: [fact2.v1, fact2._row_id, dim2._row_id] }
         │   ├─StreamExchange { dist: HashShard(fact2.v1) }
-        │   │ └─StreamTableScan { table: fact2, columns: [fact2.v1, fact2._row_id], stream_scan_type: ArrangementBackfill, stream_key: [fact2._row_id], pk: [_row_id], dist: UpstreamHashShard(fact2._row_id) }
+        │   │ └─StreamTableScan { table: fact2, columns: [fact2.v1, fact2._row_id], stream_scan_type: SnapshotBackfill, stream_key: [fact2._row_id], pk: [_row_id], dist: UpstreamHashShard(fact2._row_id) }
         │   └─StreamExchange { dist: HashShard(dim2.v1) }
-        │     └─StreamTableScan { table: dim2, columns: [dim2.v1, dim2._row_id], stream_scan_type: ArrangementBackfill, stream_key: [dim2._row_id], pk: [_row_id], dist: UpstreamHashShard(dim2._row_id) }
+        │     └─StreamTableScan { table: dim2, columns: [dim2.v1, dim2._row_id], stream_scan_type: SnapshotBackfill, stream_key: [dim2._row_id], pk: [_row_id], dist: UpstreamHashShard(dim2._row_id) }
         └─StreamHashJoin { type: LeftOuter, predicate: fact3.v1 = fact4.v1, output: [fact3.v1, fact3._row_id, dim3._row_id, fact4._row_id, dim4._row_id, fact4.v1] }
           ├─StreamHashJoin { type: LeftOuter, predicate: fact3.v1 = dim3.v1, output: [fact3.v1, fact3._row_id, dim3._row_id] }
           │ ├─StreamExchange { dist: HashShard(fact3.v1) }
-          │ │ └─StreamTableScan { table: fact3, columns: [fact3.v1, fact3._row_id], stream_scan_type: ArrangementBackfill, stream_key: [fact3._row_id], pk: [_row_id], dist: UpstreamHashShard(fact3._row_id) }
+          │ │ └─StreamTableScan { table: fact3, columns: [fact3.v1, fact3._row_id], stream_scan_type: SnapshotBackfill, stream_key: [fact3._row_id], pk: [_row_id], dist: UpstreamHashShard(fact3._row_id) }
           │ └─StreamExchange { dist: HashShard(dim3.v1) }
-          │   └─StreamTableScan { table: dim3, columns: [dim3.v1, dim3._row_id], stream_scan_type: ArrangementBackfill, stream_key: [dim3._row_id], pk: [_row_id], dist: UpstreamHashShard(dim3._row_id) }
+          │   └─StreamTableScan { table: dim3, columns: [dim3.v1, dim3._row_id], stream_scan_type: SnapshotBackfill, stream_key: [dim3._row_id], pk: [_row_id], dist: UpstreamHashShard(dim3._row_id) }
           └─StreamHashJoin { type: LeftOuter, predicate: fact4.v1 = dim4.v1, output: [fact4.v1, fact4._row_id, dim4._row_id] }
             ├─StreamExchange { dist: HashShard(fact4.v1) }
-            │ └─StreamTableScan { table: fact4, columns: [fact4.v1, fact4._row_id], stream_scan_type: ArrangementBackfill, stream_key: [fact4._row_id], pk: [_row_id], dist: UpstreamHashShard(fact4._row_id) }
+            │ └─StreamTableScan { table: fact4, columns: [fact4.v1, fact4._row_id], stream_scan_type: SnapshotBackfill, stream_key: [fact4._row_id], pk: [_row_id], dist: UpstreamHashShard(fact4._row_id) }
             └─StreamExchange { dist: HashShard(dim4.v1) }
-              └─StreamTableScan { table: dim4, columns: [dim4.v1, dim4._row_id], stream_scan_type: ArrangementBackfill, stream_key: [dim4._row_id], pk: [_row_id], dist: UpstreamHashShard(dim4._row_id) }
+              └─StreamTableScan { table: dim4, columns: [dim4.v1, dim4._row_id], stream_scan_type: SnapshotBackfill, stream_key: [dim4._row_id], pk: [_row_id], dist: UpstreamHashShard(dim4._row_id) }
   backfill_order_plan: |
     digraph G {
       "public.dim1" -> "public.fact1";
@@ -118,10 +118,10 @@
     └─StreamUnion { all: true }
       ├─StreamExchange { dist: HashShard(t1._row_id, 0:Int32) }
       │ └─StreamProject { exprs: [t1.v1, t1._row_id, 0:Int32] }
-      │   └─StreamTableScan { table: t1, columns: [t1.v1, t1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
+      │   └─StreamTableScan { table: t1, columns: [t1.v1, t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
       └─StreamExchange { dist: HashShard(t2._row_id, 1:Int32) }
         └─StreamProject { exprs: [t2.v2, t2._row_id, 1:Int32] }
-          └─StreamTableScan { table: t2, columns: [t2.v2, t2._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t2._row_id], pk: [_row_id], dist: UpstreamHashShard(t2._row_id) }
+          └─StreamTableScan { table: t2, columns: [t2.v2, t2._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t2._row_id], pk: [_row_id], dist: UpstreamHashShard(t2._row_id) }
   backfill_order_plan: |
     digraph G {
     }
@@ -154,32 +154,32 @@
         │   │ └─StreamProject { exprs: [fact1.v1, fact1._row_id, dim1._row_id, fact1.v1, 0:Int32] }
         │   │   └─StreamHashJoin { type: LeftOuter, predicate: fact1.v1 = dim1.v1, output: [fact1.v1, fact1._row_id, dim1._row_id] }
         │   │     ├─StreamExchange { dist: HashShard(fact1.v1) }
-        │   │     │ └─StreamTableScan { table: fact1, columns: [fact1.v1, fact1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [fact1._row_id], pk: [_row_id], dist: UpstreamHashShard(fact1._row_id) }
+        │   │     │ └─StreamTableScan { table: fact1, columns: [fact1.v1, fact1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [fact1._row_id], pk: [_row_id], dist: UpstreamHashShard(fact1._row_id) }
         │   │     └─StreamExchange { dist: HashShard(dim1.v1) }
-        │   │       └─StreamTableScan { table: dim1, columns: [dim1.v1, dim1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [dim1._row_id], pk: [_row_id], dist: UpstreamHashShard(dim1._row_id) }
+        │   │       └─StreamTableScan { table: dim1, columns: [dim1.v1, dim1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [dim1._row_id], pk: [_row_id], dist: UpstreamHashShard(dim1._row_id) }
         │   └─StreamExchange { dist: HashShard(fact2._row_id, dim2._row_id, fact2.v1, 1:Int32) }
         │     └─StreamProject { exprs: [fact2.v1, fact2._row_id, dim2._row_id, fact2.v1, 1:Int32] }
         │       └─StreamHashJoin { type: LeftOuter, predicate: fact2.v1 = dim2.v1, output: [fact2.v1, fact2._row_id, dim2._row_id] }
         │         ├─StreamExchange { dist: HashShard(fact2.v1) }
-        │         │ └─StreamTableScan { table: fact2, columns: [fact2.v1, fact2._row_id], stream_scan_type: ArrangementBackfill, stream_key: [fact2._row_id], pk: [_row_id], dist: UpstreamHashShard(fact2._row_id) }
+        │         │ └─StreamTableScan { table: fact2, columns: [fact2.v1, fact2._row_id], stream_scan_type: SnapshotBackfill, stream_key: [fact2._row_id], pk: [_row_id], dist: UpstreamHashShard(fact2._row_id) }
         │         └─StreamExchange { dist: HashShard(dim2.v1) }
-        │           └─StreamTableScan { table: dim2, columns: [dim2.v1, dim2._row_id], stream_scan_type: ArrangementBackfill, stream_key: [dim2._row_id], pk: [_row_id], dist: UpstreamHashShard(dim2._row_id) }
+        │           └─StreamTableScan { table: dim2, columns: [dim2.v1, dim2._row_id], stream_scan_type: SnapshotBackfill, stream_key: [dim2._row_id], pk: [_row_id], dist: UpstreamHashShard(dim2._row_id) }
         └─StreamExchange { dist: HashShard(fact3.v1) }
           └─StreamUnion { all: true }
             ├─StreamExchange { dist: HashShard(fact3._row_id, dim3._row_id, fact3.v1, 0:Int32) }
             │ └─StreamProject { exprs: [fact3.v1, fact3._row_id, dim3._row_id, fact3.v1, 0:Int32] }
             │   └─StreamHashJoin { type: LeftOuter, predicate: fact3.v1 = dim3.v1, output: [fact3.v1, fact3._row_id, dim3._row_id] }
             │     ├─StreamExchange { dist: HashShard(fact3.v1) }
-            │     │ └─StreamTableScan { table: fact3, columns: [fact3.v1, fact3._row_id], stream_scan_type: ArrangementBackfill, stream_key: [fact3._row_id], pk: [_row_id], dist: UpstreamHashShard(fact3._row_id) }
+            │     │ └─StreamTableScan { table: fact3, columns: [fact3.v1, fact3._row_id], stream_scan_type: SnapshotBackfill, stream_key: [fact3._row_id], pk: [_row_id], dist: UpstreamHashShard(fact3._row_id) }
             │     └─StreamExchange { dist: HashShard(dim3.v1) }
-            │       └─StreamTableScan { table: dim3, columns: [dim3.v1, dim3._row_id], stream_scan_type: ArrangementBackfill, stream_key: [dim3._row_id], pk: [_row_id], dist: UpstreamHashShard(dim3._row_id) }
+            │       └─StreamTableScan { table: dim3, columns: [dim3.v1, dim3._row_id], stream_scan_type: SnapshotBackfill, stream_key: [dim3._row_id], pk: [_row_id], dist: UpstreamHashShard(dim3._row_id) }
             └─StreamExchange { dist: HashShard(fact4._row_id, dim4._row_id, fact4.v1, 1:Int32) }
               └─StreamProject { exprs: [fact4.v1, fact4._row_id, dim4._row_id, fact4.v1, 1:Int32] }
                 └─StreamHashJoin { type: LeftOuter, predicate: fact4.v1 = dim4.v1, output: [fact4.v1, fact4._row_id, dim4._row_id] }
                   ├─StreamExchange { dist: HashShard(fact4.v1) }
-                  │ └─StreamTableScan { table: fact4, columns: [fact4.v1, fact4._row_id], stream_scan_type: ArrangementBackfill, stream_key: [fact4._row_id], pk: [_row_id], dist: UpstreamHashShard(fact4._row_id) }
+                  │ └─StreamTableScan { table: fact4, columns: [fact4.v1, fact4._row_id], stream_scan_type: SnapshotBackfill, stream_key: [fact4._row_id], pk: [_row_id], dist: UpstreamHashShard(fact4._row_id) }
                   └─StreamExchange { dist: HashShard(dim4.v1) }
-                    └─StreamTableScan { table: dim4, columns: [dim4.v1, dim4._row_id], stream_scan_type: ArrangementBackfill, stream_key: [dim4._row_id], pk: [_row_id], dist: UpstreamHashShard(dim4._row_id) }
+                    └─StreamTableScan { table: dim4, columns: [dim4.v1, dim4._row_id], stream_scan_type: SnapshotBackfill, stream_key: [dim4._row_id], pk: [_row_id], dist: UpstreamHashShard(dim4._row_id) }
   backfill_order_plan: |
     digraph G {
       "public.dim1" -> "public.fact1";
@@ -251,26 +251,26 @@
         │ ├─StreamShare { id: 4 }
         │ │ └─StreamHashJoin { type: LeftOuter, predicate: fact1.v1 = dim1.v1, output: [fact1.v1, fact1._row_id, dim1._row_id] }
         │ │   ├─StreamExchange { dist: HashShard(fact1.v1) }
-        │ │   │ └─StreamTableScan { table: fact1, columns: [fact1.v1, fact1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [fact1._row_id], pk: [_row_id], dist: UpstreamHashShard(fact1._row_id) }
+        │ │   │ └─StreamTableScan { table: fact1, columns: [fact1.v1, fact1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [fact1._row_id], pk: [_row_id], dist: UpstreamHashShard(fact1._row_id) }
         │ │   └─StreamExchange { dist: HashShard(dim1.v1) }
-        │ │     └─StreamTableScan { table: dim1, columns: [dim1.v1, dim1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [dim1._row_id], pk: [_row_id], dist: UpstreamHashShard(dim1._row_id) }
+        │ │     └─StreamTableScan { table: dim1, columns: [dim1.v1, dim1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [dim1._row_id], pk: [_row_id], dist: UpstreamHashShard(dim1._row_id) }
         │ └─StreamHashJoin { type: LeftOuter, predicate: fact2.v1 = dim2.v1, output: [fact2.v1, fact2._row_id, dim2._row_id] }
         │   ├─StreamExchange { dist: HashShard(fact2.v1) }
-        │   │ └─StreamTableScan { table: fact2, columns: [fact2.v1, fact2._row_id], stream_scan_type: ArrangementBackfill, stream_key: [fact2._row_id], pk: [_row_id], dist: UpstreamHashShard(fact2._row_id) }
+        │   │ └─StreamTableScan { table: fact2, columns: [fact2.v1, fact2._row_id], stream_scan_type: SnapshotBackfill, stream_key: [fact2._row_id], pk: [_row_id], dist: UpstreamHashShard(fact2._row_id) }
         │   └─StreamExchange { dist: HashShard(dim2.v1) }
-        │     └─StreamTableScan { table: dim2, columns: [dim2.v1, dim2._row_id], stream_scan_type: ArrangementBackfill, stream_key: [dim2._row_id], pk: [_row_id], dist: UpstreamHashShard(dim2._row_id) }
+        │     └─StreamTableScan { table: dim2, columns: [dim2.v1, dim2._row_id], stream_scan_type: SnapshotBackfill, stream_key: [dim2._row_id], pk: [_row_id], dist: UpstreamHashShard(dim2._row_id) }
         └─StreamHashJoin { type: LeftOuter, predicate: fact1.v1 = fact3.v1, output: [fact1.v1, fact1._row_id, dim1._row_id, fact3._row_id, dim3._row_id, fact3.v1] }
           ├─StreamShare { id: 4 }
           │ └─StreamHashJoin { type: LeftOuter, predicate: fact1.v1 = dim1.v1, output: [fact1.v1, fact1._row_id, dim1._row_id] }
           │   ├─StreamExchange { dist: HashShard(fact1.v1) }
-          │   │ └─StreamTableScan { table: fact1, columns: [fact1.v1, fact1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [fact1._row_id], pk: [_row_id], dist: UpstreamHashShard(fact1._row_id) }
+          │   │ └─StreamTableScan { table: fact1, columns: [fact1.v1, fact1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [fact1._row_id], pk: [_row_id], dist: UpstreamHashShard(fact1._row_id) }
           │   └─StreamExchange { dist: HashShard(dim1.v1) }
-          │     └─StreamTableScan { table: dim1, columns: [dim1.v1, dim1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [dim1._row_id], pk: [_row_id], dist: UpstreamHashShard(dim1._row_id) }
+          │     └─StreamTableScan { table: dim1, columns: [dim1.v1, dim1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [dim1._row_id], pk: [_row_id], dist: UpstreamHashShard(dim1._row_id) }
           └─StreamHashJoin { type: LeftOuter, predicate: fact3.v1 = dim3.v1, output: [fact3.v1, fact3._row_id, dim3._row_id] }
             ├─StreamExchange { dist: HashShard(fact3.v1) }
-            │ └─StreamTableScan { table: fact3, columns: [fact3.v1, fact3._row_id], stream_scan_type: ArrangementBackfill, stream_key: [fact3._row_id], pk: [_row_id], dist: UpstreamHashShard(fact3._row_id) }
+            │ └─StreamTableScan { table: fact3, columns: [fact3.v1, fact3._row_id], stream_scan_type: SnapshotBackfill, stream_key: [fact3._row_id], pk: [_row_id], dist: UpstreamHashShard(fact3._row_id) }
             └─StreamExchange { dist: HashShard(dim3.v1) }
-              └─StreamTableScan { table: dim3, columns: [dim3.v1, dim3._row_id], stream_scan_type: ArrangementBackfill, stream_key: [dim3._row_id], pk: [_row_id], dist: UpstreamHashShard(dim3._row_id) }
+              └─StreamTableScan { table: dim3, columns: [dim3.v1, dim3._row_id], stream_scan_type: SnapshotBackfill, stream_key: [dim3._row_id], pk: [_row_id], dist: UpstreamHashShard(dim3._row_id) }
   backfill_order_plan: |
     digraph G {
     }

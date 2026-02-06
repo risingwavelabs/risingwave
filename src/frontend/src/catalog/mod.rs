@@ -206,7 +206,7 @@ pub trait OwnedByUserCatalog {
 
 impl OwnedByUserCatalog for SinkCatalog {
     fn owner(&self) -> UserId {
-        self.owner.user_id
+        self.owner
     }
 }
 

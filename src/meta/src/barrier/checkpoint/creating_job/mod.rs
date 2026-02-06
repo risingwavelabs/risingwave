@@ -45,15 +45,17 @@ use crate::barrier::context::CreateSnapshotBackfillJobCommandInfo;
 use crate::barrier::edge_builder::FragmentEdgeBuildResult;
 use crate::barrier::info::{BarrierInfo, InflightStreamingJobInfo};
 use crate::barrier::notifier::Notifier;
-use crate::barrier::progress::{CreateMviewProgressTracker, TrackingJob};
+use crate::barrier::progress::{CreateMviewProgressTracker, TrackingJob, collect_done_fragments};
 use crate::barrier::rpc::{
     ControlStreamManager, build_locality_fragment_state_table_mapping, to_partial_graph_id,
 };
-use crate::barrier::{BackfillOrderState, BackfillProgress, BarrierKind, TracedEpoch};
+use crate::barrier::{
+    BackfillOrderState, BackfillProgress, BarrierKind, FragmentBackfillProgress, TracedEpoch,
+};
 use crate::controller::fragment::InflightFragmentInfo;
 use crate::model::{FragmentDownstreamRelation, StreamActor, StreamJobActorsToCreate};
 use crate::rpc::metrics::GLOBAL_META_METRICS;
-use crate::stream::{FragmentBackfillOrder, build_actor_connector_splits};
+use crate::stream::{ExtendedFragmentBackfillOrder, build_actor_connector_splits};
 
 #[derive(Debug)]
 pub(crate) struct CreatingJobInfo {
@@ -232,6 +234,22 @@ impl CreatingStreamingJobControl {
         })
     }
 
+    pub(super) fn gen_fragment_backfill_progress(&self) -> Vec<FragmentBackfillProgress> {
+        match &self.status {
+            CreatingStreamingJobStatus::ConsumingSnapshot {
+                create_mview_tracker,
+                info,
+                ..
+            } => create_mview_tracker.collect_fragment_progress(&info.fragment_infos, true),
+            CreatingStreamingJobStatus::ConsumingLogStore { info, .. } => {
+                collect_done_fragments(self.job_id, &info.fragment_infos)
+            }
+            CreatingStreamingJobStatus::Finishing(_, _)
+            | CreatingStreamingJobStatus::Resetting(_, _)
+            | CreatingStreamingJobStatus::PlaceHolder => vec![],
+        }
+    }
+
     fn resolve_upstream_log_epochs(
         snapshot_backfill_upstream_tables: &HashSet<TableId>,
         upstream_table_log_epochs: &HashMap<TableId, Vec<(Vec<u64>, u64)>>,
@@ -386,7 +404,7 @@ impl CreatingStreamingJobControl {
         committed_epoch: u64,
         upstream_barrier_info: &BarrierInfo,
         fragment_infos: HashMap<FragmentId, InflightFragmentInfo>,
-        backfill_order: FragmentBackfillOrder,
+        backfill_order: ExtendedFragmentBackfillOrder,
         fragment_relations: &FragmentDownstreamRelation,
         version_stat: &HummockVersionStats,
         new_actors: StreamJobActorsToCreate,

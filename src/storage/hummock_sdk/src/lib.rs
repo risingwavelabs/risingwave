@@ -22,7 +22,7 @@ mod key_cmp;
 use std::borrow::Borrow;
 use std::cmp::Ordering;
 use std::collections::HashMap;
-use std::fmt::{Display, Formatter};
+use std::fmt::{Debug, Display, Formatter};
 use std::ops::{Add, AddAssign, Sub};
 use std::str::FromStr;
 
@@ -62,7 +62,7 @@ use risingwave_pb::hummock::{PbVectorIndexObjectType, VectorIndexObjectType};
 use crate::table_watermark::TableWatermarks;
 use crate::vector_index::VectorIndexAdd;
 
-#[derive(Debug, Eq, PartialEq, Clone, Copy, Hash, Ord, PartialOrd)]
+#[derive(Eq, PartialEq, Clone, Copy, Hash, Ord, PartialOrd)]
 #[cfg_attr(any(test, feature = "test"), derive(Default))]
 pub struct TypedPrimitive<const C: usize, P>(P);
 
@@ -109,6 +109,12 @@ impl<const C: usize, P: Add<Output = P>> Add<P> for TypedPrimitive<C, P> {
 impl<const C: usize, P: AddAssign> AddAssign<P> for TypedPrimitive<C, P> {
     fn add_assign(&mut self, rhs: P) {
         self.0 += rhs;
+    }
+}
+
+impl<const C: usize, P: Debug> Debug for TypedPrimitive<C, P> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self.0)
     }
 }
 
