@@ -1819,3 +1819,199 @@ impl GroupStateValidator {
         Self::check_single_group_emergency(levels, compaction_config)
     }
 }
+
+#[cfg(test)]
+mod compaction_state_tests {
+    use risingwave_pb::hummock::compact_task::TaskType;
+
+    use super::*;
+
+    #[test]
+    fn test_basic_schedule_and_unschedule() {
+        let state = CompactionState::new();
+        let group_id: CompactionGroupId = 1.into();
+
+        // First schedule should succeed
+        assert!(state.try_sched_compaction(group_id, TaskType::Dynamic, ScheduleTrigger::NewData));
+        // Duplicate schedule should fail
+        assert!(!state.try_sched_compaction(group_id, TaskType::Dynamic, ScheduleTrigger::NewData));
+        // Different task type should succeed
+        assert!(state.try_sched_compaction(group_id, TaskType::Ttl, ScheduleTrigger::Periodic));
+
+        // Snapshot should contain both
+        let snapshot = state.snapshot();
+        assert!(snapshot.scheduled.contains(&(group_id, TaskType::Dynamic)));
+        assert!(snapshot.scheduled.contains(&(group_id, TaskType::Ttl)));
+
+        // Unschedule removes from scheduled set
+        state.unschedule(group_id, TaskType::Dynamic, snapshot.snapshot_time());
+        let snapshot2 = state.snapshot();
+        assert!(!snapshot2.scheduled.contains(&(group_id, TaskType::Dynamic)));
+        assert!(snapshot2.scheduled.contains(&(group_id, TaskType::Ttl)));
+    }
+
+    #[test]
+    fn test_cooldown_blocks_periodic_trigger() {
+        let state = CompactionState::new();
+        let group_id: CompactionGroupId = 1.into();
+
+        // Schedule then unschedule - should add to cooldown
+        assert!(state.try_sched_compaction(group_id, TaskType::Dynamic, ScheduleTrigger::NewData));
+        let snapshot = state.snapshot();
+        state.unschedule(group_id, TaskType::Dynamic, snapshot.snapshot_time());
+
+        // Verify in cooldown
+        assert!(state.inner.lock().dynamic_cooldown.contains(&group_id));
+
+        // Periodic trigger should be blocked
+        assert!(!state.try_sched_compaction(
+            group_id,
+            TaskType::Dynamic,
+            ScheduleTrigger::Periodic
+        ));
+    }
+
+    #[test]
+    fn test_new_data_clears_cooldown() {
+        let state = CompactionState::new();
+        let group_id: CompactionGroupId = 1.into();
+
+        // Put group in cooldown
+        assert!(state.try_sched_compaction(group_id, TaskType::Dynamic, ScheduleTrigger::NewData));
+        let snapshot = state.snapshot();
+        state.unschedule(group_id, TaskType::Dynamic, snapshot.snapshot_time());
+        assert!(state.inner.lock().dynamic_cooldown.contains(&group_id));
+
+        // NewData trigger should clear cooldown and schedule
+        assert!(state.try_sched_compaction(group_id, TaskType::Dynamic, ScheduleTrigger::NewData));
+        assert!(!state.inner.lock().dynamic_cooldown.contains(&group_id));
+    }
+
+    #[test]
+    fn test_cooldown_only_affects_dynamic_type() {
+        let state = CompactionState::new();
+        let group_id: CompactionGroupId = 1.into();
+
+        // Put group in cooldown for Dynamic
+        assert!(state.try_sched_compaction(group_id, TaskType::Dynamic, ScheduleTrigger::NewData));
+        let snapshot = state.snapshot();
+        state.unschedule(group_id, TaskType::Dynamic, snapshot.snapshot_time());
+
+        // Ttl unschedule should NOT add to cooldown
+        let group_id_2: CompactionGroupId = 2.into();
+        assert!(state.try_sched_compaction(group_id_2, TaskType::Ttl, ScheduleTrigger::Periodic));
+        let snapshot2 = state.snapshot();
+        state.unschedule(group_id_2, TaskType::Ttl, snapshot2.snapshot_time());
+        assert!(!state.inner.lock().dynamic_cooldown.contains(&group_id_2));
+
+        // Other task types should work regardless of cooldown
+        assert!(state.try_sched_compaction(group_id, TaskType::Ttl, ScheduleTrigger::Periodic));
+        assert!(state.try_sched_compaction(
+            group_id,
+            TaskType::SpaceReclaim,
+            ScheduleTrigger::Periodic
+        ));
+    }
+
+    #[test]
+    fn test_race_condition_new_data_after_snapshot() {
+        let state = CompactionState::new();
+        let group_id: CompactionGroupId = 1.into();
+
+        assert!(state.try_sched_compaction(group_id, TaskType::Dynamic, ScheduleTrigger::NewData));
+        let snapshot = state.snapshot();
+
+        // Simulate new data arriving AFTER snapshot
+        {
+            let mut guard = state.inner.lock();
+            guard.last_new_data_time.insert(group_id, Instant::now());
+        }
+
+        // Unschedule should NOT add to cooldown (new data arrived after snapshot)
+        state.unschedule(group_id, TaskType::Dynamic, snapshot.snapshot_time());
+        assert!(
+            !state.inner.lock().dynamic_cooldown.contains(&group_id),
+            "Should skip cooldown when new data arrived after snapshot"
+        );
+    }
+
+    #[test]
+    fn test_remove_compaction_group_cleans_all_state() {
+        let state = CompactionState::new();
+        let group_id: CompactionGroupId = 1.into();
+
+        // Set up state
+        assert!(state.try_sched_compaction(group_id, TaskType::Dynamic, ScheduleTrigger::NewData));
+        assert!(state.try_sched_compaction(group_id, TaskType::Ttl, ScheduleTrigger::Periodic));
+        state.inner.lock().dynamic_cooldown.insert(group_id);
+
+        // Remove group
+        state.remove_compaction_group(group_id);
+
+        // Verify all state cleaned up
+        let guard = state.inner.lock();
+        assert!(!guard.scheduled.contains(&(group_id, TaskType::Dynamic)));
+        assert!(!guard.scheduled.contains(&(group_id, TaskType::Ttl)));
+        assert!(!guard.dynamic_cooldown.contains(&group_id));
+        assert!(!guard.last_new_data_time.contains_key(&group_id));
+    }
+
+    #[test]
+    fn test_snapshot_pick_type_priority() {
+        let state = CompactionState::new();
+        let group_id: CompactionGroupId = 1.into();
+
+        // Empty group returns None
+        assert_eq!(state.snapshot().pick_type(group_id), None);
+
+        // Priority order: Dynamic > SpaceReclaim > Ttl > Tombstone > VnodeWatermark
+        state.try_sched_compaction(
+            group_id,
+            TaskType::VnodeWatermark,
+            ScheduleTrigger::Periodic,
+        );
+        assert_eq!(
+            state.snapshot().pick_type(group_id),
+            Some(TaskType::VnodeWatermark)
+        );
+
+        state.try_sched_compaction(group_id, TaskType::Tombstone, ScheduleTrigger::Periodic);
+        assert_eq!(
+            state.snapshot().pick_type(group_id),
+            Some(TaskType::Tombstone)
+        );
+
+        state.try_sched_compaction(group_id, TaskType::Ttl, ScheduleTrigger::Periodic);
+        assert_eq!(state.snapshot().pick_type(group_id), Some(TaskType::Ttl));
+
+        state.try_sched_compaction(group_id, TaskType::SpaceReclaim, ScheduleTrigger::Periodic);
+        assert_eq!(
+            state.snapshot().pick_type(group_id),
+            Some(TaskType::SpaceReclaim)
+        );
+
+        state.try_sched_compaction(group_id, TaskType::Dynamic, ScheduleTrigger::NewData);
+        assert_eq!(
+            state.snapshot().pick_type(group_id),
+            Some(TaskType::Dynamic)
+        );
+    }
+
+    #[test]
+    fn test_multiple_groups_independent_cooldown() {
+        let state = CompactionState::new();
+        let g1: CompactionGroupId = 1.into();
+        let g2: CompactionGroupId = 2.into();
+
+        state.try_sched_compaction(g1, TaskType::Dynamic, ScheduleTrigger::NewData);
+        state.try_sched_compaction(g2, TaskType::Dynamic, ScheduleTrigger::NewData);
+        let snapshot = state.snapshot();
+
+        // Only unschedule g1
+        state.unschedule(g1, TaskType::Dynamic, snapshot.snapshot_time());
+
+        let guard = state.inner.lock();
+        assert!(guard.dynamic_cooldown.contains(&g1));
+        assert!(!guard.dynamic_cooldown.contains(&g2));
+    }
+}
