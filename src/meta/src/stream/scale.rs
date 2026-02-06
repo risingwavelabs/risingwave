@@ -799,6 +799,7 @@ struct RetryState {
     attempts: usize,
     backoff: ExponentialBackoff,
     next_attempt_at: Instant,
+    warned_after_max: bool,
 }
 
 impl RetryState {
@@ -813,6 +814,7 @@ impl RetryState {
             attempts: 0,
             backoff,
             next_attempt_at,
+            warned_after_max: false,
         }
     }
 
@@ -908,12 +910,17 @@ impl RetryQueue {
                     }
 
                     if state.attempts >= STREAM_TASK_RETRY_MAX_ATTEMPTS {
-                        tracing::warn!(
-                            task = ?task,
-                            attempts = state.attempts,
-                            error = %e.as_report(),
-                            "stream task retry limit reached; giving up"
-                        );
+                        if !state.warned_after_max {
+                            tracing::warn!(
+                                task = ?task,
+                                attempts = state.attempts,
+                                error = %e.as_report(),
+                                "stream task retry limit reached; continue with max delay"
+                            );
+                            state.warned_after_max = true;
+                        }
+                        state.schedule_next(Instant::now());
+                        self.pending.insert(task, state);
                         continue;
                     }
 

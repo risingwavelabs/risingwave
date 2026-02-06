@@ -63,7 +63,11 @@ async fn wait_jobs_contains(
 ) -> Result<()> {
     for _ in 0..(MAX_HEARTBEAT_INTERVAL_SECS_CONFIG_FOR_AUTO_SCALE * 10) {
         let res = session.run("show jobs;").await?;
-        if expected.iter().all(|name| res.contains(name)) {
+        let res_lower = res.to_ascii_lowercase();
+        if expected.iter().all(|name| {
+            let pattern = format!("create materialized view {} as", name).to_ascii_lowercase();
+            res_lower.contains(&pattern)
+        }) {
             return Ok(());
         }
         sleep(Duration::from_millis(200)).await;
