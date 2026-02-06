@@ -107,11 +107,6 @@
             "description": "Support locality backfill for complex streaming queries.",
             "type": "string",
             "const": "LocalityBackfill"
-        },
-        {
-            "description": "Delivering data to Google Cloud Firestore.",
-            "type": "string",
-            "const": "FirestoreSink"
         }
     ]
 }
