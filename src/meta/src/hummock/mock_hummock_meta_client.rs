@@ -282,8 +282,8 @@ impl HummockMetaClient for MockHummockMetaClient {
 
         let handle = tokio::spawn(async move {
             loop {
-                let (groups, task_type) =
-                    hummock_manager_compact.auto_pick_compaction_groups_and_type();
+                let snapshot = hummock_manager_compact.compaction_state.snapshot();
+                let (groups, task_type) = snapshot.pick_compaction_groups_and_type();
 
                 if groups.is_empty() {
                     break;
