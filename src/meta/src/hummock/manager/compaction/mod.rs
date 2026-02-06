@@ -53,7 +53,6 @@ use risingwave_pb::hummock::{
 use thiserror_ext::AsReport;
 use tokio::sync::RwLockWriteGuard;
 use tokio::sync::mpsc::UnboundedReceiver;
-use tokio::sync::mpsc::error::SendError;
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
 use tonic::Streaming;
@@ -99,8 +98,6 @@ static CANCEL_STATUS_SET: LazyLock<HashSet<TaskStatus>> = LazyLock::new(|| {
     .into_iter()
     .collect()
 });
-
-type CompactionRequestChannelItem = (CompactionGroupId, compact_task::TaskType);
 
 fn init_selectors() -> HashMap<compact_task::TaskType, Box<dyn CompactionSelector>> {
     let mut compaction_selectors: HashMap<compact_task::TaskType, Box<dyn CompactionSelector>> =
@@ -1103,27 +1100,19 @@ impl HummockManager {
         Ok(())
     }
 
-    /// Sends a compaction request.
+    /// Sends a compaction request triggered by new data (e.g., from `commit_epoch`).
+    ///
+    /// This clears any cooldown for the group since new data arrived.
     pub fn try_send_compaction_request(
         &self,
         compaction_group: CompactionGroupId,
         task_type: compact_task::TaskType,
     ) -> bool {
-        match self.compaction_state.try_sched_compaction(
+        self.compaction_state.try_sched_compaction(
             compaction_group,
             task_type,
             ScheduleTrigger::NewData,
-        ) {
-            Ok(_) => true,
-            Err(e) => {
-                tracing::error!(
-                    error = %e.as_report(),
-                    "failed to send compaction request for compaction group {}",
-                    compaction_group,
-                );
-                false
-            }
-        }
+        )
     }
 
     /// Apply vnode-aligned compaction for large single-table levels.
@@ -1484,15 +1473,20 @@ impl CompactionState {
 
     /// Enqueues a compaction request if the target is not yet in queue.
     ///
-    /// Behavior depends on `trigger`:
+    /// Returns `true` if the group was newly scheduled, `false` if already scheduled
+    /// or skipped due to cooldown.
+    ///
+    /// The `trigger` parameter only affects `Dynamic` task type:
     /// - `NewData`: Clears cooldown and records the time (new data arrived).
-    /// - `Periodic`: Respects cooldown - skips groups in cooldown for Dynamic type.
+    /// - `Periodic`: Respects cooldown - skips groups in cooldown.
+    ///
+    /// For other task types (`Ttl`, `SpaceReclaim`, etc.), `trigger` is ignored.
     pub fn try_sched_compaction(
         &self,
         compaction_group: CompactionGroupId,
         task_type: TaskType,
         trigger: ScheduleTrigger,
-    ) -> std::result::Result<bool, SendError<CompactionRequestChannelItem>> {
+    ) -> bool {
         let mut guard = self.inner.lock();
         if task_type == TaskType::Dynamic {
             match trigger {
@@ -1506,17 +1500,17 @@ impl CompactionState {
                 ScheduleTrigger::Periodic => {
                     // Skip groups in cooldown
                     if guard.dynamic_cooldown.contains(&compaction_group) {
-                        return Ok(false);
+                        return false;
                     }
                 }
             }
         }
         let key = (compaction_group, task_type);
         if guard.scheduled.contains(&key) {
-            return Ok(false);
+            return false;
         }
         guard.scheduled.insert(key);
-        Ok(true)
+        true
     }
 
     /// Unschedule a group. For Dynamic type, decide whether to add to cooldown.
