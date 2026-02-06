@@ -19,6 +19,8 @@ use risingwave_common::hash::WorkerSlotId;
 use risingwave_pb::common::{WorkerNode, WorkerType};
 use risingwave_simulation::cluster::{Cluster, Configuration};
 
+use super::DEFAULT_TABLE_PARALLELISM_BOUND;
+
 #[tokio::test]
 async fn test_cordon_normal() -> Result<()> {
     let mut cluster = Cluster::start(Configuration::for_scale()).await?;
@@ -48,11 +50,13 @@ async fn test_cordon_normal() -> Result<()> {
     session.run("create table t (v int);").await?;
 
     let fragments = cluster.locate_fragments([]).await?;
+    let expected_parallelism = rest_worker_slots.len().min(DEFAULT_TABLE_PARALLELISM_BOUND);
 
     for fragment in fragments {
         let used_worker_slots = fragment.used_worker_slots();
 
-        assert_eq!(used_worker_slots, rest_worker_slots);
+        assert!(used_worker_slots.is_subset(&rest_worker_slots));
+        assert_eq!(used_worker_slots.len(), expected_parallelism);
     }
 
     session.run("drop table t;").await?;
@@ -66,7 +70,9 @@ async fn test_cordon_normal() -> Result<()> {
     for fragment in fragments {
         let all_worker_slots = fragment.all_worker_slots();
         let used_worker_slots = fragment.used_worker_slots();
-        assert_eq!(used_worker_slots, all_worker_slots);
+        let expected_parallelism = all_worker_slots.len().min(DEFAULT_TABLE_PARALLELISM_BOUND);
+        assert!(used_worker_slots.is_subset(&all_worker_slots));
+        assert_eq!(used_worker_slots.len(), expected_parallelism);
     }
 
     Ok(())
