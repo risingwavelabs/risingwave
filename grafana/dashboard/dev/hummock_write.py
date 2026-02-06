@@ -9,6 +9,41 @@ def _(outer_panels: Panels):
         outer_panels.row_collapsed(
             "Hummock (Write)",
             [
+                panels.subheader("Event Handling"),
+                panels.timeseries_count(
+                    "Event Handler Pending Event Count",
+                    "",
+                    [
+                        panels.target(
+                            f"sum({metric('state_store_event_handler_pending_event')}) by ({COMPONENT_LABEL}, {NODE_LABEL}, event_type)",
+                            "{{event_type}} {{%s}} @ {{%s}}" % (COMPONENT_LABEL, NODE_LABEL),
+                        ),
+                    ],
+                ),
+                panels.timeseries_latency(
+                    "Event Handler Latency",
+                    "",
+                    [
+                        *quantile(
+                            lambda quantile, legend: panels.target(
+                                f"histogram_quantile({quantile}, sum(rate({metric('state_store_event_handler_latency_bucket')}[$__rate_interval])) by (le, event_type, {COMPONENT_LABEL}, {NODE_LABEL}))",
+                                f"p{legend}"
+                                + " {{event_type}} {{%s}} @ {{%s}}"
+                                % (COMPONENT_LABEL, NODE_LABEL),
+                            ),
+                            [50, 99, "max"],
+                        ),
+                        *quantile(
+                            lambda quantile, legend: panels.target(
+                                f"histogram_quantile({quantile}, sum(rate({metric('state_store_uploader_wait_poll_latency_bucket')}[$__rate_interval])) by (le, {COMPONENT_LABEL}, {NODE_LABEL}))",
+                                f"p{legend}"
+                                + " finished_task_wait_poll {{%s}} @ {{%s}}"
+                                % (COMPONENT_LABEL, NODE_LABEL),
+                            ),
+                            [50, 99, "max"],
+                        ),
+                    ],
+                ),
                 panels.subheader("Uploader"),
                 panels.timeseries_bytes(
                     "Uploader Memory Size",
@@ -260,41 +295,6 @@ def _(outer_panels: Panels):
                         panels.target(
                             f"sum by(le, {COMPONENT_LABEL}, {NODE_LABEL}) (rate({metric('state_store_sync_size_sum')}[$__rate_interval])) / sum by(le, {COMPONENT_LABEL}, {NODE_LABEL}) (rate({metric('state_store_sync_size_count')}[$__rate_interval])) > 0",
                             "avg - {{%s}} @ {{%s}}" % (COMPONENT_LABEL, NODE_LABEL),
-                        ),
-                    ],
-                ),
-                panels.subheader("Event Handling"),
-                panels.timeseries_count(
-                    "Event Handler Pending Event Count",
-                    "",
-                    [
-                        panels.target(
-                            f"sum({metric('state_store_event_handler_pending_event')}) by ({COMPONENT_LABEL}, {NODE_LABEL}, event_type)",
-                            "{{event_type}} {{%s}} @ {{%s}}" % (COMPONENT_LABEL, NODE_LABEL),
-                        ),
-                    ],
-                ),
-                panels.timeseries_latency(
-                    "Event Handler Latency",
-                    "",
-                    [
-                        *quantile(
-                            lambda quantile, legend: panels.target(
-                                f"histogram_quantile({quantile}, sum(rate({metric('state_store_event_handler_latency_bucket')}[$__rate_interval])) by (le, event_type, {COMPONENT_LABEL}, {NODE_LABEL}))",
-                                f"p{legend}"
-                                + " {{event_type}} {{%s}} @ {{%s}}"
-                                % (COMPONENT_LABEL, NODE_LABEL),
-                            ),
-                            [50, 99, "max"],
-                        ),
-                        *quantile(
-                            lambda quantile, legend: panels.target(
-                                f"histogram_quantile({quantile}, sum(rate({metric('state_store_uploader_wait_poll_latency_bucket')}[$__rate_interval])) by (le, {COMPONENT_LABEL}, {NODE_LABEL}))",
-                                f"p{legend}"
-                                + " finished_task_wait_poll {{%s}} @ {{%s}}"
-                                % (COMPONENT_LABEL, NODE_LABEL),
-                            ),
-                            [50, 99, "max"],
                         ),
                     ],
                 ),

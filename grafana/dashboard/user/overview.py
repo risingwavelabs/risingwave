@@ -106,7 +106,7 @@ def _(panels: Panels):
                     "Lagging Vacuum",
                 ),
                 panels.target(
-                    f"{metric('state_store_uploading_memory_usage_ratio', filter=[f'{COMPONENT_LABEL}="compute"'])} >= bool 0.8",
+                    f"{metric('state_store_uploading_memory_usage_ratio', filter=f'{COMPONENT_LABEL}="compute"')} >= bool 0.8",
                     "Abnormal Uploading Memory Usage @ {{%s}}" % (NODE_LABEL),
                 ),
                 panels.target(
