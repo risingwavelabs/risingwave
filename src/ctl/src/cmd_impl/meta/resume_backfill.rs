@@ -15,17 +15,18 @@
 use anyhow::{Result, anyhow};
 use risingwave_pb::ddl_service::RisectlResumeBackfillRequest;
 use risingwave_pb::ddl_service::risectl_resume_backfill_request::Target;
+use risingwave_pb::id::{FragmentId, JobId};
 
 use crate::CtlContext;
 
 pub async fn resume_backfill(
     context: &CtlContext,
-    job_id: Option<u32>,
-    fragment_id: Option<u32>,
+    job_id: Option<JobId>,
+    fragment_id: Option<FragmentId>,
 ) -> Result<()> {
     let target = match (job_id, fragment_id) {
-        (Some(job_id), None) => Target::JobId(job_id),
-        (None, Some(fragment_id)) => Target::FragmentId(fragment_id),
+        (Some(job_id), None) => Target::JobId(job_id.as_raw_id()),
+        (None, Some(fragment_id)) => Target::FragmentId(fragment_id.as_raw_id()),
         _ => {
             return Err(anyhow!(
                 "exactly one of job_id or fragment_id must be provided"

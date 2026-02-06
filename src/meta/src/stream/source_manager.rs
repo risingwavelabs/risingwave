@@ -222,7 +222,7 @@ impl SourceManagerCore {
         }
 
         for (source_id, new_props) in recreate_source_id_map_new_props {
-            if let Some(handle) = self.managed_sources.get_mut(&(source_id as _)) {
+            if let Some(handle) = self.managed_sources.get_mut(&source_id) {
                 // the update here should not involve fragments change and split change
                 // Or we need to drop and recreate the source worker instead of updating inplace
                 let props_wrapper =

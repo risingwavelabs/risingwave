@@ -1099,7 +1099,7 @@ impl DatabaseCheckpointControl {
             && jobs.len() > 1
             && let Some(creating_job_id) = jobs
                 .iter()
-                .find(|job| self.creating_streaming_job_controls.contains_key(job))
+                .find(|job| self.creating_streaming_job_controls.contains_key(*job))
         {
             warn!(
                 job_id = %creating_job_id,
