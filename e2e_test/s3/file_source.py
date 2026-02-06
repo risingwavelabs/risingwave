@@ -233,8 +233,8 @@ def _test_parquet_case_insensitive(minio_client: Minio):
 
     table = pa.Table.from_pydict(
         {
-            "ID": [1, 2],
-            "Age": [21, 22],
+            "ID": pa.array([1, 2], type=pa.int32()),
+            "Age": pa.array([21, 22], type=pa.int32()),
         }
     )
     pq.write_table(table, local_path, compression="snappy", version="2.6")
