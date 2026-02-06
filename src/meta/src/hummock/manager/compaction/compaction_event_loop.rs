@@ -268,7 +268,8 @@ impl HummockCompactionEventHandler {
             .get_compactor(context_id)
         {
             let mut compactor_alive = true;
-            let (groups, task_type) = self.hummock_manager.auto_pick_compaction_groups_and_type();
+            let snapshot = self.hummock_manager.compaction_state.snapshot();
+            let (groups, task_type) = snapshot.pick_compaction_groups_and_type();
             if let TaskType::Ttl = task_type {
                 match self
                     .hummock_manager
@@ -346,9 +347,11 @@ impl HummockCompactionEventHandler {
                     };
                 }
                 for group in no_task_groups {
-                    self.hummock_manager
-                        .compaction_state
-                        .unschedule(group, task_type);
+                    self.hummock_manager.compaction_state.unschedule(
+                        group,
+                        task_type,
+                        snapshot.snapshot_time(),
+                    );
                 }
                 if let Err(err) = self
                     .hummock_manager
