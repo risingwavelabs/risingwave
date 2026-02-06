@@ -132,12 +132,12 @@ def _(outer_panels: Panels):
                             "Lagging Compaction",
                         ),
                         panels.target(
-                            alert_threshold(f"min_over_time({metric('storage_stale_object_count')}[5m])"), 200),
+                            alert_threshold(f"min_over_time({metric('storage_stale_object_count')}[5m])", 200),
                             "Lagging Vacuum",
                         ),
                         panels.target(
                             alert_threshold(
-                                metric("state_store_uploading_memory_usage_ratio", filter=[f'{COMPONENT_LABEL}="compute"']), 0.8
+                                metric("state_store_uploading_memory_usage_ratio", filter=f'{COMPONENT_LABEL}="compute"'), 0.8
                             ),
                             "Abnormal Uploading Memory Usage @ {{%s}}" % (NODE_LABEL),
                         ),
