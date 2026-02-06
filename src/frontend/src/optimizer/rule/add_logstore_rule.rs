@@ -12,7 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::optimizer::plan_node::{Stream, StreamPlanRef as PlanRef, StreamSyncLogStore};
+use crate::optimizer::plan_node::{
+    Stream, StreamPlanNodeType, StreamPlanRef as PlanRef, StreamSyncLogStore, SyncLogStoreTarget,
+};
 use crate::optimizer::rule::{BoxedRule, Rule};
 
 pub struct AddLogstoreRule {}
@@ -20,7 +22,10 @@ pub struct AddLogstoreRule {}
 impl Rule<Stream> for AddLogstoreRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         plan.as_stream_hash_join()?;
-        let log_store_plan = StreamSyncLogStore::new(plan);
+        let log_store_plan = StreamSyncLogStore::new_with_target(
+            plan,
+            SyncLogStoreTarget::unaligned_hash_join(StreamPlanNodeType::StreamHashJoin),
+        );
         Some(log_store_plan.into())
     }
 }

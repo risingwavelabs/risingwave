@@ -43,7 +43,7 @@ use super::utils::{
 };
 use super::{
     ExprRewritable, PlanBase, StreamExchange, StreamNode, StreamPlanRef as PlanRef, StreamProject,
-    StreamSyncLogStore, generic,
+    StreamPlanNodeType, StreamSyncLogStore, SyncLogStoreTarget, generic,
 };
 use crate::TableCatalog;
 use crate::error::{ErrorCode, Result, RwError, bail_bind_error, bail_invalid_input_syntax};
@@ -562,8 +562,11 @@ impl StreamSink {
 
         // sink into table should have logstore for sink_decouple
         let input = if sink_decouple && target_table.is_some() {
-            StreamSyncLogStore::new_with_target(input, StreamSyncLogStore::TARGET_SINK_INTO_TABLE)
-                .into()
+            StreamSyncLogStore::new_with_target(
+                input,
+                SyncLogStoreTarget::sink_into_table(StreamPlanNodeType::StreamSink),
+            )
+            .into()
         } else {
             input
         };
