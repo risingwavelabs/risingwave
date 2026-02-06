@@ -1,8 +1,12 @@
 extend = "common.toml"
 
 [env]
+GCLOUD_SYSTEM = { source = "${SYSTEM}", mapping = { "darwin-arm64" = "darwin-arm", "darwin-amd64" = "darwin-x86_64", "linux-arm64" = "linux-arm", "linux-amd64" = "linux-x86_64" } }
 GCLOUD_DOWNLOAD_PATH = "${PREFIX_TMP}/gcloud.tgz"
-GCLOUD_DOWNLOAD_TGZ = { value = "https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/google-cloud-cli-475.0.0-linux-x86_64.tar.gz", condition = { env_not_set = [
+GCLOUD_VERSION = { value = "475.0.0", condition = { env_not_set = [
+    "GCLOUD_VERSION",
+] } }
+GCLOUD_DOWNLOAD_TGZ = { value = "https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/google-cloud-cli-${GCLOUD_VERSION}-${GCLOUD_SYSTEM}.tar.gz", condition = { env_not_set = [
     "GCLOUD_DOWNLOAD_TGZ",
 ] } }
 GCLOUD_SDK_DIR = "google-cloud-sdk"

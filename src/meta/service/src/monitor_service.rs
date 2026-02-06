@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use risingwave_common::config::ServerConfig;
-use risingwave_common_service::ProfileServiceImpl;
+use risingwave_common_heap_profiling::ProfileServiceImpl;
 use risingwave_meta::manager::MetadataManager;
 use risingwave_meta::rpc::await_tree::dump_cluster_await_tree;
 use risingwave_pb::monitor_service::monitor_service_server::MonitorService;

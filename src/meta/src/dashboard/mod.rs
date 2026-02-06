@@ -23,7 +23,7 @@ use axum::extract::{Extension, Path};
 use axum::http::{Method, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
-use risingwave_common_service::ProfileServiceImpl;
+use risingwave_common_heap_profiling::ProfileServiceImpl;
 use risingwave_rpc_client::MonitorClientPool;
 use tokio::net::TcpListener;
 use tower::ServiceBuilder;

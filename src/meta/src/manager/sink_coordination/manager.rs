@@ -105,16 +105,25 @@ impl SinkCoordinatorManager {
         hummock_manager: HummockManagerRef,
         metadata_manager: MetadataManager,
         iceberg_compact_stat_sender: UnboundedSender<IcebergSinkCompactionUpdate>,
+        await_tree_reg: await_tree::Registry,
     ) -> (Self, (JoinHandle<()>, Sender<()>)) {
         let subscriber = new_committed_epoch_subscriber(hummock_manager, metadata_manager);
-        Self::start_worker_with_spawn_worker(move |param, manager_request_stream| {
-            tokio::spawn(CoordinatorWorker::run(
-                param,
-                manager_request_stream,
-                db.clone(),
-                subscriber.clone(),
-                iceberg_compact_stat_sender.clone(),
-            ))
+        Self::start_worker_with_spawn_worker({
+            move |param, manager_request_stream| {
+                let sink_id = param.sink_id;
+                let fut = CoordinatorWorker::run(
+                    param,
+                    manager_request_stream,
+                    db.clone(),
+                    subscriber.clone(),
+                    iceberg_compact_stat_sender.clone(),
+                );
+                tokio::spawn(
+                    await_tree_reg
+                        .register_derived_root(format!("Sink Coordinator {sink_id}"))
+                        .instrument(fut),
+                )
+            }
         })
     }
 

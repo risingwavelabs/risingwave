@@ -351,11 +351,11 @@ fn calculate_statistics<'a>(
     let mut total_rows: Option<usize> = Some(0);
     let mut total_bytes: usize = 0;
     for task in tasks {
-        match (task.record_count, total_rows) {
-            (Some(count), Some(ref mut total_rows)) => *total_rows += count as usize,
-            (None, _) => total_rows = None,
+        match (task.record_count, &mut total_rows) {
+            (Some(count), Some(rows)) => *rows += count as usize,
+            (None, rows) => *rows = None,
             _ => {}
-        };
+        }
         total_bytes += task.file_size_in_bytes as usize;
     }
 

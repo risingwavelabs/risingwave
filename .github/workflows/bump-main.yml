@@ -47,12 +47,12 @@ jobs:
 
           # Find next milestone
           next_minor=$((minor + 1))
-          milestone=$(echo "$milestones_json" | jq -r ".data.repository.milestones.nodes[] | select (.title==\"release-$major.$next_minor\") // empty")
+          milestone=$(echo "$milestones_json" | jq -r ".data.repository.milestones.nodes[] | select (.title==\"future-release-$major.$next_minor\") // empty")
 
           if [[ -z "$milestone" ]]; then
             echo "Milestone release-$major.$next_minor does not exist. Checking next major..."
             next_major=$((major + 1))
-            milestone=$(echo "$milestones_json" | jq -r ".data.repository.milestones.nodes[] | select (.title==\"release-$next_major.0\") // empty")
+            milestone=$(echo "$milestones_json" | jq -r ".data.repository.milestones.nodes[] | select (.title==\"future-release-$next_major.0\") // empty")
 
             if [[ -z "$milestone" ]]; then
               echo "No next milestone found. Please create it manually."

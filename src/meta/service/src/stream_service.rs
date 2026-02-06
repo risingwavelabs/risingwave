@@ -371,14 +371,21 @@ impl StreamManagerService for StreamServiceImpl {
         &self,
         _request: Request<ListFragmentDistributionRequest>,
     ) -> Result<Response<ListFragmentDistributionResponse>, Status> {
-        let distributions = self
-            .metadata_manager
-            .catalog_controller
-            .list_fragment_descs(false)
-            .await?
-            .into_iter()
-            .map(|(dist, _)| dist)
-            .collect();
+        let include_node = _request.into_inner().include_node.unwrap_or(true);
+        let distributions = if include_node {
+            self.metadata_manager
+                .catalog_controller
+                .list_fragment_descs_with_node(false)
+                .await?
+        } else {
+            self.metadata_manager
+                .catalog_controller
+                .list_fragment_descs_without_node(false)
+                .await?
+        }
+        .into_iter()
+        .map(|(dist, _)| dist)
+        .collect();
 
         Ok(Response::new(ListFragmentDistributionResponse {
             distributions,
@@ -389,18 +396,46 @@ impl StreamManagerService for StreamServiceImpl {
         &self,
         _request: Request<ListCreatingFragmentDistributionRequest>,
     ) -> Result<Response<ListCreatingFragmentDistributionResponse>, Status> {
-        let distributions = self
-            .metadata_manager
-            .catalog_controller
-            .list_fragment_descs(true)
-            .await?
-            .into_iter()
-            .map(|(dist, _)| dist)
-            .collect();
+        let include_node = _request.into_inner().include_node.unwrap_or(true);
+        let distributions = if include_node {
+            self.metadata_manager
+                .catalog_controller
+                .list_fragment_descs_with_node(true)
+                .await?
+        } else {
+            self.metadata_manager
+                .catalog_controller
+                .list_fragment_descs_without_node(true)
+                .await?
+        }
+        .into_iter()
+        .map(|(dist, _)| dist)
+        .collect();
 
         Ok(Response::new(ListCreatingFragmentDistributionResponse {
             distributions,
         }))
+    }
+
+    async fn list_sink_log_store_tables(
+        &self,
+        _request: Request<ListSinkLogStoreTablesRequest>,
+    ) -> Result<Response<ListSinkLogStoreTablesResponse>, Status> {
+        let tables = self
+            .metadata_manager
+            .catalog_controller
+            .list_sink_log_store_tables()
+            .await?
+            .into_iter()
+            .map(|(sink_id, internal_table_id)| {
+                list_sink_log_store_tables_response::SinkLogStoreTable {
+                    sink_id: sink_id.as_raw_id(),
+                    internal_table_id: internal_table_id.as_raw_id(),
+                }
+            })
+            .collect();
+
+        Ok(Response::new(ListSinkLogStoreTablesResponse { tables }))
     }
 
     async fn get_fragment_by_id(
@@ -413,8 +448,8 @@ impl StreamManagerService for StreamServiceImpl {
             .catalog_controller
             .get_fragment_desc_by_id(req.fragment_id)
             .await?;
-        let distribution =
-            fragment_desc.map(|(desc, upstreams)| fragment_desc_to_distribution(desc, upstreams));
+        let distribution = fragment_desc
+            .map(|(desc, upstreams)| fragment_desc_to_distribution(desc, upstreams, true));
         Ok(Response::new(GetFragmentByIdResponse { distribution }))
     }
 
@@ -876,7 +911,9 @@ impl StreamManagerService for StreamServiceImpl {
 fn fragment_desc_to_distribution(
     fragment_desc: FragmentDesc,
     upstreams: Vec<FragmentId>,
+    include_node: bool,
 ) -> FragmentDistribution {
+    let node = include_node.then(|| fragment_desc.stream_node.to_protobuf());
     FragmentDistribution {
         fragment_id: fragment_desc.fragment_id,
         table_id: fragment_desc.job_id,
@@ -886,7 +923,7 @@ fn fragment_desc_to_distribution(
         fragment_type_mask: fragment_desc.fragment_type_mask as _,
         parallelism: fragment_desc.parallelism as _,
         vnode_count: fragment_desc.vnode_count as _,
-        node: Some(fragment_desc.stream_node.to_protobuf()),
+        node,
         parallelism_policy: fragment_desc.parallelism_policy,
     }
 }

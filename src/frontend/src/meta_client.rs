@@ -42,7 +42,7 @@ use risingwave_pb::meta::list_streaming_job_states_response::StreamingJobState;
 use risingwave_pb::meta::list_table_fragments_response::TableFragmentInfo;
 use risingwave_pb::meta::{
     EventLog, FragmentDistribution, PbTableParallelism, PbThrottleTarget, RecoveryStatus,
-    RefreshRequest, RefreshResponse,
+    RefreshRequest, RefreshResponse, list_sink_log_store_tables_response,
 };
 use risingwave_pb::secret::PbSecretRef;
 use risingwave_rpc_client::error::Result;
@@ -74,7 +74,10 @@ pub trait FrontendMetaClient: Send + Sync {
 
     async fn list_streaming_job_states(&self) -> Result<Vec<StreamingJobState>>;
 
-    async fn list_fragment_distribution(&self) -> Result<Vec<FragmentDistribution>>;
+    async fn list_fragment_distribution(
+        &self,
+        include_node: bool,
+    ) -> Result<Vec<FragmentDistribution>>;
 
     async fn list_creating_fragment_distribution(&self) -> Result<Vec<FragmentDistribution>>;
 
@@ -85,6 +88,10 @@ pub trait FrontendMetaClient: Send + Sync {
     async fn list_object_dependencies(&self) -> Result<Vec<PbObjectDependencies>>;
 
     async fn list_meta_snapshots(&self) -> Result<Vec<MetaSnapshotMetadata>>;
+
+    async fn list_sink_log_store_tables(
+        &self,
+    ) -> Result<Vec<list_sink_log_store_tables_response::SinkLogStoreTable>>;
 
     async fn set_system_param(
         &self,
@@ -251,8 +258,11 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
         self.0.list_streaming_job_states().await
     }
 
-    async fn list_fragment_distribution(&self) -> Result<Vec<FragmentDistribution>> {
-        self.0.list_fragment_distributions().await
+    async fn list_fragment_distribution(
+        &self,
+        include_node: bool,
+    ) -> Result<Vec<FragmentDistribution>> {
+        self.0.list_fragment_distributions(include_node).await
     }
 
     async fn list_creating_fragment_distribution(&self) -> Result<Vec<FragmentDistribution>> {
@@ -274,6 +284,12 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
     async fn list_meta_snapshots(&self) -> Result<Vec<MetaSnapshotMetadata>> {
         let manifest = self.0.get_meta_snapshot_manifest().await?;
         Ok(manifest.snapshot_metadata)
+    }
+
+    async fn list_sink_log_store_tables(
+        &self,
+    ) -> Result<Vec<list_sink_log_store_tables_response::SinkLogStoreTable>> {
+        self.0.list_sink_log_store_tables().await
     }
 
     async fn set_system_param(

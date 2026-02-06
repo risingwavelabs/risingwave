@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::id::{FunctionId, SchemaId, UserId};
 use risingwave_common::types::{Fields, Timestamptz};
 use risingwave_frontend_macro::system_catalog;
 
@@ -21,10 +22,10 @@ use crate::error::Result;
 #[derive(Fields)]
 struct RwFunction {
     #[primary_key]
-    id: i32,
+    id: FunctionId,
     name: String,
-    schema_id: i32,
-    owner: i32,
+    schema_id: SchemaId,
+    owner: UserId,
     r#type: String,
     arg_type_ids: Vec<i32>,
     return_type_id: i32,
@@ -52,10 +53,10 @@ fn read(reader: &SysCatalogReaderImpl) -> Result<Vec<RwFunction>> {
             schema
                 .iter_function_with_acl(current_user)
                 .map(|function| RwFunction {
-                    id: function.id.as_i32_id(),
+                    id: function.id,
                     name: function.name.clone(),
-                    schema_id: schema.id().as_i32_id(),
-                    owner: function.owner as i32,
+                    schema_id: schema.id(),
+                    owner: function.owner,
                     r#type: function.kind.to_string(),
                     arg_type_ids: function.arg_types.iter().map(|t| t.to_oid()).collect(),
                     return_type_id: function.return_type.to_oid(),

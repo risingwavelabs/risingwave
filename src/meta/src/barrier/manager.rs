@@ -35,8 +35,8 @@ use crate::barrier::BarrierManagerRequest::MayHaveSnapshotBackfillingJob;
 use crate::barrier::cdc_progress::CdcProgress;
 use crate::barrier::worker::GlobalBarrierWorker;
 use crate::barrier::{
-    BackfillProgress, BarrierManagerRequest, BarrierManagerStatus, RecoveryReason,
-    UpdateDatabaseBarrierRequest, schedule,
+    BackfillProgress, BarrierManagerRequest, BarrierManagerStatus, FragmentBackfillProgress,
+    RecoveryReason, UpdateDatabaseBarrierRequest, schedule,
 };
 use crate::hummock::HummockManagerRef;
 use crate::manager::sink_coordination::SinkCoordinatorManager;
@@ -101,6 +101,17 @@ impl GlobalBarrierManager {
                 },
             )
             .collect())
+    }
+
+    pub(crate) async fn get_fragment_backfill_progress(
+        &self,
+    ) -> MetaResult<Vec<FragmentBackfillProgress>> {
+        let (tx, rx) = oneshot::channel();
+        self.request_tx
+            .send(BarrierManagerRequest::GetFragmentBackfillProgress(tx))
+            .context("failed to send get fragment backfill progress request")?;
+        rx.await
+            .context("failed to receive get fragment backfill progress")?
     }
 
     pub async fn get_cdc_progress(&self) -> MetaResult<HashMap<JobId, CdcProgress>> {

@@ -45,6 +45,7 @@ use risingwave_pb::stream_plan::{
     DispatchStrategy, Dispatcher, PbDispatchOutputMapping, PbDispatcher, PbStreamActor,
     PbStreamContext, StreamNode,
 };
+use strum::Display;
 
 use super::{ActorId, FragmentId};
 
@@ -791,7 +792,7 @@ impl StreamJobFragments {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Display, Clone, Copy, PartialEq, Eq)]
 pub enum BackfillUpstreamType {
     MView,
     Values,

@@ -33,6 +33,7 @@ use crate::barrier::checkpoint::control::DatabaseCheckpointControlStatus;
 use crate::barrier::checkpoint::creating_job::CreatingStreamingJobControl;
 use crate::barrier::checkpoint::{BarrierWorkerState, CheckpointControl};
 use crate::barrier::complete_task::BarrierCompleteOutput;
+use crate::barrier::context::recovery::RenderedDatabaseRuntimeInfo;
 use crate::barrier::rpc::{
     ControlStreamManager, DatabaseInitialBarrierCollector, from_partial_graph_id,
     to_partial_graph_id,
@@ -498,6 +499,7 @@ impl DatabaseStatusAction<'_, EnterInitializing> {
     pub(crate) fn enter(
         self,
         runtime_info: DatabaseRuntimeInfoSnapshot,
+        rendered_info: RenderedDatabaseRuntimeInfo,
         control_stream_manager: &mut ControlStreamManager,
     ) {
         let database_status = self
@@ -517,26 +519,28 @@ impl DatabaseStatusAction<'_, EnterInitializing> {
             },
         };
         let DatabaseRuntimeInfoSnapshot {
-            job_infos,
-            backfill_orders,
+            recovery_context,
             mut state_table_committed_epochs,
             mut state_table_log_epochs,
             mut mv_depended_subscriptions,
-            stream_actors,
-            fragment_relations,
-            mut source_splits,
             mut background_jobs,
             mut cdc_table_snapshot_splits,
         } = runtime_info;
+        let fragment_relations = &recovery_context.fragment_relations;
+        let RenderedDatabaseRuntimeInfo {
+            job_infos,
+            stream_actors,
+            mut source_splits,
+        } = rendered_info;
         let mut injected_creating_jobs = HashSet::new();
         let result: MetaResult<_> = try {
             control_stream_manager.inject_database_initial_barrier(
                 self.database_id,
                 job_infos,
-                backfill_orders,
+                &recovery_context.job_extra_info,
                 &mut state_table_committed_epochs,
                 &mut state_table_log_epochs,
-                &fragment_relations,
+                fragment_relations,
                 &stream_actors,
                 &mut source_splits,
                 &mut background_jobs,
