@@ -1274,16 +1274,11 @@ impl IcebergSinkWriterInner {
     fn build_append_only(table: Table, writer_param: &SinkWriterParam) -> Result<Self> {
         let SinkWriterParam {
             extra_partition_col_idx,
-            actor_id,
             sink_id,
             sink_name,
             ..
         } = writer_param;
-        let metrics_labels = [
-            &actor_id.to_string(),
-            &sink_id.to_string(),
-            sink_name.as_str(),
-        ];
+        let metrics_labels = [&sink_id.to_string(), sink_name.as_str()];
 
         // Metrics
         let write_qps = GLOBAL_SINK_METRICS
@@ -1380,16 +1375,11 @@ impl IcebergSinkWriterInner {
     ) -> Result<Self> {
         let SinkWriterParam {
             extra_partition_col_idx,
-            actor_id,
             sink_id,
             sink_name,
             ..
         } = writer_param;
-        let metrics_labels = [
-            &actor_id.to_string(),
-            &sink_id.to_string(),
-            sink_name.as_str(),
-        ];
+        let metrics_labels = [&sink_id.to_string(), sink_name.as_str()];
         let unique_column_ids: Vec<_> = unique_column_ids.into_iter().map(|id| id as i32).collect();
 
         // Metrics

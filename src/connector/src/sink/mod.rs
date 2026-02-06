@@ -424,7 +424,7 @@ impl SinkMetrics {
         let sink_commit_duration = register_guarded_histogram_vec_with_registry!(
             "sink_commit_duration",
             "Duration of commit op in sink",
-            &["actor_id", "connector", "sink_id", "sink_name"],
+            &["connector", "sink_id", "sink_name"],
             registry
         )
         .unwrap();
@@ -432,7 +432,7 @@ impl SinkMetrics {
         let connector_sink_rows_received = register_guarded_int_counter_vec_with_registry!(
             "connector_sink_rows_received",
             "Number of rows received by sink",
-            &["actor_id", "connector_type", "sink_id", "sink_name"],
+            &["connector_type", "sink_id", "sink_name"],
             registry
         )
         .unwrap();
@@ -440,7 +440,7 @@ impl SinkMetrics {
         let log_store_first_write_epoch = register_guarded_int_gauge_vec_with_registry!(
             "log_store_first_write_epoch",
             "The first write epoch of log store",
-            &["actor_id", "sink_id", "sink_name"],
+            &["sink_id", "sink_name"],
             registry
         )
         .unwrap();
@@ -448,7 +448,7 @@ impl SinkMetrics {
         let log_store_latest_write_epoch = register_guarded_int_gauge_vec_with_registry!(
             "log_store_latest_write_epoch",
             "The latest write epoch of log store",
-            &["actor_id", "sink_id", "sink_name"],
+            &["sink_id", "sink_name"],
             registry
         )
         .unwrap();
@@ -456,7 +456,7 @@ impl SinkMetrics {
         let log_store_write_rows = register_guarded_int_counter_vec_with_registry!(
             "log_store_write_rows",
             "The write rate of rows",
-            &["actor_id", "sink_id", "sink_name"],
+            &["sink_id", "sink_name"],
             registry
         )
         .unwrap();
@@ -464,7 +464,7 @@ impl SinkMetrics {
         let log_store_latest_read_epoch = register_guarded_int_gauge_vec_with_registry!(
             "log_store_latest_read_epoch",
             "The latest read epoch of log store",
-            &["actor_id", "connector", "sink_id", "sink_name"],
+            &["connector", "sink_id", "sink_name"],
             registry
         )
         .unwrap();
@@ -472,7 +472,7 @@ impl SinkMetrics {
         let log_store_read_rows = register_guarded_int_counter_vec_with_registry!(
             "log_store_read_rows",
             "The read rate of rows",
-            &["actor_id", "connector", "sink_id", "sink_name"],
+            &["connector", "sink_id", "sink_name"],
             registry
         )
         .unwrap();
@@ -480,7 +480,7 @@ impl SinkMetrics {
         let log_store_read_bytes = register_guarded_int_counter_vec_with_registry!(
             "log_store_read_bytes",
             "Total size of chunks read by log reader",
-            &["actor_id", "connector", "sink_id", "sink_name"],
+            &["connector", "sink_id", "sink_name"],
             registry
         )
         .unwrap();
@@ -489,7 +489,7 @@ impl SinkMetrics {
             register_guarded_int_counter_vec_with_registry!(
                 "log_store_reader_wait_new_future_duration_ns",
                 "Accumulated duration of LogReader to wait for next call to create future",
-                &["actor_id", "connector", "sink_id", "sink_name"],
+                &["connector", "sink_id", "sink_name"],
                 registry
             )
             .unwrap();
@@ -497,7 +497,7 @@ impl SinkMetrics {
         let iceberg_write_qps = register_guarded_int_counter_vec_with_registry!(
             "iceberg_write_qps",
             "The qps of iceberg writer",
-            &["actor_id", "sink_id", "sink_name"],
+            &["sink_id", "sink_name"],
             registry
         )
         .unwrap();
@@ -505,7 +505,7 @@ impl SinkMetrics {
         let iceberg_write_latency = register_guarded_histogram_vec_with_registry!(
             "iceberg_write_latency",
             "The latency of iceberg writer",
-            &["actor_id", "sink_id", "sink_name"],
+            &["sink_id", "sink_name"],
             registry
         )
         .unwrap();
@@ -513,7 +513,7 @@ impl SinkMetrics {
         let iceberg_rolling_unflushed_data_file = register_guarded_int_gauge_vec_with_registry!(
             "iceberg_rolling_unflushed_data_file",
             "The unflushed data file count of iceberg rolling writer",
-            &["actor_id", "sink_id", "sink_name"],
+            &["sink_id", "sink_name"],
             registry
         )
         .unwrap();
@@ -521,7 +521,7 @@ impl SinkMetrics {
         let iceberg_position_delete_cache_num = register_guarded_int_gauge_vec_with_registry!(
             "iceberg_position_delete_cache_num",
             "The delete cache num of iceberg position delete writer",
-            &["actor_id", "sink_id", "sink_name"],
+            &["sink_id", "sink_name"],
             registry
         )
         .unwrap();
@@ -529,7 +529,7 @@ impl SinkMetrics {
         let iceberg_partition_num = register_guarded_int_gauge_vec_with_registry!(
             "iceberg_partition_num",
             "The partition num of iceberg partition writer",
-            &["actor_id", "sink_id", "sink_name"],
+            &["sink_id", "sink_name"],
             registry
         )
         .unwrap();
@@ -537,7 +537,7 @@ impl SinkMetrics {
         let iceberg_write_bytes = register_guarded_int_counter_vec_with_registry!(
             "iceberg_write_bytes",
             "The write bytes of iceberg writer",
-            &["actor_id", "sink_id", "sink_name"],
+            &["sink_id", "sink_name"],
             registry
         )
         .unwrap();
@@ -599,7 +599,6 @@ pub struct SinkWriterMetrics {
 impl SinkWriterMetrics {
     pub fn new(writer_param: &SinkWriterParam) -> Self {
         let labels = [
-            &writer_param.actor_id.to_string(),
             writer_param.connector.as_str(),
             &writer_param.sink_id.to_string(),
             writer_param.sink_name.as_str(),
