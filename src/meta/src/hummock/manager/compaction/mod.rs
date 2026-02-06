@@ -284,32 +284,17 @@ impl HummockManager {
             .unwrap();
     }
 
-    pub async fn auto_pick_compaction_group_and_type(
-        &self,
-    ) -> Option<(CompactionGroupId, compact_task::TaskType)> {
-        let mut compaction_group_ids = self.compaction_group_ids().await;
-        compaction_group_ids.shuffle(&mut thread_rng());
-
-        for cg_id in compaction_group_ids {
-            if let Some(pick_type) = self.compaction_state.auto_pick_type(cg_id) {
-                return Some((cg_id, pick_type));
-            }
-        }
-
-        None
-    }
-
-    /// This method will return all compaction group id in a random order and task type. If there are any group block by `write_limit`, it will return a single array with `TaskType::Emergency`.
-    /// If these groups get different task-type, it will return all group id with `TaskType::Dynamic` if the first group get `TaskType::Dynamic`, otherwise it will return the single group with other task type.
-    async fn auto_pick_compaction_groups_and_type(
+    /// This method will return all compaction group id in a random order and task type.
+    /// If these groups get different task-type, it will return all group id with `TaskType::Dynamic`
+    /// if the first group get `TaskType::Dynamic`, otherwise it will return the single group with other task type.
+    pub fn auto_pick_compaction_groups_and_type(
         &self,
     ) -> (Vec<CompactionGroupId>, compact_task::TaskType) {
-        let mut compaction_group_ids = self.compaction_group_ids().await;
-        compaction_group_ids.shuffle(&mut thread_rng());
+        let (snapshot, group_ids) = self.compaction_state.snapshot_with_shuffled_group_ids();
 
         let mut normal_groups = vec![];
-        for cg_id in compaction_group_ids {
-            if let Some(pick_type) = self.compaction_state.auto_pick_type(cg_id) {
+        for cg_id in group_ids {
+            if let Some(pick_type) = CompactionState::pick_type_from_snapshot(&snapshot, cg_id) {
                 if pick_type == TaskType::Dynamic {
                     normal_groups.push(cg_id);
                 } else if normal_groups.is_empty() {
@@ -1415,17 +1400,40 @@ impl CompactionState {
         self.scheduled.lock().remove(&(compaction_group, task_type));
     }
 
-    pub fn auto_pick_type(&self, group: CompactionGroupId) -> Option<TaskType> {
-        let guard = self.scheduled.lock();
-        if guard.contains(&(group, compact_task::TaskType::Dynamic)) {
+    /// Take a snapshot of the scheduled set to reduce lock contention.
+    pub fn snapshot(&self) -> HashSet<(CompactionGroupId, compact_task::TaskType)> {
+        self.scheduled.lock().clone()
+    }
+
+    /// Take a snapshot and extract unique group ids in shuffled order.
+    pub fn snapshot_with_shuffled_group_ids(
+        &self,
+    ) -> (
+        HashSet<(CompactionGroupId, compact_task::TaskType)>,
+        Vec<CompactionGroupId>,
+    ) {
+        let snapshot = self.snapshot();
+        let mut group_ids: Vec<_> = snapshot.iter().map(|(g, _)| *g).collect();
+        group_ids.sort_unstable();
+        group_ids.dedup();
+        group_ids.shuffle(&mut thread_rng());
+        (snapshot, group_ids)
+    }
+
+    /// Pick task type from snapshot by priority order.
+    pub fn pick_type_from_snapshot(
+        snapshot: &HashSet<(CompactionGroupId, compact_task::TaskType)>,
+        group: CompactionGroupId,
+    ) -> Option<TaskType> {
+        if snapshot.contains(&(group, compact_task::TaskType::Dynamic)) {
             Some(compact_task::TaskType::Dynamic)
-        } else if guard.contains(&(group, compact_task::TaskType::SpaceReclaim)) {
+        } else if snapshot.contains(&(group, compact_task::TaskType::SpaceReclaim)) {
             Some(compact_task::TaskType::SpaceReclaim)
-        } else if guard.contains(&(group, compact_task::TaskType::Ttl)) {
+        } else if snapshot.contains(&(group, compact_task::TaskType::Ttl)) {
             Some(compact_task::TaskType::Ttl)
-        } else if guard.contains(&(group, compact_task::TaskType::Tombstone)) {
+        } else if snapshot.contains(&(group, compact_task::TaskType::Tombstone)) {
             Some(compact_task::TaskType::Tombstone)
-        } else if guard.contains(&(group, compact_task::TaskType::VnodeWatermark)) {
+        } else if snapshot.contains(&(group, compact_task::TaskType::VnodeWatermark)) {
             Some(compact_task::TaskType::VnodeWatermark)
         } else {
             None

@@ -282,15 +282,14 @@ impl HummockMetaClient for MockHummockMetaClient {
 
         let handle = tokio::spawn(async move {
             loop {
-                let group_and_type = hummock_manager_compact
-                    .auto_pick_compaction_group_and_type()
-                    .await;
+                let (groups, task_type) =
+                    hummock_manager_compact.auto_pick_compaction_groups_and_type();
 
-                if group_and_type.is_none() {
+                if groups.is_empty() {
                     break;
                 }
 
-                let (group, task_type) = group_and_type.unwrap();
+                let group = groups[0];
 
                 if let TaskType::Ttl = task_type {
                     match hummock_manager_compact
