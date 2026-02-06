@@ -200,6 +200,7 @@ pub(crate) struct KvLogStoreMetrics {
     pub buffer_unconsumed_row_count: LabelGuardedIntGauge,
     pub buffer_unconsumed_epoch_count: LabelGuardedIntGauge,
     pub buffer_unconsumed_min_epoch: LabelGuardedIntGauge,
+    pub buffer_memory_bytes: LabelGuardedIntGauge,
     pub persistent_log_read_metrics: KvLogStoreReadMetrics,
     pub flushed_buffer_read_metrics: KvLogStoreReadMetrics,
 }
@@ -301,6 +302,9 @@ impl KvLogStoreMetrics {
         let buffer_unconsumed_min_epoch = metrics
             .kv_log_store_buffer_unconsumed_min_epoch
             .with_guarded_label_values(labels);
+        let buffer_memory_bytes = metrics
+            .kv_log_store_buffer_memory_bytes
+            .with_guarded_label_values(labels);
 
         Self {
             storage_write_size,
@@ -310,6 +314,7 @@ impl KvLogStoreMetrics {
             buffer_unconsumed_row_count,
             buffer_unconsumed_epoch_count,
             buffer_unconsumed_min_epoch,
+            buffer_memory_bytes,
             persistent_log_read_metrics: KvLogStoreReadMetrics {
                 storage_read_size: persistent_log_read_size,
                 storage_read_count: persistent_log_read_count,
@@ -331,6 +336,7 @@ impl KvLogStoreMetrics {
             buffer_unconsumed_row_count: LabelGuardedIntGauge::test_int_gauge::<4>(),
             buffer_unconsumed_epoch_count: LabelGuardedIntGauge::test_int_gauge::<4>(),
             buffer_unconsumed_min_epoch: LabelGuardedIntGauge::test_int_gauge::<4>(),
+            buffer_memory_bytes: LabelGuardedIntGauge::test_int_gauge::<4>(),
             rewind_count: LabelGuardedIntCounter::test_int_counter::<4>(),
             rewind_delay: LabelGuardedHistogram::test_histogram::<4>(),
             persistent_log_read_metrics: KvLogStoreReadMetrics::for_test(),
