@@ -24,7 +24,8 @@ impl Rule<Stream> for AddLogstoreRule {
         plan.as_stream_hash_join()?;
         let log_store_plan = StreamSyncLogStore::new_with_target(
             plan,
-            SyncLogStoreTarget::unaligned_hash_join(StreamPlanNodeType::StreamHashJoin),
+            StreamPlanNodeType::StreamHashJoin,
+            SyncLogStoreTarget::UnalignedHashJoin,
         );
         Some(log_store_plan.into())
     }

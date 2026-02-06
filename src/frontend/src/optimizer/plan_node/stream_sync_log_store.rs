@@ -30,29 +30,15 @@ use crate::stream_fragmenter::BuildFragmentGraphState;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum SyncLogStoreTarget {
-    UnalignedHashJoin(StreamPlanNodeType),
-    SinkIntoTable(StreamPlanNodeType),
+    UnalignedHashJoin,
+    SinkIntoTable,
 }
 
 impl SyncLogStoreTarget {
-    pub fn unaligned_hash_join(plan_node: StreamPlanNodeType) -> Self {
-        Self::UnalignedHashJoin(plan_node)
-    }
-
-    pub fn sink_into_table(plan_node: StreamPlanNodeType) -> Self {
-        Self::SinkIntoTable(plan_node)
-    }
-
     pub fn metrics_target(self) -> &'static str {
         match self {
-            Self::UnalignedHashJoin(_) => "unaligned_hash_join",
-            Self::SinkIntoTable(_) => "sink-into-table",
-        }
-    }
-
-    pub fn plan_node_type(self) -> StreamPlanNodeType {
-        match self {
-            Self::UnalignedHashJoin(plan_node) | Self::SinkIntoTable(plan_node) => plan_node,
+            Self::UnalignedHashJoin => "unaligned_hash_join",
+            Self::SinkIntoTable => "sink-into-table",
         }
     }
 }
@@ -61,11 +47,16 @@ impl SyncLogStoreTarget {
 pub struct StreamSyncLogStore {
     pub base: PlanBase<Stream>,
     pub input: PlanRef,
+    pub plan_node_discriminant: StreamPlanNodeType,
     pub metrics_target: SyncLogStoreTarget,
 }
 
 impl StreamSyncLogStore {
-    pub fn new_with_target(input: PlanRef, metrics_target: SyncLogStoreTarget) -> Self {
+    pub fn new_with_target(
+        input: PlanRef,
+        plan_node_discriminant: StreamPlanNodeType,
+        metrics_target: SyncLogStoreTarget,
+    ) -> Self {
         let base = PlanBase::new_stream(
             input.ctx(),
             input.schema().clone(),
@@ -81,6 +72,7 @@ impl StreamSyncLogStore {
         Self {
             base,
             input,
+            plan_node_discriminant,
             metrics_target,
         }
     }
@@ -98,7 +90,7 @@ impl PlanTreeNodeUnary<Stream> for StreamSyncLogStore {
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        Self::new_with_target(input, self.metrics_target)
+        Self::new_with_target(input, self.plan_node_discriminant, self.metrics_target)
     }
 }
 

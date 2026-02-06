@@ -564,7 +564,8 @@ impl StreamSink {
         let input = if sink_decouple && target_table.is_some() {
             StreamSyncLogStore::new_with_target(
                 input,
-                SyncLogStoreTarget::sink_into_table(StreamPlanNodeType::StreamSink),
+                StreamPlanNodeType::StreamSink,
+                SyncLogStoreTarget::SinkIntoTable,
             )
             .into()
         } else {
