@@ -85,9 +85,9 @@ def _(outer_panels: Panels):
     poll_duration_expr = (
         f"{poll_duration_rate_expr} / on(fragment_id) {actor_count_expr}"
     )
-    zero_mv_expr = f"0 * max by (materialized_view_id) ({metric('table_info')})"
+    zero_for_all_mvs_expr = f"0 * max by (materialized_view_id) ({metric('table_info')})"
     def _coalesce_mv(expr: str) -> str:
-        return f"(({expr}) or on(materialized_view_id) {zero_mv_expr})"
+        return f"(({expr}) or on(materialized_view_id) {zero_for_all_mvs_expr})"
 
     kv_log_store_buffer_usage_by_fragment_expr = (
         f"sum({metric('kv_log_store_buffer_memory_bytes')}"
