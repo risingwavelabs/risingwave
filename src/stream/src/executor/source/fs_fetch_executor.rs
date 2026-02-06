@@ -227,7 +227,6 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                 )
                 .await?
                 .map_err(StreamExecutorError::connector_error);
-                let single_file_stream = single_file_stream.map(|reader| reader);
                 let single_file_stream =
                     SetReadingFileOnPoll::new(single_file_stream, reading_file.clone(), split_id)
                         .boxed();
@@ -305,6 +304,19 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
         let source_desc = source_desc_builder
             .build()
             .map_err(StreamExecutorError::connector_error)?;
+        let actor_id = self.actor_ctx.id.to_string();
+        let fragment_id = self.actor_ctx.fragment_id.to_string();
+        let source_id = core.source_id.to_string();
+        let source_name = core.source_name.clone();
+        let dirty_split_count_metrics = source_desc
+            .metrics
+            .file_source_dirty_split_count
+            .with_guarded_label_values(&[&source_id, &source_name, &actor_id, &fragment_id]);
+        let failed_split_count_metrics = source_desc
+            .metrics
+            .file_source_failed_split_count
+            .with_guarded_label_values(&[&source_id, &source_name, &actor_id, &fragment_id]);
+        dirty_split_count_metrics.set(0);
 
         // pulsar's `message_id_data_idx` is not used in this executor, so we don't need to get it.
         let (Some(split_idx), Some(offset_idx), _) = get_split_offset_col_idx(&source_desc.columns)
@@ -378,6 +390,8 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                     } else {
                         // Exceeded max retries: mark dirty in memory and skip this split afterwards.
                         dirty_splits.insert(split_id.clone());
+                        dirty_split_count_metrics.set(dirty_splits.len() as i64);
+                        failed_split_count_metrics.inc();
                         retry_counts.remove(&split_id);
                         tracing::error!(
                             source_id = %core.source_id,
@@ -546,6 +560,7 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                                 if let Some((split_id, offset)) = mapping.into_iter().next() {
                                     *reading_file.lock().expect("mutex poisoned") =
                                         Some(split_id.clone());
+                                    retry_counts.remove(&split_id);
                                     let row = state_store_handler.get(&split_id).await?
                                         .unwrap_or_else(|| {
                                             panic!("The fs_split (file_name) {:?} should be in the state table.",
