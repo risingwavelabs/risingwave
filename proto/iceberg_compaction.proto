@@ -43,10 +43,10 @@ message SubscribeIcebergCompactionEventRequest {
     PullTask pull_task = 2;
 
     // Compactor will report plan completion to meta.
-    ReportPlan report_plan = 3;
+    ReportPlan report_plan = 4;
   }
 
-  uint64 create_at = 7;
+  uint64 create_at = 3;
 }
 
 message PlanKey {
