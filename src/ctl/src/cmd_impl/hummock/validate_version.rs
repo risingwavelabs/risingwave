@@ -22,10 +22,11 @@ use risingwave_hummock_sdk::compaction_group::hummock_version_ext;
 use risingwave_hummock_sdk::key::{FullKey, UserKey};
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
-use risingwave_hummock_sdk::{HummockSstableObjectId, HummockVersionId, version_archive_dir};
+use risingwave_hummock_sdk::{HummockVersionId, version_archive_dir};
 use risingwave_object_store::object::ObjectStoreRef;
 use risingwave_pb::hummock::HummockVersionArchive;
 use risingwave_pb::hummock::group_delta::DeltaType;
+use risingwave_pb::id::HummockSstableId;
 use risingwave_rpc_client::HummockMetaClient;
 use risingwave_storage::hummock::value::HummockValue;
 use risingwave_storage::hummock::{Block, BlockHolder, BlockIterator, SstableStoreRef};
@@ -171,10 +172,9 @@ pub async fn print_version_delta_in_archive(
     context: &CtlContext,
     archive_ids: impl IntoIterator<Item = HummockVersionId>,
     data_dir: String,
-    sst_id: impl Into<HummockSstableObjectId>,
+    sst_id: HummockSstableId,
     use_new_object_prefix_strategy: bool,
 ) -> anyhow::Result<()> {
-    let sst_id = sst_id.into();
     let hummock_opts =
         HummockServiceOpts::from_env(Some(data_dir.clone()), use_new_object_prefix_strategy)?;
     let hummock = context.hummock_store(hummock_opts).await?;
@@ -206,7 +206,7 @@ pub async fn print_version_delta_in_archive(
     Ok(())
 }
 
-fn match_delta(delta: &DeltaType, sst_id: HummockSstableObjectId) -> bool {
+fn match_delta(delta: &DeltaType, sst_id: HummockSstableId) -> bool {
     match delta {
         DeltaType::GroupConstruct(_)
         | DeltaType::GroupDestroy(_)
@@ -217,7 +217,7 @@ fn match_delta(delta: &DeltaType, sst_id: HummockSstableObjectId) -> bool {
                 .inserted_table_infos
                 .iter()
                 .any(|sst| sst.sst_id == sst_id)
-                || delta.removed_table_ids.contains(&sst_id.inner())
+                || delta.removed_table_ids.contains(&sst_id)
         }
         DeltaType::NewL0SubLevel(delta) => delta
             .inserted_table_infos

@@ -22,7 +22,6 @@ use risingwave_common::catalog::{
     AlterDatabaseParam, CatalogVersion, FunctionId, IndexId, ObjectId,
 };
 use risingwave_common::id::{ConnectionId, JobId, SchemaId, SourceId, ViewId};
-use risingwave_hummock_sdk::HummockVersionId;
 use risingwave_pb::catalog::{
     PbComment, PbCreateType, PbDatabase, PbFunction, PbIndex, PbSchema, PbSink, PbSource,
     PbSubscription, PbTable, PbView,
@@ -742,7 +741,7 @@ impl CatalogWriterImpl {
             rx.changed().await.map_err(|e| anyhow!(e))?;
         }
         self.hummock_snapshot_manager
-            .wait(HummockVersionId::new(version.hummock_version_id))
+            .wait(version.hummock_version_id)
             .await;
         Ok(())
     }

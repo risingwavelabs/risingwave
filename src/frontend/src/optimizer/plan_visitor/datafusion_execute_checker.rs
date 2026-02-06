@@ -82,6 +82,13 @@ impl LogicalPlanVisitor for DataFusionExecuteChecker {
         self.check_inputs(plan)
     }
 
+    fn visit_logical_project_set(
+        &mut self,
+        plan: &crate::optimizer::plan_node::LogicalProjectSet,
+    ) -> Self::Result {
+        self.check_inputs(plan)
+    }
+
     fn visit_logical_join(
         &mut self,
         plan: &crate::optimizer::plan_node::LogicalJoin,
