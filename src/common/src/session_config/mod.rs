@@ -67,13 +67,6 @@ const DISABLE_SOURCE_RATE_LIMIT: i32 = -1;
 const DISABLE_DML_RATE_LIMIT: i32 = -1;
 const DISABLE_SINK_RATE_LIMIT: i32 = -1;
 
-/// Default parallelism bound for tables
-const DEFAULT_TABLE_PARALLELISM_BOUND: std::num::NonZeroU64 = std::num::NonZeroU64::new(4).unwrap();
-
-/// Default parallelism bound for sources
-const DEFAULT_SOURCE_PARALLELISM_BOUND: std::num::NonZeroU64 =
-    std::num::NonZeroU64::new(4).unwrap();
-
 /// Default to bypass cluster limits iff in debug mode.
 const BYPASS_CLUSTER_LIMITS: bool = cfg!(debug_assertions);
 
@@ -187,8 +180,8 @@ pub struct SessionConfig {
     #[parameter(default = ConfigAdaptiveParallelismStrategy::default())]
     streaming_parallelism_strategy: ConfigAdaptiveParallelismStrategy,
 
-    /// Specific adaptive parallelism strategy for table. Defaults to `BOUNDED(4)`.
-    #[parameter(default = ConfigAdaptiveParallelismStrategy::Bounded(DEFAULT_TABLE_PARALLELISM_BOUND))]
+    /// Specific adaptive parallelism strategy for table. Defaults to `default`, which resolves to `BOUNDED(4)` for tables.
+    #[parameter(default = ConfigAdaptiveParallelismStrategy::default())]
     streaming_parallelism_strategy_for_table: ConfigAdaptiveParallelismStrategy,
 
     /// Specific parallelism for table. By default, it will fall back to `STREAMING_PARALLELISM`.
@@ -211,8 +204,8 @@ pub struct SessionConfig {
     #[parameter(default = ConfigParallelism::default())]
     streaming_parallelism_for_index: ConfigParallelism,
 
-    /// Specific adaptive parallelism strategy for source. Defaults to `BOUNDED(4)`.
-    #[parameter(default = ConfigAdaptiveParallelismStrategy::Bounded(DEFAULT_SOURCE_PARALLELISM_BOUND))]
+    /// Specific adaptive parallelism strategy for source. Defaults to `default`, which resolves to `BOUNDED(4)` for sources.
+    #[parameter(default = ConfigAdaptiveParallelismStrategy::default())]
     streaming_parallelism_strategy_for_source: ConfigAdaptiveParallelismStrategy,
 
     /// Specific parallelism for source. By default, it will fall back to `STREAMING_PARALLELISM`.

@@ -244,7 +244,7 @@ pub fn build_graph_with_strategy(
         let job_strategy = job_type
             .as_ref()
             .map(|t| t.to_parallelism_strategy(config.deref()));
-        derive_parallelism_strategy(job_strategy, config.streaming_parallelism_strategy())
+        derive_parallelism_strategy(job_strategy, config.streaming_parallelism_strategy(), job_type.as_ref())
     };
 
     // Set context for this streaming job.
