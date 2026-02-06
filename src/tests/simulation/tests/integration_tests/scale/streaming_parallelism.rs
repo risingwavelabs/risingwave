@@ -237,6 +237,9 @@ async fn test_parallelism_exceed_virtual_node_max_alter_adaptive() -> Result<()>
     configuration.compute_node_cores = vnode_max + 100;
     let mut cluster = Cluster::start(configuration).await?;
     let mut session = cluster.start_session();
+    session
+        .run("set streaming_parallelism_strategy_for_table = 'AUTO'")
+        .await?;
     session.run("set streaming_parallelism = 1").await?;
     session.run("create table t(v int)").await?;
     session
