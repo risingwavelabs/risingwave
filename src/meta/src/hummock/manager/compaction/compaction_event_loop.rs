@@ -268,10 +268,7 @@ impl HummockCompactionEventHandler {
             .get_compactor(context_id)
         {
             let mut compactor_alive = true;
-            let (groups, task_type) = self
-                .hummock_manager
-                .auto_pick_compaction_groups_and_type()
-                .await;
+            let (groups, task_type) = self.hummock_manager.auto_pick_compaction_groups_and_type();
             if let TaskType::Ttl = task_type {
                 match self
                     .hummock_manager
