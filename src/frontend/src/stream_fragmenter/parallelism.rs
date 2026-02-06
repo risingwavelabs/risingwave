@@ -195,7 +195,7 @@ mod tests {
     }
 
     #[test]
-    fn test_table_source_default_to_bounded() {
+    fn test_default_strategy_resolution_by_job_type() {
         // Tables default to BOUNDED(4)
         assert_eq!(
             derive_parallelism_strategy(

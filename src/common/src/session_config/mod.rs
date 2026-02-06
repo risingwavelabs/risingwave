@@ -180,7 +180,7 @@ pub struct SessionConfig {
     #[parameter(default = ConfigAdaptiveParallelismStrategy::default())]
     streaming_parallelism_strategy: ConfigAdaptiveParallelismStrategy,
 
-    /// Specific adaptive parallelism strategy for table. Defaults to `default`, which resolves to `BOUNDED(4)` for tables.
+    /// Specific adaptive parallelism strategy for table. Defaults to `Default`, which resolves to `BOUNDED(4)` for tables.
     #[parameter(default = ConfigAdaptiveParallelismStrategy::default())]
     streaming_parallelism_strategy_for_table: ConfigAdaptiveParallelismStrategy,
 
@@ -204,7 +204,7 @@ pub struct SessionConfig {
     #[parameter(default = ConfigParallelism::default())]
     streaming_parallelism_for_index: ConfigParallelism,
 
-    /// Specific adaptive parallelism strategy for source. Defaults to `default`, which resolves to `BOUNDED(4)` for sources.
+    /// Specific adaptive parallelism strategy for source. Defaults to `Default`, which resolves to `BOUNDED(4)` for sources.
     #[parameter(default = ConfigAdaptiveParallelismStrategy::default())]
     streaming_parallelism_strategy_for_source: ConfigAdaptiveParallelismStrategy,
 
