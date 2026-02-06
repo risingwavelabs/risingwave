@@ -624,7 +624,7 @@ impl GlobalBarrierWorkerContextImpl {
 
                             if scan_types
                                 .values()
-                                .any(|scan_type| !scan_type.is_reschedulable())
+                                .any(|scan_type| !scan_type.is_reschedulable(false))
                             {
                                 unreschedulable_jobs.insert(job_id);
                             }
