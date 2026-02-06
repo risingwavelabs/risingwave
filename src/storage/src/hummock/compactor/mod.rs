@@ -464,6 +464,8 @@ pub fn start_iceberg_compactor(
                             status: status as i32,
                             error_message,
                             result: None,
+                            // Reserved for future use. In PR1, compactor does not implement retries
+                            // and always reports attempt=0.
                             attempt: 0,
                         };
                         if let Err(e) = request_sender.send(SubscribeIcebergCompactionEventRequest {

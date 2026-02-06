@@ -23,6 +23,8 @@ message SubscribeIcebergCompactionEventRequest {
       STATUS_UNSPECIFIED = 0;
       SUCCESS = 1;
       FAILED = 2;
+      // Reserved for future use. The compactor does not emit CANCELED until explicit
+      // cancellation handling is implemented end-to-end.
       CANCELED = 3;
     }
     Status status = 2;
