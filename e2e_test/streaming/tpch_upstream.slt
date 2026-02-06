@@ -1,3 +1,6 @@
+statement ok
+SET streaming_parallelism_strategy_for_table = 'AUTO';
+
 include ../tpch/create_tables.slt.part
 
 # First, create materialized views with empty data
@@ -44,3 +47,6 @@ include ./tpch/q22.slt.part
 include ./tpch/drop_views.slt.part
 
 include ../tpch/drop_tables.slt.part
+
+statement ok
+SET streaming_parallelism_strategy_for_table = DEFAULT;
