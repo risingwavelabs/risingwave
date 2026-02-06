@@ -65,27 +65,7 @@ impl EstimateSize for LogStoreBufferItem {
     }
 
     fn estimated_size(&self) -> usize {
-        match self {
-            LogStoreBufferItem::StreamChunk {
-                chunk,
-                start_seq_id: _,
-                end_seq_id: _,
-                flushed: _,
-                chunk_id: _,
-            } => {
-                chunk.estimated_size()
-                    + size_of::<SeqId>() * 2
-                    + size_of::<bool>()
-                    + size_of::<ChunkId>()
-            }
-            LogStoreBufferItem::Flushed {
-                vnode_bitmap,
-                start_seq_id: _,
-                end_seq_id: _,
-                chunk_id: _,
-            } => vnode_bitmap.estimated_size() + size_of::<SeqId>() * 2 + size_of::<ChunkId>(),
-            LogStoreBufferItem::Barrier { .. } => 0,
-        }
+        size_of::<Self>() + self.estimated_heap_size()
     }
 }
 
