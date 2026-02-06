@@ -475,7 +475,7 @@ impl DdlController {
         let notification_version = tokio::spawn(fut).await.map_err(|e| anyhow!(e))??;
         Ok(Some(WaitVersion {
             catalog_version: notification_version,
-            hummock_version_id: self.barrier_manager.get_hummock_version_id().await.to_u64(),
+            hummock_version_id: self.barrier_manager.get_hummock_version_id().await,
         }))
     }
 
@@ -1738,7 +1738,7 @@ impl DdlController {
             .filter(|id| {
                 !cross_db_snapshot_backfill_info
                     .upstream_mv_table_id_to_backfill_epoch
-                    .contains_key(id)
+                    .contains_key(*id)
             })
             .cloned()
             .collect();

@@ -24,6 +24,7 @@
 #![expect(clippy::module_inception)]
 // FIXME: This should be fixed!!! https://github.com/risingwavelabs/risingwave/issues/19906
 #![expect(clippy::large_enum_variant)]
+#![feature(step_trait)]
 
 pub mod id;
 

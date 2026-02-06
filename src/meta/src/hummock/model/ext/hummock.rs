@@ -50,7 +50,7 @@ impl From<sea_orm::DbErr> for MetadataModelError {
 impl Transactional<Transaction> for CompactionGroup {
     async fn upsert_in_transaction(&self, trx: &mut Transaction) -> MetadataModelResult<()> {
         let m = compaction_config::ActiveModel {
-            compaction_group_id: Set(self.group_id.try_into().unwrap()),
+            compaction_group_id: Set(self.group_id),
             config: Set(CompactionConfig::from(&(*self.compaction_config))),
         };
         compaction_config::Entity::insert(m)
@@ -78,7 +78,7 @@ impl Transactional<Transaction> for CompactionGroup {
 impl Transactional<Transaction> for CompactStatus {
     async fn upsert_in_transaction(&self, trx: &mut Transaction) -> MetadataModelResult<()> {
         let m = compaction_status::ActiveModel {
-            compaction_group_id: Set(self.compaction_group_id.try_into().unwrap()),
+            compaction_group_id: Set(self.compaction_group_id),
             status: Set(LevelHandlers::from(
                 self.level_handlers.iter().map_into().collect_vec(),
             )),
@@ -142,7 +142,7 @@ impl Transactional<Transaction> for HummockPinnedVersion {
     async fn upsert_in_transaction(&self, trx: &mut Transaction) -> MetadataModelResult<()> {
         let m = hummock_pinned_version::ActiveModel {
             context_id: Set(self.context_id),
-            min_pinned_id: Set(self.min_pinned_id.try_into().unwrap()),
+            min_pinned_id: Set(self.min_pinned_id),
         };
         hummock_pinned_version::Entity::insert(m)
             .on_conflict(
@@ -193,7 +193,7 @@ impl Transactional<Transaction> for HummockPinnedSnapshot {
 impl Transactional<Transaction> for HummockVersionStats {
     async fn upsert_in_transaction(&self, trx: &mut Transaction) -> MetadataModelResult<()> {
         let m = hummock_version_stats::ActiveModel {
-            id: Set(self.hummock_version_id.try_into().unwrap()),
+            id: Set(self.hummock_version_id),
             stats: Set(TableStats(self.table_stats.clone())),
         };
         hummock_version_stats::Entity::insert(m)
@@ -221,8 +221,8 @@ impl Transactional<Transaction> for HummockVersionStats {
 impl Transactional<Transaction> for HummockVersionDelta {
     async fn upsert_in_transaction(&self, trx: &mut Transaction) -> MetadataModelResult<()> {
         let m = hummock_version_delta::ActiveModel {
-            id: Set(self.id.to_u64().try_into().unwrap()),
-            prev_id: Set(self.prev_id.to_u64().try_into().unwrap()),
+            id: Set(self.id),
+            prev_id: Set(self.prev_id),
             max_committed_epoch: Set(0.into()),
             safe_epoch: Set(0.into()),
             trivial_move: Set(self.trivial_move),
@@ -246,28 +246,23 @@ impl Transactional<Transaction> for HummockVersionDelta {
     }
 
     async fn delete_in_transaction(&self, trx: &mut Transaction) -> MetadataModelResult<()> {
-        hummock_version_delta::Entity::delete_by_id(
-            HummockVersionId::try_from(self.id.to_u64()).unwrap(),
-        )
-        .exec(trx)
-        .await?;
+        hummock_version_delta::Entity::delete_by_id(self.id)
+            .exec(trx)
+            .await?;
         Ok(())
     }
 }
 
 impl From<compaction_config::Model> for CompactionGroup {
     fn from(value: compaction_config::Model) -> Self {
-        Self::new(
-            value.compaction_group_id.try_into().unwrap(),
-            value.config.to_protobuf(),
-        )
+        Self::new(value.compaction_group_id, value.config.to_protobuf())
     }
 }
 
 impl From<compaction_status::Model> for CompactStatus {
     fn from(value: compaction_status::Model) -> Self {
         Self {
-            compaction_group_id: value.compaction_group_id.try_into().unwrap(),
+            compaction_group_id: value.compaction_group_id,
             level_handlers: value.status.to_protobuf().iter().map_into().collect(),
         }
     }

@@ -782,7 +782,7 @@ impl GlobalBarrierWorkerContextImpl {
                 !recovery_context
                     .fragment_context
                     .job_map
-                    .contains_key(job_id)
+                    .contains_key(*job_id)
             })
             .copied()
             .collect_vec();

@@ -337,7 +337,7 @@ impl ScaleController {
 
         if let Some(missing_fragment_id) = fragment_id_list
             .iter()
-            .find(|fragment_id| !existing_fragment_ids.contains(fragment_id))
+            .find(|fragment_id| !existing_fragment_ids.contains(*fragment_id))
         {
             return Err(MetaError::catalog_id_not_found(
                 "fragment",
