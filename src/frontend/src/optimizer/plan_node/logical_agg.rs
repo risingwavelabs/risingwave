@@ -1521,6 +1521,24 @@ impl ToStream for LogicalAgg {
         }
     }
 
+    fn try_better_locality(&self, columns: &[usize]) -> Option<PlanRef> {
+        if columns.is_empty() {
+            return None;
+        }
+
+        // Check if the given columns are a prefix of group keys.
+        let group_key = self.group_key().to_vec();
+        if columns.len() > group_key.len() || columns != &group_key[..columns.len()] {
+            return None;
+        }
+
+        // Return the same plan directly without calling `try_better_locality` on input.
+        // Because in `to_stream`, we will enforce the locality requirement on the group keys anyway.
+        // If we call `try_better_locality` on input, it would miss the chance to utilize the locality of the current agg,
+        // since the agg's input doesn't have the locality yet at that moment.
+        Some(self.clone_with_input(self.input()).into())
+    }
+
     fn logical_rewrite_for_stream(
         &self,
         ctx: &mut RewriteStreamContext,
