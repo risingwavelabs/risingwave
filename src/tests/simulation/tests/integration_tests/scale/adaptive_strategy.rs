@@ -32,6 +32,9 @@ async fn test_adaptive_strategy_create() -> Result<()> {
     let mut cluster = Cluster::start(config).await?;
     let mut session = cluster.start_session();
     session
+        .run("set streaming_parallelism_strategy_for_table = 'DEFAULT'")
+        .await?;
+    session
         .run("alter system set adaptive_parallelism_strategy to AUTO")
         .await?;
     session.run("create table t_auto(v int)").await?;
@@ -74,6 +77,9 @@ async fn test_adaptive_strategy_alter() -> Result<()> {
 
     let mut cluster = Cluster::start(config).await?;
     let mut session = cluster.start_session();
+    session
+        .run("set streaming_parallelism_strategy_for_table = 'DEFAULT'")
+        .await?;
 
     session
         .run("alter system set adaptive_parallelism_strategy to AUTO")
@@ -163,6 +169,9 @@ async fn test_streaming_parallelism_strategy_session_override() -> Result<()> {
 
     let mut cluster = Cluster::start(config).await?;
     let mut session = cluster.start_session();
+    session
+        .run("set streaming_parallelism_strategy_for_table = 'DEFAULT'")
+        .await?;
 
     session
         .run("alter system set adaptive_parallelism_strategy to 'BOUNDED(2)'")
@@ -187,6 +196,9 @@ async fn test_streaming_parallelism_strategy_for_materialized_view() -> Result<(
 
     let mut cluster = Cluster::start(config).await?;
     let mut session = cluster.start_session();
+    session
+        .run("set streaming_parallelism_strategy_for_table = 'DEFAULT'")
+        .await?;
 
     session
         .run("alter system set adaptive_parallelism_strategy to 'BOUNDED(2)'")
@@ -217,6 +229,9 @@ async fn test_streaming_parallelism_strategy_persistence() -> Result<()> {
 
     let mut cluster = Cluster::start(config).await?;
     let mut session = cluster.start_session();
+    session
+        .run("set streaming_parallelism_strategy_for_table = 'DEFAULT'")
+        .await?;
 
     session
         .run("alter system set adaptive_parallelism_strategy to 'BOUNDED(2)'")
@@ -245,6 +260,9 @@ async fn test_streaming_parallelism_fixed_ignores_strategy() -> Result<()> {
 
     let mut cluster = Cluster::start(config).await?;
     let mut session = cluster.start_session();
+    session
+        .run("set streaming_parallelism_strategy_for_table = 'DEFAULT'")
+        .await?;
 
     session.run("set streaming_parallelism = 4").await?;
     session
@@ -266,6 +284,9 @@ async fn test_streaming_parallelism_strategy_default_fallback() -> Result<()> {
 
     let mut cluster = Cluster::start(config).await?;
     let mut session = cluster.start_session();
+    session
+        .run("set streaming_parallelism_strategy_for_table = 'DEFAULT'")
+        .await?;
 
     session
         .run("alter system set adaptive_parallelism_strategy to 'BOUNDED(2)'")

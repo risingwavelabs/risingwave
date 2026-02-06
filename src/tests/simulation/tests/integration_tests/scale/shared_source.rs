@@ -115,6 +115,9 @@ async fn test_shared_source() -> Result<()> {
     )));
     let mut session = cluster.start_session();
 
+    session
+        .run("set streaming_parallelism_strategy_for_source = 'DEFAULT'")
+        .await?;
     session.run("set rw_implicit_flush = true;").await?;
 
     session.run(CREATE_SOURCE).await?;
@@ -195,6 +198,9 @@ async fn test_issue_19563() -> Result<()> {
     )));
     let mut session = cluster.start_session();
 
+    session
+        .run("set streaming_parallelism_strategy_for_source = 'DEFAULT'")
+        .await?;
     session.run("set rw_implicit_flush = true;").await?;
 
     session
