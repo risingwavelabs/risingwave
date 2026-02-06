@@ -12,11 +12,21 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::num::NonZeroUsize;
+
 use risingwave_common::session_config::parallelism::{
     ConfigAdaptiveParallelismStrategy, ConfigParallelism,
 };
 use risingwave_common::system_param::AdaptiveParallelismStrategy;
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
+
+use super::GraphJobType;
+
+/// Default parallelism bound for tables
+const DEFAULT_TABLE_PARALLELISM_BOUND: usize = 4;
+
+/// Default parallelism bound for sources
+const DEFAULT_SOURCE_PARALLELISM_BOUND: usize = 4;
 
 pub(crate) fn derive_parallelism(
     specific_type_parallelism: Option<ConfigParallelism>,
@@ -45,6 +55,7 @@ pub(crate) fn derive_parallelism(
 pub(crate) fn derive_parallelism_strategy(
     specific_strategy: Option<ConfigAdaptiveParallelismStrategy>,
     global_strategy: ConfigAdaptiveParallelismStrategy,
+    job_type: Option<&GraphJobType>,
 ) -> Option<AdaptiveParallelismStrategy> {
     let to_strategy =
         |cfg: ConfigAdaptiveParallelismStrategy| -> Option<AdaptiveParallelismStrategy> {
@@ -52,7 +63,19 @@ pub(crate) fn derive_parallelism_strategy(
         };
 
     match specific_strategy.unwrap_or(ConfigAdaptiveParallelismStrategy::Default) {
-        ConfigAdaptiveParallelismStrategy::Default => to_strategy(global_strategy),
+        ConfigAdaptiveParallelismStrategy::Default => {
+            // For tables and sources, Default maps to BOUNDED(4) to limit resource usage.
+            // For other job types, Default falls back to the global strategy.
+            match job_type {
+                Some(GraphJobType::Table) => Some(AdaptiveParallelismStrategy::Bounded(
+                    NonZeroUsize::new(DEFAULT_TABLE_PARALLELISM_BOUND).unwrap(),
+                )),
+                Some(GraphJobType::Source) => Some(AdaptiveParallelismStrategy::Bounded(
+                    NonZeroUsize::new(DEFAULT_SOURCE_PARALLELISM_BOUND).unwrap(),
+                )),
+                _ => to_strategy(global_strategy),
+            }
+        }
         other => to_strategy(other),
     }
 }
@@ -142,13 +165,18 @@ mod tests {
     #[test]
     fn test_parallelism_strategy_fallback() {
         assert_eq!(
-            derive_parallelism_strategy(None, ConfigAdaptiveParallelismStrategy::Auto),
+            derive_parallelism_strategy(
+                None,
+                ConfigAdaptiveParallelismStrategy::Auto,
+                Some(&GraphJobType::MaterializedView)
+            ),
             Some(AdaptiveParallelismStrategy::Auto)
         );
         assert_eq!(
             derive_parallelism_strategy(
                 Some(ConfigAdaptiveParallelismStrategy::Default),
-                ConfigAdaptiveParallelismStrategy::Full
+                ConfigAdaptiveParallelismStrategy::Full,
+                Some(&GraphJobType::Sink)
             ),
             Some(AdaptiveParallelismStrategy::Full)
         );
@@ -159,9 +187,45 @@ mod tests {
         assert_eq!(
             derive_parallelism_strategy(
                 Some(ConfigAdaptiveParallelismStrategy::Ratio(0.5)),
-                ConfigAdaptiveParallelismStrategy::Full
+                ConfigAdaptiveParallelismStrategy::Full,
+                Some(&GraphJobType::Table)
             ),
             Some(AdaptiveParallelismStrategy::Ratio(0.5))
+        );
+    }
+
+    #[test]
+    fn test_default_strategy_resolution_by_job_type() {
+        // Tables default to BOUNDED(4)
+        assert_eq!(
+            derive_parallelism_strategy(
+                Some(ConfigAdaptiveParallelismStrategy::Default),
+                ConfigAdaptiveParallelismStrategy::Auto,
+                Some(&GraphJobType::Table)
+            ),
+            Some(AdaptiveParallelismStrategy::Bounded(
+                NonZeroUsize::new(DEFAULT_TABLE_PARALLELISM_BOUND).unwrap()
+            ))
+        );
+        // Sources default to BOUNDED(4)
+        assert_eq!(
+            derive_parallelism_strategy(
+                Some(ConfigAdaptiveParallelismStrategy::Default),
+                ConfigAdaptiveParallelismStrategy::Full,
+                Some(&GraphJobType::Source)
+            ),
+            Some(AdaptiveParallelismStrategy::Bounded(
+                NonZeroUsize::new(DEFAULT_SOURCE_PARALLELISM_BOUND).unwrap()
+            ))
+        );
+        // MVs fall back to global strategy
+        assert_eq!(
+            derive_parallelism_strategy(
+                Some(ConfigAdaptiveParallelismStrategy::Default),
+                ConfigAdaptiveParallelismStrategy::Auto,
+                Some(&GraphJobType::MaterializedView)
+            ),
+            Some(AdaptiveParallelismStrategy::Auto)
         );
     }
 }
