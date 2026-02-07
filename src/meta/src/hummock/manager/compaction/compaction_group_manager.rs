@@ -529,7 +529,7 @@ impl CompactionGroupManager {
     }
 }
 
-fn update_compaction_config(target: &mut CompactionConfig, items: &[MutableConfig]) {
+fn update_compaction_config(target: &mut CompactionConfig, items: &[MutableConfig]) -> Result<()> {
     for item in items {
         match item {
             MutableConfig::MaxBytesForLevelBase(c) => {
@@ -578,8 +578,22 @@ fn update_compaction_config(target: &mut CompactionConfig, items: &[MutableConfi
                 target.tombstone_reclaim_ratio = *c;
             }
             MutableConfig::CompressionAlgorithm(c) => {
-                target.compression_algorithm[c.get_level() as usize]
-                    .clone_from(&c.compression_algorithm);
+                let level = c.get_level();
+                if level > target.max_level as u32 {
+                    return Err(Error::CompactionGroup(format!(
+                        "invalid compression_algorithm level {}, max_level is {}",
+                        level, target.max_level
+                    )));
+                }
+
+                let Some(algorithm) = target.compression_algorithm.get_mut(level as usize) else {
+                    return Err(Error::CompactionGroup(format!(
+                        "invalid compression_algorithm level {}, compression_algorithm len is {}",
+                        level,
+                        target.compression_algorithm.len()
+                    )));
+                };
+                algorithm.clone_from(&c.compression_algorithm);
             }
             MutableConfig::MaxL0CompactLevelCount(c) => {
                 target.max_l0_compact_level_count = Some(*c);
@@ -623,6 +637,8 @@ fn update_compaction_config(target: &mut CompactionConfig, items: &[MutableConfi
             }
         }
     }
+
+    Ok(())
 }
 
 impl CompactionGroupTransaction<'_> {
@@ -689,7 +705,7 @@ impl CompactionGroupTransaction<'_> {
                 Error::CompactionGroup(format!("invalid group {}", *compaction_group_id))
             })?;
             let mut config = group.compaction_config.as_ref().clone();
-            update_compaction_config(&mut config, config_to_update);
+            update_compaction_config(&mut config, config_to_update)?;
             if let Err(reason) = validate_compaction_config(&config) {
                 return Err(Error::CompactionGroup(reason));
             }
