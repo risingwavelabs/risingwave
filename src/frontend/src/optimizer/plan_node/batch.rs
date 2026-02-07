@@ -26,6 +26,9 @@ use crate::optimizer::property::Order;
 #[auto_impl::auto_impl(&)]
 pub trait BatchPlanNodeMetadata: PhysicalPlanRef {
     fn order(&self) -> &Order;
+    fn orders(&self) -> Vec<Order> {
+        vec![self.order().clone()]
+    }
 }
 
 /// Prelude for batch plan nodes.
