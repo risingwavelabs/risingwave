@@ -35,7 +35,7 @@ use risingwave_common::catalog::{
 use risingwave_common::config::{MAX_CONNECTION_WINDOW_SIZE, MetaConfig};
 use risingwave_common::hash::WorkerSlotMapping;
 use risingwave_common::id::{
-    ConnectionId, DatabaseId, JobId, SchemaId, SinkId, SubscriptionId, ViewId, WorkerId,
+    ConnectionId, DatabaseId, JobId, SchemaId, SinkId, SubscriptionId, UserId, ViewId, WorkerId,
 };
 use risingwave_common::monitor::EndpointExt;
 use risingwave_common::system_param::reader::SystemParamsReader;
@@ -78,7 +78,7 @@ use risingwave_pb::iceberg_compaction::{
     SubscribeIcebergCompactionEventRequest, SubscribeIcebergCompactionEventResponse,
     subscribe_iceberg_compaction_event_request,
 };
-use risingwave_pb::id::{ActorId, FragmentId, SourceId};
+use risingwave_pb::id::{ActorId, FragmentId, HummockSstableId, SourceId};
 use risingwave_pb::meta::alter_connector_props_request::{
     AlterConnectorPropsObject, AlterIcebergTableIds, ExtraOptions,
 };
@@ -190,7 +190,7 @@ impl MetaClient {
         connection_name: String,
         database_id: DatabaseId,
         schema_id: SchemaId,
-        owner_id: u32,
+        owner_id: UserId,
         req: create_connection_request::Payload,
     ) -> Result<WaitVersion> {
         let request = CreateConnectionRequest {
@@ -211,7 +211,7 @@ impl MetaClient {
         secret_name: String,
         database_id: DatabaseId,
         schema_id: SchemaId,
-        owner_id: u32,
+        owner_id: UserId,
         value: Vec<u8>,
     ) -> Result<WaitVersion> {
         let request = CreateSecretRequest {
@@ -559,7 +559,7 @@ impl MetaClient {
             .ok_or_else(|| anyhow!("wait version not set"))?)
     }
 
-    pub async fn alter_owner(&self, object: Object, owner_id: u32) -> Result<WaitVersion> {
+    pub async fn alter_owner(&self, object: Object, owner_id: UserId) -> Result<WaitVersion> {
         let request = AlterOwnerRequest {
             object: Some(object),
             owner_id,
@@ -726,7 +726,7 @@ impl MetaClient {
         secret_name: String,
         database_id: DatabaseId,
         schema_id: SchemaId,
-        owner_id: u32,
+        owner_id: UserId,
         value: Vec<u8>,
     ) -> Result<WaitVersion> {
         let request = AlterSecretRequest {
@@ -928,7 +928,7 @@ impl MetaClient {
         Ok(resp.version)
     }
 
-    pub async fn drop_user(&self, user_id: u32) -> Result<u64> {
+    pub async fn drop_user(&self, user_id: UserId) -> Result<u64> {
         let request = DropUserRequest { user_id };
         let resp = self.inner.drop_user(request).await?;
         Ok(resp.version)
@@ -952,10 +952,10 @@ impl MetaClient {
 
     pub async fn grant_privilege(
         &self,
-        user_ids: Vec<u32>,
+        user_ids: Vec<UserId>,
         privileges: Vec<GrantPrivilege>,
         with_grant_option: bool,
-        granted_by: u32,
+        granted_by: UserId,
     ) -> Result<u64> {
         let request = GrantPrivilegeRequest {
             user_ids,
@@ -969,10 +969,10 @@ impl MetaClient {
 
     pub async fn revoke_privilege(
         &self,
-        user_ids: Vec<u32>,
+        user_ids: Vec<UserId>,
         privileges: Vec<GrantPrivilege>,
-        granted_by: u32,
-        revoke_by: u32,
+        granted_by: UserId,
+        revoke_by: UserId,
         revoke_grant_option: bool,
         cascade: bool,
     ) -> Result<u64> {
@@ -990,11 +990,11 @@ impl MetaClient {
 
     pub async fn alter_default_privilege(
         &self,
-        user_ids: Vec<u32>,
+        user_ids: Vec<UserId>,
         database_id: DatabaseId,
         schema_ids: Vec<SchemaId>,
         operation: AlterDefaultPrivilegeOperation,
-        granted_by: u32,
+        granted_by: UserId,
     ) -> Result<()> {
         let request = AlterDefaultPrivilegeRequest {
             user_ids,
@@ -1121,7 +1121,7 @@ impl MetaClient {
     pub async fn flush(&self, database_id: DatabaseId) -> Result<HummockVersionId> {
         let request = FlushRequest { database_id };
         let resp = self.inner.flush(request).await?;
-        Ok(HummockVersionId::new(resp.hummock_version_id))
+        Ok(resp.hummock_version_id)
     }
 
     pub async fn wait(&self) -> Result<()> {
@@ -1365,7 +1365,7 @@ impl MetaClient {
         committed_epoch_limit: HummockEpoch,
     ) -> Result<Vec<HummockVersionDelta>> {
         let req = ListVersionDeltasRequest {
-            start_id: start_id.to_u64(),
+            start_id,
             num_limit,
             committed_epoch_limit,
         };
@@ -1387,7 +1387,7 @@ impl MetaClient {
         compaction_groups: Vec<CompactionGroupId>,
     ) -> Result<()> {
         let req = TriggerCompactionDeterministicRequest {
-            version_id: version_id.to_u64(),
+            version_id,
             compaction_groups,
         };
         self.inner.trigger_compaction_deterministic(req).await?;
@@ -1675,7 +1675,7 @@ impl MetaClient {
         Ok(resp.branched_objects)
     }
 
-    pub async fn list_active_write_limit(&self) -> Result<HashMap<u64, WriteLimit>> {
+    pub async fn list_active_write_limit(&self) -> Result<HashMap<CompactionGroupId, WriteLimit>> {
         let req = ListActiveWriteLimitRequest {};
         let resp = self.inner.list_active_write_limit(req).await?;
         Ok(resp.write_limits)
@@ -1945,7 +1945,7 @@ impl HummockMetaClient for MetaClient {
     async fn unpin_version_before(&self, unpin_version_before: HummockVersionId) -> Result<()> {
         let req = UnpinVersionBeforeRequest {
             context_id: self.worker_id(),
-            unpin_version_before: unpin_version_before.to_u64(),
+            unpin_version_before,
         };
         self.inner.unpin_version_before(req).await?;
         Ok(())
@@ -1982,10 +1982,10 @@ impl HummockMetaClient for MetaClient {
 
     async fn trigger_manual_compaction(
         &self,
-        compaction_group_id: u64,
+        compaction_group_id: CompactionGroupId,
         table_id: JobId,
         level: u32,
-        sst_ids: Vec<u64>,
+        sst_ids: Vec<HummockSstableId>,
     ) -> Result<()> {
         // TODO: support key_range parameter
         let req = TriggerManualCompactionRequest {
