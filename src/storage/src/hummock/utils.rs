@@ -664,8 +664,49 @@ pub(crate) async fn wait_for_update(
                 // CN with the same distribution as the upstream MV.
                 // See #3845 for more details.
                 if let Ok(suppressed_count) = LOG_SUPPRESSOR.check() {
-                    // Keep short backtrace for observability.
-                    let backtrace = tracing::field::display(Backtrace::capture());
+                    // Provide backtrace iff in debug mode for observability.
+                    let backtrace = cfg!(debug_assertions).then(Backtrace::capture);
+
+                    let backtrace = backtrace
+                        .as_ref()
+                        .map(|bt| ShortBacktrace { bt, limit: 30 })
+                        .map(tracing::field::display);
+
+                    struct ShortBacktrace<'a> {
+                        bt: &'a Backtrace,
+                        limit: usize,
+                    }
+
+                    impl std::fmt::Display for ShortBacktrace<'_> {
+                        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                            if self.bt.status() != std::backtrace::BacktraceStatus::Captured {
+                                return write!(f, "{:?}", self.bt);
+                            }
+
+                            let mut rendered = String::new();
+                            for (idx, frame) in self.bt.frames().iter().enumerate() {
+                                if idx >= self.limit {
+                                    break;
+                                }
+                                let _ = std::fmt::Write::write_fmt(
+                                    &mut rendered,
+                                    format_args!("{idx}: {frame:?}\n"),
+                                );
+                            }
+
+                            if self.bt.frames().len() > self.limit {
+                                let _ = std::fmt::Write::write_fmt(
+                                    &mut rendered,
+                                    format_args!(
+                                        "... {} frames omitted\n",
+                                        self.bt.frames().len() - self.limit
+                                    ),
+                                );
+                            }
+
+                            write!(f, "{rendered}")
+                        }
+                    }
                     tracing::warn!(
                         suppressed_count,
                         info = periodic_debug_info(),
