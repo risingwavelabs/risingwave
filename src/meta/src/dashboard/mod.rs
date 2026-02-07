@@ -328,7 +328,7 @@ pub(super) mod handlers {
         let mut fragment_to_relation_map = HashMap::new();
         for (relation_id, tf) in table_fragments {
             for fragment_id in tf.fragments.keys() {
-                fragment_to_relation_map.insert(*fragment_id, relation_id.as_raw_id());
+                fragment_to_relation_map.insert(*fragment_id, relation_id);
             }
         }
         let map = FragmentToRelationMap {

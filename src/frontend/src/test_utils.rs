@@ -450,7 +450,7 @@ impl CatalogWriter for MockCatalogWriter {
 
     async fn drop_table(
         &self,
-        source_id: Option<u32>,
+        source_id: Option<SourceId>,
         table_id: TableId,
         cascade: bool,
     ) -> Result<()> {
@@ -462,7 +462,7 @@ impl CatalogWriter for MockCatalogWriter {
             .into());
         }
         if let Some(source_id) = source_id {
-            self.drop_table_or_source_id(source_id);
+            self.drop_table_or_source_id(source_id.as_raw_id());
         }
         let (database_id, schema_id) = self.drop_table_or_source_id(table_id.as_raw_id());
         let indexes =
@@ -478,7 +478,7 @@ impl CatalogWriter for MockCatalogWriter {
         if let Some(source_id) = source_id {
             self.catalog
                 .write()
-                .drop_source(database_id, schema_id, source_id.into());
+                .drop_source(database_id, schema_id, source_id);
         }
         Ok(())
     }
@@ -629,7 +629,7 @@ impl CatalogWriter for MockCatalogWriter {
             alter_name_request::Object::TableId(table_id) => {
                 self.catalog
                     .write()
-                    .alter_table_name_by_id(table_id.into(), object_name);
+                    .alter_table_name_by_id(table_id, object_name);
                 Ok(())
             }
             _ => {
@@ -673,14 +673,14 @@ impl CatalogWriter for MockCatalogWriter {
             alter_set_schema_request::Object::TableId(table_id) => {
                 let mut pb_table = {
                     let reader = self.catalog.read();
-                    let table = reader.get_any_table_by_id(table_id.into())?.to_owned();
+                    let table = reader.get_any_table_by_id(table_id)?.to_owned();
                     table.to_prost()
                 };
                 pb_table.schema_id = new_schema_id;
                 self.catalog.write().update_table(&pb_table);
                 self.table_id_to_schema_id
                     .write()
-                    .insert(table_id, new_schema_id);
+                    .insert(table_id.as_raw_id(), new_schema_id);
                 Ok(())
             }
             _ => unreachable!(),

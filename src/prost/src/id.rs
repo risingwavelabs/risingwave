@@ -14,7 +14,6 @@
 
 use std::any::type_name;
 use std::borrow::Borrow;
-use std::collections::{BTreeMap, HashMap};
 use std::fmt::Formatter;
 use std::iter::Step;
 use std::num::TryFromIntError;
@@ -68,6 +67,11 @@ impl<const N: usize, P: FromStr> FromStr for TypedId<N, P> {
     }
 }
 
+// # safety: transparent repr
+unsafe impl<const N: usize, P> prost::TransparentOver for TypedId<N, P> {
+    type Inner = P;
+}
+
 impl<const N: usize, P> Borrow<P> for TypedId<N, P> {
     fn borrow(&self) -> &P {
         // Safety: transparent repr
@@ -88,36 +92,6 @@ where
     #[expect(clippy::wrong_self_convention)]
     pub fn as_raw_id(self) -> P {
         self.0
-    }
-
-    pub fn raw_slice(slice: &[Self]) -> &[P] {
-        // SAFETY: transparent repr
-        unsafe { std::mem::transmute(slice) }
-    }
-
-    pub fn mut_raw_vec(vec: &mut Vec<Self>) -> &mut Vec<P> {
-        // SAFETY: transparent repr
-        unsafe { std::mem::transmute(vec) }
-    }
-
-    pub fn raw_hash_map_ref<V>(map: &HashMap<Self, V>) -> &HashMap<P, V> {
-        // SAFETY: transparent repr
-        unsafe { std::mem::transmute(map) }
-    }
-
-    pub fn raw_hash_map_mut_ref<V>(map: &mut HashMap<Self, V>) -> &mut HashMap<P, V> {
-        // SAFETY: transparent repr
-        unsafe { std::mem::transmute(map) }
-    }
-
-    pub fn raw_btree_map_ref<V>(map: &BTreeMap<Self, V>) -> &BTreeMap<P, V> {
-        // SAFETY: transparent repr
-        unsafe { std::mem::transmute(map) }
-    }
-
-    pub fn raw_btree_map_mut_ref<V>(map: &mut BTreeMap<Self, V>) -> &mut BTreeMap<P, V> {
-        // SAFETY: transparent repr
-        unsafe { std::mem::transmute(map) }
     }
 }
 
@@ -464,13 +438,13 @@ impl From<LocalOperatorId> for StreamNodeLocalOperatorId {
 impl From<OptionalAssociatedTableId> for TableId {
     fn from(value: OptionalAssociatedTableId) -> Self {
         let OptionalAssociatedTableId::AssociatedTableId(table_id) = value;
-        Self(table_id)
+        table_id
     }
 }
 
 impl From<TableId> for OptionalAssociatedTableId {
     fn from(value: TableId) -> Self {
-        OptionalAssociatedTableId::AssociatedTableId(value.0)
+        OptionalAssociatedTableId::AssociatedTableId(value)
     }
 }
 
@@ -482,13 +456,13 @@ impl_as!(SubscriptionId, SubscriberId);
 impl From<OptionalAssociatedSourceId> for SourceId {
     fn from(value: OptionalAssociatedSourceId) -> Self {
         let OptionalAssociatedSourceId::AssociatedSourceId(source_id) = value;
-        Self(source_id)
+        source_id
     }
 }
 
 impl From<SourceId> for OptionalAssociatedSourceId {
     fn from(value: SourceId) -> Self {
-        OptionalAssociatedSourceId::AssociatedSourceId(value.0)
+        OptionalAssociatedSourceId::AssociatedSourceId(value)
     }
 }
 
@@ -497,7 +471,7 @@ macro_rules! impl_into_object {
         $(
             impl From<$type_name> for $mod_prefix {
                 fn from(value: $type_name) -> Self {
-                    <$mod_prefix>::$type_name(value.0)
+                    <$mod_prefix>::$type_name(value)
                 }
             }
         )+

@@ -13,14 +13,12 @@
 // limitations under the License.
 
 use std::collections::HashMap;
-use std::collections::hash_map::Entry;
 
 use risingwave_common::acl::{AclMode, AclModeSet};
-use risingwave_common::id::ObjectId;
+use risingwave_common::catalog::{DatabaseId, ObjectId, SchemaId};
 use risingwave_pb::user::grant_privilege::Object as GrantObject;
 use risingwave_pb::user::{PbAction, PbAuthInfo, PbGrantPrivilege, PbUserInfo};
 
-use crate::catalog::SchemaId;
 use crate::user::UserId;
 
 /// `UserCatalog` is responsible for managing user's information.
@@ -38,9 +36,9 @@ pub struct UserCatalog {
 
     // User owned acl mode set, group by object id.
     // TODO: merge it after we fully migrate to sql-backend.
-    pub database_acls: HashMap<u32, AclModeSet>,
-    pub schema_acls: HashMap<u32, AclModeSet>,
-    pub object_acls: HashMap<u32, AclModeSet>,
+    pub database_acls: HashMap<DatabaseId, AclModeSet>,
+    pub schema_acls: HashMap<SchemaId, AclModeSet>,
+    pub object_acls: HashMap<ObjectId, AclModeSet>,
 }
 
 impl From<PbUserInfo> for UserCatalog {
@@ -80,18 +78,44 @@ impl UserCatalog {
         }
     }
 
-    fn get_acl_entry(&mut self, object: GrantObject) -> Entry<'_, u32, AclModeSet> {
+    fn get_or_insert_acl(&mut self, object: GrantObject) -> &mut AclModeSet {
         match object {
-            GrantObject::DatabaseId(id) => self.database_acls.entry(id),
-            GrantObject::SchemaId(id) => self.schema_acls.entry(id),
-            GrantObject::TableId(id)
-            | GrantObject::SourceId(id)
-            | GrantObject::SinkId(id)
-            | GrantObject::ViewId(id)
-            | GrantObject::FunctionId(id)
-            | GrantObject::SubscriptionId(id)
-            | GrantObject::ConnectionId(id)
-            | GrantObject::SecretId(id) => self.object_acls.entry(id),
+            GrantObject::DatabaseId(id) => {
+                self.database_acls.entry(id).or_insert(AclModeSet::empty())
+            }
+            GrantObject::SchemaId(id) => self.schema_acls.entry(id).or_insert(AclModeSet::empty()),
+            GrantObject::TableId(id) => self
+                .object_acls
+                .entry(id.as_object_id())
+                .or_insert(AclModeSet::empty()),
+            GrantObject::SourceId(id) => self
+                .object_acls
+                .entry(id.as_object_id())
+                .or_insert(AclModeSet::empty()),
+            GrantObject::SinkId(id) => self
+                .object_acls
+                .entry(id.as_object_id())
+                .or_insert(AclModeSet::empty()),
+            GrantObject::ViewId(id) => self
+                .object_acls
+                .entry(id.as_object_id())
+                .or_insert(AclModeSet::empty()),
+            GrantObject::FunctionId(id) => self
+                .object_acls
+                .entry(id.as_object_id())
+                .or_insert(AclModeSet::empty()),
+            GrantObject::SubscriptionId(id) => self
+                .object_acls
+                .entry(id.as_object_id())
+                .or_insert(AclModeSet::empty()),
+            GrantObject::ConnectionId(id) => self
+                .object_acls
+                .entry(id.as_object_id())
+                .or_insert(AclModeSet::empty()),
+            GrantObject::SecretId(id) => self
+                .object_acls
+                .entry(id.as_object_id())
+                .or_insert(AclModeSet::empty()),
         }
     }
 
@@ -99,14 +123,14 @@ impl UserCatalog {
         match object {
             GrantObject::DatabaseId(id) => self.database_acls.get(&id),
             GrantObject::SchemaId(id) => self.schema_acls.get(&id),
-            GrantObject::TableId(id)
-            | GrantObject::SourceId(id)
-            | GrantObject::SinkId(id)
-            | GrantObject::ViewId(id)
-            | GrantObject::FunctionId(id)
-            | GrantObject::SubscriptionId(id)
-            | GrantObject::ConnectionId(id)
-            | GrantObject::SecretId(id) => self.object_acls.get(&id),
+            GrantObject::TableId(id) => self.object_acls.get(&id.as_object_id()),
+            GrantObject::SourceId(id) => self.object_acls.get(&id.as_object_id()),
+            GrantObject::SinkId(id) => self.object_acls.get(&id.as_object_id()),
+            GrantObject::ViewId(id) => self.object_acls.get(&id.as_object_id()),
+            GrantObject::FunctionId(id) => self.object_acls.get(&id.as_object_id()),
+            GrantObject::SubscriptionId(id) => self.object_acls.get(&id.as_object_id()),
+            GrantObject::ConnectionId(id) => self.object_acls.get(&id.as_object_id()),
+            GrantObject::SecretId(id) => self.object_acls.get(&id.as_object_id()),
         }
     }
 
@@ -116,9 +140,7 @@ impl UserCatalog {
         self.object_acls.clear();
         let privileges = self.grant_privileges.clone();
         for privilege in privileges {
-            let entry = self
-                .get_acl_entry(privilege.object.unwrap())
-                .or_insert(AclModeSet::empty());
+            let entry = self.get_or_insert_acl(privilege.object.unwrap());
             for awo in privilege.action_with_opts {
                 entry
                     .modes
@@ -214,12 +236,10 @@ impl UserCatalog {
         // `Select` and `Execute` are the minimum required privileges for object visibility.
         // `Execute` is required for functions.
         // `Usage` is required for connections and secrets.
-        self.object_acls
-            .get(&obj_id.as_raw_id())
-            .is_some_and(|acl_set| {
-                acl_set.has_mode(AclMode::Select)
-                    || acl_set.has_mode(AclMode::Execute)
-                    || acl_set.has_mode(AclMode::Usage)
-            })
+        self.object_acls.get(&obj_id).is_some_and(|acl_set| {
+            acl_set.has_mode(AclMode::Select)
+                || acl_set.has_mode(AclMode::Execute)
+                || acl_set.has_mode(AclMode::Usage)
+        })
     }
 }

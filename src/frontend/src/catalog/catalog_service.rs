@@ -172,7 +172,7 @@ pub trait CatalogWriter: Send + Sync {
 
     async fn drop_table(
         &self,
-        source_id: Option<u32>,
+        source_id: Option<SourceId>,
         table_id: TableId,
         cascade: bool,
     ) -> Result<()>;
@@ -509,7 +509,7 @@ impl CatalogWriter for CatalogWriterImpl {
 
     async fn drop_table(
         &self,
-        source_id: Option<u32>,
+        source_id: Option<SourceId>,
         table_id: TableId,
         cascade: bool,
     ) -> Result<()> {

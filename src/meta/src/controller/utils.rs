@@ -1168,18 +1168,23 @@ where
         .into_iter()
         .map(|(privilege, object)| {
             let object = object.unwrap();
-            let oid = object.oid.as_raw_id();
             let obj = match object.obj_type {
-                ObjectType::Database => PbGrantObject::DatabaseId(oid),
-                ObjectType::Schema => PbGrantObject::SchemaId(oid),
-                ObjectType::Table | ObjectType::Index => PbGrantObject::TableId(oid),
-                ObjectType::Source => PbGrantObject::SourceId(oid),
-                ObjectType::Sink => PbGrantObject::SinkId(oid),
-                ObjectType::View => PbGrantObject::ViewId(oid),
-                ObjectType::Function => PbGrantObject::FunctionId(oid),
-                ObjectType::Connection => PbGrantObject::ConnectionId(oid),
-                ObjectType::Subscription => PbGrantObject::SubscriptionId(oid),
-                ObjectType::Secret => PbGrantObject::SecretId(oid),
+                ObjectType::Database => PbGrantObject::DatabaseId(object.oid.as_database_id()),
+                ObjectType::Schema => PbGrantObject::SchemaId(object.oid.as_schema_id()),
+                ObjectType::Table | ObjectType::Index => {
+                    PbGrantObject::TableId(object.oid.as_table_id())
+                }
+                ObjectType::Source => PbGrantObject::SourceId(object.oid.as_source_id()),
+                ObjectType::Sink => PbGrantObject::SinkId(object.oid.as_sink_id()),
+                ObjectType::View => PbGrantObject::ViewId(object.oid.as_view_id()),
+                ObjectType::Function => PbGrantObject::FunctionId(object.oid.as_function_id()),
+                ObjectType::Connection => {
+                    PbGrantObject::ConnectionId(object.oid.as_connection_id())
+                }
+                ObjectType::Subscription => {
+                    PbGrantObject::SubscriptionId(object.oid.as_subscription_id())
+                }
+                ObjectType::Secret => PbGrantObject::SecretId(object.oid.as_secret_id()),
             };
             PbGrantPrivilege {
                 action_with_opts: vec![PbActionWithGrantOption {
@@ -1326,16 +1331,16 @@ where
 // todo: remove it after migrated to sql backend.
 pub fn extract_grant_obj_id(object: &PbGrantObject) -> ObjectId {
     match object {
-        PbGrantObject::DatabaseId(id)
-        | PbGrantObject::SchemaId(id)
-        | PbGrantObject::TableId(id)
-        | PbGrantObject::SourceId(id)
-        | PbGrantObject::SinkId(id)
-        | PbGrantObject::ViewId(id)
-        | PbGrantObject::FunctionId(id)
-        | PbGrantObject::SubscriptionId(id)
-        | PbGrantObject::ConnectionId(id)
-        | PbGrantObject::SecretId(id) => (*id).into(),
+        PbGrantObject::DatabaseId(id) => (*id).into(),
+        PbGrantObject::SchemaId(id) => (*id).into(),
+        PbGrantObject::TableId(id) => (*id).into(),
+        PbGrantObject::SourceId(id) => (*id).into(),
+        PbGrantObject::SinkId(id) => (*id).into(),
+        PbGrantObject::ViewId(id) => (*id).into(),
+        PbGrantObject::FunctionId(id) => (*id).into(),
+        PbGrantObject::SubscriptionId(id) => (*id).into(),
+        PbGrantObject::ConnectionId(id) => (*id).into(),
+        PbGrantObject::SecretId(id) => (*id).into(),
     }
 }
 
