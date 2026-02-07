@@ -29,6 +29,7 @@ use risingwave_pb::hummock::subscribe_compaction_event_response::{
     Event as ResponseEvent, PullTaskAck,
 };
 use risingwave_pb::hummock::{CompactTaskProgress, SubscribeCompactionEventRequest};
+use risingwave_pb::iceberg_compaction;
 use risingwave_pb::iceberg_compaction::SubscribeIcebergCompactionEventRequest;
 use risingwave_pb::iceberg_compaction::subscribe_iceberg_compaction_event_request::{
     Event as IcebergRequestEvent, PullTask as IcebergPullTask,
@@ -634,27 +635,55 @@ impl IcebergCompactionEventHandler {
         {
             let mut compactor_alive = true;
 
-            let iceberg_compaction_handles = self
-                .compaction_manager
-                .get_top_n_iceberg_commit_sink_ids(pull_task_count)
-                .await;
+            // Requeue expired in-flight plans.
+            self.compaction_manager
+                .requeue_expired_plans(Instant::now());
 
-            for handle in iceberg_compaction_handles {
-                let compactor = compactor.clone();
-                // send iceberg commit task to compactor
-                if let Err(e) = async move {
-                    handle
-                        .send_compact_task(
-                            compactor,
-                            next_compaction_task_id(&self.compaction_manager.env).await?,
-                        )
-                        .await
+            // Fill pending plans if empty.
+            if self.compaction_manager.is_pending_empty() {
+                let iceberg_compaction_handles = self
+                    .compaction_manager
+                    .get_top_n_iceberg_commit_sink_ids(pull_task_count)
+                    .await;
+
+                for handle in iceberg_compaction_handles {
+                    let task_id = match next_compaction_task_id(&self.compaction_manager.env).await
+                    {
+                        Ok(task_id) => task_id,
+                        Err(e) => {
+                            tracing::warn!(
+                                error = %e.as_report(),
+                                "Failed to allocate iceberg compaction task id"
+                            );
+                            compactor_alive = false;
+                            continue;
+                        }
+                    };
+                    let plan_tasks = match handle.build_plan_tasks(task_id, 0).await {
+                        Ok(plan_tasks) => plan_tasks,
+                        Err(e) => {
+                            tracing::warn!(
+                                error = %e.as_report(),
+                                "Failed to build iceberg plan task for {}",
+                                context_id,
+                            );
+                            compactor_alive = false;
+                            continue;
+                        }
+                    };
+                    for plan_task in plan_tasks {
+                        self.compaction_manager.enqueue_plan(plan_task);
+                    }
                 }
-                .await
-                {
+            }
+
+            // Send up to pull_task_count plans.
+            let plans = self.compaction_manager.take_next_plans(pull_task_count);
+            for plan in plans {
+                if let Err(e) = compactor.send_event(IcebergResponseEvent::PlanTask(plan)) {
                     tracing::warn!(
                         error = %e.as_report(),
-                        "Failed to send iceberg commit task to {}",
+                        "Failed to send iceberg plan task to {}",
                         context_id,
                     );
                     compactor_alive = false;
@@ -677,6 +706,17 @@ impl IcebergCompactionEventHandler {
 
         false
     }
+
+    async fn handle_report_plan_event(
+        &self,
+        _context_id: HummockContextId,
+        report_plan: iceberg_compaction::subscribe_iceberg_compaction_event_request::ReportPlan,
+    ) -> bool {
+        if let Err(e) = self.compaction_manager.report_plan(report_plan).await {
+            tracing::warn!(error = %e.as_report(), "Failed to handle iceberg plan report");
+        }
+        true
+    }
 }
 
 pub struct IcebergCompactionEventDispatcher {
@@ -693,6 +733,12 @@ impl CompactionEventDispatcher for IcebergCompactionEventDispatcher {
                 return self
                     .compaction_event_handler
                     .handle_pull_task_event(context_id, pull_task_count as usize)
+                    .await;
+            }
+            IcebergRequestEvent::ReportPlan(report_plan) => {
+                return self
+                    .compaction_event_handler
+                    .handle_report_plan_event(context_id, report_plan)
                     .await;
             }
             _ => unreachable!(),

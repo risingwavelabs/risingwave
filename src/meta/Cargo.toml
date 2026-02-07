@@ -33,6 +33,7 @@ futures-async-stream = { workspace = true }
 hex = "0.4"
 http = "1"
 iceberg = { workspace = true }
+iceberg-compaction-core = { git = "https://github.com/nimtable/iceberg-compaction.git", rev = "e5b75408cef82ce25d70ab1b05e42d46aaabd22b" }
 indexmap = { workspace = true }
 itertools = { workspace = true }
 jsonbb = { workspace = true }
