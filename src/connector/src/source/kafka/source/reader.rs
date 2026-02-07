@@ -278,7 +278,25 @@ impl KafkaSplitReader {
 
             // Emit EOF marker messages for partitions that reached end
             for partition in eof_partitions {
-                let last_offset = last_offsets.get(&partition).copied().unwrap_or(-1);
+                let split_id: SplitId = partition.to_string().into();
+                let last_offset = if let Some(&offset) = last_offsets.get(&partition) {
+                    // We have seen at least one message from this partition
+                    offset
+                } else {
+                    // No messages seen yet - this means all offsets between start and high_watermark
+                    // are invisible (e.g., all are transaction control messages).
+                    // Use the target offset from backfill_info, which is high_watermark - 1.
+                    if let Some(BackfillInfo::HasDataToBackfill { latest_offset }) =
+                        self.backfill_info.get(&split_id)
+                    {
+                        // Parse the latest_offset string and use it as last_offset
+                        // EOF offset will be latest_offset + 1, which equals high_watermark
+                        latest_offset.parse::<i64>().unwrap_or(-1)
+                    } else {
+                        // No backfill needed for this split, shouldn't happen in practice
+                        -1
+                    }
+                };
                 res.push(SourceMessage::kafka_partition_eof(partition, last_offset));
             }
 
