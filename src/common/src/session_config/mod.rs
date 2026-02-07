@@ -183,7 +183,7 @@ pub struct SessionConfig {
     #[parameter(default = ConfigParallelism::default())]
     streaming_parallelism_for_backfill: ConfigParallelism,
 
-    /// The adaptive parallelism strategy for streaming jobs. Defaults to `system`, which follows the system setting.
+    /// The adaptive parallelism strategy for streaming jobs. Defaults to `default`, which follows the system setting.
     #[parameter(default = ConfigAdaptiveParallelismStrategy::default())]
     streaming_parallelism_strategy: ConfigAdaptiveParallelismStrategy,
 

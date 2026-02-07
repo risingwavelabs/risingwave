@@ -23,7 +23,6 @@ const KEYWORD_DEFAULT: &str = "default";
 const KEYWORD_ADAPTIVE: &str = "adaptive";
 const KEYWORD_AUTO: &str = "auto";
 const KEYWORD_DEFAULT_STRATEGY: &str = "default";
-const KEYWORD_SYSTEM_STRATEGY: &str = "system";
 
 #[derive(Copy, Default, Debug, Clone, PartialEq, Eq)]
 pub enum ConfigParallelism {
@@ -82,9 +81,7 @@ impl FromStr for ConfigAdaptiveParallelismStrategy {
     type Err = ParallelismStrategyParseError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        if s.eq_ignore_ascii_case(KEYWORD_SYSTEM_STRATEGY)
-            || s.eq_ignore_ascii_case(KEYWORD_DEFAULT_STRATEGY)
-        {
+        if s.eq_ignore_ascii_case(KEYWORD_DEFAULT_STRATEGY) {
             return Ok(Self::Default);
         }
 
@@ -131,7 +128,7 @@ impl std::fmt::Display for ConfigAdaptiveParallelismStrategy {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             ConfigAdaptiveParallelismStrategy::Default => {
-                write!(f, "{}", KEYWORD_SYSTEM_STRATEGY)
+                write!(f, "{}", KEYWORD_DEFAULT_STRATEGY)
             }
             ConfigAdaptiveParallelismStrategy::Auto => AdaptiveParallelismStrategy::Auto.fmt(f),
             ConfigAdaptiveParallelismStrategy::Full => AdaptiveParallelismStrategy::Full.fmt(f),
@@ -154,16 +151,6 @@ mod tests {
     fn test_strategy_parse_default() {
         assert_eq!(
             "default"
-                .parse::<ConfigAdaptiveParallelismStrategy>()
-                .unwrap(),
-            ConfigAdaptiveParallelismStrategy::Default
-        );
-    }
-
-    #[test]
-    fn test_strategy_parse_system() {
-        assert_eq!(
-            "system"
                 .parse::<ConfigAdaptiveParallelismStrategy>()
                 .unwrap(),
             ConfigAdaptiveParallelismStrategy::Default
