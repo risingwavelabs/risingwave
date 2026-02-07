@@ -330,6 +330,7 @@ pub struct UpdateMutation {
     pub actor_cdc_table_snapshot_splits: CdcTableSnapshotSplitAssignmentWithGeneration,
     pub sink_schema_change: HashMap<SinkId, PbSinkSchemaChange>,
     pub subscriptions_to_drop: Vec<SubscriptionUpstreamInfo>,
+    pub replace_sink_id: Option<SinkId>,
 }
 
 #[derive(Debug, Clone)]
@@ -775,6 +776,7 @@ impl Mutation {
                 actor_cdc_table_snapshot_splits,
                 sink_schema_change,
                 subscriptions_to_drop,
+                replace_sink_id,
             }) => PbMutation::Update(PbUpdateMutation {
                 dispatcher_update: dispatchers.values().flatten().cloned().collect(),
                 merge_update: merges.values().cloned().collect(),
@@ -808,6 +810,7 @@ impl Mutation {
                     .map(|(sink_id, change)| ((*sink_id).as_raw_id(), change.clone()))
                     .collect(),
                 subscriptions_to_drop: subscriptions_to_drop.clone(),
+                replace_sink_id: replace_sink_id.map(|id| id.as_raw_id()),
             }),
             Mutation::Add(AddMutation {
                 adds,
@@ -988,6 +991,7 @@ impl Mutation {
                     .map(|(sink_id, change)| (SinkId::from(*sink_id), change.clone()))
                     .collect(),
                 subscriptions_to_drop: update.subscriptions_to_drop.clone(),
+                replace_sink_id: update.replace_sink_id.map(SinkId::from),
             }),
 
             PbMutation::Add(add) => Mutation::Add(AddMutation {

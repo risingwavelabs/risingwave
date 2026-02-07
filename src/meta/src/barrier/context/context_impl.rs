@@ -498,10 +498,20 @@ impl PostCollectCommand {
                         &replace_plan,
                     )
                     .await;
+
                 barrier_manager_context
                     .hummock_manager
                     .unregister_table_ids(to_drop_state_table_ids.iter().cloned())
                     .await?;
+
+                if old_fragments.stream_job_id != new_fragments.stream_job_id {
+                    barrier_manager_context
+                        .refresh_manager
+                        .remove_progress_tracker(
+                            old_fragments.stream_job_id.as_mv_table_id(),
+                            "replace_streaming_jobs",
+                        );
+                }
             }
 
             PostCollectCommand::CreateSubscription { subscription_id } => {

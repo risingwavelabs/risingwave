@@ -654,7 +654,7 @@ impl CatalogController {
         Ok(version)
     }
 
-    async fn notify_hummock_dropped_tables(&self, tables: Vec<PbTable>) {
+    pub async fn notify_hummock_dropped_tables(&self, tables: Vec<PbTable>) {
         if tables.is_empty() {
             return;
         }

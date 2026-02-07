@@ -52,6 +52,7 @@ use risingwave_pb::catalog::{
 };
 use risingwave_pb::common::PbActorLocation;
 use risingwave_pb::ddl_service::alter_owner_request::Object;
+use risingwave_pb::ddl_service::streaming_job_resource_type::PbResourceType;
 use risingwave_pb::ddl_service::{
     DdlProgress, TableJobType, WaitVersion, alter_name_request, alter_set_schema_request,
     alter_swap_rename_request, streaming_job_resource_type,
@@ -176,6 +177,12 @@ pub enum DdlCommand {
     AlterName(alter_name_request::Object, String),
     AlterSwapRename(alter_swap_rename_request::Object),
     ReplaceStreamJob(ReplaceStreamJobInfo),
+    ReplaceSink {
+        stream_job: StreamingJob,
+        fragment_graph: StreamFragmentGraphProto,
+        dependencies: HashSet<ObjectId>,
+        resource_type: streaming_job_resource_type::ResourceType,
+    },
     AlterNonSharedSource(Source),
     AlterObjectOwner(Object, UserId),
     AlterSetSchema(alter_set_schema_request::Object, SchemaId),
@@ -212,6 +219,7 @@ impl DdlCommand {
             DdlCommand::AlterName(object, _) => Left(format!("{object:?}")),
             DdlCommand::AlterSwapRename(object) => Left(format!("{object:?}")),
             DdlCommand::ReplaceStreamJob(info) => Left(info.streaming_job.name()),
+            DdlCommand::ReplaceSink { stream_job, .. } => Left(stream_job.name()),
             DdlCommand::AlterNonSharedSource(source) => Left(source.name.clone()),
             DdlCommand::AlterObjectOwner(object, _) => Left(format!("{object:?}")),
             DdlCommand::AlterSetSchema(object, _) => Left(format!("{object:?}")),
@@ -256,6 +264,7 @@ impl DdlCommand {
             DdlCommand::CreateStreamingJob { .. }
             | DdlCommand::CreateNonSharedSource(_)
             | DdlCommand::ReplaceStreamJob(_)
+            | DdlCommand::ReplaceSink { .. }
             | DdlCommand::AlterNonSharedSource(_)
             | DdlCommand::ResetSource(_)
             | DdlCommand::CreateSubscription(_) => false,
@@ -436,6 +445,15 @@ impl DdlController {
                     streaming_job,
                     fragment_graph,
                 }) => ctrl.replace_job(streaming_job, fragment_graph).await,
+                DdlCommand::ReplaceSink {
+                    stream_job,
+                    fragment_graph,
+                    dependencies,
+                    resource_type,
+                } => {
+                    ctrl.replace_sink(stream_job, fragment_graph, dependencies, resource_type)
+                        .await
+                }
                 DdlCommand::AlterName(relation, name) => ctrl.alter_name(relation, &name).await,
                 DdlCommand::AlterObjectOwner(object, owner_id) => {
                     ctrl.alter_owner(object, owner_id).await
@@ -964,6 +982,7 @@ impl DdlController {
                 dependencies,
                 resource_type.clone(),
                 &fragment_graph.backfill_parallelism,
+                false,
             )
             .await;
         if let Err(meta_err) = check_ret {
@@ -1047,15 +1066,13 @@ impl DdlController {
         }
     }
 
-    #[await_tree::instrument(boxed)]
-    async fn create_streaming_job_inner(
+    async fn build_new_streaming_job(
         &self,
         ctx: StreamContext,
         mut streaming_job: StreamingJob,
         fragment_graph: StreamFragmentGraphProto,
         resource_type: streaming_job_resource_type::ResourceType,
-        permit: OwnedSemaphorePermit,
-    ) -> MetaResult<NotificationVersion> {
+    ) -> MetaResult<(CreateStreamingJobContext, StreamJobFragmentsToCreate)> {
         let mut fragment_graph =
             StreamFragmentGraph::new(&self.env, fragment_graph, &streaming_job)?;
         streaming_job.set_info_from_graph(&fragment_graph);
@@ -1151,14 +1168,31 @@ impl DdlController {
             _ => {}
         }
 
+        Ok((ctx, stream_job_fragments))
+    }
+
+    #[await_tree::instrument(boxed)]
+    async fn create_streaming_job_inner(
+        &self,
+        ctx: StreamContext,
+        streaming_job: StreamingJob,
+        fragment_graph: StreamFragmentGraphProto,
+        resource_type: streaming_job_resource_type::ResourceType,
+        permit: OwnedSemaphorePermit,
+    ) -> MetaResult<NotificationVersion> {
+        let (ctx, stream_job_fragments) = self
+            .build_new_streaming_job(ctx, streaming_job, fragment_graph, resource_type)
+            .await?;
+
         let backfill_orders = ctx.fragment_backfill_ordering.to_meta_model();
         self.metadata_manager
             .catalog_controller
             .prepare_stream_job_fragments(
                 &stream_job_fragments,
-                streaming_job,
+                &ctx.streaming_job,
                 false,
                 Some(backfill_orders),
+                true,
             )
             .await?;
 
@@ -1286,6 +1320,131 @@ impl DdlController {
             LocalSecretManager::global().remove_secret(secret);
         }
         Ok(version)
+    }
+
+    /// Currently only used for replace-sink, but its idea is generally to creating a new job and dropping the old one,
+    /// so it can theoretically be applied to other jobs in the future.
+    pub async fn replace_sink(
+        &self,
+        mut streaming_job: StreamingJob,
+        fragment_graph: StreamFragmentGraphProto,
+        dependencies: HashSet<ObjectId>,
+        resource_type: PbResourceType,
+    ) -> MetaResult<NotificationVersion> {
+        if !matches!(streaming_job, StreamingJob::Sink(_)) {
+            bail_not_implemented!("replace only supports sink job currently");
+        }
+
+        if streaming_job.create_type() == CreateType::Background {
+            tracing::warn!(
+                "replace sink does not support background create type, changing to foreground"
+            );
+            streaming_job.set_create_type(CreateType::Foreground);
+        }
+
+        let _reschedule_job_lock = self.stream_manager.reschedule_lock_read_guard().await;
+
+        let old_job = self
+            .metadata_manager
+            .catalog_controller
+            .get_sink_job_by_name(
+                streaming_job.database_id(),
+                streaming_job.schema_id(),
+                &streaming_job.name(),
+            )
+            .await?
+            .ok_or_else(|| anyhow!("sink {} does not exist", streaming_job.name()))?;
+
+        if old_job.job_status != JobStatus::Created {
+            bail!(
+                "only sink in Created status can be replaced, current status: {:?}",
+                old_job.job_status
+            );
+        }
+
+        let old_job_id = old_job.job_id;
+
+        let result: MetaResult<JobId> = try {
+            let ctx = StreamContext::from_protobuf(fragment_graph.get_ctx().unwrap());
+            self.metadata_manager
+                .catalog_controller
+                .create_job_catalog(
+                    &mut streaming_job,
+                    &ctx,
+                    &fragment_graph.parallelism,
+                    fragment_graph.max_parallelism as _,
+                    dependencies,
+                    resource_type.clone(),
+                    &None,
+                    true,
+                )
+                .await?;
+
+            let (create_ctx, stream_job_fragments) = self
+                .build_new_streaming_job(ctx, streaming_job, fragment_graph, resource_type)
+                .await?;
+
+            self.metadata_manager
+                .catalog_controller
+                .prepare_stream_job_fragments(
+                    &stream_job_fragments,
+                    &create_ctx.streaming_job,
+                    false,
+                    None,
+                    false,
+                )
+                .await?;
+
+            let new_job_id = create_ctx.streaming_job.id();
+            let replace_ctx = {
+                let old_fragments = self
+                    .metadata_manager
+                    .get_job_fragments_by_id(old_job_id)
+                    .await?;
+                ReplaceStreamJobContext {
+                    old_fragments,
+                    replace_upstream: HashMap::new(),
+                    new_no_shuffle: create_ctx.new_no_shuffle,
+                    upstream_fragment_downstreams: create_ctx.upstream_fragment_downstreams,
+                    building_locations: create_ctx.building_locations,
+                    streaming_job: create_ctx.streaming_job,
+                    tmp_id: new_job_id,
+                    drop_table_connector_ctx: None,
+                    auto_refresh_schema_sinks: None,
+                }
+            };
+
+            self.stream_manager
+                .replace_stream_job(stream_job_fragments, replace_ctx)
+                .await?;
+
+            new_job_id
+        };
+
+        match result {
+            Ok(new_job_id) => {
+                let (version, dropped_tables) = self
+                    .metadata_manager
+                    .catalog_controller
+                    .finish_replace_sink(old_job_id, new_job_id)
+                    .await?;
+
+                self.barrier_manager
+                    .drop_tables_in_hummock(dropped_tables)
+                    .await?;
+
+                self.sink_manager
+                    .stop_sink_coordinator(vec![old_job_id.as_sink_id()])
+                    .await;
+
+                Ok(version)
+            }
+            Err(err) => {
+                tracing::error!(id = %old_job_id, error = %err.as_report(), "failed to replace sink");
+                // TODO: drop tmp new sink job
+                Err(err)
+            }
+        }
     }
 
     /// This is used for `ALTER TABLE ADD/DROP COLUMN` / `ALTER SOURCE ADD COLUMN`.
@@ -1522,6 +1681,7 @@ impl DdlController {
                             true,
                             None,
                             None,
+                            false,
                         )
                         .await?;
                 }
@@ -1529,7 +1689,13 @@ impl DdlController {
 
             self.metadata_manager
                 .catalog_controller
-                .prepare_stream_job_fragments(&stream_job_fragments, &streaming_job, true, None)
+                .prepare_stream_job_fragments(
+                    &stream_job_fragments,
+                    &streaming_job,
+                    true,
+                    None,
+                    false,
+                )
                 .await?;
 
             self.stream_manager
@@ -1973,32 +2139,31 @@ impl DdlController {
 
         let id = stream_job.id();
 
-        // check if performing drop table connector
-        let mut drop_table_associated_source_id = None;
-        if let StreamingJob::Table(None, _, _) = &stream_job {
-            drop_table_associated_source_id = self
-                .metadata_manager
-                .get_table_associated_source_id(id.as_mv_table_id())
-                .await?;
-        }
-
         let old_fragments = self.metadata_manager.get_job_fragments_by_id(id).await?;
         let old_internal_table_ids = old_fragments.internal_table_ids();
 
         // handle drop table's associated source
-        let mut drop_table_connector_ctx = None;
-        if let Some(to_remove_source_id) = drop_table_associated_source_id {
+        let drop_table_connector_ctx = if let StreamingJob::Table(None, _, _) = &stream_job
+            && let Some(to_remove_source_id) = self
+                .metadata_manager
+                .get_table_associated_source_id(id.as_mv_table_id())
+                .await?
+        {
             // drop table's associated source means the fragment containing the table has just one internal table (associated source's state table)
             debug_assert!(old_internal_table_ids.len() == 1);
 
-            drop_table_connector_ctx = Some(DropTableConnectorContext {
+            Some(DropTableConnectorContext {
                 // we do not remove the original table catalog as it's still needed for the streaming job
                 // just need to remove the ref to the state table
                 to_change_streaming_job_id: id,
                 to_remove_state_table_id: old_internal_table_ids[0], // asserted before
                 to_remove_source_id,
-            });
-        } else if stream_job.is_materialized_view() {
+            })
+        } else {
+            None
+        };
+
+        if stream_job.is_materialized_view() {
             // If it's ALTER MV, use `state::match` to match the internal tables, which is more complicated
             // but more robust.
             let old_fragments_upstreams = self
@@ -2015,7 +2180,7 @@ impl DdlController {
 
             fragment_graph.fit_internal_table_ids_with_mapping(result.table_matches);
             fragment_graph.fit_snapshot_backfill_epochs(result.snapshot_backfill_epochs);
-        } else {
+        } else if drop_table_connector_ctx.is_none() {
             // If it's ALTER TABLE or SOURCE, use a trivial table id matching algorithm to keep the original behavior.
             // TODO(alter-mv): this is actually a special case of ALTER MV, can we merge the two branches?
             let old_internal_tables = self

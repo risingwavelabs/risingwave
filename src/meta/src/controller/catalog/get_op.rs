@@ -119,6 +119,27 @@ impl CatalogController {
         }
     }
 
+    pub async fn get_sink_job_by_name(
+        &self,
+        database_id: DatabaseId,
+        schema_id: SchemaId,
+        job_name: &str,
+    ) -> MetaResult<Option<streaming_job::Model>> {
+        let inner = self.inner.read().await;
+        let job = StreamingJob::find()
+            .join(JoinType::InnerJoin, streaming_job::Relation::Object.def())
+            .join(JoinType::LeftJoin, sink::Relation::Object.def().rev())
+            .filter(
+                object::Column::DatabaseId
+                    .eq(database_id)
+                    .and(object::Column::SchemaId.eq(schema_id))
+                    .and(sink::Column::Name.eq(job_name)),
+            )
+            .one(&inner.db)
+            .await?;
+        Ok(job)
+    }
+
     pub async fn get_table_associated_source_id(
         &self,
         table_id: TableId,
