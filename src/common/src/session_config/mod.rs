@@ -244,6 +244,10 @@ pub struct SessionConfig {
     #[parameter(default = true)]
     streaming_use_snapshot_backfill: bool,
 
+    /// Enable serverless backfill for streaming queries. Defaults to false.
+    #[parameter(default = false)]
+    enable_serverless_backfill: bool,
+
     /// Allow `jsonb` in stream key
     #[parameter(default = false, alias = "rw_streaming_allow_jsonb_in_stream_key")]
     streaming_allow_jsonb_in_stream_key: bool,
