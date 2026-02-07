@@ -52,6 +52,7 @@ fn preflight_check_proxy() -> Result<()> {
 }
 
 fn preflight_check_ulimit() -> Result<()> {
+    // Use a shell to read the soft limit in a portable way.
     let ulimit = Command::new("sh")
         .args(["-c", "ulimit -n"])
         .output()?
