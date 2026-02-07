@@ -31,6 +31,11 @@ use crate::source::base::SourceMessage;
 pub struct KafkaMeta {
     pub timestamp: Timestamp,
     pub headers: Option<OwnedHeaders>,
+    /// Indicates this message is an EOF marker for the partition.
+    /// This is set when the consumer reaches the end of the partition,
+    /// which is important for Kafka transactions where control messages
+    /// (COMMIT/ABORT) occupy offsets but are not visible to consumers.
+    pub is_partition_eof: bool,
 }
 
 impl KafkaMeta {
@@ -104,6 +109,26 @@ impl SourceMessage {
                 } else {
                     None
                 },
+                is_partition_eof: false,
+            }),
+        }
+    }
+
+    /// Create an EOF marker message for a Kafka partition.
+    /// This is used when the consumer reaches the end of a partition,
+    /// signaling that backfill should complete even if target_offset wasn't reached
+    /// (due to Kafka transaction control messages occupying offsets).
+    pub fn kafka_partition_eof(partition: i32, last_offset: i64) -> Self {
+        SourceMessage {
+            key: None,
+            payload: None,
+            // Use the last visible offset + 1 as the EOF offset
+            offset: (last_offset + 1).to_string(),
+            split_id: partition.to_string().into(),
+            meta: SourceMeta::Kafka(KafkaMeta {
+                timestamp: Timestamp::NotAvailable,
+                headers: None,
+                is_partition_eof: true,
             }),
         }
     }
