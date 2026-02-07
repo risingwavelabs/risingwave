@@ -31,6 +31,8 @@ use pulsar::authentication::oauth2::{OAuth2Authentication, OAuth2Params};
 use pulsar::{Authentication, Pulsar, TokioExecutor};
 use rdkafka::ClientConfig;
 use risingwave_common::bail;
+use rustls_pki_types::pem::PemObject;
+use rustls_pki_types::{CertificateDer, PrivatePkcs8KeyDer};
 use serde::Deserialize;
 use serde_with::json::JsonString;
 use serde_with::{DisplayFromStr, serde_as};
@@ -1135,9 +1137,9 @@ pub(crate) fn load_certs(
         certificates.as_bytes().to_owned()
     };
 
-    rustls_pemfile::certs(&mut cert_bytes.as_slice())
-        .map(|cert| Ok(cert?))
-        .collect()
+    CertificateDer::pem_slice_iter(&cert_bytes)
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| anyhow!("Failed to parse certificates: {}", e).into())
 }
 
 pub(crate) fn load_private_key(
@@ -1149,10 +1151,11 @@ pub(crate) fn load_private_key(
         certificate.as_bytes().to_owned()
     };
 
-    let cert = rustls_pemfile::pkcs8_private_keys(&mut cert_bytes.as_slice())
+    let cert = PrivatePkcs8KeyDer::pem_slice_iter(&cert_bytes)
         .next()
-        .ok_or_else(|| anyhow!("No private key found"))?;
-    Ok(cert?.into())
+        .ok_or_else(|| anyhow!("No private key found"))?
+        .map_err(|e| anyhow!("Failed to parse private key: {}", e))?;
+    Ok(cert.into())
 }
 
 #[serde_as]
