@@ -23,8 +23,11 @@ use anyhow::anyhow;
 use arc_swap::ArcSwap;
 use futures::{TryFutureExt, pin_mut};
 use itertools::Itertools;
+use risingwave_common::catalog::DatabaseId;
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::system_param::{AdaptiveParallelismStrategy, PAUSE_ON_NEXT_BOOTSTRAP_KEY};
+use risingwave_meta_model::WorkerId;
+use risingwave_pb::common::WorkerNode;
 use risingwave_pb::meta::Recovery;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::stream_service::streaming_control_stream_response::Response;
@@ -46,9 +49,10 @@ use crate::barrier::rpc::{
 };
 use crate::barrier::schedule::{MarkReadyOptions, PeriodicBarriers};
 use crate::barrier::{
-    BarrierManagerRequest, BarrierManagerStatus, BarrierWorkerRuntimeInfoSnapshot, RecoveryReason,
-    UpdateDatabaseBarrierRequest, schedule,
+    BarrierManagerRequest, BarrierManagerStatus, BarrierWorkerRuntimeInfoSnapshot, Command,
+    RecoveryReason, RescheduleContext, UpdateDatabaseBarrierRequest, schedule,
 };
+use crate::controller::scale::render_actor_assignments;
 use crate::error::MetaErrorInner;
 use crate::hummock::HummockManagerRef;
 use crate::manager::sink_coordination::SinkCoordinatorManager;
@@ -57,7 +61,9 @@ use crate::manager::{
     MetadataManager,
 };
 use crate::rpc::metrics::GLOBAL_META_METRICS;
-use crate::stream::{GlobalRefreshManagerRef, ScaleControllerRef, SourceManagerRef};
+use crate::stream::{
+    GlobalRefreshManagerRef, ScaleControllerRef, SourceManagerRef, build_reschedule_commands,
+};
 use crate::{MetaError, MetaResult};
 
 /// [`crate::barrier::worker::GlobalBarrierWorker`] sends barriers to all registered compute nodes and
@@ -100,6 +106,52 @@ pub(super) struct GlobalBarrierWorker<C> {
     term_id: String,
 }
 
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+
+    use tokio::sync::oneshot;
+
+    use super::*;
+    use crate::barrier::RescheduleContext;
+    use crate::barrier::notifier::Notifier;
+
+    #[tokio::test]
+    async fn test_reschedule_intent_without_workers_notifies_start_failed() {
+        let env = MetaSrvEnv::for_test().await;
+        let (started_tx, started_rx) = oneshot::channel();
+        let (_collected_tx, _collected_rx) = oneshot::channel();
+
+        let notifier = Notifier {
+            started: Some(started_tx),
+            collected: Some(_collected_tx),
+        };
+
+        let new_barrier = schedule::NewBarrier {
+            database_id: DatabaseId::new(1),
+            command: Some((
+                Command::RescheduleIntent {
+                    context: RescheduleContext::empty(),
+                },
+                vec![notifier],
+            )),
+            span: tracing::Span::none(),
+            checkpoint: false,
+        };
+
+        let result = resolve_reschedule_intent(
+            env,
+            HashMap::new(),
+            AdaptiveParallelismStrategy::default(),
+            new_barrier,
+        );
+
+        assert!(matches!(result, Ok(None)));
+        let started = started_rx.await.expect("started notifier dropped");
+        assert!(started.is_err());
+    }
+}
+
 impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
     pub(super) async fn new_inner(
         env: MetaSrvEnv,
@@ -134,6 +186,87 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
             term_id: "uninitialized".into(),
         }
     }
+}
+
+fn resolve_reschedule_intent(
+    env: MetaSrvEnv,
+    worker_nodes: HashMap<WorkerId, WorkerNode>,
+    adaptive_parallelism_strategy: AdaptiveParallelismStrategy,
+    mut new_barrier: schedule::NewBarrier,
+) -> MetaResult<Option<schedule::NewBarrier>> {
+    let Some((command, notifiers)) = new_barrier.command.take() else {
+        return Ok(Some(new_barrier));
+    };
+
+    match command {
+        Command::RescheduleIntent { context } => {
+            let span = tracing::info_span!(
+                "resolve_reschedule_intent",
+                database_id = %new_barrier.database_id
+            );
+            let resolved = {
+                let _guard = span.enter();
+                build_reschedule_from_context(
+                    &env,
+                    worker_nodes,
+                    adaptive_parallelism_strategy,
+                    new_barrier.database_id,
+                    context,
+                )
+            };
+            match resolved {
+                Ok(Some(command)) => {
+                    new_barrier.command = Some((command, notifiers));
+                    Ok(Some(new_barrier))
+                }
+                Ok(None) => {
+                    // No-op intent: notify to unblock callers even though no barrier is injected.
+                    for mut notifier in notifiers {
+                        notifier.notify_started();
+                        notifier.notify_collected();
+                    }
+                    Ok(None)
+                }
+                Err(err) => {
+                    for notifier in notifiers {
+                        notifier.notify_start_failed(err.clone());
+                    }
+                    Ok(None)
+                }
+            }
+        }
+        _ => {
+            new_barrier.command = Some((command, notifiers));
+            Ok(Some(new_barrier))
+        }
+    }
+}
+
+fn build_reschedule_from_context(
+    env: &MetaSrvEnv,
+    worker_nodes: HashMap<WorkerId, WorkerNode>,
+    adaptive_parallelism_strategy: AdaptiveParallelismStrategy,
+    database_id: DatabaseId,
+    context: RescheduleContext,
+) -> MetaResult<Option<Command>> {
+    if worker_nodes.is_empty() {
+        return Err(anyhow!("no active streaming workers for reschedule").into());
+    }
+
+    let actor_id_counter = env.actor_id_generator();
+    if context.is_empty() {
+        return Ok(None);
+    }
+
+    let rendered = render_actor_assignments(
+        actor_id_counter,
+        &worker_nodes,
+        adaptive_parallelism_strategy,
+        &context.loaded,
+    )?;
+
+    let mut commands = build_reschedule_commands(env, rendered.fragments, context)?;
+    Ok(commands.remove(&database_id))
 }
 
 impl GlobalBarrierWorker<GlobalBarrierWorkerContextImpl> {
@@ -536,6 +669,34 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                 }
                 new_barrier = self.periodic_barriers.next_barrier(&*self.context) => {
                     let database_id = new_barrier.database_id;
+                    let new_barrier = if matches!(
+                        new_barrier.command,
+                        Some((Command::RescheduleIntent { .. }, _))
+                    ) {
+                        let env = self.env.clone();
+                        let worker_nodes = self
+                            .active_streaming_nodes
+                            .current()
+                            .iter()
+                            .map(|(worker_id, worker)| (*worker_id, worker.clone()))
+                            .collect();
+                        let adaptive_parallelism_strategy = self.adaptive_parallelism_strategy;
+                        match resolve_reschedule_intent(
+                            env,
+                            worker_nodes,
+                            adaptive_parallelism_strategy,
+                            new_barrier,
+                        ) {
+                            Ok(Some(new_barrier)) => new_barrier,
+                            Ok(None) => continue,
+                            Err(err) => {
+                                self.failure_recovery(err).await;
+                                continue;
+                            }
+                        }
+                    } else {
+                        new_barrier
+                    };
                     if let Err(e) = self.checkpoint_control.handle_new_barrier(new_barrier, &mut self.control_stream_manager) {
                         if !self.enable_recovery {
                             panic!(

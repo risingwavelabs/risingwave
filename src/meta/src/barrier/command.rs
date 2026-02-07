@@ -18,7 +18,7 @@ use std::fmt::{Display, Formatter};
 
 use itertools::Itertools;
 use risingwave_common::bitmap::Bitmap;
-use risingwave_common::catalog::TableId;
+use risingwave_common::catalog::{DatabaseId, TableId};
 use risingwave_common::hash::{ActorMapping, VnodeCountCompat};
 use risingwave_common::id::{JobId, SourceId};
 use risingwave_common::must_match;
@@ -27,7 +27,7 @@ use risingwave_common::util::epoch::Epoch;
 use risingwave_connector::source::{CdcTableSnapshotSplitRaw, SplitImpl};
 use risingwave_hummock_sdk::change_log::build_table_change_log_delta;
 use risingwave_hummock_sdk::vector_index::VectorIndexDelta;
-use risingwave_meta_model::WorkerId;
+use risingwave_meta_model::{DispatcherType, WorkerId, fragment_relation};
 use risingwave_pb::catalog::CreateType;
 use risingwave_pb::common::PbActorInfo;
 use risingwave_pb::hummock::vector_index_delta::PbVectorIndexInit;
@@ -59,6 +59,8 @@ use crate::barrier::info::BarrierInfo;
 use crate::barrier::rpc::{ControlStreamManager, to_partial_graph_id};
 use crate::barrier::utils::{collect_new_vector_index_info, collect_resp_info};
 use crate::controller::fragment::{InflightActorInfo, InflightFragmentInfo};
+use crate::controller::scale::LoadedFragmentContext;
+use crate::controller::utils::StreamingJobExtraInfo;
 use crate::hummock::{CommitEpochInfo, NewTableFragmentInfo};
 use crate::manager::{StreamingJob, StreamingJobType};
 use crate::model::{
@@ -103,6 +105,78 @@ pub struct Reschedule {
     pub actor_splits: HashMap<ActorId, Vec<SplitImpl>>,
 
     pub newly_created_actors: HashMap<ActorId, (StreamActorWithDispatchers, WorkerId)>,
+}
+
+/// Preloaded context for rescheduling, built outside the barrier worker.
+#[derive(Debug, Clone)]
+pub struct RescheduleContext {
+    pub loaded: LoadedFragmentContext,
+    pub job_extra_info: HashMap<JobId, StreamingJobExtraInfo>,
+    pub upstream_fragments: HashMap<FragmentId, HashMap<FragmentId, DispatcherType>>,
+    pub downstream_fragments: HashMap<FragmentId, HashMap<FragmentId, DispatcherType>>,
+    pub downstream_relations: HashMap<(FragmentId, FragmentId), fragment_relation::Model>,
+}
+
+impl RescheduleContext {
+    pub fn empty() -> Self {
+        Self {
+            loaded: LoadedFragmentContext::default(),
+            job_extra_info: HashMap::new(),
+            upstream_fragments: HashMap::new(),
+            downstream_fragments: HashMap::new(),
+            downstream_relations: HashMap::new(),
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.loaded.is_empty()
+    }
+
+    pub fn for_database(&self, database_id: DatabaseId) -> Option<Self> {
+        let loaded = self.loaded.for_database(database_id)?;
+        let job_ids: HashSet<JobId> = loaded.job_map.keys().copied().collect();
+        let fragment_ids: HashSet<FragmentId> = loaded
+            .job_fragments
+            .values()
+            .flat_map(|fragments| fragments.keys().copied())
+            .collect();
+
+        let job_extra_info = self
+            .job_extra_info
+            .iter()
+            .filter(|(job_id, _)| job_ids.contains(job_id))
+            .map(|(job_id, info)| (*job_id, info.clone()))
+            .collect();
+
+        let upstream_fragments = self
+            .upstream_fragments
+            .iter()
+            .filter(|(fragment_id, _)| fragment_ids.contains(fragment_id))
+            .map(|(fragment_id, upstreams)| (*fragment_id, upstreams.clone()))
+            .collect();
+
+        let downstream_fragments = self
+            .downstream_fragments
+            .iter()
+            .filter(|(fragment_id, _)| fragment_ids.contains(fragment_id))
+            .map(|(fragment_id, downstreams)| (*fragment_id, downstreams.clone()))
+            .collect();
+
+        let downstream_relations = self
+            .downstream_relations
+            .iter()
+            .filter(|((source_fragment_id, _), _)| fragment_ids.contains(source_fragment_id))
+            .map(|(key, relation)| (*key, relation.clone()))
+            .collect();
+
+        Some(Self {
+            loaded,
+            job_extra_info,
+            upstream_fragments,
+            downstream_fragments,
+            downstream_relations,
+        })
+    }
 }
 
 /// Replacing an old job with a new one. All actors in the job will be rebuilt.
@@ -331,6 +405,11 @@ pub enum Command {
         cross_db_snapshot_backfill_info: SnapshotBackfillInfo,
     },
 
+    /// Reschedule context. It must be resolved inside the barrier worker before injection.
+    RescheduleIntent {
+        context: RescheduleContext,
+    },
+
     /// `Reschedule` command generates a `Update` barrier by the [`Reschedule`] of each fragment.
     /// Mainly used for scaling and migration.
     ///
@@ -432,6 +511,7 @@ impl std::fmt::Display for Command {
             Command::CreateStreamingJob { info, .. } => {
                 write!(f, "CreateStreamingJob: {}", info.streaming_job)
             }
+            Command::RescheduleIntent { .. } => write!(f, "RescheduleIntent"),
             Command::RescheduleFragment { .. } => write!(f, "RescheduleFragment"),
             Command::ReplaceStreamJob(plan) => {
                 write!(f, "ReplaceStreamJob: {}", plan.streaming_job)
@@ -567,6 +647,7 @@ impl Command {
 
                 Some((Some((info.streaming_job.id(), cdc_tracker)), changes))
             }
+            Command::RescheduleIntent { .. } => None,
             Command::RescheduleFragment { reschedules, .. } => Some((
                 None,
                 reschedules
@@ -730,6 +811,9 @@ impl Command {
                     cross_db_snapshot_backfill_info,
                 },
             },
+            Command::RescheduleIntent { .. } => {
+                PostCollectCommand::Command("RescheduleIntent".to_owned())
+            }
             Command::RescheduleFragment { reschedules, .. } => {
                 PostCollectCommand::RescheduleFragment { reschedules }
             }
@@ -1171,6 +1255,7 @@ impl Command {
                 )
             }
 
+            Command::RescheduleIntent { .. } => None,
             Command::RescheduleFragment {
                 reschedules,
                 fragment_actors,

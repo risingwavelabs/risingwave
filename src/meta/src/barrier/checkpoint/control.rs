@@ -266,6 +266,7 @@ impl CheckpointControl {
                         return Ok(());
                     }
                     Command::RescheduleFragment { .. }
+                    | Command::RescheduleIntent { .. }
                     | Command::ReplaceStreamJob(_)
                     | Command::SourceChangeSplit(_)
                     | Command::Throttle { .. }
@@ -1063,6 +1064,16 @@ impl DatabaseCheckpointControl {
         } else {
             (None, vec![])
         };
+
+        if let Some(Command::RescheduleIntent { .. }) = &command {
+            warn!("reschedule intent should be resolved before injection");
+            for notifier in notifiers {
+                notifier.notify_start_failed(
+                    anyhow!("reschedule intent must be resolved before injection").into(),
+                );
+            }
+            return Ok(());
+        }
 
         if let Some(Command::DropStreamingJobs {
             streaming_job_ids, ..
