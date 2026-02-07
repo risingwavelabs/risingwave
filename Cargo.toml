@@ -206,8 +206,8 @@ parking_lot = { version = "0.12", features = [
 parquet = { version = "56", features = ["async"] }
 pin-project-lite = "0.2"
 prost = { version = "=0.13.4" }
-prost-derive = { version = "=0.13.4" }
 prost-build = { version = "=0.13.4" }
+prost-derive = { version = "=0.13.4" }
 prost-types = { version = "=0.13.4" }
 rand = { version = "0.9", features = ["small_rng"] }
 rdkafka = { package = "madsim-rdkafka", version = "0.4.4", features = [
@@ -437,7 +437,7 @@ bson = { git = "https://github.com/risingwavelabs/bson-rust", tag = "v2.14.0-jso
 # in the last release v4.8.0+2.3.0, the zstd-sys requirement is 2.0.6 < 2.0.13, and the release does not contain zstd related changes
 rdkafka-sys = { git = "https://github.com/risingwavelabs/rust-rdkafka", package = "rdkafka-sys", branch = "downgrade-zstd" }
 
-prost = { git = "https://github.com/risingwavelabs/prost.git", package = "prost", rev = "7729254fdad1f9a4a4599e09a158a50faa0bc268" }
-prost-derive = { git = "https://github.com/risingwavelabs/prost.git", package = "prost-derive", rev = "7729254fdad1f9a4a4599e09a158a50faa0bc268" }
-prost-build = { git = "https://github.com/risingwavelabs/prost.git", package = "prost-build", rev = "7729254fdad1f9a4a4599e09a158a50faa0bc268" }
-prost-types = { git = "https://github.com/risingwavelabs/prost.git", package = "prost-types", rev = "7729254fdad1f9a4a4599e09a158a50faa0bc268" }
+prost = { git = "https://github.com/risingwavelabs/prost.git", package = "prost", rev = "d7baf5f4d4c12d82987bd86a91a8663005881bdd" }
+prost-derive = { git = "https://github.com/risingwavelabs/prost.git", package = "prost-derive", rev = "d7baf5f4d4c12d82987bd86a91a8663005881bdd" }
+prost-build = { git = "https://github.com/risingwavelabs/prost.git", package = "prost-build", rev = "d7baf5f4d4c12d82987bd86a91a8663005881bdd" }
+prost-types = { git = "https://github.com/risingwavelabs/prost.git", package = "prost-types", rev = "d7baf5f4d4c12d82987bd86a91a8663005881bdd" }

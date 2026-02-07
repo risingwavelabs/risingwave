@@ -807,7 +807,7 @@ impl MetaClient {
 
     pub async fn drop_table(
         &self,
-        source_id: Option<u32>,
+        source_id: Option<SourceId>,
         table_id: TableId,
         cascade: bool,
     ) -> Result<WaitVersion> {

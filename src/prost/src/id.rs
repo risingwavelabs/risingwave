@@ -438,13 +438,13 @@ impl From<LocalOperatorId> for StreamNodeLocalOperatorId {
 impl From<OptionalAssociatedTableId> for TableId {
     fn from(value: OptionalAssociatedTableId) -> Self {
         let OptionalAssociatedTableId::AssociatedTableId(table_id) = value;
-        Self(table_id)
+        table_id
     }
 }
 
 impl From<TableId> for OptionalAssociatedTableId {
     fn from(value: TableId) -> Self {
-        OptionalAssociatedTableId::AssociatedTableId(value.0)
+        OptionalAssociatedTableId::AssociatedTableId(value)
     }
 }
 
@@ -456,13 +456,13 @@ impl_as!(SubscriptionId, SubscriberId);
 impl From<OptionalAssociatedSourceId> for SourceId {
     fn from(value: OptionalAssociatedSourceId) -> Self {
         let OptionalAssociatedSourceId::AssociatedSourceId(source_id) = value;
-        Self(source_id)
+        source_id
     }
 }
 
 impl From<SourceId> for OptionalAssociatedSourceId {
     fn from(value: SourceId) -> Self {
-        OptionalAssociatedSourceId::AssociatedSourceId(value.0)
+        OptionalAssociatedSourceId::AssociatedSourceId(value)
     }
 }
 
@@ -471,7 +471,7 @@ macro_rules! impl_into_object {
         $(
             impl From<$type_name> for $mod_prefix {
                 fn from(value: $type_name) -> Self {
-                    <$mod_prefix>::$type_name(value.0)
+                    <$mod_prefix>::$type_name(value)
                 }
             }
         )+

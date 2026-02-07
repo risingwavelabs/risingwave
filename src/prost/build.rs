@@ -135,6 +135,7 @@ for_all_wrapped_id_fields! (
             schema_id: SchemaId,
             database_id: DatabaseId,
             connection_id: ConnectionId,
+            associated_table_id: TableId,
             owner: UserId,
         }
         StreamSourceInfo {
@@ -151,6 +152,7 @@ for_all_wrapped_id_fields! (
             id: TableId,
             primary_table_id: TableId,
             job_id: JobId,
+            associated_source_id: SourceId,
             schema_id: SchemaId,
             database_id: DatabaseId,
             fragment_id: FragmentId,
@@ -194,7 +196,27 @@ for_all_wrapped_id_fields! (
         AlterFragmentParallelismRequest {
             fragment_ids: FragmentId,
         }
+        AlterNameRequest {
+            table_id: TableId,
+            view_id: ViewId,
+            index_id: IndexId,
+            sink_id: SinkId,
+            source_id: SourceId,
+            schema_id: SchemaId,
+            database_id: DatabaseId,
+            subscription_id: SubscriptionId,
+        }
         AlterOwnerRequest {
+            table_id: TableId,
+            view_id: ViewId,
+            source_id: SourceId,
+            sink_id: SinkId,
+            schema_id: SchemaId,
+            database_id: DatabaseId,
+            subscription_id: SubscriptionId,
+            connection_id: ConnectionId,
+            secret_id: SecretId,
+            function_id: FunctionId,
             owner_id: UserId,
         }
         AlterParallelismRequest {
@@ -210,6 +232,13 @@ for_all_wrapped_id_fields! (
             owner_id: UserId,
         }
         AlterSetSchemaRequest {
+            table_id: TableId,
+            view_id: ViewId,
+            source_id: SourceId,
+            sink_id: SinkId,
+            function_id: FunctionId,
+            connection_id: ConnectionId,
+            subscription_id: SubscriptionId,
             new_schema_id: SchemaId,
         }
         AlterStreamingJobConfigRequest {
@@ -277,6 +306,7 @@ for_all_wrapped_id_fields! (
             subscription_id: SubscriptionId,
         }
         DropTableRequest {
+            id: SourceId,
             table_id: TableId,
         }
         DropViewRequest {
@@ -293,6 +323,10 @@ for_all_wrapped_id_fields! (
         }
         ResetSourceRequest {
             source_id: SourceId,
+        }
+        RisectlResumeBackfillRequest {
+            job_id: JobId,
+            fragment_id: FragmentId,
         }
         WaitVersion {
             hummock_version_id: HummockVersionId,
@@ -758,6 +792,10 @@ for_all_wrapped_id_fields! (
         LoadFinishMutation {
             associated_source_id: SourceId,
         }
+        LookupNode {
+            table_id: TableId,
+            index_id: TableId,
+        }
         MaterializeNode {
             table_id: TableId,
         }
@@ -944,6 +982,18 @@ for_all_wrapped_id_fields! (
         }
         DropUserRequest {
             user_id: UserId,
+        }
+        GrantPrivilege {
+            database_id: DatabaseId,
+            schema_id: SchemaId,
+            table_id: TableId,
+            source_id: SourceId,
+            sink_id: SinkId,
+            view_id: ViewId,
+            function_id: FunctionId,
+            subscription_id: SubscriptionId,
+            connection_id: ConnectionId,
+            secret_id: SecretId,
         }
         GrantPrivilege.ActionWithGrantOption {
             granted_by: UserId,
