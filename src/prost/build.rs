@@ -185,6 +185,9 @@ for_all_wrapped_id_fields! (
         }
     }
     ddl_service {
+        AlterBackfillParallelismRequest {
+            table_id: JobId,
+        }
         AlterCdcTableBackfillParallelismRequest {
             table_id: JobId,
         }
