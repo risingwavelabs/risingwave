@@ -42,8 +42,8 @@ use super::utils::{
     Distill, IndicesDisplay, childless_record, infer_kv_log_store_table_catalog_inner,
 };
 use super::{
-    ExprRewritable, PlanBase, StreamExchange, StreamNode, StreamPlanRef as PlanRef, StreamProject,
-    StreamPlanNodeType, StreamSyncLogStore, SyncLogStoreTarget, generic,
+    ExprRewritable, PlanBase, StreamExchange, StreamNode, StreamPlanNodeType,
+    StreamPlanRef as PlanRef, StreamProject, StreamSyncLogStore, SyncLogStoreTarget, generic,
 };
 use crate::TableCatalog;
 use crate::error::{ErrorCode, Result, RwError, bail_bind_error, bail_invalid_input_syntax};
