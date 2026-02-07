@@ -32,13 +32,14 @@ use tokio::sync::oneshot::Receiver;
 use tokio::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard, oneshot};
 use tokio::task::JoinHandle;
 use tokio::time::{Instant, MissedTickBehavior};
+use tokio_retry::strategy::{ExponentialBackoff, jitter};
 
 use crate::barrier::{Command, Reschedule, SharedFragmentInfo};
 use crate::controller::scale::{
     FragmentRenderMap, NoShuffleEnsemble, RenderedGraph, find_fragment_no_shuffle_dags_detailed,
     render_fragments, render_jobs,
 };
-use crate::error::bail_invalid_parameter;
+use crate::error::{MetaErrorInner, bail_invalid_parameter};
 use crate::manager::{ActiveStreamingWorkerNodes, LocalNotification, MetaSrvEnv, MetadataManager};
 use crate::model::{ActorId, FragmentId, StreamActor, StreamActorWithDispatchers};
 use crate::stream::{GlobalStreamManager, SourceManagerRef};
@@ -765,6 +766,320 @@ pub enum ReschedulePolicy {
     Both(ParallelismPolicy, ResourceGroupPolicy),
 }
 
+const STREAM_TASK_RETRY_BASE_DELAY: Duration = Duration::from_millis(200);
+const STREAM_TASK_RETRY_MAX_DELAY: Duration = Duration::from_secs(5);
+const STREAM_TASK_RETRY_MAX_ATTEMPTS: usize = 60;
+const STREAM_TASK_RETRY_TICK_INTERVAL: Duration = Duration::from_millis(200);
+
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+enum RetryTask {
+    PostBackfillReschedule(JobId),
+}
+
+impl RetryTask {
+    async fn execute(&self, manager: &GlobalStreamManager) -> MetaResult<()> {
+        match self {
+            RetryTask::PostBackfillReschedule(job_id) => {
+                manager.apply_post_backfill_parallelism(*job_id).await
+            }
+        }
+    }
+
+    fn is_retryable(&self, err: &MetaError) -> bool {
+        match self {
+            RetryTask::PostBackfillReschedule(_) => matches!(
+                err.inner(),
+                MetaErrorInner::RescheduleBlockedBySnapshotBackfill
+            ),
+        }
+    }
+}
+
+struct RetryState {
+    attempts: usize,
+    backoff: ExponentialBackoff,
+    next_attempt_at: Instant,
+    warned_after_max: bool,
+}
+
+impl RetryState {
+    fn new(now: Instant) -> Self {
+        let mut backoff =
+            ExponentialBackoff::from_millis(STREAM_TASK_RETRY_BASE_DELAY.as_millis() as u64)
+                .factor(2)
+                .max_delay(STREAM_TASK_RETRY_MAX_DELAY);
+        let delay = backoff.next().unwrap_or(STREAM_TASK_RETRY_MAX_DELAY);
+        let next_attempt_at = now + jitter(delay);
+        Self {
+            attempts: 0,
+            backoff,
+            next_attempt_at,
+            warned_after_max: false,
+        }
+    }
+
+    fn schedule_next(&mut self, now: Instant) {
+        let delay = self.backoff.next().unwrap_or(STREAM_TASK_RETRY_MAX_DELAY);
+        self.next_attempt_at = now + jitter(delay);
+    }
+}
+
+struct RetryQueue {
+    pending: HashMap<RetryTask, RetryState>,
+    ticker: tokio::time::Interval,
+}
+
+impl RetryQueue {
+    fn new() -> Self {
+        let mut ticker = tokio::time::interval(STREAM_TASK_RETRY_TICK_INTERVAL);
+        ticker.set_missed_tick_behavior(MissedTickBehavior::Skip);
+        Self {
+            pending: HashMap::new(),
+            ticker,
+        }
+    }
+
+    fn enqueue(&mut self, task: RetryTask) {
+        if self.pending.contains_key(&task) {
+            return;
+        }
+        let now = Instant::now();
+        self.pending.insert(task, RetryState::new(now));
+    }
+
+    fn has_pending(&self) -> bool {
+        !self.pending.is_empty()
+    }
+
+    async fn execute_or_enqueue(&mut self, manager: &GlobalStreamManager, task: RetryTask) {
+        if let Err(e) = task.execute(manager).await {
+            if task.is_retryable(&e) {
+                self.enqueue(task.clone());
+                tracing::warn!(
+                    task = ?task,
+                    error = %e.as_report(),
+                    "stream task failed; will retry"
+                );
+            } else {
+                tracing::warn!(
+                    task = ?task,
+                    error = %e.as_report(),
+                    "stream task failed with non-retryable error"
+                );
+            }
+        }
+    }
+
+    async fn tick(&mut self, manager: &GlobalStreamManager) {
+        if self.pending.is_empty() {
+            return;
+        }
+
+        let now = Instant::now();
+        let due_tasks = self
+            .pending
+            .iter()
+            .filter(|(_, state)| state.next_attempt_at <= now)
+            .map(|(task, _)| task.clone())
+            .collect_vec();
+
+        for task in due_tasks {
+            let mut state = match self.pending.remove(&task) {
+                Some(state) => state,
+                None => continue,
+            };
+
+            state.attempts += 1;
+
+            match task.execute(manager).await {
+                Ok(()) => {
+                    tracing::info!(
+                        task = ?task,
+                        attempts = state.attempts,
+                        "stream task succeeded after retry"
+                    );
+                }
+                Err(e) => {
+                    if !task.is_retryable(&e) {
+                        tracing::warn!(
+                            task = ?task,
+                            error = %e.as_report(),
+                            "stream task failed with non-retryable error"
+                        );
+                        continue;
+                    }
+
+                    if state.attempts >= STREAM_TASK_RETRY_MAX_ATTEMPTS {
+                        if !state.warned_after_max {
+                            tracing::warn!(
+                                task = ?task,
+                                attempts = state.attempts,
+                                error = %e.as_report(),
+                                "stream task retry limit reached; continue with max delay"
+                            );
+                            state.warned_after_max = true;
+                        }
+                        state.schedule_next(Instant::now());
+                        self.pending.insert(task, state);
+                        continue;
+                    }
+
+                    state.schedule_next(Instant::now());
+                    tracing::debug!(
+                        task = ?task,
+                        attempts = state.attempts,
+                        next_retry_at = ?state.next_attempt_at,
+                        "stream task retry scheduled"
+                    );
+                    self.pending.insert(task, state);
+                }
+            }
+        }
+    }
+}
+
+struct StreamManagerRunState {
+    worker_cache: BTreeMap<WorkerId, WorkerNode>,
+    previous_adaptive_parallelism_strategy: AdaptiveParallelismStrategy,
+    should_trigger: bool,
+}
+
+impl StreamManagerRunState {
+    fn new(worker_nodes: Vec<WorkerNode>) -> Self {
+        let worker_cache = worker_nodes
+            .into_iter()
+            .map(|worker| (worker.id, worker))
+            .collect();
+        Self {
+            worker_cache,
+            previous_adaptive_parallelism_strategy: AdaptiveParallelismStrategy::default(),
+            should_trigger: false,
+        }
+    }
+
+    fn is_streaming_compute(worker: &WorkerNode) -> bool {
+        worker.get_type() == Ok(WorkerType::ComputeNode)
+            && worker.property.as_ref().unwrap().is_streaming
+    }
+
+    async fn handle_scale_tick(
+        &mut self,
+        manager: &GlobalStreamManager,
+        ticker: &mut tokio::time::Interval,
+    ) {
+        if self.worker_cache.is_empty() {
+            tracing::debug!("no available worker nodes");
+            self.should_trigger = false;
+            return;
+        }
+
+        match manager.trigger_parallelism_control().await {
+            Ok(cont) => {
+                self.should_trigger = cont;
+            }
+            Err(e) => {
+                tracing::warn!(
+                    error = %e.as_report(),
+                    "Failed to trigger scale out, waiting for next tick to retry after {}s",
+                    ticker.period().as_secs()
+                );
+                ticker.reset();
+            }
+        }
+    }
+
+    fn handle_system_params_change(&mut self, reader: &impl SystemParamsRead) {
+        let new_strategy = reader.adaptive_parallelism_strategy();
+        if new_strategy != self.previous_adaptive_parallelism_strategy {
+            tracing::info!(
+                "adaptive parallelism strategy changed from {:?} to {:?}",
+                self.previous_adaptive_parallelism_strategy,
+                new_strategy
+            );
+            self.should_trigger = true;
+            self.previous_adaptive_parallelism_strategy = new_strategy;
+        }
+    }
+
+    fn handle_worker_activated(&mut self, worker: WorkerNode) {
+        if !Self::is_streaming_compute(&worker) {
+            return;
+        }
+
+        tracing::info!(worker = %worker.id, "worker activated notification received");
+
+        let prev_worker = self.worker_cache.insert(worker.id, worker.clone());
+
+        match prev_worker {
+            Some(prev_worker)
+                if prev_worker.compute_node_parallelism() != worker.compute_node_parallelism() =>
+            {
+                tracing::info!(worker = %worker.id, "worker parallelism changed");
+                self.should_trigger = true;
+            }
+            Some(prev_worker) if prev_worker.resource_group() != worker.resource_group() => {
+                tracing::info!(worker = %worker.id, "worker label changed");
+                self.should_trigger = true;
+            }
+            None => {
+                tracing::info!(worker = %worker.id, "new worker joined");
+                self.should_trigger = true;
+            }
+            _ => {}
+        }
+    }
+
+    fn handle_worker_deleted(&mut self, worker: WorkerNode) {
+        if !Self::is_streaming_compute(&worker) {
+            return;
+        }
+
+        match self.worker_cache.remove(&worker.id) {
+            Some(prev_worker) => {
+                tracing::info!(
+                    worker = %prev_worker.id,
+                    "worker removed from stream manager cache"
+                );
+            }
+            None => {
+                tracing::warn!(
+                    worker = %worker.id,
+                    "worker not found in stream manager cache, but it was removed"
+                );
+            }
+        }
+    }
+
+    async fn handle_notification(
+        &mut self,
+        manager: &GlobalStreamManager,
+        retry_queue: &mut RetryQueue,
+        notification: LocalNotification,
+    ) {
+        match notification {
+            LocalNotification::SystemParamsChange(reader) => {
+                self.handle_system_params_change(&reader);
+            }
+            LocalNotification::WorkerNodeActivated(worker) => {
+                self.handle_worker_activated(worker);
+            }
+            LocalNotification::WorkerNodeDeleted(worker) => {
+                self.handle_worker_deleted(worker);
+            }
+            LocalNotification::StreamingJobBackfillFinished(job_id) => {
+                tracing::debug!(
+                    job_id = %job_id,
+                    "received backfill finished notification"
+                );
+                retry_queue
+                    .execute_or_enqueue(manager, RetryTask::PostBackfillReschedule(job_id))
+                    .await;
+            }
+            _ => {}
+        }
+    }
+}
+
 impl GlobalStreamManager {
     #[await_tree::instrument("acquire_reschedule_read_guard")]
     pub async fn reschedule_lock_read_guard(&self) -> RwLockReadGuard<'_, ()> {
@@ -827,11 +1142,6 @@ impl GlobalStreamManager {
 
         let active_workers =
             ActiveStreamingWorkerNodes::new_snapshot(self.metadata_manager.clone()).await?;
-
-        if job_ids.is_empty() {
-            tracing::info!("no streaming jobs for scaling, maybe an empty cluster");
-            return Ok(false);
-        }
 
         tracing::info!(
             "trigger parallelism control for jobs: {:#?}, workers {:#?}",
@@ -907,16 +1217,12 @@ impl GlobalStreamManager {
             .await
             .expect("list active streaming compute nodes");
 
-        let mut worker_cache: BTreeMap<_, _> = worker_nodes
-            .into_iter()
-            .map(|worker| (worker.id, worker))
-            .collect();
-
-        let mut previous_adaptive_parallelism_strategy = AdaptiveParallelismStrategy::default();
-
-        let mut should_trigger = false;
+        let mut run_state = StreamManagerRunState::new(worker_nodes);
+        let mut retry_queue = RetryQueue::new();
 
         loop {
+            let has_pending_retry = retry_queue.has_pending();
+
             tokio::select! {
                 biased;
 
@@ -925,96 +1231,20 @@ impl GlobalStreamManager {
                     break;
                 }
 
-                _ = ticker.tick(), if should_trigger => {
-                    let include_workers = worker_cache.keys().copied().collect_vec();
+                _ = ticker.tick(), if run_state.should_trigger => {
+                    run_state.handle_scale_tick(self, &mut ticker).await;
+                }
 
-                    if include_workers.is_empty() {
-                        tracing::debug!("no available worker nodes");
-                        should_trigger = false;
-                        continue;
-                    }
-
-                    match self.trigger_parallelism_control().await {
-                        Ok(cont) => {
-                            should_trigger = cont;
-                        }
-                        Err(e) => {
-                            tracing::warn!(error = %e.as_report(), "Failed to trigger scale out, waiting for next tick to retry after {}s", ticker.period().as_secs());
-                            ticker.reset();
-                        }
-                    }
+                _ = retry_queue.ticker.tick(), if has_pending_retry => {
+                    retry_queue.tick(self).await;
                 }
 
                 notification = local_notification_rx.recv() => {
                     let notification = notification.expect("local notification channel closed in loop of stream manager");
 
-                    // Only maintain the cache for streaming compute nodes.
-                    let worker_is_streaming_compute = |worker: &WorkerNode| {
-                        worker.get_type() == Ok(WorkerType::ComputeNode)
-                            && worker.property.as_ref().unwrap().is_streaming
-                    };
-
-                    match notification {
-                        LocalNotification::SystemParamsChange(reader) => {
-                            let new_strategy = reader.adaptive_parallelism_strategy();
-                            if new_strategy != previous_adaptive_parallelism_strategy {
-                                tracing::info!("adaptive parallelism strategy changed from {:?} to {:?}", previous_adaptive_parallelism_strategy, new_strategy);
-                                should_trigger = true;
-                                previous_adaptive_parallelism_strategy = new_strategy;
-                            }
-                        }
-                        LocalNotification::WorkerNodeActivated(worker) => {
-                            if !worker_is_streaming_compute(&worker) {
-                                continue;
-                            }
-
-                            tracing::info!(worker = %worker.id, "worker activated notification received");
-
-                            let prev_worker = worker_cache.insert(worker.id, worker.clone());
-
-                            match prev_worker {
-                                Some(prev_worker) if prev_worker.compute_node_parallelism() != worker.compute_node_parallelism()  => {
-                                    tracing::info!(worker = %worker.id, "worker parallelism changed");
-                                    should_trigger = true;
-                                }
-                                Some(prev_worker) if prev_worker.resource_group() != worker.resource_group()  => {
-                                    tracing::info!(worker = %worker.id, "worker label changed");
-                                    should_trigger = true;
-                                }
-                                None => {
-                                    tracing::info!(worker = %worker.id, "new worker joined");
-                                    should_trigger = true;
-                                }
-                                _ => {}
-                            }
-                        }
-
-                        // Since our logic for handling passive scale-in is within the barrier manager,
-                        // there’s not much we can do here. All we can do is proactively remove the entries from our cache.
-                        LocalNotification::WorkerNodeDeleted(worker) => {
-                            if !worker_is_streaming_compute(&worker) {
-                                continue;
-                            }
-
-                            match worker_cache.remove(&worker.id) {
-                                Some(prev_worker) => {
-                                    tracing::info!(worker = %prev_worker.id, "worker removed from stream manager cache");
-                                }
-                                None => {
-                                    tracing::warn!(worker = %worker.id, "worker not found in stream manager cache, but it was removed");
-                                }
-                            }
-                        }
-
-                        LocalNotification::StreamingJobBackfillFinished(job_id) => {
-                            tracing::debug!(job_id = %job_id, "received backfill finished notification");
-                            if let Err(e) = self.apply_post_backfill_parallelism(job_id).await {
-                                tracing::warn!(job_id = %job_id, error = %e.as_report(), "failed to restore parallelism after backfill");
-                            }
-                        }
-
-                        _ => {}
-                    }
+                    run_state
+                        .handle_notification(self, &mut retry_queue, notification)
+                        .await;
                 }
             }
         }
@@ -1068,10 +1298,7 @@ impl GlobalStreamManager {
         let policy = ReschedulePolicy::Parallelism(ParallelismPolicy {
             parallelism: target,
         });
-        if let Err(e) = self.reschedule_streaming_job(job_id, policy, false).await {
-            tracing::warn!(job_id = %job_id, error = %e.as_report(), "reschedule after backfill failed");
-            return Err(e);
-        }
+        self.reschedule_streaming_job(job_id, policy, false).await?;
 
         tracing::info!(job_id = %job_id, "parallelism reschedule after backfill submitted");
         Ok(())

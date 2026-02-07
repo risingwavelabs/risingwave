@@ -1119,10 +1119,7 @@ impl DatabaseCheckpointControl {
             warn!("ignore reschedule when creating streaming job with snapshot backfill");
             for notifier in notifiers {
                 notifier.notify_start_failed(
-                    anyhow!(
-                            "cannot reschedule when creating streaming job with snapshot backfill",
-                        )
-                        .into(),
+                    crate::error::MetaErrorInner::RescheduleBlockedBySnapshotBackfill.into(),
                 );
             }
             return Ok(());
