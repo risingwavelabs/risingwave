@@ -679,32 +679,12 @@ pub(crate) async fn wait_for_update(
 
                     impl std::fmt::Display for ShortBacktrace<'_> {
                         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                            if self.bt.status() != std::backtrace::BacktraceStatus::Captured {
-                                return write!(f, "{:?}", self.bt);
+                            writeln!(f, "backtrace:")?;
+                            for (idx, frame) in self.bt.frames().iter().take(self.limit).enumerate()
+                            {
+                                writeln!(f, "{}: {:?}", idx, frame)?;
                             }
-
-                            let mut rendered = String::new();
-                            for (idx, frame) in self.bt.frames().iter().enumerate() {
-                                if idx >= self.limit {
-                                    break;
-                                }
-                                let _ = std::fmt::Write::write_fmt(
-                                    &mut rendered,
-                                    format_args!("{idx}: {frame:?}\n"),
-                                );
-                            }
-
-                            if self.bt.frames().len() > self.limit {
-                                let _ = std::fmt::Write::write_fmt(
-                                    &mut rendered,
-                                    format_args!(
-                                        "... {} frames omitted\n",
-                                        self.bt.frames().len() - self.limit
-                                    ),
-                                );
-                            }
-
-                            write!(f, "{rendered}")
+                            Ok(())
                         }
                     }
                     tracing::warn!(
