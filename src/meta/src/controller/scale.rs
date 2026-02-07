@@ -1821,12 +1821,12 @@ mod tests {
             components: HashSet::from([fragment_id]),
         }];
 
-        let fragment_map =
-            HashMap::from([(job_id, HashMap::from([(fragment_id, fragment_model)]))]);
+        let fragment_map = HashMap::from([(fragment_id, fragment_model)]);
+        let job_fragments = HashMap::from([(job_id, fragment_map)]);
         let job_map = HashMap::from([(job_id, job_model)]);
 
         // 4 workers with 1 parallelism each = total 4 parallelism
-        let worker_map = HashMap::from([
+        let worker_map: HashMap<WorkerId, WorkerNode> = HashMap::from([
             (1.into(), build_worker_node(1, 1, "default")),
             (2.into(), build_worker_node(2, 1, "default")),
             (3.into(), build_worker_node(3, 1, "default")),
@@ -1851,7 +1851,7 @@ mod tests {
         let result = render_actors(
             &actor_id_counter,
             &ensembles,
-            &fragment_map,
+            &job_fragments,
             &job_map,
             &worker_map,
             AdaptiveParallelismStrategy::Full,
@@ -1914,12 +1914,12 @@ mod tests {
             components: HashSet::from([fragment_id]),
         }];
 
-        let fragment_map =
-            HashMap::from([(job_id, HashMap::from([(fragment_id, fragment_model)]))]);
+        let fragment_map = HashMap::from([(fragment_id, fragment_model)]);
+        let job_fragments = HashMap::from([(job_id, fragment_map)]);
         let job_map = HashMap::from([(job_id, job_model)]);
 
         // 4 workers = total 4 parallelism
-        let worker_map = HashMap::from([
+        let worker_map: HashMap<WorkerId, WorkerNode> = HashMap::from([
             (1.into(), build_worker_node(1, 1, "default")),
             (2.into(), build_worker_node(2, 1, "default")),
             (3.into(), build_worker_node(3, 1, "default")),
@@ -1944,7 +1944,7 @@ mod tests {
         let result = render_actors(
             &actor_id_counter,
             &ensembles,
-            &fragment_map,
+            &job_fragments,
             &job_map,
             &worker_map,
             AdaptiveParallelismStrategy::Bounded(NonZeroUsize::new(3).unwrap()),
@@ -2008,12 +2008,12 @@ mod tests {
             components: HashSet::from([fragment_id]),
         }];
 
-        let fragment_map =
-            HashMap::from([(job_id, HashMap::from([(fragment_id, fragment_model)]))]);
+        let fragment_map = HashMap::from([(fragment_id, fragment_model)]);
+        let job_fragments = HashMap::from([(job_id, fragment_map)]);
         let job_map = HashMap::from([(job_id, job_model)]);
 
         // 6 workers = total 6 parallelism
-        let worker_map = HashMap::from([
+        let worker_map: HashMap<WorkerId, WorkerNode> = HashMap::from([
             (1.into(), build_worker_node(1, 1, "default")),
             (2.into(), build_worker_node(2, 1, "default")),
             (3.into(), build_worker_node(3, 1, "default")),
@@ -2039,7 +2039,7 @@ mod tests {
         let result = render_actors(
             &actor_id_counter,
             &ensembles,
-            &fragment_map,
+            &job_fragments,
             &job_map,
             &worker_map,
             AdaptiveParallelismStrategy::Full,
@@ -2102,12 +2102,12 @@ mod tests {
             components: HashSet::from([fragment_id]),
         }];
 
-        let fragment_map =
-            HashMap::from([(job_id, HashMap::from([(fragment_id, fragment_model)]))]);
+        let fragment_map = HashMap::from([(fragment_id, fragment_model)]);
+        let job_fragments = HashMap::from([(job_id, fragment_map)]);
         let job_map = HashMap::from([(job_id, job_model)]);
 
         // 8 workers = total 8 parallelism
-        let worker_map = HashMap::from([
+        let worker_map: HashMap<WorkerId, WorkerNode> = HashMap::from([
             (1.into(), build_worker_node(1, 1, "default")),
             (2.into(), build_worker_node(2, 1, "default")),
             (3.into(), build_worker_node(3, 1, "default")),
@@ -2135,7 +2135,7 @@ mod tests {
         let result = render_actors(
             &actor_id_counter,
             &ensembles,
-            &fragment_map,
+            &job_fragments,
             &job_map,
             &worker_map,
             AdaptiveParallelismStrategy::Full,

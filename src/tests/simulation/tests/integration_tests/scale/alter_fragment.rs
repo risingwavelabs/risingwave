@@ -20,9 +20,12 @@ use risingwave_simulation::cluster::{Cluster, Configuration};
 use risingwave_simulation::ctl_ext::predicate::identity_contains;
 use risingwave_simulation::utils::AssertResult;
 
+use super::with_default_table_strategy;
+
 #[tokio::test]
 async fn test_alter_fragment_no_shuffle() -> Result<()> {
-    let mut cluster = Cluster::start(Configuration::for_scale_no_shuffle()).await?;
+    let configuration = with_default_table_strategy(Configuration::for_scale_no_shuffle());
+    let mut cluster = Cluster::start(configuration).await?;
     let default_parallelism = cluster.config().compute_nodes * cluster.config().compute_node_cores;
     cluster.run("create table t1 (c1 int, c2 int);").await?;
     let upstream_fragment = cluster
@@ -76,7 +79,8 @@ async fn test_alter_fragment_no_shuffle() -> Result<()> {
 
 #[tokio::test]
 async fn test_alter_fragment() -> Result<()> {
-    let mut cluster = Cluster::start(Configuration::for_scale()).await?;
+    let configuration = with_default_table_strategy(Configuration::for_scale());
+    let mut cluster = Cluster::start(configuration).await?;
     let default_parallelism = cluster.config().compute_nodes * cluster.config().compute_node_cores;
     cluster.run("create table t1 (c1 int, c2 int);").await?;
     let materialize_fragment = cluster
