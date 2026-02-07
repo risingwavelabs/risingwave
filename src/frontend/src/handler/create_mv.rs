@@ -304,11 +304,19 @@ pub(crate) async fn gen_create_mv_graph(
         risingwave_common::license::Feature::ResourceGroup.check_available()?;
     }
 
-    let is_serverless_backfill = with_options
+    let serverless_backfill_from_with = with_options
         .remove(&CLOUD_SERVERLESS_BACKFILL_ENABLED.to_owned())
-        .unwrap_or_default()
-        .parse::<bool>()
-        .unwrap_or(false);
+        .map(|value| value.parse::<bool>().unwrap_or(false));
+    let is_serverless_backfill = match serverless_backfill_from_with {
+        Some(value) => value,
+        None => {
+            if resource_group.is_some() {
+                false
+            } else {
+                handler_args.session.config().enable_serverless_backfill()
+            }
+        }
+    };
 
     if resource_group.is_some() && is_serverless_backfill {
         return Err(RwError::from(InvalidInputSyntax(
