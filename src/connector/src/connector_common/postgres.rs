@@ -66,6 +66,10 @@ pub enum SslMode {
     VerifyFull,
 }
 
+impl crate::with_options::WithOptions for SslMode {
+    fn assert_receiver_is_with_options(&self) {}
+}
+
 pub struct PostgresExternalTable {
     column_descs: Vec<ColumnDesc>,
     pk_names: Vec<String>,
