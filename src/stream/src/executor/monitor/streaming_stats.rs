@@ -277,7 +277,7 @@ impl StreamingMetrics {
         let sink_input_row_count = register_guarded_int_counter_vec_with_registry!(
             "stream_sink_input_row_count",
             "Total number of rows streamed into sink executors",
-            &["sink_id", "actor_id", "fragment_id"],
+            &["sink_id", "fragment_id"],
             registry
         )
         .unwrap();
@@ -285,7 +285,7 @@ impl StreamingMetrics {
         let sink_input_bytes = register_guarded_int_counter_vec_with_registry!(
             "stream_sink_input_bytes",
             "Total size of chunks streamed into sink executors",
-            &["sink_id", "actor_id", "fragment_id"],
+            &["sink_id", "fragment_id"],
             registry
         )
         .unwrap();
@@ -343,7 +343,7 @@ impl StreamingMetrics {
         let sink_chunk_buffer_size = register_guarded_int_gauge_vec_with_registry!(
             "stream_sink_chunk_buffer_size",
             "Total size of chunks buffered in a barrier",
-            &["sink_id", "actor_id", "fragment_id"],
+            &["sink_id", "fragment_id"],
             registry
         )
         .unwrap();
@@ -1423,14 +1423,10 @@ impl StreamingMetrics {
     pub fn new_sink_exec_metrics(
         &self,
         id: SinkId,
-        actor_id: ActorId,
+        _actor_id: ActorId,
         fragment_id: FragmentId,
     ) -> SinkExecutorMetrics {
-        let label_list: &[&str; 3] = &[
-            &id.to_string(),
-            &actor_id.to_string(),
-            &fragment_id.to_string(),
-        ];
+        let label_list = &[&id.to_string(), &fragment_id.to_string()];
         SinkExecutorMetrics {
             sink_input_row_count: self
                 .sink_input_row_count

@@ -360,11 +360,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
             // TODO(hzxa21): support rate limit?
             processed_input.boxed()
         } else {
-            let labels = [
-                &actor_id.to_string(),
-                &sink_id.to_string(),
-                self.sink_param.sink_name.as_str(),
-            ];
+            let labels = [&sink_id.to_string(), self.sink_param.sink_name.as_str()];
             let log_store_first_write_epoch = GLOBAL_SINK_METRICS
                 .log_store_first_write_epoch
                 .with_guarded_label_values(&labels);
@@ -697,7 +693,6 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
             .collect_vec();
 
         let labels = [
-            &actor_context.id.to_string(),
             sink_writer_param.connector.as_str(),
             &sink_writer_param.sink_id.to_string(),
             sink_writer_param.sink_name.as_str(),
