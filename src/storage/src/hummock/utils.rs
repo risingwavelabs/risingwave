@@ -664,10 +664,8 @@ pub(crate) async fn wait_for_update(
                 // CN with the same distribution as the upstream MV.
                 // See #3845 for more details.
                 if let Ok(suppressed_count) = LOG_SUPPRESSOR.check() {
-                    // Provide backtrace iff in debug mode for observability.
-                    let backtrace = cfg!(debug_assertions)
-                        .then(Backtrace::capture)
-                        .map(tracing::field::display);
+                    // Keep short backtrace for observability.
+                    let backtrace = tracing::field::display(Backtrace::capture());
                     tracing::warn!(
                         suppressed_count,
                         info = periodic_debug_info(),
