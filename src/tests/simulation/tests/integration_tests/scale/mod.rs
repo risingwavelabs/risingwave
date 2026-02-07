@@ -44,7 +44,7 @@ const SET_MV_STRATEGY_DEFAULT: &str =
 
 fn with_per_session_query(mut config: Configuration, query: &str) -> Configuration {
     let mut per_session_queries = (*config.per_session_queries).clone();
-    per_session_queries.push(query.to_string());
+    per_session_queries.push(query.to_owned());
     config.per_session_queries = per_session_queries.into();
     config
 }
