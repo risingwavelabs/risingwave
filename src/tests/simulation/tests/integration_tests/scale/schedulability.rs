@@ -19,13 +19,12 @@ use risingwave_common::hash::WorkerSlotId;
 use risingwave_pb::common::{WorkerNode, WorkerType};
 use risingwave_simulation::cluster::{Cluster, Configuration};
 
+use super::start_scale_session;
+
 #[tokio::test]
 async fn test_cordon_normal() -> Result<()> {
     let mut cluster = Cluster::start(Configuration::for_scale()).await?;
-    let mut session = cluster.start_session();
-    session
-        .run("set streaming_parallelism_strategy_for_table = 'DEFAULT'")
-        .await?;
+    let mut session = start_scale_session(&mut cluster).await?;
 
     let mut workers: Vec<WorkerNode> = cluster
         .get_cluster_info()
@@ -78,10 +77,7 @@ async fn test_cordon_normal() -> Result<()> {
 #[tokio::test]
 async fn test_cordon_no_shuffle_failed() -> Result<()> {
     let mut cluster = Cluster::start(Configuration::for_scale()).await?;
-    let mut session = cluster.start_session();
-    session
-        .run("set streaming_parallelism_strategy_for_table = 'DEFAULT'")
-        .await?;
+    let mut session = start_scale_session(&mut cluster).await?;
 
     let mut workers: Vec<WorkerNode> = cluster
         .get_cluster_info()

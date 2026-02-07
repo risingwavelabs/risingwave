@@ -21,6 +21,8 @@ use risingwave_simulation::cluster::{Cluster, Configuration};
 use risingwave_simulation::utils::AssertResult;
 use tokio::time::sleep;
 
+use super::{set_default_materialized_view_strategy, start_scale_session};
+
 #[tokio::test]
 async fn test_adaptive_strategy_create() -> Result<()> {
     // 3cn * 2core
@@ -30,10 +32,7 @@ async fn test_adaptive_strategy_create() -> Result<()> {
     assert_eq!(total_cores, 6u32);
 
     let mut cluster = Cluster::start(config).await?;
-    let mut session = cluster.start_session();
-    session
-        .run("set streaming_parallelism_strategy_for_table = 'DEFAULT'")
-        .await?;
+    let mut session = start_scale_session(&mut cluster).await?;
     session
         .run("alter system set adaptive_parallelism_strategy to AUTO")
         .await?;
@@ -76,10 +75,7 @@ async fn test_adaptive_strategy_alter() -> Result<()> {
     assert_eq!(total_cores, 6u32);
 
     let mut cluster = Cluster::start(config).await?;
-    let mut session = cluster.start_session();
-    session
-        .run("set streaming_parallelism_strategy_for_table = 'DEFAULT'")
-        .await?;
+    let mut session = start_scale_session(&mut cluster).await?;
 
     session
         .run("alter system set adaptive_parallelism_strategy to AUTO")
@@ -168,10 +164,7 @@ async fn test_streaming_parallelism_strategy_session_override() -> Result<()> {
     assert_eq!(total_cores, 6u32);
 
     let mut cluster = Cluster::start(config).await?;
-    let mut session = cluster.start_session();
-    session
-        .run("set streaming_parallelism_strategy_for_table = 'DEFAULT'")
-        .await?;
+    let mut session = start_scale_session(&mut cluster).await?;
 
     session
         .run("alter system set adaptive_parallelism_strategy to 'BOUNDED(2)'")
@@ -195,10 +188,7 @@ async fn test_streaming_parallelism_strategy_for_materialized_view() -> Result<(
     assert_eq!(total_cores, 6u32);
 
     let mut cluster = Cluster::start(config).await?;
-    let mut session = cluster.start_session();
-    session
-        .run("set streaming_parallelism_strategy_for_table = 'DEFAULT'")
-        .await?;
+    let mut session = start_scale_session(&mut cluster).await?;
 
     session
         .run("alter system set adaptive_parallelism_strategy to 'BOUNDED(2)'")
@@ -228,10 +218,7 @@ async fn test_streaming_parallelism_strategy_persistence() -> Result<()> {
     assert_eq!(total_cores, 6u32);
 
     let mut cluster = Cluster::start(config).await?;
-    let mut session = cluster.start_session();
-    session
-        .run("set streaming_parallelism_strategy_for_table = 'DEFAULT'")
-        .await?;
+    let mut session = start_scale_session(&mut cluster).await?;
 
     session
         .run("alter system set adaptive_parallelism_strategy to 'BOUNDED(2)'")
@@ -259,10 +246,7 @@ async fn test_streaming_parallelism_fixed_ignores_strategy() -> Result<()> {
     assert_eq!(total_cores, 6u32);
 
     let mut cluster = Cluster::start(config).await?;
-    let mut session = cluster.start_session();
-    session
-        .run("set streaming_parallelism_strategy_for_table = 'DEFAULT'")
-        .await?;
+    let mut session = start_scale_session(&mut cluster).await?;
 
     session.run("set streaming_parallelism = 4").await?;
     session
@@ -283,10 +267,7 @@ async fn test_streaming_parallelism_strategy_default_fallback() -> Result<()> {
     assert_eq!(total_cores, 6u32);
 
     let mut cluster = Cluster::start(config).await?;
-    let mut session = cluster.start_session();
-    session
-        .run("set streaming_parallelism_strategy_for_table = 'DEFAULT'")
-        .await?;
+    let mut session = start_scale_session(&mut cluster).await?;
 
     session
         .run("alter system set adaptive_parallelism_strategy to 'BOUNDED(2)'")
@@ -297,9 +278,7 @@ async fn test_streaming_parallelism_strategy_default_fallback() -> Result<()> {
     session.run("create table t_fallback_base(v int)").await?;
     session.run("select distinct parallelism from rw_fragment_parallelism where name = 't_fallback_base' and distribution_type = 'HASH';").await?.assert_result_eq("3");
 
-    session
-        .run("set streaming_parallelism_strategy_for_materialized_view = 'DEFAULT'")
-        .await?;
+    set_default_materialized_view_strategy(&mut session).await?;
     session
         .run("create materialized view m_fallback as select * from t_fallback_base")
         .await?;
