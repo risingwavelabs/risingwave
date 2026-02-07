@@ -52,6 +52,7 @@ impl Binder {
                 .iter()
                 .map(|f| (false, f.clone())),
             format!("{}_{}", UNNAMED_SUBQUERY, sub_query_id),
+            None, // schema_name - subqueries have no schema
             alias,
         )?;
         Ok(BoundSubquery { query, lateral })
