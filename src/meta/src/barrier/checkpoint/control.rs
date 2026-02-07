@@ -275,6 +275,7 @@ impl CheckpointControl {
                     | Command::ListFinish { .. }
                     | Command::LoadFinish { .. }
                     | Command::ResetSource { .. }
+                    | Command::InjectSourceOffsets { .. }
                     | Command::ResumeBackfill { .. } => {
                         if cfg!(debug_assertions) {
                             panic!(
