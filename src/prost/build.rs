@@ -617,10 +617,6 @@ for_all_wrapped_id_fields! (
         ListCdcProgressResponse {
             cdc_progress: JobId,
         }
-        ListObjectDependenciesResponse.ObjectDependencies {
-            object_id: ObjectId,
-            referenced_object_id: ObjectId,
-        }
         ListRateLimitsResponse.RateLimitInfo {
             job_id: JobId,
             fragment_id: FragmentId,
@@ -648,6 +644,10 @@ for_all_wrapped_id_fields! (
         }
         ListUnmigratedTablesResponse.UnmigratedTable {
             table_id: TableId,
+        }
+        ObjectDependency {
+            object_id: ObjectId,
+            referenced_object_id: ObjectId,
         }
         RefreshRequest {
             table_id: TableId,

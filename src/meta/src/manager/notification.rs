@@ -203,6 +203,7 @@ impl NotificationManager {
                 objects: vec![PbObject {
                     object_info: object_info.into(),
                 }],
+                dependencies: vec![],
             }),
         )
         .await

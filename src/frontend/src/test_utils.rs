@@ -60,7 +60,6 @@ use risingwave_pb::meta::list_actor_splits_response::ActorSplit;
 use risingwave_pb::meta::list_actor_states_response::ActorState;
 use risingwave_pb::meta::list_cdc_progress_response::PbCdcProgress;
 use risingwave_pb::meta::list_iceberg_tables_response::IcebergTable;
-use risingwave_pb::meta::list_object_dependencies_response::PbObjectDependencies;
 use risingwave_pb::meta::list_rate_limits_response::RateLimitInfo;
 use risingwave_pb::meta::list_refresh_table_states_response::RefreshTableState;
 use risingwave_pb::meta::list_streaming_job_states_response::StreamingJobState;
@@ -1103,10 +1102,6 @@ impl FrontendMetaClient for MockFrontendMetaClient {
     }
 
     async fn list_actor_splits(&self) -> RpcResult<Vec<ActorSplit>> {
-        Ok(vec![])
-    }
-
-    async fn list_object_dependencies(&self) -> RpcResult<Vec<PbObjectDependencies>> {
         Ok(vec![])
     }
 

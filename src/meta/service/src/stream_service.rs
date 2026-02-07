@@ -530,21 +530,6 @@ impl StreamManagerService for StreamServiceImpl {
         Ok(Response::new(ListActorStatesResponse { states }))
     }
 
-    async fn list_object_dependencies(
-        &self,
-        _request: Request<ListObjectDependenciesRequest>,
-    ) -> Result<Response<ListObjectDependenciesResponse>, Status> {
-        let dependencies = self
-            .metadata_manager
-            .catalog_controller
-            .list_created_object_dependencies()
-            .await?;
-
-        Ok(Response::new(ListObjectDependenciesResponse {
-            dependencies,
-        }))
-    }
-
     async fn recover(
         &self,
         _request: Request<RecoverRequest>,
