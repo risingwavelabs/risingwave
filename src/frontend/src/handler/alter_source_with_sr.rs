@@ -20,7 +20,7 @@ use pgwire::pg_response::StatementType;
 use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::{ColumnCatalog, max_column_id};
 use risingwave_connector::WithPropertiesExt;
-use risingwave_pb::catalog::StreamSourceInfo;
+use risingwave_pb::catalog::{StreamSourceExternalSchema, StreamSourceInfo};
 use risingwave_pb::plan_common::{EncodeType, FormatType};
 use risingwave_sqlparser::ast::{
     CompatibleFormatEncode, CreateSourceStatement, Encode, Format, FormatEncodeOptions, ObjectName,
@@ -154,7 +154,12 @@ pub async fn refresh_sr_and_get_columns_diff(
     original_source: &SourceCatalog,
     format_encode: &FormatEncodeOptions,
     session: &Arc<SessionImpl>,
-) -> Result<(StreamSourceInfo, Vec<ColumnCatalog>, Vec<ColumnCatalog>)> {
+) -> Result<(
+    StreamSourceInfo,
+    Vec<ColumnCatalog>,
+    Vec<ColumnCatalog>,
+    Option<StreamSourceExternalSchema>,
+)> {
     let mut with_properties = original_source.with_properties.clone();
     validate_compatibility(format_encode, &mut with_properties)?;
 
@@ -162,7 +167,7 @@ pub async fn refresh_sr_and_get_columns_diff(
         bail_not_implemented!("altering a cdc source is not supported");
     }
 
-    let (Some(columns_from_resolve_source), source_info) = bind_columns_from_source(
+    let (Some(columns_from_resolve_source), source_info, external_schema) = bind_columns_from_source(
         session,
         format_encode,
         Either::Right(&with_properties),
@@ -189,7 +194,12 @@ pub async fn refresh_sr_and_get_columns_diff(
         original_source = ?original_source.columns
     );
 
-    Ok((source_info, added_columns, dropped_columns))
+    Ok((
+        source_info,
+        added_columns,
+        dropped_columns,
+        external_schema,
+    ))
 }
 
 fn get_format_encode_from_source(source: &SourceCatalog) -> Result<FormatEncodeOptions> {
@@ -239,7 +249,7 @@ pub async fn handle_alter_source_with_sr(
         .into());
     }
 
-    let (source_info, added_columns, dropped_columns) =
+    let (source_info, added_columns, dropped_columns, external_schema) =
         refresh_sr_and_get_columns_diff(&source, &format_encode, &session).await?;
 
     if !dropped_columns.is_empty() {
@@ -254,6 +264,7 @@ pub async fn handle_alter_source_with_sr(
 
     source.info = source_info;
     source.columns.extend(added_columns);
+    source.external_schema = external_schema;
     source.definition = alter_definition_format_encode(
         source.create_sql_ast_purified()?,
         format_encode.row_options.clone(),

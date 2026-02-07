@@ -263,6 +263,26 @@ impl CatalogController {
 
         let source: source::ActiveModel = pb_source.clone().into();
         Source::update(source).exec(&txn).await?;
+
+        if let Some(external_schema) = &pb_source.external_schema {
+            let model = source_external_schema::ActiveModel {
+                source_id: Set(source_id),
+                version: Set(external_schema.version.clone()),
+                content: Set(external_schema.content.clone()),
+            };
+            source_external_schema::Entity::insert(model)
+                .on_conflict(
+                    sea_orm::sea_query::OnConflict::column(source_external_schema::Column::SourceId)
+                        .update_columns([
+                            source_external_schema::Column::Version,
+                            source_external_schema::Column::Content,
+                        ])
+                        .to_owned(),
+                )
+                .exec(&txn)
+                .await?;
+        }
+
         txn.commit().await?;
 
         let version = self
