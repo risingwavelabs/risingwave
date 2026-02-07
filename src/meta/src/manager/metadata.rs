@@ -714,6 +714,7 @@ impl MetadataManager {
     pub async fn collect_unreschedulable_backfill_jobs(
         &self,
         job_ids: impl IntoIterator<Item = &JobId>,
+        is_online: bool,
     ) -> MetaResult<HashSet<JobId>> {
         let mut unreschedulable = HashSet::new();
 
@@ -724,7 +725,7 @@ impl MetadataManager {
                 .await?;
             if scan_types
                 .values()
-                .any(|scan_type| !scan_type.is_reschedulable())
+                .any(|scan_type| !scan_type.is_reschedulable(is_online))
             {
                 unreschedulable.insert(*job_id);
             }
