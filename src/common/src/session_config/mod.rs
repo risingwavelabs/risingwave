@@ -487,6 +487,12 @@ pub struct SessionConfig {
     #[parameter(default = false)]
     enable_datafusion_engine: bool,
 
+    /// Prefer hash join over sort merge join in DataFusion engine
+    /// When enabled, the DataFusion engine will prioritize hash joins for query execution plans,
+    /// potentially improving performance for certain workloads, but may cause OOM for large datasets.
+    #[parameter(default = true)]
+    datafusion_prefer_hash_join: bool,
+
     /// Emit chunks in upsert format for `UPDATE` and `DELETE` DMLs.
     /// May lead to undefined behavior if the table is created with `ON CONFLICT DO NOTHING`.
     ///
