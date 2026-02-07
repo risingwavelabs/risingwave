@@ -521,8 +521,9 @@ pub async fn handle(
                     | ObjectType::Index
                     | ObjectType::Table
                     | ObjectType::Schema
-                    | ObjectType::Connection => true,
-                    ObjectType::Database | ObjectType::User | ObjectType::Secret => {
+                    | ObjectType::Connection
+                    | ObjectType::Secret => true,
+                    ObjectType::Database | ObjectType::User => {
                         bail_not_implemented!("DROP CASCADE");
                     }
                 }
@@ -580,7 +581,8 @@ pub async fn handle(
                     .await
                 }
                 ObjectType::Secret => {
-                    drop_secret::handle_drop_secret(handler_args, object_name, if_exists).await
+                    drop_secret::handle_drop_secret(handler_args, object_name, if_exists, cascade)
+                        .await
                 }
             }
         }

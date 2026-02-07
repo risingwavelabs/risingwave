@@ -290,12 +290,16 @@ impl DdlService for DdlServiceImpl {
     ) -> Result<Response<DropSecretResponse>, Status> {
         let req = request.into_inner();
         let secret_id = req.get_secret_id();
+        let drop_mode = DropMode::from_request_setting(req.cascade);
         let version = self
             .ddl_controller
-            .run_command(DdlCommand::DropSecret(secret_id))
+            .run_command(DdlCommand::DropSecret(secret_id, drop_mode))
             .await?;
 
-        Ok(Response::new(DropSecretResponse { version }))
+        Ok(Response::new(DropSecretResponse {
+            status: None,
+            version,
+        }))
     }
 
     async fn alter_secret(
