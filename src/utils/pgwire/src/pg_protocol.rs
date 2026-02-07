@@ -42,6 +42,7 @@ use tokio_openssl::SslStream;
 use tracing::Instrument;
 
 use crate::error::{PsqlError, PsqlResult};
+use crate::error_or_notice::Severity;
 use crate::memory_manager::{MessageMemoryGuard, MessageMemoryManagerRef};
 use crate::net::AddressRef;
 use crate::pg_extended::ResultCache;
@@ -467,6 +468,7 @@ where
                                 // At this time we're not in a session, use compact error message for
                                 // better alignment with Postgres' UI.
                                 pretty: false,
+                                severity: Some(Severity::Fatal),
                             })
                             .ok()?;
                         let _ = self.stream.flush().await;
@@ -478,6 +480,7 @@ where
                             .write_no_flush(BeMessage::ErrorResponse {
                                 error: &e,
                                 pretty: true,
+                                severity: None,
                             })
                             .ok()?;
                         self.ready_for_query().ok()?;
@@ -488,6 +491,7 @@ where
                             .write_no_flush(BeMessage::ErrorResponse {
                                 error: &e,
                                 pretty: true,
+                                severity: None,
                             })
                             .ok()?;
                         let _ = self.stream.flush().await;
@@ -506,6 +510,7 @@ where
                             .write_no_flush(BeMessage::ErrorResponse {
                                 error: &e,
                                 pretty: true,
+                                severity: None,
                             })
                             .ok()?;
                     }

@@ -1640,7 +1640,6 @@ impl SessionManagerImpl {
                 client_addr,
             );
 
-            // TODO: adding `FATAL` message support for no matching HBA entry.
             let Some(hba_entry_opt) = hba_entry_opt else {
                 bail_permission_denied!(
                     "no pg_hba.conf entry for host \"{peer_addr}\", user \"{user_name}\", database \"{database_name}\""
