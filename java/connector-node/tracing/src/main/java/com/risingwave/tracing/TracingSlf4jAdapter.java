@@ -37,27 +37,27 @@ public class TracingSlf4jAdapter extends LegacyAbstractLogger {
 
     @Override
     public boolean isTraceEnabled() {
-        return TracingSlf4jImpl.isEnabled(Level.TRACE);
+        return TracingSlf4jImpl.isEnabled(name, Level.TRACE);
     }
 
     @Override
     public boolean isDebugEnabled() {
-        return TracingSlf4jImpl.isEnabled(Level.DEBUG);
+        return TracingSlf4jImpl.isEnabled(name, Level.DEBUG);
     }
 
     @Override
     public boolean isInfoEnabled() {
-        return TracingSlf4jImpl.isEnabled(Level.INFO);
+        return TracingSlf4jImpl.isEnabled(name, Level.INFO);
     }
 
     @Override
     public boolean isWarnEnabled() {
-        return TracingSlf4jImpl.isEnabled(Level.WARN);
+        return TracingSlf4jImpl.isEnabled(name, Level.WARN);
     }
 
     @Override
     public boolean isErrorEnabled() {
-        return TracingSlf4jImpl.isEnabled(Level.ERROR);
+        return TracingSlf4jImpl.isEnabled(name, Level.ERROR);
     }
 
     @Override
@@ -72,6 +72,11 @@ public class TracingSlf4jAdapter extends LegacyAbstractLogger {
             String messagePattern,
             Object[] arguments,
             Throwable throwable) {
+        // Apply Java-side per-logger overrides before any expensive work (formatting/JNI).
+        if (!TracingSlf4jImpl.isEnabled(name, level)) {
+            return;
+        }
+
         var pm = new ParameterizedMessage(messagePattern, arguments, throwable);
         var message = pm.getFormattedMessage();
 
