@@ -24,12 +24,12 @@ use risingwave_pb::hummock::{
     PbValidationTask,
 };
 
-use crate::HummockSstableObjectId;
 use crate::compaction_group::StateTableId;
 use crate::key_range::KeyRange;
 use crate::level::InputLevel;
 use crate::sstable_info::SstableInfo;
 use crate::table_watermark::{TableWatermarks, WatermarkSerdeType};
+use crate::{CompactionGroupId, HummockSstableObjectId};
 
 #[derive(Clone, PartialEq, Default, Debug)]
 pub struct CompactTask {
@@ -49,7 +49,7 @@ pub struct CompactTask {
     pub base_level: u32,
     pub task_status: PbTaskStatus,
     /// compaction group the task belongs to.
-    pub compaction_group_id: u64,
+    pub compaction_group_id: CompactionGroupId,
     /// compaction group id when the compaction task is created
     pub compaction_group_version_id: u64,
     /// `existing_table_ids` for compaction drop key
@@ -197,7 +197,7 @@ impl CompactTask {
         self.input_ssts
             .iter()
             .flat_map(|level| level.table_infos.iter())
-            .any(|sst| sst.sst_id.inner() != sst.object_id.inner())
+            .any(|sst| sst.sst_id.as_raw_id() != sst.object_id.as_raw_id())
     }
 
     pub fn get_table_ids_from_input_ssts(&self) -> impl Iterator<Item = StateTableId> + use<> {
@@ -531,11 +531,7 @@ impl From<PbValidationTask> for ValidationTask {
                 .into_iter()
                 .map(SstableInfo::from)
                 .collect_vec(),
-            sst_id_to_worker_id: pb_validation_task
-                .sst_id_to_worker_id
-                .into_iter()
-                .map(|(object_id, worker_id)| (object_id.into(), worker_id))
-                .collect(),
+            sst_id_to_worker_id: pb_validation_task.sst_id_to_worker_id.into_iter().collect(),
         }
     }
 }
@@ -548,11 +544,7 @@ impl From<ValidationTask> for PbValidationTask {
                 .into_iter()
                 .map(|sst| sst.into())
                 .collect_vec(),
-            sst_id_to_worker_id: validation_task
-                .sst_id_to_worker_id
-                .into_iter()
-                .map(|(object_id, worker_id)| (object_id.inner(), worker_id))
-                .collect(),
+            sst_id_to_worker_id: validation_task.sst_id_to_worker_id,
         }
     }
 }
@@ -588,11 +580,7 @@ impl From<PbReportTask> for ReportTask {
                 .into_iter()
                 .map(SstableInfo::from)
                 .collect_vec(),
-            object_timestamps: value
-                .object_timestamps
-                .into_iter()
-                .map(|(object_id, timestamp)| (object_id.into(), timestamp))
-                .collect(),
+            object_timestamps: value.object_timestamps,
         }
     }
 }
@@ -608,11 +596,7 @@ impl From<ReportTask> for PbReportTask {
                 .into_iter()
                 .map(|sst| sst.into())
                 .collect_vec(),
-            object_timestamps: value
-                .object_timestamps
-                .into_iter()
-                .map(|(object_id, timestamp)| (object_id.inner(), timestamp))
-                .collect(),
+            object_timestamps: value.object_timestamps,
         }
     }
 }

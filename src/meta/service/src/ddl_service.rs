@@ -95,6 +95,7 @@ impl DdlServiceImpl {
             source_manager,
             barrier_manager,
             sink_manager.clone(),
+            iceberg_compaction_manager.clone(),
         )
         .await;
         Self {
