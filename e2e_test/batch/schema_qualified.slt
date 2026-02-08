@@ -1,0 +1,134 @@
+# Test on support schema-qualified name on BindContext
+
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+# Test on gap-fill table function
+statement ok
+CREATE SCHEMA test;
+
+statement ok
+CREATE TABLE test.gap_normal_table (
+    ts TIMESTAMP,
+    value DOUBLE,
+    PRIMARY KEY (ts)
+);
+
+statement ok
+INSERT INTO test.gap_normal_table VALUES
+    ('2024-05-21 10:00:00', 10.0),
+    ('2024-05-21 10:02:00', 12.0),
+    ('2024-05-21 10:05:00', 15.0);
+
+statement ok
+CREATE MATERIALIZED VIEW gap_filled_normal AS
+SELECT ts, value
+FROM GAP_FILL(test.gap_normal_table, ts, INTERVAL '1' MINUTE);
+
+statement ok
+SELECT ts, value FROM gap_filled_normal ORDER BY ts;
+
+statement ok
+DROP MATERIALIZED VIEW gap_filled_normal;
+
+statement ok
+DROP TABLE test.gap_normal_table;
+
+# Test on window-table function
+statement ok
+CREATE TABLE test.t1 (id int, created_at date);
+
+statement ok
+SELECT * FROM tumble(test.t1, created_at, interval '3' day);
+
+statement ok
+DROP TABLE test.t1;
+
+# Test on watermark function
+statement ok
+CREATE TABLE test.t (
+    ts timestamp,
+    foo int,
+    watermark for ts as ts - interval '5 minutes'
+) APPEND ONLY;
+
+statement ok
+CREATE MATERIALIZED VIEW mv1 as select * from test.t emit on window close;
+
+statement ok
+DROP MATERIALIZED VIEW mv1;
+
+statement ok
+DROP TABLE test.t;
+
+# Test on base table
+statement ok
+CREATE TABLE test.t(v int);
+
+statement ok
+SELECT test.t.v FROM test.t;
+
+statement ok
+SELECT tt.v FROM test.t AS tt;
+
+statement error
+SELECT ss.t.v FROM test.t AS tt;
+
+statement error
+SELECT s.tt.v FROM test.t AS tt;
+
+statement error
+SELECT test.t.v FROM test.t AS tt;
+
+statement ok
+DROP TABLE test.t;
+
+statement ok
+DROP SCHEMA test;
+
+# Test on join condition
+statement ok
+create schema s1;
+
+statement ok
+create schema s2;
+
+statement ok
+create table s1.a(id int, a int);
+
+statement ok
+create table s2.a(id int, b int);
+
+statement error
+select a, b from s1.a AS a1 join s2.a AS a2 on s1.a.id = s2.a.id;
+
+statement ok
+DROP TABLE s1.a;
+
+statement ok
+DROP TABLE s2.a;
+
+statement ok
+DROP SCHEMA s1;
+
+statement ok
+DROP SCHEMA s2;
+
+# Test on use schema-qualified to refer the column, but the table has alias
+statement ok
+CREATE SCHEMA s;
+
+statement ok
+CREATE TABLE s.t(v int);
+
+statement error
+SELECT s.t.v FROM s.t AS tt;
+
+statement ok
+DROP TABLE s.t;
+
+statement ok
+DROP SCHEMA s;
+
+
+
