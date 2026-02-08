@@ -337,7 +337,7 @@ impl ScaleController {
 
         if let Some(missing_fragment_id) = fragment_id_list
             .iter()
-            .find(|fragment_id| !existing_fragment_ids.contains(fragment_id))
+            .find(|fragment_id| !existing_fragment_ids.contains(*fragment_id))
         {
             return Err(MetaError::catalog_id_not_found(
                 "fragment",
@@ -796,7 +796,7 @@ impl GlobalStreamManager {
 
         let unreschedulable_jobs = self
             .metadata_manager
-            .collect_unreschedulable_backfill_jobs(&background_streaming_jobs)
+            .collect_unreschedulable_backfill_jobs(&background_streaming_jobs, true)
             .await?;
 
         let database_objects: HashMap<risingwave_meta_model::DatabaseId, Vec<JobId>> = self
