@@ -44,9 +44,10 @@ use risingwave_pb::stream_plan::throttle_mutation::ThrottleConfig;
 use risingwave_pb::stream_plan::update_mutation::*;
 use risingwave_pb::stream_plan::{
     AddMutation, ConnectorPropsChangeMutation, Dispatcher, Dispatchers, DropSubscriptionsMutation,
-    ListFinishMutation, LoadFinishMutation, PauseMutation, PbSinkAddColumnsOp, PbSinkSchemaChange,
-    PbUpstreamSinkInfo, ResumeMutation, SourceChangeSplitMutation, StartFragmentBackfillMutation,
+    ListFinishMutation, LoadFinishMutation, PauseMutation, PbSinkAddColumnsOp, PbSinkDropColumnsOp,
+    PbSinkSchemaChange, PbUpstreamSinkInfo, ResumeMutation, SourceChangeSplitMutation,
     StopMutation, SubscriptionUpstreamInfo, ThrottleMutation, UpdateMutation,
+    StartFragmentBackfillMutation,
 };
 use risingwave_pb::stream_service::BarrierCompleteResponse;
 use tracing::warn;
@@ -1591,6 +1592,19 @@ impl Command {
                 .into_iter()
                 .flat_map(|sinks| {
                     sinks.iter().map(|sink| {
+                        let op = if !sink.removed_column_names.is_empty() {
+                            PbSinkSchemaChangeOp::DropColumns(PbSinkDropColumnsOp {
+                                column_names: sink.removed_column_names.clone(),
+                            })
+                        } else {
+                            PbSinkSchemaChangeOp::AddColumns(PbSinkAddColumnsOp {
+                                fields: sink
+                                    .newly_add_fields
+                                    .iter()
+                                    .map(|field| field.to_prost())
+                                    .collect(),
+                            })
+                        };
                         (
                             sink.original_sink.id.as_raw_id(),
                             PbSinkSchemaChange {
@@ -1611,13 +1625,7 @@ impl Command {
                                         name: col.column_desc.as_ref().unwrap().name.clone(),
                                     })
                                     .collect(),
-                                op: Some(PbSinkSchemaChangeOp::AddColumns(PbSinkAddColumnsOp {
-                                    fields: sink
-                                        .newly_add_fields
-                                        .iter()
-                                        .map(|field| field.to_prost())
-                                        .collect(),
-                                })),
+                                op: Some(op),
                             },
                         )
                     })

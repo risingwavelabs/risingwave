@@ -24,7 +24,7 @@ use pgwire::pg_response::StatementType::{self, ABORT, BEGIN, COMMIT, ROLLBACK, S
 use pgwire::pg_response::{PgResponse, PgResponseBuilder, RowSetResult};
 use pgwire::pg_server::BoxedError;
 use pgwire::types::{Format, Row};
-use risingwave_common::catalog::AlterDatabaseParam;
+use risingwave_common::catalog::{AlterDatabaseParam, ICEBERG_SINK_PREFIX};
 use risingwave_common::types::Fields;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::{bail, bail_not_implemented};
@@ -1503,12 +1503,31 @@ fn check_ban_ddl_for_iceberg_engine_table(
         } => {
             let (table, schema_name) = get_table_catalog_by_table_name(session.as_ref(), name)?;
             if table.is_iceberg_engine_table() {
-                bail!(
-                    "ALTER TABLE {} is not supported for iceberg table: {}.{}",
-                    operation,
-                    schema_name,
-                    name
-                );
+                if matches!(operation, AlterTableOperation::DropColumn { .. }) {
+                    // TODO: allow DROP COLUMN for iceberg table after iceberg sink schema change supports drop.
+                    bail!(
+                        "ALTER TABLE DROP COLUMN is not supported for iceberg table: {}.{}",
+                        schema_name,
+                        name
+                    );
+                }
+                let catalog_reader = session.env().catalog_reader().read_guard();
+                let db_name = session.database();
+                let sink_name = format!("{}{}", ICEBERG_SINK_PREFIX, table.name());
+                let sink = catalog_reader
+                    .get_schema_by_name(&db_name, &schema_name)
+                    .ok()
+                    .and_then(|schema| schema.get_created_sink_by_name(&sink_name));
+
+                let auto_refresh = sink.and_then(|s| s.auto_refresh_schema_from_table);
+                if auto_refresh.is_none() {
+                    bail!(
+                        "ALTER TABLE {} is not supported for iceberg table without auto schema change sink: {}.{}",
+                        operation,
+                        schema_name,
+                        name
+                    );
+                }
             }
         }
 

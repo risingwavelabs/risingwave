@@ -18,7 +18,10 @@ use std::num::NonZeroUsize;
 use anyhow::anyhow;
 use indexmap::IndexMap;
 use itertools::Itertools;
-use risingwave_common::catalog::{FragmentTypeFlag, FragmentTypeMask, ICEBERG_SINK_PREFIX};
+use risingwave_common::catalog::{
+    ColumnCatalog, FragmentTypeFlag, FragmentTypeMask, ICEBERG_SINK_PREFIX, ICEBERG_SOURCE_PREFIX,
+    RISINGWAVE_ICEBERG_ROW_ID, ROW_ID_COLUMN_NAME, max_column_id,
+};
 use risingwave_common::config::DefaultParallelism;
 use risingwave_common::hash::VnodeCountCompat;
 use risingwave_common::id::JobId;
@@ -43,6 +46,7 @@ use risingwave_meta_model::streaming_job::BackfillOrders;
 use risingwave_meta_model::table::TableType;
 use risingwave_meta_model::user_privilege::Action;
 use risingwave_meta_model::*;
+use risingwave_pb::catalog::table::PbEngine;
 use risingwave_pb::catalog::{PbConnection, PbCreateType, PbTable};
 use risingwave_pb::ddl_service::streaming_job_resource_type;
 use risingwave_pb::meta::alter_connector_props_request::AlterIcebergTableIds;
@@ -1363,6 +1367,62 @@ impl CatalogController {
         Ok(version)
     }
 
+    fn update_iceberg_source_columns(
+        original_source_columns: &[ColumnCatalog],
+        original_row_id_index: Option<usize>,
+        new_table_columns: &[ColumnCatalog],
+    ) -> (Vec<ColumnCatalog>, Option<usize>) {
+        let row_id_column_name = original_row_id_index
+            .and_then(|idx| original_source_columns.get(idx))
+            .map(|col| col.name().to_owned());
+        let mut next_column_id = max_column_id(original_source_columns).next();
+        let existing_columns: HashMap<String, ColumnCatalog> = original_source_columns
+            .iter()
+            .cloned()
+            .map(|col| (col.name().to_owned(), col))
+            .collect();
+
+        let mut new_columns = Vec::new();
+        for table_col in new_table_columns
+            .iter()
+            .filter(|col| !col.is_rw_sys_column())
+        {
+            let mut source_col_name = table_col.name().to_owned();
+            if source_col_name == ROW_ID_COLUMN_NAME {
+                source_col_name = RISINGWAVE_ICEBERG_ROW_ID.to_owned();
+            }
+
+            if let Some(existing) = existing_columns.get(&source_col_name) {
+                new_columns.push(existing.clone());
+            } else {
+                let mut new_col = table_col.clone();
+                new_col.column_desc.name = source_col_name;
+                new_col.column_desc.column_id = next_column_id;
+                next_column_id = next_column_id.next();
+                new_columns.push(new_col);
+            }
+        }
+
+        let mut seen_names: HashSet<String> = new_columns
+            .iter()
+            .map(|col| col.name().to_owned())
+            .collect();
+        for col in original_source_columns
+            .iter()
+            .filter(|col| col.is_iceberg_hidden_column())
+        {
+            if seen_names.insert(col.name().to_owned()) {
+                new_columns.push(col.clone());
+            }
+        }
+
+        let new_row_id_index = row_id_column_name
+            .as_ref()
+            .and_then(|name| new_columns.iter().position(|col| col.name() == name));
+
+        (new_columns, new_row_id_index)
+    }
+
     pub async fn finish_replace_streaming_job_inner(
         tmp_id: JobId,
         replace_upstream: FragmentReplaceUpstream,
@@ -1378,14 +1438,69 @@ impl CatalogController {
         let job_type = streaming_job.job_type();
 
         let mut index_item_rewriter = None;
+        let mut updated_iceberg_source_id: Option<SourceId> = None;
 
         // Update catalog
         match streaming_job {
-            StreamingJob::Table(_source, table, _table_job_type) => {
-                // The source catalog should remain unchanged
-
+            StreamingJob::Table(_, table, _table_job_type) => {
                 let original_column_catalogs =
                     get_table_columns(txn, original_job_id.as_mv_table_id()).await?;
+                let schema_changed = original_column_catalogs.to_protobuf() != table.columns;
+                let is_iceberg = table
+                    .engine
+                    .and_then(|engine| PbEngine::try_from(engine).ok())
+                    == Some(PbEngine::Iceberg);
+                if is_iceberg && schema_changed {
+                    let iceberg_source_name = format!("{}{}", ICEBERG_SOURCE_PREFIX, table.name);
+                    let source = Source::find()
+                        .inner_join(Object)
+                        .filter(
+                            object::Column::DatabaseId
+                                .eq(table.database_id)
+                                .and(object::Column::SchemaId.eq(table.schema_id))
+                                .and(source::Column::Name.eq(&iceberg_source_name)),
+                        )
+                        .one(txn)
+                        .await?
+                        .ok_or_else(|| {
+                            MetaError::catalog_id_not_found("source", iceberg_source_name)
+                        })?;
+
+                    let source_id = source.source_id;
+                    let source_version = source.version;
+                    let source_columns: Vec<ColumnCatalog> = source
+                        .columns
+                        .to_protobuf()
+                        .into_iter()
+                        .map(ColumnCatalog::from)
+                        .collect();
+                    let source_row_id_index = source
+                        .row_id_index
+                        .and_then(|idx| usize::try_from(idx).ok());
+                    let table_columns: Vec<ColumnCatalog> = table
+                        .columns
+                        .iter()
+                        .cloned()
+                        .map(ColumnCatalog::from)
+                        .collect();
+                    let (updated_columns, updated_row_id_index) =
+                        Self::update_iceberg_source_columns(
+                            &source_columns,
+                            source_row_id_index,
+                            &table_columns,
+                        );
+                    let updated_columns: Vec<PbColumnCatalog> = updated_columns
+                        .into_iter()
+                        .map(|col| col.to_protobuf())
+                        .collect();
+
+                    let mut source_active = source.into_active_model();
+                    source_active.columns = Set(ColumnCatalogArray::from(updated_columns));
+                    source_active.row_id_index = Set(updated_row_id_index.map(|idx| idx as i32));
+                    source_active.version = Set(source_version + 1);
+                    source_active.update(txn).await?;
+                    updated_iceberg_source_id = Some(source_id);
+                }
 
                 index_item_rewriter = Some({
                     let original_columns = original_column_catalogs
@@ -1560,6 +1675,19 @@ impl CatalogController {
             _ => unreachable!("invalid streaming job type for replace: {:?}", job_type),
         }
 
+        if let Some(source_id) = updated_iceberg_source_id {
+            let (source, source_obj) = Source::find_by_id(source_id)
+                .find_also_related(Object)
+                .one(txn)
+                .await?
+                .ok_or_else(|| MetaError::catalog_id_not_found("source", source_id))?;
+            objects.push(PbObject {
+                object_info: Some(PbObjectInfo::Source(
+                    ObjectModel(source, source_obj.unwrap()).into(),
+                )),
+            });
+        }
+
         if let Some(expr_rewriter) = index_item_rewriter {
             let index_items: Vec<(IndexId, ExprNodeArray)> = Index::find()
                 .select_only()
@@ -1628,8 +1756,10 @@ impl CatalogController {
                 if let Some((log_store_table_id, new_log_store_table_columns)) =
                     finish_sink_context.new_log_store_table
                 {
+                    let new_length = new_log_store_table_columns.len();
                     let new_log_store_table_columns: ColumnCatalogArray =
                         new_log_store_table_columns.into();
+                    let new_value_indices: Vec<u32> = (0..new_length as u32).collect();
                     let (mut table, table_obj) = Table::find_by_id(log_store_table_id)
                         .find_also_related(Object)
                         .one(txn)
@@ -1638,11 +1768,13 @@ impl CatalogController {
                     Table::update(table::ActiveModel {
                         table_id: Set(log_store_table_id),
                         columns: Set(new_log_store_table_columns.clone()),
+                        value_indices: Set(I32Array::from(new_value_indices.clone())),
                         ..Default::default()
                     })
                     .exec(txn)
                     .await?;
                     table.columns = new_log_store_table_columns;
+                    table.value_indices = I32Array::from(new_value_indices);
                     objects.push(PbObject {
                         object_info: Some(PbObjectInfo::Table(
                             ObjectModel(table, table_obj.unwrap(), sink_streaming_job.clone())
