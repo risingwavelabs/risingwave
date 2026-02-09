@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::id::{ConnectionId, SchemaId, SinkId, UserId};
 use risingwave_common::catalog::CreateType;
+use risingwave_common::id::{ConnectionId, SchemaId, SinkId, UserId};
 use risingwave_common::types::{Fields, JsonbVal, Timestamptz};
 use risingwave_connector::WithOptionsSecResolved;
 use risingwave_frontend_macro::system_catalog;

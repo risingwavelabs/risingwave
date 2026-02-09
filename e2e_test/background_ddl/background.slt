@@ -1,0 +1,138 @@
+# Test whether sinks, materialized views, and indexes run in the background
+
+# Test index part
+statement ok
+create table t(v1 int);
+
+statement ok
+insert into t select * from generate_series(1, 500000);
+
+statement ok
+set background_ddl=false;
+
+statement ok
+CREATE INDEX index1 ON t (v1);
+
+query I
+select background_ddl from rw_catalog.rw_indexes where name='index1';
+----
+f
+
+statement ok
+set background_ddl=true;
+
+statement ok
+CREATE INDEX index2 ON t (v1);
+
+query I
+select background_ddl from rw_catalog.rw_indexes where name='index2';
+----
+t
+
+statement ok
+drop index index1;
+
+statement ok
+drop index index2;
+
+statement ok
+drop table t;
+
+statement ok
+set background_ddl=false;
+
+# Test sink part
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+SET sink_decouple TO true;
+
+statement ok
+create table t(v1 int);
+
+statement ok
+set backfill_rate_limit=5000;
+
+statement ok
+insert into t select * from generate_series(1, 10000);
+
+statement ok
+CREATE SINK sink1 AS select * from t WITH (
+    connector = 'blackhole'
+);
+
+query I
+select background_ddl from rw_catalog.rw_sinks where name='sink1';
+----
+f
+
+statement ok
+set background_ddl=true;
+
+statement ok
+CREATE SINK sink2 AS select * from t WITH (
+    connector = 'blackhole'
+);
+
+query I
+select background_ddl from rw_catalog.rw_sinks where name='sink2';
+----
+t
+
+statement ok
+drop sink sink1;
+
+statement ok
+drop sink sink2;
+
+statement ok
+drop table t;
+
+statement ok
+set background_ddl=false;
+
+# Test materialized view part
+statement ok
+create table t(v1 int);
+
+statement ok
+insert into t select * from generate_series(1, 10000);
+
+statement ok
+set backfill_rate_limit=5000;
+
+statement ok
+create materialized view m1 as select * from t;
+
+query I
+select background_ddl from rw_catalog.rw_materialized_views where name='m1';
+----
+f
+
+statement ok
+set background_ddl=true;
+
+statement ok
+create materialized view m2 as select * from t;
+
+query I
+select background_ddl from rw_catalog.rw_materialized_views where name='m2';
+----
+t
+
+statement ok
+drop materialized view m1;
+
+statement ok
+drop materialized view m2;
+
+statement ok
+drop table t;
+
+statement ok
+set background_ddl=false;
+
+statement ok
+set backfill_rate_limit=default;
+
