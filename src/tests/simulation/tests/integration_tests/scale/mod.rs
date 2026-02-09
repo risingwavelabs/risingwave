@@ -56,16 +56,7 @@ pub fn with_default_table_strategy(config: Configuration) -> Configuration {
 pub async fn start_scale_session(cluster: &mut Cluster) -> Result<Session> {
     let mut session = cluster.start_session();
     session.run(SET_TABLE_STRATEGY_DEFAULT).await?;
-    Ok(session)
-}
-
-pub async fn start_scale_session_with_source_default(cluster: &mut Cluster) -> Result<Session> {
-    let mut session = start_scale_session(cluster).await?;
     session.run(SET_SOURCE_STRATEGY_DEFAULT).await?;
-    Ok(session)
-}
-
-pub async fn set_default_materialized_view_strategy(session: &mut Session) -> Result<()> {
     session.run(SET_MV_STRATEGY_DEFAULT).await?;
-    Ok(())
+    Ok(session)
 }
