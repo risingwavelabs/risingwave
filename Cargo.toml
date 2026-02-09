@@ -215,7 +215,7 @@ rdkafka = { package = "madsim-rdkafka", version = "0.4.4", features = [
 ] }
 redis = { version = "1.0" }
 regex = "1.12"
-reqwest = { version = "0.12.2", features = ["json", "stream"] }
+reqwest = { version = "0.13.2", features = ["json", "stream"] }
 risingwave_backup = { path = "./src/storage/backup" }
 risingwave_batch = { path = "./src/batch" }
 risingwave_batch_executors = { path = "./src/batch/executors" }
