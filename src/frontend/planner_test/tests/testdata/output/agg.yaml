@@ -2265,7 +2265,7 @@
     FROM with_0
     WHERE false;
   logical_plan: |-
-    LogicalProject { exprs: [null:Struct(StructType { fields: [("a", Int16), ("b", Float64), ("c", Time)] }), 995:Int32, '-168:00:00':Interval, 294:Float64] }
+    LogicalProject { exprs: [null:Struct(a:Int16, b:Float64, c:Time), 995:Int32, '-168:00:00':Interval, 294:Float64] }
     └─LogicalFilter { predicate: false:Boolean }
       └─LogicalShare { id: 7 }
         └─LogicalProject { exprs: [true:Boolean, -2147483600:Float32, -10773:Int16] }
@@ -2278,6 +2278,6 @@
   batch_plan: 'BatchValues { rows: [] }'
   stream_plan: |-
     StreamMaterialize { columns: [col_0, col_1, col_2, col_3, _row_id(hidden)], stream_key: [_row_id], pk_columns: [_row_id], pk_conflict: NoCheck }
-    └─StreamProject { exprs: [null:Struct(StructType { fields: [("a", Int16), ("b", Float64), ("c", Time)] }), 995:Int32, '-168:00:00':Interval, 294:Float64, _row_id] }
+    └─StreamProject { exprs: [null:Struct(a:Int16, b:Float64, c:Time), 995:Int32, '-168:00:00':Interval, 294:Float64, _row_id] }
       └─StreamFilter { predicate: false:Boolean }
         └─StreamValues { rows: [[0:Int64]] }
