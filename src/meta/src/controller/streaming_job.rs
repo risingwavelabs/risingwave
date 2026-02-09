@@ -1972,6 +1972,29 @@ impl CatalogController {
         Ok(())
     }
 
+    pub async fn update_job_backfill_rate_limit(
+        &self,
+        job_id: JobId,
+        rate_limit: Option<u32>,
+    ) -> MetaResult<()> {
+        let inner = self.inner.write().await;
+        let txn = inner.db.begin().await?;
+
+        ensure_job_not_canceled(job_id, &txn).await?;
+
+        streaming_job::ActiveModel {
+            job_id: Set(job_id),
+            backfill_rate_limit: Set(Some(rate_limit.map_or(-1, |limit| limit as i32))),
+            ..Default::default()
+        }
+        .update(&txn)
+        .await?;
+
+        txn.commit().await?;
+
+        Ok(())
+    }
+
     // edit the `rate_limit` of the `Chain` node in given `table_id`'s fragments
     // return the actor_ids to be applied
     pub async fn apply_backfill_rate_limit_by_job_id(

@@ -369,6 +369,26 @@ impl CreatingJobTracker {
         }
     }
 
+    /// Update desired backfill rate limit for a queued job. Returns true if updated.
+    pub async fn update_queued_desired_backfill_rate_limit(
+        &self,
+        job_id: JobId,
+        new_rate_limit: Option<u32>,
+    ) -> bool {
+        let mut entries = self.entries.lock().await;
+        if let Some(entry) = entries.get_mut(&job_id) {
+            if let PermitState::Queued {
+                ref mut desired_rate_limit,
+                ..
+            } = entry.permit_state
+            {
+                *desired_rate_limit = new_rate_limit;
+                return true;
+            }
+        }
+        false
+    }
+
     // Resolve desired backfill limit for recovery without mutating catalog.
     async fn resolve_backfill_rate_limit_for_recovery(
         self: &Arc<Self>,

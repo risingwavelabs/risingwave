@@ -26,9 +26,12 @@ use risingwave_connector::source::CdcTableSnapshotSplitRaw;
 use risingwave_meta_model::prelude::Fragment as FragmentModel;
 use risingwave_meta_model::{StreamingParallelism, fragment};
 use risingwave_pb::catalog::{CreateType, PbSink, PbTable, Subscription};
+use risingwave_pb::common::ThrottleType;
 use risingwave_pb::expr::PbExprNode;
+use risingwave_pb::meta::ThrottleTarget;
 use risingwave_pb::meta::table_fragments::ActorStatus;
 use risingwave_pb::plan_common::{PbColumnCatalog, PbField};
+use risingwave_pb::stream_plan::throttle_mutation::ThrottleConfig;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QuerySelect};
 use thiserror_ext::AsReport;
 use tokio::sync::oneshot;
@@ -385,6 +388,111 @@ impl GlobalStreamManager {
         tracing::debug!("cleaning creating job info: {}", job_id);
         self.creating_job_tracker.remove_execution(job_id).await;
         result
+    }
+
+    pub async fn apply_throttle(
+        &self,
+        object_id: u32,
+        rate_limit: Option<u32>,
+        throttle_type: ThrottleType,
+        throttle_target: ThrottleTarget,
+    ) -> MetaResult<()> {
+        let raw_object_id: u32;
+        let jobs: HashSet<JobId>;
+        let fragments: HashSet<FragmentId>;
+
+        match (throttle_type, throttle_target) {
+            (ThrottleType::Source, ThrottleTarget::Source | ThrottleTarget::Table) => {
+                (jobs, fragments) = self
+                    .metadata_manager
+                    .update_source_rate_limit_by_source_id(object_id.into(), rate_limit)
+                    .await?;
+                raw_object_id = object_id;
+            }
+            (ThrottleType::Backfill, ThrottleTarget::Mv)
+            | (ThrottleType::Backfill, ThrottleTarget::Sink)
+            | (ThrottleType::Backfill, ThrottleTarget::Table) => {
+                let job_id = JobId::from(object_id);
+                if self
+                    .creating_job_tracker
+                    .update_queued_desired_backfill_rate_limit(job_id, rate_limit)
+                    .await
+                {
+                    self.metadata_manager
+                        .catalog_controller
+                        .update_job_backfill_rate_limit(job_id, rate_limit)
+                        .await?;
+                    return Ok(());
+                }
+                fragments = self
+                    .metadata_manager
+                    .update_backfill_rate_limit_by_job_id(job_id, rate_limit)
+                    .await?;
+                jobs = [job_id].into_iter().collect();
+                raw_object_id = object_id;
+            }
+            (ThrottleType::Dml, ThrottleTarget::Table) => {
+                fragments = self
+                    .metadata_manager
+                    .update_dml_rate_limit_by_job_id(JobId::from(object_id), rate_limit)
+                    .await?;
+                jobs = [object_id.into()].into_iter().collect();
+                raw_object_id = object_id;
+            }
+            (ThrottleType::Sink, ThrottleTarget::Sink) => {
+                fragments = self
+                    .metadata_manager
+                    .update_sink_rate_limit_by_sink_id(object_id.into(), rate_limit)
+                    .await?;
+                jobs = [object_id.into()].into_iter().collect();
+                raw_object_id = object_id;
+            }
+            (_, ThrottleTarget::Fragment) => {
+                self.metadata_manager
+                    .update_fragment_rate_limit_by_fragment_id(object_id.into(), rate_limit)
+                    .await?;
+                let fragment_id = object_id.into();
+                fragments = [fragment_id].into_iter().collect();
+                let job_id = self
+                    .metadata_manager
+                    .catalog_controller
+                    .get_fragment_streaming_job_id(fragment_id)
+                    .await?;
+                jobs = [job_id].into_iter().collect();
+                raw_object_id = job_id.as_raw_id();
+            }
+            _ => {
+                return Err(MetaError::invalid_parameter(format!(
+                    "unsupported throttle target/type: {:?}/{:?}",
+                    throttle_target, throttle_type
+                )));
+            }
+        }
+
+        let database_id = self
+            .metadata_manager
+            .catalog_controller
+            .get_object_database_id(raw_object_id)
+            .await?;
+
+        let throttle_config = ThrottleConfig {
+            rate_limit,
+            throttle_type: throttle_type.into(),
+        };
+        self.barrier_scheduler
+            .run_command(
+                database_id,
+                Command::Throttle {
+                    jobs,
+                    config: fragments
+                        .into_iter()
+                        .map(|fragment_id| (fragment_id, throttle_config))
+                        .collect(),
+                },
+            )
+            .await?;
+
+        Ok(())
     }
 
     /// The function will return after barrier collected
