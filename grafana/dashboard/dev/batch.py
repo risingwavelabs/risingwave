@@ -109,6 +109,38 @@ def _(outer_panels: Panels):
                     ],
                 ),
                 panels.timeseries_query_per_sec(
+                    "Query Per Second (DataFusion)",
+                    "",
+                    [
+                        panels.target(
+                            f"rate({metric('datafusion_completed_query_counter')}[$__rate_interval])",
+                            "",
+                        ),
+                    ],
+                ),
+                panels.timeseries_count(
+                    "The Number of Completed Queries (DataFusion)",
+                    "",
+                    [
+                        panels.target(
+                            f"{metric('datafusion_completed_query_counter')}",
+                            "",
+                        ),
+                    ],
+                    ["last"],
+                ),
+                panels.timeseries_count(
+                    "The Number of Failed Queries (DataFusion)",
+                    "",
+                    [
+                        panels.target(
+                            f"{metric('datafusion_failed_query_counter')}",
+                            "",
+                        ),
+                    ],
+                    ["last"],
+                ),
+                panels.timeseries_query_per_sec(
                     "Query Per Second (Distributed Query Mode)",
                     "",
                     [
@@ -249,6 +281,20 @@ def _(outer_panels: Panels):
                         *quantile(
                             lambda quantile, legend: panels.target(
                                 f"histogram_quantile({quantile}, sum(rate({metric('frontend_latency_local_execution_bucket')}[$__rate_interval])) by (le, {COMPONENT_LABEL}, {NODE_LABEL}))",
+                                f"p{legend}"
+                                + " - {{%s}} @ {{%s}}" % (COMPONENT_LABEL, NODE_LABEL),
+                            ),
+                            [50, 90, 99, "max"],
+                        ),
+                    ],
+                ),
+                panels.timeseries_latency(
+                    "Query Latency (DataFusion)",
+                    "",
+                    [
+                        *quantile(
+                            lambda quantile, legend: panels.target(
+                                f"histogram_quantile({quantile}, sum(rate({metric('datafusion_latency_bucket')}[$__rate_interval])) by (le, {COMPONENT_LABEL}, {NODE_LABEL}))",
                                 f"p{legend}"
                                 + " - {{%s}} @ {{%s}}" % (COMPONENT_LABEL, NODE_LABEL),
                             ),

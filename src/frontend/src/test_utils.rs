@@ -37,7 +37,7 @@ use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_common::util::cluster_limit::ClusterLimit;
 use risingwave_common::util::worker_util::DEFAULT_RESOURCE_GROUP;
 use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
-use risingwave_hummock_sdk::{HummockVersionId, INVALID_VERSION_ID};
+use risingwave_hummock_sdk::{CompactionGroupId, HummockVersionId, INVALID_VERSION_ID};
 use risingwave_pb::backup_service::MetaSnapshotMetadata;
 use risingwave_pb::catalog::{
     PbComment, PbDatabase, PbFunction, PbIndex, PbSchema, PbSink, PbSource, PbStreamJobStatus,
@@ -60,7 +60,6 @@ use risingwave_pb::meta::list_actor_splits_response::ActorSplit;
 use risingwave_pb::meta::list_actor_states_response::ActorState;
 use risingwave_pb::meta::list_cdc_progress_response::PbCdcProgress;
 use risingwave_pb::meta::list_iceberg_tables_response::IcebergTable;
-use risingwave_pb::meta::list_object_dependencies_response::PbObjectDependencies;
 use risingwave_pb::meta::list_rate_limits_response::RateLimitInfo;
 use risingwave_pb::meta::list_refresh_table_states_response::RefreshTableState;
 use risingwave_pb::meta::list_streaming_job_states_response::StreamingJobState;
@@ -427,7 +426,7 @@ impl CatalogWriter for MockCatalogWriter {
         _connection_name: String,
         _database_id: DatabaseId,
         _schema_id: SchemaId,
-        _owner_id: u32,
+        _owner_id: UserId,
         _connection: create_connection_request::Payload,
     ) -> Result<()> {
         unreachable!()
@@ -438,7 +437,7 @@ impl CatalogWriter for MockCatalogWriter {
         _secret_name: String,
         _database_id: DatabaseId,
         _schema_id: SchemaId,
-        _owner_id: u32,
+        _owner_id: UserId,
         _payload: Vec<u8>,
     ) -> Result<()> {
         unreachable!()
@@ -605,7 +604,7 @@ impl CatalogWriter for MockCatalogWriter {
         unreachable!()
     }
 
-    async fn drop_secret(&self, _secret_id: SecretId) -> Result<()> {
+    async fn drop_secret(&self, _secret_id: SecretId, _cascade: bool) -> Result<()> {
         unreachable!()
     }
 
@@ -643,7 +642,7 @@ impl CatalogWriter for MockCatalogWriter {
         Ok(())
     }
 
-    async fn alter_owner(&self, object: Object, owner_id: u32) -> Result<()> {
+    async fn alter_owner(&self, object: Object, owner_id: UserId) -> Result<()> {
         for database in self.catalog.read().iter_databases() {
             for schema in database.iter_schemas() {
                 match object {
@@ -715,7 +714,7 @@ impl CatalogWriter for MockCatalogWriter {
         _secret_name: String,
         _database_id: DatabaseId,
         _schema_id: SchemaId,
-        _owner_id: u32,
+        _owner_id: UserId,
         _payload: Vec<u8>,
     ) -> Result<()> {
         unreachable!()
@@ -934,7 +933,7 @@ pub struct MockUserInfoWriter {
 impl UserInfoWriter for MockUserInfoWriter {
     async fn create_user(&self, user: UserInfo) -> Result<()> {
         let mut user = user;
-        user.id = self.gen_id();
+        user.id = self.gen_id().into();
         self.user_info.write().create_user(user);
         Ok(())
     }
@@ -1049,7 +1048,7 @@ impl MockUserInfoWriter {
         });
         Self {
             user_info,
-            id: AtomicU32::new(NON_RESERVED_USER_ID as u32),
+            id: AtomicU32::new(NON_RESERVED_USER_ID.as_raw_id()),
         }
     }
 
@@ -1106,10 +1105,6 @@ impl FrontendMetaClient for MockFrontendMetaClient {
         Ok(vec![])
     }
 
-    async fn list_object_dependencies(&self) -> RpcResult<Vec<PbObjectDependencies>> {
-        Ok(vec![])
-    }
-
     async fn list_meta_snapshots(&self) -> RpcResult<Vec<MetaSnapshotMetadata>> {
         Ok(vec![])
     }
@@ -1148,7 +1143,7 @@ impl FrontendMetaClient for MockFrontendMetaClient {
         Ok(HashMap::new())
     }
 
-    async fn list_hummock_pinned_versions(&self) -> RpcResult<Vec<(WorkerId, u64)>> {
+    async fn list_hummock_pinned_versions(&self) -> RpcResult<Vec<(WorkerId, HummockVersionId)>> {
         unimplemented!()
     }
 
@@ -1176,7 +1171,9 @@ impl FrontendMetaClient for MockFrontendMetaClient {
         unimplemented!()
     }
 
-    async fn list_hummock_active_write_limits(&self) -> RpcResult<HashMap<u64, WriteLimit>> {
+    async fn list_hummock_active_write_limits(
+        &self,
+    ) -> RpcResult<HashMap<CompactionGroupId, WriteLimit>> {
         unimplemented!()
     }
 

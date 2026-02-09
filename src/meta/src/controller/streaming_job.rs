@@ -51,7 +51,7 @@ use risingwave_pb::meta::object::PbObjectInfo;
 use risingwave_pb::meta::subscribe_response::{
     Info as NotificationInfo, Info, Operation as NotificationOperation, Operation,
 };
-use risingwave_pb::meta::{PbObject, PbObjectGroup};
+use risingwave_pb::meta::{ObjectDependency as PbObjectDependency, PbObject, PbObjectGroup};
 use risingwave_pb::plan_common::PbColumnCatalog;
 use risingwave_pb::plan_common::source_refresh_mode::{
     RefreshMode, SourceRefreshModeFullReload, SourceRefreshModeStreaming,
@@ -81,7 +81,8 @@ use crate::controller::utils::{
     check_relation_name_duplicate, check_sink_into_table_cycle, ensure_job_not_canceled,
     ensure_object_id, ensure_user_id, fetch_target_fragments, get_internal_tables_by_id,
     get_table_columns, grant_default_privileges_automatically, insert_fragment_relations,
-    list_user_info_by_ids, try_get_iceberg_table_by_downstream_sink,
+    list_object_dependencies_by_object_id, list_user_info_by_ids,
+    try_get_iceberg_table_by_downstream_sink,
 };
 use crate::error::MetaErrorInner;
 use crate::manager::{NotificationVersion, StreamingJob, StreamingJobType};
@@ -626,6 +627,7 @@ impl CatalogController {
                 Operation::Add,
                 Info::ObjectGroup(PbObjectGroup {
                     objects: objects_to_notify,
+                    dependencies: vec![],
                 }),
             )
             .await;
@@ -1079,15 +1081,18 @@ impl CatalogController {
             return Ok(());
         }
 
-        let (notification_op, objects, updated_user_info) =
-            Self::finish_streaming_job_inner(&txn, job_id).await?;
+        let (notification_op, objects, updated_user_info, dependencies) =
+            self.finish_streaming_job_inner(&txn, job_id).await?;
 
         txn.commit().await?;
 
         let mut version = self
             .notify_frontend(
                 notification_op,
-                NotificationInfo::ObjectGroup(PbObjectGroup { objects }),
+                NotificationInfo::ObjectGroup(PbObjectGroup {
+                    objects,
+                    dependencies,
+                }),
             )
             .await;
 
@@ -1112,9 +1117,15 @@ impl CatalogController {
 
     /// `finish_streaming_job` marks job related objects as `Created` and notify frontend.
     pub async fn finish_streaming_job_inner(
+        &self,
         txn: &DatabaseTransaction,
         job_id: JobId,
-    ) -> MetaResult<(Operation, Vec<risingwave_pb::meta::Object>, Vec<PbUserInfo>)> {
+    ) -> MetaResult<(
+        Operation,
+        Vec<risingwave_pb::meta::Object>,
+        Vec<PbUserInfo>,
+        Vec<PbObjectDependency>,
+    )> {
         let job_type = Object::find_by_id(job_id)
             .select_only()
             .column(object::Column::ObjType)
@@ -1314,7 +1325,10 @@ impl CatalogController {
             updated_user_info = grant_default_privileges_automatically(txn, job_id).await?;
         }
 
-        Ok((notification_op, objects, updated_user_info))
+        let dependencies =
+            list_object_dependencies_by_object_id(txn, job_id.as_object_id()).await?;
+
+        Ok((notification_op, objects, updated_user_info, dependencies))
     }
 
     pub async fn finish_replace_streaming_job(
@@ -1345,7 +1359,10 @@ impl CatalogController {
         let mut version = self
             .notify_frontend(
                 NotificationOperation::Update,
-                NotificationInfo::ObjectGroup(PbObjectGroup { objects }),
+                NotificationInfo::ObjectGroup(PbObjectGroup {
+                    objects,
+                    dependencies: vec![],
+                }),
             )
             .await;
 
@@ -1816,6 +1833,7 @@ impl CatalogController {
                     objects: vec![PbObject {
                         object_info: Some(relation_info),
                     }],
+                    dependencies: vec![],
                 }),
             )
             .await;
@@ -2346,6 +2364,7 @@ impl CatalogController {
             NotificationOperation::Update,
             NotificationInfo::ObjectGroup(PbObjectGroup {
                 objects: to_update_objs,
+                dependencies: vec![],
             }),
         )
         .await;
@@ -2410,6 +2429,7 @@ impl CatalogController {
                 NotificationOperation::Update,
                 NotificationInfo::ObjectGroup(PbObjectGroup {
                     objects: relation_infos,
+                    dependencies: vec![],
                 }),
             )
             .await;
@@ -2530,6 +2550,7 @@ impl CatalogController {
                 NotificationOperation::Update,
                 NotificationInfo::ObjectGroup(PbObjectGroup {
                     objects: relation_infos,
+                    dependencies: vec![],
                 }),
             )
             .await;
@@ -2961,6 +2982,7 @@ impl CatalogController {
                 NotificationOperation::Update,
                 NotificationInfo::ObjectGroup(PbObjectGroup {
                     objects: updated_objects,
+                    dependencies: vec![],
                 }),
             )
             .await;

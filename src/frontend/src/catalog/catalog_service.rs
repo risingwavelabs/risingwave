@@ -22,7 +22,6 @@ use risingwave_common::catalog::{
     AlterDatabaseParam, CatalogVersion, FunctionId, IndexId, ObjectId,
 };
 use risingwave_common::id::{ConnectionId, JobId, SchemaId, SourceId, ViewId};
-use risingwave_hummock_sdk::HummockVersionId;
 use risingwave_pb::catalog::{
     PbComment, PbCreateType, PbDatabase, PbFunction, PbIndex, PbSchema, PbSink, PbSource,
     PbSubscription, PbTable, PbView,
@@ -156,7 +155,7 @@ pub trait CatalogWriter: Send + Sync {
         connection_name: String,
         database_id: DatabaseId,
         schema_id: SchemaId,
-        owner_id: u32,
+        owner_id: UserId,
         connection: create_connection_request::Payload,
     ) -> Result<()>;
 
@@ -165,7 +164,7 @@ pub trait CatalogWriter: Send + Sync {
         secret_name: String,
         database_id: DatabaseId,
         schema_id: SchemaId,
-        owner_id: u32,
+        owner_id: UserId,
         payload: Vec<u8>,
     ) -> Result<()>;
 
@@ -201,7 +200,7 @@ pub trait CatalogWriter: Send + Sync {
 
     async fn drop_connection(&self, connection_id: ConnectionId, cascade: bool) -> Result<()>;
 
-    async fn drop_secret(&self, secret_id: SecretId) -> Result<()>;
+    async fn drop_secret(&self, secret_id: SecretId, cascade: bool) -> Result<()>;
 
     async fn alter_secret(
         &self,
@@ -209,7 +208,7 @@ pub trait CatalogWriter: Send + Sync {
         secret_name: String,
         database_id: DatabaseId,
         schema_id: SchemaId,
-        owner_id: u32,
+        owner_id: UserId,
         payload: Vec<u8>,
     ) -> Result<()>;
 
@@ -219,7 +218,11 @@ pub trait CatalogWriter: Send + Sync {
         object_name: &str,
     ) -> Result<()>;
 
-    async fn alter_owner(&self, object: alter_owner_request::Object, owner_id: u32) -> Result<()>;
+    async fn alter_owner(
+        &self,
+        object: alter_owner_request::Object,
+        owner_id: UserId,
+    ) -> Result<()>;
 
     /// Replace the source in the catalog.
     async fn alter_source(&self, source: PbSource) -> Result<()>;
@@ -468,7 +471,7 @@ impl CatalogWriter for CatalogWriterImpl {
         connection_name: String,
         database_id: DatabaseId,
         schema_id: SchemaId,
-        owner_id: u32,
+        owner_id: UserId,
         connection: create_connection_request::Payload,
     ) -> Result<()> {
         let version = self
@@ -489,7 +492,7 @@ impl CatalogWriter for CatalogWriterImpl {
         secret_name: String,
         database_id: DatabaseId,
         schema_id: SchemaId,
-        owner_id: u32,
+        owner_id: UserId,
         payload: Vec<u8>,
     ) -> Result<()> {
         let version = self
@@ -585,8 +588,8 @@ impl CatalogWriter for CatalogWriterImpl {
         self.wait_version(version).await
     }
 
-    async fn drop_secret(&self, secret_id: SecretId) -> Result<()> {
-        let version = self.meta_client.drop_secret(secret_id).await?;
+    async fn drop_secret(&self, secret_id: SecretId, cascade: bool) -> Result<()> {
+        let version = self.meta_client.drop_secret(secret_id, cascade).await?;
         self.wait_version(version).await
     }
 
@@ -599,7 +602,11 @@ impl CatalogWriter for CatalogWriterImpl {
         self.wait_version(version).await
     }
 
-    async fn alter_owner(&self, object: alter_owner_request::Object, owner_id: u32) -> Result<()> {
+    async fn alter_owner(
+        &self,
+        object: alter_owner_request::Object,
+        owner_id: UserId,
+    ) -> Result<()> {
         let version = self.meta_client.alter_owner(object, owner_id).await?;
         self.wait_version(version).await
     }
@@ -656,7 +663,7 @@ impl CatalogWriter for CatalogWriterImpl {
         secret_name: String,
         database_id: DatabaseId,
         schema_id: SchemaId,
-        owner_id: u32,
+        owner_id: UserId,
         payload: Vec<u8>,
     ) -> Result<()> {
         let version = self
@@ -734,7 +741,7 @@ impl CatalogWriterImpl {
             rx.changed().await.map_err(|e| anyhow!(e))?;
         }
         self.hummock_snapshot_manager
-            .wait(HummockVersionId::new(version.hummock_version_id))
+            .wait(version.hummock_version_id)
             .await;
         Ok(())
     }

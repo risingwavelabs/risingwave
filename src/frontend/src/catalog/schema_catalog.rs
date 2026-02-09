@@ -81,7 +81,7 @@ pub struct SchemaCatalog {
     connection_sink_ref: HashMap<ConnectionId, Vec<SinkId>>,
     // This field only available when schema is "pg_catalog". Meanwhile, others will be empty.
     system_table_by_name: HashMap<String, Arc<SystemTableCatalog>>,
-    pub owner: u32,
+    pub owner: UserId,
 }
 
 impl SchemaCatalog {
@@ -597,6 +597,20 @@ impl SchemaCatalog {
             .expect("secret not found by name");
     }
 
+    pub fn iter_object_ids(&self) -> impl Iterator<Item = ObjectId> + '_ {
+        self.table_by_id
+            .keys()
+            .map(|id| id.as_object_id())
+            .chain(self.source_by_id.keys().map(|id| id.as_object_id()))
+            .chain(self.sink_by_id.keys().map(|id| id.as_object_id()))
+            .chain(self.subscription_by_id.keys().map(|id| id.as_object_id()))
+            .chain(self.index_by_id.keys().map(|id| id.as_object_id()))
+            .chain(self.view_by_id.keys().map(|id| id.as_object_id()))
+            .chain(self.function_by_id.keys().map(|id| id.as_object_id()))
+            .chain(self.connection_by_id.keys().map(|id| id.as_object_id()))
+            .chain(self.secret_by_id.keys().map(|id| id.as_object_id()))
+    }
+
     pub fn iter_all(&self) -> impl Iterator<Item = &Arc<TableCatalog>> {
         self.table_by_name.values()
     }
@@ -713,7 +727,7 @@ impl SchemaCatalog {
     ) -> impl Iterator<Item = &'a Arc<SinkCatalog>> {
         self.sink_by_name
             .values()
-            .filter(|s| has_access_to_object(user, s.id, s.owner.user_id))
+            .filter(|s| has_access_to_object(user, s.id, s.owner))
     }
 
     pub fn iter_subscription(&self) -> impl Iterator<Item = &Arc<SubscriptionCatalog>> {
@@ -726,7 +740,7 @@ impl SchemaCatalog {
     ) -> impl Iterator<Item = &'a Arc<SubscriptionCatalog>> {
         self.subscription_by_name
             .values()
-            .filter(|s| has_access_to_object(user, s.id, s.owner.user_id))
+            .filter(|s| has_access_to_object(user, s.id, s.owner))
     }
 
     pub fn iter_view(&self) -> impl Iterator<Item = &Arc<ViewCatalog>> {
@@ -1030,7 +1044,7 @@ impl SchemaCatalog {
             })
         } else if let Some(sink) = self.get_sink_by_id(oid.as_sink_id()) {
             Some(OwnedGrantObject {
-                owner: sink.owner.user_id,
+                owner: sink.owner,
                 object: Object::SinkId(oid.as_raw_id()),
             })
         } else if let Some(view) = self.get_view_by_id(oid.as_view_id()) {
@@ -1045,7 +1059,7 @@ impl SchemaCatalog {
             })
         } else if let Some(subscription) = self.get_subscription_by_id(oid.as_subscription_id()) {
             Some(OwnedGrantObject {
-                owner: subscription.owner.user_id,
+                owner: subscription.owner,
                 object: Object::SubscriptionId(oid.as_raw_id()),
             })
         } else if let Some(connection) = self.get_connection_by_id(oid.as_connection_id()) {

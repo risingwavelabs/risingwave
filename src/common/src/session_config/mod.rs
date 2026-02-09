@@ -244,6 +244,10 @@ pub struct SessionConfig {
     #[parameter(default = true)]
     streaming_use_snapshot_backfill: bool,
 
+    /// Enable serverless backfill for streaming queries. Defaults to false.
+    #[parameter(default = false)]
+    enable_serverless_backfill: bool,
+
     /// Allow `jsonb` in stream key
     #[parameter(default = false, alias = "rw_streaming_allow_jsonb_in_stream_key")]
     streaming_allow_jsonb_in_stream_key: bool,
@@ -482,6 +486,12 @@ pub struct SessionConfig {
     /// When enabled, queries involving Iceberg tables will be executed using the DataFusion engine.
     #[parameter(default = false)]
     enable_datafusion_engine: bool,
+
+    /// Prefer hash join over sort merge join in DataFusion engine
+    /// When enabled, the DataFusion engine will prioritize hash joins for query execution plans,
+    /// potentially improving performance for certain workloads, but may cause OOM for large datasets.
+    #[parameter(default = true)]
+    datafusion_prefer_hash_join: bool,
 
     /// Emit chunks in upsert format for `UPDATE` and `DELETE` DMLs.
     /// May lead to undefined behavior if the table is created with `ON CONFLICT DO NOTHING`.
