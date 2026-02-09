@@ -182,6 +182,99 @@ impl RescheduleContext {
             downstream_relations,
         })
     }
+
+    /// Split this context into per-database contexts without cloning the large loaded graph
+    /// payloads.
+    pub fn into_database_contexts(self) -> HashMap<DatabaseId, Self> {
+        let Self {
+            loaded,
+            job_extra_info,
+            upstream_fragments,
+            downstream_fragments,
+            downstream_relations,
+        } = self;
+
+        let mut contexts: HashMap<_, _> = loaded
+            .into_database_contexts()
+            .into_iter()
+            .map(|(database_id, loaded)| {
+                (
+                    database_id,
+                    Self {
+                        loaded,
+                        job_extra_info: HashMap::new(),
+                        upstream_fragments: HashMap::new(),
+                        downstream_fragments: HashMap::new(),
+                        downstream_relations: HashMap::new(),
+                    },
+                )
+            })
+            .collect();
+
+        if contexts.is_empty() {
+            return contexts;
+        }
+
+        let mut job_databases = HashMap::new();
+        let mut fragment_databases = HashMap::new();
+        for (&database_id, context) in &contexts {
+            for job_id in context.loaded.job_map.keys().copied() {
+                job_databases.insert(job_id, database_id);
+            }
+            for fragment_id in context
+                .loaded
+                .job_fragments
+                .values()
+                .flat_map(|fragments| fragments.keys().copied())
+            {
+                fragment_databases.insert(fragment_id, database_id);
+            }
+        }
+
+        for (job_id, info) in job_extra_info {
+            if let Some(database_id) = job_databases.get(&job_id).copied() {
+                contexts
+                    .get_mut(&database_id)
+                    .expect("database context should exist for job")
+                    .job_extra_info
+                    .insert(job_id, info);
+            }
+        }
+
+        for (fragment_id, upstreams) in upstream_fragments {
+            if let Some(database_id) = fragment_databases.get(&fragment_id).copied() {
+                contexts
+                    .get_mut(&database_id)
+                    .expect("database context should exist for fragment")
+                    .upstream_fragments
+                    .insert(fragment_id, upstreams);
+            }
+        }
+
+        for (fragment_id, downstreams) in downstream_fragments {
+            if let Some(database_id) = fragment_databases.get(&fragment_id).copied() {
+                contexts
+                    .get_mut(&database_id)
+                    .expect("database context should exist for fragment")
+                    .downstream_fragments
+                    .insert(fragment_id, downstreams);
+            }
+        }
+
+        for ((source_fragment_id, target_fragment_id), relation) in downstream_relations {
+            // Route by source fragment ownership. A target may be outside of current reschedule
+            // set, but this edge still belongs to the source-side command.
+            if let Some(database_id) = fragment_databases.get(&source_fragment_id).copied() {
+                contexts
+                    .get_mut(&database_id)
+                    .expect("database context should exist for relation source")
+                    .downstream_relations
+                    .insert((source_fragment_id, target_fragment_id), relation);
+            }
+        }
+
+        contexts
+    }
 }
 
 /// Replacing an old job with a new one. All actors in the job will be rebuilt.

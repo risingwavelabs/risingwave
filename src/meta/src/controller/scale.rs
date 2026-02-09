@@ -330,6 +330,103 @@ impl LoadedFragmentContext {
             fragment_splits,
         })
     }
+
+    /// Split this loaded context by database in a single ownership pass to avoid cloning large
+    /// fragment payloads (for example `stream_node` in `LoadedFragment`).
+    pub fn into_database_contexts(self) -> HashMap<DatabaseId, Self> {
+        let Self {
+            ensembles,
+            mut job_fragments,
+            mut job_map,
+            streaming_job_databases,
+            mut database_map,
+            mut fragment_source_ids,
+            mut fragment_splits,
+        } = self;
+
+        let mut contexts = HashMap::<DatabaseId, Self>::new();
+        let mut fragment_databases = HashMap::<FragmentId, DatabaseId>::new();
+
+        for (job_id, database_id) in streaming_job_databases {
+            let context = contexts.entry(database_id).or_insert_with(|| {
+                let database_model = database_map
+                    .remove(&database_id)
+                    .expect("database should exist for streaming job");
+                Self {
+                    ensembles: Vec::new(),
+                    job_fragments: HashMap::new(),
+                    job_map: HashMap::new(),
+                    streaming_job_databases: HashMap::new(),
+                    database_map: HashMap::from([(database_id, database_model)]),
+                    fragment_source_ids: HashMap::new(),
+                    fragment_splits: HashMap::new(),
+                }
+            });
+
+            let fragments = job_fragments
+                .remove(&job_id)
+                .expect("job fragments should exist for streaming job");
+            for fragment_id in fragments.keys().copied() {
+                fragment_databases.insert(fragment_id, database_id);
+                if let Some(source_id) = fragment_source_ids.remove(&fragment_id) {
+                    context.fragment_source_ids.insert(fragment_id, source_id);
+                }
+                if let Some(splits) = fragment_splits.remove(&fragment_id) {
+                    context.fragment_splits.insert(fragment_id, splits);
+                }
+            }
+
+            assert!(
+                context
+                    .job_map
+                    .insert(
+                        job_id,
+                        job_map
+                            .remove(&job_id)
+                            .expect("streaming job should exist for loaded context"),
+                    )
+                    .is_none(),
+                "duplicated streaming job"
+            );
+            assert!(
+                context.job_fragments.insert(job_id, fragments).is_none(),
+                "duplicated job fragments"
+            );
+            assert!(
+                context
+                    .streaming_job_databases
+                    .insert(job_id, database_id)
+                    .is_none(),
+                "duplicated job database mapping"
+            );
+        }
+
+        for ensemble in ensembles {
+            let Some(database_id) = ensemble
+                .components
+                .iter()
+                .find_map(|fragment_id| fragment_databases.get(fragment_id).copied())
+            else {
+                continue;
+            };
+
+            debug_assert!(
+                ensemble
+                    .components
+                    .iter()
+                    .all(|fragment_id| fragment_databases.get(fragment_id) == Some(&database_id)),
+                "ensemble {ensemble:?} should belong to a single database"
+            );
+
+            contexts
+                .get_mut(&database_id)
+                .expect("database context should exist for ensemble")
+                .ensembles
+                .push(ensemble);
+        }
+
+        contexts
+    }
 }
 
 /// Fragment-scoped rendering entry point used by operational tooling.

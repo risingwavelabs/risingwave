@@ -329,17 +329,11 @@ async fn build_reschedule_intent_for_jobs(
         return Ok(HashMap::new());
     }
 
-    let database_ids: HashSet<DatabaseId> = database_jobs
+    let commands = reschedule_context
+        .into_database_contexts()
         .into_iter()
-        .map(|(database_id, _)| database_id)
+        .map(|(database_id, context)| (database_id, Command::RescheduleIntent { context }))
         .collect();
-
-    let mut commands = HashMap::new();
-    for database_id in database_ids {
-        if let Some(context) = reschedule_context.for_database(database_id) {
-            commands.insert(database_id, Command::RescheduleIntent { context });
-        }
-    }
 
     Ok(commands)
 }
@@ -381,17 +375,11 @@ async fn build_reschedule_intent_for_fragments(
         return Ok(HashMap::new());
     }
 
-    let database_ids: HashSet<DatabaseId> = fragment_databases
+    let commands = reschedule_context
+        .into_database_contexts()
         .into_iter()
-        .map(|(_, database_id)| database_id)
+        .map(|(database_id, context)| (database_id, Command::RescheduleIntent { context }))
         .collect();
-
-    let mut commands = HashMap::new();
-    for database_id in database_ids {
-        if let Some(context) = reschedule_context.for_database(database_id) {
-            commands.insert(database_id, Command::RescheduleIntent { context });
-        }
-    }
 
     Ok(commands)
 }
@@ -656,25 +644,20 @@ pub(crate) fn build_reschedule_commands(
         )
         .collect();
 
-    let all_related_fragment_ids = all_related_fragment_ids.into_iter().collect_vec();
-
-    let all_prev_fragments: HashMap<_, _> = {
-        let read_guard = env.shared_actor_infos().read_guard();
-        all_related_fragment_ids
-            .iter()
-            .map(|&fragment_id| {
-                read_guard
-                    .get_fragment(fragment_id as FragmentId)
-                    .cloned()
-                    .map(|fragment| (fragment_id, fragment))
-                    .ok_or_else(|| {
-                        MetaError::from(anyhow!(
-                            "previous fragment info for {fragment_id} not found"
-                        ))
-                    })
-            })
-            .collect::<MetaResult<_>>()?
-    };
+    let read_guard = env.shared_actor_infos().read_guard();
+    let all_prev_fragments: HashMap<FragmentId, &SharedFragmentInfo> = all_related_fragment_ids
+        .into_iter()
+        .map(|fragment_id| {
+            read_guard
+                .get_fragment(fragment_id as FragmentId)
+                .map(|fragment| (fragment_id, fragment))
+                .ok_or_else(|| {
+                    MetaError::from(anyhow!(
+                        "previous fragment info for {fragment_id} not found"
+                    ))
+                })
+        })
+        .collect::<MetaResult<_>>()?;
 
     let all_rendered_fragments: HashMap<_, _> = render_result
         .values()
