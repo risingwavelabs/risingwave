@@ -1683,7 +1683,7 @@ impl CatalogController {
                 .ok_or_else(|| MetaError::catalog_id_not_found("source", source_id))?;
             objects.push(PbObject {
                 object_info: Some(PbObjectInfo::Source(
-                    ObjectModel(source, source_obj.unwrap()).into(),
+                    ObjectModel(source, source_obj.unwrap(), None).into(),
                 )),
             });
         }
