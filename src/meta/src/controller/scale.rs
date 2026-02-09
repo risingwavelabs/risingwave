@@ -346,6 +346,8 @@ impl LoadedFragmentContext {
 
         let mut contexts = HashMap::<DatabaseId, Self>::new();
         let mut fragment_databases = HashMap::<FragmentId, DatabaseId>::new();
+        let mut unresolved_ensembles = 0usize;
+        let mut unresolved_ensemble_sample: Option<Vec<FragmentId>> = None;
 
         for (job_id, database_id) in streaming_job_databases {
             let context = contexts.entry(database_id).or_insert_with(|| {
@@ -407,6 +409,11 @@ impl LoadedFragmentContext {
                 .iter()
                 .find_map(|fragment_id| fragment_databases.get(fragment_id).copied())
             else {
+                unresolved_ensembles += 1;
+                if unresolved_ensemble_sample.is_none() {
+                    unresolved_ensemble_sample =
+                        Some(ensemble.components.iter().copied().collect());
+                }
                 continue;
             };
 
@@ -424,6 +431,19 @@ impl LoadedFragmentContext {
                 .ensembles
                 .push(ensemble);
         }
+
+        if unresolved_ensembles > 0 {
+            tracing::warn!(
+                unresolved_ensembles,
+                ?unresolved_ensemble_sample,
+                known_fragments = fragment_databases.len(),
+                "skip ensembles without resolved database while splitting loaded context"
+            );
+        }
+        debug_assert_eq!(
+            unresolved_ensembles, 0,
+            "all ensembles should be mappable to a database"
+        );
 
         contexts
     }
