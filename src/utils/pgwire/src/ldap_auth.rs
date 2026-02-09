@@ -141,19 +141,18 @@ impl LdapTlsConfig {
             let client_key_bytes = fs::read(key).map_err(|e| {
                 PsqlError::StartupError(anyhow!(e).context("Failed to read client key").into())
             })?;
-            let client_certs =
-                CertificateDer::pem_slice_iter(&client_cert_bytes)
-                    .collect::<Result<Vec<_>, _>>()
-                    .map_err(|e| {
-                        PsqlError::StartupError(
-                            anyhow!(e)
-                                .context("Failed to parse client certificate")
-                                .into(),
-                        )
-                    })?;
-
-            let client_private_key = PrivateKeyDer::from_pem_slice(&client_key_bytes)
+            let client_certs = CertificateDer::pem_slice_iter(&client_cert_bytes)
+                .collect::<Result<Vec<_>, _>>()
                 .map_err(|e| {
+                    PsqlError::StartupError(
+                        anyhow!(e)
+                            .context("Failed to parse client certificate")
+                            .into(),
+                    )
+                })?;
+
+            let client_private_key =
+                PrivateKeyDer::from_pem_slice(&client_key_bytes).map_err(|e| {
                     PsqlError::StartupError(anyhow!(e).context("Failed to parse client key").into())
                 })?;
 
