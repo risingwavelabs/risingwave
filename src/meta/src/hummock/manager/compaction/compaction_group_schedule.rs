@@ -893,10 +893,11 @@ impl HummockManager {
         )
         .await?;
 
-        match self
+        let result = self
             .merge_compaction_group(group.group_id, next_group.group_id)
-            .await
-        {
+            .await;
+
+        match &result {
             Ok(()) => {
                 tracing::info!(
                     "merge group-{} to group-{}",
@@ -915,11 +916,11 @@ impl HummockManager {
                     "failed to merge group-{} group-{}",
                     next_group.group_id,
                     group.group_id,
-                )
+                );
             }
         }
 
-        Ok(())
+        result
     }
 }
 
