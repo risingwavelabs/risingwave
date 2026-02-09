@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use risingwave_pb::hummock::PbSstableInfo;
+use risingwave_pb::id::HummockSstableId;
 use sea_orm::entity::prelude::*;
 use sea_orm::{DeriveEntityModel, DeriveRelation, EnumIter};
 
@@ -22,7 +23,7 @@ use crate::HummockSstableObjectId;
 #[sea_orm(table_name = "hummock_sstable_info")]
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
-    pub sst_id: HummockSstableObjectId,
+    pub sst_id: HummockSstableId,
     pub object_id: HummockSstableObjectId,
     pub sstable_info: SstableInfoV2Backend,
 }

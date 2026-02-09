@@ -37,7 +37,7 @@ use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_common::util::cluster_limit::ClusterLimit;
 use risingwave_common::util::worker_util::DEFAULT_RESOURCE_GROUP;
 use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
-use risingwave_hummock_sdk::{HummockVersionId, INVALID_VERSION_ID};
+use risingwave_hummock_sdk::{CompactionGroupId, HummockVersionId, INVALID_VERSION_ID};
 use risingwave_pb::backup_service::MetaSnapshotMetadata;
 use risingwave_pb::catalog::{
     PbComment, PbDatabase, PbFunction, PbIndex, PbSchema, PbSink, PbSource, PbStreamJobStatus,
@@ -605,7 +605,7 @@ impl CatalogWriter for MockCatalogWriter {
         unreachable!()
     }
 
-    async fn drop_secret(&self, _secret_id: SecretId) -> Result<()> {
+    async fn drop_secret(&self, _secret_id: SecretId, _cascade: bool) -> Result<()> {
         unreachable!()
     }
 
@@ -1148,7 +1148,7 @@ impl FrontendMetaClient for MockFrontendMetaClient {
         Ok(HashMap::new())
     }
 
-    async fn list_hummock_pinned_versions(&self) -> RpcResult<Vec<(WorkerId, u64)>> {
+    async fn list_hummock_pinned_versions(&self) -> RpcResult<Vec<(WorkerId, HummockVersionId)>> {
         unimplemented!()
     }
 
@@ -1176,7 +1176,9 @@ impl FrontendMetaClient for MockFrontendMetaClient {
         unimplemented!()
     }
 
-    async fn list_hummock_active_write_limits(&self) -> RpcResult<HashMap<u64, WriteLimit>> {
+    async fn list_hummock_active_write_limits(
+        &self,
+    ) -> RpcResult<HashMap<CompactionGroupId, WriteLimit>> {
         unimplemented!()
     }
 

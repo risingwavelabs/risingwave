@@ -19,8 +19,8 @@ use risingwave_common::id::{ConnectionId, JobId, SourceId, TableId, WorkerId};
 use risingwave_common::session_config::SessionConfig;
 use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_common::util::cluster_limit::ClusterLimit;
-use risingwave_hummock_sdk::HummockVersionId;
 use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
+use risingwave_hummock_sdk::{CompactionGroupId, HummockVersionId};
 use risingwave_pb::backup_service::MetaSnapshotMetadata;
 use risingwave_pb::catalog::Table;
 use risingwave_pb::common::WorkerNode;
@@ -112,7 +112,7 @@ pub trait FrontendMetaClient: Send + Sync {
     ) -> Result<HashMap<TableId, Table>>;
 
     /// Returns vector of (`worker_id`, `min_pinned_version_id`)
-    async fn list_hummock_pinned_versions(&self) -> Result<Vec<(WorkerId, u64)>>;
+    async fn list_hummock_pinned_versions(&self) -> Result<Vec<(WorkerId, HummockVersionId)>>;
 
     async fn get_hummock_current_version(&self) -> Result<HummockVersion>;
 
@@ -124,7 +124,9 @@ pub trait FrontendMetaClient: Send + Sync {
 
     async fn list_hummock_compaction_group_configs(&self) -> Result<Vec<CompactionGroupInfo>>;
 
-    async fn list_hummock_active_write_limits(&self) -> Result<HashMap<u64, WriteLimit>>;
+    async fn list_hummock_active_write_limits(
+        &self,
+    ) -> Result<HashMap<CompactionGroupId, WriteLimit>>;
 
     async fn list_hummock_meta_configs(&self) -> Result<HashMap<String, String>>;
 
@@ -325,7 +327,7 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
         Ok(tables)
     }
 
-    async fn list_hummock_pinned_versions(&self) -> Result<Vec<(WorkerId, u64)>> {
+    async fn list_hummock_pinned_versions(&self) -> Result<Vec<(WorkerId, HummockVersionId)>> {
         let pinned_versions = self
             .0
             .risectl_get_pinned_versions_summary()
@@ -366,7 +368,9 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
         self.0.risectl_list_compaction_group().await
     }
 
-    async fn list_hummock_active_write_limits(&self) -> Result<HashMap<u64, WriteLimit>> {
+    async fn list_hummock_active_write_limits(
+        &self,
+    ) -> Result<HashMap<CompactionGroupId, WriteLimit>> {
         self.0.list_active_write_limit().await
     }
 
