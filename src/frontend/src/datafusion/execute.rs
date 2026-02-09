@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::sync::{Arc, LazyLock};
+use std::time::Instant;
 
 use async_trait::async_trait;
 use datafusion::config::ConfigOptions;
@@ -41,6 +42,7 @@ use crate::handler::RwPgResponse;
 use crate::handler::util::{DataChunkToRowSetAdapter, to_pg_field};
 use crate::scheduler::SchedulerError;
 use crate::session::SessionImpl;
+use crate::utils::DropGuard;
 
 #[derive(Clone)]
 pub struct DfBatchQueryPlanResult {
@@ -88,6 +90,8 @@ pub async fn execute_datafusion_plan(
     formats: Vec<Format>,
 ) -> RwResult<RwPgResponse> {
     let ctx = create_datafusion_context(session.as_ref());
+
+    let query_start_time = Instant::now();
 
     let pg_descs: Vec<PgFieldDescriptor> = plan.schema.fields().iter().map(to_pg_field).collect();
     let column_types = plan.schema.fields().iter().map(|f| f.data_type()).collect();
@@ -160,9 +164,40 @@ pub async fn execute_datafusion_plan(
 
     let first_field_format = formats.first().copied().unwrap_or(Format::Text);
 
+    let failed_counter_guard = DropGuard::new({
+        let failed_query_counter = session
+            .env()
+            .frontend_metrics
+            .datafusion
+            .failed_query_counter
+            .clone();
+        move || {
+            failed_query_counter.inc();
+        }
+    });
+    let callback = async move {
+        session
+            .env()
+            .frontend_metrics
+            .datafusion
+            .latency
+            .observe(query_start_time.elapsed().as_secs_f64());
+
+        session
+            .env()
+            .frontend_metrics
+            .datafusion
+            .completed_query_counter
+            .inc();
+        failed_counter_guard.disarm();
+
+        Ok(())
+    };
+
     Ok(PgResponse::builder(plan.stmt_type)
         .row_cnt_format_opt(Some(first_field_format))
         .values(row_stream, pg_descs)
+        .callback(callback)
         .into())
 }
 
