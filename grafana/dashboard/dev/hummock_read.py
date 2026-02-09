@@ -5,6 +5,9 @@ from . import section
 @section
 def _(outer_panels: Panels):
     panels = outer_panels.sub_panel()
+    vnode_get_filter = "operation='get'"
+    vnode_get_pruned_filter = "operation='get', result='pruned'"
+    vnode_get_checked_filter = "operation='get', result='checked'"
     return [
         outer_panels.row_collapsed(
             "Hummock (Read)",
