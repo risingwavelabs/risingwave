@@ -315,16 +315,20 @@ impl CreatingStreamingJobStatus {
                 *prev_epoch_fake_physical_time += 1;
                 let curr_epoch =
                     TracedEpoch::new(Epoch::from_physical_time(*prev_epoch_fake_physical_time));
-                pending_non_checkpoint_barriers.push(prev_epoch.value().0);
                 let kind = match kind {
                     PbBarrierKind::Unspecified => {
                         unreachable!()
                     }
                     PbBarrierKind::Initial => {
-                        unreachable!("unlikely to handle initial barrier")
+                        assert!(pending_non_checkpoint_barriers.is_empty());
+                        BarrierKind::Initial
                     }
-                    PbBarrierKind::Barrier => BarrierKind::Barrier,
+                    PbBarrierKind::Barrier => {
+                        pending_non_checkpoint_barriers.push(prev_epoch.value().0);
+                        BarrierKind::Barrier
+                    }
                     PbBarrierKind::Checkpoint => {
+                        pending_non_checkpoint_barriers.push(prev_epoch.value().0);
                         BarrierKind::Checkpoint(take(pending_non_checkpoint_barriers))
                     }
                 };
