@@ -111,6 +111,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::LazyLock;
 
 use risingwave_common::id::ObjectId;
+use risingwave_pb::common::PbObjectType;
 use risingwave_sqlparser::ast::Statement;
 
 use crate::optimizer::plan_node::generic::GenericPlanRef;
@@ -973,16 +974,17 @@ impl LogicalOptimizer {
         let Some(current_user) = user_reader.get_user_by_name(&session.user_name()) else {
             return;
         };
-        let mv_dependencies = catalog_reader.iter_object_dependencies().fold(
-            HashMap::<ObjectId, HashSet<ObjectId>>::new(),
-            |mut dep_map, dep| {
-                dep_map
-                    .entry(dep.object_id)
-                    .or_default()
-                    .insert(dep.referenced_object_id);
-                dep_map
-            },
-        );
+        let mut mv_dependencies: HashMap<ObjectId, HashSet<ObjectId>> = HashMap::new();
+        let mut mviews_with_source_dependency: HashSet<ObjectId> = HashSet::new();
+        for dep in catalog_reader.iter_object_dependencies() {
+            mv_dependencies
+                .entry(dep.object_id)
+                .or_default()
+                .insert(dep.referenced_object_id);
+            if dep.referenced_object_type == PbObjectType::Source {
+                mviews_with_source_dependency.insert(dep.object_id);
+            }
+        }
         let db_name = session.database();
         let Ok(schemas) = catalog_reader.iter_schemas(&db_name) else {
             return;
@@ -991,6 +993,9 @@ impl LogicalOptimizer {
         for schema in schemas {
             for mv in schema.iter_created_mvs_with_acl(current_user) {
                 let mv_object_id = mv.id().as_object_id();
+                if mviews_with_source_dependency.contains(&mv_object_id) {
+                    continue;
+                }
                 let is_subset = mv_dependencies
                     .get(&mv_object_id)
                     .is_some_and(|deps| deps.is_subset(query_relations));
