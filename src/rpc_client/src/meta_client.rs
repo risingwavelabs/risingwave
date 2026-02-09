@@ -806,7 +806,7 @@ impl MetaClient {
 
     pub async fn drop_table(
         &self,
-        source_id: Option<u32>,
+        source_id: Option<SourceId>,
         table_id: TableId,
         cascade: bool,
     ) -> Result<WaitVersion> {
@@ -1605,7 +1605,7 @@ impl MetaClient {
 
     pub async fn list_serving_vnode_mappings(
         &self,
-    ) -> Result<HashMap<FragmentId, (u32, WorkerSlotMapping)>> {
+    ) -> Result<HashMap<FragmentId, (JobId, WorkerSlotMapping)>> {
         let req = GetServingVnodeMappingsRequest {};
         let resp = self.inner.get_serving_vnode_mappings(req).await?;
         let mappings = resp
@@ -1618,7 +1618,7 @@ impl MetaClient {
                         resp.fragment_to_table
                             .get(&p.fragment_id)
                             .cloned()
-                            .unwrap_or(0),
+                            .unwrap_or_default(),
                         WorkerSlotMapping::from_protobuf(p.mapping.as_ref().unwrap()),
                     ),
                 )
