@@ -140,7 +140,7 @@ impl TryToBatchPb for BatchLogSeqScan {
                 epoch: Some(risingwave_pb::common::batch_query_epoch::Epoch::Committed(
                     BatchQueryCommittedEpoch {
                         epoch: self.core.epoch_range.0,
-                        hummock_version_id: 0,
+                        hummock_version_id: 0.into(),
                     },
                 )),
             }),
@@ -148,7 +148,7 @@ impl TryToBatchPb for BatchLogSeqScan {
                 epoch: Some(risingwave_pb::common::batch_query_epoch::Epoch::Committed(
                     BatchQueryCommittedEpoch {
                         epoch: self.core.epoch_range.1,
-                        hummock_version_id: 0,
+                        hummock_version_id: 0.into(),
                     },
                 )),
             }),

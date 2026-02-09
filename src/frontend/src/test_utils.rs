@@ -37,7 +37,7 @@ use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_common::util::cluster_limit::ClusterLimit;
 use risingwave_common::util::worker_util::DEFAULT_RESOURCE_GROUP;
 use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
-use risingwave_hummock_sdk::{HummockVersionId, INVALID_VERSION_ID};
+use risingwave_hummock_sdk::{CompactionGroupId, HummockVersionId, INVALID_VERSION_ID};
 use risingwave_pb::backup_service::MetaSnapshotMetadata;
 use risingwave_pb::catalog::{
     PbComment, PbDatabase, PbFunction, PbIndex, PbSchema, PbSink, PbSource, PbStreamJobStatus,
@@ -60,7 +60,6 @@ use risingwave_pb::meta::list_actor_splits_response::ActorSplit;
 use risingwave_pb::meta::list_actor_states_response::ActorState;
 use risingwave_pb::meta::list_cdc_progress_response::PbCdcProgress;
 use risingwave_pb::meta::list_iceberg_tables_response::IcebergTable;
-use risingwave_pb::meta::list_object_dependencies_response::PbObjectDependencies;
 use risingwave_pb::meta::list_rate_limits_response::RateLimitInfo;
 use risingwave_pb::meta::list_refresh_table_states_response::RefreshTableState;
 use risingwave_pb::meta::list_streaming_job_states_response::StreamingJobState;
@@ -605,7 +604,7 @@ impl CatalogWriter for MockCatalogWriter {
         unreachable!()
     }
 
-    async fn drop_secret(&self, _secret_id: SecretId) -> Result<()> {
+    async fn drop_secret(&self, _secret_id: SecretId, _cascade: bool) -> Result<()> {
         unreachable!()
     }
 
@@ -1106,10 +1105,6 @@ impl FrontendMetaClient for MockFrontendMetaClient {
         Ok(vec![])
     }
 
-    async fn list_object_dependencies(&self) -> RpcResult<Vec<PbObjectDependencies>> {
-        Ok(vec![])
-    }
-
     async fn list_meta_snapshots(&self) -> RpcResult<Vec<MetaSnapshotMetadata>> {
         Ok(vec![])
     }
@@ -1148,7 +1143,7 @@ impl FrontendMetaClient for MockFrontendMetaClient {
         Ok(HashMap::new())
     }
 
-    async fn list_hummock_pinned_versions(&self) -> RpcResult<Vec<(WorkerId, u64)>> {
+    async fn list_hummock_pinned_versions(&self) -> RpcResult<Vec<(WorkerId, HummockVersionId)>> {
         unimplemented!()
     }
 
@@ -1176,7 +1171,9 @@ impl FrontendMetaClient for MockFrontendMetaClient {
         unimplemented!()
     }
 
-    async fn list_hummock_active_write_limits(&self) -> RpcResult<HashMap<u64, WriteLimit>> {
+    async fn list_hummock_active_write_limits(
+        &self,
+    ) -> RpcResult<HashMap<CompactionGroupId, WriteLimit>> {
         unimplemented!()
     }
 

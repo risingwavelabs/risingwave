@@ -597,6 +597,20 @@ impl SchemaCatalog {
             .expect("secret not found by name");
     }
 
+    pub fn iter_object_ids(&self) -> impl Iterator<Item = ObjectId> + '_ {
+        self.table_by_id
+            .keys()
+            .map(|id| id.as_object_id())
+            .chain(self.source_by_id.keys().map(|id| id.as_object_id()))
+            .chain(self.sink_by_id.keys().map(|id| id.as_object_id()))
+            .chain(self.subscription_by_id.keys().map(|id| id.as_object_id()))
+            .chain(self.index_by_id.keys().map(|id| id.as_object_id()))
+            .chain(self.view_by_id.keys().map(|id| id.as_object_id()))
+            .chain(self.function_by_id.keys().map(|id| id.as_object_id()))
+            .chain(self.connection_by_id.keys().map(|id| id.as_object_id()))
+            .chain(self.secret_by_id.keys().map(|id| id.as_object_id()))
+    }
+
     pub fn iter_all(&self) -> impl Iterator<Item = &Arc<TableCatalog>> {
         self.table_by_name.values()
     }
