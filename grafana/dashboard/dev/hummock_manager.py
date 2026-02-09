@@ -266,7 +266,7 @@ Additionally, a metric on all objects (including dangling ones) is updated with 
                         ),
                     ],
                 ),
-                
+
                 panels.subheader("Time Travel"),
                 panels.timeseries_count(
                     "State Table Count",

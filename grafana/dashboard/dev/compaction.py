@@ -146,7 +146,7 @@ def _(outer_panels: Panels):
                         ),
                     ],
                 ),
-                
+
                 panels.subheader("Performance"),
                 panels.timeseries_latency(
                     "Compaction Duration",
