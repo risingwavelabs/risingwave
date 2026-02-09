@@ -1139,7 +1139,8 @@ pub(crate) fn load_certs(
 
     CertificateDer::pem_slice_iter(&cert_bytes)
         .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| anyhow!("Failed to parse certificates: {}", e).into())
+        .context("Failed to parse certificates")
+        .map_err(Into::into)
 }
 
 pub(crate) fn load_private_key(
@@ -1154,7 +1155,7 @@ pub(crate) fn load_private_key(
     let cert = PrivatePkcs8KeyDer::pem_slice_iter(&cert_bytes)
         .next()
         .ok_or_else(|| anyhow!("No private key found"))?
-        .map_err(|e| anyhow!("Failed to parse private key: {}", e))?;
+        .context("Failed to parse private key")?;
     Ok(cert.into())
 }
 
