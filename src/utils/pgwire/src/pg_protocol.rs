@@ -1515,6 +1515,18 @@ pub mod truncated_fmt {
     }
 }
 
+/// Handle `options` in `StartupMessage` from client
+///
+/// It is like shell arguments but only respects backslash-escape and space;
+/// quotes have no special meaning and are handled literally.
+///
+/// PostgreSQL allows both `-c key=value` and `--key=value`.
+///
+/// `key-name` is normalized as `key_name`.
+///
+/// * <https://github.com/postgres/postgres/blob/REL_18_1/src/backend/utils/init/postinit.c#L487>
+/// * <https://github.com/postgres/postgres/blob/REL_18_1/src/backend/tcop/postgres.c#L3866>
+/// * <https://github.com/postgres/postgres/blob/REL_18_1/src/backend/utils/misc/guc.c#L6361>
 fn parse_options(options: &str) -> PsqlResult<Vec<(String, String)>> {
     let mut args = Vec::new();
     let mut current_arg = String::new();
