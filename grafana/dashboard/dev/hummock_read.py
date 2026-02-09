@@ -8,7 +8,7 @@ def _(outer_panels: Panels):
     return [
         outer_panels.row_collapsed(
             "Hummock (Read)",
-            [   
+            [
                 panels.subheader("Read"),
                 panels.timeseries_ops(
                     "Iterator Key Flow",

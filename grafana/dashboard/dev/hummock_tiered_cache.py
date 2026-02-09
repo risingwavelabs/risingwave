@@ -60,7 +60,7 @@ def _(outer_panels: Panels):
                         ),
                     ],
                 ),
-                
+
                 panels.timeseries_ops(
                     "Hybrid Cache Ops",
                     "",
