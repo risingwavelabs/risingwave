@@ -1323,24 +1323,31 @@ impl DdlController {
                     .catalog_controller
                     .get_table_columns(table.id)
                     .await?;
-                // compare column id to find newly added columns
-                let mut original_table_column_ids: HashSet<_> = original_table_columns
+                // compare column id to find newly added and removed columns
+                let original_table_column_ids: HashSet<_> = original_table_columns
                     .iter()
                     .map(|col| col.column_id())
+                    .collect();
+                let new_table_column_ids: HashSet<_> = table
+                    .columns
+                    .iter()
+                    .map(|col| ColumnId::new(col.column_desc.as_ref().unwrap().column_id as _))
                     .collect();
                 let newly_added_columns = table
                     .columns
                     .iter()
                     .filter(|col| {
-                        !original_table_column_ids.remove(&ColumnId::new(
+                        !original_table_column_ids.contains(&ColumnId::new(
                             col.column_desc.as_ref().unwrap().column_id as _,
                         ))
                     })
                     .map(|col| ColumnCatalog::from(col.clone()))
                     .collect_vec();
-                if !original_table_column_ids.is_empty() {
-                    return Err(anyhow!("new table columns does not contains all original columns. new: {:?}, original: {:?}, not included: {:?}", table.columns, original_table_columns, original_table_column_ids).into());
-                }
+                let removed_columns = original_table_columns
+                    .iter()
+                    .filter(|col| !new_table_column_ids.contains(&col.column_id()))
+                    .cloned()
+                    .collect_vec();
                 let mut sinks = Vec::with_capacity(auto_refresh_schema_sinks.len());
                 for sink in auto_refresh_schema_sinks {
                     let sink_job_fragments = self
@@ -1361,6 +1368,7 @@ impl DdlController {
                             &original_sink_fragment,
                             &sink,
                             &newly_added_columns,
+                            &removed_columns,
                             table,
                             fragment_graph.table_fragment_id(),
                             self.env.id_gen_manager(),
@@ -1408,6 +1416,10 @@ impl DdlController {
                         newly_add_fields: newly_added_columns
                             .iter()
                             .map(|col| Field::from(&col.column_desc))
+                            .collect(),
+                        removed_column_names: removed_columns
+                            .iter()
+                            .map(|col| col.name.clone())
                             .collect(),
                         new_fragment: new_sink_fragment,
                         new_log_store_table,

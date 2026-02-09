@@ -313,10 +313,24 @@ pub fn get_table_catalog_by_table_name(
 
     let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
     let reader = session.env().catalog_reader().read_guard();
-    let (table, schema_name) =
-        reader.get_created_table_by_name(db_name, schema_path, &real_table_name)?;
-
-    Ok((table.clone(), schema_name.to_owned()))
+    match reader.get_created_table_by_name(db_name, schema_path, &real_table_name) {
+        Ok((table, schema_name)) => Ok((table.clone(), schema_name.to_owned())),
+        Err(err) => {
+            if let Some(table) = session
+                .staging_catalog_manager()
+                .get_table(&real_table_name)
+            {
+                // During CREATE TABLE (iceberg engine), the table is only in staging, but we
+                // still need a stable schema name for internal sink planning.
+                let schema_name = reader
+                    .get_schema_by_id(table.database_id, table.schema_id)
+                    .map(|schema| schema.name.clone())?;
+                Ok((Arc::new(table.clone()), schema_name))
+            } else {
+                Err(err.into())
+            }
+        }
+    }
 }
 
 /// Execute an async operation with a notification if it takes too long.
