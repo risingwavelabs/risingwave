@@ -199,7 +199,8 @@ impl HummockManager {
             rewrite_commit_sstables_to_sub_level(commit_sstables, &group_id_to_config);
 
         // build group_id to truncate tables
-        let mut group_id_to_truncate_tables: HashMap<u64, HashSet<TableId>> = HashMap::new();
+        let mut group_id_to_truncate_tables: HashMap<CompactionGroupId, HashSet<TableId>> =
+            HashMap::new();
         for table_id in &truncate_tables {
             if let Some(compaction_group_id) = table_compaction_group_mapping.get(table_id) {
                 group_id_to_truncate_tables
@@ -236,7 +237,11 @@ impl HummockManager {
             self.env.notification_manager(),
         );
         add_prost_table_stats_map(&mut version_stats.table_stats, &table_stats_change);
-        if purge_prost_table_stats(&mut version_stats.table_stats, version.latest_version()) {
+        if purge_prost_table_stats(
+            &mut version_stats.table_stats,
+            version.latest_version(),
+            &truncate_tables,
+        ) {
             self.metrics.version_stats.reset();
             versioning.local_metrics.clear();
         }
@@ -373,7 +378,7 @@ impl HummockManager {
         let mut sst_to_cg_vec = Vec::with_capacity(sstables.len());
         let commit_object_id_vec = sstables.iter().map(|s| s.sst_info.object_id).collect_vec();
         for commit_sst in sstables {
-            let mut group_table_ids: BTreeMap<u64, Vec<TableId>> = BTreeMap::new();
+            let mut group_table_ids: BTreeMap<CompactionGroupId, Vec<TableId>> = BTreeMap::new();
             for table_id in &commit_sst.sst_info.table_ids {
                 match table_compaction_group_mapping.get(table_id) {
                     Some(cg_id_from_meta) => {
@@ -397,10 +402,10 @@ impl HummockManager {
         }
 
         // Generate new SST IDs for each compaction group
-        // `next_sstable_object_id` will update the global SST ID and reserve the new SST IDs
+        // `next_sstable_id` will update the global SST ID and reserve the new SST IDs
         // So we need to get the new SST ID first and then split the SSTs
         let mut new_sst_id = next_sstable_id(&self.env, new_sst_id_number).await?;
-        let mut commit_sstables: BTreeMap<u64, Vec<SstableInfo>> = BTreeMap::new();
+        let mut commit_sstables: BTreeMap<CompactionGroupId, Vec<SstableInfo>> = BTreeMap::new();
 
         for (mut sst, group_table_ids) in sst_to_cg_vec {
             let len = group_table_ids.len();
@@ -503,7 +508,8 @@ fn rewrite_commit_sstables_to_sub_level(
     commit_sstables: BTreeMap<CompactionGroupId, Vec<SstableInfo>>,
     group_id_to_config: &HashMap<CompactionGroupId, Arc<CompactionConfig>>,
 ) -> BTreeMap<CompactionGroupId, Vec<Vec<SstableInfo>>> {
-    let mut overlapping_sstables: BTreeMap<u64, Vec<Vec<SstableInfo>>> = BTreeMap::new();
+    let mut overlapping_sstables: BTreeMap<CompactionGroupId, Vec<Vec<SstableInfo>>> =
+        BTreeMap::new();
     for (group_id, inserted_table_infos) in commit_sstables {
         let config = group_id_to_config
             .get(&group_id)

@@ -15,6 +15,7 @@
 use std::ops::Deref;
 
 use iceberg::table::Table;
+use risingwave_common::id::SourceId;
 use risingwave_common::types::{Fields, JsonbVal, Timestamptz};
 use risingwave_connector::WithPropertiesExt;
 use risingwave_connector::error::ConnectorResult;
@@ -27,7 +28,7 @@ use crate::error::Result;
 #[derive(Fields)]
 struct RwIcebergSnapshots {
     #[primary_key]
-    source_id: i32,
+    source_id: SourceId,
     schema_name: String,
     source_name: String,
     sequence_number: i64,
@@ -65,7 +66,7 @@ async fn read(reader: &SysCatalogReaderImpl) -> Result<Vec<RwIcebergSnapshots>> 
                 .snapshots()
                 .map(|snapshot| {
                     Ok(RwIcebergSnapshots {
-                        source_id: source.id.as_i32_id(),
+                        source_id: source.id,
                         schema_name: schema_name.clone(),
                         source_name: source.name.clone(),
                         sequence_number: snapshot.sequence_number(),

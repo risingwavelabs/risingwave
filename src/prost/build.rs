@@ -56,6 +56,7 @@ macro_rules! for_all_wrapped_id_fields {
 for_all_wrapped_id_fields! (
     backup_service {
         MetaSnapshotMetadata {
+            hummock_version_id: HummockVersionId,
             state_table_info: TableId,
         }
     }
@@ -86,14 +87,17 @@ for_all_wrapped_id_fields! (
             id: ConnectionId,
             schema_id: SchemaId,
             database_id: DatabaseId,
+            owner: UserId,
         }
         Database {
             id: DatabaseId,
+            owner: UserId,
         }
         Function {
             id: FunctionId,
             schema_id: SchemaId,
             database_id: DatabaseId,
+            owner: UserId,
         }
         Index {
             id: IndexId,
@@ -101,15 +105,18 @@ for_all_wrapped_id_fields! (
             primary_table_id: TableId,
             schema_id: SchemaId,
             database_id: DatabaseId,
+            owner: UserId,
         }
         Schema {
             id: SchemaId,
             database_id: DatabaseId,
+            owner: UserId,
         }
         Secret {
             id: SecretId,
             schema_id: SchemaId,
             database_id: DatabaseId,
+            owner: UserId,
         }
         Sink {
             id: SinkId,
@@ -118,6 +125,7 @@ for_all_wrapped_id_fields! (
             target_table: TableId,
             auto_refresh_schema_from_table: TableId,
             connection_id: ConnectionId,
+            owner: UserId,
         }
         SinkFormatDesc {
             connection_id: ConnectionId,
@@ -127,6 +135,7 @@ for_all_wrapped_id_fields! (
             schema_id: SchemaId,
             database_id: DatabaseId,
             connection_id: ConnectionId,
+            owner: UserId,
         }
         StreamSourceInfo {
             connection_id: ConnectionId,
@@ -136,6 +145,7 @@ for_all_wrapped_id_fields! (
             dependent_table_id: TableId,
             schema_id: SchemaId,
             database_id: DatabaseId,
+            owner: UserId,
         }
         Table {
             id: TableId,
@@ -145,11 +155,13 @@ for_all_wrapped_id_fields! (
             database_id: DatabaseId,
             fragment_id: FragmentId,
             dml_fragment_id: FragmentId,
+            owner: UserId,
         }
         View {
             id: ViewId,
             schema_id: SchemaId,
             database_id: DatabaseId,
+            owner: UserId,
         }
     }
     common {
@@ -159,6 +171,9 @@ for_all_wrapped_id_fields! (
         }
         ActorLocation {
             worker_node_id: WorkerId,
+        }
+        BatchQueryCommittedEpoch {
+            hummock_version_id: HummockVersionId,
         }
         WorkerNode {
             id: WorkerId,
@@ -179,6 +194,9 @@ for_all_wrapped_id_fields! (
         AlterFragmentParallelismRequest {
             fragment_ids: FragmentId,
         }
+        AlterOwnerRequest {
+            owner_id: UserId,
+        }
         AlterParallelismRequest {
             table_id: JobId,
         }
@@ -189,6 +207,7 @@ for_all_wrapped_id_fields! (
             database_id: DatabaseId,
             schema_id: SchemaId,
             secret_id: SecretId,
+            owner_id: UserId,
         }
         AlterSetSchemaRequest {
             new_schema_id: SchemaId,
@@ -206,16 +225,20 @@ for_all_wrapped_id_fields! (
         CreateConnectionRequest {
             database_id: DatabaseId,
             schema_id: SchemaId,
+            owner_id: UserId,
         }
         CreateMaterializedViewRequest {
             dependencies: ObjectId,
+            owner_id: UserId,
         }
         CreateSecretRequest {
             database_id: DatabaseId,
             schema_id: SchemaId,
+            owner_id: UserId,
         }
         CreateSinkRequest {
             dependencies: ObjectId,
+            owner_id: UserId,
         }
         CreateTableRequest {
             dependencies: ObjectId,
@@ -271,6 +294,9 @@ for_all_wrapped_id_fields! (
         ResetSourceRequest {
             source_id: SourceId,
         }
+        WaitVersion {
+            hummock_version_id: HummockVersionId,
+        }
     }
     frontend_service {
         GetTableReplacePlanRequest {
@@ -279,10 +305,19 @@ for_all_wrapped_id_fields! (
         }
     }
     hummock {
+        BranchedObject {
+            object_id: HummockSstableObjectId,
+            sst_id: HummockSstableId,
+            compaction_group_id: CompactionGroupId,
+        }
         CancelCompactTask {
             context_id: WorkerId,
         }
+        CompactStatus {
+            compaction_group_id: CompactionGroupId,
+        }
         CompactTask {
+            compaction_group_id: CompactionGroupId,
             existing_table_ids: TableId,
             table_options: TableId,
             table_vnode_partition: TableId,
@@ -292,33 +327,97 @@ for_all_wrapped_id_fields! (
         CompactTaskAssignment {
             context_id: WorkerId,
         }
+        CompactTaskProgress {
+            compaction_group_id: CompactionGroupId,
+        }
+        CompactionGroup {
+            id: CompactionGroupId,
+        }
         CompactionGroupInfo {
+            id: CompactionGroupId,
+            parent_id: CompactionGroupId,
             member_table_ids: TableId,
+        }
+        GetCompactionScoreRequest {
+            compaction_group_id: CompactionGroupId,
+        }
+        GetCompactionScoreResponse {
+            compaction_group_id: CompactionGroupId,
+        }
+        GetNewObjectIdsResponse {
+            start_id: HummockRawObjectId,
+            end_id: HummockRawObjectId,
         }
         GetVersionByEpochRequest {
             table_id: TableId,
+        }
+
+        GroupConstruct {
+            new_sst_start_id: HummockSstableId,
+            parent_group_id: CompactionGroupId,
+            group_id: CompactionGroupId,
+        }
+        GroupMerge {
+            left_group_id: CompactionGroupId,
+            right_group_id: CompactionGroupId,
+        }
+        HnswGraphFileInfo {
+            object_id: HummockHnswGraphFileId,
         }
         HummockPinnedSnapshot {
             context_id: WorkerId,
         }
         HummockPinnedVersion {
             context_id: WorkerId,
+            min_pinned_id: HummockVersionId,
         }
         HummockVersion {
+            id: HummockVersionId,
             table_watermarks: TableId,
             table_change_logs: TableId,
             state_table_info: TableId,
             vector_indexes: TableId,
+            levels: CompactionGroupId,
+        }
+        HummockVersion.Levels {
+            group_id: CompactionGroupId,
+            parent_group_id: CompactionGroupId,
+        }
+        HummockVersionCheckpoint {
+            stale_objects: HummockVersionId,
+        }
+        HummockVersionCheckpoint.StaleObjects {
+            id: HummockSstableObjectId,
         }
         HummockVersionDelta {
+            id: HummockVersionId,
+            prev_id: HummockVersionId,
             new_table_watermarks: TableId,
             removed_table_ids: TableId,
             change_log_delta: TableId,
             state_table_info_delta: TableId,
             vector_index_delta: TableId,
+            group_deltas: CompactionGroupId,
         }
         HummockVersionStats {
+            hummock_version_id: HummockVersionId,
             table_stats: TableId,
+        }
+        IntraLevelDelta {
+            removed_table_ids: HummockSstableId,
+        }
+        LevelHandler.RunningCompactTask {
+            ssts: HummockSstableId,
+        }
+        ListActiveWriteLimitResponse {
+            write_limits: CompactionGroupId,
+        }
+        ListVersionDeltasRequest {
+            start_id: HummockVersionId,
+        }
+        MergeCompactionGroupRequest {
+            left_group_id: CompactionGroupId,
+            right_group_id: CompactionGroupId,
         }
         PinVersionRequest {
             context_id: WorkerId,
@@ -326,32 +425,74 @@ for_all_wrapped_id_fields! (
         PinnedVersionsSummary {
             workers: WorkerId,
         }
+        ReplayVersionDeltaResponse {
+            modified_compaction_groups: CompactionGroupId,
+        }
         ReportCompactionTaskRequest.ReportTask {
             table_stats_change: TableId,
+            object_timestamps: HummockSstableObjectId,
+        }
+        RiseCtlUpdateCompactionConfigRequest {
+            compaction_group_ids: CompactionGroupId,
         }
         SplitCompactionGroupRequest {
+            group_id: CompactionGroupId,
             table_ids: TableId,
         }
+        SplitCompactionGroupResponse {
+            new_group_id: CompactionGroupId,
+        }
         SstableInfo {
+            object_id: HummockSstableObjectId,
+            sst_id: HummockSstableId,
             table_ids: TableId,
+        }
+        StateTableInfo {
+            compaction_group_id: CompactionGroupId,
+        }
+        StateTableInfoDelta {
+            compaction_group_id: CompactionGroupId,
         }
         SubscribeCompactionEventRequest.Register {
             context_id: WorkerId,
         }
         SubscribeCompactionEventRequest.ReportTask {
             table_stats_change: TableId,
+            object_timestamps: HummockSstableObjectId,
+        }
+        TriggerCompactionDeterministicRequest {
+            version_id: HummockVersionId,
+            compaction_groups: CompactionGroupId,
         }
         TriggerManualCompactionRequest {
+            compaction_group_id: CompactionGroupId,
             table_id: JobId,
+            sst_ids: HummockSstableId,
         }
         TruncateTables {
             table_ids: TableId,
         }
         UnpinVersionBeforeRequest {
             context_id: WorkerId,
+            unpin_version_before: HummockVersionId,
         }
         UnpinVersionRequest {
             context_id: WorkerId,
+        }
+        VacuumTask {
+            sstable_object_ids: HummockSstableObjectId,
+        }
+        ValidationTask {
+            sst_id_to_worker_id: HummockSstableObjectId,
+        }
+        VectorFileInfo {
+            object_id: HummockVectorFileId,
+        }
+        VectorIndexObject {
+            id: HummockRawObjectId,
+        }
+        WriteLimits {
+            write_limits: CompactionGroupId,
         }
         WriteLimits.WriteLimit {
             table_ids: TableId,
@@ -420,6 +561,9 @@ for_all_wrapped_id_fields! (
         FlushRequest {
             database_id: DatabaseId,
         }
+        FlushResponse {
+            hummock_version_id: HummockVersionId,
+        }
         FragmentDistribution {
             fragment_id: FragmentId,
             upstream_fragment_ids: FragmentId,
@@ -473,10 +617,6 @@ for_all_wrapped_id_fields! (
         ListCdcProgressResponse {
             cdc_progress: JobId,
         }
-        ListObjectDependenciesResponse.ObjectDependencies {
-            object_id: ObjectId,
-            referenced_object_id: ObjectId,
-        }
         ListRateLimitsResponse.RateLimitInfo {
             job_id: JobId,
             fragment_id: FragmentId,
@@ -504,6 +644,10 @@ for_all_wrapped_id_fields! (
         }
         ListUnmigratedTablesResponse.UnmigratedTable {
             table_id: TableId,
+        }
+        ObjectDependency {
+            object_id: ObjectId,
+            referenced_object_id: ObjectId,
         }
         RefreshRequest {
             table_id: TableId,
@@ -547,6 +691,7 @@ for_all_wrapped_id_fields! (
         StackTraceResponse {
             barrier_worker_state: WorkerId,
             jvm_stack_traces: WorkerId,
+            node_errors: WorkerId,
         }
     }
     plan_common {
@@ -589,6 +734,9 @@ for_all_wrapped_id_fields! (
             added_actors: ActorId,
             actor_splits: ActorId,
             actor_dispatchers: ActorId,
+        }
+        BackfillOrder {
+            order: RelationId,
         }
         CdcFilterNode {
             upstream_source_id: SourceId,
@@ -707,7 +855,6 @@ for_all_wrapped_id_fields! (
     }
     stream_service {
         BarrierCompleteResponse {
-            database_id: DatabaseId,
             truncate_tables: TableId,
             refresh_finished_tables: TableId,
             table_watermarks: TableId,
@@ -738,8 +885,10 @@ for_all_wrapped_id_fields! (
         BarrierCompleteResponse.LocalSstableInfo {
             table_stats_map: TableId,
         }
+        GetMinUncommittedObjectIdResponse {
+            min_uncommitted_object_id: HummockRawObjectId,
+        }
         InjectBarrierRequest {
-            database_id: DatabaseId,
             table_ids_to_sync: TableId,
             actor_ids_to_collect: ActorId,
             partial_graph_id: PartialGraphId,
@@ -753,21 +902,19 @@ for_all_wrapped_id_fields! (
             fragment_id: FragmentId,
         }
         StreamingControlStreamRequest.CreatePartialGraphRequest {
-            database_id: DatabaseId,
             partial_graph_id: PartialGraphId,
         }
         StreamingControlStreamRequest.RemovePartialGraphRequest {
-            database_id: DatabaseId,
             partial_graph_ids: PartialGraphId,
         }
-        StreamingControlStreamRequest.ResetDatabaseRequest {
-            database_id: DatabaseId,
+        StreamingControlStreamRequest.ResetPartialGraphsRequest {
+            partial_graph_ids: PartialGraphId,
         }
-        StreamingControlStreamResponse.ReportDatabaseFailureResponse {
-            database_id: DatabaseId,
+        StreamingControlStreamResponse.ReportPartialGraphFailureResponse {
+            partial_graph_id: PartialGraphId,
         }
-        StreamingControlStreamResponse.ResetDatabaseResponse {
-            database_id: DatabaseId,
+        StreamingControlStreamResponse.ResetPartialGraphResponse {
+            partial_graph_id: PartialGraphId,
         }
     }
     task_service {
@@ -775,7 +922,6 @@ for_all_wrapped_id_fields! (
             table_id: TableId,
         }
         GetStreamRequest.Get {
-            database_id: DatabaseId,
             up_partial_graph_id: PartialGraphId,
             up_fragment_id: FragmentId,
             down_fragment_id: FragmentId,
@@ -787,6 +933,32 @@ for_all_wrapped_id_fields! (
         AlterDefaultPrivilegeRequest {
             database_id: DatabaseId,
             schema_ids: SchemaId,
+            user_ids: UserId,
+            granted_by: UserId,
+        }
+        AlterDefaultPrivilegeRequest.GrantPrivilege {
+            grantees: UserId,
+        }
+        AlterDefaultPrivilegeRequest.RevokePrivilege {
+            grantees: UserId,
+        }
+        DropUserRequest {
+            user_id: UserId,
+        }
+        GrantPrivilege.ActionWithGrantOption {
+            granted_by: UserId,
+        }
+        GrantPrivilegeRequest {
+            user_ids: UserId,
+            granted_by: UserId,
+        }
+        RevokePrivilegeRequest {
+            user_ids: UserId,
+            granted_by: UserId,
+            revoke_by: UserId,
+        }
+        UserInfo {
+            id: UserId,
         }
     }
 );

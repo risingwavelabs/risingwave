@@ -23,6 +23,7 @@ use risingwave_common::bail;
 use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common_rate_limit::{MonitoredRateLimiter, RateLimit, RateLimiter};
+use risingwave_pb::common::ThrottleType;
 use risingwave_storage::row_serde::value_serde::ValueRowSerde;
 use risingwave_storage::store::PrefetchOptions;
 
@@ -558,9 +559,10 @@ where
                             }
                         }
                         Mutation::Throttle(fragment_to_apply) => {
-                            let new_rate_limit_entry = fragment_to_apply.get(&self.fragment_id);
-                            if let Some(new_rate_limit) = new_rate_limit_entry {
-                                let new_rate_limit = (*new_rate_limit).into();
+                            if let Some(entry) = fragment_to_apply.get(&self.fragment_id)
+                                && entry.throttle_type() == ThrottleType::Backfill
+                            {
+                                let new_rate_limit = entry.rate_limit.into();
                                 let old_rate_limit = self.rate_limiter.update(new_rate_limit);
                                 if old_rate_limit != new_rate_limit {
                                     tracing::info!(

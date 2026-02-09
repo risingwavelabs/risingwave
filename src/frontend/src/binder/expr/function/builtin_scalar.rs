@@ -205,6 +205,8 @@ impl Binder {
                 ("scale", raw_call(ExprType::Scale)),
                 ("min_scale", raw_call(ExprType::MinScale)),
                 ("trim_scale", raw_call(ExprType::TrimScale)),
+                ("gamma", raw_call(ExprType::Gamma)),
+                ("lgamma", raw_call(ExprType::Lgamma)),
                 // date and time
                 (
                     "to_timestamp",

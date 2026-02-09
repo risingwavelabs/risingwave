@@ -202,7 +202,7 @@ impl From<HummockReadEpoch> for TracedHummockReadEpoch {
         match value {
             HummockReadEpoch::Committed(epoch) => Self::Committed(epoch),
             HummockReadEpoch::BatchQueryCommitted(epoch, version_id) => {
-                Self::BatchQueryReadCommitted(epoch, version_id.to_u64())
+                Self::BatchQueryReadCommitted(epoch, version_id.as_raw_id())
             }
             HummockReadEpoch::NoWait(epoch) => Self::NoWait(epoch),
             HummockReadEpoch::Backup(epoch) => Self::Backup(epoch),
@@ -257,7 +257,7 @@ pub struct TracedInitOptions {
 #[derive(Debug, Clone, PartialEq, Eq, Decode, Encode)]
 pub struct TracedSealCurrentEpochOptions {
     // The watermark is serialized into protobuf
-    pub table_watermarks: Option<(bool, Vec<Vec<u8>>, bool)>,
+    pub table_watermarks: Option<(bool, Vec<Vec<u8>>, i32)>,
     pub switch_op_consistency_level: Option<bool>,
 }
 

@@ -157,6 +157,7 @@ impl<W: SstableWriter> SstableBuilder<W, Xor16FilterBuilder> {
                 .into_iter()
                 .map(|(table_id, v)| (table_id.into(), v))
                 .collect(),
+            HashMap::default(),
         ));
 
         Self::new(
@@ -554,7 +555,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
         let sst_info: SstableInfo = SstableInfoInner {
             object_id: self.sst_object_id,
             // use the same sst_id as object_id for initial sst
-            sst_id: self.sst_object_id.inner().into(),
+            sst_id: self.sst_object_id.as_raw_id().into(),
             bloom_filter_kind,
             key_range: KeyRange {
                 left: Bytes::from(meta.smallest_key.clone()),
@@ -924,6 +925,7 @@ pub(super) mod tests {
             FilterKeyExtractorImpl::Multi(filter),
             table_id_to_vnode,
             table_id_to_watermark_serde,
+            HashMap::default(),
         ));
 
         let mut builder = SstableBuilder::new(

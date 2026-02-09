@@ -42,11 +42,13 @@ impl BatchProject {
         let distribution = core
             .i2o_col_mapping()
             .rewrite_provided_distribution(core.input.distribution());
-        let order = core
-            .i2o_col_mapping()
-            .rewrite_provided_order(core.input.order());
-
-        let base = PlanBase::new_batch_with_core(&core, distribution, order);
+        let orders = core
+            .input
+            .orders()
+            .into_iter()
+            .map(|order| core.i2o_col_mapping().rewrite_provided_order(&order))
+            .collect();
+        let base = PlanBase::new_batch_with_core_and_orders(&core, distribution, orders);
         BatchProject { base, core }
     }
 

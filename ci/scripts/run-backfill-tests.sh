@@ -161,7 +161,7 @@ test_backfill_tombstone() {
 
 test_replication_with_column_pruning() {
   echo "--- e2e, test_replication_with_column_pruning"
-  risedev ci-start ci-backfill
+  RUST_LOG="risingwave_storage::hummock::event_handler::hummock_event_handler=error" risedev ci-start ci-backfill
   run_sql_file "$PARENT_PATH"/sql/backfill/replication_with_column_pruning/create_base_table.sql
   # Provide snapshot
   run_sql_file "$PARENT_PATH"/sql/backfill/replication_with_column_pruning/insert.sql
@@ -329,7 +329,7 @@ test_snapshot_backfill() {
 
   sqllogictest -p 4566 -d dev 'e2e_test/backfill/snapshot_backfill/drop_nexmark_table.slt'
 
-  sqllogictest -p 4566 -d dev 'e2e_test/backfill/snapshot_backfill/failed_tests.slt' --label snapshot-backfill
+  sqllogictest -p 4566 -d dev 'e2e_test/backfill/snapshot_backfill/failed_tests.slt'
 
   kill_cluster
 }
@@ -343,7 +343,7 @@ test_scale_in() {
   psql -c "alter system set per_database_isolation = false"
 
   psql -c "create table t(v1 int); insert into t select * from generate_series(1, 1000); flush"
-  psql -c "set background_ddl=true; set backfill_rate_limit=10; create materialized view m1 as select * from t; flush"
+  psql -c "set background_ddl=true; set backfill_rate_limit=10; set streaming_use_snapshot_backfill=false; create materialized view m1 as select * from t; flush"
   internal_table=$(psql -t -c "show internal tables;" | grep -v 'INFO')
 
   for i in $(seq 1 100000); do

@@ -630,6 +630,7 @@ impl TableFunction {
                 ("job_id".to_owned(), DataType::Int32),
                 ("fragment_id".to_owned(), DataType::Int32),
                 ("backfill_state_table_id".to_owned(), DataType::Int32),
+                ("partition_id".to_owned(), DataType::Varchar),
                 ("backfill_progress".to_owned(), DataType::Jsonb),
             ])),
             function_type: TableFunctionType::InternalSourceBackfillProgress,

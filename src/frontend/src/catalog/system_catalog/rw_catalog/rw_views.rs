@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::id::{SchemaId, UserId, ViewId};
 use risingwave_common::types::{Fields, Timestamptz};
 use risingwave_frontend_macro::system_catalog;
 
@@ -21,10 +22,10 @@ use crate::error::Result;
 #[derive(Fields)]
 struct RwView {
     #[primary_key]
-    id: i32,
+    id: ViewId,
     name: String,
-    schema_id: i32,
-    owner: i32,
+    schema_id: SchemaId,
+    owner: UserId,
     definition: String,
     acl: Vec<String>,
     created_at: Option<Timestamptz>,
@@ -45,10 +46,10 @@ fn read_rw_view_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwView>> {
     Ok(schemas
         .flat_map(|schema| {
             schema.iter_view_with_acl(current_user).map(|view| RwView {
-                id: view.id.as_i32_id(),
+                id: view.id,
                 name: view.name().to_owned(),
-                schema_id: schema.id().as_i32_id(),
-                owner: view.owner as i32,
+                schema_id: schema.id(),
+                owner: view.owner,
                 definition: view.create_sql(schema.name()),
                 acl: get_acl_items(view.id, false, &users, username_map),
                 created_at: view.created_at_epoch.map(|e| e.as_timestamptz()),

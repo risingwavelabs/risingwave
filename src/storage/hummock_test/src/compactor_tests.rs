@@ -520,7 +520,7 @@ pub(crate) mod tests {
         register_table_ids_to_compaction_group(
             &hummock_manager_ref,
             &[drop_table_id, existing_table_id],
-            StaticCompactionGroupId::StateDefault.into(),
+            StaticCompactionGroupId::StateDefault,
         )
         .await;
 
@@ -917,6 +917,7 @@ pub(crate) mod tests {
             FilterKeyExtractorImpl::Multi(multi_filter_key_extractor),
             table_id_to_vnode,
             table_id_to_watermark_serde,
+            HashMap::default(),
         ));
 
         let compact_ctx = get_compactor_context(&storage);
@@ -2001,7 +2002,7 @@ pub(crate) mod tests {
         .await;
         epoch += millisec_interval_epoch;
 
-        let parent_group_id = 2;
+        let parent_group_id = 2.into();
         let split_table_ids = vec![table_id_2];
 
         async fn compact_once(

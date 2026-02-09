@@ -36,7 +36,7 @@ easy-ext = "1"
 educe = "0.6"
 either = "1"
 enum-as-inner = "0.6"
-fancy-regex = "0.16.1"
+fancy-regex = "0.17.0"
 fixedbitset = "0.5"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = { workspace = true }
@@ -66,7 +66,7 @@ pretty_assertions = "1"
 prometheus = { version = "0.14", features = ["process"] }
 prometheus-http-query = "0.8"
 prost = { workspace = true }
-quick-xml = { version = "0.38", features = ["serialize"] }
+quick-xml = { version = "0.39", features = ["serialize"] }
 rand = { version = "0.9", features = ["small_rng"] }
 risingwave_batch = { workspace = true }
 risingwave_common = { workspace = true }

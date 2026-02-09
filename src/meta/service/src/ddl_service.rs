@@ -22,11 +22,11 @@ use rand::rng as thread_rng;
 use rand::seq::IndexedRandom;
 use replace_job_plan::{ReplaceSource, ReplaceTable};
 use risingwave_common::catalog::{AlterDatabaseParam, ColumnCatalog};
-use risingwave_common::id::TableId;
+use risingwave_common::id::{FragmentId, JobId, ObjectId, TableId};
 use risingwave_common::types::DataType;
 use risingwave_common::util::stream_graph_visitor;
 use risingwave_connector::sink::catalog::SinkId;
-use risingwave_meta::barrier::{BarrierScheduler, Command};
+use risingwave_meta::barrier::{BarrierScheduler, Command, ResumeBackfillTarget};
 use risingwave_meta::manager::{EventLogManagerRef, MetadataManager, iceberg_compaction};
 use risingwave_meta::model::TableParallelism as ModelTableParallelism;
 use risingwave_meta::rpc::metrics::MetaMetrics;
@@ -48,6 +48,7 @@ use risingwave_pb::id::SourceId;
 use risingwave_pb::meta::event_log;
 use risingwave_pb::meta::table_parallelism::{FixedParallelism, Parallelism};
 use risingwave_pb::stream_plan::stream_node::NodeBody;
+use risingwave_pb::stream_plan::throttle_mutation::ThrottleConfig;
 use thiserror_ext::AsReport;
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
@@ -94,6 +95,7 @@ impl DdlServiceImpl {
             source_manager,
             barrier_manager,
             sink_manager.clone(),
+            iceberg_compaction_manager.clone(),
         )
         .await;
         Self {
@@ -288,12 +290,16 @@ impl DdlService for DdlServiceImpl {
     ) -> Result<Response<DropSecretResponse>, Status> {
         let req = request.into_inner();
         let secret_id = req.get_secret_id();
+        let drop_mode = DropMode::from_request_setting(req.cascade);
         let version = self
             .ddl_controller
-            .run_command(DdlCommand::DropSecret(secret_id))
+            .run_command(DdlCommand::DropSecret(secret_id, drop_mode))
             .await?;
 
-        Ok(Response::new(DropSecretResponse { version }))
+        Ok(Response::new(DropSecretResponse {
+            status: None,
+            version,
+        }))
     }
 
     async fn alter_secret(
@@ -773,6 +779,62 @@ impl DdlService for DdlServiceImpl {
             .list_all_state_tables()
             .await?;
         Ok(Response::new(RisectlListStateTablesResponse { tables }))
+    }
+
+    async fn risectl_resume_backfill(
+        &self,
+        request: Request<RisectlResumeBackfillRequest>,
+    ) -> Result<Response<RisectlResumeBackfillResponse>, Status> {
+        let request = request.into_inner();
+        let target = request
+            .target
+            .ok_or_else(|| Status::invalid_argument("missing resume backfill target"))?;
+
+        match target {
+            risectl_resume_backfill_request::Target::JobId(job_id) => {
+                let job_id = JobId::new(job_id);
+                let database_id = self
+                    .metadata_manager
+                    .catalog_controller
+                    .get_object_database_id(ObjectId::new(job_id.as_raw_id()))
+                    .await?;
+                self.barrier_scheduler
+                    .run_command(
+                        database_id,
+                        Command::ResumeBackfill {
+                            target: ResumeBackfillTarget::Job(job_id),
+                        },
+                    )
+                    .await?;
+            }
+            risectl_resume_backfill_request::Target::FragmentId(fragment_id) => {
+                let fragment_id = FragmentId::new(fragment_id);
+                let mut job_ids = self
+                    .metadata_manager
+                    .catalog_controller
+                    .get_fragment_job_id(vec![fragment_id])
+                    .await?;
+                let job_id = job_ids
+                    .pop()
+                    .ok_or_else(|| Status::invalid_argument("fragment not found"))?;
+                let job_id = JobId::new(job_id.as_raw_id());
+                let database_id = self
+                    .metadata_manager
+                    .catalog_controller
+                    .get_object_database_id(ObjectId::new(job_id.as_raw_id()))
+                    .await?;
+                self.barrier_scheduler
+                    .run_command(
+                        database_id,
+                        Command::ResumeBackfill {
+                            target: ResumeBackfillTarget::Fragment(fragment_id),
+                        },
+                    )
+                    .await?;
+            }
+        }
+
+        Ok(Response::new(RisectlResumeBackfillResponse {}))
     }
 
     async fn replace_job_plan(
@@ -1611,6 +1673,10 @@ impl DdlService for DdlServiceImpl {
                 .metadata_manager
                 .update_source_rate_limit_by_source_id(SourceId::new(source_id), source_rate_limit)
                 .await?;
+            let throttle_config = ThrottleConfig {
+                throttle_type: risingwave_pb::common::ThrottleType::Source.into(),
+                rate_limit: source_rate_limit,
+            };
             let _ = self
                 .barrier_scheduler
                 .run_command(
@@ -1619,7 +1685,7 @@ impl DdlService for DdlServiceImpl {
                         jobs,
                         config: fragments
                             .into_iter()
-                            .map(|fragment_id| (fragment_id, source_rate_limit))
+                            .map(|fragment_id| (fragment_id, throttle_config))
                             .collect(),
                     },
                 )

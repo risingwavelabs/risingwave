@@ -24,12 +24,12 @@ use risingwave_pb::hummock::{
     PbValidationTask,
 };
 
-use crate::HummockSstableObjectId;
 use crate::compaction_group::StateTableId;
 use crate::key_range::KeyRange;
 use crate::level::InputLevel;
 use crate::sstable_info::SstableInfo;
 use crate::table_watermark::{TableWatermarks, WatermarkSerdeType};
+use crate::{CompactionGroupId, HummockSstableObjectId};
 
 #[derive(Clone, PartialEq, Default, Debug)]
 pub struct CompactTask {
@@ -49,7 +49,7 @@ pub struct CompactTask {
     pub base_level: u32,
     pub task_status: PbTaskStatus,
     /// compaction group the task belongs to.
-    pub compaction_group_id: u64,
+    pub compaction_group_id: CompactionGroupId,
     /// compaction group id when the compaction task is created
     pub compaction_group_version_id: u64,
     /// `existing_table_ids` for compaction drop key
@@ -73,6 +73,7 @@ pub struct CompactTask {
     pub pk_prefix_table_watermarks: BTreeMap<TableId, TableWatermarks>,
 
     pub non_pk_prefix_table_watermarks: BTreeMap<TableId, TableWatermarks>,
+    pub value_table_watermarks: BTreeMap<TableId, TableWatermarks>,
 
     pub table_schemas: BTreeMap<TableId, PbTableSchema>,
 
@@ -122,6 +123,11 @@ impl CompactTask {
                 .sum::<usize>()
             + self
                 .non_pk_prefix_table_watermarks
+                .values()
+                .map(|table_watermark| size_of::<u32>() + table_watermark.estimated_encode_len())
+                .sum::<usize>()
+            + self
+                .value_table_watermarks
                 .values()
                 .map(|table_watermark| size_of::<u32>() + table_watermark.estimated_encode_len())
                 .sum::<usize>()
@@ -191,7 +197,7 @@ impl CompactTask {
         self.input_ssts
             .iter()
             .flat_map(|level| level.table_infos.iter())
-            .any(|sst| sst.sst_id.inner() != sst.object_id.inner())
+            .any(|sst| sst.sst_id.as_raw_id() != sst.object_id.as_raw_id())
     }
 
     pub fn get_table_ids_from_input_ssts(&self) -> impl Iterator<Item = StateTableId> + use<> {
@@ -233,6 +239,37 @@ impl CompactTask {
     }
 }
 
+fn split_watermark_serde_types(
+    pb_compact_task: &PbCompactTask,
+) -> (
+    BTreeMap<TableId, TableWatermarks>,
+    BTreeMap<TableId, TableWatermarks>,
+    BTreeMap<TableId, TableWatermarks>,
+) {
+    let mut pk_prefix_table_watermarks = BTreeMap::default();
+    let mut non_pk_prefix_table_watermarks = BTreeMap::default();
+    let mut value_table_watermarks = BTreeMap::default();
+    for (table_id, pbwatermark) in &pb_compact_task.table_watermarks {
+        let watermark = TableWatermarks::from(pbwatermark);
+        match watermark.watermark_type {
+            WatermarkSerdeType::PkPrefix => {
+                pk_prefix_table_watermarks.insert(*table_id, watermark);
+            }
+            WatermarkSerdeType::NonPkPrefix => {
+                non_pk_prefix_table_watermarks.insert(*table_id, watermark);
+            }
+            WatermarkSerdeType::Value => {
+                value_table_watermarks.insert(*table_id, watermark);
+            }
+        }
+    }
+    (
+        pk_prefix_table_watermarks,
+        non_pk_prefix_table_watermarks,
+        value_table_watermarks,
+    )
+}
+
 pub fn is_compaction_task_expired(
     compaction_group_version_id_in_task: u64,
     compaction_group_version_id_expected: u64,
@@ -242,20 +279,8 @@ pub fn is_compaction_task_expired(
 
 impl From<PbCompactTask> for CompactTask {
     fn from(pb_compact_task: PbCompactTask) -> Self {
-        let (pk_prefix_table_watermarks, non_pk_prefix_table_watermarks) = pb_compact_task
-            .table_watermarks
-            .into_iter()
-            .map(|(table_id, pb_table_watermark)| {
-                let table_watermark = TableWatermarks::from(pb_table_watermark);
-                (table_id, table_watermark)
-            })
-            .partition(|(_table_id, table_watermarke)| {
-                matches!(
-                    table_watermarke.watermark_type,
-                    WatermarkSerdeType::PkPrefix
-                )
-            });
-
+        let (pk_prefix_table_watermarks, non_pk_prefix_table_watermarks, value_table_watermarks) =
+            split_watermark_serde_types(&pb_compact_task);
         #[expect(deprecated)]
         Self {
             input_ssts: pb_compact_task
@@ -304,6 +329,7 @@ impl From<PbCompactTask> for CompactTask {
                 .collect(),
             pk_prefix_table_watermarks,
             non_pk_prefix_table_watermarks,
+            value_table_watermarks,
             table_schemas: pb_compact_task
                 .table_schemas
                 .iter()
@@ -318,20 +344,8 @@ impl From<PbCompactTask> for CompactTask {
 
 impl From<&PbCompactTask> for CompactTask {
     fn from(pb_compact_task: &PbCompactTask) -> Self {
-        let (pk_prefix_table_watermarks, non_pk_prefix_table_watermarks) = pb_compact_task
-            .table_watermarks
-            .iter()
-            .map(|(table_id, pb_table_watermark)| {
-                let table_watermark = TableWatermarks::from(pb_table_watermark);
-                (*table_id, table_watermark)
-            })
-            .partition(|(_table_id, table_watermarke)| {
-                matches!(
-                    table_watermarke.watermark_type,
-                    WatermarkSerdeType::PkPrefix
-                )
-            });
-
+        let (pk_prefix_table_watermarks, non_pk_prefix_table_watermarks, value_table_watermarks) =
+            split_watermark_serde_types(pb_compact_task);
         #[expect(deprecated)]
         Self {
             input_ssts: pb_compact_task
@@ -380,6 +394,7 @@ impl From<&PbCompactTask> for CompactTask {
                 .collect(),
             pk_prefix_table_watermarks,
             non_pk_prefix_table_watermarks,
+            value_table_watermarks,
             table_schemas: pb_compact_task
                 .table_schemas
                 .iter()
@@ -435,6 +450,7 @@ impl From<CompactTask> for PbCompactTask {
                 .pk_prefix_table_watermarks
                 .into_iter()
                 .chain(compact_task.non_pk_prefix_table_watermarks)
+                .chain(compact_task.value_table_watermarks)
                 .map(|(table_id, table_watermark)| (table_id, table_watermark.into()))
                 .collect(),
             split_by_state_table: compact_task.split_by_state_table,
@@ -489,6 +505,7 @@ impl From<&CompactTask> for PbCompactTask {
                 .pk_prefix_table_watermarks
                 .iter()
                 .chain(compact_task.non_pk_prefix_table_watermarks.iter())
+                .chain(compact_task.value_table_watermarks.iter())
                 .map(|(table_id, table_watermark)| (*table_id, table_watermark.into()))
                 .collect(),
             split_by_state_table: compact_task.split_by_state_table,
@@ -514,11 +531,7 @@ impl From<PbValidationTask> for ValidationTask {
                 .into_iter()
                 .map(SstableInfo::from)
                 .collect_vec(),
-            sst_id_to_worker_id: pb_validation_task
-                .sst_id_to_worker_id
-                .into_iter()
-                .map(|(object_id, worker_id)| (object_id.into(), worker_id))
-                .collect(),
+            sst_id_to_worker_id: pb_validation_task.sst_id_to_worker_id.into_iter().collect(),
         }
     }
 }
@@ -531,11 +544,7 @@ impl From<ValidationTask> for PbValidationTask {
                 .into_iter()
                 .map(|sst| sst.into())
                 .collect_vec(),
-            sst_id_to_worker_id: validation_task
-                .sst_id_to_worker_id
-                .into_iter()
-                .map(|(object_id, worker_id)| (object_id.inner(), worker_id))
-                .collect(),
+            sst_id_to_worker_id: validation_task.sst_id_to_worker_id,
         }
     }
 }
@@ -571,11 +580,7 @@ impl From<PbReportTask> for ReportTask {
                 .into_iter()
                 .map(SstableInfo::from)
                 .collect_vec(),
-            object_timestamps: value
-                .object_timestamps
-                .into_iter()
-                .map(|(object_id, timestamp)| (object_id.into(), timestamp))
-                .collect(),
+            object_timestamps: value.object_timestamps,
         }
     }
 }
@@ -591,11 +596,7 @@ impl From<ReportTask> for PbReportTask {
                 .into_iter()
                 .map(|sst| sst.into())
                 .collect_vec(),
-            object_timestamps: value
-                .object_timestamps
-                .into_iter()
-                .map(|(object_id, timestamp)| (object_id.inner(), timestamp))
-                .collect(),
+            object_timestamps: value.object_timestamps,
         }
     }
 }

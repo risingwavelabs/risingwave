@@ -47,7 +47,7 @@ use risingwave_meta_model::{
     SchemaId, SecretId, SinkId, SourceId, StreamingParallelism, SubscriptionId, UserId, ViewId,
 };
 use risingwave_pb::catalog::{
-    Comment, Connection, CreateType, Database, Function, PbSink, PbTable, Schema, Secret, Source,
+    Comment, Connection, CreateType, Database, Function, PbTable, Schema, Secret, Source,
     Subscription, Table, View,
 };
 use risingwave_pb::common::PbActorLocation;
@@ -57,6 +57,7 @@ use risingwave_pb::ddl_service::{
     alter_swap_rename_request, streaming_job_resource_type,
 };
 use risingwave_pb::meta::table_fragments::PbActorStatus;
+use risingwave_pb::plan_common::PbColumnCatalog;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
     PbDispatchOutputMapping, PbStreamFragmentGraph, PbStreamNode, PbUpstreamSinkInfo,
@@ -75,6 +76,7 @@ use crate::controller::cluster::StreamingClusterInfo;
 use crate::controller::streaming_job::{FinishAutoRefreshSchemaSinkContext, SinkIntoTableContext};
 use crate::controller::utils::build_select_node_list;
 use crate::error::{MetaErrorInner, bail_invalid_parameter, bail_unavailable};
+use crate::manager::iceberg_compaction::IcebergCompactionManagerRef;
 use crate::manager::sink_coordination::SinkCoordinatorManager;
 use crate::manager::{
     IGNORED_NOTIFICATION_VERSION, LocalNotification, MetaSrvEnv, MetadataManager,
@@ -181,7 +183,7 @@ pub enum DdlCommand {
     DropConnection(ConnectionId, DropMode),
     CreateSecret(Secret),
     AlterSecret(Secret),
-    DropSecret(SecretId),
+    DropSecret(SecretId, DropMode),
     CommentOn(Comment),
     CreateSubscription(Subscription),
     DropSubscription(SubscriptionId, DropMode),
@@ -217,7 +219,7 @@ impl DdlCommand {
             DdlCommand::DropConnection(id, _) => Right(id.as_object_id()),
             DdlCommand::CreateSecret(secret) => Left(secret.name.clone()),
             DdlCommand::AlterSecret(secret) => Left(secret.name.clone()),
-            DdlCommand::DropSecret(id) => Right(id.as_object_id()),
+            DdlCommand::DropSecret(id, _) => Right(id.as_object_id()),
             DdlCommand::CommentOn(comment) => Right(comment.table_id.into()),
             DdlCommand::CreateSubscription(subscription) => Left(subscription.name.clone()),
             DdlCommand::DropSubscription(id, _) => Right(id.as_object_id()),
@@ -235,7 +237,7 @@ impl DdlCommand {
             | DdlCommand::DropView(_, _)
             | DdlCommand::DropStreamingJob { .. }
             | DdlCommand::DropConnection(_, _)
-            | DdlCommand::DropSecret(_)
+            | DdlCommand::DropSecret(_, _)
             | DdlCommand::DropSubscription(_, _)
             | DdlCommand::AlterName(_, _)
             | DdlCommand::AlterObjectOwner(_, _)
@@ -270,6 +272,7 @@ pub struct DdlController {
     pub(crate) source_manager: SourceManagerRef,
     barrier_manager: BarrierManagerRef,
     sink_manager: SinkCoordinatorManager,
+    iceberg_compaction_manager: IcebergCompactionManagerRef,
 
     // The semaphore is used to limit the number of concurrent streaming job creation.
     pub(crate) creating_streaming_job_permits: Arc<CreatingStreamingJobPermit>,
@@ -348,6 +351,7 @@ impl DdlController {
         source_manager: SourceManagerRef,
         barrier_manager: BarrierManagerRef,
         sink_manager: SinkCoordinatorManager,
+        iceberg_compaction_manager: IcebergCompactionManagerRef,
     ) -> Self {
         let creating_streaming_job_permits = Arc::new(CreatingStreamingJobPermit::new(&env).await);
         Self {
@@ -357,6 +361,7 @@ impl DdlController {
             source_manager,
             barrier_manager,
             sink_manager,
+            iceberg_compaction_manager,
             creating_streaming_job_permits,
             seq: Arc::new(AtomicU64::new(0)),
         }
@@ -445,7 +450,9 @@ impl DdlController {
                     ctrl.drop_connection(connection_id, drop_mode).await
                 }
                 DdlCommand::CreateSecret(secret) => ctrl.create_secret(secret).await,
-                DdlCommand::DropSecret(secret_id) => ctrl.drop_secret(secret_id).await,
+                DdlCommand::DropSecret(secret_id, drop_mode) => {
+                    ctrl.drop_secret(secret_id, drop_mode).await
+                }
                 DdlCommand::AlterSecret(secret) => ctrl.alter_secret(secret).await,
                 DdlCommand::AlterNonSharedSource(source) => {
                     ctrl.alter_non_shared_source(source).await
@@ -474,7 +481,7 @@ impl DdlController {
         let notification_version = tokio::spawn(fut).await.map_err(|e| anyhow!(e))??;
         Ok(Some(WaitVersion {
             catalog_version: notification_version,
-            hummock_version_id: self.barrier_manager.get_hummock_version_id().await.to_u64(),
+            hummock_version_id: self.barrier_manager.get_hummock_version_id().await,
         }))
     }
 
@@ -737,8 +744,12 @@ impl DdlController {
             .await
     }
 
-    async fn drop_secret(&self, secret_id: SecretId) -> MetaResult<NotificationVersion> {
-        self.drop_object(ObjectType::Secret, secret_id, DropMode::Restrict)
+    async fn drop_secret(
+        &self,
+        secret_id: SecretId,
+        drop_mode: DropMode,
+    ) -> MetaResult<NotificationVersion> {
+        self.drop_object(ObjectType::Secret, secret_id, drop_mode)
             .await
     }
 
@@ -948,7 +959,6 @@ impl DdlController {
             self.validate_table_for_sink(target_table).await?;
         }
         let ctx = StreamContext::from_protobuf(fragment_graph.get_ctx().unwrap());
-        let specific_resource_group = resource_type.resource_group();
         let check_ret = self
             .metadata_manager
             .catalog_controller
@@ -958,7 +968,7 @@ impl DdlController {
                 &fragment_graph.parallelism,
                 fragment_graph.max_parallelism as _,
                 dependencies,
-                specific_resource_group,
+                resource_type.clone(),
                 &fragment_graph.backfill_parallelism,
             )
             .await;
@@ -1147,9 +1157,15 @@ impl DdlController {
             _ => {}
         }
 
+        let backfill_orders = ctx.fragment_backfill_ordering.to_meta_model();
         self.metadata_manager
             .catalog_controller
-            .prepare_stream_job_fragments(&stream_job_fragments, streaming_job, false)
+            .prepare_stream_job_fragments(
+                &stream_job_fragments,
+                streaming_job,
+                false,
+                Some(backfill_orders),
+            )
             .await?;
 
         // create streaming jobs.
@@ -1262,8 +1278,13 @@ impl DdlController {
         // stop sink coordinators for iceberg table sinks
         if !iceberg_sink_ids.is_empty() {
             self.sink_manager
-                .stop_sink_coordinator(iceberg_sink_ids)
+                .stop_sink_coordinator(iceberg_sink_ids.clone())
                 .await;
+
+            for sink_id in iceberg_sink_ids {
+                self.iceberg_compaction_manager
+                    .clear_iceberg_commits_by_sink_id(sink_id);
+            }
         }
 
         // remove secrets.
@@ -1518,6 +1539,7 @@ impl DdlController {
                             &empty_downstreams,
                             true,
                             None,
+                            None,
                         )
                         .await?;
                 }
@@ -1525,7 +1547,7 @@ impl DdlController {
 
             self.metadata_manager
                 .catalog_controller
-                .prepare_stream_job_fragments(&stream_job_fragments, &streaming_job, true)
+                .prepare_stream_job_fragments(&stream_job_fragments, &streaming_job, true, None)
                 .await?;
 
             self.stream_manager
@@ -1743,7 +1765,7 @@ impl DdlController {
             .filter(|id| {
                 !cross_db_snapshot_backfill_info
                     .upstream_mv_table_id_to_backfill_epoch
-                    .contains_key(id)
+                    .contains_key(*id)
             })
             .cloned()
             .collect();
@@ -1807,12 +1829,20 @@ impl DdlController {
             resource_group.clone(),
         )?;
 
-        let parallelism = self
-            .env
-            .system_params_reader()
-            .await
-            .adaptive_parallelism_strategy()
-            .compute_target_parallelism(parallelism.get());
+        let parallelism = if initial_parallelism.is_some() {
+            parallelism.get()
+        } else {
+            // Prefer job-level override for initial scheduling, fallback to system strategy.
+            let adaptive_strategy = match stream_ctx.adaptive_parallelism_strategy {
+                Some(strategy) => strategy,
+                None => self
+                    .env
+                    .system_params_reader()
+                    .await
+                    .adaptive_parallelism_strategy(),
+            };
+            adaptive_strategy.compute_target_parallelism(parallelism.get())
+        };
 
         let parallelism = NonZeroUsize::new(parallelism).expect("parallelism must be positive");
         let actor_graph_builder = ActorGraphBuilder::new(
@@ -1877,7 +1907,8 @@ impl DdlController {
                 .get_mview_fragment_by_id(table_id.as_job_id())
                 .await?;
             let upstream_sink_info = build_upstream_sink_info(
-                sink,
+                sink.id,
+                sink.original_target_columns.clone(),
                 sink_fragment.fragment_id as _,
                 target_table,
                 mview_fragment_id,
@@ -2239,6 +2270,8 @@ impl DdlController {
             Object::DatabaseId(id) => (ObjectType::Database, id),
             Object::SubscriptionId(id) => (ObjectType::Subscription, id),
             Object::ConnectionId(id) => (ObjectType::Connection, id),
+            Object::FunctionId(id) => (ObjectType::Function, id),
+            Object::SecretId(id) => (ObjectType::Secret, id),
         };
         self.metadata_manager
             .catalog_controller
@@ -2324,13 +2357,14 @@ fn report_create_object(
 }
 
 pub fn build_upstream_sink_info(
-    sink: &PbSink,
+    sink_id: SinkId,
+    original_target_columns: Vec<PbColumnCatalog>,
     sink_fragment_id: FragmentId,
     target_table: &PbTable,
     target_fragment_id: FragmentId,
 ) -> MetaResult<UpstreamSinkInfo> {
-    let sink_columns = if !sink.original_target_columns.is_empty() {
-        sink.original_target_columns.clone()
+    let sink_columns = if !original_target_columns.is_empty() {
+        original_target_columns.clone()
     } else {
         // This is due to the fact that the value did not exist in earlier versions,
         // which means no schema changes such as `ADD/DROP COLUMN` have been made to the table.
@@ -2384,10 +2418,10 @@ pub fn build_upstream_sink_info(
     let current_target_columns = target_table.get_columns();
     let project_exprs = build_select_node_list(&sink_columns, current_target_columns)?;
     Ok(UpstreamSinkInfo {
-        sink_id: sink.id,
+        sink_id,
         sink_fragment_id: sink_fragment_id as _,
         sink_output_fields,
-        sink_original_target_columns: sink.get_original_target_columns().clone(),
+        sink_original_target_columns: original_target_columns,
         project_exprs,
         new_sink_downstream: new_downstream_relation,
     })

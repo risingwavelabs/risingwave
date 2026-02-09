@@ -236,6 +236,9 @@ pub const SINK_TYPE_APPEND_ONLY: &str = "append-only";
 pub const SINK_TYPE_DEBEZIUM: &str = "debezium";
 pub const SINK_TYPE_UPSERT: &str = "upsert";
 pub const SINK_TYPE_RETRACT: &str = "retract";
+/// Whether to drop DELETE and convert UPDATE to INSERT in the sink executor.
+pub const SINK_USER_IGNORE_DELETE_OPTION: &str = "ignore_delete";
+/// Alias for [`SINK_USER_IGNORE_DELETE_OPTION`], kept for backward compatibility.
 pub const SINK_USER_FORCE_APPEND_ONLY_OPTION: &str = "force_append_only";
 pub const SINK_USER_FORCE_COMPACTION: &str = "force_compaction";
 
@@ -1082,6 +1085,12 @@ pub enum SinkError {
     ),
     #[error("Mongodb error: {0}")]
     Mongodb(
+        #[source]
+        #[backtrace]
+        anyhow::Error,
+    ),
+    #[error("Redshift error: {0}")]
+    Redshift(
         #[source]
         #[backtrace]
         anyhow::Error,

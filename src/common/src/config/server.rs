@@ -15,6 +15,7 @@
 use super::*;
 
 /// The section `[server]` in `risingwave.toml`.
+#[serde_with::apply(Option => #[serde(with = "none_as_empty_string")])]
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde, ConfigDoc)]
 pub struct ServerConfig {
     /// The interval for periodic heartbeat from worker to the meta service.
@@ -50,6 +51,7 @@ pub struct ServerConfig {
     pub unrecognized: Unrecognized<Self>,
 }
 
+#[serde_with::apply(Option => #[serde(with = "none_as_empty_string")])]
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde, ConfigDoc)]
 pub struct HeapProfilingConfig {
     /// Enable to auto dump heap profile when memory usage is high

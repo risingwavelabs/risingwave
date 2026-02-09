@@ -30,6 +30,7 @@ use risingwave_common::bail;
 use risingwave_common::catalog::{DatabaseId, FragmentTypeFlag, TableId};
 use risingwave_common::id::JobId;
 use risingwave_common::util::epoch::Epoch;
+use risingwave_common::util::stream_graph_visitor::visit_stream_node_cont;
 use risingwave_common::util::tracing::TracingContext;
 use risingwave_connector::source::SplitImpl;
 use risingwave_meta_model::WorkerId;
@@ -38,6 +39,7 @@ use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::id::PartialGraphId;
 use risingwave_pb::source::{PbCdcTableSnapshotSplits, PbCdcTableSnapshotSplitsWithGeneration};
 use risingwave_pb::stream_plan::barrier_mutation::Mutation;
+use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{AddMutation, Barrier, BarrierMutation};
 use risingwave_pb::stream_service::inject_barrier_request::build_actor_info::UpstreamActors;
 use risingwave_pb::stream_service::inject_barrier_request::{
@@ -45,7 +47,7 @@ use risingwave_pb::stream_service::inject_barrier_request::{
 };
 use risingwave_pb::stream_service::streaming_control_stream_request::{
     CreatePartialGraphRequest, PbCreatePartialGraphRequest, PbInitRequest,
-    RemovePartialGraphRequest, ResetDatabaseRequest,
+    RemovePartialGraphRequest, ResetPartialGraphsRequest,
 };
 use risingwave_pb::stream_service::{
     BarrierCompleteResponse, InjectBarrierRequest, StreamingControlStreamRequest,
@@ -59,6 +61,8 @@ use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
 use super::{BarrierKind, TracedEpoch};
+use crate::barrier::BackfillOrderState;
+use crate::barrier::backfill_order_control::get_nodes_with_backfill_dependencies;
 use crate::barrier::cdc_progress::CdcTableBackfillTracker;
 use crate::barrier::checkpoint::{
     BarrierWorkerState, CreatingStreamingJobControl, DatabaseCheckpointControl,
@@ -72,6 +76,7 @@ use crate::barrier::info::{
 use crate::barrier::progress::CreateMviewProgressTracker;
 use crate::barrier::utils::{NodeToCollect, is_valid_after_worker_err};
 use crate::controller::fragment::InflightFragmentInfo;
+use crate::controller::utils::StreamingJobExtraInfo;
 use crate::manager::MetaSrvEnv;
 use crate::model::{
     ActorId, FragmentDownstreamRelation, FragmentId, StreamActor, StreamJobActorsToCreate,
@@ -80,26 +85,67 @@ use crate::model::{
 use crate::stream::cdc::{
     CdcTableSnapshotSplits, is_parallelized_backfill_enabled_cdc_scan_fragment,
 };
-use crate::stream::{StreamFragmentGraph, build_actor_connector_splits};
+use crate::stream::{
+    ExtendedFragmentBackfillOrder, StreamFragmentGraph, UserDefinedFragmentBackfillOrder,
+    build_actor_connector_splits,
+};
 use crate::{MetaError, MetaResult};
 
-pub(super) fn to_partial_graph_id(job_id: Option<JobId>) -> PartialGraphId {
-    job_id
+pub(super) fn to_partial_graph_id(
+    database_id: DatabaseId,
+    creating_job_id: Option<JobId>,
+) -> PartialGraphId {
+    let raw_job_id = creating_job_id
         .map(|job_id| {
             assert_ne!(job_id, u32::MAX);
             job_id.as_raw_id()
         })
-        .unwrap_or(u32::MAX)
-        .into()
+        .unwrap_or(u32::MAX);
+    (((database_id.as_raw_id() as u64) << 32) | (raw_job_id as u64)).into()
 }
 
-pub(super) fn from_partial_graph_id(partial_graph_id: PartialGraphId) -> Option<JobId> {
-    let partial_graph_id = partial_graph_id.as_raw_id();
-    if partial_graph_id == u32::MAX {
+pub(super) fn from_partial_graph_id(
+    partial_graph_id: PartialGraphId,
+) -> (DatabaseId, Option<JobId>) {
+    let id = partial_graph_id.as_raw_id();
+    let database_id = (id >> 32) as u32;
+    let raw_creating_job_id = (id & ((1 << 32) - 1)) as u32;
+    let creating_job_id = if raw_creating_job_id == u32::MAX {
         None
     } else {
-        Some(JobId::new(partial_graph_id))
+        Some(JobId::new(raw_creating_job_id))
+    };
+    (database_id.into(), creating_job_id)
+}
+
+pub(super) fn build_locality_fragment_state_table_mapping(
+    fragment_infos: &HashMap<FragmentId, InflightFragmentInfo>,
+) -> HashMap<FragmentId, Vec<TableId>> {
+    let mut mapping = HashMap::new();
+
+    for (fragment_id, fragment_info) in fragment_infos {
+        let mut state_table_ids = Vec::new();
+        visit_stream_node_cont(&fragment_info.nodes, |stream_node| {
+            if let Some(NodeBody::LocalityProvider(locality_provider)) =
+                stream_node.node_body.as_ref()
+            {
+                let state_table_id = locality_provider
+                    .state_table
+                    .as_ref()
+                    .expect("must have state table")
+                    .id;
+                state_table_ids.push(state_table_id);
+                false
+            } else {
+                true
+            }
+        });
+        if !state_table_ids.is_empty() {
+            mapping.insert(*fragment_id, state_table_ids);
+        }
     }
+
+    mapping
 }
 
 struct ControlStreamNode {
@@ -510,14 +556,12 @@ impl ControlStreamManager {
     ) -> impl Iterator<Item = PbCreatePartialGraphRequest> {
         initial_inflight_infos.flat_map(|(database_id, creating_job_ids)| {
             [PbCreatePartialGraphRequest {
-                partial_graph_id: to_partial_graph_id(None),
-                database_id,
+                partial_graph_id: to_partial_graph_id(database_id, None),
             }]
             .into_iter()
             .chain(
                 creating_job_ids.map(move |job_id| PbCreatePartialGraphRequest {
-                    partial_graph_id: to_partial_graph_id(Some(job_id)),
-                    database_id,
+                    partial_graph_id: to_partial_graph_id(database_id, Some(job_id)),
                 }),
             )
         })
@@ -560,9 +604,14 @@ impl DatabaseInitialBarrierCollector {
         (&self.database_state, &self.creating_streaming_job_controls)
     }
 
+    pub(super) fn creating_job_ids(&self) -> impl Iterator<Item = JobId> {
+        self.creating_streaming_job_controls.keys().copied()
+    }
+
     pub(super) fn collect_resp(&mut self, resp: BarrierCompleteResponse) {
-        assert_eq!(self.database_id, resp.database_id);
-        if let Some(creating_job_id) = from_partial_graph_id(resp.partial_graph_id) {
+        let (database_id, creating_job_id) = from_partial_graph_id(resp.partial_graph_id);
+        assert_eq!(self.database_id, database_id);
+        if let Some(creating_job_id) = creating_job_id {
             assert!(
                 !self
                     .creating_streaming_job_controls
@@ -604,6 +653,7 @@ impl ControlStreamManager {
         &mut self,
         database_id: DatabaseId,
         jobs: HashMap<JobId, HashMap<FragmentId, InflightFragmentInfo>>,
+        job_extra_info: &HashMap<JobId, StreamingJobExtraInfo>,
         state_table_committed_epochs: &mut HashMap<TableId, u64>,
         state_table_log_epochs: &mut HashMap<TableId, Vec<(Vec<u64>, u64)>>,
         fragment_relations: &FragmentDownstreamRelation,
@@ -614,6 +664,7 @@ impl ControlStreamManager {
         is_paused: bool,
         hummock_version_stats: &HummockVersionStats,
         cdc_table_snapshot_splits: &mut HashMap<JobId, CdcTableSnapshotSplits>,
+        injected_creating_jobs: &mut HashSet<JobId>,
     ) -> MetaResult<DatabaseInitialBarrierCollector> {
         self.add_partial_graph(database_id, None);
         fn collect_source_splits(
@@ -633,8 +684,12 @@ impl ControlStreamManager {
         fn build_mutation(
             splits: &HashMap<ActorId, Vec<SplitImpl>>,
             cdc_table_snapshot_split_assignment: HashMap<ActorId, PbCdcTableSnapshotSplits>,
+            backfill_orders: &ExtendedFragmentBackfillOrder,
             is_paused: bool,
         ) -> Mutation {
+            let backfill_nodes_to_pause = get_nodes_with_backfill_dependencies(backfill_orders)
+                .into_iter()
+                .collect();
             Mutation::Add(AddMutation {
                 // Actors built during recovery is not treated as newly added actors.
                 actor_dispatchers: Default::default(),
@@ -645,8 +700,7 @@ impl ControlStreamManager {
                 }),
                 pause: is_paused,
                 subscriptions_to_add: Default::default(),
-                // TODO(kwannoel): recover using backfill order plan
-                backfill_nodes_to_pause: Default::default(),
+                backfill_nodes_to_pause,
                 new_upstream_sinks: Default::default(),
             })
         }
@@ -672,6 +726,17 @@ impl ControlStreamManager {
                 );
             }
             prev_epoch
+        }
+        fn job_backfill_orders(
+            job_extra_info: &HashMap<JobId, StreamingJobExtraInfo>,
+            job_id: JobId,
+        ) -> UserDefinedFragmentBackfillOrder {
+            UserDefinedFragmentBackfillOrder::new(
+                job_extra_info
+                    .get(&job_id)
+                    .and_then(|info| info.backfill_orders.clone())
+                    .map_or_else(HashMap::new, |orders| orders.0),
+            )
         }
 
         let mut subscribers: HashMap<_, HashMap<_, _>> = jobs
@@ -813,14 +878,27 @@ impl ControlStreamManager {
                 .into_iter()
                 .map(|(job_id, (fragment_infos, is_background_creating))| {
                     let status = if is_background_creating {
+                        let backfill_ordering = job_backfill_orders(job_extra_info, job_id);
+                        let backfill_ordering = StreamFragmentGraph::extend_fragment_backfill_ordering_with_locality_backfill(
+                            backfill_ordering,
+                            fragment_relations,
+                            || fragment_infos.iter().map(|(fragment_id, fragment)| {
+                            (*fragment_id, fragment.fragment_type_mask, &fragment.nodes)
+                        }));
+                        let locality_fragment_state_table_mapping =
+                            build_locality_fragment_state_table_mapping(&fragment_infos);
+                        let backfill_order_state = BackfillOrderState::recover_from_fragment_infos(
+                            &backfill_ordering,
+                            &fragment_infos,
+                            locality_fragment_state_table_mapping,
+                        );
                         CreateStreamingJobStatus::Creating {
                             tracker: CreateMviewProgressTracker::recover(
                                 job_id,
                                 &fragment_infos,
-                                Default::default(),
+                                backfill_order_state,
                                 hummock_version_stats,
                             ),
-                            is_serverless: false, // serverless backfill not support background ddl yet
                         }
                     } else {
                         CreateStreamingJobStatus::Created
@@ -867,11 +945,11 @@ impl ControlStreamManager {
                 .values()
                 .flat_map(|job| {
                     job.fragment_infos()
-                        .map(|info| (info, to_partial_graph_id(None)))
+                        .map(|info| (info, to_partial_graph_id(database_id, None)))
                 })
                 .chain(ongoing_snapshot_backfill_jobs.iter().flat_map(
                     |(job_id, (fragments, ..))| {
-                        let partial_graph_id = to_partial_graph_id(Some(*job_id));
+                        let partial_graph_id = to_partial_graph_id(database_id, Some(*job_id));
                         fragments
                             .values()
                             .map(move |fragment| (fragment, partial_graph_id))
@@ -904,9 +982,33 @@ impl ControlStreamManager {
                 InflightFragmentInfo::actor_ids_to_collect(database_jobs.values().flatten());
             let database_job_source_splits =
                 collect_source_splits(database_jobs.values().flatten(), source_splits);
+            let database_backfill_orders =
+                UserDefinedFragmentBackfillOrder::merge(database_jobs.values().map(|job| {
+                    if matches!(job.status, CreateStreamingJobStatus::Creating { .. }) {
+                        job_backfill_orders(job_extra_info, job.job_id)
+                    } else {
+                        UserDefinedFragmentBackfillOrder::default()
+                    }
+                }));
+            let database_backfill_orders =
+                StreamFragmentGraph::extend_fragment_backfill_ordering_with_locality_backfill(
+                    database_backfill_orders,
+                    fragment_relations,
+                    || {
+                        database_jobs.values().flat_map(|job_fragments| {
+                            job_fragments
+                                .fragment_infos
+                                .iter()
+                                .map(|(fragment_id, fragment)| {
+                                    (*fragment_id, fragment.fragment_type_mask, &fragment.nodes)
+                                })
+                        })
+                    },
+                );
             let mutation = build_mutation(
                 &database_job_source_splits,
                 cdc_table_snapshot_split_assignment,
+                &database_backfill_orders,
                 is_paused,
             );
 
@@ -956,12 +1058,27 @@ impl ControlStreamManager {
             if is_paused {
                 bail!("should not pause when having snapshot backfill job {job_id}");
             }
+            let job_backfill_orders = job_backfill_orders(job_extra_info, job_id);
+            let job_backfill_orders =
+                StreamFragmentGraph::extend_fragment_backfill_ordering_with_locality_backfill(
+                    job_backfill_orders,
+                    fragment_relations,
+                    || {
+                        info.iter().map(|(fragment_id, fragment)| {
+                            (*fragment_id, fragment.fragment_type_mask, &fragment.nodes)
+                        })
+                    },
+                );
             let mutation = build_mutation(
                 &database_job_source_splits,
                 Default::default(), // no cdc backfill job for
+                &job_backfill_orders,
                 false,
             );
 
+            // add the job_id to `injected_creating_jobs` before it attempts to call `CreatingStreamingJobControl::recover`,
+            // which may create a new partial graph in CN.
+            injected_creating_jobs.insert(job_id);
             creating_streaming_job_controls.insert(
                 job_id,
                 CreatingStreamingJobControl::recover(
@@ -973,10 +1090,11 @@ impl ControlStreamManager {
                     committed_epoch,
                     &barrier_info,
                     info,
+                    job_backfill_orders,
                     fragment_relations,
                     hummock_version_stats,
                     node_actors,
-                    mutation.clone(),
+                    mutation,
                     self,
                 )?,
             );
@@ -1043,7 +1161,7 @@ impl ControlStreamManager {
 
         let nodes_to_sync_table: HashSet<_> = nodes_to_sync_table.collect();
 
-        let partial_graph_id = to_partial_graph_id(creating_job_id);
+        let partial_graph_id = to_partial_graph_id(database_id, creating_job_id);
 
         nodes_to_sync_table.iter().for_each(|worker_id| {
             assert!(node_actors.contains_key(worker_id), "worker_id {worker_id} in nodes_to_sync_table {nodes_to_sync_table:?} but not in node_actors {node_actors:?}");
@@ -1091,7 +1209,6 @@ impl ControlStreamManager {
                                     InjectBarrierRequest {
                                         request_id: Uuid::new_v4().to_string(),
                                         barrier: Some(barrier),
-                                        database_id,
                                         actor_ids_to_collect: actor_ids_to_collect.iter().copied().collect(),
                                         table_ids_to_sync,
                                         partial_graph_id,
@@ -1171,7 +1288,7 @@ impl ControlStreamManager {
         database_id: DatabaseId,
         creating_job_id: Option<JobId>,
     ) {
-        let partial_graph_id = to_partial_graph_id(creating_job_id);
+        let partial_graph_id = to_partial_graph_id(database_id, creating_job_id);
         self.connected_workers().for_each(|(_, node)| {
             if node
                 .handle
@@ -1180,7 +1297,6 @@ impl ControlStreamManager {
                     request: Some(
                         streaming_control_stream_request::Request::CreatePartialGraph(
                             CreatePartialGraphRequest {
-                                database_id,
                                 partial_graph_id,
                             },
                         ),
@@ -1201,7 +1317,7 @@ impl ControlStreamManager {
         }
         let partial_graph_ids = creating_job_ids
             .into_iter()
-            .map(|job_id| to_partial_graph_id(Some(job_id)))
+            .map(|job_id| to_partial_graph_id(database_id, Some(job_id)))
             .collect_vec();
         self.connected_workers().for_each(|(_, node)| {
             if node.handle
@@ -1211,7 +1327,6 @@ impl ControlStreamManager {
                         streaming_control_stream_request::Request::RemovePartialGraph(
                             RemovePartialGraphRequest {
                                 partial_graph_ids: partial_graph_ids.clone(),
-                                database_id,
                             },
                         ),
                     ),
@@ -1223,10 +1338,9 @@ impl ControlStreamManager {
         })
     }
 
-    pub(super) fn reset_database(
+    pub(super) fn reset_partial_graphs(
         &mut self,
-        database_id: DatabaseId,
-        reset_request_id: u32,
+        partial_graph_ids: Vec<PartialGraphId>,
     ) -> HashSet<WorkerId> {
         self.connected_workers()
             .filter_map(|(worker_id, node)| {
@@ -1234,12 +1348,13 @@ impl ControlStreamManager {
                     .handle
                     .request_sender
                     .send(StreamingControlStreamRequest {
-                        request: Some(streaming_control_stream_request::Request::ResetDatabase(
-                            ResetDatabaseRequest {
-                                database_id,
-                                reset_request_id,
-                            },
-                        )),
+                        request: Some(
+                            streaming_control_stream_request::Request::ResetPartialGraphs(
+                                ResetPartialGraphsRequest {
+                                    partial_graph_ids: partial_graph_ids.clone(),
+                                },
+                            ),
+                        ),
                     })
                     .is_err()
                 {
@@ -1322,4 +1437,23 @@ pub(super) fn merge_node_rpc_errors<E: Error + Send + Sync + 'static>(
             s
         });
     anyhow!(concat).into()
+}
+
+#[cfg(test)]
+mod test_partial_graph_id {
+    use crate::barrier::rpc::{from_partial_graph_id, to_partial_graph_id};
+
+    #[test]
+    fn test_partial_graph_id_conversion() {
+        let database_id = 233.into();
+        let job_id = 233.into();
+        assert_eq!(
+            (database_id, None),
+            from_partial_graph_id(to_partial_graph_id(database_id, None))
+        );
+        assert_eq!(
+            (database_id, Some(job_id)),
+            from_partial_graph_id(to_partial_graph_id(database_id, Some(job_id)))
+        );
+    }
 }

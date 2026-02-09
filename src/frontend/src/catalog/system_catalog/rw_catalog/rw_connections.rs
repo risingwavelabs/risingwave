@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::id::{ConnectionId, SchemaId, UserId};
 use risingwave_common::types::Fields;
 use risingwave_frontend_macro::system_catalog;
 
@@ -22,10 +23,10 @@ use crate::handler::create_connection::print_connection_params;
 #[derive(Fields)]
 struct RwConnection {
     #[primary_key]
-    id: i32,
+    id: ConnectionId,
     name: String,
-    schema_id: i32,
-    owner: i32,
+    schema_id: SchemaId,
+    owner: UserId,
     type_: String,
     provider: String,
     acl: Vec<String>,
@@ -48,10 +49,10 @@ fn read_rw_connections(reader: &SysCatalogReaderImpl) -> Result<Vec<RwConnection
         .flat_map(|schema| {
             schema.iter_connections_with_acl(current_user).map(|conn| {
                 let mut rw_connection = RwConnection {
-                    id: conn.id.as_i32_id(),
+                    id: conn.id,
                     name: conn.name.clone(),
-                    schema_id: schema.id().as_i32_id(),
-                    owner: conn.owner as i32,
+                    schema_id: schema.id(),
+                    owner: conn.owner,
                     type_: conn.connection_type().into(),
                     provider: "".to_owned(),
                     acl: get_acl_items(conn.id, false, &users, username_map),

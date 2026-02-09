@@ -121,3 +121,47 @@ drop table t2;
 
 statement ok
 drop table txx;
+
+# Test UNION with set-returning functions (unnest) - issue #17880
+# This used to panic with "assertion failed: Schema::all_type_eq"
+
+query I rowsort
+select unnest(Array[1,2,3]) union all (select unnest(Array[1,2,3]));
+----
+1
+1
+2
+2
+3
+3
+
+query I rowsort
+(select unnest(Array[1,2,3])) union all (select unnest(Array[1,2,3]));
+----
+1
+1
+2
+2
+3
+3
+
+query I rowsort
+select unnest(Array[1,2,3]) union all select unnest(Array[1,2,3]);
+----
+1
+1
+2
+2
+3
+3
+
+query I rowsort
+select unnest(Array[1,2,3]) intersect (select unnest(Array[2,3,4]));
+----
+2
+3
+
+query I rowsort
+select unnest(Array[1,2,3]) except (select unnest(Array[2,3,4]));
+----
+1
