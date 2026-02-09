@@ -9,6 +9,14 @@ description: Triage and fix failing Buildkite CI checks for RisingWave pull requ
 
 Diagnose Buildkite failures programmatically and avoid guessing from UI screenshots. Prefer structured build/job JSON plus artifact inspection to find the exact failing test case and mismatch, then implement the smallest correct fix.
 
+## Target Selection
+
+Resolve triage target with this precedence:
+
+- If user provides a Buildkite build URL, use that build directly.
+- Else if user specifies a branch and/or a pipeline (for example `pull-request`, `main-cron`), use the specified scope.
+- Else default to the current git branch and inspect the checks for the PR associated with that branch.
+
 ## Workflow
 
 1. Identify the failing Buildkite build(s).
@@ -24,15 +32,17 @@ For exact commands and endpoint patterns, read `references/buildkite-ci-triage.m
 
 ## Step 1: Identify Failing Buildkite Checks
 
-Use `gh pr checks <PR_NUMBER>` to find failing checks and capture Buildkite URLs (`.../builds/<N>`).
+When no explicit target is given, find the PR for the current branch first, then run `gh pr checks <PR_NUMBER>` to find failing checks and capture Buildkite URLs (`.../builds/<N>`).
 
-If only branch info is available, list recent branch builds with `bk build list`.
+If user specifies a branch/pipeline, list and filter builds with `bk build list` using those parameters.
+If user provides a Buildkite build URL, skip discovery and start from that build number.
 
 ## Step 2: Pull Build JSON and Failed Jobs
 
 Fetch `builds/<N>.json`, then list failed jobs by non-zero `exit_status`.
 
 Capture at least:
+
 - pipeline
 - build number
 - job id
@@ -42,6 +52,7 @@ Capture at least:
 ## Step 3: Extract the Concrete Failure
 
 Fetch each failed job log and search for high-signal patterns:
+
 - `query result mismatch`
 - `[Diff] (-expected|+actual)`
 - `query is expected to fail with error:`
@@ -54,6 +65,7 @@ Stop once you have one concrete failing file/case and mismatch.
 ## Step 4: Fall Back to Artifacts
 
 If logs only show wrapper errors (for example, command exited with status), inspect artifacts from the same job, especially:
+
 - `risedev-logs.zip`
 - `risedev-logs/nodetype-*.log`
 
@@ -62,6 +74,7 @@ Extract and search artifact logs for the exact mismatch.
 ## Step 5: Apply Focused Fixes
 
 Prefer minimal fixes tied to evidence:
+
 - SQLLogicTest mismatch: update expected sections in the correct `.slt`/`.slt.part` file only when query output change is intentional.
 - Wrong runtime behavior: fix source code and keep tests as-is.
 - Flaky/cancellation-only signal (`143`): treat as infra/cancel unless corroborated by product errors.
@@ -73,6 +86,7 @@ Avoid broad "retry and hope" actions without root-cause evidence.
 Run the narrowest local check that validates the fix when possible. If full validation is not feasible, state it explicitly.
 
 Always report:
+
 - failing check/build/job identifiers
 - failing file/test/case
 - exact mismatch/error evidence
