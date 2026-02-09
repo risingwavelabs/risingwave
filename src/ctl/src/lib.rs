@@ -23,6 +23,7 @@ use risingwave_common::util::tokio_util::sync::CancellationToken;
 use risingwave_hummock_sdk::{HummockEpoch, HummockVersionId};
 use risingwave_meta::backup_restore::RestoreOpts;
 use risingwave_pb::hummock::rise_ctl_update_compaction_config_request::CompressionAlgorithm;
+use risingwave_pb::id::{CompactionGroupId, FragmentId, HummockSstableId, JobId, TableId};
 use risingwave_pb::meta::update_worker_node_schedulability_request::Schedulability;
 use thiserror_ext::AsReport;
 
@@ -106,8 +107,8 @@ enum HummockCommands {
 
     /// list hummock version deltas in the meta store
     ListVersionDeltas {
-        #[clap(short, long = "start-version-delta-id", default_value_t = 0)]
-        start_id: u64,
+        #[clap(short, long = "start-version-delta-id", default_value_t = HummockVersionId::new(0))]
+        start_id: HummockVersionId,
 
         #[clap(short, long = "num-epochs", default_value_t = 100)]
         num_epochs: u32,
@@ -120,7 +121,7 @@ enum HummockCommands {
         epoch: u64,
 
         #[clap(short, long = "table-id")]
-        table_id: u32,
+        table_id: TableId,
 
         // data directory for hummock state store. None: use default
         data_dir: Option<String>,
@@ -131,8 +132,8 @@ enum HummockCommands {
     SstDump(SstDumpArgs),
     /// trigger a targeted compaction through `compaction_group_id`
     TriggerManualCompaction {
-        #[clap(short, long = "compaction-group-id", default_value_t = 2)]
-        compaction_group_id: u64,
+        #[clap(short, long = "compaction-group-id", default_value_t = CompactionGroupId::new(2))]
+        compaction_group_id: CompactionGroupId,
 
         #[clap(short, long = "table-id", default_value_t = 0)]
         table_id: u32,
@@ -141,7 +142,7 @@ enum HummockCommands {
         level: u32,
 
         #[clap(short, long = "sst-ids", value_delimiter = ',')]
-        sst_ids: Vec<u64>,
+        sst_ids: Vec<HummockSstableId>,
     },
     /// Trigger a full GC for SSTs that is not pinned, with timestamp <= now -
     /// `sst_retention_time_sec`, and with `prefix` in path.
@@ -158,7 +159,7 @@ enum HummockCommands {
     /// Update compaction config for compaction groups.
     UpdateCompactionConfig {
         #[clap(long, value_delimiter = ',')]
-        compaction_group_ids: Vec<u64>,
+        compaction_group_ids: Vec<CompactionGroupId>,
         #[clap(long)]
         max_bytes_for_level_base: Option<u64>,
         #[clap(long)]
@@ -221,9 +222,9 @@ enum HummockCommands {
     /// Split given compaction group into two. Moves the given tables to the new group.
     SplitCompactionGroup {
         #[clap(long)]
-        compaction_group_id: u64,
+        compaction_group_id: CompactionGroupId,
         #[clap(long, value_delimiter = ',')]
-        table_ids: Vec<u32>,
+        table_ids: Vec<TableId>,
         #[clap(long, default_value_t = 0)]
         partition_vnode_count: u32,
     },
@@ -240,7 +241,7 @@ enum HummockCommands {
     },
     GetCompactionScore {
         #[clap(long)]
-        compaction_group_id: u64,
+        compaction_group_id: CompactionGroupId,
     },
     /// Validate the current `HummockVersion`.
     ValidateVersion,
@@ -272,7 +273,7 @@ enum HummockCommands {
         data_dir: String,
         /// Version deltas that are related to the SST id are printed.
         #[clap(long)]
-        sst_id: u64,
+        sst_id: HummockSstableId,
         #[clap(short, long = "use-new-object-prefix-strategy", default_value = "true")]
         use_new_object_prefix_strategy: bool,
     },
@@ -292,9 +293,9 @@ enum HummockCommands {
     },
     MergeCompactionGroup {
         #[clap(long)]
-        left_group_id: u64,
+        left_group_id: CompactionGroupId,
         #[clap(long)]
-        right_group_id: u64,
+        right_group_id: CompactionGroupId,
     },
     MigrateLegacyObject {
         url: String,
@@ -326,7 +327,7 @@ enum TableCommands {
     /// scan a state table using Id
     ScanById {
         /// id of the state table to operate on
-        table_id: u32,
+        table_id: TableId,
         // data directory for hummock state store. None: use default
         data_dir: Option<String>,
         #[clap(short, long = "use-new-object-prefix-strategy", default_value = "true")]
@@ -380,9 +381,9 @@ enum MetaCommands {
     )]
     ResumeBackfill {
         #[clap(long)]
-        job_id: Option<u32>,
+        job_id: Option<JobId>,
         #[clap(long)]
-        fragment_id: Option<u32>,
+        fragment_id: Option<FragmentId>,
     },
     /// get cluster info
     ClusterInfo,
@@ -623,12 +624,7 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
             start_id,
             num_epochs,
         }) => {
-            cmd_impl::hummock::list_version_deltas(
-                context,
-                HummockVersionId::new(start_id),
-                num_epochs,
-            )
-            .await?;
+            cmd_impl::hummock::list_version_deltas(context, start_id, num_epochs).await?;
         }
         Commands::Hummock(HummockCommands::ListKv {
             epoch,

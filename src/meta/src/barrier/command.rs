@@ -607,7 +607,7 @@ impl Command {
                                     .iter()
                                     .filter(|(actor_id, _)| {
                                         // only keep the existing actors
-                                        !reschedule.newly_created_actors.contains_key(actor_id)
+                                        !reschedule.newly_created_actors.contains_key(*actor_id)
                                     })
                                     .map(|(actor_id, bitmap)| (*actor_id, bitmap.clone()))
                                     .collect(),

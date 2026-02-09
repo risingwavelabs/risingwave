@@ -167,3 +167,46 @@
                         └─StreamLocalityProvider { locality_columns: [t.p1] }
                           └─StreamExchange { dist: HashShard(t.p1) }
                             └─StreamTableScan { table: t, columns: [t.id, t.p1, t.p2, t.time, t.v1, t.v2, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+- sql: |
+    set enable_locality_backfill = true;
+    create table t (a int, b int, c int);
+    select
+      max(num) as max_num
+    from (
+      select
+        count(*) as num, a, b
+      from t
+      group by a, b
+    )
+    group by a;
+  stream_plan: |-
+    StreamMaterialize { columns: [max_num, t.a(hidden)], stream_key: [t.a], pk_columns: [t.a], pk_conflict: NoCheck }
+    └─StreamProject { exprs: [max(count), t.a] }
+      └─StreamHashAgg { group_key: [t.a], aggs: [max(count), count] }
+        └─StreamExchange { dist: HashShard(t.a) }
+          └─StreamHashAgg { group_key: [t.a, t.b], aggs: [count] }
+            └─StreamLocalityProvider { locality_columns: [t.a, t.b] }
+              └─StreamExchange { dist: HashShard(t.a, t.b) }
+                └─StreamTableScan { table: t, columns: [t.a, t.b, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+- sql: |
+    set enable_locality_backfill = true;
+    create table t (a int, b int, c int);
+    select
+      max(num) as max_num
+    from (
+      select
+        count(*) as num, a, b
+      from t
+      group by a, b
+    )
+    group by b;
+  stream_plan: |-
+    StreamMaterialize { columns: [max_num, t.b(hidden)], stream_key: [t.b], pk_columns: [t.b], pk_conflict: NoCheck }
+    └─StreamProject { exprs: [max(count), t.b] }
+      └─StreamHashAgg { group_key: [t.b], aggs: [max(count), count] }
+        └─StreamLocalityProvider { locality_columns: [t.b] }
+          └─StreamExchange { dist: HashShard(t.b) }
+            └─StreamHashAgg { group_key: [t.a, t.b], aggs: [count] }
+              └─StreamLocalityProvider { locality_columns: [t.a, t.b] }
+                └─StreamExchange { dist: HashShard(t.a, t.b) }
+                  └─StreamTableScan { table: t, columns: [t.a, t.b, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }

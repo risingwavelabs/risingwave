@@ -22,7 +22,6 @@ use risingwave_common::catalog::{
     AlterDatabaseParam, CatalogVersion, FunctionId, IndexId, ObjectId,
 };
 use risingwave_common::id::{ConnectionId, JobId, SchemaId, SourceId, ViewId};
-use risingwave_hummock_sdk::HummockVersionId;
 use risingwave_pb::catalog::{
     PbComment, PbCreateType, PbDatabase, PbFunction, PbIndex, PbSchema, PbSink, PbSource,
     PbSubscription, PbTable, PbView,
@@ -201,7 +200,7 @@ pub trait CatalogWriter: Send + Sync {
 
     async fn drop_connection(&self, connection_id: ConnectionId, cascade: bool) -> Result<()>;
 
-    async fn drop_secret(&self, secret_id: SecretId) -> Result<()>;
+    async fn drop_secret(&self, secret_id: SecretId, cascade: bool) -> Result<()>;
 
     async fn alter_secret(
         &self,
@@ -589,8 +588,8 @@ impl CatalogWriter for CatalogWriterImpl {
         self.wait_version(version).await
     }
 
-    async fn drop_secret(&self, secret_id: SecretId) -> Result<()> {
-        let version = self.meta_client.drop_secret(secret_id).await?;
+    async fn drop_secret(&self, secret_id: SecretId, cascade: bool) -> Result<()> {
+        let version = self.meta_client.drop_secret(secret_id, cascade).await?;
         self.wait_version(version).await
     }
 
@@ -742,7 +741,7 @@ impl CatalogWriterImpl {
             rx.changed().await.map_err(|e| anyhow!(e))?;
         }
         self.hummock_snapshot_manager
-            .wait(HummockVersionId::new(version.hummock_version_id))
+            .wait(version.hummock_version_id)
             .await;
         Ok(())
     }
