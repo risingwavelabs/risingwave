@@ -43,7 +43,7 @@ use risingwave_pb::catalog::{
     PbComment, PbDatabase, PbFunction, PbIndex, PbSchema, PbSink, PbSource, PbStreamJobStatus,
     PbSubscription, PbTable, PbView, Table,
 };
-use risingwave_pb::common::WorkerNode;
+use risingwave_pb::common::{PbObjectType, WorkerNode};
 use risingwave_pb::ddl_service::alter_owner_request::Object;
 use risingwave_pb::ddl_service::create_iceberg_table_request::{PbSinkJobInfo, PbTableJobInfo};
 use risingwave_pb::ddl_service::{
@@ -56,7 +56,6 @@ use risingwave_pb::hummock::{
 };
 use risingwave_pb::id::ActorId;
 use risingwave_pb::meta::cancel_creating_jobs_request::PbJobs;
-use risingwave_pb::meta::ObjectDependency as PbObjectDependency;
 use risingwave_pb::meta::list_actor_splits_response::ActorSplit;
 use risingwave_pb::meta::list_actor_states_response::ActorState;
 use risingwave_pb::meta::list_cdc_progress_response::PbCdcProgress;
@@ -66,15 +65,15 @@ use risingwave_pb::meta::list_refresh_table_states_response::RefreshTableState;
 use risingwave_pb::meta::list_streaming_job_states_response::StreamingJobState;
 use risingwave_pb::meta::list_table_fragments_response::TableFragmentInfo;
 use risingwave_pb::meta::{
-    EventLog, FragmentDistribution, PbTableParallelism, PbThrottleTarget, RecoveryStatus,
-    RefreshRequest, RefreshResponse, SystemParams, list_sink_log_store_tables_response,
+    EventLog, FragmentDistribution, ObjectDependency as PbObjectDependency, PbTableParallelism,
+    PbThrottleTarget, RecoveryStatus, RefreshRequest, RefreshResponse, SystemParams,
+    list_sink_log_store_tables_response,
 };
 use risingwave_pb::secret::PbSecretRef;
 use risingwave_pb::stream_plan::StreamFragmentGraph;
 use risingwave_pb::user::alter_default_privilege_request::Operation as AlterDefaultPrivilegeOperation;
 use risingwave_pb::user::update_user_request::UpdateField;
 use risingwave_pb::user::{GrantPrivilege, UserInfo};
-use risingwave_pb::common::PbObjectType;
 use risingwave_rpc_client::error::Result as RpcResult;
 use tempfile::{Builder, NamedTempFile};
 
@@ -966,7 +965,9 @@ impl MockCatalogWriter {
                 referenced_object_type: self.get_object_type(referenced_object_id) as i32,
             })
             .collect();
-        self.catalog.write().insert_object_dependencies(dependencies);
+        self.catalog
+            .write()
+            .insert_object_dependencies(dependencies);
     }
 }
 
