@@ -135,6 +135,8 @@ impl RescheduleContext {
     pub fn for_database(&self, database_id: DatabaseId) -> Option<Self> {
         let loaded = self.loaded.for_database(database_id)?;
         let job_ids: HashSet<JobId> = loaded.job_map.keys().copied().collect();
+        // Use the filtered loaded context as the source of truth so every side map is pruned by
+        // the same fragment set.
         let fragment_ids: HashSet<FragmentId> = loaded
             .job_fragments
             .values()
@@ -165,6 +167,9 @@ impl RescheduleContext {
         let downstream_relations = self
             .downstream_relations
             .iter()
+            // Ownership of this map is source-fragment based. We keep all downstream edges for
+            // selected sources because the target side can still be referenced during dispatcher
+            // reconstruction even if that target fragment is not being rescheduled.
             .filter(|((source_fragment_id, _), _)| fragment_ids.contains(source_fragment_id))
             .map(|(key, relation)| (*key, relation.clone()))
             .collect();
