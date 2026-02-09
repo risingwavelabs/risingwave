@@ -12417,7 +12417,6 @@ dependencies = [
  "pbjson-build",
  "prost 0.13.4",
  "prost-build 0.13.4",
- "prost-derive 0.13.4",
  "prost-helpers",
  "risingwave_error",
  "sea-orm",

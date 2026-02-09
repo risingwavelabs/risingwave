@@ -12,8 +12,6 @@ enum-as-inner = "0.6"
 paste = "1"
 pbjson = "0.9"
 prost = { workspace = true }
-prost-build = { workspace = true }
-prost-derive = { workspace = true }
 prost-helpers = { path = "helpers" }
 risingwave_error = { workspace = true }
 sea-orm  = { workspace = true }
