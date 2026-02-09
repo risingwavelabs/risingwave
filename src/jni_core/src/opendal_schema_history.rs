@@ -22,6 +22,7 @@ use risingwave_common::config::ObjectStoreConfig;
 use risingwave_common::{DATA_DIRECTORY, STATE_STORE_URL};
 use risingwave_object_store::object::object_metrics::GLOBAL_OBJECT_STORE_METRICS;
 use risingwave_object_store::object::{ObjectError, ObjectStoreImpl, build_remote_object_store};
+use thiserror_ext::AsReport;
 use tokio::sync::OnceCell;
 
 use crate::{EnvParam, JAVA_BINDING_ASYNC_RUNTIME, execute_and_catch, to_guarded_slice};
@@ -43,11 +44,11 @@ fn put_object_total_timeout() -> Option<Duration> {
                 Ok(ms) => ms,
                 Err(e) => {
                     tracing::warn!(
-                        "Invalid {}={:?} ({}), falling back to default {}ms",
+                        error = %e.as_report(),
+                        value = %v,
+                        "Invalid {}, falling back to default {}ms",
                         PUT_OBJECT_TOTAL_TIMEOUT_ENV,
-                        v,
-                        e,
-                        DEFAULT_PUT_OBJECT_TOTAL_TIMEOUT_MS
+                        DEFAULT_PUT_OBJECT_TOTAL_TIMEOUT_MS,
                     );
                     DEFAULT_PUT_OBJECT_TOTAL_TIMEOUT_MS
                 }
