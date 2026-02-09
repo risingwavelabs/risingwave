@@ -164,10 +164,13 @@ impl HummockManager {
                 (group_2, group_1)
             };
 
-        // We can only merge two groups with non-overlapping member table ids
+        // We can only merge two groups with non-overlapping member table ids.
+        // After the swap above, member_table_ids_1 has the smaller first element.
+        // If the last element of member_table_ids_1 >= the first element of member_table_ids_2,
+        // the two groups' table id ranges overlap and cannot be merged.
         if member_table_ids_1.last().unwrap() >= member_table_ids_2.first().unwrap() {
             return Err(Error::CompactionGroup(format!(
-                "invalid merge group_1 {} group_2 {}",
+                "invalid merge group_1 {} group_2 {}: table id ranges overlap",
                 left_group_id, right_group_id
             )));
         }
@@ -893,10 +896,11 @@ impl HummockManager {
         )
         .await?;
 
-        match self
+        let result = self
             .merge_compaction_group(group.group_id, next_group.group_id)
-            .await
-        {
+            .await;
+
+        match &result {
             Ok(()) => {
                 tracing::info!(
                     "merge group-{} to group-{}",
@@ -915,11 +919,11 @@ impl HummockManager {
                     "failed to merge group-{} group-{}",
                     next_group.group_id,
                     group.group_id,
-                )
+                );
             }
         }
 
-        Ok(())
+        result
     }
 }
 
@@ -1032,6 +1036,33 @@ impl GroupMergeValidator {
                 "group-{} or group-{} is empty",
                 group.group_id, next_group.group_id
             )));
+        }
+
+        // Check non-overlapping table ids early to avoid acquiring heavyweight write locks
+        // in merge_compaction_group_impl only to fail at the overlap check.
+        // Sort both sides and ensure table_ids_1 has the smaller first element,
+        // then reject if table_ids_1's last element >= table_ids_2's first element (overlap).
+        {
+            let mut table_ids_1: Vec<TableId> = group.table_statistic.keys().cloned().collect_vec();
+            let mut table_ids_2: Vec<TableId> =
+                next_group.table_statistic.keys().cloned().collect_vec();
+            table_ids_1.sort();
+            table_ids_2.sort();
+            if table_ids_1.is_empty() || table_ids_2.is_empty() {
+                return Err(Error::CompactionGroup(format!(
+                    "group-{} or group-{} has empty table ids",
+                    group.group_id, next_group.group_id
+                )));
+            }
+            if table_ids_1.first().unwrap() > table_ids_2.first().unwrap() {
+                std::mem::swap(&mut table_ids_1, &mut table_ids_2);
+            }
+            if table_ids_1.last().unwrap() >= table_ids_2.first().unwrap() {
+                return Err(Error::CompactionGroup(format!(
+                    "group-{} and group-{} have overlapping table id ranges, not mergeable",
+                    group.group_id, next_group.group_id
+                )));
+            }
         }
 
         if group
