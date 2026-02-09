@@ -27,7 +27,7 @@ use risingwave_common::array::arrow::arrow_schema_iceberg::DataType as ArrowData
 use risingwave_common::bail;
 use risingwave_common::catalog::{
     ColumnCatalog, ICEBERG_SINK_PREFIX, ObjectId, RISINGWAVE_ICEBERG_ROW_ID, ROW_ID_COLUMN_NAME,
-    Schema, UserId,
+    Schema,
 };
 use risingwave_common::license::Feature;
 use risingwave_common::secret::LocalSecretManager;
