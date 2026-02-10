@@ -20,6 +20,9 @@ use risingwave_common::id::TableId;
 use risingwave_common::types::{Fields, JsonbVal};
 use risingwave_frontend_macro::system_catalog;
 use risingwave_hummock_sdk::version::HummockVersion;
+use risingwave_pb::id::{
+    CompactionGroupId, HummockSstableId, HummockSstableObjectId, HummockVersionId,
+};
 use serde_json::json;
 
 use crate::catalog::system_catalog::SysCatalogReaderImpl;
@@ -28,16 +31,16 @@ use crate::error::Result;
 #[derive(Fields)]
 struct RwHummockVersion {
     #[primary_key]
-    version_id: i64,
+    version_id: HummockVersionId,
     compaction_group: JsonbVal,
 }
 
 #[derive(Fields)]
 struct RwHummockSstable {
     #[primary_key]
-    sstable_id: i64,
-    object_id: i64,
-    compaction_group_id: i64,
+    sstable_id: HummockSstableId,
+    object_id: HummockSstableObjectId,
+    compaction_group_id: CompactionGroupId,
     level_id: i32,
     sub_level_id: Option<i64>,
     level_type: i32,
@@ -100,7 +103,7 @@ fn version_to_compaction_group_rows(version: &HummockVersion) -> Vec<RwHummockVe
         .levels
         .values()
         .map(|cg| RwHummockVersion {
-            version_id: version.id.to_u64() as _,
+            version_id: version.id,
             compaction_group: json!(cg.to_protobuf()).into(),
         })
         .collect()
@@ -113,9 +116,9 @@ fn version_to_sstable_rows(version: HummockVersion) -> Vec<RwHummockSstable> {
             for sst in level.table_infos {
                 let key_range = sst.key_range.clone();
                 sstables.push(RwHummockSstable {
-                    sstable_id: sst.sst_id.inner() as _,
-                    object_id: sst.object_id.inner() as _,
-                    compaction_group_id: cg.group_id as _,
+                    sstable_id: sst.sst_id,
+                    object_id: sst.object_id,
+                    compaction_group_id: cg.group_id,
                     level_id: level.level_idx as _,
                     sub_level_id: (level.level_idx == 0).then_some(level.sub_level_id as _),
                     level_type: level.level_type as _,

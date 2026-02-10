@@ -221,7 +221,7 @@ impl FilterKeyExtractor for MultiFilterKeyExtractor {
             return full_key;
         }
 
-        let table_id = get_table_id(full_key).into();
+        let table_id = get_table_id(full_key);
         self.id_to_filter_key_extractor
             .get(&table_id)
             .unwrap()
