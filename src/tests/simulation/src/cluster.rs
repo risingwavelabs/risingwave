@@ -222,6 +222,8 @@ metrics_level = "Disabled"
                 "create view if not exists mview_parallelism as select m.name, tf.parallelism from rw_materialized_views m, rw_table_fragments tf where m.id = tf.table_id;".into(),
                 "set streaming_parallelism_strategy_for_table = 'DEFAULT'".into(),
                 "set streaming_parallelism_strategy_for_source = 'DEFAULT'".into(),
+                // Note: MV strategy is not set to DEFAULT here because tests using this config
+                // explicitly override it to test different strategies (e.g., FULL, BOUNDED).
             ]
                 .into(),
             ..Default::default()
