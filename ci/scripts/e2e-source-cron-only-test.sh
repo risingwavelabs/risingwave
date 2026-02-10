@@ -36,7 +36,7 @@ python3 -m pip install --break-system-packages -r ./e2e_test/requirements.txt
 
 echo "--- e2e, cron_only inline source tests"
 RUST_LOG="debug,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info,risingwave_meta=info" \
-risedev ci-start ci-inline-source-test
+risedev ci-start ci-inline-source-cron-only-test
 
 echo "--- Run cron_only source inline tests"
 risedev slt './e2e_test/source_inline/**/cron_only/**/*.slt' -j4

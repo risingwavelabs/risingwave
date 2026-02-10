@@ -845,6 +845,30 @@ profile:
         password: post\tgres
         user-managed: true
 
+  # Minimal configuration for cron_only source tests (only Kafka)
+  ci-inline-source-cron-only-test:
+    config-path: src/config/ci-recovery.toml
+    steps:
+      - use: minio
+      - use: meta-node
+        meta-backend: env
+      - use: compute-node
+        enable-tiered-cache: true
+      - use: frontend
+      - use: compactor
+      - use: pubsub
+        persist-data: true
+      - use: kafka
+        user-managed: true
+        address: message_queue
+        port: 29092
+      - use: postgres
+        port: 5432
+        address: db
+        user: postgres
+        password: post\tgres
+        user-managed: true
+
   ci-redis:
     config-path: src/config/ci.toml
     steps:
