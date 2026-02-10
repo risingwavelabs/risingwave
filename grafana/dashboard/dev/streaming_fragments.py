@@ -41,6 +41,9 @@ def _(outer_panels: Panels):
     scheduled_duration_expr = (
         f"{scheduled_duration_rate_expr} / on(fragment_id) {actor_count_expr} / 1000000000"
     )
+    channel_buffered_bytes_expr = (
+        f"sum({metric('stream_actor_channel_buffered_bytes')}) by (fragment_id)"
+    )
     return [
         outer_panels.row_collapsed(
             "Streaming Fragments",
@@ -113,6 +116,16 @@ def _(outer_panels: Panels):
                     dict.fromkeys(["Time", "fragment_id"], True),
                     {"Value": "rate"},
                     {"rate": "percent"},
+                ),
+                panels.timeseries_bytes(
+                    "Actor Channel Buffered Bytes",
+                    "Estimated buffered bytes for actor channels per fragment.",
+                    [
+                        panels.target(
+                            f"{channel_buffered_bytes_expr}",
+                            "fragment {{fragment_id}}",
+                        ),
+                    ],
                 ),
                 panels.subheader("Busy Rate (IO + CPU Usage) by Fragment"),
                 panels.timeseries_percentage(
