@@ -146,6 +146,12 @@ impl Configuration {
             meta_nodes: 1,
             compactor_nodes: 2,
             compute_node_cores: 2,
+            per_session_queries: vec![
+                "set streaming_parallelism_strategy_for_table = 'DEFAULT'".into(),
+                "set streaming_parallelism_strategy_for_source = 'DEFAULT'".into(),
+                "set streaming_parallelism_strategy_for_materialized_view = 'DEFAULT'".into(),
+            ]
+            .into(),
             ..Default::default()
         }
     }
@@ -154,11 +160,10 @@ impl Configuration {
     /// so table scan will use `no_shuffle`.
     pub fn for_scale_no_shuffle() -> Self {
         let mut conf = Self::for_scale();
-        conf.per_session_queries = vec![
-            "SET STREAMING_USE_ARRANGEMENT_BACKFILL = false;".into(),
-            "SET STREAMING_USE_SNAPSHOT_BACKFILL = false;".into(),
-        ]
-        .into();
+        let mut per_session_queries = (*conf.per_session_queries).clone();
+        per_session_queries.push("SET STREAMING_USE_ARRANGEMENT_BACKFILL = false;".into());
+        per_session_queries.push("SET STREAMING_USE_SNAPSHOT_BACKFILL = false;".into());
+        conf.per_session_queries = per_session_queries.into();
         conf
     }
 

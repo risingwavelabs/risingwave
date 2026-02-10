@@ -32,19 +32,3 @@ mod singleton_migration;
 mod sink;
 mod streaming_parallelism;
 mod table;
-
-use anyhow::Result;
-use risingwave_simulation::cluster::{Cluster, Configuration};
-
-const SET_TABLE_STRATEGY_DEFAULT: &str = "set streaming_parallelism_strategy_for_table = 'DEFAULT'";
-
-fn with_per_session_query(mut config: Configuration, query: &str) -> Configuration {
-    let mut per_session_queries = (*config.per_session_queries).clone();
-    per_session_queries.push(query.to_owned());
-    config.per_session_queries = per_session_queries.into();
-    config
-}
-
-pub fn with_default_table_strategy(config: Configuration) -> Configuration {
-    with_per_session_query(config, SET_TABLE_STRATEGY_DEFAULT)
-}
