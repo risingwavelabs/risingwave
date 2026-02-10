@@ -23,7 +23,7 @@ use risingwave_pb::stream_plan::DispatcherType;
 use risingwave_simulation::cluster::{Cluster, Configuration};
 use risingwave_simulation::ctl_ext::predicate::{identity_contains, no_identity_contains};
 
-use super::start_scale_session_with_source_default;
+
 
 const CREATE_SOURCE: &str = r#"
 CREATE SOURCE s(v1 int, v2 varchar) WITH (
@@ -115,7 +115,7 @@ async fn test_shared_source() -> Result<()> {
     cluster.create_kafka_topics(convert_args!(hashmap!(
         "shared_source" => 4,
     )));
-    let mut session = start_scale_session_with_source_default(&mut cluster).await?;
+    let mut session = cluster.start_session();
     session.run("set rw_implicit_flush = true;").await?;
 
     session.run(CREATE_SOURCE).await?;
@@ -194,7 +194,7 @@ async fn test_issue_19563() -> Result<()> {
     cluster.create_kafka_topics(convert_args!(hashmap!(
         "shared_source" => 4,
     )));
-    let mut session = start_scale_session_with_source_default(&mut cluster).await?;
+    let mut session = cluster.start_session();
     session.run("set rw_implicit_flush = true;").await?;
 
     session

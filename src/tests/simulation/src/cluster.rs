@@ -146,6 +146,12 @@ impl Configuration {
             meta_nodes: 1,
             compactor_nodes: 2,
             compute_node_cores: 2,
+            per_session_queries: vec![
+                "set streaming_parallelism_strategy_for_table = 'DEFAULT'".into(),
+                "set streaming_parallelism_strategy_for_source = 'DEFAULT'".into(),
+                "set streaming_parallelism_strategy_for_materialized_view = 'DEFAULT'".into(),
+            ]
+            .into(),
             ..Default::default()
         }
     }
@@ -154,17 +160,21 @@ impl Configuration {
     /// so table scan will use `no_shuffle`.
     pub fn for_scale_no_shuffle() -> Self {
         let mut conf = Self::for_scale();
-        conf.per_session_queries = vec![
-            "SET STREAMING_USE_ARRANGEMENT_BACKFILL = false;".into(),
-            "SET STREAMING_USE_SNAPSHOT_BACKFILL = false;".into(),
-        ]
-        .into();
+        let mut per_session_queries = (*conf.per_session_queries).clone();
+        per_session_queries.push("SET STREAMING_USE_ARRANGEMENT_BACKFILL = false;".into());
+        per_session_queries.push("SET STREAMING_USE_SNAPSHOT_BACKFILL = false;".into());
+        conf.per_session_queries = per_session_queries.into();
         conf
     }
 
     pub fn for_scale_shared_source() -> Self {
         let mut conf = Self::for_scale();
-        conf.per_session_queries = vec!["SET STREAMING_USE_SHARED_SOURCE = true;".into()].into();
+        conf.per_session_queries = vec![
+            "SET STREAMING_USE_SHARED_SOURCE = true;".into(),
+            "set streaming_parallelism_strategy_for_table = 'DEFAULT'".into(),
+            "set streaming_parallelism_strategy_for_source = 'DEFAULT'".into(),
+            "set streaming_parallelism_strategy_for_materialized_view = 'DEFAULT'".into(),
+        ].into();
         conf
     }
 
@@ -210,6 +220,10 @@ metrics_level = "Disabled"
             per_session_queries: vec![
                 "create view if not exists table_parallelism as select t.name, tf.parallelism from rw_tables t, rw_table_fragments tf where t.id = tf.table_id;".into(),
                 "create view if not exists mview_parallelism as select m.name, tf.parallelism from rw_materialized_views m, rw_table_fragments tf where m.id = tf.table_id;".into(),
+                "set streaming_parallelism_strategy_for_table = 'DEFAULT'".into(),
+                "set streaming_parallelism_strategy_for_source = 'DEFAULT'".into(),
+                // Note: MV strategy is not set to DEFAULT here because tests using this config
+                // explicitly override it to test different strategies (e.g., FULL, BOUNDED).
             ]
                 .into(),
             ..Default::default()
