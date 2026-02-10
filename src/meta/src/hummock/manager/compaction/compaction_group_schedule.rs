@@ -1048,12 +1048,6 @@ impl GroupMergeValidator {
                 next_group.table_statistic.keys().cloned().collect_vec();
             table_ids_1.sort();
             table_ids_2.sort();
-            if table_ids_1.is_empty() || table_ids_2.is_empty() {
-                return Err(Error::CompactionGroup(format!(
-                    "group-{} or group-{} has empty table ids",
-                    group.group_id, next_group.group_id
-                )));
-            }
             if table_ids_1.first().unwrap() > table_ids_2.first().unwrap() {
                 std::mem::swap(&mut table_ids_1, &mut table_ids_2);
             }

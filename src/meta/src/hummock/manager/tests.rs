@@ -2625,17 +2625,10 @@ async fn test_vacuum() {
     assert_eq!(deleted, 3);
 }
 
-/// Regression test: `try_merge_compaction_group` must propagate errors from
-/// `merge_compaction_group` back to the caller. Before the fix, errors were
-/// swallowed (always returned `Ok(())`), causing the timer task's merge
-/// scheduling loop (`on_handle_schedule_group_merge`) to incorrectly advance
-/// its right pointer (`right += 1`) instead of moving the left pointer forward
-/// (`left = right; right = left + 1`). This led to infinite retries of the
-/// same unmergeable pair and 167K+ error log spam.
-///
-/// The test creates two groups with overlapping table ID ranges (which makes
-/// them unmergeable) and verifies that `try_merge_compaction_group` returns
-/// `Err`, ensuring the caller can correctly advance its scan position.
+/// Regression test: `try_merge_compaction_group` must return `Err` for groups
+/// with overlapping table ID ranges. Before the fix, errors were swallowed
+/// (always returned `Ok(())`), causing the merge scheduling loop to retry
+/// the same unmergeable pair infinitely (167K+ error log spam).
 #[tokio::test]
 async fn test_try_merge_compaction_group_error_propagation() {
     let (_env, hummock_manager, _, worker_id) = setup_compute_env(80).await;
@@ -2644,9 +2637,7 @@ async fn test_try_merge_compaction_group_error_propagation() {
         worker_id as _,
     ));
 
-    // Register tables to create overlapping ranges across groups:
-    //   StateDefault(2): [100, 102]
-    //   MaterializedView(3): [101, 200]
+    // StateDefault(2): [100, 102], MaterializedView(3): [101, 200]
     hummock_manager
         .register_table_ids_for_test(&[(100, 2.into()), (102, 2.into())])
         .await
@@ -2670,14 +2661,8 @@ async fn test_try_merge_compaction_group_error_propagation() {
         .await
         .unwrap();
 
-    // Split table [101] out of MaterializedView(3) into a dynamic group.
-    // Before: MV(3) = [101, 200]
-    // After:  MV(3) = [200], Group_X = [101]
-    //
-    // Now StateDefault(2) = [100, 102] and Group_X = [101] have overlapping
-    // table ID ranges: last(100,102)=102 >= first(101)=101.
-    // These groups originated from different parents (StateDefault vs MV),
-    // which is the real-world scenario that triggers the bug.
+    // Split table 101 out of MV(3) → Group_X = [101].
+    // Now StateDefault(2)=[100,102] and Group_X=[101] have overlapping table ID ranges.
     hummock_manager
         .move_state_tables_to_dedicated_compaction_group(
             StaticCompactionGroupId::MaterializedView,
@@ -2687,11 +2672,10 @@ async fn test_try_merge_compaction_group_error_propagation() {
         .await
         .unwrap();
 
-    let state_default_id: CompactionGroupId = StaticCompactionGroupId::StateDefault.into();
+    let state_default_id: CompactionGroupId = StaticCompactionGroupId::StateDefault;
     let group_x_id = get_compaction_group_id_by_table_id(hummock_manager.clone(), 101).await;
     assert_ne!(state_default_id, group_x_id);
 
-    // Build CompactionGroupStatistic for both groups
     let group_infos = hummock_manager.calculate_compaction_group_statistic().await;
     let sd_stat = group_infos
         .iter()
@@ -2702,15 +2686,11 @@ async fn test_try_merge_compaction_group_error_propagation() {
         .find(|g| g.group_id == group_x_id)
         .unwrap();
 
-    // Empty throughput manager — no throughput data means all tables are
-    // considered low-throughput, so the throughput check won't block the merge.
     let throughput_manager = TableWriteThroughputStatisticManager::new(100);
     let created_tables: HashSet<TableId> =
         HashSet::from_iter(vec![100.into(), 101.into(), 102.into(), 200.into()]);
 
-    // Critical assertion: try_merge_compaction_group MUST return Err for
-    // groups whose table ID ranges overlap. This guards against regression
-    // of the bug where the error was swallowed.
+    // Must return Err for overlapping groups — guards against the swallowed-error regression.
     let result = hummock_manager
         .try_merge_compaction_group(&throughput_manager, sd_stat, gx_stat, &created_tables)
         .await;
