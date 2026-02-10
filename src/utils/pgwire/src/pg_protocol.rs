@@ -1649,5 +1649,10 @@ mod tests {
             parse_options("-c a=1 --b=2").unwrap(),
             vec![("a".into(), "1".into()), ("b".into(), "2".into())]
         );
+        // Unpaired trailing backslash is silently dropped, same as PostgreSQL
+        assert_eq!(
+            parse_options(r#"-c a=b\"#).unwrap(),
+            vec![("a".into(), "b".into())]
+        );
     }
 }
