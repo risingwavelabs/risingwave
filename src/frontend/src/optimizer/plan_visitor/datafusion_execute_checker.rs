@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use crate::optimizer::plan_node::{Logical, PlanTreeNode};
-use crate::optimizer::plan_visitor::{DefaultValue, LogicalPlanVisitor};
+use crate::optimizer::plan_visitor::{DefaultBehavior, LogicalPlanVisitor, Merge};
 use crate::optimizer::{LogicalPlanRef, PlanVisitor};
 
 /// Visitor to check if this plan can be executed by DataFusion.
@@ -24,6 +24,15 @@ struct DataFusionExecuteChecker;
 pub struct CheckResult {
     pub supported: bool,
     pub have_iceberg_scan: bool,
+}
+
+impl CheckResult {
+    fn merge(self, other: Self) -> Self {
+        CheckResult {
+            supported: self.supported && other.supported,
+            have_iceberg_scan: self.have_iceberg_scan || other.have_iceberg_scan,
+        }
+    }
 }
 
 impl DataFusionExecuteChecker {
@@ -38,21 +47,18 @@ impl DataFusionExecuteChecker {
                     supported: true,
                     have_iceberg_scan: false,
                 },
-                |mut acc, item| {
-                    acc.supported &= item.supported;
-                    acc.have_iceberg_scan |= item.have_iceberg_scan;
-                    acc
-                },
+                CheckResult::merge,
             )
     }
 }
 
 impl LogicalPlanVisitor for DataFusionExecuteChecker {
-    type DefaultBehavior = DefaultValue;
     type Result = CheckResult;
 
+    type DefaultBehavior = impl DefaultBehavior<Self::Result>;
+
     fn default_behavior() -> Self::DefaultBehavior {
-        DefaultValue
+        Merge(CheckResult::merge)
     }
 
     fn visit_logical_agg(

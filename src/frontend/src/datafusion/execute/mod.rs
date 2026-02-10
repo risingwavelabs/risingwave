@@ -28,15 +28,17 @@ use risingwave_common::array::DataChunk;
 use risingwave_common::array::arrow::IcebergArrowConvert;
 use risingwave_common::catalog::Schema as RwSchema;
 use risingwave_common::error::BoxedError;
+use thiserror::Error;
 use tokio::sync::mpsc;
 
 use crate::PgResponseStream;
 use crate::datafusion::CastExecutor;
 use crate::datafusion::execute::memory_ctx::RwMemoryPool;
 use crate::datafusion::execute::query_planner::RwCustomQueryPlanner;
-use crate::error::Result as RwResult;
+use crate::error::{Result as RwResult, RwError};
 use crate::handler::RwPgResponse;
 use crate::handler::util::{DataChunkToRowSetAdapter, to_pg_field};
+use crate::optimizer::BatchOptimizedLogicalPlanRoot;
 use crate::scheduler::SchedulerError;
 use crate::session::SessionImpl;
 use crate::utils::DropGuard;
@@ -49,6 +51,35 @@ pub struct DfBatchQueryPlanResult {
     pub(crate) plan: Arc<LogicalPlan>,
     pub(crate) schema: RwSchema,
     pub(crate) stmt_type: StatementType,
+}
+
+#[derive(Debug, Error)]
+pub enum GenDataFusionPlanError {
+    #[error("Missing Iceberg Scan")]
+    MissingIcebergScan,
+    #[error("Unsupported Plan Node")]
+    UnsupportedPlanNode,
+    #[error("Generating plan error: {0}")]
+    Generating(RwError),
+}
+
+pub fn try_gen_datafusion_plan(
+    optimized_logical: &BatchOptimizedLogicalPlanRoot,
+) -> Result<Arc<LogicalPlan>, GenDataFusionPlanError> {
+    use crate::optimizer::DataFusionExecuteCheckerExt;
+
+    let check_result = optimized_logical.plan.check_for_datafusion();
+    if !check_result.have_iceberg_scan {
+        return Err(GenDataFusionPlanError::MissingIcebergScan);
+    }
+    if !check_result.supported {
+        return Err(GenDataFusionPlanError::UnsupportedPlanNode);
+    }
+
+    let plan = optimized_logical
+        .gen_datafusion_logical_plan()
+        .map_err(GenDataFusionPlanError::Generating)?;
+    Ok(plan)
 }
 
 pub fn create_datafusion_context(session: &SessionImpl) -> RwResult<DFSessionContext> {
