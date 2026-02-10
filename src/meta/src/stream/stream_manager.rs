@@ -44,6 +44,7 @@ use crate::barrier::{
 };
 use crate::controller::catalog::DropTableConnectorContext;
 use crate::controller::fragment::{InflightActorInfo, InflightFragmentInfo};
+use crate::controller::scale::find_fragment_no_shuffle_dags_detailed;
 use crate::error::bail_invalid_parameter;
 use crate::manager::{
     ActiveStreamingWorkerNodes, MetaSrvEnv, MetadataManager, NotificationVersion, StreamingJob,
@@ -740,14 +741,14 @@ impl GlobalStreamManager {
             .await?;
 
         if !background_jobs.is_empty() {
-            let unreschedulable = self
+            let blocked_jobs = self
                 .metadata_manager
-                .collect_unreschedulable_backfill_jobs(&background_jobs, !deferred)
+                .collect_unreschedulable_backfill_related_jobs(&background_jobs, !deferred)
                 .await?;
 
-            if unreschedulable.contains(&job_id) {
+            if blocked_jobs.contains(&job_id) {
                 bail!(
-                    "Cannot alter the job {} because it is a non-reschedulable background backfill job",
+                    "Cannot alter the job {} because it is blocked by a non-reschedulable background backfill dependency",
                     job_id,
                 );
             }
@@ -859,8 +860,57 @@ impl GlobalStreamManager {
 
         let _reschedule_job_lock = self.reschedule_lock_write_guard().await;
 
+        let blocked_jobs = {
+            let background_jobs = self
+                .metadata_manager
+                .list_background_creating_jobs()
+                .await?;
+            if background_jobs.is_empty() {
+                HashSet::new()
+            } else {
+                self.metadata_manager
+                    .collect_unreschedulable_backfill_related_jobs(&background_jobs, true)
+                    .await?
+            }
+        };
+
         let active_workers =
             ActiveStreamingWorkerNodes::new_snapshot(self.metadata_manager.clone()).await?;
+
+        let requested_fragment_ids: Vec<_> = fragment_targets.keys().copied().collect();
+
+        if !blocked_jobs.is_empty() {
+            let no_shuffle_related_fragment_ids = {
+                let inner = self.metadata_manager.catalog_controller.inner.read().await;
+                find_fragment_no_shuffle_dags_detailed(&inner.db, &requested_fragment_ids)
+                    .await?
+                    .into_iter()
+                    .flat_map(|ensemble| ensemble.component_fragments().collect_vec())
+                    .collect::<HashSet<_>>()
+            };
+
+            if !no_shuffle_related_fragment_ids.is_empty() {
+                let fragment_job_mapping = self
+                    .metadata_manager
+                    .catalog_controller
+                    .fragment_job_mapping()
+                    .await?;
+
+                let blocked_reschedule_jobs = no_shuffle_related_fragment_ids
+                    .iter()
+                    .filter_map(|fragment_id| fragment_job_mapping.get(fragment_id))
+                    .copied()
+                    .filter(|job_id| blocked_jobs.contains(job_id))
+                    .collect::<HashSet<_>>();
+
+                if !blocked_reschedule_jobs.is_empty() {
+                    bail!(
+                        "Cannot alter fragments because jobs {:?} are blocked by non-reschedulable background backfill dependencies",
+                        blocked_reschedule_jobs
+                    );
+                }
+            }
+        }
 
         let fragment_policy = fragment_targets
             .into_iter()

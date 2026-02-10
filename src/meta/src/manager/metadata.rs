@@ -20,7 +20,7 @@ use itertools::Itertools;
 use risingwave_common::catalog::{DatabaseId, TableId, TableOption};
 use risingwave_common::id::JobId;
 use risingwave_meta_model::refresh_job::{self, RefreshState};
-use risingwave_meta_model::{SinkId, SourceId, WorkerId};
+use risingwave_meta_model::{DispatcherType, SinkId, SourceId, WorkerId};
 use risingwave_pb::catalog::{PbSource, PbTable};
 use risingwave_pb::common::worker_node::{PbResource, Property as AddNodeProperty, State};
 use risingwave_pb::common::{HostAddress, PbWorkerNode, PbWorkerType, WorkerNode, WorkerType};
@@ -36,6 +36,7 @@ use crate::barrier::SharedFragmentInfo;
 use crate::controller::catalog::CatalogControllerRef;
 use crate::controller::cluster::{ClusterControllerRef, StreamingClusterInfo, WorkerExtraInfo};
 use crate::controller::fragment::FragmentParallelismInfo;
+use crate::controller::scale::find_fragment_no_shuffle_dags_detailed;
 use crate::manager::{LocalNotification, NotificationVersion};
 use crate::model::{ActorId, ClusterId, FragmentId, StreamJobFragments, SubscriptionId};
 use crate::stream::SplitAssignment;
@@ -733,6 +734,119 @@ impl MetadataManager {
 
         Ok(unreschedulable)
     }
+
+    pub async fn collect_unreschedulable_backfill_related_jobs(
+        &self,
+        job_ids: impl IntoIterator<Item = &JobId>,
+        is_online: bool,
+    ) -> MetaResult<HashSet<JobId>> {
+        let mut unreschedulable_jobs = HashSet::new();
+        let mut unreschedulable_fragments = HashSet::new();
+        let mut unreschedulable_snapshot_fragments = HashSet::new();
+
+        for job_id in job_ids {
+            let scan_types = self
+                .catalog_controller
+                .get_job_fragment_backfill_scan_type(*job_id)
+                .await?;
+
+            let mut job_unreschedulable = false;
+            for (fragment_id, scan_type) in scan_types {
+                if !scan_type.is_reschedulable(is_online) {
+                    job_unreschedulable = true;
+                    unreschedulable_fragments.insert(fragment_id);
+                    if scan_type == PbStreamScanType::SnapshotBackfill {
+                        unreschedulable_snapshot_fragments.insert(fragment_id);
+                    }
+                }
+            }
+
+            if job_unreschedulable {
+                unreschedulable_jobs.insert(*job_id);
+            }
+        }
+
+        if unreschedulable_jobs.is_empty() {
+            return Ok(unreschedulable_jobs);
+        }
+
+        let fragment_job_mapping = self.catalog_controller.fragment_job_mapping().await?;
+        let snapshot_upstream_fragments = if unreschedulable_snapshot_fragments.is_empty() {
+            HashSet::new()
+        } else {
+            let fragment_relations = self.catalog_controller.fragment_relation_mapping().await?;
+            collect_snapshot_upstream_fragments(
+                &unreschedulable_snapshot_fragments,
+                &fragment_relations,
+            )
+        };
+
+        let mut no_shuffle_seeds: HashSet<_> = unreschedulable_fragments
+            .iter()
+            .filter(|fragment_id| !unreschedulable_snapshot_fragments.contains(*fragment_id))
+            .copied()
+            .collect();
+        no_shuffle_seeds.extend(snapshot_upstream_fragments);
+
+        let no_shuffle_related_fragments = if no_shuffle_seeds.is_empty() {
+            HashSet::new()
+        } else {
+            let inner = self.catalog_controller.inner.read().await;
+            find_fragment_no_shuffle_dags_detailed(
+                &inner.db,
+                &no_shuffle_seeds.iter().copied().collect_vec(),
+            )
+            .await?
+            .into_iter()
+            .flat_map(|ensemble| ensemble.component_fragments().collect_vec())
+            .collect::<HashSet<_>>()
+        };
+
+        let mut blocked_jobs = collect_blocked_jobs_from_fragments(
+            &unreschedulable_snapshot_fragments,
+            &no_shuffle_related_fragments,
+            &fragment_job_mapping,
+        );
+        blocked_jobs.extend(unreschedulable_jobs);
+        Ok(blocked_jobs)
+    }
+}
+
+fn collect_snapshot_upstream_fragments(
+    unreschedulable_snapshot_fragments: &HashSet<FragmentId>,
+    fragment_relations: &[(FragmentId, FragmentId, DispatcherType)],
+) -> HashSet<FragmentId> {
+    fragment_relations
+        .iter()
+        .filter_map(|(source_fragment_id, target_fragment_id, _)| {
+            unreschedulable_snapshot_fragments
+                .contains(target_fragment_id)
+                .then_some(*source_fragment_id)
+        })
+        .collect()
+}
+
+fn collect_blocked_jobs_from_fragments(
+    unreschedulable_snapshot_fragments: &HashSet<FragmentId>,
+    no_shuffle_related_fragments: &HashSet<FragmentId>,
+    fragment_job_mapping: &HashMap<FragmentId, JobId>,
+) -> HashSet<JobId> {
+    let mut blocked_jobs = HashSet::new();
+
+    // Snapshot backfill blocks itself, but not all non-no-shuffle ancestors.
+    for snapshot_fragment_id in unreschedulable_snapshot_fragments {
+        if let Some(job_id) = fragment_job_mapping.get(snapshot_fragment_id) {
+            blocked_jobs.insert(*job_id);
+        }
+    }
+
+    for fragment_id in no_shuffle_related_fragments {
+        if let Some(job_id) = fragment_job_mapping.get(fragment_id) {
+            blocked_jobs.insert(*job_id);
+        }
+    }
+
+    blocked_jobs
 }
 
 impl MetadataManager {
@@ -762,5 +876,79 @@ impl MetadataManager {
     pub(crate) async fn notify_finish_failed(&self, database_id: Option<DatabaseId>, err: String) {
         let mut mgr = self.catalog_controller.get_inner_write_guard().await;
         mgr.notify_finish_failed(database_id, err);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_collect_related_jobs_no_shuffle_infectious() {
+        let fragment_job_mapping = HashMap::from([
+            (1u32.into(), JobId::new(1)),
+            (2u32.into(), JobId::new(2)),
+            (3u32.into(), JobId::new(3)),
+            (4u32.into(), JobId::new(4)),
+        ]);
+        let blocked_jobs = collect_blocked_jobs_from_fragments(
+            &HashSet::new(),
+            &HashSet::from([1u32.into(), 2u32.into(), 3u32.into(), 4u32.into()]),
+            &fragment_job_mapping,
+        );
+
+        assert_eq!(
+            blocked_jobs,
+            HashSet::from([JobId::new(1), JobId::new(2), JobId::new(3), JobId::new(4),])
+        );
+    }
+
+    #[test]
+    fn test_collect_related_jobs_snapshot_only_one_hop() {
+        let fragment_job_mapping = HashMap::from([
+            (10u32.into(), JobId::new(10)),
+            (20u32.into(), JobId::new(20)),
+            (30u32.into(), JobId::new(30)),
+        ]);
+        let fragment_relations = vec![
+            (10u32.into(), 20u32.into(), DispatcherType::Hash),
+            (30u32.into(), 10u32.into(), DispatcherType::Hash),
+        ];
+
+        let snapshot_upstream = collect_snapshot_upstream_fragments(
+            &HashSet::from([20u32.into()]),
+            &fragment_relations,
+        );
+        assert_eq!(snapshot_upstream, HashSet::from([10u32.into()]));
+
+        let blocked_jobs = collect_blocked_jobs_from_fragments(
+            &HashSet::from([20u32.into()]),
+            &snapshot_upstream,
+            &fragment_job_mapping,
+        );
+
+        assert_eq!(
+            blocked_jobs,
+            HashSet::from([JobId::new(10), JobId::new(20)])
+        );
+    }
+
+    #[test]
+    fn test_collect_related_jobs_snapshot_then_no_shuffle_chain() {
+        let fragment_job_mapping = HashMap::from([
+            (1u32.into(), JobId::new(1)),
+            (2u32.into(), JobId::new(2)),
+            (3u32.into(), JobId::new(3)),
+        ]);
+        let blocked_jobs = collect_blocked_jobs_from_fragments(
+            &HashSet::from([3u32.into()]),
+            &HashSet::from([1u32.into(), 2u32.into()]),
+            &fragment_job_mapping,
+        );
+
+        assert_eq!(
+            blocked_jobs,
+            HashSet::from([JobId::new(1), JobId::new(2), JobId::new(3)])
+        );
     }
 }

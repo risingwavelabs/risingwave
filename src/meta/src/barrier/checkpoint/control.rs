@@ -1114,21 +1114,6 @@ impl DatabaseCheckpointControl {
             return Ok(());
         };
 
-        if let Some(Command::RescheduleFragment { .. }) = &command
-            && !self.creating_streaming_job_controls.is_empty()
-        {
-            warn!("ignore reschedule when creating streaming job with snapshot backfill");
-            for notifier in notifiers {
-                notifier.notify_start_failed(
-                    anyhow!(
-                            "cannot reschedule when creating streaming job with snapshot backfill",
-                        )
-                        .into(),
-                );
-            }
-            return Ok(());
-        }
-
         if !matches!(&command, Some(Command::CreateStreamingJob { .. }))
             && self.database_info.is_empty()
         {
