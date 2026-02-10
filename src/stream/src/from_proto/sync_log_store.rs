@@ -49,7 +49,6 @@ impl ExecutorBuilder for SyncLogStoreExecutorBuilder {
                 SyncLogStoreTarget::UnalignedHashJoin => "unaligned_hash_join",
                 SyncLogStoreTarget::SinkIntoTable => "sink-into-table",
             };
-            #[allow(deprecated)]
             let legacy_metrics_target = node.metrics_target.as_str();
             let metrics_target = if metrics_target.is_empty() {
                 legacy_metrics_target

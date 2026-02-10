@@ -1036,8 +1036,8 @@ message SyncLogStoreNode {
   // Deprecated. Use the one from `StreamingDeveloperConfig` instead.
   optional uint32 buffer_size = 3 [deprecated = true];
   bool aligned = 4;
-  // Deprecated. Use `target` instead.
-  string metrics_target = 5 [deprecated = true];
+  // Metric label for this sync log store target, e.g. unaligned join or sink into table.
+  string metrics_target = 5;
   SyncLogStoreTarget target = 6;
 }
 
