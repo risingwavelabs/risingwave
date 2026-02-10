@@ -21,7 +21,7 @@ use risingwave_simulation::cluster::{Cluster, Configuration};
 use risingwave_simulation::ctl_ext::predicate::identity_contains;
 use risingwave_simulation::utils::AssertResult;
 
-use super::start_scale_session;
+
 use crate::scale::auto_parallelism::MAX_HEARTBEAT_INTERVAL_SECS_CONFIG_FOR_AUTO_SCALE;
 
 #[tokio::test]

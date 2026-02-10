@@ -25,7 +25,7 @@ use risingwave_simulation::ctl_ext::predicate::{identity_contains, no_identity_c
 use risingwave_simulation::utils::AssertResult;
 use tokio::time::sleep;
 
-use super::start_scale_session;
+
 
 /// Please ensure that this value is the same as the one in the `risingwave-auto-scale.toml` file.
 pub const MAX_HEARTBEAT_INTERVAL_SECS_CONFIG_FOR_AUTO_SCALE: u64 = 15;

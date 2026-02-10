@@ -19,7 +19,7 @@ use risingwave_common::hash::WorkerSlotId;
 use risingwave_pb::common::{WorkerNode, WorkerType};
 use risingwave_simulation::cluster::{Cluster, Configuration};
 
-use super::start_scale_session;
+
 
 #[tokio::test]
 async fn test_cordon_normal() -> Result<()> {
