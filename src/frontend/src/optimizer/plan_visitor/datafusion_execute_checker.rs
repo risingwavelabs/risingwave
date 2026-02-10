@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use crate::optimizer::plan_node::{Logical, PlanTreeNode};
-use crate::optimizer::plan_visitor::{DefaultBehavior, LogicalPlanVisitor, Merge};
+use crate::optimizer::plan_visitor::{DefaultBehavior, LogicalPlanVisitor};
 use crate::optimizer::{LogicalPlanRef, PlanVisitor};
 
 /// Visitor to check if this plan can be executed by DataFusion.
@@ -24,15 +24,6 @@ struct DataFusionExecuteChecker;
 pub struct CheckResult {
     pub supported: bool,
     pub have_iceberg_scan: bool,
-}
-
-impl CheckResult {
-    fn merge(self, other: Self) -> Self {
-        CheckResult {
-            supported: self.supported && other.supported,
-            have_iceberg_scan: self.have_iceberg_scan || other.have_iceberg_scan,
-        }
-    }
 }
 
 impl DataFusionExecuteChecker {
@@ -47,18 +38,21 @@ impl DataFusionExecuteChecker {
                     supported: true,
                     have_iceberg_scan: false,
                 },
-                CheckResult::merge,
+                |mut acc, item| {
+                    acc.supported &= item.supported;
+                    acc.have_iceberg_scan |= item.have_iceberg_scan;
+                    acc
+                },
             )
     }
 }
 
 impl LogicalPlanVisitor for DataFusionExecuteChecker {
+    type DefaultBehavior = DefaultValueBehavior;
     type Result = CheckResult;
 
-    type DefaultBehavior = impl DefaultBehavior<Self::Result>;
-
     fn default_behavior() -> Self::DefaultBehavior {
-        Merge(CheckResult::merge)
+        DefaultValueBehavior
     }
 
     fn visit_logical_agg(
@@ -158,6 +152,17 @@ impl LogicalPlanVisitor for DataFusionExecuteChecker {
         CheckResult {
             supported: true,
             have_iceberg_scan: true,
+        }
+    }
+}
+
+struct DefaultValueBehavior;
+impl DefaultBehavior<CheckResult> for DefaultValueBehavior {
+    fn apply(&self, results: impl IntoIterator<Item = CheckResult>) -> CheckResult {
+        let have_iceberg_scan = results.into_iter().any(|res| res.have_iceberg_scan);
+        CheckResult {
+            supported: false,
+            have_iceberg_scan,
         }
     }
 }

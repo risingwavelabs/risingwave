@@ -60,7 +60,7 @@ pub enum GenDataFusionPlanError {
     #[error("Unsupported Plan Node")]
     UnsupportedPlanNode,
     #[error("Generating plan error: {0}")]
-    Generating(RwError),
+    Generating(#[source] RwError),
 }
 
 pub fn try_gen_datafusion_plan(

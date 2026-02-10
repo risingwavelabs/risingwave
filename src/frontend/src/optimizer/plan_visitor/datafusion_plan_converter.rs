@@ -43,7 +43,7 @@ use crate::optimizer::{LogicalPlanRef, PlanVisitor};
 /// Returns an error if the plan contains unsupported nodes or expressions.
 // When you add a new plan node here, please also update `DataFusionExecuteChecker`.
 #[derive(Debug, Clone, Copy)]
-pub struct DataFusionPlanConverter;
+struct DataFusionPlanConverter;
 
 impl LogicalPlanVisitor for DataFusionPlanConverter {
     type DefaultBehavior = DefaultValueBehavior;
@@ -428,7 +428,7 @@ impl LogicalPlanVisitor for DataFusionPlanConverter {
     }
 }
 
-pub struct DefaultValueBehavior;
+struct DefaultValueBehavior;
 impl DefaultBehavior<RwResult<Arc<DFLogicalPlan>>> for DefaultValueBehavior {
     fn apply(
         &self,
