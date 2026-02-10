@@ -295,9 +295,8 @@ impl HummockCompactionEventHandler {
 
     /// Selects and dispatches compaction tasks to a compactor.
     ///
-    /// This method is intentionally separated from [`handle_pull_task_event`] so that
-    /// `PullTaskAck` sending cannot be accidentally skipped by early returns inside
-    /// task selection logic.
+    /// Separated from `handle_pull_task_event` so that `PullTaskAck` cannot be
+    /// accidentally skipped by early returns.
     async fn try_dispatch_tasks(
         &self,
         compactor: &Arc<Compactor>,

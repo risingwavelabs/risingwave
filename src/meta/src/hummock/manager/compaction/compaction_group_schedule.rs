@@ -1121,7 +1121,7 @@ impl GroupMergeValidator {
             );
 
             return Err(Error::CompactionGroup(format!(
-                "Cannot merge group {} and next_group {} with different compaction config. left_config: {:?}, right_config: {:?}",
+                "Cannot merge group {} and next_group {} with different compaction config (split_weight_by_vnode is excluded from comparison). left_config: {:?}, right_config: {:?}",
                 group.group_id, next_group.group_id, left_config, right_config
             )));
         }
