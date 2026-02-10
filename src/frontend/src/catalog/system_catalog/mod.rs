@@ -30,6 +30,7 @@ use risingwave_common::catalog::{
 };
 use risingwave_common::error::BoxedError;
 use risingwave_common::id::ObjectId;
+use risingwave_common::metrics_reader::MetricsReader;
 use risingwave_common::session_config::SessionConfig;
 use risingwave_common::system_param::local_manager::SystemParamsReaderRef;
 use risingwave_common::types::DataType;
@@ -100,6 +101,8 @@ pub struct SysCatalogReaderImpl {
     config: Arc<RwLock<SessionConfig>>,
     // Read system params.
     system_params: SystemParamsReaderRef,
+    // Read metrics.
+    pub(super) metrics_reader: Arc<dyn MetricsReader>,
 }
 
 impl SysCatalogReaderImpl {
@@ -110,6 +113,7 @@ impl SysCatalogReaderImpl {
         auth_context: Arc<AuthContext>,
         config: Arc<RwLock<SessionConfig>>,
         system_params: SystemParamsReaderRef,
+        metrics_reader: Arc<dyn MetricsReader>,
     ) -> Self {
         Self {
             catalog_reader,
@@ -118,6 +122,7 @@ impl SysCatalogReaderImpl {
             auth_context,
             config,
             system_params,
+            metrics_reader,
         }
     }
 }
