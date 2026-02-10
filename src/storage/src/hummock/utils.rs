@@ -26,7 +26,7 @@ use bytes::Bytes;
 use foyer::Hint;
 use futures::{Stream, StreamExt, pin_mut};
 use parking_lot::Mutex;
-use risingwave_common::catalog::{TableId, TableOption};
+use risingwave_common::catalog::TableId;
 use risingwave_common::config::StorageMemoryConfig;
 use risingwave_expr::codegen::try_stream;
 use risingwave_hummock_sdk::can_concat;
@@ -401,14 +401,12 @@ pub(crate) async fn do_insert_sanity_check(
     key: &TableKey<Bytes>,
     value: &Bytes,
     inner: &impl StateStoreRead,
-    table_option: TableOption,
     op_consistency_level: &OpConsistencyLevel,
 ) -> StorageResult<()> {
     if let OpConsistencyLevel::Inconsistent = op_consistency_level {
         return Ok(());
     }
     let read_options = ReadOptions {
-        retention_seconds: table_option.retention_seconds,
         cache_policy: CachePolicy::Fill(Hint::Normal),
         ..Default::default()
     };
@@ -432,7 +430,6 @@ pub(crate) async fn do_delete_sanity_check(
     key: &TableKey<Bytes>,
     old_value: &Bytes,
     inner: &impl StateStoreRead,
-    table_option: TableOption,
     op_consistency_level: &OpConsistencyLevel,
 ) -> StorageResult<()> {
     let OpConsistencyLevel::ConsistentOldValue {
@@ -443,7 +440,6 @@ pub(crate) async fn do_delete_sanity_check(
         return Ok(());
     };
     let read_options = ReadOptions {
-        retention_seconds: table_option.retention_seconds,
         cache_policy: CachePolicy::Fill(Hint::Normal),
         ..Default::default()
     };
@@ -478,7 +474,6 @@ pub(crate) async fn do_update_sanity_check(
     old_value: &Bytes,
     new_value: &Bytes,
     inner: &impl StateStoreRead,
-    table_option: TableOption,
     op_consistency_level: &OpConsistencyLevel,
 ) -> StorageResult<()> {
     let OpConsistencyLevel::ConsistentOldValue {
@@ -489,7 +484,6 @@ pub(crate) async fn do_update_sanity_check(
         return Ok(());
     };
     let read_options = ReadOptions {
-        retention_seconds: table_option.retention_seconds,
         cache_policy: CachePolicy::Fill(Hint::Normal),
         ..Default::default()
     };
@@ -658,9 +652,27 @@ pub(crate) async fn wait_for_update(
         match tokio::time::timeout(Duration::from_secs(30), receiver.changed()).await {
             Err(_) => {
                 // Provide backtrace iff in debug mode for observability.
-                let backtrace = cfg!(debug_assertions)
-                    .then(Backtrace::capture)
+                let backtrace = cfg!(debug_assertions).then(Backtrace::capture);
+
+                let backtrace = backtrace
+                    .as_ref()
+                    .map(|bt| ShortBacktrace { bt, limit: 30 })
                     .map(tracing::field::display);
+
+                struct ShortBacktrace<'a> {
+                    bt: &'a Backtrace,
+                    limit: usize,
+                }
+
+                impl std::fmt::Display for ShortBacktrace<'_> {
+                    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+                        writeln!(f, "backtrace:")?;
+                        for (idx, frame) in self.bt.frames().iter().take(self.limit).enumerate() {
+                            writeln!(f, "{}: {:?}", idx, frame)?;
+                        }
+                        Ok(())
+                    }
+                }
 
                 // The reason that we need to retry here is batch scan in
                 // chain/rearrange_chain is waiting for an

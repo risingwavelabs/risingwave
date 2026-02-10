@@ -292,6 +292,8 @@ message AlterOwnerRequest {
     uint32 database_id = 6;
     uint32 subscription_id = 7;
     uint32 connection_id = 8;
+    uint32 secret_id = 9;
+    uint32 function_id = 10;
   }
   uint32 owner_id = 20;
 }
@@ -412,6 +414,17 @@ message RisectlListStateTablesResponse {
   repeated catalog.Table tables = 1;
 }
 
+// Used by risectl
+message RisectlResumeBackfillRequest {
+  oneof target {
+    uint32 job_id = 1;
+    uint32 fragment_id = 2;
+  }
+}
+
+// Used by risectl
+message RisectlResumeBackfillResponse {}
+
 message CreateIndexRequest {
   catalog.Index index = 1;
   catalog.Table index_table = 2;
@@ -518,10 +531,12 @@ message CreateSecretResponse {
 
 message DropSecretRequest {
   uint32 secret_id = 1;
+  bool cascade = 2;
 }
 
 message DropSecretResponse {
   WaitVersion version = 1;
+  common.Status status = 2;
 }
 
 message AlterSecretRequest {
@@ -687,6 +702,7 @@ service DdlService {
   rpc AlterResourceGroup(AlterResourceGroupRequest) returns (AlterResourceGroupResponse);
   rpc DropTable(DropTableRequest) returns (DropTableResponse);
   rpc RisectlListStateTables(RisectlListStateTablesRequest) returns (RisectlListStateTablesResponse);
+  rpc RisectlResumeBackfill(RisectlResumeBackfillRequest) returns (RisectlResumeBackfillResponse);
   rpc CreateView(CreateViewRequest) returns (CreateViewResponse);
   rpc DropView(DropViewRequest) returns (DropViewResponse);
   rpc CreateIndex(CreateIndexRequest) returns (CreateIndexResponse);

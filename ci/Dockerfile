@@ -51,7 +51,7 @@ RUN curl -sSL "https://github.com/bufbuild/buf/releases/download/v1.29.0/buf-$(u
     tar -xvzf - -C /usr/local --strip-components 1
 
 # install python dependencies
-RUN pip3 install --break-system-packages pytest
+RUN pip3 install --break-system-packages pytest codecov-cli
 
 # Install poetry
 RUN curl -sSL https://install.python-poetry.org | python3 -

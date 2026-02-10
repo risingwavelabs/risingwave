@@ -22,7 +22,7 @@ use bytes::Bytes;
 use itertools::Itertools;
 use parking_lot::RwLock;
 use risingwave_common::array::VectorRef;
-use risingwave_common::catalog::TableId;
+use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_common::config::Role;
 use risingwave_common::dispatch_distance_measurement;
 use risingwave_common::util::epoch::is_max_epoch;
@@ -31,7 +31,7 @@ use risingwave_hummock_sdk::key::{
     TableKey, TableKeyRange, is_empty_key_range, vnode, vnode_range,
 };
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
-use risingwave_hummock_sdk::table_watermark::{PkPrefixTableWatermarksIndex, WatermarkSerdeType};
+use risingwave_hummock_sdk::table_watermark::TableWatermarksIndex;
 use risingwave_hummock_sdk::version::{HummockVersion, LocalHummockVersion};
 use risingwave_hummock_sdk::{HummockRawObjectId, HummockReadEpoch, SyncResult};
 use risingwave_rpc_client::HummockMetaClient;
@@ -134,10 +134,8 @@ pub fn get_committed_read_version_tuple(
     mut key_range: TableKeyRange,
     epoch: HummockEpoch,
 ) -> (TableKeyRange, ReadVersionTuple) {
-    if let Some(table_watermarks) = version.table_watermarks.get(&table_id)
-        && let WatermarkSerdeType::PkPrefix = table_watermarks.watermark_type
-    {
-        PkPrefixTableWatermarksIndex::new_committed(
+    if let Some(table_watermarks) = version.table_watermarks.get(&table_id) {
+        TableWatermarksIndex::new_committed(
             table_watermarks.clone(),
             version
                 .state_table_info
@@ -145,6 +143,7 @@ pub fn get_committed_read_version_tuple(
                 .get(&table_id)
                 .expect("should exist when having table watermark")
                 .committed_epoch,
+            table_watermarks.watermark_type,
         )
         .rewrite_range_with_table_watermark(epoch, &mut key_range)
     }
@@ -295,6 +294,7 @@ impl HummockStorageReadSnapshot {
                 key,
                 self.epoch.get_epoch(),
                 self.table_id,
+                self.table_option,
                 read_options,
                 read_version_tuple,
                 on_key_value_fn,
@@ -315,6 +315,7 @@ impl HummockStorageReadSnapshot {
                 key_range,
                 self.epoch.get_epoch(),
                 self.table_id,
+                self.table_option,
                 read_options,
                 read_version_tuple,
             )
@@ -334,6 +335,7 @@ impl HummockStorageReadSnapshot {
                 key_range,
                 self.epoch.get_epoch(),
                 self.table_id,
+                self.table_option,
                 read_options,
                 read_version_tuple,
                 None,
@@ -374,14 +376,35 @@ impl HummockStorageReadSnapshot {
                 self.build_read_version_tuple_from_backup(epoch, self.table_id, key_range)
                     .await
             }
-            HummockReadEpoch::Committed(epoch)
-            | HummockReadEpoch::BatchQueryCommitted(epoch, _)
+            HummockReadEpoch::Committed(epoch) => {
+                let tuple = self
+                    .build_read_version_tuple_from_committed(epoch, self.table_id, key_range)
+                    .await?;
+                let (_, (_, _, version)) = &tuple;
+                let Some(committed_epoch) = version.table_committed_epoch(self.table_id) else {
+                    return Err(HummockError::other(format!(
+                        "table {} not found in version",
+                        self.table_id
+                    ))
+                    .into());
+                };
+                if committed_epoch != epoch {
+                    return Err(HummockError::wait_epoch(format!(
+                        "mismatch table {} committed_epoch {} for read committed_epoch {}",
+                        self.table_id, committed_epoch, epoch
+                    ))
+                    .into());
+                }
+                Ok(tuple)
+            }
+            HummockReadEpoch::BatchQueryCommitted(epoch, _)
             | HummockReadEpoch::TimeTravel(epoch) => {
                 self.build_read_version_tuple_from_committed(epoch, self.table_id, key_range)
                     .await
             }
             HummockReadEpoch::NoWait(epoch) => {
                 self.build_read_version_tuple_from_all(epoch, self.table_id, key_range)
+                    .await
             }
         }
     }
@@ -439,7 +462,7 @@ impl HummockStorageReadSnapshot {
         ))
     }
 
-    fn build_read_version_tuple_from_all(
+    async fn build_read_version_tuple_from_all(
         &self,
         epoch: u64,
         table_id: TableId,
@@ -452,11 +475,11 @@ impl HummockStorageReadSnapshot {
         let ret = if let Some(info) = info
             && epoch <= info.committed_epoch
         {
-            if epoch < info.committed_epoch {
-                return Err(
-                    HummockError::expired_epoch(table_id, info.committed_epoch, epoch).into(),
-                );
-            }
+            let pinned_version = if epoch < info.committed_epoch {
+                pinned_version
+            } else {
+                self.get_epoch_hummock_version(epoch, table_id).await?
+            };
             // read committed_version directly without build snapshot
             get_committed_read_version_tuple(pinned_version, table_id, key_range, epoch)
         } else {
@@ -649,6 +672,7 @@ impl HummockStorage {
 pub struct HummockStorageReadSnapshot {
     epoch: HummockReadEpoch,
     table_id: TableId,
+    table_option: TableOption,
     recent_versions: Arc<ArcSwap<RecentVersions>>,
     hummock_version_reader: HummockVersionReader,
     read_version_mapping: ReadOnlyReadVersionMapping,
@@ -903,6 +927,7 @@ impl StateStore for HummockStorage {
         Ok(HummockStorageReadSnapshot {
             epoch,
             table_id: options.table_id,
+            table_option: options.table_option,
             recent_versions: self.recent_versions.clone(),
             hummock_version_reader: self.hummock_version_reader.clone(),
             read_version_mapping: self.read_version_mapping.clone(),
@@ -960,10 +985,6 @@ impl HummockStorage {
 
             yield_now().await
         }
-    }
-
-    pub fn get_shared_buffer_size(&self) -> usize {
-        self.buffer_tracker.get_buffer_size()
     }
 
     /// Creates a [`HummockStorage`] with default stats. Should only be used by tests.

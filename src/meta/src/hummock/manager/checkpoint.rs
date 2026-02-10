@@ -52,7 +52,7 @@ impl HummockVersionCheckpoint {
             stale_objects: checkpoint
                 .stale_objects
                 .iter()
-                .map(|(version_id, objects)| (HummockVersionId::new(*version_id), objects.clone()))
+                .map(|(version_id, objects)| (*version_id, objects.clone()))
                 .collect(),
         }
     }
@@ -63,7 +63,7 @@ impl HummockVersionCheckpoint {
             stale_objects: self
                 .stale_objects
                 .iter()
-                .map(|(version_id, objects)| (version_id.to_u64(), objects.clone()))
+                .map(|(version_id, objects)| (*version_id, objects.clone()))
                 .collect(),
         }
     }
@@ -195,16 +195,16 @@ impl HummockManager {
             let mut vector_files = vec![];
             for object_id in removed_object_ids {
                 match object_id {
-                    HummockObjectId::Sstable(sst_id) => sst_ids.push(sst_id.inner()),
+                    HummockObjectId::Sstable(sst_id) => sst_ids.push(sst_id),
                     HummockObjectId::VectorFile(vector_file_id) => {
                         vector_files.push(PbVectorIndexObject {
-                            id: vector_file_id.inner(),
+                            id: vector_file_id.as_raw(),
                             object_type: PbVectorIndexObjectType::VectorIndexObjectVector as _,
                         })
                     }
                     HummockObjectId::HnswGraphFile(graph_file_id) => {
                         vector_files.push(PbVectorIndexObject {
-                            id: graph_file_id.inner(),
+                            id: graph_file_id.as_raw(),
                             object_type: PbVectorIndexObjectType::VectorIndexObjectHnswGraph as _,
                         });
                     }
@@ -266,7 +266,7 @@ impl HummockManager {
         timer.observe_duration();
         self.metrics
             .checkpoint_version_id
-            .set(new_checkpoint_id.to_u64() as i64);
+            .set(new_checkpoint_id.as_i64_id());
 
         Ok(new_checkpoint_id - old_checkpoint_id)
     }

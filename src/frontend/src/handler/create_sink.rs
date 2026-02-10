@@ -24,7 +24,7 @@ use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::array::arrow::IcebergArrowConvert;
 use risingwave_common::array::arrow::arrow_schema_iceberg::DataType as ArrowDataType;
 use risingwave_common::bail;
-use risingwave_common::catalog::{ColumnCatalog, ICEBERG_SINK_PREFIX, ObjectId, Schema, UserId};
+use risingwave_common::catalog::{ColumnCatalog, ICEBERG_SINK_PREFIX, ObjectId, Schema};
 use risingwave_common::license::Feature;
 use risingwave_common::secret::LocalSecretManager;
 use risingwave_common::system_param::reader::SystemParamsRead;
@@ -37,7 +37,7 @@ use risingwave_connector::sink::snowflake_redshift::redshift::RedshiftSink;
 use risingwave_connector::sink::snowflake_redshift::snowflake::SnowflakeV2Sink;
 use risingwave_connector::sink::{
     CONNECTOR_TYPE_KEY, SINK_SNAPSHOT_OPTION, SINK_TYPE_OPTION, SINK_USER_FORCE_APPEND_ONLY_OPTION,
-    Sink, enforce_secret_sink,
+    SINK_USER_IGNORE_DELETE_OPTION, Sink, enforce_secret_sink,
 };
 use risingwave_connector::{
     AUTO_SCHEMA_CHANGE_KEY, SINK_CREATE_TABLE_IF_NOT_EXISTS_KEY, SINK_INTERMEDIATE_TABLE_NAME,
@@ -321,6 +321,9 @@ pub async fn gen_sink_plan(
                 if let Some(v) = resolved_with_options.get(SINK_USER_FORCE_APPEND_ONLY_OPTION) {
                     f.options.insert(SINK_USER_FORCE_APPEND_ONLY_OPTION.into(), v.into());
                 }
+                if let Some(v) = resolved_with_options.get(SINK_USER_IGNORE_DELETE_OPTION) {
+                    f.options.insert(SINK_USER_IGNORE_DELETE_OPTION.into(), v.into());
+                }
                 f
             }),
             // Case C: no format + encode required
@@ -428,7 +431,7 @@ pub async fn gen_sink_plan(
     let sink_catalog = sink_desc.into_catalog(
         sink_schema_id,
         sink_database_id,
-        UserId::new(session.user_id()),
+        session.user_id(),
         connector_conn_ref,
     );
 

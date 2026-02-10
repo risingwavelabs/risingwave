@@ -26,8 +26,7 @@ use datafusion::prelude::*;
 use risingwave_common::array::ArrayError;
 use risingwave_common::array::arrow::IcebergArrowConvert;
 use risingwave_connector::source::ConnectorProperties;
-use risingwave_connector::source::iceberg::IcebergProperties;
-use risingwave_pb::batch_plan::iceberg_scan_node::IcebergScanType;
+use risingwave_connector::source::iceberg::{IcebergFileScanTask, IcebergProperties};
 
 use super::IcebergScan;
 use crate::error::{ErrorCode, Result as RwResult, RwError};
@@ -40,8 +39,7 @@ use crate::optimizer::plan_node::LogicalIcebergScan;
 pub struct IcebergTableProvider {
     pub iceberg_properties: Arc<IcebergProperties>,
     pub arrow_schema: Arc<ArrowSchema>,
-    pub snapshot_id: Option<i64>,
-    pub iceberg_scan_type: IcebergScanType,
+    pub task: IcebergFileScanTask,
 }
 
 #[async_trait]
@@ -109,8 +107,7 @@ impl IcebergTableProvider {
         Ok(Self {
             iceberg_properties,
             arrow_schema,
-            snapshot_id: plan.snapshot_id,
-            iceberg_scan_type: plan.iceberg_scan_type,
+            task: plan.task.clone(),
         })
     }
 }

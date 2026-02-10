@@ -157,6 +157,7 @@ impl ObserverState for FrontendObserverNode {
             version,
             secrets,
             cluster_resource,
+            object_dependencies,
         } = snapshot;
 
         for db in databases {
@@ -192,6 +193,7 @@ impl ObserverState for FrontendObserverNode {
         for secret in &secrets {
             catalog_guard.create_secret(secret)
         }
+        catalog_guard.set_object_dependencies(object_dependencies);
         for user in users {
             user_guard.create_user(user)
         }
@@ -268,6 +270,9 @@ impl FrontendObserverNode {
                 _ => panic!("receive an unsupported notify {:?}", resp),
             },
             Info::ObjectGroup(object_group) => {
+                if !object_group.dependencies.is_empty() {
+                    catalog_guard.insert_object_dependencies(object_group.dependencies.clone());
+                }
                 for object in &object_group.objects {
                     let Some(obj) = object.object_info.as_ref() else {
                         continue;

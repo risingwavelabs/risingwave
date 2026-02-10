@@ -16,6 +16,8 @@ use risingwave_common::cast::datetime_to_timestamp_millis;
 use risingwave_common::catalog::{ICEBERG_SINK_PREFIX, ICEBERG_SOURCE_PREFIX};
 use risingwave_common::system_param::{OverrideValidate, Validate};
 use risingwave_common::util::epoch::Epoch;
+use risingwave_pb::common::PbObjectType;
+use risingwave_pb::meta::PbObjectDependency;
 
 use super::*;
 use crate::barrier::SnapshotBackfillInfo;
@@ -80,14 +82,14 @@ impl CatalogController {
                 name: Set(schema_name.into()),
             };
             let schema = schema.insert(&txn).await?;
-            schemas.push(ObjectModel(schema, schema_obj).into());
+            schemas.push(ObjectModel(schema, schema_obj, None).into());
         }
         txn.commit().await?;
 
         let mut version = self
             .notify_frontend(
                 NotificationOperation::Add,
-                NotificationInfo::Database(ObjectModel(db.clone(), db_obj).into()),
+                NotificationInfo::Database(ObjectModel(db.clone(), db_obj, None).into()),
             )
             .await;
         for schema in schemas {
@@ -127,7 +129,7 @@ impl CatalogController {
         let mut version = self
             .notify_frontend(
                 NotificationOperation::Add,
-                NotificationInfo::Schema(ObjectModel(schema, schema_obj).into()),
+                NotificationInfo::Schema(ObjectModel(schema, schema_obj, None).into()),
             )
             .await;
 
@@ -216,7 +218,7 @@ impl CatalogController {
             .copied()
             .map_into()
             .chain(connection_ids.iter().copied().map_into());
-        if !secret_ids.is_empty() || !connection_ids.is_empty() {
+        let dependencies = if !secret_ids.is_empty() || !connection_ids.is_empty() {
             ObjectDependency::insert_many(dep_relation_ids.map(|id| {
                 object_dependency::ActiveModel {
                     oid: Set(id),
@@ -226,7 +228,22 @@ impl CatalogController {
             }))
             .exec(&txn)
             .await?;
-        }
+            secret_ids
+                .iter()
+                .map(|id| PbObjectDependency {
+                    object_id: source_id.as_object_id(),
+                    referenced_object_id: id.as_object_id(),
+                    referenced_object_type: PbObjectType::Secret as _,
+                })
+                .chain(connection_ids.iter().map(|id| PbObjectDependency {
+                    object_id: source_id.as_object_id(),
+                    referenced_object_id: id.as_object_id(),
+                    referenced_object_type: PbObjectType::Connection as _,
+                }))
+                .collect_vec()
+        } else {
+            vec![]
+        };
 
         let mut job_notifications = vec![];
         let mut updated_user_info = vec![];
@@ -248,8 +265,9 @@ impl CatalogController {
                 .one(&txn)
                 .await?
                 .ok_or(MetaError::from(anyhow!("table {} not found", table_name)))?;
-            let table_notifications =
-                Self::finish_streaming_job_inner(&txn, table_id.as_job_id()).await?;
+            let table_notifications = self
+                .finish_streaming_job_inner(&txn, table_id.as_job_id())
+                .await?;
             job_notifications.push((table_id.as_job_id(), table_notifications));
 
             // 2. finish iceberg sink job.
@@ -269,7 +287,7 @@ impl CatalogController {
                 .await?
                 .ok_or(MetaError::from(anyhow!("sink {} not found", sink_name)))?;
             let sink_job_id = sink_id.as_job_id();
-            let sink_notifications = Self::finish_streaming_job_inner(&txn, sink_job_id).await?;
+            let sink_notifications = self.finish_streaming_job_inner(&txn, sink_job_id).await?;
             job_notifications.push((sink_job_id, sink_notifications));
         } else {
             updated_user_info = grant_default_privileges_automatically(&txn, source_id).await?;
@@ -277,9 +295,15 @@ impl CatalogController {
 
         txn.commit().await?;
 
-        for (job_id, (op, objects, user_info)) in job_notifications {
+        for (job_id, (op, objects, user_info, dependencies)) in job_notifications {
             let mut version = self
-                .notify_frontend(op, NotificationInfo::ObjectGroup(PbObjectGroup { objects }))
+                .notify_frontend(
+                    op,
+                    NotificationInfo::ObjectGroup(PbObjectGroup {
+                        objects,
+                        dependencies,
+                    }),
+                )
                 .await;
             if !user_info.is_empty() {
                 version = self.notify_users_update(user_info).await;
@@ -297,9 +321,14 @@ impl CatalogController {
         }
 
         let mut version = self
-            .notify_frontend_relation_info(
+            .notify_frontend(
                 NotificationOperation::Add,
-                PbObjectInfo::Source(pb_source),
+                NotificationInfo::ObjectGroup(PbObjectGroup {
+                    objects: vec![PbObject {
+                        object_info: Some(PbObjectInfo::Source(pb_source)),
+                    }],
+                    dependencies,
+                }),
             )
             .await;
 
@@ -393,7 +422,7 @@ impl CatalogController {
         let connection: connection::ActiveModel = pb_connection.clone().into();
         Connection::insert(connection).exec(&txn).await?;
 
-        for secret_id in dep_secrets {
+        for secret_id in &dep_secrets {
             ObjectDependency::insert(object_dependency::ActiveModel {
                 oid: Set(secret_id.as_object_id()),
                 used_by: Set(conn_obj.oid),
@@ -429,7 +458,19 @@ impl CatalogController {
         let mut version = self
             .notify_frontend(
                 NotificationOperation::Add,
-                NotificationInfo::Connection(pb_connection),
+                NotificationInfo::ObjectGroup(PbObjectGroup {
+                    objects: vec![PbObject {
+                        object_info: Some(PbObjectInfo::Connection(pb_connection)),
+                    }],
+                    dependencies: dep_secrets
+                        .iter()
+                        .map(|secret_id| PbObjectDependency {
+                            object_id: conn_obj.oid,
+                            referenced_object_id: secret_id.as_object_id(),
+                            referenced_object_type: PbObjectType::Secret as _,
+                        })
+                        .collect(),
+                }),
             )
             .await;
 
@@ -528,22 +569,34 @@ impl CatalogController {
         let view: view::ActiveModel = pb_view.clone().into();
         View::insert(view).exec(&txn).await?;
 
-        for obj_id in dependencies {
-            ObjectDependency::insert(object_dependency::ActiveModel {
-                oid: Set(obj_id),
-                used_by: Set(view_obj.oid),
-                ..Default::default()
-            })
+        let dependencies = if !dependencies.is_empty() {
+            ObjectDependency::insert_many(dependencies.into_iter().map(|obj_id| {
+                object_dependency::ActiveModel {
+                    oid: Set(obj_id),
+                    used_by: Set(view_obj.oid),
+                    ..Default::default()
+                }
+            }))
             .exec(&txn)
             .await?;
-        }
+            list_object_dependencies_by_object_id(&txn, view_obj.oid).await?
+        } else {
+            vec![]
+        };
 
         let updated_user_info = grant_default_privileges_automatically(&txn, view_obj.oid).await?;
 
         txn.commit().await?;
-
         let mut version = self
-            .notify_frontend_relation_info(NotificationOperation::Add, PbObjectInfo::View(pb_view))
+            .notify_frontend(
+                NotificationOperation::Add,
+                NotificationInfo::ObjectGroup(PbObjectGroup {
+                    objects: vec![PbObject {
+                        object_info: Some(PbObjectInfo::View(pb_view)),
+                    }],
+                    dependencies,
+                }),
+            )
             .await;
 
         // notify default privileges for views

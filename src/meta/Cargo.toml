@@ -22,7 +22,7 @@ bytes = { version = "1", features = ["serde"] }
 chrono = { workspace = true }
 clap = { workspace = true }
 comfy-table = "7"
-crepe = "0.1"
+crepe = "0.2"
 easy-ext = "1"
 educe = "0.6"
 either = "1"
@@ -49,6 +49,7 @@ prost = { workspace = true }
 rand = { workspace = true }
 risingwave_backup = { workspace = true }
 risingwave_common = { workspace = true }
+risingwave_common_heap_profiling = { workspace = true }
 risingwave_connector = { workspace = true }
 risingwave_hummock_sdk = { workspace = true }
 risingwave_license = { workspace = true }

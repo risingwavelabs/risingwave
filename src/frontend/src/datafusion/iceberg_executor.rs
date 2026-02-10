@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::any::Any;
-use std::collections::HashSet;
 use std::sync::Arc;
 
 use datafusion::arrow::array::{Int64Array, RecordBatch, RecordBatchOptions, StringArray};
@@ -29,18 +28,17 @@ use datafusion::physical_plan::{
 };
 use datafusion::prelude::Expr;
 use datafusion_common::stats::Precision;
-use datafusion_common::{DataFusionError, Statistics, exec_err, internal_err, not_impl_err};
-use futures::{StreamExt, TryStreamExt};
+use datafusion_common::{DataFusionError, Statistics, exec_err};
+use futures::StreamExt;
 use futures_async_stream::try_stream;
 use iceberg::scan::FileScanTask;
-use iceberg::spec::DataContentType;
 use iceberg::table::Table;
 use risingwave_common::catalog::{
     ICEBERG_FILE_PATH_COLUMN_NAME, ICEBERG_FILE_POS_COLUMN_NAME, ICEBERG_SEQUENCE_NUM_COLUMN_NAME,
 };
 use risingwave_common::util::iter_util::ZipEqFast;
+use risingwave_connector::source::iceberg::IcebergFileScanTask;
 use risingwave_connector::source::prelude::IcebergSplitEnumerator;
-use risingwave_pb::batch_plan::iceberg_scan_node::IcebergScanType;
 
 use super::{IcebergTableProvider, to_datafusion_error};
 
@@ -57,11 +55,9 @@ pub struct IcebergScan {
 struct IcebergScanInner {
     #[educe(Debug(ignore))]
     table: Table,
-    snapshot_id: Option<i64>,
     tasks: Vec<Vec<FileScanTask>>,
     statistics: Vec<Statistics>,
     total_statistics: Statistics,
-    iceberg_scan_type: IcebergScanType,
     arrow_schema: SchemaRef,
     scan_column_names: Vec<String>,
     need_seq_num: bool,
@@ -76,19 +72,24 @@ impl DisplayAs for IcebergScan {
         format_type: DisplayFormatType,
         f: &mut std::fmt::Formatter<'_>,
     ) -> std::fmt::Result {
-        let scan_type = self.inner.iceberg_scan_type.as_str_name();
         if format_type == DisplayFormatType::TreeRender {
             writeln!(f, "{}", self.inner.table.identifier())?;
-            writeln!(f, "iceberg_scan_type={}", scan_type)?;
             return Ok(());
         }
 
         write!(f, "IcebergScan: ")?;
-        write!(f, "iceberg_scan_type={}", scan_type)?;
-        write!(f, ", table={}", self.inner.table.identifier())?;
+        write!(f, "table={}", self.inner.table.identifier())?;
         if format_type == DisplayFormatType::Verbose {
-            write!(f, ", snapshot_id={:?}", self.inner.snapshot_id)?;
             write!(f, ", scan_column_names={:?}", self.inner.scan_column_names)?;
+            write!(f, ", need_seq_num={}", self.inner.need_seq_num)?;
+            write!(
+                f,
+                ", need_file_path_and_pos={}",
+                self.inner.need_file_path_and_pos
+            )?;
+            if let Some(projection) = &self.inner.projection {
+                write!(f, ", projection={:?}", projection)?;
+            }
         }
         Ok(())
     }
@@ -168,13 +169,6 @@ impl IcebergScan {
                 .collect();
             arrow_schema = Arc::new(Schema::new(fields));
         }
-        let plan_properties = PlanProperties::new(
-            EquivalenceProperties::new(arrow_schema.clone()),
-            // TODO: determine partitioning
-            Partitioning::UnknownPartitioning(1),
-            EmissionType::Incremental,
-            Boundedness::Bounded,
-        );
         let mut scan_column_names: Vec<String> = provider
             .arrow_schema
             .fields()
@@ -192,7 +186,7 @@ impl IcebergScan {
         let need_file_path_and_pos = scan_column_names
             .iter()
             .any(|name| name == ICEBERG_FILE_PATH_COLUMN_NAME)
-            && matches!(provider.iceberg_scan_type, IcebergScanType::DataScan);
+            && matches!(provider.task, IcebergFileScanTask::Data(_));
         scan_column_names.retain(|name| {
             ![
                 ICEBERG_FILE_PATH_COLUMN_NAME,
@@ -202,107 +196,50 @@ impl IcebergScan {
             .contains(&name.as_str())
         });
 
-        let mut inner = IcebergScanInner {
-            table,
-            snapshot_id: provider.snapshot_id,
-            tasks: vec![],
-            statistics: vec![],
-            total_statistics: Statistics::default(),
-            iceberg_scan_type: provider.iceberg_scan_type,
-            arrow_schema,
-            scan_column_names,
-            need_seq_num,
-            need_file_path_and_pos,
-            plan_properties,
-            projection: projection.cloned(),
-        };
-        let scan_tasks = inner
-            .list_iceberg_scan_task()
-            .try_collect::<Vec<_>>()
-            .await?;
-        if scan_tasks.len() <= batch_parallelism {
-            inner.tasks = scan_tasks.into_iter().map(|task| vec![task]).collect();
+        let scan_tasks = provider.task.tasks();
+        let tasks = if scan_tasks.len() <= batch_parallelism {
+            scan_tasks.iter().map(|task| vec![task.clone()]).collect()
         } else {
-            inner.tasks = IcebergSplitEnumerator::split_n_vecs(scan_tasks, batch_parallelism);
-        }
-        inner.statistics = inner
-            .tasks
+            IcebergSplitEnumerator::split_n_vecs(scan_tasks.to_vec(), batch_parallelism)
+        };
+        let statistics = tasks
             .iter()
-            .map(|tasks| calculate_statistics(tasks.iter(), &inner.arrow_schema))
+            .map(|tasks| calculate_statistics(tasks.iter(), &arrow_schema))
             .collect();
-        inner.total_statistics =
-            calculate_statistics(inner.tasks.iter().flatten(), &inner.arrow_schema);
-        inner.plan_properties.partitioning = Partitioning::UnknownPartitioning(inner.tasks.len());
+        let total_statistics = calculate_statistics(scan_tasks.iter(), &arrow_schema);
+        let plan_properties = PlanProperties::new(
+            EquivalenceProperties::new(arrow_schema.clone()),
+            Partitioning::UnknownPartitioning(tasks.len()),
+            EmissionType::Incremental,
+            Boundedness::Bounded,
+        );
 
         Ok(Self {
-            inner: Arc::new(inner),
+            inner: Arc::new(IcebergScanInner {
+                table,
+                tasks,
+                statistics,
+                total_statistics,
+                arrow_schema,
+                scan_column_names,
+                need_seq_num,
+                need_file_path_and_pos,
+                plan_properties,
+                projection: projection.cloned(),
+            }),
         })
     }
 }
 
 impl IcebergScanInner {
-    #[try_stream(ok = FileScanTask, error = DataFusionError)]
-    async fn list_iceberg_scan_task(&self) {
-        let mut scan_builder = self.table.scan().select(&self.scan_column_names);
-        if let Some(snapshot_id) = self.snapshot_id {
-            scan_builder = scan_builder.snapshot_id(snapshot_id);
-        }
-        let scan = scan_builder.build().map_err(to_datafusion_error)?;
-
-        let mut position_delete_files_set = HashSet::new();
-        let mut equality_delete_files_set = HashSet::new();
-
-        #[for_await]
-        for scan_task in scan.plan_files().await.map_err(to_datafusion_error)? {
-            let mut scan_task = scan_task.map_err(to_datafusion_error)?;
-            match self.iceberg_scan_type {
-                IcebergScanType::DataScan => {
-                    if scan_task.data_file_content != DataContentType::Data {
-                        return internal_err!(
-                            "Files of type {:?} should not be in the data files",
-                            scan_task.data_file_content
-                        );
-                    }
-                    // Delete files are handled by dedicated scans; clear them for data scan tasks.
-                    scan_task.deletes.clear();
-                    yield scan_task;
-                }
-                IcebergScanType::EqualityDeleteScan => {
-                    for delete_file in scan_task.deletes {
-                        if delete_file.data_file_content == DataContentType::EqualityDeletes
-                            && equality_delete_files_set.insert(delete_file.data_file_path.clone())
-                        {
-                            yield delete_file.as_ref().clone()
-                        }
-                    }
-                }
-                IcebergScanType::PositionDeleteScan => {
-                    for delete_file in scan_task.deletes {
-                        if delete_file.data_file_content == DataContentType::PositionDeletes
-                            && position_delete_files_set.insert(delete_file.data_file_path.clone())
-                        {
-                            let mut task = delete_file.as_ref().clone();
-                            task.project_field_ids = Vec::new();
-                            yield task;
-                        }
-                    }
-                }
-                _ => {
-                    return not_impl_err!(
-                        "Iceberg scan type {:?} is not supported",
-                        self.iceberg_scan_type
-                    );
-                }
-            }
-        }
-    }
-
     #[try_stream(ok = RecordBatch, error = DataFusionError)]
     pub async fn execute_inner(self: Arc<Self>, chunk_size: usize, partition: usize) {
         let reader = self
             .table
             .reader_builder()
             .with_batch_size(chunk_size)
+            .with_row_group_filtering_enabled(true)
+            .with_row_selection_enabled(true)
             .build();
 
         for task in &self.tasks[partition] {
@@ -414,11 +351,11 @@ fn calculate_statistics<'a>(
     let mut total_rows: Option<usize> = Some(0);
     let mut total_bytes: usize = 0;
     for task in tasks {
-        match (task.record_count, total_rows) {
-            (Some(count), Some(ref mut total_rows)) => *total_rows += count as usize,
-            (None, _) => total_rows = None,
+        match (task.record_count, &mut total_rows) {
+            (Some(count), Some(rows)) => *rows += count as usize,
+            (None, rows) => *rows = None,
             _ => {}
-        };
+        }
         total_bytes += task.file_size_in_bytes as usize;
     }
 

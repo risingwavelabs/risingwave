@@ -10,14 +10,14 @@ def section(func: Callable[[Panels], list]):
     return func
 
 
-# The import order determines the order of the sections in the dashboard.
-from . import streaming_metadata as _
+# NOTE: The import order determines the order of the sections in the dashboard.
 from . import overview as _
 from . import cpu as _
 from . import memory as _
 from . import network as _
 from . import storage as _
-from . import streaming_relations as _
+from . import streaming as _
+from . import actor_info as _
 from . import batch as _
 
 

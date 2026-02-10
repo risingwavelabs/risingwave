@@ -230,7 +230,7 @@ impl<W: SinkWriter<CommitMetadata = Option<SinkMetadata>>> LogSinker for Coordin
                                 .await?;
                             sink_writer_metrics
                                 .sink_commit_duration
-                                .observe(start_time.elapsed().as_millis() as f64);
+                                .observe(start_time.elapsed().as_secs_f64());
 
                             current_checkpoint = 0;
                             if let Some(new_vnode_bitmap) = new_vnode_bitmap {

@@ -27,6 +27,7 @@ use risingwave_meta::manager::MetadataManager;
 use risingwave_meta::stream::{GlobalRefreshManagerRef, SourceManagerRunningInfo};
 use risingwave_meta::{MetaError, model};
 use risingwave_meta_model::{ConnectionId, FragmentId, StreamingParallelism};
+use risingwave_pb::common::ThrottleType;
 use risingwave_pb::meta::alter_connector_props_request::AlterConnectorPropsObject;
 use risingwave_pb::meta::cancel_creating_jobs_request::Jobs;
 use risingwave_pb::meta::list_actor_splits_response::FragmentType;
@@ -40,6 +41,7 @@ use risingwave_pb::meta::table_fragments::PbState;
 use risingwave_pb::meta::table_fragments::fragment::PbFragmentDistributionType;
 use risingwave_pb::meta::*;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
+use risingwave_pb::stream_plan::throttle_mutation::ThrottleConfig;
 use tonic::{Request, Response, Status};
 
 use crate::barrier::{BarrierScheduler, Command};
@@ -87,7 +89,7 @@ impl StreamManagerService for StreamServiceImpl {
         let version_id = self.barrier_scheduler.flush(req.database_id).await?;
         Ok(Response::new(FlushResponse {
             status: None,
-            hummock_version_id: version_id.to_u64(),
+            hummock_version_id: version_id,
         }))
     }
 
@@ -139,43 +141,41 @@ impl StreamManagerService for StreamServiceImpl {
     ) -> Result<Response<ApplyThrottleResponse>, Status> {
         let request = request.into_inner();
 
+        // Decode enums from raw i32 fields to handle decoupled target/type.
+        let throttle_target = request.throttle_target();
+        let throttle_type = request.throttle_type();
+
         let raw_object_id: u32;
         let jobs: HashSet<JobId>;
         let fragments: HashSet<FragmentId>;
 
-        match request.kind() {
-            ThrottleTarget::Source | ThrottleTarget::TableWithSource => {
+        match (throttle_type, throttle_target) {
+            (ThrottleType::Source, ThrottleTarget::Source | ThrottleTarget::Table) => {
                 (jobs, fragments) = self
                     .metadata_manager
                     .update_source_rate_limit_by_source_id(request.id.into(), request.rate)
                     .await?;
                 raw_object_id = request.id;
             }
-            ThrottleTarget::Mv => {
+            (ThrottleType::Backfill, ThrottleTarget::Mv)
+            | (ThrottleType::Backfill, ThrottleTarget::Sink)
+            | (ThrottleType::Backfill, ThrottleTarget::Table) => {
                 fragments = self
                     .metadata_manager
-                    .update_backfill_rate_limit_by_job_id(request.id.into(), request.rate)
+                    .update_backfill_rate_limit_by_job_id(JobId::from(request.id), request.rate)
                     .await?;
                 jobs = [request.id.into()].into_iter().collect();
                 raw_object_id = request.id;
             }
-            ThrottleTarget::CdcTable => {
+            (ThrottleType::Dml, ThrottleTarget::Table) => {
                 fragments = self
                     .metadata_manager
-                    .update_backfill_rate_limit_by_job_id(request.id.into(), request.rate)
+                    .update_dml_rate_limit_by_job_id(JobId::from(request.id), request.rate)
                     .await?;
                 jobs = [request.id.into()].into_iter().collect();
                 raw_object_id = request.id;
             }
-            ThrottleTarget::TableDml => {
-                fragments = self
-                    .metadata_manager
-                    .update_dml_rate_limit_by_job_id(request.id.into(), request.rate)
-                    .await?;
-                jobs = [request.id.into()].into_iter().collect();
-                raw_object_id = request.id;
-            }
-            ThrottleTarget::Sink => {
+            (ThrottleType::Sink, ThrottleTarget::Sink) => {
                 fragments = self
                     .metadata_manager
                     .update_sink_rate_limit_by_sink_id(request.id.into(), request.rate)
@@ -183,7 +183,8 @@ impl StreamManagerService for StreamServiceImpl {
                 jobs = [request.id.into()].into_iter().collect();
                 raw_object_id = request.id;
             }
-            ThrottleTarget::Fragment => {
+            // FIXME(kwannoel): specialize for throttle type x target
+            (_, ThrottleTarget::Fragment) => {
                 self.metadata_manager
                     .update_fragment_rate_limit_by_fragment_id(request.id.into(), request.rate)
                     .await?;
@@ -197,8 +198,11 @@ impl StreamManagerService for StreamServiceImpl {
                 jobs = [job_id].into_iter().collect();
                 raw_object_id = job_id.as_raw_id();
             }
-            ThrottleTarget::Unspecified => {
-                return Err(Status::invalid_argument("unspecified throttle target"));
+            _ => {
+                return Err(Status::invalid_argument(format!(
+                    "unsupported throttle target/type: {:?}/{:?}",
+                    throttle_target, throttle_type
+                )));
             }
         };
 
@@ -208,7 +212,10 @@ impl StreamManagerService for StreamServiceImpl {
             .get_object_database_id(raw_object_id)
             .await?;
 
-        // TODO: check whether shared source is correct
+        let throttle_config = ThrottleConfig {
+            rate_limit: request.rate,
+            throttle_type: throttle_type.into(),
+        };
         let _i = self
             .barrier_scheduler
             .run_command(
@@ -217,7 +224,7 @@ impl StreamManagerService for StreamServiceImpl {
                     jobs,
                     config: fragments
                         .into_iter()
-                        .map(|fragment_id| (fragment_id, request.rate))
+                        .map(|fragment_id| (fragment_id, throttle_config))
                         .collect(),
                 },
             )
@@ -293,10 +300,8 @@ impl StreamManagerService for StreamServiceImpl {
                                     id: actor.actor_id,
                                     node: Some(fragment.nodes.clone()),
                                     dispatcher: dispatchers
-                                        .get_mut(&(fragment.fragment_id as _))
-                                        .and_then(|dispatchers| {
-                                            dispatchers.remove(&(actor.actor_id as _))
-                                        })
+                                        .get_mut(&fragment.fragment_id)
+                                        .and_then(|dispatchers| dispatchers.remove(&actor.actor_id))
                                         .unwrap_or_default(),
                                 })
                                 .collect_vec(),
@@ -364,14 +369,21 @@ impl StreamManagerService for StreamServiceImpl {
         &self,
         _request: Request<ListFragmentDistributionRequest>,
     ) -> Result<Response<ListFragmentDistributionResponse>, Status> {
-        let distributions = self
-            .metadata_manager
-            .catalog_controller
-            .list_fragment_descs(false)
-            .await?
-            .into_iter()
-            .map(|(dist, _)| dist)
-            .collect();
+        let include_node = _request.into_inner().include_node.unwrap_or(true);
+        let distributions = if include_node {
+            self.metadata_manager
+                .catalog_controller
+                .list_fragment_descs_with_node(false)
+                .await?
+        } else {
+            self.metadata_manager
+                .catalog_controller
+                .list_fragment_descs_without_node(false)
+                .await?
+        }
+        .into_iter()
+        .map(|(dist, _)| dist)
+        .collect();
 
         Ok(Response::new(ListFragmentDistributionResponse {
             distributions,
@@ -382,18 +394,46 @@ impl StreamManagerService for StreamServiceImpl {
         &self,
         _request: Request<ListCreatingFragmentDistributionRequest>,
     ) -> Result<Response<ListCreatingFragmentDistributionResponse>, Status> {
-        let distributions = self
-            .metadata_manager
-            .catalog_controller
-            .list_fragment_descs(true)
-            .await?
-            .into_iter()
-            .map(|(dist, _)| dist)
-            .collect();
+        let include_node = _request.into_inner().include_node.unwrap_or(true);
+        let distributions = if include_node {
+            self.metadata_manager
+                .catalog_controller
+                .list_fragment_descs_with_node(true)
+                .await?
+        } else {
+            self.metadata_manager
+                .catalog_controller
+                .list_fragment_descs_without_node(true)
+                .await?
+        }
+        .into_iter()
+        .map(|(dist, _)| dist)
+        .collect();
 
         Ok(Response::new(ListCreatingFragmentDistributionResponse {
             distributions,
         }))
+    }
+
+    async fn list_sink_log_store_tables(
+        &self,
+        _request: Request<ListSinkLogStoreTablesRequest>,
+    ) -> Result<Response<ListSinkLogStoreTablesResponse>, Status> {
+        let tables = self
+            .metadata_manager
+            .catalog_controller
+            .list_sink_log_store_tables()
+            .await?
+            .into_iter()
+            .map(|(sink_id, internal_table_id)| {
+                list_sink_log_store_tables_response::SinkLogStoreTable {
+                    sink_id: sink_id.as_raw_id(),
+                    internal_table_id: internal_table_id.as_raw_id(),
+                }
+            })
+            .collect();
+
+        Ok(Response::new(ListSinkLogStoreTablesResponse { tables }))
     }
 
     async fn get_fragment_by_id(
@@ -406,8 +446,8 @@ impl StreamManagerService for StreamServiceImpl {
             .catalog_controller
             .get_fragment_desc_by_id(req.fragment_id)
             .await?;
-        let distribution =
-            fragment_desc.map(|(desc, upstreams)| fragment_desc_to_distribution(desc, upstreams));
+        let distribution = fragment_desc
+            .map(|(desc, upstreams)| fragment_desc_to_distribution(desc, upstreams, true));
         Ok(Response::new(GetFragmentByIdResponse { distribution }))
     }
 
@@ -490,21 +530,6 @@ impl StreamManagerService for StreamServiceImpl {
         Ok(Response::new(ListActorStatesResponse { states }))
     }
 
-    async fn list_object_dependencies(
-        &self,
-        _request: Request<ListObjectDependenciesRequest>,
-    ) -> Result<Response<ListObjectDependenciesResponse>, Status> {
-        let dependencies = self
-            .metadata_manager
-            .catalog_controller
-            .list_created_object_dependencies()
-            .await?;
-
-        Ok(Response::new(ListObjectDependenciesResponse {
-            dependencies,
-        }))
-    }
-
     async fn recover(
         &self,
         _request: Request<RecoverRequest>,
@@ -534,7 +559,7 @@ impl StreamManagerService for StreamServiceImpl {
             let guard = self.env.shared_actor_infos().read_guard();
             guard
                 .iter_over_fragments()
-                .filter(|(frag_id, _)| all_fragment_ids.contains(frag_id))
+                .filter(|(frag_id, _)| all_fragment_ids.contains(*frag_id))
                 .flat_map(|(fragment_id, fragment_info)| {
                     fragment_info
                         .actors
@@ -554,11 +579,7 @@ impl StreamManagerService for StreamServiceImpl {
         let fragment_to_source: HashMap<_, _> = source_fragments
             .into_iter()
             .flat_map(|(source_id, fragment_ids)| {
-                let source_type = if is_shared_source
-                    .get(&(source_id as _))
-                    .copied()
-                    .unwrap_or(false)
-                {
+                let source_type = if is_shared_source.get(&source_id).copied().unwrap_or(false) {
                     FragmentType::SharedSource
                 } else {
                     FragmentType::NonSharedSource
@@ -591,12 +612,12 @@ impl StreamManagerService for StreamServiceImpl {
             .into_iter()
             .flat_map(|(actor_id, fragment_id)| {
                 let (source_id, fragment_type) = fragment_to_source
-                    .get(&(fragment_id as _))
+                    .get(&fragment_id)
                     .copied()
                     .unwrap_or_default();
 
                 actor_splits
-                    .remove(&(actor_id as _))
+                    .remove(&actor_id)
                     .unwrap_or_default()
                     .into_iter()
                     .map(move |split| list_actor_splits_response::ActorSplit {
@@ -869,7 +890,9 @@ impl StreamManagerService for StreamServiceImpl {
 fn fragment_desc_to_distribution(
     fragment_desc: FragmentDesc,
     upstreams: Vec<FragmentId>,
+    include_node: bool,
 ) -> FragmentDistribution {
+    let node = include_node.then(|| fragment_desc.stream_node.to_protobuf());
     FragmentDistribution {
         fragment_id: fragment_desc.fragment_id,
         table_id: fragment_desc.job_id,
@@ -879,7 +902,7 @@ fn fragment_desc_to_distribution(
         fragment_type_mask: fragment_desc.fragment_type_mask as _,
         parallelism: fragment_desc.parallelism as _,
         vnode_count: fragment_desc.vnode_count as _,
-        node: Some(fragment_desc.stream_node.to_protobuf()),
+        node,
         parallelism_policy: fragment_desc.parallelism_policy,
     }
 }

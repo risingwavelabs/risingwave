@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::id::TableId;
 use risingwave_common::types::Fields;
 use risingwave_frontend_macro::system_catalog;
 
@@ -21,7 +22,7 @@ use crate::error::Result;
 #[derive(Fields)]
 struct RwTableStats {
     #[primary_key]
-    id: i32,
+    id: TableId,
     total_key_count: i64,
     total_key_size: i64,
     total_value_size: i64,
@@ -34,7 +35,7 @@ fn read_table_stats(reader: &SysCatalogReaderImpl) -> Result<Vec<RwTableStats>> 
     let mut rows = vec![];
     for (id, stats) in &table_stats.table_stats {
         rows.push(RwTableStats {
-            id: id.as_i32_id(),
+            id: *id,
             total_key_count: stats.total_key_count,
             total_key_size: stats.total_key_size,
             total_value_size: stats.total_value_size,

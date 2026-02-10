@@ -15,10 +15,12 @@
 use risingwave_common::catalog::FragmentTypeMask;
 use risingwave_common::id::JobId;
 use risingwave_meta_model::refresh_job::{self, RefreshState};
+use risingwave_pb::meta::ObjectDependency as PbObjectDependency;
 use sea_orm::prelude::DateTime;
 
 use super::*;
 use crate::controller::fragment::FragmentTypeMaskExt;
+use crate::controller::utils::load_streaming_jobs_by_ids;
 
 impl CatalogController {
     pub async fn list_time_travel_table_ids(&self) -> MetaResult<Vec<TableId>> {
@@ -86,7 +88,7 @@ impl CatalogController {
                     None
                 };
                 MetaTelemetryJobDesc {
-                    table_id: table_id.as_i32_id(),
+                    table_id,
                     connector: connector_info,
                     optimization: vec![],
                 }
@@ -98,14 +100,14 @@ impl CatalogController {
         &self,
         include_initial: bool,
         database_id: Option<DatabaseId>,
-    ) -> MetaResult<Vec<(JobId, String, DateTime)>> {
+    ) -> MetaResult<HashSet<JobId>> {
         Ok(self
             .list_creating_jobs(include_initial, false, database_id)
             .await?
             .into_iter()
-            .map(|(job_id, definition, init_at, create_type)| {
+            .map(|(job_id, _, _, create_type, _)| {
                 assert_eq!(create_type, CreateType::Background);
-                (job_id, definition, init_at)
+                job_id
             })
             .collect())
     }
@@ -115,7 +117,7 @@ impl CatalogController {
         include_initial: bool,
         include_foreground: bool,
         database_id: Option<DatabaseId>,
-    ) -> MetaResult<Vec<(JobId, String, DateTime, CreateType)>> {
+    ) -> MetaResult<Vec<(JobId, String, DateTime, CreateType, bool)>> {
         let inner = self.inner.read().await;
         let create_type_cond = if include_foreground {
             SimpleExpr::from(true)
@@ -131,22 +133,27 @@ impl CatalogController {
             .map(|database_id| object::Column::DatabaseId.eq(database_id))
             .unwrap_or_else(|| SimpleExpr::from(true));
         let filter_cond = create_type_cond.and(status_cond).and(database_cond);
-        let mut table_info: Vec<(JobId, String, DateTime, CreateType)> = Table::find()
+        let object_columns = [object::Column::InitializedAt];
+        let streaming_job_columns = [
+            streaming_job::Column::CreateType,
+            streaming_job::Column::IsServerlessBackfill,
+        ];
+        let mut table_info: Vec<(JobId, String, DateTime, CreateType, bool)> = Table::find()
             .select_only()
             .columns([table::Column::TableId, table::Column::Definition])
-            .column(object::Column::InitializedAt)
-            .column(streaming_job::Column::CreateType)
+            .columns(object_columns)
+            .columns(streaming_job_columns)
             .join(JoinType::LeftJoin, table::Relation::Object1.def())
             .join(JoinType::LeftJoin, object::Relation::StreamingJob.def())
             .filter(filter_cond.clone())
             .into_tuple()
             .all(&inner.db)
             .await?;
-        let sink_info: Vec<(JobId, String, DateTime, CreateType)> = Sink::find()
+        let sink_info: Vec<(JobId, String, DateTime, CreateType, bool)> = Sink::find()
             .select_only()
             .columns([sink::Column::SinkId, sink::Column::Definition])
-            .column(object::Column::InitializedAt)
-            .column(streaming_job::Column::CreateType)
+            .columns(object_columns)
+            .columns(streaming_job_columns)
             .join(JoinType::LeftJoin, sink::Relation::Object.def())
             .join(JoinType::LeftJoin, object::Relation::StreamingJob.def())
             .filter(filter_cond)
@@ -164,12 +171,20 @@ impl CatalogController {
         inner.list_databases().await
     }
 
-    pub async fn list_all_object_dependencies(&self) -> MetaResult<Vec<PbObjectDependencies>> {
-        self.list_object_dependencies(true).await
+    pub async fn list_all_object_dependencies(&self) -> MetaResult<Vec<PbObjectDependency>> {
+        let inner = self.inner.read().await;
+        let txn = inner.db.begin().await?;
+        let dependencies = list_object_dependencies(&txn, true).await?;
+        txn.commit().await?;
+        Ok(dependencies)
     }
 
-    pub async fn list_created_object_dependencies(&self) -> MetaResult<Vec<PbObjectDependencies>> {
-        self.list_object_dependencies(false).await
+    pub async fn list_created_object_dependencies(&self) -> MetaResult<Vec<PbObjectDependency>> {
+        let inner = self.inner.read().await;
+        let txn = inner.db.begin().await?;
+        let dependencies = list_object_dependencies(&txn, false).await?;
+        txn.commit().await?;
+        Ok(dependencies)
     }
 
     pub async fn list_schemas(&self) -> MetaResult<Vec<PbSchema>> {
@@ -238,9 +253,18 @@ impl CatalogController {
             .filter(table::Column::TableType.eq(table_type))
             .all(&inner.db)
             .await?;
+        let streaming_jobs = load_streaming_jobs_by_ids(
+            &inner.db,
+            table_objs.iter().map(|(table, _)| table.job_id()),
+        )
+        .await?;
         Ok(table_objs
             .into_iter()
-            .map(|(table, obj)| ObjectModel(table, obj.unwrap()).into())
+            .map(|(table, obj)| {
+                let job_id = table.job_id();
+                let streaming_job = streaming_jobs.get(&job_id).cloned();
+                ObjectModel(table, obj.unwrap(), streaming_job).into()
+            })
             .collect())
     }
 
@@ -279,7 +303,7 @@ impl CatalogController {
             .await?;
         Ok(conn_objs
             .into_iter()
-            .map(|(conn, obj)| ObjectModel(conn, obj.unwrap()).into())
+            .map(|(conn, obj)| ObjectModel(conn, obj.unwrap(), None).into())
             .collect())
     }
 
@@ -340,10 +364,19 @@ impl CatalogController {
             ))
             .all(&inner.db)
             .await?;
+        let streaming_jobs = load_streaming_jobs_by_ids(
+            &inner.db,
+            table_objs.iter().map(|(table, _)| table.job_id()),
+        )
+        .await?;
 
         Ok(table_objs
             .into_iter()
-            .map(|(table, obj)| ObjectModel(table, obj.unwrap()).into())
+            .map(|(table, obj)| {
+                let job_id = table.job_id();
+                let streaming_job = streaming_jobs.get(&job_id).cloned();
+                ObjectModel(table, obj.unwrap(), streaming_job).into()
+            })
             .collect())
     }
 

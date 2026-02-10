@@ -111,11 +111,12 @@ message PauseMutation {}
 message ResumeMutation {}
 
 message ThrottleMutation {
-  message RateLimit {
+  message ThrottleConfig {
     optional uint32 rate_limit = 1;
+    common.ThrottleType throttle_type = 2;
   }
 
-  map<uint32, RateLimit> fragment_throttle = 1;
+  map<uint32, ThrottleConfig> fragment_throttle = 1;
 }
 
 message SubscriptionUpstreamInfo {
@@ -174,7 +175,7 @@ message BarrierMutation {
     PauseMutation pause = 7;
     // Resume the dataflow of the whole streaming graph, only used for scaling.
     ResumeMutation resume = 8;
-    // Throttle specific source exec or backfill exec.
+    // Alter the RateLimit of some specific executors
     ThrottleMutation throttle = 10;
     // Drop subscription on mv
     DropSubscriptionsMutation drop_subscriptions = 12;
@@ -533,6 +534,7 @@ message DeltaExpression {
   expr.ExprNode delta = 2;
 }
 
+// Deprecated: Use InequalityPairV2 instead.
 message InequalityPair {
   // Input index of greater side of inequality.
   uint32 key_required_larger = 1;
@@ -542,6 +544,27 @@ message InequalityPair {
   bool clean_state = 3;
   // greater >= less + delta_expression, if `None`, it represents that greater >= less
   DeltaExpression delta_expression = 4;
+}
+
+enum InequalityType {
+  INEQUALITY_TYPE_UNSPECIFIED = 0;
+  INEQUALITY_TYPE_LESS_THAN = 1;
+  INEQUALITY_TYPE_LESS_THAN_OR_EQUAL = 2;
+  INEQUALITY_TYPE_GREATER_THAN = 3;
+  INEQUALITY_TYPE_GREATER_THAN_OR_EQUAL = 4;
+}
+
+message InequalityPairV2 {
+  // Index of the left side of the inequality (from left input).
+  uint32 left_idx = 1;
+  // Index of the right side of the inequality (from right input, NOT offset by left_cols_num).
+  uint32 right_idx = 2;
+  // Whether this condition is used to clean left state table of `HashJoinExecutor`.
+  bool clean_left_state = 3;
+  // Whether this condition is used to clean right state table of `HashJoinExecutor`.
+  bool clean_right_state = 4;
+  // Comparison operator: left_col `<op>` right_col (e.g., <, <=, >, >=).
+  InequalityType op = 5;
 }
 
 enum JoinEncodingType {
@@ -585,6 +608,9 @@ message HashJoinNode {
   // Which encoding will be used to encode join rows in operator cache.
   // Deprecated. Use the one from `StreamingDeveloperConfig` instead.
   JoinEncodingType join_encoding_type = 15 [deprecated = true];
+
+  // New inequality pairs with clearer semantics. Takes precedence over `inequality_pairs` if non-empty.
+  repeated InequalityPairV2 inequality_pairs_v2 = 16;
 }
 
 message AsOfJoinNode {
@@ -1228,6 +1254,8 @@ message StreamContext {
   string timezone = 1;
   // The partial config of this job to override the global config.
   string config_override = 2;
+  // The adaptive parallelism strategy for this streaming job, if explicitly set.
+  string adaptive_parallelism_strategy = 3;
 }
 
 message BackfillOrder {
