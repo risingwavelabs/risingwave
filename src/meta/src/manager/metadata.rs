@@ -352,7 +352,7 @@ impl MetadataManager {
 
     pub async fn list_background_creating_jobs(&self) -> MetaResult<HashSet<JobId>> {
         self.catalog_controller
-            .list_background_creating_jobs(false, None)
+            .list_background_creating_jobs(true, None)
             .await
     }
 
