@@ -210,6 +210,9 @@ metrics_level = "Disabled"
             per_session_queries: vec![
                 "create view if not exists table_parallelism as select t.name, tf.parallelism from rw_tables t, rw_table_fragments tf where t.id = tf.table_id;".into(),
                 "create view if not exists mview_parallelism as select m.name, tf.parallelism from rw_materialized_views m, rw_table_fragments tf where m.id = tf.table_id;".into(),
+                "set streaming_parallelism_strategy_for_table = 'DEFAULT'".into(),
+                "set streaming_parallelism_strategy_for_source = 'DEFAULT'".into(),
+                "set streaming_parallelism_strategy_for_materialized_view = 'DEFAULT'".into(),
             ]
                 .into(),
             ..Default::default()

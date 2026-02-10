@@ -21,7 +21,7 @@ use risingwave_simulation::cluster::{Cluster, Configuration};
 use risingwave_simulation::utils::AssertResult;
 use tokio::time::sleep;
 
-use super::start_scale_session;
+use super::{set_default_materialized_view_strategy, start_scale_session};
 
 #[tokio::test]
 async fn test_adaptive_strategy_create() -> Result<()> {
@@ -278,6 +278,7 @@ async fn test_streaming_parallelism_strategy_default_fallback() -> Result<()> {
     session.run("create table t_fallback_base(v int)").await?;
     session.run("select distinct parallelism from rw_fragment_parallelism where name = 't_fallback_base' and distribution_type = 'HASH';").await?.assert_result_eq("3");
 
+    set_default_materialized_view_strategy(&mut session).await?;
     session
         .run("create materialized view m_fallback as select * from t_fallback_base")
         .await?;
