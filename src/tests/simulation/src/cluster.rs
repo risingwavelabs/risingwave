@@ -164,7 +164,12 @@ impl Configuration {
 
     pub fn for_scale_shared_source() -> Self {
         let mut conf = Self::for_scale();
-        conf.per_session_queries = vec!["SET STREAMING_USE_SHARED_SOURCE = true;".into()].into();
+        conf.per_session_queries = vec![
+            "SET STREAMING_USE_SHARED_SOURCE = true;".into(),
+            "set streaming_parallelism_strategy_for_table = 'DEFAULT'".into(),
+            "set streaming_parallelism_strategy_for_source = 'DEFAULT'".into(),
+            "set streaming_parallelism_strategy_for_materialized_view = 'DEFAULT'".into(),
+        ].into();
         conf
     }
 
