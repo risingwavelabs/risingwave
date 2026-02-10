@@ -1370,6 +1370,16 @@ pub struct CompactionScheduleSnapshot {
 }
 
 impl CompactionScheduleSnapshot {
+    /// Task type priority order for scheduling.
+    /// Higher priority types are checked first.
+    const TASK_TYPE_PRIORITY: &[TaskType] = &[
+        TaskType::Dynamic,
+        TaskType::SpaceReclaim,
+        TaskType::Ttl,
+        TaskType::Tombstone,
+        TaskType::VnodeWatermark,
+    ];
+
     /// Returns the time when this snapshot was taken.
     pub fn snapshot_time(&self) -> Instant {
         self.snapshot_time
@@ -1380,7 +1390,9 @@ impl CompactionScheduleSnapshot {
     /// Returns groups in shuffled order for fair scheduling. If groups have different
     /// task types, prioritizes non-Dynamic types (returns single group) unless
     /// Dynamic groups were seen first (returns all Dynamic groups).
-    pub fn pick_compaction_groups_and_type(&self) -> (Vec<CompactionGroupId>, TaskType) {
+    ///
+    /// Returns `None` if no groups are scheduled.
+    pub fn pick_compaction_groups_and_type(&self) -> Option<(Vec<CompactionGroupId>, TaskType)> {
         let group_ids = self.group_ids_shuffled();
         let mut normal_groups = vec![];
         for cg_id in group_ids {
@@ -1388,18 +1400,20 @@ impl CompactionScheduleSnapshot {
                 if pick_type == TaskType::Dynamic {
                     normal_groups.push(cg_id);
                 } else if normal_groups.is_empty() {
-                    return (vec![cg_id], pick_type);
+                    return Some((vec![cg_id], pick_type));
                 }
             }
         }
-        (normal_groups, TaskType::Dynamic)
+        if normal_groups.is_empty() {
+            None
+        } else {
+            Some((normal_groups, TaskType::Dynamic))
+        }
     }
 
     /// Extract unique group ids in shuffled order for fair scheduling.
     fn group_ids_shuffled(&self) -> Vec<CompactionGroupId> {
-        let mut group_ids: Vec<_> = self.scheduled.iter().map(|(g, _)| *g).collect();
-        group_ids.sort_unstable();
-        group_ids.dedup();
+        let mut group_ids: Vec<_> = self.scheduled.iter().map(|(g, _)| *g).unique().collect();
         group_ids.shuffle(&mut thread_rng());
         group_ids
     }
@@ -1407,34 +1421,10 @@ impl CompactionScheduleSnapshot {
     /// Pick task type for a group by priority order.
     /// Priority: `Dynamic` > `SpaceReclaim` > `Ttl` > `Tombstone` > `VnodeWatermark`
     fn pick_type(&self, group: CompactionGroupId) -> Option<TaskType> {
-        if self
-            .scheduled
-            .contains(&(group, compact_task::TaskType::Dynamic))
-        {
-            Some(compact_task::TaskType::Dynamic)
-        } else if self
-            .scheduled
-            .contains(&(group, compact_task::TaskType::SpaceReclaim))
-        {
-            Some(compact_task::TaskType::SpaceReclaim)
-        } else if self
-            .scheduled
-            .contains(&(group, compact_task::TaskType::Ttl))
-        {
-            Some(compact_task::TaskType::Ttl)
-        } else if self
-            .scheduled
-            .contains(&(group, compact_task::TaskType::Tombstone))
-        {
-            Some(compact_task::TaskType::Tombstone)
-        } else if self
-            .scheduled
-            .contains(&(group, compact_task::TaskType::VnodeWatermark))
-        {
-            Some(compact_task::TaskType::VnodeWatermark)
-        } else {
-            None
-        }
+        Self::TASK_TYPE_PRIORITY
+            .iter()
+            .find(|t| self.scheduled.contains(&(group, **t)))
+            .copied()
     }
 }
 
@@ -1505,12 +1495,7 @@ impl CompactionState {
                 }
             }
         }
-        let key = (compaction_group, task_type);
-        if guard.scheduled.contains(&key) {
-            return false;
-        }
-        guard.scheduled.insert(key);
-        true
+        guard.scheduled.insert((compaction_group, task_type))
     }
 
     /// Unschedule a group. For Dynamic type, decide whether to add to cooldown.
@@ -2013,5 +1998,71 @@ mod compaction_state_tests {
         let guard = state.inner.lock();
         assert!(guard.dynamic_cooldown.contains(&g1));
         assert!(!guard.dynamic_cooldown.contains(&g2));
+    }
+
+    #[test]
+    fn test_pick_compaction_groups_empty() {
+        let state = CompactionState::new();
+        let snapshot = state.snapshot();
+        // No scheduled groups → returns None
+        assert!(snapshot.pick_compaction_groups_and_type().is_none());
+    }
+
+    #[test]
+    fn test_pick_compaction_groups_mixed_types() {
+        let state = CompactionState::new();
+        let g1: CompactionGroupId = 1.into();
+        let g2: CompactionGroupId = 2.into();
+        let g3: CompactionGroupId = 3.into();
+
+        // g1: Dynamic, g2: Ttl, g3: Dynamic
+        state.try_sched_compaction(g1, TaskType::Dynamic, ScheduleTrigger::NewData);
+        state.try_sched_compaction(g2, TaskType::Ttl, ScheduleTrigger::Periodic);
+        state.try_sched_compaction(g3, TaskType::Dynamic, ScheduleTrigger::NewData);
+
+        let snapshot = state.snapshot();
+        let (groups, task_type) = snapshot.pick_compaction_groups_and_type().unwrap();
+
+        // Due to shuffle, either:
+        // - Ttl group is encountered first → returns (vec![g2], Ttl)
+        // - Dynamic group is encountered first → collects all Dynamic, skips Ttl
+        //   → returns ([g1, g3] in some order, Dynamic)
+        if task_type == TaskType::Dynamic {
+            assert!(groups.contains(&g1));
+            assert!(groups.contains(&g3));
+            assert!(!groups.contains(&g2)); // Ttl group excluded from Dynamic result
+        } else {
+            assert_eq!(task_type, TaskType::Ttl);
+            assert_eq!(groups, vec![g2]);
+        }
+    }
+
+    #[test]
+    fn test_pick_compaction_groups_all_dynamic() {
+        let state = CompactionState::new();
+        let g1: CompactionGroupId = 1.into();
+        let g2: CompactionGroupId = 2.into();
+
+        state.try_sched_compaction(g1, TaskType::Dynamic, ScheduleTrigger::NewData);
+        state.try_sched_compaction(g2, TaskType::Dynamic, ScheduleTrigger::NewData);
+
+        let snapshot = state.snapshot();
+        let (groups, task_type) = snapshot.pick_compaction_groups_and_type().unwrap();
+        assert_eq!(task_type, TaskType::Dynamic);
+        assert!(groups.contains(&g1));
+        assert!(groups.contains(&g2));
+    }
+
+    #[test]
+    fn test_pick_compaction_groups_single_non_dynamic() {
+        let state = CompactionState::new();
+        let g1: CompactionGroupId = 1.into();
+
+        state.try_sched_compaction(g1, TaskType::SpaceReclaim, ScheduleTrigger::Periodic);
+
+        let snapshot = state.snapshot();
+        let (groups, task_type) = snapshot.pick_compaction_groups_and_type().unwrap();
+        assert_eq!(task_type, TaskType::SpaceReclaim);
+        assert_eq!(groups, vec![g1]);
     }
 }
