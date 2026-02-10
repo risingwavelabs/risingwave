@@ -93,7 +93,6 @@ use risingwave_pb::id::FragmentId;
 use risingwave_pb::stream_service::InjectBarrierRequest;
 
 use crate::executor::exchange::permit;
-use crate::executor::exchange::permit::channel_from_config;
 use crate::task::barrier_worker::await_epoch_completed_future::AwaitEpochCompletedFuture;
 use crate::task::barrier_worker::{ScoredStreamError, TakeReceiverRequest};
 use crate::task::cdc_progress::CdcTableBackfillState;
@@ -807,7 +806,19 @@ impl PartialGraphState {
     ) {
         let request = match request {
             TakeReceiverRequest::Remote(result_sender) => {
-                let (tx, rx) = channel_from_config(self.local_barrier_manager.env.global_config());
+                let upstream_actor_id_str = upstream_actor_id.to_string();
+                let actor_channel_buffered_bytes = self
+                    .actor_manager
+                    .streaming_metrics
+                    .actor_channel_buffered_bytes
+                    .with_guarded_label_values(&[&upstream_actor_id_str]);
+                let (tx, rx) = permit::channel_from_config_with_metrics(
+                    self.local_barrier_manager.env.global_config(),
+                    permit::ChannelMetrics {
+                        sender_actor_channel_buffered_bytes: actor_channel_buffered_bytes.clone(),
+                        receiver_actor_channel_buffered_bytes: actor_channel_buffered_bytes,
+                    },
+                );
                 let _ = result_sender.send(Ok(rx));
                 NewOutputRequest::Remote(tx)
             }
