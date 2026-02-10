@@ -13,10 +13,9 @@
 // limitations under the License.
 
 use pretty_xmlish::XmlNode;
-use risingwave_pb::stream_plan::SyncLogStoreNode;
+use risingwave_pb::stream_plan::{SyncLogStoreNode, SyncLogStoreTarget};
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 
-use super::StreamPlanNodeType;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::generic::PhysicalPlanRef;
 use crate::optimizer::plan_node::stream::StreamPlanNodeMetadata;
@@ -28,35 +27,15 @@ use crate::optimizer::plan_node::{
 };
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum SyncLogStoreTarget {
-    UnalignedHashJoin,
-    SinkIntoTable,
-}
-
-impl SyncLogStoreTarget {
-    pub fn metrics_target(self) -> &'static str {
-        match self {
-            Self::UnalignedHashJoin => "unaligned_hash_join",
-            Self::SinkIntoTable => "sink-into-table",
-        }
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamSyncLogStore {
     pub base: PlanBase<Stream>,
     pub input: PlanRef,
-    pub plan_node_discriminant: StreamPlanNodeType,
     pub metrics_target: SyncLogStoreTarget,
 }
 
 impl StreamSyncLogStore {
-    pub fn new_with_target(
-        input: PlanRef,
-        plan_node_discriminant: StreamPlanNodeType,
-        metrics_target: SyncLogStoreTarget,
-    ) -> Self {
+    pub fn new_with_target(input: PlanRef, metrics_target: SyncLogStoreTarget) -> Self {
         let base = PlanBase::new_stream(
             input.ctx(),
             input.schema().clone(),
@@ -72,7 +51,6 @@ impl StreamSyncLogStore {
         Self {
             base,
             input,
-            plan_node_discriminant,
             metrics_target,
         }
     }
@@ -90,7 +68,7 @@ impl PlanTreeNodeUnary<Stream> for StreamSyncLogStore {
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        Self::new_with_target(input, self.plan_node_discriminant, self.metrics_target)
+        Self::new_with_target(input, self.metrics_target)
     }
 }
 
@@ -106,7 +84,8 @@ impl StreamNode for StreamSyncLogStore {
         NodeBody::SyncLogStore(Box::new(SyncLogStoreNode {
             log_store_table,
             aligned: false,
-            metrics_target: self.metrics_target.metrics_target().to_owned(),
+            metrics_target: String::new(),
+            target: self.metrics_target as i32,
 
             // The following fields should now be read from per-job config override.
             #[allow(deprecated)]

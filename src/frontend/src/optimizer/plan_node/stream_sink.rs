@@ -33,7 +33,7 @@ use risingwave_connector::sink::{
 };
 use risingwave_connector::{WithPropertiesExt, match_sink_name_str};
 use risingwave_pb::expr::expr_node::Type;
-use risingwave_pb::stream_plan::SinkLogStoreType;
+use risingwave_pb::stream_plan::{SinkLogStoreType, SyncLogStoreTarget};
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
 use super::derive::{derive_columns, derive_pk};
@@ -42,8 +42,8 @@ use super::utils::{
     Distill, IndicesDisplay, childless_record, infer_kv_log_store_table_catalog_inner,
 };
 use super::{
-    ExprRewritable, PlanBase, StreamExchange, StreamNode, StreamPlanNodeType,
-    StreamPlanRef as PlanRef, StreamProject, StreamSyncLogStore, SyncLogStoreTarget, generic,
+    ExprRewritable, PlanBase, StreamExchange, StreamNode, StreamPlanRef as PlanRef, StreamProject,
+    StreamSyncLogStore, generic,
 };
 use crate::TableCatalog;
 use crate::error::{ErrorCode, Result, RwError, bail_bind_error, bail_invalid_input_syntax};
@@ -562,12 +562,7 @@ impl StreamSink {
 
         // sink into table should have logstore for sink_decouple
         let input = if sink_decouple && target_table.is_some() {
-            StreamSyncLogStore::new_with_target(
-                input,
-                StreamPlanNodeType::StreamSink,
-                SyncLogStoreTarget::SinkIntoTable,
-            )
-            .into()
+            StreamSyncLogStore::new_with_target(input, SyncLogStoreTarget::SinkIntoTable).into()
         } else {
             input
         };

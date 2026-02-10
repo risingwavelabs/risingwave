@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_pb::stream_plan::SyncLogStoreNode;
+use risingwave_pb::stream_plan::{SyncLogStoreNode, SyncLogStoreTarget};
 use risingwave_storage::StateStore;
 use tokio::time::Duration;
 
@@ -42,12 +42,24 @@ impl ExecutorBuilder for SyncLogStoreExecutorBuilder {
             let actor_id = actor_context.id;
             let fragment_id = params.fragment_id;
             let name = "sync_log_store";
+            let target = SyncLogStoreTarget::from_i32(node.target)
+                .unwrap_or(SyncLogStoreTarget::Unspecified);
+            let metrics_target = match target {
+                SyncLogStoreTarget::Unspecified => "",
+                SyncLogStoreTarget::UnalignedHashJoin => "unaligned_hash_join",
+                SyncLogStoreTarget::SinkIntoTable => "sink-into-table",
+            };
+            let metrics_target = if metrics_target.is_empty() {
+                node.metrics_target.as_str()
+            } else {
+                metrics_target
+            };
             SyncedKvLogStoreMetrics::new(
                 streaming_metrics,
                 actor_id,
                 fragment_id,
                 name,
-                node.metrics_target.as_str(),
+                metrics_target,
             )
         };
 
