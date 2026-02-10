@@ -51,6 +51,46 @@ def gen_pipeline_steps():
     pipeline_steps = ""
     for test_case, test_formats in CASES_MAP.items():
         for test_format in test_formats:
+            # For Postgres CDC, additionally test against Postgres 18 as the upstream.
+            if test_case == "postgres-cdc" and test_format == "json":
+                # Default: Postgres 17 (defined in docker compose).
+                pipeline_steps += f"""
+ - label: Run Demos {test_case} {test_format}
+   key: {test_case}-{test_format}
+   command: ci/scripts/integration-tests.sh -c {test_case} -f {test_format}
+   timeout_in_minutes: 30
+   retry: *auto-retry
+   concurrency: 10
+   concurrency_group: 'integration-test/run'
+   plugins:
+     - seek-oss/aws-sm#v2.3.2:
+         env:
+           GHCR_USERNAME: ghcr-username
+           GHCR_TOKEN: ghcr-token
+           RW_LICENSE_KEY: rw-license-key
+     - ./ci/plugins/docker-compose-logs
+"""
+                # Extra: Postgres 18.
+                pipeline_steps += f"""
+ - label: Run Demos {test_case} {test_format} (pg18)
+   key: {test_case}-{test_format}-pg18
+   command: ci/scripts/integration-tests.sh -c {test_case} -f {test_format}
+   env:
+     RW_CDC_POSTGRES_IMAGE: "postgres:18-alpine"
+   timeout_in_minutes: 30
+   retry: *auto-retry
+   concurrency: 10
+   concurrency_group: 'integration-test/run'
+   plugins:
+     - seek-oss/aws-sm#v2.3.2:
+         env:
+           GHCR_USERNAME: ghcr-username
+           GHCR_TOKEN: ghcr-token
+           RW_LICENSE_KEY: rw-license-key
+     - ./ci/plugins/docker-compose-logs
+"""
+                continue
+
             pipeline_steps += f"""
  - label: Run Demos {test_case} {test_format}
    key: {test_case}-{test_format}
