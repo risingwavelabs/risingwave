@@ -30,6 +30,8 @@ use datafusion::physical_plan::{
 use datafusion::physical_planner::{ExtensionPlanner, PhysicalPlanner};
 use datafusion_common::{DFSchemaRef, Result as DFResult, exec_datafusion_err, exec_err};
 use futures_async_stream::try_stream;
+use risingwave_common::bitmap::Bitmap;
+use risingwave_common::util::iter_util::ZipEqFast;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, educe::Educe)]
 #[educe(PartialOrd)]
@@ -51,10 +53,6 @@ impl Expand {
             column_subsets,
             schema,
         }
-    }
-
-    pub fn column_subsets(&self) -> &[Vec<usize>] {
-        &self.column_subsets
     }
 }
 
@@ -193,25 +191,17 @@ impl ExecutionPlan for ExpandExec {
     }
 }
 
-// Imitate risingwave_[batch|stream] ExpandExecutor: one input scan, expand rows by subsets.
+// imitate risingwave_batch_executors::executor::ExpandExecutor::do_execute
 #[try_stream(ok = RecordBatch, error = datafusion_common::DataFusionError)]
 async fn expand_stream(
     input: SendableRecordBatchStream,
     schema: ArrowSchemaRef,
     column_subsets: Vec<Vec<usize>>,
 ) {
-    // `keep_columns` semantics in RW expand executor: for each subset, keep values on listed
-    // positions and fill other expanded positions with NULLs.
     let input_len = (schema.fields().len() - 1) / 2;
-    let subset_masks: Vec<Vec<bool>> = column_subsets
+    let subset_masks: Vec<Bitmap> = column_subsets
         .iter()
-        .map(|subset| {
-            let mut mask = vec![false; input_len];
-            for &idx in subset {
-                mask[idx] = true;
-            }
-            mask
-        })
+        .map(|subset| Bitmap::from_indices(input_len, subset))
         .collect();
 
     #[for_await]
@@ -219,6 +209,9 @@ async fn expand_stream(
         let input_batch = input_batch?;
         let input_rows = input_batch.num_rows();
         let input_cols = input_batch.columns();
+        if input_cols.len() != input_len {
+            return exec_err!("ExpandExec: unexpected number of input columns");
+        }
 
         for (flag, subset_mask) in subset_masks.iter().enumerate() {
             let flag = i64::try_from(flag)
@@ -227,11 +220,11 @@ async fn expand_stream(
                 Arc::new(Int64Array::from_iter(std::iter::repeat_n(flag, input_rows)));
 
             let mut output_cols = Vec::with_capacity(input_len * 2 + 1);
-            for (idx, keep) in subset_mask.iter().enumerate() {
-                if *keep {
-                    output_cols.push(input_cols[idx].clone());
+            for (input_col, keep) in input_cols.iter().zip_eq_fast(subset_mask.iter()) {
+                if keep {
+                    output_cols.push(input_col.clone());
                 } else {
-                    output_cols.push(new_null_array(input_cols[idx].data_type(), input_rows));
+                    output_cols.push(new_null_array(input_col.data_type(), input_rows));
                 }
             }
             output_cols.extend(input_cols.iter().cloned());
@@ -264,7 +257,7 @@ impl ExtensionPlanner for ExpandPlanner {
         let schema = expand.schema().inner().clone();
         Ok(Some(Arc::new(ExpandExec::new(
             physical_inputs[0].clone(),
-            expand.column_subsets().to_vec(),
+            expand.column_subsets.clone(),
             schema,
         ))))
     }
