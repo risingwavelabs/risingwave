@@ -1526,7 +1526,7 @@ template:
     application: "metastore"
 
     # The docker image. Can be overridden to use a different version.
-    image: "postgres:17-alpine"
+    image: "postgres:18-alpine"
 
     # If set to true, data will be persisted at data/{id}.
     persist-data: true
