@@ -37,7 +37,7 @@ async fn test_passive_online_and_offline() -> Result<()> {
         true,
     );
     let mut cluster = Cluster::start(config.clone()).await?;
-    let mut session = start_scale_session(&mut cluster).await?;
+    let mut session = cluster.start_session();
 
     session.run("create table t (v1 int);").await?;
     session
@@ -217,7 +217,7 @@ async fn test_active_online() -> Result<()> {
     ))
     .await;
 
-    let mut session = start_scale_session(&mut cluster).await?;
+    let mut session = cluster.start_session();
 
     session.run("create table t (v1 int);").await?;
     session
@@ -302,7 +302,7 @@ async fn test_auto_parallelism_control_with_fixed_and_auto_helper(
     ))
     .await;
 
-    let mut session = start_scale_session(&mut cluster).await?;
+    let mut session = cluster.start_session();
 
     session.run("create table t (v1 int);").await?;
 

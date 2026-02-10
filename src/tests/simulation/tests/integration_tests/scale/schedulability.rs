@@ -24,7 +24,7 @@ use risingwave_simulation::cluster::{Cluster, Configuration};
 #[tokio::test]
 async fn test_cordon_normal() -> Result<()> {
     let mut cluster = Cluster::start(Configuration::for_scale()).await?;
-    let mut session = start_scale_session(&mut cluster).await?;
+    let mut session = cluster.start_session();
 
     let mut workers: Vec<WorkerNode> = cluster
         .get_cluster_info()
@@ -77,7 +77,7 @@ async fn test_cordon_normal() -> Result<()> {
 #[tokio::test]
 async fn test_cordon_no_shuffle_failed() -> Result<()> {
     let mut cluster = Cluster::start(Configuration::for_scale()).await?;
-    let mut session = start_scale_session(&mut cluster).await?;
+    let mut session = cluster.start_session();
 
     let mut workers: Vec<WorkerNode> = cluster
         .get_cluster_info()

@@ -28,7 +28,7 @@ use crate::scale::auto_parallelism::MAX_HEARTBEAT_INTERVAL_SECS_CONFIG_FOR_AUTO_
 async fn test_streaming_parallelism_default() -> Result<()> {
     let mut cluster = Cluster::start(Configuration::for_scale()).await?;
     let default_parallelism = cluster.config().compute_nodes * cluster.config().compute_node_cores;
-    let mut session = start_scale_session(&mut cluster).await?;
+    let mut session = cluster.start_session();
     session.run("create table t1 (c1 int, c2 int);").await?;
     let materialize_fragment = cluster
         .locate_one_fragment([identity_contains("materialize")])
@@ -62,7 +62,7 @@ async fn test_streaming_parallelism_set_zero() -> Result<()> {
     let mut cluster = Cluster::start(Configuration::for_scale()).await?;
     let default_parallelism = cluster.config().compute_nodes * cluster.config().compute_node_cores;
 
-    let mut session = start_scale_session(&mut cluster).await?;
+    let mut session = cluster.start_session();
     session.run("set streaming_parallelism=0;").await?;
     session.run("create table t1 (c1 int, c2 int);").await?;
 
