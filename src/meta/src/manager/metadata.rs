@@ -351,9 +351,15 @@ impl MetadataManager {
     }
 
     pub async fn list_background_creating_jobs(&self) -> MetaResult<HashSet<JobId>> {
-        self.catalog_controller
-            .list_background_creating_jobs(true, None)
-            .await
+        // For reschedule guard, we need all creating jobs (foreground + background),
+        // then rely on backfill scan type checks to decide which jobs are actually blocked.
+        Ok(self
+            .catalog_controller
+            .list_creating_jobs(true, true, None)
+            .await?
+            .into_iter()
+            .map(|(job_id, _, _, _, _)| job_id)
+            .collect())
     }
 
     pub async fn list_sources(&self) -> MetaResult<Vec<PbSource>> {
