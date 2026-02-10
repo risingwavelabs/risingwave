@@ -232,7 +232,7 @@ pub fn build_graph_with_strategy(
                 .get_params()
                 .load();
 
-            let p = match job_type {
+            let configured_parallelism = match job_type {
                 GraphJobType::Table => config.streaming_parallelism_for_table(),
                 GraphJobType::MaterializedView => {
                     config.streaming_parallelism_for_materialized_view()
@@ -242,8 +242,8 @@ pub fn build_graph_with_strategy(
                 GraphJobType::Index => config.streaming_parallelism_for_index(),
             };
 
-            if p == ConfigParallelism::Default {
-                let system_p = match job_type {
+            if configured_parallelism == ConfigParallelism::Default {
+                let system_parallelism = match job_type {
                     GraphJobType::Table => system_params.streaming_parallelism_for_table(),
                     GraphJobType::MaterializedView => {
                         system_params.streaming_parallelism_for_materialized_view()
@@ -253,13 +253,15 @@ pub fn build_graph_with_strategy(
                     GraphJobType::Index => system_params.streaming_parallelism_for_index(),
                 };
 
-                if system_p != 0 {
-                    ConfigParallelism::Fixed(std::num::NonZeroU64::new(system_p as u64).unwrap())
+                if system_parallelism != 0 {
+                    ConfigParallelism::Fixed(
+                        std::num::NonZeroU64::new(system_parallelism as u64).unwrap(),
+                    )
                 } else {
-                    p
+                    configured_parallelism
                 }
             } else {
-                p
+                configured_parallelism
             }
         } else {
             ConfigParallelism::Default
@@ -289,7 +291,7 @@ pub fn build_graph_with_strategy(
                 .get_params()
                 .load();
 
-            let s = match job_type {
+            let configured_strategy = match job_type {
                 GraphJobType::Table => config.streaming_parallelism_strategy_for_table(),
                 GraphJobType::MaterializedView => {
                     config.streaming_parallelism_strategy_for_materialized_view()
@@ -299,8 +301,8 @@ pub fn build_graph_with_strategy(
                 GraphJobType::Index => config.streaming_parallelism_strategy_for_index(),
             };
 
-            if s == ConfigAdaptiveParallelismStrategy::Default {
-                let system_s = match job_type {
+            if configured_strategy == ConfigAdaptiveParallelismStrategy::Default {
+                let system_strategy = match job_type {
                     GraphJobType::Table => system_params.adaptive_parallelism_strategy_for_table(),
                     GraphJobType::MaterializedView => {
                         system_params.adaptive_parallelism_strategy_for_materialized_view()
@@ -312,13 +314,13 @@ pub fn build_graph_with_strategy(
                     GraphJobType::Index => system_params.adaptive_parallelism_strategy_for_index(),
                 };
 
-                if system_s != AdaptiveParallelismStrategy::Auto {
-                    system_s.into()
+                if system_strategy != AdaptiveParallelismStrategy::Auto {
+                    system_strategy.into()
                 } else {
-                    s
+                    configured_strategy
                 }
             } else {
-                s
+                configured_strategy
             }
         } else {
             ConfigAdaptiveParallelismStrategy::Default

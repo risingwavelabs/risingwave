@@ -12,19 +12,25 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt::Debug;
-use std::ops::Deref;
-use std::sync::Arc;
+use std::borrow::Borrow;
+use std::str::FromStr;
 
 use risingwave_license::LicenseKeyRef;
 use risingwave_pb::meta::PbSystemParams;
 
 use super::{AdaptiveParallelismStrategy, ParamValue, default};
+use crate::for_all_params;
 
 /// Information about a system parameter.
+///
+/// Used to display to users through `pg_settings` system table and `SHOW PARAMETERS` command.
 pub struct ParameterInfo {
     pub name: &'static str,
     pub mutable: bool,
+    /// The [`ToString`] representation of the parameter value.
+    ///
+    /// Certain parameters, such as `license_key`, may be sensitive, and redaction is applied to them in their newtypes.
+    /// As a result, we get the redacted value here for display.
     pub value: String,
     pub description: &'static str,
 }
@@ -32,19 +38,26 @@ pub struct ParameterInfo {
 macro_rules! define_system_params_read_trait {
     ($({ $field:ident, $type:ty, $default:expr, $is_mutable:expr, $doc:literal, $($rest:tt)* },)*) => {
         /// The trait delegating reads on [`risingwave_pb::meta::SystemParams`].
+        ///
+        /// Purposes:
+        /// - Avoid misuse of deprecated fields by hiding their getters.
+        /// - Abstract fallback logic for fields that might not be provided by meta service due to backward
+        ///   compatibility.
+        /// - Redact sensitive fields by returning a newtype around the original value.
         pub trait SystemParamsRead {
             $(
                 #[doc = $doc]
                 fn $field(&self) -> <$type as ParamValue>::Borrowed<'_>;
             )*
 
+            /// Return the information of all parameters.
             fn get_all(&self) -> Vec<ParameterInfo> {
                 vec![
                     $(
                         ParameterInfo {
                             name: stringify!($field),
                             mutable: $is_mutable,
-                            value: self.$field().to_string(),
+                            value: self.$field().to_string(), // use `to_string` to get displayable (maybe redacted) value
                             description: $doc,
                         },
                     )*
@@ -54,47 +67,24 @@ macro_rules! define_system_params_read_trait {
     };
 }
 
-crate::for_all_params!(define_system_params_read_trait);
+for_all_params!(define_system_params_read_trait);
 
-/// A wrapper for [`PbSystemParams`] to provide easy access to system parameters.
+/// The wrapper delegating reads on [`risingwave_pb::meta::SystemParams`].
+///
+/// See [`SystemParamsRead`] for more details.
+// TODO: should we manually impl `PartialEq` by comparing each field with read functions?
 #[derive(Clone, PartialEq)]
-pub struct SystemParamsReader<I = Arc<PbSystemParams>> {
+pub struct SystemParamsReader<I = PbSystemParams> {
     inner: I,
 }
 
-impl From<PbSystemParams> for SystemParamsReader {
-    fn from(params: PbSystemParams) -> Self {
-        Self {
-            inner: Arc::new(params),
-        }
-    }
-}
-
-impl<I> SystemParamsReader<I>
-where
-    I: Deref<Target = PbSystemParams>,
-{
-    pub fn new(inner: I) -> Self {
-        Self { inner }
-    }
-
-    pub fn inner(&self) -> &PbSystemParams {
-        &self.inner
-    }
-
-    /// Return a new reader with the reference to the inner system params.
-    pub fn as_ref(&self) -> SystemParamsReader<&PbSystemParams> {
-        SystemParamsReader {
-            inner: self.inner(),
-        }
-    }
-}
-
+// TODO: should ban `Debug` for inner `SystemParams`.
+// https://github.com/risingwavelabs/risingwave/pull/17906#discussion_r1705056943
 macro_rules! impl_system_params_reader_debug {
-    ($({ $field:ident, $type:ty, $default:expr, $is_mutable:expr, $doc:literal, $($rest:tt)* },)*) => {
-        impl<I> Debug for SystemParamsReader<I>
+    ($({ $field:ident, $($rest:tt)* },)*) => {
+        impl<I> std::fmt::Debug for SystemParamsReader<I>
         where
-            I: Deref<Target = PbSystemParams>,
+            I: Borrow<PbSystemParams>,
         {
             fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
                 f.debug_struct("SystemParamsReader")
@@ -107,98 +97,113 @@ macro_rules! impl_system_params_reader_debug {
     };
 }
 
-crate::for_all_params!(impl_system_params_reader_debug);
+for_all_params!(impl_system_params_reader_debug);
 
+impl<I> From<I> for SystemParamsReader<I>
+where
+    I: Borrow<PbSystemParams>,
+{
+    fn from(inner: I) -> Self {
+        Self { inner }
+    }
+}
+
+impl<I> SystemParamsReader<I>
+where
+    I: Borrow<PbSystemParams>,
+{
+    pub fn new(inner: I) -> Self {
+        Self { inner }
+    }
+
+    /// Return a new reader with the reference to the inner system params.
+    pub fn as_ref(&self) -> SystemParamsReader<&PbSystemParams> {
+        SystemParamsReader {
+            inner: self.inner(),
+        }
+    }
+
+    fn inner(&self) -> &PbSystemParams {
+        self.inner.borrow()
+    }
+}
+
+/// - Unwrap the field if it always exists.
+///   For example, if a parameter is introduced before the initial public release.
+///
+/// - Otherwise, specify the fallback logic when the field is missing.
 impl<I> SystemParamsRead for SystemParamsReader<I>
 where
-    I: Deref<Target = PbSystemParams>,
+    I: Borrow<PbSystemParams>,
 {
     fn barrier_interval_ms(&self) -> u32 {
+        self.inner().barrier_interval_ms.unwrap()
+    }
+
+    fn enforce_secret(&self) -> bool {
         self.inner()
-            .barrier_interval_ms
-            .unwrap_or(*default::BARRIER_INTERVAL_MS)
+            .enforce_secret
+            .unwrap_or_else(default::enforce_secret)
     }
 
     fn checkpoint_frequency(&self) -> u64 {
-        self.inner()
-            .checkpoint_frequency
-            .unwrap_or(*default::CHECKPOINT_FREQUENCY)
-    }
-
-    fn sstable_size_mb(&self) -> u32 {
-        self.inner()
-            .sstable_size_mb
-            .unwrap_or(*default::SSTABLE_SIZE_MB)
+        self.inner().checkpoint_frequency.unwrap()
     }
 
     fn parallel_compact_size_mb(&self) -> u32 {
-        self.inner()
-            .parallel_compact_size_mb
-            .unwrap_or(*default::PARALLEL_COMPACT_SIZE_MB)
+        self.inner().parallel_compact_size_mb.unwrap()
+    }
+
+    fn sstable_size_mb(&self) -> u32 {
+        self.inner().sstable_size_mb.unwrap()
     }
 
     fn block_size_kb(&self) -> u32 {
-        self.inner()
-            .block_size_kb
-            .unwrap_or(*default::BLOCK_SIZE_KB)
+        self.inner().block_size_kb.unwrap()
     }
 
     fn bloom_false_positive(&self) -> f64 {
-        self.inner()
-            .bloom_false_positive
-            .unwrap_or(*default::BLOOM_FALSE_POSITIVE)
+        self.inner().bloom_false_positive.unwrap()
     }
 
     fn state_store(&self) -> &str {
-        self.inner()
-            .state_store
-            .as_deref()
-            .unwrap_or_else(|| default::STATE_STORE.as_str())
+        self.inner().state_store.as_ref().unwrap()
     }
 
     fn data_directory(&self) -> &str {
-        self.inner()
-            .data_directory
-            .as_deref()
-            .unwrap_or_else(|| default::DATA_DIRECTORY.as_str())
+        self.inner().data_directory.as_ref().unwrap()
+    }
+
+    fn use_new_object_prefix_strategy(&self) -> bool {
+        *self
+            .inner()
+            .use_new_object_prefix_strategy
+            .as_ref()
+            .unwrap()
     }
 
     fn backup_storage_url(&self) -> &str {
-        self.inner()
-            .backup_storage_url
-            .as_deref()
-            .unwrap_or_else(|| default::BACKUP_STORAGE_URL.as_str())
+        self.inner().backup_storage_url.as_ref().unwrap()
     }
 
     fn backup_storage_directory(&self) -> &str {
-        self.inner()
-            .backup_storage_directory
-            .as_deref()
-            .unwrap_or_else(|| default::BACKUP_STORAGE_DIRECTORY.as_str())
+        self.inner().backup_storage_directory.as_ref().unwrap()
     }
 
     fn max_concurrent_creating_streaming_jobs(&self) -> u32 {
-        self.inner()
-            .max_concurrent_creating_streaming_jobs
-            .unwrap_or(*default::MAX_CONCURRENT_CREATING_STREAMING_JOBS)
+        self.inner().max_concurrent_creating_streaming_jobs.unwrap()
     }
 
     fn pause_on_next_bootstrap(&self) -> bool {
         self.inner()
             .pause_on_next_bootstrap
-            .unwrap_or(*default::PAUSE_ON_NEXT_BOOTSTRAP)
+            .unwrap_or_else(default::pause_on_next_bootstrap)
     }
 
     fn enable_tracing(&self) -> bool {
         self.inner()
             .enable_tracing
-            .unwrap_or(*default::ENABLE_TRACING)
-    }
-
-    fn use_new_object_prefix_strategy(&self) -> bool {
-        self.inner()
-            .use_new_object_prefix_strategy
-            .unwrap_or_else(|| *default::USE_NEW_OBJECT_PREFIX_STRATEGY)
+            .unwrap_or_else(default::enable_tracing)
     }
 
     fn license_key(&self) -> LicenseKeyRef<'_> {
@@ -212,96 +217,90 @@ where
     fn time_travel_retention_ms(&self) -> u64 {
         self.inner()
             .time_travel_retention_ms
-            .unwrap_or(*default::TIME_TRAVEL_RETENTION_MS)
+            .unwrap_or_else(default::time_travel_retention_ms)
     }
 
     fn adaptive_parallelism_strategy(&self) -> AdaptiveParallelismStrategy {
         self.inner()
             .adaptive_parallelism_strategy
             .as_deref()
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(*default::ADAPTIVE_PARALLELISM_STRATEGY)
+            .and_then(|s| AdaptiveParallelismStrategy::from_str(s).ok())
+            .unwrap_or(AdaptiveParallelismStrategy::Auto)
     }
 
-    fn per_database_isolation(&self) -> bool {
+    fn per_database_isolation(&self) -> <bool as ParamValue>::Borrowed<'_> {
         self.inner()
             .per_database_isolation
-            .unwrap_or(*default::PER_DATABASE_ISOLATION)
-    }
-
-    fn enforce_secret(&self) -> bool {
-        self.inner()
-            .enforce_secret
-            .unwrap_or(*default::ENFORCE_SECRET)
+            .unwrap_or_else(default::per_database_isolation)
     }
 
     fn streaming_parallelism_for_table(&self) -> u32 {
         self.inner()
             .streaming_parallelism_for_table
-            .unwrap_or(*default::STREAMING_PARALLELISM_FOR_TABLE)
+            .unwrap_or_else(default::streaming_parallelism_for_table)
     }
 
     fn streaming_parallelism_for_materialized_view(&self) -> u32 {
         self.inner()
             .streaming_parallelism_for_materialized_view
-            .unwrap_or(*default::STREAMING_PARALLELISM_FOR_MATERIALIZED_VIEW)
+            .unwrap_or_else(default::streaming_parallelism_for_materialized_view)
     }
 
     fn streaming_parallelism_for_sink(&self) -> u32 {
         self.inner()
             .streaming_parallelism_for_sink
-            .unwrap_or(*default::STREAMING_PARALLELISM_FOR_SINK)
+            .unwrap_or_else(default::streaming_parallelism_for_sink)
     }
 
     fn streaming_parallelism_for_source(&self) -> u32 {
         self.inner()
             .streaming_parallelism_for_source
-            .unwrap_or(*default::STREAMING_PARALLELISM_FOR_SOURCE)
+            .unwrap_or_else(default::streaming_parallelism_for_source)
     }
 
     fn streaming_parallelism_for_index(&self) -> u32 {
         self.inner()
             .streaming_parallelism_for_index
-            .unwrap_or(*default::STREAMING_PARALLELISM_FOR_INDEX)
+            .unwrap_or_else(default::streaming_parallelism_for_index)
     }
 
     fn adaptive_parallelism_strategy_for_table(&self) -> AdaptiveParallelismStrategy {
         self.inner()
             .adaptive_parallelism_strategy_for_table
             .as_deref()
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(*default::ADAPTIVE_PARALLELISM_STRATEGY_FOR_TABLE)
+            .and_then(|s| AdaptiveParallelismStrategy::from_str(s).ok())
+            .unwrap_or_else(default::adaptive_parallelism_strategy_for_table)
     }
 
     fn adaptive_parallelism_strategy_for_materialized_view(&self) -> AdaptiveParallelismStrategy {
         self.inner()
             .adaptive_parallelism_strategy_for_materialized_view
             .as_deref()
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(*default::ADAPTIVE_PARALLELISM_STRATEGY_FOR_MATERIALIZED_VIEW)
+            .and_then(|s| AdaptiveParallelismStrategy::from_str(s).ok())
+            .unwrap_or_else(default::adaptive_parallelism_strategy_for_materialized_view)
     }
 
     fn adaptive_parallelism_strategy_for_sink(&self) -> AdaptiveParallelismStrategy {
         self.inner()
             .adaptive_parallelism_strategy_for_sink
             .as_deref()
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(*default::ADAPTIVE_PARALLELISM_STRATEGY_FOR_SINK)
+            .and_then(|s| AdaptiveParallelismStrategy::from_str(s).ok())
+            .unwrap_or_else(default::adaptive_parallelism_strategy_for_sink)
     }
 
     fn adaptive_parallelism_strategy_for_source(&self) -> AdaptiveParallelismStrategy {
         self.inner()
             .adaptive_parallelism_strategy_for_source
             .as_deref()
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(*default::ADAPTIVE_PARALLELISM_STRATEGY_FOR_SOURCE)
+            .and_then(|s| AdaptiveParallelismStrategy::from_str(s).ok())
+            .unwrap_or_else(default::adaptive_parallelism_strategy_for_source)
     }
 
     fn adaptive_parallelism_strategy_for_index(&self) -> AdaptiveParallelismStrategy {
         self.inner()
             .adaptive_parallelism_strategy_for_index
             .as_deref()
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(*default::ADAPTIVE_PARALLELISM_STRATEGY_FOR_INDEX)
+            .and_then(|s| AdaptiveParallelismStrategy::from_str(s).ok())
+            .unwrap_or_else(default::adaptive_parallelism_strategy_for_index)
     }
 }
