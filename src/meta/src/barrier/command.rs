@@ -146,21 +146,21 @@ impl RescheduleContext {
         let job_extra_info = self
             .job_extra_info
             .iter()
-            .filter(|(job_id, _)| job_ids.contains(job_id))
+            .filter(|(job_id, _)| job_ids.contains(*job_id))
             .map(|(job_id, info)| (*job_id, info.clone()))
             .collect();
 
         let upstream_fragments = self
             .upstream_fragments
             .iter()
-            .filter(|(fragment_id, _)| fragment_ids.contains(fragment_id))
+            .filter(|(fragment_id, _)| fragment_ids.contains(*fragment_id))
             .map(|(fragment_id, upstreams)| (*fragment_id, upstreams.clone()))
             .collect();
 
         let downstream_fragments = self
             .downstream_fragments
             .iter()
-            .filter(|(fragment_id, _)| fragment_ids.contains(fragment_id))
+            .filter(|(fragment_id, _)| fragment_ids.contains(*fragment_id))
             .map(|(fragment_id, downstreams)| (*fragment_id, downstreams.clone()))
             .collect();
 
