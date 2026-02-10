@@ -17,6 +17,7 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 
 use risingwave_common::array::StreamChunkBuilder;
+use risingwave_common_estimate_size::EstimateSize;
 use tokio::sync::mpsc;
 
 use super::exchange::input::BoxedActorInput;
@@ -287,7 +288,6 @@ where
             self.fragment_id,
             self.upstream_fragment_id,
         );
-
         let mut barrier_buffer = DispatchBarrierBuffer::new(
             self.barrier_rx,
             actor_id,
@@ -306,6 +306,9 @@ where
                 DispatcherMessage::Watermark(watermark) => Message::Watermark(watermark),
                 DispatcherMessage::Chunk(chunk) => {
                     metrics.actor_in_record_cnt.inc_by(chunk.cardinality() as _);
+                    metrics
+                        .actor_channel_buffered_bytes
+                        .sub(chunk.estimated_size() as i64);
                     Message::Chunk(chunk)
                 }
                 DispatcherMessage::Barrier(barrier) => {
