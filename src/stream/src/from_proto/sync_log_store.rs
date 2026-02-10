@@ -42,15 +42,17 @@ impl ExecutorBuilder for SyncLogStoreExecutorBuilder {
             let actor_id = actor_context.id;
             let fragment_id = params.fragment_id;
             let name = "sync_log_store";
-            let target = SyncLogStoreTarget::from_i32(node.target)
-                .unwrap_or(SyncLogStoreTarget::Unspecified);
+            let target =
+                SyncLogStoreTarget::try_from(node.target).unwrap_or(SyncLogStoreTarget::Unspecified);
             let metrics_target = match target {
                 SyncLogStoreTarget::Unspecified => "",
                 SyncLogStoreTarget::UnalignedHashJoin => "unaligned_hash_join",
                 SyncLogStoreTarget::SinkIntoTable => "sink-into-table",
             };
+            #[allow(deprecated)]
+            let legacy_metrics_target = node.metrics_target.as_str();
             let metrics_target = if metrics_target.is_empty() {
-                node.metrics_target.as_str()
+                legacy_metrics_target
             } else {
                 metrics_target
             };

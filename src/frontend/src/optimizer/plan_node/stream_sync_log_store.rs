@@ -84,7 +84,6 @@ impl StreamNode for StreamSyncLogStore {
         NodeBody::SyncLogStore(Box::new(SyncLogStoreNode {
             log_store_table,
             aligned: false,
-            metrics_target: String::new(),
             target: self.metrics_target as i32,
 
             // The following fields should now be read from per-job config override.
@@ -92,6 +91,7 @@ impl StreamNode for StreamSyncLogStore {
             pause_duration_ms: None,
             #[allow(deprecated)]
             buffer_size: None,
+            ..Default::default()
         }))
     }
 }
