@@ -42,8 +42,8 @@ impl ExecutorBuilder for SyncLogStoreExecutorBuilder {
             let actor_id = actor_context.id;
             let fragment_id = params.fragment_id;
             let name = "sync_log_store";
-            let target =
-                SyncLogStoreTarget::try_from(node.target).unwrap_or(SyncLogStoreTarget::Unspecified);
+            let target = SyncLogStoreTarget::try_from(node.target)
+                .unwrap_or(SyncLogStoreTarget::Unspecified);
             let metrics_target = match target {
                 SyncLogStoreTarget::Unspecified => "",
                 SyncLogStoreTarget::UnalignedHashJoin => "unaligned_hash_join",
