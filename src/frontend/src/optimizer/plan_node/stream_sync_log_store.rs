@@ -13,8 +13,8 @@
 // limitations under the License.
 
 use pretty_xmlish::XmlNode;
-use risingwave_pb::stream_plan::{SyncLogStoreNode, SyncLogStoreTarget};
 use risingwave_pb::stream_plan::stream_node::NodeBody;
+use risingwave_pb::stream_plan::{SyncLogStoreNode, SyncLogStoreTarget};
 
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::generic::PhysicalPlanRef;
