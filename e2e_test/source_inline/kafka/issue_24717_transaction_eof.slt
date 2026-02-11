@@ -5,57 +5,19 @@
 # to hang because target_offset (high_watermark - 1) may point to a control message
 # that will never be delivered to the consumer.
 #
-# This test verifies that backfill completes correctly even when the last visible
-# offset is not target_offset due to transaction control messages.
-#
-# Note: This test requires manual setup with a Rust transactional producer
-# (see issue #24717 for the producer code). For automated CI testing,
-# we use a simpler test that exercises the EOF handling logic.
+# This test verifies that backfill completes correctly with the partition EOF
+# handling logic. While we cannot easily produce transaction control messages
+# in the CI environment, this test exercises the EOF-based backfill completion path.
 
 control substitution on
 
-# Create a topic for transaction testing
+# Create a topic for testing
 system ok
 rpk topic create issue_24717_tx_test -p 1
 
-# Try to send messages with transaction (requires kafka-python)
-# If kafka-python is not available, fall back to normal messages
+# Produce test messages
 system ok
-python3 - ${RISEDEV_KAFKA_BOOTSTRAP_SERVERS} issue_24717_tx_test <<'PYTHON_EOF' || cat <<EOF | rpk topic produce issue_24717_tx_test -f "%v"
-import sys
-try:
-    from kafka import KafkaProducer
-    from kafka.errors import KafkaError
-except ImportError:
-    print("kafka-python not available, using fallback", file=sys.stderr)
-    sys.exit(1)
-
-bootstrap_servers = sys.argv[1]
-topic = sys.argv[2]
-
-producer = KafkaProducer(
-    bootstrap_servers=bootstrap_servers,
-    transactional_id=f'test-txn-{topic}',
-    value_serializer=lambda v: v.encode('utf-8'),
-    acks='all',
-    retries=3,
-    max_in_flight_requests_per_connection=1
-)
-
-try:
-    producer.init_transactions()
-    producer.begin_transaction()
-    producer.send(topic, '{"id": 1, "name": "test1"}').get(timeout=10)
-    producer.send(topic, '{"id": 2, "name": "test2"}').get(timeout=10)
-    producer.commit_transaction()
-    print("Transaction committed with COMMIT control message")
-except Exception as e:
-    print(f"Transaction failed: {e}", file=sys.stderr)
-    producer.abort_transaction()
-    sys.exit(1)
-finally:
-    producer.close()
-PYTHON_EOF
+cat <<EOF | rpk topic produce issue_24717_tx_test -f "%v"
 {"id": 1, "name": "test1"}
 {"id": 2, "name": "test2"}
 EOF
@@ -72,8 +34,8 @@ WITH (
     scan.startup.mode = 'earliest'
 ) FORMAT PLAIN ENCODE JSON;
 
-# Test 1: Normal backfill without transactions
-# This should work in both old and new code
+# Test 1: Backfill should complete - partition EOF signals the reader
+# that all visible data has been consumed
 statement ok
 SET BACKGROUND_DDL = false;
 
@@ -87,9 +49,7 @@ SELECT id, name FROM issue_24717_mv ORDER BY id;
 1 test1
 2 test2
 
-# Test 2: Simulate EOF handling by creating MV on existing data
-# The new code enables partition.eof which will trigger EOF signals
-# even without transaction control messages
+# Test 2: Create another MV on the same source to exercise EOF handling again
 statement ok
 CREATE MATERIALIZED VIEW issue_24717_mv2 AS SELECT * FROM issue_24717_source;
 
@@ -99,7 +59,7 @@ SELECT id, name FROM issue_24717_mv2 ORDER BY id;
 1 test1
 2 test2
 
-# Test 3: Add more data and verify EOF handling on incremental data
+# Test 3: Add more data and verify EOF handling on incremental backfill
 system ok
 cat <<EOF | rpk topic produce issue_24717_tx_test -f "%v"
 {"id": 3, "name": "test3"}
@@ -107,8 +67,7 @@ EOF
 
 sleep 2s
 
-# Create another MV - this will backfill from start to current position
-# With partition.eof enabled, it should complete quickly
+# Create another MV - backfills from start to current position
 statement ok
 CREATE MATERIALIZED VIEW issue_24717_mv3 AS SELECT * FROM issue_24717_source;
 
@@ -134,8 +93,3 @@ DROP SOURCE issue_24717_source;
 
 system ok
 rpk topic delete issue_24717_tx_test
-
-# Note: To properly test transaction control messages, use the following manual test:
-# 1. Run the Rust producer from issue #24717 to create transaction control messages
-# 2. Verify with: kafka-run-class kafka.tools.DumpLogSegments --files /tmp/kafka-logs/demo-0/*.log --print-data-log
-# 3. Create source and MV as above - should NOT hang
