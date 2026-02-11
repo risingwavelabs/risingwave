@@ -130,8 +130,9 @@ impl MvSelectionRule {
         let mut rewritten_agg_calls = Vec::with_capacity(query_agg.agg_calls().len());
         for query_call in query_agg.agg_calls() {
             let normalized_query_call = Self::normalize_agg_call(query_call, &query_input_to_base)?;
-            let mv_call_idx = if let Some(mv_call_idx) =
-                normalized_call_to_mv_idx.get(&normalized_query_call).copied()
+            let mv_call_idx = if let Some(mv_call_idx) = normalized_call_to_mv_idx
+                .get(&normalized_query_call)
+                .copied()
             {
                 mv_call_idx
             } else {
