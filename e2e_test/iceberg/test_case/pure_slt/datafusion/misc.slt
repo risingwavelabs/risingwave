@@ -132,6 +132,76 @@ FROM t_expand;
 statement ok
 DROP TABLE t_expand;
 
+# ==================== Grouping Sets Tests ====================
+
+statement ok
+CREATE TABLE t_grouping_sets(
+    a INT,
+    b INT,
+    v INT,
+) WITH (commit_checkpoint_interval = 1) ENGINE = iceberg;
+
+statement ok
+INSERT INTO t_grouping_sets VALUES
+(1, 10, 10),
+(1, 10, 20),
+(2, 20, 5),
+(2, 20, 10);
+
+statement ok
+FLUSH;
+
+sleep 5s
+
+# GROUPING SETS should be rewritten into Expand + Agg, and run in DataFusion engine.
+query ??? rowsort
+SELECT
+    a,
+    b,
+    sum(v)
+FROM t_grouping_sets
+GROUP BY GROUPING SETS ((a), (b));
+----
+1 NULL 30
+2 NULL 15
+NULL 10 30
+NULL 20 15
+
+# ROLLUP is equivalent to GROUPING SETS ((a, b), (a), ()).
+query ??? rowsort
+SELECT
+    a,
+    b,
+    sum(v)
+FROM t_grouping_sets
+GROUP BY ROLLUP (a, b);
+----
+1 10 30
+1 NULL 30
+2 20 15
+2 NULL 15
+NULL NULL 45
+
+# CUBE is equivalent to GROUPING SETS ((a, b), (a), (b), ()).
+query ??? rowsort
+SELECT
+    a,
+    b,
+    sum(v)
+FROM t_grouping_sets
+GROUP BY CUBE (a, b);
+----
+1 10 30
+1 NULL 30
+2 20 15
+2 NULL 15
+NULL 10 30
+NULL 20 15
+NULL NULL 45
+
+statement ok
+DROP TABLE t_grouping_sets;
+
 # ==================== Scalar Function Tests ====================
 
 statement ok
