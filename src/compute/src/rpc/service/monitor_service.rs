@@ -455,10 +455,18 @@ impl MonitorService for MonitorServiceImpl {
         };
 
         let stats = TableCacheRefillStats::from(&*context.read());
-        let json_value = serde_json::to_value(stats)
-            .map_err(|err| Status::internal(format!("failed to serialize stats: {err}")))?;
-        let json_string_pretty = serde_json::to_string_pretty(&json_value)
-            .map_err(|err| Status::internal(format!("failed to serialize stats: {err}")))?;
+        let json_value = serde_json::to_value(stats).map_err(|err| {
+            Status::internal(format!(
+                "failed to serialize stats: {e}",
+                e = err.as_report()
+            ))
+        })?;
+        let json_string_pretty = serde_json::to_string_pretty(&json_value).map_err(|err| {
+            Status::internal(format!(
+                "failed to serialize stats: {e}",
+                e = err.as_report()
+            ))
+        })?;
         Ok(Response::new(GetTableCacheRefillStatsResponse {
             stats: json_string_pretty,
         }))
