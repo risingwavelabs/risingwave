@@ -183,7 +183,7 @@ pub enum DdlCommand {
     DropConnection(ConnectionId, DropMode),
     CreateSecret(Secret),
     AlterSecret(Secret),
-    DropSecret(SecretId),
+    DropSecret(SecretId, DropMode),
     CommentOn(Comment),
     CreateSubscription(Subscription),
     DropSubscription(SubscriptionId, DropMode),
@@ -219,7 +219,7 @@ impl DdlCommand {
             DdlCommand::DropConnection(id, _) => Right(id.as_object_id()),
             DdlCommand::CreateSecret(secret) => Left(secret.name.clone()),
             DdlCommand::AlterSecret(secret) => Left(secret.name.clone()),
-            DdlCommand::DropSecret(id) => Right(id.as_object_id()),
+            DdlCommand::DropSecret(id, _) => Right(id.as_object_id()),
             DdlCommand::CommentOn(comment) => Right(comment.table_id.into()),
             DdlCommand::CreateSubscription(subscription) => Left(subscription.name.clone()),
             DdlCommand::DropSubscription(id, _) => Right(id.as_object_id()),
@@ -237,7 +237,7 @@ impl DdlCommand {
             | DdlCommand::DropView(_, _)
             | DdlCommand::DropStreamingJob { .. }
             | DdlCommand::DropConnection(_, _)
-            | DdlCommand::DropSecret(_)
+            | DdlCommand::DropSecret(_, _)
             | DdlCommand::DropSubscription(_, _)
             | DdlCommand::AlterName(_, _)
             | DdlCommand::AlterObjectOwner(_, _)
@@ -450,7 +450,9 @@ impl DdlController {
                     ctrl.drop_connection(connection_id, drop_mode).await
                 }
                 DdlCommand::CreateSecret(secret) => ctrl.create_secret(secret).await,
-                DdlCommand::DropSecret(secret_id) => ctrl.drop_secret(secret_id).await,
+                DdlCommand::DropSecret(secret_id, drop_mode) => {
+                    ctrl.drop_secret(secret_id, drop_mode).await
+                }
                 DdlCommand::AlterSecret(secret) => ctrl.alter_secret(secret).await,
                 DdlCommand::AlterNonSharedSource(source) => {
                     ctrl.alter_non_shared_source(source).await
@@ -742,8 +744,12 @@ impl DdlController {
             .await
     }
 
-    async fn drop_secret(&self, secret_id: SecretId) -> MetaResult<NotificationVersion> {
-        self.drop_object(ObjectType::Secret, secret_id, DropMode::Restrict)
+    async fn drop_secret(
+        &self,
+        secret_id: SecretId,
+        drop_mode: DropMode,
+    ) -> MetaResult<NotificationVersion> {
+        self.drop_object(ObjectType::Secret, secret_id, drop_mode)
             .await
     }
 
@@ -2188,15 +2194,15 @@ impl DdlController {
         relation: alter_name_request::Object,
         new_name: &str,
     ) -> MetaResult<NotificationVersion> {
-        let (obj_type, id) = match relation {
-            alter_name_request::Object::TableId(id) => (ObjectType::Table, id),
-            alter_name_request::Object::ViewId(id) => (ObjectType::View, id),
-            alter_name_request::Object::IndexId(id) => (ObjectType::Index, id),
-            alter_name_request::Object::SinkId(id) => (ObjectType::Sink, id),
-            alter_name_request::Object::SourceId(id) => (ObjectType::Source, id),
-            alter_name_request::Object::SchemaId(id) => (ObjectType::Schema, id),
-            alter_name_request::Object::DatabaseId(id) => (ObjectType::Database, id),
-            alter_name_request::Object::SubscriptionId(id) => (ObjectType::Subscription, id),
+        let (obj_type, id): (ObjectType, ObjectId) = match relation {
+            alter_name_request::Object::TableId(id) => (ObjectType::Table, id.into()),
+            alter_name_request::Object::ViewId(id) => (ObjectType::View, id.into()),
+            alter_name_request::Object::IndexId(id) => (ObjectType::Index, id.into()),
+            alter_name_request::Object::SinkId(id) => (ObjectType::Sink, id.into()),
+            alter_name_request::Object::SourceId(id) => (ObjectType::Source, id.into()),
+            alter_name_request::Object::SchemaId(id) => (ObjectType::Schema, id.into()),
+            alter_name_request::Object::DatabaseId(id) => (ObjectType::Database, id.into()),
+            alter_name_request::Object::SubscriptionId(id) => (ObjectType::Subscription, id.into()),
         };
         self.metadata_manager
             .catalog_controller
@@ -2243,21 +2249,21 @@ impl DdlController {
         object: Object,
         owner_id: UserId,
     ) -> MetaResult<NotificationVersion> {
-        let (obj_type, id) = match object {
-            Object::TableId(id) => (ObjectType::Table, id),
-            Object::ViewId(id) => (ObjectType::View, id),
-            Object::SourceId(id) => (ObjectType::Source, id),
-            Object::SinkId(id) => (ObjectType::Sink, id),
-            Object::SchemaId(id) => (ObjectType::Schema, id),
-            Object::DatabaseId(id) => (ObjectType::Database, id),
-            Object::SubscriptionId(id) => (ObjectType::Subscription, id),
-            Object::ConnectionId(id) => (ObjectType::Connection, id),
-            Object::FunctionId(id) => (ObjectType::Function, id),
-            Object::SecretId(id) => (ObjectType::Secret, id),
+        let (obj_type, id): (ObjectType, ObjectId) = match object {
+            Object::TableId(id) => (ObjectType::Table, id.into()),
+            Object::ViewId(id) => (ObjectType::View, id.into()),
+            Object::SourceId(id) => (ObjectType::Source, id.into()),
+            Object::SinkId(id) => (ObjectType::Sink, id.into()),
+            Object::SchemaId(id) => (ObjectType::Schema, id.into()),
+            Object::DatabaseId(id) => (ObjectType::Database, id.into()),
+            Object::SubscriptionId(id) => (ObjectType::Subscription, id.into()),
+            Object::ConnectionId(id) => (ObjectType::Connection, id.into()),
+            Object::FunctionId(id) => (ObjectType::Function, id.into()),
+            Object::SecretId(id) => (ObjectType::Secret, id.into()),
         };
         self.metadata_manager
             .catalog_controller
-            .alter_owner(obj_type, id.into(), owner_id as _)
+            .alter_owner(obj_type, id, owner_id as _)
             .await
     }
 
@@ -2266,18 +2272,22 @@ impl DdlController {
         object: alter_set_schema_request::Object,
         new_schema_id: SchemaId,
     ) -> MetaResult<NotificationVersion> {
-        let (obj_type, id) = match object {
-            alter_set_schema_request::Object::TableId(id) => (ObjectType::Table, id),
-            alter_set_schema_request::Object::ViewId(id) => (ObjectType::View, id),
-            alter_set_schema_request::Object::SourceId(id) => (ObjectType::Source, id),
-            alter_set_schema_request::Object::SinkId(id) => (ObjectType::Sink, id),
-            alter_set_schema_request::Object::FunctionId(id) => (ObjectType::Function, id),
-            alter_set_schema_request::Object::ConnectionId(id) => (ObjectType::Connection, id),
-            alter_set_schema_request::Object::SubscriptionId(id) => (ObjectType::Subscription, id),
+        let (obj_type, id): (ObjectType, ObjectId) = match object {
+            alter_set_schema_request::Object::TableId(id) => (ObjectType::Table, id.into()),
+            alter_set_schema_request::Object::ViewId(id) => (ObjectType::View, id.into()),
+            alter_set_schema_request::Object::SourceId(id) => (ObjectType::Source, id.into()),
+            alter_set_schema_request::Object::SinkId(id) => (ObjectType::Sink, id.into()),
+            alter_set_schema_request::Object::FunctionId(id) => (ObjectType::Function, id.into()),
+            alter_set_schema_request::Object::ConnectionId(id) => {
+                (ObjectType::Connection, id.into())
+            }
+            alter_set_schema_request::Object::SubscriptionId(id) => {
+                (ObjectType::Subscription, id.into())
+            }
         };
         self.metadata_manager
             .catalog_controller
-            .alter_schema(obj_type, id.into(), new_schema_id as _)
+            .alter_schema(obj_type, id, new_schema_id)
             .await
     }
 

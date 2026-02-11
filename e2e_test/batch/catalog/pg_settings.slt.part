@@ -35,6 +35,7 @@ user cdc_source_wait_streaming_start_timeout
 user client_encoding
 user client_min_messages
 user create_compaction_group_for_mv
+user datafusion_prefer_hash_join
 user datestyle
 user disable_purify_definition
 user dml_rate_limit

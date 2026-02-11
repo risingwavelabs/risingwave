@@ -9979,7 +9979,7 @@ dependencies = [
 [[package]]
 name = "prost"
 version = "0.13.4"
-source = "git+https://github.com/risingwavelabs/prost.git?rev=4a442caf7c0a43feb4aea64bde6aea4488d9917f#4a442caf7c0a43feb4aea64bde6aea4488d9917f"
+source = "git+https://github.com/risingwavelabs/prost.git?rev=d7baf5f4d4c12d82987bd86a91a8663005881bdd#d7baf5f4d4c12d82987bd86a91a8663005881bdd"
 dependencies = [
  "bytes",
  "prost-derive 0.13.4",
@@ -10020,7 +10020,7 @@ dependencies = [
 [[package]]
 name = "prost-build"
 version = "0.13.4"
-source = "git+https://github.com/risingwavelabs/prost.git?rev=4a442caf7c0a43feb4aea64bde6aea4488d9917f#4a442caf7c0a43feb4aea64bde6aea4488d9917f"
+source = "git+https://github.com/risingwavelabs/prost.git?rev=d7baf5f4d4c12d82987bd86a91a8663005881bdd#d7baf5f4d4c12d82987bd86a91a8663005881bdd"
 dependencies = [
  "heck 0.5.0",
  "itertools 0.13.0",
@@ -10052,7 +10052,7 @@ dependencies = [
 [[package]]
 name = "prost-derive"
 version = "0.13.4"
-source = "git+https://github.com/risingwavelabs/prost.git?rev=4a442caf7c0a43feb4aea64bde6aea4488d9917f#4a442caf7c0a43feb4aea64bde6aea4488d9917f"
+source = "git+https://github.com/risingwavelabs/prost.git?rev=d7baf5f4d4c12d82987bd86a91a8663005881bdd#d7baf5f4d4c12d82987bd86a91a8663005881bdd"
 dependencies = [
  "anyhow",
  "itertools 0.13.0",
@@ -10110,7 +10110,7 @@ dependencies = [
 [[package]]
 name = "prost-types"
 version = "0.13.4"
-source = "git+https://github.com/risingwavelabs/prost.git?rev=4a442caf7c0a43feb4aea64bde6aea4488d9917f#4a442caf7c0a43feb4aea64bde6aea4488d9917f"
+source = "git+https://github.com/risingwavelabs/prost.git?rev=d7baf5f4d4c12d82987bd86a91a8663005881bdd#d7baf5f4d4c12d82987bd86a91a8663005881bdd"
 dependencies = [
  "prost 0.13.4",
 ]
@@ -14970,9 +14970,9 @@ dependencies = [
 
 [[package]]
 name = "tempfile"
-version = "3.24.0"
+version = "3.25.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "655da9c7eb6305c55742045d5a8d2037996d61d8de95806335c7c86ce0f82e9c"
+checksum = "0136791f7c95b1f6dd99f9cc786b91bb81c3800b639b3478e561ddb7be95e5f1"
 dependencies = [
  "fastrand",
  "getrandom 0.3.1",

@@ -23,6 +23,7 @@ use risingwave_pb::hummock::{
     LevelType, PbCompactTask, PbKeyRange, PbTableOption, PbTableSchema, PbTableStats,
     PbValidationTask,
 };
+use risingwave_pb::id::WorkerId;
 
 use crate::compaction_group::StateTableId;
 use crate::key_range::KeyRange;
@@ -520,7 +521,7 @@ impl From<&CompactTask> for PbCompactTask {
 #[derive(Clone, PartialEq, Default)]
 pub struct ValidationTask {
     pub sst_infos: Vec<SstableInfo>,
-    pub sst_id_to_worker_id: HashMap<HummockSstableObjectId, u32>,
+    pub sst_id_to_worker_id: HashMap<HummockSstableObjectId, WorkerId>,
 }
 
 impl From<PbValidationTask> for ValidationTask {

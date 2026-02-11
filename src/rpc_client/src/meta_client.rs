@@ -91,7 +91,6 @@ use risingwave_pb::meta::list_actor_splits_response::ActorSplit;
 use risingwave_pb::meta::list_actor_states_response::ActorState;
 use risingwave_pb::meta::list_cdc_progress_response::PbCdcProgress;
 use risingwave_pb::meta::list_iceberg_tables_response::IcebergTable;
-use risingwave_pb::meta::list_object_dependencies_response::PbObjectDependencies;
 use risingwave_pb::meta::list_refresh_table_states_response::RefreshTableState;
 use risingwave_pb::meta::list_streaming_job_states_response::StreamingJobState;
 use risingwave_pb::meta::list_table_fragments_response::TableFragmentInfo;
@@ -248,8 +247,8 @@ impl MetaClient {
             .ok_or_else(|| anyhow!("wait version not set"))?)
     }
 
-    pub async fn drop_secret(&self, secret_id: SecretId) -> Result<WaitVersion> {
-        let request = DropSecretRequest { secret_id };
+    pub async fn drop_secret(&self, secret_id: SecretId, cascade: bool) -> Result<WaitVersion> {
+        let request = DropSecretRequest { secret_id, cascade };
         let resp = self.inner.drop_secret(request).await?;
         Ok(resp
             .version
@@ -807,7 +806,7 @@ impl MetaClient {
 
     pub async fn drop_table(
         &self,
-        source_id: Option<u32>,
+        source_id: Option<SourceId>,
         table_id: TableId,
         cascade: bool,
     ) -> Result<WaitVersion> {
@@ -1235,14 +1234,6 @@ impl MetaClient {
         Ok(resp.actor_splits)
     }
 
-    pub async fn list_object_dependencies(&self) -> Result<Vec<PbObjectDependencies>> {
-        let resp = self
-            .inner
-            .list_object_dependencies(ListObjectDependenciesRequest {})
-            .await?;
-        Ok(resp.dependencies)
-    }
-
     pub async fn pause(&self) -> Result<PauseResponse> {
         let request = PauseRequest {};
         let resp = self.inner.pause(request).await?;
@@ -1614,7 +1605,7 @@ impl MetaClient {
 
     pub async fn list_serving_vnode_mappings(
         &self,
-    ) -> Result<HashMap<FragmentId, (u32, WorkerSlotMapping)>> {
+    ) -> Result<HashMap<FragmentId, (JobId, WorkerSlotMapping)>> {
         let req = GetServingVnodeMappingsRequest {};
         let resp = self.inner.get_serving_vnode_mappings(req).await?;
         let mappings = resp
@@ -1627,7 +1618,7 @@ impl MetaClient {
                         resp.fragment_to_table
                             .get(&p.fragment_id)
                             .cloned()
-                            .unwrap_or(0),
+                            .unwrap_or_default(),
                         WorkerSlotMapping::from_protobuf(p.mapping.as_ref().unwrap()),
                     ),
                 )
@@ -2529,7 +2520,6 @@ macro_rules! for_all_meta_rpc {
             ,{ stream_client, list_sink_log_store_tables, ListSinkLogStoreTablesRequest, ListSinkLogStoreTablesResponse }
             ,{ stream_client, list_actor_states, ListActorStatesRequest, ListActorStatesResponse }
             ,{ stream_client, list_actor_splits, ListActorSplitsRequest, ListActorSplitsResponse }
-            ,{ stream_client, list_object_dependencies, ListObjectDependenciesRequest, ListObjectDependenciesResponse }
             ,{ stream_client, recover, RecoverRequest, RecoverResponse }
             ,{ stream_client, list_rate_limits, ListRateLimitsRequest, ListRateLimitsResponse }
             ,{ stream_client, list_cdc_progress, ListCdcProgressRequest, ListCdcProgressResponse }

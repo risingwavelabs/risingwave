@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2026 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,18 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::{Arc, LazyLock};
+use std::sync::Arc;
+use std::time::Instant;
 
-use async_trait::async_trait;
-use datafusion::config::ConfigOptions;
-use datafusion::execution::context::QueryPlanner;
-use datafusion::execution::runtime_env::RuntimeEnv;
-use datafusion::execution::{SessionState, SessionStateBuilder};
+use datafusion::execution::SessionStateBuilder;
+use datafusion::execution::runtime_env::RuntimeEnvBuilder;
 use datafusion::logical_expr::LogicalPlan;
 use datafusion::physical_plan::{ExecutionPlan, execute_stream};
-use datafusion::physical_planner::{DefaultPhysicalPlanner, PhysicalPlanner};
 use datafusion::prelude::{SessionConfig as DFSessionConfig, SessionContext as DFSessionContext};
-use datafusion_common::Result as DFResult;
 use futures_async_stream::for_await;
 use pgwire::pg_field_descriptor::PgFieldDescriptor;
 use pgwire::pg_response::{PgResponse, StatementType};
@@ -35,30 +31,39 @@ use risingwave_common::error::BoxedError;
 use tokio::sync::mpsc;
 
 use crate::PgResponseStream;
-use crate::datafusion::{CastExecutor, ProjectSetPlanner};
+use crate::datafusion::CastExecutor;
+use crate::datafusion::execute::memory_ctx::RwMemoryPool;
+use crate::datafusion::execute::query_planner::RwCustomQueryPlanner;
 use crate::error::Result as RwResult;
 use crate::handler::RwPgResponse;
 use crate::handler::util::{DataChunkToRowSetAdapter, to_pg_field};
 use crate::scheduler::SchedulerError;
 use crate::session::SessionImpl;
+use crate::utils::DropGuard;
+
+mod memory_ctx;
+mod query_planner;
 
 #[derive(Clone)]
 pub struct DfBatchQueryPlanResult {
-    pub(crate) plan: Arc<datafusion::logical_expr::LogicalPlan>,
+    pub(crate) plan: Arc<LogicalPlan>,
     pub(crate) schema: RwSchema,
     pub(crate) stmt_type: StatementType,
 }
 
-pub fn create_datafusion_context(session: &SessionImpl) -> DFSessionContext {
+pub fn create_datafusion_context(session: &SessionImpl) -> RwResult<DFSessionContext> {
     let df_config = create_config(session);
-    let runtime = Arc::new(RuntimeEnv::default());
+    let memory_pool = Arc::new(RwMemoryPool::new(session.env().mem_context()));
+    let runtime = RuntimeEnvBuilder::new()
+        .with_memory_pool(memory_pool)
+        .build_arc()?;
     let state = SessionStateBuilder::new()
         .with_config(df_config)
         .with_runtime_env(runtime)
         .with_default_features()
-        .with_query_planner(Arc::new(RwCustomQueryPlanner))
+        .with_query_planner(RwCustomQueryPlanner::new())
         .build();
-    DFSessionContext::new_with_state(state)
+    Ok(DFSessionContext::new_with_state(state))
 }
 
 pub async fn build_datafusion_physical_plan(
@@ -67,11 +72,9 @@ pub async fn build_datafusion_physical_plan(
 ) -> RwResult<Arc<dyn ExecutionPlan>> {
     let state = ctx.state();
 
-    // TODO: some optimizing rules will cause inconsistency, need to investigate later
-    // Currently we disable all optimizing rules to ensure correctness
     let df_plan = state.analyzer().execute_and_check(
         plan.plan.as_ref().clone(),
-        &ConfigOptions::default(),
+        state.config_options(),
         |_, _| {},
     )?;
     let df_plan = state.optimizer().optimize(df_plan, &state, |_, _| {})?;
@@ -87,7 +90,9 @@ pub async fn execute_datafusion_plan(
     plan: DfBatchQueryPlanResult,
     formats: Vec<Format>,
 ) -> RwResult<RwPgResponse> {
-    let ctx = create_datafusion_context(session.as_ref());
+    let ctx = create_datafusion_context(session.as_ref())?;
+
+    let query_start_time = Instant::now();
 
     let pg_descs: Vec<PgFieldDescriptor> = plan.schema.fields().iter().map(to_pg_field).collect();
     let column_types = plan.schema.fields().iter().map(|f| f.data_type()).collect();
@@ -160,9 +165,40 @@ pub async fn execute_datafusion_plan(
 
     let first_field_format = formats.first().copied().unwrap_or(Format::Text);
 
+    let failed_counter_guard = DropGuard::new({
+        let failed_query_counter = session
+            .env()
+            .frontend_metrics
+            .datafusion
+            .failed_query_counter
+            .clone();
+        move || {
+            failed_query_counter.inc();
+        }
+    });
+    let callback = async move {
+        session
+            .env()
+            .frontend_metrics
+            .datafusion
+            .latency
+            .observe(query_start_time.elapsed().as_secs_f64());
+
+        session
+            .env()
+            .frontend_metrics
+            .datafusion
+            .completed_query_counter
+            .inc();
+        failed_counter_guard.disarm();
+
+        Ok(())
+    };
+
     Ok(PgResponse::builder(plan.stmt_type)
         .row_cnt_format_opt(Some(first_field_format))
         .values(row_stream, pg_descs)
+        .callback(callback)
         .into())
 }
 
@@ -174,29 +210,7 @@ fn create_config(session: &SessionImpl) -> DFSessionConfig {
         df_config = df_config.with_target_partitions(batch_parallelism.get().try_into().unwrap());
     }
     df_config = df_config.with_batch_size(session.env().batch_config().developer.chunk_size);
+    df_config.options_mut().optimizer.prefer_hash_join = rw_config.datafusion_prefer_hash_join();
 
     df_config
-}
-
-#[derive(Debug)]
-pub struct RwCustomQueryPlanner;
-
-#[async_trait]
-impl QueryPlanner for RwCustomQueryPlanner {
-    async fn create_physical_plan(
-        &self,
-        logical_plan: &LogicalPlan,
-        session_state: &SessionState,
-    ) -> DFResult<Arc<dyn ExecutionPlan>> {
-        static PLANNER: LazyLock<Arc<DefaultPhysicalPlanner>> = LazyLock::new(|| {
-            Arc::new(DefaultPhysicalPlanner::with_extension_planners(vec![
-                Arc::new(ProjectSetPlanner),
-            ]))
-        });
-
-        let planner = PLANNER.clone();
-        planner
-            .create_physical_plan(logical_plan, session_state)
-            .await
-    }
 }
