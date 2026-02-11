@@ -25,6 +25,7 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicBoolean;
 import org.slf4j.event.Level;
 
 public class TracingSlf4jImpl {
@@ -125,6 +126,7 @@ public class TracingSlf4jImpl {
     }
 
     private static class JavaLoggerLevelOverrides {
+        private static final AtomicBoolean warnedInvalidRwJavaLog = new AtomicBoolean(false);
         private final int defaultMaxBindingLevel;
         private final List<Rule> rules;
 
@@ -161,6 +163,7 @@ public class TracingSlf4jImpl {
         private static JavaLoggerLevelOverrides parse(String raw) {
             int defaultMax = BINDING_TRACE;
             List<Rule> rules = new ArrayList<>();
+            List<String> invalidTokens = new ArrayList<>();
 
             for (String part : raw.split(",")) {
                 String token = part.trim();
@@ -174,6 +177,8 @@ public class TracingSlf4jImpl {
                     Optional<Integer> lvl = parseMaxBindingLevel(token);
                     if (lvl.isPresent()) {
                         defaultMax = lvl.get();
+                    } else {
+                        invalidTokens.add(token);
                     }
                     continue;
                 }
@@ -181,6 +186,7 @@ public class TracingSlf4jImpl {
                 String prefix = token.substring(0, eq).trim();
                 String levelStr = token.substring(eq + 1).trim();
                 if (prefix.isEmpty()) {
+                    invalidTokens.add(token);
                     continue;
                 }
 
@@ -189,6 +195,8 @@ public class TracingSlf4jImpl {
                     Optional<Integer> lvl = parseMaxBindingLevel(levelStr);
                     if (lvl.isPresent()) {
                         defaultMax = lvl.get();
+                    } else {
+                        invalidTokens.add(token);
                     }
                     continue;
                 }
@@ -196,12 +204,30 @@ public class TracingSlf4jImpl {
                 Optional<Integer> lvl = parseMaxBindingLevel(levelStr);
                 if (lvl.isPresent()) {
                     rules.add(new Rule(prefix, lvl.get()));
+                } else {
+                    invalidTokens.add(token);
                 }
             }
 
+            warnInvalidRwJavaLogOnce(raw, invalidTokens);
             // Longest prefix match wins: sort by descending prefix length.
             rules.sort(Comparator.comparingInt((Rule r) -> r.prefix.length()).reversed());
             return new JavaLoggerLevelOverrides(defaultMax, List.copyOf(rules));
+        }
+
+        private static void warnInvalidRwJavaLogOnce(String raw, List<String> invalidTokens) {
+            if (invalidTokens.isEmpty()) {
+                return;
+            }
+            if (!warnedInvalidRwJavaLog.compareAndSet(false, true)) {
+                return;
+            }
+            System.err.println(
+                    "[WARN] Invalid RW_JAVA_LOG directives ignored: "
+                            + invalidTokens
+                            + ". Expected format like: \"info,io.debezium=error,org.apache.kafka=warn\". Got: \""
+                            + raw
+                            + "\"");
         }
 
         private static Optional<Integer> parseMaxBindingLevel(String rawLevel) {
