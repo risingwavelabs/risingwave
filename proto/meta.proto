@@ -27,6 +27,10 @@ service TelemetryInfoService {
 
 message HeartbeatRequest {
   uint32 node_id = 1;
+  // Resource info reported by the worker node.
+  // Used to update resource info in meta after meta restart,
+  // since resource info is not persistent in meta store.
+  optional common.WorkerNode.Resource resource = 2;
 }
 
 message HeartbeatResponse {

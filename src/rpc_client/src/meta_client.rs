@@ -378,7 +378,15 @@ impl MetaClient {
 
     /// Send heartbeat signal to meta service.
     pub async fn send_heartbeat(&self, node_id: WorkerId) -> Result<()> {
-        let request = HeartbeatRequest { node_id };
+        let request = HeartbeatRequest {
+            node_id,
+            resource: Some(risingwave_pb::common::worker_node::Resource {
+                rw_version: RW_VERSION.to_owned(),
+                total_memory_bytes: system_memory_available_bytes() as _,
+                total_cpu_cores: total_cpu_available() as _,
+                hostname: hostname(),
+            }),
+        };
         let resp = self.inner.heartbeat(request).await?;
         if let Some(status) = resp.status
             && status.code() == risingwave_pb::common::status::Code::UnknownWorker

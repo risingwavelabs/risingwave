@@ -229,12 +229,16 @@ impl ClusterController {
     }
 
     /// Invoked when it receives a heartbeat from a worker node.
-    pub async fn heartbeat(&self, worker_id: WorkerId) -> MetaResult<()> {
+    pub async fn heartbeat(
+        &self,
+        worker_id: WorkerId,
+        resource: Option<PbResource>,
+    ) -> MetaResult<()> {
         tracing::trace!(target: "events::meta::server_heartbeat", %worker_id, "receive heartbeat");
         self.inner
             .write()
             .await
-            .heartbeat(worker_id, self.max_heartbeat_interval)
+            .heartbeat(worker_id, self.max_heartbeat_interval, resource)
     }
 
     pub fn start_heartbeat_checker(
@@ -915,9 +919,22 @@ impl ClusterControllerInner {
         Ok(worker)
     }
 
-    pub fn heartbeat(&mut self, worker_id: WorkerId, ttl: Duration) -> MetaResult<()> {
+    pub fn heartbeat(
+        &mut self,
+        worker_id: WorkerId,
+        ttl: Duration,
+        resource: Option<PbResource>,
+    ) -> MetaResult<()> {
         if let Some(worker_info) = self.worker_extra_info.get_mut(&worker_id) {
             worker_info.update_ttl(ttl);
+            // Update resource info if provided. This ensures that after a meta restart,
+            // resource info (CPU, memory, etc.) is repopulated from the worker's heartbeat,
+            // since resource info is not persistent in meta store.
+            if let Some(resource) = resource {
+                if worker_info.resource != resource {
+                    worker_info.resource = resource;
+                }
+            }
             Ok(())
         } else {
             Err(MetaError::invalid_worker(worker_id, "worker not found"))
