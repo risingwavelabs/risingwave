@@ -116,7 +116,7 @@ impl SourceMessage {
 
     /// Create an EOF marker message for a Kafka partition.
     /// This is used when the consumer reaches the end of a partition,
-    /// signaling that backfill should complete even if target_offset wasn't reached
+    /// signaling that backfill should complete even if `target_offset` wasn't reached
     /// (due to Kafka transaction control messages occupying offsets).
     pub fn kafka_partition_eof(partition: i32, last_offset: i64) -> Self {
         SourceMessage {
