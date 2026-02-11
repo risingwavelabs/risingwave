@@ -126,7 +126,11 @@ impl FallibleRule<Logical> for IcebergIntermediateScanRule {
                 .collect();
             projection_columns.sort_unstable_by_key(|&s| table_schema.field_id_by_name(s));
             projection_columns.dedup();
-            set_project_field_ids(&mut data_files, table_schema.as_ref(), projection_columns.iter())?;
+            set_project_field_ids(
+                &mut data_files,
+                table_schema.as_ref(),
+                projection_columns.iter(),
+            )?;
             match format_version {
                 FormatVersion::V1 | FormatVersion::V2 => {
                     for file in &mut data_files {
