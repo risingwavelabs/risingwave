@@ -103,6 +103,12 @@ impl MvSelectionRule {
         if !query_agg.grouping_sets().is_empty() || !mv_agg.grouping_sets().is_empty() {
             return None;
         }
+        // DISTINCT aggregates are not composable via partial-to-total rollup.
+        if query_agg.agg_calls().iter().any(|call| call.distinct)
+            || mv_agg.agg_calls().iter().any(|call| call.distinct)
+        {
+            return None;
+        }
 
         let (query_base_input, query_input_to_base) =
             Self::agg_input_to_base_mapping(query_agg.clone())?;
