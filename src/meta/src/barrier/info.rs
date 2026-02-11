@@ -639,13 +639,13 @@ impl InflightDatabaseInfo {
                 }
             }
         }
-        if let PostCollectCommand::RescheduleFragment { reschedules, .. } = command {
+        if let PostCollectCommand::Reschedule { reschedules, .. } = command {
             // During reschedule we expect fragments to be rebuilt with new actors and no vnode bitmap update.
             debug_assert!(
                 reschedules
                     .values()
                     .all(|reschedule| reschedule.vnode_bitmap_updates.is_empty()),
-                "RescheduleFragment should not carry vnode bitmap updates when actors are rebuilt"
+                "Reschedule should not carry vnode bitmap updates when actors are rebuilt"
             );
 
             // Collect jobs that own the rescheduled fragments; de-duplicate via HashSet.
@@ -1114,7 +1114,6 @@ impl InflightDatabaseInfo {
                 | Command::Resume
                 | Command::DropStreamingJobs { .. }
                 | Command::RescheduleIntent { .. }
-                | Command::RescheduleFragment { .. }
                 | Command::SourceChangeSplit { .. }
                 | Command::Throttle { .. }
                 | Command::CreateSubscription { .. }

@@ -44,6 +44,7 @@ use crate::barrier::checkpoint::{CheckpointControl, CheckpointControlEvent};
 use crate::barrier::complete_task::{BarrierCompleteOutput, CompletingTask};
 use crate::barrier::context::recovery::{RenderedDatabaseRuntimeInfo, render_runtime_info};
 use crate::barrier::context::{GlobalBarrierWorkerContext, GlobalBarrierWorkerContextImpl};
+use crate::barrier::info::InflightDatabaseInfo;
 use crate::barrier::rpc::{
     ControlStreamManager, WorkerNodeEvent, from_partial_graph_id, merge_node_rpc_errors,
 };
@@ -132,6 +133,7 @@ mod tests {
             command: Some((
                 Command::RescheduleIntent {
                     context: RescheduleContext::empty(),
+                    reschedule_plan: None,
                 },
                 vec![notifier],
             )),
@@ -143,6 +145,7 @@ mod tests {
             env,
             HashMap::new(),
             AdaptiveParallelismStrategy::default(),
+            None,
             new_barrier,
         );
 
@@ -192,6 +195,7 @@ fn resolve_reschedule_intent(
     env: MetaSrvEnv,
     worker_nodes: HashMap<WorkerId, WorkerNode>,
     adaptive_parallelism_strategy: AdaptiveParallelismStrategy,
+    database_info: Option<&InflightDatabaseInfo>,
     mut new_barrier: schedule::NewBarrier,
 ) -> MetaResult<Option<schedule::NewBarrier>> {
     let Some((command, notifiers)) = new_barrier.command.take() else {
@@ -199,12 +203,25 @@ fn resolve_reschedule_intent(
     };
 
     match command {
-        Command::RescheduleIntent { context } => {
+        Command::RescheduleIntent {
+            context,
+            reschedule_plan,
+        } => {
+            if let Some(reschedule_plan) = reschedule_plan {
+                new_barrier.command = Some((
+                    Command::RescheduleIntent {
+                        context,
+                        reschedule_plan: Some(reschedule_plan),
+                    },
+                    notifiers,
+                ));
+                return Ok(Some(new_barrier));
+            }
             let span = tracing::info_span!(
                 "resolve_reschedule_intent",
                 database_id = %new_barrier.database_id
             );
-            let resolved = {
+            let reschedule_plan = {
                 let _guard = span.enter();
                 build_reschedule_from_context(
                     &env,
@@ -212,11 +229,23 @@ fn resolve_reschedule_intent(
                     adaptive_parallelism_strategy,
                     new_barrier.database_id,
                     context,
+                    database_info.ok_or_else(|| {
+                        anyhow!(
+                            "database {} not found when resolving reschedule intent",
+                            new_barrier.database_id
+                        )
+                    })?,
                 )
             };
-            match resolved {
-                Ok(Some(command)) => {
-                    new_barrier.command = Some((command, notifiers));
+            match reschedule_plan {
+                Ok(Some(reschedule_plan)) => {
+                    new_barrier.command = Some((
+                        Command::RescheduleIntent {
+                            context: RescheduleContext::empty(),
+                            reschedule_plan: Some(reschedule_plan),
+                        },
+                        notifiers,
+                    ));
                     Ok(Some(new_barrier))
                 }
                 Ok(None) => {
@@ -248,7 +277,8 @@ fn build_reschedule_from_context(
     adaptive_parallelism_strategy: AdaptiveParallelismStrategy,
     database_id: DatabaseId,
     context: RescheduleContext,
-) -> MetaResult<Option<Command>> {
+    database_info: &InflightDatabaseInfo,
+) -> MetaResult<Option<crate::barrier::ReschedulePlan>> {
     if worker_nodes.is_empty() {
         return Err(anyhow!("no active streaming workers for reschedule").into());
     }
@@ -265,7 +295,11 @@ fn build_reschedule_from_context(
         &context.loaded,
     )?;
 
-    let mut commands = build_reschedule_commands(env, rendered.fragments, context)?;
+    let all_prev_fragments = database_info
+        .fragment_infos()
+        .map(|fragment| (fragment.fragment_id, fragment))
+        .collect();
+    let mut commands = build_reschedule_commands(rendered.fragments, context, all_prev_fragments)?;
     Ok(commands.remove(&database_id))
 }
 
@@ -681,10 +715,12 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                             .map(|(worker_id, worker)| (*worker_id, worker.clone()))
                             .collect();
                         let adaptive_parallelism_strategy = self.adaptive_parallelism_strategy;
+                        let database_info = self.checkpoint_control.database_info(database_id);
                         match resolve_reschedule_intent(
                             env,
                             worker_nodes,
                             adaptive_parallelism_strategy,
+                            database_info,
                             new_barrier,
                         ) {
                             Ok(Some(new_barrier)) => new_barrier,

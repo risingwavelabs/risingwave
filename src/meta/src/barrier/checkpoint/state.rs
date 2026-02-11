@@ -145,10 +145,22 @@ impl DatabaseCheckpointControl {
         hummock_version_stats: &HummockVersionStats,
     ) -> MetaResult<ApplyCommandInfo> {
         debug_assert!(
-            !matches!(command, Some(Command::RescheduleIntent { .. })),
+            !matches!(
+                command,
+                Some(Command::RescheduleIntent {
+                    reschedule_plan: None,
+                    ..
+                })
+            ),
             "reschedule intent must be resolved before apply"
         );
-        if matches!(command, Some(Command::RescheduleIntent { .. })) {
+        if matches!(
+            command,
+            Some(Command::RescheduleIntent {
+                reschedule_plan: None,
+                ..
+            })
+        ) {
             bail!("reschedule intent must be resolved before apply");
         }
         let mut edges = self

@@ -75,8 +75,8 @@ use crate::stream::{
 };
 use crate::{MetaError, MetaResult};
 
-/// [`Reschedule`] is for the [`Command::RescheduleFragment`], which is used for rescheduling actors
-/// in some fragment, like scaling or migrating.
+/// [`Reschedule`] describes per-fragment changes in a resolved reschedule plan,
+/// used for actor scaling or migration.
 #[derive(Debug, Clone)]
 pub struct Reschedule {
     /// Added actors in this fragment.
@@ -105,6 +105,14 @@ pub struct Reschedule {
     pub actor_splits: HashMap<ActorId, Vec<SplitImpl>>,
 
     pub newly_created_actors: HashMap<ActorId, (StreamActorWithDispatchers, WorkerId)>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ReschedulePlan {
+    pub reschedules: HashMap<FragmentId, Reschedule>,
+    /// Should contain the actor ids in upstream and downstream fragments referenced by
+    /// `reschedules`.
+    pub fragment_actors: HashMap<FragmentId, HashSet<ActorId>>,
 }
 
 /// Preloaded context for rescheduling, built outside the barrier worker.
@@ -506,24 +514,18 @@ pub enum Command {
     /// Reschedule context. It must be resolved inside the barrier worker before injection.
     RescheduleIntent {
         context: RescheduleContext,
-    },
-
-    /// `Reschedule` command generates a `Update` barrier by the [`Reschedule`] of each fragment.
-    /// Mainly used for scaling and migration.
-    ///
-    /// Barriers from which actors should be collected, and the post behavior of this command are
-    /// very similar to `Create` and `Drop` commands, for added and removed actors, respectively.
-    RescheduleFragment {
-        reschedules: HashMap<FragmentId, Reschedule>,
-        // Should contain the actor ids in upstream and downstream fragment of `reschedules`
-        fragment_actors: HashMap<FragmentId, HashSet<ActorId>>,
+        /// Filled by the barrier worker after resolving `context` against current worker topology.
+        ///
+        /// We keep unresolved `context` outside of checkpoint state and only materialize this
+        /// execution plan right before injection, then drop `context` to release memory earlier.
+        reschedule_plan: Option<ReschedulePlan>,
     },
 
     /// `ReplaceStreamJob` command generates a `Update` barrier with the given `replace_upstream`. This is
     /// essentially switching the downstream of the old job fragments to the new ones, and
     /// dropping the old job fragments. Used for schema change.
     ///
-    /// This can be treated as a special case of `RescheduleFragment`, while the upstream fragment
+    /// This can be treated as a special case of reschedule, while the upstream fragment
     /// of the Merge executors are changed additionally.
     ReplaceStreamJob(ReplaceStreamJobPlan),
 
@@ -609,8 +611,15 @@ impl std::fmt::Display for Command {
             Command::CreateStreamingJob { info, .. } => {
                 write!(f, "CreateStreamingJob: {}", info.streaming_job)
             }
-            Command::RescheduleIntent { .. } => write!(f, "RescheduleIntent"),
-            Command::RescheduleFragment { .. } => write!(f, "RescheduleFragment"),
+            Command::RescheduleIntent {
+                reschedule_plan, ..
+            } => {
+                if reschedule_plan.is_some() {
+                    write!(f, "RescheduleIntent(planned)")
+                } else {
+                    write!(f, "RescheduleIntent")
+                }
+            }
             Command::ReplaceStreamJob(plan) => {
                 write!(f, "ReplaceStreamJob: {}", plan.streaming_job)
             }
@@ -745,8 +754,10 @@ impl Command {
 
                 Some((Some((info.streaming_job.id(), cdc_tracker)), changes))
             }
-            Command::RescheduleIntent { .. } => None,
-            Command::RescheduleFragment { reschedules, .. } => Some((
+            Command::RescheduleIntent {
+                reschedule_plan: Some(ReschedulePlan { reschedules, .. }),
+                ..
+            } => Some((
                 None,
                 reschedules
                     .iter()
@@ -797,6 +808,7 @@ impl Command {
                     })
                     .collect(),
             )),
+            Command::RescheduleIntent { .. } => None,
             Command::ReplaceStreamJob(plan) => Some((None, plan.fragment_changes())),
             Command::SourceChangeSplit(SplitState {
                 split_assignment, ..
@@ -844,7 +856,7 @@ pub enum PostCollectCommand {
         job_type: CreateStreamingJobType,
         cross_db_snapshot_backfill_info: SnapshotBackfillInfo,
     },
-    RescheduleFragment {
+    Reschedule {
         reschedules: HashMap<FragmentId, Reschedule>,
     },
     ReplaceStreamJob(ReplaceStreamJobPlan),
@@ -870,7 +882,7 @@ impl PostCollectCommand {
             PostCollectCommand::Command(name) => name.as_str(),
             PostCollectCommand::DropStreamingJobs { .. } => "DropStreamingJobs",
             PostCollectCommand::CreateStreamingJob { .. } => "CreateStreamingJob",
-            PostCollectCommand::RescheduleFragment { .. } => "RescheduleFragment",
+            PostCollectCommand::Reschedule { .. } => "Reschedule",
             PostCollectCommand::ReplaceStreamJob(_) => "ReplaceStreamJob",
             PostCollectCommand::SourceChangeSplit { .. } => "SourceChangeSplit",
             PostCollectCommand::CreateSubscription { .. } => "CreateSubscription",
@@ -909,11 +921,12 @@ impl Command {
                     cross_db_snapshot_backfill_info,
                 },
             },
+            Command::RescheduleIntent {
+                reschedule_plan: Some(ReschedulePlan { reschedules, .. }),
+                ..
+            } => PostCollectCommand::Reschedule { reschedules },
             Command::RescheduleIntent { .. } => {
                 PostCollectCommand::Command("RescheduleIntent".to_owned())
-            }
-            Command::RescheduleFragment { reschedules, .. } => {
-                PostCollectCommand::RescheduleFragment { reschedules }
             }
             Command::ReplaceStreamJob(plan) => PostCollectCommand::ReplaceStreamJob(plan),
             Command::SourceChangeSplit(SplitState { split_assignment }) => {
@@ -1353,10 +1366,12 @@ impl Command {
                 )
             }
 
-            Command::RescheduleIntent { .. } => None,
-            Command::RescheduleFragment {
-                reschedules,
-                fragment_actors,
+            Command::RescheduleIntent {
+                reschedule_plan:
+                    Some(ReschedulePlan {
+                        reschedules,
+                        fragment_actors,
+                    }),
                 ..
             } => {
                 let mut dispatcher_update = HashMap::new();
@@ -1528,6 +1543,7 @@ impl Command {
                 tracing::debug!("update mutation: {mutation:?}");
                 Some(mutation)
             }
+            Command::RescheduleIntent { .. } => None,
 
             Command::CreateSubscription {
                 upstream_mv_table_id,
@@ -1655,9 +1671,12 @@ impl Command {
                     },
                 )))
             }
-            Command::RescheduleFragment {
-                reschedules,
-                fragment_actors,
+            Command::RescheduleIntent {
+                reschedule_plan:
+                    Some(ReschedulePlan {
+                        reschedules,
+                        fragment_actors,
+                    }),
                 ..
             } => {
                 // we assume that we only scale the actors in database partial graph
@@ -1700,6 +1719,7 @@ impl Command {
                 }
                 Some(map)
             }
+            Command::RescheduleIntent { .. } => None,
             Command::ReplaceStreamJob(replace_table) => {
                 let edges = edges.as_mut().expect("should exist");
                 let mut actors = edges.collect_actors_to_create(

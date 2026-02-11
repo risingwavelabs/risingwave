@@ -35,7 +35,7 @@ use tokio::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard, oneshot};
 use tokio::task::JoinHandle;
 use tokio::time::{Instant, MissedTickBehavior};
 
-use crate::barrier::{Command, Reschedule, RescheduleContext, SharedFragmentInfo};
+use crate::barrier::{Command, Reschedule, RescheduleContext, ReschedulePlan};
 use crate::controller::scale::{
     FragmentRenderMap, LoadedFragmentContext, NoShuffleEnsemble,
     find_fragment_no_shuffle_dags_detailed, load_fragment_context, load_fragment_context_for_jobs,
@@ -332,7 +332,15 @@ async fn build_reschedule_intent_for_jobs(
     let commands = reschedule_context
         .into_database_contexts()
         .into_iter()
-        .map(|(database_id, context)| (database_id, Command::RescheduleIntent { context }))
+        .map(|(database_id, context)| {
+            (
+                database_id,
+                Command::RescheduleIntent {
+                    context,
+                    reschedule_plan: None,
+                },
+            )
+        })
         .collect();
 
     Ok(commands)
@@ -378,7 +386,15 @@ async fn build_reschedule_intent_for_fragments(
     let commands = reschedule_context
         .into_database_contexts()
         .into_iter()
-        .map(|(database_id, context)| (database_id, Command::RescheduleIntent { context }))
+        .map(|(database_id, context)| {
+            (
+                database_id,
+                Command::RescheduleIntent {
+                    context,
+                    reschedule_plan: None,
+                },
+            )
+        })
         .collect();
 
     Ok(commands)
@@ -475,20 +491,14 @@ async fn build_reschedule_context_from_loaded(
 /// while `all_actor_dispatchers` contains the new dispatcher list for each actor. `job_extra_info`
 /// supplies job-level context for building new actors.
 fn diff_fragment(
-    prev_fragment_info: &SharedFragmentInfo,
+    prev_fragment_info: &InflightFragmentInfo,
     curr_actors: &HashMap<ActorId, InflightActorInfo>,
     upstream_fragments: HashMap<FragmentId, DispatcherType>,
     downstream_fragments: HashMap<FragmentId, DispatcherType>,
     all_actor_dispatchers: HashMap<ActorId, Vec<PbDispatcher>>,
     job_extra_info: Option<&StreamingJobExtraInfo>,
 ) -> MetaResult<Reschedule> {
-    let prev_actors: HashMap<_, _> = prev_fragment_info
-        .actors
-        .iter()
-        .map(|(actor_id, actor)| (*actor_id, actor))
-        .collect();
-
-    let prev_ids: HashSet<_> = prev_actors.keys().cloned().collect();
+    let prev_ids: HashSet<_> = prev_fragment_info.actors.keys().cloned().collect();
     let curr_ids: HashSet<_> = curr_actors.keys().cloned().collect();
 
     let removed_actors: HashSet<_> = &prev_ids - &curr_ids;
@@ -513,7 +523,7 @@ fn diff_fragment(
 
     let mut vnode_bitmap_updates = HashMap::new();
     for actor_id in kept_ids {
-        let prev_actor = prev_actors[&actor_id];
+        let prev_actor = &prev_fragment_info.actors[&actor_id];
         let curr_actor = &curr_actors[&actor_id];
 
         // Check if the vnode distribution has changed.
@@ -609,10 +619,10 @@ fn diff_fragment(
 }
 
 pub(crate) fn build_reschedule_commands(
-    env: &MetaSrvEnv,
     render_result: FragmentRenderMap,
     context: RescheduleContext,
-) -> MetaResult<HashMap<DatabaseId, Command>> {
+    all_prev_fragments: HashMap<FragmentId, &InflightFragmentInfo>,
+) -> MetaResult<HashMap<DatabaseId, ReschedulePlan>> {
     if render_result.is_empty() {
         return Ok(HashMap::new());
     }
@@ -644,20 +654,13 @@ pub(crate) fn build_reschedule_commands(
         )
         .collect();
 
-    let read_guard = env.shared_actor_infos().read_guard();
-    let all_prev_fragments: HashMap<FragmentId, &SharedFragmentInfo> = all_related_fragment_ids
-        .into_iter()
-        .map(|fragment_id| {
-            read_guard
-                .get_fragment(fragment_id as FragmentId)
-                .map(|fragment| (fragment_id, fragment))
-                .ok_or_else(|| {
-                    MetaError::from(anyhow!(
-                        "previous fragment info for {fragment_id} not found"
-                    ))
-                })
-        })
-        .collect::<MetaResult<_>>()?;
+    for fragment_id in all_related_fragment_ids {
+        if !all_prev_fragments.contains_key(&fragment_id) {
+            return Err(MetaError::from(anyhow!(
+                "previous fragment info for {fragment_id} not found"
+            )));
+        }
+    }
 
     let all_rendered_fragments: HashMap<_, _> = render_result
         .values()
@@ -812,19 +815,18 @@ pub(crate) fn build_reschedule_commands(
             reschedules.insert(*fragment_id as FragmentId, reschedule);
         }
 
-        let command = Command::RescheduleFragment {
+        let command = ReschedulePlan {
             reschedules,
             fragment_actors: all_fragment_actors,
         };
 
-        if let Command::RescheduleFragment { reschedules, .. } = &command {
-            debug_assert!(
-                reschedules
-                    .values()
-                    .all(|reschedule| reschedule.vnode_bitmap_updates.is_empty()),
-                "RescheduleFragment command carries vnode_bitmap_updates, expected full rebuild"
-            );
-        }
+        debug_assert!(
+            command
+                .reschedules
+                .values()
+                .all(|reschedule| reschedule.vnode_bitmap_updates.is_empty()),
+            "reschedule plan carries vnode_bitmap_updates, expected full rebuild"
+        );
 
         commands.insert(*database_id, command);
     }
