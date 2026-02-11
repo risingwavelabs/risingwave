@@ -126,24 +126,28 @@ impl MvSelectionRule {
             query_group_key_in_mv_output.push(*mv_group_key_pos.get(&base_col_idx)?);
         }
 
-        let mut used_mv_aggs = vec![false; mv_agg.agg_calls().len()];
+        let mut normalized_call_to_mv_idx: HashMap<PlanAggCall, usize> = HashMap::new();
         let mut rewritten_agg_calls = Vec::with_capacity(query_agg.agg_calls().len());
         for query_call in query_agg.agg_calls() {
             let normalized_query_call = Self::normalize_agg_call(query_call, &query_input_to_base)?;
-            let mv_call_idx = mv_agg
-                .agg_calls()
-                .iter()
-                .enumerate()
-                .find(|(idx, mv_call)| {
-                    if used_mv_aggs[*idx] {
-                        return false;
-                    }
-                    Self::normalize_agg_call(mv_call, &mv_input_to_base).is_some_and(
-                        |normalized_mv_call| normalized_mv_call == normalized_query_call,
-                    )
-                })?
-                .0;
-            used_mv_aggs[mv_call_idx] = true;
+            let mv_call_idx = if let Some(mv_call_idx) =
+                normalized_call_to_mv_idx.get(&normalized_query_call).copied()
+            {
+                mv_call_idx
+            } else {
+                let mv_call_idx = mv_agg
+                    .agg_calls()
+                    .iter()
+                    .enumerate()
+                    .find(|(_, mv_call)| {
+                        Self::normalize_agg_call(mv_call, &mv_input_to_base).is_some_and(
+                            |normalized_mv_call| normalized_mv_call == normalized_query_call,
+                        )
+                    })?
+                    .0;
+                normalized_call_to_mv_idx.insert(normalized_query_call.clone(), mv_call_idx);
+                mv_call_idx
+            };
 
             // Only composable aggregate kinds can be rolled up from MV states.
             query_call.agg_type.partial_to_total()?;
@@ -238,11 +242,11 @@ impl MvSelectionRule {
             if mv_agg_idx >= mv_agg_to_mv_output.len() {
                 return None;
             }
-            if mv_agg_to_mv_output[mv_agg_idx].is_some() {
-                // Reject duplicated projection from agg output to MV output.
-                return None;
+            if mv_agg_to_mv_output[mv_agg_idx].is_none() {
+                // Keep the first projected output for each agg column.
+                // Duplicate projections (e.g. s1/s2 from the same agg output) are valid.
+                mv_agg_to_mv_output[mv_agg_idx] = Some(mv_output_idx);
             }
-            mv_agg_to_mv_output[mv_agg_idx] = Some(mv_output_idx);
         }
         let mv_agg_to_mv_output = mv_agg_to_mv_output
             .into_iter()
