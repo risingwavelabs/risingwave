@@ -14,77 +14,12 @@
 
 use std::time::Duration;
 
-use anyhow::{Result, bail};
+use anyhow::Result;
 use futures::future::BoxFuture;
-use risingwave_simulation::cluster::{Configuration, Session};
+use risingwave_simulation::cluster::Configuration;
 use risingwave_simulation::nexmark::{NexmarkCluster, THROUGHPUT};
 use risingwave_simulation::utils::AssertResult;
-use tokio::time::{interval, sleep, timeout};
-
-const RESULT_POLL_INTERVAL: Duration = Duration::from_secs(2);
-const RESULT_WAIT_TIMEOUT: Duration = Duration::from_secs(120);
-const STABLE_SAMPLE_COUNT: usize = 3;
-
-async fn wait_until_result_stable(
-    session: &mut Session,
-    sql: &str,
-    poll_interval: Duration,
-    timeout_duration: Duration,
-) -> Result<String> {
-    let mut last: Option<String> = None;
-    let mut same_count = 0;
-    let fut = async {
-        let mut ticker = interval(poll_interval);
-        loop {
-            ticker.tick().await;
-            let result = session.run(sql).await?;
-            let trimmed = result.trim();
-            if trimmed.is_empty() {
-                continue;
-            }
-            let is_same = last.as_deref().is_some_and(|prev| prev.trim() == trimmed);
-            if is_same {
-                same_count += 1;
-            } else {
-                last = Some(result.clone());
-                same_count = 1;
-            }
-            if same_count >= STABLE_SAMPLE_COUNT {
-                return Ok::<_, anyhow::Error>(result);
-            }
-        }
-    };
-
-    match timeout(timeout_duration, fut).await {
-        Ok(r) => Ok(r?),
-        Err(_) => bail!("wait_until_result_stable timeout"),
-    }
-}
-
-async fn wait_until_result_eq(
-    session: &mut Session,
-    sql: &str,
-    expected: &str,
-    poll_interval: Duration,
-    timeout_duration: Duration,
-) -> Result<String> {
-    let expected = expected.trim().to_string();
-    let fut = async {
-        let mut ticker = interval(poll_interval);
-        loop {
-            ticker.tick().await;
-            let result = session.run(sql).await?;
-            if result.trim() == expected {
-                return Ok::<_, anyhow::Error>(result);
-            }
-        }
-    };
-
-    match timeout(timeout_duration, fut).await {
-        Ok(r) => Ok(r?),
-        Err(_) => bail!("wait_until_result_eq timeout"),
-    }
-}
+use tokio::time::sleep;
 
 /// Common code for Nexmark chaos tests.
 ///
@@ -109,13 +44,7 @@ async fn nexmark_chaos_common_inner(
     let mut session = cluster.start_session();
     session.run(create).await?;
     sleep(Duration::from_secs(30)).await;
-    let final_result = wait_until_result_stable(
-        &mut session,
-        select,
-        RESULT_POLL_INTERVAL,
-        RESULT_WAIT_TIMEOUT,
-    )
-    .await?;
+    let final_result = session.run(select).await?;
     session.run(drop).await?;
     sleep(Duration::from_secs(5)).await;
 
@@ -159,24 +88,9 @@ async fn nexmark_chaos_common_inner(
         ))
         .await?;
 
-    let result = if watermark {
-        wait_until_result_stable(
-            &mut session,
-            select,
-            RESULT_POLL_INTERVAL,
-            RESULT_WAIT_TIMEOUT,
-        )
-        .await?
-    } else {
-        wait_until_result_eq(
-            &mut session,
-            select,
-            &final_result,
-            RESULT_POLL_INTERVAL,
-            RESULT_WAIT_TIMEOUT,
-        )
-        .await?
-    };
+    sleep(Duration::from_secs(50)).await;
+
+    let result = session.run(select).await?;
     if watermark {
         if result.trim() != final_result.trim() {
             println!(

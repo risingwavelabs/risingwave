@@ -14,46 +14,11 @@
 
 use std::time::Duration;
 
-use anyhow::{Result, bail};
+use anyhow::Result;
 use risingwave_simulation::cluster::{Configuration, KillOpts};
 use risingwave_simulation::nexmark::{NexmarkCluster, THROUGHPUT};
 use risingwave_simulation::utils::AssertResult;
 use tokio::time::sleep;
-
-const RESULT_POLL_INTERVAL: Duration = Duration::from_secs(2);
-const RESULT_WAIT_TIMEOUT: Duration = Duration::from_secs(120);
-const STABLE_SAMPLE_COUNT: usize = 3;
-
-async fn wait_until_result_stable(cluster: &mut NexmarkCluster, sql: &str) -> Result<String> {
-    let mut last: Option<String> = None;
-    let mut same_count = 0;
-    let result = cluster
-        .wait_until(
-            sql,
-            |r| {
-                let trimmed = r.trim();
-                if trimmed.is_empty() {
-                    return false;
-                }
-                let is_same = last.as_deref().is_some_and(|prev| prev.trim() == trimmed);
-                if is_same {
-                    same_count += 1;
-                } else {
-                    last = Some(r.to_string());
-                    same_count = 1;
-                }
-                same_count >= STABLE_SAMPLE_COUNT
-            },
-            RESULT_POLL_INTERVAL,
-            RESULT_WAIT_TIMEOUT,
-        )
-        .await?;
-
-    if result.trim().is_empty() {
-        bail!("wait_until_result_stable returned empty result");
-    }
-    Ok(result)
-}
 
 /// Setup a nexmark stream, inject failures, and verify results.
 async fn nexmark_recovery_common(create: &str, select: &str, drop: &str) -> Result<()> {
@@ -67,7 +32,7 @@ async fn nexmark_recovery_common(create: &str, select: &str, drop: &str) -> Resu
     // get the output without failures as the standard result
     cluster.run(create).await?;
     sleep(Duration::from_secs(30)).await;
-    let expected = wait_until_result_stable(&mut cluster, select).await?;
+    let expected = cluster.run(select).await?;
     cluster.run(drop).await?;
     sleep(Duration::from_secs(5)).await;
 
@@ -81,15 +46,7 @@ async fn nexmark_recovery_common(create: &str, select: &str, drop: &str) -> Resu
     // wait enough time to make sure the stream is end
     sleep(Duration::from_secs(60)).await;
 
-    cluster
-        .wait_until(
-            select,
-            |r| r.trim() == expected.trim(),
-            RESULT_POLL_INTERVAL,
-            RESULT_WAIT_TIMEOUT,
-        )
-        .await?
-        .assert_result_eq(&expected);
+    cluster.run(select).await?.assert_result_eq(&expected);
 
     Ok(())
 }
