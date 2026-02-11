@@ -781,11 +781,7 @@ impl MetadataManager {
             )
         };
 
-        let mut no_shuffle_seeds: HashSet<_> = unreschedulable_fragments
-            .iter()
-            .filter(|fragment_id| !unreschedulable_snapshot_fragments.contains(*fragment_id))
-            .copied()
-            .collect();
+        let mut no_shuffle_seeds = unreschedulable_fragments;
         no_shuffle_seeds.extend(snapshot_upstream_fragments);
 
         let no_shuffle_related_fragments = if no_shuffle_seeds.is_empty() {
