@@ -1086,10 +1086,15 @@ impl DdlService for DdlServiceImpl {
                     .start_timer();
                 // send a request to the frontend to get the ReplaceJobPlan
                 // will retry with exponential backoff if the request fails
+                let schema_name = self
+                    .metadata_manager
+                    .get_schema_name_by_id(table.schema_id)
+                    .await?;
                 let resp = client
                     .get_table_replace_plan(GetTableReplacePlanRequest {
                         database_id: table.database_id,
                         owner: table.owner,
+                        schema_name,
                         table_name: table.name.clone(),
                         table_change: Some(table_change.clone()),
                     })

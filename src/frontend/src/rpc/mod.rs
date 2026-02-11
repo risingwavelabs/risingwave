@@ -73,8 +73,14 @@ impl FrontendService for FrontendServiceImpl {
         tracing::info!("get_table_replace_plan for table {}", req.table_name);
 
         let table_change = req.table_change.expect("schema change message is required");
-        let replace_plan =
-            get_new_table_plan(table_change, req.table_name, req.database_id, req.owner).await?;
+        let replace_plan = get_new_table_plan(
+            table_change,
+            req.schema_name,
+            req.table_name,
+            req.database_id,
+            req.owner,
+        )
+        .await?;
 
         Ok(RpcResponse::new(GetTableReplacePlanResponse {
             replace_plan: Some(replace_plan),
@@ -114,6 +120,7 @@ impl FrontendService for FrontendServiceImpl {
 /// Get the new table plan for the given table schema change
 async fn get_new_table_plan(
     table_change: TableSchemaChange,
+    schema_name: String,
     table_name: String,
     database_id: u32,
     owner: u32,
@@ -132,7 +139,10 @@ async fn get_new_table_plan(
         .into_iter()
         .map(|c| c.into())
         .collect_vec();
-    let table_name = ObjectName::from(vec![table_name.as_str().into()]);
+    let table_name = ObjectName::from(vec![
+        schema_name.as_str().into(),
+        table_name.as_str().into(),
+    ]);
 
     let (new_table_definition, original_catalog) =
         get_new_table_definition_for_cdc_table(&session, table_name.clone(), &new_version_columns)

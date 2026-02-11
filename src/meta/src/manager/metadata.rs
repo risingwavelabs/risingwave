@@ -515,6 +515,12 @@ impl MetadataManager {
             .await
     }
 
+    pub async fn get_schema_name_by_id(&self, schema_id: u32) -> MetaResult<String> {
+        self.catalog_controller
+            .get_schema_name_by_id(schema_id as _)
+            .await
+    }
+
     pub async fn get_downstream_fragments(
         &self,
         job_id: u32,

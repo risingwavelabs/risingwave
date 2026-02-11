@@ -12,6 +12,7 @@ message GetTableReplacePlanRequest {
   uint32 owner = 2;
   string table_name = 3;
   ddl_service.TableSchemaChange table_change = 4;
+  string schema_name = 5;
 }
 
 message GetTableReplacePlanResponse {

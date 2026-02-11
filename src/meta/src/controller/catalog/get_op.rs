@@ -42,6 +42,15 @@ impl CatalogController {
         Ok(database_id.ok_or_else(|| anyhow!("object has no database id: {object_id}"))?)
     }
 
+    pub async fn get_schema_name_by_id(&self, schema_id: SchemaId) -> MetaResult<String> {
+        let inner = self.inner.read().await;
+        let schema = Schema::find_by_id(schema_id)
+            .one(&inner.db)
+            .await?
+            .ok_or_else(|| MetaError::catalog_id_not_found("schema", schema_id))?;
+        Ok(schema.name)
+    }
+
     pub async fn get_connection_by_id(
         &self,
         connection_id: ConnectionId,
