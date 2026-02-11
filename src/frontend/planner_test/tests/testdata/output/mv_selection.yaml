@@ -208,3 +208,19 @@
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
     └─BatchScan { table: mv, columns: [mv.count], distribution: Single }
+- id: agg_rollup_selection
+  sql: |
+    create table t_rollup (a int, b int, c int);
+    create materialized view mv_rollup as
+      select a, c, sum(b) as s, count(*) as cnt
+      from t_rollup
+      group by a, c;
+    set enable_mv_selection = true;
+    select a, sum(b) as s, count(*) as cnt
+    from t_rollup
+    group by a;
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchSortAgg { group_key: [mv_rollup.a], aggs: [sum(mv_rollup.s), sum0(mv_rollup.cnt)] }
+      └─BatchExchange { order: [mv_rollup.a ASC], dist: HashShard(mv_rollup.a) }
+        └─BatchScan { table: mv_rollup, columns: [mv_rollup.a, mv_rollup.s, mv_rollup.cnt], distribution: SomeShard }

@@ -195,3 +195,16 @@
     select count(*) from t1;
   expected_outputs:
   - batch_plan
+- id: agg_rollup_selection
+  sql: |
+    create table t_rollup (a int, b int, c int);
+    create materialized view mv_rollup as
+      select a, c, sum(b) as s, count(*) as cnt
+      from t_rollup
+      group by a, c;
+    set enable_mv_selection = true;
+    select a, sum(b) as s, count(*) as cnt
+    from t_rollup
+    group by a;
+  expected_outputs:
+  - batch_plan
