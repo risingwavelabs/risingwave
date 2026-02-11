@@ -1424,10 +1424,10 @@ impl SessionImpl {
     }
 
     pub fn statement_timeout(&self) -> Duration {
-        if self.config().statement_timeout() == 0 {
+        if self.config().statement_timeout().millis() == 0 {
             Duration::from_secs(self.env.batch_config.statement_timeout_in_sec as u64)
         } else {
-            Duration::from_secs(self.config().statement_timeout() as u64)
+            Duration::from_millis(self.config().statement_timeout().millis() as u64)
         }
     }
 
@@ -1667,7 +1667,6 @@ impl SessionManagerImpl {
                 client_addr,
             );
 
-            // TODO: adding `FATAL` message support for no matching HBA entry.
             let Some(hba_entry_opt) = hba_entry_opt else {
                 bail_permission_denied!(
                     "no pg_hba.conf entry for host \"{peer_addr}\", user \"{user_name}\", database \"{database_name}\""

@@ -79,7 +79,7 @@ exclude = [
 resolver = "2"
 
 [workspace.package]
-version = "2.8.0-alpha"
+version = "2.9.0-alpha"
 edition = "2024"
 homepage = "https://github.com/risingwavelabs/risingwave"
 keywords = ["sql", "database", "streaming"]
@@ -169,14 +169,14 @@ hashbrown0_15 = { package = "hashbrown", version = "0.15", features = [
 ] }
 hytra = "0.1"
 # branch dev_rebase_main_20251111
-iceberg = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "da0a554ac6de294e2a04d96fdf6dd4c535aa8d2a", features = [
+iceberg = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "4d5f635572a8e90c77a3c56c12aa40d5362f0d68", features = [
     "storage-s3",
     "storage-gcs",
     "storage-azblob",
     "storage-azdls",
 ] }
-iceberg-catalog-glue = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "da0a554ac6de294e2a04d96fdf6dd4c535aa8d2a" }
-iceberg-catalog-rest = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "da0a554ac6de294e2a04d96fdf6dd4c535aa8d2a" }
+iceberg-catalog-glue = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "4d5f635572a8e90c77a3c56c12aa40d5362f0d68" }
+iceberg-catalog-rest = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "4d5f635572a8e90c77a3c56c12aa40d5362f0d68" }
 
 adbc_core = { version = "0.22" }
 adbc_snowflake = { version = "0.22", default-features = false }
@@ -205,8 +205,10 @@ parking_lot = { version = "0.12", features = [
 ] }
 parquet = { version = "56", features = ["async"] }
 pin-project-lite = "0.2"
-prost = { version = "0.13" }
-prost-build = { version = "0.13" }
+prost = { version = "=0.13.4" }
+prost-build = { version = "=0.13.4" }
+prost-derive = { version = "=0.13.4" }
+prost-types = { version = "=0.13.4" }
 rand = { version = "0.9", features = ["small_rng"] }
 rdkafka = { package = "madsim-rdkafka", version = "0.4.4", features = [
     "cmake-build",
@@ -435,7 +437,7 @@ bson = { git = "https://github.com/risingwavelabs/bson-rust", tag = "v2.14.0-jso
 # in the last release v4.8.0+2.3.0, the zstd-sys requirement is 2.0.6 < 2.0.13, and the release does not contain zstd related changes
 rdkafka-sys = { git = "https://github.com/risingwavelabs/rust-rdkafka", package = "rdkafka-sys", branch = "downgrade-zstd" }
 
-prost = { git = "https://github.com/risingwavelabs/prost.git", package = "prost", rev = "4a442caf7c0a43feb4aea64bde6aea4488d9917f" }
-prost-derive = { git = "https://github.com/risingwavelabs/prost.git", package = "prost-derive", rev = "4a442caf7c0a43feb4aea64bde6aea4488d9917f" }
-prost-build = { git = "https://github.com/risingwavelabs/prost.git", package = "prost-build", rev = "4a442caf7c0a43feb4aea64bde6aea4488d9917f" }
-prost-types = { git = "https://github.com/risingwavelabs/prost.git", package = "prost-types", rev = "4a442caf7c0a43feb4aea64bde6aea4488d9917f" }
+prost = { git = "https://github.com/risingwavelabs/prost.git", package = "prost", rev = "d7baf5f4d4c12d82987bd86a91a8663005881bdd" }
+prost-derive = { git = "https://github.com/risingwavelabs/prost.git", package = "prost-derive", rev = "d7baf5f4d4c12d82987bd86a91a8663005881bdd" }
+prost-build = { git = "https://github.com/risingwavelabs/prost.git", package = "prost-build", rev = "d7baf5f4d4c12d82987bd86a91a8663005881bdd" }
+prost-types = { git = "https://github.com/risingwavelabs/prost.git", package = "prost-types", rev = "d7baf5f4d4c12d82987bd86a91a8663005881bdd" }

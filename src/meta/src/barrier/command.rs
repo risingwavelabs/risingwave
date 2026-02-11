@@ -68,8 +68,8 @@ use crate::model::{
 };
 use crate::stream::cdc::parallel_cdc_table_backfill_fragment;
 use crate::stream::{
-    AutoRefreshSchemaSinkContext, ConnectorPropsChange, FragmentBackfillOrder, SplitAssignment,
-    SplitState, UpstreamSinkInfo, build_actor_connector_splits,
+    AutoRefreshSchemaSinkContext, ConnectorPropsChange, ExtendedFragmentBackfillOrder,
+    SplitAssignment, SplitState, UpstreamSinkInfo, build_actor_connector_splits,
 };
 use crate::{MetaError, MetaResult};
 
@@ -214,7 +214,7 @@ pub struct CreateStreamingJobCommandInfo {
     pub job_type: StreamingJobType,
     pub create_type: CreateType,
     pub streaming_job: StreamingJob,
-    pub fragment_backfill_ordering: FragmentBackfillOrder,
+    pub fragment_backfill_ordering: ExtendedFragmentBackfillOrder,
     pub cdc_table_snapshot_splits: Option<Vec<CdcTableSnapshotSplitRaw>>,
     pub locality_fragment_state_table_mapping: HashMap<FragmentId, Vec<TableId>>,
     pub is_serverless: bool,
@@ -607,7 +607,7 @@ impl Command {
                                     .iter()
                                     .filter(|(actor_id, _)| {
                                         // only keep the existing actors
-                                        !reschedule.newly_created_actors.contains_key(actor_id)
+                                        !reschedule.newly_created_actors.contains_key(*actor_id)
                                     })
                                     .map(|(actor_id, bitmap)| (*actor_id, bitmap.clone()))
                                     .collect(),

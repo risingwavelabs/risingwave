@@ -970,12 +970,12 @@ mod tests {
 
         let initial_version = PinnedVersion::new(
             HummockVersion::from_rpc_protobuf(&PbHummockVersion {
-                id: 1,
+                id: 1.into(),
                 state_table_info: HashMap::from_iter([(
                     TEST_TABLE_ID,
                     StateTableInfo {
                         committed_epoch: epoch0,
-                        compaction_group_id: StaticCompactionGroupId::StateDefault as _,
+                        compaction_group_id: StaticCompactionGroupId::StateDefault,
                     },
                 )]),
                 ..Default::default()
@@ -1123,20 +1123,20 @@ mod tests {
 
         let initial_version = PinnedVersion::new(
             HummockVersion::from_rpc_protobuf(&PbHummockVersion {
-                id: 1,
+                id: 1.into(),
                 state_table_info: HashMap::from_iter([
                     (
                         table_id1,
                         StateTableInfo {
                             committed_epoch: epoch0,
-                            compaction_group_id: StaticCompactionGroupId::StateDefault as _,
+                            compaction_group_id: StaticCompactionGroupId::StateDefault,
                         },
                     ),
                     (
                         table_id2,
                         StateTableInfo {
                             committed_epoch: epoch0,
-                            compaction_group_id: StaticCompactionGroupId::StateDefault as _,
+                            compaction_group_id: StaticCompactionGroupId::StateDefault,
                         },
                     ),
                 ]),

@@ -653,9 +653,27 @@ pub(crate) async fn wait_for_update<T: Future<Output = HummockResult<bool>> + Se
         match tokio::time::timeout(Duration::from_secs(30), receiver.changed()).await {
             Err(_) => {
                 // Provide backtrace iff in debug mode for observability.
-                let backtrace = cfg!(debug_assertions)
-                    .then(Backtrace::capture)
+                let backtrace = cfg!(debug_assertions).then(Backtrace::capture);
+
+                let backtrace = backtrace
+                    .as_ref()
+                    .map(|bt| ShortBacktrace { bt, limit: 30 })
                     .map(tracing::field::display);
+
+                struct ShortBacktrace<'a> {
+                    bt: &'a Backtrace,
+                    limit: usize,
+                }
+
+                impl std::fmt::Display for ShortBacktrace<'_> {
+                    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+                        writeln!(f, "backtrace:")?;
+                        for (idx, frame) in self.bt.frames().iter().take(self.limit).enumerate() {
+                            writeln!(f, "{}: {:?}", idx, frame)?;
+                        }
+                        Ok(())
+                    }
+                }
 
                 // The reason that we need to retry here is batch scan in
                 // chain/rearrange_chain is waiting for an

@@ -35,7 +35,7 @@ use risingwave_common::catalog::{
 use risingwave_common::config::{MAX_CONNECTION_WINDOW_SIZE, MetaConfig};
 use risingwave_common::hash::WorkerSlotMapping;
 use risingwave_common::id::{
-    ConnectionId, DatabaseId, JobId, SchemaId, SinkId, SubscriptionId, ViewId, WorkerId,
+    ConnectionId, DatabaseId, JobId, SchemaId, SinkId, SubscriptionId, UserId, ViewId, WorkerId,
 };
 use risingwave_common::monitor::EndpointExt;
 use risingwave_common::system_param::reader::SystemParamsReader;
@@ -80,7 +80,7 @@ use risingwave_pb::iceberg_compaction::{
     SubscribeIcebergCompactionEventRequest, SubscribeIcebergCompactionEventResponse,
     subscribe_iceberg_compaction_event_request,
 };
-use risingwave_pb::id::{ActorId, FragmentId, SourceId};
+use risingwave_pb::id::{ActorId, FragmentId, HummockSstableId, SourceId};
 use risingwave_pb::meta::alter_connector_props_request::{
     AlterConnectorPropsObject, AlterIcebergTableIds, ExtraOptions,
 };
@@ -93,7 +93,6 @@ use risingwave_pb::meta::list_actor_splits_response::ActorSplit;
 use risingwave_pb::meta::list_actor_states_response::ActorState;
 use risingwave_pb::meta::list_cdc_progress_response::PbCdcProgress;
 use risingwave_pb::meta::list_iceberg_tables_response::IcebergTable;
-use risingwave_pb::meta::list_object_dependencies_response::PbObjectDependencies;
 use risingwave_pb::meta::list_refresh_table_states_response::RefreshTableState;
 use risingwave_pb::meta::list_streaming_job_states_response::StreamingJobState;
 use risingwave_pb::meta::list_table_fragments_response::TableFragmentInfo;
@@ -192,7 +191,7 @@ impl MetaClient {
         connection_name: String,
         database_id: DatabaseId,
         schema_id: SchemaId,
-        owner_id: u32,
+        owner_id: UserId,
         req: create_connection_request::Payload,
     ) -> Result<WaitVersion> {
         let request = CreateConnectionRequest {
@@ -213,7 +212,7 @@ impl MetaClient {
         secret_name: String,
         database_id: DatabaseId,
         schema_id: SchemaId,
-        owner_id: u32,
+        owner_id: UserId,
         value: Vec<u8>,
     ) -> Result<WaitVersion> {
         let request = CreateSecretRequest {
@@ -250,8 +249,8 @@ impl MetaClient {
             .ok_or_else(|| anyhow!("wait version not set"))?)
     }
 
-    pub async fn drop_secret(&self, secret_id: SecretId) -> Result<WaitVersion> {
-        let request = DropSecretRequest { secret_id };
+    pub async fn drop_secret(&self, secret_id: SecretId, cascade: bool) -> Result<WaitVersion> {
+        let request = DropSecretRequest { secret_id, cascade };
         let resp = self.inner.drop_secret(request).await?;
         Ok(resp
             .version
@@ -561,7 +560,7 @@ impl MetaClient {
             .ok_or_else(|| anyhow!("wait version not set"))?)
     }
 
-    pub async fn alter_owner(&self, object: Object, owner_id: u32) -> Result<WaitVersion> {
+    pub async fn alter_owner(&self, object: Object, owner_id: UserId) -> Result<WaitVersion> {
         let request = AlterOwnerRequest {
             object: Some(object),
             owner_id,
@@ -728,7 +727,7 @@ impl MetaClient {
         secret_name: String,
         database_id: DatabaseId,
         schema_id: SchemaId,
-        owner_id: u32,
+        owner_id: UserId,
         value: Vec<u8>,
     ) -> Result<WaitVersion> {
         let request = AlterSecretRequest {
@@ -809,7 +808,7 @@ impl MetaClient {
 
     pub async fn drop_table(
         &self,
-        source_id: Option<u32>,
+        source_id: Option<SourceId>,
         table_id: TableId,
         cascade: bool,
     ) -> Result<WaitVersion> {
@@ -930,7 +929,7 @@ impl MetaClient {
         Ok(resp.version)
     }
 
-    pub async fn drop_user(&self, user_id: u32) -> Result<u64> {
+    pub async fn drop_user(&self, user_id: UserId) -> Result<u64> {
         let request = DropUserRequest { user_id };
         let resp = self.inner.drop_user(request).await?;
         Ok(resp.version)
@@ -954,10 +953,10 @@ impl MetaClient {
 
     pub async fn grant_privilege(
         &self,
-        user_ids: Vec<u32>,
+        user_ids: Vec<UserId>,
         privileges: Vec<GrantPrivilege>,
         with_grant_option: bool,
-        granted_by: u32,
+        granted_by: UserId,
     ) -> Result<u64> {
         let request = GrantPrivilegeRequest {
             user_ids,
@@ -971,10 +970,10 @@ impl MetaClient {
 
     pub async fn revoke_privilege(
         &self,
-        user_ids: Vec<u32>,
+        user_ids: Vec<UserId>,
         privileges: Vec<GrantPrivilege>,
-        granted_by: u32,
-        revoke_by: u32,
+        granted_by: UserId,
+        revoke_by: UserId,
         revoke_grant_option: bool,
         cascade: bool,
     ) -> Result<u64> {
@@ -992,11 +991,11 @@ impl MetaClient {
 
     pub async fn alter_default_privilege(
         &self,
-        user_ids: Vec<u32>,
+        user_ids: Vec<UserId>,
         database_id: DatabaseId,
         schema_ids: Vec<SchemaId>,
         operation: AlterDefaultPrivilegeOperation,
-        granted_by: u32,
+        granted_by: UserId,
     ) -> Result<()> {
         let request = AlterDefaultPrivilegeRequest {
             user_ids,
@@ -1123,7 +1122,7 @@ impl MetaClient {
     pub async fn flush(&self, database_id: DatabaseId) -> Result<HummockVersionId> {
         let request = FlushRequest { database_id };
         let resp = self.inner.flush(request).await?;
-        Ok(HummockVersionId::new(resp.hummock_version_id))
+        Ok(resp.hummock_version_id)
     }
 
     pub async fn wait(&self) -> Result<()> {
@@ -1163,10 +1162,15 @@ impl MetaClient {
         Ok(resp.states)
     }
 
-    pub async fn list_fragment_distributions(&self) -> Result<Vec<FragmentDistribution>> {
+    pub async fn list_fragment_distributions(
+        &self,
+        include_node: bool,
+    ) -> Result<Vec<FragmentDistribution>> {
         let resp = self
             .inner
-            .list_fragment_distribution(ListFragmentDistributionRequest {})
+            .list_fragment_distribution(ListFragmentDistributionRequest {
+                include_node: Some(include_node),
+            })
             .await?;
         Ok(resp.distributions)
     }
@@ -1174,7 +1178,9 @@ impl MetaClient {
     pub async fn list_creating_fragment_distribution(&self) -> Result<Vec<FragmentDistribution>> {
         let resp = self
             .inner
-            .list_creating_fragment_distribution(ListCreatingFragmentDistributionRequest {})
+            .list_creating_fragment_distribution(ListCreatingFragmentDistributionRequest {
+                include_node: Some(true),
+            })
             .await?;
         Ok(resp.distributions)
     }
@@ -1228,14 +1234,6 @@ impl MetaClient {
             .await?;
 
         Ok(resp.actor_splits)
-    }
-
-    pub async fn list_object_dependencies(&self) -> Result<Vec<PbObjectDependencies>> {
-        let resp = self
-            .inner
-            .list_object_dependencies(ListObjectDependenciesRequest {})
-            .await?;
-        Ok(resp.dependencies)
     }
 
     pub async fn pause(&self) -> Result<PauseResponse> {
@@ -1360,7 +1358,7 @@ impl MetaClient {
         committed_epoch_limit: HummockEpoch,
     ) -> Result<Vec<HummockVersionDelta>> {
         let req = ListVersionDeltasRequest {
-            start_id: start_id.to_u64(),
+            start_id,
             num_limit,
             committed_epoch_limit,
         };
@@ -1382,7 +1380,7 @@ impl MetaClient {
         compaction_groups: Vec<CompactionGroupId>,
     ) -> Result<()> {
         let req = TriggerCompactionDeterministicRequest {
-            version_id: version_id.to_u64(),
+            version_id,
             compaction_groups,
         };
         self.inner.trigger_compaction_deterministic(req).await?;
@@ -1609,7 +1607,7 @@ impl MetaClient {
 
     pub async fn list_serving_vnode_mappings(
         &self,
-    ) -> Result<HashMap<FragmentId, (u32, WorkerSlotMapping)>> {
+    ) -> Result<HashMap<FragmentId, (JobId, WorkerSlotMapping)>> {
         let req = GetServingVnodeMappingsRequest {};
         let resp = self.inner.get_serving_vnode_mappings(req).await?;
         let mappings = resp
@@ -1622,7 +1620,7 @@ impl MetaClient {
                         resp.fragment_to_table
                             .get(&p.fragment_id)
                             .cloned()
-                            .unwrap_or(0),
+                            .unwrap_or_default(),
                         WorkerSlotMapping::from_protobuf(p.mapping.as_ref().unwrap()),
                     ),
                 )
@@ -1670,7 +1668,7 @@ impl MetaClient {
         Ok(resp.branched_objects)
     }
 
-    pub async fn list_active_write_limit(&self) -> Result<HashMap<u64, WriteLimit>> {
+    pub async fn list_active_write_limit(&self) -> Result<HashMap<CompactionGroupId, WriteLimit>> {
         let req = ListActiveWriteLimitRequest {};
         let resp = self.inner.list_active_write_limit(req).await?;
         Ok(resp.write_limits)
@@ -1895,6 +1893,14 @@ impl MetaClient {
         Ok(resp.states)
     }
 
+    pub async fn list_sink_log_store_tables(
+        &self,
+    ) -> Result<Vec<list_sink_log_store_tables_response::SinkLogStoreTable>> {
+        let request = ListSinkLogStoreTablesRequest {};
+        let resp = self.inner.list_sink_log_store_tables(request).await?;
+        Ok(resp.tables)
+    }
+
     pub async fn create_iceberg_table(
         &self,
         table_job_info: PbTableJobInfo,
@@ -1959,7 +1965,7 @@ impl HummockMetaClient for MetaClient {
     async fn unpin_version_before(&self, unpin_version_before: HummockVersionId) -> Result<()> {
         let req = UnpinVersionBeforeRequest {
             context_id: self.worker_id(),
-            unpin_version_before: unpin_version_before.to_u64(),
+            unpin_version_before,
         };
         self.inner.unpin_version_before(req).await?;
         Ok(())
@@ -1996,10 +2002,10 @@ impl HummockMetaClient for MetaClient {
 
     async fn trigger_manual_compaction(
         &self,
-        compaction_group_id: u64,
+        compaction_group_id: CompactionGroupId,
         table_id: JobId,
         level: u32,
-        sst_ids: Vec<u64>,
+        sst_ids: Vec<HummockSstableId>,
     ) -> Result<()> {
         // TODO: support key_range parameter
         let req = TriggerManualCompactionRequest {
@@ -2560,9 +2566,9 @@ macro_rules! for_all_meta_rpc {
             ,{ stream_client, list_streaming_job_states, ListStreamingJobStatesRequest, ListStreamingJobStatesResponse }
             ,{ stream_client, list_fragment_distribution, ListFragmentDistributionRequest, ListFragmentDistributionResponse }
             ,{ stream_client, list_creating_fragment_distribution, ListCreatingFragmentDistributionRequest, ListCreatingFragmentDistributionResponse }
+            ,{ stream_client, list_sink_log_store_tables, ListSinkLogStoreTablesRequest, ListSinkLogStoreTablesResponse }
             ,{ stream_client, list_actor_states, ListActorStatesRequest, ListActorStatesResponse }
             ,{ stream_client, list_actor_splits, ListActorSplitsRequest, ListActorSplitsResponse }
-            ,{ stream_client, list_object_dependencies, ListObjectDependenciesRequest, ListObjectDependenciesResponse }
             ,{ stream_client, recover, RecoverRequest, RecoverResponse }
             ,{ stream_client, list_rate_limits, ListRateLimitsRequest, ListRateLimitsResponse }
             ,{ stream_client, list_cdc_progress, ListCdcProgressRequest, ListCdcProgressResponse }

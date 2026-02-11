@@ -25,9 +25,7 @@ use risingwave_hummock_sdk::time_travel::{
     IncompleteHummockVersion, IncompleteHummockVersionDelta, refill_version,
 };
 use risingwave_hummock_sdk::version::{GroupDeltaCommon, HummockVersion, HummockVersionDelta};
-use risingwave_hummock_sdk::{
-    CompactionGroupId, HummockEpoch, HummockObjectId, HummockSstableId, HummockSstableObjectId,
-};
+use risingwave_hummock_sdk::{CompactionGroupId, HummockEpoch, HummockObjectId, HummockSstableId};
 use risingwave_meta_model::hummock_sstable_info::SstableInfoV2Backend;
 use risingwave_meta_model::{
     HummockVersionId, hummock_epoch_to_version, hummock_sstable_info, hummock_time_travel_delta,
@@ -88,10 +86,8 @@ impl HummockManager {
             txn.commit().await?;
             return Ok(());
         };
-        let mut watermark_version_id = std::cmp::min(
-            version_watermark.version_id,
-            min_pinned_version_id.to_u64().try_into().unwrap(),
-        );
+        let mut watermark_version_id =
+            std::cmp::min(version_watermark.version_id, min_pinned_version_id);
         if let Some(max_version_count) = self.env.opts.time_travel_vacuum_max_version_count
             && let Some(earliest_version_id) = hummock_time_travel_version::Entity::find()
                 .select_only()
@@ -103,7 +99,11 @@ impl HummockManager {
         {
             watermark_version_id = std::cmp::min(
                 watermark_version_id,
-                earliest_version_id.saturating_add(max_version_count as i64),
+                HummockVersionId::new(
+                    earliest_version_id
+                        .as_raw_id()
+                        .saturating_add(max_version_count.into()),
+                ),
             );
         }
         let res = hummock_epoch_to_version::Entity::delete_many()
@@ -146,10 +146,7 @@ impl HummockManager {
             hummock_time_travel_version::Entity::find()
                 .select_only()
                 .column(hummock_time_travel_version::Column::VersionId)
-                .filter(
-                    hummock_time_travel_version::Column::VersionId
-                        .lt(latest_valid_version_id.to_u64()),
-                )
+                .filter(hummock_time_travel_version::Column::VersionId.lt(latest_valid_version_id))
                 .order_by_desc(hummock_time_travel_version::Column::VersionId)
                 .into_tuple()
                 .all(&txn)
@@ -158,10 +155,7 @@ impl HummockManager {
             hummock_time_travel_delta::Entity::find()
                 .select_only()
                 .column(hummock_time_travel_delta::Column::VersionId)
-                .filter(
-                    hummock_time_travel_delta::Column::VersionId
-                        .lt(latest_valid_version_id.to_u64()),
-                )
+                .filter(hummock_time_travel_delta::Column::VersionId.lt(latest_valid_version_id))
                 .into_tuple()
                 .all(&txn)
                 .await?;
@@ -185,7 +179,7 @@ impl HummockManager {
                                 .iter()
                                 .skip(start_idx * delete_sst_batch_size)
                                 .take(delete_sst_batch_size)
-                                .map(|sst_id| sst_id.inner()),
+                                .copied(),
                         ),
                     )
                     .exec(txn)
@@ -263,27 +257,23 @@ impl HummockManager {
         }
 
         let res = hummock_time_travel_version::Entity::delete_many()
-            .filter(
-                hummock_time_travel_version::Column::VersionId.lt(latest_valid_version_id.to_u64()),
-            )
+            .filter(hummock_time_travel_version::Column::VersionId.lt(latest_valid_version_id))
             .exec(&txn)
             .await?;
         tracing::info!(
-            watermark_version_id,
-            latest_valid_version_id = latest_valid_version_id.to_u64(),
+            %watermark_version_id,
+            %latest_valid_version_id,
             "Deleted {} rows from hummock_time_travel_version.",
             res.rows_affected
         );
 
         let res = hummock_time_travel_delta::Entity::delete_many()
-            .filter(
-                hummock_time_travel_delta::Column::VersionId.lt(latest_valid_version_id.to_u64()),
-            )
+            .filter(hummock_time_travel_delta::Column::VersionId.lt(latest_valid_version_id))
             .exec(&txn)
             .await?;
         tracing::info!(
-            watermark_version_id,
-            latest_valid_version_id = latest_valid_version_id.to_u64(),
+            %watermark_version_id,
+            %latest_valid_version_id,
             "Deleted {} rows from hummock_time_travel_delta.",
             res.rows_affected
         );
@@ -313,7 +303,7 @@ impl HummockManager {
         while !remain_sst.is_empty() {
             let batch = remain_sst
                 .drain(..std::cmp::min(remain_sst.len(), batch_size))
-                .map(|object_id| object_id.as_raw().inner());
+                .map(|object_id| object_id.as_raw());
             let reject_object_ids: Vec<risingwave_meta_model::HummockSstableObjectId> =
                 hummock_sstable_info::Entity::find()
                     .filter(hummock_sstable_info::Column::ObjectId.is_in(batch))
@@ -323,8 +313,7 @@ impl HummockManager {
                     .all(&self.env.meta_store_ref().conn)
                     .await?;
             for reject in reject_object_ids {
-                let reject: u64 = reject.try_into().unwrap();
-                let object_id = HummockObjectId::Sstable(HummockSstableObjectId::from(reject));
+                let object_id = HummockObjectId::Sstable(reject);
                 result.remove(&object_id);
             }
         }
@@ -476,7 +465,7 @@ impl HummockManager {
             query_tz = ?(Epoch(query_epoch).as_timestamptz()),
             actual_epoch = epoch_to_version.epoch,
             actual_tz = ?(Epoch(u64::try_from(epoch_to_version.epoch).unwrap()).as_timestamptz()),
-            actual_version_id,
+            %actual_version_id,
             "convert query epoch"
         );
 
@@ -512,13 +501,9 @@ impl HummockManager {
         let sst_info_fetch_batch_size = self.env.opts.hummock_time_travel_sst_info_fetch_batch_size;
         while !sst_ids.is_empty() {
             let sst_infos = hummock_sstable_info::Entity::find()
-                .filter(
-                    hummock_sstable_info::Column::SstId.is_in(
-                        sst_ids
-                            .drain(..std::cmp::min(sst_info_fetch_batch_size, sst_ids.len()))
-                            .map(|sst_id| sst_id.inner()),
-                    ),
-                )
+                .filter(hummock_sstable_info::Column::SstId.is_in(
+                    sst_ids.drain(..std::cmp::min(sst_info_fetch_batch_size, sst_ids.len())),
+                ))
                 .all(&sql_store.conn)
                 .await?;
             for sst_info in sst_infos {
@@ -575,8 +560,8 @@ impl HummockManager {
                         break;
                     };
                     batch.push(hummock_sstable_info::ActiveModel {
-                        sst_id: Set(sst_info.sst_id.inner().try_into().unwrap()),
-                        object_id: Set(sst_info.object_id.inner().try_into().unwrap()),
+                        sst_id: Set(sst_info.sst_id),
+                        object_id: Set(sst_info.object_id),
                         sstable_info: Set(SstableInfoV2Backend::from(&sst_info.to_protobuf())),
                     });
                     remain -= 1;
@@ -595,11 +580,10 @@ impl HummockManager {
 
         let mut batch = vec![];
         for (table_id, _cg_id, committed_epoch) in tables_to_commit {
-            let version_id: u64 = delta.id.to_u64();
             let m = hummock_epoch_to_version::ActiveModel {
                 epoch: Set(committed_epoch.try_into().unwrap()),
-                table_id: Set(table_id.as_raw_id() as _),
-                version_id: Set(version_id.try_into().unwrap()),
+                table_id: Set(i64::from(table_id.as_raw_id())),
+                version_id: Set(delta.id),
             };
             batch.push(m);
             if batch.len()
@@ -652,10 +636,7 @@ impl HummockManager {
             )
             .await?;
             let m = hummock_time_travel_version::ActiveModel {
-                version_id: Set(risingwave_meta_model::HummockVersionId::try_from(
-                    version.id.to_u64(),
-                )
-                .unwrap()),
+                version_id: Set(version.id),
                 version: Set(
                     (&IncompleteHummockVersion::from((version, &time_travel_table_ids))
                         .to_protobuf())
@@ -686,10 +667,7 @@ impl HummockManager {
             .any(|table_id| time_travel_table_ids.contains(table_id));
         if written > 0 || has_state_table_info_delta {
             let m = hummock_time_travel_delta::ActiveModel {
-                version_id: Set(risingwave_meta_model::HummockVersionId::try_from(
-                    delta.id.to_u64(),
-                )
-                .unwrap()),
+                version_id: Set(delta.id),
                 version_delta: Set((&IncompleteHummockVersionDelta::from((
                     &delta,
                     &time_travel_table_ids,
@@ -725,7 +703,7 @@ fn replay_archive(
         // Need to work around the assertion in `apply_version_delta`.
         // Because compaction deltas are not included in time travel archive.
         while last_version.id < d.prev_id {
-            last_version.id = last_version.id + 1;
+            last_version.id += 1;
         }
         last_version.apply_version_delta(&d);
     }

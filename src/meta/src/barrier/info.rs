@@ -43,7 +43,10 @@ use crate::barrier::command::PostCollectCommand;
 use crate::barrier::edge_builder::{FragmentEdgeBuildResult, FragmentEdgeBuilder};
 use crate::barrier::progress::{CreateMviewProgressTracker, StagingCommitInfo};
 use crate::barrier::rpc::{ControlStreamManager, to_partial_graph_id};
-use crate::barrier::{BackfillProgress, BarrierKind, Command, CreateStreamingJobType, TracedEpoch};
+use crate::barrier::{
+    BackfillProgress, BarrierKind, Command, CreateStreamingJobType, FragmentBackfillProgress,
+    TracedEpoch,
+};
 use crate::controller::fragment::{InflightActorInfo, InflightFragmentInfo};
 use crate::controller::utils::rebuild_fragment_mapping;
 use crate::manager::NotificationManagerRef;
@@ -554,6 +557,18 @@ impl InflightDatabaseInfo {
                 .as_ref()
                 .map(|tracker| (*job_id, tracker.gen_cdc_progress()))
         })
+    }
+
+    pub fn gen_fragment_backfill_progress(&self) -> Vec<FragmentBackfillProgress> {
+        let mut result = Vec::new();
+        for job in self.jobs.values() {
+            let CreateStreamingJobStatus::Creating { tracker } = &job.status else {
+                continue;
+            };
+            let fragment_progress = tracker.collect_fragment_progress(&job.fragment_infos, true);
+            result.extend(fragment_progress);
+        }
+        result
     }
 
     pub(super) fn may_assign_fragment_cdc_backfill_splits(
@@ -1146,7 +1161,7 @@ impl InflightDatabaseInfo {
                             !info
                                 .stream_job_fragments
                                 .fragments
-                                .contains_key(fragment_id)
+                                .contains_key(*fragment_id)
                         })
                         .unwrap_or(true)
                     })

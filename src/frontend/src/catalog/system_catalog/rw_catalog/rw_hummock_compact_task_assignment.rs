@@ -14,6 +14,7 @@
 
 use risingwave_common::types::{Fields, JsonbVal};
 use risingwave_frontend_macro::system_catalog;
+use risingwave_pb::id::CompactionGroupId;
 use serde_json::json;
 
 use crate::catalog::system_catalog::SysCatalogReaderImpl;
@@ -22,7 +23,7 @@ use crate::error::Result;
 #[derive(Fields)]
 struct RwHummockCompactTaskAssignment {
     #[primary_key]
-    compaction_group_id: i64,
+    compaction_group_id: CompactionGroupId,
     task_id: i64,
     select_level: i32,
     target_level: i32,
@@ -48,7 +49,7 @@ async fn read(reader: &SysCatalogReaderImpl) -> Result<Vec<RwHummockCompactTaskA
         let select_level = compact_task.input_ssts[0].level_idx;
 
         rows.push(RwHummockCompactTaskAssignment {
-            compaction_group_id: compact_task.compaction_group_id as _,
+            compaction_group_id: compact_task.compaction_group_id,
             task_id: compact_task.task_id as _,
             select_level: select_level as _,
             target_level: compact_task.target_level as _,

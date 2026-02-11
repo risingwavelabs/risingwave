@@ -295,7 +295,7 @@ mod tests {
         let mut raw = ClusterMetadata::default();
         raw.default_cf.insert(vec![0, 1, 2], vec![3, 4, 5]);
         raw.hummock_version.id = HummockVersionId::new(1);
-        raw.version_stats.hummock_version_id = 10;
+        raw.version_stats.hummock_version_id = 10.into();
         raw.version_stats.table_stats.insert(
             200.into(),
             TableStats {
@@ -304,7 +304,7 @@ mod tests {
             },
         );
         raw.compaction_groups.push(CompactionGroup {
-            id: 3000,
+            id: 3000.into(),
             ..Default::default()
         });
         raw.encode_to(&mut buf).unwrap();

@@ -45,6 +45,7 @@ use risingwave_pb::stream_plan::{
     DispatchStrategy, Dispatcher, PbDispatchOutputMapping, PbDispatcher, PbStreamActor,
     PbStreamContext, StreamNode,
 };
+use strum::Display;
 
 use super::{ActorId, FragmentId};
 
@@ -215,7 +216,7 @@ impl Fragment {
                 .map(|actor| {
                     actor.to_protobuf(
                         dispatchers
-                            .and_then(|dispatchers| dispatchers.get(&(actor.actor_id as _)))
+                            .and_then(|dispatchers| dispatchers.get(&actor.actor_id))
                             .into_iter()
                             .flatten()
                             .cloned(),
@@ -363,7 +364,7 @@ impl StreamJobFragments {
                         *id,
                         fragment.to_protobuf(
                             fragment_upstreams.get(id).into_iter().flatten().cloned(),
-                            fragment_dispatchers.get(&(*id as _)),
+                            fragment_dispatchers.get(id),
                         ),
                     )
                 })
@@ -791,7 +792,7 @@ impl StreamJobFragments {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Display, Clone, Copy, PartialEq, Eq)]
 pub enum BackfillUpstreamType {
     MView,
     Values,

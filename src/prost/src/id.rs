@@ -13,10 +13,11 @@
 // limitations under the License.
 
 use std::any::type_name;
-use std::collections::{BTreeMap, HashMap};
+use std::borrow::Borrow;
 use std::fmt::Formatter;
+use std::iter::Step;
 use std::num::TryFromIntError;
-use std::ops::{Add, AddAssign};
+use std::ops::{Add, AddAssign, Sub};
 use std::str::FromStr;
 
 use sea_orm::sea_query::{ArrayType, ValueTypeErr};
@@ -66,108 +67,43 @@ impl<const N: usize, P: FromStr> FromStr for TypedId<N, P> {
     }
 }
 
+// # safety: transparent repr
+unsafe impl<const N: usize, P> prost::TransparentOver for TypedId<N, P> {
+    type Inner = P;
+}
+
+impl<const N: usize, P> Borrow<P> for TypedId<N, P> {
+    fn borrow(&self) -> &P {
+        // Safety: transparent repr
+        unsafe { std::mem::transmute(self) }
+    }
+}
+
+impl<const N: usize, P> TypedId<N, P> {
+    pub const fn new(inner: P) -> Self {
+        TypedId(inner)
+    }
+}
+
 impl<const N: usize, P> TypedId<N, P>
 where
     Self: UniqueTypedIdDeclaration,
 {
-    pub const fn new(inner: P) -> Self {
-        TypedId(inner)
-    }
-
     #[expect(clippy::wrong_self_convention)]
     pub fn as_raw_id(self) -> P {
         self.0
-    }
-
-    pub fn raw_slice(slice: &[Self]) -> &[P] {
-        // SAFETY: transparent repr
-        unsafe { std::mem::transmute(slice) }
-    }
-
-    pub fn mut_raw_vec(vec: &mut Vec<Self>) -> &mut Vec<P> {
-        // SAFETY: transparent repr
-        unsafe { std::mem::transmute(vec) }
-    }
-
-    pub fn raw_hash_map_ref<V>(map: &HashMap<Self, V>) -> &HashMap<P, V> {
-        // SAFETY: transparent repr
-        unsafe { std::mem::transmute(map) }
-    }
-
-    pub fn raw_hash_map_mut_ref<V>(map: &mut HashMap<Self, V>) -> &mut HashMap<P, V> {
-        // SAFETY: transparent repr
-        unsafe { std::mem::transmute(map) }
-    }
-
-    pub fn raw_btree_map_ref<V>(map: &BTreeMap<Self, V>) -> &BTreeMap<P, V> {
-        // SAFETY: transparent repr
-        unsafe { std::mem::transmute(map) }
-    }
-
-    pub fn raw_btree_map_mut_ref<V>(map: &mut BTreeMap<Self, V>) -> &mut BTreeMap<P, V> {
-        // SAFETY: transparent repr
-        unsafe { std::mem::transmute(map) }
     }
 }
 
 type TypedU32Id<const N: usize> = TypedId<N, u32>;
 
-impl<const N: usize> TypedU32Id<N>
-where
-    Self: UniqueTypedIdDeclaration,
-{
+impl<const N: usize> TypedU32Id<N> {
     pub const fn placeholder() -> Self {
         Self(OBJECT_ID_PLACEHOLDER)
     }
 
     pub fn is_placeholder(&self) -> bool {
         self.0 == OBJECT_ID_PLACEHOLDER
-    }
-
-    pub fn as_i32_id(self) -> i32 {
-        self.to_i32()
-    }
-
-    fn from_i32(inner: i32) -> Self {
-        Self(inner.try_into().unwrap_or_else(|e: TryFromIntError| {
-            if cfg!(debug_assertions) {
-                panic!(
-                    "invalid i32 id {} for {}: {:?}",
-                    inner,
-                    type_name::<Self>(),
-                    e.as_report()
-                );
-            } else {
-                warn!(
-                    "invalid i32 id {} for {}: {:?}",
-                    inner,
-                    type_name::<Self>(),
-                    e.as_report()
-                );
-                inner as _
-            }
-        }))
-    }
-
-    fn to_i32(self) -> i32 {
-        self.0.try_into().unwrap_or_else(|e: TryFromIntError| {
-            if cfg!(debug_assertions) {
-                panic!(
-                    "invalid u32 id {} for {}: {:?}",
-                    self.0,
-                    type_name::<Self>(),
-                    e.as_report()
-                );
-            } else {
-                warn!(
-                    "invalid u32 id {} for {}: {:?}",
-                    self.0,
-                    type_name::<Self>(),
-                    e.as_report()
-                );
-                self.0 as _
-            }
-        })
     }
 }
 
@@ -177,62 +113,141 @@ impl<const N: usize, P> From<P> for TypedId<N, P> {
     }
 }
 
-impl<const N: usize> From<TypedU32Id<N>> for sea_orm::Value
-where
-    TypedU32Id<N>: UniqueTypedIdDeclaration,
-{
-    fn from(value: TypedU32Id<N>) -> Self {
-        sea_orm::Value::from(value.to_i32())
-    }
+/// Implements `from_$signed` and `to_$signed` conversion methods for TypedId types.
+/// - `$unsigned`: the unsigned primitive type (u32 or u64)
+/// - `$signed`: the corresponding signed type for DB storage (i32 or i64)
+macro_rules! impl_typed_id_conversion {
+    ($unsigned:ty, $signed:ty) => {
+        paste::paste! {
+            impl<const N: usize> TypedId<N, $unsigned>
+            {
+                fn [< from_ $signed >](inner: $signed) -> Self {
+                    Self(inner.try_into().unwrap_or_else(|e: TryFromIntError| {
+                        if cfg!(debug_assertions) {
+                            panic!(
+                                "invalid {} id {} for {}: {:?}",
+                                stringify!($signed),
+                                inner,
+                                type_name::<Self>(),
+                                e.as_report()
+                            );
+                        } else {
+                            warn!(
+                                "invalid {} id {} for {}: {:?}",
+                                stringify!($signed),
+                                inner,
+                                type_name::<Self>(),
+                                e.as_report()
+                            );
+                            inner as _
+                        }
+                    }))
+                }
+
+                fn [< to_ $signed >](self) -> $signed {
+                    self.0.try_into().unwrap_or_else(|e: TryFromIntError| {
+                        if cfg!(debug_assertions) {
+                            panic!(
+                                "invalid {} id {} for {}: {:?}",
+                                stringify!($unsigned),
+                                self.0,
+                                type_name::<Self>(),
+                                e.as_report()
+                            );
+                        } else {
+                            warn!(
+                                "invalid {} id {} for {}: {:?}",
+                                stringify!($unsigned),
+                                self.0,
+                                type_name::<Self>(),
+                                e.as_report()
+                            );
+                            self.0 as _
+                        }
+                    })
+                }
+
+                pub fn [< as_ $signed _id >](self) -> $signed {
+                    self.[< to_ $signed >]()
+                }
+            }
+        }
+    };
 }
 
-impl<const N: usize> sea_orm::sea_query::ValueType for TypedU32Id<N>
-where
-    Self: UniqueTypedIdDeclaration,
-{
-    fn try_from(v: sea_orm::Value) -> Result<Self, ValueTypeErr> {
-        let inner = <i32 as sea_orm::sea_query::ValueType>::try_from(v)?;
-        Ok(Self::from_i32(inner))
-    }
+impl_typed_id_conversion!(u32, i32);
+impl_typed_id_conversion!(u64, i64);
 
-    fn type_name() -> String {
-        <i32 as sea_orm::sea_query::ValueType>::type_name()
-    }
+/// Implements SeaORM traits for TypedId types.
+/// - `$unsigned`: the unsigned primitive type (u32 or u64)
+/// - `$signed`: the corresponding signed type for DB storage (i32 or i64)
+macro_rules! impl_sea_orm_for_typed_id {
+    ($unsigned:ty, $signed:ty) => {
+        paste::paste! {
+            impl<const N: usize> From<TypedId<N, $unsigned>> for sea_orm::Value
+            where
+                TypedId<N, $unsigned>: UniqueTypedIdDeclaration,
+            {
+                fn from(value: TypedId<N, $unsigned>) -> Self {
+                    sea_orm::Value::from(value.[< to_ $signed >]())
+                }
+            }
 
-    fn array_type() -> ArrayType {
-        <i32 as sea_orm::sea_query::ValueType>::array_type()
-    }
+            impl<const N: usize> sea_orm::sea_query::ValueType for TypedId<N, $unsigned>
+            where
+                Self: UniqueTypedIdDeclaration,
+            {
+                fn try_from(v: sea_orm::Value) -> Result<Self, ValueTypeErr> {
+                    let inner = <$signed as sea_orm::sea_query::ValueType>::try_from(v)?;
+                    Ok(Self::[< from_ $signed >](inner))
+                }
 
-    fn column_type() -> ColumnType {
-        <i32 as sea_orm::sea_query::ValueType>::column_type()
-    }
+                fn type_name() -> String {
+                    <$signed as sea_orm::sea_query::ValueType>::type_name()
+                }
+
+                fn array_type() -> ArrayType {
+                    <$signed as sea_orm::sea_query::ValueType>::array_type()
+                }
+
+                fn column_type() -> ColumnType {
+                    <$signed as sea_orm::sea_query::ValueType>::column_type()
+                }
+            }
+
+            impl<const N: usize> sea_orm::sea_query::Nullable for TypedId<N, $unsigned>
+            where
+                Self: UniqueTypedIdDeclaration,
+            {
+                fn null() -> sea_orm::Value {
+                    <$signed as sea_orm::sea_query::Nullable>::null()
+                }
+            }
+
+            impl<const N: usize> sea_orm::TryGetable for TypedId<N, $unsigned>
+            where
+                Self: UniqueTypedIdDeclaration,
+            {
+                fn try_get_by<I: ColIdx>(res: &QueryResult, index: I) -> Result<Self, TryGetError> {
+                    let inner = <$signed as sea_orm::TryGetable>::try_get_by(res, index)?;
+                    Ok(Self::[< from_ $signed >](inner))
+                }
+            }
+
+            impl<const N: usize> sea_orm::TryFromU64 for TypedId<N, $unsigned>
+            where
+                Self: UniqueTypedIdDeclaration,
+            {
+                fn try_from_u64(n: u64) -> Result<Self, DbErr> {
+                    Ok(Self::[< from_ $signed >](<$signed as sea_orm::TryFromU64>::try_from_u64(n)?))
+                }
+            }
+        }
+    };
 }
 
-impl<const N: usize> sea_orm::sea_query::Nullable for TypedU32Id<N> {
-    fn null() -> sea_orm::Value {
-        <i32 as sea_orm::sea_query::Nullable>::null()
-    }
-}
-
-impl<const N: usize> sea_orm::TryGetable for TypedU32Id<N>
-where
-    Self: UniqueTypedIdDeclaration,
-{
-    fn try_get_by<I: ColIdx>(res: &QueryResult, index: I) -> Result<Self, TryGetError> {
-        let inner = <i32 as sea_orm::TryGetable>::try_get_by(res, index)?;
-        Ok(Self::from_i32(inner))
-    }
-}
-
-impl<const N: usize> sea_orm::TryFromU64 for TypedU32Id<N>
-where
-    Self: UniqueTypedIdDeclaration,
-{
-    fn try_from_u64(n: u64) -> Result<Self, DbErr> {
-        let inner = <i32 as sea_orm::TryFromU64>::try_from_u64(n)?;
-        Ok(Self::from_i32(inner))
-    }
-}
+impl_sea_orm_for_typed_id!(u32, i32);
+impl_sea_orm_for_typed_id!(u64, i64);
 
 impl<const N: usize, P: Serialize> Serialize for TypedId<N, P> {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
@@ -252,19 +267,54 @@ impl<'de, const N: usize, P: Deserialize<'de>> Deserialize<'de> for TypedId<N, P
     }
 }
 
-impl<const N: usize> Add<u32> for TypedU32Id<N> {
-    type Output = Self;
+impl<const N: usize, P: Sub<Output = P>> Sub for TypedId<N, P> {
+    type Output = P;
 
-    fn add(self, rhs: u32) -> Self::Output {
-        Self(self.0.checked_add(rhs).unwrap())
+    fn sub(self, rhs: Self) -> Self::Output {
+        self.0 - rhs.0
     }
 }
 
-impl<const N: usize> AddAssign<u32> for TypedU32Id<N> {
-    fn add_assign(&mut self, rhs: u32) {
-        self.0 = self.0.checked_add(rhs).unwrap()
+impl<const N: usize, P: Step> Step for TypedId<N, P> {
+    fn steps_between(start: &Self, end: &Self) -> (usize, Option<usize>) {
+        P::steps_between(&start.0, &end.0)
+    }
+
+    fn forward_checked(start: Self, count: usize) -> Option<Self> {
+        P::forward_checked(start.0, count).map(Self)
+    }
+
+    fn backward_checked(start: Self, count: usize) -> Option<Self> {
+        P::backward_checked(start.0, count).map(Self)
     }
 }
+
+macro_rules! impl_add {
+    ($type_name:ty) => {
+        impl<const N: usize> Add<$type_name> for TypedId<N, $type_name> {
+            type Output = Self;
+
+            fn add(self, rhs: $type_name) -> Self::Output {
+                Self(self.0.checked_add(rhs).unwrap())
+            }
+        }
+
+        impl<const N: usize> AddAssign<$type_name> for TypedId<N, $type_name> {
+            fn add_assign(&mut self, rhs: $type_name) {
+                self.0 = self.0.checked_add(rhs).unwrap()
+            }
+        }
+
+        impl<const N: usize> PartialEq<TypedId<N, $type_name>> for $type_name {
+            fn eq(&self, other: &TypedId<N, $type_name>) -> bool {
+                *self == other.0
+            }
+        }
+    };
+}
+
+impl_add!(u32);
+impl_add!(u64);
 
 #[expect(dead_code)]
 pub trait UniqueTypedIdDeclaration {}
@@ -312,7 +362,9 @@ declare_id_types!(
     ConnectionId,
     SecretId,
     SubscriberId,
-    LocalOperatorId
+    LocalOperatorId,
+    UserId,
+    RelationId
 );
 
 declare_id_type!(ObjectId, u32, 256);
@@ -322,7 +374,14 @@ declare_id_types!(
     GlobalOperatorId,
     StreamNodeLocalOperatorId,
     ExecutorId,
-    PartialGraphId
+    PartialGraphId,
+    HummockRawObjectId,
+    HummockSstableObjectId,
+    HummockSstableId,
+    HummockVectorFileId,
+    HummockHnswGraphFileId,
+    HummockVersionId,
+    CompactionGroupId
 );
 
 macro_rules! impl_as {
@@ -379,13 +438,13 @@ impl From<LocalOperatorId> for StreamNodeLocalOperatorId {
 impl From<OptionalAssociatedTableId> for TableId {
     fn from(value: OptionalAssociatedTableId) -> Self {
         let OptionalAssociatedTableId::AssociatedTableId(table_id) = value;
-        Self(table_id)
+        table_id
     }
 }
 
 impl From<TableId> for OptionalAssociatedTableId {
     fn from(value: TableId) -> Self {
-        OptionalAssociatedTableId::AssociatedTableId(value.0)
+        OptionalAssociatedTableId::AssociatedTableId(value)
     }
 }
 
@@ -397,13 +456,13 @@ impl_as!(SubscriptionId, SubscriberId);
 impl From<OptionalAssociatedSourceId> for SourceId {
     fn from(value: OptionalAssociatedSourceId) -> Self {
         let OptionalAssociatedSourceId::AssociatedSourceId(source_id) = value;
-        Self(source_id)
+        source_id
     }
 }
 
 impl From<SourceId> for OptionalAssociatedSourceId {
     fn from(value: SourceId) -> Self {
-        OptionalAssociatedSourceId::AssociatedSourceId(value.0)
+        OptionalAssociatedSourceId::AssociatedSourceId(value)
     }
 }
 
@@ -412,7 +471,7 @@ macro_rules! impl_into_object {
         $(
             impl From<$type_name> for $mod_prefix {
                 fn from(value: $type_name) -> Self {
-                    <$mod_prefix>::$type_name(value.0)
+                    <$mod_prefix>::$type_name(value)
                 }
             }
         )+
@@ -531,3 +590,37 @@ impl_object_id_conversion!(
     ConnectionId,
     SecretId
 );
+
+macro_rules! declare_relation {
+    ($($id_name:ident),+) => {
+        $(
+            impl $id_name {
+                pub fn as_relation_id(self) -> RelationId {
+                    RelationId::new(self.0)
+                }
+            }
+        )+
+    };
+}
+
+declare_relation!(TableId, SourceId, SinkId, IndexId, ViewId, SubscriptionId);
+
+macro_rules! impl_hummock_object_id {
+    ($type_name:ty) => {
+        impl $type_name {
+            pub fn as_raw(&self) -> HummockRawObjectId {
+                HummockRawObjectId::new(self.0)
+            }
+        }
+
+        impl From<HummockRawObjectId> for $type_name {
+            fn from(id: HummockRawObjectId) -> Self {
+                Self(id.0)
+            }
+        }
+    };
+}
+
+impl_hummock_object_id!(HummockSstableObjectId);
+impl_hummock_object_id!(HummockVectorFileId);
+impl_hummock_object_id!(HummockHnswGraphFileId);

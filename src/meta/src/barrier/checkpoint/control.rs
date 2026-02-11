@@ -47,7 +47,7 @@ use crate::barrier::schedule::{NewBarrier, PeriodicBarriers};
 use crate::barrier::utils::{
     NodeToCollect, collect_creating_job_commit_epoch_info, is_valid_after_worker_err,
 };
-use crate::barrier::{BackfillProgress, Command, CreateStreamingJobType};
+use crate::barrier::{BackfillProgress, Command, CreateStreamingJobType, FragmentBackfillProgress};
 use crate::manager::MetaSrvEnv;
 use crate::rpc::metrics::GLOBAL_META_METRICS;
 use crate::{MetaError, MetaResult};
@@ -351,6 +351,27 @@ impl CheckpointControl {
                 .values()
             {
                 progress.extend([(creating_job.job_id, creating_job.gen_backfill_progress())]);
+            }
+        }
+        progress
+    }
+
+    pub(crate) fn gen_fragment_backfill_progress(&self) -> Vec<FragmentBackfillProgress> {
+        let mut progress = Vec::new();
+        for status in self.databases.values() {
+            let Some(database_checkpoint_control) = status.running_state() else {
+                continue;
+            };
+            progress.extend(
+                database_checkpoint_control
+                    .database_info
+                    .gen_fragment_backfill_progress(),
+            );
+            for creating_job in database_checkpoint_control
+                .creating_streaming_job_controls
+                .values()
+            {
+                progress.extend(creating_job.gen_fragment_backfill_progress());
             }
         }
         progress
@@ -1078,7 +1099,7 @@ impl DatabaseCheckpointControl {
             && jobs.len() > 1
             && let Some(creating_job_id) = jobs
                 .iter()
-                .find(|job| self.creating_streaming_job_controls.contains_key(job))
+                .find(|job| self.creating_streaming_job_controls.contains_key(*job))
         {
             warn!(
                 job_id = %creating_job_id,

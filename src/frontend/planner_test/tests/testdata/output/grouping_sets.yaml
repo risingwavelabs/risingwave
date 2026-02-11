@@ -16,7 +16,7 @@
       └─StreamHashAgg { group_key: [items_sold.brand_expanded, items_sold.size_expanded, flag], aggs: [sum(items_sold.sales), count] }
         └─StreamExchange { dist: HashShard(items_sold.brand_expanded, items_sold.size_expanded, flag) }
           └─StreamExpand { column_subsets: [[items_sold.brand], [items_sold.size], []] }
-            └─StreamTableScan { table: items_sold, columns: [items_sold.brand, items_sold.size, items_sold.sales, items_sold._row_id], stream_scan_type: ArrangementBackfill, stream_key: [items_sold._row_id], pk: [_row_id], dist: UpstreamHashShard(items_sold._row_id) }
+            └─StreamTableScan { table: items_sold, columns: [items_sold.brand, items_sold.size, items_sold.sales, items_sold._row_id], stream_scan_type: SnapshotBackfill, stream_key: [items_sold._row_id], pk: [_row_id], dist: UpstreamHashShard(items_sold._row_id) }
 - name: with distinct
   sql: |
     create table items_sold (brand varchar, size varchar, sales int);
@@ -36,7 +36,7 @@
       └─StreamHashAgg { group_key: [items_sold.brand_expanded, items_sold.size_expanded, flag], aggs: [sum(distinct items_sold.sales), count] }
         └─StreamExchange { dist: HashShard(items_sold.brand_expanded, items_sold.size_expanded, flag) }
           └─StreamExpand { column_subsets: [[items_sold.brand], [items_sold.size], []] }
-            └─StreamTableScan { table: items_sold, columns: [items_sold.brand, items_sold.size, items_sold.sales, items_sold._row_id], stream_scan_type: ArrangementBackfill, stream_key: [items_sold._row_id], pk: [_row_id], dist: UpstreamHashShard(items_sold._row_id) }
+            └─StreamTableScan { table: items_sold, columns: [items_sold.brand, items_sold.size, items_sold.sales, items_sold._row_id], stream_scan_type: SnapshotBackfill, stream_key: [items_sold._row_id], pk: [_row_id], dist: UpstreamHashShard(items_sold._row_id) }
 - name: column pruning
   sql: |
     create table items_sold (c1 int, brand varchar, c2 int, size varchar, c3 int, sales int, c4 int,);
@@ -56,7 +56,7 @@
         └─StreamExchange { dist: HashShard(items_sold.size_expanded, items_sold.brand_expanded, flag) }
           └─StreamExpand { column_subsets: [[items_sold.size], [items_sold.brand], []] }
             └─StreamProject { exprs: [items_sold.size, items_sold.brand, items_sold.sales, items_sold._row_id] }
-              └─StreamTableScan { table: items_sold, columns: [items_sold.brand, items_sold.size, items_sold.sales, items_sold._row_id], stream_scan_type: ArrangementBackfill, stream_key: [items_sold._row_id], pk: [_row_id], dist: UpstreamHashShard(items_sold._row_id) }
+              └─StreamTableScan { table: items_sold, columns: [items_sold.brand, items_sold.size, items_sold.sales, items_sold._row_id], stream_scan_type: SnapshotBackfill, stream_key: [items_sold._row_id], pk: [_row_id], dist: UpstreamHashShard(items_sold._row_id) }
 - name: grouping agg calls
   sql: |
     create table items_sold (brand varchar, size varchar, sales int);
@@ -76,7 +76,7 @@
       └─StreamHashAgg { group_key: [items_sold.brand_expanded, items_sold.size_expanded, flag], aggs: [sum(items_sold.sales), count(distinct items_sold.sales), count] }
         └─StreamExchange { dist: HashShard(items_sold.brand_expanded, items_sold.size_expanded, flag) }
           └─StreamExpand { column_subsets: [[items_sold.brand], [items_sold.size], []] }
-            └─StreamTableScan { table: items_sold, columns: [items_sold.brand, items_sold.size, items_sold.sales, items_sold._row_id], stream_scan_type: ArrangementBackfill, stream_key: [items_sold._row_id], pk: [_row_id], dist: UpstreamHashShard(items_sold._row_id) }
+            └─StreamTableScan { table: items_sold, columns: [items_sold.brand, items_sold.size, items_sold.sales, items_sold._row_id], stream_scan_type: SnapshotBackfill, stream_key: [items_sold._row_id], pk: [_row_id], dist: UpstreamHashShard(items_sold._row_id) }
 - name: too many arguments for grouping error
   sql: |
     create table items_sold (brand varchar, size varchar, sales int);
@@ -106,7 +106,7 @@
       └─StreamHashAgg { group_key: [items_sold.brand_expanded, items_sold.size_expanded, flag], aggs: [sum(items_sold.sales), count] }
         └─StreamExchange { dist: HashShard(items_sold.brand_expanded, items_sold.size_expanded, flag) }
           └─StreamExpand { column_subsets: [[], [items_sold.brand], [items_sold.brand, items_sold.size]] }
-            └─StreamTableScan { table: items_sold, columns: [items_sold.brand, items_sold.size, items_sold.sales, items_sold._row_id], stream_scan_type: ArrangementBackfill, stream_key: [items_sold._row_id], pk: [_row_id], dist: UpstreamHashShard(items_sold._row_id) }
+            └─StreamTableScan { table: items_sold, columns: [items_sold.brand, items_sold.size, items_sold.sales, items_sold._row_id], stream_scan_type: SnapshotBackfill, stream_key: [items_sold._row_id], pk: [_row_id], dist: UpstreamHashShard(items_sold._row_id) }
 - name: rollup2
   sql: |
     create table items_sold (brand varchar, size varchar, sales int);
@@ -124,7 +124,7 @@
       └─StreamHashAgg { group_key: [items_sold.brand_expanded, items_sold.size_expanded, flag], aggs: [sum(items_sold.sales), count] }
         └─StreamExchange { dist: HashShard(items_sold.brand_expanded, items_sold.size_expanded, flag) }
           └─StreamExpand { column_subsets: [[], [items_sold.brand, items_sold.size]] }
-            └─StreamTableScan { table: items_sold, columns: [items_sold.brand, items_sold.size, items_sold.sales, items_sold._row_id], stream_scan_type: ArrangementBackfill, stream_key: [items_sold._row_id], pk: [_row_id], dist: UpstreamHashShard(items_sold._row_id) }
+            └─StreamTableScan { table: items_sold, columns: [items_sold.brand, items_sold.size, items_sold.sales, items_sold._row_id], stream_scan_type: SnapshotBackfill, stream_key: [items_sold._row_id], pk: [_row_id], dist: UpstreamHashShard(items_sold._row_id) }
 - name: cube1
   sql: |
     create table items_sold (brand varchar, size varchar, sales int);
@@ -142,7 +142,7 @@
       └─StreamHashAgg { group_key: [items_sold.brand_expanded, items_sold.size_expanded, flag], aggs: [sum(items_sold.sales), count] }
         └─StreamExchange { dist: HashShard(items_sold.brand_expanded, items_sold.size_expanded, flag) }
           └─StreamExpand { column_subsets: [[], [items_sold.brand], [items_sold.size], [items_sold.brand, items_sold.size]] }
-            └─StreamTableScan { table: items_sold, columns: [items_sold.brand, items_sold.size, items_sold.sales, items_sold._row_id], stream_scan_type: ArrangementBackfill, stream_key: [items_sold._row_id], pk: [_row_id], dist: UpstreamHashShard(items_sold._row_id) }
+            └─StreamTableScan { table: items_sold, columns: [items_sold.brand, items_sold.size, items_sold.sales, items_sold._row_id], stream_scan_type: SnapshotBackfill, stream_key: [items_sold._row_id], pk: [_row_id], dist: UpstreamHashShard(items_sold._row_id) }
 - name: cube2
   sql: |
     create table items_sold (brand varchar, size varchar, sales int);
@@ -160,7 +160,7 @@
       └─StreamHashAgg { group_key: [items_sold.brand_expanded, items_sold.size_expanded, flag], aggs: [sum(items_sold.sales), count] }
         └─StreamExchange { dist: HashShard(items_sold.brand_expanded, items_sold.size_expanded, flag) }
           └─StreamExpand { column_subsets: [[], [items_sold.brand], [items_sold.size], [items_sold.size], [items_sold.brand, items_sold.size], [items_sold.brand, items_sold.size], [items_sold.size], [items_sold.brand, items_sold.size]] }
-            └─StreamTableScan { table: items_sold, columns: [items_sold.brand, items_sold.size, items_sold.sales, items_sold._row_id], stream_scan_type: ArrangementBackfill, stream_key: [items_sold._row_id], pk: [_row_id], dist: UpstreamHashShard(items_sold._row_id) }
+            └─StreamTableScan { table: items_sold, columns: [items_sold.brand, items_sold.size, items_sold.sales, items_sold._row_id], stream_scan_type: SnapshotBackfill, stream_key: [items_sold._row_id], pk: [_row_id], dist: UpstreamHashShard(items_sold._row_id) }
 - name: cube3
   sql: |
     create table items_sold (brand varchar, size varchar, sales int);
@@ -178,7 +178,7 @@
       └─StreamHashAgg { group_key: [items_sold.brand_expanded, items_sold.size_expanded, flag], aggs: [sum(items_sold.sales), count] }
         └─StreamExchange { dist: HashShard(items_sold.brand_expanded, items_sold.size_expanded, flag) }
           └─StreamExpand { column_subsets: [[], [items_sold.brand, items_sold.size], [items_sold.size], [items_sold.brand, items_sold.size]] }
-            └─StreamTableScan { table: items_sold, columns: [items_sold.brand, items_sold.size, items_sold.sales, items_sold._row_id], stream_scan_type: ArrangementBackfill, stream_key: [items_sold._row_id], pk: [_row_id], dist: UpstreamHashShard(items_sold._row_id) }
+            └─StreamTableScan { table: items_sold, columns: [items_sold.brand, items_sold.size, items_sold.sales, items_sold._row_id], stream_scan_type: SnapshotBackfill, stream_key: [items_sold._row_id], pk: [_row_id], dist: UpstreamHashShard(items_sold._row_id) }
 - name: only one set in grouping sets
   sql: |
     create table items_sold (brand varchar, size varchar, sales int);
@@ -196,4 +196,4 @@
       └─StreamHashAgg { group_key: [items_sold.brand, 0:Int64], aggs: [sum(null:Int32), count] }
         └─StreamExchange { dist: HashShard(items_sold.brand, 0:Int64) }
           └─StreamProject { exprs: [items_sold.brand, null:Int32, 0:Int64, items_sold._row_id] }
-            └─StreamTableScan { table: items_sold, columns: [items_sold.brand, items_sold._row_id], stream_scan_type: ArrangementBackfill, stream_key: [items_sold._row_id], pk: [_row_id], dist: UpstreamHashShard(items_sold._row_id) }
+            └─StreamTableScan { table: items_sold, columns: [items_sold.brand, items_sold._row_id], stream_scan_type: SnapshotBackfill, stream_key: [items_sold._row_id], pk: [_row_id], dist: UpstreamHashShard(items_sold._row_id) }

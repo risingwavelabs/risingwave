@@ -44,6 +44,9 @@ use crate::hummock::CachePolicy;
 use crate::monitor::{MonitoredStateStore, MonitoredStorageMetrics};
 pub(crate) use crate::vector::{OnNearestItem, Vector};
 
+mod auto_rebuild;
+pub use auto_rebuild::{AutoRebuildStateStoreReadIter, timeout_auto_rebuild};
+
 pub trait StaticSendSync = Send + Sync + 'static;
 
 pub trait IterItem: Send + 'static {
