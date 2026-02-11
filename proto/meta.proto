@@ -405,6 +405,41 @@ message AlterConnectorPropsRequest {
 
 message AlterConnectorPropsResponse {}
 
+// Options for controlling the safe property update workflow
+message PropertyUpdateOptions {
+  // If true, reset split assignments after updating properties
+  // This causes splits to be re-discovered from upstream
+  bool reset_splits = 1;
+}
+
+// Request for orchestrated source property update with pause/resume
+message AlterSourcePropertiesSafeRequest {
+  uint32 source_id = 1;
+  map<string, string> changed_props = 2;
+  map<string, secret.SecretRef> changed_secret_refs = 3;
+  PropertyUpdateOptions options = 4;
+}
+
+message AlterSourcePropertiesSafeResponse {}
+
+// Request to reset source split assignments (UNSAFE - admin only)
+message ResetSourceSplitsRequest {
+  uint32 source_id = 1;
+}
+
+message ResetSourceSplitsResponse {}
+
+// Request to inject specific offsets into source splits (UNSAFE - admin only)
+message InjectSourceOffsetsRequest {
+  uint32 source_id = 1;
+  // Split ID -> offset (JSON-encoded based on connector type)
+  map<string, string> split_offsets = 2;
+}
+
+message InjectSourceOffsetsResponse {
+  repeated string applied_split_ids = 1;
+}
+
 message ListCdcProgressRequest {}
 
 message ListCdcProgressResponse {
@@ -446,6 +481,9 @@ service StreamManagerService {
   rpc Recover(RecoverRequest) returns (RecoverResponse);
   rpc ListRateLimits(ListRateLimitsRequest) returns (ListRateLimitsResponse);
   rpc AlterConnectorProps(AlterConnectorPropsRequest) returns (AlterConnectorPropsResponse);
+  rpc AlterSourcePropertiesSafe(AlterSourcePropertiesSafeRequest) returns (AlterSourcePropertiesSafeResponse);
+  rpc ResetSourceSplits(ResetSourceSplitsRequest) returns (ResetSourceSplitsResponse);
+  rpc InjectSourceOffsets(InjectSourceOffsetsRequest) returns (InjectSourceOffsetsResponse);
   rpc GetFragmentById(GetFragmentByIdRequest) returns (GetFragmentByIdResponse);
   rpc GetFragmentVnodes(GetFragmentVnodesRequest) returns (GetFragmentVnodesResponse);
   rpc GetActorVnodes(GetActorVnodesRequest) returns (GetActorVnodesResponse);

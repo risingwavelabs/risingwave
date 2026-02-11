@@ -194,6 +194,16 @@ services:
       - ..:/risingwave
     stop_grace_period: 30s
 
+  # Minimal environment for cron_only source tests (only Kafka alter tests)
+  source-cron-only-test-env:
+    image: public.ecr.aws/w1p7b4n3/rw-build-env:${BUILD_ENV_VERSION:?}
+    depends_on:
+      - db
+      - message_queue
+    volumes:
+      - ..:/risingwave
+    stop_grace_period: 30s
+
   backward-compatibility-test-env:
     image: public.ecr.aws/w1p7b4n3/rw-build-env:${BUILD_ENV_VERSION:?}
     depends_on:
