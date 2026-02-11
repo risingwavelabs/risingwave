@@ -1379,7 +1379,7 @@ fn parse_create_table() {
                         ],
                     ),
                     ColumnDef::new(
-                        "ref".into(),
+                        Ident::new_unchecked("ref"),
                         DataType::Int,
                         None,
                         vec![ColumnOptionDef {

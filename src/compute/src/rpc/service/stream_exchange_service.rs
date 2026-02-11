@@ -60,7 +60,7 @@ impl StreamExchangeService for StreamExchangeServiceImpl {
             down_actor_id,
             up_fragment_id,
             down_fragment_id,
-            database_id,
+            up_partial_graph_id,
             term_id,
         } = {
             let req = request_stream
@@ -75,7 +75,7 @@ impl StreamExchangeService for StreamExchangeServiceImpl {
 
         let receiver = self
             .stream_mgr
-            .take_receiver(database_id, term_id, (up_actor_id, down_actor_id))
+            .take_receiver(up_partial_graph_id, term_id, (up_actor_id, down_actor_id))
             .await?;
 
         // Map the remaining stream to add-permits.
@@ -128,6 +128,10 @@ impl StreamExchangeServiceImpl {
         );
         pin_mut!(select_stream);
 
+        let exchange_frag_send_size_metrics = metrics
+            .stream_fragment_exchange_bytes
+            .with_label_values(&[&up_fragment_id, &down_fragment_id]);
+
         while let Some(r) = select_stream.try_next().await? {
             match r {
                 Either::Left(permits_to_add) => {
@@ -151,10 +155,7 @@ impl StreamExchangeServiceImpl {
 
                     yield response;
 
-                    metrics
-                        .stream_fragment_exchange_bytes
-                        .with_label_values(&[&up_fragment_id, &down_fragment_id])
-                        .inc_by(bytes as u64);
+                    exchange_frag_send_size_metrics.inc_by(bytes as u64);
                 }
             }
         }

@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -35,7 +35,7 @@ pub async fn list_serving_fragment_mappings(context: &CtlContext) -> anyhow::Res
     let mut table = Table::new();
     table.set_header({
         let mut row = Row::new();
-        row.add_cell("Table Id".into());
+        row.add_cell("Job Id".into());
         row.add_cell("Fragment Id".into());
         row.add_cell("Virtual Node".into());
         row.add_cell("Worker".into());
@@ -44,7 +44,7 @@ pub async fn list_serving_fragment_mappings(context: &CtlContext) -> anyhow::Res
 
     let rows = mappings
         .iter()
-        .flat_map(|(fragment_id, (table_id, mapping))| {
+        .flat_map(|(fragment_id, (job_id, mapping))| {
             let mut worker_nodes: HashMap<WorkerId, Vec<VirtualNode>> = HashMap::new();
             for (vnode, worker_slot_id) in mapping.iter_with_vnode() {
                 worker_nodes
@@ -52,9 +52,9 @@ pub async fn list_serving_fragment_mappings(context: &CtlContext) -> anyhow::Res
                     .or_default()
                     .push(vnode);
             }
-            worker_nodes.into_iter().map(|(worker_id, vnodes)| {
-                (*table_id, *fragment_id, vnodes, workers.get(&worker_id))
-            })
+            worker_nodes
+                .into_iter()
+                .map(|(worker_id, vnodes)| (*job_id, *fragment_id, vnodes, workers.get(&worker_id)))
         })
         .collect_vec();
 

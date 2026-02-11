@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -50,7 +50,7 @@ impl SpaceReclaimCompactionPicker {
         // it means all the table exist , so we not need to pick this sst
         sst.table_ids
             .iter()
-            .filter(|id| self.all_table_ids.contains(id))
+            .filter(|id| self.all_table_ids.contains(*id))
             .count()
     }
 }

@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -603,7 +603,7 @@ mod tests {
             register_table_ids_to_compaction_group(
                 hummock_manager.as_ref(),
                 &[1],
-                StaticCompactionGroupId::StateDefault.into(),
+                StaticCompactionGroupId::StateDefault,
             )
             .await;
             let _sst_infos =
@@ -611,7 +611,7 @@ mod tests {
             let _receiver = compactor_manager.add_compactor(context_id);
             hummock_manager
                 .get_compact_task(
-                    StaticCompactionGroupId::StateDefault.into(),
+                    StaticCompactionGroupId::StateDefault,
                     &mut default_compaction_selector(),
                 )
                 .await

@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -135,10 +135,11 @@ pub enum ErrorCode {
     CatalogError(
         #[source]
         #[backtrace]
+        #[message]
         BoxedError,
     ),
     #[error("Protocol error: {0}")]
-    ProtocolError(String),
+    ProtocolError(#[message] String),
     #[error("Scheduler error: {0}")]
     SchedulerError(
         #[source]
@@ -151,6 +152,8 @@ pub enum ErrorCode {
     SessionNotFound,
     #[error("Item not found: {0}")]
     ItemNotFound(String),
+    #[error("Duplicate Relation Name: {0}")]
+    DuplicateRelationName(String),
     #[error("Invalid input syntax: {0}")]
     InvalidInputSyntax(#[message] String),
     #[error("Can not compare in memory: {0}")]
@@ -175,7 +178,7 @@ pub enum ErrorCode {
         BoxedError,
     ),
     #[error("Permission denied: {0}")]
-    PermissionDenied(String),
+    PermissionDenied(#[message] String),
     #[error("Failed to get/set session config: {0}")]
     SessionConfig(
         #[from]

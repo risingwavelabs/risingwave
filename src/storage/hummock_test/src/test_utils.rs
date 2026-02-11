@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -181,7 +181,7 @@ pub async fn register_tables_with_id_for_test(
     register_table_ids_to_compaction_group(
         hummock_manager_ref,
         table_ids,
-        StaticCompactionGroupId::StateDefault.into(),
+        StaticCompactionGroupId::StateDefault,
     )
     .await;
 }
@@ -204,7 +204,7 @@ pub async fn register_tables_with_catalog_for_test(
     register_table_ids_to_compaction_group(
         hummock_manager_ref,
         &table_ids,
-        StaticCompactionGroupId::StateDefault.into(),
+        StaticCompactionGroupId::StateDefault,
     )
     .await;
 }

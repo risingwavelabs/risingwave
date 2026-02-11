@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -11,6 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+
 pub mod compaction;
 pub mod compactor_manager;
 pub mod error;
@@ -28,6 +29,7 @@ pub mod test_utils;
 use std::time::Duration;
 
 pub use compactor_manager::*;
+use futures::future::BoxFuture;
 #[cfg(any(test, feature = "test"))]
 pub use mock_hummock_meta_client::MockHummockMetaClient;
 use tokio::sync::oneshot::Sender;
@@ -41,6 +43,7 @@ pub fn start_hummock_workers(
     hummock_manager: HummockManagerRef,
     backup_manager: BackupManagerRef,
     meta_opts: &MetaOpts,
+    should_pause_vacuum_time_travel: Box<dyn Fn() -> BoxFuture<'static, bool> + Send>,
 ) -> Vec<(JoinHandle<()>, Sender<()>)> {
     // These critical tasks are put in their own timer loop deliberately, to avoid long-running ones
     // from blocking others.
@@ -58,6 +61,7 @@ pub fn start_hummock_workers(
         start_vacuum_time_travel_metadata_loop(
             hummock_manager,
             Duration::from_secs(meta_opts.time_travel_vacuum_interval_sec),
+            should_pause_vacuum_time_travel,
         ),
     ];
     workers
@@ -93,6 +97,7 @@ pub fn start_vacuum_metadata_loop(
 pub fn start_vacuum_time_travel_metadata_loop(
     hummock_manager: HummockManagerRef,
     interval: Duration,
+    should_pause_vacuum_time_travel: Box<dyn Fn() -> BoxFuture<'static, bool> + Send>,
 ) -> (JoinHandle<()>, Sender<()>) {
     let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
     let join_handle = tokio::spawn(async move {
@@ -107,6 +112,10 @@ pub fn start_vacuum_time_travel_metadata_loop(
                     tracing::info!("Vacuum time travel metadata loop is stopped");
                     return;
                 }
+            }
+            if should_pause_vacuum_time_travel().await {
+                tracing::warn!("time travel vacuum paused");
+                continue;
             }
             if let Err(err) = hummock_manager.delete_time_travel_metadata().await {
                 tracing::warn!(error = %err.as_report(), "Vacuum time travel metadata error");

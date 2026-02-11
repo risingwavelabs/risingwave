@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
 use anyhow::anyhow;
@@ -24,6 +24,7 @@ use risingwave_common::catalog::{ColumnId, TableId};
 use risingwave_common::metrics::{GLOBAL_ERROR_METRICS, LabelGuardedMetric};
 use risingwave_common::system_param::local_manager::SystemParamsReaderRef;
 use risingwave_common::system_param::reader::SystemParamsRead;
+use risingwave_common::types::JsonbVal;
 use risingwave_common::util::epoch::{Epoch, EpochPair};
 use risingwave_connector::parser::schema_change::SchemaChangeEnvelope;
 use risingwave_connector::source::cdc::split::extract_postgres_lsn_from_offset_str;
@@ -34,6 +35,7 @@ use risingwave_connector::source::{
     StreamChunkWithState, WaitCheckpointTask, build_pulsar_ack_channel_id,
 };
 use risingwave_hummock_sdk::HummockReadEpoch;
+use risingwave_pb::common::ThrottleType;
 use risingwave_pb::id::SourceId;
 use risingwave_storage::store::TryWaitEpochOptions;
 use thiserror_ext::AsReport;
@@ -75,7 +77,7 @@ pub struct SourceExecutor<S: StateStore> {
     is_shared_non_cdc: bool,
 
     /// Local barrier manager for reporting source load finished events
-    _barrier_manager: LocalBarrierManager,
+    barrier_manager: LocalBarrierManager,
 }
 
 impl<S: StateStore> SourceExecutor<S> {
@@ -98,7 +100,7 @@ impl<S: StateStore> SourceExecutor<S> {
             system_params,
             rate_limit_rps,
             is_shared_non_cdc,
-            _barrier_manager: barrier_manager,
+            barrier_manager,
         }
     }
 
@@ -395,6 +397,107 @@ impl<S: StateStore> SourceExecutor<S> {
         Ok(())
     }
 
+    /// Handle `InjectSourceOffsets` mutation by updating split offsets in place.
+    /// Returns `true` if any offsets were injected and a stream rebuild is needed.
+    ///
+    /// This is an UNSAFE operation that can cause data duplication or loss
+    /// depending on the correctness of the provided offsets.
+    async fn handle_inject_source_offsets(
+        &mut self,
+        split_offsets: &HashMap<String, String>,
+    ) -> StreamExecutorResult<bool> {
+        tracing::warn!(
+            actor_id = %self.actor_ctx.id,
+            source_id = %self.stream_source_core.source_id,
+            num_offsets = split_offsets.len(),
+            "UNSAFE: Injecting source offsets - this may cause data duplication or loss"
+        );
+
+        // First, filter to only offsets for splits this actor owns
+        let offsets_to_inject: Vec<(String, String)> = {
+            let owned_splits: HashSet<&str> = self
+                .stream_source_core
+                .latest_split_info
+                .keys()
+                .map(|s| s.as_ref())
+                .collect();
+            split_offsets
+                .iter()
+                .filter(|(split_id, _)| owned_splits.contains(split_id.as_str()))
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect()
+        };
+
+        // Update splits and prepare JSON states for persistence
+        let mut json_states: Vec<(String, JsonbVal)> = Vec::new();
+        let mut failed_splits: Vec<String> = Vec::new();
+
+        for (split_id, offset) in &offsets_to_inject {
+            if let Some(split) = self
+                .stream_source_core
+                .latest_split_info
+                .get_mut(split_id.as_str())
+            {
+                tracing::info!(
+                    actor_id = %self.actor_ctx.id,
+                    split_id = %split_id,
+                    offset = %offset,
+                    "Injecting offset for owned split"
+                );
+                // Update the split's offset in place
+                if let Err(e) = split.update_in_place(offset.clone()) {
+                    tracing::error!(
+                        actor_id = %self.actor_ctx.id,
+                        split_id = %split_id,
+                        error = ?e.as_report(),
+                        "Failed to update split offset"
+                    );
+                    failed_splits.push(split_id.clone());
+                    continue;
+                }
+                // Mark this split as updated for persistence
+                self.stream_source_core
+                    .updated_splits_in_epoch
+                    .insert(split_id.clone().into(), split.clone());
+                // Parse the offset as JSON and store it
+                let json_value: serde_json::Value = serde_json::from_str(offset)
+                    .unwrap_or_else(|_| serde_json::json!({ "offset": offset }));
+                json_states.push((split_id.clone(), JsonbVal::from(json_value)));
+            }
+        }
+
+        if !failed_splits.is_empty() {
+            return Err(StreamExecutorError::connector_error(anyhow!(
+                "failed to inject offsets for splits: {:?}",
+                failed_splits
+            )));
+        }
+
+        let num_injected = json_states.len();
+        if num_injected > 0 {
+            // Store the injected offsets as JSON in the state table
+            self.stream_source_core
+                .split_state_store
+                .set_states_json(json_states)
+                .await?;
+
+            tracing::info!(
+                actor_id = %self.actor_ctx.id,
+                source_id = %self.stream_source_core.source_id,
+                num_injected = num_injected,
+                "Offset injection completed for owned splits, triggering rebuild"
+            );
+            Ok(true)
+        } else {
+            tracing::info!(
+                actor_id = %self.actor_ctx.id,
+                source_id = %self.stream_source_core.source_id,
+                "No owned splits to inject offsets for"
+            );
+            Ok(false)
+        }
+    }
+
     async fn persist_state_and_clear_cache(
         &mut self,
         epoch: EpochPair,
@@ -461,6 +564,39 @@ impl<S: StateStore> SourceExecutor<S> {
         Ok(())
     }
 
+    /// Report CDC source offset updated only the first time.
+    fn maybe_report_cdc_source_offset(
+        &self,
+        updated_splits: &HashMap<SplitId, SplitImpl>,
+        epoch: EpochPair,
+        source_id: SourceId,
+        must_report_cdc_offset_once: &mut bool,
+        must_wait_cdc_offset_before_report: bool,
+    ) {
+        // Report CDC source offset updated only the first time
+        if *must_report_cdc_offset_once
+            && (!must_wait_cdc_offset_before_report
+                || updated_splits
+                    .values()
+                    .any(|split| split.is_cdc_split() && !split.get_cdc_split_offset().is_empty()))
+        {
+            // Report only once, then ignore all subsequent offset updates
+            self.barrier_manager.report_cdc_source_offset_updated(
+                epoch,
+                self.actor_ctx.id,
+                source_id,
+            );
+            tracing::info!(
+                actor_id = %self.actor_ctx.id,
+                source_id = %source_id,
+                epoch = ?epoch,
+                "Reported CDC source offset updated to meta (first time only)"
+            );
+            // Mark as reported to prevent any future reports, even if offset changes
+            *must_report_cdc_offset_once = false;
+        }
+    }
+
     /// A source executor with a stream source receives:
     /// 1. Barrier messages
     /// 2. Data from external source
@@ -480,12 +616,26 @@ impl<S: StateStore> SourceExecutor<S> {
                 )
             })?;
         let first_epoch = first_barrier.epoch;
-        let mut boot_state =
+        // must_report_cdc_offset is true if and only if the source is a CDC source.
+        // must_wait_cdc_offset_before_report is true if and only if the source is a MySQL or SQL Server CDC source.
+        let (mut boot_state, mut must_report_cdc_offset_once, must_wait_cdc_offset_before_report) =
             if let Some(splits) = first_barrier.initial_split_assignment(self.actor_ctx.id) {
+                // CDC source must reach this branch.
                 tracing::debug!(?splits, "boot with splits");
-                splits.to_vec()
+                // Skip report for non-CDC.
+                let must_report_cdc_offset_once = splits.iter().any(|split| split.is_cdc_split());
+                // Only for MySQL and SQL Server CDC, we need to wait for the offset to be non-empty before reporting.
+                let must_wait_cdc_offset_before_report = must_report_cdc_offset_once
+                    && splits.iter().any(|split| {
+                        matches!(split, SplitImpl::MysqlCdc(_) | SplitImpl::SqlServerCdc(_))
+                    });
+                (
+                    splits.to_vec(),
+                    must_report_cdc_offset_once,
+                    must_wait_cdc_offset_before_report,
+                )
             } else {
-                Vec::default()
+                (Vec::default(), true, true)
             };
         let is_pause_on_startup = first_barrier.is_pause_on_startup();
         let mut is_uninitialized = first_barrier.is_newly_added(self.actor_ctx.id);
@@ -656,9 +806,9 @@ impl<S: StateStore> SourceExecutor<S> {
                                 {
                                     // rebuild the stream reader with new props
                                     tracing::info!(
-                                        "updating source properties from {:?} to {:?}",
-                                        source_desc.source.config,
-                                        new_props
+                                        actor_id = %self.actor_ctx.id,
+                                        source_id = %source_id,
+                                        "updating source connector properties",
                                     );
                                     source_desc.update_reader(new_props.clone())?;
                                     // suppose the connector props change will not involve state change
@@ -685,25 +835,182 @@ impl<S: StateStore> SourceExecutor<S> {
                                     },
                                 );
                             }
-                            Mutation::Throttle(actor_to_apply) => {
-                                if let Some(new_rate_limit) = actor_to_apply.get(&self.actor_ctx.id)
-                                    && *new_rate_limit != self.rate_limit_rps
+                            Mutation::Throttle(fragment_to_apply) => {
+                                if let Some(entry) =
+                                    fragment_to_apply.get(&self.actor_ctx.fragment_id)
+                                    && entry.throttle_type() == ThrottleType::Source
+                                    && entry.rate_limit != self.rate_limit_rps
                                 {
                                     tracing::info!(
                                         "updating rate limit from {:?} to {:?}",
                                         self.rate_limit_rps,
-                                        *new_rate_limit
+                                        entry.rate_limit
                                     );
-                                    self.rate_limit_rps = *new_rate_limit;
+                                    self.rate_limit_rps = entry.rate_limit;
                                     // recreate from latest_split_info
                                     self.rebuild_stream_reader(&source_desc, &mut stream)?;
                                 }
                             }
+                            Mutation::ResetSource { source_id } => {
+                                // Note: RESET SOURCE only clears the offset, does NOT pause the source.
+                                // When offset is None, after recovery/restart, Debezium will automatically
+                                // enter recovery mode and fetch the latest offset from upstream.
+                                if *source_id == self.stream_source_core.source_id {
+                                    tracing::info!(
+                                        actor_id = %self.actor_ctx.id,
+                                        source_id = source_id.as_raw_id(),
+                                        "Resetting CDC source: clearing offset (set to None)"
+                                    );
+
+                                    // Step 1: Collect all current splits and clear their offsets
+                                    let splits_with_cleared_offset: Vec<SplitImpl> = self.stream_source_core
+                                        .latest_split_info
+                                        .values()
+                                        .map(|split| {
+                                            // Clone the split and clear its offset
+                                            let mut new_split = split.clone();
+                                            match &mut new_split {
+                                                SplitImpl::MysqlCdc(debezium_split) => {
+                                                    if let Some(mysql_split) = debezium_split.mysql_split.as_mut() {
+                                                        tracing::info!(
+                                                            split_id = ?mysql_split.inner.split_id,
+                                                            old_offset = ?mysql_split.inner.start_offset,
+                                                            "Clearing MySQL CDC offset"
+                                                        );
+                                                        mysql_split.inner.start_offset = None;
+                                                    }
+                                                }
+                                                SplitImpl::PostgresCdc(debezium_split) => {
+                                                    if let Some(pg_split) = debezium_split.postgres_split.as_mut() {
+                                                        tracing::info!(
+                                                            split_id = ?pg_split.inner.split_id,
+                                                            old_offset = ?pg_split.inner.start_offset,
+                                                            "Clearing PostgreSQL CDC offset"
+                                                        );
+                                                        pg_split.inner.start_offset = None;
+                                                    }
+                                                }
+                                                SplitImpl::MongodbCdc(debezium_split) => {
+                                                    if let Some(mongo_split) = debezium_split.mongodb_split.as_mut() {
+                                                        tracing::info!(
+                                                            split_id = ?mongo_split.inner.split_id,
+                                                            old_offset = ?mongo_split.inner.start_offset,
+                                                            "Clearing MongoDB CDC offset"
+                                                        );
+                                                        mongo_split.inner.start_offset = None;
+                                                    }
+                                                }
+                                                SplitImpl::CitusCdc(debezium_split) => {
+                                                    if let Some(citus_split) = debezium_split.citus_split.as_mut() {
+                                                        tracing::info!(
+                                                            split_id = ?citus_split.inner.split_id,
+                                                            old_offset = ?citus_split.inner.start_offset,
+                                                            "Clearing Citus CDC offset"
+                                                        );
+                                                        citus_split.inner.start_offset = None;
+                                                    }
+                                                }
+                                                SplitImpl::SqlServerCdc(debezium_split) => {
+                                                    if let Some(sqlserver_split) = debezium_split.sql_server_split.as_mut() {
+                                                        tracing::info!(
+                                                            split_id = ?sqlserver_split.inner.split_id,
+                                                            old_offset = ?sqlserver_split.inner.start_offset,
+                                                            "Clearing SQL Server CDC offset"
+                                                        );
+                                                        sqlserver_split.inner.start_offset = None;
+                                                    }
+                                                }
+                                                _ => {
+                                                    tracing::warn!(
+                                                        "RESET SOURCE called on non-CDC split type"
+                                                    );
+                                                }
+                                            }
+                                            new_split
+                                        })
+                                        .collect();
+
+                                    if !splits_with_cleared_offset.is_empty() {
+                                        tracing::info!(
+                                            actor_id = %self.actor_ctx.id,
+                                            split_count = splits_with_cleared_offset.len(),
+                                            "Updating state table with cleared offsets"
+                                        );
+
+                                        // Step 2: Write splits back to state table with offset = None
+                                        self.stream_source_core
+                                            .split_state_store
+                                            .set_states(splits_with_cleared_offset.clone())
+                                            .await?;
+
+                                        // Step 3: Update in-memory split info with cleared offsets
+                                        for split in splits_with_cleared_offset {
+                                            self.stream_source_core
+                                                .latest_split_info
+                                                .insert(split.id(), split.clone());
+                                            self.stream_source_core
+                                                .updated_splits_in_epoch
+                                                .insert(split.id(), split);
+                                        }
+
+                                        tracing::info!(
+                                            actor_id = %self.actor_ctx.id,
+                                            source_id = source_id.as_raw_id(),
+                                            "RESET SOURCE completed: offset cleared (set to None). \
+                                             Trigger recovery/restart to fetch latest offset from upstream."
+                                        );
+                                    } else {
+                                        tracing::warn!(
+                                            actor_id = %self.actor_ctx.id,
+                                            "No splits found to reset - source may not be initialized yet"
+                                        );
+                                    }
+                                } else {
+                                    tracing::debug!(
+                                        actor_id = %self.actor_ctx.id,
+                                        target_source_id = source_id.as_raw_id(),
+                                        current_source_id = self.stream_source_core.source_id.as_raw_id(),
+                                        "ResetSource mutation for different source, ignoring"
+                                    );
+                                }
+                            }
+
+                            Mutation::InjectSourceOffsets {
+                                source_id,
+                                split_offsets,
+                            } => {
+                                if *source_id == self.stream_source_core.source_id {
+                                    if self.handle_inject_source_offsets(split_offsets).await? {
+                                        // Trigger a rebuild to apply the new offsets
+                                        split_change = Some((
+                                            &source_desc,
+                                            &mut stream,
+                                            ApplyMutationAfterBarrier::ConnectorPropsChange,
+                                        ));
+                                    }
+                                } else {
+                                    tracing::debug!(
+                                        actor_id = %self.actor_ctx.id,
+                                        target_source_id = source_id.as_raw_id(),
+                                        current_source_id = self.stream_source_core.source_id.as_raw_id(),
+                                        "InjectSourceOffsets mutation for different source, ignoring"
+                                    );
+                                }
+                            }
+
                             _ => {}
                         }
                     }
 
                     let updated_splits = self.persist_state_and_clear_cache(epoch).await?;
+
+                    self.maybe_report_cdc_source_offset(
+                        &updated_splits,
+                        epoch,
+                        source_id,
+                        &mut must_report_cdc_offset_once,
+                        must_wait_cdc_offset_before_report,
+                    );
 
                     // when handle a checkpoint barrier, spawn a task to wait for epoch commit notification
                     if barrier.kind.is_checkpoint()

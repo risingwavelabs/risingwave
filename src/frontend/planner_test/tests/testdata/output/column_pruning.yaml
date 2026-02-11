@@ -150,11 +150,9 @@
             └─LogicalScan { table: t, columns: [t.x, t.y, t.z, t.w, t._row_id, t._rw_timestamp] }
   optimized_logical_plan_for_batch: |-
     LogicalProject { exprs: [row_number] }
-    └─LogicalOverWindow { window_functions: [row_number() OVER(PARTITION BY t.x ORDER BY t.y ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
-      └─LogicalProject { exprs: [t.x, t.y] }
-        └─LogicalFilter { predicate: (t.z > 0:Int32) AND (t.y > 0:Int32) }
-          └─LogicalTopN { order: [t.y ASC], limit: 3, offset: 0, group_key: [t.x] }
-            └─LogicalScan { table: t, columns: [t.x, t.y, t.z], predicate: (t.x > 0:Int32) }
+    └─LogicalFilter { predicate: (t.z > 0:Int32) AND (t.y > 0:Int32) AND (row_number <= 3:Int32) }
+      └─LogicalOverWindow { window_functions: [row_number() OVER(PARTITION BY t.x ORDER BY t.y ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
+        └─LogicalScan { table: t, columns: [t.x, t.y, t.z], predicate: (t.x > 0:Int32) }
 - name: mixed
   sql: |
     create table t (v1 bigint, v2 double precision, v3 int);
@@ -190,4 +188,4 @@
     StreamMaterialize { columns: [a, window_end, t1._row_id(hidden)], stream_key: [t1._row_id, window_end], pk_columns: [t1._row_id, window_end], pk_conflict: NoCheck }
     └─StreamHopWindow { time_col: t1.created_at, slide: 00:15:00, size: 00:30:00, output: [t1.a, window_end, t1._row_id] }
       └─StreamFilter { predicate: IsNotNull(t1.created_at) }
-        └─StreamTableScan { table: t1, columns: [t1.a, t1.created_at, t1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
+        └─StreamTableScan { table: t1, columns: [t1.a, t1.created_at, t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }

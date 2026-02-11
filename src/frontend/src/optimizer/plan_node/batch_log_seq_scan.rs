@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -140,7 +140,7 @@ impl TryToBatchPb for BatchLogSeqScan {
                 epoch: Some(risingwave_pb::common::batch_query_epoch::Epoch::Committed(
                     BatchQueryCommittedEpoch {
                         epoch: self.core.epoch_range.0,
-                        hummock_version_id: 0,
+                        hummock_version_id: 0.into(),
                     },
                 )),
             }),
@@ -148,7 +148,7 @@ impl TryToBatchPb for BatchLogSeqScan {
                 epoch: Some(risingwave_pb::common::batch_query_epoch::Epoch::Committed(
                     BatchQueryCommittedEpoch {
                         epoch: self.core.epoch_range.1,
-                        hummock_version_id: 0,
+                        hummock_version_id: 0.into(),
                     },
                 )),
             }),

@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -60,12 +60,12 @@ impl ReadSnapshot {
                 epoch: Some(batch_query_epoch::Epoch::Committed(
                     BatchQueryCommittedEpoch {
                         epoch: snapshot.batch_query_epoch(read_storage_tables)?.0,
-                        hummock_version_id: snapshot.value.id.to_u64(),
+                        hummock_version_id: snapshot.value.id,
                     },
                 )),
             },
             ReadSnapshot::ReadUncommitted => BatchQueryEpoch {
-                epoch: Some(batch_query_epoch::Epoch::Current(u64::MAX)),
+                epoch: Some(batch_query_epoch::Epoch::Current(Epoch::now().0)),
             },
             ReadSnapshot::Other(e) => BatchQueryEpoch {
                 epoch: Some(batch_query_epoch::Epoch::Backup(e.0)),
@@ -339,13 +339,13 @@ impl HummockSnapshotManager {
     pub fn add_table_for_test(&self, table_id: TableId) {
         self.update_inner(|version| {
             let mut version = version.clone();
-            version.id = version.id.next();
+            version.id += 1;
             version.state_table_info.apply_delta(
                 &HashMap::from_iter([(
                     table_id,
                     StateTableInfoDelta {
                         committed_epoch: INVALID_EPOCH,
-                        compaction_group_id: 0,
+                        compaction_group_id: 0.into(),
                     },
                 )]),
                 &HashSet::new(),

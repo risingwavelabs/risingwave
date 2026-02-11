@@ -1,0 +1,61 @@
+- id: watermark ttl basic
+  sql: |
+    explain create table t (
+      id int primary key,
+      ts timestamp,
+      watermark for ts as ts - interval '1 minute' with ttl
+    );
+  expected_outputs:
+    - explain_output
+
+- id: watermark ttl append-only pk
+  sql: |
+    explain create table t (
+      id int primary key,
+      ts timestamp,
+      watermark for ts as ts - interval '1 minute' with ttl
+    ) append only;
+  expected_outputs:
+    - explain_output
+
+- id: watermark ttl non-append-only row-id
+  sql: |
+    explain create table t (
+      id int,
+      ts timestamp,
+      watermark for ts as ts - interval '1 minute' with ttl
+    );
+  expected_outputs:
+    - explain_output
+
+- id: watermark ttl append-only row-id
+  sql: |
+    explain create table t (
+      id int,
+      ts timestamp,
+      watermark for ts as ts - interval '1 minute' with ttl
+    ) append only;
+  expected_outputs:
+    - explain_output
+
+- id: watermark ttl append-only proctime generated column
+  sql: |
+    explain create table t (
+      id int,
+      proc_time timestamptz as proctime(),
+      watermark for proc_time as proc_time with ttl
+    ) append only;
+  expected_outputs:
+    - explain_output
+
+- id: watermark ttl scan keeps stream key columns
+  sql: |
+    create table t (
+      v int,
+      proc_time timestamptz as proctime(),
+      watermark for proc_time as proc_time with ttl
+    ) append only;
+    select v from t;
+  expected_outputs:
+    - stream_plan
+    - batch_plan

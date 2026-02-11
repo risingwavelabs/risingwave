@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -96,7 +96,7 @@ impl Order {
     pub fn enforce_if_not_satisfies(&self, plan: BatchPlanRef) -> Result<BatchPlanRef> {
         use crate::optimizer::plan_node::batch::prelude::*;
 
-        if !plan.order().satisfies(self) {
+        if !plan.orders().iter().any(|order| order.satisfies(self)) {
             Ok(self.enforce(plan))
         } else {
             Ok(plan)

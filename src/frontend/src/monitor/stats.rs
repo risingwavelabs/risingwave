@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -27,12 +27,16 @@ use risingwave_common::metrics::TrAdderGauge;
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 use tokio::task::JoinHandle;
 
+#[cfg(feature = "datafusion")]
+use crate::datafusion::DataFusionMetrics;
 use crate::session::SessionMapRef;
 
 #[derive(Clone)]
 pub struct FrontendMetrics {
     pub query_counter_local_execution: GenericCounter<AtomicU64>,
     pub latency_local_execution: Histogram,
+    #[cfg(feature = "datafusion")]
+    pub datafusion: DataFusionMetrics,
     pub active_sessions: IntGauge,
     pub batch_total_mem: TrAdderGauge,
 }
@@ -44,17 +48,20 @@ impl FrontendMetrics {
     fn new(registry: &Registry) -> Self {
         let query_counter_local_execution = register_int_counter_with_registry!(
             "frontend_query_counter_local_execution",
-            "Total query number of local execution mode",
+            "Total query number of local execution mode for RisingWave batch engine",
             registry
         )
         .unwrap();
 
         let opts = histogram_opts!(
             "frontend_latency_local_execution",
-            "latency of local execution mode",
+            "latency of local execution mode for RisingWave batch engine",
             exponential_buckets(0.01, 2.0, 23).unwrap()
         );
         let latency_local_execution = register_histogram_with_registry!(opts, registry).unwrap();
+
+        #[cfg(feature = "datafusion")]
+        let datafusion = DataFusionMetrics::new(registry);
 
         let active_sessions = register_int_gauge_with_registry!(
             "frontend_active_sessions",
@@ -76,6 +83,8 @@ impl FrontendMetrics {
         Self {
             query_counter_local_execution,
             latency_local_execution,
+            #[cfg(feature = "datafusion")]
+            datafusion,
             active_sessions,
             batch_total_mem,
         }

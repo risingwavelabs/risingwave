@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,7 +20,7 @@ use futures::future::BoxFuture;
 use futures::{Future, FutureExt};
 use risingwave_common::array::VectorRef;
 use risingwave_common::bitmap::Bitmap;
-use risingwave_common::catalog::TableId;
+use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_common::hash::VirtualNode;
 use risingwave_hummock_sdk::key::{TableKey, TableKeyRange};
 use risingwave_hummock_sdk::{HummockEpoch, HummockReadEpoch, SyncResult};
@@ -43,7 +43,7 @@ pub struct TracedStateStore<S, E = ()> {
     extra: E,
 }
 
-type TableSnapshot = (TableId, Option<HummockReadEpoch>);
+type TableSnapshot = (TableId, Option<HummockReadEpoch>, TableOption);
 
 impl<S> TracedStateStore<S, TableSnapshot> {
     fn new_with_snapshot_epoch(inner: S, epoch: TableSnapshot) -> Self {
@@ -70,9 +70,14 @@ impl<S> TracedStateStore<S, TableSnapshot> {
         self.extra.0
     }
 
+    fn table_option(&self) -> TableOption {
+        self.extra.2
+    }
+
     pub fn new_local(inner: S, options: NewLocalOptions) -> Self {
         let id = get_concurrent_id();
         let table_id = options.table_id;
+        let table_option = options.table_option;
         let local_storage_id = rand::random::<u64>();
         let storage_type: StorageType = StorageType::Local(id, local_storage_id);
         let _span: MayTraceSpan =
@@ -81,7 +86,7 @@ impl<S> TracedStateStore<S, TableSnapshot> {
         Self {
             inner,
             storage_type,
-            extra: (table_id, None),
+            extra: (table_id, None, table_option),
         }
     }
 }
@@ -129,9 +134,11 @@ impl<S> TracedStateStore<S, TableSnapshot> {
         let span = TraceSpan::new_get_span(
             key.0.clone(),
             self.raw_epoch(),
-            read_options
-                .clone()
-                .into_traced_read_options(self.table_id(), self.epoch()),
+            read_options.clone().into_traced_read_options(
+                self.table_id(),
+                self.epoch(),
+                self.table_option(),
+            ),
             self.storage_type,
         );
 
@@ -185,9 +192,11 @@ impl<S: LocalStateStore> LocalStateStore for TracedStateStore<S, TableSnapshot> 
         let span = TraceSpan::new_iter_span(
             bytes_key_range,
             None,
-            read_options
-                .clone()
-                .into_traced_read_options(self.table_id(), self.epoch()),
+            read_options.clone().into_traced_read_options(
+                self.table_id(),
+                self.epoch(),
+                self.table_option(),
+            ),
             self.storage_type,
         );
         self.traced_iter(self.inner.iter(key_range, read_options), span)
@@ -203,9 +212,11 @@ impl<S: LocalStateStore> LocalStateStore for TracedStateStore<S, TableSnapshot> 
         let span = TraceSpan::new_iter_span(
             bytes_key_range,
             None,
-            read_options
-                .clone()
-                .into_traced_read_options(self.table_id(), self.epoch()),
+            read_options.clone().into_traced_read_options(
+                self.table_id(),
+                self.epoch(),
+                self.table_option(),
+            ),
             self.storage_type,
         );
         self.traced_iter(self.inner.rev_iter(key_range, read_options), span)
@@ -246,7 +257,7 @@ impl<S: LocalStateStore> LocalStateStore for TracedStateStore<S, TableSnapshot> 
     fn new_flushed_snapshot_reader(&self) -> Self::FlushedSnapshotReader {
         TracedStateStore::new_with_snapshot_epoch(
             self.inner.new_flushed_snapshot_reader(),
-            (self.table_id(), None),
+            (self.table_id(), None, self.table_option()),
         )
     }
 
@@ -320,11 +331,15 @@ impl<S: StateStore> StateStore for TracedStateStore<S> {
         options: NewReadSnapshotOptions,
     ) -> StorageResult<Self::ReadSnapshot> {
         let table_id = options.table_id;
+        let table_option = options.table_option;
         self.inner
             .new_read_snapshot(epoch, options)
             .await
             .map(|snapshot| {
-                TracedStateStore::new_with_snapshot_epoch(snapshot, (table_id, Some(epoch)))
+                TracedStateStore::new_with_snapshot_epoch(
+                    snapshot,
+                    (table_id, Some(epoch), table_option),
+                )
             })
     }
 
@@ -361,9 +376,11 @@ impl<S: StateStoreRead> StateStoreRead for TracedStateStore<S, TableSnapshot> {
         let span = TraceSpan::new_iter_span(
             bytes_key_range,
             self.raw_epoch(),
-            read_options
-                .clone()
-                .into_traced_read_options(self.table_id(), self.epoch()),
+            read_options.clone().into_traced_read_options(
+                self.table_id(),
+                self.epoch(),
+                self.table_option(),
+            ),
             self.storage_type,
         );
         self.traced_iter(self.inner.iter(key_range, read_options), span)
@@ -379,9 +396,11 @@ impl<S: StateStoreRead> StateStoreRead for TracedStateStore<S, TableSnapshot> {
         let span = TraceSpan::new_iter_span(
             bytes_key_range,
             self.raw_epoch(),
-            read_options
-                .clone()
-                .into_traced_read_options(self.table_id(), self.epoch()),
+            read_options.clone().into_traced_read_options(
+                self.table_id(),
+                self.epoch(),
+                self.table_option(),
+            ),
             self.storage_type,
         );
         self.traced_iter(self.inner.rev_iter(key_range, read_options), span)

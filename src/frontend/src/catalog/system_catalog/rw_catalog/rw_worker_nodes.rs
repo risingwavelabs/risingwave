@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use itertools::Itertools;
+use risingwave_common::id::WorkerId;
 use risingwave_common::types::{Fields, Timestamptz};
 use risingwave_frontend_macro::system_catalog;
 use risingwave_pb::common::WorkerType;
@@ -24,7 +25,7 @@ use crate::error::Result;
 #[derive(Fields)]
 struct RwWorkerNode {
     #[primary_key]
-    id: i32,
+    id: WorkerId,
     host: Option<String>,
     port: Option<String>,
     r#type: String,
@@ -56,7 +57,7 @@ async fn read_rw_worker_nodes_info(reader: &SysCatalogReaderImpl) -> Result<Vec<
             let is_compute = worker.get_type().unwrap() == WorkerType::ComputeNode;
             let is_compactor = worker.get_type().unwrap() == WorkerType::Compactor;
             RwWorkerNode {
-                id: worker.id.as_i32_id(),
+                id: worker.id,
                 host: host.map(|h| h.host.clone()),
                 port: host.map(|h| h.port.to_string()),
                 r#type: worker.get_type().unwrap().as_str_name().into(),

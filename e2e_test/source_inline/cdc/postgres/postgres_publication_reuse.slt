@@ -1,0 +1,154 @@
+# Test: Publication reuse causes column mismatch
+# This test requires PostgreSQL 15+ for partial publication support
+control substitution on
+
+# Prepare: Create table and partial publication in public schema
+system ok
+psql -c "
+    DROP TABLE IF EXISTS users CASCADE;
+    DROP PUBLICATION IF EXISTS rw_test_publication;
+    CREATE TABLE users (
+        id int PRIMARY KEY,
+        username varchar,
+        email varchar,
+        password_hash varchar,
+        created_at timestamp
+    );
+    INSERT INTO users VALUES
+        (1, 'alice', 'alice@example.com', 'hash123', '2024-01-01 10:00:00'),
+        (2, 'bob', 'bob@example.com', 'hash456', '2024-01-02 11:00:00');
+    CREATE PUBLICATION rw_test_publication FOR TABLE users (id, username, email);
+    "
+
+# Test 1: Create source with fixed publication name (3 columns)
+statement ok
+create source s1 with (
+    connector = 'postgres-cdc',
+    hostname = '${PGHOST:localhost}',
+    port = '${PGPORT:5432}',
+    username = '${PGUSER:$USER}',
+    password = '${PGPASSWORD:}',
+    database.name = '${PGDATABASE:postgres}',
+    table.name = 'users',
+    publication.name = 'rw_test_publication'
+);
+
+statement ok
+create table t1 (
+    id int primary key,
+    username varchar,
+    email varchar
+) from s1 table 'public.users';
+
+sleep 2s
+
+# Verify data (should have 3 columns)
+query I
+select count(*) from t1;
+----
+2
+
+query III
+select id, username, email from t1 order by id;
+----
+1 alice alice@example.com
+2 bob bob@example.com
+
+# Drop source s1 (publication remains in PostgreSQL)
+statement ok
+drop source s1 cascade;
+
+sleep 1s
+
+# Test 2: Try to create source with same publication but 5 columns
+# CREATE SOURCE succeeds, but CREATE TABLE should FAIL
+# because the publication only covers 3 columns
+statement ok
+create source s2_fail with (
+    connector = 'postgres-cdc',
+    hostname = '${PGHOST:localhost}',
+    port = '${PGPORT:5432}',
+    username = '${PGUSER:$USER}',
+    password = '${PGPASSWORD:}',
+    database.name = '${PGDATABASE:postgres}',
+    table.name = 'users',
+    publication.name = 'rw_test_publication'
+);
+
+# This should FAIL: publication doesn't cover all columns
+statement error does not cover all columns of the table
+create table t2_fail (
+    id int primary key,
+    username varchar,
+    email varchar,
+    password_hash varchar,
+    created_at timestamp
+) from s2_fail table 'public.users';
+
+# Clean up failed source
+statement ok
+drop source s2_fail;
+
+# Test 3: Create source without specifying publication.name (per-source)
+# This should SUCCEED because it creates a new publication with all columns
+statement ok
+create source s2 with (
+    connector = 'postgres-cdc',
+    hostname = '${PGHOST:localhost}',
+    port = '${PGPORT:5432}',
+    username = '${PGUSER:$USER}',
+    password = '${PGPASSWORD:}',
+    database.name = '${PGDATABASE:postgres}',
+    table.name = 'users'
+);
+
+statement ok
+create table t2 (
+    id int primary key,
+    username varchar,
+    email varchar,
+    password_hash varchar,
+    created_at timestamp
+) from s2 table 'public.users';
+
+sleep 2s
+
+# Verify data (should have 5 columns)
+query I
+select count(*) from t2;
+----
+2
+
+query IIIT
+select id, username, email, password_hash from t2 order by id;
+----
+1 alice alice@example.com hash123
+2 bob bob@example.com hash456
+
+# Insert new data to verify CDC is working
+system ok
+psql -c "
+    INSERT INTO users VALUES (3, 'charlie', 'charlie@example.com', 'hash789', '2024-01-03 12:00:00');
+    "
+
+sleep 2s
+
+query I
+select count(*) from t2;
+----
+3
+
+query III
+select id, username, email from t2 where id = 3;
+----
+3 charlie charlie@example.com
+
+# Clean up
+statement ok
+drop source s2 cascade;
+
+system ok
+psql -c "
+    DROP TABLE IF EXISTS users CASCADE;
+    DROP PUBLICATION IF EXISTS rw_test_publication;
+    "

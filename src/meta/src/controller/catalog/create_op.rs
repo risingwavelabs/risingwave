@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,9 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::cast::datetime_to_timestamp_millis;
 use risingwave_common::catalog::{ICEBERG_SINK_PREFIX, ICEBERG_SOURCE_PREFIX};
 use risingwave_common::system_param::{OverrideValidate, Validate};
 use risingwave_common::util::epoch::Epoch;
+use risingwave_pb::common::PbObjectType;
+use risingwave_pb::meta::PbObjectDependency;
 
 use super::*;
 use crate::barrier::SnapshotBackfillInfo;
@@ -79,14 +82,14 @@ impl CatalogController {
                 name: Set(schema_name.into()),
             };
             let schema = schema.insert(&txn).await?;
-            schemas.push(ObjectModel(schema, schema_obj).into());
+            schemas.push(ObjectModel(schema, schema_obj, None).into());
         }
         txn.commit().await?;
 
         let mut version = self
             .notify_frontend(
                 NotificationOperation::Add,
-                NotificationInfo::Database(ObjectModel(db.clone(), db_obj).into()),
+                NotificationInfo::Database(ObjectModel(db.clone(), db_obj, None).into()),
             )
             .await;
         for schema in schemas {
@@ -126,7 +129,7 @@ impl CatalogController {
         let mut version = self
             .notify_frontend(
                 NotificationOperation::Add,
-                NotificationInfo::Schema(ObjectModel(schema, schema_obj).into()),
+                NotificationInfo::Schema(ObjectModel(schema, schema_obj, None).into()),
             )
             .await;
 
@@ -192,50 +195,6 @@ impl CatalogController {
         )
         .await?;
 
-        let mut job_notifications = vec![];
-        // check if it belongs to iceberg table
-        if pb_source.name.starts_with(ICEBERG_SOURCE_PREFIX) {
-            // 1. finish iceberg table job.
-            let table_name = pb_source.name.trim_start_matches(ICEBERG_SOURCE_PREFIX);
-            let table_id = Table::find()
-                .select_only()
-                .column(table::Column::TableId)
-                .join(JoinType::InnerJoin, table::Relation::Object1.def())
-                .filter(
-                    object::Column::DatabaseId
-                        .eq(pb_source.database_id)
-                        .and(object::Column::SchemaId.eq(pb_source.schema_id))
-                        .and(table::Column::Name.eq(table_name)),
-                )
-                .into_tuple::<TableId>()
-                .one(&txn)
-                .await?
-                .ok_or(MetaError::from(anyhow!("table {} not found", table_name)))?;
-            let table_notifications =
-                Self::finish_streaming_job_inner(&txn, table_id.as_job_id()).await?;
-            job_notifications.push((table_id.as_job_id(), table_notifications));
-
-            // 2. finish iceberg sink job.
-            let sink_name = format!("{}{}", ICEBERG_SINK_PREFIX, table_name);
-            let sink_id = Sink::find()
-                .select_only()
-                .column(sink::Column::SinkId)
-                .join(JoinType::InnerJoin, sink::Relation::Object.def())
-                .filter(
-                    object::Column::DatabaseId
-                        .eq(pb_source.database_id)
-                        .and(object::Column::SchemaId.eq(pb_source.schema_id))
-                        .and(sink::Column::Name.eq(&sink_name)),
-                )
-                .into_tuple::<SinkId>()
-                .one(&txn)
-                .await?
-                .ok_or(MetaError::from(anyhow!("sink {} not found", sink_name)))?;
-            let sink_job_id = sink_id.as_job_id();
-            let sink_notifications = Self::finish_streaming_job_inner(&txn, sink_job_id).await?;
-            job_notifications.push((sink_job_id, sink_notifications));
-        }
-
         // handle secret ref
         let secret_ids = get_referred_secret_ids_from_source(&pb_source)?;
         let connection_ids = get_referred_connection_ids_from_source(&pb_source);
@@ -259,7 +218,7 @@ impl CatalogController {
             .copied()
             .map_into()
             .chain(connection_ids.iter().copied().map_into());
-        if !secret_ids.is_empty() || !connection_ids.is_empty() {
+        let dependencies = if !secret_ids.is_empty() || !connection_ids.is_empty() {
             ObjectDependency::insert_many(dep_relation_ids.map(|id| {
                 object_dependency::ActiveModel {
                     oid: Set(id),
@@ -269,15 +228,82 @@ impl CatalogController {
             }))
             .exec(&txn)
             .await?;
-        }
+            secret_ids
+                .iter()
+                .map(|id| PbObjectDependency {
+                    object_id: source_id.as_object_id(),
+                    referenced_object_id: id.as_object_id(),
+                    referenced_object_type: PbObjectType::Secret as _,
+                })
+                .chain(connection_ids.iter().map(|id| PbObjectDependency {
+                    object_id: source_id.as_object_id(),
+                    referenced_object_id: id.as_object_id(),
+                    referenced_object_type: PbObjectType::Connection as _,
+                }))
+                .collect_vec()
+        } else {
+            vec![]
+        };
 
-        let updated_user_info = grant_default_privileges_automatically(&txn, source_id).await?;
+        let mut job_notifications = vec![];
+        let mut updated_user_info = vec![];
+        // check if it belongs to iceberg table
+        if pb_source.name.starts_with(ICEBERG_SOURCE_PREFIX) {
+            // 1. finish iceberg table job.
+            let table_name = pb_source.name.trim_start_matches(ICEBERG_SOURCE_PREFIX);
+            let table_id = Table::find()
+                .select_only()
+                .column(table::Column::TableId)
+                .join(JoinType::InnerJoin, table::Relation::Object1.def())
+                .filter(
+                    object::Column::DatabaseId
+                        .eq(pb_source.database_id)
+                        .and(object::Column::SchemaId.eq(pb_source.schema_id))
+                        .and(table::Column::Name.eq(table_name)),
+                )
+                .into_tuple::<TableId>()
+                .one(&txn)
+                .await?
+                .ok_or(MetaError::from(anyhow!("table {} not found", table_name)))?;
+            let table_notifications = self
+                .finish_streaming_job_inner(&txn, table_id.as_job_id())
+                .await?;
+            job_notifications.push((table_id.as_job_id(), table_notifications));
+
+            // 2. finish iceberg sink job.
+            let sink_name = format!("{}{}", ICEBERG_SINK_PREFIX, table_name);
+            let sink_id = Sink::find()
+                .select_only()
+                .column(sink::Column::SinkId)
+                .join(JoinType::InnerJoin, sink::Relation::Object.def())
+                .filter(
+                    object::Column::DatabaseId
+                        .eq(pb_source.database_id)
+                        .and(object::Column::SchemaId.eq(pb_source.schema_id))
+                        .and(sink::Column::Name.eq(&sink_name)),
+                )
+                .into_tuple::<SinkId>()
+                .one(&txn)
+                .await?
+                .ok_or(MetaError::from(anyhow!("sink {} not found", sink_name)))?;
+            let sink_job_id = sink_id.as_job_id();
+            let sink_notifications = self.finish_streaming_job_inner(&txn, sink_job_id).await?;
+            job_notifications.push((sink_job_id, sink_notifications));
+        } else {
+            updated_user_info = grant_default_privileges_automatically(&txn, source_id).await?;
+        }
 
         txn.commit().await?;
 
-        for (job_id, (op, objects, user_info)) in job_notifications {
+        for (job_id, (op, objects, user_info, dependencies)) in job_notifications {
             let mut version = self
-                .notify_frontend(op, NotificationInfo::ObjectGroup(PbObjectGroup { objects }))
+                .notify_frontend(
+                    op,
+                    NotificationInfo::ObjectGroup(PbObjectGroup {
+                        objects,
+                        dependencies,
+                    }),
+                )
                 .await;
             if !user_info.is_empty() {
                 version = self.notify_users_update(user_info).await;
@@ -295,9 +321,14 @@ impl CatalogController {
         }
 
         let mut version = self
-            .notify_frontend_relation_info(
+            .notify_frontend(
                 NotificationOperation::Add,
-                PbObjectInfo::Source(pb_source),
+                NotificationInfo::ObjectGroup(PbObjectGroup {
+                    objects: vec![PbObject {
+                        object_info: Some(PbObjectInfo::Source(pb_source)),
+                    }],
+                    dependencies,
+                }),
             )
             .await;
 
@@ -331,7 +362,7 @@ impl CatalogController {
         .await?;
         pb_function.id = function_obj.oid.as_function_id();
         pb_function.created_at_epoch = Some(
-            Epoch::from_unix_millis(function_obj.created_at.and_utc().timestamp_millis() as _).0,
+            Epoch::from_unix_millis(datetime_to_timestamp_millis(function_obj.created_at) as _).0,
         );
         pb_function.created_at_cluster_version = function_obj.created_at_cluster_version;
         let function: function::ActiveModel = pb_function.clone().into();
@@ -391,7 +422,7 @@ impl CatalogController {
         let connection: connection::ActiveModel = pb_connection.clone().into();
         Connection::insert(connection).exec(&txn).await?;
 
-        for secret_id in dep_secrets {
+        for secret_id in &dep_secrets {
             ObjectDependency::insert(object_dependency::ActiveModel {
                 oid: Set(secret_id.as_object_id()),
                 used_by: Set(conn_obj.oid),
@@ -427,7 +458,19 @@ impl CatalogController {
         let mut version = self
             .notify_frontend(
                 NotificationOperation::Add,
-                NotificationInfo::Connection(pb_connection),
+                NotificationInfo::ObjectGroup(PbObjectGroup {
+                    objects: vec![PbObject {
+                        object_info: Some(PbObjectInfo::Connection(pb_connection)),
+                    }],
+                    dependencies: dep_secrets
+                        .iter()
+                        .map(|secret_id| PbObjectDependency {
+                            object_id: conn_obj.oid,
+                            referenced_object_id: secret_id.as_object_id(),
+                            referenced_object_type: PbObjectType::Secret as _,
+                        })
+                        .collect(),
+                }),
             )
             .await;
 
@@ -520,28 +563,40 @@ impl CatalogController {
         .await?;
         pb_view.id = view_obj.oid.as_view_id();
         pb_view.created_at_epoch =
-            Some(Epoch::from_unix_millis(view_obj.created_at.and_utc().timestamp_millis() as _).0);
+            Some(Epoch::from_unix_millis(datetime_to_timestamp_millis(view_obj.created_at) as _).0);
         pb_view.created_at_cluster_version = view_obj.created_at_cluster_version;
 
         let view: view::ActiveModel = pb_view.clone().into();
         View::insert(view).exec(&txn).await?;
 
-        for obj_id in dependencies {
-            ObjectDependency::insert(object_dependency::ActiveModel {
-                oid: Set(obj_id),
-                used_by: Set(view_obj.oid),
-                ..Default::default()
-            })
+        let dependencies = if !dependencies.is_empty() {
+            ObjectDependency::insert_many(dependencies.into_iter().map(|obj_id| {
+                object_dependency::ActiveModel {
+                    oid: Set(obj_id),
+                    used_by: Set(view_obj.oid),
+                    ..Default::default()
+                }
+            }))
             .exec(&txn)
             .await?;
-        }
+            list_object_dependencies_by_object_id(&txn, view_obj.oid).await?
+        } else {
+            vec![]
+        };
 
         let updated_user_info = grant_default_privileges_automatically(&txn, view_obj.oid).await?;
 
         txn.commit().await?;
-
         let mut version = self
-            .notify_frontend_relation_info(NotificationOperation::Add, PbObjectInfo::View(pb_view))
+            .notify_frontend(
+                NotificationOperation::Add,
+                NotificationInfo::ObjectGroup(PbObjectGroup {
+                    objects: vec![PbObject {
+                        object_info: Some(PbObjectInfo::View(pb_view)),
+                    }],
+                    dependencies,
+                }),
+            )
             .await;
 
         // notify default privileges for views

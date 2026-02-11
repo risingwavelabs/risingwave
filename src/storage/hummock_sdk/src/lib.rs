@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -22,16 +22,11 @@ mod key_cmp;
 use std::borrow::Borrow;
 use std::cmp::Ordering;
 use std::collections::HashMap;
-use std::fmt::{Display, Formatter};
-use std::ops::{Add, AddAssign, Sub};
-use std::str::FromStr;
 
 pub use key_cmp::*;
 use risingwave_common::util::epoch::EPOCH_SPILL_TIME_MASK;
 use risingwave_pb::common::{BatchQueryEpoch, batch_query_epoch};
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use sstable_info::SstableInfo;
-use tracing::warn;
 
 use crate::key_range::KeyRangeCommon;
 use crate::table_stats::TableStatsMap;
@@ -40,6 +35,7 @@ pub mod change_log;
 pub mod compact;
 pub mod compact_task;
 pub mod compaction_group;
+pub mod filter_utils;
 pub mod key;
 pub mod key_range;
 pub mod level;
@@ -58,193 +54,21 @@ pub use compact::*;
 use risingwave_common::catalog::TableId;
 use risingwave_pb::hummock::hummock_version_checkpoint::PbStaleObjects;
 use risingwave_pb::hummock::{PbVectorIndexObjectType, VectorIndexObjectType};
+pub use risingwave_pb::id::{
+    CompactionGroupId, HummockHnswGraphFileId, HummockRawObjectId, HummockSstableId,
+    HummockSstableObjectId, HummockVectorFileId, HummockVersionId,
+};
 
 use crate::table_watermark::TableWatermarks;
 use crate::vector_index::VectorIndexAdd;
-
-#[derive(Debug, Eq, PartialEq, Clone, Copy, Hash, Ord, PartialOrd)]
-#[cfg_attr(any(test, feature = "test"), derive(Default))]
-pub struct TypedPrimitive<const C: usize, P>(P);
-
-impl<const C: usize, P: PartialEq> PartialEq<P> for TypedPrimitive<C, P> {
-    fn eq(&self, other: &P) -> bool {
-        self.0 == *other
-    }
-}
-
-macro_rules! impl_primitive {
-    ($($t:ty)*) => {$(
-        impl<const C: usize> PartialEq<TypedPrimitive<C, $t>> for $t {
-            fn eq(&self, other: &TypedPrimitive<C, $t>) -> bool {
-                *self == other.0
-            }
-        }
-    )*}
-}
-
-impl_primitive!(u64);
-
-impl<const C: usize, P: FromStr> FromStr for TypedPrimitive<C, P> {
-    type Err = P::Err;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        P::from_str(s).map(TypedPrimitive)
-    }
-}
-
-impl<const C: usize, P> Borrow<P> for TypedPrimitive<C, P> {
-    fn borrow(&self) -> &P {
-        &self.0
-    }
-}
-
-impl<const C: usize, P: Add<Output = P>> Add<P> for TypedPrimitive<C, P> {
-    type Output = Self;
-
-    fn add(self, rhs: P) -> Self::Output {
-        Self(self.0 + rhs)
-    }
-}
-
-impl<const C: usize, P: AddAssign> AddAssign<P> for TypedPrimitive<C, P> {
-    fn add_assign(&mut self, rhs: P) {
-        self.0 += rhs;
-    }
-}
-
-impl<const C: usize, P: Display> Display for TypedPrimitive<C, P> {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
-
-impl<const C: usize, P> From<P> for TypedPrimitive<C, P> {
-    fn from(value: P) -> Self {
-        Self(value)
-    }
-}
-
-impl<const C: usize, P: Serialize> Serialize for TypedPrimitive<C, P> {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        self.0.serialize(serializer)
-    }
-}
-
-impl<'de, const C: usize, P: Deserialize<'de>> Deserialize<'de> for TypedPrimitive<C, P> {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        Ok(Self(<P as Deserialize>::deserialize(deserializer)?))
-    }
-}
-
-impl<const C: usize, P> TypedPrimitive<C, P> {
-    pub const fn new(id: P) -> Self {
-        Self(id)
-    }
-
-    pub fn inner(self) -> P {
-        self.0
-    }
-}
-
-pub type HummockRawObjectId = TypedPrimitive<0, u64>;
-pub type HummockSstableObjectId = TypedPrimitive<1, u64>;
-pub type HummockSstableId = TypedPrimitive<2, u64>;
-pub type HummockVectorFileId = TypedPrimitive<3, u64>;
-pub type HummockHnswGraphFileId = TypedPrimitive<4, u64>;
-
-macro_rules! impl_object_id {
-    ($type_name:ty) => {
-        impl $type_name {
-            pub fn as_raw(&self) -> HummockRawObjectId {
-                HummockRawObjectId::new(self.0)
-            }
-        }
-
-        impl From<HummockRawObjectId> for $type_name {
-            fn from(id: HummockRawObjectId) -> Self {
-                Self(id.0)
-            }
-        }
-    };
-}
-
-impl_object_id!(HummockSstableObjectId);
-impl_object_id!(HummockVectorFileId);
-impl_object_id!(HummockHnswGraphFileId);
 
 pub type HummockRefCount = u64;
 pub type HummockContextId = risingwave_common::id::WorkerId;
 pub type HummockEpoch = u64;
 pub type HummockCompactionTaskId = u64;
-pub type CompactionGroupId = u64;
 
-#[derive(Debug, Clone, PartialEq, Copy, Ord, PartialOrd, Eq, Hash)]
-pub struct HummockVersionId(u64);
-
-impl Display for HummockVersionId {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
-
-impl Serialize for HummockVersionId {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        serializer.serialize_u64(self.0)
-    }
-}
-
-impl<'de> Deserialize<'de> for HummockVersionId {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        Ok(Self(<u64 as Deserialize>::deserialize(deserializer)?))
-    }
-}
-
-impl HummockVersionId {
-    pub const MAX: Self = Self(i64::MAX as _);
-
-    pub const fn new(id: u64) -> Self {
-        Self(id)
-    }
-
-    pub fn next(&self) -> Self {
-        Self(self.0 + 1)
-    }
-
-    pub fn to_u64(self) -> u64 {
-        self.0
-    }
-}
-
-impl Add<u64> for HummockVersionId {
-    type Output = Self;
-
-    fn add(self, rhs: u64) -> Self::Output {
-        Self(self.0 + rhs)
-    }
-}
-
-impl Sub for HummockVersionId {
-    type Output = u64;
-
-    fn sub(self, rhs: Self) -> Self::Output {
-        self.0 - rhs.0
-    }
-}
-
-pub const INVALID_VERSION_ID: HummockVersionId = HummockVersionId(0);
-pub const FIRST_VERSION_ID: HummockVersionId = HummockVersionId(1);
+pub const INVALID_VERSION_ID: HummockVersionId = HummockVersionId::new(0);
+pub const FIRST_VERSION_ID: HummockVersionId = HummockVersionId::new(1);
 pub const SPLIT_TABLE_COMPACTION_GROUP_ID_HEAD: u64 = 1u64 << 56;
 pub const SINGLE_TABLE_COMPACTION_GROUP_ID_HEAD: u64 = 2u64 << 56;
 pub const SST_OBJECT_SUFFIX: &str = "data";
@@ -285,7 +109,7 @@ macro_rules! for_all_object_suffix {
             pub fn as_raw(&self) -> HummockRawObjectId {
                 let raw = match self {
                     $(
-                        HummockObjectId::$name(id) => id.0,
+                        HummockObjectId::$name(id) => id.as_raw_id(),
                     )+
                 };
                 HummockRawObjectId::new(raw)
@@ -337,7 +161,7 @@ pub fn get_stale_object_ids(
     stale_objects
         .id
         .iter()
-        .map(|sst_id| HummockObjectId::Sstable((*sst_id).into()))
+        .map(|sst_id| HummockObjectId::Sstable(*sst_id))
         .chain(stale_objects.vector_files.iter().map(
             |file| match file.get_object_type().unwrap() {
                 PbVectorIndexObjectType::VectorIndexObjectUnspecified => {
@@ -445,19 +269,10 @@ pub enum HummockReadEpoch {
 impl From<BatchQueryEpoch> for HummockReadEpoch {
     fn from(e: BatchQueryEpoch) -> Self {
         match e.epoch.unwrap() {
-            batch_query_epoch::Epoch::Committed(epoch) => HummockReadEpoch::BatchQueryCommitted(
-                epoch.epoch,
-                HummockVersionId::new(epoch.hummock_version_id),
-            ),
-            batch_query_epoch::Epoch::Current(epoch) => {
-                if epoch != HummockEpoch::MAX {
-                    warn!(
-                        epoch,
-                        "ignore specified current epoch and set it to u64::MAX"
-                    );
-                }
-                HummockReadEpoch::NoWait(HummockEpoch::MAX)
+            batch_query_epoch::Epoch::Committed(epoch) => {
+                HummockReadEpoch::BatchQueryCommitted(epoch.epoch, epoch.hummock_version_id)
             }
+            batch_query_epoch::Epoch::Current(epoch) => HummockReadEpoch::NoWait(epoch),
             batch_query_epoch::Epoch::Backup(epoch) => HummockReadEpoch::Backup(epoch),
             batch_query_epoch::Epoch::TimeTravel(epoch) => HummockReadEpoch::TimeTravel(epoch),
         }

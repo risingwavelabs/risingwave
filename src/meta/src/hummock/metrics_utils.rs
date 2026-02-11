@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -442,11 +442,9 @@ pub fn trigger_pin_unpin_version_state(
     pinned_versions: &BTreeMap<HummockContextId, HummockPinnedVersion>,
 ) {
     if let Some(m) = pinned_versions.values().map(|v| v.min_pinned_id).min() {
-        metrics.min_pinned_version_id.set(m as i64);
+        metrics.min_pinned_version_id.set(m.as_i64_id());
     } else {
-        metrics
-            .min_pinned_version_id
-            .set(HummockVersionId::MAX.to_u64() as _);
+        metrics.min_pinned_version_id.set(u64::MAX as _);
     }
 }
 
@@ -617,11 +615,17 @@ pub fn trigger_split_stat(metrics: &MetaMetrics, version: &HummockVersion) {
     }
 }
 
-pub fn build_level_metrics_label(compaction_group_id: u64, level_idx: usize) -> String {
+pub fn build_level_metrics_label(
+    compaction_group_id: CompactionGroupId,
+    level_idx: usize,
+) -> String {
     format!("cg{}_L{}", compaction_group_id, level_idx)
 }
 
-pub fn build_level_l0_metrics_label(compaction_group_id: u64, overlapping: bool) -> String {
+pub fn build_level_l0_metrics_label(
+    compaction_group_id: CompactionGroupId,
+    overlapping: bool,
+) -> String {
     if overlapping {
         format!("cg{}_l0_sub_overlapping", compaction_group_id)
     } else {
@@ -630,7 +634,7 @@ pub fn build_level_l0_metrics_label(compaction_group_id: u64, overlapping: bool)
 }
 
 pub fn build_compact_task_stat_metrics_label(
-    compaction_group_id: u64,
+    compaction_group_id: CompactionGroupId,
     select_level: usize,
     target_level: usize,
 ) -> String {
@@ -641,7 +645,7 @@ pub fn build_compact_task_stat_metrics_label(
 }
 
 pub fn build_compact_task_l0_stat_metrics_label(
-    compaction_group_id: u64,
+    compaction_group_id: CompactionGroupId,
     overlapping: bool,
     partition: bool,
 ) -> String {

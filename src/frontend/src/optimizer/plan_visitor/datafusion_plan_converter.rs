@@ -18,24 +18,32 @@ use std::sync::Arc;
 use datafusion::arrow::datatypes::{Field as ArrowField, Schema as ArrowSchema};
 use datafusion::datasource::provider_as_source;
 use datafusion::logical_expr::{
-    Expr as DFExpr, ExprSchemable, Join, JoinConstraint, LogicalPlan as DFLogicalPlan, LogicalPlan,
-    TableScan, Values, build_join_schema,
+    Aggregate, Expr as DFExpr, ExprSchemable, Extension, Join, JoinConstraint,
+    LogicalPlan as DFLogicalPlan, LogicalPlan, TableScan, Values, build_join_schema,
 };
 use datafusion::prelude::lit;
-use datafusion_common::{DFSchema, ScalarValue};
+use datafusion_common::{Column, DFSchema, NullEquality, ScalarValue};
 use itertools::Itertools;
 use risingwave_common::array::arrow::IcebergArrowConvert;
 use risingwave_common::bail_not_implemented;
+use risingwave_common::catalog::Schema as RwSchema;
 
-use crate::datafusion::{ColumnTrait, IcebergTableProvider, convert_expr, convert_join_type};
+use crate::datafusion::{
+    ColumnTrait, ConcatColumns, Expand as DfExpand, IcebergTableProvider, InputColumns, ProjectSet,
+    convert_agg_call, convert_column_order, convert_expr, convert_join_type, convert_window_expr,
+};
 use crate::error::{ErrorCode, Result as RwResult};
-use crate::optimizer::plan_node::generic::GenericPlanRef;
-use crate::optimizer::plan_node::{PlanTreeNodeBinary, PlanTreeNodeUnary};
+use crate::optimizer::plan_node::generic::{GenericPlanRef, TopNLimit};
+use crate::optimizer::plan_node::{PlanTreeNode, PlanTreeNodeBinary, PlanTreeNodeUnary};
 use crate::optimizer::plan_visitor::{DefaultBehavior, LogicalPlanVisitor};
 use crate::optimizer::{LogicalPlanRef, PlanVisitor};
 
+/// Visitor to convert RisingWave logical plan to DataFusion logical plan.
+///
+/// Returns an error if the plan contains unsupported nodes or expressions.
+// When you add a new plan node here, please also update `DataFusionExecuteChecker`.
 #[derive(Debug, Clone, Copy)]
-pub struct DataFusionPlanConverter;
+struct DataFusionPlanConverter;
 
 impl LogicalPlanVisitor for DataFusionPlanConverter {
     type DefaultBehavior = DefaultValueBehavior;
@@ -45,17 +53,55 @@ impl LogicalPlanVisitor for DataFusionPlanConverter {
         DefaultValueBehavior
     }
 
+    fn visit_logical_agg(
+        &mut self,
+        plan: &crate::optimizer::plan_node::LogicalAgg,
+    ) -> Self::Result {
+        // TODO: support grouping sets, rollup, cube
+        // Risingwave will convert it to logical expand first, then aggregate
+        // But datafusion doesn't have logical expand node, so we need to use other way to implement it
+        if !plan.grouping_sets().is_empty() {
+            bail_not_implemented!(
+                "DataFusionPlanConverter: LogicalAgg with grouping sets is not supported"
+            );
+        }
+
+        let rw_input = plan.input();
+        let df_input = self.visit(plan.input())?;
+        let input_columns = InputColumns::new(df_input.schema().as_ref(), rw_input.schema());
+        let group_expr = plan
+            .group_key()
+            .indices()
+            .map(|index| DFExpr::Column(input_columns.column(index)))
+            .collect_vec();
+        let aggr_expr = plan
+            .agg_calls()
+            .iter()
+            .map(|agg_call| {
+                Ok(DFExpr::AggregateFunction(convert_agg_call(
+                    agg_call,
+                    &input_columns,
+                )?))
+            })
+            .collect::<RwResult<Vec<DFExpr>>>()?;
+
+        let aggregate = Aggregate::try_new(df_input, group_expr, aggr_expr)?;
+        Ok(Arc::new(LogicalPlan::Aggregate(aggregate)))
+    }
+
     fn visit_logical_filter(
         &mut self,
         plan: &crate::optimizer::plan_node::LogicalFilter,
     ) -> Self::Result {
-        let input = self.visit(plan.input())?;
+        let rw_input = plan.input();
+        let df_input = self.visit(rw_input.clone())?;
+        let input_columns = InputColumns::new(df_input.schema().as_ref(), rw_input.schema());
         let predicate = match plan.predicate().as_expr_unless_true() {
-            Some(expr) => convert_expr(&expr, input.schema().as_ref())?,
+            Some(expr) => convert_expr(&expr, &input_columns)?,
             None => lit(true),
         };
 
-        let filter = datafusion::logical_expr::Filter::try_new(predicate, input)?;
+        let filter = datafusion::logical_expr::Filter::try_new(predicate, df_input)?;
         Ok(Arc::new(LogicalPlan::Filter(filter)))
     }
 
@@ -63,52 +109,71 @@ impl LogicalPlanVisitor for DataFusionPlanConverter {
         &mut self,
         plan: &crate::optimizer::plan_node::LogicalProject,
     ) -> Self::Result {
-        let input_plan = self.visit(plan.input())?;
-        let input_schema = input_plan.schema();
+        let rw_input = plan.input();
+        let df_input = self.visit(rw_input.clone())?;
 
-        let mut df_exprs = Vec::new();
-        for expr in plan.exprs() {
-            df_exprs.push(convert_expr(expr, input_schema.as_ref())?);
-        }
+        let input_columns = InputColumns::new(df_input.schema().as_ref(), rw_input.schema());
+        let mut df_exprs = plan
+            .exprs()
+            .iter()
+            .map(|e| convert_expr(e, &input_columns))
+            .collect::<RwResult<Vec<_>>>()?;
 
-        // DataFusion requires unique expression names in projection.
-        let mut duplicated_exprs = HashMap::new();
-        for expr in &mut df_exprs {
-            let (relation, field) = expr.to_field(input_schema)?;
-            let count = duplicated_exprs
-                .entry((relation.clone(), field.name().clone()))
-                .or_insert(0);
-            *count += 1;
-            if *count > 1 {
-                let take_expr = std::mem::replace(expr, DFExpr::Literal(ScalarValue::Null));
-                *expr = take_expr.alias_qualified(relation, format!("{}@{}", field.name(), count));
-            }
-        }
+        deduplicate_projection_expr_names(&mut df_exprs, df_input.schema().as_ref())?;
 
-        let projection = datafusion::logical_expr::Projection::try_new(df_exprs, input_plan)?;
+        let projection = datafusion::logical_expr::Projection::try_new(df_exprs, df_input)?;
         Ok(Arc::new(LogicalPlan::Projection(projection)))
+    }
+
+    fn visit_logical_expand(
+        &mut self,
+        plan: &crate::optimizer::plan_node::LogicalExpand,
+    ) -> Self::Result {
+        let df_input = self.visit(plan.input())?;
+        let df_schema = Arc::new(convert_schema(plan.schema())?);
+        let expand = DfExpand::new(df_input, plan.column_subsets().clone(), df_schema);
+        Ok(Arc::new(LogicalPlan::Extension(Extension {
+            node: Arc::new(expand),
+        })))
+    }
+
+    fn visit_logical_project_set(
+        &mut self,
+        plan: &crate::optimizer::plan_node::LogicalProjectSet,
+    ) -> Self::Result {
+        let df_input = self.visit(plan.input())?;
+        let rw_schema = plan.schema();
+        let df_schema = convert_schema(rw_schema)?;
+
+        let project_set =
+            ProjectSet::new(df_input, plan.select_list().clone(), Arc::new(df_schema));
+
+        Ok(Arc::new(LogicalPlan::Extension(Extension {
+            node: Arc::new(project_set),
+        })))
     }
 
     fn visit_logical_join(
         &mut self,
         plan: &crate::optimizer::plan_node::LogicalJoin,
     ) -> Self::Result {
-        // Recursively convert left and right children
-        let left_plan = self.visit(plan.left())?;
-        let right_plan = self.visit(plan.right())?;
-        let concat_columns = left_plan
-            .schema()
-            .iter()
-            .map(Into::into)
-            .chain(right_plan.schema().iter().map(Into::into))
-            .collect_vec();
+        let rw_left = plan.left();
+        let rw_right = plan.right();
+        let df_left = self.visit(plan.left())?;
+        let df_right = self.visit(plan.right())?;
+        let concat_columns = ConcatColumns::new(
+            df_left.schema(),
+            rw_left.schema(),
+            df_right.schema(),
+            rw_right.schema(),
+        );
 
         // Convert join type from RisingWave to DataFusion
         let df_join_type = convert_join_type(plan.join_type())?;
 
         // Extract equijoin conditions - get equal join key pairs
-        let left_col_num = plan.left().schema().len();
-        let right_col_num = plan.right().schema().len();
+        let left_col_num = rw_left.schema().len();
+        let right_col_num = rw_right.schema().len();
         let (eq_indexes, other_condition) =
             plan.on().clone().split_eq_keys(left_col_num, right_col_num);
         let join_on_exprs = eq_indexes
@@ -146,17 +211,21 @@ impl LogicalPlanVisitor for DataFusionPlanConverter {
             None => None,
         };
 
-        let join_schema =
-            build_join_schema(left_plan.schema(), right_plan.schema(), &df_join_type)?;
+        let join_schema = build_join_schema(df_left.schema(), df_right.schema(), &df_join_type)?;
+        let null_equality = if null_equals_null {
+            NullEquality::NullEqualsNull
+        } else {
+            NullEquality::NullEqualsNothing
+        };
         let join = Join {
-            left: left_plan,
-            right: right_plan,
+            left: df_left,
+            right: df_right,
             on: join_on_exprs,
             filter,
             join_type: df_join_type,
             join_constraint: JoinConstraint::On,
             schema: Arc::new(join_schema),
-            null_equals_null,
+            null_equality,
         };
         if plan.output_indices_are_trivial() {
             return Ok(Arc::new(LogicalPlan::Join(join)));
@@ -165,7 +234,7 @@ impl LogicalPlanVisitor for DataFusionPlanConverter {
         let projection_exprs = plan
             .output_indices()
             .iter()
-            .map(|&idx| DFExpr::Column(join.schema.column(idx)))
+            .map(|&idx| DFExpr::Column(Column::from(join.schema.qualified_field(idx))))
             .collect_vec();
         let projection = datafusion::logical_expr::Projection::try_new(
             projection_exprs,
@@ -179,21 +248,14 @@ impl LogicalPlanVisitor for DataFusionPlanConverter {
         plan: &crate::optimizer::plan_node::LogicalValues,
     ) -> Self::Result {
         let rw_schema = plan.schema();
-
-        let arrow_fields = rw_schema
-            .fields()
-            .iter()
-            .map(|f| IcebergArrowConvert.to_arrow_field(&f.name, &f.data_type))
-            .collect::<Result<Vec<ArrowField>, _>>()?;
-
-        let arrow_schema = ArrowSchema::new(arrow_fields);
-        let df_schema = DFSchema::try_from(Arc::new(arrow_schema))?;
+        let df_schema = convert_schema(rw_schema)?;
+        let input_columns = InputColumns::new(&df_schema, rw_schema);
 
         let mut df_rows: Vec<Vec<DFExpr>> = Vec::with_capacity(plan.rows().len());
         for row in plan.rows() {
             let mut df_row: Vec<DFExpr> = Vec::with_capacity(row.len());
             for expr in row {
-                df_row.push(convert_expr(expr, &df_schema)?);
+                df_row.push(convert_expr(expr, &input_columns)?);
             }
             df_rows.push(df_row);
         }
@@ -228,12 +290,137 @@ impl LogicalPlanVisitor for DataFusionPlanConverter {
         Ok(Arc::new(LogicalPlan::Limit(limit)))
     }
 
+    fn visit_logical_top_n(
+        &mut self,
+        plan: &crate::optimizer::plan_node::LogicalTopN,
+    ) -> Self::Result {
+        let rw_input = plan.input();
+        let df_input = self.visit(rw_input.clone())?;
+
+        let TopNLimit::Simple(limit) = plan.limit_attr() else {
+            bail_not_implemented!(
+                "DataFusionPlanConverter: LogicalTopN with_ties is not supported"
+            );
+        };
+        if !plan.group_key().is_empty() {
+            bail_not_implemented!(
+                "DataFusionPlanConverter: LogicalTopN with a non-empty group key is not supported. This may arise from DISTINCT ON or correlated joins."
+            );
+        }
+        let offset = plan.offset();
+
+        let input_columns = InputColumns::new(df_input.schema().as_ref(), rw_input.schema());
+        let sort_expr = plan
+            .topn_order()
+            .column_orders
+            .iter()
+            .map(|order| convert_column_order(order, &input_columns))
+            .collect_vec();
+        let fetch = offset.saturating_add(limit).min(usize::MAX as _) as usize;
+        let sort = datafusion::logical_expr::Sort {
+            expr: sort_expr,
+            input: df_input,
+            fetch: Some(fetch),
+        };
+        let mut result = Arc::new(LogicalPlan::Sort(sort));
+
+        if offset > 0 {
+            let limit = datafusion::logical_expr::Limit {
+                skip: Some(Box::new(lit(offset))),
+                fetch: Some(Box::new(lit(limit))),
+                input: result,
+            };
+            result = Arc::new(LogicalPlan::Limit(limit));
+        }
+
+        Ok(result)
+    }
+
+    fn visit_logical_union(
+        &mut self,
+        plan: &crate::optimizer::plan_node::LogicalUnion,
+    ) -> Self::Result {
+        let inputs = plan
+            .inputs()
+            .iter()
+            .map(|input| self.visit(input.clone()))
+            .collect::<RwResult<Vec<_>>>()?;
+
+        let mut res = Arc::new(LogicalPlan::Union(
+            datafusion::logical_expr::Union::try_new_with_loose_types(inputs)?,
+        ));
+        if !plan.all() {
+            res = Arc::new(LogicalPlan::Distinct(
+                datafusion::logical_expr::Distinct::All(res),
+            ));
+        }
+        Ok(res)
+    }
+
+    fn visit_logical_over_window(
+        &mut self,
+        plan: &crate::optimizer::plan_node::LogicalOverWindow,
+    ) -> Self::Result {
+        let rw_input = plan.input();
+        let df_input = self.visit(rw_input.clone())?;
+
+        let input_columns = InputColumns::new(df_input.schema().as_ref(), rw_input.schema());
+        let df_exprs = plan
+            .window_functions()
+            .iter()
+            .map(|wf| convert_window_expr(wf, &input_columns))
+            .collect::<RwResult<Vec<_>>>()?;
+
+        let window_plan = datafusion::logical_expr::Window::try_new(df_exprs, df_input)?;
+        Ok(Arc::new(LogicalPlan::Window(window_plan)))
+    }
+
+    fn visit_logical_dedup(
+        &mut self,
+        plan: &crate::optimizer::plan_node::LogicalDedup,
+    ) -> Self::Result {
+        let rw_input = plan.input();
+        let df_input = self.visit(rw_input.clone())?;
+
+        let input_columns = InputColumns::new(df_input.schema().as_ref(), rw_input.schema());
+        let on_exprs = plan
+            .dedup_cols()
+            .iter()
+            .map(|index| DFExpr::Column(input_columns.column(*index)))
+            .collect_vec();
+        let select_exprs = (0..input_columns.len())
+            .map(|index| DFExpr::Column(input_columns.column(index)))
+            .collect_vec();
+
+        let distinct_on =
+            datafusion::logical_expr::DistinctOn::try_new(on_exprs, select_exprs, None, df_input)?;
+        let distinct_plan = datafusion::logical_expr::Distinct::On(distinct_on);
+        Ok(Arc::new(LogicalPlan::Distinct(distinct_plan)))
+    }
+
     fn visit_logical_iceberg_scan(
         &mut self,
         plan: &crate::optimizer::plan_node::LogicalIcebergScan,
     ) -> Self::Result {
-        // DataFusion requires unique table names for each scan, so we can't use actual table name here.
-        let table_name = format!("iceberg_scan#{}", plan.base.id().0);
+        let mut raw_table_name = plan
+            .core
+            .catalog
+            .as_ref()
+            .ok_or_else(|| {
+                ErrorCode::InternalError(
+                    "DataFusionPlanConverter: Iceberg table scan cannot find catalog info"
+                        .to_owned(),
+                )
+            })?
+            .name
+            .as_str();
+        // remove prefix __iceberg_source_
+        if raw_table_name.starts_with("__iceberg_source_") {
+            raw_table_name = &raw_table_name["__iceberg_source_".len()..];
+        }
+
+        // DataFusion requires unique table names for each scan, so we append the plan id to the table name.
+        let table_name = format!("{}#{}", raw_table_name, plan.base.id().0);
         let table_source =
             provider_as_source(Arc::new(IcebergTableProvider::from_logical_plan(plan)?));
         let table_scan = TableScan::try_new(table_name, table_source, None, vec![], None)?;
@@ -241,7 +428,7 @@ impl LogicalPlanVisitor for DataFusionPlanConverter {
     }
 }
 
-pub struct DefaultValueBehavior;
+struct DefaultValueBehavior;
 impl DefaultBehavior<RwResult<Arc<DFLogicalPlan>>> for DefaultValueBehavior {
     fn apply(
         &self,
@@ -260,4 +447,36 @@ pub impl LogicalPlanRef {
         let result = DataFusionPlanConverter.visit(self.clone())?;
         Ok(result)
     }
+}
+
+fn convert_schema(rw_schema: &RwSchema) -> RwResult<DFSchema> {
+    let arrow_fields = rw_schema
+        .fields()
+        .iter()
+        .map(|f| IcebergArrowConvert.to_arrow_field(&f.name, &f.data_type))
+        .collect::<Result<Vec<ArrowField>, _>>()?;
+
+    let arrow_schema = ArrowSchema::new(arrow_fields);
+    let df_schema = DFSchema::try_from(Arc::new(arrow_schema))?;
+    Ok(df_schema)
+}
+
+fn deduplicate_projection_expr_names(
+    exprs: &mut [DFExpr],
+    input_schema: &DFSchema,
+) -> RwResult<()> {
+    // DataFusion requires unique expression names in projection.
+    let mut duplicated_exprs = HashMap::new();
+    for expr in exprs {
+        let (relation, field) = expr.to_field(input_schema)?;
+        let count = duplicated_exprs
+            .entry((relation.clone(), field.name().clone()))
+            .or_insert(0);
+        *count += 1;
+        if *count > 1 {
+            let take_expr = std::mem::replace(expr, DFExpr::Literal(ScalarValue::Null, None));
+            *expr = take_expr.alias_qualified(relation, format!("{}@{}", field.name(), count));
+        }
+    }
+    Ok(())
 }

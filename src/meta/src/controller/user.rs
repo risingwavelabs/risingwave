@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -40,8 +40,8 @@ use crate::controller::catalog::CatalogController;
 use crate::controller::utils::{
     PartialUserPrivilege, check_user_name_duplicate, ensure_object_id,
     ensure_privileges_not_referred, ensure_user_id, extract_grant_obj_id,
-    get_index_state_tables_by_table_id, get_internal_tables_by_id, get_object_owner,
-    get_referring_privileges_cascade, get_user_privilege, list_user_info_by_ids,
+    get_iceberg_related_object_ids, get_index_state_tables_by_table_id, get_internal_tables_by_id,
+    get_object_owner, get_referring_privileges_cascade, get_user_privilege, list_user_info_by_ids,
 };
 use crate::manager::{IGNORED_NOTIFICATION_VERSION, NotificationVersion};
 use crate::{MetaError, MetaResult};
@@ -261,6 +261,17 @@ impl CatalogController {
                                 ..Default::default()
                             }),
                     );
+                    let iceberg_privilege_object_ids =
+                        get_iceberg_related_object_ids(id, &txn).await?;
+                    privileges.extend(iceberg_privilege_object_ids.iter().map(
+                        |&iceberg_object_id| user_privilege::ActiveModel {
+                            oid: Set(iceberg_object_id),
+                            granted_by: Set(grantor),
+                            action: Set(action),
+                            with_grant_option: Set(with_grant_option),
+                            ..Default::default()
+                        },
+                    ));
                 }
             }
         }
@@ -405,6 +416,15 @@ impl CatalogController {
                         .chain(index_state_table_ids.iter())
                         .map(|&tid| (tid.as_object_id(), vec![Action::Select])),
                 );
+                let iceberg_privilege_object_ids =
+                    get_iceberg_related_object_ids(obj, &txn).await?;
+                if !iceberg_privilege_object_ids.is_empty() {
+                    revoke_items.extend(
+                        iceberg_privilege_object_ids
+                            .into_iter()
+                            .map(|iceberg_object_id| (iceberg_object_id, vec![Action::Select])),
+                    );
+                }
             }
         }
 
@@ -749,7 +769,7 @@ mod tests {
     use crate::manager::MetaSrvEnv;
 
     const TEST_DATABASE_ID: DatabaseId = DatabaseId::new(1);
-    const TEST_ROOT_USER_ID: UserId = 1;
+    const TEST_ROOT_USER_ID: UserId = UserId::new(1);
 
     fn make_test_user(name: &str) -> PbUserInfo {
         PbUserInfo {
@@ -848,7 +868,7 @@ mod tests {
             privilege_1
                 .iter()
                 .all(|gp| gp.object == Some(TEST_DATABASE_ID.into())
-                    && gp.action_with_opts[0].granted_by == TEST_ROOT_USER_ID as u32)
+                    && gp.action_with_opts[0].granted_by == TEST_ROOT_USER_ID)
         );
 
         let privilege_2 = get_user_privilege(user_2.user_id, &mgr.inner.read().await.db).await?;
@@ -857,7 +877,7 @@ mod tests {
             privilege_2
                 .iter()
                 .all(|gp| gp.object == Some(TEST_DATABASE_ID.into())
-                    && gp.action_with_opts[0].granted_by == user_1.user_id as u32
+                    && gp.action_with_opts[0].granted_by == user_1.user_id
                     && gp.action_with_opts[0].with_grant_option)
         );
 

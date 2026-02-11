@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -272,7 +272,7 @@ impl HummockManager {
                     sst_infos: sst_infos.into_iter().map(|sst| sst.into()).collect_vec(),
                     sst_id_to_worker_id: sst_to_context
                         .iter()
-                        .map(|(object_id, worker_id)| (object_id.inner(), worker_id.as_raw_id()))
+                        .map(|(object_id, worker_id)| (*object_id, *worker_id))
                         .collect(),
                 }))
                 .is_err()
@@ -330,7 +330,6 @@ async fn check_gc_history(
     object_ids: impl IntoIterator<Item = HummockSstableObjectId>,
 ) -> Result<()> {
     let futures = object_ids.into_iter().map(|id| async move {
-        let id: risingwave_meta_model::HummockSstableObjectId = id.inner().try_into().unwrap();
         hummock_gc_history::Entity::find_by_id(id)
             .one(db)
             .await
@@ -347,9 +346,7 @@ async fn check_gc_history(
         ?expired_object_ids,
         "new SSTs are rejected because they have already been GCed"
     );
-    Err(Error::InvalidSst(
-        (expired_object_ids[0].object_id as u64).into(),
-    ))
+    Err(Error::InvalidSst(expired_object_ids[0].object_id))
 }
 
 // pin and unpin method
@@ -367,15 +364,15 @@ impl HummockManager {
             context_id,
             HummockPinnedVersion {
                 context_id,
-                min_pinned_id: INVALID_VERSION_ID.to_u64(),
+                min_pinned_id: INVALID_VERSION_ID,
             },
         );
         let version_id = versioning.current_version.id;
         let ret = versioning.current_version.clone();
-        if HummockVersionId::new(context_pinned_version.min_pinned_id) == INVALID_VERSION_ID
-            || HummockVersionId::new(context_pinned_version.min_pinned_id) > version_id
+        if context_pinned_version.min_pinned_id == INVALID_VERSION_ID
+            || context_pinned_version.min_pinned_id > version_id
         {
-            context_pinned_version.min_pinned_id = version_id.to_u64();
+            context_pinned_version.min_pinned_id = version_id;
             commit_multi_var!(self.meta_store_ref(), context_pinned_version)?;
             trigger_pin_unpin_version_state(&self.metrics, &context_info.pinned_versions);
         }
@@ -407,16 +404,16 @@ impl HummockManager {
             context_id,
             HummockPinnedVersion {
                 context_id,
-                min_pinned_id: 0,
+                min_pinned_id: HummockVersionId::default(),
             },
         );
         assert!(
-            context_pinned_version.min_pinned_id <= unpin_before.to_u64(),
+            context_pinned_version.min_pinned_id <= unpin_before,
             "val must be monotonically non-decreasing. old = {}, new = {}.",
             context_pinned_version.min_pinned_id,
             unpin_before
         );
-        context_pinned_version.min_pinned_id = unpin_before.to_u64();
+        context_pinned_version.min_pinned_id = unpin_before;
         commit_multi_var!(self.meta_store_ref(), context_pinned_version)?;
         trigger_pin_unpin_version_state(&self.metrics, &context_info.pinned_versions);
 
@@ -456,10 +453,8 @@ impl HummockManager {
 
 fn trigger_safepoint_stat(metrics: &MetaMetrics, safepoints: &[HummockVersionId]) {
     if let Some(sp) = safepoints.iter().min() {
-        metrics.min_safepoint_version_id.set(sp.to_u64() as _);
+        metrics.min_safepoint_version_id.set(sp.as_i64_id());
     } else {
-        metrics
-            .min_safepoint_version_id
-            .set(HummockVersionId::MAX.to_u64() as _);
+        metrics.min_safepoint_version_id.set(u64::MAX as _);
     }
 }

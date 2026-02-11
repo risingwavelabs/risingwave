@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#[cfg(feature = "datafusion")]
+use datafusion::physical_plan::{ExecutionPlan, displayable};
 use petgraph::dot::Dot;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_batch::worker_manager::worker_node_manager::WorkerNodeSelector;
@@ -25,10 +27,14 @@ use thiserror_ext::AsReport;
 use super::create_index::{gen_create_index_plan, resolve_index_schema};
 use super::create_mv::gen_create_mv_plan;
 use super::create_sink::gen_sink_plan;
-use super::query::gen_batch_plan_by_statement;
+use super::query::{BatchPlanChoice, gen_batch_plan_by_statement};
 use super::util::SourceSchemaCompatExt;
 use super::{RwPgResponse, RwPgResponseBuilderExt};
 use crate::OptimizerContextRef;
+#[cfg(feature = "datafusion")]
+use crate::datafusion::{
+    DfBatchQueryPlanResult, build_datafusion_physical_plan, create_datafusion_context,
+};
 use crate::error::{ErrorCode, Result};
 use crate::handler::HandlerArgs;
 use crate::handler::create_table::handle_create_table_plan;
@@ -49,12 +55,23 @@ pub async fn do_handle_explain(
     // Workaround to avoid `Rc` across `await` point.
     let mut batch_plan_fragmenter = None;
     let mut batch_plan_fragmenter_fmt = ExplainFormat::Json;
+    #[cfg(feature = "datafusion")]
+    let mut datafusion_physical_plan_request: Option<(
+        DfBatchQueryPlanResult,
+        ExplainFormat,
+        bool,
+    )> = None;
 
     let session = handler_args.session.clone();
 
     enum PhysicalPlanRef {
         Stream(StreamPlanRef),
         Batch(BatchPlanRef),
+    }
+    enum PlanToExplain {
+        Rw(PhysicalPlanRef),
+        #[cfg(feature = "datafusion")]
+        Df(DfBatchQueryPlanResult),
     }
 
     {
@@ -101,14 +118,22 @@ pub async fn do_handle_explain(
                 )
                 .await?;
                 let context = plan.ctx();
-                (Ok(PhysicalPlanRef::Stream(plan)), Some(table), context)
+                (
+                    Ok(PlanToExplain::Rw(PhysicalPlanRef::Stream(plan))),
+                    Some(table),
+                    context,
+                )
             }
             Statement::CreateSink { stmt } => {
                 let plan = gen_sink_plan(handler_args, stmt, Some(explain_options), false)
                     .await
                     .map(|plan| plan.sink_plan)?;
                 let context = plan.ctx();
-                (Ok(PhysicalPlanRef::Stream(plan)), None, context)
+                (
+                    Ok(PlanToExplain::Rw(PhysicalPlanRef::Stream(plan))),
+                    None,
+                    context,
+                )
             }
 
             Statement::FetchCursor {
@@ -123,7 +148,11 @@ pub async fn do_handle_explain(
                     .await
                     .map(|x| x.plan)?;
                 let context = plan.ctx();
-                (Ok(PhysicalPlanRef::Batch(plan)), None, context)
+                (
+                    Ok(PlanToExplain::Rw(PhysicalPlanRef::Batch(plan))),
+                    None,
+                    context,
+                )
             }
 
             // For other queries without `await` point, we can keep a copy of reference to the
@@ -145,7 +174,12 @@ pub async fn do_handle_explain(
                         emit_mode,
                         ..
                     } => gen_create_mv_plan(&session, context, *query, name, columns, emit_mode)
-                        .map(|(plan, table)| (PhysicalPlanRef::Stream(plan), Some(table))),
+                        .map(|(plan, table)| {
+                            (
+                                PlanToExplain::Rw(PhysicalPlanRef::Stream(plan)),
+                                Some(table),
+                            )
+                        }),
                     Statement::CreateView {
                         materialized: false,
                         ..
@@ -186,7 +220,10 @@ pub async fn do_handle_explain(
                         )
                     }
                     .map(|(plan, index_table, _index)| {
-                        (PhysicalPlanRef::Stream(plan), Some(index_table))
+                        (
+                            PlanToExplain::Rw(PhysicalPlanRef::Stream(plan)),
+                            Some(index_table),
+                        )
                     }),
 
                     // -- Batch Queries --
@@ -194,9 +231,16 @@ pub async fn do_handle_explain(
                     | Statement::Delete { .. }
                     | Statement::Update { .. }
                     | Statement::Query { .. } => {
-                        let plan_result =
-                            gen_batch_plan_by_statement(&session, context, stmt)?.unwrap_rw()?;
-                        Ok((PhysicalPlanRef::Batch(plan_result.plan), None))
+                        match gen_batch_plan_by_statement(&session, context, stmt)? {
+                            BatchPlanChoice::Rw(plan_result) => Ok((
+                                PlanToExplain::Rw(PhysicalPlanRef::Batch(plan_result.plan)),
+                                None,
+                            )),
+                            #[cfg(feature = "datafusion")]
+                            BatchPlanChoice::Df(plan_result) => {
+                                Ok((PlanToExplain::Df(plan_result), None))
+                            }
+                        }
                     }
 
                     _ => bail_not_implemented!("unsupported statement for EXPLAIN: {stmt}"),
@@ -224,7 +268,7 @@ pub async fn do_handle_explain(
             ExplainType::DistSql => {
                 if let Ok(plan) = &plan {
                     match plan {
-                        PhysicalPlanRef::Batch(plan) => {
+                        PlanToExplain::Rw(PhysicalPlanRef::Batch(plan)) => {
                             let worker_node_manager_reader = WorkerNodeSelector::new(
                                 session.env().worker_node_manager_ref(),
                                 session.is_barrier_read(),
@@ -241,7 +285,7 @@ pub async fn do_handle_explain(
                                 ExplainFormat::Json
                             }
                         }
-                        PhysicalPlanRef::Stream(plan) => {
+                        PlanToExplain::Rw(PhysicalPlanRef::Stream(plan)) => {
                             let graph = build_graph(plan.clone(), None)?;
                             let table = table.map(|x| x.to_prost());
                             if explain_format == ExplainFormat::Dot {
@@ -254,36 +298,55 @@ pub async fn do_handle_explain(
                                 blocks.push(explain_stream_graph(&graph, table, explain_verbose));
                             }
                         }
+                        #[cfg(feature = "datafusion")]
+                        PlanToExplain::Df(_) => {
+                            return Err(ErrorCode::NotSupported(
+                                "EXPLAIN DISTRIBUTED for DataFusion plan".into(),
+                                "Distributed explain is only available for RisingWave batch plans."
+                                    .into(),
+                            )
+                            .into());
+                        }
                     }
                 }
             }
             ExplainType::Physical => {
                 // if explain trace is on, the plan has been in the rows
                 if !explain_trace && let Ok(physical_plan) = &plan {
-                    let plan = match &physical_plan {
-                        PhysicalPlanRef::Stream(plan) => plan as &dyn Explain,
-                        PhysicalPlanRef::Batch(plan) => plan as &dyn Explain,
-                    };
-                    match explain_format {
-                        ExplainFormat::Text => {
-                            blocks.push(plan.explain_to_string());
-                        }
-                        ExplainFormat::Json => blocks.push(plan.explain_to_json()),
-                        ExplainFormat::Xml => blocks.push(plan.explain_to_xml()),
-                        ExplainFormat::Yaml => blocks.push(plan.explain_to_yaml()),
-                        ExplainFormat::Dot => {
-                            if explain_backfill && let PhysicalPlanRef::Stream(plan) = physical_plan
-                            {
-                                let dot_formatted_backfill_order =
-                                    explain_backfill_order_in_dot_format(
-                                        &session,
-                                        context.with_options().backfill_order_strategy(),
-                                        plan.clone(),
-                                    )?;
-                                blocks.push(dot_formatted_backfill_order);
-                            } else {
-                                blocks.push(plan.explain_to_dot());
+                    match physical_plan {
+                        PlanToExplain::Rw(physical_plan) => {
+                            let plan = match &physical_plan {
+                                PhysicalPlanRef::Stream(plan) => plan as &dyn Explain,
+                                PhysicalPlanRef::Batch(plan) => plan as &dyn Explain,
+                            };
+                            match explain_format {
+                                ExplainFormat::Text => {
+                                    blocks.push(plan.explain_to_string());
+                                }
+                                ExplainFormat::Json => blocks.push(plan.explain_to_json()),
+                                ExplainFormat::Xml => blocks.push(plan.explain_to_xml()),
+                                ExplainFormat::Yaml => blocks.push(plan.explain_to_yaml()),
+                                ExplainFormat::Dot => {
+                                    if explain_backfill
+                                        && let PhysicalPlanRef::Stream(plan) = physical_plan
+                                    {
+                                        let dot_formatted_backfill_order =
+                                            explain_backfill_order_in_dot_format(
+                                                &session,
+                                                context.with_options().backfill_order_strategy(),
+                                                plan.clone(),
+                                            )?;
+                                        blocks.push(dot_formatted_backfill_order);
+                                    } else {
+                                        blocks.push(plan.explain_to_dot());
+                                    }
+                                }
                             }
+                        }
+                        #[cfg(feature = "datafusion")]
+                        PlanToExplain::Df(plan) => {
+                            datafusion_physical_plan_request =
+                                Some((plan.clone(), explain_format, explain_verbose));
                         }
                     }
                 }
@@ -303,6 +366,19 @@ pub async fn do_handle_explain(
         plan?;
     }
 
+    // Use explain_datafusion_plan here to avoid `Rc` across `await` point.
+    #[cfg(feature = "datafusion")]
+    if let Some((plan, explain_format, explain_verbose)) = datafusion_physical_plan_request {
+        let df_ctx = create_datafusion_context(session.as_ref())?;
+        let physical_plan = build_datafusion_physical_plan(&df_ctx, &plan).await?;
+        explain_datafusion_plan(
+            physical_plan.as_ref(),
+            explain_format,
+            explain_verbose,
+            blocks,
+        )?;
+    }
+
     if let Some(fragmenter) = batch_plan_fragmenter {
         let query = fragmenter.generate_complete_query().await?;
         let stage_graph = if batch_plan_fragmenter_fmt == ExplainFormat::Dot {
@@ -315,6 +391,27 @@ pub async fn do_handle_explain(
         blocks.push(stage_graph);
     }
 
+    Ok(())
+}
+
+#[cfg(feature = "datafusion")]
+fn explain_datafusion_plan(
+    plan: &dyn ExecutionPlan,
+    explain_format: ExplainFormat,
+    verbose: bool,
+    blocks: &mut Vec<String>,
+) -> Result<()> {
+    let output = match explain_format {
+        ExplainFormat::Text => displayable(plan).indent(verbose).to_string(),
+        unsupported => {
+            return Err(ErrorCode::NotSupported(
+                format!("EXPLAIN ... {:?} for DataFusion plan", unsupported),
+                "Only TEXT format is supported for DataFusion plans.".to_owned(),
+            )
+            .into());
+        }
+    };
+    blocks.push(output);
     Ok(())
 }
 

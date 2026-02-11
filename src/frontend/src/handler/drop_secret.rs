@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -30,6 +30,7 @@ pub async fn handle_drop_secret(
     handler_args: HandlerArgs,
     secret_name: ObjectName,
     if_exists: bool,
+    cascade: bool,
 ) -> Result<RwPgResponse> {
     Feature::SecretManagement.check_available()?;
 
@@ -39,7 +40,9 @@ pub async fn handle_drop_secret(
         fetch_secret_catalog_with_db_schema_id(&session, &secret_name, if_exists)?
     {
         let catalog_writer = session.catalog_writer()?;
-        catalog_writer.drop_secret(secret_catalog.id).await?;
+        catalog_writer
+            .drop_secret(secret_catalog.id, cascade)
+            .await?;
 
         Ok(RwPgResponse::empty_result(StatementType::DROP_SECRET))
     } else {

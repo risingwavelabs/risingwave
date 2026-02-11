@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,7 +19,6 @@ use itertools::Itertools;
 use pgwire::pg_field_descriptor::PgFieldDescriptor;
 use pgwire::pg_protocol::truncated_fmt;
 use pgwire::pg_response::{PgResponse, StatementType};
-use pgwire::pg_server::Session;
 use risingwave_batch::worker_manager::worker_node_manager::WorkerNodeManagerRef;
 use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::{ColumnCatalog, ColumnDesc};
@@ -29,7 +28,9 @@ use risingwave_common::util::addr::HostAddr;
 use risingwave_connector::source::kafka::PRIVATELINK_CONNECTION;
 use risingwave_expr::scalar::like::{i_like_default, like_default};
 use risingwave_pb::catalog::connection;
-use risingwave_pb::frontend_service::GetRunningSqlsRequest;
+use risingwave_pb::frontend_service::{
+    GetAllCursorsRequest, GetAllSubCursorsRequest, GetRunningSqlsRequest,
+};
 use risingwave_pb::id::WorkerId;
 use risingwave_rpc_client::FrontendClientPoolRef;
 use risingwave_sqlparser::ast::{
@@ -46,7 +47,6 @@ use crate::catalog::{CatalogError, IndexCatalog};
 use crate::error::{Result, RwError};
 use crate::handler::HandlerArgs;
 use crate::handler::create_connection::print_connection_params;
-use crate::session::cursor_manager::SubscriptionCursor;
 use crate::session::{SessionImpl, WorkerProcessId};
 use crate::user::has_access_to_object;
 use crate::user::user_catalog::UserCatalog;
@@ -375,7 +375,7 @@ impl From<Arc<IndexCatalog>> for ShowIndexRow {
 #[derive(Fields)]
 #[fields(style = "Title Case")]
 struct ShowClusterRow {
-    id: i32,
+    id: WorkerId,
     addr: String,
     r#type: String,
     state: String,
@@ -424,16 +424,19 @@ struct ShowSubscriptionRow {
 #[derive(Fields)]
 #[fields(style = "Title Case")]
 struct ShowCursorRow {
+    worker_id: String,
     session_id: String,
     user: String,
     host: String,
     database: String,
     cursor_name: String,
+    info: Option<String>,
 }
 
 #[derive(Fields)]
 #[fields(style = "Title Case")]
 struct ShowSubscriptionCursorRow {
+    worker_id: String,
     session_id: String,
     user: String,
     host: String,
@@ -442,6 +445,7 @@ struct ShowSubscriptionCursorRow {
     subscription_name: String,
     state: String,
     idle_duration_ms: i64,
+    info: Option<String>,
 }
 
 /// Infer the row description for different show objects.
@@ -710,7 +714,7 @@ pub async fn handle_show_object(
                 let addr: HostAddr = worker.host.as_ref().unwrap().into();
                 let property = worker.property.as_ref();
                 ShowClusterRow {
-                    id: worker.id.as_i32_id(),
+                    id: worker.id,
                     addr: addr.to_string(),
                     r#type: worker.get_type().unwrap().as_str_name().into(),
                     state: worker.get_state().unwrap().as_str_name().to_owned(),
@@ -750,68 +754,21 @@ pub async fn handle_show_object(
                 .into());
         }
         ShowObject::Cursor => {
-            let sessions = session
-                .env()
-                .sessions_map()
-                .read()
-                .values()
-                .cloned()
-                .collect_vec();
-            let mut rows = vec![];
-            for s in sessions {
-                let session_id = format!("{}", s.id().0);
-                let user = s.user_name();
-                let host = format!("{}", s.peer_addr());
-                let database = s.database();
-
-                s.get_cursor_manager()
-                    .iter_query_cursors(|cursor_name: &String, _| {
-                        rows.push(ShowCursorRow {
-                            session_id: session_id.clone(),
-                            user: user.clone(),
-                            host: host.clone(),
-                            database: database.clone(),
-                            cursor_name: cursor_name.to_owned(),
-                        });
-                    })
-                    .await;
-            }
+            let rows = show_all_cursors_impl(
+                session.env().frontend_client_pool(),
+                session.env().worker_node_manager_ref(),
+            )
+            .await;
             return Ok(PgResponse::builder(StatementType::SHOW_COMMAND)
                 .rows(rows)
                 .into());
         }
         ShowObject::SubscriptionCursor => {
-            let sessions = session
-                .env()
-                .sessions_map()
-                .read()
-                .values()
-                .cloned()
-                .collect_vec();
-            let mut rows = vec![];
-            for s in sessions {
-                let session_id = format!("{}", s.id().0);
-                let user = s.user_name();
-                let host = format!("{}", s.peer_addr());
-                let database = s.database().clone();
-
-                s.get_cursor_manager()
-                    .iter_subscription_cursors(
-                        |cursor_name: &String, cursor: &SubscriptionCursor| {
-                            rows.push(ShowSubscriptionCursorRow {
-                                session_id: session_id.clone(),
-                                user: user.clone(),
-                                host: host.clone(),
-                                database: database.clone(),
-                                cursor_name: cursor_name.to_owned(),
-                                subscription_name: cursor.subscription_name().to_owned(),
-                                state: cursor.state_info_string(),
-                                idle_duration_ms: cursor.idle_duration().as_millis() as i64,
-                            });
-                        },
-                    )
-                    .await;
-            }
+            let rows = show_all_sub_cursors_impl(
+                session.env().frontend_client_pool(),
+                session.env().worker_node_manager_ref(),
+            )
+            .await;
 
             return Ok(PgResponse::builder(StatementType::SHOW_COMMAND)
                 .rows(rows)
@@ -897,7 +854,7 @@ pub fn handle_show_create_object(
         ShowCreateType::Sink => {
             let (sink, schema) =
                 catalog_reader.get_any_sink_by_name(&database, schema_path, &object_name)?;
-            if !has_access_to_object(current_user, sink.id, sink.owner.user_id) {
+            if !has_access_to_object(current_user, sink.id, sink.owner) {
                 return Err(CatalogError::not_found("sink", name.to_string()).into());
             }
             (sink.create_sql(), schema)
@@ -939,7 +896,7 @@ pub fn handle_show_create_object(
         ShowCreateType::Subscription => {
             let (subscription, schema) =
                 catalog_reader.get_subscription_by_name(&database, schema_path, &object_name)?;
-            if !has_access_to_object(current_user, subscription.id, subscription.owner.user_id) {
+            if !has_access_to_object(current_user, subscription.id, subscription.owner) {
                 return Err(CatalogError::not_found("subscription", name.to_string()).into());
             }
             (subscription.create_sql(), schema)
@@ -953,6 +910,152 @@ pub fn handle_show_create_object(
             create_sql: sql,
         }])
         .into())
+}
+
+async fn show_all_sub_cursors_impl(
+    frontend_client_pool: FrontendClientPoolRef,
+    worker_node_manager: WorkerNodeManagerRef,
+) -> Vec<ShowSubscriptionCursorRow> {
+    fn on_error(worker_id: WorkerId, err_msg: String) -> Vec<ShowSubscriptionCursorRow> {
+        vec![ShowSubscriptionCursorRow {
+            worker_id: format!("{}", worker_id),
+            session_id: "".to_owned(),
+            user: "".to_owned(),
+            host: "".to_owned(),
+            database: "".to_owned(),
+            cursor_name: "".to_owned(),
+            subscription_name: "".to_owned(),
+            state: "".to_owned(),
+            idle_duration_ms: 0,
+            info: Some(format!(
+                "Failed to show subscription cursor from worker {worker_id} due to: {err_msg}"
+            )),
+        }]
+    }
+
+    let futures = worker_node_manager
+        .list_frontend_nodes()
+        .into_iter()
+        .map(|worker| {
+            let frontend_client_pool_ = frontend_client_pool.clone();
+            async move {
+                let client = match frontend_client_pool_.get(&worker).await {
+                    Ok(client) => client,
+                    Err(e) => {
+                        return on_error(worker.id, format!("{}", e.as_report()));
+                    }
+                };
+
+                let resp = match client.get_all_sub_cursors(GetAllSubCursorsRequest {}).await {
+                    Ok(resp) => resp,
+                    Err(e) => {
+                        return on_error(worker.id, format!("{}", e.as_report()));
+                    }
+                };
+
+                resp.into_inner()
+                    .subscription_cursors
+                    .into_iter()
+                    .flat_map(|sub_cursor| {
+                        let worker_id = worker.id.to_string();
+                        let session_id = sub_cursor.session_id.to_string();
+
+                        let user = sub_cursor.user_name;
+                        let host = sub_cursor.peer_addr;
+                        let database = sub_cursor.database;
+
+                        let size = sub_cursor.states.len();
+                        let mut sub_cursors = vec![];
+                        for index in 0..size {
+                            sub_cursors.push(ShowSubscriptionCursorRow {
+                                worker_id: worker_id.clone(),
+                                session_id: session_id.clone(),
+                                user: user.clone(),
+                                host: host.clone(),
+                                database: database.clone(),
+                                cursor_name: sub_cursor.cursor_names[index].clone(),
+                                subscription_name: sub_cursor.subscription_names[index].clone(),
+                                state: sub_cursor.states[index].clone(),
+                                idle_duration_ms: sub_cursor.idle_durations[index] as i64,
+                                info: None,
+                            })
+                        }
+                        sub_cursors
+                    })
+                    .collect_vec()
+            }
+        })
+        .collect_vec();
+    join_all(futures).await.into_iter().flatten().collect()
+}
+
+async fn show_all_cursors_impl(
+    frontend_client_pool: FrontendClientPoolRef,
+    worker_node_manager: WorkerNodeManagerRef,
+) -> Vec<ShowCursorRow> {
+    fn on_error(worker_id: WorkerId, err_msg: String) -> Vec<ShowCursorRow> {
+        vec![ShowCursorRow {
+            worker_id: format!("{}", worker_id),
+            session_id: "".to_owned(),
+            user: "".to_owned(),
+            host: "".to_owned(),
+            database: "".to_owned(),
+            cursor_name: "".to_owned(),
+            info: Some(format!(
+                "Failed to show cursor from worker {worker_id} due to: {err_msg}"
+            )),
+        }]
+    }
+    let futures = worker_node_manager
+        .list_frontend_nodes()
+        .into_iter()
+        .map(|worker| {
+            let frontend_client_pool_ = frontend_client_pool.clone();
+            async move {
+                let client = match frontend_client_pool_.get(&worker).await {
+                    Ok(client) => client,
+                    Err(e) => {
+                        return on_error(worker.id, format!("{}", e.as_report()));
+                    }
+                };
+
+                let resp = match client.get_all_cursors(GetAllCursorsRequest {}).await {
+                    Ok(resp) => resp,
+                    Err(e) => {
+                        return on_error(worker.id, format!("{}", e.as_report()));
+                    }
+                };
+
+                resp.into_inner()
+                    .all_cursors
+                    .into_iter()
+                    .flat_map(|cursors| {
+                        let worker_id = worker.id.to_string();
+                        let session_id = cursors.session_id.to_string();
+
+                        let user = cursors.user_name;
+                        let host = cursors.peer_addr;
+                        let database = cursors.database;
+
+                        cursors
+                            .cursor_names
+                            .into_iter()
+                            .map(|cursor_name| ShowCursorRow {
+                                worker_id: worker_id.clone(),
+                                session_id: session_id.clone(),
+                                user: user.clone(),
+                                host: host.clone(),
+                                database: database.clone(),
+                                cursor_name,
+                                info: None,
+                            })
+                            .collect_vec()
+                    })
+                    .collect_vec()
+            }
+        })
+        .collect_vec();
+    join_all(futures).await.into_iter().flatten().collect()
 }
 
 async fn show_process_list_impl(

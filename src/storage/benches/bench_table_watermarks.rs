@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -26,8 +26,7 @@ use risingwave_common::util::epoch::test_epoch;
 use risingwave_hummock_sdk::HummockEpoch;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::table_watermark::{
-    PkPrefixTableWatermarksIndex, TableWatermarks, VnodeWatermark, WatermarkDirection,
-    WatermarkSerdeType,
+    TableWatermarks, TableWatermarksIndex, VnodeWatermark, WatermarkDirection, WatermarkSerdeType,
 };
 use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionStateTableInfo};
 use risingwave_pb::hummock::{PbHummockVersion, StateTableInfoDelta};
@@ -119,7 +118,7 @@ fn gen_version(
     ));
     let committed_epoch = test_epoch(new_epoch_idx as _);
     let mut version = HummockVersion::from_persisted_protobuf(&PbHummockVersion {
-        id: new_epoch_idx as _,
+        id: (new_epoch_idx as u64).into(),
         ..Default::default()
     });
     version.table_watermarks = (0..table_count)
@@ -133,7 +132,7 @@ fn gen_version(
                     TableId::new(table_id as _),
                     StateTableInfoDelta {
                         committed_epoch,
-                        compaction_group_id: StaticCompactionGroupId::StateDefault as _,
+                        compaction_group_id: StaticCompactionGroupId::StateDefault,
                     },
                 )
             })
@@ -178,10 +177,11 @@ fn bench_table_watermarks(c: &mut Criterion) {
     let staging_epoch_count: usize = 500;
     let vnode_part_count = 16;
 
-    let mut table_watermarks = PkPrefixTableWatermarksIndex::new_committed(
+    let mut table_watermarks = TableWatermarksIndex::new_committed(
         gen_committed_table_watermarks(safe_epoch_idx, committed_epoch_idx, vnode_part_count)
             .into(),
         test_epoch(committed_epoch_idx as u64),
+        WatermarkSerdeType::PkPrefix,
     );
     for i in 0..staging_epoch_count {
         let (epoch, watermarks) =

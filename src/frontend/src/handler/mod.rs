@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -42,6 +42,7 @@ use crate::scheduler::{DistributedQueryStream, LocalQueryStream};
 use crate::session::SessionImpl;
 use crate::utils::WithOptions;
 
+mod alter_connection_props;
 mod alter_database_param;
 mod alter_mv;
 mod alter_owner;
@@ -112,6 +113,7 @@ pub mod privilege;
 pub mod query;
 mod recover;
 mod refresh;
+mod reset_source;
 pub mod show;
 mod transaction;
 mod use_db;
@@ -519,8 +521,9 @@ pub async fn handle(
                     | ObjectType::Index
                     | ObjectType::Table
                     | ObjectType::Schema
-                    | ObjectType::Connection => true,
-                    ObjectType::Database | ObjectType::User | ObjectType::Secret => {
+                    | ObjectType::Connection
+                    | ObjectType::Secret => true,
+                    ObjectType::Database | ObjectType::User => {
                         bail_not_implemented!("DROP CASCADE");
                     }
                 }
@@ -578,7 +581,8 @@ pub async fn handle(
                     .await
                 }
                 ObjectType::Secret => {
-                    drop_secret::handle_drop_secret(handler_args, object_name, if_exists).await
+                    drop_secret::handle_drop_secret(handler_args, object_name, if_exists, cascade)
+                        .await
                 }
             }
         }
@@ -706,6 +710,7 @@ pub async fn handle(
                     name,
                     new_owner_name,
                     StatementType::ALTER_DATABASE,
+                    None,
                 )
                 .await
             }
@@ -788,6 +793,7 @@ pub async fn handle(
                     name,
                     new_owner_name,
                     StatementType::ALTER_SCHEMA,
+                    None,
                 )
                 .await
             }
@@ -817,6 +823,7 @@ pub async fn handle(
                     name,
                     new_owner_name,
                     StatementType::ALTER_TABLE,
+                    None,
                 )
                 .await
             }
@@ -849,7 +856,8 @@ pub async fn handle(
             AlterTableOperation::SetSourceRateLimit { rate_limit } => {
                 alter_streaming_rate_limit::handle_alter_streaming_rate_limit(
                     handler_args,
-                    PbThrottleTarget::TableWithSource,
+                    PbThrottleTarget::Table,
+                    risingwave_pb::common::PbThrottleType::Source,
                     name,
                     rate_limit,
                 )
@@ -862,7 +870,8 @@ pub async fn handle(
             AlterTableOperation::SetDmlRateLimit { rate_limit } => {
                 alter_streaming_rate_limit::handle_alter_streaming_rate_limit(
                     handler_args,
-                    PbThrottleTarget::TableDml,
+                    PbThrottleTarget::Table,
+                    risingwave_pb::common::PbThrottleType::Dml,
                     name,
                     rate_limit,
                 )
@@ -889,7 +898,8 @@ pub async fn handle(
             AlterTableOperation::SetBackfillRateLimit { rate_limit } => {
                 alter_streaming_rate_limit::handle_alter_streaming_rate_limit(
                     handler_args,
-                    PbThrottleTarget::CdcTable,
+                    PbThrottleTarget::Table,
+                    risingwave_pb::common::PbThrottleType::Backfill,
                     name,
                     rate_limit,
                 )
@@ -1016,6 +1026,7 @@ pub async fn handle(
                         name,
                         new_owner_name,
                         statement_type,
+                        None,
                     )
                     .await
                 }
@@ -1036,6 +1047,7 @@ pub async fn handle(
                     alter_streaming_rate_limit::handle_alter_streaming_rate_limit(
                         handler_args,
                         PbThrottleTarget::Mv,
+                        risingwave_pb::common::PbThrottleType::Backfill,
                         name,
                         rate_limit,
                     )
@@ -1108,6 +1120,7 @@ pub async fn handle(
                     name,
                     new_owner_name,
                     StatementType::ALTER_SINK,
+                    None,
                 )
                 .await
             }
@@ -1165,6 +1178,17 @@ pub async fn handle(
                 alter_streaming_rate_limit::handle_alter_streaming_rate_limit(
                     handler_args,
                     PbThrottleTarget::Sink,
+                    risingwave_pb::common::PbThrottleType::Sink,
+                    name,
+                    rate_limit,
+                )
+                .await
+            }
+            AlterSinkOperation::SetBackfillRateLimit { rate_limit } => {
+                alter_streaming_rate_limit::handle_alter_streaming_rate_limit(
+                    handler_args,
+                    PbThrottleTarget::Sink,
+                    risingwave_pb::common::PbThrottleType::Backfill,
                     name,
                     rate_limit,
                 )
@@ -1190,6 +1214,7 @@ pub async fn handle(
                     name,
                     new_owner_name,
                     StatementType::ALTER_SUBSCRIPTION,
+                    None,
                 )
                 .await
             }
@@ -1236,6 +1261,7 @@ pub async fn handle(
                     name,
                     new_owner_name,
                     StatementType::ALTER_SOURCE,
+                    None,
                 )
                 .await
             }
@@ -1260,6 +1286,7 @@ pub async fn handle(
                 alter_streaming_rate_limit::handle_alter_streaming_rate_limit(
                     handler_args,
                     PbThrottleTarget::Source,
+                    risingwave_pb::common::PbThrottleType::Source,
                     name,
                     rate_limit,
                 )
@@ -1305,6 +1332,9 @@ pub async fn handle(
                 )
                 .await
             }
+            AlterSourceOperation::ResetSource => {
+                reset_source::handle_reset_source(handler_args, name).await
+            }
         },
         Statement::AlterFunction {
             name,
@@ -1316,6 +1346,16 @@ pub async fn handle(
                     handler_args,
                     name,
                     new_schema_name,
+                    StatementType::ALTER_FUNCTION,
+                    args,
+                )
+                .await
+            }
+            AlterFunctionOperation::ChangeOwner { new_owner_name } => {
+                alter_owner::handle_alter_owner(
+                    handler_args,
+                    name,
+                    new_owner_name,
                     StatementType::ALTER_FUNCTION,
                     args,
                 )
@@ -1339,6 +1379,15 @@ pub async fn handle(
                     name,
                     new_owner_name,
                     StatementType::ALTER_CONNECTION,
+                    None,
+                )
+                .await
+            }
+            AlterConnectionOperation::AlterConnectorProps { alter_props } => {
+                alter_connection_props::handle_alter_connection_connector_props(
+                    handler_args,
+                    name,
+                    alter_props,
                 )
                 .await
             }
@@ -1346,11 +1395,25 @@ pub async fn handle(
         Statement::AlterSystem { param, value } => {
             alter_system::handle_alter_system(handler_args, param, value).await
         }
-        Statement::AlterSecret {
-            name,
-            with_options,
-            operation,
-        } => alter_secret::handle_alter_secret(handler_args, name, with_options, operation).await,
+        Statement::AlterSecret { name, operation } => match operation {
+            AlterSecretOperation::ChangeCredential {
+                with_options,
+                new_credential,
+            } => {
+                alter_secret::handle_alter_secret(handler_args, name, with_options, new_credential)
+                    .await
+            }
+            AlterSecretOperation::ChangeOwner { new_owner_name } => {
+                alter_owner::handle_alter_owner(
+                    handler_args,
+                    name,
+                    new_owner_name,
+                    StatementType::ALTER_SECRET,
+                    None,
+                )
+                .await
+            }
+        },
         Statement::AlterFragment {
             fragment_ids,
             operation,
@@ -1366,6 +1429,7 @@ pub async fn handle(
                 alter_streaming_rate_limit::handle_alter_streaming_rate_limit_by_id(
                     &handler_args.session,
                     PbThrottleTarget::Fragment,
+                    risingwave_pb::common::PbThrottleType::Backfill,
                     *fragment_id,
                     rate_limit,
                     StatementType::SET_VARIABLE,

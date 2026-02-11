@@ -70,8 +70,10 @@ echo "--- Run kafka sasl test"
 risedev slt './e2e_test/kafka-sasl/**/*.slt' -j4
 echo "--- Run kafka sasl test done"
 
-risedev slt './e2e_test/source_inline/**/*.slt' -j4
-risedev slt './e2e_test/source_inline/**/*.slt.serial'
+# Skip cron_only tests in both PR and main-cron e2e-source-test
+# cron_only tests are run separately in main-cron via dedicated job
+risedev slt './e2e_test/source_inline/**/*.slt' --skip 'cron_only' -j8
+risedev slt './e2e_test/source_inline/**/*.slt.serial' --skip 'cron_only'
 
 echo "--- Run Vault secret tests"
 risedev slt './e2e_test/ddl/vault_secret.slt'
@@ -127,7 +129,11 @@ risedev slt './e2e_test/source_inline/cdc/mongodb/**/*.slt'
 echo "--- inline cdc test"
 export MYSQL_HOST=mysql MYSQL_TCP_PORT=3306 MYSQL_PWD=123456
 
+echo "--- Starting MySQL CDC offline schema change test for OpendalSchemaHistory ---"
 source ci/scripts/e2e-source-mysql-offline-schema-change.sh
+
+echo "--- Starting MySQL CDC binlog expire and ALTER SOURCE RESET test ---"
+source ci/scripts/e2e-source-mysql-cdc-reset.sh
 
 echo "--- mysql offline schema change test done --- \n\n"
 

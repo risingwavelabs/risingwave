@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,7 +14,9 @@
 
 use std::fmt::{Display, Formatter};
 
+use anyhow::anyhow;
 use bytes::{Buf, BufMut};
+use itertools::Itertools;
 use risingwave_hummock_sdk::version::HummockVersion;
 use serde::{Deserialize, Serialize};
 
@@ -66,7 +68,9 @@ macro_rules! for_all_metadata_models_v2 {
             {iceberg_namespace_properties, risingwave_meta_model::iceberg_namespace_properties},
             {user_default_privilege, risingwave_meta_model::user_default_privilege},
             {fragment_splits, risingwave_meta_model::fragment_splits},
-            {pending_sink_state, risingwave_meta_model::pending_sink_state}
+            {pending_sink_state, risingwave_meta_model::pending_sink_state},
+            {refresh_jobs, risingwave_meta_model::refresh_job},
+            {cdc_table_snapshot_splits, risingwave_meta_model::cdc_table_snapshot_split}
         }
     };
 }
@@ -161,6 +165,42 @@ impl Metadata for MetadataV2 {
 
     fn hummock_version(self) -> HummockVersion {
         self.hummock_version
+    }
+
+    fn storage_url(&self) -> BackupResult<String> {
+        let storage_url_from_snapshot = self
+            .system_parameters
+            .iter()
+            .filter_map(|m| {
+                if m.name == "state_store" {
+                    return Some(m.value.clone());
+                }
+                None
+            })
+            .exactly_one()
+            .map_err(|_| BackupError::Other(anyhow!("expect state_store")))?;
+        storage_url_from_snapshot
+            .strip_prefix("hummock+")
+            .map(|s| s.to_owned())
+            .ok_or_else(|| {
+                BackupError::Other(anyhow!(
+                    "invalid state_store from metadata snapshot: {}",
+                    storage_url_from_snapshot
+                ))
+            })
+    }
+
+    fn storage_directory(&self) -> BackupResult<String> {
+        self.system_parameters
+            .iter()
+            .filter_map(|m| {
+                if m.name == "data_directory" {
+                    return Some(m.value.clone());
+                }
+                None
+            })
+            .exactly_one()
+            .map_err(|_| BackupError::Other(anyhow!("expect data_directory")))
     }
 }
 

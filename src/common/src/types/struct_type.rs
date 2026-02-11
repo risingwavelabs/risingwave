@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,11 +20,11 @@ use std::sync::Arc;
 use anyhow::anyhow;
 use either::Either;
 use itertools::{Itertools, repeat_n};
+use risingwave_sqlparser::ast::QuoteIdent;
 
 use super::DataType;
 use crate::catalog::ColumnId;
 use crate::util::iter_util::ZipEqFast;
-use crate::util::quote_ident::QuoteIdent;
 
 /// A cheaply cloneable struct type.
 #[derive(Clone, PartialEq, Eq, Hash)]
@@ -32,18 +32,42 @@ pub struct StructType(Arc<StructTypeInner>);
 
 impl Debug for StructType {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        let alternate = f.alternate();
-
-        let mut d = f.debug_struct("StructType");
-        d.field("fields", &self.0.fields);
-        if let Some(ids) = &self.0.field_ids
-        // TODO: This is for making `EXPLAIN` output more concise, but it hurts the readability
-        // for testing and debugging. Avoid using `Debug` repr in `EXPLAIN` output instead.
-            && alternate
-        {
-            d.field("field_ids", ids);
+        // `DataType` derives `Debug`, so `StructType`'s `Debug` representation frequently appears
+        // in `EXPLAIN` and planner test outputs. Prefer a compact single-line format for `{:?}`,
+        // while keeping the detailed `StructType { fields: ..., field_ids: ... }` for `{:#?}`.
+        if f.alternate() {
+            let mut d = f.debug_struct("StructType");
+            d.field("fields", &self.0.fields);
+            if let Some(ids) = &self.0.field_ids {
+                d.field("field_ids", ids);
+            }
+            d.finish()
+        } else {
+            // Many internal composite types use synthetic field names like `f1`, `f2`, ...
+            // Treat them as unnamed to keep `EXPLAIN` output concise.
+            let omit_names = self.is_unnamed()
+                || self
+                    .0
+                    .fields
+                    .iter()
+                    .enumerate()
+                    .all(|(i, (name, _))| name == &format!("f{}", i + 1));
+            let mut first = true;
+            for (name, ty) in self.iter() {
+                if !first {
+                    write!(f, ", ")?;
+                }
+                first = false;
+                if omit_names {
+                    // Unnamed struct comes from `ROW(...)` expressions and prints as `Struct(t1, t2, ...)`.
+                    write!(f, "{:?}", ty)?;
+                } else {
+                    // Quote the identifier when needed (e.g. reserved keywords or special chars).
+                    write!(f, "{}:{:?}", QuoteIdent(name), ty)?;
+                }
+            }
+            Ok(())
         }
-        d.finish()
     }
 }
 

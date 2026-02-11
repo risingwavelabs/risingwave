@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -24,9 +24,12 @@ pub struct CompactionGroup {
 }
 
 impl CompactionGroup {
-    pub fn new(group_id: CompactionGroupId, compaction_config: CompactionConfig) -> Self {
+    pub fn new(
+        group_id: impl Into<CompactionGroupId>,
+        compaction_config: CompactionConfig,
+    ) -> Self {
         Self {
-            group_id,
+            group_id: group_id.into(),
             compaction_config: Arc::new(compaction_config),
         }
     }

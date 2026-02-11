@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -11,11 +11,14 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+
 #![feature(proc_macro_hygiene, stmt_expr_attributes)]
 #![feature(custom_test_frameworks)]
 #![test_runner(risingwave_test_runner::test_runner::run_failpont_tests)]
 #![feature(type_alias_impl_trait)]
 
+#[cfg(test)]
+mod auto_rebuild_iter_tests;
 #[cfg(test)]
 mod compactor_tests;
 #[cfg(all(test, feature = "failpoints"))]

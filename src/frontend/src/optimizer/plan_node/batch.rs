@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -26,6 +26,9 @@ use crate::optimizer::property::Order;
 #[auto_impl::auto_impl(&)]
 pub trait BatchPlanNodeMetadata: PhysicalPlanRef {
     fn order(&self) -> &Order;
+    fn orders(&self) -> Vec<Order> {
+        vec![self.order().clone()]
+    }
 }
 
 /// Prelude for batch plan nodes.

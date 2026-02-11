@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -31,6 +31,8 @@ use pulsar::authentication::oauth2::{OAuth2Authentication, OAuth2Params};
 use pulsar::{Authentication, Pulsar, TokioExecutor};
 use rdkafka::ClientConfig;
 use risingwave_common::bail;
+use rustls_pki_types::pem::PemObject;
+use rustls_pki_types::{CertificateDer, PrivatePkcs8KeyDer};
 use serde::Deserialize;
 use serde_with::json::JsonString;
 use serde_with::{DisplayFromStr, serde_as};
@@ -1135,9 +1137,10 @@ pub(crate) fn load_certs(
         certificates.as_bytes().to_owned()
     };
 
-    rustls_pemfile::certs(&mut cert_bytes.as_slice())
-        .map(|cert| Ok(cert?))
-        .collect()
+    CertificateDer::pem_slice_iter(&cert_bytes)
+        .collect::<Result<Vec<_>, _>>()
+        .context("Failed to parse certificates")
+        .map_err(Into::into)
 }
 
 pub(crate) fn load_private_key(
@@ -1149,10 +1152,11 @@ pub(crate) fn load_private_key(
         certificate.as_bytes().to_owned()
     };
 
-    let cert = rustls_pemfile::pkcs8_private_keys(&mut cert_bytes.as_slice())
+    let cert = PrivatePkcs8KeyDer::pem_slice_iter(&cert_bytes)
         .next()
-        .ok_or_else(|| anyhow!("No private key found"))?;
-    Ok(cert?.into())
+        .ok_or_else(|| anyhow!("No private key found"))?
+        .context("Failed to parse private key")?;
+    Ok(cert.into())
 }
 
 #[serde_as]

@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -201,14 +201,14 @@ mod tests {
     ) -> PinnedVersion {
         PinnedVersion::new(
             HummockVersion::from_rpc_protobuf(&PbHummockVersion {
-                id: version_id,
+                id: version_id.into(),
                 state_table_info: HashMap::from_iter(table_committed_epoch.into_iter().map(
                     |(table_id, committed_epoch)| {
                         (
                             table_id,
                             StateTableInfo {
                                 committed_epoch,
-                                compaction_group_id: 0,
+                                compaction_group_id: 0.into(),
                             },
                         )
                     },

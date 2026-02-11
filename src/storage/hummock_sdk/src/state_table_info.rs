@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use risingwave_pb::hummock::PbStateTableInfo;
+use risingwave_pb::id::CompactionGroupId;
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -20,7 +21,7 @@ pub struct StateTableInfo {
     #[serde(default)]
     pub committed_epoch: u64,
     #[serde(default)]
-    pub compaction_group_id: u64,
+    pub compaction_group_id: CompactionGroupId,
 }
 
 impl From<StateTableInfo> for PbStateTableInfo {

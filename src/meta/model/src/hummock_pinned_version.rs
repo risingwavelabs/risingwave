@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -35,7 +35,7 @@ impl From<Model> for HummockPinnedVersion {
     fn from(value: Model) -> Self {
         Self {
             context_id: value.context_id,
-            min_pinned_id: value.min_pinned_id as _,
+            min_pinned_id: value.min_pinned_id,
         }
     }
 }

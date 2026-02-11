@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,11 +17,15 @@ mod cluster_info;
 mod connection;
 mod pause_resume;
 mod reschedule;
+mod resume_backfill;
 mod serving;
+mod source_props;
 
 pub use backup_meta::*;
 pub use cluster_info::*;
 pub use connection::*;
 pub use pause_resume::*;
 pub use reschedule::*;
+pub use resume_backfill::*;
 pub use serving::*;
+pub use source_props::*;

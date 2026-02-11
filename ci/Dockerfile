@@ -51,7 +51,7 @@ RUN curl -sSL "https://github.com/bufbuild/buf/releases/download/v1.29.0/buf-$(u
     tar -xvzf - -C /usr/local --strip-components 1
 
 # install python dependencies
-RUN pip3 install --break-system-packages pytest
+RUN pip3 install --break-system-packages pytest codecov-cli
 
 # Install poetry
 RUN curl -sSL https://install.python-poetry.org | python3 -
@@ -73,7 +73,7 @@ ENV CARGO_REGISTRIES_CRATES_IO_PROTOCOL=sparse
 RUN curl -L --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh | bash
 RUN cargo binstall -y --locked cargo-llvm-cov cargo-nextest cargo-sort cargo-cache cargo-machete \
     cargo-make@0.37.24 \
-    sqllogictest-bin@0.28.4 \
+    sqllogictest-bin@0.29.0 \
     sccache@0.10.0 \
     && cargo cache -a \
     && rm -rf "/root/.cargo/registry/index" \

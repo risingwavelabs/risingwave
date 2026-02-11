@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -72,7 +72,7 @@ impl GcManager {
         let mut paths = Vec::with_capacity(1000);
         for object_id in object_id_list {
             let obj_prefix = self.store.get_object_prefix(
-                object_id.as_raw().inner(),
+                object_id.as_raw().as_raw_id(),
                 self.use_new_object_prefix_strategy,
             );
             paths.push(get_object_data_path(
@@ -196,7 +196,7 @@ impl HummockManager {
         // The lock order requires version lock to be held as well.
         let version_id = versioning.checkpoint.version.id;
         let res = hummock_version_delta::Entity::delete_many()
-            .filter(hummock_version_delta::Column::Id.lte(version_id.to_u64()))
+            .filter(hummock_version_delta::Column::Id.lte(version_id))
             .exec(&self.env.meta_store_ref().conn)
             .await?;
         tracing::debug!(rows_affected = res.rows_affected, "Deleted version deltas");
@@ -318,11 +318,10 @@ impl HummockManager {
         if object_ids.is_empty() {
             return Ok(0);
         }
-        // It's crucial to get pinned_by_metadata_backup only after object_ids.
-        let pinned_by_metadata_backup = backup_manager
-            .as_ref()
-            .map(|b| b.list_pinned_object_ids())
-            .unwrap_or_default();
+        let pinned_by_metadata_backup = match backup_manager.as_ref() {
+            Some(b) => b.list_pinned_object_ids().await,
+            None => HashSet::default(),
+        };
         // It's crucial to collect_min_uncommitted_object_id (i.e. `min_object_id`) only after LIST object store (i.e. `object_ids`).
         // Because after getting `min_object_id`, new compute nodes may join and generate new uncommitted objects that are not covered by `min_sst_id`.
         // By getting `min_object_id` after `object_ids`, it's ensured `object_ids` won't include any objects from those new compute nodes.
@@ -424,7 +423,7 @@ impl HummockManager {
         let now = self.now().await?;
         let dt = DateTime::from_timestamp(now.try_into().unwrap(), 0).unwrap();
         let mut models = object_ids.map(|o| hummock_gc_history::ActiveModel {
-            object_id: Set(o.as_raw().inner().try_into().unwrap()),
+            object_id: Set(o.as_raw().into()),
             mark_delete_at: Set(dt.naive_utc()),
         });
         let db = &self.meta_store_ref().conn;
@@ -516,7 +515,7 @@ impl HummockManager {
             return Ok(());
         };
         // Objects pinned by either meta backup or time travel should be filtered out.
-        let backup_pinned: HashSet<_> = backup_manager.list_pinned_object_ids();
+        let backup_pinned: HashSet<_> = backup_manager.list_pinned_object_ids().await;
         // The version_pinned is obtained after the candidate object_ids for deletion, which is new enough for filtering purpose.
         let version_pinned = {
             let versioning = self.versioning.read().await;
@@ -556,8 +555,8 @@ async fn collect_min_uncommitted_object_id(
         .into_iter()
         .map(|resp| resp.min_uncommitted_object_id)
         .min()
-        .unwrap_or(u64::MAX);
-    Ok(min_watermark.into())
+        .unwrap_or(u64::MAX.into());
+    Ok(min_watermark)
 }
 
 pub struct FullGcState {
@@ -602,7 +601,7 @@ mod tests {
             hummock_manager.clone(),
             worker_id as _,
         ));
-        let compaction_group_id = StaticCompactionGroupId::StateDefault.into();
+        let compaction_group_id = StaticCompactionGroupId::StateDefault;
         hummock_manager
             .start_full_gc(
                 Duration::from_secs(hummock_manager.env.opts.min_sst_retention_time_sec + 1),

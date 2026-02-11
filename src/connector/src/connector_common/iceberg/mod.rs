@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,26 +18,30 @@ mod mock_catalog;
 mod storage_catalog;
 
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 
 use ::iceberg::io::{
     S3_ACCESS_KEY_ID, S3_ASSUME_ROLE_ARN, S3_ENDPOINT, S3_REGION, S3_SECRET_ACCESS_KEY,
 };
 use ::iceberg::table::Table;
-use ::iceberg::{Catalog, TableIdent};
+use ::iceberg::{Catalog, CatalogBuilder, TableIdent};
 use anyhow::{Context, anyhow};
+use iceberg::io::object_cache::ObjectCache;
 use iceberg::io::{
     ADLS_ACCOUNT_KEY, ADLS_ACCOUNT_NAME, AZBLOB_ACCOUNT_KEY, AZBLOB_ACCOUNT_NAME, AZBLOB_ENDPOINT,
     GCS_CREDENTIALS_JSON, GCS_DISABLE_CONFIG_LOAD, S3_DISABLE_CONFIG_LOAD, S3_PATH_STYLE_ACCESS,
 };
 use iceberg_catalog_glue::{AWS_ACCESS_KEY_ID, AWS_REGION_NAME, AWS_SECRET_ACCESS_KEY};
+use moka::future::Cache as MokaCache;
 use phf::{Set, phf_set};
 use risingwave_common::bail;
+use risingwave_common::error::IcebergError;
 use risingwave_common::util::deployment::Deployment;
 use risingwave_common::util::env_var::env_var_is_true;
 use serde::Deserialize;
 use serde_with::serde_as;
 use url::Url;
+use uuid::Uuid;
 use with_options::WithOptions;
 
 use crate::connector_common::common::DISABLE_DEFAULT_CREDENTIAL;
@@ -166,7 +170,37 @@ pub struct IcebergCommon {
     /// Enable vended credentials for iceberg REST catalog.
     #[serde(default, deserialize_with = "deserialize_optional_bool_from_string")]
     pub vended_credentials: Option<bool>,
+
+    /// Security type for REST catalog authentication.
+    /// Supported values: `none`, `oauth2`, `google`.
+    /// When set to `google`, uses Iceberg's `GoogleAuthManager` (requires Iceberg 1.10+)
+    /// for authentication using Google Application Default Credentials (ADC).
+    #[serde(rename = "catalog.security")]
+    pub catalog_security: Option<String>,
+
+    /// OAuth-based scopes for Google authentication.
+    /// Comma-separated list of OAuth-based scopes to request.
+    /// Only applicable when `catalog.security` is set to `google`.
+    /// Default: <https://www.googleapis.com/auth/cloud-platform>
+    #[serde(rename = "gcp.auth.scopes")]
+    pub gcp_auth_scopes: Option<String>,
+
+    /// Custom `FileIO` implementation class for the Iceberg catalog.
+    /// Allows specifying a custom `FileIO` implementation instead of the default.
+    /// Examples:
+    /// - `org.apache.iceberg.aws.s3.S3FileIO` for Amazon S3 (default)
+    /// - `org.apache.iceberg.gcp.gcs.GCSFileIO` for Google Cloud Storage
+    /// - `org.apache.iceberg.azure.adlsv2.ADLSFileIO` for Azure Data Lake Storage Gen2
+    #[serde(rename = "catalog.io_impl")]
+    pub catalog_io_impl: Option<String>,
 }
+
+// Matches iceberg::io::object_cache default size (32MB).
+// TODO: change it after object cache get refactored.
+const DEFAULT_OBJECT_CACHE_SIZE_BYTES: u64 = 32 * 1024 * 1024;
+const SHARED_OBJECT_CACHE_BUDGET_BYTES: u64 = 512 * 1024 * 1024;
+const SHARED_OBJECT_CACHE_MAX_TABLES: u64 =
+    SHARED_OBJECT_CACHE_BUDGET_BYTES / DEFAULT_OBJECT_CACHE_SIZE_BYTES;
 
 impl EnforceSecret for IcebergCommon {
     const ENFORCE_SECRET_PROPERTIES: Set<&'static str> = phf_set! {
@@ -361,13 +395,17 @@ impl IcebergCommon {
                 Some(warehouse_path) => {
                     let (bucket, _) = {
                         let is_s3_tables = warehouse_path.starts_with("arn:aws:s3tables");
+                        // BigLake catalog federation uses bq:// prefix for BigQuery-managed Iceberg tables
+                        let is_bq_catalog_federation = warehouse_path.starts_with("bq://");
                         let url = Url::parse(warehouse_path);
-                        if (url.is_err() || is_s3_tables)
+                        if (url.is_err() || is_s3_tables || is_bq_catalog_federation)
                             && (catalog_type == "rest" || catalog_type == "rest_rust")
                         {
-                            // If the warehouse path is not a valid URL, it could be a warehouse name in rest catalog
-                            // Or it could be a s3tables path, which is not a valid URL but a valid warehouse path,
-                            // so we allow it to pass here.
+                            // If the warehouse path is not a valid URL, it could be:
+                            // - A warehouse name in REST catalog
+                            // - An S3 Tables path (arn:aws:s3tables:...)
+                            // - A BigLake path (bq://projects/...) for Google Cloud BigQuery integration
+                            // We allow these to pass through for REST catalogs.
                             (None, None)
                         } else {
                             let url = url.with_context(|| {
@@ -429,13 +467,14 @@ impl IcebergCommon {
             }
             java_catalog_configs.extend(java_catalog_props.clone());
 
-            // Currently we only support s3, so let's set it to s3
-            java_catalog_configs.insert(
-                "io-impl".to_owned(),
-                "org.apache.iceberg.aws.s3.S3FileIO".to_owned(),
-            );
+            // Set io-impl: use custom io-impl if provided, otherwise default to S3FileIO
+            let io_impl = self
+                .catalog_io_impl
+                .clone()
+                .unwrap_or_else(|| "org.apache.iceberg.aws.s3.S3FileIO".to_owned());
+            java_catalog_configs.insert("io-impl".to_owned(), io_impl);
 
-            // suppress log of S3FileIO like: Unclosed S3FileIO instance created by...
+            // suppress log of FileIO like: Unclosed FileIO instance created by...
             java_catalog_configs.insert("init-creation-stacktrace".to_owned(), "false".to_owned());
 
             if let Some(region) = &self.s3_region {
@@ -466,18 +505,68 @@ impl IcebergCommon {
 
             match self.catalog_type() {
                 "rest" => {
-                    if let Some(credential) = &self.catalog_credential {
-                        java_catalog_configs.insert("credential".to_owned(), credential.clone());
-                    }
-                    if let Some(token) = &self.catalog_token {
-                        java_catalog_configs.insert("token".to_owned(), token.clone());
-                    }
-                    if let Some(oauth2_server_uri) = &self.catalog_oauth2_server_uri {
-                        java_catalog_configs
-                            .insert("oauth2-server-uri".to_owned(), oauth2_server_uri.clone());
-                    }
-                    if let Some(scope) = &self.catalog_scope {
-                        java_catalog_configs.insert("scope".to_owned(), scope.clone());
+                    // Handle security type for REST catalog (Iceberg 1.10+)
+                    if let Some(security) = &self.catalog_security {
+                        match security.to_lowercase().as_str() {
+                            "google" => {
+                                // Google AuthManager (Iceberg 1.10+) - uses Google ADC
+                                java_catalog_configs.insert(
+                                    "rest.auth.type".to_owned(),
+                                    "org.apache.iceberg.gcp.auth.GoogleAuthManager".to_owned(),
+                                );
+                                // Set GCP auth scopes if provided
+                                if let Some(gcp_auth_scopes) = &self.gcp_auth_scopes {
+                                    java_catalog_configs.insert(
+                                        "gcp.auth.scopes".to_owned(),
+                                        gcp_auth_scopes.clone(),
+                                    );
+                                }
+                            }
+                            "oauth2" => {
+                                // Standard OAuth2 authentication
+                                if let Some(credential) = &self.catalog_credential {
+                                    java_catalog_configs
+                                        .insert("credential".to_owned(), credential.clone());
+                                }
+                                if let Some(token) = &self.catalog_token {
+                                    java_catalog_configs.insert("token".to_owned(), token.clone());
+                                }
+                                if let Some(oauth2_server_uri) = &self.catalog_oauth2_server_uri {
+                                    java_catalog_configs.insert(
+                                        "oauth2-server-uri".to_owned(),
+                                        oauth2_server_uri.clone(),
+                                    );
+                                }
+                                if let Some(scope) = &self.catalog_scope {
+                                    java_catalog_configs.insert("scope".to_owned(), scope.clone());
+                                }
+                            }
+                            "none" | "" => {
+                                // No authentication
+                            }
+                            _ => {
+                                tracing::warn!(
+                                    "Unknown catalog.security value: {}. Supported values: none, oauth2, google",
+                                    security
+                                );
+                            }
+                        }
+                    } else {
+                        // Legacy behavior: use individual OAuth2 properties if security type not specified
+                        if let Some(credential) = &self.catalog_credential {
+                            java_catalog_configs
+                                .insert("credential".to_owned(), credential.clone());
+                        }
+                        if let Some(token) = &self.catalog_token {
+                            java_catalog_configs.insert("token".to_owned(), token.clone());
+                        }
+                        if let Some(oauth2_server_uri) = &self.catalog_oauth2_server_uri {
+                            java_catalog_configs
+                                .insert("oauth2-server-uri".to_owned(), oauth2_server_uri.clone());
+                        }
+                        if let Some(scope) = &self.catalog_scope {
+                            java_catalog_configs.insert("scope".to_owned(), scope.clone());
+                        }
                     }
                     if let Some(rest_signing_region) = &self.rest_signing_region {
                         java_catalog_configs.insert(
@@ -563,6 +652,20 @@ impl IcebergCommon {
 
                     if let Some(glue_id) = self.glue_id.as_deref() {
                         java_catalog_configs.insert("glue.id".to_owned(), glue_id.to_owned());
+                    }
+                }
+                "jdbc" => {
+                    if let Some(iam_role_arn) = &self.s3_iam_role_arn {
+                        java_catalog_configs
+                            .insert("client.assume-role.arn".to_owned(), iam_role_arn.clone());
+                        java_catalog_configs.insert(
+                            "client.factory".to_owned(),
+                            "org.apache.iceberg.aws.AssumeRoleAwsClientFactory".to_owned(),
+                        );
+                        if let Some(region) = &self.s3_region {
+                            java_catalog_configs
+                                .insert("client.assume-role.region".to_owned(), region.clone());
+                        }
                     }
                 }
                 _ => {}
@@ -667,20 +770,22 @@ impl IcebergCommon {
                     iceberg_configs.insert(format!("header.{}", header_name), header_value);
                 }
 
-                let config_builder =
-                    iceberg_catalog_rest::RestCatalogConfig::builder()
-                        .uri(self.catalog_uri.clone().with_context(|| {
-                            "`catalog.uri` must be set in rest catalog".to_owned()
-                        })?)
-                        .props(iceberg_configs);
-
-                let config = match &self.warehouse_path {
-                    Some(warehouse_path) => {
-                        config_builder.warehouse(warehouse_path.clone()).build()
-                    }
-                    None => config_builder.build(),
-                };
-                let catalog = iceberg_catalog_rest::RestCatalog::new(config);
+                iceberg_configs.insert(
+                    iceberg_catalog_rest::REST_CATALOG_PROP_URI.to_owned(),
+                    self.catalog_uri
+                        .clone()
+                        .with_context(|| "`catalog.uri` must be set in rest catalog".to_owned())?,
+                );
+                if let Some(warehouse_path) = &self.warehouse_path {
+                    iceberg_configs.insert(
+                        iceberg_catalog_rest::REST_CATALOG_PROP_WAREHOUSE.to_owned(),
+                        warehouse_path.clone(),
+                    );
+                }
+                let catalog = iceberg_catalog_rest::RestCatalogBuilder::default()
+                    .load("rest", iceberg_configs)
+                    .await
+                    .map_err(|e| anyhow!(IcebergError::from(e)))?;
                 Ok(Arc::new(catalog))
             }
             "glue_rust" => {
@@ -717,18 +822,22 @@ impl IcebergCommon {
                         path_style_access.to_string(),
                     );
                 }
-                let config_builder =
-                    iceberg_catalog_glue::GlueCatalogConfig::builder()
-                        .warehouse(self.warehouse_path.clone().ok_or_else(|| {
-                            anyhow!("`warehouse.path` must be set in glue catalog")
-                        })?)
-                        .props(iceberg_configs);
-                let config = if let Some(uri) = self.catalog_uri.as_deref() {
-                    config_builder.uri(uri.to_owned()).build()
-                } else {
-                    config_builder.build()
-                };
-                let catalog = iceberg_catalog_glue::GlueCatalog::new(config).await?;
+                iceberg_configs.insert(
+                    iceberg_catalog_glue::GLUE_CATALOG_PROP_WAREHOUSE.to_owned(),
+                    self.warehouse_path
+                        .clone()
+                        .ok_or_else(|| anyhow!("`warehouse.path` must be set in glue catalog"))?,
+                );
+                if let Some(uri) = self.catalog_uri.as_deref() {
+                    iceberg_configs.insert(
+                        iceberg_catalog_glue::GLUE_CATALOG_PROP_URI.to_owned(),
+                        uri.to_owned(),
+                    );
+                }
+                let catalog = iceberg_catalog_glue::GlueCatalogBuilder::default()
+                    .load("glue", iceberg_configs)
+                    .await
+                    .map_err(|e| anyhow!(IcebergError::from(e)))?;
                 Ok(Arc::new(catalog))
             }
             catalog_type
@@ -782,6 +891,30 @@ impl IcebergCommon {
             .to_table_ident()
             .context("Unable to parse table name")?;
 
-        catalog.load_table(&table_id).await.map_err(Into::into)
+        let table = catalog.load_table(&table_id).await?;
+        Ok(rebuild_table_with_shared_cache(table).await)
     }
+}
+
+/// Get a globally shared object cache keyed by table UUID to avoid reuse after drop & recreate.
+pub(crate) async fn shared_object_cache(
+    init_object_cache: Arc<ObjectCache>,
+    table_uuid: Uuid,
+) -> Arc<ObjectCache> {
+    static CACHE: LazyLock<MokaCache<Uuid, Arc<ObjectCache>>> = LazyLock::new(|| {
+        MokaCache::builder()
+            .max_capacity(SHARED_OBJECT_CACHE_MAX_TABLES)
+            .build()
+    });
+
+    CACHE
+        .get_with(table_uuid, async { init_object_cache })
+        .await
+}
+
+pub async fn rebuild_table_with_shared_cache(table: Table) -> Table {
+    let table_uuid = table.metadata().uuid();
+    let init_object_cache = table.object_cache();
+    let object_cache = shared_object_cache(init_object_cache, table_uuid).await;
+    table.with_object_cache(object_cache)
 }

@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -155,7 +155,7 @@ impl BoxedExecutorBuilder for LogStoreRowSeqScanExecutorBuilder {
                 table,
                 old_epoch,
                 new_epoch,
-                HummockVersionId::new(version_id),
+                version_id,
                 chunk_size as usize,
                 source.plan_node().get_identity().clone(),
                 metrics,

@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -40,7 +40,7 @@ use crate::hummock::manager::transaction::HummockVersionTransaction;
 use crate::hummock::manager::versioning::Versioning;
 use crate::hummock::manager::{HummockManager, commit_multi_var};
 use crate::hummock::metrics_utils::remove_compaction_group_in_sst_stat;
-use crate::hummock::sequence::{next_compaction_group_id, next_sstable_object_id};
+use crate::hummock::sequence::{next_compaction_group_id, next_sstable_id};
 use crate::hummock::table_write_throughput_statistic::{
     TableWriteThroughputStatistic, TableWriteThroughputStatisticManager,
 };
@@ -164,10 +164,13 @@ impl HummockManager {
                 (group_2, group_1)
             };
 
-        // We can only merge two groups with non-overlapping member table ids
+        // We can only merge two groups with non-overlapping member table ids.
+        // After the swap above, member_table_ids_1 has the smaller first element.
+        // If the last element of member_table_ids_1 >= the first element of member_table_ids_2,
+        // the two groups' table id ranges overlap and cannot be merged.
         if member_table_ids_1.last().unwrap() >= member_table_ids_2.first().unwrap() {
             return Err(Error::CompactionGroup(format!(
-                "invalid merge group_1 {} group_2 {}",
+                "invalid merge group_1 {} group_2 {}: table id ranges overlap",
                 left_group_id, right_group_id
             )));
         }
@@ -462,7 +465,7 @@ impl HummockManager {
             .latest_version()
             .count_new_ssts_in_group_split(parent_group_id, split_key.clone());
 
-        let new_sst_start_id = next_sstable_object_id(&self.env, split_sst_count).await?;
+        let new_sst_start_id = next_sstable_id(&self.env, split_sst_count).await?;
         let (new_compaction_group_id, config) = {
             // All NewCompactionGroup pairs are mapped to one new compaction group.
             let new_compaction_group_id = next_compaction_group_id(&self.env).await?;
@@ -491,7 +494,7 @@ impl HummockManager {
                         group_config: Some(config.clone()),
                         group_id: new_compaction_group_id,
                         parent_group_id,
-                        new_sst_start_id: new_sst_start_id.inner(),
+                        new_sst_start_id,
                         table_ids: vec![],
                         version: CompatibilityVersion::LATEST as _, // for compatibility
                         split_key: Some(split_key.into()),
@@ -640,7 +643,7 @@ impl HummockManager {
             )));
         }
 
-        fn check_table_ids_valid(cg_id_to_table_ids: &BTreeMap<u64, Vec<TableId>>) {
+        fn check_table_ids_valid(cg_id_to_table_ids: &BTreeMap<CompactionGroupId, Vec<TableId>>) {
             // 1. table_ids in different cg are sorted.
             {
                 cg_id_to_table_ids
@@ -675,9 +678,9 @@ impl HummockManager {
         // The new compaction group id is always generate on the right side
         // Hence, we return the first compaction group id as the result
         // split 1
-        let mut cg_id_to_table_ids: BTreeMap<u64, Vec<TableId>> = BTreeMap::new();
+        let mut cg_id_to_table_ids: BTreeMap<CompactionGroupId, Vec<TableId>> = BTreeMap::new();
         let table_id_to_split = *table_ids.first().unwrap();
-        let mut target_compaction_group_id = 0;
+        let mut target_compaction_group_id: CompactionGroupId = 0.into();
         let result_vec = self
             .split_compaction_group_impl(
                 parent_group_id,
@@ -768,7 +771,7 @@ impl HummockManager {
         table_write_throughput_statistic_manager: &TableWriteThroughputStatisticManager,
         table_id: TableId,
         _table_size: &u64,
-        parent_group_id: u64,
+        parent_group_id: CompactionGroupId,
     ) {
         let mut table_throughput = table_write_throughput_statistic_manager
             .get_table_throughput_descending(
@@ -836,7 +839,11 @@ impl HummockManager {
                 // split if the accumulated size is greater than half of the group size
                 // avoid split a small table to dedicated compaction group and trigger multiple merge
                 assert!(table_ids.is_sorted());
-                if accumulated_size * 2 > group_max_size {
+                let remaining_size = group.group_size.saturating_sub(accumulated_size);
+                if accumulated_size > group_max_size / 2
+                    && remaining_size > 0
+                    && table_ids.len() < group.table_statistic.len()
+                {
                     let ret = self
                         .move_state_tables_to_dedicated_compaction_group(
                             group.group_id,
@@ -889,10 +896,11 @@ impl HummockManager {
         )
         .await?;
 
-        match self
+        let result = self
             .merge_compaction_group(group.group_id, next_group.group_id)
-            .await
-        {
+            .await;
+
+        match &result {
             Ok(()) => {
                 tracing::info!(
                     "merge group-{} to group-{}",
@@ -911,11 +919,11 @@ impl HummockManager {
                     "failed to merge group-{} group-{}",
                     next_group.group_id,
                     group.group_id,
-                )
+                );
             }
         }
 
-        Ok(())
+        result
     }
 }
 
@@ -1012,10 +1020,10 @@ impl GroupMergeValidator {
         versioning: &MonitoredRwLock<Versioning>,
     ) -> Result<()> {
         // TODO: remove this check after refactor group id
-        if (group.group_id == StaticCompactionGroupId::StateDefault as u64
-            && next_group.group_id == StaticCompactionGroupId::MaterializedView as u64)
-            || (group.group_id == StaticCompactionGroupId::MaterializedView as u64
-                && next_group.group_id == StaticCompactionGroupId::StateDefault as u64)
+        if (group.group_id == StaticCompactionGroupId::StateDefault
+            && next_group.group_id == StaticCompactionGroupId::MaterializedView)
+            || (group.group_id == StaticCompactionGroupId::MaterializedView
+                && next_group.group_id == StaticCompactionGroupId::StateDefault)
         {
             return Err(Error::CompactionGroup(format!(
                 "group-{} and group-{} are both StaticCompactionGroupId",
@@ -1028,6 +1036,27 @@ impl GroupMergeValidator {
                 "group-{} or group-{} is empty",
                 group.group_id, next_group.group_id
             )));
+        }
+
+        // Check non-overlapping table ids early to avoid acquiring heavyweight write locks
+        // in merge_compaction_group_impl only to fail at the overlap check.
+        // Sort both sides and ensure table_ids_1 has the smaller first element,
+        // then reject if table_ids_1's last element >= table_ids_2's first element (overlap).
+        {
+            let mut table_ids_1: Vec<TableId> = group.table_statistic.keys().cloned().collect_vec();
+            let mut table_ids_2: Vec<TableId> =
+                next_group.table_statistic.keys().cloned().collect_vec();
+            table_ids_1.sort();
+            table_ids_2.sort();
+            if table_ids_1.first().unwrap() > table_ids_2.first().unwrap() {
+                std::mem::swap(&mut table_ids_1, &mut table_ids_2);
+            }
+            if table_ids_1.last().unwrap() >= table_ids_2.first().unwrap() {
+                return Err(Error::CompactionGroup(format!(
+                    "group-{} and group-{} have overlapping table id ranges, not mergeable",
+                    group.group_id, next_group.group_id
+                )));
+            }
         }
 
         if group
@@ -1066,8 +1095,8 @@ impl GroupMergeValidator {
                 .as_ref();
 
             tracing::warn!(
-                group_id = group.group_id,
-                next_group_id = next_group.group_id,
+                group_id = %group.group_id,
+                next_group_id = %next_group.group_id,
                 left_config = ?left_config,
                 right_config = ?right_config,
                 "compaction config mismatch detected while merging compaction groups"

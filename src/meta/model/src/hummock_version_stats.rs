@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -41,7 +41,7 @@ pub struct TableStats(pub HashMap<TableId, PbTableStats>);
 impl From<Model> for HummockVersionStats {
     fn from(value: Model) -> Self {
         Self {
-            hummock_version_id: value.id as _,
+            hummock_version_id: value.id,
             table_stats: value.stats.0,
         }
     }

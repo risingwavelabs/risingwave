@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -93,7 +93,9 @@ impl<Src: OpendalSource> OpendalReader<Src> {
                 .file_source_input_row_count
                 .with_guarded_label_values(&[&source_id, &source_name, &actor_id, &fragment_id]);
             let chunk_stream;
-            if let EncodingProperties::Parquet = &self.parser_config.specific.encoding_config {
+            if let EncodingProperties::Parquet(parquet_props) =
+                &self.parser_config.specific.encoding_config
+            {
                 let actor_id = source_ctx.actor_id.to_string();
                 let source_id = source_ctx.source_id.to_string();
                 let split_id = split.id();
@@ -115,6 +117,7 @@ impl<Src: OpendalSource> OpendalReader<Src> {
                     object_name.clone(),
                     self.columns.clone(),
                     Some(self.parser_config.common.rw_columns.clone()),
+                    parquet_props.case_insensitive,
                     self.source_ctx.source_ctrl_opts.chunk_size,
                     split.offset,
                     Some(file_source_input_row_count.clone()),

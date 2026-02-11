@@ -1,0 +1,43 @@
+# See https://github.com/risingwavelabs/risingwave/issues/24367
+
+control substitution on
+
+statement ok
+set rw_implicit_flush = true;
+
+# Keep the test deterministic.
+statement ok
+set sink_decouple = false;
+
+statement ok
+set streaming_parallelism = 1;
+
+statement ok
+create table s (k1 int, k2 int, v int, primary key (k1, k2));
+
+system ok
+rpk topic delete 'test-rw-sink-issue-upsert-kafka' || true;
+
+system ok
+rpk topic create 'test-rw-sink-issue-upsert-kafka'
+
+statement ok
+create sink sk from s with (
+  ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+  topic = 'test-rw-sink-issue-upsert-kafka',
+  primary_key = 'k1'
+) format plain encode json (
+  force_append_only = 'true'
+)
+
+statement ok
+insert into s values (1, 1, 11), (1, 2, 12);
+
+query III rowsort
+select * from s;
+----
+1   1   11
+1   2   12
+
+statement ok
+drop table s cascade;

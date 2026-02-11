@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -249,6 +249,11 @@ impl NotificationServiceImpl {
             users,
             catalog_version,
         ) = self.get_catalog_snapshot().await?;
+        let object_dependencies = self
+            .metadata_manager
+            .catalog_controller
+            .list_created_object_dependencies()
+            .await?;
 
         // Use the plain text secret value for frontend. The secret value will be masked in frontend handle.
         let decrypted_secrets = self.decrypt_secrets(secrets)?;
@@ -311,6 +316,7 @@ impl NotificationServiceImpl {
             serving_worker_slot_mappings,
             streaming_worker_slot_mappings,
             session_params,
+            object_dependencies,
             cluster_resource: Some(cluster_resource),
             ..Default::default()
         })
@@ -323,7 +329,7 @@ impl NotificationServiceImpl {
             .on_current_version(|version| version.into())
             .await;
         let hummock_write_limits = self.hummock_manager.write_limits().await;
-        let meta_backup_manifest_id = self.backup_manager.manifest().manifest_id;
+        let meta_backup_manifest_id = self.backup_manager.manifest().await.manifest_id;
         let cluster_resource = self.get_cluster_resource().await;
 
         Ok(MetaSnapshot {

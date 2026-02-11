@@ -14,43 +14,51 @@
 
 use core::num::NonZeroU64;
 use std::collections::BTreeMap;
+use std::time::Duration;
 
 use anyhow::anyhow;
+use itertools::Itertools;
 use phf::{Set, phf_set};
 use risingwave_common::array::StreamChunk;
-use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema};
+use risingwave_common::catalog::Schema;
 use risingwave_common::types::DataType;
 use risingwave_pb::connector_service::{SinkMetadata, sink_metadata};
+use risingwave_pb::stream_plan::PbSinkSchemaChange;
 use serde::Deserialize;
 use serde_with::{DisplayFromStr, serde_as};
 use thiserror_ext::AsReport;
-use tokio::sync::mpsc::UnboundedSender;
+use tokio::sync::mpsc::{UnboundedSender, unbounded_channel};
+use tokio::time::{MissedTickBehavior, interval};
 use tonic::async_trait;
 use with_options::WithOptions;
 
 use crate::connector_common::IcebergSinkCompactionUpdate;
 use crate::enforce_secret::EnforceSecret;
+use crate::sink::catalog::SinkId;
 use crate::sink::coordinate::CoordinatedLogSinker;
 use crate::sink::decouple_checkpoint_log_sink::default_commit_checkpoint_interval;
 use crate::sink::file_sink::s3::S3Common;
 use crate::sink::jdbc_jni_client::{self, JdbcJniClient};
-use crate::sink::remote::CoordinatedRemoteSinkWriter;
-use crate::sink::snowflake_redshift::{AugmentedChunk, SnowflakeRedshiftSinkS3Writer};
+use crate::sink::snowflake_redshift::{
+    __OP, __ROW_ID, SnowflakeRedshiftSinkJdbcWriter, SnowflakeRedshiftSinkS3Writer,
+};
 use crate::sink::writer::SinkWriter;
 use crate::sink::{
     Result, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT,
     SinglePhaseCommitCoordinator, Sink, SinkCommitCoordinator, SinkError, SinkParam,
-    SinkWriterMetrics, SinkWriterParam,
+    SinkWriterParam,
 };
 
 pub const SNOWFLAKE_SINK_V2: &str = "snowflake_v2";
-pub const SNOWFLAKE_SINK_ROW_ID: &str = "__row_id";
-pub const SNOWFLAKE_SINK_OP: &str = "__op";
 
 const AUTH_METHOD_PASSWORD: &str = "password";
 const AUTH_METHOD_KEY_PAIR_FILE: &str = "key_pair_file";
 const AUTH_METHOD_KEY_PAIR_OBJECT: &str = "key_pair_object";
 const PROP_AUTH_METHOD: &str = "auth.method";
+
+pub fn build_full_table_name(database: &str, schema_name: &str, table_name: &str) -> String {
+    format!(r#""{}"."{}"."{}""#, database, schema_name, table_name)
+}
 
 #[serde_as]
 #[derive(Debug, Clone, Deserialize, WithOptions)]
@@ -70,10 +78,15 @@ pub struct SnowflakeV2Config {
     #[serde(rename = "schema")]
     pub snowflake_schema: Option<String>,
 
-    #[serde(default = "default_schedule")]
+    #[serde(default = "default_target_interval_schedule")]
     #[serde(rename = "write.target.interval.seconds")]
     #[serde_as(as = "DisplayFromStr")]
-    pub snowflake_schedule_seconds: u64,
+    pub writer_target_interval_seconds: u64,
+
+    #[serde(default = "default_intermediate_interval_schedule")]
+    #[serde(rename = "write.intermediate.interval.seconds")]
+    #[serde_as(as = "DisplayFromStr")]
+    pub write_intermediate_interval_seconds: u64,
 
     #[serde(rename = "warehouse")]
     pub snowflake_warehouse: Option<String>,
@@ -132,8 +145,12 @@ pub struct SnowflakeV2Config {
     pub stage: Option<String>,
 }
 
-fn default_schedule() -> u64 {
+fn default_target_interval_schedule() -> u64 {
     3600 // Default to 1 hour
+}
+
+fn default_intermediate_interval_schedule() -> u64 {
+    1800 // Default to 0.5 hour
 }
 
 fn default_with_s3() -> bool {
@@ -301,7 +318,11 @@ impl SnowflakeV2Config {
         schema: &Schema,
         pk_indices: &Vec<usize>,
     ) -> Result<Option<(SnowflakeTaskContext, JdbcJniClient)>> {
-        if !self.auto_schema_change && is_append_only && !self.create_table_if_not_exists {
+        if !self.auto_schema_change
+            && is_append_only
+            && !self.create_table_if_not_exists
+            && !self.with_s3
+        {
             // append-only + no auto schema change is not need to create a client
             return Ok(None);
         }
@@ -344,7 +365,7 @@ impl SnowflakeV2Config {
                     "intermediate.table.name is required"
                 )))?;
             snowflake_task_ctx.cdc_table_name = Some(cdc_table_name.clone());
-            snowflake_task_ctx.schedule_seconds = self.snowflake_schedule_seconds;
+            snowflake_task_ctx.writer_target_interval_seconds = self.writer_target_interval_seconds;
             snowflake_task_ctx.warehouse = Some(
                 self.snowflake_warehouse
                     .clone()
@@ -445,6 +466,7 @@ impl Sink for SnowflakeV2Sink {
         {
             let client = SnowflakeJniClient::new(client, snowflake_task_ctx);
             client.execute_create_table().await?;
+            client.execute_create_pipe().await?;
         }
 
         Ok(())
@@ -498,6 +520,7 @@ impl Sink for SnowflakeV2Sink {
             &self.schema,
             &self.pk_indices,
             self.is_append_only,
+            self.param.sink_id,
         )?;
         Ok(SinkCommitCoordinator::SinglePhase(Box::new(coordinator)))
     }
@@ -505,7 +528,7 @@ impl Sink for SnowflakeV2Sink {
 
 pub enum SnowflakeSinkWriter {
     S3(SnowflakeRedshiftSinkS3Writer),
-    Jdbc(SnowflakeSinkJdbcWriter),
+    Jdbc(SnowflakeRedshiftSinkJdbcWriter),
 }
 
 impl SnowflakeSinkWriter {
@@ -516,8 +539,16 @@ impl SnowflakeSinkWriter {
         param: SinkParam,
     ) -> Result<Self> {
         let schema = param.schema();
+        let database = config.snowflake_database.ok_or_else(|| {
+            SinkError::Config(anyhow!("database is required for Snowflake JDBC sink"))
+        })?;
+        let schema_name = config.snowflake_schema.ok_or_else(|| {
+            SinkError::Config(anyhow!("schema is required for Snowflake JDBC sink"))
+        })?;
+        let table_name = config.snowflake_target_table_name.ok_or_else(|| {
+            SinkError::Config(anyhow!("table.name is required for Snowflake JDBC sink"))
+        })?;
         if config.with_s3 {
-            let executor_id = writer_param.executor_id;
             let s3_writer = SnowflakeRedshiftSinkS3Writer::new(
                 config.s3_inner.ok_or_else(|| {
                     SinkError::Config(anyhow!(
@@ -526,13 +557,17 @@ impl SnowflakeSinkWriter {
                 })?,
                 schema,
                 is_append_only,
-                executor_id,
-                config.snowflake_target_table_name,
+                table_name,
             )?;
             Ok(Self::S3(s3_writer))
         } else {
-            let jdbc_writer =
-                SnowflakeSinkJdbcWriter::new(config, is_append_only, writer_param, param).await?;
+            let jdbc_writer = SnowflakeRedshiftSinkJdbcWriter::new(
+                is_append_only,
+                writer_param,
+                param,
+                build_full_table_name(&database, &schema_name, &table_name),
+            )
+            .await?;
             Ok(Self::Jdbc(jdbc_writer))
         }
     }
@@ -583,119 +618,7 @@ impl SinkWriter for SnowflakeSinkWriter {
     }
 }
 
-pub struct SnowflakeSinkJdbcWriter {
-    augmented_row: AugmentedChunk,
-    jdbc_sink_writer: CoordinatedRemoteSinkWriter,
-}
-
-impl SnowflakeSinkJdbcWriter {
-    pub async fn new(
-        config: SnowflakeV2Config,
-        is_append_only: bool,
-        writer_param: SinkWriterParam,
-        mut param: SinkParam,
-    ) -> Result<Self> {
-        let metrics = SinkWriterMetrics::new(&writer_param);
-        let properties = &param.properties;
-        let column_descs = &mut param.columns;
-        let full_table_name = if is_append_only {
-            format!(
-                r#""{}"."{}"."{}""#,
-                config.snowflake_database.clone().unwrap_or_default(),
-                config.snowflake_schema.clone().unwrap_or_default(),
-                config
-                    .snowflake_target_table_name
-                    .clone()
-                    .unwrap_or_default()
-            )
-        } else {
-            let max_column_id = column_descs
-                .iter()
-                .map(|column| column.column_id.get_id())
-                .max()
-                .unwrap_or(0);
-            (*column_descs).push(ColumnDesc::named(
-                SNOWFLAKE_SINK_ROW_ID,
-                ColumnId::new(max_column_id + 1),
-                DataType::Varchar,
-            ));
-            (*column_descs).push(ColumnDesc::named(
-                SNOWFLAKE_SINK_OP,
-                ColumnId::new(max_column_id + 2),
-                DataType::Int32,
-            ));
-            format!(
-                r#""{}"."{}"."{}""#,
-                config.snowflake_database.clone().unwrap_or_default(),
-                config.snowflake_schema.clone().unwrap_or_default(),
-                config.snowflake_cdc_table_name.clone().unwrap_or_default()
-            )
-        };
-        let mut new_properties = BTreeMap::from([
-            ("table.name".to_owned(), full_table_name),
-            ("connector".to_owned(), "snowflake_v2".to_owned()),
-            (
-                "jdbc.url".to_owned(),
-                config.jdbc_url.clone().unwrap_or_default(),
-            ),
-            ("type".to_owned(), "append-only".to_owned()),
-            (
-                "primary_key".to_owned(),
-                properties.get("primary_key").cloned().unwrap_or_default(),
-            ),
-            (
-                "schema.name".to_owned(),
-                config.snowflake_schema.clone().unwrap_or_default(),
-            ),
-            (
-                "database.name".to_owned(),
-                config.snowflake_database.clone().unwrap_or_default(),
-            ),
-        ]);
-
-        // Reuse build_jdbc_connection_properties to get driver properties (auth, user, etc.)
-        let (_jdbc_url, connection_properties) = config.build_jdbc_connection_properties()?;
-        for (key, value) in connection_properties {
-            new_properties.insert(key, value);
-        }
-
-        param.properties = new_properties;
-
-        let jdbc_sink_writer =
-            CoordinatedRemoteSinkWriter::new(param.clone(), metrics.clone()).await?;
-        Ok(Self {
-            augmented_row: AugmentedChunk::new(0, is_append_only),
-            jdbc_sink_writer,
-        })
-    }
-}
-
-impl SnowflakeSinkJdbcWriter {
-    async fn begin_epoch(&mut self, epoch: u64) -> Result<()> {
-        self.augmented_row.reset_epoch(epoch);
-        self.jdbc_sink_writer.begin_epoch(epoch).await?;
-        Ok(())
-    }
-
-    async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()> {
-        let chunk = self.augmented_row.augmented_chunk(chunk)?;
-        self.jdbc_sink_writer.write_batch(chunk).await?;
-        Ok(())
-    }
-
-    async fn barrier(&mut self, is_checkpoint: bool) -> Result<()> {
-        self.jdbc_sink_writer.barrier(is_checkpoint).await?;
-        Ok(())
-    }
-
-    async fn abort(&mut self) -> Result<()> {
-        // TODO: abort should clean up all the data written in this epoch.
-        self.jdbc_sink_writer.abort().await?;
-        Ok(())
-    }
-}
-
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct SnowflakeTaskContext {
     // required for task creation
     pub target_table_name: String,
@@ -706,7 +629,7 @@ pub struct SnowflakeTaskContext {
     // only upsert
     pub task_name: Option<String>,
     pub cdc_table_name: Option<String>,
-    pub schedule_seconds: u64,
+    pub writer_target_interval_seconds: u64,
     pub warehouse: Option<String>,
     pub pk_column_names: Option<Vec<String>>,
     pub all_column_names: Option<Vec<String>>,
@@ -717,6 +640,8 @@ pub struct SnowflakeTaskContext {
 }
 pub struct SnowflakeSinkCommitter {
     client: Option<SnowflakeJniClient>,
+    _periodic_task_handle: Option<tokio::task::JoinHandle<()>>,
+    shutdown_sender: Option<tokio::sync::mpsc::UnboundedSender<()>>,
 }
 
 impl SnowflakeSinkCommitter {
@@ -725,15 +650,62 @@ impl SnowflakeSinkCommitter {
         schema: &Schema,
         pk_indices: &Vec<usize>,
         is_append_only: bool,
+        sink_id: SinkId,
     ) -> Result<Self> {
-        let client = if let Some((snowflake_task_ctx, client)) =
-            config.build_snowflake_task_ctx_jdbc_client(is_append_only, schema, pk_indices)?
-        {
-            Some(SnowflakeJniClient::new(client, snowflake_task_ctx))
-        } else {
-            None
-        };
-        Ok(Self { client })
+        let (client, periodic_task_handle, shutdown_sender) =
+            if let Some((snowflake_task_ctx, client)) =
+                config.build_snowflake_task_ctx_jdbc_client(is_append_only, schema, pk_indices)?
+            {
+                let (shutdown_sender, shutdown_receiver) = unbounded_channel();
+                let snowflake_client =
+                    SnowflakeJniClient::new(client.clone(), snowflake_task_ctx.clone());
+                let periodic_task_handle = tokio::spawn(async move {
+                    Self::run_periodic_query_task(
+                        snowflake_client,
+                        config.write_intermediate_interval_seconds,
+                        sink_id,
+                        shutdown_receiver,
+                    )
+                    .await;
+                });
+                (
+                    Some(SnowflakeJniClient::new(client, snowflake_task_ctx)),
+                    Some(periodic_task_handle),
+                    Some(shutdown_sender),
+                )
+            } else {
+                (None, None, None)
+            };
+
+        Ok(Self {
+            client,
+            _periodic_task_handle: periodic_task_handle,
+            shutdown_sender,
+        })
+    }
+
+    async fn run_periodic_query_task(
+        client: SnowflakeJniClient,
+        write_intermediate_interval_seconds: u64,
+        sink_id: SinkId,
+        mut shutdown_receiver: tokio::sync::mpsc::UnboundedReceiver<()>,
+    ) {
+        let mut copy_timer = interval(Duration::from_secs(write_intermediate_interval_seconds));
+        copy_timer.set_missed_tick_behavior(MissedTickBehavior::Skip);
+        loop {
+            tokio::select! {
+                _ = shutdown_receiver.recv() => break,
+                _ = copy_timer.tick() => {
+                    if let Err(e) = async {
+                        client.execute_flush_pipe().await?;
+                        Ok::<(),SinkError>(())
+                    }.await {
+                        tracing::error!("Failed to execute copy into task for sink id {}: {}", sink_id, e.as_report());
+                    }
+                }
+            }
+        }
+        tracing::info!("Periodic query task stopped for sink id {}", sink_id);
     }
 }
 
@@ -748,34 +720,45 @@ impl SinglePhaseCommitCoordinator for SnowflakeSinkCommitter {
         Ok(())
     }
 
-    async fn commit(
+    async fn commit_data(&mut self, _epoch: u64, _metadata: Vec<SinkMetadata>) -> Result<()> {
+        Ok(())
+    }
+
+    async fn commit_schema_change(
         &mut self,
         _epoch: u64,
-        _metadata: Vec<SinkMetadata>,
-        add_columns: Option<Vec<Field>>,
+        schema_change: PbSinkSchemaChange,
     ) -> Result<()> {
+        use risingwave_pb::stream_plan::sink_schema_change::PbOp as SinkSchemaChangeOp;
+        let schema_change_op = schema_change
+            .op
+            .ok_or_else(|| SinkError::Coordinator(anyhow!("Invalid schema change operation")))?;
+        let SinkSchemaChangeOp::AddColumns(add_columns) = schema_change_op else {
+            return Err(SinkError::Coordinator(anyhow!(
+                "Only AddColumns schema change is supported for Snowflake sink"
+            )));
+        };
         let client = self.client.as_mut().ok_or_else(|| {
             SinkError::Config(anyhow!("Snowflake sink committer is not initialized."))
         })?;
-        client.execute_flush_pipe().await?;
-
-        if let Some(add_columns) = add_columns {
-            client
-                .execute_alter_add_columns(
-                    &add_columns
-                        .iter()
-                        .map(|f| (f.name.clone(), f.data_type.to_string()))
-                        .collect::<Vec<_>>(),
-                )
-                .await?;
-        }
-        Ok(())
+        client
+            .execute_alter_add_columns(
+                &add_columns
+                    .fields
+                    .into_iter()
+                    .map(|f| (f.name, DataType::from(f.data_type.unwrap()).to_string()))
+                    .collect_vec(),
+            )
+            .await
     }
 }
 
 impl Drop for SnowflakeSinkCommitter {
     fn drop(&mut self) {
         if let Some(client) = self.client.take() {
+            if let Some(sender) = self.shutdown_sender.take() {
+                let _ = sender.send(()); // Ignore the result, as the receiver may have been dropped.
+            }
             tokio::spawn(async move {
                 client.execute_drop_task().await.ok();
             });
@@ -937,7 +920,7 @@ fn build_create_table_sql(
     schema: &Schema,
     need_op_and_row_id: bool,
 ) -> Result<String> {
-    let full_table_name = format!(r#""{}"."{}"."{}""#, database, schema_name, table_name);
+    let full_table_name = build_full_table_name(database, schema_name, table_name);
     let mut columns: Vec<String> = schema
         .fields
         .iter()
@@ -947,8 +930,8 @@ fn build_create_table_sql(
         })
         .collect::<Result<Vec<String>>>()?;
     if need_op_and_row_id {
-        columns.push(format!(r#""{}" STRING"#, SNOWFLAKE_SINK_ROW_ID));
-        columns.push(format!(r#""{}" INT"#, SNOWFLAKE_SINK_OP));
+        columns.push(format!(r#""{}" STRING"#, __ROW_ID));
+        columns.push(format!(r#""{}" INT"#, __OP));
     }
     let columns_str = columns.join(", ");
     Ok(format!(
@@ -1014,7 +997,7 @@ fn build_alter_add_column_sql(
     schema: &str,
     columns: &Vec<(String, String)>,
 ) -> String {
-    let full_table_name = format!(r#""{}"."{}"."{}""#, database, schema, table_name);
+    let full_table_name = build_full_table_name(database, schema, table_name);
     jdbc_jni_client::build_alter_add_column_sql(&full_table_name, columns, true)
 }
 
@@ -1055,7 +1038,7 @@ fn build_create_merge_into_task_sql(snowflake_task_context: &SnowflakeTaskContex
         task_name,
         cdc_table_name,
         target_table_name,
-        schedule_seconds,
+        writer_target_interval_seconds,
         warehouse,
         pk_column_names,
         all_column_names,
@@ -1119,7 +1102,7 @@ fn build_create_merge_into_task_sql(snowflake_task_context: &SnowflakeTaskContex
     format!(
         r#"CREATE OR REPLACE TASK {task_name}
 WAREHOUSE = {warehouse}
-SCHEDULE = '{schedule_seconds} SECONDS'
+SCHEDULE = '{writer_target_interval_seconds} SECONDS'
 AS
 BEGIN
     LET max_row_id STRING;
@@ -1147,7 +1130,7 @@ BEGIN
 END;"#,
         task_name = full_task_name,
         warehouse = warehouse.as_ref().unwrap(),
-        schedule_seconds = schedule_seconds,
+        writer_target_interval_seconds = writer_target_interval_seconds,
         cdc_table_name = full_cdc_table_name,
         target_table_name = full_target_table_name,
         pk_names_str = pk_names_str,
@@ -1155,8 +1138,8 @@ END;"#,
         all_column_names_set_str = all_column_names_set_str,
         all_column_names_str = all_column_names_str,
         all_column_names_insert_str = all_column_names_insert_str,
-        snowflake_sink_row_id = SNOWFLAKE_SINK_ROW_ID,
-        snowflake_sink_op = SNOWFLAKE_SINK_OP,
+        snowflake_sink_row_id = __ROW_ID,
+        snowflake_sink_op = __OP,
     )
 }
 
@@ -1245,7 +1228,7 @@ mod tests {
             task_name: Some("test_task".to_owned()),
             cdc_table_name: Some("test_cdc_table".to_owned()),
             target_table_name: "test_target_table".to_owned(),
-            schedule_seconds: 3600,
+            writer_target_interval_seconds: 3600,
             warehouse: Some("test_warehouse".to_owned()),
             pk_column_names: Some(vec!["v1".to_owned()]),
             all_column_names: Some(vec!["v1".to_owned(), "v2".to_owned()]),
@@ -1293,7 +1276,7 @@ END;"#;
             task_name: Some("test_task_multi_pk".to_owned()),
             cdc_table_name: Some("cdc_multi_pk".to_owned()),
             target_table_name: "target_multi_pk".to_owned(),
-            schedule_seconds: 300,
+            writer_target_interval_seconds: 300,
             warehouse: Some("multi_pk_warehouse".to_owned()),
             pk_column_names: Some(vec!["id1".to_owned(), "id2".to_owned()]),
             all_column_names: Some(vec!["id1".to_owned(), "id2".to_owned(), "val".to_owned()]),

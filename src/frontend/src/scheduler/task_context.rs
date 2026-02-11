@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -64,6 +64,10 @@ impl BatchTaskContext for FrontendBatchTaskContext {
             self.session.auth_context(),
             self.session.shared_config(),
             self.session.env().system_params_manager().get_params(),
+            Arc::new(MetricsReaderImpl::new(
+                self.session.env().prometheus_client().cloned(),
+                self.session.env().prometheus_selector().to_owned(),
+            )),
         ))
     }
 

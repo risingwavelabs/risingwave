@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -28,6 +28,7 @@ use risingwave_hummock_sdk::key::{key_with_epoch, map_table_key_range};
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::sstable_info::SstableInfoInner;
 use risingwave_meta::hummock::test_utils::setup_compute_env;
+use risingwave_storage::hummock::MemoryLimiter;
 use risingwave_storage::hummock::event_handler::TEST_LOCAL_INSTANCE_ID;
 use risingwave_storage::hummock::iterator::test_utils::{
     iterator_test_table_key_of, iterator_test_user_key_of,
@@ -37,8 +38,15 @@ use risingwave_storage::hummock::store::version::{
     HummockReadVersion, StagingSstableInfo, VersionUpdate, read_filter_for_version,
 };
 use risingwave_storage::hummock::test_utils::*;
+use risingwave_storage::hummock::utils::MemoryTracker;
 
 use crate::test_utils::prepare_first_valid_version;
+
+fn tracker_for_test(imm: &SharedBufferBatch) -> MemoryTracker {
+    MemoryLimiter::unlimit()
+        .try_require_memory(imm.size() as _)
+        .expect("unlimited tracker should succeed")
+}
 
 #[tokio::test]
 async fn test_read_version_basic() {
@@ -57,6 +65,8 @@ async fn test_read_version_basic() {
         vnodes,
     );
 
+    read_version.init();
+
     {
         // single imm
         let sorted_items = gen_dummy_batch(1);
@@ -69,7 +79,8 @@ async fn test_read_version_basic() {
             TableId::from(table_id),
         );
 
-        read_version.add_imm(imm);
+        let tracker = tracker_for_test(&imm);
+        read_version.add_pending_imm(imm, tracker);
 
         let key = iterator_test_table_key_of(1_usize);
         let key_range = map_table_key_range((
@@ -103,7 +114,8 @@ async fn test_read_version_basic() {
                 TableId::from(table_id),
             );
 
-            read_version.add_imm(imm);
+            let tracker = tracker_for_test(&imm);
+            read_version.add_pending_imm(imm, tracker);
             let _ = read_version.start_upload_pending_imms();
         }
 
@@ -304,6 +316,7 @@ async fn test_read_filter_basic() {
         pinned_version,
         vnodes.clone(),
     )));
+    read_version.write().init();
     read_version.write().update_vnode_bitmap(vnodes);
 
     {
@@ -318,7 +331,8 @@ async fn test_read_filter_basic() {
             TableId::from(table_id),
         );
 
-        read_version.write().add_imm(imm);
+        let tracker = tracker_for_test(&imm);
+        read_version.write().add_pending_imm(imm, tracker);
 
         // directly prune_overlap
         let key = Bytes::from(iterator_test_table_key_of(epoch as usize));

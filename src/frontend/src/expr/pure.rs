@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::borrow::Cow;
+
 use expr_node::Type;
 use risingwave_pb::expr::expr_node;
 
@@ -20,20 +22,80 @@ use crate::expr::FunctionCall;
 
 #[derive(Default)]
 pub(crate) struct ImpureAnalyzer {
-    pub(crate) impure: bool,
+    impure: Option<Cow<'static, str>>,
+}
+
+impl ImpureAnalyzer {
+    /// Returns `true` if the expression is impure.
+    ///
+    /// Only call this method after visiting the expression.
+    pub fn is_impure(&self) -> bool {
+        self.impure.is_some()
+    }
+
+    /// Returns the description of the impure expression if it is impure, for error reporting.
+    /// `None` if the expression is pure.
+    ///
+    /// Only call this method after visiting the expression.
+    pub fn impure_expr_desc(&self) -> Option<&str> {
+        self.impure.as_deref()
+    }
 }
 
 impl ExprVisitor for ImpureAnalyzer {
-    fn visit_user_defined_function(&mut self, _func_call: &super::UserDefinedFunction) {
-        self.impure = true;
+    fn visit_user_defined_function(&mut self, func_call: &super::UserDefinedFunction) {
+        let name = &func_call.catalog.name;
+        self.impure = Some(format!("user-defined function `{name}`").into());
+    }
+
+    fn visit_table_function(&mut self, func_call: &super::TableFunction) {
+        use crate::expr::table_function::TableFunctionType as Type;
+        let func_type = func_call.function_type;
+        match func_type {
+            Type::Unspecified => unreachable!(),
+
+            // deterministic
+            Type::GenerateSeries
+            | Type::Unnest
+            | Type::RegexpMatches
+            | Type::Range
+            | Type::GenerateSubscripts
+            | Type::PgExpandarray
+            | Type::JsonbArrayElements
+            | Type::JsonbArrayElementsText
+            | Type::JsonbEach
+            | Type::JsonbEachText
+            | Type::JsonbObjectKeys
+            | Type::JsonbPathQuery
+            | Type::JsonbPopulateRecordset
+            | Type::JsonbToRecordset => {
+                func_call.args.iter().for_each(|expr| self.visit_expr(expr));
+            }
+
+            // indeterministic
+            Type::FileScan
+            | Type::PostgresQuery
+            | Type::MysqlQuery
+            | Type::InternalBackfillProgress
+            | Type::InternalSourceBackfillProgress
+            | Type::InternalGetChannelDeltaStats
+            | Type::PgGetKeywords => {
+                self.impure = Some(func_type.as_str_name().into());
+            }
+            Type::UserDefined => {
+                let name = &func_call.user_defined.as_ref().unwrap().name;
+                self.impure = Some(format!("user-defined table function `{name}`").into());
+            }
+        }
     }
 
     fn visit_now(&mut self, _: &super::Now) {
-        self.impure = true;
+        self.impure = Some("NOW or PROCTIME".into());
     }
 
     fn visit_function_call(&mut self, func_call: &super::FunctionCall) {
-        match func_call.func_type() {
+        let func_type = func_call.func_type();
+        match func_type {
             Type::Unspecified => unreachable!(),
             Type::Add
             | Type::Subtract
@@ -148,6 +210,8 @@ impl ExprVisitor for ImpureAnalyzer {
             | Type::Scale
             | Type::MinScale
             | Type::TrimScale
+            | Type::Gamma
+            | Type::Lgamma
             | Type::Left
             | Type::Right
             | Type::Degrees
@@ -172,6 +236,7 @@ impl ExprVisitor for ImpureAnalyzer {
             | Type::ArraySum
             | Type::ArraySort
             | Type::ArrayAppend
+            | Type::ArrayReverse
             | Type::ArrayPrepend
             | Type::FormatType
             | Type::ArrayDistinct
@@ -284,6 +349,11 @@ impl ExprVisitor for ImpureAnalyzer {
             | Type::L2Norm
             | Type::L2Normalize
             | Type::Subvector
+            // TODO: `rw_vnode` is more like STABLE instead of IMMUTABLE, because even its result is
+            // deterministic, it needs to read the total vnode count from the context, which means that
+            // it cannot be evaluated during constant folding. We have to treat it pure here so it can be used
+            // internally without materialization.
+            | Type::Vnode
             | Type::VnodeUser
             | Type::RwEpochToTs
             | Type::CheckNotNull
@@ -296,8 +366,7 @@ impl ExprVisitor for ImpureAnalyzer {
                     .for_each(|expr| self.visit_expr(expr));
             }
             // expression output is not deterministic
-            Type::Vnode // obtain vnode count from the context
-            | Type::TestFeature
+            Type::TestFeature
             | Type::License
             | Type::Proctime
             | Type::PgSleep
@@ -325,7 +394,7 @@ impl ExprVisitor for ImpureAnalyzer {
             | Type::HasFunctionPrivilege
             | Type::OpenaiEmbedding
             | Type::HasDatabasePrivilege
-            | Type::Random => self.impure = true,
+            | Type::Random => self.impure = Some(func_type.as_str_name().into()),
         }
     }
 }
@@ -337,13 +406,21 @@ pub fn is_pure(expr: &ExprImpl) -> bool {
 pub fn is_impure(expr: &ExprImpl) -> bool {
     let mut a = ImpureAnalyzer::default();
     a.visit_expr(expr);
-    a.impure
+    a.is_impure()
 }
 
 pub fn is_impure_func_call(func_call: &FunctionCall) -> bool {
     let mut a = ImpureAnalyzer::default();
     a.visit_function_call(func_call);
-    a.impure
+    a.is_impure()
+}
+
+/// Returns the description of the impure expression if it is impure, for error reporting.
+/// `None` if the expression is pure.
+pub fn impure_expr_desc(expr: &ExprImpl) -> Option<String> {
+    let mut a = ImpureAnalyzer::default();
+    a.visit_expr(expr);
+    a.impure_expr_desc().map(|s| s.to_owned())
 }
 
 #[cfg(test)]

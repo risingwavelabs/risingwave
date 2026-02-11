@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -27,14 +27,27 @@ pub struct ErrorOrNoticeMessage<'a> {
 
 impl<'a> ErrorOrNoticeMessage<'a> {
     /// Create a Postgres error message from an error, with the error code and message extracted from the error.
-    pub fn error(error: &(dyn std::error::Error + 'static)) -> Self {
-        let message = error.to_report_string_pretty();
+    pub fn error(error: &(dyn std::error::Error + 'static), pretty: bool) -> Self {
+        Self::error_with_severity(error, pretty, Severity::Error)
+    }
+
+    /// Create a Postgres error message from an error, with a custom severity.
+    pub fn error_with_severity(
+        error: &(dyn std::error::Error + 'static),
+        pretty: bool,
+        severity: Severity,
+    ) -> Self {
+        let message = if pretty {
+            error.to_report_string_pretty()
+        } else {
+            error.to_report_string()
+        };
         let error_code = error_request_copy::<PostgresErrorCode>(error)
             .filter(|e| e.is_error()) // should not be warning or success
             .unwrap_or(PostgresErrorCode::InternalError);
 
         Self {
-            severity: Severity::Error,
+            severity,
             error_code,
             message: Cow::Owned(message),
         }
@@ -53,7 +66,7 @@ impl<'a> ErrorOrNoticeMessage<'a> {
 /// Severity: the field contents are ERROR, FATAL, or PANIC (in an error message), or WARNING,
 /// NOTICE, DEBUG, INFO, or LOG (in a notice message), or a localized translation of one of these.
 /// Always present.
-#[derive(PartialEq, Eq, Clone, Debug)]
+#[derive(PartialEq, Eq, Clone, Copy, Debug)]
 pub enum Severity {
     Error,
     Fatal,

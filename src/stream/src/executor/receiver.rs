@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -95,19 +95,15 @@ mod tests {
 
         let b1 = Barrier::new_test_barrier(test_epoch(1)).with_mutation(Mutation::Update(
             UpdateMutation {
-                dispatchers: Default::default(),
                 merges: merge_updates,
-                vnode_bitmaps: Default::default(),
-                dropped_actors: Default::default(),
-                actor_splits: Default::default(),
-                actor_new_dispatchers: Default::default(),
-                actor_cdc_table_snapshot_splits: Default::default(),
-                sink_add_columns: Default::default(),
+                ..Default::default()
             },
         ));
 
         barrier_test_env.inject_barrier(&b1, [actor_id]);
         barrier_test_env.flush_all_events().await;
+
+        let actor_ctx = ActorContext::for_test(actor_id);
 
         let input = new_input(
             &barrier_test_env.local_barrier_manager,
@@ -116,12 +112,13 @@ mod tests {
             fragment_id,
             &helper_make_local_actor(old),
             upstream_fragment_id,
+            actor_ctx.config.clone(),
         )
         .await
         .unwrap();
 
         let receiver = ReceiverExecutor::new(
-            ActorContext::for_test(actor_id),
+            actor_ctx.clone(),
             fragment_id,
             upstream_fragment_id,
             input,

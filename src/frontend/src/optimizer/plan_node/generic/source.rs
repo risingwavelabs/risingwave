@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -347,5 +347,17 @@ impl Source {
             },
             1,
         )
+    }
+
+    pub fn clone_with_column_catalog(&self, column_catalog: Vec<ColumnCatalog>) -> Self {
+        let row_id_index = column_catalog.iter().position(|c| c.is_row_id_column());
+        Self {
+            catalog: self.catalog.clone(),
+            column_catalog,
+            row_id_index,
+            kind: self.kind.clone(),
+            ctx: self.ctx.clone(),
+            as_of: self.as_of.clone(),
+        }
     }
 }

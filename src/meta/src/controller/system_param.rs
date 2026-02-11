@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -27,7 +27,7 @@ use risingwave_meta_model::system_parameter;
 use risingwave_pb::meta::PbSystemParams;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use sea_orm::ActiveValue::Set;
-use sea_orm::{ActiveModelTrait, DatabaseConnection, EntityTrait, TransactionTrait};
+use sea_orm::{DatabaseConnection, EntityTrait, TransactionTrait};
 use tokio::sync::RwLock;
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
@@ -198,7 +198,7 @@ impl SystemParamsController {
         };
 
         param.value = Set(new_value);
-        param.update(&self.db).await?;
+        SystemParameter::update(param).exec(&self.db).await?;
         *params_guard = params.clone();
 
         // Run common handler.
@@ -291,7 +291,10 @@ mod tests {
             is_mutable: Set(true),
             description: Set(None),
         };
-        deprecated_param.insert(&system_param_ctl.db).await.unwrap();
+        SystemParameter::insert(deprecated_param)
+            .exec(&system_param_ctl.db)
+            .await
+            .unwrap();
 
         // init system parameter controller as not first launch.
         let system_param_ctl = SystemParamsController::new(

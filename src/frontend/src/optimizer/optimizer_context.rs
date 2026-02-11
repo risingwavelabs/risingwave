@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -23,11 +23,10 @@ use risingwave_sqlparser::ast::{ExplainFormat, ExplainOptions, ExplainType};
 
 use super::property::WatermarkGroupId;
 use crate::Explain;
-use crate::binder::ShareId;
 use crate::expr::{CorrelatedId, SessionTimezone};
 use crate::handler::HandlerArgs;
 use crate::optimizer::LogicalPlanRef;
-use crate::optimizer::plan_node::{LogicalPlanRef as PlanRef, PlanNodeId};
+use crate::optimizer::plan_node::PlanNodeId;
 use crate::session::SessionImpl;
 use crate::utils::{OverwriteOptions, WithOptions};
 
@@ -56,9 +55,9 @@ pub struct OptimizerContext {
     /// Store the configs can be overwritten in with clause
     /// if not specified, use the value from session variable.
     overwrite_options: OverwriteOptions,
-    /// Store the mapping between `share_id` and the corresponding
-    /// `PlanRef`, used by rcte's planning. (e.g., in `LogicalCteRef`)
-    rcte_cache: RefCell<HashMap<ShareId, PlanRef>>,
+    /// Mapping from iceberg table identifier to current snapshot id.
+    /// Used to keep same snapshot id when multiple scans from the same iceberg table exist in a query.
+    iceberg_snapshot_id_map: RefCell<HashMap<String, Option<i64>>>,
 
     /// Last assigned plan node ID.
     last_plan_node_id: Cell<i32>,
@@ -105,7 +104,7 @@ impl OptimizerContext {
             session_timezone,
             total_rule_applied: RefCell::new(0),
             overwrite_options,
-            rcte_cache: RefCell::new(HashMap::new()),
+            iceberg_snapshot_id_map: RefCell::new(HashMap::new()),
 
             last_plan_node_id: Cell::new(RESERVED_ID_NUM.into()),
             last_correlated_id: Cell::new(0),
@@ -131,7 +130,7 @@ impl OptimizerContext {
             session_timezone: RefCell::new(SessionTimezone::new("UTC".into())),
             total_rule_applied: RefCell::new(0),
             overwrite_options: OverwriteOptions::default(),
-            rcte_cache: RefCell::new(HashMap::new()),
+            iceberg_snapshot_id_map: RefCell::new(HashMap::new()),
 
             last_plan_node_id: Cell::new(0),
             last_correlated_id: Cell::new(0),
@@ -279,12 +278,8 @@ impl OptimizerContext {
         self.session_timezone.borrow().timezone()
     }
 
-    pub fn get_rcte_cache_plan(&self, id: &ShareId) -> Option<PlanRef> {
-        self.rcte_cache.borrow().get(id).cloned()
-    }
-
-    pub fn insert_rcte_cache_plan(&self, id: ShareId, plan: PlanRef) {
-        self.rcte_cache.borrow_mut().insert(id, plan);
+    pub fn iceberg_snapshot_id_map(&self) -> RefMut<'_, HashMap<String, Option<i64>>> {
+        self.iceberg_snapshot_id_map.borrow_mut()
     }
 }
 

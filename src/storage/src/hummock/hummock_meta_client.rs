@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,10 +17,10 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use futures::stream::BoxStream;
 use risingwave_hummock_sdk::version::HummockVersion;
-use risingwave_hummock_sdk::{ObjectIdRange, SyncResult};
+use risingwave_hummock_sdk::{CompactionGroupId, ObjectIdRange, SyncResult};
 use risingwave_pb::hummock::{PbHummockVersion, SubscribeCompactionEventRequest};
 use risingwave_pb::iceberg_compaction::SubscribeIcebergCompactionEventRequest;
-use risingwave_pb::id::{JobId, TableId};
+use risingwave_pb::id::{HummockSstableId, JobId, TableId};
 use risingwave_rpc_client::error::Result;
 use risingwave_rpc_client::{
     CompactionEventItem, HummockMetaClient, HummockMetaClientChangeLogInfo,
@@ -78,10 +78,10 @@ impl HummockMetaClient for MonitoredHummockMetaClient {
 
     async fn trigger_manual_compaction(
         &self,
-        compaction_group_id: u64,
+        compaction_group_id: CompactionGroupId,
         table_id: JobId,
         level: u32,
-        sst_ids: Vec<u64>,
+        sst_ids: Vec<HummockSstableId>,
     ) -> Result<()> {
         self.meta_client
             .trigger_manual_compaction(compaction_group_id, table_id, level, sst_ids)

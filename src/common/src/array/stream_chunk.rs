@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -364,6 +364,20 @@ impl StreamChunk {
                 prev_r = None;
             } else {
                 prev_r = Some(curr);
+            }
+        }
+
+        // Normalize update pairs that became partially invisible.
+        // If only U- is visible, turn it into Delete; if only U+ is visible, turn it into Insert.
+        for idx in 0..len.saturating_sub(1) {
+            if c.op(idx) == Op::UpdateDelete && c.op(idx + 1) == Op::UpdateInsert {
+                let delete_vis = c.vis(idx);
+                let insert_vis = c.vis(idx + 1);
+                if delete_vis && !insert_vis {
+                    c.set_op(idx, Op::Delete);
+                } else if !delete_vis && insert_vis {
+                    c.set_op(idx + 1, Op::Insert);
+                }
             }
         }
         c.into()
@@ -918,6 +932,24 @@ mod tests {
 | + | 1 | 6 |
 | + | 2 | 3 |
 +---+---+---+"
+        );
+    }
+
+    #[test]
+    fn test_eliminate_adjacent_noop_update_normalize_update_pair() {
+        let c = StreamChunk::from_pretty(
+            "  I I
+            + 1 10
+            U- 1 10
+            U+ 1 20",
+        );
+        let c = c.eliminate_adjacent_noop_update();
+        assert_eq!(
+            c.to_pretty().to_string(),
+            "\
++---+---+----+
+| + | 1 | 20 |
++---+---+----+"
         );
     }
 }

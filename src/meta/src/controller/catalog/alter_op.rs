@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use anyhow::Context;
+use risingwave_common::cast::datetime_to_timestamp_millis;
 use risingwave_common::catalog::{AlterDatabaseParam, ICEBERG_SINK_PREFIX, ICEBERG_SOURCE_PREFIX};
 use risingwave_common::config::mutate::TomlTableMutateExt as _;
 use risingwave_common::config::{StreamingConfig, merge_streaming_config_section};
@@ -25,6 +26,7 @@ use sea_orm::sea_query::Expr;
 use sea_orm::{ActiveModelTrait, DatabaseTransaction};
 
 use super::*;
+use crate::controller::utils::load_streaming_jobs_by_ids;
 use crate::error::bail_invalid_parameter;
 
 impl CatalogController {
@@ -54,7 +56,7 @@ impl CatalogController {
         let version = self
             .notify_frontend(
                 NotificationOperation::Update,
-                NotificationInfo::Database(ObjectModel(database, obj).into()),
+                NotificationInfo::Database(ObjectModel(database, obj, None).into()),
             )
             .await;
         Ok(version)
@@ -85,7 +87,7 @@ impl CatalogController {
         let version = self
             .notify_frontend(
                 NotificationOperation::Update,
-                NotificationInfo::Schema(ObjectModel(schema, obj).into()),
+                NotificationInfo::Schema(ObjectModel(schema, obj, None).into()),
             )
             .await;
         Ok(version)
@@ -139,6 +141,7 @@ impl CatalogController {
                 NotificationOperation::Update,
                 NotificationInfo::ObjectGroup(PbObjectGroup {
                     objects: to_update_relations,
+                    dependencies: vec![],
                 }),
             )
             .await;
@@ -231,6 +234,7 @@ impl CatalogController {
                 NotificationOperation::Update,
                 NotificationInfo::ObjectGroup(PbObjectGroup {
                     objects: to_update_relations,
+                    dependencies: vec![],
                 }),
             )
             .await;
@@ -260,7 +264,7 @@ impl CatalogController {
         }
 
         let source: source::ActiveModel = pb_source.clone().into();
-        source.update(&txn).await?;
+        Source::update(source).exec(&txn).await?;
         txn.commit().await?;
 
         let version = self
@@ -306,7 +310,7 @@ impl CatalogController {
                 let version = self
                     .notify_frontend(
                         NotificationOperation::Update,
-                        NotificationInfo::Database(ObjectModel(db, obj).into()),
+                        NotificationInfo::Database(ObjectModel(db, obj, None).into()),
                     )
                     .await;
                 return Ok(version);
@@ -322,7 +326,7 @@ impl CatalogController {
                 let version = self
                     .notify_frontend(
                         NotificationOperation::Update,
-                        NotificationInfo::Schema(ObjectModel(schema, obj).into()),
+                        NotificationInfo::Schema(ObjectModel(schema, obj, None).into()),
                     )
                     .await;
                 return Ok(version);
@@ -332,6 +336,9 @@ impl CatalogController {
                     .one(&txn)
                     .await?
                     .ok_or_else(|| MetaError::catalog_id_not_found("table", object_id))?;
+                let streaming_job = streaming_job::Entity::find_by_id(object_id.as_job_id())
+                    .one(&txn)
+                    .await?;
 
                 // associated source.
                 if let Some(associated_source_id) = table.optional_associated_source_id {
@@ -348,7 +355,9 @@ impl CatalogController {
                         .ok_or_else(|| {
                             MetaError::catalog_id_not_found("source", associated_source_id)
                         })?;
-                    objects.push(PbObjectInfo::Source(ObjectModel(source, src_obj).into()));
+                    objects.push(PbObjectInfo::Source(
+                        ObjectModel(source, src_obj, None).into(),
+                    ));
                 }
 
                 // associated sink and source for iceberg table.
@@ -381,7 +390,9 @@ impl CatalogController {
                         .one(&txn)
                         .await?
                         .ok_or_else(|| MetaError::catalog_id_not_found("sink", iceberg_sink))?;
-                    objects.push(PbObjectInfo::Sink(ObjectModel(sink, sink_obj).into()));
+                    objects.push(PbObjectInfo::Sink(
+                        ObjectModel(sink, sink_obj, streaming_job.clone()).into(),
+                    ));
 
                     let iceberg_source = Source::find()
                         .inner_join(Object)
@@ -411,7 +422,9 @@ impl CatalogController {
                         .one(&txn)
                         .await?
                         .ok_or_else(|| MetaError::catalog_id_not_found("source", iceberg_source))?;
-                    objects.push(PbObjectInfo::Source(ObjectModel(source, source_obj).into()));
+                    objects.push(PbObjectInfo::Source(
+                        ObjectModel(source, source_obj, None).into(),
+                    ));
                 }
 
                 // indexes.
@@ -424,7 +437,9 @@ impl CatalogController {
                     .await?
                     .into_iter()
                     .unzip();
-                objects.push(PbObjectInfo::Table(ObjectModel(table, obj).into()));
+                objects.push(PbObjectInfo::Table(
+                    ObjectModel(table, obj, streaming_job).into(),
+                ));
 
                 // internal tables.
                 let internal_tables: Vec<TableId> = Table::find()
@@ -445,10 +460,7 @@ impl CatalogController {
 
                 if !index_ids.is_empty() || !table_ids.is_empty() {
                     Object::update_many()
-                        .col_expr(
-                            object::Column::OwnerId,
-                            SimpleExpr::Value(Value::Int(Some(new_owner))),
-                        )
+                        .col_expr(object::Column::OwnerId, SimpleExpr::Value(new_owner.into()))
                         .filter(
                             object::Column::Oid.is_in::<ObjectId, _>(
                                 index_ids
@@ -468,9 +480,16 @@ impl CatalogController {
                         .filter(table::Column::TableId.is_in(table_ids))
                         .all(&txn)
                         .await?;
+                    let streaming_jobs = load_streaming_jobs_by_ids(
+                        &txn,
+                        table_objs.iter().map(|(table, _)| table.job_id()),
+                    )
+                    .await?;
                     for (table, table_obj) in table_objs {
+                        let job_id = table.job_id();
+                        let streaming_job = streaming_jobs.get(&job_id).cloned();
                         objects.push(PbObjectInfo::Table(
-                            ObjectModel(table, table_obj.unwrap()).into(),
+                            ObjectModel(table, table_obj.unwrap(), streaming_job).into(),
                         ));
                     }
                 }
@@ -481,9 +500,18 @@ impl CatalogController {
                         .filter(index::Column::IndexId.is_in(index_ids))
                         .all(&txn)
                         .await?;
+                    let streaming_jobs = load_streaming_jobs_by_ids(
+                        &txn,
+                        index_objs
+                            .iter()
+                            .map(|(index, _)| index.index_id.as_job_id()),
+                    )
+                    .await?;
                     for (index, index_obj) in index_objs {
+                        let streaming_job =
+                            streaming_jobs.get(&index.index_id.as_job_id()).cloned();
                         objects.push(PbObjectInfo::Index(
-                            ObjectModel(index, index_obj.unwrap()).into(),
+                            ObjectModel(index, index_obj.unwrap(), streaming_job).into(),
                         ));
                     }
                 }
@@ -494,7 +522,7 @@ impl CatalogController {
                     .await?
                     .ok_or_else(|| MetaError::catalog_id_not_found("source", object_id))?;
                 let is_shared = source.is_shared();
-                objects.push(PbObjectInfo::Source(ObjectModel(source, obj).into()));
+                objects.push(PbObjectInfo::Source(ObjectModel(source, obj, None).into()));
 
                 // Note: For non-shared source, we don't update their state tables, which
                 // belongs to the MV.
@@ -503,24 +531,30 @@ impl CatalogController {
                         &txn,
                         object_id,
                         object::Column::OwnerId,
-                        Value::Int(Some(new_owner)),
+                        new_owner,
                         &mut objects,
                     )
                     .await?;
                 }
             }
             ObjectType::Sink => {
-                let sink = Sink::find_by_id(object_id.as_sink_id())
+                let (sink, sink_obj) = Sink::find_by_id(object_id.as_sink_id())
+                    .find_also_related(Object)
                     .one(&txn)
                     .await?
                     .ok_or_else(|| MetaError::catalog_id_not_found("sink", object_id))?;
-                objects.push(PbObjectInfo::Sink(ObjectModel(sink, obj).into()));
+                let streaming_job = streaming_job::Entity::find_by_id(sink.sink_id.as_job_id())
+                    .one(&txn)
+                    .await?;
+                objects.push(PbObjectInfo::Sink(
+                    ObjectModel(sink, sink_obj.unwrap(), streaming_job).into(),
+                ));
 
                 update_internal_tables(
                     &txn,
                     object_id,
                     object::Column::OwnerId,
-                    Value::Int(Some(new_owner)),
+                    new_owner,
                     &mut objects,
                 )
                 .await?;
@@ -531,7 +565,7 @@ impl CatalogController {
                     .await?
                     .ok_or_else(|| MetaError::catalog_id_not_found("subscription", object_id))?;
                 objects.push(PbObjectInfo::Subscription(
-                    ObjectModel(subscription, obj).into(),
+                    ObjectModel(subscription, obj, None).into(),
                 ));
             }
             ObjectType::View => {
@@ -539,7 +573,7 @@ impl CatalogController {
                     .one(&txn)
                     .await?
                     .ok_or_else(|| MetaError::catalog_id_not_found("view", object_id))?;
-                objects.push(PbObjectInfo::View(ObjectModel(view, obj).into()));
+                objects.push(PbObjectInfo::View(ObjectModel(view, obj, None).into()));
             }
             ObjectType::Connection => {
                 let connection = Connection::find_by_id(object_id.as_connection_id())
@@ -547,8 +581,24 @@ impl CatalogController {
                     .await?
                     .ok_or_else(|| MetaError::catalog_id_not_found("connection", object_id))?;
                 objects.push(PbObjectInfo::Connection(
-                    ObjectModel(connection, obj).into(),
+                    ObjectModel(connection, obj, None).into(),
                 ));
+            }
+            ObjectType::Function => {
+                let function = Function::find_by_id(object_id.as_function_id())
+                    .one(&txn)
+                    .await?
+                    .ok_or_else(|| MetaError::catalog_id_not_found("function", object_id))?;
+                objects.push(PbObjectInfo::Function(
+                    ObjectModel(function, obj, None).into(),
+                ));
+            }
+            ObjectType::Secret => {
+                let secret = Secret::find_by_id(object_id.as_secret_id())
+                    .one(&txn)
+                    .await?
+                    .ok_or_else(|| MetaError::catalog_id_not_found("secret", object_id))?;
+                objects.push(PbObjectInfo::Secret(ObjectModel(secret, obj, None).into()));
             }
             _ => unreachable!("not supported object type: {:?}", object_type),
         };
@@ -565,6 +615,7 @@ impl CatalogController {
                             object_info: Some(object),
                         })
                         .collect(),
+                    dependencies: vec![],
                 }),
             )
             .await;
@@ -588,6 +639,9 @@ impl CatalogController {
         if obj.schema_id == Some(new_schema) {
             return Ok(IGNORED_NOTIFICATION_VERSION);
         }
+        let streaming_job = StreamingJob::find_by_id(object_id.as_job_id())
+            .one(&txn)
+            .await?;
         let database_id = obj.database_id.unwrap();
 
         let mut objects = vec![];
@@ -603,7 +657,10 @@ impl CatalogController {
                 let mut obj = obj.into_active_model();
                 obj.schema_id = Set(Some(new_schema));
                 let obj = obj.update(&txn).await?;
-                objects.push(PbObjectInfo::Table(ObjectModel(table, obj).into()));
+
+                objects.push(PbObjectInfo::Table(
+                    ObjectModel(table, obj, streaming_job).into(),
+                ));
 
                 // associated source.
                 if let Some(associated_source_id) = associated_src_id {
@@ -620,7 +677,9 @@ impl CatalogController {
                         .ok_or_else(|| {
                             MetaError::catalog_id_not_found("source", associated_source_id)
                         })?;
-                    objects.push(PbObjectInfo::Source(ObjectModel(source, src_obj).into()));
+                    objects.push(PbObjectInfo::Source(
+                        ObjectModel(source, src_obj, None).into(),
+                    ));
                 }
 
                 // indexes.
@@ -686,9 +745,16 @@ impl CatalogController {
                         .filter(table::Column::TableId.is_in(table_ids))
                         .all(&txn)
                         .await?;
+                    let streaming_jobs = load_streaming_jobs_by_ids(
+                        &txn,
+                        table_objs.iter().map(|(table, _)| table.job_id()),
+                    )
+                    .await?;
                     for (table, table_obj) in table_objs {
+                        let job_id = table.job_id();
+                        let streaming_job = streaming_jobs.get(&job_id).cloned();
                         objects.push(PbObjectInfo::Table(
-                            ObjectModel(table, table_obj.unwrap()).into(),
+                            ObjectModel(table, table_obj.unwrap(), streaming_job).into(),
                         ));
                     }
                 }
@@ -698,9 +764,18 @@ impl CatalogController {
                         .filter(index::Column::IndexId.is_in(index_ids))
                         .all(&txn)
                         .await?;
+                    let streaming_jobs = load_streaming_jobs_by_ids(
+                        &txn,
+                        index_objs
+                            .iter()
+                            .map(|(index, _)| index.index_id.as_job_id()),
+                    )
+                    .await?;
                     for (index, index_obj) in index_objs {
+                        let streaming_job =
+                            streaming_jobs.get(&index.index_id.as_job_id()).cloned();
                         objects.push(PbObjectInfo::Index(
-                            ObjectModel(index, index_obj.unwrap()).into(),
+                            ObjectModel(index, index_obj.unwrap(), streaming_job).into(),
                         ));
                     }
                 }
@@ -716,7 +791,7 @@ impl CatalogController {
                 let mut obj = obj.into_active_model();
                 obj.schema_id = Set(Some(new_schema));
                 let obj = obj.update(&txn).await?;
-                objects.push(PbObjectInfo::Source(ObjectModel(source, obj).into()));
+                objects.push(PbObjectInfo::Source(ObjectModel(source, obj, None).into()));
 
                 // Note: For non-shared source, we don't update their state tables, which
                 // belongs to the MV.
@@ -725,7 +800,7 @@ impl CatalogController {
                         &txn,
                         object_id,
                         object::Column::SchemaId,
-                        new_schema.into(),
+                        new_schema,
                         &mut objects,
                     )
                     .await?;
@@ -741,13 +816,15 @@ impl CatalogController {
                 let mut obj = obj.into_active_model();
                 obj.schema_id = Set(Some(new_schema));
                 let obj = obj.update(&txn).await?;
-                objects.push(PbObjectInfo::Sink(ObjectModel(sink, obj).into()));
+                objects.push(PbObjectInfo::Sink(
+                    ObjectModel(sink, obj, streaming_job).into(),
+                ));
 
                 update_internal_tables(
                     &txn,
                     object_id,
                     object::Column::SchemaId,
-                    new_schema.into(),
+                    new_schema,
                     &mut objects,
                 )
                 .await?;
@@ -764,7 +841,7 @@ impl CatalogController {
                 obj.schema_id = Set(Some(new_schema));
                 let obj = obj.update(&txn).await?;
                 objects.push(PbObjectInfo::Subscription(
-                    ObjectModel(subscription, obj).into(),
+                    ObjectModel(subscription, obj, None).into(),
                 ));
             }
             ObjectType::View => {
@@ -777,7 +854,7 @@ impl CatalogController {
                 let mut obj = obj.into_active_model();
                 obj.schema_id = Set(Some(new_schema));
                 let obj = obj.update(&txn).await?;
-                objects.push(PbObjectInfo::View(ObjectModel(view, obj).into()));
+                objects.push(PbObjectInfo::View(ObjectModel(view, obj, None).into()));
             }
             ObjectType::Function => {
                 let function = Function::find_by_id(object_id.as_function_id())
@@ -785,16 +862,16 @@ impl CatalogController {
                     .await?
                     .ok_or_else(|| MetaError::catalog_id_not_found("function", object_id))?;
 
-                let mut pb_function: PbFunction = ObjectModel(function, obj).into();
+                let mut pb_function: PbFunction = ObjectModel(function, obj, None).into();
                 pb_function.schema_id = new_schema;
                 check_function_signature_duplicate(&pb_function, &txn).await?;
 
-                object::ActiveModel {
+                Object::update(object::ActiveModel {
                     oid: Set(object_id),
                     schema_id: Set(Some(new_schema)),
                     ..Default::default()
-                }
-                .update(&txn)
+                })
+                .exec(&txn)
                 .await?;
 
                 txn.commit().await?;
@@ -812,16 +889,16 @@ impl CatalogController {
                     .await?
                     .ok_or_else(|| MetaError::catalog_id_not_found("connection", object_id))?;
 
-                let mut pb_connection: PbConnection = ObjectModel(connection, obj).into();
+                let mut pb_connection: PbConnection = ObjectModel(connection, obj, None).into();
                 pb_connection.schema_id = new_schema;
                 check_connection_name_duplicate(&pb_connection, &txn).await?;
 
-                object::ActiveModel {
+                Object::update(object::ActiveModel {
                     oid: Set(object_id),
                     schema_id: Set(Some(new_schema)),
                     ..Default::default()
-                }
-                .update(&txn)
+                })
+                .exec(&txn)
                 .await?;
 
                 txn.commit().await?;
@@ -847,6 +924,7 @@ impl CatalogController {
                             object_info: Some(relation_info),
                         })
                         .collect_vec(),
+                    dependencies: vec![],
                 }),
             )
             .await;
@@ -983,7 +1061,7 @@ impl CatalogController {
         let version = self
             .notify_frontend(
                 NotificationOperation::Update,
-                NotificationInfo::Database(ObjectModel(database.clone(), obj).into()),
+                NotificationInfo::Database(ObjectModel(database.clone(), obj, None).into()),
             )
             .await;
         Ok((version, database))
@@ -1046,12 +1124,12 @@ impl CatalogController {
             }
         }
 
-        streaming_job::ActiveModel {
+        StreamingJob::update(streaming_job::ActiveModel {
             job_id: Set(job_id),
             config_override: Set(Some(updated_config_override)),
             ..Default::default()
-        }
-        .update(&txn)
+        })
+        .exec(&txn)
         .await?;
 
         txn.commit().await?;
@@ -1099,7 +1177,7 @@ impl CatalogController {
             table_id: Set(table_id),
             current_status: Set(status),
             last_trigger_time: if trigger_time.is_some() {
-                Set(trigger_time.map(|t| t.and_utc().timestamp_millis()))
+                Set(trigger_time.map(datetime_to_timestamp_millis))
             } else {
                 NotSet
             },
@@ -1110,7 +1188,7 @@ impl CatalogController {
             },
             ..Default::default()
         };
-        active.update(&inner.db).await?;
+        RefreshJob::update(active).exec(&inner.db).await?;
         Ok(())
     }
 
@@ -1138,7 +1216,7 @@ impl CatalogController {
             trigger_interval_secs: Set(trigger_interval_secs),
             ..Default::default()
         };
-        active.update(&inner.db).await?;
+        RefreshJob::update(active).exec(&inner.db).await?;
         Ok(())
     }
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright 2025 RisingWave Labs
+ * Copyright 2024 RisingWave Labs
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -12,7 +12,6 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- *
  */
 
 import { Expose, plainToInstance } from "class-transformer"
@@ -31,7 +30,6 @@ import {
 } from "../../proto/gen/catalog"
 import {
   FragmentToRelationMap,
-  ListObjectDependenciesResponse_ObjectDependencies as ObjectDependencies,
   RelationIdInfos,
   TableFragments,
 } from "../../proto/gen/meta"
@@ -272,9 +270,13 @@ export async function getSchemas() {
 
 // Returns a map of object id to a list of object ids that it depends on
 export async function getObjectDependencies() {
-  let objDependencies: ObjectDependencies[] = (
-    await api.get("/object_dependencies")
-  ).map(ObjectDependencies.fromJSON)
+  type ObjectDependencyRow = {
+    objectId: number
+    referencedObjectId: number
+  }
+  const objDependencies: ObjectDependencyRow[] = await api.get(
+    "/object_dependencies"
+  )
   const objDependencyGroup = new Map<number, number[]>()
   objDependencies.forEach((x) => {
     if (!objDependencyGroup.has(x.objectId)) {

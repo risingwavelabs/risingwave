@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -74,15 +74,12 @@ pub mod worker_property;
 
 pub type TransactionId = i32;
 
-pub type UserId = i32;
 pub type PrivilegeId = i32;
 pub type DefaultPrivilegeId = i32;
 
-pub type HummockVersionId = i64;
+pub use risingwave_pb::id::{CompactionGroupId, HummockSstableObjectId, HummockVersionId};
 pub type Epoch = i64;
-pub type CompactionGroupId = i64;
 pub type CompactionTaskId = i64;
-pub type HummockSstableObjectId = i64;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, EnumIter, DeriveActiveEnum, Serialize, Deserialize)]
 #[sea_orm(rs_type = "String", db_type = "string(None)")]
@@ -154,6 +151,7 @@ impl CreateType {
 }
 
 /// Defines struct with a single pb field that derives `FromJsonQueryResult`, it will helps to map json value stored in database to Pb struct.
+#[macro_export]
 macro_rules! derive_from_json_struct {
     ($struct_name:ident, $field_type:ty) => {
         #[derive(Clone, Debug, PartialEq, FromJsonQueryResult, Serialize, Deserialize, Default)]
@@ -402,6 +400,11 @@ derive_from_blob!(ExprContext, risingwave_pb::plan_common::PbExprContext);
 derive_from_blob!(
     SourceRefreshMode,
     risingwave_pb::plan_common::PbSourceRefreshMode
+);
+
+derive_from_blob!(
+    SinkSchemachange,
+    risingwave_pb::stream_plan::PbSinkSchemaChange
 );
 
 derive_array_from_blob!(

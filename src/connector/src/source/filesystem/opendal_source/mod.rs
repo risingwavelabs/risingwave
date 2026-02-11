@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -35,6 +35,7 @@ use self::opendal_reader::OpendalReader;
 use super::OpendalFsSplit;
 use super::file_common::CompressionFormat;
 pub use super::s3::S3PropertiesCommon;
+use crate::deserialize_optional_bool_from_string;
 use crate::enforce_secret::EnforceSecret;
 use crate::error::{ConnectorError, ConnectorResult};
 use crate::source::{SourceProperties, UnknownFields};
@@ -59,6 +60,13 @@ pub struct FsSourceCommon {
 
     #[serde(rename = "compression_format", default = "Default::default")]
     pub compression_format: CompressionFormat,
+
+    #[serde(
+        rename = "parquet.case_insensitive",
+        default,
+        deserialize_with = "deserialize_optional_bool_from_string"
+    )]
+    pub parquet_case_insensitive: Option<bool>,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, WithOptions)]

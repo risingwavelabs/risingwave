@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,6 +19,7 @@ use risingwave_pb::hummock::hummock_version::PbLevels;
 use risingwave_pb::hummock::{
     PbInputLevel, PbLevel, PbLevelType, PbOverlappingLevel, PbSstableInfo,
 };
+use risingwave_pb::id::CompactionGroupId;
 
 use crate::sstable_info::SstableInfo;
 
@@ -215,8 +216,8 @@ impl Level {
 pub struct LevelsCommon<T> {
     pub levels: Vec<LevelCommon<T>>,
     pub l0: OverlappingLevelCommon<T>,
-    pub group_id: u64,
-    pub parent_group_id: u64,
+    pub group_id: CompactionGroupId,
+    pub parent_group_id: CompactionGroupId,
 
     #[deprecated]
     pub member_table_ids: Vec<u32>,

@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,6 +19,8 @@ pub const AUTO_DUMP_SUFFIX: &str = "auto.heap";
 pub const COLLAPSED_SUFFIX: &str = "collapsed";
 
 pub mod jeprof;
+pub mod profile_service;
 pub mod profiler;
 
+pub use profile_service::ProfileServiceImpl;
 pub use profiler::HeapProfiler;

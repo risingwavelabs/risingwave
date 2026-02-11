@@ -1,16 +1,18 @@
-// Copyright 2025 RisingWave Labs
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+/*
+ * Copyright 2024 RisingWave Labs
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 
 package com.risingwave.connector.source.core;
 
@@ -20,6 +22,7 @@ import com.risingwave.connector.cdc.debezium.internal.DebeziumOffsetSerializer;
 import com.risingwave.connector.source.common.CdcConnectorException;
 import com.risingwave.proto.ConnectorServiceProto.CdcMessage;
 import com.risingwave.proto.ConnectorServiceProto.GetEventStreamResponse;
+import com.risingwave.proto.ConnectorServiceProto.SourceType;
 import io.debezium.connector.postgresql.PostgresOffsetContext;
 import io.debezium.embedded.EmbeddedEngineChangeEventProxy;
 import io.debezium.engine.ChangeEvent;
@@ -117,6 +120,26 @@ public class DbzChangeEventConsumer
         }
     }
 
+    private static SourceType toProtoSourceType(SourceTypeE connector) {
+        if (connector == null) {
+            return SourceType.UNSPECIFIED;
+        }
+        switch (connector) {
+            case MYSQL:
+                return SourceType.MYSQL;
+            case POSTGRES:
+                return SourceType.POSTGRES;
+            case CITUS:
+                return SourceType.CITUS;
+            case MONGODB:
+                return SourceType.MONGODB;
+            case SQL_SERVER:
+                return SourceType.SQL_SERVER;
+            default:
+                return SourceType.UNSPECIFIED;
+        }
+    }
+
     private boolean isHeartbeatEvent(SourceRecord record) {
         String topic = record.topic();
         return topic != null
@@ -158,11 +181,11 @@ public class DbzChangeEventConsumer
             } catch (IOException e) {
                 LOG.warn("failed to serialize debezium offset", e);
             }
-
             var msgBuilder =
                     CdcMessage.newBuilder()
                             .setOffset(offsetStr)
-                            .setPartition(String.valueOf(sourceId));
+                            .setPartition(String.valueOf(sourceId))
+                            .setSourceType(toProtoSourceType(connector));
 
             switch (eventType) {
                 case HEARTBEAT:

@@ -64,9 +64,19 @@ const_assert_eq!(
 const_assert_eq!(StreamKind::Upsert as i32, PbStreamKind::Upsert as i32);
 
 impl StreamKind {
+    /// Returns `true` if it's [`StreamKind::Retract`].
+    pub fn is_retract(self) -> bool {
+        matches!(self, Self::Retract)
+    }
+
     /// Returns `true` if it's [`StreamKind::AppendOnly`].
     pub fn is_append_only(self) -> bool {
         matches!(self, Self::AppendOnly)
+    }
+
+    /// Returns `true` if it's [`StreamKind::Upsert`].
+    pub fn is_upsert(self) -> bool {
+        matches!(self, Self::Upsert)
     }
 
     /// Returns the stream kind representing the merge (union) of the two.

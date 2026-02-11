@@ -181,7 +181,6 @@ impl StreamVectorIndexWrite {
             cardinality,
             created_at_epoch: None,
             initialized_at_epoch: None,
-            cleaned_by_watermark: false,
             create_type,
             stream_job_status: StreamJobStatus::Creating,
             description: None,

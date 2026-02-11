@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,7 +17,6 @@ use std::future::Future;
 use anyhow::anyhow;
 use futures::{Stream, TryStreamExt};
 use risingwave_common::bitmap::Bitmap;
-use risingwave_common::catalog::Field;
 use risingwave_pb::connector_service::coordinate_request::{
     CommitRequest, StartCoordinationRequest, UpdateVnodeBitmapRequest,
 };
@@ -26,7 +25,7 @@ use risingwave_pb::connector_service::{
     CoordinateRequest, CoordinateResponse, PbSinkParam, SinkMetadata, coordinate_request,
     coordinate_response,
 };
-use risingwave_pb::stream_plan::PbSinkAddColumns;
+use risingwave_pb::stream_plan::PbSinkSchemaChange;
 use tokio::sync::mpsc::Receiver;
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Response, Status};
@@ -98,15 +97,13 @@ impl CoordinatorStreamHandle {
         &mut self,
         epoch: u64,
         metadata: SinkMetadata,
-        add_columns: Option<Vec<Field>>,
+        schema_change: Option<PbSinkSchemaChange>,
     ) -> anyhow::Result<()> {
         self.send_request(CoordinateRequest {
             msg: Some(coordinate_request::Msg::CommitRequest(CommitRequest {
                 epoch,
                 metadata: Some(metadata),
-                add_columns: add_columns.map(|columns| PbSinkAddColumns {
-                    fields: columns.into_iter().map(|field| field.to_prost()).collect(),
-                }),
+                schema_change,
             })),
         })
         .await?;

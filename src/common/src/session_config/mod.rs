@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,6 +18,7 @@ pub mod parallelism;
 mod query_mode;
 mod search_path;
 pub mod sink_decouple;
+mod statement_timeout;
 mod transaction_isolation_level;
 mod visibility_mode;
 
@@ -28,6 +29,7 @@ pub use query_mode::QueryMode;
 use risingwave_common_proc_macro::{ConfigDoc, SessionConfig};
 pub use search_path::{SearchPath, USER_NAME_WILD_CARD};
 use serde::{Deserialize, Serialize};
+pub use statement_timeout::StatementTimeout;
 use thiserror::Error;
 
 use self::non_zero64::ConfigNonZeroU64;
@@ -35,7 +37,7 @@ use crate::config::mutate::TomlTableMutateExt;
 use crate::config::streaming::{JoinEncodingType, OverWindowCachePolicy};
 use crate::config::{ConfigMergeError, StreamingConfig, merge_streaming_config_section};
 use crate::hash::VirtualNode;
-use crate::session_config::parallelism::ConfigParallelism;
+use crate::session_config::parallelism::{ConfigAdaptiveParallelismStrategy, ConfigParallelism};
 use crate::session_config::sink_decouple::SinkDecouple;
 use crate::session_config::transaction_isolation_level::IsolationLevel;
 pub use crate::session_config::visibility_mode::VisibilityMode;
@@ -170,21 +172,49 @@ pub struct SessionConfig {
     #[parameter(default = ConfigParallelism::default())]
     streaming_parallelism: ConfigParallelism,
 
+    /// Specific parallelism for backfill. By default, it will fall back to `STREAMING_PARALLELISM`.
+    #[parameter(default = ConfigParallelism::default())]
+    streaming_parallelism_for_backfill: ConfigParallelism,
+
+    /// The adaptive parallelism strategy for streaming jobs. Defaults to `default`, which follows the system setting.
+    #[parameter(default = ConfigAdaptiveParallelismStrategy::default())]
+    streaming_parallelism_strategy: ConfigAdaptiveParallelismStrategy,
+
+    /// Specific adaptive parallelism strategy for table. Falls back to `STREAMING_PARALLELISM_STRATEGY`.
+    #[parameter(default = ConfigAdaptiveParallelismStrategy::default())]
+    streaming_parallelism_strategy_for_table: ConfigAdaptiveParallelismStrategy,
+
     /// Specific parallelism for table. By default, it will fall back to `STREAMING_PARALLELISM`.
     #[parameter(default = ConfigParallelism::default())]
     streaming_parallelism_for_table: ConfigParallelism,
+
+    /// Specific adaptive parallelism strategy for sink. Falls back to `STREAMING_PARALLELISM_STRATEGY`.
+    #[parameter(default = ConfigAdaptiveParallelismStrategy::default())]
+    streaming_parallelism_strategy_for_sink: ConfigAdaptiveParallelismStrategy,
 
     /// Specific parallelism for sink. By default, it will fall back to `STREAMING_PARALLELISM`.
     #[parameter(default = ConfigParallelism::default())]
     streaming_parallelism_for_sink: ConfigParallelism,
 
+    /// Specific adaptive parallelism strategy for index. Falls back to `STREAMING_PARALLELISM_STRATEGY`.
+    #[parameter(default = ConfigAdaptiveParallelismStrategy::default())]
+    streaming_parallelism_strategy_for_index: ConfigAdaptiveParallelismStrategy,
+
     /// Specific parallelism for index. By default, it will fall back to `STREAMING_PARALLELISM`.
     #[parameter(default = ConfigParallelism::default())]
     streaming_parallelism_for_index: ConfigParallelism,
 
+    /// Specific adaptive parallelism strategy for source. Falls back to `STREAMING_PARALLELISM_STRATEGY`.
+    #[parameter(default = ConfigAdaptiveParallelismStrategy::default())]
+    streaming_parallelism_strategy_for_source: ConfigAdaptiveParallelismStrategy,
+
     /// Specific parallelism for source. By default, it will fall back to `STREAMING_PARALLELISM`.
     #[parameter(default = ConfigParallelism::default())]
     streaming_parallelism_for_source: ConfigParallelism,
+
+    /// Specific adaptive parallelism strategy for materialized view. Falls back to `STREAMING_PARALLELISM_STRATEGY`.
+    #[parameter(default = ConfigAdaptiveParallelismStrategy::default())]
+    streaming_parallelism_strategy_for_materialized_view: ConfigAdaptiveParallelismStrategy,
 
     /// Specific parallelism for materialized view. By default, it will fall back to `STREAMING_PARALLELISM`.
     #[parameter(default = ConfigParallelism::default())]
@@ -211,16 +241,22 @@ pub struct SessionConfig {
     #[parameter(default = true)]
     streaming_use_arrangement_backfill: bool,
 
-    #[parameter(default = false)]
+    #[parameter(default = true)]
     streaming_use_snapshot_backfill: bool,
+
+    /// Enable serverless backfill for streaming queries. Defaults to false.
+    #[parameter(default = false)]
+    enable_serverless_backfill: bool,
 
     /// Allow `jsonb` in stream key
     #[parameter(default = false, alias = "rw_streaming_allow_jsonb_in_stream_key")]
     streaming_allow_jsonb_in_stream_key: bool,
 
-    /// Enable materialized expressions for impure functions (typically UDF).
-    #[parameter(default = true)]
-    streaming_enable_materialized_expressions: bool,
+    /// Unsafe: allow impure expressions on non-append-only streams without materialization.
+    ///
+    /// This may lead to inconsistent results or panics due to re-evaluation on updates/retracts.
+    #[parameter(default = false)]
+    streaming_unsafe_allow_unmaterialized_impure_expr: bool,
 
     /// Separate consecutive `StreamHashJoin` by no-shuffle `StreamExchange`
     #[parameter(default = false)]
@@ -299,8 +335,8 @@ pub struct SessionConfig {
     /// `log_min_error_statement` is set to ERROR or lower, the statement that timed out will also be
     /// logged. If this value is specified without units, it is taken as milliseconds. A value of
     /// zero (the default) disables the timeout.
-    #[parameter(default = 0u32)]
-    statement_timeout: u32,
+    #[parameter(default = StatementTimeout::default())]
+    statement_timeout: StatementTimeout,
 
     /// Terminate any session that has been idle (that is, waiting for a client query) within an open transaction for longer than the specified amount of time in milliseconds.
     #[parameter(default = 60000u32)]
@@ -450,6 +486,21 @@ pub struct SessionConfig {
     /// When enabled, queries involving Iceberg tables will be executed using the DataFusion engine.
     #[parameter(default = false)]
     enable_datafusion_engine: bool,
+
+    /// Prefer hash join over sort merge join in DataFusion engine
+    /// When enabled, the DataFusion engine will prioritize hash joins for query execution plans,
+    /// potentially improving performance for certain workloads, but may cause OOM for large datasets.
+    #[parameter(default = true)]
+    datafusion_prefer_hash_join: bool,
+
+    /// Emit chunks in upsert format for `UPDATE` and `DELETE` DMLs.
+    /// May lead to undefined behavior if the table is created with `ON CONFLICT DO NOTHING`.
+    ///
+    /// When enabled:
+    /// - `UPDATE` will only emit `Insert` records for new rows, instead of `Update` records.
+    /// - `DELETE` will only include key columns and pad the rest with NULL, instead of emitting complete rows.
+    #[parameter(default = false)]
+    upsert_dml: bool,
 }
 
 fn check_iceberg_engine_connection(val: &str) -> Result<(), String> {

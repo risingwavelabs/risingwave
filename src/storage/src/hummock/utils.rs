@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -26,7 +26,7 @@ use bytes::Bytes;
 use foyer::Hint;
 use futures::{Stream, StreamExt, pin_mut};
 use parking_lot::Mutex;
-use risingwave_common::catalog::{TableId, TableOption};
+use risingwave_common::catalog::TableId;
 use risingwave_common::config::StorageMemoryConfig;
 use risingwave_expr::codegen::try_stream;
 use risingwave_hummock_sdk::can_concat;
@@ -83,21 +83,24 @@ where
     R: RangeBounds<TableKey<B>>,
     B: AsRef<[u8]> + EmptySliceRef,
 {
+    debug_assert!(info.table_ids.is_sorted());
     let table_range = &info.key_range;
     let table_start = FullKey::decode(table_range.left.as_ref()).user_key;
     let table_end = FullKey::decode(table_range.right.as_ref()).user_key;
     let (left, right) = bound_table_key_range(table_id, table_key_range);
     let left: Bound<UserKey<&[u8]>> = left.as_ref().map(|key| key.as_ref());
     let right: Bound<UserKey<&[u8]>> = right.as_ref().map(|key| key.as_ref());
-    range_overlap(
-        &(left, right),
-        &table_start,
-        if table_range.right_exclusive {
-            Bound::Excluded(&table_end)
-        } else {
-            Bound::Included(&table_end)
-        },
-    ) && info.table_ids.binary_search(&table_id).is_ok()
+
+    info.table_ids.binary_search(&table_id).is_ok()
+        && range_overlap(
+            &(left, right),
+            &table_start,
+            if table_range.right_exclusive {
+                Bound::Excluded(&table_end)
+            } else {
+                Bound::Included(&table_end)
+            },
+        )
 }
 
 /// Search the SST containing the specified key within a level, using binary search.
@@ -398,14 +401,12 @@ pub(crate) async fn do_insert_sanity_check(
     key: &TableKey<Bytes>,
     value: &Bytes,
     inner: &impl StateStoreRead,
-    table_option: TableOption,
     op_consistency_level: &OpConsistencyLevel,
 ) -> StorageResult<()> {
     if let OpConsistencyLevel::Inconsistent = op_consistency_level {
         return Ok(());
     }
     let read_options = ReadOptions {
-        retention_seconds: table_option.retention_seconds,
         cache_policy: CachePolicy::Fill(Hint::Normal),
         ..Default::default()
     };
@@ -429,7 +430,6 @@ pub(crate) async fn do_delete_sanity_check(
     key: &TableKey<Bytes>,
     old_value: &Bytes,
     inner: &impl StateStoreRead,
-    table_option: TableOption,
     op_consistency_level: &OpConsistencyLevel,
 ) -> StorageResult<()> {
     let OpConsistencyLevel::ConsistentOldValue {
@@ -440,7 +440,6 @@ pub(crate) async fn do_delete_sanity_check(
         return Ok(());
     };
     let read_options = ReadOptions {
-        retention_seconds: table_option.retention_seconds,
         cache_policy: CachePolicy::Fill(Hint::Normal),
         ..Default::default()
     };
@@ -475,7 +474,6 @@ pub(crate) async fn do_update_sanity_check(
     old_value: &Bytes,
     new_value: &Bytes,
     inner: &impl StateStoreRead,
-    table_option: TableOption,
     op_consistency_level: &OpConsistencyLevel,
 ) -> StorageResult<()> {
     let OpConsistencyLevel::ConsistentOldValue {
@@ -486,7 +484,6 @@ pub(crate) async fn do_update_sanity_check(
         return Ok(());
     };
     let read_options = ReadOptions {
-        retention_seconds: table_option.retention_seconds,
         cache_policy: CachePolicy::Fill(Hint::Normal),
         ..Default::default()
     };
@@ -655,9 +652,27 @@ pub(crate) async fn wait_for_update(
         match tokio::time::timeout(Duration::from_secs(30), receiver.changed()).await {
             Err(_) => {
                 // Provide backtrace iff in debug mode for observability.
-                let backtrace = cfg!(debug_assertions)
-                    .then(Backtrace::capture)
+                let backtrace = cfg!(debug_assertions).then(Backtrace::capture);
+
+                let backtrace = backtrace
+                    .as_ref()
+                    .map(|bt| ShortBacktrace { bt, limit: 30 })
                     .map(tracing::field::display);
+
+                struct ShortBacktrace<'a> {
+                    bt: &'a Backtrace,
+                    limit: usize,
+                }
+
+                impl std::fmt::Display for ShortBacktrace<'_> {
+                    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+                        writeln!(f, "backtrace:")?;
+                        for (idx, frame) in self.bt.frames().iter().take(self.limit).enumerate() {
+                            writeln!(f, "{}: {:?}", idx, frame)?;
+                        }
+                        Ok(())
+                    }
+                }
 
                 // The reason that we need to retry here is batch scan in
                 // chain/rearrange_chain is waiting for an

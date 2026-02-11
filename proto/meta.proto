@@ -273,7 +273,9 @@ message ListStreamingJobStatesResponse {
   repeated StreamingJobState states = 1;
 }
 
-message ListFragmentDistributionRequest {}
+message ListFragmentDistributionRequest {
+  optional bool include_node = 1;
+}
 
 message FragmentDistribution {
   uint32 fragment_id = 1;
@@ -294,12 +296,24 @@ message ListFragmentDistributionResponse {
 
 // List fragments containing stream scans, and corresponding
 // to a streaming job in creation.
-message ListCreatingFragmentDistributionRequest {}
+message ListCreatingFragmentDistributionRequest {
+  optional bool include_node = 1;
+}
 
 // List fragments containing stream scans, and corresponding
 // to a streaming job in creation.
 message ListCreatingFragmentDistributionResponse {
   repeated FragmentDistribution distributions = 1;
+}
+
+message ListSinkLogStoreTablesRequest {}
+
+message ListSinkLogStoreTablesResponse {
+  message SinkLogStoreTable {
+    uint32 sink_id = 1;
+    uint32 internal_table_id = 2;
+  }
+  repeated SinkLogStoreTable tables = 1;
 }
 
 message ListActorStatesRequest {}
@@ -336,31 +350,26 @@ message ListActorSplitsResponse {
   repeated ActorSplit actor_splits = 1;
 }
 
-message ListObjectDependenciesRequest {}
-
-message ListObjectDependenciesResponse {
-  message ObjectDependencies {
-    uint32 object_id = 1;
-    uint32 referenced_object_id = 2;
-  }
-  repeated ObjectDependencies dependencies = 1;
+message ObjectDependency {
+  uint32 object_id = 1;
+  uint32 referenced_object_id = 2;
+  common.ObjectType referenced_object_type = 3;
 }
 
 enum ThrottleTarget {
   THROTTLE_TARGET_UNSPECIFIED = 0;
   SOURCE = 1;
   MV = 2;
-  TABLE_WITH_SOURCE = 3;
-  CDC_TABLE = 4;
-  TABLE_DML = 5;
-  SINK = 6;
-  FRAGMENT = 7;
+  TABLE = 3;
+  SINK = 4;
+  FRAGMENT = 5;
 }
 
 message ApplyThrottleRequest {
-  ThrottleTarget kind = 1;
-  uint32 id = 2;
-  optional uint32 rate = 3;
+  ThrottleTarget throttle_target = 1;
+  common.ThrottleType throttle_type = 2;
+  uint32 id = 3;
+  optional uint32 rate = 4;
 }
 
 message ApplyThrottleResponse {
@@ -396,6 +405,41 @@ message AlterConnectorPropsRequest {
 
 message AlterConnectorPropsResponse {}
 
+// Options for controlling the safe property update workflow
+message PropertyUpdateOptions {
+  // If true, reset split assignments after updating properties
+  // This causes splits to be re-discovered from upstream
+  bool reset_splits = 1;
+}
+
+// Request for orchestrated source property update with pause/resume
+message AlterSourcePropertiesSafeRequest {
+  uint32 source_id = 1;
+  map<string, string> changed_props = 2;
+  map<string, secret.SecretRef> changed_secret_refs = 3;
+  PropertyUpdateOptions options = 4;
+}
+
+message AlterSourcePropertiesSafeResponse {}
+
+// Request to reset source split assignments (UNSAFE - admin only)
+message ResetSourceSplitsRequest {
+  uint32 source_id = 1;
+}
+
+message ResetSourceSplitsResponse {}
+
+// Request to inject specific offsets into source splits (UNSAFE - admin only)
+message InjectSourceOffsetsRequest {
+  uint32 source_id = 1;
+  // Split ID -> offset (JSON-encoded based on connector type)
+  map<string, string> split_offsets = 2;
+}
+
+message InjectSourceOffsetsResponse {
+  repeated string applied_split_ids = 1;
+}
+
 message ListCdcProgressRequest {}
 
 message ListCdcProgressResponse {
@@ -430,13 +474,16 @@ service StreamManagerService {
   rpc ListStreamingJobStates(ListStreamingJobStatesRequest) returns (ListStreamingJobStatesResponse);
   rpc ListFragmentDistribution(ListFragmentDistributionRequest) returns (ListFragmentDistributionResponse);
   rpc ListCreatingFragmentDistribution(ListCreatingFragmentDistributionRequest) returns (ListCreatingFragmentDistributionResponse);
+  rpc ListSinkLogStoreTables(ListSinkLogStoreTablesRequest) returns (ListSinkLogStoreTablesResponse);
   rpc ListActorStates(ListActorStatesRequest) returns (ListActorStatesResponse);
   rpc ListActorSplits(ListActorSplitsRequest) returns (ListActorSplitsResponse);
-  rpc ListObjectDependencies(ListObjectDependenciesRequest) returns (ListObjectDependenciesResponse);
   rpc ApplyThrottle(ApplyThrottleRequest) returns (ApplyThrottleResponse);
   rpc Recover(RecoverRequest) returns (RecoverResponse);
   rpc ListRateLimits(ListRateLimitsRequest) returns (ListRateLimitsResponse);
   rpc AlterConnectorProps(AlterConnectorPropsRequest) returns (AlterConnectorPropsResponse);
+  rpc AlterSourcePropertiesSafe(AlterSourcePropertiesSafeRequest) returns (AlterSourcePropertiesSafeResponse);
+  rpc ResetSourceSplits(ResetSourceSplitsRequest) returns (ResetSourceSplitsResponse);
+  rpc InjectSourceOffsets(InjectSourceOffsetsRequest) returns (InjectSourceOffsetsResponse);
   rpc GetFragmentById(GetFragmentByIdRequest) returns (GetFragmentByIdResponse);
   rpc GetFragmentVnodes(GetFragmentVnodesRequest) returns (GetFragmentVnodesResponse);
   rpc GetActorVnodes(GetActorVnodesRequest) returns (GetActorVnodesResponse);
@@ -585,6 +632,7 @@ message MetaSnapshot {
   // for streaming
   repeated FragmentWorkerSlotMapping streaming_worker_slot_mappings = 21;
   repeated FragmentWorkerSlotMapping serving_worker_slot_mappings = 22;
+  repeated ObjectDependency object_dependencies = 26;
 
   SnapshotVersion version = 13;
 }
@@ -607,6 +655,7 @@ message Object {
 
 message ObjectGroup {
   repeated Object objects = 1;
+  repeated ObjectDependency dependencies = 2;
 }
 
 message Recovery {}

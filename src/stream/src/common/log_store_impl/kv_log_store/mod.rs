@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -592,16 +592,21 @@ mod tests {
     use std::pin::pin;
     use std::sync::Arc;
     use std::task::Poll;
+    use std::time::Duration;
 
     use itertools::Itertools;
     use risingwave_common::array::StreamChunk;
     use risingwave_common::bitmap::{Bitmap, BitmapBuilder};
     use risingwave_common::hash::VirtualNode;
+    use risingwave_common::types::DataType;
     use risingwave_common::util::epoch::{EpochExt, EpochPair};
     use risingwave_connector::sink::log_store::{
-        ChunkId, LogReader, LogStoreFactory, LogStoreReadItem, LogWriter, TruncateOffset,
+        ChunkId, FlushCurrentEpochOptions, LogReader, LogStoreFactory, LogStoreReadItem, LogWriter,
+        TruncateOffset,
     };
     use risingwave_hummock_test::test_utils::prepare_hummock_test_env;
+    use risingwave_pb::plan_common::PbField;
+    use risingwave_pb::stream_plan::{PbSinkAddColumnsOp, PbSinkSchemaChange};
 
     use crate::common::log_store_impl::kv_log_store::test_utils::{
         LogWriterTestExt, TEST_DATA_SIZE, calculate_vnode_bitmap, check_rows_eq,
@@ -1960,7 +1965,7 @@ mod tests {
                         is_checkpoint: false,
                         new_vnode_bitmap: None,
                         is_stop: false,
-                        add_columns: None,
+                        schema_change: None,
                     },
                 ),
                 (
@@ -1976,7 +1981,7 @@ mod tests {
                         is_checkpoint: true,
                         new_vnode_bitmap: None,
                         is_stop: false,
-                        add_columns: None,
+                        schema_change: None,
                     },
                 ),
             ],
@@ -2025,7 +2030,7 @@ mod tests {
                         is_checkpoint: false,
                         new_vnode_bitmap: None,
                         is_stop: false,
-                        add_columns: None,
+                        schema_change: None,
                     },
                 ),
                 (
@@ -2041,7 +2046,7 @@ mod tests {
                         is_checkpoint: true,
                         new_vnode_bitmap: None,
                         is_stop: false,
-                        add_columns: None,
+                        schema_change: None,
                     },
                 ),
             ],
@@ -2100,11 +2105,143 @@ mod tests {
                         is_checkpoint: true,
                         new_vnode_bitmap: None,
                         is_stop: false,
-                        add_columns: None,
+                        schema_change: None,
                     },
                 ),
             ],
         )
         .await;
+    }
+
+    #[tokio::test]
+    async fn test_schema_change() {
+        let pk_info: &'static KvLogStorePkInfo = &KV_LOG_STORE_V2_INFO;
+        let gen_stream_chunk = |base| gen_stream_chunk_with_info(base, pk_info);
+        let test_env = prepare_hummock_test_env().await;
+
+        let table = gen_test_log_store_table(pk_info);
+
+        test_env.register_table(table.clone()).await;
+
+        let stream_chunk1 = gen_stream_chunk(0);
+        let bitmap = calculate_vnode_bitmap(stream_chunk1.rows());
+        let bitmap = Arc::new(bitmap);
+
+        let factory = KvLogStoreFactory::new(
+            test_env.storage.clone(),
+            table.clone(),
+            Some(bitmap),
+            1024,
+            1024,
+            KvLogStoreMetrics::for_test(),
+            "test",
+            pk_info,
+        );
+        let (mut reader, mut writer) = factory.build().await;
+
+        let epoch1 = test_env
+            .storage
+            .get_pinned_version()
+            .table_committed_epoch(table.id)
+            .unwrap()
+            .next_epoch();
+        test_env
+            .storage
+            .start_epoch(epoch1, HashSet::from_iter([table.id]));
+        writer
+            .init(EpochPair::new_test_epoch(epoch1), false)
+            .await
+            .unwrap();
+
+        writer.write_chunk(stream_chunk1.clone()).await.unwrap();
+
+        let epoch2 = epoch1.next_epoch();
+        test_env
+            .storage
+            .start_epoch(epoch2, HashSet::from_iter([table.id]));
+
+        use risingwave_pb::stream_plan::sink_schema_change::PbOp as PbSchemaChangeOp;
+        let schema_change = PbSinkSchemaChange {
+            original_schema: table
+                .columns
+                .iter()
+                .map(|col| PbField {
+                    data_type: Some(
+                        col.column_desc
+                            .as_ref()
+                            .unwrap()
+                            .column_type
+                            .as_ref()
+                            .unwrap()
+                            .clone(),
+                    ),
+                    name: col.column_desc.as_ref().unwrap().name.clone(),
+                })
+                .collect(),
+            op: Some(PbSchemaChangeOp::AddColumns(PbSinkAddColumnsOp {
+                fields: vec![PbField {
+                    data_type: Some(DataType::Int32.to_protobuf()),
+                    name: "new_col".to_owned(),
+                }],
+            })),
+        };
+
+        // Flush with schema change should wait until the reader truncates the barrier.
+        let mut flush_future = Box::pin(writer.flush_current_epoch(
+            epoch2,
+            FlushCurrentEpochOptions {
+                is_checkpoint: true,
+                new_vnode_bitmap: None,
+                is_stop: false,
+                schema_change: Some(schema_change.clone()),
+            },
+        ));
+
+        assert!(
+            tokio::time::timeout(Duration::from_millis(50), flush_future.as_mut())
+                .await
+                .is_err()
+        );
+
+        reader.init().await.unwrap();
+        reader.start_from(None).await.unwrap();
+
+        match reader.next_item().await.unwrap() {
+            (
+                epoch,
+                LogStoreReadItem::StreamChunk {
+                    chunk: read_chunk, ..
+                },
+            ) => {
+                assert_eq!(epoch, epoch1);
+                assert!(check_stream_chunk_eq(&stream_chunk1, &read_chunk));
+            }
+            item => unreachable!("{:?}", item),
+        }
+
+        match reader.next_item().await.unwrap() {
+            (
+                epoch,
+                LogStoreReadItem::Barrier {
+                    is_checkpoint,
+                    schema_change: read_schema_change,
+                    ..
+                },
+            ) => {
+                assert_eq!(epoch, epoch1);
+                assert!(is_checkpoint);
+                assert_eq!(read_schema_change, Some(schema_change.clone()));
+                reader
+                    .truncate(TruncateOffset::Barrier { epoch: epoch1 })
+                    .unwrap();
+            }
+            item => unreachable!("{:?}", item),
+        }
+
+        let post_flush = flush_future.await.unwrap();
+        post_flush.post_yield_barrier().await.unwrap();
+
+        // Writer should be able to continue with the next epoch after reader truncation.
+        writer.write_chunk(gen_stream_chunk(10)).await.unwrap();
     }
 }

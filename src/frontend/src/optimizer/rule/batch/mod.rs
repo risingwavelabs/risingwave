@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub mod batch_iceberg_count_star;
-pub mod batch_iceberg_predicate_pushdown;
 pub(crate) mod batch_project_merge_rule;
 pub mod batch_push_limit_to_scan_rule;
 

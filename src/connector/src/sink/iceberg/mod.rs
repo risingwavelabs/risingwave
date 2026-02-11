@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -23,34 +23,39 @@ use std::time::Duration;
 use anyhow::{Context, anyhow};
 use async_trait::async_trait;
 use await_tree::InstrumentAwait;
-use iceberg::arrow::{arrow_schema_to_schema, schema_to_arrow_schema};
+use iceberg::arrow::{
+    RecordBatchPartitionSplitter, arrow_schema_to_schema, schema_to_arrow_schema,
+};
 use iceberg::spec::{
-    DataFile, MAIN_BRANCH, Operation, SerializedDataFile, Transform, UnboundPartitionField,
-    UnboundPartitionSpec,
+    DataFile, FormatVersion, MAIN_BRANCH, Operation, PartitionSpecRef,
+    SchemaRef as IcebergSchemaRef, SerializedDataFile, TableProperties, Transform,
+    UnboundPartitionField, UnboundPartitionSpec,
 };
 use iceberg::table::Table;
-use iceberg::transaction::Transaction;
+use iceberg::transaction::{ApplyTransactionAction, FastAppendAction, Transaction};
 use iceberg::writer::base_writer::data_file_writer::DataFileWriterBuilder;
+use iceberg::writer::base_writer::deletion_vector_writer::{
+    DeletionVectorWriter, DeletionVectorWriterBuilder,
+};
 use iceberg::writer::base_writer::equality_delete_writer::{
     EqualityDeleteFileWriterBuilder, EqualityDeleteWriterConfig,
 };
-use iceberg::writer::base_writer::sort_position_delete_writer::{
-    POSITION_DELETE_SCHEMA, SortPositionDeleteWriterBuilder,
+use iceberg::writer::base_writer::position_delete_file_writer::{
+    POSITION_DELETE_SCHEMA, PositionDeleteFileWriter, PositionDeleteFileWriterBuilder,
+    PositionDeleteInput,
 };
+use iceberg::writer::delta_writer::{DELETE_OP, DeltaWriterBuilder, INSERT_OP};
 use iceberg::writer::file_writer::ParquetWriterBuilder;
 use iceberg::writer::file_writer::location_generator::{
     DefaultFileNameGenerator, DefaultLocationGenerator,
 };
-use iceberg::writer::function_writer::equality_delta_writer::{
-    DELETE_OP, EqualityDeltaWriterBuilder, INSERT_OP,
-};
-use iceberg::writer::function_writer::fanout_partition_writer::FanoutPartitionWriterBuilder;
+use iceberg::writer::file_writer::rolling_writer::RollingFileWriterBuilder;
+use iceberg::writer::task_writer::TaskWriter;
 use iceberg::writer::{IcebergWriter, IcebergWriterBuilder};
 use iceberg::{Catalog, NamespaceIdent, TableCreation, TableIdent};
 use itertools::Itertools;
 use parquet::file::properties::WriterProperties;
 use prometheus::monitored_general_writer::MonitoredGeneralWriterBuilder;
-use prometheus::monitored_position_delete_writer::MonitoredPositionDeleteWriterBuilder;
 use regex::Regex;
 use risingwave_common::array::arrow::arrow_array_iceberg::{Int32Array, RecordBatch};
 use risingwave_common::array::arrow::arrow_schema_iceberg::{
@@ -62,17 +67,20 @@ use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::bail;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{Field, Schema};
+use risingwave_common::error::IcebergError;
 use risingwave_common::metrics::{LabelGuardedHistogram, LabelGuardedIntCounter};
 use risingwave_common_estimate_size::EstimateSize;
 use risingwave_pb::connector_service::SinkMetadata;
 use risingwave_pb::connector_service::sink_metadata::Metadata::Serialized;
 use risingwave_pb::connector_service::sink_metadata::SerializedMetadata;
+use risingwave_pb::stream_plan::PbSinkSchemaChange;
+use serde::de::{self, Deserializer, Visitor};
 use serde::{Deserialize, Serialize};
 use serde_json::from_value;
 use serde_with::{DisplayFromStr, serde_as};
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc::UnboundedSender;
-use tokio_retry::Retry;
+use tokio_retry::RetryIf;
 use tokio_retry::strategy::{ExponentialBackoff, jitter};
 use tracing::warn;
 use url::Url;
@@ -96,12 +104,15 @@ use crate::sink::{
 use crate::{deserialize_bool_from_string, deserialize_optional_string_seq_from_string};
 
 pub const ICEBERG_SINK: &str = "iceberg";
+
 pub const ICEBERG_COW_BRANCH: &str = "ingestion";
 pub const ICEBERG_WRITE_MODE_MERGE_ON_READ: &str = "merge-on-read";
 pub const ICEBERG_WRITE_MODE_COPY_ON_WRITE: &str = "copy-on-write";
 pub const ICEBERG_COMPACTION_TYPE_FULL: &str = "full";
 pub const ICEBERG_COMPACTION_TYPE_SMALL_FILES: &str = "small-files";
 pub const ICEBERG_COMPACTION_TYPE_FILES_WITH_DELETE: &str = "files-with-delete";
+
+pub const PARTITION_DATA_ID_START: i32 = 1000;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -162,6 +173,7 @@ pub const ENABLE_COMPACTION: &str = "enable_compaction";
 pub const COMPACTION_INTERVAL_SEC: &str = "compaction_interval_sec";
 pub const ENABLE_SNAPSHOT_EXPIRATION: &str = "enable_snapshot_expiration";
 pub const WRITE_MODE: &str = "write_mode";
+pub const FORMAT_VERSION: &str = "format_version";
 pub const SNAPSHOT_EXPIRATION_RETAIN_LAST: &str = "snapshot_expiration_retain_last";
 pub const SNAPSHOT_EXPIRATION_MAX_AGE_MILLIS: &str = "snapshot_expiration_max_age_millis";
 pub const SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_FILES: &str = "snapshot_expiration_clear_expired_files";
@@ -187,12 +199,80 @@ fn default_iceberg_write_mode() -> IcebergWriteMode {
     IcebergWriteMode::MergeOnRead
 }
 
+fn default_iceberg_format_version() -> FormatVersion {
+    FormatVersion::V2
+}
+
 fn default_true() -> bool {
     true
 }
 
 fn default_some_true() -> Option<bool> {
     Some(true)
+}
+
+fn parse_format_version_str(value: &str) -> std::result::Result<FormatVersion, String> {
+    let parsed = value
+        .trim()
+        .parse::<u8>()
+        .map_err(|_| "`format-version` must be one of 1, 2, or 3".to_owned())?;
+    match parsed {
+        1 => Ok(FormatVersion::V1),
+        2 => Ok(FormatVersion::V2),
+        3 => Ok(FormatVersion::V3),
+        _ => Err("`format-version` must be one of 1, 2, or 3".to_owned()),
+    }
+}
+
+fn deserialize_format_version<'de, D>(
+    deserializer: D,
+) -> std::result::Result<FormatVersion, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    struct FormatVersionVisitor;
+
+    impl<'de> Visitor<'de> for FormatVersionVisitor {
+        type Value = FormatVersion;
+
+        fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            formatter.write_str("format-version as 1, 2, or 3")
+        }
+
+        fn visit_u64<E>(self, value: u64) -> std::result::Result<Self::Value, E>
+        where
+            E: de::Error,
+        {
+            let value = u8::try_from(value)
+                .map_err(|_| E::custom("`format-version` must be one of 1, 2, or 3"))?;
+            parse_format_version_str(&value.to_string()).map_err(E::custom)
+        }
+
+        fn visit_i64<E>(self, value: i64) -> std::result::Result<Self::Value, E>
+        where
+            E: de::Error,
+        {
+            let value = u8::try_from(value)
+                .map_err(|_| E::custom("`format-version` must be one of 1, 2, or 3"))?;
+            parse_format_version_str(&value.to_string()).map_err(E::custom)
+        }
+
+        fn visit_str<E>(self, value: &str) -> std::result::Result<Self::Value, E>
+        where
+            E: de::Error,
+        {
+            parse_format_version_str(value).map_err(E::custom)
+        }
+
+        fn visit_string<E>(self, value: String) -> std::result::Result<Self::Value, E>
+        where
+            E: de::Error,
+        {
+            self.visit_str(&value)
+        }
+    }
+
+    deserializer.deserialize_any(FormatVersionVisitor)
 }
 
 /// Compaction type for Iceberg sink
@@ -335,6 +415,14 @@ pub struct IcebergConfig {
     #[serde(rename = "write_mode", default = "default_iceberg_write_mode")]
     pub write_mode: IcebergWriteMode,
 
+    /// Iceberg format version for table creation.
+    #[serde(
+        rename = "format_version",
+        default = "default_iceberg_format_version",
+        deserialize_with = "deserialize_format_version"
+    )]
+    pub format_version: FormatVersion,
+
     /// The maximum age (in milliseconds) for snapshots before they expire
     /// For example, if set to 3600000, snapshots older than 1 hour will be expired
     #[serde(rename = "snapshot_expiration_max_age_millis", default)]
@@ -414,6 +502,21 @@ impl EnforceSecret for IcebergConfig {
 }
 
 impl IcebergConfig {
+    /// Validate that append-only sinks use merge-on-read mode
+    /// Copy-on-write is strictly worse than merge-on-read for append-only workloads
+    fn validate_append_only_write_mode(
+        sink_type: &str,
+        write_mode: IcebergWriteMode,
+    ) -> Result<()> {
+        if sink_type == SINK_TYPE_APPEND_ONLY && write_mode == IcebergWriteMode::CopyOnWrite {
+            return Err(SinkError::Config(anyhow!(
+                "'copy-on-write' mode is not supported for append-only iceberg sink. \
+                 Please use 'merge-on-read' instead, which is strictly better for append-only workloads."
+            )));
+        }
+        Ok(())
+    }
+
     pub fn from_btreemap(values: BTreeMap<String, String>) -> Result<Self> {
         let mut config =
             serde_json::from_value::<IcebergConfig>(serde_json::to_value(&values).unwrap())
@@ -443,6 +546,9 @@ impl IcebergConfig {
                 )));
             }
         }
+
+        // Enforce merge-on-read for append-only sinks
+        Self::validate_append_only_write_mode(&config.r#type, config.write_mode)?;
 
         // All configs start with "catalog." will be treated as java configs.
         config.java_catalog_props = values
@@ -492,6 +598,10 @@ impl IcebergConfig {
         self.common.catalog_name()
     }
 
+    pub fn table_format_version(&self) -> FormatVersion {
+        self.format_version
+    }
+
     pub fn compaction_interval_sec(&self) -> u64 {
         // default to 1 hour
         self.compaction_interval_sec.unwrap_or(3600)
@@ -505,7 +615,7 @@ impl IcebergConfig {
     }
 
     pub fn trigger_snapshot_count(&self) -> usize {
-        self.trigger_snapshot_count.unwrap_or(16)
+        self.trigger_snapshot_count.unwrap_or(usize::MAX)
     }
 
     pub fn small_files_threshold_mb(&self) -> u64 {
@@ -639,8 +749,10 @@ async fn create_table_if_not_exists_impl(config: &IcebergConfig, param: &SinkPar
             match &config.common.warehouse_path {
                 Some(warehouse_path) => {
                     let is_s3_tables = warehouse_path.starts_with("arn:aws:s3tables");
+                    // BigLake catalog federation uses bq:// prefix for BigQuery-managed Iceberg tables
+                    let is_bq_catalog_federation = warehouse_path.starts_with("bq://");
                     let url = Url::parse(warehouse_path);
-                    if url.is_err() || is_s3_tables {
+                    if url.is_err() || is_s3_tables || is_bq_catalog_federation {
                         // For rest catalog, the warehouse_path could be a warehouse name.
                         // In this case, we should specify the location when creating a table.
                         if config.common.catalog_type() == "rest"
@@ -673,7 +785,7 @@ async fn create_table_if_not_exists_impl(config: &IcebergConfig, param: &SinkPar
                                 .source_id(id)
                                 .transform(transform)
                                 .name(format!("_p_{}", column))
-                                .field_id(i as i32)
+                                .field_id(PARTITION_DATA_ID_START + i as i32)
                                 .build(),
                         ),
                         None => bail!(format!(
@@ -694,9 +806,17 @@ async fn create_table_if_not_exists_impl(config: &IcebergConfig, param: &SinkPar
             None => None,
         };
 
+        // Put format-version into table properties, because catalog like jdbc extract format-version from table properties.
+        let properties = HashMap::from([(
+            TableProperties::PROPERTY_FORMAT_VERSION.to_owned(),
+            (config.format_version as u8).to_string(),
+        )]);
+
         let table_creation_builder = TableCreation::builder()
             .name(config.table.table_name().to_owned())
-            .schema(iceberg_schema);
+            .schema(iceberg_schema)
+            .format_version(config.table_format_version())
+            .properties(properties);
 
         let table_creation = match (location, partition_spec) {
             (Some(location), Some(partition_spec)) => table_creation_builder
@@ -778,6 +898,12 @@ impl Sink for IcebergSink {
                 .map_err(|e| anyhow::anyhow!(e))?;
         }
 
+        // Enforce merge-on-read for append-only tables
+        IcebergConfig::validate_append_only_write_mode(
+            &self.config.r#type,
+            self.config.write_mode,
+        )?;
+
         // Validate compaction type configuration
         let compaction_type = self.config.compaction_type();
 
@@ -842,6 +968,10 @@ impl Sink for IcebergSink {
 
         let _ = self.create_and_validate_table().await?;
         Ok(())
+    }
+
+    fn support_schema_change() -> bool {
+        true
     }
 
     fn validate_alter_config(config: &BTreeMap<String, String>) -> Result<()> {
@@ -938,6 +1068,127 @@ enum ProjectIdxVec {
     Done(Vec<usize>),
 }
 
+type DataFileWriterBuilderType =
+    DataFileWriterBuilder<ParquetWriterBuilder, DefaultLocationGenerator, DefaultFileNameGenerator>;
+type PositionDeleteFileWriterBuilderType = PositionDeleteFileWriterBuilder<
+    ParquetWriterBuilder,
+    DefaultLocationGenerator,
+    DefaultFileNameGenerator,
+>;
+type PositionDeleteFileWriterType = PositionDeleteFileWriter<
+    ParquetWriterBuilder,
+    DefaultLocationGenerator,
+    DefaultFileNameGenerator,
+>;
+type DeletionVectorWriterBuilderType =
+    DeletionVectorWriterBuilder<DefaultLocationGenerator, DefaultFileNameGenerator>;
+type DeletionVectorWriterType =
+    DeletionVectorWriter<DefaultLocationGenerator, DefaultFileNameGenerator>;
+type EqualityDeleteFileWriterBuilderType = EqualityDeleteFileWriterBuilder<
+    ParquetWriterBuilder,
+    DefaultLocationGenerator,
+    DefaultFileNameGenerator,
+>;
+
+#[derive(Clone)]
+enum PositionDeleteWriterBuilderType {
+    PositionDelete(PositionDeleteFileWriterBuilderType),
+    DeletionVector(DeletionVectorWriterBuilderType),
+}
+
+enum PositionDeleteWriterType {
+    PositionDelete(PositionDeleteFileWriterType),
+    DeletionVector(DeletionVectorWriterType),
+}
+
+#[async_trait]
+impl IcebergWriterBuilder<Vec<PositionDeleteInput>> for PositionDeleteWriterBuilderType {
+    type R = PositionDeleteWriterType;
+
+    async fn build(
+        self,
+        partition_key: Option<iceberg::spec::PartitionKey>,
+    ) -> iceberg::Result<Self::R> {
+        match self {
+            PositionDeleteWriterBuilderType::PositionDelete(builder) => Ok(
+                PositionDeleteWriterType::PositionDelete(builder.build(partition_key).await?),
+            ),
+            PositionDeleteWriterBuilderType::DeletionVector(builder) => Ok(
+                PositionDeleteWriterType::DeletionVector(builder.build(partition_key).await?),
+            ),
+        }
+    }
+}
+
+#[async_trait]
+impl IcebergWriter<Vec<PositionDeleteInput>> for PositionDeleteWriterType {
+    async fn write(&mut self, input: Vec<PositionDeleteInput>) -> iceberg::Result<()> {
+        match self {
+            PositionDeleteWriterType::PositionDelete(writer) => writer.write(input).await,
+            PositionDeleteWriterType::DeletionVector(writer) => writer.write(input).await,
+        }
+    }
+
+    async fn close(&mut self) -> iceberg::Result<Vec<DataFile>> {
+        match self {
+            PositionDeleteWriterType::PositionDelete(writer) => writer.close().await,
+            PositionDeleteWriterType::DeletionVector(writer) => writer.close().await,
+        }
+    }
+}
+
+#[derive(Clone)]
+struct TaskWriterBuilderWrapper<B: IcebergWriterBuilder> {
+    inner: B,
+    fanout_enabled: bool,
+    schema: IcebergSchemaRef,
+    partition_spec: PartitionSpecRef,
+    compute_partition: bool,
+}
+
+impl<B: IcebergWriterBuilder> TaskWriterBuilderWrapper<B> {
+    fn new(
+        inner: B,
+        fanout_enabled: bool,
+        schema: IcebergSchemaRef,
+        partition_spec: PartitionSpecRef,
+        compute_partition: bool,
+    ) -> Self {
+        Self {
+            inner,
+            fanout_enabled,
+            schema,
+            partition_spec,
+            compute_partition,
+        }
+    }
+
+    fn build(self) -> iceberg::Result<TaskWriter<B>> {
+        let partition_splitter = match (
+            self.partition_spec.is_unpartitioned(),
+            self.compute_partition,
+        ) {
+            (true, _) => None,
+            (false, true) => Some(RecordBatchPartitionSplitter::new_with_computed_values(
+                self.schema.clone(),
+                self.partition_spec.clone(),
+            )?),
+            (false, false) => Some(RecordBatchPartitionSplitter::new_with_precomputed_values(
+                self.schema.clone(),
+                self.partition_spec.clone(),
+            )?),
+        };
+
+        Ok(TaskWriter::new_with_partition_splitter(
+            self.inner,
+            self.fanout_enabled,
+            self.schema,
+            self.partition_spec,
+            partition_splitter,
+        ))
+    }
+}
+
 pub enum IcebergSinkWriter {
     Created(IcebergSinkWriterArgs),
     Initialized(IcebergSinkWriterInner),
@@ -964,55 +1215,19 @@ pub struct IcebergSinkWriterInner {
 
 #[allow(clippy::type_complexity)]
 enum IcebergWriterDispatch {
-    PartitionAppendOnly {
+    Append {
         writer: Option<Box<dyn IcebergWriter>>,
-        writer_builder: MonitoredGeneralWriterBuilder<
-            FanoutPartitionWriterBuilder<
-                DataFileWriterBuilder<
-                    ParquetWriterBuilder<DefaultLocationGenerator, DefaultFileNameGenerator>,
-                >,
-            >,
-        >,
+        writer_builder:
+            TaskWriterBuilderWrapper<MonitoredGeneralWriterBuilder<DataFileWriterBuilderType>>,
     },
-    NonPartitionAppendOnly {
+    Upsert {
         writer: Option<Box<dyn IcebergWriter>>,
-        writer_builder: MonitoredGeneralWriterBuilder<
-            DataFileWriterBuilder<
-                ParquetWriterBuilder<DefaultLocationGenerator, DefaultFileNameGenerator>,
-            >,
-        >,
-    },
-    PartitionUpsert {
-        writer: Option<Box<dyn IcebergWriter>>,
-        writer_builder: MonitoredGeneralWriterBuilder<
-            FanoutPartitionWriterBuilder<
-                EqualityDeltaWriterBuilder<
-                    DataFileWriterBuilder<
-                        ParquetWriterBuilder<DefaultLocationGenerator, DefaultFileNameGenerator>,
-                    >,
-                    MonitoredPositionDeleteWriterBuilder<
-                        ParquetWriterBuilder<DefaultLocationGenerator, DefaultFileNameGenerator>,
-                    >,
-                    EqualityDeleteFileWriterBuilder<
-                        ParquetWriterBuilder<DefaultLocationGenerator, DefaultFileNameGenerator>,
-                    >,
-                >,
-            >,
-        >,
-        arrow_schema_with_op_column: SchemaRef,
-    },
-    NonpartitionUpsert {
-        writer: Option<Box<dyn IcebergWriter>>,
-        writer_builder: MonitoredGeneralWriterBuilder<
-            EqualityDeltaWriterBuilder<
-                DataFileWriterBuilder<
-                    ParquetWriterBuilder<DefaultLocationGenerator, DefaultFileNameGenerator>,
-                >,
-                MonitoredPositionDeleteWriterBuilder<
-                    ParquetWriterBuilder<DefaultLocationGenerator, DefaultFileNameGenerator>,
-                >,
-                EqualityDeleteFileWriterBuilder<
-                    ParquetWriterBuilder<DefaultLocationGenerator, DefaultFileNameGenerator>,
+        writer_builder: TaskWriterBuilderWrapper<
+            MonitoredGeneralWriterBuilder<
+                DeltaWriterBuilder<
+                    DataFileWriterBuilderType,
+                    PositionDeleteWriterBuilderType,
+                    EqualityDeleteFileWriterBuilderType,
                 >,
             >,
         >,
@@ -1023,10 +1238,8 @@ enum IcebergWriterDispatch {
 impl IcebergWriterDispatch {
     pub fn get_writer(&mut self) -> Option<&mut Box<dyn IcebergWriter>> {
         match self {
-            IcebergWriterDispatch::PartitionAppendOnly { writer, .. }
-            | IcebergWriterDispatch::NonPartitionAppendOnly { writer, .. }
-            | IcebergWriterDispatch::PartitionUpsert { writer, .. }
-            | IcebergWriterDispatch::NonpartitionUpsert { writer, .. } => writer.as_mut(),
+            IcebergWriterDispatch::Append { writer, .. }
+            | IcebergWriterDispatch::Upsert { writer, .. } => writer.as_mut(),
         }
     }
 }
@@ -1058,7 +1271,7 @@ impl IcebergSinkWriter {
 }
 
 impl IcebergSinkWriterInner {
-    async fn build_append_only(table: Table, writer_param: &SinkWriterParam) -> Result<Self> {
+    fn build_append_only(table: Table, writer_param: &SinkWriterParam) -> Result<Self> {
         let SinkWriterParam {
             extra_partition_col_idx,
             actor_id,
@@ -1090,7 +1303,7 @@ impl IcebergSinkWriterInner {
 
         let schema = table.metadata().current_schema();
         let partition_spec = table.metadata().default_partition_spec();
-
+        let fanout_enabled = !partition_spec.fields().is_empty();
         // To avoid duplicate file name, each time the sink created will generate a unique uuid as file name suffix.
         let unique_uuid_suffix = Uuid::now_v7();
 
@@ -1103,9 +1316,10 @@ impl IcebergSinkWriterInner {
             )
             .build();
 
-        let parquet_writer_builder = ParquetWriterBuilder::new(
-            parquet_writer_properties,
-            schema.clone(),
+        let parquet_writer_builder =
+            ParquetWriterBuilder::new(parquet_writer_properties, schema.clone());
+        let rolling_builder = RollingFileWriterBuilder::new_with_default_file_size(
+            parquet_writer_builder,
             table.file_io().clone(),
             DefaultLocationGenerator::new(table.metadata().clone())
                 .map_err(|err| SinkError::Iceberg(anyhow!(err)))?,
@@ -1115,89 +1329,51 @@ impl IcebergSinkWriterInner {
                 iceberg::spec::DataFileFormat::Parquet,
             ),
         );
-        let data_file_builder =
-            DataFileWriterBuilder::new(parquet_writer_builder, None, partition_spec.spec_id());
-        if partition_spec.fields().is_empty() {
-            let writer_builder = MonitoredGeneralWriterBuilder::new(
-                data_file_builder,
-                write_qps.clone(),
-                write_latency.clone(),
-            );
-            let inner_writer = Some(Box::new(
-                writer_builder
-                    .clone()
-                    .build()
-                    .await
-                    .map_err(|err| SinkError::Iceberg(anyhow!(err)))?,
-            ) as Box<dyn IcebergWriter>);
-            Ok(Self {
-                arrow_schema: Arc::new(
-                    schema_to_arrow_schema(table.metadata().current_schema())
-                        .map_err(|err| SinkError::Iceberg(anyhow!(err)))?,
-                ),
-                metrics: IcebergWriterMetrics {
-                    _write_qps: write_qps,
-                    _write_latency: write_latency,
-                    write_bytes,
-                },
-                writer: IcebergWriterDispatch::NonPartitionAppendOnly {
-                    writer: inner_writer,
-                    writer_builder,
-                },
-                table,
-                project_idx_vec: {
-                    if let Some(extra_partition_col_idx) = extra_partition_col_idx {
-                        ProjectIdxVec::Prepare(*extra_partition_col_idx)
-                    } else {
-                        ProjectIdxVec::None
-                    }
-                },
-            })
-        } else {
-            let partition_builder = MonitoredGeneralWriterBuilder::new(
-                FanoutPartitionWriterBuilder::new(
-                    data_file_builder,
-                    partition_spec.clone(),
-                    schema.clone(),
-                )
+        let data_file_builder = DataFileWriterBuilder::new(rolling_builder);
+        let monitored_builder = MonitoredGeneralWriterBuilder::new(
+            data_file_builder,
+            write_qps.clone(),
+            write_latency.clone(),
+        );
+        let writer_builder = TaskWriterBuilderWrapper::new(
+            monitored_builder,
+            fanout_enabled,
+            schema.clone(),
+            partition_spec.clone(),
+            true,
+        );
+        let inner_writer = Some(Box::new(
+            writer_builder
+                .clone()
+                .build()
                 .map_err(|err| SinkError::Iceberg(anyhow!(err)))?,
-                write_qps.clone(),
-                write_latency.clone(),
-            );
-            let inner_writer = Some(Box::new(
-                partition_builder
-                    .clone()
-                    .build()
-                    .await
+        ) as Box<dyn IcebergWriter>);
+        Ok(Self {
+            arrow_schema: Arc::new(
+                schema_to_arrow_schema(table.metadata().current_schema())
                     .map_err(|err| SinkError::Iceberg(anyhow!(err)))?,
-            ) as Box<dyn IcebergWriter>);
-            Ok(Self {
-                arrow_schema: Arc::new(
-                    schema_to_arrow_schema(table.metadata().current_schema())
-                        .map_err(|err| SinkError::Iceberg(anyhow!(err)))?,
-                ),
-                metrics: IcebergWriterMetrics {
-                    _write_qps: write_qps,
-                    _write_latency: write_latency,
-                    write_bytes,
-                },
-                writer: IcebergWriterDispatch::PartitionAppendOnly {
-                    writer: inner_writer,
-                    writer_builder: partition_builder,
-                },
-                table,
-                project_idx_vec: {
-                    if let Some(extra_partition_col_idx) = extra_partition_col_idx {
-                        ProjectIdxVec::Prepare(*extra_partition_col_idx)
-                    } else {
-                        ProjectIdxVec::None
-                    }
-                },
-            })
-        }
+            ),
+            metrics: IcebergWriterMetrics {
+                _write_qps: write_qps,
+                _write_latency: write_latency,
+                write_bytes,
+            },
+            writer: IcebergWriterDispatch::Append {
+                writer: inner_writer,
+                writer_builder,
+            },
+            table,
+            project_idx_vec: {
+                if let Some(extra_partition_col_idx) = extra_partition_col_idx {
+                    ProjectIdxVec::Prepare(*extra_partition_col_idx)
+                } else {
+                    ProjectIdxVec::None
+                }
+            },
+        })
     }
 
-    async fn build_upsert(
+    fn build_upsert(
         table: Table,
         unique_column_ids: Vec<usize>,
         writer_param: &SinkWriterParam,
@@ -1228,9 +1404,6 @@ impl IcebergSinkWriterInner {
         let _rolling_unflushed_data_file = GLOBAL_SINK_METRICS
             .iceberg_rolling_unflushed_data_file
             .with_guarded_label_values(&metrics_labels);
-        let position_delete_cache_num = GLOBAL_SINK_METRICS
-            .iceberg_position_delete_cache_num
-            .with_guarded_label_values(&metrics_labels);
         let write_bytes = GLOBAL_SINK_METRICS
             .iceberg_write_bytes
             .with_guarded_label_values(&metrics_labels);
@@ -1238,6 +1411,8 @@ impl IcebergSinkWriterInner {
         // Determine the schema id and partition spec id
         let schema = table.metadata().current_schema();
         let partition_spec = table.metadata().default_partition_spec();
+        let fanout_enabled = !partition_spec.fields().is_empty();
+        let use_deletion_vectors = table.metadata().format_version() >= FormatVersion::V3;
 
         // To avoid duplicate file name, each time the sink created will generate a unique uuid as file name suffix.
         let unique_uuid_suffix = Uuid::now_v7();
@@ -1252,9 +1427,10 @@ impl IcebergSinkWriterInner {
             .build();
 
         let data_file_builder = {
-            let parquet_writer_builder = ParquetWriterBuilder::new(
-                parquet_writer_properties.clone(),
-                schema.clone(),
+            let parquet_writer_builder =
+                ParquetWriterBuilder::new(parquet_writer_properties.clone(), schema.clone());
+            let rolling_writer_builder = RollingFileWriterBuilder::new_with_default_file_size(
+                parquet_writer_builder,
                 table.file_io().clone(),
                 DefaultLocationGenerator::new(table.metadata().clone())
                     .map_err(|err| SinkError::Iceberg(anyhow!(err)))?,
@@ -1264,12 +1440,27 @@ impl IcebergSinkWriterInner {
                     iceberg::spec::DataFileFormat::Parquet,
                 ),
             );
-            DataFileWriterBuilder::new(parquet_writer_builder, None, partition_spec.spec_id())
+            DataFileWriterBuilder::new(rolling_writer_builder)
         };
-        let position_delete_builder = {
+        let position_delete_builder = if use_deletion_vectors {
+            let location_generator = DefaultLocationGenerator::new(table.metadata().clone())
+                .map_err(|err| SinkError::Iceberg(anyhow!(err)))?;
+            PositionDeleteWriterBuilderType::DeletionVector(DeletionVectorWriterBuilder::new(
+                table.file_io().clone(),
+                location_generator,
+                DefaultFileNameGenerator::new(
+                    writer_param.actor_id.to_string(),
+                    Some(format!("delvec-{}", unique_uuid_suffix)),
+                    iceberg::spec::DataFileFormat::Puffin,
+                ),
+            ))
+        } else {
             let parquet_writer_builder = ParquetWriterBuilder::new(
                 parquet_writer_properties.clone(),
-                POSITION_DELETE_SCHEMA.clone(),
+                POSITION_DELETE_SCHEMA.clone().into(),
+            );
+            let rolling_writer_builder = RollingFileWriterBuilder::new_with_default_file_size(
+                parquet_writer_builder,
                 table.file_io().clone(),
                 DefaultLocationGenerator::new(table.metadata().clone())
                     .map_err(|err| SinkError::Iceberg(anyhow!(err)))?,
@@ -1279,33 +1470,25 @@ impl IcebergSinkWriterInner {
                     iceberg::spec::DataFileFormat::Parquet,
                 ),
             );
-            MonitoredPositionDeleteWriterBuilder::new(
-                SortPositionDeleteWriterBuilder::new(
-                    parquet_writer_builder,
-                    writer_param
-                        .streaming_config
-                        .developer
-                        .iceberg_sink_positional_delete_cache_size,
-                    None,
-                    None,
-                ),
-                position_delete_cache_num,
-            )
+            PositionDeleteWriterBuilderType::PositionDelete(PositionDeleteFileWriterBuilder::new(
+                rolling_writer_builder,
+            ))
         };
         let equality_delete_builder = {
             let config = EqualityDeleteWriterConfig::new(
                 unique_column_ids.clone(),
                 table.metadata().current_schema().clone(),
-                None,
-                partition_spec.spec_id(),
             )
             .map_err(|err| SinkError::Iceberg(anyhow!(err)))?;
             let parquet_writer_builder = ParquetWriterBuilder::new(
-                parquet_writer_properties.clone(),
+                parquet_writer_properties,
                 Arc::new(
                     arrow_schema_to_schema(config.projected_arrow_schema_ref())
                         .map_err(|err| SinkError::Iceberg(anyhow!(err)))?,
                 ),
+            );
+            let rolling_writer_builder = RollingFileWriterBuilder::new_with_default_file_size(
+                parquet_writer_builder,
                 table.file_io().clone(),
                 DefaultLocationGenerator::new(table.metadata().clone())
                     .map_err(|err| SinkError::Iceberg(anyhow!(err)))?,
@@ -1316,114 +1499,66 @@ impl IcebergSinkWriterInner {
                 ),
             );
 
-            EqualityDeleteFileWriterBuilder::new(parquet_writer_builder, config)
+            EqualityDeleteFileWriterBuilder::new(rolling_writer_builder, config)
         };
-        let delta_builder = EqualityDeltaWriterBuilder::new(
+        let delta_builder = DeltaWriterBuilder::new(
             data_file_builder,
             position_delete_builder,
             equality_delete_builder,
             unique_column_ids,
+            schema.clone(),
         );
-        if partition_spec.fields().is_empty() {
-            let writer_builder = MonitoredGeneralWriterBuilder::new(
+        let original_arrow_schema = Arc::new(
+            schema_to_arrow_schema(table.metadata().current_schema())
+                .map_err(|err| SinkError::Iceberg(anyhow!(err)))?,
+        );
+        let schema_with_extra_op_column = {
+            let mut new_fields = original_arrow_schema.fields().iter().cloned().collect_vec();
+            new_fields.push(Arc::new(ArrowField::new(
+                "op".to_owned(),
+                ArrowDataType::Int32,
+                false,
+            )));
+            Arc::new(ArrowSchema::new(new_fields))
+        };
+        let writer_builder = TaskWriterBuilderWrapper::new(
+            MonitoredGeneralWriterBuilder::new(
                 delta_builder,
                 write_qps.clone(),
                 write_latency.clone(),
-            );
-            let inner_writer = Some(Box::new(
-                writer_builder
-                    .clone()
-                    .build()
-                    .await
-                    .map_err(|err| SinkError::Iceberg(anyhow!(err)))?,
-            ) as Box<dyn IcebergWriter>);
-            let original_arrow_schema = Arc::new(
-                schema_to_arrow_schema(table.metadata().current_schema())
-                    .map_err(|err| SinkError::Iceberg(anyhow!(err)))?,
-            );
-            let schema_with_extra_op_column = {
-                let mut new_fields = original_arrow_schema.fields().iter().cloned().collect_vec();
-                new_fields.push(Arc::new(ArrowField::new(
-                    "op".to_owned(),
-                    ArrowDataType::Int32,
-                    false,
-                )));
-                Arc::new(ArrowSchema::new(new_fields))
-            };
-            Ok(Self {
-                arrow_schema: original_arrow_schema,
-                metrics: IcebergWriterMetrics {
-                    _write_qps: write_qps,
-                    _write_latency: write_latency,
-                    write_bytes,
-                },
-                table,
-                writer: IcebergWriterDispatch::NonpartitionUpsert {
-                    writer: inner_writer,
-                    writer_builder,
-                    arrow_schema_with_op_column: schema_with_extra_op_column,
-                },
-                project_idx_vec: {
-                    if let Some(extra_partition_col_idx) = extra_partition_col_idx {
-                        ProjectIdxVec::Prepare(*extra_partition_col_idx)
-                    } else {
-                        ProjectIdxVec::None
-                    }
-                },
-            })
-        } else {
-            let original_arrow_schema = Arc::new(
-                schema_to_arrow_schema(table.metadata().current_schema())
-                    .map_err(|err| SinkError::Iceberg(anyhow!(err)))?,
-            );
-            let schema_with_extra_op_column = {
-                let mut new_fields = original_arrow_schema.fields().iter().cloned().collect_vec();
-                new_fields.push(Arc::new(ArrowField::new(
-                    "op".to_owned(),
-                    ArrowDataType::Int32,
-                    false,
-                )));
-                Arc::new(ArrowSchema::new(new_fields))
-            };
-            let partition_builder = MonitoredGeneralWriterBuilder::new(
-                FanoutPartitionWriterBuilder::new_with_custom_schema(
-                    delta_builder,
-                    schema_with_extra_op_column.clone(),
-                    partition_spec.clone(),
-                    table.metadata().current_schema().clone(),
-                ),
-                write_qps.clone(),
-                write_latency.clone(),
-            );
-            let inner_writer = Some(Box::new(
-                partition_builder
-                    .clone()
-                    .build()
-                    .await
-                    .map_err(|err| SinkError::Iceberg(anyhow!(err)))?,
-            ) as Box<dyn IcebergWriter>);
-            Ok(Self {
-                arrow_schema: original_arrow_schema,
-                metrics: IcebergWriterMetrics {
-                    _write_qps: write_qps,
-                    _write_latency: write_latency,
-                    write_bytes,
-                },
-                table,
-                writer: IcebergWriterDispatch::PartitionUpsert {
-                    writer: inner_writer,
-                    writer_builder: partition_builder,
-                    arrow_schema_with_op_column: schema_with_extra_op_column,
-                },
-                project_idx_vec: {
-                    if let Some(extra_partition_col_idx) = extra_partition_col_idx {
-                        ProjectIdxVec::Prepare(*extra_partition_col_idx)
-                    } else {
-                        ProjectIdxVec::None
-                    }
-                },
-            })
-        }
+            ),
+            fanout_enabled,
+            schema.clone(),
+            partition_spec.clone(),
+            true,
+        );
+        let inner_writer = Some(Box::new(
+            writer_builder
+                .clone()
+                .build()
+                .map_err(|err| SinkError::Iceberg(anyhow!(err)))?,
+        ) as Box<dyn IcebergWriter>);
+        Ok(Self {
+            arrow_schema: original_arrow_schema,
+            metrics: IcebergWriterMetrics {
+                _write_qps: write_qps,
+                _write_latency: write_latency,
+                write_bytes,
+            },
+            table,
+            writer: IcebergWriterDispatch::Upsert {
+                writer: inner_writer,
+                writer_builder,
+                arrow_schema_with_op_column: schema_with_extra_op_column,
+            },
+            project_idx_vec: {
+                if let Some(extra_partition_col_idx) = extra_partition_col_idx {
+                    ProjectIdxVec::Prepare(*extra_partition_col_idx)
+                } else {
+                    ProjectIdxVec::None
+                }
+            },
+        })
     }
 }
 
@@ -1439,15 +1574,12 @@ impl SinkWriter for IcebergSinkWriter {
 
         let table = create_and_validate_table_impl(&args.config, &args.sink_param).await?;
         let inner = match &args.unique_column_ids {
-            Some(unique_column_ids) => {
-                IcebergSinkWriterInner::build_upsert(
-                    table,
-                    unique_column_ids.clone(),
-                    &args.writer_param,
-                )
-                .await?
-            }
-            None => IcebergSinkWriterInner::build_append_only(table, &args.writer_param).await?,
+            Some(unique_column_ids) => IcebergSinkWriterInner::build_upsert(
+                table,
+                unique_column_ids.clone(),
+                &args.writer_param,
+            )?,
+            None => IcebergSinkWriterInner::build_append_only(table, &args.writer_param)?,
         };
 
         *self = IcebergSinkWriter::Initialized(inner);
@@ -1462,7 +1594,7 @@ impl SinkWriter for IcebergSinkWriter {
 
         // Try to build writer if it's None.
         match &mut inner.writer {
-            IcebergWriterDispatch::PartitionAppendOnly {
+            IcebergWriterDispatch::Append {
                 writer,
                 writer_builder,
             } => {
@@ -1471,26 +1603,11 @@ impl SinkWriter for IcebergSinkWriter {
                         writer_builder
                             .clone()
                             .build()
-                            .await
                             .map_err(|err| SinkError::Iceberg(anyhow!(err)))?,
                     ));
                 }
             }
-            IcebergWriterDispatch::NonPartitionAppendOnly {
-                writer,
-                writer_builder,
-            } => {
-                if writer.is_none() {
-                    *writer = Some(Box::new(
-                        writer_builder
-                            .clone()
-                            .build()
-                            .await
-                            .map_err(|err| SinkError::Iceberg(anyhow!(err)))?,
-                    ));
-                }
-            }
-            IcebergWriterDispatch::PartitionUpsert {
+            IcebergWriterDispatch::Upsert {
                 writer,
                 writer_builder,
                 ..
@@ -1500,22 +1617,6 @@ impl SinkWriter for IcebergSinkWriter {
                         writer_builder
                             .clone()
                             .build()
-                            .await
-                            .map_err(|err| SinkError::Iceberg(anyhow!(err)))?,
-                    ));
-                }
-            }
-            IcebergWriterDispatch::NonpartitionUpsert {
-                writer,
-                writer_builder,
-                ..
-            } => {
-                if writer.is_none() {
-                    *writer = Some(Box::new(
-                        writer_builder
-                            .clone()
-                            .build()
-                            .await
                             .map_err(|err| SinkError::Iceberg(anyhow!(err)))?,
                     ));
                 }
@@ -1548,8 +1649,7 @@ impl SinkWriter for IcebergSinkWriter {
         }
         let write_batch_size = chunk.estimated_heap_size();
         let batch = match &inner.writer {
-            IcebergWriterDispatch::PartitionAppendOnly { .. }
-            | IcebergWriterDispatch::NonPartitionAppendOnly { .. } => {
+            IcebergWriterDispatch::Append { .. } => {
                 // separate out insert chunk
                 let filters =
                     chunk.visibility() & ops.iter().map(|op| *op == Op::Insert).collect::<Bitmap>();
@@ -1558,11 +1658,7 @@ impl SinkWriter for IcebergSinkWriter {
                     .to_record_batch(inner.arrow_schema.clone(), &chunk.compact_vis())
                     .map_err(|err| SinkError::Iceberg(anyhow!(err)))?
             }
-            IcebergWriterDispatch::PartitionUpsert {
-                arrow_schema_with_op_column,
-                ..
-            }
-            | IcebergWriterDispatch::NonpartitionUpsert {
+            IcebergWriterDispatch::Upsert {
                 arrow_schema_with_op_column,
                 ..
             } => {
@@ -1607,7 +1703,7 @@ impl SinkWriter for IcebergSinkWriter {
         }
 
         let close_result = match &mut inner.writer {
-            IcebergWriterDispatch::PartitionAppendOnly {
+            IcebergWriterDispatch::Append {
                 writer,
                 writer_builder,
             } => {
@@ -1617,7 +1713,7 @@ impl SinkWriter for IcebergSinkWriter {
                     }
                     _ => None,
                 };
-                match writer_builder.clone().build().await {
+                match writer_builder.clone().build() {
                     Ok(new_writer) => {
                         *writer = Some(Box::new(new_writer));
                     }
@@ -1629,29 +1725,7 @@ impl SinkWriter for IcebergSinkWriter {
                 }
                 close_result
             }
-            IcebergWriterDispatch::NonPartitionAppendOnly {
-                writer,
-                writer_builder,
-            } => {
-                let close_result = match writer.take() {
-                    Some(mut writer) => {
-                        Some(writer.close().instrument_await("iceberg_close").await)
-                    }
-                    _ => None,
-                };
-                match writer_builder.clone().build().await {
-                    Ok(new_writer) => {
-                        *writer = Some(Box::new(new_writer));
-                    }
-                    _ => {
-                        // In this case, the writer is closed and we can't build a new writer. But we can't return the error
-                        // here because current writer may close successfully. So we just log the error.
-                        warn!("Failed to build new writer after close");
-                    }
-                }
-                close_result
-            }
-            IcebergWriterDispatch::PartitionUpsert {
+            IcebergWriterDispatch::Upsert {
                 writer,
                 writer_builder,
                 ..
@@ -1662,30 +1736,7 @@ impl SinkWriter for IcebergSinkWriter {
                     }
                     _ => None,
                 };
-                match writer_builder.clone().build().await {
-                    Ok(new_writer) => {
-                        *writer = Some(Box::new(new_writer));
-                    }
-                    _ => {
-                        // In this case, the writer is closed and we can't build a new writer. But we can't return the error
-                        // here because current writer may close successfully. So we just log the error.
-                        warn!("Failed to build new writer after close");
-                    }
-                }
-                close_result
-            }
-            IcebergWriterDispatch::NonpartitionUpsert {
-                writer,
-                writer_builder,
-                ..
-            } => {
-                let close_result = match writer.take() {
-                    Some(mut writer) => {
-                        Some(writer.close().instrument_await("iceberg_close").await)
-                    }
-                    _ => None,
-                };
-                match writer_builder.clone().build().await {
+                match writer_builder.clone().build() {
                     Ok(new_writer) => {
                         *writer = Some(Box::new(new_writer));
                     }
@@ -1701,12 +1752,14 @@ impl SinkWriter for IcebergSinkWriter {
 
         match close_result {
             Some(Ok(result)) => {
-                let version = inner.table.metadata().format_version() as u8;
+                let format_version = inner.table.metadata().format_version();
                 let partition_type = inner.table.metadata().default_partition_type();
                 let data_files = result
                     .into_iter()
                     .map(|f| {
-                        SerializedDataFile::try_from(f, partition_type, version == 1)
+                        // Truncate large column statistics BEFORE serialization
+                        let truncated = truncate_datafile(f);
+                        SerializedDataFile::try_from(truncated, partition_type, format_version)
                             .map_err(|err| SinkError::Iceberg(anyhow!(err)))
                     })
                     .collect::<Result<Vec<_>>>()?;
@@ -1725,6 +1778,71 @@ impl SinkWriter for IcebergSinkWriter {
 const SCHEMA_ID: &str = "schema_id";
 const PARTITION_SPEC_ID: &str = "partition_spec_id";
 const DATA_FILES: &str = "data_files";
+
+/// Maximum size for column statistics (min/max values) in bytes.
+/// Column statistics larger than this will be truncated to avoid metadata bloat.
+/// This is especially important for large fields like JSONB, TEXT, BINARY, etc.
+///
+/// Fix for large column statistics in `DataFile` metadata that can cause OOM errors.
+/// We truncate at the `DataFile` level (before serialization) by directly modifying
+/// the public `lower_bounds` and `upper_bounds` fields.
+///
+/// This prevents metadata from ballooning to gigabytes when dealing with large
+/// JSONB, TEXT, or BINARY fields, while still preserving statistics for small fields
+/// that benefit from query optimization.
+const MAX_COLUMN_STAT_SIZE: usize = 10240; // 10KB
+
+/// Truncate large column statistics from `DataFile` BEFORE serialization.
+///
+/// This function directly modifies `DataFile`'s `lower_bounds` and `upper_bounds`
+/// to remove entries that exceed `MAX_COLUMN_STAT_SIZE`.
+///
+/// # Arguments
+/// * `data_file` - A `DataFile` to process
+///
+/// # Returns
+/// The modified `DataFile` with large statistics truncated
+fn truncate_datafile(mut data_file: DataFile) -> DataFile {
+    // Process lower_bounds - remove entries with large values
+    data_file.lower_bounds.retain(|field_id, datum| {
+        // Use to_bytes() to get the actual binary size without JSON serialization overhead
+        let size = match datum.to_bytes() {
+            Ok(bytes) => bytes.len(),
+            Err(_) => 0,
+        };
+
+        if size > MAX_COLUMN_STAT_SIZE {
+            tracing::debug!(
+                field_id = field_id,
+                size = size,
+                "Truncating large lower_bound statistic"
+            );
+            return false;
+        }
+        true
+    });
+
+    // Process upper_bounds - remove entries with large values
+    data_file.upper_bounds.retain(|field_id, datum| {
+        // Use to_bytes() to get the actual binary size without JSON serialization overhead
+        let size = match datum.to_bytes() {
+            Ok(bytes) => bytes.len(),
+            Err(_) => 0,
+        };
+
+        if size > MAX_COLUMN_STAT_SIZE {
+            tracing::debug!(
+                field_id = field_id,
+                size = size,
+                "Truncating large upper_bound statistic"
+            );
+            return false;
+        }
+        true
+    });
+
+    data_file
+}
 
 #[derive(Default, Clone)]
 struct IcebergCommitResult {
@@ -1949,32 +2067,44 @@ impl IcebergSinkCommitter {
 impl SinglePhaseCommitCoordinator for IcebergSinkCommitter {
     async fn init(&mut self) -> Result<()> {
         tracing::info!(
-            "Sink id = {}: iceberg sink coordinator initing.",
-            self.param.sink_id
+            sink_id = %self.param.sink_id,
+            "Iceberg sink coordinator initialized",
         );
 
         Ok(())
     }
 
-    async fn commit(
+    async fn commit_data(&mut self, epoch: u64, metadata: Vec<SinkMetadata>) -> Result<()> {
+        tracing::debug!("Starting iceberg direct commit in epoch {epoch}");
+
+        if metadata.is_empty() {
+            tracing::debug!(?epoch, "No datafile to commit");
+            return Ok(());
+        }
+
+        // Commit data if present
+        if let Some((write_results, snapshot_id)) = self.pre_commit_inner(epoch, metadata)? {
+            self.commit_data_impl(epoch, write_results, snapshot_id)
+                .await?;
+        }
+
+        Ok(())
+    }
+
+    async fn commit_schema_change(
         &mut self,
         epoch: u64,
-        metadata: Vec<SinkMetadata>,
-        add_columns: Option<Vec<Field>>,
+        schema_change: PbSinkSchemaChange,
     ) -> Result<()> {
-        tracing::info!("Starting iceberg direct commit in epoch {epoch}");
+        tracing::info!(
+            "Committing schema change {:?} in epoch {}",
+            schema_change,
+            epoch
+        );
+        self.commit_schema_change_impl(schema_change).await?;
+        tracing::info!("Successfully committed schema change in epoch {}", epoch);
 
-        let (write_results, snapshot_id) =
-            match self.pre_commit_inner(epoch, metadata, add_columns)? {
-                Some((write_results, snapshot_id)) => (write_results, snapshot_id),
-                None => {
-                    tracing::debug!(?epoch, "no data to commit");
-                    return Ok(());
-                }
-            };
-
-        self.commit_iceberg_inner(epoch, write_results, snapshot_id)
-            .await
+        Ok(())
     }
 }
 
@@ -1982,8 +2112,8 @@ impl SinglePhaseCommitCoordinator for IcebergSinkCommitter {
 impl TwoPhaseCommitCoordinator for IcebergSinkCommitter {
     async fn init(&mut self) -> Result<()> {
         tracing::info!(
-            "Sink id = {}: iceberg sink coordinator initing.",
-            self.param.sink_id
+            sink_id = %self.param.sink_id,
+            "Iceberg sink coordinator initialized",
         );
 
         Ok(())
@@ -1993,18 +2123,17 @@ impl TwoPhaseCommitCoordinator for IcebergSinkCommitter {
         &mut self,
         epoch: u64,
         metadata: Vec<SinkMetadata>,
-        add_columns: Option<Vec<Field>>,
-    ) -> Result<Vec<u8>> {
-        tracing::info!("Starting iceberg pre commit in epoch {epoch}");
+        _schema_change: Option<PbSinkSchemaChange>,
+    ) -> Result<Option<Vec<u8>>> {
+        tracing::debug!("Starting iceberg pre commit in epoch {epoch}");
 
-        let (write_results, snapshot_id) =
-            match self.pre_commit_inner(epoch, metadata, add_columns)? {
-                Some((write_results, snapshot_id)) => (write_results, snapshot_id),
-                None => {
-                    tracing::debug!(?epoch, "no data to commit");
-                    return Ok(vec![]);
-                }
-            };
+        let (write_results, snapshot_id) = match self.pre_commit_inner(epoch, metadata)? {
+            Some((write_results, snapshot_id)) => (write_results, snapshot_id),
+            None => {
+                tracing::debug!(?epoch, "no data to pre commit");
+                return Ok(None);
+            }
+        };
 
         let mut write_results_bytes = Vec::new();
         for each_parallelism_write_result in write_results {
@@ -2017,29 +2146,46 @@ impl TwoPhaseCommitCoordinator for IcebergSinkCommitter {
         write_results_bytes.push(snapshot_id_bytes);
 
         let pre_commit_metadata_bytes: Vec<u8> = serialize_metadata(write_results_bytes);
-        Ok(pre_commit_metadata_bytes)
+        Ok(Some(pre_commit_metadata_bytes))
     }
 
-    async fn commit(&mut self, epoch: u64, commit_metadata: Vec<u8>) -> Result<()> {
-        tracing::info!("Starting iceberg commit in epoch {epoch}");
+    async fn commit_data(&mut self, epoch: u64, commit_metadata: Vec<u8>) -> Result<()> {
+        tracing::debug!("Starting iceberg commit in epoch {epoch}");
+
         if commit_metadata.is_empty() {
-            tracing::debug!(?epoch, "no data to commit");
+            tracing::debug!(?epoch, "No datafile to commit");
             return Ok(());
         }
 
-        let mut write_results_bytes = deserialize_metadata(commit_metadata);
+        // Deserialize commit metadata
+        let mut payload = deserialize_metadata(commit_metadata);
+        if payload.is_empty() {
+            return Err(SinkError::Iceberg(anyhow!(
+                "Invalid commit metadata: empty payload"
+            )));
+        }
 
-        let snapshot_id_bytes = write_results_bytes.pop().unwrap();
+        // Last element is snapshot_id
+        let snapshot_id_bytes = payload.pop().ok_or_else(|| {
+            SinkError::Iceberg(anyhow!("Invalid commit metadata: missing snapshot_id"))
+        })?;
         let snapshot_id = i64::from_le_bytes(
             snapshot_id_bytes
                 .try_into()
                 .map_err(|_| SinkError::Iceberg(anyhow!("Invalid snapshot id bytes")))?,
         );
 
-        if self
+        // Remaining elements are write_results
+        let write_results = payload
+            .into_iter()
+            .map(IcebergCommitResult::try_from_serialized_bytes)
+            .collect::<Result<Vec<_>>>()?;
+
+        let snapshot_committed = self
             .is_snapshot_id_in_iceberg(&self.config, snapshot_id)
-            .await?
-        {
+            .await?;
+
+        if snapshot_committed {
             tracing::info!(
                 "Snapshot id {} already committed in iceberg table, skip committing again.",
                 snapshot_id
@@ -2047,14 +2193,28 @@ impl TwoPhaseCommitCoordinator for IcebergSinkCommitter {
             return Ok(());
         }
 
-        let mut write_results = vec![];
-        for each in write_results_bytes {
-            let write_result = IcebergCommitResult::try_from_serialized_bytes(each)?;
-            write_results.push(write_result);
+        self.commit_data_impl(epoch, write_results, snapshot_id)
+            .await
+    }
+
+    async fn commit_schema_change(
+        &mut self,
+        epoch: u64,
+        schema_change: PbSinkSchemaChange,
+    ) -> Result<()> {
+        let schema_updated = self.check_schema_change_applied(&schema_change)?;
+        if schema_updated {
+            tracing::info!("Schema change already committed in epoch {}, skip", epoch);
+            return Ok(());
         }
 
-        self.commit_iceberg_inner(epoch, write_results, snapshot_id)
-            .await?;
+        tracing::info!(
+            "Committing schema change {:?} in epoch {}",
+            schema_change,
+            epoch
+        );
+        self.commit_schema_change_impl(schema_change).await?;
+        tracing::info!("Successfully committed schema change in epoch {epoch}");
 
         Ok(())
     }
@@ -2071,16 +2231,7 @@ impl IcebergSinkCommitter {
         &mut self,
         _epoch: u64,
         metadata: Vec<SinkMetadata>,
-        add_columns: Option<Vec<Field>>,
     ) -> Result<Option<(Vec<IcebergCommitResult>, i64)>> {
-        if let Some(add_columns) = add_columns {
-            return Err(anyhow!(
-                "Iceberg sink not support add columns, but got: {:?}",
-                add_columns
-            )
-            .into());
-        }
-
         let write_results: Vec<IcebergCommitResult> = metadata
             .iter()
             .map(IcebergCommitResult::try_from)
@@ -2107,13 +2258,12 @@ impl IcebergSinkCommitter {
             )));
         }
 
-        let txn = Transaction::new(&self.table);
-        let snapshot_id = txn.generate_unique_snapshot_id();
+        let snapshot_id = FastAppendAction::generate_snapshot_id(&self.table);
 
         Ok(Some((write_results, snapshot_id)))
     }
 
-    async fn commit_iceberg_inner(
+    async fn commit_data_impl(
         &mut self,
         epoch: u64,
         write_results: Vec<IcebergCommitResult>,
@@ -2180,35 +2330,74 @@ impl IcebergSinkCommitter {
             .take(self.commit_retry_num as usize);
         let catalog = self.catalog.clone();
         let table_ident = self.table.identifier().clone();
-        let table = Retry::spawn(retry_strategy, || async {
-            let table = Self::reload_table(
-                catalog.as_ref(),
-                &table_ident,
-                expect_schema_id,
-                expect_partition_spec_id,
-            )
-            .await?;
-            let txn = Transaction::new(&table);
-            let mut append_action = txn
-                .fast_append(Some(snapshot_id), None, vec![])
-                .map_err(|err| SinkError::Iceberg(anyhow!(err)))?
-                .with_to_branch(commit_branch(
-                    self.config.r#type.as_str(),
-                    self.config.write_mode,
-                ));
-            append_action
-                .add_data_files(data_files.clone())
-                .map_err(|err| SinkError::Iceberg(anyhow!(err)))?;
-            let tx = append_action.apply().await.map_err(|err| {
-                tracing::error!(error = %err.as_report(), "Failed to apply iceberg table");
-                SinkError::Iceberg(anyhow!(err))
-            })?;
-            tx.commit(self.catalog.as_ref()).await.map_err(|err| {
-                tracing::error!(error = %err.as_report(), "Failed to commit iceberg table");
-                SinkError::Iceberg(anyhow!(err))
-            })
-        })
-        .await?;
+
+        // Custom retry logic that:
+        // 1. Calls reload_table before each commit attempt to get the latest metadata
+        // 2. If reload_table fails (table not exists/schema/partition mismatch), stops retrying immediately
+        // 3. If commit fails, retries with backoff
+        enum CommitError {
+            ReloadTable(SinkError), // Non-retriable: schema/partition mismatch
+            Commit(SinkError),      // Retriable: commit conflicts, network errors
+        }
+
+        let table = RetryIf::spawn(
+            retry_strategy,
+            || async {
+                // Reload table before each commit attempt to get the latest metadata
+                let table = Self::reload_table(
+                    catalog.as_ref(),
+                    &table_ident,
+                    expect_schema_id,
+                    expect_partition_spec_id,
+                )
+                .await
+                .map_err(|e| {
+                    tracing::error!(error = %e.as_report(), "Failed to reload iceberg table");
+                    CommitError::ReloadTable(e)
+                })?;
+
+                let txn = Transaction::new(&table);
+                let append_action = txn
+                    .fast_append()
+                    .set_snapshot_id(snapshot_id)
+                    .set_target_branch(commit_branch(
+                        self.config.r#type.as_str(),
+                        self.config.write_mode,
+                    ))
+                    .add_data_files(data_files.clone());
+
+                let tx = append_action.apply(txn).map_err(|err| {
+                    let err: IcebergError = err.into();
+                    tracing::error!(error = %err.as_report(), "Failed to apply iceberg table");
+                    CommitError::Commit(SinkError::Iceberg(anyhow!(err)))
+                })?;
+
+                tx.commit(catalog.as_ref()).await.map_err(|err| {
+                    let err: IcebergError = err.into();
+                    tracing::error!(error = %err.as_report(), "Failed to commit iceberg table");
+                    CommitError::Commit(SinkError::Iceberg(anyhow!(err)))
+                })
+            },
+            |err: &CommitError| {
+                // Only retry on commit errors, not on reload_table errors
+                match err {
+                    CommitError::Commit(_) => {
+                        tracing::warn!("Commit failed, will retry");
+                        true
+                    }
+                    CommitError::ReloadTable(_) => {
+                        tracing::error!(
+                            "reload_table failed with non-retriable error, will not retry"
+                        );
+                        false
+                    }
+                }
+            },
+        )
+        .await
+        .map_err(|e| match e {
+            CommitError::ReloadTable(e) | CommitError::Commit(e) => e,
+        })?;
         self.table = table;
 
         let snapshot_num = self.table.metadata().snapshots().count();
@@ -2220,7 +2409,7 @@ impl IcebergSinkCommitter {
             .with_guarded_label_values(&metrics_labels)
             .set(snapshot_num as i64);
 
-        tracing::info!("Succeeded to commit to iceberg table in epoch {epoch}.");
+        tracing::debug!("Succeeded to commit to iceberg table in epoch {epoch}.");
 
         if let Some(iceberg_compact_stat_sender) = &self.iceberg_compact_stat_sender
             && self.config.enable_compaction
@@ -2252,6 +2441,171 @@ impl IcebergSinkCommitter {
         } else {
             Ok(false)
         }
+    }
+
+    /// Check if the specified columns already exist in the iceberg table's current schema.
+    /// This is used to determine if schema change has already been applied.
+    fn check_schema_change_applied(&self, schema_change: &PbSinkSchemaChange) -> Result<bool> {
+        let current_schema = self.table.metadata().current_schema();
+        let current_arrow_schema = schema_to_arrow_schema(current_schema.as_ref())
+            .context("Failed to convert schema")
+            .map_err(SinkError::Iceberg)?;
+
+        let iceberg_arrow_convert = IcebergArrowConvert;
+
+        let schema_matches = |expected: &[ArrowField]| {
+            if current_arrow_schema.fields().len() != expected.len() {
+                return false;
+            }
+
+            expected.iter().all(|expected_field| {
+                current_arrow_schema.fields().iter().any(|current_field| {
+                    current_field.name() == expected_field.name()
+                        && current_field.data_type() == expected_field.data_type()
+                })
+            })
+        };
+
+        let original_arrow_fields: Vec<ArrowField> = schema_change
+            .original_schema
+            .iter()
+            .map(|pb_field| {
+                let field = Field::from(pb_field);
+                iceberg_arrow_convert
+                    .to_arrow_field(&field.name, &field.data_type)
+                    .context("Failed to convert field to arrow")
+                    .map_err(SinkError::Iceberg)
+            })
+            .collect::<Result<_>>()?;
+
+        // If current schema equals original_schema, then schema change is NOT applied.
+        if schema_matches(&original_arrow_fields) {
+            tracing::debug!(
+                "Current iceberg schema matches original_schema ({} columns); schema change not applied",
+                original_arrow_fields.len()
+            );
+            return Ok(false);
+        }
+
+        // We only support add_columns for now.
+        let Some(risingwave_pb::stream_plan::sink_schema_change::Op::AddColumns(add_columns_op)) =
+            schema_change.op.as_ref()
+        else {
+            return Err(SinkError::Iceberg(anyhow!(
+                "Unsupported sink schema change op in iceberg sink: {:?}",
+                schema_change.op
+            )));
+        };
+
+        let add_arrow_fields: Vec<ArrowField> = add_columns_op
+            .fields
+            .iter()
+            .map(|pb_field| {
+                let field = Field::from(pb_field);
+                iceberg_arrow_convert
+                    .to_arrow_field(&field.name, &field.data_type)
+                    .context("Failed to convert field to arrow")
+                    .map_err(SinkError::Iceberg)
+            })
+            .collect::<Result<_>>()?;
+
+        let mut expected_after_change = original_arrow_fields;
+        expected_after_change.extend(add_arrow_fields);
+
+        // If current schema equals original_schema + add_columns, then schema change is applied.
+        if schema_matches(&expected_after_change) {
+            tracing::debug!(
+                "Current iceberg schema matches original_schema + add_columns ({} columns); schema change already applied",
+                expected_after_change.len()
+            );
+            return Ok(true);
+        }
+
+        Err(SinkError::Iceberg(anyhow!(
+            "Current iceberg schema does not match either original_schema ({} cols) or original_schema + add_columns; cannot determine whether schema change is applied",
+            schema_change.original_schema.len()
+        )))
+    }
+
+    /// Commit schema changes (e.g., add columns) to the iceberg table.
+    /// This function uses Transaction API to atomically update the table schema
+    /// with optimistic locking to prevent concurrent conflicts.
+    async fn commit_schema_change_impl(&mut self, schema_change: PbSinkSchemaChange) -> Result<()> {
+        use iceberg::spec::NestedField;
+
+        let Some(risingwave_pb::stream_plan::sink_schema_change::Op::AddColumns(add_columns_op)) =
+            schema_change.op.as_ref()
+        else {
+            return Err(SinkError::Iceberg(anyhow!(
+                "Unsupported sink schema change op in iceberg sink: {:?}",
+                schema_change.op
+            )));
+        };
+
+        let add_columns = add_columns_op.fields.iter().map(Field::from).collect_vec();
+
+        // Step 1: Get current table metadata
+        let metadata = self.table.metadata();
+        let mut next_field_id = metadata.last_column_id() + 1;
+        tracing::debug!("Starting schema change, next_field_id: {}", next_field_id);
+
+        // Step 2: Build new fields to add
+        let iceberg_create_table_arrow_convert = IcebergCreateTableArrowConvert::default();
+        let mut new_fields = Vec::new();
+
+        for field in &add_columns {
+            // Convert RisingWave Field to Arrow Field using IcebergCreateTableArrowConvert
+            let arrow_field = iceberg_create_table_arrow_convert
+                .to_arrow_field(&field.name, &field.data_type)
+                .with_context(|| format!("Failed to convert field '{}' to arrow", field.name))
+                .map_err(SinkError::Iceberg)?;
+
+            // Convert Arrow DataType to Iceberg Type
+            let iceberg_type = iceberg::arrow::arrow_type_to_type(arrow_field.data_type())
+                .map_err(|err| {
+                    SinkError::Iceberg(
+                        anyhow!(err).context("Failed to convert Arrow type to Iceberg type"),
+                    )
+                })?;
+
+            // Create NestedField with the next available field ID
+            let nested_field = Arc::new(NestedField::optional(
+                next_field_id,
+                &field.name,
+                iceberg_type,
+            ));
+
+            new_fields.push(nested_field);
+            tracing::info!("Prepared field '{}' with ID {}", field.name, next_field_id);
+            next_field_id += 1;
+        }
+
+        // Step 3: Create Transaction with UpdateSchemaAction
+        tracing::info!(
+            "Committing schema change to catalog for table {}",
+            self.table.identifier()
+        );
+
+        let txn = Transaction::new(&self.table);
+        let action = txn.update_schema().add_fields(new_fields);
+
+        let updated_table = action
+            .apply(txn)
+            .context("Failed to apply schema update action")
+            .map_err(SinkError::Iceberg)?
+            .commit(self.catalog.as_ref())
+            .await
+            .context("Failed to commit table schema change")
+            .map_err(SinkError::Iceberg)?;
+
+        self.table = updated_table;
+
+        tracing::info!(
+            "Successfully committed schema change, added {} columns to iceberg table",
+            add_columns.len()
+        );
+
+        Ok(())
     }
 
     /// Check if the number of snapshots since the last rewrite/overwrite operation exceeds the limit
@@ -2453,11 +2807,11 @@ pub fn try_matches_arrow_schema(rw_schema: &Schema, arrow_schema: &ArrowSchema) 
     Ok(())
 }
 
-pub fn serialize_metadata(metadata: Vec<Vec<u8>>) -> Vec<u8> {
+fn serialize_metadata(metadata: Vec<Vec<u8>>) -> Vec<u8> {
     serde_json::to_vec(&metadata).unwrap()
 }
 
-pub fn deserialize_metadata(bytes: Vec<u8>) -> Vec<Vec<u8>> {
+fn deserialize_metadata(bytes: Vec<u8>) -> Vec<Vec<u8>> {
     serde_json::from_slice(&bytes).unwrap()
 }
 
@@ -2513,6 +2867,8 @@ pub fn should_enable_iceberg_cow(sink_type: &str, write_mode: IcebergWriteMode) 
 
 impl crate::with_options::WithOptions for IcebergWriteMode {}
 
+impl crate::with_options::WithOptions for FormatVersion {}
+
 impl crate::with_options::WithOptions for CompactionType {}
 
 #[cfg(test)]
@@ -2526,7 +2882,7 @@ mod test {
     use crate::sink::decouple_checkpoint_log_sink::ICEBERG_DEFAULT_COMMIT_CHECKPOINT_INTERVAL;
     use crate::sink::iceberg::{
         COMPACTION_INTERVAL_SEC, COMPACTION_MAX_SNAPSHOTS_NUM, CompactionType, ENABLE_COMPACTION,
-        ENABLE_SNAPSHOT_EXPIRATION, IcebergConfig, IcebergWriteMode,
+        ENABLE_SNAPSHOT_EXPIRATION, FormatVersion, IcebergConfig, IcebergWriteMode,
         SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_FILES, SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_META_DATA,
         SNAPSHOT_EXPIRATION_MAX_AGE_MILLIS, SNAPSHOT_EXPIRATION_RETAIN_LAST, WRITE_MODE,
     };
@@ -2765,6 +3121,9 @@ mod test {
                 adlsgen2_account_key: None,
                 adlsgen2_endpoint: None,
                 vended_credentials: None,
+                catalog_security: None,
+                gcp_auth_scopes: None,
+                catalog_io_impl: None,
             },
             table: IcebergTableIdentifier {
                 database_name: Some("demo_db".to_owned()),
@@ -2786,6 +3145,7 @@ mod test {
             compaction_interval_sec: Some(DEFAULT_ICEBERG_COMPACTION_INTERVAL / 2),
             enable_snapshot_expiration: true,
             write_mode: IcebergWriteMode::MergeOnRead,
+            format_version: FormatVersion::V2,
             snapshot_expiration_max_age_millis: None,
             snapshot_expiration_retain_last: None,
             snapshot_expiration_clear_expired_files: true,
@@ -2917,6 +3277,234 @@ mod test {
         test_create_catalog(values).await;
     }
 
+    /// Test parsing Google authentication configuration with custom scopes.
+    #[test]
+    fn test_parse_google_auth_with_custom_scopes() {
+        let values: BTreeMap<String, String> = [
+            ("connector", "iceberg"),
+            ("type", "append-only"),
+            ("force_append_only", "true"),
+            ("catalog.name", "biglake-catalog"),
+            ("catalog.type", "rest"),
+            (
+                "catalog.uri",
+                "https://biglake.googleapis.com/iceberg/v1/restcatalog",
+            ),
+            ("warehouse.path", "bq://projects/my-gcp-project"),
+            ("catalog.security", "google"),
+            ("gcp.auth.scopes", "https://www.googleapis.com/auth/cloud-platform,https://www.googleapis.com/auth/bigquery"),
+            ("database.name", "my_dataset"),
+            ("table.name", "my_table"),
+        ]
+        .into_iter()
+        .map(|(k, v)| (k.to_owned(), v.to_owned()))
+        .collect();
+
+        let iceberg_config = IcebergConfig::from_btreemap(values).unwrap();
+
+        // Verify catalog type
+        assert_eq!(iceberg_config.catalog_type(), "rest");
+
+        // Verify Google-specific options
+        assert_eq!(
+            iceberg_config.common.catalog_security.as_deref(),
+            Some("google")
+        );
+        assert_eq!(
+            iceberg_config.common.gcp_auth_scopes.as_deref(),
+            Some(
+                "https://www.googleapis.com/auth/cloud-platform,https://www.googleapis.com/auth/bigquery"
+            )
+        );
+
+        // Verify warehouse path with bq:// prefix
+        assert_eq!(
+            iceberg_config.common.warehouse_path.as_deref(),
+            Some("bq://projects/my-gcp-project")
+        );
+    }
+
+    /// Test parsing BigLake/Google Cloud REST catalog configuration.
+    #[test]
+    fn test_parse_biglake_google_auth_config() {
+        let values: BTreeMap<String, String> = [
+            ("connector", "iceberg"),
+            ("type", "append-only"),
+            ("force_append_only", "true"),
+            ("catalog.name", "biglake-catalog"),
+            ("catalog.type", "rest"),
+            (
+                "catalog.uri",
+                "https://biglake.googleapis.com/iceberg/v1/restcatalog",
+            ),
+            ("warehouse.path", "bq://projects/my-gcp-project"),
+            (
+                "catalog.header",
+                "x-goog-user-project=my-gcp-project",
+            ),
+            ("catalog.security", "google"),
+            ("gcp.auth.scopes", "https://www.googleapis.com/auth/cloud-platform,https://www.googleapis.com/auth/bigquery"),
+            ("database.name", "my_dataset"),
+            ("table.name", "my_table"),
+        ]
+        .into_iter()
+        .map(|(k, v)| (k.to_owned(), v.to_owned()))
+        .collect();
+
+        let iceberg_config = IcebergConfig::from_btreemap(values).unwrap();
+
+        // Verify catalog type
+        assert_eq!(iceberg_config.catalog_type(), "rest");
+
+        // Verify Google-specific options
+        assert_eq!(
+            iceberg_config.common.catalog_security.as_deref(),
+            Some("google")
+        );
+        assert_eq!(
+            iceberg_config.common.gcp_auth_scopes.as_deref(),
+            Some(
+                "https://www.googleapis.com/auth/cloud-platform,https://www.googleapis.com/auth/bigquery"
+            )
+        );
+
+        // Verify warehouse path with bq:// prefix
+        assert_eq!(
+            iceberg_config.common.warehouse_path.as_deref(),
+            Some("bq://projects/my-gcp-project")
+        );
+
+        // Verify custom header
+        assert_eq!(
+            iceberg_config.common.catalog_header.as_deref(),
+            Some("x-goog-user-project=my-gcp-project")
+        );
+    }
+
+    /// Test parsing `oauth2` security configuration.
+    #[test]
+    fn test_parse_oauth2_security_config() {
+        let values: BTreeMap<String, String> = [
+            ("connector", "iceberg"),
+            ("type", "append-only"),
+            ("force_append_only", "true"),
+            ("catalog.name", "oauth2-catalog"),
+            ("catalog.type", "rest"),
+            ("catalog.uri", "https://example.com/iceberg/rest"),
+            ("warehouse.path", "s3://my-bucket/warehouse"),
+            ("catalog.security", "oauth2"),
+            ("catalog.credential", "client_id:client_secret"),
+            ("catalog.token", "bearer-token"),
+            (
+                "catalog.oauth2_server_uri",
+                "https://oauth.example.com/token",
+            ),
+            ("catalog.scope", "read write"),
+            ("database.name", "test_db"),
+            ("table.name", "test_table"),
+        ]
+        .into_iter()
+        .map(|(k, v)| (k.to_owned(), v.to_owned()))
+        .collect();
+
+        let iceberg_config = IcebergConfig::from_btreemap(values).unwrap();
+
+        // Verify catalog type
+        assert_eq!(iceberg_config.catalog_type(), "rest");
+
+        // Verify OAuth2-specific options
+        assert_eq!(
+            iceberg_config.common.catalog_security.as_deref(),
+            Some("oauth2")
+        );
+        assert_eq!(
+            iceberg_config.common.catalog_credential.as_deref(),
+            Some("client_id:client_secret")
+        );
+        assert_eq!(
+            iceberg_config.common.catalog_token.as_deref(),
+            Some("bearer-token")
+        );
+        assert_eq!(
+            iceberg_config.common.catalog_oauth2_server_uri.as_deref(),
+            Some("https://oauth.example.com/token")
+        );
+        assert_eq!(
+            iceberg_config.common.catalog_scope.as_deref(),
+            Some("read write")
+        );
+    }
+
+    /// Test parsing invalid security configuration.
+    #[test]
+    fn test_parse_invalid_security_config() {
+        let values: BTreeMap<String, String> = [
+            ("connector", "iceberg"),
+            ("type", "append-only"),
+            ("force_append_only", "true"),
+            ("catalog.name", "invalid-catalog"),
+            ("catalog.type", "rest"),
+            ("catalog.uri", "https://example.com/iceberg/rest"),
+            ("warehouse.path", "s3://my-bucket/warehouse"),
+            ("catalog.security", "invalid_security_type"),
+            ("database.name", "test_db"),
+            ("table.name", "test_table"),
+        ]
+        .into_iter()
+        .map(|(k, v)| (k.to_owned(), v.to_owned()))
+        .collect();
+
+        // This should still parse successfully, but with a warning for unknown security type
+        let iceberg_config = IcebergConfig::from_btreemap(values).unwrap();
+
+        // Verify that the invalid security type is still stored
+        assert_eq!(
+            iceberg_config.common.catalog_security.as_deref(),
+            Some("invalid_security_type")
+        );
+
+        // Verify catalog type
+        assert_eq!(iceberg_config.catalog_type(), "rest");
+    }
+
+    /// Test parsing custom `FileIO` implementation configuration.
+    #[test]
+    fn test_parse_custom_io_impl_config() {
+        let values: BTreeMap<String, String> = [
+            ("connector", "iceberg"),
+            ("type", "append-only"),
+            ("force_append_only", "true"),
+            ("catalog.name", "gcs-catalog"),
+            ("catalog.type", "rest"),
+            ("catalog.uri", "https://example.com/iceberg/rest"),
+            ("warehouse.path", "gs://my-bucket/warehouse"),
+            ("catalog.security", "google"),
+            ("catalog.io_impl", "org.apache.iceberg.gcp.gcs.GCSFileIO"),
+            ("database.name", "test_db"),
+            ("table.name", "test_table"),
+        ]
+        .into_iter()
+        .map(|(k, v)| (k.to_owned(), v.to_owned()))
+        .collect();
+
+        let iceberg_config = IcebergConfig::from_btreemap(values).unwrap();
+
+        // Verify catalog type
+        assert_eq!(iceberg_config.catalog_type(), "rest");
+
+        // Verify custom `FileIO` implementation
+        assert_eq!(
+            iceberg_config.common.catalog_io_impl.as_deref(),
+            Some("org.apache.iceberg.gcp.gcs.GCSFileIO")
+        );
+
+        // Verify Google security is set
+        assert_eq!(
+            iceberg_config.common.catalog_security.as_deref(),
+            Some("google")
+        );
+    }
+
     #[test]
     fn test_config_constants_consistency() {
         // This test ensures our constants match the expected configuration names
@@ -2985,5 +3573,117 @@ mod test {
         assert_eq!(iceberg_config.trigger_snapshot_count, Some(10));
         assert_eq!(iceberg_config.target_file_size_mb, Some(256));
         assert_eq!(iceberg_config.compaction_type, Some(CompactionType::Full));
+    }
+
+    #[test]
+    fn test_append_only_rejects_copy_on_write() {
+        // Test that append-only sinks reject copy-on-write mode
+        let values = [
+            ("connector", "iceberg"),
+            ("type", "append-only"),
+            ("warehouse.path", "s3://iceberg"),
+            ("s3.endpoint", "http://127.0.0.1:9301"),
+            ("s3.access.key", "test"),
+            ("s3.secret.key", "test"),
+            ("s3.region", "us-east-1"),
+            ("catalog.type", "storage"),
+            ("catalog.name", "demo"),
+            ("database.name", "test_db"),
+            ("table.name", "test_table"),
+            ("write_mode", "copy-on-write"),
+        ]
+        .into_iter()
+        .map(|(k, v)| (k.to_owned(), v.to_owned()))
+        .collect();
+
+        let result = IcebergConfig::from_btreemap(values);
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("'copy-on-write' mode is not supported for append-only iceberg sink")
+        );
+    }
+
+    #[test]
+    fn test_append_only_accepts_merge_on_read() {
+        // Test that append-only sinks accept merge-on-read mode (explicit)
+        let values = [
+            ("connector", "iceberg"),
+            ("type", "append-only"),
+            ("warehouse.path", "s3://iceberg"),
+            ("s3.endpoint", "http://127.0.0.1:9301"),
+            ("s3.access.key", "test"),
+            ("s3.secret.key", "test"),
+            ("s3.region", "us-east-1"),
+            ("catalog.type", "storage"),
+            ("catalog.name", "demo"),
+            ("database.name", "test_db"),
+            ("table.name", "test_table"),
+            ("write_mode", "merge-on-read"),
+        ]
+        .into_iter()
+        .map(|(k, v)| (k.to_owned(), v.to_owned()))
+        .collect();
+
+        let result = IcebergConfig::from_btreemap(values);
+        assert!(result.is_ok());
+        let config = result.unwrap();
+        assert_eq!(config.write_mode, IcebergWriteMode::MergeOnRead);
+    }
+
+    #[test]
+    fn test_append_only_defaults_to_merge_on_read() {
+        // Test that append-only sinks default to merge-on-read when write_mode is not specified
+        let values = [
+            ("connector", "iceberg"),
+            ("type", "append-only"),
+            ("warehouse.path", "s3://iceberg"),
+            ("s3.endpoint", "http://127.0.0.1:9301"),
+            ("s3.access.key", "test"),
+            ("s3.secret.key", "test"),
+            ("s3.region", "us-east-1"),
+            ("catalog.type", "storage"),
+            ("catalog.name", "demo"),
+            ("database.name", "test_db"),
+            ("table.name", "test_table"),
+        ]
+        .into_iter()
+        .map(|(k, v)| (k.to_owned(), v.to_owned()))
+        .collect();
+
+        let result = IcebergConfig::from_btreemap(values);
+        assert!(result.is_ok());
+        let config = result.unwrap();
+        assert_eq!(config.write_mode, IcebergWriteMode::MergeOnRead);
+    }
+
+    #[test]
+    fn test_upsert_accepts_copy_on_write() {
+        // Test that upsert sinks accept copy-on-write mode
+        let values = [
+            ("connector", "iceberg"),
+            ("type", "upsert"),
+            ("primary_key", "id"),
+            ("warehouse.path", "s3://iceberg"),
+            ("s3.endpoint", "http://127.0.0.1:9301"),
+            ("s3.access.key", "test"),
+            ("s3.secret.key", "test"),
+            ("s3.region", "us-east-1"),
+            ("catalog.type", "storage"),
+            ("catalog.name", "demo"),
+            ("database.name", "test_db"),
+            ("table.name", "test_table"),
+            ("write_mode", "copy-on-write"),
+        ]
+        .into_iter()
+        .map(|(k, v)| (k.to_owned(), v.to_owned()))
+        .collect();
+
+        let result = IcebergConfig::from_btreemap(values);
+        assert!(result.is_ok());
+        let config = result.unwrap();
+        assert_eq!(config.write_mode, IcebergWriteMode::CopyOnWrite);
     }
 }

@@ -19,7 +19,7 @@ clap = { workspace = true }
 fail = "0.5"
 foyer = { workspace = true }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
-futures-async-stream = "0.2.9"
+futures-async-stream = { workspace = true }
 itertools = { workspace = true }
 parking_lot = { workspace = true }
 rand = { workspace = true }
@@ -32,7 +32,7 @@ risingwave_object_store = { workspace = true }
 risingwave_pb = { workspace = true }
 risingwave_rpc_client = { workspace = true }
 risingwave_storage = { workspace = true, features = ["test"] }
-serial_test = { version = "3.2", optional = true }
+serial_test = { version = "3.3", optional = true }
 tokio = { version = "0.2", package = "madsim-tokio" }
 
 [target.'cfg(not(madsim))'.dependencies]
@@ -46,7 +46,7 @@ futures = { version = "0.3", default-features = false, features = [
     "executor",
 ] }
 
-futures-async-stream = "0.2.9"
+futures-async-stream = { workspace = true }
 risingwave_hummock_sdk = { workspace = true }
 risingwave_test_runner = { workspace = true }
 sync-point = { path = "../../utils/sync-point" }

@@ -12,19 +12,28 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+mod aggregate;
+mod cast_executor;
 mod convert;
+mod error;
 mod execute;
-mod function;
+mod expand;
 mod iceberg_executor;
 mod iceberg_table_provider;
+mod metrics;
+mod project_set;
+mod scalar_function;
+mod window_function;
 
+pub use aggregate::{convert_agg_call, convert_agg_type_to_udaf};
+pub use cast_executor::CastExecutor;
 pub use convert::*;
+pub use error::to_datafusion_error;
 pub use execute::*;
-pub use function::convert_function_call;
+pub use expand::{Expand, ExpandPlanner};
 pub use iceberg_executor::IcebergScan;
 pub use iceberg_table_provider::IcebergTableProvider;
-use risingwave_common::error::BoxedError;
-
-pub fn to_datafusion_error(error: impl Into<BoxedError>) -> datafusion::error::DataFusionError {
-    datafusion::error::DataFusionError::External(error.into())
-}
+pub use metrics::DataFusionMetrics;
+pub use project_set::{ProjectSet, ProjectSetPlanner};
+pub use scalar_function::*;
+pub use window_function::convert_window_expr;

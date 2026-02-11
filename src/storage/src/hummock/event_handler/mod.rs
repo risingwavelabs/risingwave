@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -32,13 +32,14 @@ pub mod hummock_event_handler;
 pub mod refiller;
 pub mod uploader;
 
-pub use hummock_event_handler::HummockEventHandler;
+pub(crate) use hummock_event_handler::HummockEventHandler;
 use risingwave_hummock_sdk::vector_index::VectorIndexAdd;
 use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
 
 use super::store::version::HummockReadVersion;
 use crate::hummock::event_handler::hummock_event_handler::HummockEventSender;
 use crate::hummock::event_handler::uploader::SyncedData;
+use crate::hummock::utils::MemoryTracker;
 
 #[derive(Debug)]
 pub struct BufferWriteRequest {
@@ -72,7 +73,7 @@ pub enum HummockEvent {
 
     ImmToUploader {
         instance_id: SharedBufferBatchId,
-        imms: Vec<ImmutableMemtable>,
+        imms: Vec<(ImmutableMemtable, MemoryTracker)>,
     },
 
     StartEpoch {
@@ -158,7 +159,7 @@ impl HummockEvent {
                 format!(
                     "ImmToUploader {} {:?}",
                     instance_id,
-                    imms.iter().map(|imm| imm.batch_id()).collect_vec()
+                    imms.iter().map(|(imm, _)| imm.batch_id()).collect_vec()
                 )
             }
 
@@ -195,6 +196,27 @@ impl HummockEvent {
             HummockEvent::RegisterVectorWriter { .. } => "RegisterVectorWriter".to_owned(),
             HummockEvent::VectorWriterSealEpoch { .. } => "VectorWriterSealEpoch".to_owned(),
             HummockEvent::DropVectorWriter { .. } => "DropVectorWriter".to_owned(),
+        }
+    }
+
+    pub fn event_name(&self) -> &'static str {
+        match self {
+            HummockEvent::BufferMayFlush => "BufferMayFlush",
+            HummockEvent::SyncEpoch { .. } => "SyncEpoch",
+            HummockEvent::Clear(..) => "Clear",
+            HummockEvent::Shutdown => "Shutdown",
+            HummockEvent::ImmToUploader { .. } => "ImmToUploader",
+            HummockEvent::StartEpoch { .. } => "StartEpoch",
+            HummockEvent::InitEpoch { .. } => "InitEpoch",
+            HummockEvent::LocalSealEpoch { .. } => "LocalSealEpoch",
+            #[cfg(any(test, feature = "test"))]
+            HummockEvent::FlushEvent(_) => "FlushEvent",
+            HummockEvent::RegisterReadVersion { .. } => "RegisterReadVersion",
+            HummockEvent::DestroyReadVersion { .. } => "DestroyReadVersion",
+            HummockEvent::RegisterVectorWriter { .. } => "RegisterVectorWriter",
+            HummockEvent::VectorWriterSealEpoch { .. } => "VectorWriterSealEpoch",
+            HummockEvent::DropVectorWriter { .. } => "DropVectorWriter",
+            HummockEvent::GetMinUncommittedObjectId { .. } => "GetMinUncommittedObjectId",
         }
     }
 }

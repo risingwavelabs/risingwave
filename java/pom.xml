@@ -65,7 +65,7 @@
         <!-- dependency versions -->
         <protobuf.version>3.25.8</protobuf.version> <!-- https://github.com/grpc/grpc-java/issues/11015 -->
         <grpc.version>1.75.0</grpc.version>
-        <log4j.version>2.25.1</log4j.version>
+        <log4j.version>2.25.3</log4j.version>
         <slf4j.version>2.0.17</slf4j.version>
         <debezium.version>3.2.4.Final</debezium.version>
         <jackson.version>2.19.2</jackson.version>
@@ -78,6 +78,13 @@
 
     <dependencyManagement>
         <dependencies>
+            <dependency>
+                <groupId>io.grpc</groupId>
+                <artifactId>grpc-bom</artifactId>
+                <version>${grpc.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
             <dependency>
                 <groupId>org.apache.logging.log4j</groupId>
                 <artifactId>log4j-api</artifactId>
@@ -329,6 +336,11 @@
             <dependency>
                 <groupId>software.amazon.awssdk</groupId>
                 <artifactId>glue</artifactId>
+                <version>${aws.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>software.amazon.awssdk</groupId>
+                <artifactId>kms</artifactId>
                 <version>${aws.version}</version>
             </dependency>
             <dependency>

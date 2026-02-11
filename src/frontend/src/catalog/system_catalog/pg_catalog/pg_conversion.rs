@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,6 +14,7 @@
 
 use risingwave_common::types::Fields;
 use risingwave_frontend_macro::system_catalog;
+use risingwave_pb::id::SchemaId;
 
 /// The catalog `pg_conversion` describes encoding conversion functions.
 /// Reference: `https://www.postgresql.org/docs/current/catalog-pg-conversion.html`
@@ -22,7 +23,7 @@ use risingwave_frontend_macro::system_catalog;
 struct PgConversion {
     oid: i32,
     conname: String,
-    connamespace: i32,
+    connamespace: SchemaId,
     conowner: i32,
     conforencoding: i16,
     contoencoding: i16,

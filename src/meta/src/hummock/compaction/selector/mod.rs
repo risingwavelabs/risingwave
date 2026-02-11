@@ -1,17 +1,17 @@
-//  Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
-//  Licensed under the Apache License, Version 2.0 (the "License");
-//  you may not use this file except in compliance with the License.
-//  You may obtain a copy of the License at
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
 //
-//  http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
-//  Unless required by applicable law or agreed to in writing, software
-//  distributed under the License is distributed on an "AS IS" BASIS,
-//  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-//  See the License for the specific language governing permissions and
-//  limitations under the License.
-//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 // Copyright (c) 2011-present, Facebook, Inc.  All rights reserved.
 // This source code is licensed under both the GPLv2 (found in the
 // COPYING file in the root directory) and Apache 2.0 License
@@ -32,10 +32,10 @@ pub use emergency_selector::EmergencySelector;
 pub use level_selector::{DynamicLevelSelector, DynamicLevelSelectorCore};
 pub use manual_selector::{ManualCompactionOption, ManualCompactionSelector};
 use risingwave_common::catalog::{TableId, TableOption};
-use risingwave_hummock_sdk::HummockCompactionTaskId;
 use risingwave_hummock_sdk::level::Levels;
 use risingwave_hummock_sdk::table_watermark::TableWatermarks;
 use risingwave_hummock_sdk::version::HummockVersionStateTableInfo;
+use risingwave_hummock_sdk::{CompactionGroupId, HummockCompactionTaskId};
 use risingwave_pb::hummock::compact_task;
 pub use space_reclaim_selector::SpaceReclaimCompactionSelector;
 pub use tombstone_compaction_selector::TombstoneCompactionSelector;
@@ -87,7 +87,7 @@ pub struct LocalSelectorStatistic {
 }
 
 impl LocalSelectorStatistic {
-    pub fn report_to_metrics(&self, group_id: u64, metrics: &MetaMetrics) {
+    pub fn report_to_metrics(&self, group_id: CompactionGroupId, metrics: &MetaMetrics) {
         for (start_level, target_level, stats) in &self.skip_picker {
             let level_label = format!("cg{}-{}-to-{}", group_id, start_level, target_level);
             if stats.skip_by_write_amp_limit > 0 {
@@ -142,7 +142,7 @@ pub mod tests {
             level_type: LevelType::Overlapping,
             total_file_size: sst.sst_size,
             uncompressed_file_size: sst.uncompressed_file_size,
-            sub_level_id: sst.sst_id.inner(),
+            sub_level_id: sst.sst_id.as_raw_id(),
             table_infos: vec![sst],
             ..Default::default()
         });
@@ -159,7 +159,7 @@ pub mod tests {
             .iter()
             .map(|table| table.uncompressed_file_size)
             .sum();
-        let sub_level_id = table_infos[0].sst_id.inner();
+        let sub_level_id = table_infos[0].sst_id.as_raw_id();
         levels.l0.total_file_size += total_file_size;
         levels.l0.sub_levels.push(Level {
             level_idx: 0,

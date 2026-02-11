@@ -26,8 +26,7 @@ use datafusion::prelude::*;
 use risingwave_common::array::ArrayError;
 use risingwave_common::array::arrow::IcebergArrowConvert;
 use risingwave_connector::source::ConnectorProperties;
-use risingwave_connector::source::iceberg::IcebergProperties;
-use risingwave_pb::batch_plan::iceberg_scan_node::IcebergScanType;
+use risingwave_connector::source::iceberg::{IcebergFileScanTask, IcebergProperties};
 
 use super::IcebergScan;
 use crate::error::{ErrorCode, Result as RwResult, RwError};
@@ -40,8 +39,7 @@ use crate::optimizer::plan_node::LogicalIcebergScan;
 pub struct IcebergTableProvider {
     pub iceberg_properties: Arc<IcebergProperties>,
     pub arrow_schema: Arc<ArrowSchema>,
-    pub snapshot_id: Option<i64>,
-    pub iceberg_scan_type: IcebergScanType,
+    pub task: IcebergFileScanTask,
 }
 
 #[async_trait]
@@ -60,20 +58,20 @@ impl TableProvider for IcebergTableProvider {
 
     async fn scan(
         &self,
-        _state: &dyn Session,
+        state: &dyn Session,
         projection: Option<&Vec<usize>>,
         filters: &[Expr],
         limit: Option<usize>,
     ) -> DFResult<Arc<dyn ExecutionPlan>> {
-        Ok(Arc::new(IcebergScan::new(
-            self, projection, filters, limit,
-        )?))
+        let batch_parallelism = state.config().target_partitions();
+        let scan = IcebergScan::new(self, projection, filters, limit, batch_parallelism).await?;
+        Ok(Arc::new(scan))
     }
 
     fn supports_filters_pushdown(
         &self,
         filters: &[&Expr],
-    ) -> Result<Vec<TableProviderFilterPushDown>, datafusion::error::DataFusionError> {
+    ) -> DFResult<Vec<TableProviderFilterPushDown>> {
         Ok(vec![TableProviderFilterPushDown::Inexact; filters.len()])
     }
 }
@@ -97,7 +95,6 @@ impl IcebergTableProvider {
             .core
             .column_catalog
             .iter()
-            .filter(|column| !column.is_hidden())
             .map(|column| {
                 let column_desc = &column.column_desc;
                 let field = IcebergArrowConvert
@@ -110,8 +107,7 @@ impl IcebergTableProvider {
         Ok(Self {
             iceberg_properties,
             arrow_schema,
-            snapshot_id: plan.snapshot_id,
-            iceberg_scan_type: plan.iceberg_scan_type,
+            task: plan.task.clone(),
         })
     }
 }

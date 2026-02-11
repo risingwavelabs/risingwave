@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -39,15 +39,16 @@ use crate::stream_fragmenter::BuildFragmentGraphState;
 pub struct StreamDeltaJoin {
     pub base: PlanBase<Stream>,
     core: generic::Join<PlanRef>,
-
-    /// The join condition must be equivalent to `logical.on`, but separated into equal and
-    /// non-equal parts to facilitate execution later
-    eq_join_predicate: EqJoinPredicate,
 }
 
 impl StreamDeltaJoin {
-    pub fn new(core: generic::Join<PlanRef>, eq_join_predicate: EqJoinPredicate) -> Result<Self> {
+    pub fn new(core: generic::Join<PlanRef>) -> Result<Self> {
         let ctx = core.ctx();
+
+        let eq_join_predicate = core
+            .on
+            .as_eq_predicate_ref()
+            .expect("StreamDeltaJoin requires JoinOn::EqPredicate in core");
 
         if eq_join_predicate.has_non_eq() {
             todo!("non-eq condition not supported for delta join");
@@ -92,16 +93,15 @@ impl StreamDeltaJoin {
             MonotonicityMap::new(), // TODO: derive monotonicity
         );
 
-        Ok(Self {
-            base,
-            core,
-            eq_join_predicate,
-        })
+        Ok(Self { base, core })
     }
 
     /// Get a reference to the delta hash join's eq join predicate.
     pub fn eq_join_predicate(&self) -> &EqJoinPredicate {
-        &self.eq_join_predicate
+        self.core
+            .on
+            .as_eq_predicate_ref()
+            .expect("StreamDeltaJoin should store predicate as EqJoinPredicate")
     }
 }
 
@@ -142,7 +142,7 @@ impl PlanTreeNodeBinary<Stream> for StreamDeltaJoin {
         let mut core = self.core.clone();
         core.left = left;
         core.right = right;
-        Self::new(core, self.eq_join_predicate.clone()).unwrap()
+        Self::new(core).unwrap()
     }
 }
 
@@ -155,6 +155,7 @@ impl TryToStreamPb for StreamDeltaJoin {
     ) -> SchedulerResult<NodeBody> {
         let left = self.left();
         let right = self.right();
+        let retract = left.stream_kind().is_retract() || right.stream_kind().is_retract();
 
         let left_table = if let Some(stream_table_scan) = left.as_stream_table_scan() {
             stream_table_scan.core()
@@ -171,7 +172,7 @@ impl TryToStreamPb for StreamDeltaJoin {
 
         // TODO: add a separate delta join node in proto, or move fragmenter to frontend so that we
         // don't need an intermediate representation.
-        let eq_join_predicate = &self.eq_join_predicate;
+        let eq_join_predicate = self.eq_join_predicate();
         Ok(NodeBody::DeltaIndexJoin(Box::new(DeltaIndexJoinNode {
             join_type: self.core.join_type as i32,
             left_key: eq_join_predicate
@@ -187,7 +188,8 @@ impl TryToStreamPb for StreamDeltaJoin {
             condition: eq_join_predicate
                 .other_cond()
                 .as_expr_unless_true()
-                .map(|x| x.to_expr_proto()),
+                .map(|expr| expr.to_expr_proto_checked_pure(retract, "JOIN condition"))
+                .transpose()?,
             left_table_id: left_table_catalog.id,
             right_table_id: right_table_catalog.id,
             left_info: Some(ArrangementInfo {
@@ -235,9 +237,7 @@ impl ExprRewritable<Stream> for StreamDeltaJoin {
     fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
         let mut core = self.core.clone();
         core.rewrite_exprs(r);
-        Self::new(core, self.eq_join_predicate.rewrite_exprs(r))
-            .unwrap()
-            .into()
+        Self::new(core).unwrap().into()
     }
 }
 impl ExprVisitable for StreamDeltaJoin {

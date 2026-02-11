@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -49,7 +49,7 @@ impl UserDefinedFunction {
             id: FunctionId::placeholder(),
             name: udf.name.clone(),
             // FIXME(yuhao): owner is not in udf proto.
-            owner: u32::MAX - 1,
+            owner: (u32::MAX - 1).into(),
             kind: FunctionKind::Scalar,
             arg_names: udf.arg_names.clone(),
             arg_types,

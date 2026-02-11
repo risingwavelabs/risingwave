@@ -88,6 +88,7 @@ impl<'de> Deserialize<'de> for DefaultParallelism {
 }
 
 /// The section `[meta]` in `risingwave.toml`.
+#[serde_with::apply(Option => #[serde(with = "none_as_empty_string")])]
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde, ConfigDoc)]
 pub struct MetaConfig {
     /// Objects within `min_sst_retention_time_sec` won't be deleted by hummock full GC, even they
@@ -298,8 +299,9 @@ pub struct MetaConfig {
     pub event_log_channel_max_size: u32,
 
     #[serde(default)]
-    #[config_doc(omitted)]
+    #[config_doc(nested)]
     pub developer: MetaDeveloperConfig,
+
     /// Whether compactor should rewrite row to remove dropped column.
     #[serde(default = "default::meta::enable_dropped_column_reclaim")]
     pub enable_dropped_column_reclaim: bool,
@@ -377,6 +379,7 @@ pub struct MetaConfig {
 }
 
 /// Note: only applies to meta store backends other than `SQLite`.
+#[serde_with::apply(Option => #[serde(with = "none_as_empty_string")])]
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde, ConfigDoc)]
 pub struct MetaStoreConfig {
     /// Maximum number of connections for the meta store connection pool.
@@ -400,6 +403,7 @@ pub struct MetaStoreConfig {
 ///
 /// It is put at [`MetaConfig::developer`].
 #[serde_prefix_all("meta_", mode = "alias")]
+#[serde_with::apply(Option => #[serde(with = "none_as_empty_string")])]
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde, ConfigDoc)]
 pub struct MetaDeveloperConfig {
     /// The number of traces to be cached in-memory by the tracing collector
@@ -444,6 +448,9 @@ pub struct MetaDeveloperConfig {
     #[serde(default = "default::developer::time_travel_vacuum_interval_sec")]
     pub time_travel_vacuum_interval_sec: u64,
 
+    #[serde(default = "default::developer::time_travel_vacuum_max_version_count")]
+    pub time_travel_vacuum_max_version_count: Option<u32>,
+
     /// Max number of epoch-to-version inserted into meta store per INSERT, during time travel metadata writing.
     #[serde(default = "default::developer::hummock_time_travel_epoch_version_insert_batch_size")]
     pub hummock_time_travel_epoch_version_insert_batch_size: usize,
@@ -477,6 +484,7 @@ pub struct MetaDeveloperConfig {
     pub frontend_client_config: RpcClientConfig,
 }
 
+#[serde_with::apply(Option => #[serde(with = "none_as_empty_string")])]
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde, ConfigDoc)]
 pub struct CompactionConfig {
     #[serde(default = "default::compaction_config::max_bytes_for_level_base")]
@@ -533,6 +541,10 @@ pub struct CompactionConfig {
     pub level0_stop_write_threshold_max_size: u64,
     #[serde(default = "default::compaction_config::enable_optimize_l0_interval_selection")]
     pub enable_optimize_l0_interval_selection: bool,
+    #[serde(default = "default::compaction_config::vnode_aligned_level_size_threshold")]
+    pub vnode_aligned_level_size_threshold: Option<u64>,
+    #[serde(default = "default::compaction_config::max_kv_count_for_xor16")]
+    pub max_kv_count_for_xor16: Option<u64>,
 }
 
 pub mod default {
@@ -792,9 +804,9 @@ pub mod default {
         const DEFAULT_TARGET_FILE_SIZE_BASE: u64 = 32 * MB;
         // 32MB
         const DEFAULT_MAX_SUB_COMPACTION: u32 = 4;
-        const DEFAULT_LEVEL_MULTIPLIER: u64 = 5;
+        const DEFAULT_LEVEL_MULTIPLIER: u64 = 10;
         const DEFAULT_MAX_SPACE_RECLAIM_BYTES: u64 = 512 * MB; // 512MB;
-        const DEFAULT_LEVEL0_STOP_WRITE_THRESHOLD_SUB_LEVEL_NUMBER: u64 = 300;
+        const DEFAULT_LEVEL0_STOP_WRITE_THRESHOLD_SUB_LEVEL_NUMBER: u64 = 128;
         const DEFAULT_MAX_COMPACTION_FILE_COUNT: u64 = 100;
         const DEFAULT_MIN_SUB_LEVEL_COMPACT_LEVEL_COUNT: u32 = 3;
         const DEFAULT_MIN_OVERLAPPING_SUB_LEVEL_COMPACT_LEVEL_COUNT: u32 = 12;
@@ -803,11 +815,14 @@ pub mod default {
         const DEFAULT_MAX_LEVEL: u32 = 6;
         const DEFAULT_MAX_L0_COMPACT_LEVEL_COUNT: u32 = 42;
         const DEFAULT_SST_ALLOWED_TRIVIAL_MOVE_MIN_SIZE: u64 = 4 * MB;
-        const DEFAULT_SST_ALLOWED_TRIVIAL_MOVE_MAX_COUNT: u32 = 64;
+        const DEFAULT_SST_ALLOWED_TRIVIAL_MOVE_MAX_COUNT: u32 = 256;
         const DEFAULT_EMERGENCY_LEVEL0_SST_FILE_COUNT: u32 = 2000; // > 50G / 32M = 1600
         const DEFAULT_EMERGENCY_LEVEL0_SUB_LEVEL_PARTITION: u32 = 256;
-        const DEFAULT_LEVEL0_STOP_WRITE_THRESHOLD_MAX_SST_COUNT: u32 = 10000; // 10000 * 32M = 320G
+        const DEFAULT_LEVEL0_STOP_WRITE_THRESHOLD_MAX_SST_COUNT: u32 = 5000;
         const DEFAULT_LEVEL0_STOP_WRITE_THRESHOLD_MAX_SIZE: u64 = 300 * 1024 * MB; // 300GB
+        const DEFAULT_ENABLE_OPTIMIZE_L0_INTERVAL_SELECTION: bool = true;
+        const DEFAULT_VNODE_ALIGNED_LEVEL_SIZE_THRESHOLD: Option<u64> = None;
+        pub const DEFAULT_MAX_KV_COUNT_FOR_XOR16: u64 = 256 * 1024;
 
         use crate::catalog::hummock::CompactionFilterFlag;
 
@@ -912,7 +927,15 @@ pub mod default {
         }
 
         pub fn enable_optimize_l0_interval_selection() -> bool {
-            false
+            DEFAULT_ENABLE_OPTIMIZE_L0_INTERVAL_SELECTION
+        }
+
+        pub fn vnode_aligned_level_size_threshold() -> Option<u64> {
+            DEFAULT_VNODE_ALIGNED_LEVEL_SIZE_THRESHOLD
+        }
+
+        pub fn max_kv_count_for_xor16() -> Option<u64> {
+            Some(DEFAULT_MAX_KV_COUNT_FOR_XOR16)
         }
     }
 }

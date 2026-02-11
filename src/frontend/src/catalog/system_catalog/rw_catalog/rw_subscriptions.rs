@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::id::{SchemaId, SubscriptionId, UserId};
 use risingwave_common::types::{Fields, Timestamptz};
 use risingwave_frontend_macro::system_catalog;
 
@@ -21,10 +22,10 @@ use crate::error::Result;
 #[derive(Fields)]
 struct RwSubscription {
     #[primary_key]
-    id: i32,
+    id: SubscriptionId,
     name: String,
-    schema_id: i32,
-    owner: i32,
+    schema_id: SchemaId,
+    owner: UserId,
     definition: String,
     acl: Vec<String>,
     initialized_at: Option<Timestamptz>,
@@ -49,10 +50,10 @@ fn read_rw_subscriptions_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwSub
             schema
                 .iter_subscription_with_acl(current_user)
                 .map(|subscription| RwSubscription {
-                    id: subscription.id.as_i32_id(),
+                    id: subscription.id,
                     name: subscription.name.clone(),
-                    schema_id: schema.id().as_i32_id(),
-                    owner: subscription.owner.user_id as i32,
+                    schema_id: schema.id(),
+                    owner: subscription.owner,
                     definition: subscription.definition.clone(),
                     acl: get_acl_items(subscription.id, false, &users, username_map),
                     initialized_at: subscription

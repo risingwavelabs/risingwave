@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -39,8 +39,8 @@ crate::derive_from_blob!(FullVersionDelta, PbHummockVersionDelta);
 impl From<Model> for PbHummockVersionDelta {
     fn from(value: Model) -> Self {
         let ret = value.full_version_delta.to_protobuf();
-        assert_eq!(value.id, ret.id as i64);
-        assert_eq!(value.prev_id, ret.prev_id as i64);
+        assert_eq!(value.id, ret.id);
+        assert_eq!(value.prev_id, ret.prev_id);
         assert_eq!(value.trivial_move, ret.trivial_move);
         ret
     }

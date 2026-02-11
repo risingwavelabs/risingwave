@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -355,12 +355,14 @@ async fn test_table_materialize() -> StreamResult<()> {
     let delete = Box::new(DeleteExecutor::new(
         table_id,
         INITIAL_TABLE_VERSION_ID,
+        vec![0],
         dml_manager.clone(),
         delete_inner,
         1024,
         "DeleteExecutor".to_owned(),
         false,
         0,
+        false,
     ));
 
     curr_epoch.inc_epoch();

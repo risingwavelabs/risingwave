@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -22,7 +22,7 @@ use foyer::{
 };
 use futures::TryFutureExt;
 use itertools::Itertools;
-use risingwave_common::catalog::TableId;
+use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_common::config::EvictionConfig;
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::util::epoch::test_epoch;
@@ -267,6 +267,7 @@ pub async fn gen_test_sstable_impl<B: AsRef<[u8]> + Clone + Default + Eq, F: Fil
             .into_iter()
             .map(|(table_id, v)| (table_id.into(), v))
             .collect(),
+        HashMap::default(),
     ));
 
     let mut b = SstableBuilder::<_, F>::new(
@@ -519,7 +520,6 @@ impl From<StateStoreTestReadOptions> for crate::store::ReadOptions {
             prefix_hint: val.prefix_hint,
             prefetch_options: val.prefetch_options,
             cache_policy: val.cache_policy,
-            retention_seconds: val.retention_seconds,
         }
     }
 }
@@ -588,6 +588,9 @@ impl<S: StateStore> StateStoreReadTestExt for S {
                 read_options.get_read_epoch(epoch),
                 NewReadSnapshotOptions {
                     table_id: read_options.table_id,
+                    table_option: TableOption {
+                        retention_seconds: read_options.retention_seconds,
+                    },
                 },
             )
             .await?;
@@ -609,6 +612,9 @@ impl<S: StateStore> StateStoreReadTestExt for S {
                 read_options.get_read_epoch(epoch),
                 NewReadSnapshotOptions {
                     table_id: read_options.table_id,
+                    table_option: TableOption {
+                        retention_seconds: read_options.retention_seconds,
+                    },
                 },
             )
             .await?;
@@ -626,6 +632,9 @@ impl<S: StateStore> StateStoreReadTestExt for S {
                 read_options.get_read_epoch(epoch),
                 NewReadSnapshotOptions {
                     table_id: read_options.table_id,
+                    table_option: TableOption {
+                        retention_seconds: read_options.retention_seconds,
+                    },
                 },
             )
             .await?;

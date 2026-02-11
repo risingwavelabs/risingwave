@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -42,11 +42,13 @@ impl BatchProject {
         let distribution = core
             .i2o_col_mapping()
             .rewrite_provided_distribution(core.input.distribution());
-        let order = core
-            .i2o_col_mapping()
-            .rewrite_provided_order(core.input.order());
-
-        let base = PlanBase::new_batch_with_core(&core, distribution, order);
+        let orders = core
+            .input
+            .orders()
+            .into_iter()
+            .map(|order| core.i2o_col_mapping().rewrite_provided_order(&order))
+            .collect();
+        let base = PlanBase::new_batch_with_core_and_orders(&core, distribution, orders);
         BatchProject { base, core }
     }
 

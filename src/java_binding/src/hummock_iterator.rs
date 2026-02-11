@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,7 +18,7 @@ use anyhow::anyhow;
 use bytes::Bytes;
 use foyer::{CacheBuilder, HybridCacheBuilder};
 use futures::{TryFutureExt, TryStreamExt};
-use risingwave_common::catalog::ColumnDesc;
+use risingwave_common::catalog::{ColumnDesc, TableOption};
 use risingwave_common::config::{MetricLevel, ObjectStoreConfig};
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::row::OwnedRow;
@@ -164,6 +164,9 @@ pub(crate) async fn new_hummock_java_binding_iter(
                     key_range,
                     read_plan.epoch,
                     table_id,
+                    TableOption {
+                        retention_seconds: table.retention_seconds,
+                    },
                     ReadOptions {
                         cache_policy: CachePolicy::NotFill,
                         ..Default::default()

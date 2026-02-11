@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -79,9 +79,20 @@ pub struct BatchExtra {
     /// Common fields for physical plan nodes.
     physical: PhysicalCommonExtra,
 
-    /// The order property of the `PlanNode`'s output, store an `&Order::any()` here will not affect
-    /// correctness, but insert unnecessary sort in plan
-    order: Order,
+    /// Equivalent order properties of the `PlanNode`'s output.
+    ///
+    /// The first item is canonical and returned by `order()`. Additional items represent
+    /// equivalent orders that can also satisfy required order checks.
+    ///
+    /// Example (`BatchSeqScan`):
+    /// - Base table order: `(a, b, c, d)`.
+    /// - Scan range fixes `a = const` and `b = const` (`eq_prefix_len = 2`).
+    /// - The scan can provide these equivalent orders:
+    ///   `(a, b, c, d)`, `(b, c, d)`, `(c, d)`.
+    ///
+    /// This lets optimization rules avoid unnecessary `BatchSort` when required order is a suffix
+    /// after fixed equality prefixes.
+    orders: Vec<Order>,
 }
 
 impl GetPhysicalCommon for BatchExtra {
@@ -178,7 +189,14 @@ impl stream::StreamPlanNodeMetadata for PlanBase<Stream> {
 
 impl batch::BatchPlanNodeMetadata for PlanBase<Batch> {
     fn order(&self) -> &Order {
-        &self.extra.order
+        self.extra
+            .orders
+            .first()
+            .expect("batch plan node should always have at least one order")
+    }
+
+    fn orders(&self) -> Vec<Order> {
+        self.extra.orders.clone()
     }
 }
 
@@ -276,6 +294,19 @@ impl PlanBase<Batch> {
         dist: Distribution,
         order: Order,
     ) -> Self {
+        Self::new_batch_with_orders(ctx, schema, dist, vec![order])
+    }
+
+    pub fn new_batch_with_orders(
+        ctx: OptimizerContextRef,
+        schema: Schema,
+        dist: Distribution,
+        orders: Vec<Order>,
+    ) -> Self {
+        assert!(
+            !orders.is_empty(),
+            "batch plan node should always have at least one order"
+        );
         let id = ctx.next_plan_node_id();
         let functional_dependency = FunctionalDependencySet::new(schema.len());
         Self {
@@ -286,7 +317,7 @@ impl PlanBase<Batch> {
             functional_dependency,
             extra: BatchExtra {
                 physical: PhysicalCommonExtra { dist },
-                order,
+                orders,
             },
         }
     }
@@ -297,6 +328,14 @@ impl PlanBase<Batch> {
         order: Order,
     ) -> Self {
         Self::new_batch(core.ctx(), core.schema(), dist, order)
+    }
+
+    pub fn new_batch_with_core_and_orders(
+        core: &impl GenericPlanNode,
+        dist: Distribution,
+        orders: Vec<Order>,
+    ) -> Self {
+        Self::new_batch_with_orders(core.ctx(), core.schema(), dist, orders)
     }
 }
 

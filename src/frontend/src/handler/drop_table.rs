@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -63,7 +63,7 @@ pub async fn handle_drop_table(
 
     let catalog_writer = session.catalog_writer()?;
     execute_with_long_running_notification(
-        catalog_writer.drop_table(source_id.map(|id| id.as_raw_id()), table_id, cascade),
+        catalog_writer.drop_table(source_id, table_id, cascade),
         &session,
         "DROP TABLE",
         LongRunningNotificationAction::SuggestRecover,

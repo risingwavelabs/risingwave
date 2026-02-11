@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,8 +16,8 @@ use std::ops::Deref;
 
 use anyhow::anyhow;
 use futures::StreamExt;
-use iceberg::spec::ManifestList;
 use iceberg::table::Table;
+use risingwave_common::id::SourceId;
 use risingwave_common::types::Fields;
 use risingwave_connector::WithPropertiesExt;
 use risingwave_connector::source::ConnectorProperties;
@@ -29,7 +29,7 @@ use crate::error::Result;
 #[derive(Fields)]
 struct RwIcebergFiles {
     #[primary_key]
-    source_id: i32,
+    source_id: SourceId,
     schema_name: String,
     source_name: String,
     /// Type of content stored by the data file: data, equality deletes,
@@ -47,7 +47,7 @@ struct RwIcebergFiles {
     /// Required when content is `EqualityDeletes` and should be null
     /// otherwise. Fields with ids listed in this column must be present
     /// in the delete file
-    pub equality_ids: Vec<i32>,
+    pub equality_ids: Option<Vec<i32>>,
     /// ID representing sort order for this file.
     ///
     /// If sort order ID is missing or unknown, then the order is assumed to
@@ -81,9 +81,11 @@ async fn read(reader: &SysCatalogReaderImpl) -> Result<Vec<RwIcebergFiles>> {
         let config = ConnectorProperties::extract(source.with_properties.clone(), false)?;
         if let ConnectorProperties::Iceberg(iceberg_properties) = config {
             let table: Table = iceberg_properties.load_table().await?;
+            let metadata = table.metadata_ref();
             if let Some(snapshot) = table.metadata().current_snapshot() {
-                let manifest_list: ManifestList = snapshot
-                    .load_manifest_list(table.file_io(), table.metadata())
+                let manifest_list = table
+                    .object_cache()
+                    .get_manifest_list(snapshot, &metadata)
                     .await
                     .map_err(|e| anyhow!(e))?;
                 for entry in manifest_list.entries() {
@@ -97,7 +99,7 @@ async fn read(reader: &SysCatalogReaderImpl) -> Result<Vec<RwIcebergFiles>> {
                     while let Some(manifest_entry) = manifest_entries_stream.next().await {
                         let file = manifest_entry.data_file();
                         result.push(RwIcebergFiles {
-                            source_id: source.id.as_i32_id(),
+                            source_id: source.id,
                             schema_name: schema_name.clone(),
                             source_name: source.name.clone(),
                             content: format!("{:?}", file.content_type()),
@@ -105,7 +107,7 @@ async fn read(reader: &SysCatalogReaderImpl) -> Result<Vec<RwIcebergFiles>> {
                             file_format: file.file_format().to_string(),
                             record_count: file.record_count() as i64,
                             file_size_in_bytes: file.file_size_in_bytes() as i64,
-                            equality_ids: file.equality_ids().to_vec(),
+                            equality_ids: file.equality_ids(),
                             sort_order_id: file.sort_order_id(),
                         });
                     }
