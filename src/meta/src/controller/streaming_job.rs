@@ -14,6 +14,7 @@
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::num::NonZeroUsize;
+use std::time::{Duration, Instant};
 
 use anyhow::anyhow;
 use indexmap::IndexMap;
@@ -501,9 +502,13 @@ impl CatalogController {
         creating_streaming_job: Option<&'a StreamingJob>,
         backfill_orders: Option<BackfillOrders>,
     ) -> MetaResult<()> {
+        let total_start = Instant::now();
         let fragments = Self::prepare_fragment_models_from_fragments(job_id, get_fragments())?;
 
+        let lock_wait_start = Instant::now();
         let inner = self.inner.write().await;
+        let lock_wait = lock_wait_start.elapsed();
+        let exec_start = Instant::now();
 
         let need_notify = creating_streaming_job
             .map(|job| job.should_notify_creating())
@@ -511,10 +516,14 @@ impl CatalogController {
         let definition = creating_streaming_job.map(|job| job.definition());
 
         let mut objects_to_notify = vec![];
+        let txn_begin_start = Instant::now();
         let txn = inner.db.begin().await?;
+        let txn_begin_elapsed = txn_begin_start.elapsed();
 
         // Ensure the job exists.
+        let ensure_job_start = Instant::now();
         ensure_job_not_canceled(job_id, &txn).await?;
+        let ensure_job_elapsed = ensure_job_start.elapsed();
 
         if let Some(backfill_orders) = backfill_orders {
             let job = streaming_job::ActiveModel {
@@ -530,6 +539,7 @@ impl CatalogController {
             .flat_map(|fragment| fragment.state_table_ids.inner_ref().clone())
             .collect_vec();
 
+        let fragment_insert_start = Instant::now();
         if !fragments.is_empty() {
             let fragment_models = fragments
                 .into_iter()
@@ -537,6 +547,7 @@ impl CatalogController {
                 .collect_vec();
             Fragment::insert_many(fragment_models).exec(&txn).await?;
         }
+        let fragment_insert_elapsed = fragment_insert_start.elapsed();
 
         // Fields including `fragment_id` and `vnode_count` were placeholder values before.
         // After table fragments are created, update them for all tables.
@@ -596,11 +607,15 @@ impl CatalogController {
             }
         }
 
+        let relation_insert_start = Instant::now();
         insert_fragment_relations(&txn, downstreams).await?;
+        let relation_insert_elapsed = relation_insert_start.elapsed();
 
+        let mut dml_update_elapsed: Option<Duration> = None;
         if !for_replace {
             // Update dml fragment id.
             if let Some(StreamingJob::Table(_, table, _)) = creating_streaming_job {
+                let dml_update_start = Instant::now();
                 Table::update(table::ActiveModel {
                     table_id: Set(table.id),
                     dml_fragment_id: Set(table.dml_fragment_id),
@@ -608,10 +623,13 @@ impl CatalogController {
                 })
                 .exec(&txn)
                 .await?;
+                dml_update_elapsed = Some(dml_update_start.elapsed());
             }
         }
 
+        let txn_commit_start = Instant::now();
         txn.commit().await?;
+        let txn_commit_elapsed = txn_commit_start.elapsed();
 
         // FIXME: there's a gap between the catalog creation and notification, which may lead to
         // frontend receiving duplicate notifications if the frontend restarts right in this gap. We
@@ -626,6 +644,23 @@ impl CatalogController {
             )
             .await;
         }
+
+        let exec_elapsed = exec_start.elapsed();
+        let total_elapsed = total_start.elapsed();
+        tracing::info!(
+            %job_id,
+            for_replace,
+            ?lock_wait,
+            ?txn_begin_elapsed,
+            ?ensure_job_elapsed,
+            ?fragment_insert_elapsed,
+            ?relation_insert_elapsed,
+            ?dml_update_elapsed,
+            ?txn_commit_elapsed,
+            ?exec_elapsed,
+            ?total_elapsed,
+            "prepare_streaming_job timing"
+        );
 
         Ok(())
     }

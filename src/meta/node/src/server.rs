@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use otlp_embedded::TraceServiceServer;
 use regex::Regex;
@@ -670,6 +670,14 @@ pub async fn start_service_as_election_leader(
         env.system_params_manager_impl_ref(),
         meta_metrics.clone(),
     ));
+    if let Some((interval, slow_threshold)) = scheduler_delay_monitor_config() {
+        tracing::info!(
+            ?interval,
+            ?slow_threshold,
+            "Starting scheduler delay monitor"
+        );
+        sub_tasks.push(start_scheduler_delay_monitor(interval, slow_threshold));
+    }
     sub_tasks.push(SystemParamsController::start_params_notifier(
         env.system_params_manager_impl_ref(),
     ));
@@ -824,4 +832,87 @@ fn is_correct_data_directory(data_directory: &str) -> bool {
         return false;
     }
     true
+}
+
+fn scheduler_delay_monitor_config() -> Option<(Duration, Duration)> {
+    const DEFAULT_INTERVAL_MS: u64 = 100;
+    const DEFAULT_THRESHOLD_MS: u64 = 200;
+    const INTERVAL_ENV: &str = "RW_META_SCHED_DIAG_INTERVAL_MS";
+    const THRESHOLD_ENV: &str = "RW_META_SCHED_DIAG_THRESHOLD_MS";
+
+    let interval_ms = std::env::var(INTERVAL_ENV)
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+        .unwrap_or(DEFAULT_INTERVAL_MS);
+    let threshold_ms = std::env::var(THRESHOLD_ENV)
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+        .unwrap_or(DEFAULT_THRESHOLD_MS);
+
+    if interval_ms == 0 || threshold_ms == 0 {
+        tracing::info!(
+            interval_ms,
+            threshold_ms,
+            "Scheduler delay monitor is disabled"
+        );
+        return None;
+    }
+
+    Some((
+        Duration::from_millis(interval_ms),
+        Duration::from_millis(threshold_ms),
+    ))
+}
+
+fn start_scheduler_delay_monitor(
+    interval: Duration,
+    slow_threshold: Duration,
+) -> (
+    tokio::task::JoinHandle<()>,
+    tokio::sync::oneshot::Sender<()>,
+) {
+    const HEALTH_LOG_INTERVAL: Duration = Duration::from_secs(10);
+    let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
+    let join_handle = tokio::spawn(async move {
+        let mut ticker = tokio::time::interval(interval);
+        ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        let mut last = Instant::now();
+        let mut last_health_log = Instant::now();
+        let mut initialized = false;
+        loop {
+            tokio::select! {
+                _ = ticker.tick() => {
+                    let now = Instant::now();
+                    if initialized {
+                        let elapsed = now.duration_since(last);
+                        let drift = elapsed.saturating_sub(interval);
+                        if drift > slow_threshold {
+                            tracing::warn!(
+                                ?elapsed,
+                                ?drift,
+                                ?interval,
+                                ?slow_threshold,
+                                "tokio scheduler delay detected"
+                            );
+                        } else if now.duration_since(last_health_log) >= HEALTH_LOG_INTERVAL {
+                            tracing::info!(
+                                ?elapsed,
+                                ?interval,
+                                "tokio scheduler delay monitor tick"
+                            );
+                            last_health_log = now;
+                        }
+                    } else {
+                        initialized = true;
+                    }
+                    last = now;
+                }
+                _ = &mut shutdown_rx => {
+                    tracing::info!("Scheduler delay monitor is stopped");
+                    return;
+                }
+            }
+        }
+    });
+    (join_handle, shutdown_tx)
 }
