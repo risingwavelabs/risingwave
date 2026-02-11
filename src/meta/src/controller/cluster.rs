@@ -1261,6 +1261,67 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_reregister_compute_node_updates_resource() -> MetaResult<()> {
+        let env = MetaSrvEnv::for_test().await;
+        let cluster_ctl = ClusterController::new(env, Duration::from_secs(1)).await?;
+
+        let host = HostAddress {
+            host: "localhost".to_owned(),
+            port: 5010,
+        };
+        let property = AddNodeProperty {
+            is_streaming: true,
+            is_serving: true,
+            is_unschedulable: false,
+            parallelism: 4,
+            ..Default::default()
+        };
+
+        let resource_v1 = PbResource {
+            rw_version: "rw-v1".to_owned(),
+            total_memory_bytes: 1024,
+            total_cpu_cores: 4,
+            hostname: "host-v1".to_owned(),
+        };
+        let worker_id = cluster_ctl
+            .add_worker(
+                PbWorkerType::ComputeNode,
+                host.clone(),
+                property.clone(),
+                resource_v1,
+            )
+            .await?;
+
+        let resource_v2 = PbResource {
+            rw_version: "rw-v2".to_owned(),
+            total_memory_bytes: 2048,
+            total_cpu_cores: 8,
+            hostname: "host-v2".to_owned(),
+        };
+        let worker_id_after_reregister = cluster_ctl
+            .add_worker(
+                PbWorkerType::ComputeNode,
+                host.clone(),
+                property,
+                resource_v2.clone(),
+            )
+            .await?;
+        assert_eq!(worker_id, worker_id_after_reregister);
+
+        let worker = cluster_ctl
+            .get_worker_by_id(worker_id)
+            .await?
+            .expect("worker should exist");
+        assert_eq!(
+            worker.resource.expect("worker resource should exist"),
+            resource_v2
+        );
+
+        cluster_ctl.delete_worker(host).await?;
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn test_list_workers_include_meta_node() -> MetaResult<()> {
         let env = MetaSrvEnv::for_test().await;
         let cluster_ctl = ClusterController::new(env, Duration::from_secs(1)).await?;
