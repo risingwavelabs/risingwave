@@ -17,3 +17,19 @@ set synchronize_seqscans to f;
 
 statement ok
 set synchronize_seqscans to default;
+
+statement error time unit is required
+set statement_timeout = 2;
+
+statement ok
+set statement_timeout = '2s';
+
+statement ok
+select pg_sleep(1);
+
+skipif madsim
+statement error timeout
+select pg_sleep(3);
+
+statement ok
+set statement_timeout = 0;

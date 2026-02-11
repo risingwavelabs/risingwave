@@ -14,7 +14,6 @@
 
 use std::clone::Clone;
 use std::collections::VecDeque;
-use std::future::Future;
 use std::ops::Deref;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -671,7 +670,7 @@ impl SstableStore {
 
     pub fn get_object_data_path(&self, object_id: HummockObjectId) -> String {
         let obj_prefix = self.store.get_object_prefix(
-            object_id.as_raw().inner(),
+            object_id.as_raw().as_raw_id(),
             self.use_new_object_prefix_strategy,
         );
         risingwave_hummock_sdk::get_object_data_path(&obj_prefix, &self.path, object_id)
@@ -712,11 +711,11 @@ impl SstableStore {
     }
 
     /// Returns `table_holder`
-    pub fn sstable(
+    pub async fn sstable(
         &self,
         sstable_info_ref: &SstableInfo,
         stats: &mut StoreLocalStatistic,
-    ) -> impl Future<Output = HummockResult<TableHolder>> + Send + 'static + use<> {
+    ) -> HummockResult<TableHolder> {
         let object_id = sstable_info_ref.object_id;
         let store = self.store.clone();
         let meta_path = self.get_sst_data_path(object_id);
@@ -724,7 +723,7 @@ impl SstableStore {
         let range = sstable_info_ref.meta_offset as usize..;
         let skip_bloom_filter_in_serde = self.skip_bloom_filter_in_serde;
 
-        let entry = self.meta_cache.get_or_fetch(&object_id, || async move {
+        let fetch = self.meta_cache.get_or_fetch(&object_id, || async move {
             let now = Instant::now();
             let buf = store
                 .read(&meta_path, range)
@@ -739,13 +738,16 @@ impl SstableStore {
         });
 
         stats.cache_meta_block_total += 1;
-
-        async move {
-            entry
-                .instrument_await("fetch_meta".verbose())
-                .await
-                .map_err(HummockError::foyer_error)
+        let entry = fetch
+            .instrument_await("fetch_meta".verbose())
+            .await
+            .map_err(HummockError::foyer_error);
+        if let Ok(ref entry) = entry
+            && entry.source() == foyer::Source::Outer
+        {
+            stats.cache_meta_block_miss += 1;
         }
+        entry
     }
 
     pub async fn list_sst_object_metadata_from_object_store(

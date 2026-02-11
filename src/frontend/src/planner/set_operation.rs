@@ -12,16 +12,33 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::catalog::PROJECTED_ROW_ID_COLUMN_NAME;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 
 use crate::binder::{BoundSetExpr, BoundSetOperation};
 use crate::error::Result;
+use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{
     LogicalExcept, LogicalIntersect, LogicalPlanRef as PlanRef, LogicalProject, LogicalUnion,
 };
 use crate::planner::Planner;
 
 impl Planner {
+    /// Strip the hidden `projected_row_id` column if present as the first column.
+    /// This is necessary because `LogicalProjectSet` adds this hidden column for set-returning
+    /// functions like `unnest()`, but it should not participate in set operations.
+    fn strip_projected_row_id(plan: PlanRef) -> PlanRef {
+        let schema = plan.schema();
+        if let Some(field) = schema.fields.first()
+            && field.name == PROJECTED_ROW_ID_COLUMN_NAME
+        {
+            let len = schema.len();
+            LogicalProject::with_out_col_idx(plan, 1..len).into()
+        } else {
+            plan
+        }
+    }
+
     pub(super) fn plan_set_operation(
         &mut self,
         op: BoundSetOperation,
@@ -42,6 +59,11 @@ impl Planner {
         } else {
             (left, right)
         };
+
+        // Strip hidden `projected_row_id` column from both sides to ensure schema alignment.
+        // This column is added by `LogicalProjectSet` for set-returning functions like `unnest()`.
+        let left = Self::strip_projected_row_id(left);
+        let right = Self::strip_projected_row_id(right);
 
         match op {
             BoundSetOperation::Union => Ok(LogicalUnion::create(all, vec![left, right])),

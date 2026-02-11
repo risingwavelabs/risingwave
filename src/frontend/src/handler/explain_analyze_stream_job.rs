@@ -219,21 +219,18 @@ mod net {
     ) -> Result<ExecutorStats> {
         let dispatcher_fragment_ids = dispatcher_fragment_ids.iter().copied().collect::<Vec<_>>();
         let mut initial_aggregated_stats = ExecutorStats::new();
+        let monitor_client_pool = handler_args.session.env().monitor_client_pool();
+
         for node in worker_nodes {
-            let mut compute_client = handler_args.session.env().client_pool().get(node).await?;
-            let stats = compute_client
-                .monitor_client
+            let client = monitor_client_pool.get(node).await?;
+            let stats = client
                 .get_profile_stats(GetProfileStatsRequest {
                     executor_ids: executor_ids.iter().copied().collect(),
                     dispatcher_fragment_ids: dispatcher_fragment_ids.clone(),
                 })
                 .await
                 .expect("get profiling stats failed");
-            initial_aggregated_stats.record(
-                executor_ids,
-                &dispatcher_fragment_ids,
-                &stats.into_inner(),
-            );
+            initial_aggregated_stats.record(executor_ids, &dispatcher_fragment_ids, &stats);
         }
         tracing::debug!(?initial_aggregated_stats, "initial aggregated stats");
 
@@ -241,20 +238,15 @@ mod net {
 
         let mut final_aggregated_stats = ExecutorStats::new();
         for node in worker_nodes {
-            let mut compute_client = handler_args.session.env().client_pool().get(node).await?;
-            let stats = compute_client
-                .monitor_client
+            let client = monitor_client_pool.get(node).await?;
+            let stats = client
                 .get_profile_stats(GetProfileStatsRequest {
                     executor_ids: executor_ids.iter().copied().collect(),
                     dispatcher_fragment_ids: dispatcher_fragment_ids.clone(),
                 })
                 .await
                 .expect("get profiling stats failed");
-            final_aggregated_stats.record(
-                executor_ids,
-                &dispatcher_fragment_ids,
-                &stats.into_inner(),
-            );
+            final_aggregated_stats.record(executor_ids, &dispatcher_fragment_ids, &stats);
         }
         tracing::debug!(?final_aggregated_stats, "final aggregated stats");
 

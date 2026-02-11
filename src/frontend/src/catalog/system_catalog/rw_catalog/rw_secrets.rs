@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::id::{SchemaId, SecretId, UserId};
 use risingwave_common::types::Fields;
 use risingwave_frontend_macro::system_catalog;
 
@@ -21,10 +22,10 @@ use crate::error::Result;
 #[derive(Fields)]
 struct RwSecret {
     #[primary_key]
-    id: i32,
-    schema_id: i32,
+    id: SecretId,
+    schema_id: SchemaId,
     name: String,
-    owner: i32,
+    owner: UserId,
     acl: Vec<String>,
 }
 
@@ -44,10 +45,10 @@ fn read_rw_secret_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwSecret>> {
             schema
                 .iter_secret_with_acl(current_user)
                 .map(|secret| RwSecret {
-                    id: secret.id.as_i32_id(),
-                    schema_id: secret.schema_id.as_i32_id(),
+                    id: secret.id,
+                    schema_id: secret.schema_id,
                     name: secret.name.clone(),
-                    owner: secret.owner as i32,
+                    owner: secret.owner,
                     acl: get_acl_items(secret.id, false, &users, username_map),
                 })
         })

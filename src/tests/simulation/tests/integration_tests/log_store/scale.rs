@@ -60,7 +60,7 @@ async fn test_scale_in_synced_log_store() -> Result<()> {
         tracing::info!("setup tables and mv");
         run_amplification_workload(&mut cluster, dimension_count).await?;
         tracing::info!("ran initial amplification workload");
-        assert_lag_in_log_store(&mut cluster, UNALIGNED_MV_NAME, result_count).await?;
+        check_lag_in_log_store(&mut cluster, UNALIGNED_MV_NAME, result_count).await?;
 
         async fn assert_parallelism_eq(session: &mut Session, parallelism: usize) {
             let parallelism_sql = format!(
@@ -91,20 +91,20 @@ async fn test_scale_in_synced_log_store() -> Result<()> {
             tracing::info!("killed compute nodes: {node_name_a}, {node_name_b}");
 
             cluster.wait_for_recovery().await?;
-            assert_lag_in_log_store(&mut cluster, UNALIGNED_MV_NAME, result_count).await?;
+            check_lag_in_log_store(&mut cluster, UNALIGNED_MV_NAME, result_count).await?;
             assert_parallelism_eq(&mut session, 6).await;
             tracing::info!("cluster scaled to 6 parallelism and recovered");
 
             cluster.simple_restart_nodes(&nodes).await;
             tracing::info!("restarted compute nodes: {node_name_a}, {node_name_b}");
 
-            assert_lag_in_log_store(&mut cluster, UNALIGNED_MV_NAME, result_count).await?;
+            check_lag_in_log_store(&mut cluster, UNALIGNED_MV_NAME, result_count).await?;
             cluster.wait_for_recovery().await?;
             tracing::info!("cluster recovered");
 
             cluster.wait_for_scale(10).await?;
             assert_parallelism_eq(&mut session, 10).await;
-            assert_lag_in_log_store(&mut cluster, UNALIGNED_MV_NAME, result_count).await?;
+            check_lag_in_log_store(&mut cluster, UNALIGNED_MV_NAME, result_count).await?;
             tracing::info!("cluster scaled back to 10 parallelism");
 
             run_amplification_workload(&mut cluster, dimension_count).await?;

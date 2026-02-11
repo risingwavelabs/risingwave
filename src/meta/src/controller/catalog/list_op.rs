@@ -15,10 +15,12 @@
 use risingwave_common::catalog::FragmentTypeMask;
 use risingwave_common::id::JobId;
 use risingwave_meta_model::refresh_job::{self, RefreshState};
+use risingwave_pb::meta::ObjectDependency as PbObjectDependency;
 use sea_orm::prelude::DateTime;
 
 use super::*;
 use crate::controller::fragment::FragmentTypeMaskExt;
+use crate::controller::utils::load_streaming_jobs_by_ids;
 
 impl CatalogController {
     pub async fn list_time_travel_table_ids(&self) -> MetaResult<Vec<TableId>> {
@@ -86,7 +88,7 @@ impl CatalogController {
                     None
                 };
                 MetaTelemetryJobDesc {
-                    table_id: table_id.as_i32_id(),
+                    table_id,
                     connector: connector_info,
                     optimization: vec![],
                 }
@@ -169,12 +171,20 @@ impl CatalogController {
         inner.list_databases().await
     }
 
-    pub async fn list_all_object_dependencies(&self) -> MetaResult<Vec<PbObjectDependencies>> {
-        self.list_object_dependencies(true).await
+    pub async fn list_all_object_dependencies(&self) -> MetaResult<Vec<PbObjectDependency>> {
+        let inner = self.inner.read().await;
+        let txn = inner.db.begin().await?;
+        let dependencies = list_object_dependencies(&txn, true).await?;
+        txn.commit().await?;
+        Ok(dependencies)
     }
 
-    pub async fn list_created_object_dependencies(&self) -> MetaResult<Vec<PbObjectDependencies>> {
-        self.list_object_dependencies(false).await
+    pub async fn list_created_object_dependencies(&self) -> MetaResult<Vec<PbObjectDependency>> {
+        let inner = self.inner.read().await;
+        let txn = inner.db.begin().await?;
+        let dependencies = list_object_dependencies(&txn, false).await?;
+        txn.commit().await?;
+        Ok(dependencies)
     }
 
     pub async fn list_schemas(&self) -> MetaResult<Vec<PbSchema>> {
@@ -243,9 +253,18 @@ impl CatalogController {
             .filter(table::Column::TableType.eq(table_type))
             .all(&inner.db)
             .await?;
+        let streaming_jobs = load_streaming_jobs_by_ids(
+            &inner.db,
+            table_objs.iter().map(|(table, _)| table.job_id()),
+        )
+        .await?;
         Ok(table_objs
             .into_iter()
-            .map(|(table, obj)| ObjectModel(table, obj.unwrap()).into())
+            .map(|(table, obj)| {
+                let job_id = table.job_id();
+                let streaming_job = streaming_jobs.get(&job_id).cloned();
+                ObjectModel(table, obj.unwrap(), streaming_job).into()
+            })
             .collect())
     }
 
@@ -284,7 +303,7 @@ impl CatalogController {
             .await?;
         Ok(conn_objs
             .into_iter()
-            .map(|(conn, obj)| ObjectModel(conn, obj.unwrap()).into())
+            .map(|(conn, obj)| ObjectModel(conn, obj.unwrap(), None).into())
             .collect())
     }
 
@@ -345,10 +364,19 @@ impl CatalogController {
             ))
             .all(&inner.db)
             .await?;
+        let streaming_jobs = load_streaming_jobs_by_ids(
+            &inner.db,
+            table_objs.iter().map(|(table, _)| table.job_id()),
+        )
+        .await?;
 
         Ok(table_objs
             .into_iter()
-            .map(|(table, obj)| ObjectModel(table, obj.unwrap()).into())
+            .map(|(table, obj)| {
+                let job_id = table.job_id();
+                let streaming_job = streaming_jobs.get(&job_id).cloned();
+                ObjectModel(table, obj.unwrap(), streaming_job).into()
+            })
             .collect())
     }
 

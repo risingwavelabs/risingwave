@@ -216,7 +216,7 @@ impl CatalogController {
             .all(&txn)
             .await?
             .into_iter()
-            .map(|(sink, obj)| ObjectModel(sink, obj.unwrap()).into())
+            .map(|(sink, obj)| ObjectModel(sink, obj.unwrap(), None).into())
             .collect();
 
         let removed_streaming_job_ids: Vec<JobId> = StreamingJob::find()
@@ -281,7 +281,7 @@ impl CatalogController {
             .iter()
             .filter(|obj| obj.obj_type == ObjectType::Secret)
             .map(|obj| obj.oid.as_secret_id())
-            .collect_vec();
+            .collect();
 
         if !removed_streaming_job_ids.is_empty() {
             let removed_internal_table_objs: Vec<PartialObject> = Object::find()
@@ -369,7 +369,7 @@ impl CatalogController {
             .all(&txn)
             .await?
             .into_iter()
-            .map(|(table, obj)| PbTable::from(ObjectModel(table, obj.unwrap())));
+            .map(|(table, obj)| PbTable::from(ObjectModel(table, obj.unwrap(), None)));
         // delete all in to_drop_objects.
         let res = Object::delete_many()
             .filter(object::Column::Oid.is_in(removed_objects.keys().cloned()))

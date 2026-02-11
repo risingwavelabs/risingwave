@@ -42,6 +42,7 @@ use tokio_openssl::SslStream;
 use tracing::Instrument;
 
 use crate::error::{PsqlError, PsqlResult};
+use crate::error_or_notice::Severity;
 use crate::memory_manager::{MessageMemoryGuard, MessageMemoryManagerRef};
 use crate::net::AddressRef;
 use crate::pg_extended::ResultCache;
@@ -58,13 +59,7 @@ use crate::types::Format;
 static RW_QUERY_LOG_TRUNCATE_LEN: LazyLock<usize> =
     LazyLock::new(|| match std::env::var("RW_QUERY_LOG_TRUNCATE_LEN") {
         Ok(len) if len.parse::<usize>().is_ok() => len.parse::<usize>().unwrap(),
-        _ => {
-            if cfg!(debug_assertions) {
-                65536
-            } else {
-                1024
-            }
-        }
+        _ => 65536,
     });
 
 tokio::task_local! {
@@ -473,6 +468,7 @@ where
                                 // At this time we're not in a session, use compact error message for
                                 // better alignment with Postgres' UI.
                                 pretty: false,
+                                severity: Some(Severity::Fatal),
                             })
                             .ok()?;
                         let _ = self.stream.flush().await;
@@ -484,6 +480,7 @@ where
                             .write_no_flush(BeMessage::ErrorResponse {
                                 error: &e,
                                 pretty: true,
+                                severity: None,
                             })
                             .ok()?;
                         self.ready_for_query().ok()?;
@@ -494,6 +491,7 @@ where
                             .write_no_flush(BeMessage::ErrorResponse {
                                 error: &e,
                                 pretty: true,
+                                severity: None,
                             })
                             .ok()?;
                         let _ = self.stream.flush().await;
@@ -512,6 +510,7 @@ where
                             .write_no_flush(BeMessage::ErrorResponse {
                                 error: &e,
                                 pretty: true,
+                                severity: None,
                             })
                             .ok()?;
                     }

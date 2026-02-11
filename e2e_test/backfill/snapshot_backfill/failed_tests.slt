@@ -6,4 +6,7 @@ include ../../batch/explain_analyze.slt
 include ../../background_ddl/basic.slt
 include ../../batch/catalog/rw_depend.slt.part
 include ../../background_ddl/basic.slt
+include ../../background_ddl/sink.slt
+include ../../backfill/backfill_order_control_recovery.slt
+
 

@@ -68,6 +68,27 @@ def _(outer_panels: Panels):
                         ),
                     ],
                 ),
+                panels.table_info(
+                    "Backfill Fragment Progress",
+                    "Backfill progress per fragment",
+                    [
+                        panels.table_target(
+                            f"group({metric('backfill_fragment_progress')}) by (job_id, fragment_id, backfill_state_table_id, backfill_target_relation_id, backfill_target_relation_name, backfill_target_relation_type, backfill_type, backfill_epoch, upstream_type, backfill_progress)"
+                        )
+                    ],
+                    [
+                        "job_id",
+                        "fragment_id",
+                        "backfill_state_table_id",
+                        "backfill_target_relation_id",
+                        "backfill_target_relation_name",
+                        "backfill_target_relation_type",
+                        "backfill_type",
+                        "backfill_epoch",
+                        "upstream_type",
+                        "backfill_progress",
+                    ],
+                ),
             ],
         )
     ]

@@ -54,6 +54,7 @@ use crate::rpc::metrics::MetaMetrics;
 pub type SourceManagerRef = Arc<SourceManager>;
 pub type SplitAssignment = HashMap<FragmentId, HashMap<ActorId, Vec<SplitImpl>>>;
 pub type DiscoveredSourceSplits = HashMap<SourceId, Vec<SplitImpl>>;
+
 // ALTER CONNECTOR parameters, specifying the new parameters to be set for each job_id (source_id/sink_id)
 pub type ConnectorPropsChange = HashMap<ObjectId, HashMap<String, String>>;
 
@@ -221,7 +222,7 @@ impl SourceManagerCore {
         }
 
         for (source_id, new_props) in recreate_source_id_map_new_props {
-            if let Some(handle) = self.managed_sources.get_mut(&(source_id as _)) {
+            if let Some(handle) = self.managed_sources.get_mut(&source_id) {
                 // the update here should not involve fragments change and split change
                 // Or we need to drop and recreate the source worker instead of updating inplace
                 let props_wrapper =

@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::id::UserId;
 use risingwave_common::types::Fields;
 use risingwave_frontend_macro::system_catalog;
 
@@ -35,7 +36,7 @@ struct RwRelation {
     name: String,
     relation_type: String,
     schema_id: i32,
-    owner: i32,
+    owner: UserId,
     definition: String,
     acl: Vec<String>,
 }

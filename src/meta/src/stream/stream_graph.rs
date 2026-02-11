@@ -22,9 +22,10 @@ pub mod state_match;
 pub use actor::{ActorGraphBuildResult, ActorGraphBuilder};
 pub use assignment::*;
 pub use fragment::{
-    CompleteStreamFragmentGraph, FragmentBackfillOrder, FragmentGraphDownstreamContext,
-    FragmentGraphUpstreamContext, StreamFragmentGraph, check_sink_fragments_support_refresh_schema,
-    fill_snapshot_backfill_epoch, rewrite_refresh_schema_sink_fragment,
+    CompleteStreamFragmentGraph, ExtendedFragmentBackfillOrder, FragmentGraphDownstreamContext,
+    FragmentGraphUpstreamContext, StreamFragmentGraph, UserDefinedFragmentBackfillOrder,
+    check_sink_fragments_support_refresh_schema, fill_snapshot_backfill_epoch,
+    rewrite_refresh_schema_sink_fragment,
 };
 pub(crate) use id::GlobalActorIdGen;
 pub use schedule::Locations;

@@ -21,7 +21,7 @@ use risingwave_common::catalog::{DatabaseId, TableId, TableOption};
 use risingwave_common::id::JobId;
 use risingwave_meta_model::refresh_job::{self, RefreshState};
 use risingwave_meta_model::{SinkId, SourceId, WorkerId};
-use risingwave_pb::catalog::{PbSink, PbSource, PbTable};
+use risingwave_pb::catalog::{PbSource, PbTable};
 use risingwave_pb::common::worker_node::{PbResource, Property as AddNodeProperty, State};
 use risingwave_pb::common::{HostAddress, PbWorkerNode, PbWorkerType, WorkerNode, WorkerType};
 use risingwave_pb::meta::list_rate_limits_response::RateLimitInfo;
@@ -98,7 +98,10 @@ impl ActiveStreamingWorkerNodes {
             .subscribe_active_streaming_compute_nodes()
             .await?;
         Ok(Self {
-            worker_nodes: nodes.into_iter().map(|node| (node.id, node)).collect(),
+            worker_nodes: nodes
+                .into_iter()
+                .filter_map(|node| node.is_streaming_schedulable().then_some((node.id, node)))
+                .collect(),
             rx,
             meta_manager: Some(meta_manager),
         })
@@ -115,12 +118,16 @@ impl ActiveStreamingWorkerNodes {
                 .recv()
                 .await
                 .expect("notification stopped or uninitialized");
+            fn is_target_worker_node(worker: &WorkerNode) -> bool {
+                worker.r#type == WorkerType::ComputeNode as i32
+                    && worker.property.as_ref().unwrap().is_streaming
+                    && worker.is_streaming_schedulable()
+            }
             match notification {
                 LocalNotification::WorkerNodeDeleted(worker) => {
-                    let is_streaming_compute_node = worker.r#type == WorkerType::ComputeNode as i32
-                        && worker.property.as_ref().unwrap().is_streaming;
+                    let is_target_worker_node = is_target_worker_node(&worker);
                     let Some(prev_worker) = self.worker_nodes.remove(&worker.id) else {
-                        if is_streaming_compute_node {
+                        if is_target_worker_node {
                             warn!(
                                 ?worker,
                                 "notify to delete an non-existing streaming compute worker"
@@ -128,7 +135,7 @@ impl ActiveStreamingWorkerNodes {
                         }
                         continue;
                     };
-                    if !is_streaming_compute_node {
+                    if !is_target_worker_node {
                         warn!(
                             ?worker,
                             ?prev_worker,
@@ -146,9 +153,7 @@ impl ActiveStreamingWorkerNodes {
                     break ActiveStreamingWorkerChange::Remove(prev_worker);
                 }
                 LocalNotification::WorkerNodeActivated(worker) => {
-                    if worker.r#type != WorkerType::ComputeNode as i32
-                        || !worker.property.as_ref().unwrap().is_streaming
-                    {
+                    if !is_target_worker_node(&worker) {
                         if let Some(prev_worker) = self.worker_nodes.remove(&worker.id) {
                             warn!(
                                 ?worker,
@@ -416,12 +421,6 @@ impl MetadataManager {
     pub async fn get_table_catalog_by_ids(&self, ids: &[TableId]) -> MetaResult<Vec<PbTable>> {
         self.catalog_controller
             .get_table_by_ids(ids.to_vec(), false)
-            .await
-    }
-
-    pub async fn get_table_incoming_sinks(&self, table_id: TableId) -> MetaResult<Vec<PbSink>> {
-        self.catalog_controller
-            .get_table_incoming_sinks(table_id)
             .await
     }
 
@@ -715,6 +714,7 @@ impl MetadataManager {
     pub async fn collect_unreschedulable_backfill_jobs(
         &self,
         job_ids: impl IntoIterator<Item = &JobId>,
+        is_online: bool,
     ) -> MetaResult<HashSet<JobId>> {
         let mut unreschedulable = HashSet::new();
 
@@ -725,7 +725,7 @@ impl MetadataManager {
                 .await?;
             if scan_types
                 .values()
-                .any(|scan_type| !scan_type.is_reschedulable())
+                .any(|scan_type| !scan_type.is_reschedulable(is_online))
             {
                 unreschedulable.insert(*job_id);
             }
