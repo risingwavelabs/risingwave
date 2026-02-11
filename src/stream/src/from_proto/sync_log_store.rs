@@ -47,7 +47,7 @@ impl ExecutorBuilder for SyncLogStoreExecutorBuilder {
             let metrics_target = match target {
                 SyncLogStoreTarget::Unspecified => "",
                 SyncLogStoreTarget::UnalignedHashJoin => "unaligned_hash_join",
-                SyncLogStoreTarget::SinkIntoTable => "sink-into-table",
+                SyncLogStoreTarget::SinkIntoTable => "sink_into_table",
             };
             let legacy_metrics_target = node.metrics_target.as_str();
             let metrics_target = if metrics_target.is_empty() {
