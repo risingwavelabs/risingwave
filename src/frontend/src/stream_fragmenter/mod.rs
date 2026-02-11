@@ -32,6 +32,7 @@ use risingwave_common::session_config::parallelism::{
     ConfigAdaptiveParallelismStrategy, ConfigParallelism,
 };
 use risingwave_common::system_param::AdaptiveParallelismStrategy;
+use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_connector::source::cdc::CdcScanOptions;
 use risingwave_pb::id::{LocalOperatorId, StreamNodeLocalOperatorId};
 use risingwave_pb::plan_common::JoinType;
@@ -175,6 +176,33 @@ impl GraphJobType {
             GraphJobType::Index => config.streaming_parallelism_strategy_for_index(),
         }
     }
+
+    pub fn to_system_parallelism(&self, system_params: &impl SystemParamsRead) -> u32 {
+        match self {
+            GraphJobType::Table => system_params.streaming_parallelism_for_table(),
+            GraphJobType::MaterializedView => {
+                system_params.streaming_parallelism_for_materialized_view()
+            }
+            GraphJobType::Source => system_params.streaming_parallelism_for_source(),
+            GraphJobType::Sink => system_params.streaming_parallelism_for_sink(),
+            GraphJobType::Index => system_params.streaming_parallelism_for_index(),
+        }
+    }
+
+    pub fn to_system_parallelism_strategy(
+        &self,
+        system_params: &impl SystemParamsRead,
+    ) -> AdaptiveParallelismStrategy {
+        match self {
+            GraphJobType::Table => system_params.adaptive_parallelism_strategy_for_table(),
+            GraphJobType::MaterializedView => {
+                system_params.adaptive_parallelism_strategy_for_materialized_view()
+            }
+            GraphJobType::Source => system_params.adaptive_parallelism_strategy_for_source(),
+            GraphJobType::Sink => system_params.adaptive_parallelism_strategy_for_sink(),
+            GraphJobType::Index => system_params.adaptive_parallelism_strategy_for_index(),
+        }
+    }
 }
 
 pub fn build_graph(
@@ -223,37 +251,19 @@ pub fn build_graph_with_strategy(
     let parallelism_strategy = {
         let config = ctx.session_ctx().config();
         let streaming_parallelism = config.streaming_parallelism();
+        let system_params = ctx
+            .session_ctx()
+            .env()
+            .system_params_manager()
+            .get_params()
+            .load();
         let job_parallelism = if let Some(job_type) = job_type.as_ref() {
-            use risingwave_common::system_param::reader::SystemParamsRead;
-            let system_params = ctx
-                .session_ctx()
-                .env()
-                .system_params_manager()
-                .get_params()
-                .load();
-
-            let configured_parallelism = match job_type {
-                GraphJobType::Table => config.streaming_parallelism_for_table(),
-                GraphJobType::MaterializedView => {
-                    config.streaming_parallelism_for_materialized_view()
-                }
-                GraphJobType::Source => config.streaming_parallelism_for_source(),
-                GraphJobType::Sink => config.streaming_parallelism_for_sink(),
-                GraphJobType::Index => config.streaming_parallelism_for_index(),
-            };
+            let configured_parallelism = job_type.to_parallelism(&config);
 
             if configured_parallelism == ConfigParallelism::Default
                 && streaming_parallelism == ConfigParallelism::Default
             {
-                let system_parallelism = match job_type {
-                    GraphJobType::Table => system_params.streaming_parallelism_for_table(),
-                    GraphJobType::MaterializedView => {
-                        system_params.streaming_parallelism_for_materialized_view()
-                    }
-                    GraphJobType::Source => system_params.streaming_parallelism_for_source(),
-                    GraphJobType::Sink => system_params.streaming_parallelism_for_sink(),
-                    GraphJobType::Index => system_params.streaming_parallelism_for_index(),
-                };
+                let system_parallelism = job_type.to_system_parallelism(system_params.as_ref());
 
                 if system_parallelism != 0 {
                     ConfigParallelism::Fixed(
@@ -285,39 +295,14 @@ pub fn build_graph_with_strategy(
         fragment_graph.max_parallelism = config.streaming_max_parallelism() as _;
 
         let job_strategy = if let Some(job_type) = job_type.as_ref() {
-            use risingwave_common::system_param::reader::SystemParamsRead;
-            let system_params = ctx
-                .session_ctx()
-                .env()
-                .system_params_manager()
-                .get_params()
-                .load();
-
-            let configured_strategy = match job_type {
-                GraphJobType::Table => config.streaming_parallelism_strategy_for_table(),
-                GraphJobType::MaterializedView => {
-                    config.streaming_parallelism_strategy_for_materialized_view()
-                }
-                GraphJobType::Source => config.streaming_parallelism_strategy_for_source(),
-                GraphJobType::Sink => config.streaming_parallelism_strategy_for_sink(),
-                GraphJobType::Index => config.streaming_parallelism_strategy_for_index(),
-            };
+            let configured_strategy = job_type.to_parallelism_strategy(&config);
 
             if configured_strategy == ConfigAdaptiveParallelismStrategy::Default
                 && config.streaming_parallelism_strategy()
                     == ConfigAdaptiveParallelismStrategy::Default
             {
-                let system_strategy = match job_type {
-                    GraphJobType::Table => system_params.adaptive_parallelism_strategy_for_table(),
-                    GraphJobType::MaterializedView => {
-                        system_params.adaptive_parallelism_strategy_for_materialized_view()
-                    }
-                    GraphJobType::Source => {
-                        system_params.adaptive_parallelism_strategy_for_source()
-                    }
-                    GraphJobType::Sink => system_params.adaptive_parallelism_strategy_for_sink(),
-                    GraphJobType::Index => system_params.adaptive_parallelism_strategy_for_index(),
-                };
+                let system_strategy =
+                    job_type.to_system_parallelism_strategy(system_params.as_ref());
 
                 if system_strategy != AdaptiveParallelismStrategy::Auto {
                     system_strategy.into()
