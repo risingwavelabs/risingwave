@@ -1123,10 +1123,12 @@ impl MetaClient {
         Ok(resp.hummock_version_id)
     }
 
-    pub async fn wait(&self) -> Result<()> {
+    pub async fn wait(&self) -> Result<WaitVersion> {
         let request = WaitRequest {};
-        self.inner.wait(request).await?;
-        Ok(())
+        let resp = self.inner.wait(request).await?;
+        Ok(resp
+            .version
+            .ok_or_else(|| anyhow!("wait version not set"))?)
     }
 
     pub async fn recover(&self) -> Result<()> {

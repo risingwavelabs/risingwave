@@ -269,6 +269,8 @@ pub trait CatalogWriter: Send + Sync {
         iceberg_source: PbSource,
         if_not_exists: bool,
     ) -> Result<()>;
+
+    async fn wait(&self) -> Result<()>;
 }
 
 #[derive(Clone)]
@@ -718,6 +720,11 @@ impl CatalogWriter for CatalogWriterImpl {
             .meta_client
             .create_iceberg_table(table_job_info, sink_job_info, iceberg_source, if_not_exists)
             .await?;
+        self.wait_version(version).await
+    }
+
+    async fn wait(&self) -> Result<()> {
+        let version = self.meta_client.wait().await.map_err(|e| anyhow!(e))?;
         self.wait_version(version).await
     }
 }

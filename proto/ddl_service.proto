@@ -600,7 +600,9 @@ message GetTablesResponse {
 
 message WaitRequest {}
 
-message WaitResponse {}
+message WaitResponse {
+  WaitVersion version = 1;
+}
 
 message CommentOnRequest {
   catalog.Comment comment = 1;

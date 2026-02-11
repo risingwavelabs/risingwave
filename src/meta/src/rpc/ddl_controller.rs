@@ -624,7 +624,7 @@ impl DdlController {
         let version = self
             .metadata_manager
             .catalog_controller
-            .current_notification_version()
+            .notify_frontend_trivial()
             .await;
         Ok(version)
     }
@@ -2291,7 +2291,7 @@ impl DdlController {
             .await
     }
 
-    pub async fn wait(&self) -> MetaResult<()> {
+    pub async fn wait(&self) -> MetaResult<WaitVersion> {
         let timeout_ms = 30 * 60 * 1000;
         for _ in 0..timeout_ms {
             if self
@@ -2301,7 +2301,16 @@ impl DdlController {
                 .await?
                 .is_empty()
             {
-                return Ok(());
+                let catalog_version = self
+                    .metadata_manager
+                    .catalog_controller
+                    .notify_frontend_trivial()
+                    .await;
+                let hummock_version_id = self.barrier_manager.get_hummock_version_id().await;
+                return Ok(WaitVersion {
+                    catalog_version,
+                    hummock_version_id,
+                });
             }
 
             sleep(Duration::from_millis(1)).await;
