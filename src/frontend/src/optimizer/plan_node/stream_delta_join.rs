@@ -96,6 +96,10 @@ impl StreamDeltaJoin {
         Ok(Self { base, core })
     }
 
+    pub fn join_type(&self) -> JoinType {
+        self.core.join_type
+    }
+
     /// Get a reference to the delta hash join's eq join predicate.
     pub fn eq_join_predicate(&self) -> &EqJoinPredicate {
         self.core

@@ -27,10 +27,26 @@ pub mod auto {
     use std::collections::{HashMap, HashSet};
 
     use risingwave_pb::id::RelationId;
+    use risingwave_pb::plan_common::JoinType;
 
     use crate::optimizer::backfill_order_strategy::common::has_cycle;
     use crate::optimizer::plan_node::{StreamPlanNodeType, StreamPlanRef};
     use crate::session::SessionImpl;
+
+    fn join_inputs(plan: StreamPlanRef, join_type: JoinType) -> (StreamPlanRef, StreamPlanRef) {
+        let inputs = plan.inputs();
+        assert_eq!(inputs.len(), 2);
+        let mut inputs = inputs.into_iter();
+        let mut left = inputs.next().expect("join left input");
+        let mut right = inputs.next().expect("join right input");
+        if matches!(
+            join_type,
+            JoinType::RightOuter | JoinType::RightSemi | JoinType::RightAnti
+        ) {
+            std::mem::swap(&mut left, &mut right);
+        }
+        (left, right)
+    }
 
     #[derive(Debug)]
     pub(super) enum BackfillTreeNode {
@@ -54,10 +70,44 @@ pub mod auto {
     ) -> Option<BackfillTreeNode> {
         match plan.node_type() {
             StreamPlanNodeType::StreamHashJoin => {
-                assert_eq!(plan.inputs().len(), 2);
-                let mut inputs = plan.inputs().into_iter();
-                let l = inputs.next().unwrap();
-                let r = inputs.next().unwrap();
+                let join_type = plan
+                    .as_stream_hash_join()
+                    .expect("hash join")
+                    .join_type();
+                let (l, r) = join_inputs(plan, join_type);
+                Some(BackfillTreeNode::Join {
+                    lhs: Box::new(plan_graph_to_backfill_tree(session, l)?),
+                    rhs: Box::new(plan_graph_to_backfill_tree(session, r)?),
+                })
+            }
+            StreamPlanNodeType::StreamDeltaJoin => {
+                let join_type = plan
+                    .as_stream_delta_join()
+                    .expect("delta join")
+                    .join_type();
+                let (l, r) = join_inputs(plan, join_type);
+                Some(BackfillTreeNode::Join {
+                    lhs: Box::new(plan_graph_to_backfill_tree(session, l)?),
+                    rhs: Box::new(plan_graph_to_backfill_tree(session, r)?),
+                })
+            }
+            StreamPlanNodeType::StreamTemporalJoin => {
+                let join_type = plan
+                    .as_stream_temporal_join()
+                    .expect("temporal join")
+                    .join_type();
+                let (l, r) = join_inputs(plan, join_type);
+                Some(BackfillTreeNode::Join {
+                    lhs: Box::new(plan_graph_to_backfill_tree(session, l)?),
+                    rhs: Box::new(plan_graph_to_backfill_tree(session, r)?),
+                })
+            }
+            StreamPlanNodeType::StreamAsOfJoin => {
+                let join_type = plan
+                    .as_stream_asof_join()
+                    .expect("asof join")
+                    .join_type();
+                let (l, r) = join_inputs(plan, join_type);
                 Some(BackfillTreeNode::Join {
                     lhs: Box::new(plan_graph_to_backfill_tree(session, l)?),
                     rhs: Box::new(plan_graph_to_backfill_tree(session, r)?),
