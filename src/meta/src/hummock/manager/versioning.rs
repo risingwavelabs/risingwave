@@ -287,6 +287,7 @@ impl HummockManager {
                 self.env.notification_manager(),
                 None,
                 &self.metrics,
+                &self.env.opts,
             );
             let mut new_version_delta = version.new_delta();
             new_version_delta.with_latest_version(|version, delta| {
@@ -318,8 +319,7 @@ impl HummockManager {
         };
 
         // Store table change log in meta store.
-        // TODO(ZW): configurable
-        let insert_batch_size = 100;
+        let insert_batch_size = self.env.opts.table_change_log_insert_batch_size as usize;
         use futures::stream::{self, StreamExt};
         let mut stream = stream::iter(table_change_logs).chunks(insert_batch_size);
         let txn = self.env.meta_store_ref().conn.begin().await?;

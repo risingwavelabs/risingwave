@@ -37,7 +37,7 @@ use sea_orm::{ConnectionTrait, EntityTrait};
 use super::TableCommittedEpochNotifiers;
 use crate::hummock::model::CompactionGroup;
 use crate::hummock::model::ext::to_table_change_log_meta_store_model;
-use crate::manager::NotificationManager;
+use crate::manager::{MetaOpts, NotificationManager};
 use crate::model::{
     InMemValTransaction, MetadataModelResult, Transactional, ValTransaction, VarTransaction,
 };
@@ -70,6 +70,7 @@ pub(super) struct HummockVersionTransaction<'a> {
         HashMap<TableId, TableChangeLog>,
     )>,
     disable_apply_to_txn: bool,
+    opts: &'a MetaOpts,
 }
 
 impl<'a> HummockVersionTransaction<'a> {
@@ -80,6 +81,7 @@ impl<'a> HummockVersionTransaction<'a> {
         notification_manager: &'a NotificationManager,
         table_committed_epoch_notifiers: Option<&'a Mutex<TableCommittedEpochNotifiers>>,
         meta_metrics: &'a MetaMetrics,
+        opts: &'a MetaOpts,
     ) -> Self {
         Self {
             orig_version: version,
@@ -90,6 +92,7 @@ impl<'a> HummockVersionTransaction<'a> {
             notification_manager,
             table_committed_epoch_notifiers,
             meta_metrics,
+            opts,
         }
     }
 
@@ -329,8 +332,7 @@ where
                         .is_err()
                 });
 
-            // TODO(ZW): configurable
-            let insert_batch_size = 100;
+            let insert_batch_size = self.opts.table_change_log_insert_batch_size as usize;
             use futures::stream::{self, StreamExt};
             use sea_orm::{ColumnTrait, Condition, QueryFilter};
             let mut stream = stream::iter(change_log_to_insert).chunks(insert_batch_size);
@@ -347,8 +349,7 @@ where
                     .await?;
             }
 
-            // TODO(ZW): configurable
-            let delete_batch_size = 100;
+            let delete_batch_size = self.opts.table_change_log_delete_batch_size as usize;
             let mut stream = stream::iter(change_log_to_delete).chunks(delete_batch_size);
             while let Some(change_log_batch) = stream.next().await {
                 let mut condition = Condition::any();

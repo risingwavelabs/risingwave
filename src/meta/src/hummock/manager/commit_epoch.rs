@@ -117,6 +117,7 @@ impl HummockManager {
             self.env.notification_manager(),
             Some(&self.table_committed_epoch_notifiers),
             &self.metrics,
+            &self.env.opts,
         );
 
         let state_table_info = &version.latest_version().state_table_info;

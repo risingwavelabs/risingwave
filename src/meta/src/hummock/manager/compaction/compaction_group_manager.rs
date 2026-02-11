@@ -196,6 +196,7 @@ impl HummockManager {
             self.env.notification_manager(),
             None,
             &self.metrics,
+            &self.env.opts,
         );
         let mut new_version_delta = version.new_delta();
 
@@ -294,6 +295,7 @@ impl HummockManager {
             self.env.notification_manager(),
             None,
             &self.metrics,
+            &self.env.opts,
         );
         let mut new_version_delta = version.new_delta();
         let mut modified_groups: HashMap<CompactionGroupId, /* #member table */ u64> =

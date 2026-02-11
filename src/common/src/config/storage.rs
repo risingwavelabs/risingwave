@@ -209,6 +209,9 @@ pub struct StorageConfig {
     #[serde(default = "default::storage::time_travel_version_cache_capacity")]
     pub time_travel_version_cache_capacity: u64,
 
+    #[serde(default = "default::storage::table_change_log_cache_capacity")]
+    pub table_change_log_cache_capacity: u64,
+
     // iceberg compaction
     #[serde(default = "default::storage::iceberg_compaction_enable_validate")]
     pub iceberg_compaction_enable_validate: bool,
@@ -1050,6 +1053,10 @@ pub mod default {
 
         pub fn time_travel_version_cache_capacity() -> u64 {
             10
+        }
+
+        pub fn table_change_log_cache_capacity() -> u64 {
+            60
         }
 
         pub fn sst_skip_bloom_filter_in_serde() -> bool {

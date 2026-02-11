@@ -122,6 +122,8 @@ hummock_time_travel_filter_out_objects_batch_size = 1000
 hummock_time_travel_filter_out_objects_v1 = false
 hummock_time_travel_filter_out_objects_list_version_batch_size = 10
 hummock_time_travel_filter_out_objects_list_delta_batch_size = 1000
+table_change_log_insert_batch_size = 1000
+table_change_log_delete_batch_size = 1000
 
 [meta.developer.compute_client_config]
 connect_timeout_secs = 5
@@ -285,6 +287,7 @@ compactor_max_overlap_sst_count = 64
 compactor_max_preload_meta_file_count = 32
 vector_file_block_size_kb = 1024
 time_travel_version_cache_capacity = 10
+table_change_log_cache_capacity = 60
 iceberg_compaction_enable_validate = false
 iceberg_compaction_max_record_batch_rows = 1024
 iceberg_compaction_min_size_per_partition_mb = 1024

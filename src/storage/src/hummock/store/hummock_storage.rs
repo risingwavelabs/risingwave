@@ -222,9 +222,10 @@ impl HummockStorage {
         );
 
         let event_tx = hummock_event_handler.event_sender();
-        // TODO(ZW): configurable
-        let table_change_log_manager =
-            Arc::new(TableChangeLogManager::new(10, hummock_meta_client.clone()));
+        let table_change_log_manager = Arc::new(TableChangeLogManager::new(
+            options.table_change_log_cache_capacity,
+            hummock_meta_client.clone(),
+        ));
         let instance = Self {
             context: compactor_context,
             compaction_catalog_manager_ref: compaction_catalog_manager_ref.clone(),
