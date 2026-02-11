@@ -225,7 +225,7 @@ where
             .adaptive_parallelism_strategy
             .as_deref()
             .and_then(|s| AdaptiveParallelismStrategy::from_str(s).ok())
-            .unwrap_or(AdaptiveParallelismStrategy::Auto)
+            .unwrap_or_else(default::adaptive_parallelism_strategy)
     }
 
     fn per_database_isolation(&self) -> <bool as ParamValue>::Borrowed<'_> {

@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
-
 use anyhow::Result;
 use risingwave_simulation::cluster::{Cluster, Configuration};
 use risingwave_simulation::utils::AssertResult;
@@ -91,53 +89,54 @@ async fn test_adaptive_parallelism_strategy_from_alter_system() -> Result<()> {
 }
 
 #[tokio::test]
-async fn test_adaptive_parallelism_strategy_for_all_relations_from_config() -> Result<()> {
+async fn test_parallelism_and_strategy_fallback_chain() -> Result<()> {
     let config = Configuration::for_auto_parallelism_system_params([
-        ("adaptive_parallelism_strategy_for_table", "'BOUNDED(2)'"),
-        (
-            "adaptive_parallelism_strategy_for_materialized_view",
-            "'BOUNDED(3)'",
-        ),
-        ("adaptive_parallelism_strategy_for_sink", "'BOUNDED(4)'"),
-        ("adaptive_parallelism_strategy_for_source", "'BOUNDED(5)'"),
-        ("adaptive_parallelism_strategy_for_index", "'BOUNDED(6)'"),
+        ("streaming_parallelism_for_table", "3"),
+        ("adaptive_parallelism_strategy", "'BOUNDED(2)'"),
+        ("adaptive_parallelism_strategy_for_sink", "'BOUNDED(5)'"),
     ]);
     let mut cluster = Cluster::start(config).await?;
-    cluster.create_kafka_topics(HashMap::from([("adaptive_source_cfg".to_owned(), 1)]));
     let mut session = cluster.start_session();
 
-    session.run("CREATE TABLE t_cfg (v int);").await?;
     session
-        .run("CREATE SOURCE src_cfg(v1 int, v2 varchar) WITH (connector='kafka', properties.bootstrap.server='192.168.11.1:29092', topic='adaptive_source_cfg') FORMAT PLAIN ENCODE JSON;")
+        .run("SET streaming_parallelism_for_table = 4;")
         .await?;
     session
-        .run("CREATE MATERIALIZED VIEW mv_cfg AS SELECT * FROM t_cfg;")
+        .run("SET streaming_parallelism_strategy_for_sink = 'BOUNDED(4)';")
+        .await?;
+    session.run("CREATE TABLE t_session (v int);").await?;
+    session
+        .run("CREATE SINK sink_session FROM t_session WITH (connector = 'blackhole');")
         .await?;
     session
-        .run("CREATE SINK sink_cfg FROM t_cfg WITH (connector = 'blackhole');")
-        .await?;
-    session.run("CREATE INDEX idx_cfg ON t_cfg(v);").await?;
-
-    session
-        .run("select distinct parallelism from rw_fragment_parallelism where name = 't_cfg' and distribution_type = 'HASH';")
-        .await?
-        .assert_result_eq("2");
-    session
-        .run("select distinct f.parallelism from rw_sources s join rw_fragments f on s.id = f.table_id where s.name = 'src_cfg';")
-        .await?
-        .assert_result_eq("5");
-    session
-        .run("select distinct parallelism from rw_fragment_parallelism where name = 'mv_cfg' and distribution_type = 'HASH';")
-        .await?
-        .assert_result_eq("3");
-    session
-        .run("select distinct parallelism from rw_fragment_parallelism where name = 'sink_cfg' and distribution_type = 'HASH';")
+        .run("select distinct parallelism from rw_fragment_parallelism where name = 't_session' and distribution_type = 'HASH';")
         .await?
         .assert_result_eq("4");
     session
-        .run("select distinct parallelism from rw_fragment_parallelism where name = 'idx_cfg' and distribution_type = 'HASH';")
+        .run("select distinct parallelism from rw_fragment_parallelism where name = 'sink_session' and distribution_type = 'HASH';")
         .await?
-        .assert_result_eq("6");
+        .assert_result_eq("4");
+
+    let mut session = cluster.start_session();
+    session.run("CREATE TABLE t_system (v int);").await?;
+    session
+        .run("CREATE MATERIALIZED VIEW mv_system AS SELECT * FROM t_system;")
+        .await?;
+    session
+        .run("CREATE SINK sink_system FROM t_system WITH (connector = 'blackhole');")
+        .await?;
+    session
+        .run("select distinct parallelism from rw_fragment_parallelism where name = 't_system' and distribution_type = 'HASH';")
+        .await?
+        .assert_result_eq("3");
+    session
+        .run("select distinct parallelism from rw_fragment_parallelism where name = 'mv_system' and distribution_type = 'HASH';")
+        .await?
+        .assert_result_eq("2");
+    session
+        .run("select distinct parallelism from rw_fragment_parallelism where name = 'sink_system' and distribution_type = 'HASH';")
+        .await?
+        .assert_result_eq("5");
 
     Ok(())
 }

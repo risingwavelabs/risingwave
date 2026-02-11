@@ -217,10 +217,13 @@ metrics_level = "Disabled"
         }
     }
 
-    /// Returns the auto parallelism configuration with additional streaming parallelism params.
+    /// Returns the auto parallelism configuration with additional parallelism-related system params.
     ///
-    /// Only `streaming_parallelism_for_*` and `adaptive_parallelism_strategy_for_*`
-    /// params are accepted and merged into `[system]`, in addition to the fixed
+    /// Only params with the following prefixes are accepted and merged into `[system]`:
+    /// - `streaming_parallelism_for_`
+    /// - `adaptive_parallelism_strategy`
+    ///   (covers both `adaptive_parallelism_strategy` and `adaptive_parallelism_strategy_for_*`)
+    /// in addition to the fixed
     /// default values in `for_auto_parallelism`.
     pub fn for_auto_parallelism_system_params<K, V, I>(params: I) -> Self
     where
@@ -230,7 +233,7 @@ metrics_level = "Disabled"
     {
         let allow_list = [
             "streaming_parallelism_for_",
-            "adaptive_parallelism_strategy_for_",
+            "adaptive_parallelism_strategy",
         ];
 
         let mut system_kvs = String::new();
