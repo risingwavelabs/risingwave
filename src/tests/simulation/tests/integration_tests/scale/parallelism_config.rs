@@ -18,14 +18,23 @@ use risingwave_simulation::utils::AssertResult;
 
 #[tokio::test]
 async fn test_streaming_parallelism_from_system_params() -> Result<()> {
-    let config = Configuration::for_auto_parallelism_system_params([
-        ("streaming_parallelism_for_table", "2"),
-        ("streaming_parallelism_for_materialized_view", "3"),
-        ("streaming_parallelism_for_sink", "1"),
-        ("streaming_parallelism_for_index", "4"),
-    ]);
+    let config =
+        Configuration::for_auto_parallelism_system_params(std::iter::empty::<(&str, &str)>());
     let mut cluster = Cluster::start(config).await?;
     let mut session = cluster.start_session();
+
+    session
+        .run("ALTER SYSTEM SET streaming_parallelism_for_table TO 2;")
+        .await?;
+    session
+        .run("ALTER SYSTEM SET streaming_parallelism_for_materialized_view TO 3;")
+        .await?;
+    session
+        .run("ALTER SYSTEM SET streaming_parallelism_for_sink TO 1;")
+        .await?;
+    session
+        .run("ALTER SYSTEM SET streaming_parallelism_for_index TO 4;")
+        .await?;
 
     session.run("CREATE TABLE t1 (v1 int);").await?;
     session
@@ -66,7 +75,7 @@ async fn test_adaptive_parallelism_strategy_from_alter_system() -> Result<()> {
 
     session
         .run(
-            "ALTER SYSTEM SET adaptive_parallelism_strategy_for_materialized_view TO 'Ratio(0.5)';",
+            "ALTER SYSTEM SET streaming_parallelism_strategy_for_materialized_view TO 'Ratio(0.5)';",
         )
         .await?;
     session.run("CREATE TABLE t_base (v1 int);").await?;
@@ -80,7 +89,7 @@ async fn test_adaptive_parallelism_strategy_from_alter_system() -> Result<()> {
         .assert_result_eq(expected_parallelism.to_string());
     session
         .run(
-            "SELECT setting FROM pg_catalog.pg_settings WHERE name = 'adaptive_parallelism_strategy_for_materialized_view';",
+            "SELECT setting FROM pg_catalog.pg_settings WHERE name = 'streaming_parallelism_strategy_for_materialized_view';",
         )
         .await?
         .assert_result_eq("RATIO(0.5)");
@@ -90,13 +99,20 @@ async fn test_adaptive_parallelism_strategy_from_alter_system() -> Result<()> {
 
 #[tokio::test]
 async fn test_parallelism_and_strategy_fallback_chain() -> Result<()> {
-    let config = Configuration::for_auto_parallelism_system_params([
-        ("streaming_parallelism_for_table", "3"),
-        ("adaptive_parallelism_strategy", "'BOUNDED(2)'"),
-        ("adaptive_parallelism_strategy_for_sink", "'BOUNDED(5)'"),
-    ]);
+    let config =
+        Configuration::for_auto_parallelism_system_params(std::iter::empty::<(&str, &str)>());
     let mut cluster = Cluster::start(config).await?;
     let mut session = cluster.start_session();
+
+    session
+        .run("ALTER SYSTEM SET streaming_parallelism_for_table TO 3;")
+        .await?;
+    session
+        .run("ALTER SYSTEM SET streaming_parallelism_strategy TO 'BOUNDED(2)';")
+        .await?;
+    session
+        .run("ALTER SYSTEM SET streaming_parallelism_strategy_for_sink TO 'BOUNDED(5)';")
+        .await?;
 
     session
         .run("SET streaming_parallelism_for_table = 4;")

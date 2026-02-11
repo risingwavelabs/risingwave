@@ -449,16 +449,6 @@ time_travel_retention_ms = 600000
 adaptive_parallelism_strategy = "AUTO"
 per_database_isolation = true
 enforce_secret = false
-streaming_parallelism_for_table = 0
-streaming_parallelism_for_materialized_view = 0
-streaming_parallelism_for_sink = 0
-streaming_parallelism_for_source = 0
-streaming_parallelism_for_index = 0
-adaptive_parallelism_strategy_for_table = "AUTO"
-adaptive_parallelism_strategy_for_materialized_view = "AUTO"
-adaptive_parallelism_strategy_for_sink = "AUTO"
-adaptive_parallelism_strategy_for_source = "AUTO"
-adaptive_parallelism_strategy_for_index = "AUTO"
 
 [udf]
 enable_embedded_python_udf = false

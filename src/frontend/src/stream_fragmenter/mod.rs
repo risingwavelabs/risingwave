@@ -32,7 +32,6 @@ use risingwave_common::session_config::parallelism::{
     ConfigAdaptiveParallelismStrategy, ConfigParallelism,
 };
 use risingwave_common::system_param::AdaptiveParallelismStrategy;
-use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_connector::source::cdc::CdcScanOptions;
 use risingwave_pb::id::{LocalOperatorId, StreamNodeLocalOperatorId};
 use risingwave_pb::plan_common::JoinType;
@@ -176,33 +175,6 @@ impl GraphJobType {
             GraphJobType::Index => config.streaming_parallelism_strategy_for_index(),
         }
     }
-
-    pub fn to_system_parallelism(&self, system_params: &impl SystemParamsRead) -> u32 {
-        match self {
-            GraphJobType::Table => system_params.streaming_parallelism_for_table(),
-            GraphJobType::MaterializedView => {
-                system_params.streaming_parallelism_for_materialized_view()
-            }
-            GraphJobType::Source => system_params.streaming_parallelism_for_source(),
-            GraphJobType::Sink => system_params.streaming_parallelism_for_sink(),
-            GraphJobType::Index => system_params.streaming_parallelism_for_index(),
-        }
-    }
-
-    pub fn to_system_parallelism_strategy(
-        &self,
-        system_params: &impl SystemParamsRead,
-    ) -> AdaptiveParallelismStrategy {
-        match self {
-            GraphJobType::Table => system_params.adaptive_parallelism_strategy_for_table(),
-            GraphJobType::MaterializedView => {
-                system_params.adaptive_parallelism_strategy_for_materialized_view()
-            }
-            GraphJobType::Source => system_params.adaptive_parallelism_strategy_for_source(),
-            GraphJobType::Sink => system_params.adaptive_parallelism_strategy_for_sink(),
-            GraphJobType::Index => system_params.adaptive_parallelism_strategy_for_index(),
-        }
-    }
 }
 
 pub fn build_graph(
@@ -251,33 +223,11 @@ pub fn build_graph_with_strategy(
     let parallelism_strategy = {
         let config = ctx.session_ctx().config();
         let streaming_parallelism = config.streaming_parallelism();
-        let system_params = ctx
-            .session_ctx()
-            .env()
-            .system_params_manager()
-            .get_params()
-            .load();
-        let job_parallelism = if let Some(job_type) = job_type.as_ref() {
-            let configured_parallelism = job_type.to_parallelism(&config);
-
-            if configured_parallelism == ConfigParallelism::Default
-                && streaming_parallelism == ConfigParallelism::Default
-            {
-                let system_parallelism = job_type.to_system_parallelism(system_params.as_ref());
-
-                if system_parallelism != 0 {
-                    ConfigParallelism::Fixed(
-                        std::num::NonZeroU64::new(system_parallelism as u64).unwrap(),
-                    )
-                } else {
-                    configured_parallelism
-                }
-            } else {
-                configured_parallelism
-            }
-        } else {
-            ConfigParallelism::Default
-        };
+        let job_parallelism = job_type
+            .as_ref()
+            .map_or(ConfigParallelism::Default, |job_type| {
+                job_type.to_parallelism(&config)
+            });
         let normal_parallelism = derive_parallelism(Some(job_parallelism), streaming_parallelism);
         let backfill_parallelism = if state.has_any_backfill {
             match config.streaming_parallelism_for_backfill() {
@@ -294,31 +244,11 @@ pub fn build_graph_with_strategy(
         fragment_graph.backfill_parallelism = backfill_parallelism;
         fragment_graph.max_parallelism = config.streaming_max_parallelism() as _;
 
-        let job_strategy = if let Some(job_type) = job_type.as_ref() {
-            let configured_strategy = job_type.to_parallelism_strategy(&config);
-
-            if configured_strategy == ConfigAdaptiveParallelismStrategy::Default
-                && config.streaming_parallelism_strategy()
-                    == ConfigAdaptiveParallelismStrategy::Default
-            {
-                let system_strategy =
-                    job_type.to_system_parallelism_strategy(system_params.as_ref());
-
-                if system_strategy != AdaptiveParallelismStrategy::Auto {
-                    system_strategy.into()
-                } else if system_params.adaptive_parallelism_strategy()
-                    != AdaptiveParallelismStrategy::Auto
-                {
-                    system_params.adaptive_parallelism_strategy().into()
-                } else {
-                    configured_strategy
-                }
-            } else {
-                configured_strategy
-            }
-        } else {
-            ConfigAdaptiveParallelismStrategy::Default
-        };
+        let job_strategy = job_type
+            .as_ref()
+            .map_or(ConfigAdaptiveParallelismStrategy::Default, |job_type| {
+                job_type.to_parallelism_strategy(&config)
+            });
         derive_parallelism_strategy(Some(job_strategy), config.streaming_parallelism_strategy())
     };
 
