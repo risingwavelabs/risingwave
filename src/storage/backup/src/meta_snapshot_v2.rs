@@ -211,10 +211,16 @@ impl Metadata for MetadataV2 {
         self.hummock_table_change_logs
             .iter()
             .flat_map(|m| {
-                to_table_change_log(m)
-                    .change_log_ssts()
+                // We cannot use `change_log_ssts` here because `to_table_change_log` returns an owned value, not a reference.
+                let EpochNewChangeLog {
+                    new_value,
+                    old_value,
+                    ..
+                } = to_table_change_log(m);
+                new_value
+                    .into_iter()
+                    .chain(old_value)
                     .map(|t| t.object_id.as_raw())
-                    .collect::<HashSet<_>>()
             })
             .collect()
     }
