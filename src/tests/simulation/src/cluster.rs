@@ -149,7 +149,7 @@ impl Configuration {
             per_session_queries: vec![
                 "set streaming_parallelism_strategy_for_table = 'DEFAULT'".into(),
                 "set streaming_parallelism_strategy_for_source = 'DEFAULT'".into(),
-                "alter system set adaptive_parallelism_strategy to FULL".into(),
+                "alter system set adaptive_parallelism_strategy to AUTO".into(),
             ]
             .into(),
             ..Default::default()
@@ -163,7 +163,7 @@ impl Configuration {
         conf.per_session_queries = vec![
             "set streaming_parallelism_strategy_for_table = 'DEFAULT'".into(),
             "set streaming_parallelism_strategy_for_source = 'DEFAULT'".into(),
-            "alter system set adaptive_parallelism_strategy to FULL".into(),
+            "alter system set adaptive_parallelism_strategy to AUTO".into(),
             "SET STREAMING_USE_ARRANGEMENT_BACKFILL = false;".into(),
             "SET STREAMING_USE_SNAPSHOT_BACKFILL = false;".into(),
         ]
@@ -176,7 +176,7 @@ impl Configuration {
         conf.per_session_queries = vec![
             "set streaming_parallelism_strategy_for_table = 'DEFAULT'".into(),
             "set streaming_parallelism_strategy_for_source = 'DEFAULT'".into(),
-            "alter system set adaptive_parallelism_strategy to FULL".into(),
+            "alter system set adaptive_parallelism_strategy to AUTO".into(),
             "SET STREAMING_USE_SHARED_SOURCE = true;".into(),
         ]
         .into();
@@ -225,7 +225,7 @@ metrics_level = "Disabled"
             per_session_queries: vec![
                 "set streaming_parallelism_strategy_for_table = 'DEFAULT'".into(),
                 "set streaming_parallelism_strategy_for_source = 'DEFAULT'".into(),
-                "alter system set adaptive_parallelism_strategy to FULL".into(),
+                "alter system set adaptive_parallelism_strategy to AUTO".into(),
                 "create view if not exists table_parallelism as select t.name, tf.parallelism from rw_tables t, rw_table_fragments tf where t.id = tf.table_id;".into(),
                 "create view if not exists mview_parallelism as select m.name, tf.parallelism from rw_materialized_views m, rw_table_fragments tf where m.id = tf.table_id;".into(),
             ]
