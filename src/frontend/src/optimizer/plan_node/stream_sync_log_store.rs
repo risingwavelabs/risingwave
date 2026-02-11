@@ -81,18 +81,19 @@ impl StreamNode for StreamSyncLogStore {
             .with_id(state.gen_table_id_wrapped())
             .to_internal_table_prost()
             .into();
-        NodeBody::SyncLogStore(Box::new(SyncLogStoreNode {
+        let mut node = SyncLogStoreNode {
             log_store_table,
             aligned: false,
             target: self.metrics_target as i32,
-
-            // The following fields should now be read from per-job config override.
-            #[allow(deprecated)]
-            pause_duration_ms: None,
-            #[allow(deprecated)]
-            buffer_size: None,
             ..Default::default()
-        }))
+        };
+        // The following fields should now be read from per-job config override.
+        #[allow(deprecated)]
+        {
+            node.pause_duration_ms = None;
+            node.buffer_size = None;
+        }
+        NodeBody::SyncLogStore(Box::new(node))
     }
 }
 
