@@ -229,12 +229,16 @@ impl ClusterController {
     }
 
     /// Invoked when it receives a heartbeat from a worker node.
-    pub async fn heartbeat(&self, worker_id: WorkerId) -> MetaResult<()> {
+    pub async fn heartbeat(
+        &self,
+        worker_id: WorkerId,
+        resource: Option<PbResource>,
+    ) -> MetaResult<()> {
         tracing::trace!(target: "events::meta::server_heartbeat", %worker_id, "receive heartbeat");
         self.inner
             .write()
             .await
-            .heartbeat(worker_id, self.max_heartbeat_interval)
+            .heartbeat(worker_id, self.max_heartbeat_interval, resource)
     }
 
     pub fn start_heartbeat_checker(
@@ -477,6 +481,10 @@ impl WorkerExtraInfo {
         );
         self.expire_at = Some(expire);
     }
+
+    fn update_started_at(&mut self) {
+        self.started_at = Some(timestamp_now_sec());
+    }
 }
 
 fn timestamp_now_sec() -> u64 {
@@ -507,30 +515,6 @@ fn meta_node_info(host: &str, started_at: Option<u64>) -> PbWorkerNode {
     }
 }
 
-fn resource_to_db(resource: &PbResource) -> (String, i64, i64, String) {
-    (
-        resource.rw_version.clone(),
-        i64::try_from(resource.total_memory_bytes).unwrap_or(i64::MAX),
-        i64::try_from(resource.total_cpu_cores).unwrap_or(i64::MAX),
-        resource.hostname.clone(),
-    )
-}
-
-fn resource_from_db(worker: &worker::Model) -> PbResource {
-    PbResource {
-        rw_version: worker.resource_rw_version.clone().unwrap_or_default(),
-        total_memory_bytes: worker
-            .resource_total_memory_bytes
-            .and_then(|v| u64::try_from(v).ok())
-            .unwrap_or_default(),
-        total_cpu_cores: worker
-            .resource_total_cpu_cores
-            .and_then(|v| u64::try_from(v).ok())
-            .unwrap_or_default(),
-        hostname: worker.resource_hostname.clone().unwrap_or_default(),
-    }
-}
-
 pub struct ClusterControllerInner {
     db: DatabaseConnection,
     /// Record for tracking available machine ids, one is available.
@@ -547,10 +531,17 @@ impl ClusterControllerInner {
         db: DatabaseConnection,
         disable_automatic_parallelism_control: bool,
     ) -> MetaResult<Self> {
-        let workers: Vec<worker::Model> = Worker::find().all(&db).await?;
+        let workers: Vec<(WorkerId, Option<TransactionId>)> = Worker::find()
+            .select_only()
+            .column(worker::Column::WorkerId)
+            .column(worker::Column::TransactionId)
+            .into_tuple()
+            .all(&db)
+            .await?;
         let inuse_txn_ids: HashSet<_> = workers
             .iter()
-            .filter_map(|worker| worker.transaction_id)
+            .cloned()
+            .filter_map(|(_, txn_id)| txn_id)
             .collect();
         let available_transactional_ids = (0..Self::MAX_WORKER_REUSABLE_ID_COUNT as TransactionId)
             .filter(|id| !inuse_txn_ids.contains(id))
@@ -558,16 +549,7 @@ impl ClusterControllerInner {
 
         let worker_extra_info = workers
             .into_iter()
-            .map(|worker| {
-                (
-                    worker.worker_id,
-                    WorkerExtraInfo {
-                        expire_at: None,
-                        started_at: worker.started_at.and_then(|t| u64::try_from(t).ok()),
-                        resource: resource_from_db(&worker),
-                    },
-                )
-            })
+            .map(|(w, _)| (w, WorkerExtraInfo::default()))
             .collect();
 
         Ok(Self {
@@ -608,33 +590,18 @@ impl ClusterControllerInner {
         }
     }
 
-    async fn update_resource_and_started_at(
+    fn update_resource_and_started_at(
         &mut self,
         worker_id: WorkerId,
         resource: PbResource,
     ) -> MetaResult<()> {
-        let (rw_version, total_memory_bytes, total_cpu_cores, hostname) = resource_to_db(&resource);
-        let started_at = i64::try_from(timestamp_now_sec()).unwrap_or(i64::MAX);
-
-        let Some(worker) = Worker::find_by_id(worker_id).one(&self.db).await? else {
-            return Err(MetaError::invalid_worker(worker_id, "worker not found"));
-        };
-
-        let mut worker: worker::ActiveModel = worker.into();
-        worker.started_at = Set(Some(started_at));
-        worker.resource_rw_version = Set(Some(rw_version));
-        worker.resource_total_memory_bytes = Set(Some(total_memory_bytes));
-        worker.resource_total_cpu_cores = Set(Some(total_cpu_cores));
-        worker.resource_hostname = Set(Some(hostname));
-        worker.update(&self.db).await?;
-
-        let Some(info) = self.worker_extra_info.get_mut(&worker_id) else {
-            return Err(MetaError::invalid_worker(worker_id, "worker not found"));
-        };
-
-        info.resource = resource;
-        info.started_at = Some(started_at as u64);
-        Ok(())
+        if let Some(info) = self.worker_extra_info.get_mut(&worker_id) {
+            info.resource = resource;
+            info.update_started_at();
+            Ok(())
+        } else {
+            Err(MetaError::invalid_worker(worker_id, "worker not found"))
+        }
     }
 
     fn get_extra_info_checked(&self, worker_id: WorkerId) -> MetaResult<WorkerExtraInfo> {
@@ -764,8 +731,7 @@ impl ClusterControllerInner {
                 WorkerProperty::update(property).exec(&txn).await?;
                 txn.commit().await?;
                 self.update_worker_ttl(worker.worker_id, ttl)?;
-                self.update_resource_and_started_at(worker.worker_id, resource)
-                    .await?;
+                self.update_resource_and_started_at(worker.worker_id, resource)?;
                 Ok(worker.worker_id)
             } else if worker.worker_type == WorkerType::Frontend && property.is_none() {
                 let worker_property = worker_property::ActiveModel {
@@ -784,8 +750,7 @@ impl ClusterControllerInner {
                 WorkerProperty::insert(worker_property).exec(&txn).await?;
                 txn.commit().await?;
                 self.update_worker_ttl(worker.worker_id, ttl)?;
-                self.update_resource_and_started_at(worker.worker_id, resource)
-                    .await?;
+                self.update_resource_and_started_at(worker.worker_id, resource)?;
                 Ok(worker.worker_id)
             } else if worker.worker_type == WorkerType::Compactor {
                 if let Some(property) = property {
@@ -814,20 +779,16 @@ impl ClusterControllerInner {
                 }
                 txn.commit().await?;
                 self.update_worker_ttl(worker.worker_id, ttl)?;
-                self.update_resource_and_started_at(worker.worker_id, resource)
-                    .await?;
+                self.update_resource_and_started_at(worker.worker_id, resource)?;
                 Ok(worker.worker_id)
             } else {
                 self.update_worker_ttl(worker.worker_id, ttl)?;
-                self.update_resource_and_started_at(worker.worker_id, resource)
-                    .await?;
+                self.update_resource_and_started_at(worker.worker_id, resource)?;
                 Ok(worker.worker_id)
             };
         }
 
         let txn_id = self.apply_transaction_id(r#type)?;
-        let (rw_version, total_memory_bytes, total_cpu_cores, hostname) = resource_to_db(&resource);
-        let started_at = timestamp_now_sec();
 
         let worker = worker::ActiveModel {
             worker_id: Default::default(),
@@ -836,11 +797,6 @@ impl ClusterControllerInner {
             port: Set(host_address.port),
             status: Set(WorkerStatus::Starting),
             transaction_id: Set(txn_id),
-            started_at: Set(Some(i64::try_from(started_at).unwrap_or(i64::MAX))),
-            resource_rw_version: Set(Some(rw_version)),
-            resource_total_memory_bytes: Set(Some(total_memory_bytes)),
-            resource_total_cpu_cores: Set(Some(total_cpu_cores)),
-            resource_hostname: Set(Some(hostname)),
         };
         let insert_res = Worker::insert(worker).exec(&txn).await?;
         let worker_id = insert_res.last_insert_id as WorkerId;
@@ -890,15 +846,12 @@ impl ClusterControllerInner {
         if let Some(txn_id) = txn_id {
             self.available_transactional_ids.retain(|id| *id != txn_id);
         }
-        self.worker_extra_info.insert(
-            worker_id,
-            WorkerExtraInfo {
-                expire_at: None,
-                started_at: Some(started_at),
-                resource,
-            },
-        );
-        self.update_worker_ttl(worker_id, ttl)?;
+        let extra_info = WorkerExtraInfo {
+            started_at: Some(timestamp_now_sec()),
+            expire_at: None,
+            resource,
+        };
+        self.worker_extra_info.insert(worker_id, extra_info);
 
         Ok(worker_id)
     }
@@ -966,9 +919,17 @@ impl ClusterControllerInner {
         Ok(worker)
     }
 
-    pub fn heartbeat(&mut self, worker_id: WorkerId, ttl: Duration) -> MetaResult<()> {
+    pub fn heartbeat(
+        &mut self,
+        worker_id: WorkerId,
+        ttl: Duration,
+        resource: Option<PbResource>,
+    ) -> MetaResult<()> {
         if let Some(worker_info) = self.worker_extra_info.get_mut(&worker_id) {
             worker_info.update_ttl(ttl);
+            if let Some(resource) = resource {
+                worker_info.resource = resource;
+            }
             Ok(())
         } else {
             Err(MetaError::invalid_worker(worker_id, "worker not found"))
@@ -1261,13 +1222,93 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_reregister_compute_node_updates_resource() -> MetaResult<()> {
+    async fn test_list_workers_include_meta_node() -> MetaResult<()> {
+        let env = MetaSrvEnv::for_test().await;
+        let cluster_ctl = ClusterController::new(env, Duration::from_secs(1)).await?;
+
+        // List all workers should include the synthesized meta node.
+        let workers = cluster_ctl.list_workers(None, None).await?;
+        assert!(workers.iter().any(|w| w.r#type() == PbWorkerType::Meta));
+
+        // Explicitly listing meta workers should also include it.
+        let workers = cluster_ctl
+            .list_workers(Some(WorkerType::Meta), None)
+            .await?;
+        assert_eq!(workers.len(), 1);
+        assert_eq!(workers[0].r#type(), PbWorkerType::Meta);
+
+        // Listing starting workers should not include meta.
+        let workers = cluster_ctl
+            .list_workers(Some(WorkerType::Meta), Some(WorkerStatus::Starting))
+            .await?;
+        assert!(workers.is_empty());
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_heartbeat_updates_resource() -> MetaResult<()> {
         let env = MetaSrvEnv::for_test().await;
         let cluster_ctl = ClusterController::new(env, Duration::from_secs(1)).await?;
 
         let host = HostAddress {
             host: "localhost".to_owned(),
             port: 5010,
+        };
+        let property = AddNodeProperty {
+            is_streaming: true,
+            is_serving: true,
+            is_unschedulable: false,
+            parallelism: 4,
+            ..Default::default()
+        };
+
+        let resource_v1 = PbResource {
+            rw_version: "rw-v1".to_owned(),
+            total_memory_bytes: 1024,
+            total_cpu_cores: 4,
+            hostname: "host-v1".to_owned(),
+        };
+        let worker_id = cluster_ctl
+            .add_worker(
+                PbWorkerType::ComputeNode,
+                host.clone(),
+                property,
+                resource_v1,
+            )
+            .await?;
+
+        let resource_v2 = PbResource {
+            rw_version: "rw-v2".to_owned(),
+            total_memory_bytes: 2048,
+            total_cpu_cores: 8,
+            hostname: "host-v2".to_owned(),
+        };
+        cluster_ctl
+            .heartbeat(worker_id, Some(resource_v2.clone()))
+            .await?;
+
+        let worker = cluster_ctl
+            .get_worker_by_id(worker_id)
+            .await?
+            .expect("worker should exist");
+        assert_eq!(
+            worker.resource.expect("worker resource should exist"),
+            resource_v2
+        );
+
+        cluster_ctl.delete_worker(host).await?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_reregister_compute_node_updates_resource() -> MetaResult<()> {
+        let env = MetaSrvEnv::for_test().await;
+        let cluster_ctl = ClusterController::new(env, Duration::from_secs(1)).await?;
+
+        let host = HostAddress {
+            host: "localhost".to_owned(),
+            port: 5011,
         };
         let property = AddNodeProperty {
             is_streaming: true,
@@ -1298,7 +1339,7 @@ mod tests {
             total_cpu_cores: 8,
             hostname: "host-v2".to_owned(),
         };
-        let worker_id_after_reregister = cluster_ctl
+        cluster_ctl
             .add_worker(
                 PbWorkerType::ComputeNode,
                 host.clone(),
@@ -1306,7 +1347,6 @@ mod tests {
                 resource_v2.clone(),
             )
             .await?;
-        assert_eq!(worker_id, worker_id_after_reregister);
 
         let worker = cluster_ctl
             .get_worker_by_id(worker_id)
@@ -1318,31 +1358,6 @@ mod tests {
         );
 
         cluster_ctl.delete_worker(host).await?;
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn test_list_workers_include_meta_node() -> MetaResult<()> {
-        let env = MetaSrvEnv::for_test().await;
-        let cluster_ctl = ClusterController::new(env, Duration::from_secs(1)).await?;
-
-        // List all workers should include the synthesized meta node.
-        let workers = cluster_ctl.list_workers(None, None).await?;
-        assert!(workers.iter().any(|w| w.r#type() == PbWorkerType::Meta));
-
-        // Explicitly listing meta workers should also include it.
-        let workers = cluster_ctl
-            .list_workers(Some(WorkerType::Meta), None)
-            .await?;
-        assert_eq!(workers.len(), 1);
-        assert_eq!(workers[0].r#type(), PbWorkerType::Meta);
-
-        // Listing starting workers should not include meta.
-        let workers = cluster_ctl
-            .list_workers(Some(WorkerType::Meta), Some(WorkerStatus::Starting))
-            .await?;
-        assert!(workers.is_empty());
-
         Ok(())
     }
 }

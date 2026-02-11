@@ -377,8 +377,16 @@ impl MetaClient {
     }
 
     /// Send heartbeat signal to meta service.
-    pub async fn send_heartbeat(&self, node_id: WorkerId) -> Result<()> {
-        let request = HeartbeatRequest { node_id };
+    pub async fn send_heartbeat(&self) -> Result<()> {
+        let request = HeartbeatRequest {
+            node_id: self.worker_id,
+            resource: Some(risingwave_pb::common::worker_node::Resource {
+                rw_version: RW_VERSION.to_owned(),
+                total_memory_bytes: system_memory_available_bytes() as _,
+                total_cpu_cores: total_cpu_available() as _,
+                hostname: hostname(),
+            }),
+        };
         let resp = self.inner.heartbeat(request).await?;
         if let Some(status) = resp.status
             && status.code() == risingwave_pb::common::status::Code::UnknownWorker
@@ -1086,7 +1094,7 @@ impl MetaClient {
                 match tokio::time::timeout(
                     // TODO: decide better min_interval for timeout
                     min_interval * 3,
-                    meta_client.send_heartbeat(meta_client.worker_id()),
+                    meta_client.send_heartbeat(),
                 )
                 .await
                 {
