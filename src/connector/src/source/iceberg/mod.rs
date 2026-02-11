@@ -259,6 +259,7 @@ pub struct IcebergListResult {
     pub position_delete_files: Vec<FileScanTask>,
     pub equality_delete_columns: Vec<String>,
     pub format_version: FormatVersion,
+    pub schema: std::sync::Arc<iceberg::spec::Schema>,
 }
 
 impl IcebergSplitEnumerator {
@@ -406,6 +407,7 @@ impl IcebergSplitEnumerator {
             position_delete_files,
             equality_delete_columns,
             format_version,
+            schema,
         })
     }
 

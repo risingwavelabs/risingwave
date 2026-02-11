@@ -102,6 +102,7 @@ impl FallibleRule<Logical> for IcebergIntermediateScanRule {
                 mut position_delete_files,
                 equality_delete_columns,
                 format_version,
+                schema: table_schema,
             }) = list_result
             else {
                 tracing::info!(
@@ -117,16 +118,15 @@ impl FallibleRule<Logical> for IcebergIntermediateScanRule {
             }
 
             // Build the data file scan with pre-computed splits
-            let schema = data_files[0].schema.clone();
             let mut projection_columns: Vec<&str> = scan
                 .output_columns
                 .iter()
                 .chain(&equality_delete_columns)
                 .map(|col| col.as_str())
                 .collect();
-            projection_columns.sort_unstable_by_key(|&s| schema.field_id_by_name(s));
+            projection_columns.sort_unstable_by_key(|&s| table_schema.field_id_by_name(s));
             projection_columns.dedup();
-            set_project_field_ids(&mut data_files, &schema, projection_columns.iter())?;
+            set_project_field_ids(&mut data_files, table_schema.as_ref(), projection_columns.iter())?;
             match format_version {
                 FormatVersion::V1 | FormatVersion::V2 => {
                     for file in &mut data_files {
@@ -166,7 +166,7 @@ impl FallibleRule<Logical> for IcebergIntermediateScanRule {
             if !equality_delete_files.is_empty() {
                 set_project_field_ids(
                     &mut equality_delete_files,
-                    &schema,
+                    table_schema.as_ref(),
                     equality_delete_columns.iter(),
                 )?;
                 plan = build_equality_delete_hashjoin_scan(
@@ -182,7 +182,7 @@ impl FallibleRule<Logical> for IcebergIntermediateScanRule {
             if use_position_delete_join {
                 set_project_field_ids(
                     &mut position_delete_files,
-                    &schema,
+                    table_schema.as_ref(),
                     std::iter::empty::<&str>(),
                 )?;
                 plan = build_position_delete_hashjoin_scan(
