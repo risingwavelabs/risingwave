@@ -2374,7 +2374,10 @@ mod tests {
         upstream_columns.push(new_column.clone());
         let upstream_table = PbTable {
             name: table_name.to_owned(),
-            columns: upstream_columns.iter().map(|col| col.to_protobuf()).collect(),
+            columns: upstream_columns
+                .iter()
+                .map(|col| col.to_protobuf())
+                .collect(),
             ..Default::default()
         };
 
@@ -2497,7 +2500,10 @@ mod tests {
 
         let upstream_table = PbTable {
             name: table_name.to_owned(),
-            columns: upstream_columns.iter().map(|col| col.to_protobuf()).collect(),
+            columns: upstream_columns
+                .iter()
+                .map(|col| col.to_protobuf())
+                .collect(),
             ..Default::default()
         };
 
