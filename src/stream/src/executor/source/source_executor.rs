@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
 use anyhow::anyhow;
@@ -24,6 +24,7 @@ use risingwave_common::catalog::{ColumnId, TableId};
 use risingwave_common::metrics::{GLOBAL_ERROR_METRICS, LabelGuardedMetric};
 use risingwave_common::system_param::local_manager::SystemParamsReaderRef;
 use risingwave_common::system_param::reader::SystemParamsRead;
+use risingwave_common::types::JsonbVal;
 use risingwave_common::util::epoch::{Epoch, EpochPair};
 use risingwave_connector::parser::schema_change::SchemaChangeEnvelope;
 use risingwave_connector::source::cdc::split::extract_postgres_lsn_from_offset_str;
@@ -394,6 +395,107 @@ impl<S: StateStore> SourceExecutor<S> {
         stream.replace_data_stream(reader_stream);
 
         Ok(())
+    }
+
+    /// Handle `InjectSourceOffsets` mutation by updating split offsets in place.
+    /// Returns `true` if any offsets were injected and a stream rebuild is needed.
+    ///
+    /// This is an UNSAFE operation that can cause data duplication or loss
+    /// depending on the correctness of the provided offsets.
+    async fn handle_inject_source_offsets(
+        &mut self,
+        split_offsets: &HashMap<String, String>,
+    ) -> StreamExecutorResult<bool> {
+        tracing::warn!(
+            actor_id = %self.actor_ctx.id,
+            source_id = %self.stream_source_core.source_id,
+            num_offsets = split_offsets.len(),
+            "UNSAFE: Injecting source offsets - this may cause data duplication or loss"
+        );
+
+        // First, filter to only offsets for splits this actor owns
+        let offsets_to_inject: Vec<(String, String)> = {
+            let owned_splits: HashSet<&str> = self
+                .stream_source_core
+                .latest_split_info
+                .keys()
+                .map(|s| s.as_ref())
+                .collect();
+            split_offsets
+                .iter()
+                .filter(|(split_id, _)| owned_splits.contains(split_id.as_str()))
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect()
+        };
+
+        // Update splits and prepare JSON states for persistence
+        let mut json_states: Vec<(String, JsonbVal)> = Vec::new();
+        let mut failed_splits: Vec<String> = Vec::new();
+
+        for (split_id, offset) in &offsets_to_inject {
+            if let Some(split) = self
+                .stream_source_core
+                .latest_split_info
+                .get_mut(split_id.as_str())
+            {
+                tracing::info!(
+                    actor_id = %self.actor_ctx.id,
+                    split_id = %split_id,
+                    offset = %offset,
+                    "Injecting offset for owned split"
+                );
+                // Update the split's offset in place
+                if let Err(e) = split.update_in_place(offset.clone()) {
+                    tracing::error!(
+                        actor_id = %self.actor_ctx.id,
+                        split_id = %split_id,
+                        error = ?e.as_report(),
+                        "Failed to update split offset"
+                    );
+                    failed_splits.push(split_id.clone());
+                    continue;
+                }
+                // Mark this split as updated for persistence
+                self.stream_source_core
+                    .updated_splits_in_epoch
+                    .insert(split_id.clone().into(), split.clone());
+                // Parse the offset as JSON and store it
+                let json_value: serde_json::Value = serde_json::from_str(offset)
+                    .unwrap_or_else(|_| serde_json::json!({ "offset": offset }));
+                json_states.push((split_id.clone(), JsonbVal::from(json_value)));
+            }
+        }
+
+        if !failed_splits.is_empty() {
+            return Err(StreamExecutorError::connector_error(anyhow!(
+                "failed to inject offsets for splits: {:?}",
+                failed_splits
+            )));
+        }
+
+        let num_injected = json_states.len();
+        if num_injected > 0 {
+            // Store the injected offsets as JSON in the state table
+            self.stream_source_core
+                .split_state_store
+                .set_states_json(json_states)
+                .await?;
+
+            tracing::info!(
+                actor_id = %self.actor_ctx.id,
+                source_id = %self.stream_source_core.source_id,
+                num_injected = num_injected,
+                "Offset injection completed for owned splits, triggering rebuild"
+            );
+            Ok(true)
+        } else {
+            tracing::info!(
+                actor_id = %self.actor_ctx.id,
+                source_id = %self.stream_source_core.source_id,
+                "No owned splits to inject offsets for"
+            );
+            Ok(false)
+        }
     }
 
     async fn persist_state_and_clear_cache(
@@ -872,6 +974,30 @@ impl<S: StateStore> SourceExecutor<S> {
                                     );
                                 }
                             }
+
+                            Mutation::InjectSourceOffsets {
+                                source_id,
+                                split_offsets,
+                            } => {
+                                if *source_id == self.stream_source_core.source_id {
+                                    if self.handle_inject_source_offsets(split_offsets).await? {
+                                        // Trigger a rebuild to apply the new offsets
+                                        split_change = Some((
+                                            &source_desc,
+                                            &mut stream,
+                                            ApplyMutationAfterBarrier::ConnectorPropsChange,
+                                        ));
+                                    }
+                                } else {
+                                    tracing::debug!(
+                                        actor_id = %self.actor_ctx.id,
+                                        target_source_id = source_id.as_raw_id(),
+                                        current_source_id = self.stream_source_core.source_id.as_raw_id(),
+                                        "InjectSourceOffsets mutation for different source, ignoring"
+                                    );
+                                }
+                            }
+
                             _ => {}
                         }
                     }
