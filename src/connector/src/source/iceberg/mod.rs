@@ -18,7 +18,7 @@ mod metrics;
 use std::collections::{BinaryHeap, HashMap, HashSet};
 use std::sync::Arc;
 
-use anyhow::{Context, anyhow};
+use anyhow::anyhow;
 use async_trait::async_trait;
 use futures::StreamExt;
 use futures_async_stream::{for_await, try_stream};
@@ -388,10 +388,7 @@ impl IcebergSplitEnumerator {
                 }
             }
         }
-        let schema = scan
-            .snapshot()
-            .context("snapshot not found")?
-            .schema(table.metadata())?;
+        let schema = table_schema.clone();
         let equality_delete_columns = equality_delete_ids
             .unwrap_or_default()
             .into_iter()
