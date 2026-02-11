@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use chrono::DateTime;
 use itertools::Itertools;
@@ -27,7 +27,6 @@ use risingwave_meta::manager::MetadataManager;
 use risingwave_meta::stream::{GlobalRefreshManagerRef, SourceManagerRunningInfo};
 use risingwave_meta::{MetaError, model};
 use risingwave_meta_model::{ConnectionId, FragmentId, StreamingParallelism};
-use risingwave_pb::common::ThrottleType;
 use risingwave_pb::meta::alter_connector_props_request::AlterConnectorPropsObject;
 use risingwave_pb::meta::cancel_creating_jobs_request::Jobs;
 use risingwave_pb::meta::list_actor_splits_response::FragmentType;
@@ -41,7 +40,6 @@ use risingwave_pb::meta::table_fragments::PbState;
 use risingwave_pb::meta::table_fragments::fragment::PbFragmentDistributionType;
 use risingwave_pb::meta::*;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
-use risingwave_pb::stream_plan::throttle_mutation::ThrottleConfig;
 use tonic::{Request, Response, Status};
 
 use crate::barrier::{BarrierScheduler, Command};
@@ -140,96 +138,14 @@ impl StreamManagerService for StreamServiceImpl {
         request: Request<ApplyThrottleRequest>,
     ) -> Result<Response<ApplyThrottleResponse>, Status> {
         let request = request.into_inner();
-
-        // Decode enums from raw i32 fields to handle decoupled target/type.
-        let throttle_target = request.throttle_target();
-        let throttle_type = request.throttle_type();
-
-        let raw_object_id: u32;
-        let jobs: HashSet<JobId>;
-        let fragments: HashSet<FragmentId>;
-
-        match (throttle_type, throttle_target) {
-            (ThrottleType::Source, ThrottleTarget::Source | ThrottleTarget::Table) => {
-                (jobs, fragments) = self
-                    .metadata_manager
-                    .update_source_rate_limit_by_source_id(request.id.into(), request.rate)
-                    .await?;
-                raw_object_id = request.id;
-            }
-            (ThrottleType::Backfill, ThrottleTarget::Mv)
-            | (ThrottleType::Backfill, ThrottleTarget::Sink)
-            | (ThrottleType::Backfill, ThrottleTarget::Table) => {
-                fragments = self
-                    .metadata_manager
-                    .update_backfill_rate_limit_by_job_id(JobId::from(request.id), request.rate)
-                    .await?;
-                jobs = [request.id.into()].into_iter().collect();
-                raw_object_id = request.id;
-            }
-            (ThrottleType::Dml, ThrottleTarget::Table) => {
-                fragments = self
-                    .metadata_manager
-                    .update_dml_rate_limit_by_job_id(JobId::from(request.id), request.rate)
-                    .await?;
-                jobs = [request.id.into()].into_iter().collect();
-                raw_object_id = request.id;
-            }
-            (ThrottleType::Sink, ThrottleTarget::Sink) => {
-                fragments = self
-                    .metadata_manager
-                    .update_sink_rate_limit_by_sink_id(request.id.into(), request.rate)
-                    .await?;
-                jobs = [request.id.into()].into_iter().collect();
-                raw_object_id = request.id;
-            }
-            // FIXME(kwannoel): specialize for throttle type x target
-            (_, ThrottleTarget::Fragment) => {
-                self.metadata_manager
-                    .update_fragment_rate_limit_by_fragment_id(request.id.into(), request.rate)
-                    .await?;
-                let fragment_id = request.id.into();
-                fragments = [fragment_id].into_iter().collect();
-                let job_id = self
-                    .metadata_manager
-                    .catalog_controller
-                    .get_fragment_streaming_job_id(fragment_id)
-                    .await?;
-                jobs = [job_id].into_iter().collect();
-                raw_object_id = job_id.as_raw_id();
-            }
-            _ => {
-                return Err(Status::invalid_argument(format!(
-                    "unsupported throttle target/type: {:?}/{:?}",
-                    throttle_target, throttle_type
-                )));
-            }
-        };
-
-        let database_id = self
-            .metadata_manager
-            .catalog_controller
-            .get_object_database_id(raw_object_id)
-            .await?;
-
-        let throttle_config = ThrottleConfig {
-            rate_limit: request.rate,
-            throttle_type: throttle_type.into(),
-        };
-        let _i = self
-            .barrier_scheduler
-            .run_command(
-                database_id,
-                Command::Throttle {
-                    jobs,
-                    config: fragments
-                        .into_iter()
-                        .map(|fragment_id| (fragment_id, throttle_config))
-                        .collect(),
-                },
+        self.stream_manager
+            .apply_throttle(
+                request.id,
+                request.rate,
+                request.throttle_type(),
+                request.throttle_target(),
             )
             .await?;
-
         Ok(Response::new(ApplyThrottleResponse { status: None }))
     }
 

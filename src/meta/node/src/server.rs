@@ -564,7 +564,7 @@ pub async fn start_service_as_election_leader(
             source_manager.clone(),
             scale_controller.clone(),
         )
-        .unwrap(),
+        .await?,
     );
 
     hummock_manager

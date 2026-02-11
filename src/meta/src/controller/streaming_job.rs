@@ -119,6 +119,7 @@ impl CatalogController {
         max_parallelism: usize,
         resource_type: streaming_job_resource_type::ResourceType,
         backfill_parallelism: Option<StreamingParallelism>,
+        backfill_rate_limit: Option<u32>,
     ) -> MetaResult<JobId> {
         let obj = Self::create_object(txn, obj_type, owner_id, database_id, schema_id).await?;
         let job_id = obj.oid.as_job_id();
@@ -139,6 +140,7 @@ impl CatalogController {
                 .map(ToString::to_string)),
             parallelism: Set(streaming_parallelism),
             backfill_parallelism: Set(backfill_parallelism),
+            backfill_rate_limit: Set(Some(backfill_rate_limit.map_or(-1, |limit| limit as i32))),
             backfill_orders: Set(None),
             max_parallelism: Set(max_parallelism as _),
             specific_resource_group: Set(specific_resource_group),
@@ -164,6 +166,7 @@ impl CatalogController {
         mut dependencies: HashSet<ObjectId>,
         resource_type: streaming_job_resource_type::ResourceType,
         backfill_parallelism: &Option<Parallelism>,
+        backfill_rate_limit: Option<u32>,
     ) -> MetaResult<()> {
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
@@ -235,6 +238,7 @@ impl CatalogController {
                     max_parallelism,
                     resource_type,
                     backfill_parallelism.clone(),
+                    backfill_rate_limit,
                 )
                 .await?;
                 table.id = job_id.as_mv_table_id();
@@ -265,6 +269,7 @@ impl CatalogController {
                     max_parallelism,
                     resource_type,
                     backfill_parallelism.clone(),
+                    backfill_rate_limit,
                 )
                 .await?;
                 sink.id = job_id.as_sink_id();
@@ -284,6 +289,7 @@ impl CatalogController {
                     max_parallelism,
                     resource_type,
                     backfill_parallelism.clone(),
+                    backfill_rate_limit,
                 )
                 .await?;
                 table.id = job_id.as_mv_table_id();
@@ -344,6 +350,7 @@ impl CatalogController {
                     max_parallelism,
                     resource_type,
                     backfill_parallelism.clone(),
+                    backfill_rate_limit,
                 )
                 .await?;
                 // to be compatible with old implementation.
@@ -377,6 +384,7 @@ impl CatalogController {
                     max_parallelism,
                     resource_type,
                     backfill_parallelism.clone(),
+                    backfill_rate_limit,
                 )
                 .await?;
                 src.id = job_id.as_shared_source_id();
@@ -978,17 +986,24 @@ impl CatalogController {
             original_timezone,
             original_config_override,
             original_adaptive_strategy,
-        ): (i32, Option<String>, Option<String>, Option<String>) =
-            StreamingJobModel::find_by_id(id)
-                .select_only()
-                .column(streaming_job::Column::MaxParallelism)
-                .column(streaming_job::Column::Timezone)
-                .column(streaming_job::Column::ConfigOverride)
-                .column(streaming_job::Column::AdaptiveParallelismStrategy)
-                .into_tuple()
-                .one(&txn)
-                .await?
-                .ok_or_else(|| MetaError::catalog_id_not_found(streaming_job.job_type_str(), id))?;
+            original_backfill_rate_limit,
+        ): (
+            i32,
+            Option<String>,
+            Option<String>,
+            Option<String>,
+            Option<i32>,
+        ) = StreamingJobModel::find_by_id(id)
+            .select_only()
+            .column(streaming_job::Column::MaxParallelism)
+            .column(streaming_job::Column::Timezone)
+            .column(streaming_job::Column::ConfigOverride)
+            .column(streaming_job::Column::AdaptiveParallelismStrategy)
+            .column(streaming_job::Column::BackfillRateLimit)
+            .into_tuple()
+            .one(&txn)
+            .await?
+            .ok_or_else(|| MetaError::catalog_id_not_found(streaming_job.job_type_str(), id))?;
 
         if let Some(max_parallelism) = expected_original_max_parallelism
             && original_max_parallelism != max_parallelism as i32
@@ -1034,6 +1049,7 @@ impl CatalogController {
             original_max_parallelism as _,
             streaming_job_resource_type::ResourceType::Regular(true),
             None,
+            original_backfill_rate_limit.and_then(|limit| (limit >= 0).then_some(limit as u32)),
         )
         .await?;
 
@@ -1956,12 +1972,36 @@ impl CatalogController {
         Ok(())
     }
 
-    // edit the `rate_limit` of the `Chain` node in given `table_id`'s fragments
-    // return the actor_ids to be applied
-    pub async fn update_backfill_rate_limit_by_job_id(
+    pub async fn update_job_backfill_rate_limit(
         &self,
         job_id: JobId,
         rate_limit: Option<u32>,
+    ) -> MetaResult<()> {
+        let inner = self.inner.write().await;
+        let txn = inner.db.begin().await?;
+
+        ensure_job_not_canceled(job_id, &txn).await?;
+
+        streaming_job::ActiveModel {
+            job_id: Set(job_id),
+            backfill_rate_limit: Set(Some(rate_limit.map_or(-1, |limit| limit as i32))),
+            ..Default::default()
+        }
+        .update(&txn)
+        .await?;
+
+        txn.commit().await?;
+
+        Ok(())
+    }
+
+    // edit the `rate_limit` of the `Chain` node in given `table_id`'s fragments
+    // return the actor_ids to be applied
+    pub async fn apply_backfill_rate_limit_by_job_id(
+        &self,
+        job_id: JobId,
+        rate_limit: Option<u32>,
+        update_desired: bool,
     ) -> MetaResult<HashSet<FragmentId>> {
         let update_backfill_rate_limit =
             |fragment_type_mask: FragmentTypeMask, stream_node: &mut PbStreamNode| {
@@ -1988,12 +2028,64 @@ impl CatalogController {
                 Ok(found)
             };
 
-        self.mutate_fragments_by_job_id(
-            job_id,
-            update_backfill_rate_limit,
-            "stream scan node or source node not found",
-        )
-        .await
+        let fragments = self
+            .mutate_fragments_by_job_id(
+                job_id,
+                update_backfill_rate_limit,
+                "stream scan node or source node not found",
+            )
+            .await?;
+
+        if update_desired {
+            let inner = self.inner.read().await;
+            let txn = inner.db.begin().await?;
+            streaming_job::ActiveModel {
+                job_id: Set(job_id),
+                backfill_rate_limit: Set(Some(rate_limit.map_or(-1, |limit| limit as i32))),
+                ..Default::default()
+            }
+            .update(&txn)
+            .await?;
+            txn.commit().await?;
+        }
+
+        Ok(fragments)
+    }
+
+    pub async fn update_backfill_rate_limit_by_job_id(
+        &self,
+        job_id: JobId,
+        rate_limit: Option<u32>,
+    ) -> MetaResult<HashSet<FragmentId>> {
+        self.apply_backfill_rate_limit_by_job_id(job_id, rate_limit, true)
+            .await
+    }
+
+    pub async fn apply_backfill_rate_limit_by_job_id_without_override(
+        &self,
+        job_id: JobId,
+        rate_limit: Option<u32>,
+    ) -> MetaResult<HashSet<FragmentId>> {
+        self.apply_backfill_rate_limit_by_job_id(job_id, rate_limit, false)
+            .await
+    }
+
+    pub async fn init_job_backfill_rate_limit_if_missing(
+        &self,
+        job_id: JobId,
+        rate_limit: Option<u32>,
+    ) -> MetaResult<()> {
+        let inner = self.inner.read().await;
+        let txn = inner.db.begin().await?;
+        let desired = rate_limit.map_or(-1, |limit| limit as i32);
+        StreamingJobModel::update_many()
+            .col_expr(streaming_job::Column::BackfillRateLimit, desired.into())
+            .filter(streaming_job::Column::JobId.eq(job_id))
+            .filter(streaming_job::Column::BackfillRateLimit.is_null())
+            .exec(&txn)
+            .await?;
+        txn.commit().await?;
+        Ok(())
     }
 
     // edit the `rate_limit` of the `Sink` node in given `table_id`'s fragments

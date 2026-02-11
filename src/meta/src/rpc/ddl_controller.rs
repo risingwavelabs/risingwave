@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 use std::num::NonZeroUsize;
 use std::sync::Arc;
@@ -20,18 +19,17 @@ use std::sync::atomic::AtomicU64;
 use std::time::Duration;
 
 use anyhow::{Context, anyhow};
-use await_tree::InstrumentAwait;
 use either::Either;
 use itertools::Itertools;
 use risingwave_common::catalog::{
-    AlterDatabaseParam, ColumnCatalog, ColumnId, Field, FragmentTypeFlag,
+    AlterDatabaseParam, ColumnCatalog, ColumnId, Field, FragmentTypeFlag, FragmentTypeMask,
 };
 use risingwave_common::config::DefaultParallelism;
 use risingwave_common::hash::VnodeCountCompat;
 use risingwave_common::id::{JobId, TableId};
 use risingwave_common::secret::{LocalSecretManager, SecretEncryption};
 use risingwave_common::system_param::reader::SystemParamsRead;
-use risingwave_common::util::stream_graph_visitor::visit_stream_node_cont_mut;
+use risingwave_common::util::stream_graph_visitor::{visit_fragment, visit_stream_node_cont_mut};
 use risingwave_common::{bail, bail_not_implemented};
 use risingwave_connector::WithOptionsSecResolved;
 use risingwave_connector::connector_common::validate_connection;
@@ -66,7 +64,6 @@ use risingwave_pb::stream_plan::{
 use risingwave_pb::telemetry::{PbTelemetryDatabaseObject, PbTelemetryEventStage};
 use strum::Display;
 use thiserror_ext::AsReport;
-use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tokio::time::sleep;
 use tracing::Instrument;
 
@@ -274,73 +271,8 @@ pub struct DdlController {
     sink_manager: SinkCoordinatorManager,
     iceberg_compaction_manager: IcebergCompactionManagerRef,
 
-    // The semaphore is used to limit the number of concurrent streaming job creation.
-    pub(crate) creating_streaming_job_permits: Arc<CreatingStreamingJobPermit>,
-
     /// Sequence number for DDL commands, used for observability and debugging.
     seq: Arc<AtomicU64>,
-}
-
-#[derive(Clone)]
-pub struct CreatingStreamingJobPermit {
-    pub(crate) semaphore: Arc<Semaphore>,
-}
-
-impl CreatingStreamingJobPermit {
-    async fn new(env: &MetaSrvEnv) -> Self {
-        let mut permits = env
-            .system_params_reader()
-            .await
-            .max_concurrent_creating_streaming_jobs() as usize;
-        if permits == 0 {
-            // if the system parameter is set to zero, use the max permitted value.
-            permits = Semaphore::MAX_PERMITS;
-        }
-        let semaphore = Arc::new(Semaphore::new(permits));
-
-        let (local_notification_tx, mut local_notification_rx) =
-            tokio::sync::mpsc::unbounded_channel();
-        env.notification_manager()
-            .insert_local_sender(local_notification_tx);
-        let semaphore_clone = semaphore.clone();
-        tokio::spawn(async move {
-            while let Some(notification) = local_notification_rx.recv().await {
-                let LocalNotification::SystemParamsChange(p) = &notification else {
-                    continue;
-                };
-                let mut new_permits = p.max_concurrent_creating_streaming_jobs() as usize;
-                if new_permits == 0 {
-                    new_permits = Semaphore::MAX_PERMITS;
-                }
-                match permits.cmp(&new_permits) {
-                    Ordering::Less => {
-                        semaphore_clone.add_permits(new_permits - permits);
-                    }
-                    Ordering::Equal => continue,
-                    Ordering::Greater => {
-                        let to_release = permits - new_permits;
-                        let reduced = semaphore_clone.forget_permits(to_release);
-                        // TODO: implement dynamic semaphore with limits by ourself.
-                        if reduced != to_release {
-                            tracing::warn!(
-                                "no enough permits to release, expected {}, but reduced {}",
-                                to_release,
-                                reduced
-                            );
-                        }
-                    }
-                }
-                tracing::info!(
-                    "max_concurrent_creating_streaming_jobs changed from {} to {}",
-                    permits,
-                    new_permits
-                );
-                permits = new_permits;
-            }
-        });
-
-        Self { semaphore }
-    }
 }
 
 impl DdlController {
@@ -353,7 +285,6 @@ impl DdlController {
         sink_manager: SinkCoordinatorManager,
         iceberg_compaction_manager: IcebergCompactionManagerRef,
     ) -> Self {
-        let creating_streaming_job_permits = Arc::new(CreatingStreamingJobPermit::new(&env).await);
         Self {
             env,
             metadata_manager,
@@ -362,7 +293,6 @@ impl DdlController {
             barrier_manager,
             sink_manager,
             iceberg_compaction_manager,
-            creating_streaming_job_permits,
             seq: Arc::new(AtomicU64::new(0)),
         }
     }
@@ -768,12 +698,6 @@ impl DdlController {
         mut subscription: Subscription,
     ) -> MetaResult<NotificationVersion> {
         tracing::debug!("create subscription");
-        let _permit = self
-            .creating_streaming_job_permits
-            .semaphore
-            .acquire()
-            .await
-            .unwrap();
         let _reschedule_job_lock = self.stream_manager.reschedule_lock_read_guard().await;
         self.metadata_manager
             .catalog_controller
@@ -959,6 +883,7 @@ impl DdlController {
             self.validate_table_for_sink(target_table).await?;
         }
         let ctx = StreamContext::from_protobuf(fragment_graph.get_ctx().unwrap());
+        let backfill_rate_limit = extract_backfill_rate_limit(&fragment_graph);
         let check_ret = self
             .metadata_manager
             .catalog_controller
@@ -970,6 +895,7 @@ impl DdlController {
                 dependencies,
                 resource_type.clone(),
                 &fragment_graph.backfill_parallelism,
+                backfill_rate_limit,
             )
             .await;
         if let Err(meta_err) = check_ret {
@@ -997,15 +923,6 @@ impl DdlController {
             job_type = ?streaming_job.job_type(),
             "starting streaming job",
         );
-        // TODO: acquire permits for recovered background DDLs.
-        let permit = self
-            .creating_streaming_job_permits
-            .semaphore
-            .clone()
-            .acquire_owned()
-            .instrument_await("acquire_creating_streaming_job_permit")
-            .await
-            .unwrap();
         let _reschedule_job_lock = self.stream_manager.reschedule_lock_read_guard().await;
 
         let name = streaming_job.name();
@@ -1017,7 +934,7 @@ impl DdlController {
 
         // create streaming job.
         match self
-            .create_streaming_job_inner(ctx, streaming_job, fragment_graph, resource_type, permit)
+            .create_streaming_job_inner(ctx, streaming_job, fragment_graph, resource_type)
             .await
         {
             Ok(version) => Ok(version),
@@ -1060,7 +977,6 @@ impl DdlController {
         mut streaming_job: StreamingJob,
         fragment_graph: StreamFragmentGraphProto,
         resource_type: streaming_job_resource_type::ResourceType,
-        permit: OwnedSemaphorePermit,
     ) -> MetaResult<NotificationVersion> {
         let mut fragment_graph =
             StreamFragmentGraph::new(&self.env, fragment_graph, &streaming_job)?;
@@ -1171,7 +1087,7 @@ impl DdlController {
         // create streaming jobs.
         let version = self
             .stream_manager
-            .create_streaming_job(stream_job_fragments, ctx, permit)
+            .create_streaming_job(stream_job_fragments, ctx)
             .await?;
 
         Ok(version)
@@ -2329,6 +2245,42 @@ impl DdlController {
             .alter_streaming_job_config(job_id, entries_to_add, keys_to_remove)
             .await
     }
+}
+
+fn extract_backfill_rate_limit(fragment_graph: &StreamFragmentGraphProto) -> Option<u32> {
+    let mut saw_backfill_nodes = false;
+    let mut rate_limit: Option<u32> = None;
+    for fragment in fragment_graph.fragments.values() {
+        let fragment_type_mask = FragmentTypeMask::from(fragment.fragment_type_mask);
+        if !fragment_type_mask.contains_any(FragmentTypeFlag::backfill_rate_limit_fragments()) {
+            continue;
+        }
+        saw_backfill_nodes = true;
+        visit_fragment(fragment, |node| {
+            let node_rate_limit = match node {
+                NodeBody::StreamCdcScan(node) => node.rate_limit,
+                NodeBody::StreamScan(node) => node.rate_limit,
+                NodeBody::SourceBackfill(node) => node.rate_limit,
+                NodeBody::Sink(node) => node.rate_limit,
+                _ => None,
+            };
+            let Some(node_rate_limit) = node_rate_limit else {
+                return;
+            };
+            if let Some(existing) = rate_limit {
+                if existing != node_rate_limit {
+                    tracing::warn!(
+                        existing,
+                        node_rate_limit,
+                        "inconsistent backfill rate limit detected in fragment graph"
+                    );
+                }
+            } else {
+                rate_limit = Some(node_rate_limit);
+            }
+        });
+    }
+    saw_backfill_nodes.then_some(rate_limit).flatten()
 }
 
 fn report_create_object(

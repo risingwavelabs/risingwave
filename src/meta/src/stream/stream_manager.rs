@@ -26,16 +26,20 @@ use risingwave_connector::source::CdcTableSnapshotSplitRaw;
 use risingwave_meta_model::prelude::Fragment as FragmentModel;
 use risingwave_meta_model::{StreamingParallelism, fragment};
 use risingwave_pb::catalog::{CreateType, PbSink, PbTable, Subscription};
+use risingwave_pb::common::ThrottleType;
 use risingwave_pb::expr::PbExprNode;
+use risingwave_pb::meta::ThrottleTarget;
 use risingwave_pb::meta::table_fragments::ActorStatus;
 use risingwave_pb::plan_common::{PbColumnCatalog, PbField};
+use risingwave_pb::stream_plan::throttle_mutation::ThrottleConfig;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QuerySelect};
 use thiserror_ext::AsReport;
-use tokio::sync::{Mutex, OwnedSemaphorePermit, oneshot};
+use tokio::sync::oneshot;
 use tracing::Instrument;
 
+use super::creating_job_tracker::extract_backfill_rate_limit_from_fragments;
 use super::{
-    Locations, ReschedulePolicy, ScaleControllerRef, StreamFragmentGraph,
+    CreatingJobTracker, Locations, ReschedulePolicy, ScaleControllerRef, StreamFragmentGraph,
     UserDefinedFragmentBackfillOrder,
 };
 use crate::barrier::{
@@ -112,78 +116,6 @@ pub struct CreateStreamingJobContext {
 
     pub is_serverless_backfill: bool,
 }
-
-struct StreamingJobExecution {
-    id: JobId,
-    shutdown_tx: Option<oneshot::Sender<oneshot::Sender<bool>>>,
-    _permit: OwnedSemaphorePermit,
-}
-
-impl StreamingJobExecution {
-    fn new(
-        id: JobId,
-        shutdown_tx: oneshot::Sender<oneshot::Sender<bool>>,
-        permit: OwnedSemaphorePermit,
-    ) -> Self {
-        Self {
-            id,
-            shutdown_tx: Some(shutdown_tx),
-            _permit: permit,
-        }
-    }
-}
-
-#[derive(Default)]
-struct CreatingStreamingJobInfo {
-    streaming_jobs: Mutex<HashMap<JobId, StreamingJobExecution>>,
-}
-
-impl CreatingStreamingJobInfo {
-    async fn add_job(&self, job: StreamingJobExecution) {
-        let mut jobs = self.streaming_jobs.lock().await;
-        jobs.insert(job.id, job);
-    }
-
-    async fn delete_job(&self, job_id: JobId) {
-        let mut jobs = self.streaming_jobs.lock().await;
-        jobs.remove(&job_id);
-    }
-
-    async fn cancel_jobs(
-        &self,
-        job_ids: Vec<JobId>,
-    ) -> MetaResult<(HashMap<JobId, oneshot::Receiver<bool>>, Vec<JobId>)> {
-        let mut jobs = self.streaming_jobs.lock().await;
-        let mut receivers = HashMap::new();
-        let mut background_job_ids = vec![];
-        for job_id in job_ids {
-            if let Some(job) = jobs.get_mut(&job_id) {
-                if let Some(shutdown_tx) = job.shutdown_tx.take() {
-                    let (tx, rx) = oneshot::channel();
-                    match shutdown_tx.send(tx) {
-                        Ok(()) => {
-                            receivers.insert(job_id, rx);
-                        }
-                        Err(_) => {
-                            return Err(anyhow::anyhow!(
-                                "failed to send shutdown signal for streaming job {}: receiver dropped",
-                                job_id
-                            )
-                            .into());
-                        }
-                    }
-                }
-            } else {
-                // If these job ids do not exist in streaming_jobs, they should be background creating jobs.
-                background_job_ids.push(job_id);
-            }
-        }
-
-        Ok((receivers, background_job_ids))
-    }
-}
-
-type CreatingStreamingJobInfoRef = Arc<CreatingStreamingJobInfo>;
 
 #[derive(Debug, Clone)]
 pub struct AutoRefreshSchemaSinkContext {
@@ -268,26 +200,31 @@ pub struct GlobalStreamManager {
     /// Maintains streaming sources from external system like kafka
     pub source_manager: SourceManagerRef,
 
-    /// Creating streaming job info.
-    creating_job_info: CreatingStreamingJobInfoRef,
+    creating_job_tracker: Arc<CreatingJobTracker>,
 
     pub scale_controller: ScaleControllerRef,
 }
 
 impl GlobalStreamManager {
-    pub fn new(
+    pub async fn new(
         env: MetaSrvEnv,
         metadata_manager: MetadataManager,
         barrier_scheduler: BarrierScheduler,
         source_manager: SourceManagerRef,
         scale_controller: ScaleControllerRef,
     ) -> MetaResult<Self> {
+        let creating_job_tracker = CreatingJobTracker::new(
+            env.clone(),
+            metadata_manager.clone(),
+            barrier_scheduler.clone(),
+        )
+        .await?;
         Ok(Self {
             env,
             metadata_manager,
             barrier_scheduler,
             source_manager,
-            creating_job_info: Arc::new(CreatingStreamingJobInfo::default()),
+            creating_job_tracker,
             scale_controller,
         })
     }
@@ -307,7 +244,6 @@ impl GlobalStreamManager {
         self: &Arc<Self>,
         stream_job_fragments: StreamJobFragmentsToCreate,
         ctx: CreateStreamingJobContext,
-        permit: OwnedSemaphorePermit,
     ) -> MetaResult<NotificationVersion> {
         let await_tree_key = format!("Create Streaming Job Worker ({})", ctx.streaming_job.id());
         let await_tree_span = span!(
@@ -319,15 +255,21 @@ impl GlobalStreamManager {
         let job_id = stream_job_fragments.stream_job_id();
         let database_id = ctx.streaming_job.database_id();
 
+        let backfill_rate_limit = extract_backfill_rate_limit_from_fragments(&stream_job_fragments);
         let (cancel_tx, cancel_rx) = oneshot::channel();
-        let execution = StreamingJobExecution::new(job_id, cancel_tx, permit);
-        self.creating_job_info.add_job(execution).await;
+        self.creating_job_tracker
+            .add_execution(job_id, cancel_tx)
+            .await;
 
         let stream_manager = self.clone();
         let fut = async move {
             let create_type = ctx.create_type;
             let streaming_job = stream_manager
                 .run_create_streaming_job_command(stream_job_fragments, ctx)
+                .await?;
+            stream_manager
+                .creating_job_tracker
+                .register_job(job_id, database_id, backfill_rate_limit)
                 .await?;
             let version = match create_type {
                 CreateType::Background => {
@@ -444,8 +386,113 @@ impl GlobalStreamManager {
         .await;
 
         tracing::debug!("cleaning creating job info: {}", job_id);
-        self.creating_job_info.delete_job(job_id).await;
+        self.creating_job_tracker.remove_execution(job_id).await;
         result
+    }
+
+    pub async fn apply_throttle(
+        &self,
+        object_id: u32,
+        rate_limit: Option<u32>,
+        throttle_type: ThrottleType,
+        throttle_target: ThrottleTarget,
+    ) -> MetaResult<()> {
+        let raw_object_id: u32;
+        let jobs: HashSet<JobId>;
+        let fragments: HashSet<FragmentId>;
+
+        match (throttle_type, throttle_target) {
+            (ThrottleType::Source, ThrottleTarget::Source | ThrottleTarget::Table) => {
+                (jobs, fragments) = self
+                    .metadata_manager
+                    .update_source_rate_limit_by_source_id(object_id.into(), rate_limit)
+                    .await?;
+                raw_object_id = object_id;
+            }
+            (ThrottleType::Backfill, ThrottleTarget::Mv)
+            | (ThrottleType::Backfill, ThrottleTarget::Sink)
+            | (ThrottleType::Backfill, ThrottleTarget::Table) => {
+                let job_id = JobId::from(object_id);
+                if self
+                    .creating_job_tracker
+                    .update_queued_desired_backfill_rate_limit(job_id, rate_limit)
+                    .await
+                {
+                    self.metadata_manager
+                        .catalog_controller
+                        .update_job_backfill_rate_limit(job_id, rate_limit)
+                        .await?;
+                    return Ok(());
+                }
+                fragments = self
+                    .metadata_manager
+                    .update_backfill_rate_limit_by_job_id(job_id, rate_limit)
+                    .await?;
+                jobs = [job_id].into_iter().collect();
+                raw_object_id = object_id;
+            }
+            (ThrottleType::Dml, ThrottleTarget::Table) => {
+                fragments = self
+                    .metadata_manager
+                    .update_dml_rate_limit_by_job_id(JobId::from(object_id), rate_limit)
+                    .await?;
+                jobs = [object_id.into()].into_iter().collect();
+                raw_object_id = object_id;
+            }
+            (ThrottleType::Sink, ThrottleTarget::Sink) => {
+                fragments = self
+                    .metadata_manager
+                    .update_sink_rate_limit_by_sink_id(object_id.into(), rate_limit)
+                    .await?;
+                jobs = [object_id.into()].into_iter().collect();
+                raw_object_id = object_id;
+            }
+            (_, ThrottleTarget::Fragment) => {
+                self.metadata_manager
+                    .update_fragment_rate_limit_by_fragment_id(object_id.into(), rate_limit)
+                    .await?;
+                let fragment_id = object_id.into();
+                fragments = [fragment_id].into_iter().collect();
+                let job_id = self
+                    .metadata_manager
+                    .catalog_controller
+                    .get_fragment_streaming_job_id(fragment_id)
+                    .await?;
+                jobs = [job_id].into_iter().collect();
+                raw_object_id = job_id.as_raw_id();
+            }
+            _ => {
+                return Err(MetaError::invalid_parameter(format!(
+                    "unsupported throttle target/type: {:?}/{:?}",
+                    throttle_target, throttle_type
+                )));
+            }
+        }
+
+        let database_id = self
+            .metadata_manager
+            .catalog_controller
+            .get_object_database_id(raw_object_id)
+            .await?;
+
+        let throttle_config = ThrottleConfig {
+            rate_limit,
+            throttle_type: throttle_type.into(),
+        };
+        self.barrier_scheduler
+            .run_command(
+                database_id,
+                Command::Throttle {
+                    jobs,
+                    config: fragments
+                        .into_iter()
+                        .map(|fragment_id| (fragment_id, throttle_config))
+                        .collect(),
+                },
+            )
+            .await?;
+
+        Ok(())
     }
 
     /// The function will return after barrier collected
@@ -659,7 +706,8 @@ impl GlobalStreamManager {
         }
 
         let _reschedule_job_lock = self.reschedule_lock_read_guard().await;
-        let (receivers, background_job_ids) = self.creating_job_info.cancel_jobs(job_ids).await?;
+        let (receivers, background_job_ids) =
+            self.creating_job_tracker.cancel_jobs(job_ids).await?;
 
         let futures = receivers.into_iter().map(|(id, receiver)| async move {
             if let Ok(cancelled) = receiver.await
