@@ -24,7 +24,7 @@ use itertools::Itertools;
 use parking_lot::RwLock;
 use risingwave_common::array::VectorRef;
 use risingwave_common::bitmap::{Bitmap, BitmapBuilder};
-use risingwave_common::catalog::{TableId, TableOption};
+use risingwave_common::catalog::TableId;
 use risingwave_common::dispatch_distance_measurement;
 use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
 use risingwave_common::types::ScalarRef;
@@ -985,7 +985,6 @@ pub struct RangeKvLocalStateStore<R: RangeKv> {
 
     table_id: TableId,
     op_consistency_level: OpConsistencyLevel,
-    table_option: TableOption,
     vnodes: Arc<Bitmap>,
 }
 
@@ -997,7 +996,6 @@ impl<R: RangeKv> RangeKvLocalStateStore<R> {
             epoch: None,
             table_id: option.table_id,
             op_consistency_level: option.op_consistency_level,
-            table_option: option.table_option,
             vnodes: option.vnodes,
             vectors: vec![],
         }
@@ -1134,7 +1132,6 @@ impl<R: RangeKv> StateStoreWriteEpochControl for RangeKvLocalStateStore<R> {
                             &key,
                             &value,
                             sanity_check_read_snapshot,
-                            self.table_option,
                             &self.op_consistency_level,
                         )
                         .await?;
@@ -1148,7 +1145,6 @@ impl<R: RangeKv> StateStoreWriteEpochControl for RangeKvLocalStateStore<R> {
                             &key,
                             &old_value,
                             sanity_check_read_snapshot,
-                            self.table_option,
                             &self.op_consistency_level,
                         )
                         .await?;
@@ -1163,7 +1159,6 @@ impl<R: RangeKv> StateStoreWriteEpochControl for RangeKvLocalStateStore<R> {
                             &old_value,
                             &new_value,
                             sanity_check_read_snapshot,
-                            self.table_option,
                             &self.op_consistency_level,
                         )
                         .await?;

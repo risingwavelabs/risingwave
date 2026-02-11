@@ -23,9 +23,14 @@ use risingwave_common::hash::VirtualNode;
 use risingwave_common::id::JobId;
 use risingwave_common::util::epoch::test_epoch;
 use risingwave_meta_model::fragment::DistributionType;
+use risingwave_meta_model::{
+    CreateType, I32Array, JobStatus, StreamNode, StreamingParallelism, TableIdArray, database,
+    fragment, streaming_job,
+};
 use risingwave_pb::catalog::Database;
 use risingwave_pb::common::{HostAddress, PbWorkerType, WorkerNode, worker_node};
 use risingwave_pb::hummock::HummockVersionStats;
+use risingwave_pb::stream_plan::PbStreamNode;
 use risingwave_pb::stream_service::streaming_control_stream_request::{PbInitRequest, Request};
 use risingwave_pb::stream_service::streaming_control_stream_response::Response;
 use risingwave_pb::stream_service::{
@@ -38,8 +43,9 @@ use tokio::task::yield_now;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
 use crate::MetaResult;
-use crate::barrier::command::CommandContext;
+use crate::barrier::command::PostCollectCommand;
 use crate::barrier::context::GlobalBarrierWorkerContext;
+use crate::barrier::context::recovery::LoadedRecoveryContext;
 use crate::barrier::progress::TrackingJob;
 use crate::barrier::rpc::from_partial_graph_id;
 use crate::barrier::schedule::MarkReadyOptions;
@@ -47,10 +53,11 @@ use crate::barrier::worker::GlobalBarrierWorker;
 use crate::barrier::{
     BarrierWorkerRuntimeInfoSnapshot, DatabaseRuntimeInfoSnapshot, RecoveryReason, Scheduled,
 };
-use crate::controller::fragment::{InflightActorInfo, InflightFragmentInfo};
+use crate::controller::scale::{LoadedFragment, LoadedFragmentContext, NoShuffleEnsemble};
+use crate::controller::utils::StreamingJobExtraInfo;
 use crate::hummock::CommitEpochInfo;
 use crate::manager::{ActiveStreamingWorkerNodes, MetaOpts, MetaSrvEnv};
-use crate::model::StreamActor;
+use crate::model::{FragmentDownstreamRelation, FragmentId};
 
 enum ContextRequest {
     AbortAndMarkBlocked(RecoveryReason),
@@ -88,7 +95,7 @@ impl GlobalBarrierWorkerContext for MockBarrierWorkerContext {
         self.0.send(ContextRequest::MarkReady).unwrap();
     }
 
-    async fn post_collect_command<'a>(&'a self, _command: &'a CommandContext) -> MetaResult<()> {
+    async fn post_collect_command(&self, _command: PostCollectCommand) -> MetaResult<()> {
         unreachable!()
     }
 
@@ -121,7 +128,7 @@ impl GlobalBarrierWorkerContext for MockBarrierWorkerContext {
     async fn reload_database_runtime_info(
         &self,
         _database_id: DatabaseId,
-    ) -> MetaResult<Option<DatabaseRuntimeInfoSnapshot>> {
+    ) -> MetaResult<DatabaseRuntimeInfoSnapshot> {
         unreachable!()
     }
 
@@ -181,8 +188,9 @@ async fn test_barrier_manager_worker_crash_no_early_commit() {
         unreachable!()
     };
     let database_id = DatabaseId::new(233);
-    let job_id = JobId::new(234);
-    let worker_node = |id: u32| WorkerNode {
+    let job_id1 = JobId::new(234);
+    let job_id2 = JobId::new(235);
+    let worker_node = |id: u32, resource_group: &str| WorkerNode {
         id: id.into(),
         r#type: PbWorkerType::ComputeNode as i32,
         host: Some(HostAddress {
@@ -190,103 +198,138 @@ async fn test_barrier_manager_worker_crash_no_early_commit() {
             port: 0,
         }),
         state: worker_node::State::Running as i32,
-        property: None,
+        property: Some(worker_node::Property {
+            is_streaming: true,
+            is_serving: true,
+            is_unschedulable: false,
+            internal_rpc_host_addr: "".to_owned(),
+            parallelism: 1,
+            resource_group: Some(resource_group.to_owned()),
+            is_iceberg_compactor: false,
+        }),
         transactional_id: None,
         resource: None,
         started_at: None,
     };
-    let worker1 = worker_node(1);
-    let worker2 = worker_node(2);
-    // two actors on two singleton fragments
-    let new_actor = |actor_id| StreamActor {
-        actor_id,
-        fragment_id: actor_id.as_raw_id().into(),
-        vnode_bitmap: None,
-        mview_definition: "".to_owned(),
-        expr_context: None,
-        config_override: "".into(),
-    };
+    let worker1_group = "rg-a";
+    let worker2_group = "rg-b";
+    let worker1 = worker_node(1, worker1_group);
+    let worker2 = worker_node(2, worker2_group);
     let table1 = TableId::new(1);
     let table2 = TableId::new(2);
-    let actor1 = new_actor(1.into());
-    let actor2 = new_actor(2.into());
+    let fragment1 = FragmentId::new(101);
+    let fragment2 = FragmentId::new(102);
     let initial_epoch = test_epoch(100);
+
+    let fragment_model = |fragment_id: FragmentId, job_id: JobId, table_id: TableId| {
+        #[allow(deprecated)]
+        LoadedFragment::from(fragment::Model {
+            fragment_id,
+            job_id,
+            fragment_type_mask: 0,
+            distribution_type: DistributionType::Single,
+            stream_node: StreamNode::from(&PbStreamNode::default()),
+            state_table_ids: TableIdArray(vec![table_id]),
+            upstream_fragment_id: I32Array::default(),
+            vnode_count: VirtualNode::COUNT_FOR_TEST as i32,
+            parallelism: Some(StreamingParallelism::Fixed(1)),
+        })
+    };
+
+    let fragment_map_job1 =
+        HashMap::from([(fragment1, fragment_model(fragment1, job_id1, table1))]);
+    let fragment_map_job2 =
+        HashMap::from([(fragment2, fragment_model(fragment2, job_id2, table2))]);
+
+    let build_job_model = |job_id: JobId, resource_group: &str| streaming_job::Model {
+        job_id,
+        job_status: JobStatus::Creating,
+        create_type: CreateType::Foreground,
+        timezone: None,
+        config_override: None,
+        adaptive_parallelism_strategy: None,
+        parallelism: StreamingParallelism::Fixed(1),
+        backfill_parallelism: None,
+        backfill_orders: None,
+        max_parallelism: 1,
+        specific_resource_group: Some(resource_group.to_owned()),
+        is_serverless_backfill: false,
+    };
+    let job_model1 = build_job_model(job_id1, worker1_group);
+    let job_model2 = build_job_model(job_id2, worker2_group);
+
+    let database_model = database::Model {
+        database_id,
+        name: "db".to_owned(),
+        resource_group: "test".to_owned(),
+        barrier_interval_ms: None,
+        checkpoint_frequency: None,
+    };
+
+    let fragment_context = LoadedFragmentContext {
+        ensembles: vec![
+            NoShuffleEnsemble::for_test([fragment1], [fragment1]),
+            NoShuffleEnsemble::for_test([fragment2], [fragment2]),
+        ],
+        job_fragments: HashMap::from([(job_id1, fragment_map_job1), (job_id2, fragment_map_job2)]),
+        job_map: HashMap::from([(job_id1, job_model1), (job_id2, job_model2)]),
+        streaming_job_databases: HashMap::from([(job_id1, database_id), (job_id2, database_id)]),
+        database_map: HashMap::from([(database_id, database_model)]),
+        fragment_source_ids: HashMap::new(),
+        fragment_splits: HashMap::new(),
+    };
+
+    let recovery_context = LoadedRecoveryContext {
+        fragment_context,
+        job_extra_info: HashMap::from([
+            (
+                job_id1,
+                StreamingJobExtraInfo {
+                    timezone: None,
+                    config_override: Arc::<str>::from(""),
+                    adaptive_parallelism_strategy: None,
+                    job_definition: "".to_owned(),
+                    backfill_orders: None,
+                },
+            ),
+            (
+                job_id2,
+                StreamingJobExtraInfo {
+                    timezone: None,
+                    config_override: Arc::<str>::from(""),
+                    adaptive_parallelism_strategy: None,
+                    job_definition: "".to_owned(),
+                    backfill_orders: None,
+                },
+            ),
+        ]),
+        upstream_sink_recovery: HashMap::new(),
+        fragment_relations: FragmentDownstreamRelation::default(),
+    };
 
     tx.send(BarrierWorkerRuntimeInfoSnapshot {
         active_streaming_nodes: ActiveStreamingWorkerNodes::for_test(HashMap::from_iter([
             (worker1.id, worker1.clone()),
             (worker2.id, worker2.clone()),
         ])),
-        database_job_infos: HashMap::from_iter([(
-            database_id,
-            HashMap::from_iter([(
-                job_id,
-                HashMap::from_iter([
-                    (
-                        actor1.fragment_id,
-                        InflightFragmentInfo {
-                            fragment_id: actor1.fragment_id,
-                            distribution_type: DistributionType::Single,
-                            fragment_type_mask: Default::default(),
-                            vnode_count: VirtualNode::COUNT_FOR_TEST,
-                            nodes: Default::default(),
-                            actors: HashMap::from_iter([(
-                                actor1.actor_id as _,
-                                InflightActorInfo {
-                                    worker_id: worker1.id,
-                                    vnode_bitmap: None,
-                                    splits: vec![],
-                                },
-                            )]),
-                            state_table_ids: HashSet::from_iter([table1]),
-                        },
-                    ),
-                    (
-                        actor2.fragment_id,
-                        InflightFragmentInfo {
-                            fragment_id: actor2.fragment_id,
-                            distribution_type: DistributionType::Single,
-                            fragment_type_mask: Default::default(),
-                            vnode_count: VirtualNode::COUNT_FOR_TEST,
-                            nodes: Default::default(),
-                            actors: HashMap::from_iter([(
-                                actor2.actor_id as _,
-                                InflightActorInfo {
-                                    worker_id: worker2.id,
-                                    vnode_bitmap: None,
-                                    splits: vec![],
-                                },
-                            )]),
-                            state_table_ids: HashSet::from_iter([table2]),
-                        },
-                    ),
-                ]),
-            )]),
-        )]),
-        backfill_orders: Default::default(),
-        state_table_committed_epochs: HashMap::from_iter([
+        recovery_context,
+        state_table_committed_epochs: HashMap::from([
             (table1, initial_epoch),
             (table2, initial_epoch),
         ]),
-        state_table_log_epochs: Default::default(),
-        mv_depended_subscriptions: Default::default(),
-        stream_actors: HashMap::from_iter([
-            (actor1.actor_id as _, actor1.clone()),
-            (actor2.actor_id as _, actor2.clone()),
-        ]),
-        fragment_relations: Default::default(),
-        source_splits: Default::default(),
-        background_jobs: Default::default(),
-        hummock_version_stats: Default::default(),
+        state_table_log_epochs: HashMap::new(),
+        mv_depended_subscriptions: HashMap::new(),
+        background_jobs: HashSet::new(),
+        hummock_version_stats: HummockVersionStats::default(),
         database_infos: vec![Database {
             id: database_id,
             name: "".to_owned(),
-            owner: 0,
+            owner: 0.into(),
             resource_group: "test".to_owned(),
             barrier_interval_ms: None,
             checkpoint_frequency: None,
         }],
-        cdc_table_snapshot_splits: Default::default(),
+        cdc_table_snapshot_splits: HashMap::new(),
     })
     .unwrap();
     let make_control_stream_handle = || {

@@ -76,6 +76,7 @@ use crate::barrier::info::{
 use crate::barrier::progress::CreateMviewProgressTracker;
 use crate::barrier::utils::{NodeToCollect, is_valid_after_worker_err};
 use crate::controller::fragment::InflightFragmentInfo;
+use crate::controller::utils::StreamingJobExtraInfo;
 use crate::manager::MetaSrvEnv;
 use crate::model::{
     ActorId, FragmentDownstreamRelation, FragmentId, StreamActor, StreamJobActorsToCreate,
@@ -84,7 +85,10 @@ use crate::model::{
 use crate::stream::cdc::{
     CdcTableSnapshotSplits, is_parallelized_backfill_enabled_cdc_scan_fragment,
 };
-use crate::stream::{StreamFragmentGraph, build_actor_connector_splits};
+use crate::stream::{
+    ExtendedFragmentBackfillOrder, StreamFragmentGraph, UserDefinedFragmentBackfillOrder,
+    build_actor_connector_splits,
+};
 use crate::{MetaError, MetaResult};
 
 pub(super) fn to_partial_graph_id(
@@ -114,7 +118,7 @@ pub(super) fn from_partial_graph_id(
     (database_id.into(), creating_job_id)
 }
 
-fn build_locality_fragment_state_table_mapping(
+pub(super) fn build_locality_fragment_state_table_mapping(
     fragment_infos: &HashMap<FragmentId, InflightFragmentInfo>,
 ) -> HashMap<FragmentId, Vec<TableId>> {
     let mut mapping = HashMap::new();
@@ -649,7 +653,7 @@ impl ControlStreamManager {
         &mut self,
         database_id: DatabaseId,
         jobs: HashMap<JobId, HashMap<FragmentId, InflightFragmentInfo>>,
-        backfill_orders: HashMap<JobId, HashMap<FragmentId, Vec<FragmentId>>>,
+        job_extra_info: &HashMap<JobId, StreamingJobExtraInfo>,
         state_table_committed_epochs: &mut HashMap<TableId, u64>,
         state_table_log_epochs: &mut HashMap<TableId, Vec<(Vec<u64>, u64)>>,
         fragment_relations: &FragmentDownstreamRelation,
@@ -680,7 +684,7 @@ impl ControlStreamManager {
         fn build_mutation(
             splits: &HashMap<ActorId, Vec<SplitImpl>>,
             cdc_table_snapshot_split_assignment: HashMap<ActorId, PbCdcTableSnapshotSplits>,
-            backfill_orders: &HashMap<FragmentId, Vec<FragmentId>>,
+            backfill_orders: &ExtendedFragmentBackfillOrder,
             is_paused: bool,
         ) -> Mutation {
             let backfill_nodes_to_pause = get_nodes_with_backfill_dependencies(backfill_orders)
@@ -722,6 +726,17 @@ impl ControlStreamManager {
                 );
             }
             prev_epoch
+        }
+        fn job_backfill_orders(
+            job_extra_info: &HashMap<JobId, StreamingJobExtraInfo>,
+            job_id: JobId,
+        ) -> UserDefinedFragmentBackfillOrder {
+            UserDefinedFragmentBackfillOrder::new(
+                job_extra_info
+                    .get(&job_id)
+                    .and_then(|info| info.backfill_orders.clone())
+                    .map_or_else(HashMap::new, |orders| orders.0),
+            )
         }
 
         let mut subscribers: HashMap<_, HashMap<_, _>> = jobs
@@ -863,8 +878,13 @@ impl ControlStreamManager {
                 .into_iter()
                 .map(|(job_id, (fragment_infos, is_background_creating))| {
                     let status = if is_background_creating {
-                        let backfill_ordering =
-                            backfill_orders.get(&job_id).cloned().unwrap_or_default();
+                        let backfill_ordering = job_backfill_orders(job_extra_info, job_id);
+                        let backfill_ordering = StreamFragmentGraph::extend_fragment_backfill_ordering_with_locality_backfill(
+                            backfill_ordering,
+                            fragment_relations,
+                            || fragment_infos.iter().map(|(fragment_id, fragment)| {
+                            (*fragment_id, fragment.fragment_type_mask, &fragment.nodes)
+                        }));
                         let locality_fragment_state_table_mapping =
                             build_locality_fragment_state_table_mapping(&fragment_infos);
                         let backfill_order_state = BackfillOrderState::recover_from_fragment_infos(
@@ -962,19 +982,29 @@ impl ControlStreamManager {
                 InflightFragmentInfo::actor_ids_to_collect(database_jobs.values().flatten());
             let database_job_source_splits =
                 collect_source_splits(database_jobs.values().flatten(), source_splits);
-            let database_backfill_orders = database_jobs
-                .values()
-                .flat_map(|job| {
+            let database_backfill_orders =
+                UserDefinedFragmentBackfillOrder::merge(database_jobs.values().map(|job| {
                     if matches!(job.status, CreateStreamingJobStatus::Creating { .. }) {
-                        backfill_orders
-                            .get(&job.job_id)
-                            .cloned()
-                            .unwrap_or_default()
+                        job_backfill_orders(job_extra_info, job.job_id)
                     } else {
-                        HashMap::new()
+                        UserDefinedFragmentBackfillOrder::default()
                     }
-                })
-                .collect();
+                }));
+            let database_backfill_orders =
+                StreamFragmentGraph::extend_fragment_backfill_ordering_with_locality_backfill(
+                    database_backfill_orders,
+                    fragment_relations,
+                    || {
+                        database_jobs.values().flat_map(|job_fragments| {
+                            job_fragments
+                                .fragment_infos
+                                .iter()
+                                .map(|(fragment_id, fragment)| {
+                                    (*fragment_id, fragment.fragment_type_mask, &fragment.nodes)
+                                })
+                        })
+                    },
+                );
             let mutation = build_mutation(
                 &database_job_source_splits,
                 cdc_table_snapshot_split_assignment,
@@ -1028,7 +1058,17 @@ impl ControlStreamManager {
             if is_paused {
                 bail!("should not pause when having snapshot backfill job {job_id}");
             }
-            let job_backfill_orders = backfill_orders.get(&job_id).cloned().unwrap_or_default();
+            let job_backfill_orders = job_backfill_orders(job_extra_info, job_id);
+            let job_backfill_orders =
+                StreamFragmentGraph::extend_fragment_backfill_ordering_with_locality_backfill(
+                    job_backfill_orders,
+                    fragment_relations,
+                    || {
+                        info.iter().map(|(fragment_id, fragment)| {
+                            (*fragment_id, fragment.fragment_type_mask, &fragment.nodes)
+                        })
+                    },
+                );
             let mutation = build_mutation(
                 &database_job_source_splits,
                 Default::default(), // no cdc backfill job for
@@ -1050,6 +1090,7 @@ impl ControlStreamManager {
                     committed_epoch,
                     &barrier_info,
                     info,
+                    job_backfill_orders,
                     fragment_relations,
                     hummock_version_stats,
                     node_actors,

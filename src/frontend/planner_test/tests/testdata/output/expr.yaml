@@ -181,7 +181,7 @@
   stream_plan: |-
     StreamMaterialize { columns: [expr, t._row_id(hidden)], stream_key: [t._row_id], pk_columns: [t._row_id], pk_conflict: NoCheck }
     └─StreamProject { exprs: [Case((t.v1 = 1:Int32), 1:Decimal, (t.v1 = 2:Int32), 2:Decimal, 0.0:Decimal) as $expr1, t._row_id] }
-      └─StreamTableScan { table: t, columns: [t.v1, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+      └─StreamTableScan { table: t, columns: [t.v1, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - name: case searched form without else
   sql: |
     create table t (v1 int);
@@ -226,7 +226,7 @@
   stream_plan: |-
     StreamMaterialize { columns: [expr, t._row_id(hidden)], stream_key: [t._row_id], pk_columns: [t._row_id], pk_conflict: NoCheck }
     └─StreamProject { exprs: [Case((t.v1 = 1:Int32), null:Int32, t.v1) as $expr1, t._row_id] }
-      └─StreamTableScan { table: t, columns: [t.v1, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+      └─StreamTableScan { table: t, columns: [t.v1, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - sql: |
     create table t (v1 int);
     select nullif(v1, 1, 2) from t;
@@ -253,7 +253,7 @@
   stream_plan: |-
     StreamMaterialize { columns: [expr, t._row_id(hidden)], stream_key: [t._row_id], pk_columns: [t._row_id], pk_conflict: NoCheck }
     └─StreamProject { exprs: [Coalesce(t.v1, 1:Int32) as $expr1, t._row_id] }
-      └─StreamTableScan { table: t, columns: [t.v1, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+      └─StreamTableScan { table: t, columns: [t.v1, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - sql: |
     create table t (v1 int);
     select coalesce(v1, 1.2) from t;
@@ -287,7 +287,7 @@
   stream_plan: |-
     StreamMaterialize { columns: [expr, t._row_id(hidden)], stream_key: [t._row_id], pk_columns: [t._row_id], pk_conflict: NoCheck }
     └─StreamProject { exprs: [ConcatWs(t.v1, '1':Varchar) as $expr1, t._row_id] }
-      └─StreamTableScan { table: t, columns: [t.v1, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+      └─StreamTableScan { table: t, columns: [t.v1, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - sql: |
     create table t (v1 varchar);
     select concat_ws(v1, 1.2) from t;
@@ -321,7 +321,7 @@
   stream_plan: |-
     StreamMaterialize { columns: [expr, t._row_id(hidden)], stream_key: [t._row_id], pk_columns: [t._row_id], pk_conflict: NoCheck }
     └─StreamProject { exprs: [ConcatWs('':Varchar, t.v1, t.v2::Varchar, t.v3::Varchar, '1':Varchar) as $expr1, t._row_id] }
-      └─StreamTableScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+      └─StreamTableScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - sql: |
     create table t (v1 float);
     select concat(v1) from t;
@@ -475,7 +475,7 @@
   stream_plan: |-
     StreamMaterialize { columns: [v1, t._row_id(hidden)], stream_key: [t._row_id], pk_columns: [t._row_id], pk_conflict: NoCheck, watermark_columns: [v1] }
     └─StreamDynamicFilter { predicate: (t.v1 >= now), output_watermarks: [[t.v1]], output: [t.v1, t._row_id], cleaned_by_watermark: true }
-      ├─StreamTableScan { table: t, columns: [t.v1, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+      ├─StreamTableScan { table: t, columns: [t.v1, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
       └─StreamExchange { dist: Broadcast }
         └─StreamNow { output: [now] }
 - name: now expression with proj
@@ -489,7 +489,7 @@
   stream_plan: |-
     StreamMaterialize { columns: [v1, t._row_id(hidden)], stream_key: [t._row_id], pk_columns: [t._row_id], pk_conflict: NoCheck, watermark_columns: [v1] }
     └─StreamDynamicFilter { predicate: (t.v1 >= $expr1), output_watermarks: [[t.v1]], output: [t.v1, t._row_id], cleaned_by_watermark: true }
-      ├─StreamTableScan { table: t, columns: [t.v1, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+      ├─StreamTableScan { table: t, columns: [t.v1, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
       └─StreamExchange { dist: Broadcast }
         └─StreamProject { exprs: [SubtractWithTimeZone(now, '00:00:02':Interval, 'UTC':Varchar) as $expr1], output_watermarks: [[$expr1]], noop_update_hint: true }
           └─StreamNow { output: [now] }
@@ -501,7 +501,7 @@
     StreamMaterialize { columns: [v1, v2, t._row_id(hidden)], stream_key: [t._row_id], pk_columns: [t._row_id], pk_conflict: NoCheck, watermark_columns: [v2] }
     └─StreamDynamicFilter { predicate: (t.v2 >= now), output_watermarks: [[t.v2]], output: [t.v1, t.v2, t._row_id], cleaned_by_watermark: true }
       ├─StreamDynamicFilter { predicate: (t.v1 >= now), output_watermarks: [[t.v1]], output: [t.v1, t.v2, t._row_id], cleaned_by_watermark: true }
-      │ ├─StreamTableScan { table: t, columns: [t.v1, t.v2, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+      │ ├─StreamTableScan { table: t, columns: [t.v1, t.v2, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
       │ └─StreamExchange { dist: Broadcast }
       │   └─StreamNow { output: [now] }
       └─StreamExchange { dist: Broadcast }
@@ -522,7 +522,7 @@
         ├─StreamProject { exprs: [t.v2, max(t.v1)] }
         │ └─StreamHashAgg { group_key: [t.v2], aggs: [max(t.v1), count] }
         │   └─StreamExchange { dist: HashShard(t.v2) }
-        │     └─StreamTableScan { table: t, columns: [t.v1, t.v2, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+        │     └─StreamTableScan { table: t, columns: [t.v1, t.v2, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
         └─StreamExchange { dist: Broadcast }
           └─StreamNow { output: [now] }
 - name: forbid now in group by for stream
@@ -599,8 +599,8 @@
     └─BatchProjectSet { select_list: [Range(1:Int32, 2:Int32)] }
       └─BatchValues { rows: [[]] }
   stream_plan: |-
-    StreamMaterialize { columns: [range, _row_id(hidden), projected_row_id(hidden)], stream_key: [_row_id, projected_row_id], pk_columns: [_row_id, projected_row_id], pk_conflict: NoCheck }
-    └─StreamProject { exprs: [Range(1:Int32, 2:Int32), _row_id, projected_row_id] }
+    StreamMaterialize { columns: [range, _row_id(hidden), _rw_projected_row_id(hidden)], stream_key: [_row_id, _rw_projected_row_id], pk_columns: [_row_id, _rw_projected_row_id], pk_conflict: NoCheck }
+    └─StreamProject { exprs: [Range(1:Int32, 2:Int32), _row_id, _rw_projected_row_id] }
       └─StreamProjectSet { select_list: [Range(1:Int32, 2:Int32), $0] }
         └─StreamValues { rows: [[0:Int64]] }
 - sql: |
@@ -616,7 +616,7 @@
         ├─BatchExchange { order: [], dist: HashShard(t.j) }
         │ └─BatchScan { table: t, columns: [t.k, t.j], distribution: SomeShard }
         └─BatchExchange { order: [], dist: HashShard(t.j) }
-          └─BatchProject { exprs: [t.j, JsonbPopulateRecord(null:Struct(StructType { fields: [("a", Int32), ("b", Int32)] }), t.j) as $expr1] }
+          └─BatchProject { exprs: [t.j, JsonbPopulateRecord(null:Struct(a:Int32, b:Int32), t.j) as $expr1] }
             └─BatchNestedLoopJoin { type: Inner, predicate: true, output: all }
               ├─BatchExchange { order: [], dist: Single }
               │ └─BatchHashAgg { group_key: [t.j], aggs: [] }

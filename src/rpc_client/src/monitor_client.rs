@@ -92,7 +92,7 @@ impl MonitorClient {
             .into_inner())
     }
 
-    /// Available on compute node, compactor node, and frontend node.
+    /// Available on meta node, compute node, compactor node, and frontend node.
     pub async fn profile(&self, sleep_s: u64) -> Result<ProfilingResponse> {
         Ok(self
             .monitor_client
@@ -103,7 +103,7 @@ impl MonitorClient {
             .into_inner())
     }
 
-    /// Available on compute node, compactor node, and frontend node.
+    /// Available on meta node, compute node, compactor node, and frontend node.
     pub async fn heap_profile(&self, dir: String) -> Result<HeapProfilingResponse> {
         Ok(self
             .monitor_client
@@ -114,7 +114,7 @@ impl MonitorClient {
             .into_inner())
     }
 
-    /// Available on compute node, compactor node, and frontend node.
+    /// Available on meta node, compute node, compactor node, and frontend node.
     pub async fn list_heap_profile(&self) -> Result<ListHeapProfilingResponse> {
         Ok(self
             .monitor_client
@@ -125,7 +125,7 @@ impl MonitorClient {
             .into_inner())
     }
 
-    /// Available on compute node, compactor node, and frontend node.
+    /// Available on meta node, compute node, compactor node, and frontend node.
     pub async fn analyze_heap(&self, path: String) -> Result<AnalyzeHeapResponse> {
         Ok(self
             .monitor_client

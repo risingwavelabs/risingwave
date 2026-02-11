@@ -15,6 +15,7 @@
 use itertools::Itertools;
 use risingwave_common::types::{Fields, JsonbVal};
 use risingwave_frontend_macro::system_catalog;
+use risingwave_pb::id::CompactionGroupId;
 use serde_json::json;
 
 use crate::catalog::system_catalog::SysCatalogReaderImpl;
@@ -23,8 +24,8 @@ use crate::error::Result;
 #[derive(Fields)]
 struct RwHummockCompactionGroupConfig {
     #[primary_key]
-    id: i64,
-    parent_id: Option<i64>,
+    id: CompactionGroupId,
+    parent_id: Option<CompactionGroupId>,
     member_tables: Option<JsonbVal>,
     compaction_config: Option<JsonbVal>,
     active_write_limit: Option<JsonbVal>,
@@ -43,8 +44,8 @@ async fn read(reader: &SysCatalogReaderImpl) -> Result<Vec<RwHummockCompactionGr
     let mut rows = info
         .into_iter()
         .map(|i| RwHummockCompactionGroupConfig {
-            id: i.id as _,
-            parent_id: Some(i.parent_id as _),
+            id: i.id,
+            parent_id: Some(i.parent_id),
             member_tables: Some(json!(i.member_table_ids).into()),
             compaction_config: Some(json!(i.compaction_config).into()),
             active_write_limit: write_limits.remove(&i.id).map(|w| json!(w).into()),
@@ -56,7 +57,7 @@ async fn read(reader: &SysCatalogReaderImpl) -> Result<Vec<RwHummockCompactionGr
         write_limits
             .into_iter()
             .map(|(cg, w)| RwHummockCompactionGroupConfig {
-                id: cg as _,
+                id: cg,
                 parent_id: None,
                 member_tables: None,
                 compaction_config: None,

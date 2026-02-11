@@ -20,6 +20,7 @@ use futures::future::Either;
 use futures::stream::BoxStream;
 use futures::{FutureExt, StreamExt};
 use itertools::Itertools;
+use risingwave_hummock_sdk::CompactionGroupId;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::get_compaction_group_ids;
 use risingwave_pb::hummock::compact_task::{self, TaskStatus};
@@ -536,7 +537,7 @@ impl HummockManager {
             let c = self.get_compaction_group_map().await;
             (g, c)
         };
-        let mut slowdown_groups: HashMap<u64, u64> = HashMap::default();
+        let mut slowdown_groups: HashMap<CompactionGroupId, u64> = HashMap::default();
         {
             for (group_id, l0_file_size) in groups {
                 let group = &configs[&group_id];
@@ -551,7 +552,8 @@ impl HummockManager {
         if slowdown_groups.is_empty() {
             return;
         }
-        let mut pending_tasks: HashMap<u64, (u64, usize, RunningCompactTask)> = HashMap::default();
+        let mut pending_tasks: HashMap<u64, (CompactionGroupId, usize, RunningCompactTask)> =
+            HashMap::default();
         {
             let compaction_guard = self.compaction.read().await;
             for group_id in slowdown_groups.keys() {
@@ -581,7 +583,7 @@ impl HummockManager {
                 warn!(
                     "COMPACTION SLOW: the task-{} of group-{}(size: {}MB) level-{} has not finished after {:?}, {}, it may cause pending sstable files({:?}) blocking other task.",
                     task_id,
-                    *group_id,
+                    group_id,
                     group_size / 1024 / 1024,
                     *level_id,
                     compact_time,
@@ -628,7 +630,7 @@ impl HummockManager {
 
     fn on_handle_trigger_table_change_log(&self) {
         if let Err(e) = self.compaction_state.try_sched_compaction(
-            StaticCompactionGroupId::TableChangeLog.into(),
+            StaticCompactionGroupId::TableChangeLog,
             compact_task::TaskType::TableChangeLog,
         ) {
             tracing::error!(
@@ -669,12 +671,12 @@ impl HummockManager {
             return;
         }
 
-        let mut left = 0;
-        let mut right = left + 1;
+        let mut base = 0;
+        let mut candidate = 1;
 
-        while left < right && right < group_count {
-            let group = &group_infos[left];
-            let next_group = &group_infos[right];
+        while candidate < group_count {
+            let group = &group_infos[base];
+            let next_group = &group_infos[candidate];
             match self
                 .try_merge_compaction_group(
                     &table_write_throughput_statistic_manager,
@@ -684,14 +686,14 @@ impl HummockManager {
                 )
                 .await
             {
-                Ok(_) => right += 1,
+                Ok(_) => candidate += 1,
                 Err(e) => {
                     tracing::debug!(
                         error = %e.as_report(),
                         "Failed to merge compaction group",
                     );
-                    left = right;
-                    right = left + 1;
+                    base = candidate;
+                    candidate = base + 1;
                 }
             }
         }

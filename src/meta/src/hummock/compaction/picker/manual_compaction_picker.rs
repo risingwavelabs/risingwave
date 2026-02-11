@@ -580,7 +580,7 @@ pub mod tests {
                     if idx == 0 {
                         t_inner
                             .table_ids
-                            .push((((t.sst_id.inner() % 2) + 1) as u32).into());
+                            .push((((t.sst_id.as_raw_id() % 2) + 1) as u32).into());
                     } else {
                         t_inner.table_ids.push(3.into());
                     }

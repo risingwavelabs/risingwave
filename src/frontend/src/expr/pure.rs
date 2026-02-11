@@ -210,6 +210,8 @@ impl ExprVisitor for ImpureAnalyzer {
             | Type::Scale
             | Type::MinScale
             | Type::TrimScale
+            | Type::Gamma
+            | Type::Lgamma
             | Type::Left
             | Type::Right
             | Type::Degrees

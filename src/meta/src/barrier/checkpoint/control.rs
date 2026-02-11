@@ -47,7 +47,7 @@ use crate::barrier::schedule::{NewBarrier, PeriodicBarriers};
 use crate::barrier::utils::{
     NodeToCollect, collect_creating_job_commit_epoch_info, is_valid_after_worker_err,
 };
-use crate::barrier::{BackfillProgress, Command, CreateStreamingJobType};
+use crate::barrier::{BackfillProgress, Command, CreateStreamingJobType, FragmentBackfillProgress};
 use crate::manager::MetaSrvEnv;
 use crate::rpc::metrics::GLOBAL_META_METRICS;
 use crate::{MetaError, MetaResult};
@@ -167,6 +167,12 @@ impl CheckpointControl {
         })
     }
 
+    pub(crate) fn may_have_snapshot_backfilling_jobs(&self) -> bool {
+        self.databases
+            .values()
+            .any(|database| database.may_have_snapshot_backfilling_jobs())
+    }
+
     /// return Some(failed `database_id` -> `err`)
     pub(crate) fn handle_new_barrier(
         &mut self,
@@ -268,7 +274,8 @@ impl CheckpointControl {
                     | Command::Refresh { .. }
                     | Command::ListFinish { .. }
                     | Command::LoadFinish { .. }
-                    | Command::ResetSource { .. } => {
+                    | Command::ResetSource { .. }
+                    | Command::ResumeBackfill { .. } => {
                         if cfg!(debug_assertions) {
                             panic!(
                                 "new database graph info can only be created for normal creating streaming job, but get command: {} {:?}",
@@ -344,6 +351,27 @@ impl CheckpointControl {
                 .values()
             {
                 progress.extend([(creating_job.job_id, creating_job.gen_backfill_progress())]);
+            }
+        }
+        progress
+    }
+
+    pub(crate) fn gen_fragment_backfill_progress(&self) -> Vec<FragmentBackfillProgress> {
+        let mut progress = Vec::new();
+        for status in self.databases.values() {
+            let Some(database_checkpoint_control) = status.running_state() else {
+                continue;
+            };
+            progress.extend(
+                database_checkpoint_control
+                    .database_info
+                    .gen_fragment_backfill_progress(),
+            );
+            for creating_job in database_checkpoint_control
+                .creating_streaming_job_controls
+                .values()
+            {
+                progress.extend(creating_job.gen_fragment_backfill_progress());
             }
         }
         progress
@@ -526,6 +554,12 @@ impl DatabaseCheckpointControlStatus {
             DatabaseCheckpointControlStatus::Running(state) => Some(state),
             DatabaseCheckpointControlStatus::Recovering(_) => None,
         }
+    }
+
+    fn may_have_snapshot_backfilling_jobs(&self) -> bool {
+        self.running_state()
+            .map(|database| !database.creating_streaming_job_controls.is_empty())
+            .unwrap_or(true) // there can be snapshot backfilling jobs when the database is recovering.
     }
 
     fn database_state(
@@ -782,7 +816,7 @@ impl DatabaseCheckpointControl {
     ) {
         // `Vec::new` is a const fn, and do not have memory allocation, and therefore is lightweight enough
         let mut creating_jobs_task = vec![];
-        {
+        if let Some(committed_epoch) = self.committed_epoch {
             // `Vec::new` is a const fn, and do not have memory allocation, and therefore is lightweight enough
             let mut finished_jobs = Vec::new();
             let min_upstream_inflight_barrier = self
@@ -791,17 +825,17 @@ impl DatabaseCheckpointControl {
                 .map(|(epoch, _)| *epoch);
             for (job_id, job) in &mut self.creating_streaming_job_controls {
                 if let Some((epoch, resps, status)) =
-                    job.start_completing(min_upstream_inflight_barrier)
+                    job.start_completing(min_upstream_inflight_barrier, committed_epoch)
                 {
-                    let is_first_time = match status {
-                        CompleteJobType::First => true,
-                        CompleteJobType::Normal => false,
+                    let create_info = match status {
+                        CompleteJobType::First(info) => Some(info),
+                        CompleteJobType::Normal => None,
                         CompleteJobType::Finished => {
                             finished_jobs.push((*job_id, epoch, resps));
                             continue;
                         }
                     };
-                    creating_jobs_task.push((*job_id, epoch, resps, is_first_time));
+                    creating_jobs_task.push((*job_id, epoch, resps, create_info));
                 }
             }
             if !finished_jobs.is_empty()
@@ -848,7 +882,7 @@ impl DatabaseCheckpointControl {
                 self.handle_refresh_table_info(task, &node);
 
                 self.database_info.apply_collected_command(
-                    node.command_ctx.command.as_ref(),
+                    &node.command_ctx.command,
                     &node.state.resps,
                     hummock_version_stats,
                 );
@@ -900,7 +934,7 @@ impl DatabaseCheckpointControl {
         }
         if !creating_jobs_task.is_empty() {
             let task = task.get_or_insert_default();
-            for (job_id, epoch, resps, is_first_time) in creating_jobs_task {
+            for (job_id, epoch, resps, create_info) in creating_jobs_task {
                 collect_creating_job_commit_epoch_info(
                     &mut task.commit_info,
                     epoch,
@@ -909,11 +943,11 @@ impl DatabaseCheckpointControl {
                         .state_table_ids()
                         .iter()
                         .copied(),
-                    is_first_time,
+                    create_info.as_ref(),
                 );
                 let (_, creating_job_epochs) =
                     task.epoch_infos.entry(self.database_id).or_default();
-                creating_job_epochs.push((job_id, epoch));
+                creating_job_epochs.push((job_id, epoch, create_info));
             }
         }
     }
@@ -1065,7 +1099,7 @@ impl DatabaseCheckpointControl {
             && jobs.len() > 1
             && let Some(creating_job_id) = jobs
                 .iter()
-                .find(|job| self.creating_streaming_job_controls.contains_key(job))
+                .find(|job| self.creating_streaming_job_controls.contains_key(*job))
         {
             warn!(
                 job_id = %creating_job_id,

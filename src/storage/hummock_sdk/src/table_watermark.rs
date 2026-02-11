@@ -324,20 +324,20 @@ impl WatermarkDirection {
 
     pub fn datum_filter_by_watermark(
         &self,
-        watermark_col_in_pk: impl ToDatumRef,
+        watermark_col: impl ToDatumRef,
         watermark: impl ToDatumRef,
         order_type: OrderType,
     ) -> bool {
-        let watermark_col_in_pk = watermark_col_in_pk.to_datum_ref();
+        let watermark_col = watermark_col.to_datum_ref();
         let watermark = watermark.to_datum_ref();
         match self {
             WatermarkDirection::Ascending => {
-                // watermark_col_in_pk < watermark
-                cmp_datum(watermark_col_in_pk, watermark, order_type).is_lt()
+                // watermark_col < watermark
+                cmp_datum(watermark_col, watermark, order_type).is_lt()
             }
             WatermarkDirection::Descending => {
-                //  watermark_col_in_pk > watermark
-                cmp_datum(watermark_col_in_pk, watermark, order_type).is_gt()
+                //  watermark_col > watermark
+                cmp_datum(watermark_col, watermark, order_type).is_gt()
             }
         }
     }
@@ -1300,7 +1300,7 @@ mod tests {
                 test_table_id,
                 StateTableInfo {
                     committed_epoch: EPOCH1,
-                    compaction_group_id: StaticCompactionGroupId::StateDefault as _,
+                    compaction_group_id: StaticCompactionGroupId::StateDefault,
                 },
             )]),
             ..Default::default()

@@ -25,7 +25,6 @@ use bytes::Bytes;
 use futures::FutureExt;
 use futures::future::BoxFuture;
 use itertools::Itertools;
-use prometheus::core::GenericGauge;
 use risingwave_common::catalog::TableId;
 use risingwave_common::must_match;
 use risingwave_common::util::epoch::{EpochExt, test_epoch};
@@ -56,6 +55,7 @@ use crate::hummock::shared_buffer::shared_buffer_batch::{
     SharedBufferBatch, SharedBufferBatchId, SharedBufferValue,
 };
 use crate::hummock::store::version::StagingSstableInfo;
+use crate::hummock::utils::MemoryTracker;
 use crate::hummock::{HummockError, HummockResult, MemoryLimiter};
 use crate::mem_table::{ImmId, ImmutableMemtable};
 use crate::monitor::HummockStateStoreMetrics;
@@ -63,7 +63,7 @@ use crate::opts::StorageOpts;
 use crate::store::SealCurrentEpochOptions;
 
 pub(crate) const INITIAL_EPOCH: HummockEpoch = test_epoch(5);
-pub(crate) const TEST_TABLE_ID: TableId = TableId::new(233);
+pub(crate) use crate::hummock::shared_buffer::TEST_TABLE_ID;
 
 pub trait UploadOutputFuture = Future<Output = HummockResult<UploadTaskOutput>> + Send + 'static;
 pub trait UploadFn<Fut: UploadOutputFuture> =
@@ -93,7 +93,7 @@ impl HummockUploader {
 
 pub(super) fn test_hummock_version(epoch: HummockEpoch) -> HummockVersion {
     let mut version = HummockVersion::from_persisted_protobuf(&PbHummockVersion {
-        id: epoch,
+        id: epoch.into(),
         ..Default::default()
     });
     version.state_table_info.apply_delta(
@@ -101,7 +101,7 @@ pub(super) fn test_hummock_version(epoch: HummockEpoch) -> HummockVersion {
             TEST_TABLE_ID,
             StateTableInfoDelta {
                 committed_epoch: epoch,
-                compaction_group_id: StaticCompactionGroupId::StateDefault as _,
+                compaction_group_id: StaticCompactionGroupId::StateDefault,
             },
         )]),
         &HashSet::new(),
@@ -119,26 +119,65 @@ pub(super) fn dummy_table_key() -> Vec<u8> {
 
 pub(super) async fn gen_imm_with_limiter(
     epoch: HummockEpoch,
-    limiter: Option<&MemoryLimiter>,
-) -> ImmutableMemtable {
-    gen_imm_inner(TEST_TABLE_ID, epoch, 0, limiter).await
+    limiter: &MemoryLimiter,
+) -> (ImmutableMemtable, MemoryTracker) {
+    gen_imm_inner_with_tracker(TEST_TABLE_ID, epoch, 0, Some(limiter)).await
 }
 
-pub(crate) async fn gen_imm_inner(
+pub(crate) async fn gen_imm_inner_with_tracker(
     table_id: TableId,
     epoch: HummockEpoch,
     spill_offset: u16,
     limiter: Option<&MemoryLimiter>,
+) -> (ImmutableMemtable, MemoryTracker) {
+    let imm = gen_imm_inner(table_id, epoch, spill_offset);
+    let tracker = match limiter {
+        Some(limiter) => limiter.require_memory(imm.size() as _).await,
+        None => MemoryLimiter::unlimit()
+            .try_require_memory(imm.size() as _)
+            .expect("unlimited limiter should always succeed"),
+    };
+    (imm, tracker)
+}
+
+pub(crate) fn gen_imm_with_unlimit(epoch: HummockEpoch) -> (ImmutableMemtable, MemoryTracker) {
+    gen_imm_inner_with_unlimit(TEST_TABLE_ID, epoch, 0)
+}
+
+pub(crate) fn gen_imm_inner_with_unlimit(
+    table_id: TableId,
+    epoch: HummockEpoch,
+    spill_offset: u16,
+) -> (ImmutableMemtable, MemoryTracker) {
+    let imm = gen_imm_inner(table_id, epoch, spill_offset);
+    let tracker = MemoryLimiter::unlimit()
+        .try_require_memory(imm.size() as _)
+        .expect("unlimited limiter should always succeed");
+    (imm, tracker)
+}
+
+pub(crate) async fn tracker_for_test(
+    imm: &ImmutableMemtable,
+    limiter: Option<&MemoryLimiter>,
+) -> MemoryTracker {
+    match limiter {
+        Some(limiter) => limiter.require_memory(imm.size() as _).await,
+        None => MemoryLimiter::unlimit()
+            .try_require_memory(imm.size() as _)
+            .expect("unlimited limiter should always succeed"),
+    }
+}
+
+pub(crate) fn gen_imm_inner(
+    table_id: TableId,
+    epoch: HummockEpoch,
+    spill_offset: u16,
 ) -> ImmutableMemtable {
     let sorted_items = vec![(
         TableKey(Bytes::from(dummy_table_key())),
         SharedBufferValue::Delete,
     )];
     let size = SharedBufferBatch::measure_batch_size(&sorted_items, None).0;
-    let tracker = match limiter {
-        Some(limiter) => Some(limiter.require_memory(size as u64).await),
-        None => None,
-    };
     SharedBufferBatch::build_shared_buffer_batch(
         epoch,
         spill_offset,
@@ -147,12 +186,11 @@ pub(crate) async fn gen_imm_inner(
         size,
         table_id,
         TableMemoryMetrics::for_test(),
-        tracker,
     )
 }
 
-pub(crate) async fn gen_imm(epoch: HummockEpoch) -> ImmutableMemtable {
-    gen_imm_with_limiter(epoch, None).await
+pub(crate) fn gen_imm(epoch: HummockEpoch) -> ImmutableMemtable {
+    gen_imm_inner(TEST_TABLE_ID, epoch, 0)
 }
 
 pub(super) fn gen_sstable_info(
@@ -339,11 +377,11 @@ pub(crate) fn prepare_uploader_order_test(
     + use<>,
 ) {
     let (spawn_fn, new_task_notifier) = prepare_uploader_order_test_spawn_task_fn(skip_schedule);
-    let gauge = GenericGauge::new("test", "test").unwrap();
-    let buffer_tracker = BufferTracker::from_storage_opts(config, gauge);
+    let metrics = Arc::new(HummockStateStoreMetrics::unused());
+    let buffer_tracker = BufferTracker::from_storage_opts(config, &metrics);
 
     let uploader = HummockUploader::new(
-        Arc::new(HummockStateStoreMetrics::unused()),
+        metrics,
         initial_pinned_version(),
         spawn_fn,
         buffer_tracker.clone(),

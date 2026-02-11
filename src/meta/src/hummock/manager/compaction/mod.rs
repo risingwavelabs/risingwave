@@ -360,11 +360,11 @@ impl HummockManager {
         // Currently, table change log compactions are prioritized if available.
         if let Some(pick_type) = self
             .compaction_state
-            .auto_pick_type(StaticCompactionGroupId::TableChangeLog.into())
+            .auto_pick_type(StaticCompactionGroupId::TableChangeLog)
         {
             assert_eq!(pick_type, TaskType::TableChangeLog);
             return (
-                vec![StaticCompactionGroupId::TableChangeLog.into()],
+                vec![StaticCompactionGroupId::TableChangeLog],
                 TaskType::TableChangeLog,
             );
         }
@@ -441,7 +441,7 @@ impl HummockManager {
         let mut is_table_change_log_compaction = false;
         // table change log compaction group
         if let Ok(compaction_group_id) = compaction_groups.iter().exactly_one().copied()
-            && StaticCompactionGroupId::is_table_change_log(compaction_group_id)
+            && compaction_group_id == StaticCompactionGroupId::TableChangeLog
         {
             let task_id = next_compaction_task_id(&self.env).await?;
             let group_config = CompactionGroup::new(

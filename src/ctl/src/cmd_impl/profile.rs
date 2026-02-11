@@ -33,6 +33,7 @@ pub enum ProfileWorkerType {
     Frontend,
     ComputeNode,
     Compactor,
+    Meta,
 }
 
 pub async fn cpu_profile(
@@ -42,7 +43,7 @@ pub async fn cpu_profile(
 ) -> anyhow::Result<()> {
     let meta_client = context.meta_client().await?;
 
-    let workers = meta_client.get_cluster_info().await?.worker_nodes;
+    let workers = meta_client.list_worker_nodes(None).await?;
     let target_types = selected_worker_types(&worker_types);
     let target_nodes = workers
         .into_iter()
@@ -111,7 +112,7 @@ pub async fn heap_profile(
     let dir = dir.unwrap_or_default();
     let meta_client = context.meta_client().await?;
 
-    let workers = meta_client.get_cluster_info().await?.worker_nodes;
+    let workers = meta_client.list_worker_nodes(None).await?;
     let target_types = selected_worker_types(&worker_types);
     let target_nodes = workers
         .into_iter()
@@ -167,6 +168,7 @@ fn selected_worker_types(values: &[ProfileWorkerType]) -> HashSet<WorkerType> {
             WorkerType::Frontend,
             WorkerType::ComputeNode,
             WorkerType::Compactor,
+            WorkerType::Meta,
         ]);
     }
     values.iter().map(|value| to_worker_type(*value)).collect()
@@ -177,6 +179,7 @@ fn to_worker_type(value: ProfileWorkerType) -> WorkerType {
         ProfileWorkerType::Frontend => WorkerType::Frontend,
         ProfileWorkerType::ComputeNode => WorkerType::ComputeNode,
         ProfileWorkerType::Compactor => WorkerType::Compactor,
+        ProfileWorkerType::Meta => WorkerType::Meta,
     }
 }
 
@@ -185,6 +188,7 @@ fn worker_type_label(worker_type: WorkerType) -> &'static str {
         WorkerType::Frontend => "frontend",
         WorkerType::ComputeNode => "compute-node",
         WorkerType::Compactor => "compactor",
+        WorkerType::Meta => "meta",
         _ => "unknown",
     }
 }

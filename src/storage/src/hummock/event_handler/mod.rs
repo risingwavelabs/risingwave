@@ -32,13 +32,14 @@ pub mod hummock_event_handler;
 pub mod refiller;
 pub mod uploader;
 
-pub use hummock_event_handler::HummockEventHandler;
+pub(crate) use hummock_event_handler::HummockEventHandler;
 use risingwave_hummock_sdk::vector_index::VectorIndexAdd;
 use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
 
 use super::store::version::HummockReadVersion;
 use crate::hummock::event_handler::hummock_event_handler::HummockEventSender;
 use crate::hummock::event_handler::uploader::SyncedData;
+use crate::hummock::utils::MemoryTracker;
 
 #[derive(Debug)]
 pub struct BufferWriteRequest {
@@ -72,7 +73,7 @@ pub enum HummockEvent {
 
     ImmToUploader {
         instance_id: SharedBufferBatchId,
-        imms: Vec<ImmutableMemtable>,
+        imms: Vec<(ImmutableMemtable, MemoryTracker)>,
     },
 
     StartEpoch {
@@ -158,7 +159,7 @@ impl HummockEvent {
                 format!(
                     "ImmToUploader {} {:?}",
                     instance_id,
-                    imms.iter().map(|imm| imm.batch_id()).collect_vec()
+                    imms.iter().map(|(imm, _)| imm.batch_id()).collect_vec()
                 )
             }
 

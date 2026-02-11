@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use risingwave_common::catalog::ColumnCatalog;
 use risingwave_common::id::JobId;
@@ -629,10 +629,10 @@ impl CatalogController {
         Ok(database_objects.into_iter().into_group_map())
     }
 
-    // Output: Vec<(table id, db name, schema name, table name, resource group)>
+    // Output: Vec<(table id, db name, schema name, table name, resource group, table type)>
     pub async fn list_table_objects(
         &self,
-    ) -> MetaResult<Vec<(TableId, String, String, String, String)>> {
+    ) -> MetaResult<Vec<(TableId, String, String, String, String, TableType)>> {
         let inner = self.inner.read().await;
         Ok(Object::find()
             .select_only()
@@ -644,6 +644,7 @@ impl CatalogController {
             .column(schema::Column::Name)
             .column(table::Column::Name)
             .column(database::Column::ResourceGroup)
+            .column(table::Column::TableType)
             .into_tuple()
             .all(&inner.db)
             .await?)
@@ -687,6 +688,63 @@ impl CatalogController {
             .into_tuple()
             .all(&inner.db)
             .await?)
+    }
+
+    // Output: Vec<(id, db name, schema name, relation name, type)>
+    pub async fn list_relation_objects_by_ids(
+        &self,
+        ids: &HashSet<ObjectId>,
+    ) -> MetaResult<Vec<(ObjectId, String, String, String, String)>> {
+        if ids.is_empty() {
+            return Ok(vec![]);
+        }
+        let inner = self.inner.read().await;
+        let ids: Vec<_> = ids.iter().cloned().collect();
+
+        let tables: Vec<(ObjectId, String, String, String, TableType)> = Object::find()
+            .select_only()
+            .join(JoinType::InnerJoin, object::Relation::Table.def())
+            .join(JoinType::InnerJoin, object::Relation::Database2.def())
+            .join(JoinType::InnerJoin, object::Relation::Schema2.def())
+            .filter(object::Column::Oid.is_in(ids.clone()))
+            .column(object::Column::Oid)
+            .column(database::Column::Name)
+            .column(schema::Column::Name)
+            .column(table::Column::Name)
+            .column(table::Column::TableType)
+            .into_tuple()
+            .all(&inner.db)
+            .await?;
+
+        let sources: Vec<(ObjectId, String, String, String)> = Object::find()
+            .select_only()
+            .join(JoinType::InnerJoin, object::Relation::Source.def())
+            .join(JoinType::InnerJoin, object::Relation::Database2.def())
+            .join(JoinType::InnerJoin, object::Relation::Schema2.def())
+            .filter(object::Column::Oid.is_in(ids.clone()))
+            .column(object::Column::Oid)
+            .column(database::Column::Name)
+            .column(schema::Column::Name)
+            .column(source::Column::Name)
+            .into_tuple()
+            .all(&inner.db)
+            .await?;
+
+        let mut result = Vec::with_capacity(tables.len() + sources.len());
+        result.extend(
+            tables
+                .into_iter()
+                .map(|(id, db, schema, name, table_type)| {
+                    let relation_type = PbTableType::from(table_type).as_str_name();
+                    (id, db, schema, name, relation_type.to_owned())
+                }),
+        );
+        result.extend(
+            sources
+                .into_iter()
+                .map(|(id, db, schema, name)| (id, db, schema, name, "source".to_owned())),
+        );
+        Ok(result)
     }
 
     pub async fn get_streaming_job_status(&self, streaming_job_id: JobId) -> MetaResult<JobStatus> {

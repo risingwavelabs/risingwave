@@ -16,7 +16,7 @@ def _(outer_panels: Panels):
                     [
                         panels.target(
                             f"sum({metric('uploading_memory_size')}) by ({COMPONENT_LABEL}, {NODE_LABEL})",
-                            "uploading memory - {{%s}} @ {{%s}}"
+                            "uploading imm size - {{%s}} @ {{%s}}"
                             % (COMPONENT_LABEL, NODE_LABEL),
                         ),
                         panels.target(
@@ -33,6 +33,12 @@ def _(outer_panels: Panels):
                         panels.target(
                             f"sum({metric('uploading_memory_size')}) by ({COMPONENT_LABEL}, {NODE_LABEL}) - "
                             f"sum({metric('state_store_uploader_imm_size')}) by ({COMPONENT_LABEL}, {NODE_LABEL})",
+                            "in channel imm size - {{%s}} @ {{%s}}"
+                            % (COMPONENT_LABEL, NODE_LABEL),
+                        ),
+                        panels.target(
+                            f"sum({metric('state_store_per_table_imm_size')}) by ({COMPONENT_LABEL}, {NODE_LABEL}) - "
+                            f"sum({metric('uploading_memory_size')}) by ({COMPONENT_LABEL}, {NODE_LABEL})",
                             "orphan imm size - {{%s}} @ {{%s}}"
                             % (COMPONENT_LABEL, NODE_LABEL),
                         ),

@@ -23,6 +23,7 @@ use axum::extract::{Extension, Path};
 use axum::http::{Method, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
+use risingwave_common_heap_profiling::ProfileServiceImpl;
 use risingwave_rpc_client::MonitorClientPool;
 use tokio::net::TcpListener;
 use tower::ServiceBuilder;
@@ -44,6 +45,7 @@ pub struct DashboardService {
     pub hummock_manager: HummockManagerRef,
     pub monitor_clients: MonitorClientPool,
     pub diagnose_command: DiagnoseCommandRef,
+    pub profile_service: ProfileServiceImpl,
     pub trace_state: otlp_embedded::StateRef,
 }
 
@@ -66,19 +68,20 @@ pub(super) mod handlers {
     };
     use risingwave_pb::common::{WorkerNode, WorkerType};
     use risingwave_pb::hummock::TableStats;
-    use risingwave_pb::meta::list_object_dependencies_response::PbObjectDependencies;
     use risingwave_pb::meta::{
         ActorIds, FragmentIdToActorIdMap, FragmentToRelationMap, PbTableFragments, RelationIdInfos,
     };
     use risingwave_pb::monitor_service::stack_trace_request::ActorTracesFormat;
     use risingwave_pb::monitor_service::{
-        ChannelDeltaStats, GetStreamingPrometheusStatsResponse, GetStreamingStatsResponse,
-        HeapProfilingResponse, ListHeapProfilingResponse, StackTraceResponse,
+        AnalyzeHeapRequest, ChannelDeltaStats, GetStreamingPrometheusStatsResponse,
+        GetStreamingStatsResponse, HeapProfilingRequest, HeapProfilingResponse,
+        ListHeapProfilingRequest, ListHeapProfilingResponse, StackTraceResponse,
     };
     use risingwave_pb::user::PbUserInfo;
     use serde::{Deserialize, Serialize};
     use serde_json::json;
     use thiserror_ext::AsReport;
+    use tonic::Request;
 
     use super::*;
     use crate::controller::fragment::StreamingJobInfo;
@@ -324,7 +327,7 @@ pub(super) mod handlers {
         let mut fragment_to_relation_map = HashMap::new();
         for (relation_id, tf) in table_fragments {
             for fragment_id in tf.fragments.keys() {
-                fragment_to_relation_map.insert(*fragment_id, relation_id.as_raw_id());
+                fragment_to_relation_map.insert(*fragment_id, relation_id);
             }
         }
         let map = FragmentToRelationMap {
@@ -426,9 +429,16 @@ pub(super) mod handlers {
         Ok(Json(schemas))
     }
 
+    #[derive(Serialize)]
+    #[serde(rename_all = "camelCase")]
+    pub struct DashboardObjectDependency {
+        pub object_id: u32,
+        pub referenced_object_id: u32,
+    }
+
     pub async fn list_object_dependencies(
         Extension(srv): Extension<Service>,
-    ) -> Result<Json<Vec<PbObjectDependencies>>> {
+    ) -> Result<Json<Vec<DashboardObjectDependency>>> {
         let object_dependencies = srv
             .metadata_manager
             .catalog_controller
@@ -436,7 +446,15 @@ pub(super) mod handlers {
             .await
             .map_err(err)?;
 
-        Ok(Json(object_dependencies))
+        let result = object_dependencies
+            .into_iter()
+            .map(|dependency| DashboardObjectDependency {
+                object_id: dependency.object_id.as_raw_id(),
+                referenced_object_id: dependency.referenced_object_id.as_raw_id(),
+            })
+            .collect();
+
+        Ok(Json(result))
     }
 
     #[derive(Debug, Deserialize)]
@@ -509,6 +527,16 @@ pub(super) mod handlers {
         Path(worker_id): Path<WorkerId>,
         Extension(srv): Extension<Service>,
     ) -> Result<Json<HeapProfilingResponse>> {
+        if worker_id == crate::manager::META_NODE_ID {
+            let result = srv
+                .profile_service
+                .heap_profiling(Request::new(HeapProfilingRequest { dir: "".to_owned() }))
+                .await
+                .map_err(err)?
+                .into_inner();
+            return Ok(result.into());
+        }
+
         let worker_node = srv
             .metadata_manager
             .get_worker_by_id(worker_id)
@@ -528,6 +556,16 @@ pub(super) mod handlers {
         Path(worker_id): Path<WorkerId>,
         Extension(srv): Extension<Service>,
     ) -> Result<Json<ListHeapProfilingResponse>> {
+        if worker_id == crate::manager::META_NODE_ID {
+            let result = srv
+                .profile_service
+                .list_heap_profiling(Request::new(ListHeapProfilingRequest {}))
+                .await
+                .map_err(err)?
+                .into_inner();
+            return Ok(result.into());
+        }
+
         let worker_node = srv
             .metadata_manager
             .get_worker_by_id(worker_id)
@@ -549,21 +587,31 @@ pub(super) mod handlers {
         let file_path =
             String::from_utf8(base64_url::decode(&file_path).map_err(err)?).map_err(err)?;
 
-        let worker_node = srv
-            .metadata_manager
-            .get_worker_by_id(worker_id)
-            .await
-            .map_err(err)?
-            .context("worker node not found")
-            .map_err(err)?;
+        let collapsed_bin = if worker_id == crate::manager::META_NODE_ID {
+            srv.profile_service
+                .analyze_heap(Request::new(AnalyzeHeapRequest {
+                    path: file_path.clone(),
+                }))
+                .await
+                .map_err(err)?
+                .into_inner()
+                .result
+        } else {
+            let worker_node = srv
+                .metadata_manager
+                .get_worker_by_id(worker_id)
+                .await
+                .map_err(err)?
+                .context("worker node not found")
+                .map_err(err)?;
 
-        let client = srv.monitor_clients.get(&worker_node).await.map_err(err)?;
-
-        let collapsed_bin = client
-            .analyze_heap(file_path.clone())
-            .await
-            .map_err(err)?
-            .result;
+            let client = srv.monitor_clients.get(&worker_node).await.map_err(err)?;
+            client
+                .analyze_heap(file_path.clone())
+                .await
+                .map_err(err)?
+                .result
+        };
         let collapsed_str = String::from_utf8_lossy(&collapsed_bin).to_string();
 
         let response = Response::builder()

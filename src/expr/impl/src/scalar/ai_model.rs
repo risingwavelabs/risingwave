@@ -16,7 +16,7 @@ use std::sync::Arc;
 
 use async_openai::Client;
 use async_openai::config::OpenAIConfig;
-use async_openai::types::{CreateEmbeddingRequestArgs, Embedding, EmbeddingInput};
+use async_openai::types::embeddings::{CreateEmbeddingRequestArgs, Embedding, EmbeddingInput};
 use risingwave_common::array::{
     Array, ArrayBuilder, ArrayImpl, ArrayRef, DataChunk, F32Array, ListArrayBuilder, ListValue,
 };

@@ -30,7 +30,8 @@ use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::vector_index::VectorIndexDelta;
 use risingwave_hummock_sdk::version::HummockVersion;
 use risingwave_hummock_sdk::{
-    HummockContextId, HummockEpoch, HummockVersionId, LocalSstableInfo, ObjectIdRange, SyncResult,
+    CompactionGroupId, HummockContextId, HummockEpoch, HummockVersionId, LocalSstableInfo,
+    ObjectIdRange, SyncResult,
 };
 use risingwave_pb::common::{HostAddress, WorkerType};
 use risingwave_pb::hummock::compact_task::{TaskStatus, TaskType};
@@ -41,7 +42,7 @@ use risingwave_pb::hummock::{
     compact_task,
 };
 use risingwave_pb::iceberg_compaction::SubscribeIcebergCompactionEventRequest;
-use risingwave_pb::id::{JobId, TableId};
+use risingwave_pb::id::{HummockSstableId, JobId, TableId};
 use risingwave_rpc_client::error::{Result, RpcError};
 use risingwave_rpc_client::{
     CompactionEventItem, HummockMetaClient, HummockMetaClientChangeLogInfo,
@@ -95,7 +96,7 @@ impl MockHummockMetaClient {
     pub async fn get_compact_task(&self) -> Option<CompactTask> {
         self.hummock_manager
             .get_compact_task(
-                StaticCompactionGroupId::StateDefault.into(),
+                StaticCompactionGroupId::StateDefault,
                 &mut default_compaction_selector(),
             )
             .await
@@ -226,10 +227,10 @@ impl HummockMetaClient for MockHummockMetaClient {
 
     async fn trigger_manual_compaction(
         &self,
-        _compaction_group_id: u64,
+        _compaction_group_id: CompactionGroupId,
         _table_id: JobId,
         _level: u32,
-        _sst_ids: Vec<u64>,
+        _sst_ids: Vec<HummockSstableId>,
     ) -> Result<()> {
         todo!()
     }
@@ -357,10 +358,7 @@ impl HummockMetaClient for MockHummockMetaClient {
                                 .map(SstableInfo::from)
                                 .collect_vec(),
                             Some(table_stats_change),
-                            object_timestamps
-                                .into_iter()
-                                .map(|(id, ts)| (id.into(), ts))
-                                .collect(),
+                            object_timestamps,
                             table_change_log_output.map(TableChangeLogCompactionOutput::from),
                         )
                         .await
