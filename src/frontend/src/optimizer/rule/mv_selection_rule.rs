@@ -67,32 +67,29 @@ impl MvSelectionRule {
         )
     }
 
-    /// Try to rewrite an aggregate query using an aggregate materialized view with rollup.
+    /// Rewrite aggregate query by rolling up aggregate MV states.
     ///
-    /// Rewrite shape:
+    /// Graph (matching + rewrite):
     /// ```text
-    /// Query:
-    ///   Agg_q(group = Gq, calls = Aq)
-    ///     └─ Project_q
-    ///         └─ BaseInput
+    /// 1) Normalize both sides to base-column lineage
     ///
-    /// MV candidate:
-    ///   Project_mv(optional)
-    ///     └─ Agg_mv(group = Gm, calls = Am)
-    ///         └─ Project_mv_input
-    ///             └─ BaseInput
+    /// Query side                                  MV candidate side
+    /// Agg_q(Gq, Aq)                               [Project_mv]?
+    ///   └─ [Project_q]?                             └─ Agg_mv(Gm, Am)
+    ///       └─ BaseInput                                  └─ [Project_mv_in]?
+    ///                                                         └─ BaseInput
     ///
-    /// Rewritten:
-    ///   Agg_rollup(group = map(Gq), calls = total(Aq) over MV states)
-    ///     └─ Scan(MV table)
-    ///   (+ optional Project to restore output ordering)
+    /// 2) Match under lineage mapping
+    /// - same BaseInput
+    /// - map(Gq) ⊆ map(Gm)
+    /// - for each aq in Aq, find semantically equivalent am in Am
+    /// - aq must support partial_to_total
+    ///
+    /// 3) Build rewritten plan
+    /// Agg_rollup(group = mapped Gq, calls = total(aq) on MV columns)
+    ///   └─ Scan(MV table)
+    /// [Project] (optional, restore query output order)
     /// ```
-    ///
-    /// Key checks:
-    /// - Query/MV aggregate inputs must map to the same base input.
-    /// - Query group keys must be a subset of MV group keys (after lineage mapping).
-    /// - Query aggregate calls must match MV calls semantically after lineage mapping.
-    /// - Aggregate kind must support partial-to-total rollup (`partial_to_total`).
     fn agg_rollup_rewrite(
         plan: &PlanRef,
         candidate: &MaterializedViewCandidate,
