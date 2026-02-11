@@ -32,6 +32,13 @@ use crate::backup_restore::BackupManagerRef;
 use crate::hummock::metrics_utils::{trigger_lsm_stat, trigger_mv_stat};
 use crate::hummock::{HummockManager, TASK_NORMAL};
 
+/// Spawn a periodic background loop.
+///
+/// Notes on shutdown and cancellation:
+/// - At most one handler future is in-flight at any time. If the handler runs longer than the
+///   period, the next tick will be delayed (see `MissedTickBehavior::Delay`).
+/// - Shutdown can preempt a running handler by dropping its future. Therefore, the handler should
+///   avoid long-running synchronous/blocking code and prefer cancellation-safe async operations.
 fn spawn_periodic_loop<F, Fut>(
     name: &'static str,
     period: Duration,
@@ -43,6 +50,10 @@ where
     Fut: Future<Output = ()> + Send + 'static,
 {
     tokio::spawn(async move {
+        // `shutdown_rx` is used for the inner select when running the handler. We need another
+        // receiver for the outer select to avoid mutable-borrow conflicts.
+        let mut shutdown_rx_idle = shutdown_rx.clone();
+
         let mut trigger_interval = tokio::time::interval(period);
         trigger_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         trigger_interval.reset();
@@ -50,10 +61,22 @@ where
         loop {
             tokio::select! {
                 _ = trigger_interval.tick() => {
-                    handler().await;
+                    // Allow shutdown to preempt a running handler.
+                    let handler_fut = handler();
+                    tokio::pin!(handler_fut);
+
+                    tokio::select! {
+                        _ = &mut handler_fut => {}
+                        changed = shutdown_rx.changed() => {
+                            if changed.is_err() || *shutdown_rx.borrow() {
+                                tracing::info!("Hummock timer handler loop [{}] is stopped", name);
+                                break;
+                            }
+                        }
+                    }
                 }
-                changed = shutdown_rx.changed() => {
-                    if changed.is_err() || *shutdown_rx.borrow() {
+                changed = shutdown_rx_idle.changed() => {
+                    if changed.is_err() || *shutdown_rx_idle.borrow() {
                         tracing::info!("Hummock timer handler loop [{}] is stopped", name);
                         break;
                     }
@@ -94,14 +117,22 @@ impl HummockManager {
 
             let (child_shutdown_tx, child_shutdown_rx) = watch::channel(false);
             let split_merge_mutex = Arc::new(Mutex::new(()));
-            let mut child_handles = Vec::new();
+            let mut child_handles: Vec<(&'static str, JoinHandle<()>)> = Vec::new();
+
+            macro_rules! spawn_loop {
+                ($name:literal, $period:expr, $handler:expr $(,)?) => {{
+                    child_handles.push((
+                        $name,
+                        spawn_periodic_loop($name, $period, child_shutdown_rx.clone(), $handler),
+                    ));
+                }};
+            }
 
             {
                 let hummock_manager = hummock_manager.clone();
-                child_handles.push(spawn_periodic_loop(
+                spawn_loop!(
                     "check_dead_task",
                     Duration::from_secs(CHECK_PENDING_TASK_PERIOD_SEC),
-                    child_shutdown_rx.clone(),
                     move || {
                         let hummock_manager = hummock_manager.clone();
                         async move {
@@ -111,30 +142,28 @@ impl HummockManager {
                             hummock_manager.check_dead_task().await;
                         }
                     },
-                ));
+                );
             }
 
             {
                 let hummock_manager = hummock_manager.clone();
-                child_handles.push(spawn_periodic_loop(
+                spawn_loop!(
                     "report",
                     Duration::from_secs(STAT_REPORT_PERIOD_SEC),
-                    child_shutdown_rx.clone(),
                     move || {
                         let hummock_manager = hummock_manager.clone();
                         async move {
                             hummock_manager.handle_timer_report().await;
                         }
                     },
-                ));
+                );
             }
 
             {
                 let hummock_manager = hummock_manager.clone();
-                child_handles.push(spawn_periodic_loop(
+                spawn_loop!(
                     "compaction_heartbeat_expired_check",
                     Duration::from_secs(COMPACTION_HEARTBEAT_PERIOD_SEC),
-                    child_shutdown_rx.clone(),
                     move || {
                         let hummock_manager = hummock_manager.clone();
                         async move {
@@ -143,15 +172,14 @@ impl HummockManager {
                                 .await;
                         }
                     },
-                ));
+                );
             }
 
             {
                 let hummock_manager = hummock_manager.clone();
-                child_handles.push(spawn_periodic_loop(
+                spawn_loop!(
                     "dynamic_compaction_trigger",
                     Duration::from_secs(hummock_manager.env.opts.periodic_compaction_interval_sec),
-                    child_shutdown_rx.clone(),
                     move || {
                         let hummock_manager = hummock_manager.clone();
                         async move {
@@ -163,12 +191,12 @@ impl HummockManager {
                                 .await;
                         }
                     },
-                ));
+                );
             }
 
             {
                 let hummock_manager = hummock_manager.clone();
-                child_handles.push(spawn_periodic_loop(
+                spawn_loop!(
                     "space_reclaim_compaction_trigger",
                     Duration::from_secs(
                         hummock_manager
@@ -176,7 +204,6 @@ impl HummockManager {
                             .opts
                             .periodic_space_reclaim_compaction_interval_sec,
                     ),
-                    child_shutdown_rx.clone(),
                     move || {
                         let hummock_manager = hummock_manager.clone();
                         async move {
@@ -194,12 +221,12 @@ impl HummockManager {
                                 .await;
                         }
                     },
-                ));
+                );
             }
 
             {
                 let hummock_manager = hummock_manager.clone();
-                child_handles.push(spawn_periodic_loop(
+                spawn_loop!(
                     "ttl_compaction_trigger",
                     Duration::from_secs(
                         hummock_manager
@@ -207,7 +234,6 @@ impl HummockManager {
                             .opts
                             .periodic_ttl_reclaim_compaction_interval_sec,
                     ),
-                    child_shutdown_rx.clone(),
                     move || {
                         let hummock_manager = hummock_manager.clone();
                         async move {
@@ -219,12 +245,12 @@ impl HummockManager {
                                 .await;
                         }
                     },
-                ));
+                );
             }
 
             {
                 let hummock_manager = hummock_manager.clone();
-                child_handles.push(spawn_periodic_loop(
+                spawn_loop!(
                     "tombstone_compaction_trigger",
                     Duration::from_secs(
                         hummock_manager
@@ -232,7 +258,6 @@ impl HummockManager {
                             .opts
                             .periodic_tombstone_reclaim_compaction_interval_sec,
                     ),
-                    child_shutdown_rx.clone(),
                     move || {
                         let hummock_manager = hummock_manager.clone();
                         async move {
@@ -244,16 +269,15 @@ impl HummockManager {
                                 .await;
                         }
                     },
-                ));
+                );
             }
 
             {
                 let hummock_manager = hummock_manager.clone();
                 let backup_manager = backup_manager.clone();
-                child_handles.push(spawn_periodic_loop(
+                spawn_loop!(
                     "full_gc",
                     Duration::from_secs(hummock_manager.env.opts.full_gc_interval_sec),
-                    child_shutdown_rx.clone(),
                     move || {
                         let hummock_manager = hummock_manager.clone();
                         let backup_manager = backup_manager.clone();
@@ -271,16 +295,15 @@ impl HummockManager {
                                 );
                         }
                     },
-                ));
+                );
             }
 
             if periodic_scheduling_compaction_group_split_interval_sec > 0 {
                 let hummock_manager = hummock_manager.clone();
                 let split_merge_mutex = split_merge_mutex.clone();
-                child_handles.push(spawn_periodic_loop(
+                spawn_loop!(
                     "group_schedule_split",
                     Duration::from_secs(periodic_scheduling_compaction_group_split_interval_sec),
-                    child_shutdown_rx.clone(),
                     move || {
                         let hummock_manager = hummock_manager.clone();
                         let split_merge_mutex = split_merge_mutex.clone();
@@ -292,16 +315,15 @@ impl HummockManager {
                             hummock_manager.on_handle_schedule_group_split().await;
                         }
                     },
-                ));
+                );
             }
 
             if periodic_scheduling_compaction_group_merge_interval_sec > 0 {
                 let hummock_manager = hummock_manager.clone();
                 let split_merge_mutex = split_merge_mutex.clone();
-                child_handles.push(spawn_periodic_loop(
+                spawn_loop!(
                     "group_schedule_merge",
                     Duration::from_secs(periodic_scheduling_compaction_group_merge_interval_sec),
-                    child_shutdown_rx.clone(),
                     move || {
                         let hummock_manager = hummock_manager.clone();
                         let split_merge_mutex = split_merge_mutex.clone();
@@ -313,15 +335,15 @@ impl HummockManager {
                             hummock_manager.on_handle_schedule_group_merge().await;
                         }
                     },
-                ));
+                );
             }
 
             let _ = shutdown_rx.await;
             let _ = child_shutdown_tx.send(true);
 
-            for handle in child_handles {
+            for (name, handle) in child_handles {
                 if let Err(e) = handle.await {
-                    warn!(error = %e, "Hummock timer handler loop failed");
+                    warn!(handler = name, error = %e, "Hummock timer handler loop failed");
                 }
             }
 
@@ -436,140 +458,6 @@ impl HummockManager {
                 );
             }
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use std::sync::Arc;
-    use std::sync::atomic::{AtomicUsize, Ordering};
-    use std::time::Duration;
-
-    use tokio::sync::{Mutex, watch};
-
-    use super::spawn_periodic_loop;
-
-    #[tokio::test]
-    async fn test_spawn_periodic_loop_shutdown() {
-        let (shutdown_tx, shutdown_rx) = watch::channel(false);
-        let counter = Arc::new(AtomicUsize::new(0));
-        let handle =
-            spawn_periodic_loop("test_shutdown", Duration::from_millis(10), shutdown_rx, {
-                let counter = counter.clone();
-                move || {
-                    let counter = counter.clone();
-                    async move {
-                        counter.fetch_add(1, Ordering::Relaxed);
-                    }
-                }
-            });
-
-        tokio::time::sleep(Duration::from_millis(40)).await;
-        shutdown_tx.send(true).unwrap();
-        handle.await.unwrap();
-
-        assert!(counter.load(Ordering::Relaxed) > 0);
-    }
-
-    #[tokio::test]
-    async fn test_spawn_periodic_loop_isolated_progress() {
-        let (shutdown_tx, shutdown_rx) = watch::channel(false);
-        let slow_counter = Arc::new(AtomicUsize::new(0));
-        let fast_counter = Arc::new(AtomicUsize::new(0));
-
-        let slow_handle = spawn_periodic_loop(
-            "test_slow",
-            Duration::from_millis(10),
-            shutdown_rx.clone(),
-            {
-                let slow_counter = slow_counter.clone();
-                move || {
-                    let slow_counter = slow_counter.clone();
-                    async move {
-                        slow_counter.fetch_add(1, Ordering::Relaxed);
-                        tokio::time::sleep(Duration::from_millis(30)).await;
-                    }
-                }
-            },
-        );
-
-        let fast_handle =
-            spawn_periodic_loop("test_fast", Duration::from_millis(10), shutdown_rx, {
-                let fast_counter = fast_counter.clone();
-                move || {
-                    let fast_counter = fast_counter.clone();
-                    async move {
-                        fast_counter.fetch_add(1, Ordering::Relaxed);
-                    }
-                }
-            });
-
-        tokio::time::sleep(Duration::from_millis(120)).await;
-        shutdown_tx.send(true).unwrap();
-        slow_handle.await.unwrap();
-        fast_handle.await.unwrap();
-
-        let slow = slow_counter.load(Ordering::Relaxed);
-        let fast = fast_counter.load(Ordering::Relaxed);
-        assert!(fast > 0);
-        assert!(fast > slow);
-    }
-
-    #[tokio::test]
-    async fn test_shared_mutex_guards_concurrent_handlers() {
-        let (shutdown_tx, shutdown_rx) = watch::channel(false);
-        let scheduling_mutex = Arc::new(Mutex::new(()));
-        let in_critical = Arc::new(AtomicUsize::new(0));
-        let max_in_critical = Arc::new(AtomicUsize::new(0));
-
-        let split_handle = spawn_periodic_loop(
-            "test_split",
-            Duration::from_millis(10),
-            shutdown_rx.clone(),
-            {
-                let scheduling_mutex = scheduling_mutex.clone();
-                let in_critical = in_critical.clone();
-                let max_in_critical = max_in_critical.clone();
-                move || {
-                    let scheduling_mutex = scheduling_mutex.clone();
-                    let in_critical = in_critical.clone();
-                    let max_in_critical = max_in_critical.clone();
-                    async move {
-                        let _guard = scheduling_mutex.lock().await;
-                        let now = in_critical.fetch_add(1, Ordering::SeqCst) + 1;
-                        max_in_critical.fetch_max(now, Ordering::SeqCst);
-                        tokio::time::sleep(Duration::from_millis(15)).await;
-                        in_critical.fetch_sub(1, Ordering::SeqCst);
-                    }
-                }
-            },
-        );
-
-        let merge_handle =
-            spawn_periodic_loop("test_merge", Duration::from_millis(10), shutdown_rx, {
-                let scheduling_mutex = scheduling_mutex.clone();
-                let in_critical = in_critical.clone();
-                let max_in_critical = max_in_critical.clone();
-                move || {
-                    let scheduling_mutex = scheduling_mutex.clone();
-                    let in_critical = in_critical.clone();
-                    let max_in_critical = max_in_critical.clone();
-                    async move {
-                        let _guard = scheduling_mutex.lock().await;
-                        let now = in_critical.fetch_add(1, Ordering::SeqCst) + 1;
-                        max_in_critical.fetch_max(now, Ordering::SeqCst);
-                        tokio::time::sleep(Duration::from_millis(15)).await;
-                        in_critical.fetch_sub(1, Ordering::SeqCst);
-                    }
-                }
-            });
-
-        tokio::time::sleep(Duration::from_millis(120)).await;
-        shutdown_tx.send(true).unwrap();
-        split_handle.await.unwrap();
-        merge_handle.await.unwrap();
-
-        assert_eq!(max_in_critical.load(Ordering::SeqCst), 1);
     }
 }
 
@@ -746,5 +634,173 @@ impl HummockManager {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::time::Duration;
+
+    use tokio::sync::{Mutex, Notify, watch};
+
+    use super::spawn_periodic_loop;
+
+    #[tokio::test]
+    async fn test_spawn_periodic_loop_shutdown() {
+        let (shutdown_tx, shutdown_rx) = watch::channel(false);
+        let counter = Arc::new(AtomicUsize::new(0));
+        let handle =
+            spawn_periodic_loop("test_shutdown", Duration::from_millis(10), shutdown_rx, {
+                let counter = counter.clone();
+                move || {
+                    let counter = counter.clone();
+                    async move {
+                        counter.fetch_add(1, Ordering::Relaxed);
+                    }
+                }
+            });
+
+        tokio::time::sleep(Duration::from_millis(40)).await;
+        shutdown_tx.send(true).unwrap();
+        handle.await.unwrap();
+
+        assert!(counter.load(Ordering::Relaxed) > 0);
+    }
+
+    #[tokio::test]
+    async fn test_spawn_periodic_loop_isolated_progress() {
+        let (shutdown_tx, shutdown_rx) = watch::channel(false);
+        let slow_counter = Arc::new(AtomicUsize::new(0));
+        let fast_counter = Arc::new(AtomicUsize::new(0));
+
+        let slow_handle = spawn_periodic_loop(
+            "test_slow",
+            Duration::from_millis(10),
+            shutdown_rx.clone(),
+            {
+                let slow_counter = slow_counter.clone();
+                move || {
+                    let slow_counter = slow_counter.clone();
+                    async move {
+                        slow_counter.fetch_add(1, Ordering::Relaxed);
+                        tokio::time::sleep(Duration::from_millis(30)).await;
+                    }
+                }
+            },
+        );
+
+        let fast_handle =
+            spawn_periodic_loop("test_fast", Duration::from_millis(10), shutdown_rx, {
+                let fast_counter = fast_counter.clone();
+                move || {
+                    let fast_counter = fast_counter.clone();
+                    async move {
+                        fast_counter.fetch_add(1, Ordering::Relaxed);
+                    }
+                }
+            });
+
+        tokio::time::sleep(Duration::from_millis(120)).await;
+        shutdown_tx.send(true).unwrap();
+        slow_handle.await.unwrap();
+        fast_handle.await.unwrap();
+
+        let slow = slow_counter.load(Ordering::Relaxed);
+        let fast = fast_counter.load(Ordering::Relaxed);
+        assert!(fast > 0);
+        assert!(fast > slow);
+    }
+
+    #[tokio::test]
+    async fn test_shared_mutex_guards_concurrent_handlers() {
+        struct DecrOnDrop(Arc<AtomicUsize>);
+
+        impl Drop for DecrOnDrop {
+            fn drop(&mut self) {
+                self.0.fetch_sub(1, Ordering::SeqCst);
+            }
+        }
+
+        let (shutdown_tx, shutdown_rx) = watch::channel(false);
+        let scheduling_mutex = Arc::new(Mutex::new(()));
+        let in_critical = Arc::new(AtomicUsize::new(0));
+        let max_in_critical = Arc::new(AtomicUsize::new(0));
+
+        let split_handle = spawn_periodic_loop(
+            "test_split",
+            Duration::from_millis(10),
+            shutdown_rx.clone(),
+            {
+                let scheduling_mutex = scheduling_mutex.clone();
+                let in_critical = in_critical.clone();
+                let max_in_critical = max_in_critical.clone();
+                move || {
+                    let scheduling_mutex = scheduling_mutex.clone();
+                    let in_critical = in_critical.clone();
+                    let max_in_critical = max_in_critical.clone();
+                    async move {
+                        let _guard = scheduling_mutex.lock().await;
+                        let now = in_critical.fetch_add(1, Ordering::SeqCst) + 1;
+                        let _decr = DecrOnDrop(in_critical);
+                        max_in_critical.fetch_max(now, Ordering::SeqCst);
+                        tokio::time::sleep(Duration::from_millis(15)).await;
+                    }
+                }
+            },
+        );
+
+        let merge_handle =
+            spawn_periodic_loop("test_merge", Duration::from_millis(10), shutdown_rx, {
+                let scheduling_mutex = scheduling_mutex.clone();
+                let in_critical = in_critical.clone();
+                let max_in_critical = max_in_critical.clone();
+                move || {
+                    let scheduling_mutex = scheduling_mutex.clone();
+                    let in_critical = in_critical.clone();
+                    let max_in_critical = max_in_critical.clone();
+                    async move {
+                        let _guard = scheduling_mutex.lock().await;
+                        let now = in_critical.fetch_add(1, Ordering::SeqCst) + 1;
+                        let _decr = DecrOnDrop(in_critical);
+                        max_in_critical.fetch_max(now, Ordering::SeqCst);
+                        tokio::time::sleep(Duration::from_millis(15)).await;
+                    }
+                }
+            });
+
+        tokio::time::sleep(Duration::from_millis(120)).await;
+        shutdown_tx.send(true).unwrap();
+        split_handle.await.unwrap();
+        merge_handle.await.unwrap();
+
+        assert_eq!(max_in_critical.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn test_spawn_periodic_loop_shutdown_preempts_handler() {
+        let (shutdown_tx, shutdown_rx) = watch::channel(false);
+        let started = Arc::new(Notify::new());
+
+        let handle = spawn_periodic_loop("test_preempt", Duration::from_millis(10), shutdown_rx, {
+            let started = started.clone();
+            move || {
+                let started = started.clone();
+                async move {
+                    started.notify_one();
+                    // A long-running handler which should be cancelled by shutdown.
+                    tokio::time::sleep(Duration::from_secs(3600)).await;
+                }
+            }
+        });
+
+        started.notified().await;
+        shutdown_tx.send(true).unwrap();
+
+        tokio::time::timeout(Duration::from_millis(200), handle)
+            .await
+            .expect("handler loop should stop promptly")
+            .unwrap();
     }
 }
