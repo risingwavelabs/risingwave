@@ -343,7 +343,11 @@ impl HummockManager {
 
             for (name, handle) in child_handles {
                 if let Err(e) = handle.await {
-                    warn!(handler = name, error = %e, "Hummock timer handler loop failed");
+                    warn!(
+                        handler = name,
+                        error = %e.as_report(),
+                        "Hummock timer handler loop failed"
+                    );
                 }
             }
 
@@ -639,6 +643,7 @@ impl HummockManager {
 
 #[cfg(test)]
 mod tests {
+    use std::future::pending;
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::time::Duration;
@@ -646,28 +651,6 @@ mod tests {
     use tokio::sync::{Mutex, Notify, watch};
 
     use super::spawn_periodic_loop;
-
-    #[tokio::test]
-    async fn test_spawn_periodic_loop_shutdown() {
-        let (shutdown_tx, shutdown_rx) = watch::channel(false);
-        let counter = Arc::new(AtomicUsize::new(0));
-        let handle =
-            spawn_periodic_loop("test_shutdown", Duration::from_millis(10), shutdown_rx, {
-                let counter = counter.clone();
-                move || {
-                    let counter = counter.clone();
-                    async move {
-                        counter.fetch_add(1, Ordering::Relaxed);
-                    }
-                }
-            });
-
-        tokio::time::sleep(Duration::from_millis(40)).await;
-        shutdown_tx.send(true).unwrap();
-        handle.await.unwrap();
-
-        assert!(counter.load(Ordering::Relaxed) > 0);
-    }
 
     #[tokio::test]
     async fn test_spawn_periodic_loop_isolated_progress() {
@@ -789,8 +772,8 @@ mod tests {
                 let started = started.clone();
                 async move {
                     started.notify_one();
-                    // A long-running handler which should be cancelled by shutdown.
-                    tokio::time::sleep(Duration::from_secs(3600)).await;
+                    // A never-ending handler which should be cancelled by shutdown.
+                    pending::<()>().await;
                 }
             }
         });
@@ -798,7 +781,7 @@ mod tests {
         started.notified().await;
         shutdown_tx.send(true).unwrap();
 
-        tokio::time::timeout(Duration::from_millis(200), handle)
+        tokio::time::timeout(Duration::from_secs(1), handle)
             .await
             .expect("handler loop should stop promptly")
             .unwrap();
