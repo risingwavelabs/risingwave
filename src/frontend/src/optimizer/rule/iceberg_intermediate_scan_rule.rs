@@ -268,7 +268,7 @@ fn set_project_field_ids(
             let name = name.as_ref();
             schema
                 .field_id_by_name(name)
-                .with_context(|| format!("Column {} not found in data file schema", name))
+                .with_context(|| format!("Column {} not found in table schema", name))
         })
         .try_collect()?;
     for file in files {

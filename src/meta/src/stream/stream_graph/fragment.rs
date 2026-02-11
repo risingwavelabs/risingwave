@@ -472,7 +472,7 @@ pub fn check_sink_fragments_support_refresh_schema(
     Ok(())
 }
 
-/// Output mapping info after rewriting a StreamScan node.
+/// Output mapping info after rewriting a `StreamScan` node.
 struct ScanRewriteResult {
     old_output_index_to_new_output_index: HashMap<u32, u32>,
     new_output_index_by_column_id: HashMap<ColumnId, u32>,
@@ -536,7 +536,7 @@ fn rewrite_log_store_table(
         .collect();
 }
 
-/// Rewrite StreamScan + Merge to match the new upstream schema.
+/// Rewrite `StreamScan` + Merge to match the new upstream schema.
 fn rewrite_stream_scan_and_merge(
     stream_scan_node: &mut StreamNode,
     removed_column_ids: &HashSet<ColumnId>,
@@ -2415,20 +2415,12 @@ mod tests {
         upstream_columns.push(new_column.clone());
         let upstream_table = PbTable {
             name: table_name.to_owned(),
-            columns: upstream_columns
-                .iter()
-                .cloned()
-                .map(|col| col.to_protobuf())
-                .collect(),
+            columns: upstream_columns.iter().map(|col| col.to_protobuf()).collect(),
             ..Default::default()
         };
 
         let sink = PbSink {
-            columns: columns
-                .iter()
-                .cloned()
-                .map(|col| col.to_protobuf())
-                .collect(),
+            columns: columns.iter().map(|col| col.to_protobuf()).collect(),
             sink_type: PbSinkType::AppendOnly as i32,
             ..Default::default()
         };
@@ -2480,7 +2472,7 @@ mod tests {
         let (new_fragment, _, _) = rewrite_refresh_schema_sink_fragment(
             &original_fragment,
             &sink,
-            &[new_column.clone()],
+            std::slice::from_ref(&new_column),
             &[],
             &upstream_table,
             7.into(),
@@ -2546,20 +2538,12 @@ mod tests {
 
         let upstream_table = PbTable {
             name: table_name.to_owned(),
-            columns: upstream_columns
-                .iter()
-                .cloned()
-                .map(|col| col.to_protobuf())
-                .collect(),
+            columns: upstream_columns.iter().map(|col| col.to_protobuf()).collect(),
             ..Default::default()
         };
 
         let sink = PbSink {
-            columns: columns
-                .iter()
-                .cloned()
-                .map(|col| col.to_protobuf())
-                .collect(),
+            columns: columns.iter().map(|col| col.to_protobuf()).collect(),
             sink_type: PbSinkType::AppendOnly as i32,
             ..Default::default()
         };
@@ -2613,7 +2597,7 @@ mod tests {
             &original_fragment,
             &sink,
             &[],
-            &[removed_column.clone()],
+            std::slice::from_ref(&removed_column),
             &upstream_table,
             7.into(),
             id_gen_manager,
