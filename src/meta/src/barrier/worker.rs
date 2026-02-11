@@ -120,6 +120,9 @@ mod tests {
     #[tokio::test]
     async fn test_reschedule_intent_without_workers_notifies_start_failed() {
         let env = MetaSrvEnv::for_test().await;
+        let database_id = DatabaseId::new(1);
+        let database_info =
+            InflightDatabaseInfo::empty(database_id, env.shared_actor_infos().clone());
         let (started_tx, started_rx) = oneshot::channel();
         let (_collected_tx, _collected_rx) = oneshot::channel();
 
@@ -129,7 +132,7 @@ mod tests {
         };
 
         let new_barrier = schedule::NewBarrier {
-            database_id: DatabaseId::new(1),
+            database_id,
             command: Some((
                 Command::RescheduleIntent {
                     context: RescheduleContext::empty(),
@@ -145,7 +148,7 @@ mod tests {
             env,
             HashMap::new(),
             AdaptiveParallelismStrategy::default(),
-            None,
+            Some(&database_info),
             new_barrier,
         );
 
