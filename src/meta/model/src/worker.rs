@@ -91,6 +91,7 @@ impl From<WorkerStatus> for PbState {
 impl From<&PbWorkerNode> for ActiveModel {
     fn from(worker: &PbWorkerNode) -> Self {
         let host = worker.host.clone().unwrap();
+        let resource = worker.resource.clone().unwrap_or_default();
         Self {
             worker_id: Set(worker.id),
             worker_type: Set(worker.r#type().into()),
@@ -98,6 +99,11 @@ impl From<&PbWorkerNode> for ActiveModel {
             port: Set(host.port),
             status: Set(worker.state().into()),
             transaction_id: Set(worker.transactional_id.map(|id| id as _)),
+            started_at: Set(worker.started_at.map(|s| s as i64)),
+            resource_rw_version: Set(Some(resource.rw_version)),
+            resource_total_memory_bytes: Set(Some(resource.total_memory_bytes as i64)),
+            resource_total_cpu_cores: Set(Some(resource.total_cpu_cores as i64)),
+            resource_hostname: Set(Some(resource.hostname)),
         }
     }
 }
@@ -112,6 +118,11 @@ pub struct Model {
     pub port: i32,
     pub status: WorkerStatus,
     pub transaction_id: Option<TransactionId>,
+    pub started_at: Option<i64>,
+    pub resource_rw_version: Option<String>,
+    pub resource_total_memory_bytes: Option<i64>,
+    pub resource_total_cpu_cores: Option<i64>,
+    pub resource_hostname: Option<String>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

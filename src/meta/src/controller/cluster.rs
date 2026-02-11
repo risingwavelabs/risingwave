@@ -477,10 +477,6 @@ impl WorkerExtraInfo {
         );
         self.expire_at = Some(expire);
     }
-
-    fn update_started_at(&mut self) {
-        self.started_at = Some(timestamp_now_sec());
-    }
 }
 
 fn timestamp_now_sec() -> u64 {
@@ -511,6 +507,30 @@ fn meta_node_info(host: &str, started_at: Option<u64>) -> PbWorkerNode {
     }
 }
 
+fn resource_to_db(resource: &PbResource) -> (String, i64, i64, String) {
+    (
+        resource.rw_version.clone(),
+        i64::try_from(resource.total_memory_bytes).unwrap_or(i64::MAX),
+        i64::try_from(resource.total_cpu_cores).unwrap_or(i64::MAX),
+        resource.hostname.clone(),
+    )
+}
+
+fn resource_from_db(worker: &worker::Model) -> PbResource {
+    PbResource {
+        rw_version: worker.resource_rw_version.clone().unwrap_or_default(),
+        total_memory_bytes: worker
+            .resource_total_memory_bytes
+            .and_then(|v| u64::try_from(v).ok())
+            .unwrap_or_default(),
+        total_cpu_cores: worker
+            .resource_total_cpu_cores
+            .and_then(|v| u64::try_from(v).ok())
+            .unwrap_or_default(),
+        hostname: worker.resource_hostname.clone().unwrap_or_default(),
+    }
+}
+
 pub struct ClusterControllerInner {
     db: DatabaseConnection,
     /// Record for tracking available machine ids, one is available.
@@ -527,17 +547,10 @@ impl ClusterControllerInner {
         db: DatabaseConnection,
         disable_automatic_parallelism_control: bool,
     ) -> MetaResult<Self> {
-        let workers: Vec<(WorkerId, Option<TransactionId>)> = Worker::find()
-            .select_only()
-            .column(worker::Column::WorkerId)
-            .column(worker::Column::TransactionId)
-            .into_tuple()
-            .all(&db)
-            .await?;
+        let workers: Vec<worker::Model> = Worker::find().all(&db).await?;
         let inuse_txn_ids: HashSet<_> = workers
             .iter()
-            .cloned()
-            .filter_map(|(_, txn_id)| txn_id)
+            .filter_map(|worker| worker.transaction_id)
             .collect();
         let available_transactional_ids = (0..Self::MAX_WORKER_REUSABLE_ID_COUNT as TransactionId)
             .filter(|id| !inuse_txn_ids.contains(id))
@@ -545,7 +558,16 @@ impl ClusterControllerInner {
 
         let worker_extra_info = workers
             .into_iter()
-            .map(|(w, _)| (w, WorkerExtraInfo::default()))
+            .map(|worker| {
+                (
+                    worker.worker_id,
+                    WorkerExtraInfo {
+                        expire_at: None,
+                        started_at: worker.started_at.and_then(|t| u64::try_from(t).ok()),
+                        resource: resource_from_db(&worker),
+                    },
+                )
+            })
             .collect();
 
         Ok(Self {
@@ -586,18 +608,33 @@ impl ClusterControllerInner {
         }
     }
 
-    fn update_resource_and_started_at(
+    async fn update_resource_and_started_at(
         &mut self,
         worker_id: WorkerId,
         resource: PbResource,
     ) -> MetaResult<()> {
-        if let Some(info) = self.worker_extra_info.get_mut(&worker_id) {
-            info.resource = resource;
-            info.update_started_at();
-            Ok(())
-        } else {
-            Err(MetaError::invalid_worker(worker_id, "worker not found"))
-        }
+        let (rw_version, total_memory_bytes, total_cpu_cores, hostname) = resource_to_db(&resource);
+        let started_at = i64::try_from(timestamp_now_sec()).unwrap_or(i64::MAX);
+
+        let Some(worker) = Worker::find_by_id(worker_id).one(&self.db).await? else {
+            return Err(MetaError::invalid_worker(worker_id, "worker not found"));
+        };
+
+        let mut worker: worker::ActiveModel = worker.into();
+        worker.started_at = Set(Some(started_at));
+        worker.resource_rw_version = Set(Some(rw_version));
+        worker.resource_total_memory_bytes = Set(Some(total_memory_bytes));
+        worker.resource_total_cpu_cores = Set(Some(total_cpu_cores));
+        worker.resource_hostname = Set(Some(hostname));
+        worker.update(&self.db).await?;
+
+        let Some(info) = self.worker_extra_info.get_mut(&worker_id) else {
+            return Err(MetaError::invalid_worker(worker_id, "worker not found"));
+        };
+
+        info.resource = resource;
+        info.started_at = Some(started_at as u64);
+        Ok(())
     }
 
     fn get_extra_info_checked(&self, worker_id: WorkerId) -> MetaResult<WorkerExtraInfo> {
@@ -727,7 +764,8 @@ impl ClusterControllerInner {
                 WorkerProperty::update(property).exec(&txn).await?;
                 txn.commit().await?;
                 self.update_worker_ttl(worker.worker_id, ttl)?;
-                self.update_resource_and_started_at(worker.worker_id, resource)?;
+                self.update_resource_and_started_at(worker.worker_id, resource)
+                    .await?;
                 Ok(worker.worker_id)
             } else if worker.worker_type == WorkerType::Frontend && property.is_none() {
                 let worker_property = worker_property::ActiveModel {
@@ -746,7 +784,8 @@ impl ClusterControllerInner {
                 WorkerProperty::insert(worker_property).exec(&txn).await?;
                 txn.commit().await?;
                 self.update_worker_ttl(worker.worker_id, ttl)?;
-                self.update_resource_and_started_at(worker.worker_id, resource)?;
+                self.update_resource_and_started_at(worker.worker_id, resource)
+                    .await?;
                 Ok(worker.worker_id)
             } else if worker.worker_type == WorkerType::Compactor {
                 if let Some(property) = property {
@@ -775,16 +814,20 @@ impl ClusterControllerInner {
                 }
                 txn.commit().await?;
                 self.update_worker_ttl(worker.worker_id, ttl)?;
-                self.update_resource_and_started_at(worker.worker_id, resource)?;
+                self.update_resource_and_started_at(worker.worker_id, resource)
+                    .await?;
                 Ok(worker.worker_id)
             } else {
                 self.update_worker_ttl(worker.worker_id, ttl)?;
-                self.update_resource_and_started_at(worker.worker_id, resource)?;
+                self.update_resource_and_started_at(worker.worker_id, resource)
+                    .await?;
                 Ok(worker.worker_id)
             };
         }
 
         let txn_id = self.apply_transaction_id(r#type)?;
+        let (rw_version, total_memory_bytes, total_cpu_cores, hostname) = resource_to_db(&resource);
+        let started_at = timestamp_now_sec();
 
         let worker = worker::ActiveModel {
             worker_id: Default::default(),
@@ -793,6 +836,11 @@ impl ClusterControllerInner {
             port: Set(host_address.port),
             status: Set(WorkerStatus::Starting),
             transaction_id: Set(txn_id),
+            started_at: Set(Some(i64::try_from(started_at).unwrap_or(i64::MAX))),
+            resource_rw_version: Set(Some(rw_version)),
+            resource_total_memory_bytes: Set(Some(total_memory_bytes)),
+            resource_total_cpu_cores: Set(Some(total_cpu_cores)),
+            resource_hostname: Set(Some(hostname)),
         };
         let insert_res = Worker::insert(worker).exec(&txn).await?;
         let worker_id = insert_res.last_insert_id as WorkerId;
@@ -842,12 +890,15 @@ impl ClusterControllerInner {
         if let Some(txn_id) = txn_id {
             self.available_transactional_ids.retain(|id| *id != txn_id);
         }
-        let extra_info = WorkerExtraInfo {
-            started_at: Some(timestamp_now_sec()),
-            expire_at: None,
-            resource,
-        };
-        self.worker_extra_info.insert(worker_id, extra_info);
+        self.worker_extra_info.insert(
+            worker_id,
+            WorkerExtraInfo {
+                expire_at: None,
+                started_at: Some(started_at),
+                resource,
+            },
+        );
+        self.update_worker_ttl(worker_id, ttl)?;
 
         Ok(worker_id)
     }
