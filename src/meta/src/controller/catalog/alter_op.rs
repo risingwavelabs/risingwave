@@ -20,6 +20,8 @@ use risingwave_common::config::{StreamingConfig, merge_streaming_config_section}
 use risingwave_common::id::JobId;
 use risingwave_common::system_param::{OverrideValidate, Validate};
 use risingwave_meta_model::refresh_job::{self, RefreshState};
+use risingwave_pb::meta::PbTableCacheRefillPolicies;
+use risingwave_pb::meta::table_cache_refill_policies::PbTableCacheRefillPolicy;
 use sea_orm::ActiveValue::{NotSet, Set};
 use sea_orm::prelude::DateTime;
 use sea_orm::sea_query::Expr;
@@ -1106,7 +1108,8 @@ impl CatalogController {
         let updated_config_override = table.to_string();
 
         // Validate the config override by trying to merge it to the default config.
-        {
+        // And extract fields for other use.
+        let cache_refill_policy = {
             let merged = merge_streaming_config_section(
                 &StreamingConfig::default(),
                 &updated_config_override,
@@ -1116,13 +1119,15 @@ impl CatalogController {
             // Reject unrecognized entries.
             // Note: If these unrecognized entries are pre-existing, we also reject them here.
             // Users are able to fix them by issuing a `RESET` first.
-            if let Some(merged) = merged {
+            if let Some(merged) = &merged {
                 let unrecognized_keys = merged.unrecognized_keys().collect_vec();
                 if !unrecognized_keys.is_empty() {
                     bail_invalid_parameter!("unrecognized configs: {:?}", unrecognized_keys);
                 }
             }
-        }
+
+            merged.map(|config| config.developer.cache_refill_policy)
+        };
 
         StreamingJob::update(streaming_job::ActiveModel {
             job_id: Set(job_id),
@@ -1133,6 +1138,42 @@ impl CatalogController {
         .await?;
 
         txn.commit().await?;
+
+        let internal_tables: Vec<TableId> = Table::find()
+            .select_only()
+            .column(table::Column::TableId)
+            .filter(table::Column::BelongsToJobId.eq(job_id))
+            .into_tuple()
+            .all(&inner.db)
+            .await?;
+
+        tracing::debug!(
+            ?cache_refill_policy,
+            ?job_id,
+            ?internal_tables,
+            "notify cache refill policy for tables"
+        );
+
+        let table_refill_policies = PbTableCacheRefillPolicies {
+            policies: internal_tables
+                .into_iter()
+                .map(|table_id| {
+                    let mut p = PbTableCacheRefillPolicy::default();
+                    if let Some(policy) = cache_refill_policy {
+                        p.set_policy(policy.to_protobuf());
+                    }
+                    p.table_id = table_id.as_raw_id();
+                    p
+                })
+                .collect(),
+        };
+
+        self.env
+            .notification_manager()
+            .notify_hummock_without_version(
+                Operation::Update,
+                Info::TableCacheRefillPolicies(table_refill_policies),
+            );
 
         Ok(IGNORED_NOTIFICATION_VERSION)
     }

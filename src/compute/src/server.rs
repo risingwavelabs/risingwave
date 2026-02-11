@@ -232,6 +232,7 @@ pub async fn compute_node_serve(
     LicenseManager::get().refresh(system_params.license_key());
     let state_store = Box::pin(StateStoreImpl::new(
         state_store_url,
+        opts.role,
         storage_opts.clone(),
         hummock_meta_client.clone(),
         state_store_metrics.clone(),
@@ -418,19 +419,22 @@ pub async fn compute_node_serve(
     let stream_exchange_srv =
         StreamExchangeServiceImpl::new(stream_mgr.clone(), stream_exchange_srv_metrics);
     let stream_srv = StreamServiceImpl::new(stream_mgr.clone(), stream_env.clone());
-    let (meta_cache, block_cache) = if let Some(hummock) = state_store.as_hummock() {
-        (
-            Some(hummock.sstable_store().meta_cache().clone()),
-            Some(hummock.sstable_store().block_cache().clone()),
-        )
-    } else {
-        (None, None)
-    };
+    let (meta_cache, block_cache, table_cache_refill_context) =
+        if let Some(hummock) = state_store.as_hummock() {
+            (
+                Some(hummock.sstable_store().meta_cache().clone()),
+                Some(hummock.sstable_store().block_cache().clone()),
+                Some(hummock.table_cache_refill_context().clone()),
+            )
+        } else {
+            (None, None, None)
+        };
     let monitor_srv = MonitorServiceImpl::new(
         stream_mgr.clone(),
         config.server.clone(),
         meta_cache.clone(),
         block_cache.clone(),
+        table_cache_refill_context,
     );
     let config_srv = ConfigServiceImpl::new(batch_mgr, stream_mgr.clone(), meta_cache, block_cache);
     let health_srv = HealthServiceImpl::new();

@@ -12,14 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
+
+use risingwave_common::bitmap::Bitmap;
 use risingwave_common::license::LicenseManager;
 use risingwave_common_service::ObserverState;
 use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
 use risingwave_hummock_trace::TraceSpan;
 use risingwave_pb::catalog::Table;
-use risingwave_pb::meta::SubscribeResponse;
+use risingwave_pb::id::TableId;
 use risingwave_pb::meta::object::PbObjectInfo;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
+use risingwave_pb::meta::{SubscribeResponse, TableCacheRefillPolicies};
 use tokio::sync::mpsc::UnboundedSender;
 
 use crate::compaction_catalog_manager::CompactionCatalogManagerRef;
@@ -32,6 +36,8 @@ pub struct HummockObserverNode {
     backup_reader: BackupReaderRef,
     write_limiter: WriteLimiterRef,
     version_update_sender: UnboundedSender<HummockVersionUpdate>,
+    cache_refill_policy_sender: UnboundedSender<TableCacheRefillPolicies>,
+    serving_table_vnode_mapping_sender: UnboundedSender<(Operation, HashMap<TableId, Bitmap>)>,
     version: u64,
 }
 
@@ -93,7 +99,52 @@ impl ObserverState for HummockObserverNode {
             Info::ClusterResource(resource) => {
                 LicenseManager::get().update_cluster_resource(resource);
             }
+            Info::TableCacheRefillPolicies(policies) => {
+                tracing::info!(?policies, "receive table cache refill policies updates");
+                let _ = self
+                    .cache_refill_policy_sender
+                    .send(policies)
+                    .inspect_err(|e| {
+                        tracing::error!(
+                            policies = ?e.0,
+                            "unable to send table cache refill policies"
+                        );
+                    });
+            }
+            Info::ServingTableVnodeMappings(mappings) => {
+                let mappings = mappings
+                    .mappings
+                    .into_iter()
+                    .map(|mapping| {
+                        (
+                            TableId::from(mapping.table_id),
+                            Bitmap::from(
+                                mapping
+                                    .bitmap
+                                    .expect("serving table vnode bitmap cannot inexists"),
+                            ),
+                        )
+                    })
+                    .collect();
 
+                let op = resp.operation();
+                tracing::debug!(
+                    ?op,
+                    ?mappings,
+                    "receive serving table vnode mappings updates"
+                );
+
+                let _ = self
+                    .serving_table_vnode_mapping_sender
+                    .send((op, mappings))
+                    .inspect_err(|e| {
+                        tracing::error!(
+                            op = ?e.0.0,
+                            mappings = ?e.0.1,
+                            "unable to send serving table vnode mappings"
+                        );
+                    });
+            }
             info => {
                 panic!("invalid notification info: {info}");
             }
@@ -144,12 +195,16 @@ impl HummockObserverNode {
         compaction_catalog_manager: CompactionCatalogManagerRef,
         backup_reader: BackupReaderRef,
         version_update_sender: UnboundedSender<HummockVersionUpdate>,
+        cache_refill_policy_sender: UnboundedSender<TableCacheRefillPolicies>,
+        serving_table_vnode_mapping_sender: UnboundedSender<(Operation, HashMap<TableId, Bitmap>)>,
         write_limiter: WriteLimiterRef,
     ) -> Self {
         Self {
             compaction_catalog_manager,
             backup_reader,
             version_update_sender,
+            cache_refill_policy_sender,
+            serving_table_vnode_mapping_sender,
             version: 0,
             write_limiter,
         }

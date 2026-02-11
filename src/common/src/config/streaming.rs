@@ -19,10 +19,12 @@ use risingwave_common_proc_macro::serde_prefix_all;
 use super::*;
 
 mod async_stack_trace;
+mod cache_refill;
 mod join_encoding_type;
 mod over_window;
 
 pub use async_stack_trace::*;
+pub use cache_refill::*;
 pub use join_encoding_type::*;
 pub use over_window::*;
 
@@ -277,6 +279,11 @@ pub struct StreamingDeveloperConfig {
     /// Can be `full`, `recent`, `recent_first_n` or `recent_last_n`.
     #[serde(default)]
     pub over_window_cache_policy: OverWindowCachePolicy,
+
+    /// Cache refill policy for streaming cache refill feature.
+    /// Can be `unspecified`, `disabled`, `streaming`, `serving` or `both`.
+    #[serde(default = "default::developer::cache_refill_policy")]
+    pub cache_refill_policy: CacheRefillPolicy,
 
     #[serde(default, flatten)]
     #[serde_prefix_all(skip)]

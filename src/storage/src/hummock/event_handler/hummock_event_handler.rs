@@ -26,12 +26,17 @@ use futures::FutureExt;
 use itertools::Itertools;
 use parking_lot::RwLock;
 use prometheus::{Histogram, IntGauge, IntGaugeVec};
+use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::TableId;
+use risingwave_common::config::Role;
+use risingwave_common::config::streaming::CacheRefillPolicy;
 use risingwave_common::metrics::UintGauge;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::SstDeltaInfo;
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::version::{HummockVersionCommon, LocalHummockVersionDelta};
 use risingwave_hummock_sdk::{HummockEpoch, SyncResult};
+use risingwave_pb::meta::TableCacheRefillPolicies;
+use risingwave_pb::meta::subscribe_response::Operation;
 use tokio::spawn;
 use tokio::sync::mpsc::error::SendError;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
@@ -42,7 +47,9 @@ use super::refiller::{CacheRefillConfig, CacheRefiller};
 use super::{LocalInstanceGuard, LocalInstanceId, ReadVersionMappingType};
 use crate::compaction_catalog_manager::CompactionCatalogManagerRef;
 use crate::hummock::compactor::{CompactorContext, await_tree_key, compact};
-use crate::hummock::event_handler::refiller::{CacheRefillerEvent, SpawnRefillTask};
+use crate::hummock::event_handler::refiller::{
+    CacheRefillerEvent, SpawnRefillTask, TableCacheRefillContext,
+};
 use crate::hummock::event_handler::uploader::{
     HummockUploader, SpawnUploadTask, SyncedData, UploadTaskOutput,
 };
@@ -194,6 +201,8 @@ pub(crate) struct HummockEventHandler {
     hummock_event_tx: HummockEventSender,
     hummock_event_rx: HummockEventReceiver,
     version_update_rx: UnboundedReceiver<HummockVersionUpdate>,
+    cache_refill_policy_rx: UnboundedReceiver<TableCacheRefillPolicies>,
+    serving_table_vnode_mapping_rx: UnboundedReceiver<(Operation, HashMap<TableId, Bitmap>)>,
     read_version_mapping: Arc<RwLock<ReadVersionMappingType>>,
     /// A copy of `read_version_mapping` but owned by event handler
     local_read_version_mapping: HashMap<LocalInstanceId, (TableId, HummockReadVersionRef)>,
@@ -227,7 +236,10 @@ async fn flush_imms(
 
 impl HummockEventHandler {
     pub fn new(
+        role: Role,
         version_update_rx: UnboundedReceiver<HummockVersionUpdate>,
+        cache_refill_policy_rx: UnboundedReceiver<TableCacheRefillPolicies>,
+        serving_table_vnode_mapping_rx: UnboundedReceiver<(Operation, HashMap<TableId, Bitmap>)>,
         pinned_version: PinnedVersion,
         compactor_context: CompactorContext,
         compaction_catalog_manager_ref: CompactionCatalogManagerRef,
@@ -247,7 +259,10 @@ impl HummockEventHandler {
         let buffer_tracker =
             BufferTracker::from_storage_opts(&compactor_context.storage_opts, &state_store_metrics);
         Self::new_inner(
+            role,
             version_update_rx,
+            cache_refill_policy_rx,
+            serving_table_vnode_mapping_rx,
             compactor_context.sstable_store.clone(),
             state_store_metrics,
             CacheRefillConfig::from_storage_opts(&compactor_context.storage_opts),
@@ -301,8 +316,12 @@ impl HummockEventHandler {
         )
     }
 
+    #[expect(clippy::too_many_arguments)]
     fn new_inner(
+        role: Role,
         version_update_rx: UnboundedReceiver<HummockVersionUpdate>,
+        cache_refill_policy_rx: UnboundedReceiver<TableCacheRefillPolicies>,
+        serving_table_vnode_mapping_rx: UnboundedReceiver<(Operation, HashMap<TableId, Bitmap>)>,
         sstable_store: SstableStoreRef,
         state_store_metrics: Arc<HummockStateStoreMetrics>,
         refill_config: CacheRefillConfig,
@@ -339,12 +358,20 @@ impl HummockEventHandler {
             spawn_upload_task,
             buffer_tracker,
         );
-        let refiller = CacheRefiller::new(refill_config, sstable_store, spawn_refill_task);
+        let refiller = CacheRefiller::new(
+            role,
+            refill_config,
+            sstable_store,
+            spawn_refill_task,
+            read_version_mapping.clone(),
+        );
 
         Self {
             hummock_event_tx,
             hummock_event_rx,
             version_update_rx,
+            cache_refill_policy_rx,
+            serving_table_vnode_mapping_rx,
             version_update_notifier_tx,
             recent_versions: Arc::new(ArcSwap::from_pointee(recent_versions)),
             read_version_mapping,
@@ -374,6 +401,10 @@ impl HummockEventHandler {
 
     pub fn buffer_tracker(&self) -> &BufferTracker {
         self.uploader.buffer_tracker()
+    }
+
+    pub(crate) fn table_cache_refill_context(&self) -> &Arc<RwLock<TableCacheRefillContext>> {
+        self.refiller.table_cache_refill_context()
     }
 }
 
@@ -711,6 +742,21 @@ impl HummockEventHandler {
                     };
                     self.handle_version_update(version_update);
                 }
+                cache_refill_policies = pin!(self.cache_refill_policy_rx.recv()) => {
+                    let Some(policies) = cache_refill_policies else {
+                        warn!("cache refill policy stream ends. event handle shutdown");
+                        return;
+                    };
+                    let policies = policies.policies.into_iter().map(|policy| (TableId::from(policy.table_id), CacheRefillPolicy::from_protobuf(policy.get_policy().unwrap()))).collect::<HashMap<_, _>>();
+                    self.refiller.update_table_cache_refill_policies(policies);
+                }
+                serving_table_vnode_mapping = pin!(self.serving_table_vnode_mapping_rx.recv()) => {
+                    let Some((op, mapping)) = serving_table_vnode_mapping else {
+                        warn!("serving table vnode mapping stream ends. event handle shutdown");
+                        return;
+                    };
+                    self.refiller.update_serving_table_vnode_mapping(op, mapping);
+                }
             }
         }
     }
@@ -837,9 +883,17 @@ impl HummockEventHandler {
                         self.destroy_read_version(instance_id);
                     }
                 }
+
+                self.refiller.update_table_cache_refill_vnodes(table_id);
             }
 
             HummockEvent::DestroyReadVersion { instance_id } => {
+                let table_id = self
+                    .local_read_version_mapping
+                    .get(&instance_id)
+                    .unwrap_or_else(|| panic!("query inexist instance instance_id {instance_id}"))
+                    .0;
+                self.refiller.update_table_cache_refill_vnodes(table_id);
                 self.uploader.may_destroy_instance(instance_id);
                 self.destroy_read_version(instance_id);
             }
@@ -958,6 +1012,7 @@ mod tests {
     use parking_lot::Mutex;
     use risingwave_common::bitmap::Bitmap;
     use risingwave_common::catalog::TableId;
+    use risingwave_common::config::Role;
     use risingwave_common::hash::VirtualNode;
     use risingwave_common::util::epoch::{EpochExt, test_epoch};
     use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
@@ -1006,6 +1061,8 @@ mod tests {
         );
 
         let (_version_update_tx, version_update_rx) = unbounded_channel();
+        let (_cache_refill_policy_tx, cache_refill_policy_rx) = unbounded_channel();
+        let (_serving_table_vnode_mapping_tx, serving_table_vnode_mapping_rx) = unbounded_channel();
 
         let epoch1 = epoch0.next_epoch();
         let epoch2 = epoch1.next_epoch();
@@ -1016,7 +1073,10 @@ mod tests {
         let metrics = Arc::new(HummockStateStoreMetrics::unused());
 
         let event_handler = HummockEventHandler::new_inner(
+            Role::None,
             version_update_rx,
+            cache_refill_policy_rx,
+            serving_table_vnode_mapping_rx,
             mock_sstable_store().await,
             metrics.clone(),
             CacheRefillConfig::from_storage_opts(&storage_opt),
@@ -1168,6 +1228,8 @@ mod tests {
         );
 
         let (_version_update_tx, version_update_rx) = unbounded_channel();
+        let (_cache_refill_policy_tx, cache_refill_policy_rx) = unbounded_channel();
+        let (_serving_table_vnode_mapping_tx, serving_table_vnode_mapping_rx) = unbounded_channel();
 
         let epoch1 = epoch0.next_epoch();
         let epoch2 = epoch1.next_epoch();
@@ -1193,7 +1255,10 @@ mod tests {
         let (spawn_task, new_task_notifier) = prepare_uploader_order_test_spawn_task_fn(false);
 
         let event_handler = HummockEventHandler::new_inner(
+            Role::None,
             version_update_rx,
+            cache_refill_policy_rx,
+            serving_table_vnode_mapping_rx,
             mock_sstable_store().await,
             metrics.clone(),
             CacheRefillConfig::from_storage_opts(&storage_opt),

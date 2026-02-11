@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::config::streaming::CacheRefillPolicy;
 use risingwave_common::config::{
     EvictionConfig, ObjectStoreConfig, RwConfig, StorageMemoryConfig, extract_storage_memory_config,
 };
@@ -110,6 +111,8 @@ pub struct StorageOpts {
     pub cache_refill_unit: usize,
     pub cache_refill_threshold: f64,
     pub cache_refill_skip_recent_filter: bool,
+    pub cache_refill_skip_inheritance_filter: bool,
+    pub cache_refill_table_cache_refill_default_policy: CacheRefillPolicy,
 
     pub meta_file_cache_dir: String,
     pub meta_file_cache_capacity_mb: usize,
@@ -283,6 +286,11 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
             cache_refill_unit: c.storage.cache_refill.unit,
             cache_refill_threshold: c.storage.cache_refill.threshold,
             cache_refill_skip_recent_filter: c.storage.cache_refill.skip_recent_filter,
+            cache_refill_skip_inheritance_filter: c.storage.cache_refill.skip_inheritance_filter,
+            cache_refill_table_cache_refill_default_policy: c
+                .streaming
+                .developer
+                .cache_refill_policy,
             max_preload_wait_time_mill: c.storage.max_preload_wait_time_mill,
             compact_iter_recreate_timeout_ms: c.storage.compact_iter_recreate_timeout_ms,
 

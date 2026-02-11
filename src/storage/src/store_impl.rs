@@ -26,6 +26,7 @@ use futures::FutureExt;
 use futures::future::BoxFuture;
 use mixtrics::registry::prometheus::PrometheusMetricsRegistry;
 use risingwave_common::catalog::TableId;
+use risingwave_common::config::Role;
 use risingwave_common::license::Feature;
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 use risingwave_common_service::RpcNotificationClient;
@@ -685,6 +686,7 @@ impl StateStoreImpl {
     #[expect(clippy::borrowed_box)]
     pub async fn new(
         s: &str,
+        role: Role,
         opts: Arc<StorageOpts>,
         hummock_meta_client: Arc<MonitoredHummockMetaClient>,
         state_store_metrics: Arc<HummockStateStoreMetrics>,
@@ -863,6 +865,7 @@ impl StateStoreImpl {
                     )));
 
                 let inner = HummockStorage::new(
+                    role,
                     opts.clone(),
                     sstable_store,
                     hummock_meta_client.clone(),

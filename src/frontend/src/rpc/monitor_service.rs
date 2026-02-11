@@ -1,4 +1,4 @@
-// Copyright 2026 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,10 +17,10 @@ use risingwave_common_heap_profiling::ProfileServiceImpl;
 use risingwave_pb::monitor_service::monitor_service_server::MonitorService;
 use risingwave_pb::monitor_service::{
     AnalyzeHeapRequest, AnalyzeHeapResponse, GetProfileStatsRequest, GetProfileStatsResponse,
-    GetStreamingStatsRequest, GetStreamingStatsResponse, HeapProfilingRequest,
-    HeapProfilingResponse, ListHeapProfilingRequest, ListHeapProfilingResponse, ProfilingRequest,
-    ProfilingResponse, StackTraceRequest, StackTraceResponse, TieredCacheTracingRequest,
-    TieredCacheTracingResponse,
+    GetStreamingStatsRequest, GetStreamingStatsResponse, GetTableCacheRefillStatsRequest,
+    GetTableCacheRefillStatsResponse, HeapProfilingRequest, HeapProfilingResponse,
+    ListHeapProfilingRequest, ListHeapProfilingResponse, ProfilingRequest, ProfilingResponse,
+    StackTraceRequest, StackTraceResponse, TieredCacheTracingRequest, TieredCacheTracingResponse,
 };
 use tonic::{Request, Response, Status};
 
@@ -93,5 +93,12 @@ impl MonitorService for MonitorServiceImpl {
         _request: Request<GetProfileStatsRequest>,
     ) -> Result<Response<GetProfileStatsResponse>, Status> {
         Err(Status::unimplemented("not implemented in frontend node"))
+    }
+
+    async fn get_table_cache_refill_stats(
+        &self,
+        _request: Request<GetTableCacheRefillStatsRequest>,
+    ) -> Result<Response<GetTableCacheRefillStatsResponse>, Status> {
+        Err(Status::unimplemented("not implemented in meta node"))
     }
 }
