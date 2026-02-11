@@ -178,20 +178,29 @@ impl MvSelectionRule {
 
     fn agg_input_to_base_mapping(agg: LogicalAgg) -> Option<(PlanRef, Vec<usize>)> {
         let agg_input = agg.input();
-        let proj = agg_input.as_logical_project()?;
-        let input_to_base = proj.try_as_projection()?;
-        if let Some(scan) = proj.input().as_logical_scan() {
-            let scan_base_columns = input_to_base
-                .iter()
-                .map(|idx| scan.output_col_idx().get(*idx).copied())
-                .collect::<Option<Vec<usize>>>()?;
+        if let Some(proj) = agg_input.as_logical_project() {
+            let input_to_base = proj.try_as_projection()?;
+            if let Some(scan) = proj.input().as_logical_scan() {
+                let scan_base_columns = input_to_base
+                    .iter()
+                    .map(|idx| scan.output_col_idx().get(*idx).copied())
+                    .collect::<Option<Vec<usize>>>()?;
 
-            // Canonicalize scan shape to avoid false mismatch from different output column subsets.
+                // Canonicalize scan shape to avoid false mismatch from different output column
+                // subsets.
+                let canonical_scan =
+                    scan.clone_with_output_indices((0..scan.table().columns().len()).collect());
+                Some((canonical_scan.into(), scan_base_columns))
+            } else {
+                Some((proj.input(), input_to_base))
+            }
+        } else if let Some(scan) = agg_input.as_logical_scan() {
+            let scan_base_columns = scan.output_col_idx().clone();
             let canonical_scan =
                 scan.clone_with_output_indices((0..scan.table().columns().len()).collect());
             Some((canonical_scan.into(), scan_base_columns))
         } else {
-            Some((proj.input(), input_to_base))
+            None
         }
     }
 
