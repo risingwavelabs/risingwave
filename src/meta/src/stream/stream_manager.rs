@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
+use std::hash::Hash;
 use std::sync::Arc;
 
 use await_tree::span;
@@ -44,6 +45,7 @@ use crate::barrier::{
 };
 use crate::controller::catalog::DropTableConnectorContext;
 use crate::controller::fragment::{InflightActorInfo, InflightFragmentInfo};
+use crate::controller::scale::find_fragment_no_shuffle_dags_detailed;
 use crate::error::bail_invalid_parameter;
 use crate::manager::{
     ActiveStreamingWorkerNodes, MetaSrvEnv, MetadataManager, NotificationVersion, StreamingJob,
@@ -873,9 +875,6 @@ impl GlobalStreamManager {
             }
         };
 
-        let active_workers =
-            ActiveStreamingWorkerNodes::new_snapshot(self.metadata_manager.clone()).await?;
-
         if !blocked_jobs.is_empty() {
             let fragment_job_mapping = self
                 .metadata_manager
@@ -883,12 +882,20 @@ impl GlobalStreamManager {
                 .fragment_job_mapping()
                 .await?;
 
-            let blocked_reschedule_jobs = fragment_targets
-                .keys()
-                .filter_map(|fragment_id| fragment_job_mapping.get(fragment_id))
-                .copied()
-                .filter(|job_id| blocked_jobs.contains(job_id))
-                .collect::<HashSet<_>>();
+            let fragment_ids = fragment_targets.keys().copied().collect_vec();
+            let no_shuffle_related_fragments = {
+                let inner = self.metadata_manager.catalog_controller.inner.read().await;
+                find_fragment_no_shuffle_dags_detailed(&inner.db, &fragment_ids)
+                    .await?
+                    .into_iter()
+                    .flat_map(|ensemble| ensemble.component_fragments().collect_vec())
+                    .collect::<HashSet<_>>()
+            };
+            let blocked_reschedule_jobs = collect_blocked_reschedule_jobs(
+                &no_shuffle_related_fragments,
+                &fragment_job_mapping,
+                &blocked_jobs,
+            );
 
             if !blocked_reschedule_jobs.is_empty() {
                 bail!(
@@ -897,6 +904,9 @@ impl GlobalStreamManager {
                 );
             }
         }
+
+        let active_workers =
+            ActiveStreamingWorkerNodes::new_snapshot(self.metadata_manager.clone()).await?;
 
         let fragment_policy = fragment_targets
             .into_iter()
@@ -957,5 +967,59 @@ impl GlobalStreamManager {
             .inspect_err(|err| {
                 tracing::error!(error = ?err.as_report(), "failed to run drop command");
             });
+    }
+}
+
+fn collect_blocked_reschedule_jobs<FragmentKey>(
+    no_shuffle_related_fragments: &HashSet<FragmentKey>,
+    fragment_job_mapping: &HashMap<FragmentKey, JobId>,
+    blocked_jobs: &HashSet<JobId>,
+) -> HashSet<JobId>
+where
+    FragmentKey: Eq + Hash,
+{
+    no_shuffle_related_fragments
+        .iter()
+        .filter_map(|fragment_id| fragment_job_mapping.get(fragment_id).copied())
+        .filter(|job_id| blocked_jobs.contains(job_id))
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn collect_blocked_reschedule_jobs_detects_no_shuffle_expanded_blocked_job() {
+        let no_shuffle_related_fragments = HashSet::from([1u32, 2u32, 3u32]);
+        let fragment_job_mapping = HashMap::from([
+            (1u32, JobId::new(11)),
+            (2u32, JobId::new(22)),
+            (3u32, JobId::new(33)),
+        ]);
+        let blocked_jobs = HashSet::from([JobId::new(22)]);
+
+        let blocked_reschedule_jobs = collect_blocked_reschedule_jobs(
+            &no_shuffle_related_fragments,
+            &fragment_job_mapping,
+            &blocked_jobs,
+        );
+
+        assert_eq!(blocked_reschedule_jobs, HashSet::from([JobId::new(22)]));
+    }
+
+    #[test]
+    fn collect_blocked_reschedule_jobs_ignores_unmapped_fragments() {
+        let no_shuffle_related_fragments = HashSet::from([1u32, 2u32, 99u32]);
+        let fragment_job_mapping = HashMap::from([(1u32, JobId::new(11)), (2u32, JobId::new(22))]);
+        let blocked_jobs = HashSet::from([JobId::new(33)]);
+
+        let blocked_reschedule_jobs = collect_blocked_reschedule_jobs(
+            &no_shuffle_related_fragments,
+            &fragment_job_mapping,
+            &blocked_jobs,
+        );
+
+        assert!(blocked_reschedule_jobs.is_empty());
     }
 }
