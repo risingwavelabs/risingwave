@@ -747,29 +747,39 @@ impl HummockManager {
         {
             return;
         }
-        // split high throughput table to dedicated compaction group
+
+        // Split high throughput table to dedicated compaction group.
+        //
+        // Note: once we successfully moved (i.e. split) any table out of `group.group_id`,
+        // the `group` statistic becomes stale. In that case, we should stop further scheduling
+        // for this group in this round, and let the next periodic run re-collect statistics.
         for (table_id, table_size) in &group.table_statistic {
-            self.try_move_high_throughput_table_to_dedicated_cg(
-                table_write_throughput_statistic_manager,
-                *table_id,
-                table_size,
-                group.group_id,
-            )
-            .await;
+            if self
+                .try_move_high_throughput_table_to_dedicated_cg(
+                    table_write_throughput_statistic_manager,
+                    *table_id,
+                    table_size,
+                    group.group_id,
+                )
+                .await
+            {
+                return;
+            }
         }
 
-        // split the huge group to multiple groups
+        // Split the huge group to multiple groups.
         self.try_split_huge_compaction_group(group).await;
     }
 
     /// Try to move the high throughput table to a dedicated compaction group.
+    /// Returns `true` if the table is moved successfully.
     pub async fn try_move_high_throughput_table_to_dedicated_cg(
         &self,
         table_write_throughput_statistic_manager: &TableWriteThroughputStatisticManager,
         table_id: TableId,
         _table_size: &u64,
         parent_group_id: u64,
-    ) {
+    ) -> bool {
         let mut table_throughput = table_write_throughput_statistic_manager
             .get_table_throughput_descending(
                 table_id,
@@ -778,7 +788,7 @@ impl HummockManager {
             .peekable();
 
         if table_throughput.peek().is_none() {
-            return;
+            return false;
         }
 
         let is_high_write_throughput = GroupMergeValidator::is_table_high_write_throughput(
@@ -791,7 +801,7 @@ impl HummockManager {
 
         // do not split a table to dedicated compaction group if it is not high write throughput
         if !is_high_write_throughput {
-            return;
+            return false;
         }
 
         let ret = self
@@ -810,6 +820,7 @@ impl HummockManager {
                     self.env.opts.partition_vnode_count,
                     split_result
                 );
+                true
             }
             Err(e) => {
                 tracing::info!(
@@ -817,7 +828,8 @@ impl HummockManager {
                     "failed to split state table [{}] from group-{}",
                     table_id,
                     parent_group_id,
-                )
+                );
+                false
             }
         }
     }
