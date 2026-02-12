@@ -6,8 +6,6 @@ from .streaming_common import (
     _actor_busy_time_relative_target,
 )
 
-<<<<<<< HEAD
-<<<<<<< HEAD
 def _fragment_topk_percent_expr(expr: str) -> str:
     """Wrap an expression as top-k percent for fragment tables."""
     return f"topk(10, ({expr}) * 100)"
@@ -25,22 +23,6 @@ def _fragment_peak_rate_per_actor_with_id_at_step(per_actor_expr: str) -> str:
         f"label_replace("
         f"(max_over_time((({per_actor_expr}) / 1000000000)[$__range:$__interval])), "
         f"'id', '$1', 'fragment_id', '(.+)')"
-=======
-def _fragment_peak_rate_with_id_at_step(expr: str, normalize_ns: bool = False) -> str:
-    """Compute the peak rate over the dashboard range and attach `id` from fragment_id.
-
-    Set normalize_ns=True when the input expression is in nanoseconds.
-    """
-    normalized_expr = f"({expr}) / 1000000000" if normalize_ns else expr
-    return relabel_fragment_id_as_id(
-        f"max_over_time(({normalized_expr})[$__range:$__interval])"
->>>>>>> 0f7b4d26c0 (Update streaming overview queries)
-=======
-def _fragment_peak_rate_with_id_at_step(expr: str) -> str:
-    """Compute the peak rate over the dashboard range and attach `id` from fragment_id."""
-    return relabel_fragment_id_as_id(
-        f"max_over_time(({expr})[$__range:$__interval])"
->>>>>>> 5e36d875eb (Normalize fragment tokio expressions)
     )
 
 @section

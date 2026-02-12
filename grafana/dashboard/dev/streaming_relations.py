@@ -1,6 +1,6 @@
 from ..common import *
 from . import section
-from .streaming_common import _actor_busy_rate_expr
+from .streaming_common import _actor_busy_rate_expr, relabel_materialized_view_id_as_id
 
 def _relation_busy_rate_expr_by_mv(rate_interval: str):
     """Return per-relation busy rate (by materialized_view_id), based on busiest actor."""
