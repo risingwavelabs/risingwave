@@ -111,10 +111,11 @@ message CreateSinkResponse {
 }
 
 message ReplaceSinkRequest {
-  catalog.Sink sink = 1;
-  stream_plan.StreamFragmentGraph fragment_graph = 2;
+  uint32 old_sink_id = 1;
+  catalog.Sink sink = 2;
+  stream_plan.StreamFragmentGraph fragment_graph = 3;
   // The list of object IDs that this sink depends on.
-  repeated uint32 dependencies = 3;
+  repeated uint32 dependencies = 4;
 }
 
 message ReplaceSinkResponse {

@@ -148,6 +148,7 @@ pub trait CatalogWriter: Send + Sync {
 
     async fn replace_sink(
         &self,
+        old_sink_id: SinkId,
         sink: PbSink,
         graph: StreamFragmentGraph,
         dependencies: HashSet<ObjectId>,
@@ -481,13 +482,14 @@ impl CatalogWriter for CatalogWriterImpl {
 
     async fn replace_sink(
         &self,
+        old_sink_id: SinkId,
         sink: PbSink,
         graph: StreamFragmentGraph,
         dependencies: HashSet<ObjectId>,
     ) -> Result<()> {
         let version = self
             .meta_client
-            .replace_sink(sink, graph, dependencies)
+            .replace_sink(old_sink_id, sink, graph, dependencies)
             .await?;
         self.wait_version(version).await
     }
