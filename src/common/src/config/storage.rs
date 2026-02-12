@@ -325,6 +325,12 @@ impl Default for CacheEvictionConfig {
 
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde, ConfigDoc)]
 pub struct CacheRefillConfig {
+    /// Inflight meta cache refill tasks limit.
+    ///
+    /// 0 for unlimited.
+    #[serde(default = "default::cache_refill::meta_refill_concurrency")]
+    pub meta_refill_concurrency: usize,
+
     /// `SSTable` levels to refill.
     #[serde(default = "default::cache_refill::data_refill_levels")]
     pub data_refill_levels: Vec<u32>,
@@ -1168,6 +1174,10 @@ pub mod default {
     }
 
     pub mod cache_refill {
+        pub fn meta_refill_concurrency() -> usize {
+            0
+        }
+
         pub fn data_refill_levels() -> Vec<u32> {
             vec![]
         }
