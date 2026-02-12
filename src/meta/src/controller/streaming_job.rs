@@ -475,7 +475,7 @@ impl CatalogController {
         streaming_job: &StreamingJob,
         for_replace: bool,
         backfill_orders: Option<BackfillOrders>,
-        should_notify: bool,
+        enable_creating_notification: bool,
     ) -> MetaResult<()> {
         self.prepare_streaming_job(
             stream_job_fragments.stream_job_id(),
@@ -484,7 +484,7 @@ impl CatalogController {
             for_replace,
             Some(streaming_job),
             backfill_orders,
-            should_notify,
+            enable_creating_notification,
         )
         .await
     }
@@ -503,13 +503,13 @@ impl CatalogController {
         for_replace: bool,
         creating_streaming_job: Option<&'a StreamingJob>,
         backfill_orders: Option<BackfillOrders>,
-        should_notify: bool,
+        enable_creating_notification: bool,
     ) -> MetaResult<()> {
         let fragments = Self::prepare_fragment_models_from_fragments(job_id, get_fragments())?;
 
         let inner = self.inner.write().await;
 
-        let need_notify = should_notify
+        let need_notify = enable_creating_notification
             && creating_streaming_job
                 .map(|job| job.should_notify_creating())
                 .unwrap_or(false);
@@ -1066,7 +1066,7 @@ impl CatalogController {
         let txn = inner.db.begin().await?;
 
         let (_, removed_partial_objects, dropped_tables, updated_user_info_by_remove) = self
-            .drop_objects_in_txn(&txn, ObjectType::Sink, old_job_id, DropMode::Restrict)
+            .drop_objects_in_txn(&txn, ObjectType::Sink, old_job_id, DropMode::Cascade)
             .await?;
         let (_, new_objects, updated_user_info_by_create) =
             Self::finish_streaming_job_inner(&txn, new_job_id).await?;

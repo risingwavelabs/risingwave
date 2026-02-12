@@ -177,6 +177,7 @@ pub enum DdlCommand {
     AlterSwapRename(alter_swap_rename_request::Object),
     ReplaceStreamJob(ReplaceStreamJobInfo),
     ReplaceSink {
+        old_sink_id: SinkId,
         stream_job: StreamingJob,
         fragment_graph: StreamFragmentGraphProto,
         dependencies: HashSet<ObjectId>,
@@ -442,13 +443,20 @@ impl DdlController {
                     fragment_graph,
                 }) => ctrl.replace_job(streaming_job, fragment_graph).await,
                 DdlCommand::ReplaceSink {
+                    old_sink_id,
                     stream_job,
                     fragment_graph,
                     dependencies,
                     resource_type,
                 } => {
-                    ctrl.replace_sink(stream_job, fragment_graph, dependencies, resource_type)
-                        .await
+                    ctrl.replace_sink(
+                        old_sink_id,
+                        stream_job,
+                        fragment_graph,
+                        dependencies,
+                        resource_type,
+                    )
+                    .await
                 }
                 DdlCommand::AlterName(relation, name) => ctrl.alter_name(relation, &name).await,
                 DdlCommand::AlterObjectOwner(object, owner_id) => {
@@ -1317,6 +1325,7 @@ impl DdlController {
     /// so it can theoretically be applied to other jobs in the future.
     pub async fn replace_sink(
         &self,
+        old_sink_id: SinkId,
         mut streaming_job: StreamingJob,
         fragment_graph: StreamFragmentGraphProto,
         dependencies: HashSet<ObjectId>,
@@ -1335,25 +1344,18 @@ impl DdlController {
 
         let _reschedule_job_lock = self.stream_manager.reschedule_lock_read_guard().await;
 
-        let old_job = self
+        let old_job_id = old_sink_id.as_job_id();
+        let old_job_status = self
             .metadata_manager
             .catalog_controller
-            .get_sink_job_by_name(
-                streaming_job.database_id(),
-                streaming_job.schema_id(),
-                &streaming_job.name(),
-            )
-            .await?
-            .ok_or_else(|| anyhow!("sink {} does not exist", streaming_job.name()))?;
-
-        if old_job.job_status != JobStatus::Created {
+            .get_streaming_job_status(old_job_id)
+            .await?;
+        if old_job_status != JobStatus::Created {
             bail!(
                 "only sink in Created status can be replaced, current status: {:?}",
-                old_job.job_status
+                old_job_status
             );
         }
-
-        let old_job_id = old_job.job_id;
 
         let result: MetaResult<JobId> = try {
             let ctx = StreamContext::from_protobuf(fragment_graph.get_ctx().unwrap());
