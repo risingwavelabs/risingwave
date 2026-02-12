@@ -25,13 +25,15 @@ use risingwave_common::catalog::{DatabaseId, TableId};
 use risingwave_common::id::JobId;
 use risingwave_common::metrics::LabelGuardedIntGauge;
 use risingwave_common::util::epoch::Epoch;
-use risingwave_meta_model::WorkerId;
+use risingwave_common::util::stream_graph_visitor::visit_stream_node_cont;
+use risingwave_meta_model::{DispatcherType, WorkerId};
 use risingwave_pb::ddl_service::PbBackfillType;
 use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::id::{ActorId, FragmentId};
 use risingwave_pb::stream_plan::barrier::PbBarrierKind;
 use risingwave_pb::stream_plan::barrier_mutation::Mutation;
-use risingwave_pb::stream_plan::{AddMutation, StopMutation};
+use risingwave_pb::stream_plan::stream_node::NodeBody;
+use risingwave_pb::stream_plan::{AddMutation, StopMutation, StreamScanType};
 use risingwave_pb::stream_service::BarrierCompleteResponse;
 use risingwave_pb::stream_service::streaming_control_stream_response::ResetPartialGraphResponse;
 use status::CreatingStreamingJobStatus;
@@ -80,6 +82,33 @@ pub(crate) struct CreatingStreamingJobControl {
     status: CreatingStreamingJobStatus,
 
     upstream_lag: LabelGuardedIntGauge,
+}
+
+fn fragment_has_online_unreschedulable_scan(fragment: &InflightFragmentInfo) -> bool {
+    let mut has_unreschedulable_scan = false;
+    visit_stream_node_cont(&fragment.nodes, |node| {
+        if let Some(NodeBody::StreamScan(stream_scan)) = node.node_body.as_ref() {
+            let scan_type = stream_scan.stream_scan_type();
+            if scan_type != StreamScanType::Unspecified && !scan_type.is_reschedulable(true) {
+                has_unreschedulable_scan = true;
+                return false;
+            }
+        }
+        true
+    });
+    has_unreschedulable_scan
+}
+
+fn collect_fragment_upstream_fragment_ids(
+    fragment: &InflightFragmentInfo,
+    upstream_fragment_ids: &mut HashSet<FragmentId>,
+) {
+    visit_stream_node_cont(&fragment.nodes, |node| {
+        if let Some(NodeBody::Merge(merge)) = node.node_body.as_ref() {
+            upstream_fragment_ids.insert(merge.upstream_fragment_id);
+        }
+        true
+    });
 }
 
 impl CreatingStreamingJobControl {
@@ -819,6 +848,56 @@ impl CreatingStreamingJobControl {
             .fragment_infos()
             .into_iter()
             .flat_map(|fragments| fragments.values().map(|fragment| (fragment, self.job_id)))
+    }
+
+    pub(super) fn collect_reschedule_blocked_fragment_ids(
+        &self,
+        blocked_fragment_ids: &mut HashSet<FragmentId>,
+    ) {
+        let Some(info) = self.status.creating_job_info() else {
+            return;
+        };
+
+        for (fragment_id, fragment) in &info.fragment_infos {
+            if fragment_has_online_unreschedulable_scan(fragment) {
+                blocked_fragment_ids.insert(*fragment_id);
+                collect_fragment_upstream_fragment_ids(fragment, blocked_fragment_ids);
+            }
+        }
+
+        let mut no_shuffle_relations = Vec::new();
+        self.collect_no_shuffle_fragment_relations(&mut no_shuffle_relations);
+        for (upstream_fragment_id, downstream_fragment_id) in no_shuffle_relations {
+            blocked_fragment_ids.insert(upstream_fragment_id);
+            blocked_fragment_ids.insert(downstream_fragment_id);
+        }
+    }
+
+    pub(super) fn collect_no_shuffle_fragment_relations(
+        &self,
+        no_shuffle_relations: &mut Vec<(FragmentId, FragmentId)>,
+    ) {
+        let Some(info) = self.status.creating_job_info() else {
+            return;
+        };
+
+        for (upstream_fragment_id, downstreams) in &info.upstream_fragment_downstreams {
+            no_shuffle_relations.extend(
+                downstreams
+                    .iter()
+                    .filter(|downstream| downstream.dispatcher_type == DispatcherType::NoShuffle)
+                    .map(|downstream| (*upstream_fragment_id, downstream.downstream_fragment_id)),
+            );
+        }
+
+        for (fragment_id, downstreams) in &info.downstreams {
+            no_shuffle_relations.extend(
+                downstreams
+                    .iter()
+                    .filter(|downstream| downstream.dispatcher_type == DispatcherType::NoShuffle)
+                    .map(|downstream| (*fragment_id, downstream.downstream_fragment_id)),
+            );
+        }
     }
 
     pub fn into_tracking_job(self) -> TrackingJob {
