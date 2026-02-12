@@ -739,14 +739,14 @@ impl GlobalStreamManager {
             .await?;
 
         if !background_jobs.is_empty() {
-            let unreschedulable = self
+            let blocked_jobs = self
                 .metadata_manager
-                .collect_unreschedulable_backfill_jobs(&background_jobs, !deferred)
+                .collect_reschedule_blocked_jobs_for_creating_jobs(&background_jobs, !deferred)
                 .await?;
 
-            if unreschedulable.contains(&job_id) {
+            if blocked_jobs.contains(&job_id) {
                 bail!(
-                    "Cannot alter the job {} because it is a non-reschedulable background backfill job",
+                    "Cannot alter the job {} because it is blocked by creating snapshot backfill jobs",
                     job_id,
                 );
             }
