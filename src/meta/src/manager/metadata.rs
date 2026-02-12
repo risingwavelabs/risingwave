@@ -36,6 +36,7 @@ use crate::barrier::SharedFragmentInfo;
 use crate::controller::catalog::CatalogControllerRef;
 use crate::controller::cluster::{ClusterControllerRef, StreamingClusterInfo, WorkerExtraInfo};
 use crate::controller::fragment::FragmentParallelismInfo;
+use crate::controller::scale::find_fragment_no_shuffle_dags_detailed;
 use crate::manager::{LocalNotification, NotificationVersion};
 use crate::model::{ActorId, ClusterId, FragmentId, StreamJobFragments, SubscriptionId};
 use crate::stream::SplitAssignment;
@@ -732,6 +733,65 @@ impl MetadataManager {
         }
 
         Ok(unreschedulable)
+    }
+
+    pub async fn collect_reschedule_blocked_jobs_for_creating_jobs(
+        &self,
+        creating_job_ids: impl IntoIterator<Item = &JobId>,
+        is_online: bool,
+    ) -> MetaResult<HashSet<JobId>> {
+        let creating_job_ids: HashSet<_> = creating_job_ids.into_iter().copied().collect();
+        if creating_job_ids.is_empty() {
+            return Ok(HashSet::new());
+        }
+
+        let mut initial_fragment_ids = HashSet::new();
+        for job_id in &creating_job_ids {
+            let scan_types = self
+                .catalog_controller
+                .get_job_fragment_backfill_scan_type(*job_id)
+                .await?;
+            initial_fragment_ids.extend(scan_types.into_iter().filter_map(
+                |(fragment_id, scan_type)| {
+                    (!scan_type.is_reschedulable(is_online)).then_some(fragment_id)
+                },
+            ));
+        }
+
+        if !initial_fragment_ids.is_empty() {
+            let upstream_fragments = self
+                .catalog_controller
+                .upstream_fragments(initial_fragment_ids.iter().copied())
+                .await?;
+            initial_fragment_ids.extend(upstream_fragments.into_values().flatten());
+        }
+
+        let mut blocked_fragment_ids = initial_fragment_ids.clone();
+        if !initial_fragment_ids.is_empty() {
+            let inner = self.catalog_controller.inner.read().await;
+            let initial_fragment_ids = initial_fragment_ids.into_iter().collect_vec();
+            let ensembles =
+                find_fragment_no_shuffle_dags_detailed(&inner.db, &initial_fragment_ids).await?;
+            for ensemble in ensembles {
+                blocked_fragment_ids.extend(ensemble.fragments());
+            }
+        }
+
+        let mut blocked_job_ids = creating_job_ids;
+        if !blocked_fragment_ids.is_empty() {
+            let fragment_ids = blocked_fragment_ids.into_iter().collect_vec();
+            let fragment_job_ids = self
+                .catalog_controller
+                .get_fragment_job_id(fragment_ids)
+                .await?;
+            blocked_job_ids.extend(
+                fragment_job_ids
+                    .into_iter()
+                    .map(|job_id| job_id.as_job_id()),
+            );
+        }
+
+        Ok(blocked_job_ids)
     }
 }
 
