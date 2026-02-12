@@ -388,7 +388,9 @@ impl BatchOptimizedLogicalPlanRoot {
     }
 
     #[cfg(feature = "datafusion")]
-    pub fn gen_datafusion_logical_plan(self) -> Result<Arc<datafusion::logical_expr::LogicalPlan>> {
+    pub fn gen_datafusion_logical_plan(
+        &self,
+    ) -> Result<Arc<datafusion::logical_expr::LogicalPlan>> {
         use datafusion::logical_expr::{Expr as DFExpr, LogicalPlan, Projection, Sort};
         use datafusion_common::Column;
         use plan_visitor::LogicalPlanToDataFusionExt;

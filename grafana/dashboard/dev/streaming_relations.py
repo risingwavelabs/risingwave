@@ -1,6 +1,6 @@
 from ..common import *
 from . import section
-from .streaming_common import _actor_busy_rate_expr
+from .streaming_common import _actor_busy_rate_expr, relabel_materialized_view_id_as_id
 
 def _relation_busy_rate_expr_by_mv(rate_interval: str):
     """Return per-relation busy rate (by materialized_view_id), based on busiest actor."""
@@ -84,6 +84,18 @@ def _(outer_panels: Panels):
     )
     poll_duration_expr = (
         f"{poll_duration_rate_expr} / on(fragment_id) {actor_count_expr}"
+    )
+    executor_cache_usage_expr = (
+        f"sum({metric('stream_memory_usage')} * on(table_id) group_left(materialized_view_id) "
+        f"{metric('table_info')}) by (materialized_view_id)"
+    )
+    shared_buffer_usage_expr = _sum_fragment_metric_by_mv(
+        metric("state_store_per_table_imm_size")
+    )
+    total_memory_usage_expr = (
+        f"({executor_cache_usage_expr} + on(materialized_view_id) group_left {shared_buffer_usage_expr}) "
+        f"or {executor_cache_usage_expr} "
+        f"or {shared_buffer_usage_expr}"
     )
     return [
         outer_panels.row_collapsed(
@@ -212,14 +224,42 @@ def _(outer_panels: Panels):
                         ),
                     ],
                 ),
-                panels.subheader("Cache Memory Usage By Relation"),
+                panels.subheader("Memory Usage By Relation"),
+                panels.timeseries_bytes(
+                    "Total Memory Usage",
+                    "Sum of executor cache and shared buffer imm size",
+                    [
+                        panels.target(
+                            _relation_metric_with_metadata(
+                                relabel_materialized_view_id_as_id(
+                                    total_memory_usage_expr
+                                )
+                            ),
+                            "relation {{name}} (id={{id}} type={{type}})",
+                        ),
+                    ],
+                ),
                 panels.timeseries_bytes(
                     "Executor Cache Memory Usage of Materialized Views",
                     "Memory usage aggregated by materialized views",
                     [
                         panels.target(
-                            f"sum({metric('stream_memory_usage')} * on(table_id) group_left(materialized_view_id) {metric('table_info')}) by (materialized_view_id)",
+                            executor_cache_usage_expr,
                             "materialized view {{materialized_view_id}}",
+                        ),
+                    ],
+                ),
+                panels.timeseries_bytes(
+                    "Shared Buffer Memory Usage",
+                    "Shared buffer imm size aggregated by relation.",
+                    [
+                        panels.target(
+                            _relation_metric_with_metadata(
+                                relabel_materialized_view_id_as_id(
+                                    shared_buffer_usage_expr
+                                )
+                            ),
+                            "relation {{name}} (id={{id}} type={{type}})",
                         ),
                     ],
                 ),

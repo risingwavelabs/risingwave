@@ -1046,8 +1046,10 @@ impl DdlService for DdlServiceImpl {
     }
 
     async fn wait(&self, _request: Request<WaitRequest>) -> Result<Response<WaitResponse>, Status> {
-        self.ddl_controller.wait().await?;
-        Ok(Response::new(WaitResponse {}))
+        let version = self.ddl_controller.wait().await?;
+        Ok(Response::new(WaitResponse {
+            version: Some(version),
+        }))
     }
 
     async fn alter_cdc_table_backfill_parallelism(

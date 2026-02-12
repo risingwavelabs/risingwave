@@ -379,6 +379,7 @@ worker_threads = 0
 max_blocking_threads = 0
 
 [storage.cache_refill]
+meta_refill_concurrency = 0
 data_refill_levels = []
 timeout_ms = 6000
 concurrency = 10
@@ -446,7 +447,7 @@ enable_tracing = false
 use_new_object_prefix_strategy = ""
 license_key = ""
 time_travel_retention_ms = 600000
-adaptive_parallelism_strategy = "AUTO"
+adaptive_parallelism_strategy = "BOUNDED(64)"
 per_database_isolation = true
 enforce_secret = false
 

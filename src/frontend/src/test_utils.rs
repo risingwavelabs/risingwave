@@ -760,6 +760,10 @@ impl CatalogWriter for MockCatalogWriter {
     ) -> Result<()> {
         todo!()
     }
+
+    async fn wait(&self) -> Result<()> {
+        Ok(())
+    }
 }
 
 impl MockCatalogWriter {
@@ -1065,10 +1069,6 @@ impl FrontendMetaClient for MockFrontendMetaClient {
 
     async fn flush(&self, _database_id: DatabaseId) -> RpcResult<HummockVersionId> {
         Ok(INVALID_VERSION_ID)
-    }
-
-    async fn wait(&self) -> RpcResult<()> {
-        Ok(())
     }
 
     async fn cancel_creating_jobs(&self, _infos: PbJobs) -> RpcResult<Vec<u32>> {

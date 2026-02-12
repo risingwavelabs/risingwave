@@ -538,6 +538,7 @@ impl<S: StateStore> LogStoreFactory for KvLogStoreFactory<S> {
             .state_store
             .new_local(NewLocalOptions {
                 table_id,
+                fragment_id: self.table_catalog.fragment_id,
                 op_consistency_level: OpConsistencyLevel::Inconsistent,
                 table_option: TableOption {
                     retention_seconds: None,
