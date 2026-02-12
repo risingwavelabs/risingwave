@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::collections::{HashMap, HashSet};
-use std::future::Future;
 use std::iter::repeat_with;
 use std::ops::{Deref, DerefMut};
 use std::time::Duration;
@@ -50,6 +49,9 @@ use crate::task::{DispatcherId, NewOutputRequest};
 
 mod output_mapping;
 pub use output_mapping::DispatchOutputMapping;
+#[path = "dispatch_sync_log_store.rs"]
+mod dispatch_sync_log_store;
+pub use dispatch_sync_log_store::{SyncLogStoreDispatchConfig, SyncLogStoreDispatchExecutor};
 use risingwave_common::id::FragmentId;
 
 use crate::error::StreamError;

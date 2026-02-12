@@ -327,7 +327,8 @@ pub mod metrics {
     }
 }
 
-type ReadFlushedChunkFuture = BoxFuture<'static, LogStoreResult<(ChunkId, StreamChunk, Epoch)>>;
+pub(crate) type ReadFlushedChunkFuture =
+    BoxFuture<'static, LogStoreResult<(ChunkId, StreamChunk, Epoch)>>;
 
 pub struct SyncedKvLogStoreExecutor<S: StateStore> {
     actor_context: ActorContextRef,
@@ -379,12 +380,12 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
     }
 }
 
-struct FlushedChunkInfo {
-    epoch: u64,
-    start_seq_id: SeqId,
-    end_seq_id: SeqId,
-    flush_info: FlushInfo,
-    vnode_bitmap: Bitmap,
+pub(crate) struct FlushedChunkInfo {
+    pub(crate) epoch: u64,
+    pub(crate) start_seq_id: SeqId,
+    pub(crate) end_seq_id: SeqId,
+    pub(crate) flush_info: FlushInfo,
+    pub(crate) vnode_bitmap: Bitmap,
 }
 
 enum WriteFuture<S: LocalStateStore> {
@@ -729,16 +730,15 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
                                                     _ => {}
                                                 }
                                             }
-                                            let write_state_post_write_barrier =
-                                                Self::write_barrier(
-                                                    self.actor_context.id,
-                                                    &mut write_state,
-                                                    barrier.clone(),
-                                                    &self.metrics,
-                                                    progress.take(),
-                                                    &mut buffer,
-                                                )
-                                                .await?;
+                                            let write_state_post_write_barrier = write_barrier(
+                                                self.actor_context.id,
+                                                &mut write_state,
+                                                barrier.clone(),
+                                                &self.metrics,
+                                                progress.take(),
+                                                &mut buffer,
+                                            )
+                                            .await?;
                                             seq_id = FIRST_SEQ_ID;
                                             let update_vnode_bitmap = barrier
                                                 .as_update_vnode_bitmap(self.actor_context.id);
@@ -993,89 +993,86 @@ impl<S: StateStoreRead> ReadFuture<S> {
     }
 }
 
-// Write methods
-impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
-    async fn write_barrier<'a>(
-        actor_id: ActorId,
-        write_state: &'a mut LogStoreWriteState<S::Local>,
-        barrier: Barrier,
-        metrics: &SyncedKvLogStoreMetrics,
-        progress: LogStoreVnodeProgress,
-        buffer: &mut SyncedLogStoreBuffer,
-    ) -> StreamExecutorResult<LogStorePostSealCurrentEpoch<'a, S::Local>> {
-        tracing::trace!(%actor_id, ?progress, "applying truncation");
-        // TODO(kwannoel): As an optimization we can also change flushed chunks to be flushed items
-        // to reduce memory consumption of logstore.
+pub(crate) async fn write_barrier<'a, S: LocalStateStore>(
+    actor_id: ActorId,
+    write_state: &'a mut LogStoreWriteState<S>,
+    barrier: Barrier,
+    metrics: &SyncedKvLogStoreMetrics,
+    progress: LogStoreVnodeProgress,
+    buffer: &mut SyncedLogStoreBuffer,
+) -> StreamExecutorResult<LogStorePostSealCurrentEpoch<'a, S>> {
+    tracing::trace!(%actor_id, ?progress, "applying truncation");
+    // TODO(kwannoel): As an optimization we can also change flushed chunks to be flushed items
+    // to reduce memory consumption of logstore.
 
-        let epoch = barrier.epoch.prev;
-        let mut writer = write_state.start_writer(false);
-        writer.write_barrier(epoch, barrier.is_checkpoint())?;
+    let epoch = barrier.epoch.prev;
+    let mut writer = write_state.start_writer(false);
+    writer.write_barrier(epoch, barrier.is_checkpoint())?;
 
-        if barrier.is_checkpoint() {
-            for (epoch, item) in buffer.buffer.iter_mut().rev() {
-                match item {
-                    LogStoreBufferItem::StreamChunk {
-                        chunk,
-                        start_seq_id,
-                        end_seq_id,
-                        flushed,
-                        ..
-                    } => {
-                        if !*flushed {
-                            writer.write_chunk(chunk, *epoch, *start_seq_id, *end_seq_id)?;
-                            *flushed = true;
-                        } else {
-                            break;
-                        }
+    if barrier.is_checkpoint() {
+        for (epoch, item) in buffer.buffer.iter_mut().rev() {
+            match item {
+                LogStoreBufferItem::StreamChunk {
+                    chunk,
+                    start_seq_id,
+                    end_seq_id,
+                    flushed,
+                    ..
+                } => {
+                    if !*flushed {
+                        writer.write_chunk(chunk, *epoch, *start_seq_id, *end_seq_id)?;
+                        *flushed = true;
+                    } else {
+                        break;
                     }
-                    LogStoreBufferItem::Flushed { .. } | LogStoreBufferItem::Barrier { .. } => {}
                 }
+                LogStoreBufferItem::Flushed { .. } | LogStoreBufferItem::Barrier { .. } => {}
             }
         }
-
-        // Apply truncation
-        let (flush_info, _) = writer.finish().await?;
-        metrics
-            .storage_write_count
-            .inc_by(flush_info.flush_count as _);
-        metrics
-            .storage_write_size
-            .inc_by(flush_info.flush_size as _);
-        let post_seal = write_state.seal_current_epoch(barrier.epoch.curr, progress);
-
-        // Add to buffer
-        buffer.buffer.push_back((
-            epoch,
-            LogStoreBufferItem::Barrier {
-                is_checkpoint: barrier.is_checkpoint(),
-                next_epoch: barrier.epoch.curr,
-                schema_change: None,
-                is_stop: false,
-            },
-        ));
-        buffer.next_chunk_id = 0;
-        buffer.update_unconsumed_buffer_metrics();
-
-        Ok(post_seal)
     }
+
+    // Apply truncation
+    let (flush_info, _) = writer.finish().await?;
+    metrics
+        .storage_write_count
+        .inc_by(flush_info.flush_count as _);
+    metrics
+        .storage_write_size
+        .inc_by(flush_info.flush_size as _);
+    let post_seal = write_state.seal_current_epoch(barrier.epoch.curr, progress);
+
+    // Add to buffer
+    buffer.buffer.push_back((
+        epoch,
+        LogStoreBufferItem::Barrier {
+            is_checkpoint: barrier.is_checkpoint(),
+            next_epoch: barrier.epoch.curr,
+            schema_change: None,
+            is_stop: false,
+        },
+    ));
+    buffer.next_chunk_id = 0;
+    buffer.update_unconsumed_buffer_metrics();
+
+    Ok(post_seal)
 }
 
-struct SyncedLogStoreBuffer {
-    buffer: VecDeque<(u64, LogStoreBufferItem)>,
-    current_size: usize,
-    max_size: usize,
-    max_chunk_size: usize,
-    next_chunk_id: ChunkId,
-    metrics: SyncedKvLogStoreMetrics,
-    flushed_count: usize,
+pub(crate) struct SyncedLogStoreBuffer {
+    pub(crate) buffer: VecDeque<(u64, LogStoreBufferItem)>,
+    pub(crate) current_size: usize,
+    pub(crate) max_size: usize,
+    pub(crate) max_chunk_size: usize,
+    pub(crate) next_chunk_id: ChunkId,
+    pub(crate) metrics: SyncedKvLogStoreMetrics,
+    pub(crate) flushed_count: usize,
 }
 
 impl SyncedLogStoreBuffer {
-    fn is_empty(&self) -> bool {
+    pub(crate) fn is_empty(&self) -> bool {
         self.current_size == 0
     }
 
-    fn add_or_flush_chunk(
+    pub(crate) fn add_or_flush_chunk(
         &mut self,
         start_seq_id: SeqId,
         end_seq_id: SeqId,
@@ -1104,7 +1101,7 @@ impl SyncedLogStoreBuffer {
 
     /// After flushing a chunk, we will preserve a `FlushedItem` inside the buffer.
     /// This doesn't contain any data, but it contains the metadata to read the flushed chunk.
-    fn add_flushed_item_to_buffer(
+    pub(crate) fn add_flushed_item_to_buffer(
         &mut self,
         start_seq_id: SeqId,
         end_seq_id: SeqId,
@@ -1182,7 +1179,7 @@ impl SyncedLogStoreBuffer {
         self.update_unconsumed_buffer_metrics();
     }
 
-    fn pop_front(&mut self) -> Option<(u64, LogStoreBufferItem)> {
+    pub(crate) fn pop_front(&mut self) -> Option<(u64, LogStoreBufferItem)> {
         let item = self.buffer.pop_front();
         match &item {
             Some((_, LogStoreBufferItem::Flushed { .. })) => {
