@@ -245,9 +245,11 @@ async fn read_hummock_table_change_log(
 ) -> Result<
     Vec<crate::catalog::system_catalog::rw_catalog::rw_hummock_version::RwHummockTableChangeLog>,
 > {
-    let version = reader.meta_client.get_hummock_current_version().await?;
-    Ok(version
-        .table_change_log
+    let table_change_logs = reader
+        .meta_client
+        .get_hummock_table_change_log(None, None, None, false, None)
+        .await?;
+    Ok(table_change_logs
         .iter()
         .map(|(table_id, change_log)| RwHummockTableChangeLog {
             table_id: *table_id,

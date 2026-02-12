@@ -17,6 +17,7 @@ use std::collections::Bound::{Excluded, Included};
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 use itertools::Itertools;
+use risingwave_hummock_sdk::change_log::{EpochNewChangeLog, TableChangeLog, TableChangeLogs};
 use risingwave_hummock_sdk::compaction_group::StateTableId;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
     BranchedSstInfo, get_compaction_group_ids, get_table_compaction_group_id_mapping,
@@ -35,6 +36,7 @@ use risingwave_pb::hummock::write_limits::WriteLimit;
 use risingwave_pb::hummock::{HummockPinnedVersion, HummockVersionStats};
 use risingwave_pb::id::TableId;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
+use sea_orm::{EntityTrait, TransactionTrait};
 
 use super::GroupStateValidator;
 use crate::MetaResult;
@@ -46,6 +48,7 @@ use crate::hummock::manager::context::ContextInfo;
 use crate::hummock::manager::transaction::HummockVersionTransaction;
 use crate::hummock::metrics_utils::{LocalTableMetrics, trigger_write_stop_stats};
 use crate::hummock::model::CompactionGroup;
+use crate::hummock::model::ext::{to_table_change_log, to_table_change_log_meta_store_model};
 use crate::model::VarTransaction;
 
 #[derive(Default)]
@@ -60,12 +63,15 @@ pub struct Versioning {
     pub time_travel_snapshot_interval_counter: u64,
     /// Used to avoid the attempts to rewrite the same SST to meta store
     pub last_time_travel_snapshot_sst_ids: HashSet<HummockSstableId>,
+    /// Used by object GC and metric update.
+    pub checkpoint_table_change_log_object_size: HashMap<HummockObjectId, u64>,
 
     // Persistent states below
     pub hummock_version_deltas: BTreeMap<HummockVersionId, HummockVersionDelta>,
     /// Stats for latest hummock version.
     pub version_stats: HummockVersionStats,
     pub checkpoint: HummockVersionCheckpoint,
+    pub table_change_log: HashMap<TableId, TableChangeLog>,
 }
 
 impl ContextInfo {
@@ -96,7 +102,12 @@ impl Versioning {
         let mut tracked_object_ids = self
             .checkpoint
             .version
-            .get_object_ids(false)
+            .get_object_ids()
+            .chain(
+                self.table_change_log
+                    .values()
+                    .flat_map(|c| c.get_object_ids()),
+            )
             .collect::<HashSet<_>>();
         // add object ids added between checkpoint version and current version
         for (_, delta) in self.hummock_version_deltas.range((
@@ -156,6 +167,14 @@ impl HummockManager {
 
     pub async fn on_current_version<T>(&self, mut f: impl FnMut(&HummockVersion) -> T) -> T {
         f(&self.versioning.read().await.current_version)
+    }
+
+    pub async fn on_current_version_and_table_change_log<T>(
+        &self,
+        mut f: impl FnMut(&HummockVersion, &TableChangeLogs) -> T,
+    ) -> T {
+        let guard = self.versioning.read().await;
+        f(&guard.current_version, &guard.table_change_log)
     }
 
     pub async fn get_version_id(&self) -> HummockVersionId {
@@ -264,9 +283,11 @@ impl HummockManager {
             let mut version = HummockVersionTransaction::new(
                 &mut versioning.current_version,
                 &mut versioning.hummock_version_deltas,
+                &mut versioning.table_change_log,
                 self.env.notification_manager(),
                 None,
                 &self.metrics,
+                &self.env.opts,
             );
             let mut new_version_delta = version.new_delta();
             new_version_delta.with_latest_version(|version, delta| {
@@ -276,6 +297,129 @@ impl HummockManager {
             commit_multi_var!(self.meta_store_ref(), version)?;
         }
         Ok(())
+    }
+
+    pub async fn may_fill_backward_table_change_logs(&self) -> Result<()> {
+        let mut versioning = self.versioning.write().await;
+        let version = &mut versioning.current_version;
+        // Remove table change log from version.
+        #[expect(deprecated)]
+        let table_change_logs = {
+            let table_change_logs = std::mem::take(&mut version.table_change_log);
+            if table_change_logs.values().all(|t| t.is_empty()) {
+                return Ok(());
+            }
+            table_change_logs
+                .into_iter()
+                .flat_map(|(table_id, change_logs)| {
+                    change_logs
+                        .into_iter()
+                        .map(move |change_log| (table_id, change_log))
+                })
+        };
+
+        // Store table change log in meta store.
+        let insert_batch_size = self.env.opts.table_change_log_insert_batch_size as usize;
+        use futures::stream::{self, StreamExt};
+        let mut stream = stream::iter(table_change_logs).chunks(insert_batch_size);
+        let txn = self.env.meta_store_ref().conn.begin().await?;
+        while let Some(change_log_batch) = stream.next().await {
+            if change_log_batch.is_empty() {
+                break;
+            }
+            let insert_many = change_log_batch
+                .into_iter()
+                .map(|(table_id, change_log)| {
+                    to_table_change_log_meta_store_model(table_id, &change_log)
+                })
+                .collect::<Vec<_>>();
+            risingwave_meta_model::hummock_table_change_log::Entity::insert_many(insert_many)
+                .on_conflict_do_nothing()
+                .exec(&txn)
+                .await?;
+        }
+        txn.commit().await?;
+        Ok(())
+    }
+
+    pub async fn load_table_change_log(&self) -> Result<()> {
+        use sea_orm::EntityTrait;
+
+        use crate::model::MetadataModelError;
+        let mut versioning = self.versioning.write().await;
+        versioning.table_change_log =
+            risingwave_meta_model::hummock_table_change_log::Entity::find()
+                .all(&self.env.meta_store_ref().conn)
+                .await
+                .map_err(MetadataModelError::from)?
+                .into_iter()
+                .map(|m| (m.table_id, to_table_change_log(m)))
+                .into_group_map()
+                .into_iter()
+                .map(|(table_id, unordered_change_logs)| {
+                    (
+                        table_id,
+                        TableChangeLog::new(
+                            unordered_change_logs
+                                .into_iter()
+                                .sorted_by_key(|l| l.checkpoint_epoch),
+                        ),
+                    )
+                })
+                .collect();
+        Ok(())
+    }
+
+    pub async fn get_table_change_logs(
+        &self,
+        epoch_only: bool,
+        start_epoch_inclusive: Option<u64>,
+        end_epoch_inclusive: Option<u64>,
+        table_ids: Option<HashSet<TableId>>,
+        exclude_empty: bool,
+        limit: Option<u32>,
+    ) -> TableChangeLogs {
+        self.on_current_version_and_table_change_log(|_, table_change_logs| {
+            table_change_logs
+                .iter()
+                .filter_map(|(id, change_log)| {
+                    if let Some(table_filter) = &table_ids
+                        && !table_filter.contains(id)
+                    {
+                        return None;
+                    }
+                    let filtered_change_logs = change_log
+                        .filter_epoch((
+                            start_epoch_inclusive.unwrap_or(0),
+                            end_epoch_inclusive.unwrap_or(u64::MAX),
+                        ))
+                        .filter(|change_log| {
+                            if exclude_empty
+                                && change_log.new_value.is_empty()
+                                && change_log.old_value.is_empty()
+                            {
+                                return false;
+                            }
+                            true
+                        })
+                        .take(limit.map(|l| l as usize).unwrap_or(usize::MAX))
+                        .map(|change_log| {
+                            if epoch_only {
+                                EpochNewChangeLog {
+                                    new_value: vec![],
+                                    old_value: vec![],
+                                    non_checkpoint_epochs: change_log.non_checkpoint_epochs.clone(),
+                                    checkpoint_epoch: change_log.checkpoint_epoch,
+                                }
+                            } else {
+                                change_log.clone()
+                            }
+                        });
+                    Some((id.to_owned(), TableChangeLog::new(filtered_change_logs)))
+                })
+                .collect()
+        })
+        .await
     }
 }
 

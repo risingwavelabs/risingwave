@@ -488,7 +488,9 @@ impl SubscriptionCursor {
                         *expected_timestamp,
                         handler_args.clone(),
                         &self.subscription,
-                    ) {
+                    )
+                    .await
+                    {
                         Ok((Some(rw_timestamp), expected_timestamp)) => {
                             let (mut chunk_stream, init_query_timer, catalog) =
                                 Self::initiate_query(
@@ -645,6 +647,9 @@ impl SubscriptionCursor {
                     if cur > 0 || timeout_seconds == 0 {
                         break;
                     }
+                    let State::InitLogStoreQuery { seek_timestamp, .. } = &self.state else {
+                        unreachable!("Unexpected cursor state.");
+                    };
                     // It's only blocked when there's no data
                     // This method will only be called once, either to trigger a timeout or to get the return value in the next loop via `next_row`.
                     match tokio::time::timeout(
@@ -652,7 +657,10 @@ impl SubscriptionCursor {
                         session
                             .env
                             .hummock_snapshot_manager()
-                            .wait_table_change_log_notification(self.dependent_table_id),
+                            .wait_table_change_log_notification(
+                                self.dependent_table_id,
+                                *seek_timestamp,
+                            ),
                     )
                     .await
                     {
@@ -686,7 +694,7 @@ impl SubscriptionCursor {
         Ok((rows, desc))
     }
 
-    fn get_next_rw_timestamp(
+    async fn get_next_rw_timestamp(
         seek_timestamp: u64,
         table_id: TableId,
         expected_timestamp: Option<u64>,
@@ -701,7 +709,9 @@ impl SubscriptionCursor {
         )?;
 
         // The epoch here must be pulled every time, otherwise there will be cache consistency issues
-        let new_epochs = session.list_change_log_epochs(table_id, seek_timestamp, 2)?;
+        let new_epochs = session
+            .list_change_log_epochs(table_id, seek_timestamp, 2)
+            .await?;
         if let Some(expected_timestamp) = expected_timestamp
             && (new_epochs.is_empty() || &expected_timestamp != new_epochs.first().unwrap())
         {

@@ -24,7 +24,7 @@ use std::time::{Duration, Instant};
 
 use bytes::Bytes;
 use foyer::Hint;
-use futures::{Stream, StreamExt, pin_mut};
+use futures::{Stream, StreamExt, future, pin_mut};
 use parking_lot::Mutex;
 use risingwave_common::catalog::TableId;
 use risingwave_common::config::StorageMemoryConfig;
@@ -623,7 +623,7 @@ pub(crate) async fn wait_for_epoch(
                 )))
             };
             *prev_committed_epoch = committed_epoch;
-            ret
+            future::ready(ret)
         },
         || {
             format!(
@@ -636,16 +636,17 @@ pub(crate) async fn wait_for_epoch(
     Ok(version)
 }
 
-pub(crate) async fn wait_for_update(
+pub(crate) async fn wait_for_update<T: Future<Output = HummockResult<bool>> + Send>(
     notifier: &tokio::sync::watch::Sender<PinnedVersion>,
-    mut inspect_fn: impl FnMut(&PinnedVersion) -> HummockResult<bool>,
+    mut inspect_fn: impl FnMut(&PinnedVersion) -> T,
     mut periodic_debug_info: impl FnMut() -> String,
 ) -> HummockResult<PinnedVersion> {
     let mut receiver = notifier.subscribe();
     {
-        let version = receiver.borrow_and_update();
-        if inspect_fn(&version)? {
-            return Ok(version.clone());
+        // The clone is lightweight.
+        let version_clone = receiver.borrow_and_update().clone();
+        if inspect_fn(&version_clone).await? {
+            return Ok(version_clone);
         }
     }
     let start_time = Instant::now();
@@ -701,9 +702,10 @@ pub(crate) async fn wait_for_update(
                 return Err(HummockError::wait_epoch("tx dropped"));
             }
             Ok(Ok(_)) => {
-                let version = receiver.borrow_and_update();
-                if inspect_fn(&version)? {
-                    return Ok(version.clone());
+                // The clone is lightweight.
+                let version_clone = receiver.borrow_and_update().clone();
+                if inspect_fn(&version_clone).await? {
+                    return Ok(version_clone);
                 }
             }
         }

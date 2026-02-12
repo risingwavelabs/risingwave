@@ -19,7 +19,9 @@ use risingwave_pb::hummock::hummock_version_delta::PbChangeLogDelta;
 use risingwave_pb::hummock::{PbEpochNewChangeLog, PbSstableInfo, PbTableChangeLog};
 use tracing::warn;
 
+use crate::HummockObjectId;
 use crate::sstable_info::SstableInfo;
+use crate::version::ObjectIdReader;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct TableChangeLogCommon<T>(
@@ -55,18 +57,38 @@ impl<T> TableChangeLogCommon<T> {
             .flat_map(|epoch_change_log| epoch_change_log.epochs())
     }
 
-    pub(crate) fn change_log_into_iter(self) -> impl Iterator<Item = EpochNewChangeLogCommon<T>> {
-        self.0.into_iter()
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
     }
 
-    pub(crate) fn change_log_iter_mut(
-        &mut self,
-    ) -> impl Iterator<Item = &mut EpochNewChangeLogCommon<T>> {
-        self.0.iter_mut()
+    pub fn binary_search_by_epoch(&self, epoch: u64) -> Result<usize, usize> {
+        self.0
+            .binary_search_by_key(&epoch, |log| log.checkpoint_epoch)
+    }
+}
+
+impl<T> IntoIterator for TableChangeLogCommon<T> {
+    type IntoIter = std::collections::vec_deque::IntoIter<EpochNewChangeLogCommon<T>>;
+    type Item = EpochNewChangeLogCommon<T>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.into_iter()
     }
 }
 
 pub type TableChangeLog = TableChangeLogCommon<SstableInfo>;
+pub type TableChangeLogs = HashMap<TableId, TableChangeLog>;
+
+impl TableChangeLog {
+    pub fn get_object_ids(&self) -> impl Iterator<Item = HummockObjectId> + '_ {
+        self.0.iter().flat_map(|c| {
+            c.old_value
+                .iter()
+                .chain(c.new_value.iter())
+                .map(|t| HummockObjectId::Sstable(t.object_id()))
+        })
+    }
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct EpochNewChangeLogCommon<T> {
@@ -75,6 +97,12 @@ pub struct EpochNewChangeLogCommon<T> {
     // epochs are sorted in ascending order
     pub non_checkpoint_epochs: Vec<u64>,
     pub checkpoint_epoch: u64,
+}
+
+impl EpochNewChangeLog {
+    pub fn change_log_ssts(&self) -> impl Iterator<Item = &SstableInfo> + '_ {
+        self.new_value.iter().chain(self.old_value.iter())
+    }
 }
 
 pub(crate) fn resolve_pb_log_epochs(epochs: &Vec<u64>) -> (Vec<u64>, u64) {
@@ -221,21 +249,6 @@ impl<T> TableChangeLogCommon<T> {
         }
     }
 
-    /// Returns epochs where value is non-null and >= `min_epoch`.
-    pub fn get_non_empty_epochs(&self, min_epoch: u64, max_count: usize) -> Vec<u64> {
-        self.filter_epoch((min_epoch, u64::MAX))
-            .filter(|epoch_change_log| {
-                // Filter out empty change logs
-                let new_value_empty = epoch_change_log.new_value.is_empty();
-                let old_value_empty = epoch_change_log.old_value.is_empty();
-                !new_value_empty || !old_value_empty
-            })
-            .flat_map(|epoch_change_log| epoch_change_log.epochs())
-            .filter(|a| a >= &min_epoch)
-            .take(max_count)
-            .collect()
-    }
-
     pub fn truncate(&mut self, truncate_epoch: u64) {
         while let Some(change_log) = self.0.front()
             && change_log.checkpoint_epoch < truncate_epoch
@@ -322,6 +335,24 @@ pub struct ChangeLogDeltaCommon<T> {
 }
 
 pub type ChangeLogDelta = ChangeLogDeltaCommon<SstableInfo>;
+
+impl<T> ChangeLogDeltaCommon<T> {
+    pub fn truncate_all_table_logs() -> Self {
+        Self {
+            truncate_epoch: u64::MAX,
+            new_log: EpochNewChangeLogCommon {
+                new_value: vec![],
+                old_value: vec![],
+                non_checkpoint_epochs: vec![],
+                checkpoint_epoch: 0,
+            },
+        }
+    }
+
+    pub fn is_truncate_all_table_logs(&self) -> bool {
+        self.truncate_epoch == u64::MAX
+    }
+}
 
 impl<T> From<&ChangeLogDeltaCommon<T>> for PbChangeLogDelta
 where

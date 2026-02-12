@@ -420,6 +420,14 @@ pub mod default {
         pub fn sync_log_store_buffer_size() -> usize {
             2048
         }
+
+        pub fn table_change_log_insert_batch_size() -> u64 {
+            1000
+        }
+
+        pub fn table_change_log_delete_batch_size() -> u64 {
+            1000
+        }
     }
 }
 
