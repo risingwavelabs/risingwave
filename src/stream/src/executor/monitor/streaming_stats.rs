@@ -179,6 +179,8 @@ pub struct StreamingMetrics {
     pub kv_log_store_buffer_unconsumed_min_epoch: LabelGuardedIntGaugeVec,
     pub kv_log_store_buffer_memory_bytes: LabelGuardedIntGaugeVec,
 
+    pub crossdb_last_consumed_min_epoch: LabelGuardedIntGaugeVec,
+
     pub sync_kv_log_store_read_count: LabelGuardedIntCounterVec,
     pub sync_kv_log_store_read_size: LabelGuardedIntCounterVec,
     pub sync_kv_log_store_write_pause_duration_ns: LabelGuardedIntCounterVec,
@@ -1097,6 +1099,14 @@ impl StreamingMetrics {
                 registry
             )
             .unwrap();
+
+        let crossdb_last_consumed_min_epoch = register_guarded_int_gauge_vec_with_registry!(
+            "crossdb_last_consumed_min_epoch",
+            "Last consumed min epoch for cross-database changelog stream scan",
+            &["table_id", "actor_id", "fragment_id"],
+            registry
+        )
+        .unwrap();
 
         let kv_log_store_buffer_memory_bytes =
             register_guarded_int_gauge_vec_with_registry!(

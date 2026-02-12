@@ -507,6 +507,11 @@ pub fn trigger_gc_stat(
             .table_change_log_object_size
             .with_label_values(&[&format!("{table_id}")])
             .set(object_size as _);
+        let min_epoch = logs.epochs().min().unwrap_or_default();
+        metrics
+            .crossdb_changelog_min_epoch
+            .with_label_values(&[&format!("{table_id}")])
+            .set(min_epoch as _);
     }
 }
 
