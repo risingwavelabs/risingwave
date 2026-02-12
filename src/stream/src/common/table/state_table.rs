@@ -849,6 +849,7 @@ where
         let new_local_options = if IS_REPLICATED {
             NewLocalOptions::new_replicated(
                 table_id,
+                table_catalog.fragment_id,
                 op_consistency_level,
                 table_option,
                 distribution.vnodes().clone(),
@@ -856,6 +857,7 @@ where
         } else {
             NewLocalOptions::new(
                 table_id,
+                table_catalog.fragment_id,
                 op_consistency_level,
                 table_option,
                 distribution.vnodes().clone(),

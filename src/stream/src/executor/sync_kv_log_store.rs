@@ -559,6 +559,7 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
             .state_store
             .new_local(NewLocalOptions {
                 table_id: self.table_id,
+                fragment_id: self.actor_context.fragment_id,
                 op_consistency_level: OpConsistencyLevel::Inconsistent,
                 table_option: TableOption {
                     retention_seconds: None,
