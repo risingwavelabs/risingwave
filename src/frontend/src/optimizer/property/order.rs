@@ -96,7 +96,7 @@ impl Order {
     pub fn enforce_if_not_satisfies(&self, plan: BatchPlanRef) -> Result<BatchPlanRef> {
         use crate::optimizer::plan_node::batch::prelude::*;
 
-        if !plan.order().satisfies(self) {
+        if !plan.orders().iter().any(|order| order.satisfies(self)) {
             Ok(self.enforce(plan))
         } else {
             Ok(plan)

@@ -162,7 +162,7 @@ impl HummockStateStoreMetrics {
         )
         .unwrap();
         let sst_store_block_request_counts = RelabeledGuardedIntCounterVec::with_metric_level(
-            MetricLevel::Critical,
+            MetricLevel::Info,
             sst_store_block_request_counts,
             metric_level,
         );

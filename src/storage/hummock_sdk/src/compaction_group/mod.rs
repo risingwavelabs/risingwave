@@ -14,35 +14,29 @@
 
 pub mod hummock_version_ext;
 
-use parse_display::Display;
 use risingwave_common::catalog::TableId;
-
-use crate::CompactionGroupId;
 
 pub type StateTableId = TableId;
 
 /// A compaction task's `StaticCompactionGroupId` indicates the compaction group that all its input
 /// SSTs belong to.
-#[derive(Display)]
-pub enum StaticCompactionGroupId {
+#[expect(non_upper_case_globals)]
+#[expect(non_snake_case)]
+pub mod StaticCompactionGroupId {
+    use risingwave_pb::id::CompactionGroupId;
+
     /// Create a new compaction group.
-    NewCompactionGroup = 0,
+    pub const NewCompactionGroup: CompactionGroupId = CompactionGroupId::new(0);
     /// All shared buffer local compaction task goes to here. Meta service will never see this
     /// value. Note that currently we've restricted the compaction task's input by `via
     /// compact_shared_buffer_by_compaction_group`
-    SharedBuffer = 1,
+    pub const SharedBuffer: CompactionGroupId = CompactionGroupId::new(1);
     /// All states goes to here by default.
-    StateDefault = 2,
+    pub const StateDefault: CompactionGroupId = CompactionGroupId::new(2);
     /// All MVs goes to here.
-    MaterializedView = 3,
+    pub const MaterializedView: CompactionGroupId = CompactionGroupId::new(3);
     /// Larger than any `StaticCompactionGroupId`.
-    End = 4,
-}
-
-impl From<StaticCompactionGroupId> for CompactionGroupId {
-    fn from(cg: StaticCompactionGroupId) -> Self {
-        cg as CompactionGroupId
-    }
+    pub const End: CompactionGroupId = CompactionGroupId::new(4);
 }
 
 /// The split will follow the following rules:

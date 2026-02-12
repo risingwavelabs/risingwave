@@ -1140,6 +1140,7 @@ impl InflightDatabaseInfo {
                 }
                 Command::ReplaceStreamJob(replace_job) => (None, Some(replace_job), None),
                 Command::ResetSource { .. } => (None, None, None),
+                Command::InjectSourceOffsets { .. } => (None, None, None),
             },
         };
         // `existing_fragment_ids` consists of
@@ -1161,7 +1162,7 @@ impl InflightDatabaseInfo {
                             !info
                                 .stream_job_fragments
                                 .fragments
-                                .contains_key(fragment_id)
+                                .contains_key(*fragment_id)
                         })
                         .unwrap_or(true)
                     })

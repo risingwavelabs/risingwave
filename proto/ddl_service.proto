@@ -531,10 +531,12 @@ message CreateSecretResponse {
 
 message DropSecretRequest {
   uint32 secret_id = 1;
+  bool cascade = 2;
 }
 
 message DropSecretResponse {
   WaitVersion version = 1;
+  common.Status status = 2;
 }
 
 message AlterSecretRequest {
@@ -598,7 +600,9 @@ message GetTablesResponse {
 
 message WaitRequest {}
 
-message WaitResponse {}
+message WaitResponse {
+  WaitVersion version = 1;
+}
 
 message CommentOnRequest {
   catalog.Comment comment = 1;

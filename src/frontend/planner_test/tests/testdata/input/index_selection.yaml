@@ -595,3 +595,27 @@
     select b from t where a = 1 order by b, c limit 1;
   expected_outputs:
     - batch_plan
+- name: batch sort elimination with eq-prefix-derived orders
+  sql: |
+    create table t (a int, b int, c int, d int, primary key (a, b, c, d));
+    select a, b, c, d from t where a = 1 and b = 2 and c between 3 and 5 order by c;
+  expected_outputs:
+    - batch_plan
+- name: batch sort elimination with eq-prefix-derived orders
+  sql: |
+    create table t (a int, b int, c int, d int, primary key (a, b, c, d));
+    select a, b, c, d from t where a = 1 and b = 2 and c between 3 and 5 order by c limit 5;
+  expected_outputs:
+    - batch_plan
+- name: batch sort elimination with eq-prefix-derived orders
+  sql: |
+    create table t (a int, b int, c int, d int, primary key (a, b, c, d));
+    select a, b, c, d from t where a = 1 and b = 2 and c between 3 and 5 order by a, b, c;
+  expected_outputs:
+    - batch_plan
+- name: batch sort elimination with eq-prefix-derived orders
+  sql: |
+    create table t (a int, b int, c int, d int, primary key (a, b, c, d));
+    select a, b, c, d from t where a = 1 and b = 2 and c between 3 and 5 order by a, b, c limit 5;
+  expected_outputs:
+    - batch_plan

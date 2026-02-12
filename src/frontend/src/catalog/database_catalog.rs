@@ -61,6 +61,12 @@ impl DatabaseCatalog {
             .flat_map(|schema| schema.iter_all().map(|t| t.id()))
     }
 
+    pub fn iter_object_ids(&self) -> impl Iterator<Item = ObjectId> + '_ {
+        self.schema_by_name
+            .values()
+            .flat_map(|schema| schema.iter_object_ids())
+    }
+
     pub fn iter_schemas(&self) -> impl Iterator<Item = &SchemaCatalog> {
         self.schema_by_name.values()
     }

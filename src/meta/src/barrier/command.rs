@@ -405,6 +405,15 @@ pub enum Command {
     ResumeBackfill {
         target: ResumeBackfillTarget,
     },
+
+    /// `InjectSourceOffsets` command generates a barrier to inject specific offsets
+    /// into source splits (UNSAFE - admin only).
+    /// This can cause data duplication or loss depending on the correctness of the provided offsets.
+    InjectSourceOffsets {
+        source_id: SourceId,
+        /// Split ID -> offset (JSON-encoded based on connector type)
+        split_offsets: HashMap<String, String>,
+    },
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -478,6 +487,15 @@ impl std::fmt::Display for Command {
                     write!(f, "ResumeBackfill: fragment={fragment_id}")
                 }
             },
+            Command::InjectSourceOffsets {
+                source_id,
+                split_offsets,
+            } => write!(
+                f,
+                "InjectSourceOffsets: {} ({} splits)",
+                source_id,
+                split_offsets.len()
+            ),
         }
     }
 }
@@ -607,7 +625,7 @@ impl Command {
                                     .iter()
                                     .filter(|(actor_id, _)| {
                                         // only keep the existing actors
-                                        !reschedule.newly_created_actors.contains_key(actor_id)
+                                        !reschedule.newly_created_actors.contains_key(*actor_id)
                                     })
                                     .map(|(actor_id, bitmap)| (*actor_id, bitmap.clone()))
                                     .collect(),
@@ -644,6 +662,7 @@ impl Command {
             Command::LoadFinish { .. } => None, // LoadFinish doesn't change fragment structure
             Command::ResetSource { .. } => None, // ResetSource doesn't change fragment structure
             Command::ResumeBackfill { .. } => None, /* ResumeBackfill doesn't change fragment structure */
+            Command::InjectSourceOffsets { .. } => None, /* InjectSourceOffsets doesn't change fragment structure */
         }
     }
 
@@ -755,6 +774,9 @@ impl Command {
             Command::LoadFinish { .. } => PostCollectCommand::Command("LoadFinish".to_owned()),
             Command::ResetSource { .. } => PostCollectCommand::Command("ResetSource".to_owned()),
             Command::ResumeBackfill { target } => PostCollectCommand::ResumeBackfill { target },
+            Command::InjectSourceOffsets { .. } => {
+                PostCollectCommand::Command("InjectSourceOffsets".to_owned())
+            }
         }
     }
 }
@@ -1443,6 +1465,15 @@ impl Command {
                     ))
                 }
             }
+            Command::InjectSourceOffsets {
+                source_id,
+                split_offsets,
+            } => Some(Mutation::InjectSourceOffsets(
+                risingwave_pb::stream_plan::InjectSourceOffsetsMutation {
+                    source_id: source_id.as_raw_id(),
+                    split_offsets: split_offsets.clone(),
+                },
+            )),
         };
         Ok(mutation)
     }

@@ -76,6 +76,7 @@ use crate::controller::cluster::StreamingClusterInfo;
 use crate::controller::streaming_job::{FinishAutoRefreshSchemaSinkContext, SinkIntoTableContext};
 use crate::controller::utils::build_select_node_list;
 use crate::error::{MetaErrorInner, bail_invalid_parameter, bail_unavailable};
+use crate::manager::iceberg_compaction::IcebergCompactionManagerRef;
 use crate::manager::sink_coordination::SinkCoordinatorManager;
 use crate::manager::{
     IGNORED_NOTIFICATION_VERSION, LocalNotification, MetaSrvEnv, MetadataManager,
@@ -182,7 +183,7 @@ pub enum DdlCommand {
     DropConnection(ConnectionId, DropMode),
     CreateSecret(Secret),
     AlterSecret(Secret),
-    DropSecret(SecretId),
+    DropSecret(SecretId, DropMode),
     CommentOn(Comment),
     CreateSubscription(Subscription),
     DropSubscription(SubscriptionId, DropMode),
@@ -218,7 +219,7 @@ impl DdlCommand {
             DdlCommand::DropConnection(id, _) => Right(id.as_object_id()),
             DdlCommand::CreateSecret(secret) => Left(secret.name.clone()),
             DdlCommand::AlterSecret(secret) => Left(secret.name.clone()),
-            DdlCommand::DropSecret(id) => Right(id.as_object_id()),
+            DdlCommand::DropSecret(id, _) => Right(id.as_object_id()),
             DdlCommand::CommentOn(comment) => Right(comment.table_id.into()),
             DdlCommand::CreateSubscription(subscription) => Left(subscription.name.clone()),
             DdlCommand::DropSubscription(id, _) => Right(id.as_object_id()),
@@ -236,7 +237,7 @@ impl DdlCommand {
             | DdlCommand::DropView(_, _)
             | DdlCommand::DropStreamingJob { .. }
             | DdlCommand::DropConnection(_, _)
-            | DdlCommand::DropSecret(_)
+            | DdlCommand::DropSecret(_, _)
             | DdlCommand::DropSubscription(_, _)
             | DdlCommand::AlterName(_, _)
             | DdlCommand::AlterObjectOwner(_, _)
@@ -271,6 +272,7 @@ pub struct DdlController {
     pub(crate) source_manager: SourceManagerRef,
     barrier_manager: BarrierManagerRef,
     sink_manager: SinkCoordinatorManager,
+    iceberg_compaction_manager: IcebergCompactionManagerRef,
 
     // The semaphore is used to limit the number of concurrent streaming job creation.
     pub(crate) creating_streaming_job_permits: Arc<CreatingStreamingJobPermit>,
@@ -349,6 +351,7 @@ impl DdlController {
         source_manager: SourceManagerRef,
         barrier_manager: BarrierManagerRef,
         sink_manager: SinkCoordinatorManager,
+        iceberg_compaction_manager: IcebergCompactionManagerRef,
     ) -> Self {
         let creating_streaming_job_permits = Arc::new(CreatingStreamingJobPermit::new(&env).await);
         Self {
@@ -358,6 +361,7 @@ impl DdlController {
             source_manager,
             barrier_manager,
             sink_manager,
+            iceberg_compaction_manager,
             creating_streaming_job_permits,
             seq: Arc::new(AtomicU64::new(0)),
         }
@@ -446,7 +450,9 @@ impl DdlController {
                     ctrl.drop_connection(connection_id, drop_mode).await
                 }
                 DdlCommand::CreateSecret(secret) => ctrl.create_secret(secret).await,
-                DdlCommand::DropSecret(secret_id) => ctrl.drop_secret(secret_id).await,
+                DdlCommand::DropSecret(secret_id, drop_mode) => {
+                    ctrl.drop_secret(secret_id, drop_mode).await
+                }
                 DdlCommand::AlterSecret(secret) => ctrl.alter_secret(secret).await,
                 DdlCommand::AlterNonSharedSource(source) => {
                     ctrl.alter_non_shared_source(source).await
@@ -475,7 +481,7 @@ impl DdlController {
         let notification_version = tokio::spawn(fut).await.map_err(|e| anyhow!(e))??;
         Ok(Some(WaitVersion {
             catalog_version: notification_version,
-            hummock_version_id: self.barrier_manager.get_hummock_version_id().await.to_u64(),
+            hummock_version_id: self.barrier_manager.get_hummock_version_id().await,
         }))
     }
 
@@ -618,7 +624,7 @@ impl DdlController {
         let version = self
             .metadata_manager
             .catalog_controller
-            .current_notification_version()
+            .notify_frontend_trivial()
             .await;
         Ok(version)
     }
@@ -738,8 +744,12 @@ impl DdlController {
             .await
     }
 
-    async fn drop_secret(&self, secret_id: SecretId) -> MetaResult<NotificationVersion> {
-        self.drop_object(ObjectType::Secret, secret_id, DropMode::Restrict)
+    async fn drop_secret(
+        &self,
+        secret_id: SecretId,
+        drop_mode: DropMode,
+    ) -> MetaResult<NotificationVersion> {
+        self.drop_object(ObjectType::Secret, secret_id, drop_mode)
             .await
     }
 
@@ -1268,8 +1278,13 @@ impl DdlController {
         // stop sink coordinators for iceberg table sinks
         if !iceberg_sink_ids.is_empty() {
             self.sink_manager
-                .stop_sink_coordinator(iceberg_sink_ids)
+                .stop_sink_coordinator(iceberg_sink_ids.clone())
                 .await;
+
+            for sink_id in iceberg_sink_ids {
+                self.iceberg_compaction_manager
+                    .clear_iceberg_commits_by_sink_id(sink_id);
+            }
         }
 
         // remove secrets.
@@ -1738,7 +1753,7 @@ impl DdlController {
             .filter(|id| {
                 !cross_db_snapshot_backfill_info
                     .upstream_mv_table_id_to_backfill_epoch
-                    .contains_key(id)
+                    .contains_key(*id)
             })
             .cloned()
             .collect();
@@ -2179,15 +2194,15 @@ impl DdlController {
         relation: alter_name_request::Object,
         new_name: &str,
     ) -> MetaResult<NotificationVersion> {
-        let (obj_type, id) = match relation {
-            alter_name_request::Object::TableId(id) => (ObjectType::Table, id),
-            alter_name_request::Object::ViewId(id) => (ObjectType::View, id),
-            alter_name_request::Object::IndexId(id) => (ObjectType::Index, id),
-            alter_name_request::Object::SinkId(id) => (ObjectType::Sink, id),
-            alter_name_request::Object::SourceId(id) => (ObjectType::Source, id),
-            alter_name_request::Object::SchemaId(id) => (ObjectType::Schema, id),
-            alter_name_request::Object::DatabaseId(id) => (ObjectType::Database, id),
-            alter_name_request::Object::SubscriptionId(id) => (ObjectType::Subscription, id),
+        let (obj_type, id): (ObjectType, ObjectId) = match relation {
+            alter_name_request::Object::TableId(id) => (ObjectType::Table, id.into()),
+            alter_name_request::Object::ViewId(id) => (ObjectType::View, id.into()),
+            alter_name_request::Object::IndexId(id) => (ObjectType::Index, id.into()),
+            alter_name_request::Object::SinkId(id) => (ObjectType::Sink, id.into()),
+            alter_name_request::Object::SourceId(id) => (ObjectType::Source, id.into()),
+            alter_name_request::Object::SchemaId(id) => (ObjectType::Schema, id.into()),
+            alter_name_request::Object::DatabaseId(id) => (ObjectType::Database, id.into()),
+            alter_name_request::Object::SubscriptionId(id) => (ObjectType::Subscription, id.into()),
         };
         self.metadata_manager
             .catalog_controller
@@ -2234,21 +2249,21 @@ impl DdlController {
         object: Object,
         owner_id: UserId,
     ) -> MetaResult<NotificationVersion> {
-        let (obj_type, id) = match object {
-            Object::TableId(id) => (ObjectType::Table, id),
-            Object::ViewId(id) => (ObjectType::View, id),
-            Object::SourceId(id) => (ObjectType::Source, id),
-            Object::SinkId(id) => (ObjectType::Sink, id),
-            Object::SchemaId(id) => (ObjectType::Schema, id),
-            Object::DatabaseId(id) => (ObjectType::Database, id),
-            Object::SubscriptionId(id) => (ObjectType::Subscription, id),
-            Object::ConnectionId(id) => (ObjectType::Connection, id),
-            Object::FunctionId(id) => (ObjectType::Function, id),
-            Object::SecretId(id) => (ObjectType::Secret, id),
+        let (obj_type, id): (ObjectType, ObjectId) = match object {
+            Object::TableId(id) => (ObjectType::Table, id.into()),
+            Object::ViewId(id) => (ObjectType::View, id.into()),
+            Object::SourceId(id) => (ObjectType::Source, id.into()),
+            Object::SinkId(id) => (ObjectType::Sink, id.into()),
+            Object::SchemaId(id) => (ObjectType::Schema, id.into()),
+            Object::DatabaseId(id) => (ObjectType::Database, id.into()),
+            Object::SubscriptionId(id) => (ObjectType::Subscription, id.into()),
+            Object::ConnectionId(id) => (ObjectType::Connection, id.into()),
+            Object::FunctionId(id) => (ObjectType::Function, id.into()),
+            Object::SecretId(id) => (ObjectType::Secret, id.into()),
         };
         self.metadata_manager
             .catalog_controller
-            .alter_owner(obj_type, id.into(), owner_id as _)
+            .alter_owner(obj_type, id, owner_id as _)
             .await
     }
 
@@ -2257,22 +2272,26 @@ impl DdlController {
         object: alter_set_schema_request::Object,
         new_schema_id: SchemaId,
     ) -> MetaResult<NotificationVersion> {
-        let (obj_type, id) = match object {
-            alter_set_schema_request::Object::TableId(id) => (ObjectType::Table, id),
-            alter_set_schema_request::Object::ViewId(id) => (ObjectType::View, id),
-            alter_set_schema_request::Object::SourceId(id) => (ObjectType::Source, id),
-            alter_set_schema_request::Object::SinkId(id) => (ObjectType::Sink, id),
-            alter_set_schema_request::Object::FunctionId(id) => (ObjectType::Function, id),
-            alter_set_schema_request::Object::ConnectionId(id) => (ObjectType::Connection, id),
-            alter_set_schema_request::Object::SubscriptionId(id) => (ObjectType::Subscription, id),
+        let (obj_type, id): (ObjectType, ObjectId) = match object {
+            alter_set_schema_request::Object::TableId(id) => (ObjectType::Table, id.into()),
+            alter_set_schema_request::Object::ViewId(id) => (ObjectType::View, id.into()),
+            alter_set_schema_request::Object::SourceId(id) => (ObjectType::Source, id.into()),
+            alter_set_schema_request::Object::SinkId(id) => (ObjectType::Sink, id.into()),
+            alter_set_schema_request::Object::FunctionId(id) => (ObjectType::Function, id.into()),
+            alter_set_schema_request::Object::ConnectionId(id) => {
+                (ObjectType::Connection, id.into())
+            }
+            alter_set_schema_request::Object::SubscriptionId(id) => {
+                (ObjectType::Subscription, id.into())
+            }
         };
         self.metadata_manager
             .catalog_controller
-            .alter_schema(obj_type, id.into(), new_schema_id as _)
+            .alter_schema(obj_type, id, new_schema_id)
             .await
     }
 
-    pub async fn wait(&self) -> MetaResult<()> {
+    pub async fn wait(&self) -> MetaResult<WaitVersion> {
         let timeout_ms = 30 * 60 * 1000;
         for _ in 0..timeout_ms {
             if self
@@ -2282,7 +2301,16 @@ impl DdlController {
                 .await?
                 .is_empty()
             {
-                return Ok(());
+                let catalog_version = self
+                    .metadata_manager
+                    .catalog_controller
+                    .notify_frontend_trivial()
+                    .await;
+                let hummock_version_id = self.barrier_manager.get_hummock_version_id().await;
+                return Ok(WaitVersion {
+                    catalog_version,
+                    hummock_version_id,
+                });
             }
 
             sleep(Duration::from_millis(1)).await;

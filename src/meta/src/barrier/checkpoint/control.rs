@@ -275,7 +275,8 @@ impl CheckpointControl {
                     | Command::ListFinish { .. }
                     | Command::LoadFinish { .. }
                     | Command::ResetSource { .. }
-                    | Command::ResumeBackfill { .. } => {
+                    | Command::ResumeBackfill { .. }
+                    | Command::InjectSourceOffsets { .. } => {
                         if cfg!(debug_assertions) {
                             panic!(
                                 "new database graph info can only be created for normal creating streaming job, but get command: {} {:?}",
@@ -1099,7 +1100,7 @@ impl DatabaseCheckpointControl {
             && jobs.len() > 1
             && let Some(creating_job_id) = jobs
                 .iter()
-                .find(|job| self.creating_streaming_job_controls.contains_key(job))
+                .find(|job| self.creating_streaming_job_controls.contains_key(*job))
         {
             warn!(
                 job_id = %creating_job_id,
