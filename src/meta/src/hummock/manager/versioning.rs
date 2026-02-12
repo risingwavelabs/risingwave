@@ -405,7 +405,6 @@ impl HummockManager {
                         .take(limit.map(|l| l as usize).unwrap_or(usize::MAX))
                         .map(|change_log| {
                             if epoch_only {
-                                // TODO(ZW): review callsites checking for non-empty old_value and new_value fields.
                                 EpochNewChangeLog {
                                     new_value: vec![],
                                     old_value: vec![],

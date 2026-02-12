@@ -234,11 +234,11 @@ impl HummockSnapshotManager {
 
         let (latest_snapshot, _) = watch::channel(latest_snapshot);
 
-        let (table_change_log_notification_sender, _) = watch::channel(());
+        let (version_update_notification_sender, _) = watch::channel(());
 
         Self {
             latest_snapshot,
-            version_update_notification_sender: table_change_log_notification_sender,
+            version_update_notification_sender,
         }
     }
 

@@ -795,9 +795,10 @@ impl StateStoreReadLog for HummockStorage {
                 .get(&options.table_id)
                 .map(|i| i.committed_epoch)
                 .unwrap_or(u64::MAX);
+            // The next epoch exists either in the same `EpochNewChangeLog` or the next `EpochNewChangeLog`, so we fetch 2 `EpochNewChangeLogCommon`.
             let table_change_log = self
                 .table_change_log_manager
-                .fetch_table_change_logs(options.table_id, (epoch, max_epoch), true)
+                .fetch_table_change_logs(options.table_id, (epoch, max_epoch), true, Some(2))
                 .await?;
             if let Some(next_epoch) = next_epoch(&table_change_log, epoch, options.table_id)? {
                 return Ok(next_epoch);
@@ -814,8 +815,9 @@ impl StateStoreReadLog for HummockStorage {
                 .map(|i| i.committed_epoch)
                 .unwrap_or(u64::MAX);
             async move {
+                // The next epoch exists either in the same `EpochNewChangeLog` or the next `EpochNewChangeLog`, so we fetch 2 `EpochNewChangeLogCommon`.
                 let table_change_log = table_change_log_manager
-                    .fetch_table_change_logs(options.table_id, (epoch, max_epoch), true)
+                    .fetch_table_change_logs(options.table_id, (epoch, max_epoch), true, Some(2))
                     .await?;
                 if let Some(next_epoch) = next_epoch(&table_change_log, epoch, options.table_id)? {
                     next_epoch_ret_clone.store(Arc::new(Some(next_epoch)));

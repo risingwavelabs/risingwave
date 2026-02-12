@@ -33,6 +33,7 @@ struct CacheKey {
     table_id: TableId,
     epoch_range: (u64, u64),
     include_epoch_only: bool,
+    limit: Option<u32>,
 }
 
 /// A naive cache to reduce number of RPC sent to meta node.
@@ -55,6 +56,7 @@ impl TableChangeLogManager {
         table_id: TableId,
         epoch_range: (u64, u64),
         include_epoch_only: bool,
+        limit: Option<u32>,
         fetch: impl Future<Output = HummockResult<TableChangeLogs>> + Send + 'static,
     ) -> HummockResult<TableChangeLogs> {
         self.cache
@@ -62,6 +64,7 @@ impl TableChangeLogManager {
                 table_id,
                 epoch_range,
                 include_epoch_only,
+                limit,
             })
             .or_insert_with_if(
                 || fetch.boxed().shared(),
@@ -77,15 +80,27 @@ impl TableChangeLogManager {
             .await
     }
 
-    /// `epoch_range` start and end are both inclusive.
+    /// Fetches table change logs for the given `table_id` and `epoch_range`.
+    ///
+    /// - If the end value of `epoch_range` is not `u64::MAX`, attempts to retrieve logs from the cache; if not cached, fetches via an RPC to the meta node and stores the result in the cache.
+    /// - If the end value of `epoch_range` is `u64::MAX`, always fetches table change logs directly from the meta node (bypassing the cache).
+    ///
+    /// Both the start and end values of `epoch_range` are inclusive.
+    ///
+    /// IMPORTANT: The caller must guarantee that the current max committed epoch is at least as large as the end of the provided `epoch_range`, if it's not `u64::MAX`.
+    /// Otherwise, the cache may serve outdated results: as new epochs are committed beyond the current maximum, subsequent RPC calls for the same `epoch_range`
+    /// could retrieve different or additional change logs that were not present in the previously cached result. For example, if you request logs for
+    /// `epoch_range = (1, N)` when the current max committed epoch is `M < N`, committing epochs `M+1` through `N` would make the cache inconsistent with reality;
+    /// future fetches for `(1, N)` could return new or updated information absent from the previous cache entry.
     pub async fn fetch_table_change_logs(
         &self,
         table_id: TableId,
         epoch_range: (u64, u64),
         include_epoch_only: bool,
+        limit: Option<u32>,
     ) -> HummockResult<TableChangeLogs> {
         let hummock_meta_client = self.hummock_meta_client.clone();
-        self.get_or_insert(table_id, epoch_range, include_epoch_only, async move {
+        let fetch = async move {
             hummock_meta_client
                 .get_table_change_logs(
                     include_epoch_only,
@@ -93,11 +108,15 @@ impl TableChangeLogManager {
                     Some(epoch_range.1),
                     Some(iter::once(table_id).collect()),
                     false,
-                    None,
+                    limit,
                 )
                 .await
                 .map_err(HummockError::meta_error)
-        })
-        .await
+        };
+        if epoch_range.1 == u64::MAX {
+            return fetch.await;
+        }
+        self.get_or_insert(table_id, epoch_range, include_epoch_only, limit, fetch)
+            .await
     }
 }

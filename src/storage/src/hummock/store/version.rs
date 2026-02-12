@@ -1136,9 +1136,10 @@ impl HummockVersionReader {
         options: ReadLogOptions,
         table_change_log_manager: Arc<TableChangeLogManager>,
     ) -> HummockResult<ChangeLogIterator> {
-        let change_log = {
+        // The end value of `epoch_range` is not greater than max committed epoch, guaranteed by the caller `BatchTableInnerIterLogInner`.
+        let change_log: Vec<_> = {
             let table_change_logs = table_change_log_manager
-                .fetch_table_change_logs(options.table_id, epoch_range, false)
+                .fetch_table_change_logs(options.table_id, epoch_range, false, None)
                 .await?;
             if let Some(change_log) = table_change_logs.get(&options.table_id) {
                 change_log.filter_epoch(epoch_range).cloned().collect_vec()
