@@ -597,6 +597,79 @@ impl fmt::Display for CreateSinkStatement {
     }
 }
 
+/// Statement for `REPLACE SINK`
+/// Only supports `REPLACE SINK sink_name FROM source_name WITH (...)` syntax.
+/// Does not support AS query or sink-into-table.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct ReplaceSinkStatement {
+    pub sink_name: ObjectName,
+    pub with_properties: WithProperties,
+    /// The source object name (table/MV) to sink from
+    pub from_name: ObjectName,
+    pub emit_mode: Option<EmitMode>,
+    pub sink_schema: Option<FormatEncodeOptions>,
+}
+
+impl ParseTo for ReplaceSinkStatement {
+    fn parse_to(p: &mut Parser<'_>) -> ModalResult<Self> {
+        impl_parse_to!(sink_name: ObjectName, p);
+
+        if p.parse_keyword(Keyword::INTO) {
+            parser_err!(
+                "REPLACE SINK does not support sink into table. Use CREATE SINK ... INTO ... instead."
+            );
+        }
+        if p.parse_keyword(Keyword::AS) {
+            parser_err!(
+                "REPLACE SINK does not support AS query syntax. Only FROM syntax is supported (e.g., REPLACE SINK sink_name FROM source_name WITH (...))."
+            );
+        }
+
+        // Only FROM syntax is supported for REPLACE SINK
+        p.expect_keyword(Keyword::FROM)?;
+        impl_parse_to!(from_name: ObjectName, p);
+
+        let emit_mode: Option<EmitMode> = p.parse_emit_mode()?;
+
+        // This check cannot be put into the `WithProperties::parse_to`, since other
+        // statements may not need the with properties.
+        if !p.peek_nth_any_of_keywords(0, &[Keyword::WITH]) {
+            p.expected("WITH")?;
+        }
+        impl_parse_to!(with_properties: WithProperties, p);
+
+        if with_properties.0.is_empty() {
+            parser_err!("sink properties not provided");
+        }
+
+        let sink_schema = p.parse_schema()?;
+
+        Ok(Self {
+            sink_name,
+            with_properties,
+            from_name,
+            emit_mode,
+            sink_schema,
+        })
+    }
+}
+
+impl fmt::Display for ReplaceSinkStatement {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut v: Vec<String> = vec![];
+        impl_fmt_display!(sink_name, v, self);
+        v.push(format!("FROM {}", self.from_name));
+        if let Some(ref emit_mode) = self.emit_mode {
+            v.push(format!("EMIT {}", emit_mode));
+        }
+        impl_fmt_display!(with_properties, v, self);
+        if let Some(schema) = &self.sink_schema {
+            v.push(format!("{}", schema));
+        }
+        v.iter().join(" ").fmt(f)
+    }
+}
+
 // sql_grammar!(CreateSubscriptionStatement {
 //     if_not_exists => [Keyword::IF, Keyword::NOT, Keyword::EXISTS],
 //     subscription_name: Ident,

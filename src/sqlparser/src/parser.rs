@@ -348,6 +348,7 @@ impl Parser<'_> {
                 Keyword::RECOVER => Ok(Statement::Recover),
                 Keyword::USE => Ok(self.parse_use()?),
                 Keyword::VACUUM => Ok(self.parse_vacuum()?),
+                Keyword::REPLACE => Ok(self.parse_replace()?),
                 _ => self.expected_at(checkpoint, "statement"),
             },
             Token::LParen => {
@@ -1994,6 +1995,21 @@ impl Parser<'_> {
         } else {
             self.expected("an object type after CREATE")
         }
+    }
+
+    /// Parse a SQL REPLACE statement
+    pub fn parse_replace(&mut self) -> ModalResult<Statement> {
+        if self.parse_keyword(Keyword::SINK) {
+            self.parse_replace_sink()
+        } else {
+            self.expected("SINK after REPLACE")
+        }
+    }
+
+    pub fn parse_replace_sink(&mut self) -> ModalResult<Statement> {
+        Ok(Statement::ReplaceSink {
+            stmt: ReplaceSinkStatement::parse_to(self)?,
+        })
     }
 
     pub fn parse_create_schema(&mut self) -> ModalResult<Statement> {

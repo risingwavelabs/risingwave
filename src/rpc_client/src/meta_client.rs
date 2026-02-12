@@ -489,6 +489,26 @@ impl MetaClient {
             .ok_or_else(|| anyhow!("wait version not set"))?)
     }
 
+    pub async fn replace_sink(
+        &self,
+        old_sink_id: SinkId,
+        sink: PbSink,
+        graph: StreamFragmentGraph,
+        dependencies: HashSet<ObjectId>,
+    ) -> Result<WaitVersion> {
+        let request = ReplaceSinkRequest {
+            old_sink_id: old_sink_id.as_raw_id(),
+            sink: Some(sink),
+            fragment_graph: Some(graph),
+            dependencies: dependencies.into_iter().collect(),
+        };
+
+        let resp = self.inner.replace_sink(request).await?;
+        Ok(resp
+            .version
+            .ok_or_else(|| anyhow!("wait version not set"))?)
+    }
+
     pub async fn create_subscription(&self, subscription: PbSubscription) -> Result<WaitVersion> {
         let request = CreateSubscriptionRequest {
             subscription: Some(subscription),
@@ -2555,6 +2575,7 @@ macro_rules! for_all_meta_rpc {
             ,{ ddl_client, create_view, CreateViewRequest, CreateViewResponse }
             ,{ ddl_client, create_source, CreateSourceRequest, CreateSourceResponse }
             ,{ ddl_client, create_sink, CreateSinkRequest, CreateSinkResponse }
+            ,{ ddl_client, replace_sink, ReplaceSinkRequest, ReplaceSinkResponse }
             ,{ ddl_client, create_subscription, CreateSubscriptionRequest, CreateSubscriptionResponse }
             ,{ ddl_client, create_schema, CreateSchemaRequest, CreateSchemaResponse }
             ,{ ddl_client, create_database, CreateDatabaseRequest, CreateDatabaseResponse }

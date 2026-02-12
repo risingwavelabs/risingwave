@@ -35,8 +35,8 @@ use risingwave_pb::secret::secret_ref::PbRefAsType;
 use risingwave_pb::telemetry::{PbTelemetryEventStage, TelemetryDatabaseObject};
 use risingwave_sqlparser::ast::{
     BackfillOrderStrategy, ConnectionRefValue, CreateConnectionStatement, CreateSinkStatement,
-    CreateSourceStatement, CreateSubscriptionStatement, SecretRefAsType, SecretRefValue, SqlOption,
-    SqlOptionValue, Statement, Value,
+    CreateSourceStatement, CreateSubscriptionStatement, ReplaceSinkStatement, SecretRefAsType,
+    SecretRefValue, SqlOption, SqlOptionValue, Statement, Value,
 };
 use thiserror_ext::AsReport;
 
@@ -610,6 +610,12 @@ impl TryFrom<&Statement> for WithOptions {
             }
             | Statement::CreateIndex {
                 with_properties, ..
+            }
+            | Statement::ReplaceSink {
+                stmt:
+                    ReplaceSinkStatement {
+                        with_properties, ..
+                    },
             } => Self::try_from(with_properties.0.as_slice()),
             Statement::CreateTable { with_options, .. } => Self::try_from(with_options.as_slice()),
 

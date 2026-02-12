@@ -113,6 +113,7 @@ pub mod privilege;
 pub mod query;
 mod recover;
 mod refresh;
+pub mod replace_sink;
 mod reset_source;
 pub mod show;
 mod transaction;
@@ -298,6 +299,9 @@ pub async fn handle(
         }
         Statement::CreateSink { stmt } => {
             create_sink::handle_create_sink(handler_args, stmt, false).await
+        }
+        Statement::ReplaceSink { stmt } => {
+            replace_sink::handle_replace_sink(handler_args, stmt).await
         }
         Statement::CreateSubscription { stmt } => {
             create_subscription::handle_create_subscription(handler_args, stmt).await

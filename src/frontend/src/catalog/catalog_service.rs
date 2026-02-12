@@ -147,6 +147,14 @@ pub trait CatalogWriter: Send + Sync {
         if_not_exists: bool,
     ) -> Result<()>;
 
+    async fn replace_sink(
+        &self,
+        old_sink_id: SinkId,
+        sink: PbSink,
+        graph: StreamFragmentGraph,
+        dependencies: HashSet<ObjectId>,
+    ) -> Result<()>;
+
     async fn create_subscription(&self, subscription: PbSubscription) -> Result<()>;
 
     async fn create_function(&self, function: PbFunction) -> Result<()>;
@@ -449,6 +457,20 @@ impl CatalogWriter for CatalogWriterImpl {
         let version = self
             .meta_client
             .create_sink(sink, graph, dependencies, if_not_exists)
+            .await?;
+        self.wait_version(version).await
+    }
+
+    async fn replace_sink(
+        &self,
+        old_sink_id: SinkId,
+        sink: PbSink,
+        graph: StreamFragmentGraph,
+        dependencies: HashSet<ObjectId>,
+    ) -> Result<()> {
+        let version = self
+            .meta_client
+            .replace_sink(old_sink_id, sink, graph, dependencies)
             .await?;
         self.wait_version(version).await
     }
