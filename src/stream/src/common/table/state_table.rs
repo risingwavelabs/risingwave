@@ -1162,7 +1162,6 @@ impl<LS: LocalStateStore, SD: ValueRowSerde> StateTableRowStore<LS, SD> {
             false
         };
 
-        // In dry-run mode, we verify pruning correctness but don't apply it
         if should_prune && self.enable_state_table_vnode_stats_pruning {
             return Ok(None);
         }
@@ -1220,7 +1219,6 @@ impl<LS: LocalStateStore, SD: ValueRowSerde> StateTableRowStore<LS, SD> {
             false
         };
 
-        // In dry-run mode, we verify pruning correctness but don't apply it
         if should_prune && self.enable_state_table_vnode_stats_pruning {
             return Ok(false);
         }
@@ -1397,8 +1395,6 @@ impl<LS: LocalStateStore, SD: ValueRowSerde> StateTableRowStore<LS, SD> {
 
         let (vnode, key_without_vnode) = key.split_vnode_bytes();
 
-        // Clear vnode statistics on delete (conservative approach, skip if all_rows is present)
-        // The deleted key might be the min or max, so we invalidate the stats
         if self.all_rows.is_none()
             && let Some(stats) = &mut self.vnode_stats
             && let Some(vnode_stat) = stats.get_mut(&vnode)
@@ -1784,7 +1780,6 @@ impl<LS: LocalStateStore, SD: ValueRowSerde> StateTableRowStore<LS, SD> {
             (start, end, false)
         };
 
-        // In dry-run mode, we don't apply entire range pruning but verify correctness
         if should_prune_entirely && self.enable_state_table_vnode_stats_pruning {
             return Ok(futures::future::Either::Left(futures::stream::empty()));
         }
@@ -1873,7 +1868,6 @@ impl<LS: LocalStateStore, SD: ValueRowSerde> StateTableRowStore<LS, SD> {
             (start, end, false)
         };
 
-        // In dry-run mode, we don't apply entire range pruning but verify correctness
         if should_prune_entirely && self.enable_state_table_vnode_stats_pruning {
             return Ok(futures::future::Either::Left(futures::stream::empty()));
         }
