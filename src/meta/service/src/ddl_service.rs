@@ -496,6 +496,7 @@ impl DdlService for DdlServiceImpl {
 
         let req = request.into_inner();
 
+        let old_sink_id = SinkId::from(req.old_sink_id);
         let sink = req.get_sink()?.clone();
         let fragment_graph = req.get_fragment_graph()?.clone();
         let dependencies = req.get_dependencies().iter().copied().collect();
@@ -503,6 +504,7 @@ impl DdlService for DdlServiceImpl {
         let stream_job = StreamingJob::Sink(sink);
 
         let command = DdlCommand::ReplaceSink {
+            old_sink_id,
             stream_job,
             fragment_graph,
             dependencies,

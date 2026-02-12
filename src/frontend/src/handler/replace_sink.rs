@@ -41,7 +41,7 @@ pub async fn handle_replace_sink(
     let search_path = session.config().search_path();
     let user_name = &session.user_name();
 
-    {
+    let old_sink_id = {
         let catalog_reader = session.env().catalog_reader().read_guard();
         let schema_name = match &schema_name {
             Some(schema_name) => schema_name.clone(),
@@ -88,7 +88,9 @@ pub async fn handle_replace_sink(
                 )));
             }
         }
-    }
+
+        old_sink.id
+    };
 
     if stmt.sink_name.base_name().starts_with(ICEBERG_SINK_PREFIX) {
         return Err(RwError::from(ErrorCode::InvalidInputSyntax(format!(
@@ -153,7 +155,7 @@ pub async fn handle_replace_sink(
     let catalog_writer = session.catalog_writer()?;
 
     catalog_writer
-        .replace_sink(sink.to_proto(), graph, dependencies)
+        .replace_sink(old_sink_id, sink.to_proto(), graph, dependencies)
         .await?;
 
     Ok(PgResponse::empty_result(StatementType::REPLACE_SINK))

@@ -491,11 +491,13 @@ impl MetaClient {
 
     pub async fn replace_sink(
         &self,
+        old_sink_id: SinkId,
         sink: PbSink,
         graph: StreamFragmentGraph,
         dependencies: HashSet<ObjectId>,
     ) -> Result<WaitVersion> {
         let request = ReplaceSinkRequest {
+            old_sink_id: old_sink_id.as_raw_id(),
             sink: Some(sink),
             fragment_graph: Some(graph),
             dependencies: dependencies.into_iter().collect(),

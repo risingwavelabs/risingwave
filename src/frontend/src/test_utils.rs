@@ -393,6 +393,7 @@ impl CatalogWriter for MockCatalogWriter {
 
     async fn replace_sink(
         &self,
+        _old_sink_id: SinkId,
         _sink: PbSink,
         _graph: StreamFragmentGraph,
         _dependencies: HashSet<ObjectId>,
