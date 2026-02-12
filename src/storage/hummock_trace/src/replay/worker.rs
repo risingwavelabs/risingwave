@@ -485,7 +485,7 @@ mod tests {
         let (res_tx, mut res_rx) = unbounded_channel();
         let get_table_id = 12;
         let iter_table_id = 14654;
-        let get_fragment_id = 1;
+        let get_fragment_id = 0;
 
         let read_options = TracedReadOptions::for_test(get_table_id);
         let iter_read_options = TracedReadOptions::for_test(iter_table_id);
