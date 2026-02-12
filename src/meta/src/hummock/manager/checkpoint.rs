@@ -151,7 +151,7 @@ impl HummockManager {
             );
             return Ok(0);
         }
-        assert!(new_checkpoint_id >= old_checkpoint_id);
+        assert!(new_checkpoint_id > old_checkpoint_id);
         let mut archive: Option<PbHummockVersionArchive> = None;
         let mut stale_objects = old_checkpoint.stale_objects.clone();
         // `object_sizes` is used to calculate size of stale objects.

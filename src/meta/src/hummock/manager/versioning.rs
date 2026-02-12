@@ -299,7 +299,7 @@ impl HummockManager {
         Ok(())
     }
 
-    pub async fn may_fill_backward_table_change_logs(&self) -> Result<bool> {
+    pub async fn may_fill_backward_table_change_logs(&self) -> Result<()> {
         let mut versioning = self.versioning.write().await;
         let version = &mut versioning.current_version;
         // Remove table change log from version.
@@ -307,7 +307,7 @@ impl HummockManager {
         let table_change_logs = {
             let table_change_logs = std::mem::take(&mut version.table_change_log);
             if table_change_logs.values().all(|t| t.is_empty()) {
-                return Ok(false);
+                return Ok(());
             }
             table_change_logs
                 .into_iter()
@@ -339,7 +339,7 @@ impl HummockManager {
                 .await?;
         }
         txn.commit().await?;
-        Ok(true)
+        Ok(())
     }
 
     pub async fn load_table_change_log(&self) -> Result<()> {

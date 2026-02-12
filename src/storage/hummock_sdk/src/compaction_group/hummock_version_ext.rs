@@ -729,15 +729,18 @@ impl<L: Clone> HummockVersionCommon<SstableInfo, L> {
         changed_table_info
     }
 
+    /// Returns the enriched table change log delta. It's used to apply the change log delta to the meta store.
     pub fn apply_change_log_delta<T: Clone>(
         table_change_log: &mut HashMap<TableId, TableChangeLogCommon<T>>,
         change_log_delta: &HashMap<TableId, ChangeLogDeltaCommon<T>>,
         removed_table_ids: &HashSet<TableId>,
         state_table_info_delta: &HashMap<TableId, StateTableInfoDelta>,
         changed_table_info: &HashMap<TableId, Option<StateTableInfo>>,
-    ) {
+    ) -> HashMap<TableId, ChangeLogDeltaCommon<T>> {
+        let mut enriched_change_log_delta = HashMap::new();
         for (table_id, change_log_delta) in change_log_delta {
             let new_change_log = &change_log_delta.new_log;
+            enriched_change_log_delta.insert(*table_id, change_log_delta.clone());
             match table_change_log.entry(*table_id) {
                 Entry::Occupied(entry) => {
                     let change_log = entry.into_mut();
@@ -754,6 +757,7 @@ impl<L: Clone> HummockVersionCommon<SstableInfo, L> {
         // The table change log will also be removed when the table id is removed.
         table_change_log.retain(|table_id, _| {
             if removed_table_ids.contains(table_id) {
+                enriched_change_log_delta.insert(*table_id, ChangeLogDeltaCommon::truncate_all_table_logs());
                 return false;
             }
             if let Some(table_info_delta) = state_table_info_delta.get(table_id)
@@ -765,6 +769,7 @@ impl<L: Clone> HummockVersionCommon<SstableInfo, L> {
             }
             let contains = change_log_delta.contains_key(table_id);
             if !contains {
+                enriched_change_log_delta.insert(*table_id, ChangeLogDeltaCommon::truncate_all_table_logs());
                 static LOG_SUPPRESSOR: LazyLock<LogSuppressor> =
                     LazyLock::new(|| LogSuppressor::per_second(1));
                 if let Ok(suppressed_count) = LOG_SUPPRESSOR.check() {
@@ -784,6 +789,8 @@ impl<L: Clone> HummockVersionCommon<SstableInfo, L> {
                 change_log.truncate(change_log_delta.truncate_epoch);
             }
         }
+
+        enriched_change_log_delta
     }
 
     pub fn build_branched_sst_info(&self) -> BTreeMap<HummockSstableObjectId, BranchedSstInfo> {

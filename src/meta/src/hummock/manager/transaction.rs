@@ -64,10 +64,12 @@ pub(super) struct HummockVersionTransaction<'a> {
     table_committed_epoch_notifiers: Option<&'a Mutex<TableCommittedEpochNotifiers>>,
     meta_metrics: &'a MetaMetrics,
 
+    #[expect(clippy::type_complexity)]
     pre_applied_version: Option<(
         HummockVersion,
         Vec<HummockVersionDelta>,
         HashMap<TableId, TableChangeLog>,
+        HashMap<TableId, ChangeLogDelta>,
     )>,
     disable_apply_to_txn: bool,
     opts: &'a MetaOpts,
@@ -105,7 +107,7 @@ impl<'a> HummockVersionTransaction<'a> {
     }
 
     pub(super) fn latest_version(&self) -> &HummockVersion {
-        if let Some((version, _, _)) = &self.pre_applied_version {
+        if let Some((version, _, _, _)) = &self.pre_applied_version {
             version
         } else {
             self.orig_version
@@ -121,16 +123,17 @@ impl<'a> HummockVersionTransaction<'a> {
     }
 
     fn pre_apply(&mut self, delta: HummockVersionDelta) {
-        let (version, deltas, table_change_log) =
+        let (version, deltas, table_change_log, table_change_log_delta) =
             self.pre_applied_version.get_or_insert_with(|| {
                 (
                     self.orig_version.clone(),
                     Vec::with_capacity(1),
                     self.orig_table_change_log.clone(),
+                    HashMap::new(),
                 )
             });
         let changed_table_info = version.apply_version_delta(&delta);
-        HummockVersion::apply_change_log_delta(
+        *table_change_log_delta = HummockVersion::apply_change_log_delta(
             table_change_log,
             &delta.change_log_delta,
             &delta.removed_table_ids,
@@ -245,7 +248,7 @@ impl<'a> HummockVersionTransaction<'a> {
 
 impl InMemValTransaction for HummockVersionTransaction<'_> {
     fn commit(self) {
-        if let Some((version, deltas, table_change_log)) = self.pre_applied_version {
+        if let Some((version, deltas, table_change_log, _)) = self.pre_applied_version {
             *self.orig_version = version;
             *self.orig_table_change_log = table_change_log;
             if !self.disable_apply_to_txn {
@@ -294,48 +297,25 @@ where
         if self.disable_apply_to_txn {
             return Ok(());
         }
-        if let Some((_, deltas, modified_table_change_log)) = &self.pre_applied_version {
+        if let Some((_, deltas, _, table_change_log_delta)) = &self.pre_applied_version {
             // These upsert_in_transaction can be batched. However, we know len(deltas) is always 1 currently.
             for delta in deltas {
                 delta.upsert_in_transaction(txn).await?;
             }
 
-            let change_log_to_insert = modified_table_change_log
-                .iter()
-                .flat_map(|(table_id, change_logs)| {
-                    change_logs.iter().map(|change_log| (*table_id, change_log))
-                })
-                .filter(|(table_id, change_log)| {
-                    let Some(existing_logs) = self.orig_table_change_log.get(table_id) else {
-                        // Insert to meta store if no previous change log found for this table.
-                        return true;
-                    };
-                    // Insert to meta store if no previous change log of this checkpoint epoch found for this table.
-                    existing_logs
-                        .binary_search_by_epoch(change_log.checkpoint_epoch)
-                        .is_err()
-                });
-            let change_log_to_delete = self
-                .orig_table_change_log
-                .iter()
-                .flat_map(|(table_id, change_logs)| {
-                    change_logs.iter().map(|change_log| (*table_id, change_log))
-                })
-                .filter(|(table_id, change_log)| {
-                    let Some(modified_logs) = modified_table_change_log.get(table_id) else {
-                        // Delete from meta store if no change log found for this table.
-                        return true;
-                    };
-                    // Delete from meta store if no change log of this checkpoint epoch found for this table.
-                    modified_logs
-                        .binary_search_by_epoch(change_log.checkpoint_epoch)
-                        .is_err()
-                });
-
             let insert_batch_size = self.opts.table_change_log_insert_batch_size as usize;
             use futures::stream::{self, StreamExt};
             use sea_orm::{ColumnTrait, Condition, QueryFilter};
-            let mut stream = stream::iter(change_log_to_insert).chunks(insert_batch_size);
+            let insert_iter =
+                table_change_log_delta
+                    .iter()
+                    .filter_map(|(table_id, change_log_delta)| {
+                        if change_log_delta.is_truncate_all_table_logs() {
+                            return None;
+                        }
+                        Some((*table_id, &change_log_delta.new_log))
+                    });
+            let mut stream = stream::iter(insert_iter).chunks(insert_batch_size);
             while let Some(change_log_batch) = stream.next().await {
                 let insert_many = change_log_batch
                     .into_iter()
@@ -350,14 +330,17 @@ where
             }
 
             let delete_batch_size = self.opts.table_change_log_delete_batch_size as usize;
-            let mut stream = stream::iter(change_log_to_delete).chunks(delete_batch_size);
+            let delete_iter = table_change_log_delta
+                .iter()
+                .map(|(table_id, change_log_delta)| (*table_id, change_log_delta.truncate_epoch));
+            let mut stream = stream::iter(delete_iter).chunks(delete_batch_size);
             while let Some(change_log_batch) = stream.next().await {
                 let mut condition = Condition::any();
-                for (table_id, change_log) in change_log_batch {
+                for (table_id, truncate_epoch) in change_log_batch {
                     condition = condition.add(
                         Condition::all()
                             .add(risingwave_meta_model::hummock_table_change_log::Column::TableId.eq(table_id))
-                            .add(risingwave_meta_model::hummock_table_change_log::Column::CheckpointEpoch.eq(change_log.checkpoint_epoch as Epoch))
+                            .add(risingwave_meta_model::hummock_table_change_log::Column::CheckpointEpoch.lt(truncate_epoch as Epoch))
                     );
                 }
                 risingwave_meta_model::hummock_table_change_log::Entity::delete_many()

@@ -336,6 +336,24 @@ pub struct ChangeLogDeltaCommon<T> {
 
 pub type ChangeLogDelta = ChangeLogDeltaCommon<SstableInfo>;
 
+impl<T> ChangeLogDeltaCommon<T> {
+    pub fn truncate_all_table_logs() -> Self {
+        Self {
+            truncate_epoch: u64::MAX,
+            new_log: EpochNewChangeLogCommon {
+                new_value: vec![],
+                old_value: vec![],
+                non_checkpoint_epochs: vec![],
+                checkpoint_epoch: 0,
+            },
+        }
+    }
+
+    pub fn is_truncate_all_table_logs(&self) -> bool {
+        self.truncate_epoch == u64::MAX
+    }
+}
+
 impl<T> From<&ChangeLogDeltaCommon<T>> for PbChangeLogDelta
 where
     PbSstableInfo: for<'a> From<&'a T>,

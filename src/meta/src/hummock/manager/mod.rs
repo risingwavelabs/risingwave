@@ -346,14 +346,7 @@ impl HummockManager {
         };
         let instance = Arc::new(instance);
         instance.init_time_travel_state().await?;
-        {
-            // The following order must be preserved.
-            let need_checkpoint = instance.may_fill_backward_table_change_logs().await?;
-            instance.load_table_change_log().await?;
-            if need_checkpoint {
-                instance.create_version_checkpoint(0).await?;
-            }
-        }
+        instance.may_fill_backward_table_change_logs().await?;
 
         instance.start_worker(rx);
         instance.load_meta_store_state().await?;
