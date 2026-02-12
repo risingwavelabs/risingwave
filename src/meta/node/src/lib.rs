@@ -455,6 +455,7 @@ pub fn start(
                 periodic_scheduling_compaction_group_split_interval_sec: config
                     .meta
                     .periodic_scheduling_compaction_group_split_interval_sec,
+                enable_compaction_group_normalize: config.meta.enable_compaction_group_normalize,
                 periodic_scheduling_compaction_group_merge_interval_sec: config
                     .meta
                     .periodic_scheduling_compaction_group_merge_interval_sec,

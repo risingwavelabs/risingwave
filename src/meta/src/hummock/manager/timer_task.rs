@@ -572,6 +572,81 @@ impl HummockManager {
     async fn on_handle_schedule_group_split(&self) {
         let table_write_throughput = self.table_write_throughput_statistic_manager.read().clone();
         let mut group_infos = self.calculate_compaction_group_statistic().await;
+
+        // Normalize compaction groups by table-id order.
+        //
+        // If adjacent groups overlap by table id and the left group is a 2-table group (common MV
+        // + internal-state-table pattern), split out the first table.
+        //
+        // Put normalize here (split scheduler, not merge scheduler), so normalize and merge are
+        // naturally mutually exclusive under the single-threaded timer event loop.
+        let mut normalized = false;
+        if self.env.opts.enable_compaction_group_normalize {
+            // Do a single forward pass by table-id order. Even though splits update the version,
+            // we only use the current ordering as a hint, and refresh stats at the end.
+            let mut by_table: Vec<_> = group_infos.iter().collect();
+            by_table.sort_by_key(|group| group.table_statistic.keys().next().copied());
+
+            for w in by_table.windows(2) {
+                let left = w[0];
+                let right = w[1];
+
+                if left.table_statistic.len() != 2 || right.table_statistic.is_empty() {
+                    continue;
+                }
+
+                if left
+                    .compaction_group_config
+                    .compaction_config
+                    .disable_auto_group_scheduling
+                    .unwrap_or(false)
+                {
+                    continue;
+                }
+
+                let left_min = *left.table_statistic.keys().next().unwrap();
+                let left_max = *left.table_statistic.keys().next_back().unwrap();
+                let right_min = *right.table_statistic.keys().next().unwrap();
+
+                if left_max < right_min {
+                    continue;
+                }
+
+                match self
+                    .move_state_tables_to_dedicated_compaction_group(
+                        left.group_id,
+                        &[left_min],
+                        None,
+                    )
+                    .await
+                {
+                    Ok((new_group_id, _)) => {
+                        tracing::info!(
+                            "normalize: split table {} from group-{} (new_group_id={}), because next_group-{} min_table_id={}",
+                            left_min,
+                            left.group_id,
+                            new_group_id,
+                            right.group_id,
+                            right_min,
+                        );
+                        normalized = true;
+                    }
+                    Err(e) => {
+                        tracing::debug!(
+                            error = %e.as_report(),
+                            "normalize split failed (group-{}, table={})",
+                            left.group_id,
+                            left_min,
+                        );
+                    }
+                }
+            }
+        }
+
+        if normalized {
+            group_infos = self.calculate_compaction_group_statistic().await;
+        }
+
         group_infos.sort_by_key(|group| group.group_size);
         group_infos.reverse();
 
@@ -636,6 +711,7 @@ impl HummockManager {
         while left < right && right < group_count {
             let group = &group_infos[left];
             let next_group = &group_infos[right];
+
             match self
                 .try_merge_compaction_group(
                     &table_write_throughput_statistic_manager,
