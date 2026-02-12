@@ -623,21 +623,25 @@ impl LogicalPlanRoot {
             ).into());
         }
 
-        let locality_provider_count = LocalityProviderCounter::count(plan.clone());
-        if ctx.session_ctx().config().enable_locality_backfill() {
-            if locality_provider_count > 5 {
-                risingwave_common::license::Feature::LocalityBackfill.check_available()?
-            }
-        } else if locality_provider_count > 0
+        if LocalityProviderCounter::count(plan.clone()) > 5 {
+            // LocalityProviderCounter is non-zero only when locality backfill is enabled.
+            assert!(ctx.session_ctx().config().enable_locality_backfill());
+            risingwave_common::license::Feature::LocalityBackfill.check_available()?;
+        }
+
+        if ctx.missed_locality_providers() > 1
             && risingwave_common::license::Feature::LocalityBackfill
                 .check_available()
                 .is_ok()
         {
-            ctx.warn_to_user(
-                "This streaming job creation could benefit from the experimental locality backfill. \
+            // missed_locality_providers can only be non-zero when locality backfill is disabled.
+            assert!(!ctx.session_ctx().config().enable_locality_backfill());
+            ctx.warn_to_user(format!(
+                "This streaming job has {} operators that could benefit from locality backfill. \
                 Consider enabling it with `SET enable_locality_backfill = true` for potentially \
-                faster backfill performance if there are large data to backfill from upstream(s)."
-            );
+                faster backfill performance, when existing data volume in upstream(s) is large.",
+                ctx.missed_locality_providers()
+            ));
         }
 
         Ok(optimized_plan.into_phase(plan))
