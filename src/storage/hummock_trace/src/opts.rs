@@ -189,12 +189,12 @@ pub struct TracedTryWaitEpochOptions {
 
 #[cfg(test)]
 impl TracedNewLocalOptions {
-    pub(crate) fn for_test(table_id: u32, fragment_id: u32) -> Self {
+    pub(crate) fn for_test(table_id: u32) -> Self {
         use risingwave_common::hash::VirtualNode;
 
         Self {
             table_id: TracedTableId { table_id },
-            fragment_id: TracedFragmentId { fragment_id },
+            fragment_id: TracedFragmentId { fragment_id: 0 },
             op_consistency_level: TracedOpConsistencyLevel::Inconsistent,
             table_option: TracedTableOption {
                 retention_seconds: None,
