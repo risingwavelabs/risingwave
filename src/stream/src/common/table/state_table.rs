@@ -1786,9 +1786,9 @@ impl<LS: LocalStateStore, SD: ValueRowSerde> StateTableRowStore<LS, SD> {
 
         let table_id = self.table_id;
         let inspect_fn = move |result: &StreamExecutorResult<(K, OwnedRow)>| {
-            // Only log error when in dry-run mode and we would have pruned but got results
+            // Only log when in dry-run mode and we would have pruned but got results
             if should_prune_entirely && result.is_ok() {
-                tracing::error!(
+                tracing::warn!(
                     table_id = %table_id,
                     "vnode stats pruning dry run fails for iter. This will not affect correctness."
                 );
@@ -1874,9 +1874,9 @@ impl<LS: LocalStateStore, SD: ValueRowSerde> StateTableRowStore<LS, SD> {
 
         let table_id = self.table_id;
         let inspect_fn = move |result: &StreamExecutorResult<(K, OwnedRow)>| {
-            // Only log error when in dry-run mode and we would have pruned but got results
+            // Only log when in dry-run mode and we would have pruned but got results
             if should_prune_entirely && result.is_ok() {
-                tracing::error!(
+                tracing::warn!(
                     table_id = %table_id,
                     "vnode stats pruning dry run fails for rev_iter. This will not affect correctness."
                 );
