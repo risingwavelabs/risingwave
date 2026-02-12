@@ -1,6 +1,10 @@
 from ..common import *
 from . import section
 from .streaming_common import _actor_busy_rate_expr, relabel_materialized_view_id_as_id
+from .streaming_fragments import (
+    _kv_log_store_buffer_usage_by_fragment_expr,
+    _sync_kv_log_store_buffer_usage_by_fragment_expr,
+)
 
 def _relation_busy_rate_expr_by_mv(rate_interval: str):
     """Return per-relation busy rate (by materialized_view_id), based on busiest actor."""
@@ -88,15 +92,6 @@ def _(outer_panels: Panels):
     zero_for_all_mvs_expr = f"0 * max by (materialized_view_id) ({metric('table_info')})"
     def _coalesce_mv(expr: str) -> str:
         return f"(({expr}) or on(materialized_view_id) {zero_for_all_mvs_expr})"
-
-    kv_log_store_buffer_usage_by_fragment_expr = (
-        f"sum({metric('kv_log_store_buffer_memory_bytes')}"
-        f"  * on(actor_id) group_left(fragment_id) {metric('actor_info')})"
-        f" by (fragment_id)"
-    )
-    sync_kv_log_store_buffer_usage_by_fragment_expr = (
-        f"sum({metric('sync_kv_log_store_buffer_memory_bytes')}) by (fragment_id)"
-    )
     executor_cache_usage_expr = (
         f"sum({metric('stream_memory_usage')} * on(table_id) group_left(materialized_view_id) "
         f"{metric('table_info')}) by (materialized_view_id)"
@@ -105,10 +100,10 @@ def _(outer_panels: Panels):
         metric("state_store_per_table_imm_size")
     )
     kv_log_store_buffer_usage_expr = _sum_fragment_metric_by_mv(
-        kv_log_store_buffer_usage_by_fragment_expr
+        _kv_log_store_buffer_usage_by_fragment_expr()
     )
     sync_kv_log_store_buffer_usage_expr = _sum_fragment_metric_by_mv(
-        sync_kv_log_store_buffer_usage_by_fragment_expr
+        _sync_kv_log_store_buffer_usage_by_fragment_expr()
     )
     total_memory_usage_expr = " + ".join(
         map(

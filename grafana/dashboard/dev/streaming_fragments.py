@@ -25,6 +25,16 @@ def _fragment_peak_rate_per_actor_with_id_at_step(per_actor_expr: str) -> str:
         f"'id', '$1', 'fragment_id', '(.+)')"
     )
 
+def _kv_log_store_buffer_usage_by_fragment_expr() -> str:
+    return (
+        f"sum({metric('kv_log_store_buffer_memory_bytes')}"
+        f"  * on(actor_id) group_left(fragment_id) {metric('actor_info')})"
+        f" by (fragment_id)"
+    )
+
+def _sync_kv_log_store_buffer_usage_by_fragment_expr() -> str:
+    return f"sum({metric('sync_kv_log_store_buffer_memory_bytes')}) by (fragment_id)"
+
 @section
 def _(outer_panels: Panels):
     # The actor_id can be masked due to metrics level settings.
@@ -66,13 +76,11 @@ def _(outer_panels: Panels):
     shared_buffer_usage_expr = (
         f"sum({metric('state_store_per_table_imm_size')}) by (fragment_id)"
     )
-    kv_log_store_buffer_usage_expr = (
-        f"sum({metric('kv_log_store_buffer_memory_bytes')}"
-        f"  * on(actor_id) group_left(fragment_id) {metric('actor_info')})"
-        f" by (fragment_id)"
+    kv_log_store_buffer_by_fragment_usage_expr = (
+        _kv_log_store_buffer_usage_by_fragment_expr()
     )
-    sync_kv_log_store_buffer_usage_expr = (
-        f"sum({metric('sync_kv_log_store_buffer_memory_bytes')}) by (fragment_id)"
+    sync_kv_log_store_buffer_by_fragment_usage_expr = (
+        _sync_kv_log_store_buffer_usage_by_fragment_expr()
     )
     total_memory_usage_expr = " + ".join(
         map(
@@ -80,8 +88,8 @@ def _(outer_panels: Panels):
             [
                 executor_cache_usage_expr,
                 shared_buffer_usage_expr,
-                kv_log_store_buffer_usage_expr,
-                sync_kv_log_store_buffer_usage_expr,
+                kv_log_store_buffer_by_fragment_usage_expr,
+                sync_kv_log_store_buffer_by_fragment_usage_expr,
             ],
         )
     )
