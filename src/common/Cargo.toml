@@ -75,7 +75,7 @@ prometheus = { version = "0.14" }
 prost = { workspace = true }
 rand = { workspace = true }
 regex = { workspace = true }
-reqwest = { version = "0.12.2", features = ["json"] }
+reqwest = { version = "0.13.2", features = ["json"] }
 risingwave-fields-derive = { path = "./fields-derive" }
 risingwave_common_estimate_size = { workspace = true }
 risingwave_common_log = { path = "./log" }

@@ -42,7 +42,7 @@ opendal = { workspace = true, features = [
     "services-azfile",
 ] }
 prometheus = { version = "0.14", features = ["process"] }
-reqwest = "0.12.2" # required by opendal
+reqwest = "0.13.2" # required by opendal
 risingwave_common = { workspace = true }
 spin = "0.10"
 thiserror = { workspace = true }
