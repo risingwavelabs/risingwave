@@ -430,7 +430,7 @@ impl<S: StateStore> SnapshotBackfillExecutor<S> {
             .map(|idx| self.output_indices[*idx])
             .collect();
         let update_normalizer = UpstreamStreamKeyUpdateNormalizer::new(
-            &upstream.info.stream_key,
+            &self.upstream.info.stream_key,
             current_stream_key_indices,
         );
         let mut upstream = self.upstream.into_executor(self.barrier_rx).execute();
