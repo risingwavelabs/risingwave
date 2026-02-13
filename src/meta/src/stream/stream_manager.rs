@@ -797,21 +797,9 @@ impl GlobalStreamManager {
             }
         }
 
-        let worker_nodes = self
-            .metadata_manager
-            .list_active_streaming_compute_nodes()
-            .await?
-            .into_iter()
-            .filter(|w| w.is_streaming_schedulable())
-            .collect_vec();
-        let workers = worker_nodes.into_iter().map(|x| (x.id, x)).collect();
-
         let commands = self
             .scale_controller
-            .reschedule_backfill_parallelism_inplace(
-                HashMap::from([(job_id, parallelism)]),
-                workers,
-            )
+            .reschedule_backfill_parallelism_inplace(HashMap::from([(job_id, parallelism)]))
             .await?;
 
         if !deferred {
