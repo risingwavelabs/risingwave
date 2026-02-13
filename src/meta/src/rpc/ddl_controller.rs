@@ -526,6 +526,25 @@ impl DdlController {
             .await
     }
 
+    pub async fn reschedule_streaming_job_backfill_parallelism(
+        &self,
+        job_id: JobId,
+        parallelism: Option<StreamingParallelism>,
+        mut deferred: bool,
+    ) -> MetaResult<()> {
+        tracing::info!("altering backfill parallelism for job {}", job_id);
+        if self.barrier_manager.check_status_running().is_err() {
+            tracing::info!(
+                "alter backfill parallelism is set to deferred mode because the system is in recovery state"
+            );
+            deferred = true;
+        }
+
+        self.stream_manager
+            .reschedule_streaming_job_backfill_parallelism(job_id, parallelism, deferred)
+            .await
+    }
+
     pub async fn reschedule_cdc_table_backfill(
         &self,
         job_id: JobId,
