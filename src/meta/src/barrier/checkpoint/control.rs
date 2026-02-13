@@ -1071,21 +1071,16 @@ impl DatabaseCheckpointControl {
             (None, vec![])
         };
 
-        if matches!(
-            &command,
-            Some(Command::RescheduleIntent {
-                reschedule_plan: None,
-                ..
-            })
-        ) {
-            warn!("reschedule intent should be resolved before injection");
-            for notifier in notifiers {
-                notifier.notify_start_failed(
-                    anyhow!("reschedule intent must be resolved before injection").into(),
-                );
-            }
-            return Ok(());
-        }
+        debug_assert!(
+            !matches!(
+                &command,
+                Some(Command::RescheduleIntent {
+                    reschedule_plan: None,
+                    ..
+                })
+            ),
+            "reschedule intent should be resolved before injection"
+        );
 
         if let Some(Command::DropStreamingJobs {
             streaming_job_ids, ..

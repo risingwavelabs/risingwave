@@ -755,60 +755,63 @@ impl Command {
                 Some((Some((info.streaming_job.id(), cdc_tracker)), changes))
             }
             Command::RescheduleIntent {
-                reschedule_plan: Some(ReschedulePlan { reschedules, .. }),
-                ..
-            } => Some((
-                None,
-                reschedules
-                    .iter()
-                    .map(|(fragment_id, reschedule)| {
-                        (
-                            *fragment_id,
-                            CommandFragmentChanges::Reschedule {
-                                new_actors: reschedule
-                                    .added_actors
-                                    .iter()
-                                    .flat_map(|(node_id, actors)| {
-                                        actors.iter().map(|actor_id| {
-                                            (
-                                                *actor_id,
-                                                InflightActorInfo {
-                                                    worker_id: *node_id,
-                                                    vnode_bitmap: reschedule
-                                                        .newly_created_actors
-                                                        .get(actor_id)
-                                                        .expect("should exist")
-                                                        .0
-                                                        .0
-                                                        .vnode_bitmap
-                                                        .clone(),
-                                                    splits: reschedule
-                                                        .actor_splits
-                                                        .get(actor_id)
-                                                        .cloned()
-                                                        .unwrap_or_default(),
-                                                },
-                                            )
+                reschedule_plan, ..
+            } => {
+                let ReschedulePlan { reschedules, .. } = reschedule_plan
+                    .as_ref()
+                    .expect("reschedule intent should be resolved in global barrier worker");
+                Some((
+                    None,
+                    reschedules
+                        .iter()
+                        .map(|(fragment_id, reschedule)| {
+                            (
+                                *fragment_id,
+                                CommandFragmentChanges::Reschedule {
+                                    new_actors: reschedule
+                                        .added_actors
+                                        .iter()
+                                        .flat_map(|(node_id, actors)| {
+                                            actors.iter().map(|actor_id| {
+                                                (
+                                                    *actor_id,
+                                                    InflightActorInfo {
+                                                        worker_id: *node_id,
+                                                        vnode_bitmap: reschedule
+                                                            .newly_created_actors
+                                                            .get(actor_id)
+                                                            .expect("should exist")
+                                                            .0
+                                                            .0
+                                                            .vnode_bitmap
+                                                            .clone(),
+                                                        splits: reschedule
+                                                            .actor_splits
+                                                            .get(actor_id)
+                                                            .cloned()
+                                                            .unwrap_or_default(),
+                                                    },
+                                                )
+                                            })
                                         })
-                                    })
-                                    .collect(),
-                                actor_update_vnode_bitmap: reschedule
-                                    .vnode_bitmap_updates
-                                    .iter()
-                                    .filter(|(actor_id, _)| {
-                                        // only keep the existing actors
-                                        !reschedule.newly_created_actors.contains_key(*actor_id)
-                                    })
-                                    .map(|(actor_id, bitmap)| (*actor_id, bitmap.clone()))
-                                    .collect(),
-                                to_remove: reschedule.removed_actors.iter().cloned().collect(),
-                                actor_splits: reschedule.actor_splits.clone(),
-                            },
-                        )
-                    })
-                    .collect(),
-            )),
-            Command::RescheduleIntent { .. } => None,
+                                        .collect(),
+                                    actor_update_vnode_bitmap: reschedule
+                                        .vnode_bitmap_updates
+                                        .iter()
+                                        .filter(|(actor_id, _)| {
+                                            // only keep the existing actors
+                                            !reschedule.newly_created_actors.contains_key(*actor_id)
+                                        })
+                                        .map(|(actor_id, bitmap)| (*actor_id, bitmap.clone()))
+                                        .collect(),
+                                    to_remove: reschedule.removed_actors.iter().cloned().collect(),
+                                    actor_splits: reschedule.actor_splits.clone(),
+                                },
+                            )
+                        })
+                        .collect(),
+                ))
+            }
             Command::ReplaceStreamJob(plan) => Some((None, plan.fragment_changes())),
             Command::SourceChangeSplit(SplitState {
                 split_assignment, ..
@@ -922,11 +925,11 @@ impl Command {
                 },
             },
             Command::RescheduleIntent {
-                reschedule_plan: Some(ReschedulePlan { reschedules, .. }),
-                ..
-            } => PostCollectCommand::Reschedule { reschedules },
-            Command::RescheduleIntent { .. } => {
-                PostCollectCommand::Command("RescheduleIntent".to_owned())
+                reschedule_plan, ..
+            } => {
+                let ReschedulePlan { reschedules, .. } = reschedule_plan
+                    .expect("reschedule intent should be resolved in global barrier worker");
+                PostCollectCommand::Reschedule { reschedules }
             }
             Command::ReplaceStreamJob(plan) => PostCollectCommand::ReplaceStreamJob(plan),
             Command::SourceChangeSplit(SplitState { split_assignment }) => {
@@ -1367,13 +1370,14 @@ impl Command {
             }
 
             Command::RescheduleIntent {
-                reschedule_plan:
-                    Some(ReschedulePlan {
-                        reschedules,
-                        fragment_actors,
-                    }),
-                ..
+                reschedule_plan, ..
             } => {
+                let ReschedulePlan {
+                    reschedules,
+                    fragment_actors,
+                } = reschedule_plan
+                    .as_ref()
+                    .expect("reschedule intent should be resolved in global barrier worker");
                 let mut dispatcher_update = HashMap::new();
                 for reschedule in reschedules.values() {
                     for &(upstream_fragment_id, dispatcher_id) in
@@ -1543,7 +1547,6 @@ impl Command {
                 tracing::debug!("update mutation: {mutation:?}");
                 Some(mutation)
             }
-            Command::RescheduleIntent { .. } => None,
 
             Command::CreateSubscription {
                 upstream_mv_table_id,
@@ -1672,13 +1675,14 @@ impl Command {
                 )))
             }
             Command::RescheduleIntent {
-                reschedule_plan:
-                    Some(ReschedulePlan {
-                        reschedules,
-                        fragment_actors,
-                    }),
-                ..
+                reschedule_plan, ..
             } => {
+                let ReschedulePlan {
+                    reschedules,
+                    fragment_actors,
+                } = reschedule_plan
+                    .as_ref()
+                    .expect("reschedule intent should be resolved in global barrier worker");
                 // we assume that we only scale the actors in database partial graph
                 let mut actor_upstreams = Self::collect_database_partial_graph_actor_upstreams(
                     reschedules.iter().map(|(fragment_id, reschedule)| {
@@ -1719,7 +1723,6 @@ impl Command {
                 }
                 Some(map)
             }
-            Command::RescheduleIntent { .. } => None,
             Command::ReplaceStreamJob(replace_table) => {
                 let edges = edges.as_mut().expect("should exist");
                 let mut actors = edges.collect_actors_to_create(
