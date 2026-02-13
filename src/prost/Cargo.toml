@@ -32,7 +32,7 @@ workspace-hack = { path = "../workspace-hack" }
 static_assertions = "1"
 
 [build-dependencies]
-fs-err = "3.2"
+fs-err = "3.3"
 pbjson-build = "0.9"
 prost-build = { workspace = true }
 tonic-build = { workspace = true }
