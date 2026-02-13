@@ -171,7 +171,7 @@ pub struct MetaMetrics {
     /// Size of objects per table change log.
     pub table_change_log_object_size: IntGaugeVec,
     /// Min epoch currently retained in table change log.
-    pub crossdb_changelog_min_epoch: IntGaugeVec,
+    pub table_change_log_min_epoch: IntGaugeVec,
     /// The number of hummock version delta log.
     pub delta_log_count: IntGauge,
     /// latency of version checkpoint
@@ -559,8 +559,8 @@ impl MetaMetrics {
         )
         .unwrap();
 
-        let crossdb_changelog_min_epoch = register_int_gauge_vec_with_registry!(
-            "crossdb_changelog_min_epoch",
+        let table_change_log_min_epoch = register_int_gauge_vec_with_registry!(
+            "storage_table_change_log_min_epoch",
             "min epoch currently retained in table change log",
             &["table_id"],
             registry
@@ -985,7 +985,7 @@ impl MetaMetrics {
             total_object_size,
             table_change_log_object_count,
             table_change_log_object_size,
-            crossdb_changelog_min_epoch,
+            table_change_log_min_epoch,
             delta_log_count,
             version_checkpoint_latency,
             current_version_id,
