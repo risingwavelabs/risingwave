@@ -91,17 +91,17 @@ impl<T: UpstreamTable, S: StateStore> UpstreamTableExecutor<T, S> {
         }
     }
 
-    fn extract_last_consumed_min_epoch(progress_state: &BackfillState<S>) -> Option<u64> {
+    fn extract_last_consumed_min_epoch(progress_state: &BackfillState<S>) -> u64 {
         let mut min_epoch = u64::MAX;
         for (_, progress) in progress_state.latest_progress() {
             let Some(progress) = progress else {
-                // If any vnode has no progress yet, the global min is unknown. Returning `None`
-                // avoids reporting an overly optimistic lag estimate.
-                return None;
+                // If any vnode has no progress yet, report `0` explicitly to indicate the
+                // progress is not fully ready, instead of hiding this state.
+                return 0;
             };
             min_epoch = min_epoch.min(progress.epoch);
         }
-        (min_epoch != u64::MAX).then_some(min_epoch)
+        if min_epoch == u64::MAX { 0 } else { min_epoch }
     }
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
@@ -175,12 +175,10 @@ impl<T: UpstreamTable, S: StateStore> UpstreamTableExecutor<T, S> {
                     })
                     .await?;
 
-                if let Some(last_consumed_min_epoch) =
-                    Self::extract_last_consumed_min_epoch(&progress_state)
-                {
-                    self.crossdb_last_consumed_min_epoch
-                        .set(last_consumed_min_epoch as i64);
-                }
+                let last_consumed_min_epoch =
+                    Self::extract_last_consumed_min_epoch(&progress_state);
+                self.crossdb_last_consumed_min_epoch
+                    .set(last_consumed_min_epoch as i64);
 
                 if !finish_reported {
                     let mut row_count = 0;
