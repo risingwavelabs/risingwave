@@ -1355,6 +1355,7 @@ impl StreamingMetrics {
             kv_log_store_buffer_unconsumed_epoch_count,
             kv_log_store_buffer_unconsumed_min_epoch,
             kv_log_store_buffer_memory_bytes,
+            crossdb_last_consumed_min_epoch,
             sync_kv_log_store_read_count,
             sync_kv_log_store_read_size,
             sync_kv_log_store_write_pause_duration_ns,
