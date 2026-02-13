@@ -746,7 +746,7 @@ impl GlobalStreamManager {
 
             if blocked_jobs.contains(&job_id) {
                 bail!(
-                    "Cannot alter the job {} because it is blocked by creating snapshot backfill jobs",
+                    "Cannot alter the job {} because it is blocked by creating unreschedulable backfill jobs",
                     job_id,
                 );
             }

@@ -777,7 +777,7 @@ impl MetadataManager {
             }
         }
 
-        let mut blocked_job_ids = creating_job_ids;
+        let mut blocked_job_ids = HashSet::new();
         if !blocked_fragment_ids.is_empty() {
             let fragment_ids = blocked_fragment_ids.into_iter().collect_vec();
             let fragment_job_ids = self

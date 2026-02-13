@@ -864,13 +864,6 @@ impl CreatingStreamingJobControl {
                 collect_fragment_upstream_fragment_ids(fragment, blocked_fragment_ids);
             }
         }
-
-        let mut no_shuffle_relations = Vec::new();
-        self.collect_no_shuffle_fragment_relations(&mut no_shuffle_relations);
-        for (upstream_fragment_id, downstream_fragment_id) in no_shuffle_relations {
-            blocked_fragment_ids.insert(upstream_fragment_id);
-            blocked_fragment_ids.insert(downstream_fragment_id);
-        }
     }
 
     pub(super) fn collect_no_shuffle_fragment_relations(
