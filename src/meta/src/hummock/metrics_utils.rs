@@ -485,6 +485,8 @@ pub fn trigger_gc_stat(
     metrics.stale_object_count.set(stale_object_count as _);
     // table change log
     for (table_id, logs) in &checkpoint.version.table_change_log {
+        let table_id_label = table_id.to_string();
+        let labels = [table_id_label.as_str()];
         let object_count = logs
             .iter()
             .map(|l| l.old_value.len() + l.new_value.len())
@@ -501,12 +503,17 @@ pub fn trigger_gc_stat(
             .sum::<usize>();
         metrics
             .table_change_log_object_count
-            .with_label_values(&[&format!("{table_id}")])
+            .with_label_values(&labels)
             .set(object_count as _);
         metrics
             .table_change_log_object_size
-            .with_label_values(&[&format!("{table_id}")])
+            .with_label_values(&labels)
             .set(object_size as _);
+        let min_epoch = logs.epochs().min().unwrap_or_default();
+        metrics
+            .table_change_log_min_epoch
+            .with_label_values(&labels)
+            .set(min_epoch as _);
     }
 }
 
