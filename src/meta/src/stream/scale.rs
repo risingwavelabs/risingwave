@@ -884,6 +884,7 @@ impl GlobalStreamManager {
             .metadata_manager
             .collect_reschedule_blocked_jobs_for_creating_jobs(&background_streaming_jobs, true)
             .await?;
+        let has_blocked_jobs = !blocked_jobs.is_empty();
 
         let database_objects: HashMap<risingwave_meta_model::DatabaseId, Vec<JobId>> = self
             .metadata_manager
@@ -908,7 +909,10 @@ impl GlobalStreamManager {
 
         if job_ids.is_empty() {
             tracing::info!("no streaming jobs for scaling, maybe an empty cluster");
-            return Ok(false);
+            // Retry periodically while some jobs are temporarily blocked by creating
+            // unreschedulable backfill jobs. This allows us to scale them
+            // automatically once the creating jobs finish.
+            return Ok(has_blocked_jobs);
         }
 
         let active_workers =
@@ -916,7 +920,7 @@ impl GlobalStreamManager {
 
         if job_ids.is_empty() {
             tracing::info!("no streaming jobs for scaling, maybe an empty cluster");
-            return Ok(false);
+            return Ok(has_blocked_jobs);
         }
 
         tracing::info!(
@@ -957,7 +961,7 @@ impl GlobalStreamManager {
             let _results = future::try_join_all(futures).await?;
         }
 
-        Ok(false)
+        Ok(has_blocked_jobs)
     }
 
     /// Handles notification of worker node activation and deletion, and triggers parallelism control.
