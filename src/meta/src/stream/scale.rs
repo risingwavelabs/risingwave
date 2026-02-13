@@ -180,7 +180,6 @@ impl ScaleController {
     pub async fn reschedule_backfill_parallelism_inplace(
         &self,
         policy: HashMap<JobId, Option<StreamingParallelism>>,
-        workers: HashMap<WorkerId, PbWorkerNode>,
     ) -> MetaResult<HashMap<DatabaseId, Command>> {
         if policy.is_empty() {
             return Ok(HashMap::new());
@@ -213,7 +212,7 @@ impl ScaleController {
 
         let jobs = policy.keys().copied().collect();
 
-        let command = self.rerender_inner(&txn, jobs, &workers).await?;
+        let command = build_reschedule_intent_for_jobs(&txn, jobs).await?;
 
         txn.commit().await?;
 
