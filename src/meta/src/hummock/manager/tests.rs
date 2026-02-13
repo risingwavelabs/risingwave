@@ -46,6 +46,7 @@ use thiserror_ext::AsReport;
 use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
 use crate::hummock::compaction::selector::{ManualCompactionOption, default_compaction_selector};
 use crate::hummock::error::Error;
+use crate::hummock::table_write_throughput_statistic::TableWriteThroughputStatisticManager;
 use crate::hummock::test_utils::*;
 use crate::hummock::{HummockManagerRef, MockHummockMetaClient};
 use crate::manager::MetaSrvEnv;
@@ -2622,4 +2623,85 @@ async fn test_vacuum() {
         .await
         .unwrap();
     assert_eq!(deleted, 3);
+}
+
+/// Regression test: `try_merge_compaction_group` must return `Err` for groups
+/// with overlapping table ID ranges. Before the fix, errors were swallowed
+/// (always returned `Ok(())`), causing the merge scheduling loop to retry
+/// the same unmergeable pair infinitely (167K+ error log spam).
+#[tokio::test]
+async fn test_try_merge_compaction_group_error_propagation() {
+    let (_env, hummock_manager, _, worker_id) = setup_compute_env(80).await;
+    let hummock_meta_client: Arc<dyn HummockMetaClient> = Arc::new(MockHummockMetaClient::new(
+        hummock_manager.clone(),
+        worker_id as _,
+    ));
+
+    // StateDefault(2): [100, 102], MaterializedView(3): [101, 200]
+    hummock_manager
+        .register_table_ids_for_test(&[
+            (100, StaticCompactionGroupId::StateDefault.into()),
+            (102, StaticCompactionGroupId::StateDefault.into()),
+        ])
+        .await
+        .unwrap();
+    hummock_manager
+        .register_table_ids_for_test(&[
+            (101, StaticCompactionGroupId::MaterializedView.into()),
+            (200, StaticCompactionGroupId::MaterializedView.into()),
+        ])
+        .await
+        .unwrap();
+
+    // Commit SSTs so that split can proceed
+    let sst_1 = gen_local_sstable_info(1, vec![100, 102], test_epoch(20));
+    let sst_2 = gen_local_sstable_info(2, vec![101, 200], test_epoch(20));
+    hummock_meta_client
+        .commit_epoch(
+            30,
+            SyncResult {
+                uncommitted_ssts: vec![sst_1, sst_2],
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+
+    // Split table 101 out of MV(3) → Group_X = [101].
+    // Now StateDefault(2)=[100,102] and Group_X=[101] have overlapping table ID ranges.
+    hummock_manager
+        .move_state_tables_to_dedicated_compaction_group(
+            StaticCompactionGroupId::MaterializedView.into(),
+            &[101.into()],
+            None,
+        )
+        .await
+        .unwrap();
+
+    let state_default_id: CompactionGroupId = StaticCompactionGroupId::StateDefault.into();
+    let group_x_id = get_compaction_group_id_by_table_id(hummock_manager.clone(), 101).await;
+    assert_ne!(state_default_id, group_x_id);
+
+    let group_infos = hummock_manager.calculate_compaction_group_statistic().await;
+    let sd_stat = group_infos
+        .iter()
+        .find(|g| g.group_id == state_default_id)
+        .unwrap();
+    let gx_stat = group_infos
+        .iter()
+        .find(|g| g.group_id == group_x_id)
+        .unwrap();
+
+    let throughput_manager = TableWriteThroughputStatisticManager::new(100);
+    let created_tables: HashSet<TableId> =
+        HashSet::from_iter(vec![100.into(), 101.into(), 102.into(), 200.into()]);
+
+    // Must return Err for overlapping groups — guards against the swallowed-error regression.
+    let result = hummock_manager
+        .try_merge_compaction_group(&throughput_manager, sd_stat, gx_stat, &created_tables)
+        .await;
+    assert!(
+        result.is_err(),
+        "try_merge_compaction_group must return Err for overlapping groups, got Ok",
+    );
 }
