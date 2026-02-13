@@ -446,6 +446,23 @@ impl CatalogController {
         Ok(fragment_jobs.into_iter().collect())
     }
 
+    pub async fn fragment_relation_mapping(
+        &self,
+    ) -> MetaResult<Vec<(FragmentId, FragmentId, DispatcherType)>> {
+        let inner = self.inner.read().await;
+        let relations: Vec<(FragmentId, FragmentId, DispatcherType)> = FragmentRelation::find()
+            .select_only()
+            .columns([
+                fragment_relation::Column::SourceFragmentId,
+                fragment_relation::Column::TargetFragmentId,
+                fragment_relation::Column::DispatcherType,
+            ])
+            .into_tuple()
+            .all(&inner.db)
+            .await?;
+        Ok(relations)
+    }
+
     pub async fn get_fragment_job_id(
         &self,
         fragment_ids: Vec<FragmentId>,

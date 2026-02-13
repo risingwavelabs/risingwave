@@ -794,9 +794,9 @@ impl GlobalStreamManager {
             .list_background_creating_jobs()
             .await?;
 
-        let unreschedulable_jobs = self
+        let blocked_jobs = self
             .metadata_manager
-            .collect_unreschedulable_backfill_jobs(&background_streaming_jobs, true)
+            .collect_unreschedulable_backfill_related_jobs(&background_streaming_jobs, true)
             .await?;
 
         let database_objects: HashMap<risingwave_meta_model::DatabaseId, Vec<JobId>> = self
@@ -817,7 +817,7 @@ impl GlobalStreamManager {
                 idx_a.cmp(idx_b).then(database_a.cmp(database_b))
             })
             .map(|(_, database_id, job_id)| (*database_id, *job_id))
-            .filter(|(_, job_id)| !unreschedulable_jobs.contains(job_id))
+            .filter(|(_, job_id)| !blocked_jobs.contains(job_id))
             .collect_vec();
 
         if job_ids.is_empty() {
@@ -1011,6 +1011,9 @@ impl GlobalStreamManager {
                             if let Err(e) = self.apply_post_backfill_parallelism(job_id).await {
                                 tracing::warn!(job_id = %job_id, error = %e.as_report(), "failed to restore parallelism after backfill");
                             }
+                            // Jobs skipped due temporary backfill constraints should be retried
+                            // after a backfill completion event.
+                            should_trigger = true;
                         }
 
                         _ => {}
