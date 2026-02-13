@@ -20,6 +20,7 @@ use futures_async_stream::try_stream;
 use multimap::MultiMap;
 use risingwave_common::array::*;
 use risingwave_common::catalog::Field;
+use risingwave_common::metrics::LabelGuardedIntGauge;
 use risingwave_common::types::*;
 use risingwave_common::util::epoch::{EpochExt, test_epoch};
 use risingwave_expr::aggregate::AggCall;
@@ -91,7 +92,7 @@ async fn test_merger_sum_aggr() {
                     .unwrap();
             let consumer = SenderConsumer {
                 input: aggregator.boxed(),
-                channel: Output::new(233.into(), tx),
+                channel: Output::new(233.into(), tx, LabelGuardedIntGauge::test_int_gauge::<5>()),
             };
 
             let actor = Actor::new(
@@ -124,7 +125,7 @@ async fn test_merger_sum_aggr() {
         let (actor_future, channel) = make_actor(rx);
         outputs.push(channel);
         actor_futures.push(actor_future);
-        inputs.push(Output::new(233.into(), tx));
+        inputs.push(Output::new(233.into(), tx, LabelGuardedIntGauge::test_int_gauge::<5>()));
     }
 
     // create a round robin dispatcher, which dispatches messages to the actors

@@ -82,6 +82,9 @@ def _(outer_panels: Panels):
     sync_kv_log_store_buffer_by_fragment_usage_expr = (
         _sync_kv_log_store_buffer_usage_by_fragment_expr()
     )
+    channel_buffer_usage_expr = (
+        f"sum({metric('stream_actor_channel_buffered_bytes')}) by (fragment_id)"
+    )
     total_memory_usage_expr = " + ".join(
         map(
             _coalesce_fragment,
@@ -90,11 +93,9 @@ def _(outer_panels: Panels):
                 shared_buffer_usage_expr,
                 kv_log_store_buffer_by_fragment_usage_expr,
                 sync_kv_log_store_buffer_by_fragment_usage_expr,
+                channel_buffer_usage_expr,
             ],
         )
-    )
-    channel_buffered_bytes_expr = (
-        f"sum({metric('stream_actor_channel_buffered_bytes')}) by (fragment_id)"
     )
     return [
         outer_panels.row_collapsed(
@@ -168,16 +169,6 @@ def _(outer_panels: Panels):
                     dict.fromkeys(["Time", "fragment_id"], True),
                     {"Value": "rate"},
                     {"rate": "percent"},
-                ),
-                panels.timeseries_bytes(
-                    "Actor Channel Buffered Bytes",
-                    "Estimated buffered bytes for actor channels per fragment.",
-                    [
-                        panels.target(
-                            f"{channel_buffered_bytes_expr}",
-                            "fragment {{fragment_id}}",
-                        ),
-                    ],
                 ),
                 panels.subheader("Busy Rate (IO + CPU Usage) by Fragment"),
                 panels.timeseries_percentage(
@@ -362,6 +353,16 @@ def _(outer_panels: Panels):
                     [
                         panels.target(
                             shared_buffer_usage_expr,
+                            "fragment {{fragment_id}}",
+                        ),
+                    ],
+                ),
+                panels.timeseries_bytes(
+                    "Inter-Actor Channel Buffer Memory Usage",
+                    "Estimated buffered bytes for actor channels per fragment.",
+                    [
+                        panels.target(
+                            f"{channel_buffer_usage_expr}",
                             "fragment {{fragment_id}}",
                         ),
                     ],

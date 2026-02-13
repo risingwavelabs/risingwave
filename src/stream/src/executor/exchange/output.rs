@@ -14,12 +14,16 @@
 
 use await_tree::InstrumentAwait;
 use educe::Educe;
+use risingwave_common::metrics::LabelGuardedIntGauge;
+use risingwave_common_estimate_size::EstimateSize;
 
 use super::error::ExchangeChannelClosed;
 use super::permit::Sender;
-use crate::error::StreamResult;
+use crate::error::{StreamError, StreamResult};
 use crate::executor::DispatcherMessageBatch as Message;
 use crate::task::ActorId;
+
+pub type OutputBufferMetrics = LabelGuardedIntGauge;
 
 /// `LocalOutput` sends data to a local channel.
 #[derive(Educe)]
@@ -32,25 +36,37 @@ pub struct Output {
 
     #[educe(Debug(ignore))]
     ch: Sender,
+
+    #[educe(Debug(ignore))]
+    output_buffer_metrics: OutputBufferMetrics,
 }
 
 impl Output {
-    pub fn new(actor_id: ActorId, ch: Sender) -> Self {
+    pub fn new(actor_id: ActorId, ch: Sender, output_buffer_metrics: OutputBufferMetrics) -> Self {
         Self {
             actor_id,
             span: await_tree::span!("Output (actor {:?})", actor_id).verbose(),
             ch,
+            output_buffer_metrics,
         }
     }
 }
 
 impl Output {
     pub async fn send(&mut self, message: Message) -> StreamResult<()> {
+        let chunk_size = match &message {
+            Message::Chunk(chunk) => chunk.estimated_size() as i64,
+            _ => 0,
+        };
+
         self.ch
             .send(message)
             .instrument_await(self.span.clone())
             .await
-            .map_err(|_| ExchangeChannelClosed::output(self.actor_id).into())
+            .map_err(|_| StreamError::from(ExchangeChannelClosed::output(self.actor_id)))?;
+
+        self.output_buffer_metrics.add(chunk_size);
+        Ok(())
     }
 
     pub fn actor_id(&self) -> ActorId {

@@ -105,6 +105,9 @@ def _(outer_panels: Panels):
     sync_kv_log_store_buffer_usage_expr = _sum_fragment_metric_by_mv(
         _sync_kv_log_store_buffer_usage_by_fragment_expr()
     )
+    channel_buffer_usage_expr = _sum_fragment_metric_by_mv(
+        f"sum({metric('stream_actor_channel_buffered_bytes')}) by (fragment_id)"
+    )
     total_memory_usage_expr = " + ".join(
         map(
             _coalesce_mv,
@@ -113,6 +116,7 @@ def _(outer_panels: Panels):
                 shared_buffer_usage_expr,
                 kv_log_store_buffer_usage_expr,
                 sync_kv_log_store_buffer_usage_expr,
+                channel_buffer_usage_expr,
             ],
         )
     )
@@ -276,6 +280,20 @@ def _(outer_panels: Panels):
                             _relation_metric_with_metadata(
                                 relabel_materialized_view_id_as_id(
                                     shared_buffer_usage_expr
+                                )
+                            ),
+                            "relation {{name}} (id={{id}} type={{type}})",
+                        ),
+                    ],
+                ),
+                panels.timeseries_bytes(
+                    "Inter-Actor Channel Buffer Memory Usage",
+                    "Buffer size of inter-actor channels aggregated by relation.",
+                    [
+                        panels.target(
+                            _relation_metric_with_metadata(
+                                relabel_materialized_view_id_as_id(
+                                    channel_buffer_usage_expr
                                 )
                             ),
                             "relation {{name}} (id={{id}} type={{type}})",

@@ -28,7 +28,6 @@ use risingwave_common::hash::{ActorMapping, ExpandedActorMapping, VirtualNode};
 use risingwave_common::metrics::{LabelGuardedIntCounter, LabelGuardedIntGauge};
 use risingwave_common::row::RowExt;
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_common_estimate_size::EstimateSize;
 use risingwave_pb::stream_plan::update_mutation::PbDispatcherUpdate;
 use risingwave_pb::stream_plan::{self, PbDispatcher};
 use smallvec::{SmallVec, smallvec};
@@ -126,12 +125,17 @@ impl DispatchExecutorInner {
         &mut self,
         downstream_actors: &[ActorId],
     ) -> StreamResult<Vec<Output>> {
-        fn resolve_output(downstream_actor: ActorId, request: NewOutputRequest) -> Output {
+        let resolve_output = |downstream_actor: ActorId, request: NewOutputRequest| -> Output {
             let tx = match request {
                 NewOutputRequest::Local(tx) | NewOutputRequest::Remote(tx) => tx,
             };
-            Output::new(downstream_actor, tx)
-        }
+            Output::new(
+                downstream_actor,
+                tx,
+                self.metrics.actor_channel_buffered_bytes.clone(),
+            )
+        };
+
         let mut outputs = Vec::with_capacity(downstream_actors.len());
         for &downstream_actor in downstream_actors {
             let output =
@@ -236,14 +240,11 @@ impl DispatchExecutorInner {
                     .await;
             }
             MessageBatch::Chunk(chunk) => {
-                let chunk_size = chunk.estimated_size() as i64;
-                let buffered_bytes_metric = self.metrics.actor_channel_buffered_bytes.clone();
                 futures::stream::iter(self.dispatchers.iter_mut())
                     .for_each_concurrent(limit, |dispatcher| async {
                         let metrics = &dispatcher.actor_output_buffer_blocking_duration_ns;
                         let dispatcher_output = &mut dispatcher.dispatcher;
                         let fut = dispatcher_output.dispatch_data(chunk.clone());
-                        buffered_bytes_metric.add(chunk_size);
                         await_with_metrics(fut, metrics).await;
                     })
                     .await;
@@ -1280,7 +1281,7 @@ mod tests {
         let outputs = output_tx_vecs
             .into_iter()
             .enumerate()
-            .map(|(actor_id, tx)| Output::new(ActorId::new(actor_id as u32 + 1), tx))
+            .map(|(actor_id, tx)| Output::new(ActorId::new(actor_id as u32 + 1), tx, LabelGuardedIntGauge::test_int_gauge::<5>()))
             .collect::<Vec<_>>();
         let mut hash_mapping = (1..num_outputs + 1)
             .flat_map(|id| vec![ActorId::new(id as u32); VirtualNode::COUNT_FOR_TEST / num_outputs])
@@ -1529,7 +1530,7 @@ mod tests {
         let outputs = output_tx_vecs
             .into_iter()
             .enumerate()
-            .map(|(actor_id, tx)| Output::new(ActorId::new(1 + actor_id as u32), tx))
+            .map(|(actor_id, tx)| Output::new(ActorId::new(1 + actor_id as u32), tx, LabelGuardedIntGauge::test_int_gauge::<5>()))
             .collect::<Vec<_>>();
         let mut hash_mapping = (1..num_outputs + 1)
             .flat_map(|id| vec![ActorId::new(id as _); VirtualNode::COUNT_FOR_TEST / num_outputs])
@@ -1677,7 +1678,7 @@ mod tests {
         );
 
         let (output_tx, _output_rx) = channel_for_test();
-        let outputs = vec![Output::new(ActorId::new(1), output_tx)];
+        let outputs = vec![Output::new(ActorId::new(1), output_tx, LabelGuardedIntGauge::test_int_gauge::<5>())];
         let hash_mapping = vec![ActorId::new(1); VirtualNode::COUNT_FOR_TEST];
         let mut hash_dispatcher = HashDataDispatcher::new(
             outputs,
@@ -1736,7 +1737,7 @@ mod tests {
         );
 
         let (output_tx, _output_rx) = channel_for_test();
-        let outputs = vec![Output::new(ActorId::new(1), output_tx)];
+        let outputs = vec![Output::new(ActorId::new(1), output_tx, LabelGuardedIntGauge::test_int_gauge::<5>())];
         let hash_mapping = vec![ActorId::new(1); VirtualNode::COUNT_FOR_TEST];
         let mut hash_dispatcher = HashDataDispatcher::new(
             outputs,
