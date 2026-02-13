@@ -66,6 +66,7 @@ pub struct StreamingMetrics {
     pub actor_count: LabelGuardedIntGaugeVec,
     pub actor_in_record_cnt: RelabeledGuardedIntCounterVec,
     pub actor_out_record_cnt: RelabeledGuardedIntCounterVec,
+    pub actor_channel_buffered_bytes: LabelGuardedIntGaugeVec,
     pub actor_current_epoch: RelabeledGuardedIntGaugeVec,
 
     // Source
@@ -372,6 +373,14 @@ impl StreamingMetrics {
             .unwrap()
             // mask the first label `actor_id` if the level is less verbose than `Debug`
             .relabel_debug_1(level);
+
+        let actor_channel_buffered_bytes = register_guarded_int_gauge_vec_with_registry!(
+            "stream_actor_channel_buffered_bytes",
+            "Estimated buffered bytes for actor channels by fragment",
+            &["fragment_id"],
+            registry
+        )
+        .unwrap();
 
         let exchange_frag_recv_size = register_guarded_int_counter_vec_with_registry!(
             "stream_exchange_frag_recv_size",
@@ -1282,6 +1291,7 @@ impl StreamingMetrics {
             actor_count,
             actor_in_record_cnt,
             actor_out_record_cnt,
+            actor_channel_buffered_bytes,
             actor_current_epoch,
             source_output_row_count,
             source_split_change_count,
@@ -1449,6 +1459,9 @@ impl StreamingMetrics {
                     &fragment_id_str,
                     &upstream_fragment_id_str,
                 ]),
+            actor_channel_buffered_bytes: self
+                .actor_channel_buffered_bytes
+                .with_guarded_label_values(&[&upstream_fragment_id_str]),
         }
     }
 
@@ -1788,6 +1801,7 @@ impl StreamingMetrics {
 pub(crate) struct ActorInputMetrics {
     pub(crate) actor_in_record_cnt: LabelGuardedIntCounter,
     pub(crate) actor_input_buffer_blocking_duration_ns: LabelGuardedIntCounter,
+    pub(crate) actor_channel_buffered_bytes: LabelGuardedIntGauge,
 }
 
 /// Tokio metrics for actors

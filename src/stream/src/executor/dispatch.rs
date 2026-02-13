@@ -25,9 +25,10 @@ use risingwave_common::array::Op;
 use risingwave_common::bitmap::BitmapBuilder;
 use risingwave_common::config::StreamingConfig;
 use risingwave_common::hash::{ActorMapping, ExpandedActorMapping, VirtualNode};
-use risingwave_common::metrics::LabelGuardedIntCounter;
+use risingwave_common::metrics::{LabelGuardedIntCounter, LabelGuardedIntGauge};
 use risingwave_common::row::RowExt;
 use risingwave_common::util::iter_util::ZipEqFast;
+use risingwave_common_estimate_size::EstimateSize;
 use risingwave_pb::stream_plan::update_mutation::PbDispatcherUpdate;
 use risingwave_pb::stream_plan::{self, PbDispatcher};
 use smallvec::{SmallVec, smallvec};
@@ -92,6 +93,7 @@ struct DispatchExecutorMetrics {
     fragment_id_str: String,
     metrics: Arc<StreamingMetrics>,
     actor_out_record_cnt: LabelGuardedIntCounter,
+    actor_channel_buffered_bytes: LabelGuardedIntGauge,
 }
 
 impl DispatchExecutorMetrics {
@@ -234,11 +236,14 @@ impl DispatchExecutorInner {
                     .await;
             }
             MessageBatch::Chunk(chunk) => {
+                let chunk_size = chunk.estimated_size() as i64;
+                let buffered_bytes_metric = self.metrics.actor_channel_buffered_bytes.clone();
                 futures::stream::iter(self.dispatchers.iter_mut())
                     .for_each_concurrent(limit, |dispatcher| async {
                         let metrics = &dispatcher.actor_output_buffer_blocking_duration_ns;
                         let dispatcher_output = &mut dispatcher.dispatcher;
                         let fut = dispatcher_output.dispatch_data(chunk.clone());
+                        buffered_bytes_metric.add(chunk_size);
                         await_with_metrics(fut, metrics).await;
                     })
                     .await;
@@ -489,11 +494,15 @@ impl DispatchExecutor {
         let actor_out_record_cnt = metrics
             .actor_out_record_cnt
             .with_guarded_label_values(&[&actor_id_str, &fragment_id_str]);
+        let actor_channel_buffered_bytes = metrics
+            .actor_channel_buffered_bytes
+            .with_guarded_label_values(&[&fragment_id_str]);
         let metrics = DispatchExecutorMetrics {
             actor_id_str,
             fragment_id_str,
             metrics,
             actor_out_record_cnt,
+            actor_channel_buffered_bytes,
         };
         let dispatchers = dispatchers
             .into_iter()
