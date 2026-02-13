@@ -2639,11 +2639,17 @@ async fn test_try_merge_compaction_group_error_propagation() {
 
     // StateDefault(2): [100, 102], MaterializedView(3): [101, 200]
     hummock_manager
-        .register_table_ids_for_test(&[(100, 2.into()), (102, 2.into())])
+        .register_table_ids_for_test(&[
+            (100, StaticCompactionGroupId::StateDefault.into()),
+            (102, StaticCompactionGroupId::StateDefault.into()),
+        ])
         .await
         .unwrap();
     hummock_manager
-        .register_table_ids_for_test(&[(101, 3.into()), (200, 3.into())])
+        .register_table_ids_for_test(&[
+            (101, StaticCompactionGroupId::MaterializedView.into()),
+            (200, StaticCompactionGroupId::MaterializedView.into()),
+        ])
         .await
         .unwrap();
 
@@ -2665,14 +2671,14 @@ async fn test_try_merge_compaction_group_error_propagation() {
     // Now StateDefault(2)=[100,102] and Group_X=[101] have overlapping table ID ranges.
     hummock_manager
         .move_state_tables_to_dedicated_compaction_group(
-            StaticCompactionGroupId::MaterializedView,
+            StaticCompactionGroupId::MaterializedView.into(),
             &[101.into()],
             None,
         )
         .await
         .unwrap();
 
-    let state_default_id: CompactionGroupId = StaticCompactionGroupId::StateDefault;
+    let state_default_id: CompactionGroupId = StaticCompactionGroupId::StateDefault.into();
     let group_x_id = get_compaction_group_id_by_table_id(hummock_manager.clone(), 101).await;
     assert_ne!(state_default_id, group_x_id);
 
