@@ -21,6 +21,7 @@ use futures::stream::BoxStream;
 use futures::{FutureExt, StreamExt};
 use itertools::Itertools;
 use risingwave_hummock_sdk::CompactionGroupId;
+use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::get_compaction_group_ids;
 use risingwave_pb::hummock::compact_task::{self, TaskStatus};
 use risingwave_pb::hummock::level_handler::RunningCompactTask;
@@ -56,6 +57,7 @@ impl HummockManager {
                 SpaceReclaimCompactionTrigger,
                 TtlCompactionTrigger,
                 TombstoneCompactionTrigger,
+                TableChangeLogCompactionTrigger,
 
                 FullGc,
 
@@ -150,6 +152,23 @@ impl HummockManager {
                 Box::pin(full_gc_trigger),
                 Box::pin(tombstone_reclaim_trigger),
             ];
+
+            let periodic_table_change_log_compaction_interval_sec = hummock_manager
+                .env
+                .opts
+                .periodic_table_change_log_compaction_interval_sec;
+            if periodic_table_change_log_compaction_interval_sec > 0 {
+                let mut min_table_change_log_trigger_interval = tokio::time::interval(
+                    Duration::from_secs(periodic_table_change_log_compaction_interval_sec),
+                );
+                min_table_change_log_trigger_interval
+                    .set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+                min_table_change_log_trigger_interval.reset();
+                let table_change_log_trigger =
+                    IntervalStream::new(min_table_change_log_trigger_interval)
+                        .map(|_| HummockTimerEvent::TableChangeLogCompactionTrigger);
+                triggers.push(Box::pin(table_change_log_trigger));
+            }
 
             let periodic_scheduling_compaction_group_split_interval_sec = hummock_manager
                 .env
@@ -450,6 +469,14 @@ impl HummockManager {
                                         )
                                         .await;
                                 }
+                                HummockTimerEvent::TableChangeLogCompactionTrigger => {
+                                    // Disable periodic trigger for compaction_deterministic_test.
+                                    if hummock_manager.env.opts.compaction_deterministic_test {
+                                        continue;
+                                    }
+
+                                    hummock_manager.on_handle_trigger_table_change_log();
+                                }
 
                                 HummockTimerEvent::FullGc => {
                                     let retention_sec =
@@ -598,6 +625,18 @@ impl HummockManager {
                     cg_id,
                 );
             }
+        }
+    }
+
+    fn on_handle_trigger_table_change_log(&self) {
+        if let Err(e) = self.compaction_state.try_sched_compaction(
+            StaticCompactionGroupId::TableChangeLog,
+            compact_task::TaskType::TableChangeLog,
+        ) {
+            tracing::error!(
+                error = %e.as_report(),
+                "Failed to schedule table change log compaction"
+            );
         }
     }
 

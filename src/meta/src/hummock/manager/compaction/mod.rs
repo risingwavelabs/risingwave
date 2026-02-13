@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::sync::{Arc, LazyLock};
 use std::time::Instant;
 
@@ -30,8 +30,11 @@ use risingwave_common::catalog::TableId;
 use risingwave_common::config::meta::default::compaction_config;
 use risingwave_common::hash::VnodeCountCompat;
 use risingwave_common::util::epoch::Epoch;
-use risingwave_hummock_sdk::compact_task::{CompactTask, ReportTask};
-use risingwave_hummock_sdk::compaction_group::StateTableId;
+use risingwave_hummock_sdk::change_log::{ChangeLogDelta, EpochNewChangeLog, TableChangeLog};
+use risingwave_hummock_sdk::compact_task::{
+    CompactTask, ReportTask, TableChangeLogCompactionInput, TableChangeLogCompactionOutput,
+};
+use risingwave_hummock_sdk::compaction_group::{StateTableId, StaticCompactionGroupId};
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::level::Levels;
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
@@ -39,7 +42,7 @@ use risingwave_hummock_sdk::table_stats::{
     PbTableStatsMap, add_prost_table_stats_map, purge_prost_table_stats,
 };
 use risingwave_hummock_sdk::table_watermark::WatermarkSerdeType;
-use risingwave_hummock_sdk::version::{GroupDelta, IntraLevelDelta};
+use risingwave_hummock_sdk::version::{GroupDelta, HummockVersionStateTableInfo, IntraLevelDelta};
 use risingwave_hummock_sdk::{
     CompactionGroupId, HummockCompactionTaskId, HummockContextId, HummockSstableId,
     HummockSstableObjectId, HummockVersionId, compact_task_to_string, statistics_compact_task,
@@ -62,9 +65,10 @@ use tracing::warn;
 use crate::hummock::compaction::selector::level_selector::PickerInfo;
 use crate::hummock::compaction::selector::{
     DynamicLevelSelector, DynamicLevelSelectorCore, LocalSelectorStatistic, ManualCompactionOption,
-    ManualCompactionSelector, SpaceReclaimCompactionSelector, TombstoneCompactionSelector,
-    TtlCompactionSelector, VnodeWatermarkCompactionSelector,
+    ManualCompactionSelector, SpaceReclaimCompactionSelector, TableChangeLogCompactionSelector,
+    TombstoneCompactionSelector, TtlCompactionSelector, VnodeWatermarkCompactionSelector,
 };
+use crate::hummock::compaction::table_change_log::TableChangeLogCompactionTaskTracker;
 use crate::hummock::compaction::{CompactStatus, CompactionDeveloperConfig, CompactionSelector};
 use crate::hummock::error::{Error, Result};
 use crate::hummock::manager::transaction::{
@@ -125,12 +129,56 @@ fn init_selectors() -> HashMap<compact_task::TaskType, Box<dyn CompactionSelecto
         compact_task::TaskType::VnodeWatermark,
         Box::<VnodeWatermarkCompactionSelector>::default(),
     );
+    compaction_selectors.insert(
+        compact_task::TaskType::TableChangeLog,
+        Box::<TableChangeLogCompactionSelector>::default(),
+    );
     compaction_selectors
 }
 
 impl HummockVersionTransaction<'_> {
     fn apply_compact_task(&mut self, compact_task: &CompactTask) {
         let mut version_delta = self.new_delta();
+        if compact_task.is_table_change_log_task() {
+            let input = compact_task.table_change_log_input.as_ref().unwrap();
+            let output = compact_task.table_change_log_output.as_ref().unwrap();
+            // The reader for compacted table change logs queries over the interval [a, b], where
+            // `a` is less than or equal to `min_noncheckpoint_epoch` and `b` is greater than or equal to `max_checkpoint_epoch`.
+            let max_checkpoint_epoch = input
+                .clean_part
+                .iter()
+                .chain(input.dirty_part.iter())
+                .last()
+                .unwrap()
+                .checkpoint_epoch;
+            let min_noncheckpoint_epoch = input
+                .clean_part
+                .iter()
+                .chain(input.dirty_part.iter())
+                .next()
+                .unwrap()
+                .non_checkpoint_epochs
+                .iter()
+                .take(1)
+                .cloned()
+                .collect();
+            let log_delta = ChangeLogDelta {
+                truncate_epoch: 0,
+                new_log: EpochNewChangeLog {
+                    new_value: output.sorted_new_values_ssts.clone(),
+                    old_value: output.sorted_old_values_ssts.clone(),
+                    non_checkpoint_epochs: min_noncheckpoint_epoch,
+                    checkpoint_epoch: max_checkpoint_epoch,
+                },
+            };
+            for table_id in &compact_task.existing_table_ids {
+                version_delta
+                    .change_log_compaction_delta
+                    .insert(*table_id, log_delta.clone());
+            }
+            version_delta.pre_apply();
+            return;
+        }
         let trivial_move = compact_task.is_trivial_move_task();
         version_delta.trivial_move = trivial_move;
 
@@ -184,6 +232,9 @@ pub struct Compaction {
     pub compact_task_assignment: BTreeMap<HummockCompactionTaskId, PbCompactTaskAssignment>,
     /// `CompactStatus` of each compaction group
     pub compaction_statuses: BTreeMap<CompactionGroupId, CompactStatus>,
+
+    /// The state is not persisted.
+    pub table_change_log_compaction_task_tracker: TableChangeLogCompactionTaskTracker,
 
     pub _deterministic_mode: bool,
 }
@@ -304,6 +355,19 @@ impl HummockManager {
     async fn auto_pick_compaction_groups_and_type(
         &self,
     ) -> (Vec<CompactionGroupId>, compact_task::TaskType) {
+        // TODO(ZW): Implement an even distribution strategy for picking between
+        // table change log compaction tasks and regular hummock compaction tasks.
+        // Currently, table change log compactions are prioritized if available.
+        if let Some(pick_type) = self
+            .compaction_state
+            .auto_pick_type(StaticCompactionGroupId::TableChangeLog)
+        {
+            assert_eq!(pick_type, TaskType::TableChangeLog);
+            return (
+                vec![StaticCompactionGroupId::TableChangeLog],
+                TaskType::TableChangeLog,
+            );
+        }
         let mut compaction_group_ids = self.compaction_group_ids().await;
         compaction_group_ids.shuffle(&mut thread_rng());
 
@@ -374,6 +438,39 @@ impl HummockManager {
         let developer_config = Arc::new(CompactionDeveloperConfig::new_from_meta_opts(
             &self.env.opts,
         ));
+        let mut is_table_change_log_compaction = false;
+        // table change log compaction group
+        if let Ok(compaction_group_id) = compaction_groups.iter().exactly_one().copied()
+            && compaction_group_id == StaticCompactionGroupId::TableChangeLog
+        {
+            let task_id = next_compaction_task_id(&self.env).await?;
+            let group_config = CompactionGroup::new(
+                compaction_group_id,
+                self.compaction_group_manager
+                    .read()
+                    .await
+                    .default_compaction_config()
+                    .as_ref()
+                    .clone(),
+            );
+            let task = self.get_table_change_log_compact_task(
+                task_id,
+                compaction_group_id,
+                group_config,
+                selector,
+                &version.latest_version().table_change_log,
+                &version.latest_version().compacted_table_change_logs,
+                &compaction.table_change_log_compaction_task_tracker,
+            );
+            if let Some(task) = task {
+                pick_tasks.push(task);
+            } else {
+                unschedule_groups.push(compaction_group_id);
+            }
+            is_table_change_log_compaction = true;
+        }
+
+        // non table change log compaction groups
         'outside: for compaction_group_id in compaction_groups {
             if pick_tasks.len() >= max_select_count {
                 break;
@@ -392,14 +489,14 @@ impl HummockManager {
             // cannot find its config.
             let group_config = {
                 let config_manager = self.compaction_group_manager.read().await;
-
                 match config_manager.try_get_compaction_group_config(compaction_group_id) {
                     Some(config) => config,
                     None => continue,
                 }
             };
 
-            // StoredIdGenerator already implements ids pre-allocation by ID_PREALLOCATE_INTERVAL.
+            // TODO: Optimize to minimize meta store calls here, as this query causes extra overhead.
+            // Consider caching or batching to improve performance.
             let task_id = next_compaction_task_id(&self.env).await?;
 
             if !compaction_statuses.contains_key(&compaction_group_id) {
@@ -453,6 +550,9 @@ impl HummockManager {
                 developer_config.clone(),
                 &version.latest_version().table_watermarks,
                 &version.latest_version().state_table_info,
+                &version.latest_version().table_change_log,
+                &version.latest_version().compacted_table_change_logs,
+                &compaction.table_change_log_compaction_task_tracker,
             ) {
                 let target_level_id = compact_task.input.target_level as u32;
                 let compaction_group_version_id = version
@@ -643,6 +743,16 @@ impl HummockManager {
             }
 
             drop(versioning_guard);
+        } else if is_table_change_log_compaction {
+            drop(versioning_guard);
+            // Table change log compaction task tracker doesn't write to meta store.
+            for task in &pick_tasks {
+                for table_id in &task.existing_table_ids {
+                    compaction_guard
+                        .table_change_log_compaction_task_tracker
+                        .add_task(*table_id, task);
+                }
+            }
         } else {
             // We are using a single transaction to ensure that each task has progress when it is
             // created.
@@ -756,6 +866,7 @@ impl HummockManager {
                 sorted_output_ssts: vec![],
                 table_stats_change: HashMap::default(),
                 object_timestamps: HashMap::default(),
+                table_change_log_output: None,
             })
             .collect_vec();
         let rets = self.report_compact_tasks(tasks).await?;
@@ -829,6 +940,7 @@ impl HummockManager {
         sorted_output_ssts: Vec<SstableInfo>,
         table_stats_change: Option<PbTableStatsMap>,
         object_timestamps: HashMap<HummockSstableObjectId, u64>,
+        table_change_log_output: Option<TableChangeLogCompactionOutput>,
     ) -> Result<bool> {
         let rets = self
             .report_compact_tasks(vec![ReportTask {
@@ -837,6 +949,7 @@ impl HummockManager {
                 sorted_output_ssts,
                 table_stats_change: table_stats_change.unwrap_or_default(),
                 object_timestamps,
+                table_change_log_output,
             }])
             .await?;
         Ok(rets[0])
@@ -902,34 +1015,50 @@ impl HummockManager {
         let mut success_count = 0;
         for (idx, task) in report_tasks.into_iter().enumerate() {
             rets[idx] = true;
-            let mut compact_task = match compact_task_assignment.remove(task.task_id) {
-                Some(compact_task) => CompactTask::from(compact_task.compact_task.unwrap()),
-                None => {
-                    tracing::warn!("{}", format!("compact task {} not found", task.task_id));
+            // Restore metadata for task from task tracker.
+            let is_table_change_log_task = task.table_change_log_output.is_some();
+            let mut compact_task = if is_table_change_log_task {
+                let Some(mut compact_task) = compaction
+                    .table_change_log_compaction_task_tracker
+                    .remove_task(task.task_id)
+                else {
                     rets[idx] = false;
                     continue;
-                }
-            };
-
-            {
-                // apply result
+                };
                 compact_task.task_status = task.task_status;
-                compact_task.sorted_output_ssts = task.sorted_output_ssts;
-            }
+                compact_task.table_change_log_output = task.table_change_log_output;
+                compact_task
+            } else {
+                let mut compact_task = match compact_task_assignment.remove(task.task_id) {
+                    Some(compact_task) => CompactTask::from(compact_task.compact_task.unwrap()),
+                    None => {
+                        tracing::warn!("{}", format!("compact task {} not found", task.task_id));
+                        rets[idx] = false;
+                        continue;
+                    }
+                };
 
-            match compact_statuses.get_mut(compact_task.compaction_group_id) {
-                Some(mut compact_status) => {
-                    compact_status.report_compact_task(&compact_task);
+                {
+                    // apply result
+                    compact_task.task_status = task.task_status;
+                    compact_task.sorted_output_ssts = task.sorted_output_ssts;
                 }
-                None => {
-                    // When the group_id is not found in the compaction_statuses, it means the group has been removed.
-                    // The task is invalid and should be canceled.
-                    // e.g.
-                    // 1. The group is removed by the user unregistering the tables
-                    // 2. The group is removed by the group scheduling algorithm
-                    compact_task.task_status = TaskStatus::InvalidGroupCanceled;
+
+                match compact_statuses.get_mut(compact_task.compaction_group_id) {
+                    Some(mut compact_status) => {
+                        compact_status.report_compact_task(&compact_task);
+                    }
+                    None => {
+                        // When the group_id is not found in the compaction_statuses, it means the group has been removed.
+                        // The task is invalid and should be canceled.
+                        // e.g.
+                        // 1. The group is removed by the user unregistering the tables
+                        // 2. The group is removed by the group scheduling algorithm
+                        compact_task.task_status = TaskStatus::InvalidGroupCanceled;
+                    }
                 }
-            }
+                compact_task
+            };
 
             let is_success = if let TaskStatus::Success = compact_task.task_status {
                 match self
@@ -945,7 +1074,7 @@ impl HummockManager {
                         compact_task.task_status = TaskStatus::RetentionTimeRejected;
                         false
                     }
-                    _ => {
+                    Ok(_) if !is_table_change_log_task => {
                         let group = version
                             .latest_version()
                             .levels
@@ -961,6 +1090,7 @@ impl HummockManager {
                         }
                         !is_expired
                     }
+                    _ => true,
                 }
             } else {
                 false
@@ -1334,6 +1464,67 @@ impl HummockManager {
     pub fn compactor_manager_ref(&self) -> crate::hummock::CompactorManagerRef {
         self.compactor_manager.clone()
     }
+
+    fn get_table_change_log_compact_task(
+        &self,
+        task_id: u64,
+        compaction_group_id: CompactionGroupId,
+        group_config: CompactionGroup,
+        selector: &mut Box<dyn CompactionSelector>,
+        table_change_log: &HashMap<TableId, TableChangeLog>,
+        compacted_table_change_logs: &HashMap<TableId, TableChangeLog>,
+        table_change_log_compaction_task_tracker: &TableChangeLogCompactionTaskTracker,
+    ) -> Option<CompactTask> {
+        let mut stats = LocalSelectorStatistic::default();
+        let mut compact_status = CompactStatus::new(compaction_group_id, 0);
+        let developer_config = Arc::new(CompactionDeveloperConfig::new_from_meta_opts(
+            &self.env.opts,
+        ));
+        let compact_task = compact_status.get_compact_task(
+            &Levels::unused(),
+            &BTreeSet::default(),
+            task_id as HummockCompactionTaskId,
+            &group_config,
+            &mut stats,
+            selector,
+            &HashMap::default(),
+            developer_config,
+            &HashMap::default(),
+            &HummockVersionStateTableInfo::empty(),
+            table_change_log,
+            compacted_table_change_logs,
+            table_change_log_compaction_task_tracker,
+        )?;
+        let compression_algorithm = match compact_task.compression_algorithm.as_str() {
+            "Lz4" => 1,
+            "Zstd" => 2,
+            _ => 0,
+        };
+        let compact_task = CompactTask {
+            task_id,
+            gc_delete_keys: false,
+            splits: vec![KeyRange::inf()],
+            task_status: TaskStatus::Pending,
+            // 1 refers to the clean part.
+            target_level: 1,
+            compaction_group_id,
+            compression_algorithm,
+            target_file_size: compact_task.target_file_size,
+            current_epoch_time: Epoch::now().0,
+            task_type: compact_task.compaction_task_type,
+            max_sub_compaction: group_config.compaction_config.max_sub_compaction,
+            max_kv_count_for_xor16: group_config.compaction_config.max_kv_count_for_xor16,
+            table_change_log_input: Some(TableChangeLogCompactionInput {
+                clean_part: compact_task.input.input_table_change_logs_clean_part,
+                dirty_part: compact_task.input.input_table_change_logs_dirty_part,
+            }),
+            // Table change log compaction works for each table individually.
+            existing_table_ids: vec![compact_task.input.input_table_change_logs_table_id],
+            ..Default::default()
+        };
+        stats.report_to_metrics(compaction_group_id, self.metrics.as_ref());
+        Some(compact_task)
+    }
 }
 
 #[cfg(any(test, feature = "test"))]
@@ -1374,6 +1565,7 @@ impl HummockManager {
             sorted_output_ssts,
             table_stats_change: table_stats_change.unwrap_or_default(),
             object_timestamps: HashMap::default(),
+            table_change_log_output: None,
         }])
         .await?;
         Ok(())
@@ -1427,6 +1619,8 @@ impl CompactionState {
             Some(compact_task::TaskType::Tombstone)
         } else if guard.contains(&(group, compact_task::TaskType::VnodeWatermark)) {
             Some(compact_task::TaskType::VnodeWatermark)
+        } else if guard.contains(&(group, compact_task::TaskType::TableChangeLog)) {
+            Some(compact_task::TaskType::TableChangeLog)
         } else {
             None
         }

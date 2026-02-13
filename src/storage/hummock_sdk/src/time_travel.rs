@@ -19,6 +19,7 @@ use risingwave_pb::hummock::PbSstableInfo;
 use risingwave_pb::hummock::hummock_version::PbLevels;
 use risingwave_pb::hummock::hummock_version_delta::{PbChangeLogDelta, PbGroupDeltas};
 
+use crate::change_log::ChangeLogDelta;
 use crate::compaction_group::StateTableId;
 use crate::level::{Level, Levels, LevelsCommon};
 use crate::sstable_info::SstableInfo;
@@ -90,6 +91,7 @@ impl From<(&HummockVersion, &HashSet<StateTableId>)> for IncompleteHummockVersio
             table_change_log: HashMap::default(),
             state_table_info: version.state_table_info.clone(),
             vector_indexes: version.vector_indexes.clone(),
+            compacted_table_change_logs: HashMap::default(),
         }
     }
 }
@@ -130,24 +132,8 @@ pub type IncompleteHummockVersionDelta = HummockVersionDeltaCommon<SstableIdInVe
 impl From<(&HummockVersionDelta, &HashSet<StateTableId>)> for IncompleteHummockVersionDelta {
     fn from(p: (&HummockVersionDelta, &HashSet<StateTableId>)) -> Self {
         let (delta, time_travel_table_ids) = p;
-        #[expect(deprecated)]
-        Self {
-            id: delta.id,
-            prev_id: delta.prev_id,
-            group_deltas: delta
-                .group_deltas
-                .iter()
-                .map(|(cg_id, deltas)| {
-                    let deltas = rewrite_group_deltas(deltas, time_travel_table_ids);
-                    (*cg_id, deltas)
-                })
-                .collect(),
-            max_committed_epoch: delta.max_committed_epoch,
-            trivial_move: delta.trivial_move,
-            new_table_watermarks: delta.new_table_watermarks.clone(),
-            removed_table_ids: delta.removed_table_ids.clone(),
-            change_log_delta: delta
-                .change_log_delta
+        let filter_change_log_delta = |log_delta: &HashMap<TableId, ChangeLogDelta>| {
+            log_delta
                 .iter()
                 .filter_map(|(table_id, log_delta)| {
                     if !time_travel_table_ids.contains(table_id) {
@@ -168,7 +154,28 @@ impl From<(&HummockVersionDelta, &HashSet<StateTableId>)> for IncompleteHummockV
 
                     Some((*table_id, PbChangeLogDelta::from(log_delta).into()))
                 })
+                .collect()
+        };
+        #[expect(deprecated)]
+        Self {
+            id: delta.id,
+            prev_id: delta.prev_id,
+            group_deltas: delta
+                .group_deltas
+                .iter()
+                .map(|(cg_id, deltas)| {
+                    let deltas = rewrite_group_deltas(deltas, time_travel_table_ids);
+                    (*cg_id, deltas)
+                })
                 .collect(),
+            max_committed_epoch: delta.max_committed_epoch,
+            trivial_move: delta.trivial_move,
+            new_table_watermarks: delta.new_table_watermarks.clone(),
+            removed_table_ids: delta.removed_table_ids.clone(),
+            change_log_delta: filter_change_log_delta(&delta.change_log_delta),
+            change_log_compaction_delta: filter_change_log_delta(
+                &delta.change_log_compaction_delta,
+            ),
             state_table_info_delta: delta.state_table_info_delta.clone(),
             vector_index_delta: delta.vector_index_delta.clone(),
         }

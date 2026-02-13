@@ -389,6 +389,7 @@ impl<C: CompactionFilter> CompactorRunner<C> {
             use_block_based_filter: true,
             table_schemas: Default::default(),
             disable_drop_column_optimization: false,
+            preserve_earliest_key_version: false,
         };
         let factory = UnifiedSstableWriterFactory::new(context.sstable_store.clone());
 

@@ -218,7 +218,8 @@ async fn test_hummock_compaction_task() {
                 TaskStatus::Success,
                 vec![],
                 None,
-                HashMap::default()
+                HashMap::default(),
+                None,
             )
             .await
             .unwrap()
@@ -1015,6 +1016,7 @@ async fn test_hummock_compaction_task_heartbeat() {
                 vec![],
                 None,
                 HashMap::default(),
+                None,
             )
             .await
             .unwrap()
@@ -1046,6 +1048,7 @@ async fn test_hummock_compaction_task_heartbeat() {
                 vec![],
                 None,
                 HashMap::default(),
+                None,
             )
             .await
             .unwrap()
@@ -1366,6 +1369,7 @@ async fn test_version_stats() {
             vec![],
             Some(to_prost_table_stats_map(compact_table_stats_change)),
             HashMap::default(),
+            None,
         )
         .await
         .unwrap();
@@ -1773,6 +1777,7 @@ async fn test_move_state_tables_to_dedicated_compaction_group_trivial_expired() 
             ],
             None,
             HashMap::default(),
+            None,
         )
         .await
         .unwrap();
@@ -1784,6 +1789,7 @@ async fn test_move_state_tables_to_dedicated_compaction_group_trivial_expired() 
             vec![],
             None,
             HashMap::default(),
+            None,
         )
         .await
         .unwrap();
@@ -1889,6 +1895,7 @@ async fn test_move_state_tables_to_dedicated_compaction_group_on_demand_bottom_l
                 .collect(),
             None,
             HashMap::default(),
+            None,
         )
         .await
         .unwrap();
@@ -2011,7 +2018,8 @@ async fn test_compaction_task_expiration_due_to_split_group() {
                 TaskStatus::Success,
                 vec![],
                 None,
-                HashMap::default()
+                HashMap::default(),
+                None,
             )
             .await
             .unwrap()
@@ -2034,6 +2042,7 @@ async fn test_compaction_task_expiration_due_to_split_group() {
             vec![],
             None,
             HashMap::default(),
+            None,
         )
         .await
         .unwrap();
@@ -2290,6 +2299,7 @@ async fn test_partition_level() {
                     vec![sst.into()],
                     None,
                     HashMap::default(),
+                    None,
                 )
                 .await
                 .unwrap();
@@ -2571,6 +2581,7 @@ async fn test_merge_compaction_group_task_expired() {
             ],
             None,
             HashMap::default(),
+            None,
         )
         .await
         .unwrap();

@@ -243,6 +243,26 @@ pub mod default {
             false
         }
 
+        pub fn table_change_log_dirty_ratio() -> f32 {
+            0.5
+        }
+
+        pub fn table_change_log_min_compaction_size_dirty_part() -> u64 {
+            128 * 1024 * 1024
+        }
+
+        pub fn table_change_log_max_compaction_size_dirty_part() -> u64 {
+            10 * 1024 * 1024 * 1024
+        }
+
+        pub fn table_change_log_max_compaction_sst_count_dirty_part() -> u64 {
+            1000
+        }
+
+        pub fn table_change_log_max_compaction_size_clean_part() -> u64 {
+            10 * 1024 * 1024 * 1024
+        }
+
         pub fn max_trivial_move_task_count_per_loop() -> usize {
             256
         }

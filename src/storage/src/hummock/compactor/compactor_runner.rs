@@ -48,6 +48,7 @@ use crate::hummock::compactor::compaction_utils::{
     metrics_report_for_task, optimize_by_copy_block,
 };
 use crate::hummock::compactor::iterator::ConcatSstableIterator;
+use crate::hummock::compactor::table_change_log_compactor_runner::compact_table_change_log;
 use crate::hummock::compactor::task_progress::TaskProgressGuard;
 use crate::hummock::compactor::{
     CompactOutput, CompactionFilter, Compactor, CompactorContext, await_tree_key,
@@ -115,6 +116,7 @@ impl CompactorRunner {
                     .map(|(k, v)| (*k, v.clone()))
                     .collect(),
                 disable_drop_column_optimization: false,
+                preserve_earliest_key_version: false,
             },
             object_id_getter,
         );
@@ -339,6 +341,18 @@ pub async fn compact_with_agent(
     ),
     Option<MemoryTracker>,
 ) {
+    // Table change log compaction uses a dedicated path (different inputs/outputs).
+    if compact_task.is_table_change_log_task() {
+        return compact_table_change_log(
+            compactor_context,
+            compaction_catalog_agent_ref,
+            compact_task,
+            shutdown_rx,
+            object_id_getter,
+        )
+        .await;
+    }
+
     let context = compactor_context.clone();
     let group_label = compact_task.compaction_group_id.to_string();
     metrics_report_for_task(&compact_task, &context);
@@ -728,6 +742,12 @@ pub async fn compact_and_build_sst<F>(
 where
     F: TableBuilderFactory,
 {
+    assert!(
+        !(task_config.preserve_earliest_key_version && task_config.gc_delete_keys),
+        "gc_delete_keys must be false when preserve_earliest_key_version is true: {} {}",
+        task_config.preserve_earliest_key_version,
+        task_config.gc_delete_keys
+    );
     if !task_config.key_range.left.is_empty() {
         let full_key = FullKey::decode(&task_config.key_range.left);
         iter.seek(full_key)
@@ -760,23 +780,45 @@ where
         .map(|(table_id, schema)| (*table_id, schema.column_ids.iter().copied().collect()))
         .collect();
     while iter.is_valid() {
-        let iter_key = iter.key();
         compaction_statistics.iter_total_key_counts += 1;
-
+        // IMPORTANT: Because of memtable spill, there may be several versions of the same user-key share the same `pure_epoch`.
         let is_new_user_key = full_key_tracker.observe(iter.key());
         let mut drop = false;
-
-        // CRITICAL WARN: Because of memtable spill, there may be several versions of the same user-key share the same `pure_epoch`. Do not change this code unless necessary.
-        let value = iter.value();
         let ValueMeta {
             object_id,
             block_id,
         } = iter.value_meta();
+        let mut iter_next_called = false;
+        let mut owned_iter_key_value = None;
+        if task_config.preserve_earliest_key_version {
+            // Clone the current key and value because the iterator does not support peeking;
+            // advancing the iterator to check the next entry would make us lose access to the current one.
+            //
+            // Alternatively, we can use an additional iterator that is one step ahead of the current iterator,
+            // but the memory and IO overhead depends on the implementation of the iterator.
+            owned_iter_key_value = Some((iter.key().to_vec(), iter.value().to_bytes().to_vec()));
+            iter.next()
+                .instrument_await("iter_next_preserve_earliest_key_version".verbose())
+                .await?;
+            iter_next_called = true;
+            if iter.is_valid()
+                && full_key_tracker.latest_user_key().as_ref() == iter.key().user_key.as_ref()
+            {
+                drop = true;
+            }
+        }
+        // IMPORTANT: Always use iter_key and iter_value below, rather than directly accessing iter.key() or iter.value(),
+        // as the iterator may have already advanced when preserve_earliest_key_version is enabled.
+        let (iter_key, iter_value): (FullKey<&[u8]>, HummockValue<&[u8]>) =
+            match &owned_iter_key_value {
+                Some((key, value)) => (key.to_ref(), value.as_slice()),
+                None => (iter.key(), iter.value()),
+            };
         if is_new_user_key {
             if !max_key.is_empty() && iter_key >= max_key {
                 break;
             }
-            if value.is_delete() {
+            if iter_value.is_delete() {
                 local_stats.skip_delete_key_count += 1;
             }
         } else {
@@ -796,8 +838,12 @@ where
         // means that mv had drop)
         // Because of memtable spill, there may be a PUT key share the same `pure_epoch` with DELETE key.
         // Do not assume that "the epoch of keys behind must be smaller than the current key."
-        if (!task_config.retain_multiple_version && task_config.gc_delete_keys && value.is_delete())
-            || (!task_config.retain_multiple_version && !is_new_user_key)
+        if (!task_config.retain_multiple_version
+            && task_config.gc_delete_keys
+            && iter_value.is_delete())
+            || (!task_config.retain_multiple_version
+                && !is_new_user_key
+                && !task_config.preserve_earliest_key_version)
         {
             drop = true;
         }
@@ -816,18 +862,21 @@ where
             if should_count {
                 last_table_stats.total_key_count -= 1;
                 last_table_stats.total_key_size -= iter_key.encoded_len() as i64;
-                last_table_stats.total_value_size -= iter.value().encoded_len() as i64;
+                last_table_stats.total_value_size -= iter_value.encoded_len() as i64;
             }
-            iter.next()
-                .instrument_await("iter_next_in_drop".verbose())
-                .await?;
+            if !iter_next_called {
+                iter.next()
+                    .instrument_await("iter_next_in_drop".verbose())
+                    .await?;
+            }
+
             continue;
         }
 
         // May drop stale columns
         let check_table_id = iter_key.user_key.table_id;
         let mut is_value_rewritten = false;
-        if let HummockValue::Put(v) = value
+        if let HummockValue::Put(v) = iter_value
             && let Some(object_id) = object_id
             && let Some(block_id) = block_id
             && !skip_schema_check
@@ -865,12 +914,14 @@ where
         if !is_value_rewritten {
             // Don't allow two SSTs to share same user key
             sst_builder
-                .add_full_key(iter_key, value, is_new_user_key)
+                .add_full_key(iter_key, iter_value, is_new_user_key)
                 .instrument_await("add_full_key".verbose())
                 .await?;
         }
 
-        iter.next().instrument_await("iter_next".verbose()).await?;
+        if !iter_next_called {
+            iter.next().instrument_await("iter_next".verbose()).await?;
+        }
     }
 
     if let Some(last_table_id) = last_table_id.take() {

@@ -505,6 +505,7 @@ pub mod tests {
     use crate::hummock::compaction::selector::{
         CompactionSelector, DynamicLevelSelector, DynamicLevelSelectorCore, LocalSelectorStatistic,
     };
+    use crate::hummock::compaction::table_change_log::TableChangeLogCompactionTaskTracker;
     use crate::hummock::level_handler::LevelHandler;
     use crate::hummock::model::CompactionGroup;
     use crate::hummock::test_utils::compaction_selector_context;
@@ -625,6 +626,9 @@ pub mod tests {
                     Arc::new(CompactionDeveloperConfig::default()),
                     &Default::default(),
                     &HummockVersionStateTableInfo::empty(),
+                    &HashMap::default(),
+                    &HashMap::default(),
+                    &TableChangeLogCompactionTaskTracker::default(),
                 ),
             )
             .unwrap();
@@ -657,6 +661,9 @@ pub mod tests {
                     Arc::new(CompactionDeveloperConfig::default()),
                     &Default::default(),
                     &HummockVersionStateTableInfo::empty(),
+                    &HashMap::default(),
+                    &HashMap::default(),
+                    &TableChangeLogCompactionTaskTracker::default(),
                 ),
             )
             .unwrap();
@@ -681,6 +688,9 @@ pub mod tests {
                     Arc::new(CompactionDeveloperConfig::default()),
                     &Default::default(),
                     &HummockVersionStateTableInfo::empty(),
+                    &HashMap::default(),
+                    &HashMap::default(),
+                    &TableChangeLogCompactionTaskTracker::default(),
                 ),
             )
             .unwrap();
@@ -722,6 +732,9 @@ pub mod tests {
                 Arc::new(CompactionDeveloperConfig::default()),
                 &Default::default(),
                 &HummockVersionStateTableInfo::empty(),
+                &HashMap::default(),
+                &HashMap::default(),
+                &TableChangeLogCompactionTaskTracker::default(),
             ),
         );
         assert!(compaction.is_none());

@@ -215,6 +215,7 @@ pub async fn compact_once(
             result_task.sorted_output_ssts,
             Some(to_prost_table_stats_map(task_stats)),
             object_timestamps,
+            None,
         )
         .await
         .unwrap();

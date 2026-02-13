@@ -350,6 +350,7 @@ impl HummockManager {
                         table_stats_change: HashMap::default(),
                         sorted_output_ssts: vec![],
                         object_timestamps: HashMap::default(),
+                        table_change_log_output: None,
                     });
                 }
             });
@@ -584,6 +585,7 @@ impl HummockManager {
                             table_stats_change: HashMap::default(),
                             sorted_output_ssts: vec![],
                             object_timestamps: HashMap::default(),
+                            table_change_log_output: None,
                         });
                     }
                 }

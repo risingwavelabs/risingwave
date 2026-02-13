@@ -16,6 +16,7 @@ mod compaction_executor;
 mod compaction_filter;
 pub mod compaction_utils;
 mod iceberg_compaction;
+mod table_change_log_compactor_runner;
 use parquet::basic::Compression;
 use parquet::file::properties::WriterProperties;
 use risingwave_hummock_sdk::compact_task::{CompactTask, ValidationTask};
@@ -68,7 +69,7 @@ use risingwave_hummock_sdk::table_stats::{TableStatsMap, to_prost_table_stats_ma
 use risingwave_hummock_sdk::{
     HummockCompactionTaskId, HummockSstableObjectId, LocalSstableInfo, compact_task_to_string,
 };
-use risingwave_pb::hummock::compact_task::TaskStatus;
+use risingwave_pb::hummock::compact_task::{PbTableChangeLogCompactionOutput, TaskStatus};
 use risingwave_pb::hummock::subscribe_compaction_event_request::{
     Event as RequestEvent, HeartBeat, PullTask, ReportTask,
 };
@@ -820,6 +821,10 @@ pub fn start_compactor(
                                 .collect(),
                             table_stats_change: to_prost_table_stats_map(table_stats),
                             object_timestamps,
+                            table_change_log_output: compact_task
+                                .table_change_log_output
+                                .as_ref()
+                                .map(PbTableChangeLogCompactionOutput::from),
                         })),
                         create_at: SystemTime::now()
                             .duration_since(std::time::UNIX_EPOCH)
