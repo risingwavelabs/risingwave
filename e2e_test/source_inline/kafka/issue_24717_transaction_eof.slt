@@ -1,0 +1,95 @@
+# Issue #24717: Kafka Source Hangs on topics with transaction control messages
+#
+# When Kafka transactions are used, COMMIT/ABORT control messages occupy offsets
+# but are not visible to consumers in read_committed mode. This causes backfill
+# to hang because target_offset (high_watermark - 1) may point to a control message
+# that will never be delivered to the consumer.
+#
+# This test verifies that backfill completes correctly with the partition EOF
+# handling logic. While we cannot easily produce transaction control messages
+# in the CI environment, this test exercises the EOF-based backfill completion path.
+
+control substitution on
+
+# Create a topic for testing
+system ok
+rpk topic create issue_24717_tx_test -p 1
+
+# Produce test messages
+system ok
+cat <<EOF | rpk topic produce issue_24717_tx_test -f "%v"
+{"id": 1, "name": "test1"}
+{"id": 2, "name": "test2"}
+EOF
+
+# Wait for messages to be available
+sleep 2s
+
+# Create source
+statement ok
+CREATE SOURCE issue_24717_source (id int, name varchar)
+WITH (
+    ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+    topic = 'issue_24717_tx_test',
+    scan.startup.mode = 'earliest'
+) FORMAT PLAIN ENCODE JSON;
+
+# Test 1: Backfill should complete - partition EOF signals the reader
+# that all visible data has been consumed
+statement ok
+SET BACKGROUND_DDL = false;
+
+statement ok
+CREATE MATERIALIZED VIEW issue_24717_mv AS SELECT * FROM issue_24717_source;
+
+# Verify data is correctly ingested
+query IT
+SELECT id, name FROM issue_24717_mv ORDER BY id;
+----
+1 test1
+2 test2
+
+# Test 2: Create another MV on the same source to exercise EOF handling again
+statement ok
+CREATE MATERIALIZED VIEW issue_24717_mv2 AS SELECT * FROM issue_24717_source;
+
+query IT
+SELECT id, name FROM issue_24717_mv2 ORDER BY id;
+----
+1 test1
+2 test2
+
+# Test 3: Add more data and verify EOF handling on incremental backfill
+system ok
+cat <<EOF | rpk topic produce issue_24717_tx_test -f "%v"
+{"id": 3, "name": "test3"}
+EOF
+
+sleep 2s
+
+# Create another MV - backfills from start to current position
+statement ok
+CREATE MATERIALIZED VIEW issue_24717_mv3 AS SELECT * FROM issue_24717_source;
+
+query IT
+SELECT id, name FROM issue_24717_mv3 ORDER BY id;
+----
+1 test1
+2 test2
+3 test3
+
+# Cleanup
+statement ok
+DROP MATERIALIZED VIEW issue_24717_mv3;
+
+statement ok
+DROP MATERIALIZED VIEW issue_24717_mv2;
+
+statement ok
+DROP MATERIALIZED VIEW issue_24717_mv;
+
+statement ok
+DROP SOURCE issue_24717_source;
+
+system ok
+rpk topic delete issue_24717_tx_test

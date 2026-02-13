@@ -68,8 +68,15 @@ impl SplitReader for KafkaSplitReader {
         let bootstrap_servers = &properties.connection.brokers;
         let broker_rewrite_map = properties.privatelink_common.broker_rewrite_map.clone();
 
-        // disable partition eof
-        config.set("enable.partition.eof", "false");
+        // Enable partition EOF only for backfill readers (those with stop_offsets).
+        // This is needed to handle Kafka transactions where COMMIT/ABORT control messages
+        // occupy offsets but are not visible to read_committed consumers, causing backfill
+        // to hang when target_offset points to an invisible control message.
+        let has_stop_offsets = splits.iter().any(|s| s.stop_offset.is_some());
+        config.set(
+            "enable.partition.eof",
+            if has_stop_offsets { "true" } else { "false" },
+        );
         config.set("auto.offset.reset", "smallest");
         config.set("isolation.level", KAFKA_ISOLATION_LEVEL);
         config.set("bootstrap.servers", bootstrap_servers);
@@ -254,8 +261,21 @@ impl KafkaSplitReader {
 
         #[for_await]
         'for_outer_loop: for msgs in self.consumer.stream().ready_chunks(max_chunk_size) {
+            // Handle PartitionEOF separately - these are not errors but signals that
+            // a partition has reached the end. This is important for Kafka transactions
+            // where the last visible offset may not be high_watermark - 1.
+            let mut eof_partitions = Vec::new();
             let msgs: Vec<_> = msgs
                 .into_iter()
+                .filter_map(|result| match result {
+                    Ok(msg) => Some(Ok(msg)),
+                    Err(KafkaError::PartitionEOF(partition)) => {
+                        tracing::debug!("Partition {} reached EOF", partition);
+                        eof_partitions.push(partition);
+                        None
+                    }
+                    Err(e) => Some(Err(e)),
+                })
                 .collect::<std::result::Result<_, KafkaError>>()?;
 
             let mut split_msg_offsets = HashMap::new();
@@ -336,6 +356,25 @@ impl KafkaSplitReader {
             // don't clear `bytes_current_second` here as it is only related to `.tick()`.
             // yield in the outer loop so that we can always guarantee that some messages are read
             // every `MAX_CHUNK_SIZE`.
+
+            // Handle PartitionEOF: yield each EOF marker as a separate batch so that
+            // the parser processes each one independently (avoiding is_heartbeat_emitted dedup).
+            // Use stop_offset - 1 as the EOF marker offset, which equals target_offset in the
+            // backfill executor, guaranteeing the Backfilling → SourceCachingUp transition.
+            for partition in eof_partitions {
+                let split_id: SplitId = partition.to_string().into();
+                if let Entry::Occupied(o) = stop_offsets.entry(split_id) {
+                    let stop_offset = *o.get();
+                    o.remove();
+                    yield vec![SourceMessage::kafka_partition_eof(
+                        partition,
+                        stop_offset - 1,
+                    )];
+                    if stop_offsets.is_empty() {
+                        break 'for_outer_loop;
+                    }
+                }
+            }
         }
         tracing::info!("kafka reader finished");
     }

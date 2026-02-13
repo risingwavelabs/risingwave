@@ -107,4 +107,21 @@ impl SourceMessage {
             }),
         }
     }
+
+    /// Create an EOF marker message for a Kafka partition.
+    /// This is used when the consumer reaches the end of a partition during backfill,
+    /// signaling that backfill should complete even if `target_offset` wasn't reached
+    /// (due to Kafka transaction control messages occupying offsets).
+    pub fn kafka_partition_eof(partition: i32, offset: i64) -> Self {
+        SourceMessage {
+            key: None,
+            payload: None,
+            offset: offset.to_string(),
+            split_id: partition.to_string().into(),
+            meta: SourceMeta::Kafka(KafkaMeta {
+                timestamp: Timestamp::NotAvailable,
+                headers: None,
+            }),
+        }
+    }
 }
