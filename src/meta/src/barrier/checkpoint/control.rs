@@ -868,11 +868,7 @@ impl DatabaseCheckpointControl {
             }
         }
 
-        let mut blocked_job_ids: HashSet<_> = self
-            .creating_streaming_job_controls
-            .keys()
-            .copied()
-            .collect();
+        let mut blocked_job_ids = HashSet::new();
         blocked_job_ids.extend(
             blocked_fragment_ids
                 .into_iter()
@@ -1237,12 +1233,12 @@ impl DatabaseCheckpointControl {
             if !blocked_reschedule_job_ids.is_empty() {
                 warn!(
                     blocked_reschedule_job_ids = ?blocked_reschedule_job_ids,
-                    "reject reschedule fragments related to creating snapshot backfill jobs"
+                    "reject reschedule fragments related to creating unreschedulable backfill jobs"
                 );
                 for notifier in notifiers {
                     notifier.notify_start_failed(
                         anyhow!(
-                            "cannot reschedule jobs {:?} when creating streaming job with snapshot backfill",
+                            "cannot reschedule jobs {:?} when creating jobs with unreschedulable backfill fragments",
                             blocked_reschedule_job_ids
                         )
                         .into(),
