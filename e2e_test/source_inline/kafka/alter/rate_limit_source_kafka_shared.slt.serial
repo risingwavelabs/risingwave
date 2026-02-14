@@ -1,5 +1,11 @@
 control substitution on
 
+system ok
+rpk topic delete test_rate_limit_shared || true
+
+system ok
+rpk topic create test_rate_limit_shared -p 1
+
 ############## Create kafka seed data
 
 statement ok
@@ -162,3 +168,6 @@ drop source kafka_source cascade;
 
 statement ok
 drop table kafka_seed_data cascade;
+
+system ok
+rpk topic delete test_rate_limit_shared || true
