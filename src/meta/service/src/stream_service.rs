@@ -676,6 +676,7 @@ impl StreamManagerService for StreamServiceImpl {
                     .update_sink_props_by_sink_id(
                         request.object_id.into(),
                         request.changed_props.clone().into_iter().collect(),
+                        request.force,
                     )
                     .await?,
                 request.object_id.into(),
@@ -687,6 +688,7 @@ impl StreamManagerService for StreamServiceImpl {
                         request.object_id.into(),
                         request.changed_props.clone().into_iter().collect(),
                         request.extra_options,
+                        request.force,
                     )
                     .await?;
                 (prop, sink_id.as_object_id())
