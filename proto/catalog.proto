@@ -50,6 +50,12 @@ enum CreateType {
   CREATE_TYPE_FOREGROUND = 2;
 }
 
+message StreamSourceExternalSchema {
+  string version = 1;
+  string content = 2;
+}
+
+
 message StreamSourceInfo {
   // deprecated
   plan_common.RowFormatType row_format = 1;
@@ -109,6 +115,7 @@ message WebhookSourceInfo {
 }
 
 message Source {
+  optional StreamSourceExternalSchema external_schema = 21;
   // For shared source, this is the same as the job id.
   // For non-shared source and table with connector, this is a different oid.
   uint32 id = 1;
