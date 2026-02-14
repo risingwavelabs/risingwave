@@ -352,4 +352,16 @@ impl CreatingStreamingJobStatus {
             }
         }
     }
+
+    pub(super) fn creating_job_info(&self) -> Option<&CreatingJobInfo> {
+        match self {
+            CreatingStreamingJobStatus::ConsumingSnapshot { info, .. }
+            | CreatingStreamingJobStatus::ConsumingLogStore { info, .. } => Some(info),
+            CreatingStreamingJobStatus::Finishing(..)
+            | CreatingStreamingJobStatus::Resetting(_, _) => None,
+            CreatingStreamingJobStatus::PlaceHolder => {
+                unreachable!()
+            }
+        }
+    }
 }
