@@ -630,12 +630,12 @@ impl HummockManager {
             return;
         }
 
-        let mut left = 0;
-        let mut right = left + 1;
+        let mut base = 0;
+        let mut candidate = 1;
 
-        while left < right && right < group_count {
-            let group = &group_infos[left];
-            let next_group = &group_infos[right];
+        while candidate < group_count {
+            let group = &group_infos[base];
+            let next_group = &group_infos[candidate];
             match self
                 .try_merge_compaction_group(
                     &table_write_throughput_statistic_manager,
@@ -645,14 +645,14 @@ impl HummockManager {
                 )
                 .await
             {
-                Ok(_) => right += 1,
+                Ok(_) => candidate += 1,
                 Err(e) => {
                     tracing::debug!(
                         error = %e.as_report(),
                         "Failed to merge compaction group",
                     );
-                    left = right;
-                    right = left + 1;
+                    base = candidate;
+                    candidate = base + 1;
                 }
             }
         }
