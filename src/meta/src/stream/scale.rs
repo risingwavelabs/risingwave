@@ -1114,11 +1114,29 @@ impl GlobalStreamManager {
     async fn apply_post_backfill_parallelism(&self, job_id: JobId) -> MetaResult<()> {
         // Fetch both the target parallelism (final desired state) and the backfill parallelism
         // (temporary parallelism used during backfill phase) from the catalog.
-        let (target, backfill_parallelism) = self
+        let (target, backfill_parallelism) = match self
             .metadata_manager
             .catalog_controller
             .get_job_parallelisms(job_id)
-            .await?;
+            .await
+        {
+            Ok(parallelisms) => parallelisms,
+            Err(e)
+                if matches!(
+                    e.inner(),
+                    crate::error::MetaErrorInner::CatalogIdNotFound("streaming job", _)
+                ) =>
+            {
+                // The job may have been dropped before this notification is processed.
+                // Treat it as a benign no-op so we don't trigger unnecessary retries.
+                tracing::debug!(
+                    job_id = %job_id,
+                    "streaming job not found when applying post-backfill parallelism, skip"
+                );
+                return Ok(());
+            }
+            Err(e) => return Err(e),
+        };
 
         // Determine if we need to reschedule based on the backfill configuration.
         match backfill_parallelism {
