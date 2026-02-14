@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::catalog::is_system_schema;
 use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::Ident;
 
@@ -22,14 +23,34 @@ use crate::expr::{CorrelatedInputRef, ExprImpl, ExprType, FunctionCall, InputRef
 impl Binder {
     pub fn bind_column(&mut self, idents: &[Ident]) -> Result<ExprImpl> {
         // TODO: check quote style of `ident`.
-        let (_schema_name, table_name, column_name) = match idents {
+        let (schema_name, table_name, column_name) = match idents {
             [column] => (None, None, column.real_value()),
             [table, column] => (None, Some(table.real_value()), column.real_value()),
-            [schema, table, column] => (
-                Some(schema.real_value()),
-                Some(table.real_value()),
-                column.real_value(),
-            ),
+            [schema, table, column] => {
+                let schema_name = schema.real_value();
+                let table_name = table.real_value();
+                if !is_system_schema(&schema_name) {
+                    self.catalog
+                        .get_schema_by_name(&self.db_name, &schema_name)
+                        .map_err(|_| {
+                            ErrorCode::InvalidReference(format!(
+                                "missing FROM-clause entry for table \"{}\".",
+                                table_name
+                            ))
+                        })?;
+                    let schema_path = self.bind_schema_path(Some(&schema_name));
+                    self.catalog
+                        .get_id_by_class_name(&self.db_name, schema_path, &table_name)
+                        .map_err(|_| {
+                            ErrorCode::InvalidReference(format!(
+                                "FROM-clause entry for table \"{}\"\n\
+                                DETAIL: There is an entry for table \"{}\", but it cannot be referenced from this part of the query.",
+                                table_name, table_name
+                            ))
+                        })?;
+                }
+                (Some(schema_name), Some(table_name), column.real_value())
+            }
             _ => {
                 return Err(
                     ErrorCode::InternalError(format!("Too many idents: {:?}", idents)).into(),
@@ -46,7 +67,7 @@ impl Binder {
 
         match self
             .context
-            .get_column_binding_indices(&table_name, &column_name)
+            .get_column_binding_indices(&schema_name, &table_name, &column_name)
         {
             Ok(mut indices) => {
                 match indices.len() {
@@ -72,9 +93,23 @@ impl Binder {
                 }
             }
             Err(e) => {
-                // If the error message is not that the column is not found, throw the error
+                // If a column is referenced using three-level qualification and the table has an alias,
+                // prompt the user to use the table alias instead.
                 if let ErrorCode::ItemNotFound(_) = e {
+                    if let (Some(schema), Some(table)) = (&schema_name, &table_name)
+                        && let Some(index) =
+                            self.context.get_table_alias(schema, table, &column_name)?
+                    {
+                        let column = &self.context.columns[index];
+                        return Err(ErrorCode::InvalidReference(format!(
+                            "missing FROM-clause entry for table \"{}\"\n\
+                            HINT:  Perhaps you meant to reference the table alias \"{}\".",
+                            table, column.table_name
+                        ))
+                        .into());
+                    };
                 } else {
+                    // If the error message is not that the column is not found, throw the error
                     return Err(e.into());
                 }
             }
@@ -91,7 +126,7 @@ impl Binder {
                 }
                 // input ref from lateral context `depth` starts from 1.
                 let depth = i + 1;
-                match context.get_column_binding_index(&table_name, &column_name) {
+                match context.get_column_binding_index(&schema_name, &table_name, &column_name) {
                     Ok(index) => {
                         let column = &context.columns[index];
                         return Ok(CorrelatedInputRef::new(
@@ -116,7 +151,7 @@ impl Binder {
             }
             // `depth` starts from 1.
             let depth = i + 1;
-            match context.get_column_binding_index(&table_name, &column_name) {
+            match context.get_column_binding_index(&schema_name, &table_name, &column_name) {
                 Ok(index) => {
                     let column = &context.columns[index];
                     return Ok(CorrelatedInputRef::new(
@@ -139,7 +174,8 @@ impl Binder {
                     }
                     // correlated input ref from lateral context `depth` starts from 1.
                     let depth = i + j + 1;
-                    match context.get_column_binding_index(&table_name, &column_name) {
+                    match context.get_column_binding_index(&schema_name, &table_name, &column_name)
+                    {
                         Ok(index) => {
                             let column = &context.columns[index];
                             return Ok(CorrelatedInputRef::new(
