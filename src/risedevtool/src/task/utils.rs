@@ -38,6 +38,7 @@ where
             // Before returning the command, pull the image first.
             self.pb
                 .set_message(format!("pulling docker image \"{image}\"..."));
+            // Pull once per process to avoid redundant image downloads.
             static DOCKER_PULL: Once = Once::new();
             DOCKER_PULL.call_once(|| {
                 let mut pull_cmd = Command::new("docker");
