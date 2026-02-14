@@ -28,7 +28,7 @@ impl Binder {
             .iter()
             .map(|c| (c.is_hidden, Field::from(&c.column_desc)))
             .collect_vec();
-        self.bind_table_to_context(columns, name, None)
+        self.bind_table_to_context(columns, name, None, None)
     }
 
     pub fn get_column_binding_index(

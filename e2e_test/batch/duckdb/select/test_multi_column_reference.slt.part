@@ -227,8 +227,10 @@ CREATE TABLE s2.t1(t INT);
 statement ok
 INSERT INTO s2.t1 VALUES (42);
 
-statement error
+query I
 SELECT s1.t1.t FROM s1.t1, s2.t1
+----
+42
 
 # test various failures
 
