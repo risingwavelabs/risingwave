@@ -35,7 +35,7 @@
     "d3-scale": "^4.0.2",
     "d3-selection": "^3.0.0",
     "dagre": "^0.8.5",
-    "fabric": "^5.2.1",
+    "fabric": "^7.1.0",
     "file-saver": "^2.0.5",
     "framer-motion": "^6.5.1",
     "lodash": "^4.17.21",
