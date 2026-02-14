@@ -88,6 +88,15 @@ impl StateEvictHint {
     }
 }
 
+/// Snapshot of a window state for persistence and recovery.
+#[derive(Debug, Clone)]
+pub struct WindowStateSnapshot {
+    /// The key of the last output row.
+    pub last_output_key: Option<StateKey>,
+    /// Function-specific payload bytes.
+    pub payload: Vec<u8>,
+}
+
 pub trait WindowState: EstimateSize {
     // TODO(rc): may append rows in batch like in `hash_agg`.
     /// Append a new input row to the state. The `key` is expected to be increasing.
@@ -101,6 +110,21 @@ pub trait WindowState: EstimateSize {
 
     /// Slide the window frame forward and collect the evict hint. Don't calculate the output if possible.
     fn slide_no_output(&mut self) -> Result<StateEvictHint>;
+
+    /// Enable persistence for this window state. When enabled, the state may return
+    /// `CanEvict` hints and should support snapshot/restore.
+    fn enable_persistence(&mut self) {}
+
+    /// Create a snapshot of the current state for persistence.
+    /// Returns `None` if the state doesn't support persistence.
+    fn snapshot(&self) -> Option<WindowStateSnapshot> {
+        None
+    }
+
+    /// Restore the state from a snapshot. Called during recovery before replaying rows.
+    fn restore(&mut self, _snapshot: WindowStateSnapshot) -> Result<()> {
+        Ok(())
+    }
 }
 
 pub type BoxedWindowState = Box<dyn WindowState + Send + Sync>;
