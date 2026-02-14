@@ -20,6 +20,7 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::LazyLock;
 use crate::error::ConnectorError;
+use crate::sink::elasticsearch_opensearch::elasticsearch_opensearch_config::ElasticSearchOpenSearchConfig;
 
 macro_rules! use_source_properties {
     ({ $({ $variant_name:ident, $prop_name:ty, $split:ty }),* }) => {
@@ -167,6 +168,8 @@ pub static SINK_ALLOW_ALTER_ON_FLY_FIELDS: LazyLock<HashMap<String, HashSet<Stri
         std::any::type_name::<ClickHouseConfig>().to_owned(),
         [
             "commit_checkpoint_interval".to_owned(),
+            "clickhouse.user".to_owned(),
+            "clickhouse.password".to_owned(),
         ].into_iter().collect(),
     ).unwrap();
     // DeltaLakeConfig
@@ -174,6 +177,7 @@ pub static SINK_ALLOW_ALTER_ON_FLY_FIELDS: LazyLock<HashMap<String, HashSet<Stri
         std::any::type_name::<DeltaLakeConfig>().to_owned(),
         [
             "commit_checkpoint_interval".to_owned(),
+            "gcs.service.account".to_owned(),
         ].into_iter().collect(),
     ).unwrap();
     // DorisConfig
@@ -181,6 +185,8 @@ pub static SINK_ALLOW_ALTER_ON_FLY_FIELDS: LazyLock<HashMap<String, HashSet<Stri
         std::any::type_name::<DorisConfig>().to_owned(),
         [
             "doris.stream_load.http.timeout.ms".to_owned(),
+            "doris.user".to_owned(),
+            "doris.password".to_owned(),
         ].into_iter().collect(),
     ).unwrap();
     // IcebergConfig
@@ -201,6 +207,15 @@ pub static SINK_ALLOW_ALTER_ON_FLY_FIELDS: LazyLock<HashMap<String, HashSet<Stri
             "compaction.trigger_snapshot_count".to_owned(),
             "compaction.target_file_size_mb".to_owned(),
             "compaction.type".to_owned(),
+            "s3.access.key".to_owned(),
+            "s3.secret.key".to_owned(),
+            "gcs.credential".to_owned(),
+            "catalog.credential".to_owned(),
+            "catalog.token".to_owned(),
+            "catalog.oauth2_server_uri".to_owned(),
+            "adlsgen2.account_key".to_owned(),
+            "glue.access.key".to_owned(),
+            "glue.secret.key".to_owned(),
         ].into_iter().collect(),
     ).unwrap();
     // KafkaConfig
@@ -237,6 +252,10 @@ pub static SINK_ALLOW_ALTER_ON_FLY_FIELDS: LazyLock<HashMap<String, HashSet<Stri
         std::any::type_name::<SnowflakeV2Config>().to_owned(),
         [
             "commit_checkpoint_interval".to_owned(),
+            "username".to_owned(),
+            "password".to_owned(),
+            "private_key_file_pwd".to_owned(),
+            "private_key_pem".to_owned(),
         ].into_iter().collect(),
     ).unwrap();
     // StarrocksConfig
@@ -245,6 +264,53 @@ pub static SINK_ALLOW_ALTER_ON_FLY_FIELDS: LazyLock<HashMap<String, HashSet<Stri
         [
             "starrocks.stream_load.http.timeout.ms".to_owned(),
             "commit_checkpoint_interval".to_owned(),
+            "starrocks.user".to_owned(),
+            "starrocks.password".to_owned(),
+        ].into_iter().collect(),
+    ).unwrap();
+    // GooglePubSubConfig
+    map.try_insert(
+        std::any::type_name::<GooglePubSubConfig>().to_owned(),
+        [
+            "pubsub.credentials".to_owned(),
+        ].into_iter().collect(),
+    ).unwrap();
+    // PostgresConfig
+    map.try_insert(
+        std::any::type_name::<PostgresConfig>().to_owned(),
+        [
+            "password".to_owned(),
+            "ssl.root.cert".to_owned(),
+        ].into_iter().collect(),
+    ).unwrap();
+    // ElasticSearchOpenSearchConfig (Elasticsearch/OpenSearch)
+    map.try_insert(
+        std::any::type_name::<ElasticSearchOpenSearchConfig>().to_owned(),
+        [
+            "username".to_owned(),
+            "password".to_owned(),
+        ].into_iter().collect(),
+    ).unwrap();
+    // SqlServerConfig
+    map.try_insert(
+        std::any::type_name::<SqlServerConfig>().to_owned(),
+        [
+            "sqlserver.password".to_owned(),
+        ].into_iter().collect(),
+    ).unwrap();
+    // BigQueryConfig
+    map.try_insert(
+        std::any::type_name::<BigQueryConfig>().to_owned(),
+        [
+            "bigquery.credentials".to_owned(),
+        ].into_iter().collect(),
+    ).unwrap();
+    // RedShiftConfig
+    map.try_insert(
+        std::any::type_name::<RedShiftConfig>().to_owned(),
+        [
+            "user".to_owned(),
+            "password".to_owned(),
         ].into_iter().collect(),
     ).unwrap();
     map
