@@ -63,6 +63,16 @@ where
             .map(|v| MutGuard::new(v, &mut self.heap_size))
     }
 
+    pub fn remove(&mut self, key: &K) -> Option<V> {
+        if let Some(v) = self.inner.remove(key) {
+            self.heap_size.sub_val(key);
+            self.heap_size.sub_val(&v);
+            Some(v)
+        } else {
+            None
+        }
+    }
+
     pub fn values_mut(&mut self) -> impl Iterator<Item = AtomicMutGuard<'_, V>> + '_ {
         let heap_size = &self.heap_size;
         self.inner
