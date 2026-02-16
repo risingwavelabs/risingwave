@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#![allow(deprecated)]
+
 use std::collections::BTreeMap;
 
 pub use risingwave_common::id::*;
