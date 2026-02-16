@@ -300,8 +300,8 @@ tokio-stream = { git = "https://github.com/madsim-rs/tokio.git", rev = "0dd1055"
 ] }
 tokio-util = "0.7"
 toml = "0.9"
-tonic = { package = "madsim-tonic", version = "0.6.0+0.14" }
-tonic-build = { package = "madsim-tonic-build", version = "0.6.0+0.14" }
+tonic = { package = "madsim-tonic", version = "0.6.0" }
+tonic-build = { package = "madsim-tonic-build", version = "0.6.0" }
 tracing-opentelemetry = "=0.32.0"
 
 [workspace.lints.rust]
