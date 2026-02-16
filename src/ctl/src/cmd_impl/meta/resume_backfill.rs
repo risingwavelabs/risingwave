@@ -25,8 +25,8 @@ pub async fn resume_backfill(
     fragment_id: Option<FragmentId>,
 ) -> Result<()> {
     let target = match (job_id, fragment_id) {
-        (Some(job_id), None) => Target::JobId(job_id.as_raw_id()),
-        (None, Some(fragment_id)) => Target::FragmentId(fragment_id.as_raw_id()),
+        (Some(job_id), None) => Target::JobId(job_id),
+        (None, Some(fragment_id)) => Target::FragmentId(fragment_id),
         _ => {
             return Err(anyhow!(
                 "exactly one of job_id or fragment_id must be provided"

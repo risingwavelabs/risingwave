@@ -27,6 +27,7 @@ use risingwave_common::bitmap::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::TableId;
 use risingwave_common::dispatch_distance_measurement;
 use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
+use risingwave_common::id::FragmentId;
 use risingwave_common::types::ScalarRef;
 use risingwave_common::util::epoch::{EpochPair, MAX_EPOCH};
 use risingwave_hummock_sdk::key::{
@@ -966,6 +967,7 @@ impl<R: RangeKv> StateStore for RangeKvStateStore<R> {
             self.clone(),
             NewLocalOptions {
                 table_id: options.table_id,
+                fragment_id: FragmentId::default(),
                 op_consistency_level: Default::default(),
                 table_option: Default::default(),
                 is_replicated: false,
