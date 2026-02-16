@@ -302,7 +302,7 @@ tokio-util = "0.7"
 toml = "0.9"
 tonic = { package = "madsim-tonic", git = "https://github.com/madsim-rs/madsim", rev = "356666437468f4860377466ae0b8bfc245e01c36" }
 tonic-build = { package = "madsim-tonic-build", git = "https://github.com/madsim-rs/madsim", rev = "356666437468f4860377466ae0b8bfc245e01c36" }
-tracing-opentelemetry = "0.32.1"
+tracing-opentelemetry = "=0.32.0"
 
 [workspace.lints.rust]
 # `forbid` will also prevent the misuse of `#[allow(unused)]`
