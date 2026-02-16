@@ -187,7 +187,7 @@ jsonbb = { version = "0.2.3", features = ["float_roundtrip"] }
 jsonwebtoken = { version = "10", features = ["aws_lc_rs"] }
 linkme = { version = "0.3.32", features = ["used_linker"] }
 lru = "0.16"
-madsim = { git = "https://github.com/madsim-rs/madsim", rev = "356666437468f4860377466ae0b8bfc245e01c36" }
+madsim = "0.2.34"
 mixtrics = { version = "0.2", features = ["prometheus"] }
 mysql_async = { version = "0.36", features = [
     "native-tls-tls",
@@ -210,7 +210,7 @@ prost-build = { version = "=0.14.3" }
 prost-derive = { version = "=0.14.3" }
 prost-types = { version = "=0.14.3" }
 rand = { version = "0.9", features = ["small_rng"] }
-rdkafka = { package = "madsim-rdkafka", git = "https://github.com/madsim-rs/madsim", rev = "356666437468f4860377466ae0b8bfc245e01c36", features = [
+rdkafka = { package = "madsim-rdkafka", version = "0.4.4", features = [
     "cmake-build",
 ] }
 redis = { version = "1.0" }
@@ -300,8 +300,8 @@ tokio-stream = { git = "https://github.com/madsim-rs/tokio.git", rev = "0dd1055"
 ] }
 tokio-util = "0.7"
 toml = "0.9"
-tonic = { package = "madsim-tonic", git = "https://github.com/madsim-rs/madsim", rev = "356666437468f4860377466ae0b8bfc245e01c36" }
-tonic-build = { package = "madsim-tonic-build", git = "https://github.com/madsim-rs/madsim", rev = "356666437468f4860377466ae0b8bfc245e01c36" }
+tonic = { package = "madsim-tonic", version = "0.6.0+0.14" }
+tonic-build = { package = "madsim-tonic-build", version = "0.6.0+0.14" }
 tracing-opentelemetry = "=0.32.0"
 
 [workspace.lints.rust]
@@ -417,14 +417,8 @@ opt-level = 2
 
 [patch.crates-io]
 faiss = { git = "https://github.com/risingwavelabs/faiss-rs.git", rev = "f6f0acb" }
-# Pin the whole madsim family to a single prerelease revision for compatibility testing.
-madsim = { git = "https://github.com/madsim-rs/madsim", rev = "356666437468f4860377466ae0b8bfc245e01c36" }
-madsim-tokio = { git = "https://github.com/madsim-rs/madsim", rev = "356666437468f4860377466ae0b8bfc245e01c36" }
-madsim-rdkafka = { git = "https://github.com/madsim-rs/madsim", rev = "356666437468f4860377466ae0b8bfc245e01c36" }
-madsim-tonic = { git = "https://github.com/madsim-rs/madsim", rev = "356666437468f4860377466ae0b8bfc245e01c36" }
-madsim-tonic-build = { git = "https://github.com/madsim-rs/madsim", rev = "356666437468f4860377466ae0b8bfc245e01c36" }
 # Patch third-party crates for deterministic simulation.
-getrandom = { git = "https://github.com/madsim-rs/getrandom.git", rev = "6c9d9e9" }
+getrandom = { git = "https://github.com/madsim-rs/getrandom.git", rev = "e79a7ae" }
 # Don't patch `tokio-stream`, but only use the madsim version for **direct** dependencies.
 # Imagine an unpatched dependency depends on the original `tokio` and the patched `tokio-stream`.
 # tokio-stream = { git = "https://github.com/madsim-rs/tokio.git", rev = "0dd1055" }

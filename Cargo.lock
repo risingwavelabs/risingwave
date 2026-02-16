@@ -25,7 +25,7 @@ dependencies = [
  "libloading 0.8.9",
  "toml 0.9.11+spec-1.1.0",
  "windows-registry 0.6.1",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -106,7 +106,7 @@ version = "0.7.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "891477e0c6a8957309ee5c45a6368af3ae14bb510732d2684ffa19af310920f9"
 dependencies = [
- "getrandom 0.2.13",
+ "getrandom 0.2.11",
  "once_cell",
  "version_check",
 ]
@@ -119,7 +119,7 @@ checksum = "e89da841a80418a9b391ebaea17f5c112ffaaa96f621d2c285b5174da76b9011"
 dependencies = [
  "cfg-if",
  "const-random",
- "getrandom 0.2.13",
+ "getrandom 0.2.11",
  "once_cell",
  "version_check",
  "zerocopy 0.7.31",
@@ -1792,7 +1792,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b62ddb9cb1ec0a098ad4bbf9344d0713fa193ae1a80af55febcff2627b6a00c1"
 dependencies = [
  "futures-core",
- "getrandom 0.2.13",
+ "getrandom 0.2.11",
  "instant",
  "pin-project-lite",
  "rand 0.8.5",
@@ -1968,7 +1968,7 @@ dependencies = [
  "bitflags 2.10.0",
  "cexpr",
  "clang-sys",
- "itertools 0.13.0",
+ "itertools 0.10.5",
  "log",
  "prettyplease 0.2.15",
  "proc-macro2",
@@ -2166,7 +2166,7 @@ dependencies = [
  "ahash 0.8.11",
  "base64 0.22.1",
  "bitvec",
- "getrandom 0.2.13",
+ "getrandom 0.2.11",
  "getrandom 0.3.1",
  "hex",
  "indexmap 2.12.0",
@@ -2779,7 +2779,7 @@ version = "0.1.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f9d839f2a20b0aee515dc581a6172f2321f96cab76c1a38a4c584a194955390e"
 dependencies = [
- "getrandom 0.2.13",
+ "getrandom 0.2.11",
  "once_cell",
  "tiny-keccak",
 ]
@@ -4583,7 +4583,7 @@ dependencies = [
  "libc",
  "option-ext",
  "redox_users 0.5.2",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -5938,8 +5938,8 @@ dependencies = [
 
 [[package]]
 name = "getrandom"
-version = "0.2.13"
-source = "git+https://github.com/madsim-rs/getrandom.git?rev=6c9d9e9#6c9d9e99a6f115a032a0463f930264c76f9f8a2a"
+version = "0.2.11"
+source = "git+https://github.com/madsim-rs/getrandom.git?rev=e79a7ae#e79a7aecbcf8a43a802d30742667b77d75c613bd"
 dependencies = [
  "cfg-if",
  "js-sys",
@@ -6551,7 +6551,7 @@ dependencies = [
  "libc",
  "percent-encoding",
  "pin-project-lite",
- "socket2 0.6.0",
+ "socket2 0.5.10",
  "system-configuration",
  "tokio",
  "tower-service",
@@ -6584,7 +6584,7 @@ dependencies = [
  "js-sys",
  "log",
  "wasm-bindgen",
- "windows-core 0.61.0",
+ "windows-core 0.58.0",
 ]
 
 [[package]]
@@ -7179,7 +7179,7 @@ checksum = "0529410abe238729a60b108898784df8984c87f6054c9c4fcacc47e4803c1ce1"
 dependencies = [
  "aws-lc-rs",
  "base64 0.22.1",
- "getrandom 0.2.13",
+ "getrandom 0.2.11",
  "js-sys",
  "pem",
  "serde",
@@ -7721,7 +7721,8 @@ dependencies = [
 [[package]]
 name = "madsim"
 version = "0.2.34"
-source = "git+https://github.com/madsim-rs/madsim?rev=356666437468f4860377466ae0b8bfc245e01c36#356666437468f4860377466ae0b8bfc245e01c36"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "18351aac4194337d6ea9ffbd25b3d1540ecc0754142af1bff5ba7392d1f6f771"
 dependencies = [
  "ahash 0.8.11",
  "async-channel 2.5.0",
@@ -7770,7 +7771,8 @@ dependencies = [
 [[package]]
 name = "madsim-macros"
 version = "0.2.12"
-source = "git+https://github.com/madsim-rs/madsim?rev=356666437468f4860377466ae0b8bfc245e01c36#356666437468f4860377466ae0b8bfc245e01c36"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f3d248e97b1a48826a12c3828d921e8548e714394bf17274dd0a93910dc946e1"
 dependencies = [
  "darling 0.14.4",
  "proc-macro2",
@@ -7781,7 +7783,8 @@ dependencies = [
 [[package]]
 name = "madsim-rdkafka"
 version = "0.4.4+0.34.0"
-source = "git+https://github.com/madsim-rs/madsim?rev=356666437468f4860377466ae0b8bfc245e01c36#356666437468f4860377466ae0b8bfc245e01c36"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2490d64ab39a227e00ea40aa9eec250061f282a3c95e5a8528b3f19881d9f12e"
 dependencies = [
  "async-channel 1.9.0",
  "async-trait",
@@ -7804,7 +7807,8 @@ dependencies = [
 [[package]]
 name = "madsim-tokio"
 version = "0.2.30"
-source = "git+https://github.com/madsim-rs/madsim?rev=356666437468f4860377466ae0b8bfc245e01c36#356666437468f4860377466ae0b8bfc245e01c36"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7d3eb2acc57c82d21d699119b859e2df70a91dbdb84734885a1e72be83bdecb5"
 dependencies = [
  "madsim",
  "spin 0.9.8",
@@ -7814,7 +7818,8 @@ dependencies = [
 [[package]]
 name = "madsim-tonic"
 version = "0.6.0+0.14"
-source = "git+https://github.com/madsim-rs/madsim?rev=356666437468f4860377466ae0b8bfc245e01c36#356666437468f4860377466ae0b8bfc245e01c36"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3ac0690bd19e3eb32f4974b4a1d7b7e3a93395a853aab2cfe0eee74bd5ada2f3"
 dependencies = [
  "async-stream",
  "chrono",
@@ -7829,7 +7834,8 @@ dependencies = [
 [[package]]
 name = "madsim-tonic-build"
 version = "0.6.0+0.14"
-source = "git+https://github.com/madsim-rs/madsim?rev=356666437468f4860377466ae0b8bfc245e01c36#356666437468f4860377466ae0b8bfc245e01c36"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d2df12aca583def22dfeb88ec9d9c8f82045db3575c4973153f89bf2688f9367"
 dependencies = [
  "prettyplease 0.2.15",
  "proc-macro2",
@@ -8277,7 +8283,7 @@ version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6a51313c5820b0b02bd422f4b44776fbf47961755c74ce64afc73bfad10226c3"
 dependencies = [
- "getrandom 0.2.13",
+ "getrandom 0.2.11",
 ]
 
 [[package]]
@@ -8342,7 +8348,7 @@ dependencies = [
  "data-encoding",
  "ed25519",
  "ed25519-dalek",
- "getrandom 0.2.13",
+ "getrandom 0.2.11",
  "log",
  "rand 0.8.5",
  "signatory",
@@ -8564,7 +8570,7 @@ version = "0.7.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "77e878c846a8abae00dd069496dbe8751b16ac1c3d6bd2a7283a938e8228f90d"
 dependencies = [
- "proc-macro-crate 3.4.0",
+ "proc-macro-crate 1.3.1",
  "proc-macro2",
  "quote",
  "syn 2.0.111",
@@ -8587,7 +8593,7 @@ checksum = "c38841cdd844847e3e7c8d29cef9dcfed8877f8f56f9071f77843ecf3baf937f"
 dependencies = [
  "base64 0.13.1",
  "chrono",
- "getrandom 0.2.13",
+ "getrandom 0.2.11",
  "http 0.2.9",
  "rand 0.8.5",
  "reqwest 0.11.20",
@@ -8725,7 +8731,7 @@ dependencies = [
  "chrono",
  "crc32c",
  "futures",
- "getrandom 0.2.13",
+ "getrandom 0.2.11",
  "http 1.4.0",
  "http-body 1.0.0",
  "log",
@@ -8754,7 +8760,7 @@ dependencies = [
  "chrono",
  "crc32c",
  "futures",
- "getrandom 0.2.13",
+ "getrandom 0.2.11",
  "http 1.4.0",
  "http-body 1.0.0",
  "log",
@@ -10095,10 +10101,10 @@ name = "prost-build"
 version = "0.14.3"
 source = "git+https://github.com/risingwavelabs/prost.git?rev=040a192409e45069158300baec4f402ad1fe101a#040a192409e45069158300baec4f402ad1fe101a"
 dependencies = [
- "heck 0.5.0",
- "itertools 0.14.0",
+ "heck 0.4.1",
+ "itertools 0.10.5",
  "log",
- "multimap 0.10.0",
+ "multimap 0.8.3",
  "petgraph 0.8.3",
  "prettyplease 0.2.15",
  "prost 0.14.3",
@@ -10130,7 +10136,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8a56d757972c98b346a9b766e3f02746cde6dd1cd1d1d563472929fdd74bec4d"
 dependencies = [
  "anyhow",
- "itertools 0.14.0",
+ "itertools 0.10.5",
  "proc-macro2",
  "quote",
  "syn 2.0.111",
@@ -10142,7 +10148,7 @@ version = "0.14.3"
 source = "git+https://github.com/risingwavelabs/prost.git?rev=040a192409e45069158300baec4f402ad1fe101a#040a192409e45069158300baec4f402ad1fe101a"
 dependencies = [
  "anyhow",
- "itertools 0.14.0",
+ "itertools 0.10.5",
  "proc-macro2",
  "quote",
  "syn 2.0.111",
@@ -10595,7 +10601,7 @@ version = "0.6.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ec0be4795e2f6a28069bec0b5ff3e2ac9bafc99e6a9a7dc3547996c5c816922c"
 dependencies = [
- "getrandom 0.2.13",
+ "getrandom 0.2.11",
 ]
 
 [[package]]
@@ -10743,7 +10749,7 @@ version = "0.4.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a18479200779601e498ada4e8c1e1f50e3ee19deb0259c25825a98b5603b2cb4"
 dependencies = [
- "getrandom 0.2.13",
+ "getrandom 0.2.11",
  "libredox 0.0.1",
  "thiserror 1.0.63",
 ]
@@ -10754,7 +10760,7 @@ version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a4e608c6638b9c18977b00b475ac1f28d14e84b27d8d42f70e0bf1e3dec127ac"
 dependencies = [
- "getrandom 0.2.13",
+ "getrandom 0.2.11",
  "libredox 0.1.3",
  "thiserror 2.0.17",
 ]
@@ -10869,7 +10875,7 @@ dependencies = [
  "base64 0.22.1",
  "chrono",
  "form_urlencoded",
- "getrandom 0.2.13",
+ "getrandom 0.2.11",
  "hex",
  "hmac",
  "home",
@@ -11060,7 +11066,7 @@ checksum = "70ac5d832aa16abd7d1def883a8545280c20a60f523a370aa3a9617c2b8550ee"
 dependencies = [
  "cc",
  "cfg-if",
- "getrandom 0.2.13",
+ "getrandom 0.2.11",
  "libc",
  "untrusted 0.9.0",
  "windows-sys 0.52.0",
@@ -13228,7 +13234,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.11.0",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -15092,7 +15098,7 @@ dependencies = [
  "getrandom 0.3.1",
  "once_cell",
  "rustix 1.1.3",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -17049,19 +17055,6 @@ dependencies = [
  "windows-result 0.2.0",
  "windows-strings 0.1.0",
  "windows-targets 0.52.6",
-]
-
-[[package]]
-name = "windows-core"
-version = "0.61.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4763c1de310c86d75a878046489e2e5ba02c649d185f21c67d4cf8a56d098980"
-dependencies = [
- "windows-implement 0.60.2",
- "windows-interface 0.59.3",
- "windows-link 0.1.1",
- "windows-result 0.3.2",
- "windows-strings 0.4.0",
 ]
 
 [[package]]
