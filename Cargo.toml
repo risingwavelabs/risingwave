@@ -312,6 +312,8 @@ nonstandard_style = { level = "warn", priority = -1 }
 rust_2018_idioms = { level = "warn", priority = -1 }
 # Backward compatibility is not important for an application.
 async_fn_in_trait = "allow"
+# Protobuf-generated APIs contain legacy variants still used across crates.
+deprecated = "allow"
 unexpected_cfgs = { level = "warn", check-cfg = [
     'cfg(madsim)',
     'cfg(coverage)',
