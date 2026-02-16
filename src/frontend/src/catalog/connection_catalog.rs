@@ -29,6 +29,7 @@ pub struct ConnectionCatalog {
 impl ConnectionCatalog {
     pub fn connection_type(&self) -> &str {
         match &self.info {
+            #[expect(deprecated)]
             Info::PrivateLinkService(srv) => srv.get_provider().unwrap().as_str_name(),
             Info::ConnectionParams(params) => params.get_connection_type().unwrap().as_str_name(),
         }
@@ -36,6 +37,7 @@ impl ConnectionCatalog {
 
     pub fn provider(&self) -> &str {
         match &self.info {
+            #[expect(deprecated)]
             Info::PrivateLinkService(_) => "PRIVATELINK",
             Info::ConnectionParams(_) => panic!("ConnectionParams is not supported as provider."),
         }

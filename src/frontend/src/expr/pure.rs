@@ -97,6 +97,7 @@ impl ExprVisitor for ImpureAnalyzer {
         let func_type = func_call.func_type();
         match func_type {
             Type::Unspecified => unreachable!(),
+            #[expect(deprecated)]
             Type::Add
             | Type::Subtract
             | Type::Multiply

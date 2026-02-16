@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#![expect(deprecated)] // `#[function(..., deprecated)]` expands to deprecated enum variants.
+
 use risingwave_expr::function;
 
 /// Returns the index of the first occurrence of the specified substring in the input string,

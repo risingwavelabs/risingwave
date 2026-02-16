@@ -941,12 +941,15 @@ pub fn start_compactor(
                                     }
                                 });
                             }
+                            #[expect(deprecated)]
                             ResponseEvent::VacuumTask(_) => {
                                 unreachable!("unexpected vacuum task");
                             }
+                            #[expect(deprecated)]
                             ResponseEvent::FullScanTask(_) => {
                                 unreachable!("unexpected scan task");
                             }
+                            #[expect(deprecated)]
                             ResponseEvent::ValidationTask(validation_task) => {
                                 let validation_task = ValidationTask::from(validation_task);
                                 executor.spawn(async move {
