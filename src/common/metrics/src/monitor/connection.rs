@@ -34,8 +34,8 @@ use prometheus::{
     IntCounter, IntCounterVec, IntGauge, IntGaugeVec, Registry,
     register_int_counter_vec_with_registry, register_int_gauge_vec_with_registry,
 };
-use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 use thiserror_ext::AsReport;
+use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 use tonic::transport::{Channel, Endpoint};
 use tower_service::Service;
 use tracing::{trace, warn};
