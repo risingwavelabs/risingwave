@@ -977,7 +977,7 @@ impl DashboardService {
                 "/monitor/list_heap_profile/{worker_id}",
                 get(list_heap_profile),
             )
-            .route("/monitor/analyze/{worker_id}/*path", get(analyze_heap))
+            .route("/monitor/analyze/{worker_id}/{*path}", get(analyze_heap))
             // /monitor/diagnose/?format={text or json}
             .route("/monitor/diagnose/", get(diagnose))
             .layer(
