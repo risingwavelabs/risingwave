@@ -42,14 +42,11 @@ use google_cloud_googleapis::cloud::bigquery::storage::v1::{
 use google_cloud_pubsub::client::google_cloud_auth;
 use google_cloud_pubsub::client::google_cloud_auth::credentials::CredentialsFile;
 use phf::{Set, phf_set};
-use prost::Message;
-use prost::Message as Message014;
 use prost_reflect::{FieldDescriptor, MessageDescriptor};
 use prost_types::{
     DescriptorProto, FieldDescriptorProto, FileDescriptorProto, FileDescriptorSet,
     field_descriptor_proto,
 };
-use prost_types::DescriptorProto as DescriptorProto014;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::DataType;
@@ -686,7 +683,7 @@ impl BigQuerySinkWriter {
                 message_descriptor,
                 proto_field,
                 writer_pb_schema: ProtoSchema {
-                    proto_descriptor: Some(to_gcloud_descriptor(&descriptor_proto)?),
+                    proto_descriptor: Some(descriptor_proto.clone()),
                 },
             },
             resp_stream,
@@ -899,13 +896,6 @@ fn build_protobuf_descriptor_pool(desc: &DescriptorProto) -> Result<prost_reflec
     })
     .context("failed to build descriptor pool")
     .map_err(SinkError::BigQuery)
-}
-
-fn to_gcloud_descriptor(desc: &DescriptorProto) -> Result<DescriptorProto014> {
-    let bytes = Message::encode_to_vec(desc);
-    Message014::decode(bytes.as_slice())
-        .context("failed to convert descriptor proto")
-        .map_err(SinkError::BigQuery)
 }
 
 fn build_protobuf_schema<'a>(
