@@ -35,6 +35,7 @@ use prometheus::{
     register_int_counter_vec_with_registry, register_int_gauge_vec_with_registry,
 };
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
+use thiserror_ext::AsReport;
 use tonic::transport::{Channel, Endpoint};
 use tower_service::Service;
 use tracing::{trace, warn};
@@ -685,7 +686,7 @@ impl<L> tonic::transport::server::Router<L> {
             .unwrap_or_else(|err| {
                 panic!(
                     "failed to bind `{connection_type}` to `{listen_addr}`: {}",
-                    err
+                    err.as_report()
                 )
             });
         let incoming =
