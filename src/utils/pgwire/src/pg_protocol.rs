@@ -1576,7 +1576,10 @@ fn parse_options(options: &str) -> PsqlResult<Vec<(String, String)>> {
                 ));
             }
         } else {
-            tracing::warn!("ignoring unrecognized option for backward compatibility: {arg}");
+            tracing::warn!(
+                arg,
+                "ignoring unrecognized option for backward compatibility"
+            );
         }
     }
     Ok(config)
