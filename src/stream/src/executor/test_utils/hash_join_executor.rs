@@ -178,6 +178,7 @@ pub async fn setup_bench_stream_hash_join(
                 1024, // chunk_size
                 2048, // high_join_amplification_threshold
                 cache_size,
+                vec![], // watermark_indices_in_jk
             );
             (tx_l, tx_r, executor.boxed().execute())
         }
@@ -208,6 +209,7 @@ pub async fn setup_bench_stream_hash_join(
                 1024, // chunk_size
                 2048, // high_join_amplification_threshold
                 cache_size,
+                vec![], // watermark_indices_in_jk
             );
             (tx_l, tx_r, executor.boxed().execute())
         }

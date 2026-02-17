@@ -87,7 +87,7 @@
   stream_plan: |-
     StreamMaterialize { columns: [t1_ts, ts2, t1_v1, t1_v2, t2_v1, t2_v2, t1._row_id(hidden), t2._row_id(hidden)], stream_key: [t1._row_id, t2._row_id, t1_ts], pk_columns: [t1._row_id, t2._row_id, t1_ts], pk_conflict: NoCheck, watermark_columns: [t1_ts, ts2] }
     └─StreamExchange { dist: HashShard(t1.ts, t1._row_id, t2._row_id) }
-      └─StreamHashJoin [window, append_only] { type: Inner, predicate: t1.ts = t2.ts, output_watermarks: [[t1.ts], [t2.ts]], output: [t1.ts, t2.ts, t1.v1, t1.v2, t2.v1, t2.v2, t1._row_id, t2._row_id] }
+      └─StreamHashJoin [window, append_only] { type: Inner, predicate: t1.ts = t2.ts, conditions_to_clean_state_in_join_key: [(t1.ts = t2.ts)], output_watermarks: [[t1.ts], [t2.ts]], output: [t1.ts, t2.ts, t1.v1, t1.v2, t2.v1, t2.v2, t1._row_id, t2._row_id] }
         ├─StreamExchange { dist: HashShard(t1.ts) }
         │ └─StreamTableScan { table: t1, columns: [t1.ts, t1.v1, t1.v2, t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
         └─StreamExchange { dist: HashShard(t2.ts) }
@@ -100,7 +100,7 @@
   stream_plan: |-
     StreamMaterialize { columns: [t1_ts, t1_v1, t1_v2, t1._row_id(hidden)], stream_key: [t1._row_id, t1_ts], pk_columns: [t1._row_id, t1_ts], pk_conflict: NoCheck, watermark_columns: [t1_ts] }
     └─StreamExchange { dist: HashShard(t1.ts, t1._row_id) }
-      └─StreamHashJoin [window] { type: LeftSemi, predicate: t1.ts = t2.ts, output_watermarks: [[t1.ts]], output: all }
+      └─StreamHashJoin [window] { type: LeftSemi, predicate: t1.ts = t2.ts, conditions_to_clean_state_in_join_key: [(t1.ts = t2.ts)], output_watermarks: [[t1.ts]], output: all }
         ├─StreamExchange { dist: HashShard(t1.ts) }
         │ └─StreamTableScan { table: t1, columns: [t1.ts, t1.v1, t1.v2, t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
         └─StreamExchange { dist: HashShard(t2.ts) }
@@ -145,6 +145,43 @@
         └─StreamExchange { dist: HashShard(t2.v1) }
           └─StreamProject { exprs: [t2.ts, t2.v1, t2.v2, AddWithTimeZone(t2.ts, '00:00:01':Interval, 'UTC':Varchar) as $expr2, t2._row_id], output_watermarks: [[t2.ts, $expr2]] }
             └─StreamTableScan { table: t2, columns: [t2.ts, t2.v1, t2.v2, t2._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t2._row_id], pk: [_row_id], dist: UpstreamHashShard(t2._row_id) }
+  stream_dist_plan: |+
+    Fragment 0
+    StreamMaterialize { columns: [t1_ts, t1_v1, t1_v2, t2_ts, t2_v1, t2_v2, t1._row_id(hidden), t2._row_id(hidden)], stream_key: [t1._row_id, t2._row_id, t1_v1], pk_columns: [t1._row_id, t2._row_id, t1_v1], pk_conflict: NoCheck, watermark_columns: [t1_ts, t2_ts] }
+    └── StreamExchange Hash([1, 6, 7]) from 1
+
+    Fragment 1
+    StreamHashJoin [interval, append_only] { type: Inner, predicate: t1.v1 = t2.v1 AND (t1.ts >= $expr2) AND ($expr1 <= t2.ts), conditions_to_clean_left_state_table: (t1.ts >= $expr2), conditions_to_clean_right_state_table: ($expr1 <= t2.ts), output_watermarks: [[t1.ts], [t2.ts]], output: [t1.ts, t1.v1, t1.v2, t2.ts, t2.v1, t2.v2, t1._row_id, t2._row_id] }
+    ├── tables: [ HashJoinLeft: 0, HashJoinDegreeLeft: 1, HashJoinRight: 2, HashJoinDegreeRight: 3 ]
+    ├── StreamExchange Hash([1]) from 2
+    └── StreamExchange Hash([1]) from 3
+
+    Fragment 2
+    StreamProject { exprs: [t1.ts, t1.v1, t1.v2, AddWithTimeZone(t1.ts, '00:00:01':Interval, 'UTC':Varchar) as $expr1, t1._row_id], output_watermarks: [[t1.ts, $expr1]] }
+    └── StreamTableScan { table: t1, columns: [t1.ts, t1.v1, t1.v2, t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) } { tables: [ StreamScan: 4 ] }
+        ├── Upstream
+        └── BatchPlanNode
+
+    Fragment 3
+    StreamProject { exprs: [t2.ts, t2.v1, t2.v2, AddWithTimeZone(t2.ts, '00:00:01':Interval, 'UTC':Varchar) as $expr2, t2._row_id], output_watermarks: [[t2.ts, $expr2]] }
+    └── StreamTableScan { table: t2, columns: [t2.ts, t2.v1, t2.v2, t2._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t2._row_id], pk: [_row_id], dist: UpstreamHashShard(t2._row_id) } { tables: [ StreamScan: 5 ] }
+        ├── Upstream
+        └── BatchPlanNode
+
+    Table 0 { columns: [ t1_ts, t1_v1, t1_v2, $expr1, t1__row_id, _rw_timestamp ], primary key: [ $1 ASC, $4 ASC ], value indices: [ 0, 1, 2, 3, 4 ], distribution key: [ 1 ], read pk prefix len hint: 1, clean watermark indices: [0] }
+
+    Table 1 { columns: [ t1_v1, t1__row_id, _degree, t1_ts, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2, 3 ], distribution key: [ 0 ], read pk prefix len hint: 1, clean watermark indices: [3] }
+
+    Table 2 { columns: [ t2_ts, t2_v1, t2_v2, $expr2, t2__row_id, _rw_timestamp ], primary key: [ $1 ASC, $4 ASC ], value indices: [ 0, 1, 2, 3, 4 ], distribution key: [ 1 ], read pk prefix len hint: 1, clean watermark indices: [0] }
+
+    Table 3 { columns: [ t2_v1, t2__row_id, _degree, t2_ts, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2, 3 ], distribution key: [ 0 ], read pk prefix len hint: 1, clean watermark indices: [3] }
+
+    Table 4 { columns: [ vnode, epoch, row_count, is_epoch_finished, _row_id, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3, 4 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
+
+    Table 5 { columns: [ vnode, epoch, row_count, is_epoch_finished, _row_id, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3, 4 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
+
+    Table 4294967294 { columns: [ t1_ts, t1_v1, t1_v2, t2_ts, t2_v1, t2_v2, t1._row_id, t2._row_id, _rw_timestamp ], primary key: [ $6 ASC, $7 ASC, $1 ASC ], value indices: [ 0, 1, 2, 3, 4, 5, 6, 7 ], distribution key: [ 1, 6, 7 ], read pk prefix len hint: 3 }
+
 - name: union all
   sql: |
     create table t1 (ts timestamp with time zone, v1 int, v2 int, watermark for ts as ts - INTERVAL '1' SECOND) append only;
@@ -254,3 +291,88 @@
       │ └─StreamTableScan { table: t1, columns: [t1.ts, t1.v1, t1.v2, t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
       └─StreamExchange { dist: HashShard(t2.v1) }
         └─StreamTableScan { table: t2, columns: [t2.ts, t2.v1, t2.v2, t2._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t2._row_id], pk: [_row_id], dist: UpstreamHashShard(t2._row_id) }
+- name: window join with multiple watermark columns in join key
+  sql: |
+    create table t1 (ts timestamp with time zone, v1 int, watermark for ts as ts - INTERVAL '1' SECOND) append only;
+    create table t2 (ts timestamp with time zone, v1 int, watermark for ts as ts - INTERVAL '1' SECOND) append only;
+    create materialized view mv1 as select ts as ts1, ts as ts2, v1 from t1;
+    create materialized view mv2 as select ts as ts1, ts as ts2, v1 from t2;
+    select mv1.ts1 as mv1ts1, mv1.ts2 as mv1ts2, mv2.ts1 as mv2ts1, mv2.ts2 as mv2ts2 from mv1, mv2 where mv1.ts1 = mv2.ts1 and mv1.ts2 = mv2.ts2;
+  stream_dist_plan: |+
+    Fragment 0
+    StreamMaterialize { columns: [mv1ts1, mv1ts2, mv2ts1, mv2ts2, mv1.t1._row_id(hidden), mv2.t2._row_id(hidden)], stream_key: [mv1.t1._row_id, mv2.t2._row_id, mv1ts1, mv1ts2], pk_columns: [mv1.t1._row_id, mv2.t2._row_id, mv1ts1, mv1ts2], pk_conflict: NoCheck, watermark_columns: [mv1ts1, mv1ts2, mv2ts1, mv2ts2] }
+    └── StreamExchange Hash([0, 1, 4, 5]) from 1
+
+    Fragment 1
+    StreamHashJoin [window, append_only] { type: Inner, predicate: mv1.ts1 = mv2.ts1 AND mv1.ts2 = mv2.ts2, conditions_to_clean_state_in_join_key: [(mv1.ts1 = mv2.ts1)], output_watermarks: [[mv1.ts1], [mv2.ts1], [mv1.ts2], [mv2.ts2]], output: [mv1.ts1, mv1.ts2, mv2.ts1, mv2.ts2, mv1.t1._row_id, mv2.t2._row_id] }
+    ├── tables: [ HashJoinLeft: 0, HashJoinDegreeLeft: 1, HashJoinRight: 2, HashJoinDegreeRight: 3 ]
+    ├── StreamExchange Hash([0, 1]) from 2
+    └── StreamExchange Hash([0, 1]) from 3
+
+    Fragment 2
+    StreamTableScan { table: mv1, columns: [mv1.ts1, mv1.ts2, mv1.t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [mv1.t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(mv1.t1._row_id) } { tables: [ StreamScan: 4 ] }
+    ├── Upstream
+    └── BatchPlanNode
+
+    Fragment 3
+    StreamTableScan { table: mv2, columns: [mv2.ts1, mv2.ts2, mv2.t2._row_id], stream_scan_type: SnapshotBackfill, stream_key: [mv2.t2._row_id], pk: [t2._row_id], dist: UpstreamHashShard(mv2.t2._row_id) } { tables: [ StreamScan: 5 ] }
+    ├── Upstream
+    └── BatchPlanNode
+
+    Table 0 { columns: [ mv1_ts1, mv1_ts2, mv1_t1__row_id, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC, $2 ASC ], value indices: [ 0, 1, 2 ], distribution key: [ 0, 1 ], read pk prefix len hint: 2, clean watermark indices: [0] }
+
+    Table 1 { columns: [ mv1_ts1, mv1_ts2, mv1_t1__row_id, _degree, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC, $2 ASC ], value indices: [ 3 ], distribution key: [ 0, 1 ], read pk prefix len hint: 2, clean watermark indices: [0] }
+
+    Table 2 { columns: [ mv2_ts1, mv2_ts2, mv2_t2__row_id, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC, $2 ASC ], value indices: [ 0, 1, 2 ], distribution key: [ 0, 1 ], read pk prefix len hint: 2, clean watermark indices: [0] }
+
+    Table 3 { columns: [ mv2_ts1, mv2_ts2, mv2_t2__row_id, _degree, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC, $2 ASC ], value indices: [ 3 ], distribution key: [ 0, 1 ], read pk prefix len hint: 2, clean watermark indices: [0] }
+
+    Table 4 { columns: [ vnode, epoch, row_count, is_epoch_finished, t1__row_id, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3, 4 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
+
+    Table 5 { columns: [ vnode, epoch, row_count, is_epoch_finished, t2__row_id, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3, 4 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
+
+    Table 4294967294 { columns: [ mv1ts1, mv1ts2, mv2ts1, mv2ts2, mv1.t1._row_id, mv2.t2._row_id, _rw_timestamp ], primary key: [ $4 ASC, $5 ASC, $0 ASC, $1 ASC ], value indices: [ 0, 1, 2, 3, 4, 5 ], distribution key: [ 0, 1, 4, 5 ], read pk prefix len hint: 4 }
+
+- name: window join with watermark in join key and inequality
+  sql: |
+    create table t1 (ts timestamp with time zone, v1 int, watermark for ts as ts - INTERVAL '1' SECOND) append only;
+    create table t2 (ts timestamp with time zone, v1 int, watermark for ts as ts - INTERVAL '1' SECOND) append only;
+    create materialized view mv1 as select ts as ts1, ts as ts2, v1 from t1;
+    create materialized view mv2 as select ts as ts1, ts as ts2, v1 from t2;
+    select mv1.ts1 as mv1ts1, mv1.ts2 as mv1ts2, mv2.ts1 as mv2ts1, mv2.ts2 as mv2ts2 from mv1, mv2 where mv1.ts1 = mv2.ts1 and mv1.ts2 >= mv2.ts2 and mv1.ts2 <= mv2.ts2 + INTERVAL '1' HOUR;
+  stream_dist_plan: |+
+    Fragment 0
+    StreamMaterialize { columns: [mv1ts1, mv1ts2, mv2ts1, mv2ts2, mv1.t1._row_id(hidden), mv2.t2._row_id(hidden)], stream_key: [mv1.t1._row_id, mv2.t2._row_id, mv1ts1], pk_columns: [mv1.t1._row_id, mv2.t2._row_id, mv1ts1], pk_conflict: NoCheck, watermark_columns: [mv1ts1, mv1ts2, mv2ts1] }
+    └── StreamExchange Hash([0, 4, 5]) from 1
+
+    Fragment 1
+    StreamHashJoin [window, append_only] { type: Inner, predicate: mv1.ts1 = mv2.ts1 AND (mv1.ts2 >= mv2.ts2) AND (mv1.ts2 <= $expr1), conditions_to_clean_state_in_join_key: [(mv1.ts1 = mv2.ts1)], output_watermarks: [[mv1.ts1], [mv2.ts1], [mv1.ts2]], output: [mv1.ts1, mv1.ts2, mv2.ts1, mv2.ts2, mv1.t1._row_id, mv2.t2._row_id] }
+    ├── tables: [ HashJoinLeft: 0, HashJoinDegreeLeft: 1, HashJoinRight: 2, HashJoinDegreeRight: 3 ]
+    ├── StreamExchange Hash([0]) from 2
+    └── StreamExchange Hash([0]) from 3
+
+    Fragment 2
+    StreamTableScan { table: mv1, columns: [mv1.ts1, mv1.ts2, mv1.t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [mv1.t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(mv1.t1._row_id) } { tables: [ StreamScan: 4 ] }
+    ├── Upstream
+    └── BatchPlanNode
+
+    Fragment 3
+    StreamProject { exprs: [mv2.ts1, mv2.ts2, AddWithTimeZone(mv2.ts2, '01:00:00':Interval, 'UTC':Varchar) as $expr1, mv2.t2._row_id], output_watermarks: [[mv2.ts1], [mv2.ts2, $expr1]] }
+    └── StreamTableScan { table: mv2, columns: [mv2.ts1, mv2.ts2, mv2.t2._row_id], stream_scan_type: SnapshotBackfill, stream_key: [mv2.t2._row_id], pk: [t2._row_id], dist: UpstreamHashShard(mv2.t2._row_id) } { tables: [ StreamScan: 5 ] }
+        ├── Upstream
+        └── BatchPlanNode
+
+    Table 0 { columns: [ mv1_ts1, mv1_ts2, mv1_t1__row_id, _rw_timestamp ], primary key: [ $0 ASC, $2 ASC ], value indices: [ 0, 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 1, clean watermark indices: [0] }
+
+    Table 1 { columns: [ mv1_ts1, mv1_t1__row_id, _degree, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1, clean watermark indices: [0] }
+
+    Table 2 { columns: [ mv2_ts1, mv2_ts2, $expr1, mv2_t2__row_id, _rw_timestamp ], primary key: [ $0 ASC, $3 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [ 0 ], read pk prefix len hint: 1, clean watermark indices: [0] }
+
+    Table 3 { columns: [ mv2_ts1, mv2_t2__row_id, _degree, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1, clean watermark indices: [0] }
+
+    Table 4 { columns: [ vnode, epoch, row_count, is_epoch_finished, t1__row_id, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3, 4 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
+
+    Table 5 { columns: [ vnode, epoch, row_count, is_epoch_finished, t2__row_id, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3, 4 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
+
+    Table 4294967294 { columns: [ mv1ts1, mv1ts2, mv2ts1, mv2ts2, mv1.t1._row_id, mv2.t2._row_id, _rw_timestamp ], primary key: [ $4 ASC, $5 ASC, $0 ASC ], value indices: [ 0, 1, 2, 3, 4, 5 ], distribution key: [ 0, 4, 5 ], read pk prefix len hint: 3 }
+
