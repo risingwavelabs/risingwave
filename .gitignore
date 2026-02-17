@@ -70,6 +70,7 @@ risedev-components.user.env
 risedev-compose.yml
 risedev-profiles.user.yml
 .claude/settings.local.json
+.gemini/config.yaml
 
 # Test Generated Files & Outputs
 ft.txt
