@@ -1,6 +1,7 @@
 from pyspark.sql import SparkSession
 import configparser
 import psycopg2
+import time
 
 def check_spark_table(args):
     expect_row_count = 0
@@ -13,9 +14,16 @@ def check_spark_table(args):
     print(f"expect_row_count is {expect_row_count}")
     spark_config = args['spark']
     spark = SparkSession.builder.remote(spark_config['url']).getOrCreate()
-    actual_row_count = spark.sql("SELECT COUNT(*) FROM s1.t1").collect()[0][0]
-    print(f"actual_row_count is {actual_row_count}")
-    assert actual_row_count==expect_row_count
+    actual_row_count = 0
+    # The sink can lag behind CDC a bit on CI machines, so poll before failing.
+    for _ in range(18):
+        actual_row_count = spark.sql("SELECT COUNT(*) FROM s1.t1").collect()[0][0]
+        print(f"actual_row_count is {actual_row_count}")
+        if actual_row_count == expect_row_count:
+            return
+        time.sleep(5)
+
+    assert actual_row_count == expect_row_count
 
 
 if __name__ == "__main__":

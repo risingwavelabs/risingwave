@@ -18,6 +18,8 @@ WITH
     connect_mode = 'plain'
   );
 
+\sleep 5
+
 
 INSERT INTO
   personnel
