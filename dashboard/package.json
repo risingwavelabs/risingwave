@@ -5,15 +5,14 @@
     "build": "next build",
     "start": "next start",
     "gen-proto": "./scripts/generate_proto.sh",
-    "lint": "prettier --check . && next lint",
-    "format": "prettier --write . && next lint --fix",
+    "lint": "prettier --check .",
+    "format": "prettier --write .",
     "mock-server": "node ./mock-server.js",
     "vendor-monaco": "rsync -av node_modules/monaco-editor/min/vs/ public/monaco/",
     "postinstall": "npm run gen-proto && npm run vendor-monaco",
     "clean": "rm -rf .next/ && rm -rf out/"
   },
   "dependencies": {
-    "16": "^0.0.2",
     "@chakra-ui/react": "^2.3.1",
     "@emotion/react": "^11.10.4",
     "@emotion/styled": "^11.10.4",
