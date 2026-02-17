@@ -584,12 +584,28 @@ enum JoinEncodingType {
   CPU_OPTIMIZED = 2;
 }
 
+message JoinKeyWatermarkIndex {
+  // Index in `left_key`/`right_key`.
+  uint32 index = 1;
+  // Whether watermark on this join key triggers state cleaning of the counterpart.
+  bool do_state_cleaning = 2;
+}
+
+message HashJoinWatermarkHandleDesc {
+  // Join-key positions whose watermarks should be aligned across both sides.
+  repeated JoinKeyWatermarkIndex watermark_indices_in_jk = 1;
+  // Inequality pairs used for watermark generation / state cleaning.
+  repeated InequalityPairV2 inequality_pairs = 2;
+}
+
 message HashJoinNode {
   plan_common.JoinType join_type = 1;
   repeated int32 left_key = 2;
   repeated int32 right_key = 3;
   expr.ExprNode condition = 4;
-  repeated InequalityPair inequality_pairs = 5;
+  reserved 5;
+  reserved "inequality_pairs";
+
   // Used for internal table states.
   catalog.Table left_table = 6;
   // Used for internal table states.
@@ -620,8 +636,11 @@ message HashJoinNode {
   // Deprecated. Use the one from `StreamingDeveloperConfig` instead.
   JoinEncodingType join_encoding_type = 15 [deprecated = true];
 
-  // New inequality pairs with clearer semantics. Takes precedence over `inequality_pairs` if non-empty.
-  repeated InequalityPairV2 inequality_pairs_v2 = 16;
+  reserved 16;
+  reserved "inequality_pairs_v2";
+
+  // Description of watermark-based and other state cleaning strategies.
+  HashJoinWatermarkHandleDesc watermark_handle_desc = 17;
 }
 
 message AsOfJoinNode {
