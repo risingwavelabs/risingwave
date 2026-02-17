@@ -91,6 +91,9 @@ impl Task for FrontendService {
         ctx.pb.set_message("starting...");
 
         let mut cmd = ctx.risingwave_cmd("frontend-node")?;
+        if std::env::var_os("RUST_MIN_STACK").is_none() {
+            cmd.env("RUST_MIN_STACK", "4194304");
+        }
 
         Self::apply_command_args(&mut cmd, &self.config)?;
 

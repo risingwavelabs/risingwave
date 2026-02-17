@@ -1,5 +1,7 @@
 # Test interval join with watermark state cleaning
 
+control substitution on
+
 statement ok
 SET RW_IMPLICIT_FLUSH TO true;
 
@@ -37,6 +39,21 @@ CREATE MATERIALIZED VIEW eowc_mv AS
 SELECT * FROM interval_join_mv
 EMIT ON WINDOW CLOSE;
 
+# Resolve join internal state table IDs/names for watermark and compaction checks
+let left_state_table_id, left_state_table
+SELECT id, name
+FROM rw_catalog.rw_internal_table_info
+WHERE job_name = 'interval_join_mv' AND name LIKE '%hashjoinleft%'
+ORDER BY id
+LIMIT 1
+
+let right_state_table_id, right_state_table
+SELECT id, name
+FROM rw_catalog.rw_internal_table_info
+WHERE job_name = 'interval_join_mv' AND name LIKE '%hashjoinright%'
+ORDER BY id
+LIMIT 1
+
 # Insert initial data
 statement ok
 INSERT INTO left_table VALUES (1, '2024-01-01 00:00:10+00', 100);
@@ -56,10 +73,60 @@ SELECT * FROM eowc_mv;
 ----
 
 
+# Verify internal join-state rows before cleanup
+query IT rowsort
+SELECT left_table_id, left_table_ts FROM ${left_state_table};
+----
+1 2024-01-01 00:00:10+00:00
+
+query IT rowsort
+SELECT right_table_id, right_table_ts FROM ${right_state_table};
+----
+1 2024-01-01 00:00:05+00:00
+
+# Left side should have watermark info for state cleaning
+query I
+SELECT CASE WHEN count(*) > 0 THEN 1 ELSE 0 END
+FROM rw_catalog.rw_hummock_table_watermark
+WHERE table_id = ${left_state_table_id};
+----
+1
+
+# Right side is not cleaned by watermark in this join (left.ts >= right.ts)
+query I
+SELECT count(*)
+FROM rw_catalog.rw_hummock_table_watermark
+WHERE table_id = ${right_state_table_id};
+----
+0
+
+let left_wm_before
+SELECT max(encode(watermark::bytea, 'hex'))
+FROM rw_catalog.rw_hummock_table_watermark
+WHERE table_id = ${left_state_table_id}
+
 
 # Insert more data to advance watermark
 statement ok
 INSERT INTO left_table VALUES (2, '2024-01-01 00:00:30+00', 101);
+
+# Before the right-side row arrives, right-side watermark has not advanced,
+# so left state should still keep both rows.
+query IT rowsort
+SELECT right_table_id, right_table_ts FROM ${right_state_table};
+----
+1 2024-01-01 00:00:05+00:00
+
+query IT rowsort
+SELECT left_table_id, left_table_ts FROM ${left_state_table};
+----
+1 2024-01-01 00:00:10+00:00
+2 2024-01-01 00:00:30+00:00
+
+query I
+SELECT count(*) FROM eowc_mv;
+----
+0
 
 statement ok
 INSERT INTO right_table VALUES (2, '2024-01-01 00:00:25+00', 201);
@@ -70,11 +137,117 @@ SELECT * FROM interval_join_mv;
 1 1 2024-01-01 00:00:10+00:00 2024-01-01 00:00:05+00:00
 2 2 2024-01-01 00:00:30+00:00 2024-01-01 00:00:25+00:00
 
+let left_wm_after
+SELECT max(encode(watermark::bytea, 'hex'))
+FROM rw_catalog.rw_hummock_table_watermark
+WHERE table_id = ${left_state_table_id}
+
+query I
+SELECT CASE WHEN '${left_wm_before}' <> '${left_wm_after}' THEN 1 ELSE 0 END;
+----
+1
+
+query I
+SELECT CASE
+       WHEN min(left_table_ts) >= '2024-01-01 00:00:10+00'::timestamptz
+       AND max(left_table_ts) = '2024-01-01 00:00:30+00'::timestamptz
+       THEN 1 ELSE 0 END
+FROM ${left_state_table};
+----
+1
+
+query IT rowsort
+SELECT right_table_id, right_table_ts FROM ${right_state_table};
+----
+1 2024-01-01 00:00:05+00:00
+2 2024-01-01 00:00:25+00:00
+
+let table_id
+SELECT id
+FROM rw_catalog.rw_internal_table_info
+WHERE job_name = 'interval_join_mv' AND name LIKE '%hashjoinleft%'
+ORDER BY id
+LIMIT 1
+
+let compaction_group_id
+SELECT id
+FROM rw_catalog.rw_hummock_compaction_group_configs
+WHERE member_tables @> ('[' || $table_id || ']')::jsonb
+
+# Trigger compaction to reclaim rows older than watermark in left join state table
+system ok retry 10 backoff 1s
+./risedev ctl hummock trigger-manual-compaction -c "$compaction_group_id" -t "$table_id" -l 0,6
+
+# After compaction, the old left row (ts=10s) should be reclaimed by watermark
+query IT retry 20 backoff 1s
+SELECT left_table_id, left_table_ts FROM ${left_state_table};
+----
+2 2024-01-01 00:00:30+00:00
+
+query IT rowsort
+SELECT right_table_id, right_table_ts FROM ${right_state_table};
+----
+1 2024-01-01 00:00:05+00:00
+2 2024-01-01 00:00:25+00:00
+
+query I retry 20 backoff 1s
+SELECT total_key_count
+FROM rw_catalog.rw_table_stats
+WHERE id = ${left_state_table_id};
+----
+1
+
+query I retry 20 backoff 1s
+SELECT total_key_count
+FROM rw_catalog.rw_table_stats
+WHERE id = ${right_state_table_id};
+----
+2
+
 # Verify EOWC view receives watermark from the join
 query IITT rowsort retry 11 backoff 1s
 SELECT * FROM eowc_mv;
 ----
 1 1 2024-01-01 00:00:10+00:00 2024-01-01 00:00:05+00:00
+
+# Insert another matched pair after compaction and verify behavior remains correct.
+statement ok
+INSERT INTO left_table VALUES (3, '2024-01-01 00:00:50+00', 102);
+
+statement ok
+INSERT INTO right_table VALUES (3, '2024-01-01 00:00:45+00', 202);
+
+query IITT rowsort
+SELECT * FROM interval_join_mv;
+----
+1 1 2024-01-01 00:00:10+00:00 2024-01-01 00:00:05+00:00
+2 2 2024-01-01 00:00:30+00:00 2024-01-01 00:00:25+00:00
+3 3 2024-01-01 00:00:50+00:00 2024-01-01 00:00:45+00:00
+
+query IITT rowsort retry 11 backoff 1s
+SELECT * FROM eowc_mv;
+----
+1 1 2024-01-01 00:00:10+00:00 2024-01-01 00:00:05+00:00
+2 2 2024-01-01 00:00:30+00:00 2024-01-01 00:00:25+00:00
+
+system ok retry 10 backoff 1s
+./risedev ctl hummock trigger-manual-compaction -c "$compaction_group_id" -t "$table_id" -l 0,6
+
+query I retry 20 backoff 1s
+SELECT CASE
+       WHEN SUM(CASE WHEN left_table_id = 3 AND left_table_ts = '2024-01-01 00:00:50+00'::timestamptz THEN 1 ELSE 0 END) = 1
+       AND SUM(CASE WHEN left_table_id = 2 AND left_table_ts = '2024-01-01 00:00:30+00'::timestamptz THEN 1 ELSE 0 END) IN (0, 1)
+       THEN 1 ELSE 0 END
+FROM ${left_state_table};
+----
+1
+
+query IT rowsort
+SELECT right_table_id, right_table_ts FROM ${right_state_table};
+----
+1 2024-01-01 00:00:05+00:00
+2 2024-01-01 00:00:25+00:00
+3 2024-01-01 00:00:45+00:00
 
 statement ok
 DROP MATERIALIZED VIEW eowc_mv;
@@ -88,7 +261,7 @@ DROP TABLE left_table;
 statement ok
 DROP TABLE right_table;
 
-# Test 2: BETWEEN condition (creates two inequality pairs)
+# Test 2: LEFT JOIN with BETWEEN condition (creates two inequality pairs)
 # a.ts BETWEEN b.ts AND b.ts + INTERVAL '10' SECOND
 # This is equivalent to: a.ts >= b.ts AND a.ts <= b.ts + INTERVAL '10' SECOND
 
@@ -111,14 +284,44 @@ CREATE TABLE stream_b (
 statement ok
 CREATE MATERIALIZED VIEW between_join_mv AS
 SELECT a.id as a_id, b.id as b_id, a.ts as a_ts, b.ts as b_ts, a.val, b.val as b_val
-FROM stream_a a, stream_b b
-WHERE a.id = b.id AND a.ts BETWEEN b.ts AND b.ts + INTERVAL '10' SECOND;
+FROM stream_a a
+LEFT JOIN stream_b b
+ON a.id = b.id AND a.ts BETWEEN b.ts AND b.ts + INTERVAL '10' SECOND;
 
 # Create an EOWC view to verify watermark propagation
 statement ok
 CREATE MATERIALIZED VIEW between_eowc_mv AS
 SELECT * FROM between_join_mv
 EMIT ON WINDOW CLOSE;
+
+let degree_left_table_id, degree_left_table
+SELECT id, name
+FROM rw_catalog.rw_internal_table_info
+WHERE job_name = 'between_join_mv' AND name LIKE '%hashjoindegreeleft%'
+ORDER BY id
+LIMIT 1
+
+# Resolve internal tables for state and watermark checks in Test 2.
+let between_left_state_tid, between_left_state_tname
+SELECT id, name
+FROM rw_catalog.rw_internal_table_info
+WHERE job_name = 'between_join_mv' AND name LIKE '%hashjoinleft%'
+ORDER BY id
+LIMIT 1
+
+let between_right_state_tid, between_right_state_tname
+SELECT id, name
+FROM rw_catalog.rw_internal_table_info
+WHERE job_name = 'between_join_mv' AND name LIKE '%hashjoinright%'
+ORDER BY id
+LIMIT 1
+
+let degree_right_table_id, degree_right_table
+SELECT id, name
+FROM rw_catalog.rw_internal_table_info
+WHERE job_name = 'between_join_mv' AND name LIKE '%hashjoindegreeright%'
+ORDER BY id
+LIMIT 1
 
 # Insert data where a.ts is within the BETWEEN range
 statement ok
@@ -133,24 +336,63 @@ SELECT * FROM between_join_mv;
 ----
 1 1 2024-01-01 00:00:08+00:00 2024-01-01 00:00:05+00:00 10 20
 
-# Verify EOWC view has not received watermark from the join
-query IITT rowsort
-SELECT * FROM between_eowc_mv;
+query II rowsort retry 11 backoff 1s
+SELECT stream_a_id, _degree FROM ${degree_left_table} ORDER BY stream_a_id;
 ----
+1 1
+
+# Verify state-table watermark coverage for BETWEEN LEFT JOIN.
+query I
+SELECT CASE WHEN count(*) > 0 THEN 1 ELSE 0 END
+FROM rw_catalog.rw_hummock_table_watermark
+WHERE table_id = ${between_left_state_tid};
+----
+1
+
+query I
+SELECT CASE WHEN count(*) > 0 THEN 1 ELSE 0 END
+FROM rw_catalog.rw_hummock_table_watermark
+WHERE table_id = ${degree_left_table_id};
+----
+1
+
+query I
+SELECT CASE WHEN count(*) > 0 THEN 1 ELSE 0 END
+FROM rw_catalog.rw_hummock_table_watermark
+WHERE table_id = ${between_right_state_tid};
+----
+1
+
+query I
+SELECT count(*)
+FROM rw_catalog.rw_hummock_table_watermark
+WHERE table_id = ${degree_right_table_id};
+----
+0
+
+# Capture watermark before newer rows are inserted.
+let between_left_wm_before
+SELECT max(encode(watermark::bytea, 'hex'))
+FROM rw_catalog.rw_hummock_table_watermark
+WHERE table_id = ${between_left_state_tid}
+
+# Verify EOWC view has not received watermark from the join
+query I
+SELECT count(*) FROM between_eowc_mv;
+----
+0
 
 
-# Insert data where a.ts is outside the BETWEEN range
+# Insert data where a.ts is outside the BETWEEN range:
+# LEFT JOIN should keep this row with NULLs on b-side.
 statement ok
 INSERT INTO stream_a VALUES (2, '2024-01-01 00:00:25+00', 30);
 
-statement ok
-INSERT INTO stream_b VALUES (2, '2024-01-01 00:00:05+00', 40);
-
-# a.ts (25s) is NOT between b.ts (5s) and b.ts + 10s (15s), so no match for id=2
 query IITTII rowsort
 SELECT * FROM between_join_mv;
 ----
 1 1 2024-01-01 00:00:08+00:00 2024-01-01 00:00:05+00:00 10 20
+2 NULL 2024-01-01 00:00:25+00:00 NULL 30 NULL
 
 # Insert more data to advance watermark significantly
 statement ok
@@ -164,13 +406,111 @@ query IITTII rowsort
 SELECT * FROM between_join_mv;
 ----
 1 1 2024-01-01 00:00:08+00:00 2024-01-01 00:00:05+00:00 10 20
+2 NULL 2024-01-01 00:00:25+00:00 NULL 30 NULL
 3 3 2024-01-01 00:01:00+00:00 2024-01-01 00:00:55+00:00 50 60
 
-# Verify EOWC view receives watermark - old data should be emitted
+let between_left_wm_after
+SELECT max(encode(watermark::bytea, 'hex'))
+FROM rw_catalog.rw_hummock_table_watermark
+WHERE table_id = ${between_left_state_tid}
+
+query I
+SELECT CASE WHEN '${between_left_wm_before}' <> '${between_left_wm_after}' THEN 1 ELSE 0 END;
+----
+1
+
+# Verify degree table behavior for LEFT JOIN.
+# Old rows may already be reclaimed by implicit compaction; if present, their degree must be correct.
+query I retry 11 backoff 1s
+SELECT CASE
+       WHEN SUM(CASE WHEN stream_a_id = 3 AND _degree = 1 THEN 1 ELSE 0 END) = 1
+       AND SUM(CASE WHEN stream_a_id = 2 AND _degree = 0 THEN 1 ELSE 0 END) IN (0, 1)
+       AND SUM(CASE WHEN stream_a_id = 1 AND _degree = 1 THEN 1 ELSE 0 END) IN (0, 1)
+       THEN 1 ELSE 0 END
+FROM ${degree_left_table};
+----
+1
+
+# Verify EOWC view receives exactly the rows that should be closed by watermark.
 query IITTII rowsort retry 11 backoff 1s
 SELECT * FROM between_eowc_mv;
 ----
 1 1 2024-01-01 00:00:08+00:00 2024-01-01 00:00:05+00:00 10 20
+2 NULL 2024-01-01 00:00:25+00:00 NULL 30 NULL
+
+let between_compaction_group_id
+SELECT id
+FROM rw_catalog.rw_hummock_compaction_group_configs
+WHERE member_tables @> ('[' || $between_left_state_tid || ']')::jsonb
+
+# Trigger manual compaction for Test 2 left state table and verify cleanup.
+system ok retry 10 backoff 1s
+./risedev ctl hummock trigger-manual-compaction -c "$between_compaction_group_id" -t "$between_left_state_tid" -l 0,6
+
+query IT rowsort retry 20 backoff 1s
+SELECT stream_a_id, stream_a_ts FROM ${between_left_state_tname} ORDER BY stream_a_id;
+----
+3 2024-01-01 00:01:00+00:00
+
+query IT rowsort
+SELECT stream_b_id, stream_b_ts FROM ${between_right_state_tname} ORDER BY stream_b_id;
+----
+1 2024-01-01 00:00:05+00:00
+3 2024-01-01 00:00:55+00:00
+
+query I retry 20 backoff 1s
+SELECT total_key_count
+FROM rw_catalog.rw_table_stats
+WHERE id = ${between_left_state_tid};
+----
+1
+
+# Insert key=3 rows after compaction to verify matching with uncompacted right-state data.
+statement ok
+INSERT INTO stream_a VALUES (3, '2024-01-01 00:00:54+00', 71);
+
+statement ok
+INSERT INTO stream_a VALUES (3, '2024-01-01 00:01:03+00', 72);
+
+query IITTII rowsort
+SELECT * FROM between_join_mv;
+----
+1 1 2024-01-01 00:00:08+00:00 2024-01-01 00:00:05+00:00 10 20
+2 NULL 2024-01-01 00:00:25+00:00 NULL 30 NULL
+3 3 2024-01-01 00:01:00+00:00 2024-01-01 00:00:55+00:00 50 60
+3 3 2024-01-01 00:01:03+00:00 2024-01-01 00:00:55+00:00 72 60
+
+# Keep one more matched pair after compaction to verify behavior keeps working.
+statement ok
+INSERT INTO stream_a VALUES (4, '2024-01-01 00:01:20+00', 70);
+
+statement ok
+INSERT INTO stream_b VALUES (4, '2024-01-01 00:01:15+00', 80);
+
+query IITTII rowsort
+SELECT * FROM between_join_mv;
+----
+1 1 2024-01-01 00:00:08+00:00 2024-01-01 00:00:05+00:00 10 20
+2 NULL 2024-01-01 00:00:25+00:00 NULL 30 NULL
+3 3 2024-01-01 00:01:00+00:00 2024-01-01 00:00:55+00:00 50 60
+3 3 2024-01-01 00:01:03+00:00 2024-01-01 00:00:55+00:00 72 60
+4 4 2024-01-01 00:01:20+00:00 2024-01-01 00:01:15+00:00 70 80
+
+query IITTII rowsort retry 11 backoff 1s
+SELECT * FROM between_eowc_mv;
+----
+1 1 2024-01-01 00:00:08+00:00 2024-01-01 00:00:05+00:00 10 20
+2 NULL 2024-01-01 00:00:25+00:00 NULL 30 NULL
+3 3 2024-01-01 00:01:00+00:00 2024-01-01 00:00:55+00:00 50 60
+3 3 2024-01-01 00:01:03+00:00 2024-01-01 00:00:55+00:00 72 60
+
+system ok retry 10 backoff 1s
+./risedev ctl hummock trigger-manual-compaction -c "$between_compaction_group_id" -t "$between_left_state_tid" -l 0,6
+
+query IT rowsort retry 20 backoff 1s
+SELECT stream_a_id, stream_a_ts FROM ${between_left_state_tname} ORDER BY stream_a_id;
+----
+4 2024-01-01 00:01:20+00:00
 
 statement ok
 DROP MATERIALIZED VIEW between_eowc_mv;

@@ -1451,7 +1451,7 @@ echo "All processes has exited."
 
 [tasks.slt]
 category = "RiseDev - Test - SQLLogicTest"
-install_crate = { min_version = "0.29.0", crate_name = "sqllogictest-bin", binary = "sqllogictest", test_arg = [
+install_crate = { min_version = "0.29.1", crate_name = "sqllogictest-bin", binary = "sqllogictest", test_arg = [
     "--help",
 ], install_command = "binstall" }
 dependencies = ["check-and-load-risedev-env-file"]
