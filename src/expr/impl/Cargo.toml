@@ -34,7 +34,7 @@ fancy-regex = "0.17"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = { workspace = true }
 futures-util = "0.3"
-ginepro = { version = "0.8", optional = true }
+ginepro = { git = "https://github.com/risingwavelabs/ginepro.git", rev = "109c6f48f1db0926f4783548250f3e31680ff98c", optional = true }
 hex = "0.4"
 hmac = "0.12"
 iceberg = { workspace = true }

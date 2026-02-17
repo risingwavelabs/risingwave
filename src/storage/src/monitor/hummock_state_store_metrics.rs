@@ -162,7 +162,7 @@ impl HummockStateStoreMetrics {
         )
         .unwrap();
         let sst_store_block_request_counts = RelabeledGuardedIntCounterVec::with_metric_level(
-            MetricLevel::Critical,
+            MetricLevel::Info,
             sst_store_block_request_counts,
             metric_level,
         );
@@ -440,15 +440,16 @@ impl HummockStateStoreMetrics {
         let per_table_imm_size = register_guarded_int_gauge_vec_with_registry!(
             "state_store_per_table_imm_size",
             "Total imm size per table",
-            &["table_id"],
+            &["table_id", "fragment_id"],
             registry
         )
         .unwrap();
 
-        let per_table_imm_size = RelabeledGuardedIntGaugeVec::with_metric_level(
+        let per_table_imm_size = RelabeledGuardedIntGaugeVec::with_metric_level_relabel_n(
             MetricLevel::Debug,
             per_table_imm_size,
             metric_level,
+            1,
         );
 
         let per_table_imm_count = register_guarded_int_gauge_vec_with_registry!(

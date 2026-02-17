@@ -70,8 +70,10 @@ echo "--- Run kafka sasl test"
 risedev slt './e2e_test/kafka-sasl/**/*.slt' -j4
 echo "--- Run kafka sasl test done"
 
-risedev slt './e2e_test/source_inline/**/*.slt' -j4
-risedev slt './e2e_test/source_inline/**/*.slt.serial'
+# Skip cron_only tests in both PR and main-cron e2e-source-test
+# cron_only tests are run separately in main-cron via dedicated job
+risedev slt './e2e_test/source_inline/**/*.slt' --skip 'cron_only' -j8
+risedev slt './e2e_test/source_inline/**/*.slt.serial' --skip 'cron_only'
 
 echo "--- Run Vault secret tests"
 risedev slt './e2e_test/ddl/vault_secret.slt'
