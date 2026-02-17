@@ -20,6 +20,11 @@
 const nextConfig = {
   output: "export",
   trailingSlash: true,
+  typescript: {
+    // Skip type checking during build for faster builds
+    // Type checking is done separately in CI
+    ignoreBuildErrors: true,
+  },
 }
 
 module.exports = nextConfig

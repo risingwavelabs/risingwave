@@ -1,5 +1,5 @@
 import { theme } from "@chakra-ui/react"
-import { tinycolor } from "@ctrl/tinycolor"
+import { TinyColor } from "@ctrl/tinycolor"
 
 /**
  * The color for the edge with given back pressure value.
@@ -13,7 +13,7 @@ export function backPressureColor(value: number) {
     theme.colors.yellow["400"],
     theme.colors.orange["500"],
     theme.colors.red["700"],
-  ].map((c) => tinycolor(c))
+  ].map((c) => new TinyColor(c))
 
   value = Math.max(value, 0)
   value = Math.min(value, 1)
@@ -23,8 +23,8 @@ export function backPressureColor(value: number) {
   const floor = Math.floor(pos)
   const ceil = Math.ceil(pos)
 
-  const color = tinycolor(colorRange[floor])
-    .mix(tinycolor(colorRange[ceil]), (pos - floor) * 100)
+  const color = new TinyColor(colorRange[floor])
+    .mix(new TinyColor(colorRange[ceil]), (pos - floor) * 100)
     .toHexString()
 
   return color
@@ -56,7 +56,7 @@ export function latencyToColor(latency_ms: number, baseColor: string) {
     theme.colors.yellow["200"],
     theme.colors.orange["300"],
     theme.colors.red["400"],
-  ].map((c) => tinycolor(c))
+  ].map((c) => new TinyColor(c))
 
   if (latency_ms <= LOWER) {
     return baseColor
@@ -79,8 +79,8 @@ export function latencyToColor(latency_ms: number, baseColor: string) {
   const ceil = Math.ceil(pos)
 
   // Interpolate between colors
-  const color = tinycolor(colorRange[floor])
-    .mix(tinycolor(colorRange[ceil]), (pos - floor) * 100)
+  const color = new TinyColor(colorRange[floor])
+    .mix(new TinyColor(colorRange[ceil]), (pos - floor) * 100)
     .toHexString()
 
   return color
