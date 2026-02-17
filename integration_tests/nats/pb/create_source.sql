@@ -6,7 +6,8 @@ WITH
     subject = 'live_stream_metrics',
     stream = 'risingwave',
     allow_create_stream = 'true',
-    connect_mode = 'plain'
+    connect_mode = 'plain',
+    consumer.durable_name = 'consumer_pb'
   ) FORMAT PLAIN ENCODE PROTOBUF (
     message = 'livestream.schema.LiveStreamMetrics',
     schema.location = 'http://file_server:8080/schema'
