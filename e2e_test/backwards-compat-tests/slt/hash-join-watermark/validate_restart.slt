@@ -1,0 +1,48 @@
+query IIT rowsort
+SELECT * FROM hjw_join_mv;
+----
+1 2024-01-01 00:00:01+00:00 11
+1 2024-01-01 00:00:05+00:00 22
+
+query IIT rowsort retry 11 backoff 1s
+SELECT * FROM hjw_eowc_mv;
+----
+1 2024-01-01 00:00:01+00:00 11
+
+query IITII rowsort
+SELECT * FROM bj_mv;
+----
+1 2024-01-01 00:00:02+00:00 2024-01-01 00:00:01+00:00 100 10
+1 2024-01-01 00:00:05+00:00 2024-01-01 00:00:04+00:00 200 20
+
+statement ok
+INSERT INTO hjw_right VALUES (1, '2024-01-01 00:00:09+00', 33);
+
+statement ok
+INSERT INTO hjw_left VALUES (1, '2024-01-01 00:00:09+00', 303);
+
+query IIT rowsort
+SELECT * FROM hjw_join_mv;
+----
+1 2024-01-01 00:00:01+00:00 11
+1 2024-01-01 00:00:05+00:00 22
+1 2024-01-01 00:00:09+00:00 33
+
+query IIT rowsort retry 11 backoff 1s
+SELECT * FROM hjw_eowc_mv;
+----
+1 2024-01-01 00:00:01+00:00 11
+1 2024-01-01 00:00:05+00:00 22
+
+statement ok
+INSERT INTO bj_right VALUES (1, '2024-01-01 00:00:07+00', 30);
+
+statement ok
+INSERT INTO bj_left VALUES (1, '2024-01-01 00:00:08+00', 300);
+
+query IITII rowsort
+SELECT * FROM bj_mv;
+----
+1 2024-01-01 00:00:02+00:00 2024-01-01 00:00:01+00:00 100 10
+1 2024-01-01 00:00:05+00:00 2024-01-01 00:00:04+00:00 200 20
+1 2024-01-01 00:00:08+00:00 2024-01-01 00:00:07+00:00 300 30
