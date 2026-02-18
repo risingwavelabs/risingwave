@@ -22,6 +22,26 @@ def rw_ready(dir: str, retries: int = 30, interval: int = 5) -> bool:
     return False
 
 
+def flush_retry(dir: str, retries: int = 3, interval: int = 10):
+    """Retry FLUSH a few times to avoid transient barrier errors."""
+    for i in range(retries):
+        try:
+            subprocess.run([
+                "psql", "-h", "localhost", "-p", "4566", "-d", "dev", "-U", "root",
+                "-c", "FLUSH;", "-v", "ON_ERROR_STOP=1", "-P", "pager=off"
+            ], cwd=dir, check=True)
+            return
+        except subprocess.CalledProcessError:
+            if i == retries - 1:
+                # dump logs on final failure
+                try:
+                    subprocess.run(["docker", "compose", "logs", "risingwave-standalone", "--tail", "200"], cwd=dir, check=False)
+                except Exception:
+                    pass
+                raise
+            sleep(interval)
+
+
 def run_sql_file(f: str, dir: str):
     print("Running SQL file: {} on RisingWave".format(f))
     # ON_ERROR_STOP=1 will let psql return error code when the query fails.
@@ -45,6 +65,8 @@ def run_sql_file(f: str, dir: str):
     f_norm = f.replace('\\\\', '/').replace('\\', '/')
     if f_norm.endswith('integration_tests/nats/create_sink.sql') or ('/nats/' in f_norm and f_norm.endswith('create_sink.sql')):
         sleep(int(os.getenv('NATS_SINK_WAIT_SECS', '5')))
+        # Since FLUSH is inside the file and may fail due to barrier timing, explicitly retry it.
+        flush_retry(dir)
 
 
 def run_demo(demo: str, format: str, wait_time=40):
