@@ -18,8 +18,7 @@ WITH
     connect_mode = 'plain'
   );
 
-\sleep 5
-
+-- Removed psql meta-command \sleep; handled in runner to avoid version dependency.
 
 INSERT INTO
   personnel

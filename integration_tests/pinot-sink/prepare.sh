@@ -1,6 +1,7 @@
 #!/bin/bash
 
 set -euo pipefail
+set -x  # echo commands for CI debuggability
 
 wait_for_container_running() {
   local service_name=$1
@@ -35,11 +36,13 @@ ensure_service_running() {
 
 # setup kafka
 ensure_service_running kafka 45 2
+# create topic if not exists; tolerate already-exists error in CI reruns
 docker compose exec kafka \
-kafka-topics --create --topic orders.upsert.log --bootstrap-server localhost:9092
+  kafka-topics --create --topic orders.upsert.log --bootstrap-server localhost:9092 || true
 
 # setup pinot
 ensure_service_running pinot-controller 45 2
-docker exec -it pinot-controller /opt/pinot/bin/pinot-admin.sh AddTable \
--tableConfigFile /config/orders_table.json \
--schemaFile /config/orders_schema.json -exec
+# Avoid -it in CI (no TTY); call pinot-admin directly in the container
+docker exec pinot-controller /opt/pinot/bin/pinot-admin.sh AddTable \
+  -tableConfigFile /config/orders_table.json \
+  -schemaFile /config/orders_schema.json -exec

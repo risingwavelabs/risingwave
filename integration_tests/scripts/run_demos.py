@@ -17,6 +17,11 @@ def run_sql_file(f: str, dir: str):
                           cwd=dir)
     if proc.returncode != 0:
         sys.exit(1)
+    # Some demos historically relied on psql meta-commands like \sleep, which are not portable across psql versions.
+    # For nats create_sink, add a short post-apply wait here to avoid flakiness without requiring \sleep in SQL.
+    f_norm = f.replace('\\\\', '/').replace('\\', '/')
+    if f_norm.endswith('integration_tests/nats/create_sink.sql') or '/nats/' in f_norm and f_norm.endswith('create_sink.sql'):
+        sleep(int(os.getenv('NATS_SINK_WAIT_SECS', '5')))
 
 
 def run_demo(demo: str, format: str, wait_time=40):
