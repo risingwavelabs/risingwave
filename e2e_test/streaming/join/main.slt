@@ -5,6 +5,7 @@ include ./join.slt.part
 include ./join-3way.slt.part
 include ./asof_join.slt.part
 include ./interval_join.slt.part
+include ./hash_join_watermark.slt.part
 
 statement ok
 set streaming_join_encoding to memory_optimized;
@@ -13,6 +14,7 @@ include ./join.slt.part
 include ./join-3way.slt.part
 include ./asof_join.slt.part
 include ./interval_join.slt.part
+include ./hash_join_watermark.slt.part
 
 statement ok
 set streaming_join_encoding to default;
