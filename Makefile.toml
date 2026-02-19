@@ -715,10 +715,14 @@ PGHOST=$PGHOST PGPORT=$PGPORT PGUSER=$PGUSER PGDATABASE=$PGDATABASE psql "$@"
 [tasks.ctl]
 category = "RiseDev - Start/Stop"
 description = "Start RiseCtl"
-dependencies = ["check-and-load-risedev-env-file"]
+dependencies = [
+    "check-and-load-risedev-env-file",
+    "build-risingwave",
+    "post-build-risingwave",
+]
 script = '''
 #!/usr/bin/env bash
-cargo run -p risingwave_cmd_all --profile "${RISINGWAVE_BUILD_PROFILE}" -- ctl "$@"
+"${PREFIX_BIN}/risingwave/risectl" "$@"
 test $? -eq 0 || exit 1
 '''
 
