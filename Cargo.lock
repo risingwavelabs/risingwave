@@ -4142,7 +4142,7 @@ name = "delta_btree_map"
 version = "2.9.0-alpha"
 dependencies = [
  "educe",
- "enum-as-inner",
+ "enum-as-inner 0.7.0",
 ]
 
 [[package]]
@@ -4858,11 +4858,23 @@ dependencies = [
 
 [[package]]
 name = "enum-as-inner"
-version = "0.6.0"
+version = "0.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5ffccbb6966c05b32ef8fbac435df276c4ae4d3dc55a8cd0eb9745e6c12f546a"
+checksum = "a1e6a265c649f3f5979b601d26f1d05ada116434c87741c9493cb56218f76cbc"
 dependencies = [
- "heck 0.4.1",
+ "heck 0.5.0",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.111",
+]
+
+[[package]]
+name = "enum-as-inner"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0359ee92f81184d7985519e474bda2a5738476334edd3746c9b1265c067afe70"
+dependencies = [
+ "heck 0.5.0",
  "proc-macro2",
  "quote",
  "syn 2.0.111",
@@ -6207,7 +6219,7 @@ dependencies = [
  "async-trait",
  "cfg-if",
  "data-encoding",
- "enum-as-inner",
+ "enum-as-inner 0.6.1",
  "futures-channel",
  "futures-io",
  "futures-util",
@@ -9957,7 +9969,7 @@ version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e7849dd7319357e220886589ea0a0760ff138cde2eedfbbfd2708caee0b15dfc"
 dependencies = [
- "enum-as-inner",
+ "enum-as-inner 0.6.1",
  "mime",
  "reqwest 0.11.20",
  "serde",
@@ -11222,7 +11234,7 @@ dependencies = [
  "easy-ext",
  "educe",
  "either",
- "enum-as-inner",
+ "enum-as-inner 0.7.0",
  "enumflags2",
  "ethnum",
  "expect-test",
@@ -11597,7 +11609,7 @@ dependencies = [
  "easy-ext",
  "either",
  "elasticsearch",
- "enum-as-inner",
+ "enum-as-inner 0.7.0",
  "expect-test",
  "fs-err",
  "futures",
@@ -11833,7 +11845,7 @@ dependencies = [
  "easy-ext",
  "educe",
  "either",
- "enum-as-inner",
+ "enum-as-inner 0.7.0",
  "expect-test",
  "futures",
  "futures-async-stream",
@@ -11949,7 +11961,7 @@ dependencies = [
  "easy-ext",
  "educe",
  "either",
- "enum-as-inner",
+ "enum-as-inner 0.7.0",
  "expect-test",
  "fancy-regex",
  "fixedbitset 0.5.7",
@@ -12200,7 +12212,7 @@ dependencies = [
  "easy-ext",
  "educe",
  "either",
- "enum-as-inner",
+ "enum-as-inner 0.7.0",
  "expect-test",
  "fail",
  "futures",
@@ -12406,7 +12418,7 @@ dependencies = [
 name = "risingwave_pb"
 version = "2.9.0-alpha"
 dependencies = [
- "enum-as-inner",
+ "enum-as-inner 0.7.0",
  "fs-err",
  "madsim-tonic",
  "madsim-tonic-build",
@@ -12665,7 +12677,7 @@ dependencies = [
  "derive_builder",
  "dyn-clone",
  "either",
- "enum-as-inner",
+ "enum-as-inner 0.7.0",
  "expect-test",
  "fail",
  "faiss",
@@ -12738,7 +12750,7 @@ dependencies = [
  "dhat",
  "educe",
  "either",
- "enum-as-inner",
+ "enum-as-inner 0.7.0",
  "expect-test",
  "fail",
  "foyer",
