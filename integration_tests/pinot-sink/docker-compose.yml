@@ -21,7 +21,7 @@ services:
       file: ../../docker/docker-compose.yml
       service: prometheus-0
   kafka:
-    image: confluentinc/cp-kafka:latest
+    image: confluentinc/cp-kafka:7.4.6
     hostname: kafka
     container_name: kafka
     ports:
@@ -65,7 +65,7 @@ services:
     depends_on:
       - pinot-broker
   zookeeper:
-    image: confluentinc/cp-zookeeper:latest
+    image: confluentinc/cp-zookeeper:7.4.6
     hostname: zookeeper
     container_name: zookeeper
     ports:
