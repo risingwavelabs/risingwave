@@ -96,7 +96,10 @@ pinot-broker -brokerPort 8099 -query "SELECT * FROM orders"
 psql -h localhost -p 4566 -d dev -U root
 
 # Within the psql client
-UPDATE orders SET status = 'PROCESSING' WHERE id = 1;
+UPDATE orders
+SET status = 'PROCESSING',
+    updated_at = updated_at + 1000
+WHERE id = 1;
 flush;
 ```
 After updating the data, query the pinot table with pinot cli
