@@ -1,13 +1,15 @@
+import json
 import subprocess
 import sys
-import json
 import time
 
 relations = ["orders"]
+POLL_RETRIES = 30
+POLL_INTERVAL_SECS = 2
 
 
 def run_pinot_sql(sql: str):
-    command = f'{{"sql":"{sql}"}}'
+    payload = json.dumps({"sql": sql})
     output = subprocess.check_output([
         "docker",
         "compose",
@@ -20,7 +22,7 @@ def run_pinot_sql(sql: str):
         "-X",
         "POST",
         "-d",
-        command,
+        payload,
         "http://localhost:8099/query/sql",
     ])
     return json.loads(output.decode("utf-8"))
@@ -52,7 +54,7 @@ subprocess.run(
 )
 
 last_status = "<empty>"
-for _ in range(30):
+for _ in range(POLL_RETRIES):
     sql = "SELECT status, updated_at FROM orders WHERE id = 1 ORDER BY updated_at DESC LIMIT 1"
     result = run_pinot_sql(sql)
     rows = result.get("resultTable", {}).get("rows", [])
@@ -61,7 +63,7 @@ for _ in range(30):
         print(f"Latest status in Pinot for id=1: {rows[0]}")
         if last_status == "PROCESSING":
             break
-    time.sleep(2)
+    time.sleep(POLL_INTERVAL_SECS)
 
 if last_status != "PROCESSING":
     failed_cases.append(f"expected PROCESSING, get {last_status}")

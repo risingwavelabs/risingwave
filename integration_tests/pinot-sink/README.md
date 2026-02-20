@@ -135,7 +135,7 @@ pinot-broker -brokerPort 8099 -query "SELECT * FROM orders"
             1,
             "PROCESSING",
             1.0,
-            1685421033000,
+            1685421034000,
             10
         ]
     ]
@@ -155,5 +155,5 @@ The payload is like the following:
 {"created_at":1685421033000,"id":1,"product_id":100,"quantity":1,"status":"INIT","total":1.0,"updated_at":1685421033000,"user_id":10}
 {"created_at":1685421033000,"id":2,"product_id":100,"quantity":1,"status":"INIT","total":1.0,"updated_at":1685421033000,"user_id":10}
 {"created_at":1685421033000,"id":3,"product_id":100,"quantity":1,"status":"INIT","total":1.0,"updated_at":1685421033000,"user_id":10}
-{"created_at":1685421033000,"id":1,"product_id":100,"quantity":1,"status":"PROCESSING","total":1.0,"updated_at":1685421033000,"user_id":10}
+{"created_at":1685421033000,"id":1,"product_id":100,"quantity":1,"status":"PROCESSING","total":1.0,"updated_at":1685421034000,"user_id":10}
 ```
