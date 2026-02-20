@@ -63,12 +63,12 @@ CREATE SINK sink2 AS SELECT * FROM mv2 WITH (
 
 # Create subscriptions
 statement ok
-CREATE SUBSCRIPTION sub1 FROM mv1 WITH (
+CREATE SUBSCRIPTION IF NOT EXISTS sub1 FROM mv1 WITH (
     retention = '1D'
 );
 
 statement ok
-CREATE SUBSCRIPTION sub2 FROM mv2 WITH (
+CREATE SUBSCRIPTION IF NOT EXISTS sub2 FROM mv2 WITH (
     retention = '1D'
 );
 
