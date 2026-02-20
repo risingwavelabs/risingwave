@@ -36,7 +36,23 @@ ensure_service_running() {
 
 # setup kafka
 ensure_service_running kafka 45 2
-# create topic if not exists; tolerate already-exists error in CI reruns
+# Wait until Kafka broker is actually accepting connections (container running != broker ready).
+# Use --list to probe readiness; create the topic once the broker is up.
+kafka_ready=false
+for i in $(seq 1 60); do
+  if docker compose exec kafka \
+      kafka-topics --list --bootstrap-server localhost:9092 > /dev/null 2>&1; then
+    kafka_ready=true
+    break
+  fi
+  sleep 2
+done
+if [ "$kafka_ready" = "false" ]; then
+  echo "Kafka broker did not become ready in time" >&2
+  docker compose logs kafka --tail 50
+  exit 1
+fi
+# Create topic; tolerate already-exists error in CI reruns.
 docker compose exec kafka \
   kafka-topics --create --topic orders.upsert.log --bootstrap-server localhost:9092 || true
 
