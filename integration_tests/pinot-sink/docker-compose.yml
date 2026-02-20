@@ -40,7 +40,7 @@ services:
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
       CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
-    healthcheck: { test: nc -z localhost 9092, interval: 1s, start_period: 120s }
+    healthcheck: { test: nc -z kafka 9092, interval: 1s, start_period: 120s }
   pinot-controller:
     image: apachepinot/pinot:latest
     command: "StartController -zkAddress zookeeper:2181"

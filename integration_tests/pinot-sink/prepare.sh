@@ -40,8 +40,8 @@ ensure_service_running kafka 45 2
 # Use --list to probe readiness; create the topic once the broker is up.
 kafka_ready=false
 for i in $(seq 1 60); do
-  if docker compose exec kafka \
-      kafka-topics --list --bootstrap-server localhost:9092 > /dev/null 2>&1; then
+  if docker compose exec -T kafka \
+      kafka-topics --list --bootstrap-server kafka:9092 > /dev/null 2>&1; then
     kafka_ready=true
     break
   fi
@@ -53,8 +53,8 @@ if [ "$kafka_ready" = "false" ]; then
   exit 1
 fi
 # Create topic; tolerate already-exists error in CI reruns.
-docker compose exec kafka \
-  kafka-topics --create --topic orders.upsert.log --bootstrap-server localhost:9092 || true
+docker compose exec -T kafka \
+  kafka-topics --create --topic orders.upsert.log --bootstrap-server kafka:9092 || true
 
 # setup pinot
 ensure_service_running pinot-controller 45 2

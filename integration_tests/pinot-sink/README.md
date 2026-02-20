@@ -9,7 +9,7 @@ The demo was modified from the `pinot-upsert` project of https://github.com/duni
 2. Create a kafka topic named `orders.upsert.log` for data to sink to.
 ```shell
 docker compose exec kafka \
-kafka-topics --create --topic orders.upsert.log --bootstrap-server localhost:9092
+kafka-topics --create --topic orders.upsert.log --bootstrap-server kafka:9092
 ```
 3. Connect the RisingWave frontend via the psql client. Create RisingWave table and sink.
 ```shell
