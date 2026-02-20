@@ -123,6 +123,9 @@ pub trait SourceProperties:
 
     /// Load additional info from `ExternalTableDesc`. Currently only used by CDC.
     fn init_from_pb_cdc_table_desc(&mut self, _table_desc: &ExternalTableDesc) {}
+
+    /// Load extra options before creating split readers.
+    fn init_from_create_split_reader_opt(&mut self, _opt: &CreateSplitReaderOpt) {}
 }
 
 pub trait UnknownFields {
@@ -153,6 +156,7 @@ impl<P: DeserializeOwned + UnknownFields> TryFromBTreeMap for P {
 pub struct CreateSplitReaderOpt {
     pub support_multiple_splits: bool,
     pub seek_to_latest: bool,
+    pub for_backfill: bool,
 }
 
 #[derive(Default)]
@@ -728,15 +732,11 @@ impl ConnectorProperties {
             "spawning connector split reader",
         );
 
-        dispatch_source_prop!(self, |prop| create_split_readers(
-            *prop,
-            splits,
-            parser_config,
-            source_ctx,
-            columns,
-            opt
-        )
-        .await)
+        dispatch_source_prop!(self, |prop| {
+            let mut prop = prop;
+            <PropType as SourceProperties>::init_from_create_split_reader_opt(&mut *prop, &opt);
+            create_split_readers(*prop, splits, parser_config, source_ctx, columns, opt).await
+        })
     }
 }
 

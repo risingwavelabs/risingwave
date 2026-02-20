@@ -14,10 +14,11 @@
 
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
+use std::future::Future;
 use std::mem::swap;
 use std::time::Duration;
 
-use anyhow::Context;
+use anyhow::{Context, anyhow};
 use async_trait::async_trait;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
@@ -68,8 +69,14 @@ impl SplitReader for KafkaSplitReader {
         let bootstrap_servers = &properties.connection.brokers;
         let broker_rewrite_map = properties.privatelink_common.broker_rewrite_map.clone();
 
-        // disable partition eof
-        config.set("enable.partition.eof", "false");
+        config.set(
+            "enable.partition.eof",
+            if properties.enable_partition_eof {
+                "true"
+            } else {
+                "false"
+            },
+        );
         config.set("auto.offset.reset", "smallest");
         config.set("isolation.level", KAFKA_ISOLATION_LEVEL);
         config.set("bootstrap.servers", bootstrap_servers);
@@ -88,7 +95,7 @@ impl SplitReader for KafkaSplitReader {
             // thread consumer will keep polling in the background, we don't need to call `poll`
             // explicitly
             Some(source_ctx.metrics.rdkafka_native_metric.clone()),
-            properties.aws_auth_props,
+            properties.aws_auth_props.clone(),
             properties.connection.is_aws_msk_iam(),
         )
         .await?;
@@ -129,16 +136,43 @@ impl SplitReader for KafkaSplitReader {
                 .await?;
             tracing::info!("fetch kafka watermarks: low: {low}, high: {high}, split: {split:?}");
             // note: low is inclusive, high is exclusive, start_offset is exclusive
-            if low == high || split.start_offset.is_some_and(|offset| offset + 1 >= high) {
+            let search_start = split.start_offset.map_or(low, |offset| offset + 1).max(low);
+            if search_start >= high {
                 backfill_info.insert(split.id(), BackfillInfo::NoDataToBackfill);
-            } else {
-                debug_assert!(high > 0);
+            } else if !properties.enable_partition_eof {
                 backfill_info.insert(
                     split.id(),
                     BackfillInfo::HasDataToBackfill {
                         latest_offset: (high - 1).to_string(),
                     },
                 );
+            } else {
+                let latest_offset = find_latest_readable_offset(
+                    &consumer,
+                    split.topic.as_str(),
+                    split.partition,
+                    search_start,
+                    high,
+                    properties.common.sync_call_timeout,
+                )
+                .await?;
+                if let Some(latest_offset) = latest_offset {
+                    backfill_info.insert(
+                        split.id(),
+                        BackfillInfo::HasDataToBackfill {
+                            latest_offset: latest_offset.to_string(),
+                        },
+                    );
+                } else {
+                    tracing::warn!(
+                        topic = %split.topic,
+                        partition = split.partition,
+                        high_watermark = high,
+                        split_id = %split.id(),
+                        "kafka watermark range has no readable record under read_committed isolation; skip backfill for this range"
+                    );
+                    backfill_info.insert(split.id(), BackfillInfo::NoDataToBackfill);
+                }
             }
         }
         tracing::info!(
@@ -214,6 +248,109 @@ impl SplitReader for KafkaSplitReader {
     }
 }
 
+async fn find_latest_readable_offset(
+    consumer: &StreamConsumer<RwConsumerContext>,
+    topic: &str,
+    partition: i32,
+    search_start: i64,
+    search_end_exclusive: i64,
+    sync_call_timeout: Duration,
+) -> Result<Option<i64>> {
+    find_latest_offset_with_data(search_start, search_end_exclusive, |offset| {
+        has_readable_data_from(
+            consumer,
+            topic,
+            partition,
+            offset,
+            sync_call_timeout,
+            search_end_exclusive,
+        )
+    })
+    .await
+}
+
+async fn find_latest_offset_with_data<E, F, Fut>(
+    search_start: i64,
+    search_end_exclusive: i64,
+    mut has_data_from: F,
+) -> std::result::Result<Option<i64>, E>
+where
+    F: FnMut(i64) -> Fut,
+    Fut: Future<Output = std::result::Result<bool, E>>,
+{
+    if search_start >= search_end_exclusive || !has_data_from(search_start).await? {
+        return Ok(None);
+    }
+
+    let mut left = search_start;
+    let mut right = search_end_exclusive - 1;
+
+    while left < right {
+        let mid = left + (right - left + 1) / 2;
+        if has_data_from(mid).await? {
+            left = mid;
+        } else {
+            right = mid - 1;
+        }
+    }
+
+    Ok(Some(left))
+}
+
+async fn has_readable_data_from(
+    consumer: &StreamConsumer<RwConsumerContext>,
+    topic: &str,
+    partition: i32,
+    start_offset: i64,
+    sync_call_timeout: Duration,
+    search_end_exclusive: i64,
+) -> Result<bool> {
+    Ok(first_readable_offset(
+        consumer,
+        topic,
+        partition,
+        start_offset,
+        sync_call_timeout,
+        search_end_exclusive,
+    )
+    .await?
+    .is_some())
+}
+
+async fn first_readable_offset(
+    consumer: &StreamConsumer<RwConsumerContext>,
+    topic: &str,
+    partition: i32,
+    start_offset: i64,
+    sync_call_timeout: Duration,
+    search_end_exclusive: i64,
+) -> Result<Option<i64>> {
+    let mut tpl = TopicPartitionList::with_capacity(1);
+    tpl.add_partition_offset(topic, partition, Offset::Offset(start_offset))?;
+    consumer.assign(&tpl)?;
+
+    let deadline = tokio::time::Instant::now() + sync_call_timeout;
+    loop {
+        let timeout = deadline
+            .checked_duration_since(tokio::time::Instant::now())
+            .ok_or_else(|| anyhow!("timeout while probing readable kafka offset"))?;
+
+        // `recv` may return records after `search_end_exclusive` when new records are appended while
+        // we probe. We clamp to the watermark snapshot to keep a stable target offset.
+        let recv_result = tokio::time::timeout(timeout, consumer.recv()).await;
+        match recv_result {
+            Ok(Ok(msg)) if msg.offset() < start_offset => continue,
+            Ok(Ok(msg)) if msg.offset() < search_end_exclusive => return Ok(Some(msg.offset())),
+            Ok(Ok(_)) => return Ok(None),
+            Ok(Err(KafkaError::PartitionEOF(_))) => return Ok(None),
+            Ok(Err(err)) => return Err(err.into()),
+            Err(_elapsed) => {
+                return Err(anyhow!("timeout while probing readable kafka offset").into());
+            }
+        }
+    }
+}
+
 impl KafkaSplitReader {
     #[try_stream(ok = Vec<SourceMessage>, error = crate::error::ConnectorError)]
     async fn into_data_stream(self) {
@@ -253,10 +390,21 @@ impl KafkaSplitReader {
         let mut latest_message_id_metrics: HashMap<String, LabelGuardedIntGauge> = HashMap::new();
 
         #[for_await]
-        'for_outer_loop: for msgs in self.consumer.stream().ready_chunks(max_chunk_size) {
-            let msgs: Vec<_> = msgs
-                .into_iter()
-                .collect::<std::result::Result<_, KafkaError>>()?;
+        'for_outer_loop: for polled in self.consumer.stream().ready_chunks(max_chunk_size) {
+            let mut msgs = Vec::new();
+            for msg in polled {
+                match msg {
+                    Ok(msg) => msgs.push(msg),
+                    Err(KafkaError::PartitionEOF(_)) => {
+                        // `PartitionEOF` is used as a backfill-only control signal to detect that
+                        // there is currently no readable data in this partition.
+                    }
+                    Err(err) => return Err(err.into()),
+                }
+            }
+            if msgs.is_empty() {
+                continue;
+            }
 
             let mut split_msg_offsets = HashMap::new();
 
@@ -338,5 +486,29 @@ impl KafkaSplitReader {
             // every `MAX_CHUNK_SIZE`.
         }
         tracing::info!("kafka reader finished");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::find_latest_offset_with_data;
+
+    #[tokio::test]
+    async fn test_find_latest_offset_with_data() {
+        let visible_offsets = [0, 2, 5, 8];
+        let latest = find_latest_offset_with_data(0, 9, |start| async move {
+            Ok::<_, ()>(visible_offsets.into_iter().any(|offset| offset >= start))
+        })
+        .await
+        .unwrap();
+        assert_eq!(latest, Some(8));
+    }
+
+    #[tokio::test]
+    async fn test_find_latest_offset_with_data_no_data() {
+        let latest = find_latest_offset_with_data(3, 7, |_start| async move { Ok::<_, ()>(false) })
+            .await
+            .unwrap();
+        assert_eq!(latest, None);
     }
 }
