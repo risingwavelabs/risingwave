@@ -253,7 +253,7 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
     ) -> StreamExecutorResult<BoxStreamingFileSourceChunkStream> {
         let (stream, _) = source_desc
             .source
-            .build_stream(batch, column_ids, Arc::new(source_ctx), false)
+            .build_stream(batch, column_ids, Arc::new(source_ctx), false, false)
             .await
             .map_err(StreamExecutorError::connector_error)?;
         let optional_stream: BoxStreamingFileSourceChunkStream = stream
