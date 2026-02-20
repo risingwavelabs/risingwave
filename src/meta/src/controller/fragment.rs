@@ -1997,8 +1997,34 @@ impl CatalogController {
             return Ok(());
         }
 
+        // Split discovery and drop/reschedule are asynchronous. We may receive split updates for
+        // fragments that were just dropped by another command. Filter them out here to avoid
+        // violating the `fragment_splits.fragment_id -> fragment.fragment_id` FK during recovery.
+        let requested_fragment_ids = fragment_splits.keys().copied().collect_vec();
+        let existing_fragment_ids: HashSet<FragmentId> = FragmentModel::find()
+            .select_only()
+            .column(fragment::Column::FragmentId)
+            .filter(fragment::Column::FragmentId.is_in(requested_fragment_ids.iter().copied()))
+            .into_tuple()
+            .all(txn)
+            .await?
+            .into_iter()
+            .collect();
+
+        let missing_fragment_ids = requested_fragment_ids
+            .into_iter()
+            .filter(|fragment_id| !existing_fragment_ids.contains(fragment_id))
+            .collect_vec();
+        if !missing_fragment_ids.is_empty() {
+            tracing::warn!(
+                ?missing_fragment_ids,
+                "skip updating splits for dropped fragments"
+            );
+        }
+
         let models: Vec<fragment_splits::ActiveModel> = fragment_splits
             .iter()
+            .filter(|(fragment_id, _)| existing_fragment_ids.contains(*fragment_id))
             .map(|(fragment_id, splits)| fragment_splits::ActiveModel {
                 fragment_id: Set(*fragment_id as _),
                 splits: Set(Some(ConnectorSplits::from(&PbConnectorSplits {
@@ -2006,6 +2032,10 @@ impl CatalogController {
                 }))),
             })
             .collect();
+
+        if models.is_empty() {
+            return Ok(());
+        }
 
         FragmentSplits::insert_many(models)
             .on_conflict(
