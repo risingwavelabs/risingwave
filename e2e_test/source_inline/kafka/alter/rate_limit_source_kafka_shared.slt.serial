@@ -37,9 +37,9 @@ flush;
 
 ############## Create MV on source
 
-statement ok
 # Use DISTINCT and a non-overlapping second batch to make the assertion resilient to
 # duplicate replays while still detecting any data leakage when source_rate_limit = 0.
+statement ok
 create materialized view rl_mv1 as select count(distinct v1) from kafka_source;
 
 ############## Although source is rate limited, the MV's SourceBackfill is not.
