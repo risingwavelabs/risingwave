@@ -37,7 +37,7 @@ crc32fast = "1"
 easy-ext = "1"
 educe = "0.6"
 either = "1"
-enum-as-inner = "0.6"
+enum-as-inner = "0.7"
 enumflags2 = { version = "0.7.8" }
 ethnum = { version = "1", features = ["serde"] }
 faiss = { workspace = true }
