@@ -68,9 +68,9 @@ SET BACKGROUND_DDL=true;
 statement ok
 SET BACKFILL_RATE_LIMIT=0;
 
-statement ok
 # Shared Kafka source can replay records during recovery/reconfiguration.
 # Use DISTINCT here so this test validates rate-limit behavior instead of replay multiplicity.
+statement ok
 create materialized view rl_mv2 as select count(distinct v1) from kafka_source;
 
 sleep 1s
