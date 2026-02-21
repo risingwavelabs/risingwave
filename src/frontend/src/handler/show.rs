@@ -643,6 +643,7 @@ pub async fn handle_show_object(
                 .map(|c| {
                     let name = c.name.clone();
                     let r#type = match &c.info {
+                        #[expect(deprecated)]
                         connection::Info::PrivateLinkService(_) => {
                             PRIVATELINK_CONNECTION.to_owned()
                         },
@@ -663,6 +664,7 @@ pub async fn handle_show_object(
                         .filter_map(|sid| schema.get_sink_by_id(sid).map(|catalog| catalog.name.as_str()))
                         .collect_vec();
                     let properties = match &c.info {
+                        #[expect(deprecated)]
                         connection::Info::PrivateLinkService(i) => {
                             format!(
                                 "provider: {}\nservice_name: {}\nendpoint_id: {}\navailability_zones: {}\nsources: {}\nsinks: {}",
