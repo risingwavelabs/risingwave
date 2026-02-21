@@ -41,7 +41,9 @@ use risingwave_connector::source::cdc::external::{
     DATABASE_NAME_KEY, ExternalCdcTableType, ExternalTableConfig, ExternalTableImpl,
     SCHEMA_NAME_KEY, TABLE_NAME_KEY,
 };
-use risingwave_connector::{WithOptionsSecResolved, WithPropertiesExt, source};
+use risingwave_connector::{
+    AUTO_SCHEMA_CHANGE_KEY, WithOptionsSecResolved, WithPropertiesExt, source,
+};
 use risingwave_pb::catalog::connection::Info as ConnectionInfo;
 use risingwave_pb::catalog::connection_params::ConnectionType;
 use risingwave_pb::catalog::{PbSource, PbWebhookSourceInfo, WatermarkDesc};
@@ -59,7 +61,7 @@ use risingwave_sqlparser::ast::{
     FormatEncodeOptions, Ident, ObjectName, OnConflict, SecretRefAsType, SourceWatermark,
     Statement, TableConstraint, WebhookSourceInfo, WithProperties,
 };
-use risingwave_sqlparser::parser::{IncludeOption, Parser};
+use risingwave_sqlparser::parser::IncludeOption;
 use thiserror_ext::AsReport;
 
 use super::RwPgResponse;
@@ -1720,24 +1722,12 @@ pub async fn create_iceberg_engine_table(
         .map(|c| c.to_string())
         .collect::<Vec<String>>();
 
-    // For the table without primary key. We will use `_row_id` as primary key
-    let sink_from = if pks.len() == 1 && pks[0].eq(ROW_ID_COLUMN_NAME) {
+    // For the table without primary key. We will use `_row_id` as primary key.
+    if pks.len() == 1 && pks[0].eq(ROW_ID_COLUMN_NAME) {
         pks = vec![RISINGWAVE_ICEBERG_ROW_ID.to_owned()];
-        let [stmt]: [_; 1] = Parser::parse_sql(&format!(
-            "select {} as {}, * from {}",
-            ROW_ID_COLUMN_NAME, RISINGWAVE_ICEBERG_ROW_ID, table_name
-        ))
-        .context("unable to parse query")?
-        .try_into()
-        .unwrap();
+    }
 
-        let Statement::Query(query) = &stmt else {
-            panic!("unexpected statement: {:?}", stmt);
-        };
-        CreateSink::AsQuery(query.clone())
-    } else {
-        CreateSink::From(table_name.clone())
-    };
+    let sink_from = CreateSink::From(table_name.clone());
 
     let mut sink_name = table_name.clone();
     *sink_name.0.last_mut().unwrap() = Ident::from(
@@ -1757,6 +1747,7 @@ pub async fn create_iceberg_engine_table(
     let mut sink_handler_args = handler_args.clone();
 
     let mut sink_with = with_common.clone();
+    sink_with.insert(AUTO_SCHEMA_CHANGE_KEY.to_owned(), "true".to_owned());
 
     if table.append_only {
         sink_with.insert("type".to_owned(), "append-only".to_owned());
