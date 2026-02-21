@@ -124,7 +124,6 @@ message DropSinkResponse {
 
 message CreateSubscriptionRequest {
   catalog.Subscription subscription = 1;
-  bool if_not_exists = 2;
 }
 
 message CreateSubscriptionResponse {

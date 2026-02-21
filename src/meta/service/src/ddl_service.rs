@@ -501,10 +501,7 @@ impl DdlService for DdlServiceImpl {
         let req = request.into_inner();
 
         let subscription = req.get_subscription()?.clone();
-        let command = DdlCommand::CreateSubscription {
-            subscription,
-            if_not_exists: req.if_not_exists,
-        };
+        let command = DdlCommand::CreateSubscription(subscription);
 
         let version = self.ddl_controller.run_command(command).await?;
 

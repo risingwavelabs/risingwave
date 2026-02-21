@@ -84,7 +84,6 @@ pub async fn handle_create_subscription(
     )? {
         return Ok(resp);
     };
-    let if_not_exists = stmt.if_not_exists;
     let subscription_catalog = {
         let context = Rc::new(OptimizerContext::from_handler_args(handle_args));
         create_subscription_catalog(&session, context, stmt)?
@@ -103,7 +102,7 @@ pub async fn handle_create_subscription(
 
     let catalog_writer = session.catalog_writer()?;
     catalog_writer
-        .create_subscription(subscription_catalog.to_proto(), if_not_exists)
+        .create_subscription(subscription_catalog.to_proto())
         .await?;
 
     Ok(PgResponse::empty_result(StatementType::CREATE_SUBSCRIPTION))

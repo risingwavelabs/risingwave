@@ -496,14 +496,9 @@ impl MetaClient {
             .ok_or_else(|| anyhow!("wait version not set"))?)
     }
 
-    pub async fn create_subscription(
-        &self,
-        subscription: PbSubscription,
-        if_not_exists: bool,
-    ) -> Result<WaitVersion> {
+    pub async fn create_subscription(&self, subscription: PbSubscription) -> Result<WaitVersion> {
         let request = CreateSubscriptionRequest {
             subscription: Some(subscription),
-            if_not_exists,
         };
 
         let resp = self.inner.create_subscription(request).await?;
