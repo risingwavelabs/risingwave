@@ -40,6 +40,7 @@ use tonic::Streaming;
 
 use super::MetaSrvEnv;
 use crate::MetaResult;
+use crate::hummock::sequence::next_compaction_task_id;
 use crate::hummock::{
     IcebergCompactionEventDispatcher, IcebergCompactionEventHandler, IcebergCompactionEventLoop,
     IcebergCompactor, IcebergCompactorManagerRef,
@@ -633,11 +634,7 @@ impl IcebergCompactionManager {
             .ok_or_else(|| anyhow!("No iceberg compactor available"))?;
 
         // Generate a unique task ID
-        let task_id = self
-            .env
-            .hummock_seq
-            .next_interval("compaction_task", 1)
-            .await?;
+        let task_id = next_compaction_task_id(&self.env).await?;
 
         let sink_param = self.get_sink_param(sink_id).await?;
 

@@ -66,6 +66,9 @@ use crate::hummock::compaction::selector::{
 };
 use crate::hummock::compaction::{CompactStatus, CompactionDeveloperConfig, CompactionSelector};
 use crate::hummock::error::{Error, Result};
+use crate::hummock::manager::sequence::{
+    next_compaction_task_id, next_compaction_task_id_interval,
+};
 use crate::hummock::manager::transaction::{
     HummockVersionStatsTransaction, HummockVersionTransaction,
 };
@@ -75,7 +78,6 @@ use crate::hummock::metrics_utils::{
     trigger_local_table_stat,
 };
 use crate::hummock::model::CompactionGroup;
-use crate::hummock::sequence::next_compaction_task_id;
 use crate::hummock::{HummockManager, commit_multi_var, start_measure_real_process_timer};
 use crate::manager::META_NODE_ID;
 use crate::model::BTreeMapTransaction;
@@ -289,6 +291,9 @@ impl HummockManager {
         max_select_count: usize,
         selector: &mut Box<dyn CompactionSelector>,
     ) -> Result<(Vec<CompactTask>, Vec<CompactionGroupId>)> {
+        if compaction_groups.is_empty() {
+            return Ok((vec![], vec![]));
+        }
         let deterministic_mode = self.env.opts.compaction_deterministic_test;
 
         let mut compaction_guard = self.compaction.write().await;
@@ -335,6 +340,12 @@ impl HummockManager {
         let developer_config = Arc::new(CompactionDeveloperConfig::new_from_meta_opts(
             &self.env.opts,
         ));
+        // Pre-allocate task ids for this loop to avoid per-group SQL transactions.
+        // Each group consumes at most one task_id (trivial tasks share the same id with normal task).
+        let task_id_capacity = compaction_groups.len().min(max_select_count) as u32;
+        let mut next_task_id =
+            next_compaction_task_id_interval(&self.env, task_id_capacity).await?;
+        let task_id_end = next_task_id + u64::from(task_id_capacity);
         'outside: for compaction_group_id in compaction_groups {
             if pick_tasks.len() >= max_select_count {
                 break;
@@ -360,8 +371,14 @@ impl HummockManager {
                 }
             };
 
-            // StoredIdGenerator already implements ids pre-allocation by ID_PREALLOCATE_INTERVAL.
-            let task_id = next_compaction_task_id(&self.env).await?;
+            // Use pre-allocated task id if available, otherwise fallback to fetching a new one.
+            let task_id = if next_task_id < task_id_end {
+                let id = next_task_id;
+                next_task_id += 1;
+                id
+            } else {
+                next_compaction_task_id(&self.env).await?
+            };
 
             if !compaction_statuses.contains_key(&compaction_group_id) {
                 // lazy initialize.
