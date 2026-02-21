@@ -120,6 +120,8 @@ pub mod telemetry;
 #[rustfmt::skip]
 #[cfg_attr(madsim, path = "sim/iceberg_compaction.rs")]
 pub mod iceberg_compaction;
+#[rustfmt::skip]
+pub mod window_function;
 
 #[rustfmt::skip]
 #[path = "sim/secret.rs"]

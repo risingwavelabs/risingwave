@@ -31,6 +31,9 @@ use risingwave_expr::window_function::{
     StateEvictHint, StateKey, WindowFuncCall, WindowStateSnapshot, WindowStates,
     create_window_state,
 };
+use risingwave_pb::window_function::{
+    StateKey as PbStateKey, WindowStateSnapshot as PbWindowStateSnapshot,
+};
 use risingwave_storage::store::PrefetchOptions;
 use tracing::debug;
 
@@ -61,132 +64,49 @@ impl EstimateSize for Partition {
 
 type PartitionCache = ManagedLruCache<MemcmpEncoded, Partition>; // TODO(rc): use `K: HashKey` as key like in hash agg?
 
-/// Snapshot serialization version.
-const SNAPSHOT_VERSION: u8 = 1;
-
-/// Encode a `WindowStateSnapshot` to bytes for persistence.
-/// Format: version (u8) + has_last_key (u8) + [order_key_len (u32) + order_key + pk_len (u32) + pk] + payload_len (u32) + payload
+/// Encode a [`WindowStateSnapshot`] to bytes for persistence using protobuf.
 fn encode_snapshot(snapshot: &WindowStateSnapshot, pk_ser: &OrderedRowSerde) -> Vec<u8> {
-    let mut bytes = Vec::new();
-    bytes.push(SNAPSHOT_VERSION);
-
-    if let Some(key) = &snapshot.last_output_key {
-        bytes.push(1u8);
-        // Encode order_key
-        let order_key_bytes = &key.order_key;
-        bytes.extend_from_slice(&(order_key_bytes.len() as u32).to_le_bytes());
-        bytes.extend_from_slice(order_key_bytes);
-        // Encode pk using the serde
-        let mut pk_bytes = Vec::new();
-        pk_ser.serialize(key.pk.as_inner(), &mut pk_bytes);
-        bytes.extend_from_slice(&(pk_bytes.len() as u32).to_le_bytes());
-        bytes.extend_from_slice(&pk_bytes);
-    } else {
-        bytes.push(0u8);
-    }
-
-    // Encode payload
-    bytes.extend_from_slice(&(snapshot.payload.len() as u32).to_le_bytes());
-    bytes.extend_from_slice(&snapshot.payload);
-    bytes
+    use prost::Message;
+    let pb = PbWindowStateSnapshot {
+        last_output_key: snapshot.last_output_key.as_ref().map(|key| {
+            let mut pk_bytes = Vec::new();
+            pk_ser.serialize(key.pk.as_inner(), &mut pk_bytes);
+            PbStateKey {
+                order_key: key.order_key.to_vec(),
+                pk: pk_bytes,
+            }
+        }),
+        function_state: Some(snapshot.function_state.clone()),
+    };
+    pb.encode_to_vec()
 }
 
-/// Decode a `WindowStateSnapshot` from bytes during recovery.
+/// Decode a [`WindowStateSnapshot`] from bytes during recovery using protobuf.
 fn decode_snapshot(
     bytes: &[u8],
     pk_deser: &OrderedRowSerde,
 ) -> StreamExecutorResult<WindowStateSnapshot> {
-    if bytes.is_empty() {
-        return Err(StreamExecutorError::from(anyhow::anyhow!(
-            "invalid snapshot: empty bytes"
-        )));
-    }
-
-    let mut offset = 0;
-    let version = bytes[offset];
-    offset += 1;
-
-    if version != SNAPSHOT_VERSION {
-        return Err(StreamExecutorError::from(anyhow::anyhow!(
-            "unsupported snapshot version: {}",
-            version
-        )));
-    }
-
-    if bytes.len() < offset + 1 {
-        return Err(StreamExecutorError::from(anyhow::anyhow!(
-            "invalid snapshot: missing has_last_key"
-        )));
-    }
-    let has_last_key = bytes[offset];
-    offset += 1;
-
-    let last_output_key = if has_last_key == 1 {
-        // Decode order_key
-        if bytes.len() < offset + 4 {
-            return Err(StreamExecutorError::from(anyhow::anyhow!(
-                "invalid snapshot: missing order_key_len"
-            )));
-        }
-        let order_key_len =
-            u32::from_le_bytes(bytes[offset..offset + 4].try_into().unwrap()) as usize;
-        offset += 4;
-
-        if bytes.len() < offset + order_key_len {
-            return Err(StreamExecutorError::from(anyhow::anyhow!(
-                "invalid snapshot: missing order_key bytes"
-            )));
-        }
-        let order_key: MemcmpEncoded = bytes[offset..offset + order_key_len].to_vec().into();
-        offset += order_key_len;
-
-        // Decode pk
-        if bytes.len() < offset + 4 {
-            return Err(StreamExecutorError::from(anyhow::anyhow!(
-                "invalid snapshot: missing pk_len"
-            )));
-        }
-        let pk_len = u32::from_le_bytes(bytes[offset..offset + 4].try_into().unwrap()) as usize;
-        offset += 4;
-
-        if bytes.len() < offset + pk_len {
-            return Err(StreamExecutorError::from(anyhow::anyhow!(
-                "invalid snapshot: missing pk bytes"
-            )));
-        }
-        let pk_bytes = &bytes[offset..offset + pk_len];
-        offset += pk_len;
-        let pk = pk_deser.deserialize(pk_bytes).map_err(|e| {
-            StreamExecutorError::from(anyhow::anyhow!("failed to deserialize pk: {}", e))
-        })?;
-
-        Some(StateKey {
-            order_key,
-            pk: pk.into(),
+    use prost::Message;
+    let pb = PbWindowStateSnapshot::decode(bytes)
+        .map_err(|e| anyhow::anyhow!("failed to decode snapshot: {e}"))?;
+    let last_output_key = pb
+        .last_output_key
+        .map(|key| {
+            let pk = pk_deser
+                .deserialize(&key.pk)
+                .map_err(|e| anyhow::anyhow!("failed to deserialize pk: {e}"))?;
+            Ok::<_, anyhow::Error>(StateKey {
+                order_key: key.order_key.into(),
+                pk: pk.into(),
+            })
         })
-    } else {
-        None
-    };
-
-    // Decode payload
-    if bytes.len() < offset + 4 {
-        return Err(StreamExecutorError::from(anyhow::anyhow!(
-            "invalid snapshot: missing payload_len"
-        )));
-    }
-    let payload_len = u32::from_le_bytes(bytes[offset..offset + 4].try_into().unwrap()) as usize;
-    offset += 4;
-
-    if bytes.len() < offset + payload_len {
-        return Err(StreamExecutorError::from(anyhow::anyhow!(
-            "invalid snapshot: missing payload bytes"
-        )));
-    }
-    let payload = bytes[offset..offset + payload_len].to_vec();
-
+        .transpose()?;
+    let function_state = pb
+        .function_state
+        .ok_or_else(|| anyhow::anyhow!("snapshot missing function_state"))?;
     Ok(WindowStateSnapshot {
         last_output_key,
-        payload,
+        function_state,
     })
 }
 
@@ -242,7 +162,7 @@ struct ExecutorInner<S: StateStore> {
     /// Optional state table for persisting window function intermediate states.
     /// See `StreamEowcOverWindow::infer_intermediate_state_table` for schema definition.
     intermediate_state_table: Option<StateTable<S>>,
-    /// Serde for input stream key (pk), used for encoding/decoding StateKey in snapshots.
+    /// Serde for input stream key (pk), used for encoding/decoding `StateKey` in snapshots.
     /// Only initialized when `intermediate_state_table` is present.
     pk_serde: Option<OrderedRowSerde>,
 }
@@ -351,8 +271,7 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
                         );
                         partition
                             .states
-                            .iter_mut()
-                            .nth(call_index)
+                            .get_mut(call_index)
                             .unwrap()
                             .restore(snapshot)?;
                     }
@@ -675,13 +594,12 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
                     {
                         cache_may_stale = cache_may_stale || stale;
                     }
-                    if let Some(intermediate_post_commit) = intermediate_post_commit {
-                        if let Some((_, stale)) = intermediate_post_commit
+                    if let Some(intermediate_post_commit) = intermediate_post_commit
+                        && let Some((_, stale)) = intermediate_post_commit
                             .post_yield_barrier(update_vnode_bitmap)
                             .await?
-                        {
-                            cache_may_stale = cache_may_stale || stale;
-                        }
+                    {
+                        cache_may_stale = cache_may_stale || stale;
                     }
                     if cache_may_stale {
                         vars.partitions.clear();
