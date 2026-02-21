@@ -192,7 +192,7 @@ tiberius = { git = "https://github.com/risingwavelabs/tiberius.git", rev = "5935
     "tds73",
     "time",
 ] }
-time = "0.3.30"
+time = "0.3.47"
 tokio = { version = "0.2", package = "madsim-tokio", features = [
     "rt",
     "rt-multi-thread",
