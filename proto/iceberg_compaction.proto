@@ -15,15 +15,43 @@ message SubscribeIcebergCompactionEventRequest {
     uint32 pull_task_count = 1;
   }
 
+  // ReportPlan reports plan execution result to meta.
+  message ReportPlan {
+    PlanKey key = 1;
+
+    enum Status {
+      STATUS_UNSPECIFIED = 0;
+      SUCCESS = 1;
+      FAILED = 2;
+      CANCELED = 3;
+    }
+    Status status = 2;
+
+    string error_message = 3;
+
+    PlanResult result = 4;
+
+    // Attempt number for deduplication on meta.
+    uint32 attempt = 5;
+  }
+
   oneof event {
     // Compactor will register its own context_id with Meta via Register and establish a bi-directional streaming rpc.
     Register register = 1;
 
     // Compactor will recalculate the number of tasks needed locally after receiving the PullTaskAck and get the next batch of tasks from Meta via PullTask.
     PullTask pull_task = 2;
+
+    // Compactor will report plan completion to meta.
+    ReportPlan report_plan = 3;
   }
 
-  uint64 create_at = 3;
+  uint64 create_at = 7;
+}
+
+message PlanKey {
+  uint64 task_id = 1;
+  uint32 plan_index = 2;
 }
 
 message IcebergCompactionTask {
@@ -46,13 +74,110 @@ message IcebergCompactionTask {
   TaskType task_type = 3;
 }
 
+// Plan is the minimum unit to execute.
+message Plan {
+  // Enough to let compactor construct IcebergConfig/catalog + file IO.
+  map<string, string> props = 1;
+
+  // Optional, for logging/debug.
+  string table_ident = 2;
+
+  // Compaction task type.
+  IcebergCompactionTask.TaskType task_type = 3;
+
+  // Target branch for committing the compaction result.
+  string to_branch = 4;
+
+  // Snapshot ID from which files were selected.
+  int64 snapshot_id = 5;
+
+  // A plan corresponds to one file group to rewrite.
+  FileGroup file_group = 6;
+}
+
+message FileGroup {
+  repeated FileScanTask data_files = 1;
+  repeated FileScanTask position_delete_files = 2;
+  repeated FileScanTask equality_delete_files = 3;
+  uint32 executor_parallelism = 4;
+  uint32 output_parallelism = 5;
+}
+
+message FileScanTask {
+  uint64 start = 1;
+  uint64 length = 2;
+  optional uint64 record_count = 3;
+  string data_file_path = 4;
+
+  enum FileContent {
+    FILE_CONTENT_UNSPECIFIED = 0;
+    DATA = 1;
+    POSITION_DELETES = 2;
+    EQUALITY_DELETES = 3;
+  }
+  FileContent data_file_content = 5;
+
+  enum FileFormat {
+    FILE_FORMAT_UNSPECIFIED = 0;
+    PARQUET = 1;
+    AVRO = 2;
+    ORC = 3;
+    PUFFIN = 4;
+  }
+  FileFormat data_file_format = 6;
+
+  // Serialized iceberg Schema (JSON).
+  bytes schema_json = 7;
+  repeated int32 project_field_ids = 8;
+
+  // Serialized BoundPredicate (JSON).
+  bytes predicate_json = 9;
+  bool has_predicate = 10;
+
+  int64 sequence_number = 11;
+  repeated int32 equality_ids = 12;
+  bool has_equality_ids = 13;
+
+  uint64 file_size_in_bytes = 14;
+}
+
+message SerializedDataFile {
+  // JSON serialized iceberg::spec::manifest::SerializedDataFile.
+  bytes json = 1;
+  // Partition spec id for decoding.
+  int32 partition_spec_id = 2;
+}
+
+message PlanResult {
+  repeated SerializedDataFile added_data_files = 1;
+  repeated SerializedDataFile added_position_delete_files = 2;
+  repeated SerializedDataFile added_equality_delete_files = 3;
+
+  message RewriteStats {
+    int64 input_data_files = 1;
+    int64 input_delete_files = 2;
+    int64 output_files = 3;
+    int64 output_bytes = 4;
+  }
+  RewriteStats stats = 4;
+}
+
 message SubscribeIcebergCompactionEventResponse {
   // PullTaskAck is a response, the meta will return a PullTaskAck after distributing the task requested by the PullTask.
   // The Compactor receives the PullTaskAck and remakes its state and tries to initiate the next PullTask.
   message PullTaskAck {}
 
+  // PlanTask is a single plan to execute.
+  message PlanTask {
+    PlanKey key = 1;
+    uint32 required_parallelism = 2;
+    Plan plan = 3;
+    // Attempt number for deduplication on meta.
+    uint32 attempt = 4;
+  }
+
   oneof event {
-    IcebergCompactionTask compact_task = 1;
+    PlanTask plan_task = 1;
     PullTaskAck pull_task_ack = 2;
   }
 
