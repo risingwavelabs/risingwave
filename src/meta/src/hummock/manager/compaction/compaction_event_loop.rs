@@ -29,10 +29,12 @@ use risingwave_pb::hummock::subscribe_compaction_event_response::{
     Event as ResponseEvent, PullTaskAck,
 };
 use risingwave_pb::hummock::{CompactTaskProgress, SubscribeCompactionEventRequest};
+use risingwave_pb::iceberg_compaction;
 use risingwave_pb::iceberg_compaction::SubscribeIcebergCompactionEventRequest;
 use risingwave_pb::iceberg_compaction::subscribe_iceberg_compaction_event_request::{
     Event as IcebergRequestEvent, PullTask as IcebergPullTask,
 };
+use risingwave_pb::iceberg_compaction::subscribe_iceberg_compaction_event_request::report_plan::Status as IcebergPlanReportStatus;
 use risingwave_pb::iceberg_compaction::subscribe_iceberg_compaction_event_response::{
     Event as IcebergResponseEvent, PullTaskAck as IcebergPullTaskAck,
 };
@@ -699,6 +701,48 @@ impl IcebergCompactionEventHandler {
 
         false
     }
+
+    // PR1 only logs the report; PR2 will perform async handling (await).
+    #[allow(clippy::unused_async)]
+    async fn handle_report_plan_event(
+        &self,
+        _context_id: HummockContextId,
+        report_plan: iceberg_compaction::subscribe_iceberg_compaction_event_request::ReportPlan,
+    ) -> bool {
+        let task_id = report_plan.key.as_ref().map(|key| key.task_id).unwrap_or_default();
+        let plan_index = report_plan
+            .key
+            .as_ref()
+            .map(|key| key.plan_index)
+            .unwrap_or_default();
+        let attempt = report_plan.attempt;
+        let has_result = report_plan.result.is_some();
+
+        match IcebergPlanReportStatus::try_from(report_plan.status) {
+            Ok(IcebergPlanReportStatus::Failed) | Ok(IcebergPlanReportStatus::Canceled) => {
+                tracing::warn!(
+                    task_id = task_id,
+                    plan_index = plan_index,
+                    attempt = attempt,
+                    has_result = has_result,
+                    error_message = %report_plan.error_message,
+                    status = report_plan.status,
+                    "Received iceberg plan report"
+                );
+            }
+            _ => {
+                tracing::info!(
+                    task_id = task_id,
+                    plan_index = plan_index,
+                    attempt = attempt,
+                    has_result = has_result,
+                    status = report_plan.status,
+                    "Received iceberg plan report"
+                );
+            }
+        }
+        true
+    }
 }
 
 pub struct IcebergCompactionEventDispatcher {
@@ -715,6 +759,12 @@ impl CompactionEventDispatcher for IcebergCompactionEventDispatcher {
                 return self
                     .compaction_event_handler
                     .handle_pull_task_event(context_id, pull_task_count as usize)
+                    .await;
+            }
+            IcebergRequestEvent::ReportPlan(report_plan) => {
+                return self
+                    .compaction_event_handler
+                    .handle_report_plan_event(context_id, report_plan)
                     .await;
             }
             _ => unreachable!(),
