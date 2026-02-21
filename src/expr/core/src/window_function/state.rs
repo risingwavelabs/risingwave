@@ -93,8 +93,9 @@ impl StateEvictHint {
 pub struct WindowStateSnapshot {
     /// The key of the last output row.
     pub last_output_key: Option<StateKey>,
-    /// Function-specific payload bytes.
-    pub payload: Vec<u8>,
+    /// Function-specific state. The variant must match the window function type;
+    /// a mismatch is detected at restore time and returned as an error.
+    pub function_state: risingwave_pb::window_function::window_state_snapshot::FunctionState,
 }
 
 pub trait WindowState: EstimateSize {

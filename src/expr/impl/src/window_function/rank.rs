@@ -23,6 +23,8 @@ use risingwave_expr::window_function::{
     StateEvictHint, StateKey, StatePos, WindowFuncCall, WindowState, WindowStateSnapshot,
 };
 use risingwave_expr::{ExprError, Result};
+use risingwave_pb::window_function::window_state_snapshot::FunctionState;
+use risingwave_pb::window_function::{DenseRankState, RankState as RankStateProto, RowNumberState};
 use smallvec::SmallVec;
 
 use self::private::RankFuncCount;
@@ -34,11 +36,12 @@ mod private {
         /// Count and return the rank for the given key, updating internal state.
         fn count(&mut self, curr_key: StateKey) -> i64;
 
-        /// Encode the function state to bytes for persistence.
-        fn encode(&self) -> Vec<u8>;
+        /// Convert the function state to the proto oneof variant for persistence.
+        fn to_proto_state(&self) -> FunctionState;
 
-        /// Decode the function state from bytes during recovery.
-        fn decode(bytes: &[u8]) -> Result<Self>
+        /// Restore the function state from the proto oneof variant.
+        /// Returns an error if the variant does not match this function type.
+        fn from_proto_state(state: FunctionState) -> Result<Self>
         where
             Self: Sized;
     }
@@ -56,19 +59,21 @@ impl RankFuncCount for RowNumber {
         curr_rank
     }
 
-    fn encode(&self) -> Vec<u8> {
-        self.prev_rank.to_le_bytes().to_vec()
+    fn to_proto_state(&self) -> FunctionState {
+        FunctionState::RowNumberState(RowNumberState {
+            prev_rank: self.prev_rank,
+        })
     }
 
-    fn decode(bytes: &[u8]) -> Result<Self> {
-        if bytes.len() != 8 {
-            return Err(ExprError::Internal(anyhow::anyhow!(
-                "invalid RowNumber snapshot: expected 8 bytes, got {}",
-                bytes.len()
-            )));
+    fn from_proto_state(state: FunctionState) -> Result<Self> {
+        match state {
+            FunctionState::RowNumberState(s) => Ok(Self {
+                prev_rank: s.prev_rank,
+            }),
+            other => Err(ExprError::Internal(anyhow::anyhow!(
+                "expected RowNumberState, got {other:?}"
+            ))),
         }
-        let prev_rank = i64::from_le_bytes(bytes.try_into().unwrap());
-        Ok(Self { prev_rank })
     }
 }
 
@@ -107,67 +112,25 @@ impl RankFuncCount for Rank {
         curr_rank
     }
 
-    fn encode(&self) -> Vec<u8> {
-        // Format: has_order_key (u8) + order_key_len (u32) + order_key bytes + prev_rank (i64) + prev_pos_in_peer_group (i64)
-        let mut bytes = Vec::new();
-        if let Some(order_key) = &self.prev_order_key {
-            bytes.push(1u8);
-            bytes.extend_from_slice(&(order_key.len() as u32).to_le_bytes());
-            bytes.extend_from_slice(order_key);
-        } else {
-            bytes.push(0u8);
-        }
-        bytes.extend_from_slice(&self.prev_rank.to_le_bytes());
-        bytes.extend_from_slice(&self.prev_pos_in_peer_group.to_le_bytes());
-        bytes
+    fn to_proto_state(&self) -> FunctionState {
+        FunctionState::RankState(RankStateProto {
+            prev_order_key: self.prev_order_key.as_ref().map(|k| k.to_vec()),
+            prev_rank: self.prev_rank,
+            prev_pos_in_peer_group: self.prev_pos_in_peer_group,
+        })
     }
 
-    fn decode(bytes: &[u8]) -> Result<Self> {
-        if bytes.is_empty() {
-            return Err(ExprError::Internal(anyhow::anyhow!(
-                "invalid Rank snapshot: empty bytes"
-            )));
+    fn from_proto_state(state: FunctionState) -> Result<Self> {
+        match state {
+            FunctionState::RankState(s) => Ok(Self {
+                prev_order_key: s.prev_order_key.map(Into::into),
+                prev_rank: s.prev_rank,
+                prev_pos_in_peer_group: s.prev_pos_in_peer_group,
+            }),
+            other => Err(ExprError::Internal(anyhow::anyhow!(
+                "expected RankState, got {other:?}"
+            ))),
         }
-        let mut offset = 0;
-        let has_order_key = bytes[offset];
-        offset += 1;
-
-        let prev_order_key = if has_order_key == 1 {
-            if bytes.len() < offset + 4 {
-                return Err(ExprError::Internal(anyhow::anyhow!(
-                    "invalid Rank snapshot: missing order_key length"
-                )));
-            }
-            let order_key_len =
-                u32::from_le_bytes(bytes[offset..offset + 4].try_into().unwrap()) as usize;
-            offset += 4;
-            if bytes.len() < offset + order_key_len {
-                return Err(ExprError::Internal(anyhow::anyhow!(
-                    "invalid Rank snapshot: missing order_key bytes"
-                )));
-            }
-            let order_key = bytes[offset..offset + order_key_len].to_vec().into();
-            offset += order_key_len;
-            Some(order_key)
-        } else {
-            None
-        };
-
-        if bytes.len() < offset + 16 {
-            return Err(ExprError::Internal(anyhow::anyhow!(
-                "invalid Rank snapshot: missing prev_rank or prev_pos_in_peer_group"
-            )));
-        }
-        let prev_rank = i64::from_le_bytes(bytes[offset..offset + 8].try_into().unwrap());
-        offset += 8;
-        let prev_pos_in_peer_group =
-            i64::from_le_bytes(bytes[offset..offset + 8].try_into().unwrap());
-
-        Ok(Self {
-            prev_order_key,
-            prev_rank,
-            prev_pos_in_peer_group,
-        })
     }
 }
 
@@ -193,62 +156,23 @@ impl RankFuncCount for DenseRank {
         curr_rank
     }
 
-    fn encode(&self) -> Vec<u8> {
-        // Format: has_order_key (u8) + order_key_len (u32) + order_key bytes + prev_rank (i64)
-        let mut bytes = Vec::new();
-        if let Some(order_key) = &self.prev_order_key {
-            bytes.push(1u8);
-            bytes.extend_from_slice(&(order_key.len() as u32).to_le_bytes());
-            bytes.extend_from_slice(order_key);
-        } else {
-            bytes.push(0u8);
-        }
-        bytes.extend_from_slice(&self.prev_rank.to_le_bytes());
-        bytes
+    fn to_proto_state(&self) -> FunctionState {
+        FunctionState::DenseRankState(DenseRankState {
+            prev_order_key: self.prev_order_key.as_ref().map(|k| k.to_vec()),
+            prev_rank: self.prev_rank,
+        })
     }
 
-    fn decode(bytes: &[u8]) -> Result<Self> {
-        if bytes.is_empty() {
-            return Err(ExprError::Internal(anyhow::anyhow!(
-                "invalid DenseRank snapshot: empty bytes"
-            )));
+    fn from_proto_state(state: FunctionState) -> Result<Self> {
+        match state {
+            FunctionState::DenseRankState(s) => Ok(Self {
+                prev_order_key: s.prev_order_key.map(Into::into),
+                prev_rank: s.prev_rank,
+            }),
+            other => Err(ExprError::Internal(anyhow::anyhow!(
+                "expected DenseRankState, got {other:?}"
+            ))),
         }
-        let mut offset = 0;
-        let has_order_key = bytes[offset];
-        offset += 1;
-
-        let prev_order_key = if has_order_key == 1 {
-            if bytes.len() < offset + 4 {
-                return Err(ExprError::Internal(anyhow::anyhow!(
-                    "invalid DenseRank snapshot: missing order_key length"
-                )));
-            }
-            let order_key_len =
-                u32::from_le_bytes(bytes[offset..offset + 4].try_into().unwrap()) as usize;
-            offset += 4;
-            if bytes.len() < offset + order_key_len {
-                return Err(ExprError::Internal(anyhow::anyhow!(
-                    "invalid DenseRank snapshot: missing order_key bytes"
-                )));
-            }
-            let order_key = bytes[offset..offset + order_key_len].to_vec().into();
-            offset += order_key_len;
-            Some(order_key)
-        } else {
-            None
-        };
-
-        if bytes.len() < offset + 8 {
-            return Err(ExprError::Internal(anyhow::anyhow!(
-                "invalid DenseRank snapshot: missing prev_rank"
-            )));
-        }
-        let prev_rank = i64::from_le_bytes(bytes[offset..offset + 8].try_into().unwrap());
-
-        Ok(Self {
-            prev_order_key,
-            prev_rank,
-        })
     }
 }
 
@@ -389,12 +313,12 @@ impl<RF: RankFuncCount> WindowState for RankState<RF> {
         }
         Some(WindowStateSnapshot {
             last_output_key: self.last_output_key.clone(),
-            payload: self.func_state.encode(),
+            function_state: self.func_state.to_proto_state(),
         })
     }
 
     fn restore(&mut self, snapshot: WindowStateSnapshot) -> Result<()> {
-        self.func_state = RF::decode(&snapshot.payload)?;
+        self.func_state = RF::from_proto_state(snapshot.function_state)?;
         // Set recover_skip_until so that slide_no_output skips counting for rows
         // that have already been counted before the snapshot was taken.
         self.recover_skip_until = snapshot.last_output_key;
@@ -786,10 +710,9 @@ mod tests {
         state.enable_persistence();
 
         // Create a snapshot with default func_state (prev_rank = 0)
-        let default_func_state = RowNumber::default();
         let snapshot = WindowStateSnapshot {
             last_output_key: None,
-            payload: default_func_state.encode(),
+            function_state: RowNumber::default().to_proto_state(),
         };
 
         state.restore(snapshot).unwrap();
@@ -801,18 +724,18 @@ mod tests {
     }
 
     #[test]
-    fn test_corrupted_snapshot_bytes() {
-        // Test that invalid payload produces error
-        let invalid_bytes = vec![0u8, 1, 2]; // Too short for RowNumber
+    fn test_wrong_function_state_type_is_rejected() {
+        // Restoring a RowNumber state with a RankState payload should fail fast.
+        let call = create_call(WindowFuncKind::RowNumber);
+        let mut state = RankState::<RowNumber>::new(&call);
+        state.enable_persistence();
 
-        let result = RowNumber::decode(&invalid_bytes);
-        assert!(result.is_err());
+        // Snapshot contains a RankState variant instead of RowNumberState.
+        let snapshot = WindowStateSnapshot {
+            last_output_key: None,
+            function_state: Rank::default().to_proto_state(),
+        };
 
-        // Test empty bytes
-        let empty_result = Rank::decode(&[]);
-        assert!(empty_result.is_err());
-
-        let empty_dense_result = DenseRank::decode(&[]);
-        assert!(empty_dense_result.is_err());
+        assert!(state.restore(snapshot).is_err());
     }
 }
