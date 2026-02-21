@@ -276,12 +276,14 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
                             .restore(snapshot)?;
                     }
                 } else {
-                    tracing::warn!(
-                        "Intermediate state row has fewer columns ({}) than expected ({}), skipping call_index {}",
+                    return Err(anyhow::anyhow!(
+                        "intermediate state row has fewer columns ({}) than expected ({}) \
+                        at call_index {}, state may be corrupted",
                         row.len(),
                         num_partition_key_cols + num_calls,
                         call_index
-                    );
+                    )
+                    .into());
                 }
             }
             partition.intermediate_state_row = Some(row);
