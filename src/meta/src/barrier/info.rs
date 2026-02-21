@@ -480,6 +480,10 @@ impl InflightDatabaseInfo {
         self.jobs.contains_key(&job_id)
     }
 
+    pub(super) fn job_id_by_fragment(&self, fragment_id: FragmentId) -> Option<JobId> {
+        self.fragment_location.get(&fragment_id).copied()
+    }
+
     pub fn fragment(&self, fragment_id: FragmentId) -> &InflightFragmentInfo {
         let job_id = self.fragment_location[&fragment_id];
         self.jobs
