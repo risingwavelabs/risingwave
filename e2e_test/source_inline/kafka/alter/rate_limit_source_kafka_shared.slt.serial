@@ -35,21 +35,19 @@ create source kafka_source (v1 int) with (
 statement ok
 flush;
 
-############## Check data
-
-sleep 3s
-
 ############## Create MV on source
 
+# Use DISTINCT and a non-overlapping second batch to make the assertion resilient to
+# duplicate replays while still detecting any data leakage when source_rate_limit = 0.
 statement ok
-create materialized view rl_mv1 as select count(*) from kafka_source;
+create materialized view rl_mv1 as select count(distinct v1) from kafka_source;
 
 ############## Although source is rate limited, the MV's SourceBackfill is not.
 
 statement ok
 flush;
 
-query I
+query I retry 10 backoff 1s
 select * from rl_mv1;
 ----
 1000
@@ -57,11 +55,9 @@ select * from rl_mv1;
 ############## Insert more data. They will not go into the MV.
 
 statement ok
-insert into kafka_seed_data select * from generate_series(1, 1000);
+insert into kafka_seed_data select * from generate_series(1001, 2000);
 
-sleep 3s
-
-query I
+query I retry 10 backoff 1s
 select * from rl_mv1;
 ----
 1000
@@ -72,17 +68,19 @@ SET BACKGROUND_DDL=true;
 statement ok
 SET BACKFILL_RATE_LIMIT=0;
 
+# Shared Kafka source can replay records during recovery/reconfiguration.
+# Use DISTINCT here so this test validates rate-limit behavior instead of replay multiplicity.
 statement ok
-create materialized view rl_mv2 as select count(*) from kafka_source;
+create materialized view rl_mv2 as select count(distinct v1) from kafka_source;
 
 sleep 1s
 
-query T
+query T retry 10 backoff 1s
 SELECT progress from rw_ddl_progress;
 ----
 0 rows consumed
 
-query T
+query T retry 10 backoff 1s
 select name, node_name, fragment_type, rate_limit from rw_rate_limit join rw_relations on table_id=id
 order by name;
 ----
@@ -95,26 +93,22 @@ rl_mv2	SOURCE_BACKFILL	{SOURCE_SCAN}	0
 statement ok
 alter source kafka_source set source_rate_limit to 1000;
 
-query T
+query T retry 10 backoff 1s
 select name, node_name, fragment_type, rate_limit from rw_rate_limit join rw_relations on table_id=id
 order by name;
 ----
 kafka_source	SOURCE	{SOURCE}	1000
 rl_mv2	SOURCE_BACKFILL	{SOURCE_SCAN}	0
 
-sleep 3s
-
-query I
+query I retry 10 backoff 1s
 select * from rl_mv1;
 ----
 2000
 
-query T
+query T retry 10 backoff 1s
 SELECT progress from rw_ddl_progress;
 ----
 0 rows consumed
-
-
 
 statement error
 alter materialized view rl_mv2 set source_rate_limit = 1000;
@@ -127,7 +121,7 @@ LINE 1: alter materialized view rl_mv2 set source_rate_limit = 1000;
                                            ^
 
 
-query T
+query T retry 10 backoff 1s
 select name, node_name, fragment_type, rate_limit from rw_rate_limit join rw_relations on table_id=id
 order by name;
 ----
@@ -139,19 +133,28 @@ statement ok
 alter materialized view rl_mv2 set backfill_rate_limit = 2000;
 
 
-query T
+query T retry 10 backoff 1s
 select name, node_name, fragment_type, rate_limit from rw_rate_limit join rw_relations on table_id=id
 order by name;
 ----
 kafka_source	SOURCE	{SOURCE}	1000
 rl_mv2	SOURCE_BACKFILL	{SOURCE_SCAN}	2000
 
-sleep 3s
-
-query T
+query T retry 10 backoff 1s
 select * from rl_mv2;
 ----
 2000
+
+############## Alter Source (rate_limit = 1000 --> default)
+
+statement ok
+alter source kafka_source set source_rate_limit to default;
+
+query T retry 10 backoff 1s
+select name, node_name, fragment_type, rate_limit from rw_rate_limit join rw_relations on table_id=id
+order by name;
+----
+rl_mv2	SOURCE_BACKFILL	{SOURCE_SCAN}	2000
 
 
 
