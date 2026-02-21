@@ -62,16 +62,11 @@ CREATE SINK sink2 AS SELECT * FROM mv2 WITH (
 );
 
 # Create subscriptions
-# In madsim recovery runs, the first CREATE SUBSCRIPTION request can be committed on meta
-# before the client gets the response. Retrying the same statement may then hit duplicate name.
-# Skip this block in madsim to keep this swap test focused and deterministic.
-skipif madsim
 statement ok
 CREATE SUBSCRIPTION sub1 FROM mv1 WITH (
     retention = '1D'
 );
 
-skipif madsim
 statement ok
 CREATE SUBSCRIPTION sub2 FROM mv2 WITH (
     retention = '1D'
@@ -158,18 +153,15 @@ SHOW CREATE SINK sink2;
 public.sink2 CREATE SINK sink2 AS SELECT * FROM mv2 AS mv1 WITH (connector = 'blackhole')
 
 # Test subscription swap
-skipif madsim
 statement ok
 ALTER SUBSCRIPTION sub1 SWAP WITH sub2;
 
 # Verify subscription definitions are swapped
-skipif madsim
 query TT
 SHOW CREATE SUBSCRIPTION sub1;
 ----
 public.sub1 CREATE SUBSCRIPTION sub1 FROM mv1 WITH (retention = '1D')
 
-skipif madsim
 query TT
 SHOW CREATE SUBSCRIPTION sub2;
 ----
