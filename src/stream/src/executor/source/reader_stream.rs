@@ -173,6 +173,7 @@ impl StreamReaderBuilder {
                 column_ids.clone(),
                 source_ctx_ref.clone(),
                 seek_to_latest,
+                false,
             )
             .await
             .map_err(StreamExecutorError::connector_error)?;
@@ -223,6 +224,7 @@ impl StreamReaderBuilder {
                         source_ctx_ref.clone(),
                         // just `seek_to_latest` for initial build
                         is_initial_build,
+                        false,
                     )
                     .await
             };
