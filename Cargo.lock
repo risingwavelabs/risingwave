@@ -12581,6 +12581,7 @@ dependencies = [
  "sea-orm",
  "serde",
  "serde_json",
+ "shell-words",
  "sqllogictest",
  "tempfile",
  "tikv-jemallocator",
