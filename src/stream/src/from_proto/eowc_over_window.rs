@@ -51,11 +51,28 @@ impl ExecutorBuilder for EowcOverWindowExecutorBuilder {
                 .vnode_bitmap
                 .expect("vnodes not set for EOWC over window"),
         ));
-        let state_table = StateTableBuilder::new(node.get_state_table()?, store, vnodes)
-            .with_op_consistency_level(StateTableOpConsistencyLevel::Inconsistent)
-            .enable_preload_all_rows_by_config(&params.config)
-            .build()
-            .await;
+        let state_table =
+            StateTableBuilder::new(node.get_state_table()?, store.clone(), vnodes.clone())
+                .with_op_consistency_level(StateTableOpConsistencyLevel::Inconsistent)
+                .enable_preload_all_rows_by_config(&params.config)
+                .build()
+                .await;
+
+        // Build optional intermediate state table for persisting window function states
+        let intermediate_state_table =
+            if let Some(table_pb) = node.intermediate_state_table.as_ref() {
+                Some(
+                    StateTableBuilder::new(table_pb, store, vnodes)
+                        // Use ConsistentOldValue because we update existing rows
+                        .with_op_consistency_level(StateTableOpConsistencyLevel::ConsistentOldValue)
+                        .enable_preload_all_rows_by_config(&params.config)
+                        .build()
+                        .await,
+                )
+            } else {
+                None
+            };
+
         let exec = EowcOverWindowExecutor::new(EowcOverWindowExecutorArgs {
             actor_ctx: params.actor_context,
 
@@ -67,6 +84,7 @@ impl ExecutorBuilder for EowcOverWindowExecutorBuilder {
             order_key_index,
             state_table,
             watermark_epoch: params.watermark_epoch,
+            intermediate_state_table,
         });
         Ok((params.info, exec).into())
     }

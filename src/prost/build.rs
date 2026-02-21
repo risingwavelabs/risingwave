@@ -1055,6 +1055,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "serverless_backfill_controller",
         "secret",
         "frontend_service",
+        "window_function",
     ];
     let protos: Vec<String> = proto_files
         .iter()
