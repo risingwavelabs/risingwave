@@ -3,6 +3,46 @@ include ../../tpch/create_sources_kafka.slt.part
 
 control substitution off
 
+query I retry 20 backoff 3s
+select count(*) from supplier;
+----
+22
+
+query I retry 20 backoff 3s
+select count(*) from part;
+----
+200
+
+query I retry 20 backoff 3s
+select count(*) from partsupp;
+----
+700
+
+query I retry 20 backoff 3s
+select count(*) from customer;
+----
+150
+
+query I retry 20 backoff 3s
+select count(*) from orders;
+----
+1500
+
+query I retry 20 backoff 3s
+select count(*) from lineitem;
+----
+6005
+
+query I retry 20 backoff 3s
+select count(*) from nation;
+----
+25
+
+query I retry 20 backoff 3s
+select count(*) from region;
+----
+5
+
 include ../../streaming/tpch/create_views.slt.part
 include ../../streaming/tpch/q1.slt.part
 include ../../streaming/tpch/q2.slt.part
