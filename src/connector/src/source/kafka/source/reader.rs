@@ -337,13 +337,16 @@ async fn first_readable_offset(
 
         // `recv` may return records after `search_end_exclusive` when new records are appended while
         // we probe. We clamp to the watermark snapshot to keep a stable target offset.
-        let recv_result = tokio::time::timeout(timeout, consumer.recv()).await;
+        let recv_result = tokio::time::timeout(timeout, consumer.stream().next()).await;
         match recv_result {
-            Ok(Ok(msg)) if msg.offset() < start_offset => continue,
-            Ok(Ok(msg)) if msg.offset() < search_end_exclusive => return Ok(Some(msg.offset())),
-            Ok(Ok(_)) => return Ok(None),
-            Ok(Err(KafkaError::PartitionEOF(_))) => return Ok(None),
-            Ok(Err(err)) => return Err(err.into()),
+            Ok(Some(Ok(msg))) if msg.offset() < start_offset => continue,
+            Ok(Some(Ok(msg))) if msg.offset() < search_end_exclusive => {
+                return Ok(Some(msg.offset()));
+            }
+            Ok(Some(Ok(_))) => return Ok(None),
+            Ok(Some(Err(KafkaError::PartitionEOF(_)))) => return Ok(None),
+            Ok(Some(Err(err))) => return Err(err.into()),
+            Ok(None) => return Ok(None),
             Err(_elapsed) => {
                 return Err(anyhow!("timeout while probing readable kafka offset").into());
             }
