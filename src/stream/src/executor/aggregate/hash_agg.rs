@@ -24,7 +24,7 @@ use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common_estimate_size::EstimateSize;
 use risingwave_common_estimate_size::collections::EstimatedHashMap;
-use risingwave_expr::aggregate::{AggCall, BoxedAggregateFunction, build_retractable};
+use risingwave_expr::aggregate::{AggCall, BoxedAggregateFunction};
 use risingwave_pb::stream_plan::PbAggNodeVersion;
 
 use super::agg_group::{
@@ -32,7 +32,10 @@ use super::agg_group::{
 };
 use super::agg_state::AggStateStorage;
 use super::distinct::DistinctDeduplicater;
-use super::{AggExecutorArgs, HashAggExecutorExtraArgs, agg_call_filter_res, iter_table_storage};
+use super::{
+    AggExecutorArgs, HashAggExecutorExtraArgs, agg_call_filter_res, build_streaming_agg_funcs,
+    iter_table_storage,
+};
 use crate::cache::ManagedLruCache;
 use crate::common::metrics::MetricsInfo;
 use crate::common::table::state_table::StateTablePostCommit;
@@ -193,6 +196,12 @@ impl<K: HashKey, S: StateStore> Execute for HashAggExecutor<K, S> {
 impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
     pub fn new(args: AggExecutorArgs<S, HashAggExecutorExtraArgs>) -> StreamResult<Self> {
         let input_info = args.input.info().clone();
+        let agg_funcs = build_streaming_agg_funcs(
+            &args.agg_calls,
+            &args.storages,
+            &input_info.stream_key,
+            &input_info.schema,
+        )?;
 
         let group_key_len = args.extra.group_key_indices.len();
         // NOTE: we assume the prefix of table pk is exactly the group key
@@ -217,7 +226,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                 input_schema: input_info.schema,
                 group_key_indices: args.extra.group_key_indices,
                 group_key_table_pk_projection: group_key_table_pk_projection.to_vec().into(),
-                agg_funcs: args.agg_calls.iter().map(build_retractable).try_collect()?,
+                agg_funcs,
                 agg_calls: args.agg_calls,
                 row_count_index: args.row_count_index,
                 storages: args.storages,
