@@ -21,7 +21,7 @@ parking_lot = { workspace = true }
 pprof = { version = "0.15", features = ["flamegraph"] }
 risingwave_common = { workspace = true }
 risingwave_variables = { workspace = true }
-rlimit = "0.10"
+rlimit = "0.11"
 rustls = "0.23.5"
 # Explicitly specify the tokio version used in RisingWave runtime
 rw-tokio = { version = "=1.47.2", package = "tokio" }
