@@ -146,7 +146,11 @@ pub trait CatalogWriter: Send + Sync {
         if_not_exists: bool,
     ) -> Result<()>;
 
-    async fn create_subscription(&self, subscription: PbSubscription) -> Result<()>;
+    async fn create_subscription(
+        &self,
+        subscription: PbSubscription,
+        if_not_exists: bool,
+    ) -> Result<()>;
 
     async fn create_function(&self, function: PbFunction) -> Result<()>;
 
@@ -458,8 +462,15 @@ impl CatalogWriter for CatalogWriterImpl {
         self.wait_version(version).await
     }
 
-    async fn create_subscription(&self, subscription: PbSubscription) -> Result<()> {
-        let version = self.meta_client.create_subscription(subscription).await?;
+    async fn create_subscription(
+        &self,
+        subscription: PbSubscription,
+        if_not_exists: bool,
+    ) -> Result<()> {
+        let version = self
+            .meta_client
+            .create_subscription(subscription, if_not_exists)
+            .await?;
         self.wait_version(version).await
     }
 

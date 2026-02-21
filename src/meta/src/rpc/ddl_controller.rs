@@ -185,7 +185,10 @@ pub enum DdlCommand {
     AlterSecret(Secret),
     DropSecret(SecretId, DropMode),
     CommentOn(Comment),
-    CreateSubscription(Subscription),
+    CreateSubscription {
+        subscription: Subscription,
+        if_not_exists: bool,
+    },
     DropSubscription(SubscriptionId, DropMode),
     AlterDatabaseParam(DatabaseId, AlterDatabaseParam),
     AlterStreamingJobConfig(JobId, HashMap<String, String>, Vec<String>),
@@ -221,7 +224,7 @@ impl DdlCommand {
             DdlCommand::AlterSecret(secret) => Left(secret.name.clone()),
             DdlCommand::DropSecret(id, _) => Right(id.as_object_id()),
             DdlCommand::CommentOn(comment) => Right(comment.table_id.into()),
-            DdlCommand::CreateSubscription(subscription) => Left(subscription.name.clone()),
+            DdlCommand::CreateSubscription { subscription, .. } => Left(subscription.name.clone()),
             DdlCommand::DropSubscription(id, _) => Right(id.as_object_id()),
             DdlCommand::AlterDatabaseParam(id, _) => Right(id.as_object_id()),
             DdlCommand::AlterStreamingJobConfig(job_id, _, _) => Right(job_id.as_object_id()),
@@ -258,7 +261,7 @@ impl DdlCommand {
             | DdlCommand::ReplaceStreamJob(_)
             | DdlCommand::AlterNonSharedSource(_)
             | DdlCommand::ResetSource(_)
-            | DdlCommand::CreateSubscription(_) => false,
+            | DdlCommand::CreateSubscription { .. } => false,
         }
     }
 }
@@ -458,9 +461,10 @@ impl DdlController {
                     ctrl.alter_non_shared_source(source).await
                 }
                 DdlCommand::CommentOn(comment) => ctrl.comment_on(comment).await,
-                DdlCommand::CreateSubscription(subscription) => {
-                    ctrl.create_subscription(subscription).await
-                }
+                DdlCommand::CreateSubscription {
+                    subscription,
+                    if_not_exists,
+                } => ctrl.create_subscription(subscription, if_not_exists).await,
                 DdlCommand::DropSubscription(subscription_id, drop_mode) => {
                     ctrl.drop_subscription(subscription_id, drop_mode).await
                 }
@@ -766,6 +770,7 @@ impl DdlController {
     async fn create_subscription(
         &self,
         mut subscription: Subscription,
+        if_not_exists: bool,
     ) -> MetaResult<NotificationVersion> {
         tracing::debug!("create subscription");
         let _permit = self
@@ -775,10 +780,17 @@ impl DdlController {
             .await
             .unwrap();
         let _reschedule_job_lock = self.stream_manager.reschedule_lock_read_guard().await;
-        self.metadata_manager
+        if let Err(meta_err) = self
+            .metadata_manager
             .catalog_controller
             .create_subscription_catalog(&mut subscription)
-            .await?;
+            .await
+        {
+            if if_not_exists && matches!(meta_err.inner(), MetaErrorInner::Duplicated(_, _, _)) {
+                return Ok(IGNORED_NOTIFICATION_VERSION);
+            }
+            return Err(meta_err);
+        }
         if let Err(err) = self.stream_manager.create_subscription(&subscription).await {
             tracing::debug!(error = %err.as_report(), "failed to create subscription");
             let _ = self

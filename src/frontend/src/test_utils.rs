@@ -390,7 +390,11 @@ impl CatalogWriter for MockCatalogWriter {
         self.create_sink_inner(sink, graph)
     }
 
-    async fn create_subscription(&self, subscription: PbSubscription) -> Result<()> {
+    async fn create_subscription(
+        &self,
+        subscription: PbSubscription,
+        _if_not_exists: bool,
+    ) -> Result<()> {
         self.create_subscription_inner(subscription)
     }
 
