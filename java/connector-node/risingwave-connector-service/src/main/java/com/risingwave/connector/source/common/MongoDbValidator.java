@@ -18,11 +18,17 @@ package com.risingwave.connector.source.common;
 
 import com.mongodb.ConnectionString;
 import com.mongodb.MongoClientSettings;
+import com.mongodb.MongoCredential;
 import com.mongodb.client.MongoClient;
 import com.mongodb.client.MongoClients;
+import java.io.FileInputStream;
+import java.security.KeyStore;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
+import javax.net.ssl.KeyManagerFactory;
+import javax.net.ssl.SSLContext;
+import javax.net.ssl.TrustManagerFactory;
 import org.bson.BsonDocument;
 import org.bson.Document;
 import org.bson.conversions.Bson;
@@ -34,6 +40,14 @@ public class MongoDbValidator extends DatabaseValidator implements AutoCloseable
 
     String mongodbUrl;
     boolean isShardedCluster;
+    boolean sslEnabled;
+    String keystoreLocation;
+    String keystorePassword;
+    String keystoreType;
+    String truststoreLocation;
+    String truststorePassword;
+    boolean invalidHostnameAllowed;
+    String authMechanism;
 
     ConnectionString connStr;
     MongoClient client;
@@ -51,10 +65,101 @@ public class MongoDbValidator extends DatabaseValidator implements AutoCloseable
     static final String INHERITED_PRIVILEGES = "inheritedPrivileges";
 
     public MongoDbValidator(Map<String, String> userProps) {
-        this.mongodbUrl = userProps.get("mongodb.url");
+        this.mongodbUrl = userProps.get(DbzConnectorConfig.MongoDb.MONGO_URL);
         this.connStr = new ConnectionString(mongodbUrl);
         this.isShardedCluster = false;
-        this.client = MongoClients.create(connStr.toString());
+
+        // Parse SSL/X509 configuration
+        this.sslEnabled = Boolean.parseBoolean(
+                userProps.getOrDefault(DbzConnectorConfig.MongoDb.MONGO_SSL_ENABLED, "false"));
+        this.keystoreLocation = userProps.get(DbzConnectorConfig.MongoDb.MONGO_SSL_KEYSTORE);
+        this.keystorePassword = userProps.get(DbzConnectorConfig.MongoDb.MONGO_SSL_KEYSTORE_PASSWORD);
+        this.keystoreType = userProps.getOrDefault(DbzConnectorConfig.MongoDb.MONGO_SSL_KEYSTORE_TYPE, "PKCS12");
+        this.truststoreLocation = userProps.get(DbzConnectorConfig.MongoDb.MONGO_SSL_TRUSTSTORE);
+        this.truststorePassword = userProps.get(DbzConnectorConfig.MongoDb.MONGO_SSL_TRUSTSTORE_PASSWORD);
+        this.invalidHostnameAllowed = Boolean.parseBoolean(
+                userProps.getOrDefault(DbzConnectorConfig.MongoDb.MONGO_SSL_INVALID_HOSTNAME_ALLOWED, "false"));
+        this.authMechanism = userProps.get(DbzConnectorConfig.MongoDb.MONGO_AUTH_MECHANISM);
+
+        this.client = createMongoClient();
+    }
+
+    private MongoClient createMongoClient() {
+        MongoClientSettings.Builder settingsBuilder = MongoClientSettings.builder()
+                .applyConnectionString(connStr);
+
+        if (sslEnabled) {
+            LOG.info("SSL/TLS is enabled for MongoDB connection");
+            try {
+                SSLContext sslContext = createSSLContext();
+                settingsBuilder.applyToSslSettings(builder -> {
+                    builder.enabled(true);
+                    builder.context(sslContext);
+                    builder.invalidHostNameAllowed(invalidHostnameAllowed);
+                });
+
+                // Configure X.509 authentication if specified
+                if ("MONGODB-X509".equalsIgnoreCase(authMechanism)) {
+                    LOG.info("Using X.509 certificate authentication");
+                    settingsBuilder.credential(MongoCredential.createMongoX509Credential());
+                }
+            } catch (Exception e) {
+                throw new CdcConnectorException("Failed to configure SSL for MongoDB: " + e.getMessage(), e);
+            }
+        }
+
+        return MongoClients.create(settingsBuilder.build());
+    }
+
+    private SSLContext createSSLContext() throws Exception {
+        SSLContext sslContext = SSLContext.getInstance("TLS");
+
+        KeyManagerFactory keyManagerFactory = null;
+        TrustManagerFactory trustManagerFactory = null;
+
+        // Load keystore (contains client certificate for X.509 auth)
+        if (keystoreLocation != null && !keystoreLocation.isEmpty()) {
+            LOG.info("Loading keystore from: {}", keystoreLocation);
+            // Auto-detect keystore type if not explicitly set, based on file extension
+            String effectiveKeystoreType = keystoreType;
+            if (effectiveKeystoreType == null || effectiveKeystoreType.isEmpty() || "PKCS12".equals(effectiveKeystoreType)) {
+                // Check if file extension suggests JKS
+                if (keystoreLocation.toLowerCase().endsWith(".jks")) {
+                    effectiveKeystoreType = "JKS";
+                    LOG.info("Auto-detected JKS keystore type from file extension");
+                } else {
+                    effectiveKeystoreType = "PKCS12";
+                }
+            }
+            LOG.info("Using keystore type: {}", effectiveKeystoreType);
+            KeyStore keyStore = KeyStore.getInstance(effectiveKeystoreType);
+            char[] keyPassword = keystorePassword != null ? keystorePassword.toCharArray() : null;
+            try (FileInputStream fis = new FileInputStream(keystoreLocation)) {
+                keyStore.load(fis, keyPassword);
+            }
+            keyManagerFactory = KeyManagerFactory.getInstance(KeyManagerFactory.getDefaultAlgorithm());
+            keyManagerFactory.init(keyStore, keyPassword);
+        }
+
+        // Load truststore (contains CA certificates)
+        if (truststoreLocation != null && !truststoreLocation.isEmpty()) {
+            LOG.info("Loading truststore from: {}", truststoreLocation);
+            String truststoreType = truststoreLocation.endsWith(".jks") ? "JKS" : "PKCS12";
+            KeyStore trustStore = KeyStore.getInstance(truststoreType);
+            char[] trustPassword = truststorePassword != null ? truststorePassword.toCharArray() : null;
+            try (FileInputStream fis = new FileInputStream(truststoreLocation)) {
+                trustStore.load(fis, trustPassword);
+            }
+            trustManagerFactory = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm());
+            trustManagerFactory.init(trustStore);
+        }
+
+        sslContext.init(
+                keyManagerFactory != null ? keyManagerFactory.getKeyManagers() : null,
+                trustManagerFactory != null ? trustManagerFactory.getTrustManagers() : null,
+                null);
+
+        return sslContext;
     }
 
     @Override
@@ -65,7 +170,7 @@ public class MongoDbValidator extends DatabaseValidator implements AutoCloseable
 
         try {
             var connStr = new ConnectionString(mongodbUrl);
-            var settings =
+            var settingsBuilder =
                     MongoClientSettings.builder()
                             .applyConnectionString(connStr)
                             // Set shorter timeouts for validation
@@ -85,16 +190,39 @@ public class MongoDbValidator extends DatabaseValidator implements AutoCloseable
                             .applyToClusterSettings(
                                     builder ->
                                             builder.serverSelectionTimeout(
-                                                    validationTimeoutSeconds, TimeUnit.SECONDS))
-                            .build();
+                                                    validationTimeoutSeconds, TimeUnit.SECONDS));
 
-            try (MongoClient mongoClient = MongoClients.create(settings)) {
+            // Apply SSL/X509 configuration if enabled
+            if (sslEnabled) {
+                LOG.info("Validating MongoDB connection with SSL/TLS enabled");
+                try {
+                    SSLContext sslContext = createSSLContext();
+                    settingsBuilder.applyToSslSettings(builder -> {
+                        builder.enabled(true);
+                        builder.context(sslContext);
+                        builder.invalidHostNameAllowed(invalidHostnameAllowed);
+                    });
+
+                    // Configure X.509 authentication if specified
+                    if ("MONGODB-X509".equalsIgnoreCase(authMechanism)) {
+                        LOG.info("Validating with X.509 certificate authentication");
+                        settingsBuilder.credential(MongoCredential.createMongoX509Credential());
+                    }
+                } catch (Exception e) {
+                    throw new CdcConnectorException(
+                            "Failed to configure SSL for MongoDB validation: " + e.getMessage(), e);
+                }
+            }
+
+            try (MongoClient mongoClient = MongoClients.create(settingsBuilder.build())) {
                 // Verify that we can actually connect to the cluster
                 // Use ping command which is lightweight and fast
                 mongoClient
                         .getDatabase("admin")
                         .runCommand(org.bson.BsonDocument.parse("{ping: 1}"));
-                LOG.info("MongoDB connection validated successfully");
+                LOG.info("MongoDB connection validated successfully" +
+                        (sslEnabled ? " with SSL/TLS" : "") +
+                        ("MONGODB-X509".equalsIgnoreCase(authMechanism) ? " and X.509 auth" : ""));
             }
         } catch (CdcConnectorException e) {
             // Re-throw our custom exceptions
