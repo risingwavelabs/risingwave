@@ -337,7 +337,16 @@ async fn first_readable_offset(
 
         // `recv` may return records after `search_end_exclusive` when new records are appended while
         // we probe. We clamp to the watermark snapshot to keep a stable target offset.
+        #[cfg(madsim)]
         let recv_result = tokio::time::timeout(timeout, consumer.stream().next()).await;
+        #[cfg(not(madsim))]
+        let recv_result = tokio::time::timeout(timeout, async {
+            match consumer.recv().await {
+                Ok(msg) => Some(Ok(msg)),
+                Err(err) => Some(Err(err)),
+            }
+        })
+        .await;
         match recv_result {
             Ok(Some(Ok(msg))) if msg.offset() < start_offset => continue,
             Ok(Some(Ok(msg))) if msg.offset() < search_end_exclusive => {
