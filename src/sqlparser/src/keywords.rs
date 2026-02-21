@@ -237,6 +237,7 @@ define_keywords!(
     FLUSH,
     FOLLOWING,
     FOR,
+    FORCE,
     FOREIGN,
     FORMAT,
     FRAGMENT,
