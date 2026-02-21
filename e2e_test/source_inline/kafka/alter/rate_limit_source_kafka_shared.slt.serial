@@ -108,8 +108,6 @@ SELECT progress from rw_ddl_progress;
 ----
 0 rows consumed
 
-
-
 statement error
 alter materialized view rl_mv2 set source_rate_limit = 1000;
 ----
@@ -144,6 +142,17 @@ query T retry 10 backoff 1s
 select * from rl_mv2;
 ----
 2000
+
+############## Alter Source (rate_limit = 1000 --> default)
+
+statement ok
+alter source kafka_source set source_rate_limit to default;
+
+query T retry 10 backoff 1s
+select name, node_name, fragment_type, rate_limit from rw_rate_limit join rw_relations on table_id=id
+order by name;
+----
+rl_mv2	SOURCE_BACKFILL	{SOURCE_SCAN}	2000
 
 
 
