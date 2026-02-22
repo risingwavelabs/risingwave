@@ -71,15 +71,19 @@ def verify_control_record_gap(broker: str, topic: str):
         )
     # This test creates a fresh topic and writes one committed transactional message.
     # Under read_committed:
-    # - the data record should be visible at `low`
+    # - exactly one data record should be visible
     # - the final offset (`high - 1`) should remain invisible as the COMMIT control record
-    if delivered_offsets != [low]:
+    #
+    # Note: Kafka may place an extra transactional control record before the data record,
+    # so the visible data offset is not guaranteed to equal `low`.
+    if len(delivered_offsets) != 1:
         raise AssertionError(
-            f"expected exactly one visible data record at offset {low}, got {delivered_offsets}"
+            f"expected exactly one visible data record, got {delivered_offsets}"
         )
-    if high != low + 2:
+    data_offset = delivered_offsets[0]
+    if high != data_offset + 2:
         raise AssertionError(
-            f"expected last offset to be the COMMIT control record (low={low}, high={high})"
+            f"expected last offset to be the COMMIT control record (data_offset={data_offset}, high={high})"
         )
 
 
