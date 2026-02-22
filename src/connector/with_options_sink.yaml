@@ -615,9 +615,6 @@ IcebergConfig:
     field_type: Vec<String>
     required: false
     default: Default::default
-  - name: java_catalog_props
-    field_type: HashMap<String,String>
-    required: false
   - name: partition_by
     field_type: String
     required: false
