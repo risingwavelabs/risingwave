@@ -47,7 +47,7 @@ def verify_control_record_gap(broker: str, topic: str):
     )
     tp = TopicPartition(topic, 0)
     low, high = consumer.get_watermark_offsets(tp, timeout=10.0)
-    consumer.assign([TopicPartition(topic, 0, 0)])
+    consumer.assign([TopicPartition(topic, 0, low)])
 
     delivered_offsets = []
     deadline = time.time() + 15
@@ -68,6 +68,18 @@ def verify_control_record_gap(broker: str, topic: str):
     if high - 1 <= max(delivered_offsets):
         raise AssertionError(
             f"expect control record gap, got high={high}, delivered={delivered_offsets}"
+        )
+    # This test creates a fresh topic and writes one committed transactional message.
+    # Under read_committed:
+    # - the data record should be visible at `low`
+    # - the final offset (`high - 1`) should remain invisible as the COMMIT control record
+    if delivered_offsets != [low]:
+        raise AssertionError(
+            f"expected exactly one visible data record at offset {low}, got {delivered_offsets}"
+        )
+    if high != low + 2:
+        raise AssertionError(
+            f"expected last offset to be the COMMIT control record (low={low}, high={high})"
         )
 
 

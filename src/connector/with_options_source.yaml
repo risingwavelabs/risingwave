@@ -656,9 +656,6 @@ KafkaProperties:
   - name: aws.msk.signer_timeout_sec
     field_type: u64
     required: false
-  - name: enable_partition_eof
-    field_type: bool
-    required: true
 KinesisProperties:
   fields:
   - name: scan.startup.mode

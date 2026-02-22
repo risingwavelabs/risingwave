@@ -157,7 +157,11 @@ fn generate_with_options_yaml_inner(path: &Path) -> BTreeMap<String, StructInfo>
                     default_func,
                     rename,
                     alias,
+                    skip_deserializing,
                 } = extract_serde_properties(&field);
+                if skip_deserializing {
+                    continue;
+                }
 
                 let allow_alter_on_fly = extract_with_option_allow_alter_on_fly(&field);
 
@@ -243,6 +247,7 @@ struct SerdeProperties {
     default_func: Option<String>,
     rename: Option<String>,
     alias: Vec<String>,
+    skip_deserializing: bool,
 }
 
 #[derive(Debug, Serialize, Default)]
@@ -332,6 +337,9 @@ fn extract_serde_properties(field: &Field) -> SerdeProperties {
                         } else {
                             serde_props.default_func = Some("Default::default".to_owned());
                         }
+                    } else if meta.path.is_ident("skip") || meta.path.is_ident("skip_deserializing")
+                    {
+                        serde_props.skip_deserializing = true;
                     }
                     // drain the remaining meta. Otherwise parse_nested_meta returns err
                     // <https://github.com/dtolnay/syn/issues/1426>
