@@ -1,70 +1,96 @@
-# Coding Agent Instructions for RisingWave
+# AGENTS.md - RisingWave Repository Root
 
-## Project Overview
+## 1. Scope
 
-RisingWave is a Postgres-compatible streaming database that offers the simplest and most cost-effective way to process, analyze, and manage real-time event data — with built-in support for the Apache Iceberg™ open table format.
+Repository-wide policies applicable to all directories unless explicitly overridden.
 
-RisingWave components are developed in Rust and split into several crates:
+## 2. Purpose
 
-1. `config` - Default configurations for servers
-2. `prost` - Generated protobuf rust code (grpc and message definitions)
-3. `stream` - Stream compute engine
-4. `batch` - Batch compute engine for queries against materialized views
-5. `frontend` - SQL query planner and scheduler
-6. `storage` - Cloud native storage engine
-7. `meta` - Meta engine
-8. `utils` - Independent util crates
-9. `cmd` - All binaries, `cmd_all` contains the all-in-one binary `risingwave`
-10. `risedevtool` - Developer tool for RisingWave
+RisingWave is a Postgres-compatible streaming database with Apache Iceberg support. This repository contains all source code, tests, documentation, and tooling for the RisingWave streaming database system.
 
-## Coding Style
+## 3. Structure
 
-- Always write code comments in English.
-- Write simple, easy-to-read and easy-to-maintain code.
-- Use `cargo fmt` to format the code if needed.
-- Follow existing code patterns and conventions in the repository.
+```
+risingwave/
+├── src/               # Source code crates
+│   ├── config/        # Default server configurations
+│   ├── prost/         # Generated protobuf Rust code
+│   ├── stream/        # Stream compute engine
+│   ├── batch/         # Batch compute engine
+│   ├── frontend/      # SQL planner & scheduler
+│   ├── storage/       # Cloud-native storage engine
+│   ├── meta/          # Metadata & cluster management
+│   ├── utils/         # Independent utility crates
+│   ├── cmd/           # Binary executables
+│   └── risedevtool/   # Developer tooling
+├── e2e_test/          # End-to-end SQL logic tests
+├── docs/              # Documentation
+└── proto/             # Protobuf definitions
+```
 
-## Build, Run, Test
+## 4. Key Files
 
-You may need to learn how to build and test RisingWave when implementing features or fixing bugs.
+| File | Purpose |
+|------|---------|
+| `Cargo.toml` | Workspace manifest |
+| `risedev.yml` | Developer environment config |
+| `Makefile.toml` | Task runner definitions |
+| `AGENTS.md` | This file - agent policies |
 
-### Build & Check
+## 5. Edit Rules (Must)
 
-- Use `./risedev b` to build the project.
-- Use `./risedev c` to check if the code follow rust-clippy rules, coding styles, etc.
+- Write all code comments in English
+- Run `cargo fmt` before committing Rust code
+- Follow existing code patterns in the target module
+- Pass `./risedev c` (clippy) before submitting changes
+- Add unit tests for new public functions
+- Update planner tests with `./risedev do-apply-planner-test` when query plans change
+- Update parser tests with `./risedev update-parser-test` when syntax changes
 
-### Unit Test
+## 6. Forbidden Changes (Must Not)
 
-- Integration tests and unit tests are valid Rust/Tokio tests, you can locate and run those related in a standard Rust way.
-- Parser tests: use `./risedev update-parser-test` to regenerate expected output.
-- Planner tests: use `./risedev run-planner-test [name]` to run and `./risedev do-apply-planner-test` (or `./risedev dapt`) to update expected output.
+- Modify protobuf definitions without regenerating prost code
+- Delete or modify files in `src/prost/` manually (auto-generated)
+- Bypass safety checks with `unsafe` blocks without explicit justification
+- Commit secrets, credentials, or API keys
+- Modify `./e2e_test/` test expectations without running tests
+- Break backward compatibility without migration path
 
-### End-to-End Test
+## 7. Test Entry
 
-- Use `./risedev d` to run a RisingWave instance in the background via tmux.
-  - It builds RisingWave binaries if necessary. The build process can take up to 10 minutes, depending on the incremental build results. Use a large timeout for this step, and be patient.
-  - It kills the previous instance, if exists.
-  - Optionally pass a profile name (see `risedev.yml`) to choose external services or components. By default it uses `default`.
-  - This runs in the background so you do not need a separate terminal.
-  - You can connect right after the command finishes.
-  - Logs are written to files in `.risingwave/log` folder.
-- Use `./risedev k` to stop a RisingWave instance started by `./risedev d`.
-- Only when a RisingWave instance is running, you can use `./risedev psql -c "<your query>"` to run SQL queries in RW.
-- Only when a RisingWave instance is running, you can use `./risedev slt './path/to/e2e-test-file.slt'` to run end-to-end SLT tests.
-  - File globs like `/**/*.slt` is allowed.
-  - Failed run may leave some objects in the database that interfere with next run. Use `./risedev slt-clean ./path/to/e2e-test-file.slt` to reset the database before running tests.
-- The preferred way to write tests is to write tests in SQLLogicTest format.
-- Tests are put in `./e2e_test` folder.
+| Test Type | Entry Command |
+|-----------|---------------|
+| Unit tests | `cargo test -p <crate>` |
+| All unit tests | `./risedev test` |
+| Parser tests | `./risedev update-parser-test` |
+| Planner tests | `./risedev run-planner-test [name]` |
+| E2E tests | `./risedev slt './e2e_test/**/*.slt'` |
+| Clippy check | `./risedev c` |
+| Build check | `./risedev b` |
 
-### Sandbox escalation
+## 8. Dependencies & Contracts
 
-When sandboxing is enabled, these commands need `require_escalated` because they bind or connect to local TCP sockets:
+- Rust edition 2021
+- Workspace-based Cargo structure
+- Generated code in `src/prost/` from `proto/` definitions
+- External: tokio, tonic, etcd-client, arrow, sqlparser
+- Protocol: gRPC for internal communication
+- Storage: S3/GCS/Azure/OSS compatible
 
-- `./risedev d` and `./risedev p` (uses local ports and tmux sockets)
-- `./risedev psql ...` or direct `psql -h localhost -p 4566 ...` (local TCP connection)
-- `./risedev slt './path/to/e2e-test-file.slt'` (connects to local TCP via psql protocol)
-- Any command that checks running services via local TCP (for example, health checks or custom SQL clients)
+## 9. Overrides
 
-## Connector Development
+None. Child directories may override specific rules.
 
-See `docs/dev/src/connector/intro.md`.
+## 10. Update Triggers
+
+Regenerate this file when:
+- Build system changes (risedev commands modified)
+- New crate added to workspace
+- Protobuf generation process changes
+- Testing framework updated
+
+## 11. Metadata
+
+- Created: 2025-02-22
+- Version: 1.0
+- Parent: None (root policy)
