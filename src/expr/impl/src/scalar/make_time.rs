@@ -58,10 +58,55 @@ pub fn make_date(year: i32, month: i32, day: i32) -> Result<Date> {
     Ok(Date(make_naive_date(year, month, day)?))
 }
 
-// days int
-#[function("make_interval(int4) -> interval")]
-pub fn make_interval(days: i32) -> Interval {
-    Interval::from_month_day_usec(0, days, 0)
+// years int, months int, weeks int, days int, hours int, mins int, secs double precision
+#[function("make_interval(int4, int4, int4, int4, int4, int4, float8) -> interval")]
+pub fn make_interval(
+    years: i32,
+    months: i32,
+    weeks: i32,
+    days: i32,
+    hours: i32,
+    mins: i32,
+    secs: F64,
+) -> Result<Interval> {
+    if !secs.is_finite() {
+        return Err(ExprError::InvalidParam {
+            name: "secs",
+            reason: format!("invalid secs: {}", secs).into(),
+        });
+    }
+
+    let total_months = years
+        .checked_mul(12)
+        .and_then(|v| v.checked_add(months))
+        .ok_or(ExprError::NumericOutOfRange)?;
+
+    let total_days = weeks
+        .checked_mul(7)
+        .and_then(|v| v.checked_add(days))
+        .ok_or(ExprError::NumericOutOfRange)?;
+
+    let hours_usecs = (hours as i64)
+        .checked_mul(3600)
+        .and_then(|v| v.checked_mul(1_000_000))
+        .ok_or(ExprError::NumericOutOfRange)?;
+    let mins_usecs = (mins as i64)
+        .checked_mul(60)
+        .and_then(|v| v.checked_mul(1_000_000))
+        .ok_or(ExprError::NumericOutOfRange)?;
+
+    let secs_usecs_f64 = (secs.0 * 1_000_000.0).round_ties_even();
+    if !secs_usecs_f64.is_finite() || secs_usecs_f64 < i64::MIN as f64 || secs_usecs_f64 > i64::MAX as f64 {
+        return Err(ExprError::NumericOutOfRange);
+    }
+    let secs_usecs = secs_usecs_f64 as i64;
+
+    let total_usecs = hours_usecs
+        .checked_add(mins_usecs)
+        .and_then(|v| v.checked_add(secs_usecs))
+        .ok_or(ExprError::NumericOutOfRange)?;
+
+    Ok(Interval::from_month_day_usec(total_months, total_days, total_usecs))
 }
 
 // hour int, min int, sec double precision
@@ -167,12 +212,20 @@ mod tests {
     #[test]
     fn test_make_interval_days() {
         assert_eq!(
-            make_interval(10),
+            make_interval(0, 0, 0, 10, 0, 0, 0.0.into()).unwrap(),
             Interval::from_month_day_usec(0, 10, 0)
         );
         assert_eq!(
-            make_interval(-3),
+            make_interval(0, 0, 0, -3, 0, 0, 0.0.into()).unwrap(),
             Interval::from_month_day_usec(0, -3, 0)
+        );
+    }
+
+    #[test]
+    fn test_make_interval_mixed_fields() {
+        assert_eq!(
+            make_interval(1, 2, 1, 3, 4, 5, 6.5.into()).unwrap(),
+            Interval::from_month_day_usec(14, 10, ((4 * 3600 + 5 * 60 + 6) * 1_000_000 + 500_000) as i64)
         );
     }
 }
