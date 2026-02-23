@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use chrono::{NaiveDate, NaiveDateTime, NaiveTime};
-use risingwave_common::types::{Date, F64, FloatExt, Time, Timestamp, Timestamptz};
+use risingwave_common::types::{Date, F64, FloatExt, Interval, Time, Timestamp, Timestamptz};
 use risingwave_expr::expr_context::TIME_ZONE;
 use risingwave_expr::{ExprError, Result, capture_context, function};
 
@@ -56,6 +56,12 @@ fn make_naive_time(hour: i32, min: i32, sec: F64) -> Result<NaiveTime> {
 #[function("make_date(int4, int4, int4) -> date")]
 pub fn make_date(year: i32, month: i32, day: i32) -> Result<Date> {
     Ok(Date(make_naive_date(year, month, day)?))
+}
+
+// days int
+#[function("make_interval(int4) -> interval")]
+pub fn make_interval(days: i32) -> Interval {
+    Interval::from_month_day_usec(0, days, 0)
 }
 
 // hour int, min int, sec double precision
@@ -127,7 +133,9 @@ fn make_timestamptz_impl(
 #[cfg(test)]
 mod tests {
     use chrono::{NaiveDate, NaiveDateTime, NaiveTime};
-    use risingwave_common::types::{Date, Timestamp};
+    use risingwave_common::types::{Date, Interval, Timestamp};
+
+    use super::make_interval;
 
     #[test]
     fn test_naive_date_and_time() {
@@ -153,6 +161,18 @@ mod tests {
         assert_eq!(
             date_time.to_string(),
             String::from("1974-02-02 12:34:56.789 BC")
+        );
+    }
+
+    #[test]
+    fn test_make_interval_days() {
+        assert_eq!(
+            make_interval(10),
+            Interval::from_month_day_usec(0, 10, 0)
+        );
+        assert_eq!(
+            make_interval(-3),
+            Interval::from_month_day_usec(0, -3, 0)
         );
     }
 }
