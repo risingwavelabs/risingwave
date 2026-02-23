@@ -4,6 +4,14 @@
 
 Policies specific to `/home/k11/risingwave/src/batch` and its subdirectories. This covers the batch query execution engine, including task management, executor implementations, and distributed execution.
 
+**Policy Inheritance:**
+This file inherits rules from `/home/k11/risingwave/AGENTS.md` (root).
+When working in this directory:
+1. Read THIS file first for directory-specific rules
+2. Then read PARENT files up to root for inherited rules
+3. Child rules override parent rules (nearest-wins)
+4. If code changes conflict with these docs, update AGENTS.md to match reality
+
 ## 2. Purpose
 
 The batch compute engine executes SQL queries in a distributed, parallel manner. It receives query plans from the frontend, manages task execution across worker nodes, and coordinates data exchange between operators. It supports both OLAP-style analytical queries and DML operations (INSERT, UPDATE, DELETE).

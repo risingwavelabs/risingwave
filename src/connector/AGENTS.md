@@ -4,6 +4,14 @@
 
 Policies for the connector crate (`src/connector/`), which implements source connectors (data ingestion) and sink connectors (data egress) for RisingWave.
 
+**Policy Inheritance:**
+This file inherits rules from `/home/k11/risingwave/AGENTS.md` (root).
+When working in this directory:
+1. Read THIS file first for directory-specific rules
+2. Then read PARENT files up to root for inherited rules
+3. Child rules override parent rules (nearest-wins)
+4. If code changes conflict with these docs, update AGENTS.md to match reality
+
 ## 2. Purpose
 
 The connector crate provides the unified connector framework for RisingWave, enabling data ingestion from external systems (Kafka, Pulsar, Kinesis, CDC databases, filesystems, etc.) and data egress to downstream systems (databases, data lakes, message queues, search engines, etc.). It handles protocol parsing, serialization/deserialization, and connector lifecycle management.

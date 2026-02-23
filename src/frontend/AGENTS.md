@@ -4,6 +4,14 @@
 
 Policies for `/home/k11/risingwave/src/frontend` - the SQL query processing layer of RisingWave. This crate handles SQL parsing, binding, optimization, and query planning for both batch and streaming queries.
 
+**Policy Inheritance:**
+This file inherits rules from `/home/k11/risingwave/AGENTS.md` (root).
+When working in this directory:
+1. Read THIS file first for directory-specific rules
+2. Then read PARENT files up to root for inherited rules
+3. Child rules override parent rules (nearest-wins)
+4. If code changes conflict with these docs, update AGENTS.md to match reality
+
 ## 2. Purpose
 
 The frontend crate is the stateless SQL processing layer that:

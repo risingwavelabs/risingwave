@@ -7,6 +7,14 @@ Crate: `risingwave_sqlparser`
 
 SQL parser for RisingWave - converts SQL strings into Abstract Syntax Tree (AST).
 
+**Policy Inheritance:**
+This file inherits rules from `/home/k11/risingwave/AGENTS.md` (root).
+When working in this directory:
+1. Read THIS file first for directory-specific rules
+2. Then read PARENT files up to root for inherited rules
+3. Child rules override parent rules (nearest-wins)
+4. If code changes conflict with these docs, update AGENTS.md to match reality
+
 ## 2. Purpose
 
 ANSI SQL:2011 compatible SQL lexer and parser. Forked from sqlparser-rs.

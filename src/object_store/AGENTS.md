@@ -6,6 +6,14 @@ Directory: `/home/k11/risingwave/src/object_store`
 
 This crate provides a unified abstraction layer for object storage backends used by RisingWave. It supports multiple storage systems including AWS S3, Google Cloud Storage (GCS), Azure Blob Storage, Alibaba OSS, Huawei OBS, HDFS, WebHDFS, MinIO, and local filesystem.
 
+**Policy Inheritance:**
+This file inherits rules from `/home/k11/risingwave/AGENTS.md` (root).
+When working in this directory:
+1. Read THIS file first for directory-specific rules
+2. Then read PARENT files up to root for inherited rules
+3. Child rules override parent rules (nearest-wins)
+4. If code changes conflict with these docs, update AGENTS.md to match reality
+
 ## 2. Purpose
 
 The object_store crate serves as the storage interface layer for RisingWave's cloud-native architecture. It provides:

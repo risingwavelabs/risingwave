@@ -4,6 +4,14 @@
 
 Policies for the `/src/meta` directory containing the RisingWave metadata management service.
 
+**Policy Inheritance:**
+This file inherits rules from `/home/k11/risingwave/AGENTS.md` (root).
+When working in this directory:
+1. Read THIS file first for directory-specific rules
+2. Then read PARENT files up to root for inherited rules
+3. Child rules override parent rules (nearest-wins)
+4. If code changes conflict with these docs, update AGENTS.md to match reality
+
 ## 2. Purpose
 
 The meta service is the central metadata management and cluster coordination service for RisingWave. It manages cluster membership, catalog metadata, barrier coordination, Hummock storage metadata, streaming job lifecycle, and DDL operations.

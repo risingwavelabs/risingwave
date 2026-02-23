@@ -4,6 +4,14 @@
 
 Policies for the `risingwave_stream` crate containing the stream compute engine. This crate implements the core streaming execution engine for continuous SQL query processing.
 
+**Policy Inheritance:**
+This file inherits rules from `/home/k11/risingwave/AGENTS.md` (root).
+When working in this directory:
+1. Read THIS file first for directory-specific rules
+2. Then read PARENT files up to root for inherited rules
+3. Child rules override parent rules (nearest-wins)
+4. If code changes conflict with these docs, update AGENTS.md to match reality
+
 ## 2. Purpose
 
 The stream engine executes continuous streaming queries using an actor-based architecture. It processes unbounded data streams through a directed graph of operators (executors), handling:
