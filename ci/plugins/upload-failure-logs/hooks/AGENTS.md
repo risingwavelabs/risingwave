@@ -64,7 +64,7 @@ hooks/
 
 ## 9. Overrides
 
-Inherits from `/home/k11/risingwave/ci/plugins/upload-failure-logs/AGENTS.md` and `/home/k11/risingwave/ci/plugins/AGENTS.md`:
+Inherits from `./ci/plugins/upload-failure-logs/AGENTS.md` and `./ci/plugins/AGENTS.md`:
 - Override: Hook-specific implementation rules
 - Override: Log truncation and upload logic
 
@@ -81,4 +81,4 @@ Regenerate this file when:
 
 - Created: 2025-02-22
 - Version: 1.0
-- Parent: /home/k11/risingwave/ci/plugins/upload-failure-logs/AGENTS.md
+- Parent: ./ci/plugins/upload-failure-logs/AGENTS.md

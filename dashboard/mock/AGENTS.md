@@ -51,7 +51,7 @@ mock/
 
 ## 9. Overrides
 
-Inherits from `/home/k11/risingwave/dashboard/AGENTS.md`:
+Inherits from `./dashboard/AGENTS.md`:
 - Override: Mock data patterns
 
 ## 10. Update Triggers
@@ -64,4 +64,4 @@ Regenerate this file when:
 
 - Created: 2025-02-22
 - Version: 1.0
-- Parent: /home/k11/risingwave/dashboard/AGENTS.md
+- Parent: ./dashboard/AGENTS.md

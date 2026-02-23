@@ -94,7 +94,7 @@ dashboard/
 
 ## 9. Overrides
 
-Inherits from `/home/k11/risingwave/AGENTS.md`:
+Inherits from `./AGENTS.md`:
 - Override: Edit Rules - Next.js/React specific requirements
 - Override: Dependencies - Node.js ecosystem
 
@@ -110,4 +110,4 @@ Regenerate this file when:
 
 - Created: 2025-02-22
 - Version: 1.0
-- Parent: /home/k11/risingwave/AGENTS.md
+- Parent: ./AGENTS.md

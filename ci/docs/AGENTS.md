@@ -81,7 +81,7 @@ docs/
 
 ## 9. Overrides
 
-Inherits from `/home/k11/risingwave/ci/AGENTS.md`:
+Inherits from `./ci/AGENTS.md`:
 - Override: Test Entry - Documentation-specific validation
 - Override: Edit Rules - Documentation style requirements
 
@@ -98,4 +98,4 @@ Regenerate this file when:
 
 - Created: 2025-02-22
 - Version: 1.0
-- Parent: /home/k11/risingwave/ci/AGENTS.md
+- Parent: ./ci/AGENTS.md

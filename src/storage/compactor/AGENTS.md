@@ -2,7 +2,7 @@
 
 ## 1. Scope
 
-Policies for `/home/k11/risingwave/src/storage/compactor` and all subdirectories. This crate provides the compactor binary (risingwave_compactor), a stateless worker node that performs background compaction for the Hummock LSM-tree storage engine.
+Policies for `./src/storage/compactor` and all subdirectories. This crate provides the compactor binary (risingwave_compactor), a stateless worker node that performs background compaction for the Hummock LSM-tree storage engine.
 
 ## 2. Purpose
 
@@ -96,4 +96,4 @@ Regenerate this file when:
 
 - Created: 2025-02-22
 - Version: 1.0
-- Parent: /home/k11/risingwave/src/storage/AGENTS.md
+- Parent: ./src/storage/AGENTS.md

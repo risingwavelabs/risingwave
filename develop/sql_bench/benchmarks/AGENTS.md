@@ -66,7 +66,7 @@ develop/sql_bench/benchmarks/
 
 ## 9. Overrides
 
-Inherits from `/home/k11/risingwave/develop/sql_bench/AGENTS.md`:
+Inherits from `./develop/sql_bench/AGENTS.md`:
 - Override: Edit Rules - Benchmark-specific YAML requirements
 
 ## 10. Update Triggers
@@ -81,4 +81,4 @@ Regenerate this file when:
 
 - Created: 2025-02-22
 - Version: 1.0
-- Parent: /home/k11/risingwave/develop/sql_bench/AGENTS.md
+- Parent: ./develop/sql_bench/AGENTS.md

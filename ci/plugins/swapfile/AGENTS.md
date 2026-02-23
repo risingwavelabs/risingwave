@@ -57,7 +57,7 @@ ci/plugins/swapfile/
 
 ## 9. Overrides
 
-Inherits from `/home/k11/risingwave/ci/plugins/AGENTS.md`:
+Inherits from `./ci/plugins/AGENTS.md`:
 - Override: Edit Rules - Pre-command hook requirements
 - Override: Test Entry - Hook testing commands
 
@@ -72,4 +72,4 @@ Regenerate this file when:
 
 - Created: 2025-02-22
 - Version: 1.0
-- Parent: /home/k11/risingwave/ci/plugins/AGENTS.md
+- Parent: ./ci/plugins/AGENTS.md

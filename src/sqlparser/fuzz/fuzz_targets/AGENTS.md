@@ -2,7 +2,7 @@
 
 ## 1. Scope
 
-Policies for `/home/k11/risingwave/src/sqlparser/fuzz/fuzz_targets` - fuzzing targets for automated SQL parser testing.
+Policies for `./src/sqlparser/fuzz/fuzz_targets` - fuzzing targets for automated SQL parser testing.
 
 ## 2. Purpose
 
@@ -69,7 +69,7 @@ src/sqlparser/fuzz/fuzz_targets/
 
 ## 9. Overrides
 
-None. Inherits all rules from parent `/home/k11/risingwave/src/sqlparser/fuzz/AGENTS.md`.
+None. Inherits all rules from parent `./src/sqlparser/fuzz/AGENTS.md`.
 
 ## 10. Update Triggers
 
@@ -84,4 +84,4 @@ Regenerate this file when:
 
 - Created: 2025-02-22
 - Version: 1.0
-- Parent: /home/k11/risingwave/src/sqlparser/fuzz/AGENTS.md
+- Parent: ./src/sqlparser/fuzz/AGENTS.md

@@ -75,7 +75,7 @@ src/tests/sqlsmith/tests/testdata/
 
 ## 9. Overrides
 
-None. Follows parent AGENTS.md at `/home/k11/risingwave/src/tests/sqlsmith/tests/AGENTS.md`.
+None. Follows parent AGENTS.md at `./src/tests/sqlsmith/tests/AGENTS.md`.
 
 ## 10. Update Triggers
 
@@ -89,4 +89,4 @@ Regenerate this file when:
 
 - Created: 2025-02-22
 - Version: 1.0
-- Parent: /home/k11/risingwave/src/tests/sqlsmith/tests/AGENTS.md
+- Parent: ./src/tests/sqlsmith/tests/AGENTS.md

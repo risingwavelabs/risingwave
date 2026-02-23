@@ -72,4 +72,4 @@ Regenerate this file when:
 
 - Created: 2025-02-22
 - Version: 1.0
-- Parent: /home/k11/risingwave/src/frontend/AGENTS.md
+- Parent: ./src/frontend/AGENTS.md

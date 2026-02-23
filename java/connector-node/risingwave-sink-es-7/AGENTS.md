@@ -80,7 +80,7 @@ risingwave-sink-es-7/
 
 ## 9. Overrides
 
-Inherits from `/home/k11/risingwave/java/connector-node/AGENTS.md`:
+Inherits from `./java/connector-node/AGENTS.md`:
 - Override: Sink-specific implementation patterns
 - Override: ES/OpenSearch client configurations
 
@@ -96,4 +96,4 @@ Regenerate this file when:
 
 - Created: 2025-02-22
 - Version: 1.0
-- Parent: /home/k11/risingwave/java/connector-node/AGENTS.md
+- Parent: ./java/connector-node/AGENTS.md

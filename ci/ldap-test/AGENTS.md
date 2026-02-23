@@ -70,7 +70,7 @@ ci/ldap-test/
 
 ## 9. Overrides
 
-Inherits from `/home/k11/risingwave/ci/AGENTS.md`:
+Inherits from `./ci/AGENTS.md`:
 - Override: Edit Rules - TLS certificate security requirements
 
 ## 10. Update Triggers
@@ -85,4 +85,4 @@ Regenerate this file when:
 
 - Created: 2025-02-22
 - Version: 1.0
-- Parent: /home/k11/risingwave/ci/AGENTS.md
+- Parent: ./ci/AGENTS.md

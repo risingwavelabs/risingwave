@@ -2,7 +2,7 @@
 
 ## 1. Scope
 
-Policies for `/home/k11/risingwave/src/meta/dashboard/examples` - example programs demonstrating the RisingWave meta dashboard web interface.
+Policies for `./src/meta/dashboard/examples` - example programs demonstrating the RisingWave meta dashboard web interface.
 
 ## 2. Purpose
 
@@ -68,7 +68,7 @@ src/meta/dashboard/examples/
 
 ## 9. Overrides
 
-None. Inherits all rules from parent `/home/k11/risingwave/src/meta/dashboard/AGENTS.md`.
+None. Inherits all rules from parent `./src/meta/dashboard/AGENTS.md`.
 
 ## 10. Update Triggers
 
@@ -82,4 +82,4 @@ Regenerate this file when:
 
 - Created: 2025-02-22
 - Version: 1.0
-- Parent: /home/k11/risingwave/src/meta/dashboard/AGENTS.md
+- Parent: ./src/meta/dashboard/AGENTS.md

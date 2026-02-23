@@ -99,7 +99,7 @@ dashboard/
 
 ## 9. Overrides
 
-Inherits from `/home/k11/risingwave/grafana/AGENTS.md`:
+Inherits from `./grafana/AGENTS.md`:
 - Override: Edit Rules - Component-specific generation workflow
 - Override: Test Entry - Python component testing required
 
@@ -116,4 +116,4 @@ Regenerate this file when:
 
 - Created: 2025-02-22
 - Version: 1.0
-- Parent: /home/k11/risingwave/grafana/AGENTS.md
+- Parent: ./grafana/AGENTS.md

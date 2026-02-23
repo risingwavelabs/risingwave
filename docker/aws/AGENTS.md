@@ -67,7 +67,7 @@ aws/
 
 ## 9. Overrides
 
-Inherits from `/home/k11/risingwave/docker/AGENTS.md`:
+Inherits from `./docker/AGENTS.md`:
 - Override: Edit Rules - AWS-specific minimal image requirements
 - Override: Test Entry - AWS deployment testing required
 
@@ -84,4 +84,4 @@ Regenerate this file when:
 
 - Created: 2025-02-22
 - Version: 1.0
-- Parent: /home/k11/risingwave/docker/AGENTS.md
+- Parent: ./docker/AGENTS.md

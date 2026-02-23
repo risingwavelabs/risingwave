@@ -92,7 +92,7 @@ src/frontend/planner_test/tests/testdata/
 
 ## 9. Overrides
 
-None. Follows parent AGENTS.md at `/home/k11/risingwave/src/frontend/planner_test/tests/AGENTS.md`.
+None. Follows parent AGENTS.md at `./src/frontend/planner_test/tests/AGENTS.md`.
 
 ## 10. Update Triggers
 
@@ -107,4 +107,4 @@ Regenerate this file when:
 
 - Created: 2025-02-22
 - Version: 1.0
-- Parent: /home/k11/risingwave/src/frontend/planner_test/tests/AGENTS.md
+- Parent: ./src/frontend/planner_test/tests/AGENTS.md

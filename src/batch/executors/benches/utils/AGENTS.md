@@ -66,7 +66,7 @@ src/batch/executors/benches/utils/
 
 ## 9. Overrides
 
-None. Follows parent AGENTS.md at `/home/k11/risingwave/src/batch/executors/benches/AGENTS.md`.
+None. Follows parent AGENTS.md at `./src/batch/executors/benches/AGENTS.md`.
 
 ## 10. Update Triggers
 
@@ -80,4 +80,4 @@ Regenerate this file when:
 
 - Created: 2025-02-22
 - Version: 1.0
-- Parent: /home/k11/risingwave/src/batch/executors/benches/AGENTS.md
+- Parent: ./src/batch/executors/benches/AGENTS.md

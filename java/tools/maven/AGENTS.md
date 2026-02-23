@@ -65,7 +65,7 @@ maven/
 
 ## 9. Overrides
 
-Inherits from `/home/k11/risingwave/java/tools/AGENTS.md` and `/home/k11/risingwave/java/AGENTS.md`:
+Inherits from `./java/tools/AGENTS.md` and `./java/AGENTS.md`:
 - Override: Checkstyle-specific configuration rules
 - Override: Code quality enforcement requirements
 
@@ -82,4 +82,4 @@ Regenerate this file when:
 
 - Created: 2025-02-22
 - Version: 1.0
-- Parent: /home/k11/risingwave/java/tools/AGENTS.md
+- Parent: ./java/tools/AGENTS.md

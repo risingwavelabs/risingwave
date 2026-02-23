@@ -78,7 +78,7 @@ src/connector/codec/tests/integration_tests/
 
 ## 9. Overrides
 
-None. Follows parent AGENTS.md at `/home/k11/risingwave/src/connector/codec/AGENTS.md`.
+None. Follows parent AGENTS.md at `./src/connector/codec/AGENTS.md`.
 
 ## 10. Update Triggers
 
@@ -92,4 +92,4 @@ Regenerate this file when:
 
 - Created: 2025-02-22
 - Version: 1.0
-- Parent: /home/k11/risingwave/src/connector/codec/AGENTS.md
+- Parent: ./src/connector/codec/AGENTS.md

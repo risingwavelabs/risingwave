@@ -76,4 +76,4 @@ Regenerate this file when:
 
 - Created: 2025-02-22
 - Version: 1.0
-- Parent: `/home/k11/risingwave/src/sqlparser/AGENTS.md`
+- Parent: `./src/sqlparser/AGENTS.md`

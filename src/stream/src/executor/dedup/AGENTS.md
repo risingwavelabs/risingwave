@@ -63,7 +63,7 @@ src/stream/src/executor/dedup/
 
 ## 9. Overrides
 
-Follows parent AGENTS.md at `/home/k11/risingwave/src/stream/src/executor/AGENTS.md`. No overrides.
+Follows parent AGENTS.md at `./src/stream/src/executor/AGENTS.md`. No overrides.
 
 ## 10. Update Triggers
 
@@ -77,4 +77,4 @@ Regenerate this file when:
 
 - Created: 2025-02-22
 - Version: 1.0
-- Parent: /home/k11/risingwave/src/stream/src/executor/AGENTS.md
+- Parent: ./src/stream/src/executor/AGENTS.md

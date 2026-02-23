@@ -87,7 +87,7 @@ src/stream/src/common/log_store_impl/kv_log_store/
 
 ## 9. Overrides
 
-None. Follows parent AGENTS.md at `/home/k11/risingwave/src/stream/src/common/log_store_impl/AGENTS.md`.
+None. Follows parent AGENTS.md at `./src/stream/src/common/log_store_impl/AGENTS.md`.
 
 ## 10. Update Triggers
 
@@ -103,4 +103,4 @@ Regenerate this file when:
 
 - Created: 2025-02-22
 - Version: 1.0
-- Parent: /home/k11/risingwave/src/stream/src/common/log_store_impl/AGENTS.md
+- Parent: ./src/stream/src/common/log_store_impl/AGENTS.md

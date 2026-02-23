@@ -71,7 +71,7 @@ src/frontend/planner_test/tests/testdata/output/
 
 ## 9. Overrides
 
-None. Inherits all rules from parent `/home/k11/risingwave/src/frontend/planner_test/tests/testdata/AGENTS.md`.
+None. Inherits all rules from parent `./src/frontend/planner_test/tests/testdata/AGENTS.md`.
 
 ## 10. Update Triggers
 
@@ -84,4 +84,4 @@ Regenerate this file when:
 
 - Created: 2025-02-22
 - Version: 1.0
-- Parent: /home/k11/risingwave/src/frontend/planner_test/tests/testdata/AGENTS.md
+- Parent: ./src/frontend/planner_test/tests/testdata/AGENTS.md

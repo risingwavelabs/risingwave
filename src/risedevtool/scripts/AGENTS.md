@@ -86,4 +86,4 @@ Regenerate this file when:
 
 - Created: 2025-02-22
 - Version: 1.0
-- Parent: `/home/k11/risingwave/src/risedevtool/AGENTS.md`
+- Parent: `./src/risedevtool/AGENTS.md`

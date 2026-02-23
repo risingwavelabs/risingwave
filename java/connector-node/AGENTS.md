@@ -87,7 +87,7 @@ connector-node/
 
 ## 9. Overrides
 
-Inherits from `/home/k11/risingwave/java/AGENTS.md`:
+Inherits from `./java/AGENTS.md`:
 - Override: Connector-specific development patterns
 - Override: gRPC service implementation rules
 
@@ -103,4 +103,4 @@ Regenerate this file when:
 
 - Created: 2025-02-22
 - Version: 1.0
-- Parent: /home/k11/risingwave/java/AGENTS.md
+- Parent: ./java/AGENTS.md

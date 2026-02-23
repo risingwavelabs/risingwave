@@ -2,7 +2,7 @@
 
 ## 1. Scope
 
-Policies specific to `/home/k11/risingwave/src/batch/executors/benches`. This directory contains Criterion micro-benchmarks for batch executor operators, measuring performance of core query execution primitives.
+Policies specific to `./src/batch/executors/benches`. This directory contains Criterion micro-benchmarks for batch executor operators, measuring performance of core query execution primitives.
 
 ## 2. Purpose
 
@@ -96,4 +96,4 @@ Regenerate this file when:
 
 - Created: 2025-02-22
 - Version: 1.0
-- Parent: `/home/k11/risingwave/src/batch/AGENTS.md`
+- Parent: `./src/batch/AGENTS.md`

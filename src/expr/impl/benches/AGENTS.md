@@ -2,7 +2,7 @@
 
 ## 1. Scope
 
-Policies for `/home/k11/risingwave/src/expr/impl/benches` - Criterion-based performance benchmarks for RisingWave expression and function implementations.
+Policies for `./src/expr/impl/benches` - Criterion-based performance benchmarks for RisingWave expression and function implementations.
 
 ## 2. Purpose
 
@@ -80,7 +80,7 @@ Benchmarks are organized by function category and data type, testing with repres
 
 ## 9. Overrides
 
-None. Inherits all rules from parent `/home/k11/risingwave/src/expr/impl/AGENTS.md`.
+None. Inherits all rules from parent `./src/expr/impl/AGENTS.md`.
 
 ## 10. Update Triggers
 
@@ -96,4 +96,4 @@ Regenerate this file when:
 
 - Created: 2025-02-22
 - Version: 1.0
-- Parent: /home/k11/risingwave/src/expr/impl/AGENTS.md
+- Parent: ./src/expr/impl/AGENTS.md

@@ -2,7 +2,7 @@
 
 ## 1. Scope
 
-Policies for `/home/k11/risingwave/src/sqlparser/tests` - comprehensive test suite for the RisingWave SQL parser.
+Policies for `./src/sqlparser/tests` - comprehensive test suite for the RisingWave SQL parser.
 
 ## 2. Purpose
 
@@ -87,7 +87,7 @@ src/sqlparser/tests/
 
 ## 9. Overrides
 
-None. Inherits all rules from parent `/home/k11/risingwave/src/sqlparser/AGENTS.md`.
+None. Inherits all rules from parent `./src/sqlparser/AGENTS.md`.
 
 ## 10. Update Triggers
 
@@ -102,4 +102,4 @@ Regenerate this file when:
 
 - Created: 2025-02-22
 - Version: 1.0
-- Parent: /home/k11/risingwave/src/sqlparser/AGENTS.md
+- Parent: ./src/sqlparser/AGENTS.md

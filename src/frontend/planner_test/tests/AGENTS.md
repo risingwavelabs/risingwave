@@ -2,7 +2,7 @@
 
 ## 1. Scope
 
-Policies for `/home/k11/risingwave/src/frontend/planner_test/tests` - the test harness and test data for RisingWave's planner golden-file testing framework.
+Policies for `./src/frontend/planner_test/tests` - the test harness and test data for RisingWave's planner golden-file testing framework.
 
 ## 2. Purpose
 
@@ -87,7 +87,7 @@ src/frontend/planner_test/tests/
 
 ## 9. Overrides
 
-None. Inherits all rules from parent `/home/k11/risingwave/src/frontend/planner_test/AGENTS.md`.
+None. Inherits all rules from parent `./src/frontend/planner_test/AGENTS.md`.
 
 ## 10. Update Triggers
 
@@ -103,4 +103,4 @@ Regenerate this file when:
 
 - Created: 2025-02-22
 - Version: 1.0
-- Parent: /home/k11/risingwave/src/frontend/planner_test/AGENTS.md
+- Parent: ./src/frontend/planner_test/AGENTS.md

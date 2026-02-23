@@ -75,7 +75,7 @@ lints/
 
 ## 9. Overrides
 
-Inherits from `/home/k11/risingwave/AGENTS.md`:
+Inherits from `./AGENTS.md`:
 - Override: Edit Rules - Lint-specific development requirements
 - Override: Test Entry - cargo-dylint testing workflow
 - Override: Dependencies - Rust compiler internals
@@ -92,4 +92,4 @@ Regenerate this file when:
 
 - Created: 2025-02-22
 - Version: 1.0
-- Parent: /home/k11/risingwave/AGENTS.md
+- Parent: ./AGENTS.md

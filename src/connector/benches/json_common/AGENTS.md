@@ -59,7 +59,7 @@ src/connector/benches/json_common/
 
 ## 9. Overrides
 
-None. Follows parent AGENTS.md at `/home/k11/risingwave/src/connector/benches/AGENTS.md`.
+None. Follows parent AGENTS.md at `./src/connector/benches/AGENTS.md`.
 
 ## 10. Update Triggers
 
@@ -73,4 +73,4 @@ Regenerate this file when:
 
 - Created: 2025-02-22
 - Version: 1.0
-- Parent: /home/k11/risingwave/src/connector/benches/AGENTS.md
+- Parent: ./src/connector/benches/AGENTS.md

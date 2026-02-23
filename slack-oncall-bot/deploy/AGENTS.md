@@ -84,7 +84,7 @@ deploy/
 
 ## 9. Overrides
 
-Inherits from `/home/k11/risingwave/slack-oncall-bot/AGENTS.md`:
+Inherits from `./slack-oncall-bot/AGENTS.md`:
 - Override: Edit Rules - Deployment-specific security requirements
 - Override: Test Entry - Kubernetes-specific validation
 
@@ -101,4 +101,4 @@ Regenerate this file when:
 
 - Created: 2025-02-22
 - Version: 1.0
-- Parent: /home/k11/risingwave/slack-oncall-bot/AGENTS.md
+- Parent: ./slack-oncall-bot/AGENTS.md

@@ -94,4 +94,4 @@ Regenerate this file when:
 
 - Created: 2025-02-22
 - Version: 1.0
-- Parent: /home/k11/risingwave/src/stream/tests/AGENTS.md
+- Parent: ./src/stream/tests/AGENTS.md

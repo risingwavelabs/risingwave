@@ -60,7 +60,7 @@ src/tests/regress/data/output/
 
 ## 9. Overrides
 
-None. Inherits all rules from parent `/home/k11/risingwave/src/tests/regress/data/AGENTS.md`.
+None. Inherits all rules from parent `./src/tests/regress/data/AGENTS.md`.
 
 ## 10. Update Triggers
 
@@ -72,4 +72,4 @@ Regenerate this file when:
 
 - Created: 2025-02-22
 - Version: 1.0
-- Parent: /home/k11/risingwave/src/tests/regress/data/AGENTS.md
+- Parent: ./src/tests/regress/data/AGENTS.md

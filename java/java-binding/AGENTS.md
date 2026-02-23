@@ -75,7 +75,7 @@ java-binding/
 
 ## 9. Overrides
 
-Inherits from `/home/k11/risingwave/java/AGENTS.md`:
+Inherits from `./java/AGENTS.md`:
 - Override: JNI-specific development rules
 - Override: Native resource management requirements
 
@@ -91,4 +91,4 @@ Regenerate this file when:
 
 - Created: 2025-02-22
 - Version: 1.0
-- Parent: /home/k11/risingwave/java/AGENTS.md
+- Parent: ./java/AGENTS.md

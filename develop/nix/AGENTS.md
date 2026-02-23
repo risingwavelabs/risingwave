@@ -72,7 +72,7 @@ nix/
 
 ## 9. Overrides
 
-Inherits from `/home/k11/risingwave/develop/AGENTS.md`:
+Inherits from `./develop/AGENTS.md`:
 - Override: Test Entry - Nix-specific validation required
 - Override: Dependencies - Nix ecosystem dependencies
 
@@ -89,4 +89,4 @@ Regenerate this file when:
 
 - Created: 2025-02-22
 - Version: 1.0
-- Parent: /home/k11/risingwave/develop/AGENTS.md
+- Parent: ./develop/AGENTS.md

@@ -2,7 +2,7 @@
 
 ## 1. Scope
 
-Policies for `/home/k11/risingwave/src/tests/regress/data` - PostgreSQL-compatible regression test data for RisingWave SQL compatibility testing.
+Policies for `./src/tests/regress/data` - PostgreSQL-compatible regression test data for RisingWave SQL compatibility testing.
 
 ## 2. Purpose
 
@@ -77,7 +77,7 @@ src/tests/regress/data/
 
 ## 9. Overrides
 
-None. Inherits all rules from parent `/home/k11/risingwave/src/tests/regress/AGENTS.md`.
+None. Inherits all rules from parent `./src/tests/regress/AGENTS.md`.
 
 ## 10. Update Triggers
 
@@ -92,4 +92,4 @@ Regenerate this file when:
 
 - Created: 2025-02-22
 - Version: 1.0
-- Parent: /home/k11/risingwave/src/tests/regress/AGENTS.md
+- Parent: ./src/tests/regress/AGENTS.md

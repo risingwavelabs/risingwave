@@ -89,7 +89,7 @@ src/stream/src/task/
 
 ## 9. Overrides
 
-None. Follows parent AGENTS.md at `/home/k11/risingwave/src/stream/src/AGENTS.md`.
+None. Follows parent AGENTS.md at `./src/stream/src/AGENTS.md`.
 
 ## 10. Update Triggers
 
@@ -104,4 +104,4 @@ Regenerate this file when:
 
 - Created: 2025-02-22
 - Version: 1.0
-- Parent: /home/k11/risingwave/src/stream/src/AGENTS.md
+- Parent: ./src/stream/src/AGENTS.md

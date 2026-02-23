@@ -57,7 +57,7 @@ Note: This directory appears to be a placeholder for deployment configurations. 
 
 ## 9. Overrides
 
-Inherits from `/home/k11/risingwave/AGENTS.md`:
+Inherits from `./AGENTS.md`:
 - No overrides currently defined
 
 ## 10. Update Triggers
@@ -71,4 +71,4 @@ Regenerate this file when:
 
 - Created: 2025-02-22
 - Version: 1.0
-- Parent: /home/k11/risingwave/AGENTS.md
+- Parent: ./AGENTS.md

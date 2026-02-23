@@ -69,4 +69,4 @@ Regenerate this file when:
 
 - Created: 2025-02-22
 - Version: 1.0
-- Parent: /home/k11/risingwave/src/connector/AGENTS.md
+- Parent: ./src/connector/AGENTS.md

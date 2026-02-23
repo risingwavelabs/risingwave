@@ -2,7 +2,7 @@
 
 ## 1. Scope
 
-Policies for `/home/k11/risingwave/src/tests/sqlsmith/tests` - test runner and test data for the SQLSmith fuzzing framework.
+Policies for `./src/tests/sqlsmith/tests` - test runner and test data for the SQLSmith fuzzing framework.
 
 ## 2. Purpose
 
@@ -73,7 +73,7 @@ src/tests/sqlsmith/tests/
 
 ## 9. Overrides
 
-None. Inherits all rules from parent `/home/k11/risingwave/src/tests/sqlsmith/AGENTS.md`.
+None. Inherits all rules from parent `./src/tests/sqlsmith/AGENTS.md`.
 
 ## 10. Update Triggers
 
@@ -88,4 +88,4 @@ Regenerate this file when:
 
 - Created: 2025-02-22
 - Version: 1.0
-- Parent: /home/k11/risingwave/src/tests/sqlsmith/AGENTS.md
+- Parent: ./src/tests/sqlsmith/AGENTS.md

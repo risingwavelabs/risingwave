@@ -88,7 +88,7 @@ src/storage/backup/integration_tests/
 
 ## 9. Overrides
 
-None. Follows parent AGENTS.md at `/home/k11/risingwave/src/storage/backup/AGENTS.md`.
+None. Follows parent AGENTS.md at `./src/storage/backup/AGENTS.md`.
 
 ## 10. Update Triggers
 
@@ -103,4 +103,4 @@ Regenerate this file when:
 
 - Created: 2025-02-22
 - Version: 1.0
-- Parent: /home/k11/risingwave/src/storage/backup/AGENTS.md
+- Parent: ./src/storage/backup/AGENTS.md

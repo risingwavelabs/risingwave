@@ -2,7 +2,7 @@
 
 ## 1. Scope
 
-Policies for `/home/k11/risingwave/src/storage/benches` directory. This directory contains Criterion-based performance benchmarks for the RisingWave storage engine components.
+Policies for `./src/storage/benches` directory. This directory contains Criterion-based performance benchmarks for the RisingWave storage engine components.
 
 ## 2. Purpose
 
@@ -80,7 +80,7 @@ src/storage/benches/
 
 ## 9. Overrides
 
-None. Follows parent `/home/k11/risingwave/src/storage/AGENTS.md` rules.
+None. Follows parent `./src/storage/AGENTS.md` rules.
 
 ## 10. Update Triggers
 
@@ -94,4 +94,4 @@ Regenerate this file when:
 
 - Created: 2025-02-22
 - Version: 1.0
-- Parent: /home/k11/risingwave/src/storage/AGENTS.md
+- Parent: ./src/storage/AGENTS.md

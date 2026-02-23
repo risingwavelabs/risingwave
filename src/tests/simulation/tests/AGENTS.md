@@ -2,7 +2,7 @@
 
 ## 1. Scope
 
-Policies for `/home/k11/risingwave/src/tests/simulation/tests/integration_tests` - deterministic integration tests using the madsim simulation framework.
+Policies for `./src/tests/simulation/tests/integration_tests` - deterministic integration tests using the madsim simulation framework.
 
 ## 2. Purpose
 
@@ -101,7 +101,7 @@ src/tests/simulation/tests/integration_tests/
 
 ## 9. Overrides
 
-None. Inherits all rules from parent `/home/k11/risingwave/src/tests/simulation/AGENTS.md`.
+None. Inherits all rules from parent `./src/tests/simulation/AGENTS.md`.
 
 ## 10. Update Triggers
 
@@ -117,4 +117,4 @@ Regenerate this file when:
 
 - Created: 2025-02-22
 - Version: 1.0
-- Parent: /home/k11/risingwave/src/tests/simulation/AGENTS.md
+- Parent: ./src/tests/simulation/AGENTS.md

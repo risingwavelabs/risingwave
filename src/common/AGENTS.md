@@ -5,7 +5,7 @@
 Policies for the `common` crate and its sub-crates. This directory contains shared types, data structures, and utilities used across all RisingWave components (frontend, batch, stream, storage, meta).
 
 **Policy Inheritance:**
-This file inherits rules from `/home/k11/risingwave/AGENTS.md` (root).
+This file inherits rules from `./AGENTS.md` (root).
 When working in this directory:
 1. Read THIS file first for directory-specific rules
 2. Then read PARENT files up to root for inherited rules
@@ -132,4 +132,4 @@ Regenerate this file when:
 
 - Created: 2025-02-22
 - Version: 1.0
-- Parent: /home/k11/risingwave/AGENTS.md
+- Parent: ./AGENTS.md

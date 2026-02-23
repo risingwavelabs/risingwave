@@ -2,7 +2,7 @@
 
 ## 1. Scope
 
-Policies for `/home/k11/risingwave/src/storage/backup` and all subdirectories. This covers the backup and restore functionality for RisingWave cluster metadata and Hummock storage state.
+Policies for `./src/storage/backup` and all subdirectories. This covers the backup and restore functionality for RisingWave cluster metadata and Hummock storage state.
 
 ## 2. Purpose
 
@@ -105,4 +105,4 @@ Regenerate this file when:
 
 - Created: 2025-02-22
 - Version: 1.0
-- Parent: /home/k11/risingwave/src/storage/AGENTS.md
+- Parent: ./src/storage/AGENTS.md

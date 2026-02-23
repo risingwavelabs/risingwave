@@ -62,7 +62,7 @@ hooks/
 
 ## 9. Overrides
 
-Inherits from `/home/k11/risingwave/ci/plugins/swapfile/AGENTS.md` and `/home/k11/risingwave/ci/plugins/AGENTS.md`:
+Inherits from `./ci/plugins/swapfile/AGENTS.md` and `./ci/plugins/AGENTS.md`:
 - Override: Pre-command hook swap management rules
 - Override: Idempotent swap creation requirements
 
@@ -78,4 +78,4 @@ Regenerate this file when:
 
 - Created: 2025-02-22
 - Version: 1.0
-- Parent: /home/k11/risingwave/ci/plugins/swapfile/AGENTS.md
+- Parent: ./ci/plugins/swapfile/AGENTS.md

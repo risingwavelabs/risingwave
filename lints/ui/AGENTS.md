@@ -58,7 +58,7 @@ lints/ui/
 
 ## 9. Overrides
 
-Inherits from `/home/k11/risingwave/lints/AGENTS.md`:
+Inherits from `./lints/AGENTS.md`:
 - Override: Edit Rules - UI test-specific patterns
 - Override: Test Entry - UI test commands
 
@@ -74,4 +74,4 @@ Regenerate this file when:
 
 - Created: 2025-02-22
 - Version: 1.0
-- Parent: /home/k11/risingwave/lints/AGENTS.md
+- Parent: ./lints/AGENTS.md

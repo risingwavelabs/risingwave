@@ -61,7 +61,7 @@ hooks/
 
 ## 9. Overrides
 
-Inherits from `/home/k11/risingwave/ci/plugins/upload-failure-logs-zipped/AGENTS.md` and `/home/k11/risingwave/ci/plugins/AGENTS.md`:
+Inherits from `./ci/plugins/upload-failure-logs-zipped/AGENTS.md` and `./ci/plugins/AGENTS.md`:
 - Override: Hook-specific zip-only upload logic
 - Override: Simplified log collection approach
 
@@ -77,4 +77,4 @@ Regenerate this file when:
 
 - Created: 2025-02-22
 - Version: 1.0
-- Parent: /home/k11/risingwave/ci/plugins/upload-failure-logs-zipped/AGENTS.md
+- Parent: ./ci/plugins/upload-failure-logs-zipped/AGENTS.md

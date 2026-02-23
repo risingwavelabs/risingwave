@@ -2,7 +2,7 @@
 
 ## 1. Scope
 
-Policies for `/home/k11/risingwave/src/tests/state_cleaning_test/data` - TOML configuration files for streaming state cleaning validation tests.
+Policies for `./src/tests/state_cleaning_test/data` - TOML configuration files for streaming state cleaning validation tests.
 
 ## 2. Purpose
 
@@ -76,7 +76,7 @@ src/tests/state_cleaning_test/data/
 
 ## 9. Overrides
 
-None. Inherits all rules from parent `/home/k11/risingwave/src/tests/state_cleaning_test/AGENTS.md`.
+None. Inherits all rules from parent `./src/tests/state_cleaning_test/AGENTS.md`.
 
 ## 10. Update Triggers
 
@@ -91,4 +91,4 @@ Regenerate this file when:
 
 - Created: 2025-02-22
 - Version: 1.0
-- Parent: /home/k11/risingwave/src/tests/state_cleaning_test/AGENTS.md
+- Parent: ./src/tests/state_cleaning_test/AGENTS.md

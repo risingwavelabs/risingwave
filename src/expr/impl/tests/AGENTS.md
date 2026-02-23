@@ -2,7 +2,7 @@
 
 ## 1. Scope
 
-Policies for `/home/k11/risingwave/src/expr/impl/tests` - unit tests for RisingWave expression function signatures and registry validation.
+Policies for `./src/expr/impl/tests` - unit tests for RisingWave expression function signatures and registry validation.
 
 ## 2. Purpose
 
@@ -69,7 +69,7 @@ src/expr/impl/tests/
 
 ## 9. Overrides
 
-None. Inherits all rules from parent `/home/k11/risingwave/src/expr/impl/AGENTS.md`.
+None. Inherits all rules from parent `./src/expr/impl/AGENTS.md`.
 
 ## 10. Update Triggers
 
@@ -84,4 +84,4 @@ Regenerate this file when:
 
 - Created: 2025-02-22
 - Version: 1.0
-- Parent: /home/k11/risingwave/src/expr/impl/AGENTS.md
+- Parent: ./src/expr/impl/AGENTS.md

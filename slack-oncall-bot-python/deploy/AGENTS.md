@@ -62,7 +62,7 @@ slack-oncall-bot-python/deploy/
 
 ## 9. Overrides
 
-Inherits from `/home/k11/risingwave/slack-oncall-bot-python/AGENTS.md`:
+Inherits from `./slack-oncall-bot-python/AGENTS.md`:
 - Override: Edit Rules - Deployment-specific requirements
 - Override: Test Entry - Deployment validation commands
 
@@ -78,4 +78,4 @@ Regenerate this file when:
 
 - Created: 2025-02-22
 - Version: 1.0
-- Parent: /home/k11/risingwave/slack-oncall-bot-python/AGENTS.md
+- Parent: ./slack-oncall-bot-python/AGENTS.md

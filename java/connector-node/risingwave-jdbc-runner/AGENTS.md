@@ -70,7 +70,7 @@ risingwave-jdbc-runner/
 
 ## 9. Overrides
 
-Inherits from `/home/k11/risingwave/java/connector-node/AGENTS.md`:
+Inherits from `./java/connector-node/AGENTS.md`:
 - Override: Cloud warehouse-specific patterns
 - Override: JDBC driver management requirements
 
@@ -86,4 +86,4 @@ Regenerate this file when:
 
 - Created: 2025-02-22
 - Version: 1.0
-- Parent: /home/k11/risingwave/java/connector-node/AGENTS.md
+- Parent: ./java/connector-node/AGENTS.md

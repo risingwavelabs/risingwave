@@ -80,7 +80,7 @@ analysis-engine/
 
 ## 9. Overrides
 
-Inherits from `/home/k11/risingwave/auto-error-detection/AGENTS.md`:
+Inherits from `./auto-error-detection/AGENTS.md`:
 - Override: Test Entry - Analysis engine has specialized pattern tests
 - Override: Dependencies - Pattern matching engine specific
 
@@ -97,4 +97,4 @@ Regenerate this file when:
 
 - Created: 2025-02-22
 - Version: 1.0
-- Parent: /home/k11/risingwave/auto-error-detection/AGENTS.md
+- Parent: ./auto-error-detection/AGENTS.md

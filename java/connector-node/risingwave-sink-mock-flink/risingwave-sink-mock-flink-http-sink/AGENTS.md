@@ -71,7 +71,7 @@ risingwave-sink-mock-flink-http-sink/
 
 ## 9. Overrides
 
-Inherits from `/home/k11/risingwave/java/connector-node/risingwave-sink-mock-flink/AGENTS.md`:
+Inherits from `./java/connector-node/risingwave-sink-mock-flink/AGENTS.md`:
 - Override: HTTP-specific implementation rules
 - Override: Test-only endpoint security guidelines
 - Override: Assembly inclusion requirements
@@ -89,4 +89,4 @@ Regenerate this file when:
 
 - Created: 2025-02-22
 - Version: 1.0
-- Parent: /home/k11/risingwave/java/connector-node/risingwave-sink-mock-flink/AGENTS.md
+- Parent: ./java/connector-node/risingwave-sink-mock-flink/AGENTS.md

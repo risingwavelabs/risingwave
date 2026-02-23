@@ -2,7 +2,7 @@
 
 ## 1. Scope
 
-Policies for `/home/k11/risingwave/src/frontend/planner_test` - the golden-file testing crate for RisingWave's SQL binder, planner, and optimizer. This crate provides data-driven testing infrastructure that validates query plans through YAML-based test cases.
+Policies for `./src/frontend/planner_test` - the golden-file testing crate for RisingWave's SQL binder, planner, and optimizer. This crate provides data-driven testing infrastructure that validates query plans through YAML-based test cases.
 
 ## 2. Purpose
 
@@ -91,7 +91,7 @@ src/frontend/planner_test/
 
 ## 9. Overrides
 
-None. Inherits all rules from parent `/home/k11/risingwave/src/frontend/AGENTS.md`.
+None. Inherits all rules from parent `./src/frontend/AGENTS.md`.
 
 ## 10. Update Triggers
 
@@ -107,4 +107,4 @@ Regenerate this file when:
 
 - Created: 2025-02-22
 - Version: 1.0
-- Parent: /home/k11/risingwave/src/frontend/AGENTS.md
+- Parent: ./src/frontend/AGENTS.md

@@ -91,7 +91,7 @@ ci/
 
 ## 9. Overrides
 
-Inherits from `/home/k11/risingwave/AGENTS.md`:
+Inherits from `./AGENTS.md`:
 - Override: Test Entry - CI workflows require fork-based testing
 - Override: Dependencies - CI-specific external services
 
@@ -107,4 +107,4 @@ Regenerate this file when:
 
 - Created: 2025-02-22
 - Version: 1.0
-- Parent: /home/k11/risingwave/AGENTS.md
+- Parent: ./AGENTS.md

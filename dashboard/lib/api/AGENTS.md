@@ -64,7 +64,7 @@ lib/api/
 
 ## 9. Overrides
 
-Inherits from `/home/k11/risingwave/dashboard/lib/AGENTS.md`:
+Inherits from `./dashboard/lib/AGENTS.md`:
 - Override: API client patterns
 
 ## 10. Update Triggers
@@ -78,4 +78,4 @@ Regenerate this file when:
 
 - Created: 2025-02-22
 - Version: 1.0
-- Parent: /home/k11/risingwave/dashboard/lib/AGENTS.md
+- Parent: ./dashboard/lib/AGENTS.md
