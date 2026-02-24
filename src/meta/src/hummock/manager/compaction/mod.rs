@@ -291,58 +291,78 @@ impl HummockManager {
         max_select_count.saturating_sub(picked_task_count) as u32
     }
 
+    fn prefetched_task_id_range_is_empty(range: (u64, u64)) -> bool {
+        let (next_task_id, end_task_id_exclusive) = range;
+        next_task_id >= end_task_id_exclusive
+    }
+
     async fn refill_prefetched_compaction_task_id_range_if_needed(
         &self,
         task_id_capacity: u32,
     ) -> Result<()> {
-        if task_id_capacity == 0 || {
-            let prefetched_task_id_range = self.prefetched_compaction_task_id_range.lock();
-            let (next_task_id, end_task_id) = *prefetched_task_id_range;
-            next_task_id < end_task_id
-        } {
+        if task_id_capacity == 0 {
             return Ok(());
         }
 
-        let task_id_start = self
+        {
+            let prefetched_task_id_range = self.prefetched_compaction_task_id_range.lock();
+            if !Self::prefetched_task_id_range_is_empty(*prefetched_task_id_range) {
+                return Ok(());
+            }
+        }
+
+        let new_range_start = self
             .env
             .hummock_seq
             .next_interval(COMPACTION_TASK_ID, task_id_capacity)
             .await?;
         let mut prefetched_task_id_range = self.prefetched_compaction_task_id_range.lock();
-        let (next_task_id, end_task_id) = *prefetched_task_id_range;
-        if next_task_id >= end_task_id {
-            *prefetched_task_id_range =
-                (task_id_start, task_id_start + u64::from(task_id_capacity));
+        // Re-check after `await`: another concurrent picker may have already refilled and started
+        // consuming the in-memory range. Do not overwrite that range.
+        if !Self::prefetched_task_id_range_is_empty(*prefetched_task_id_range) {
+            return Ok(());
         }
+
+        *prefetched_task_id_range = (
+            new_range_start,
+            new_range_start + u64::from(task_id_capacity),
+        );
         Ok(())
     }
 
+    /// Pops one id from the in-memory prefetched range.
+    ///
+    /// The range is `[next, end)` and `next` is advanced by 1 when an id is returned.
     fn pop_prefetched_compaction_task_id(&self) -> Option<u64> {
         let mut prefetched_task_id_range = self.prefetched_compaction_task_id_range.lock();
-        let (next_task_id, end_task_id) = &mut *prefetched_task_id_range;
-        if *next_task_id < *end_task_id {
-            let task_id = *next_task_id;
-            *next_task_id += 1;
-            Some(task_id)
-        } else {
-            None
+        if Self::prefetched_task_id_range_is_empty(*prefetched_task_id_range) {
+            return None;
         }
+
+        let task_id = prefetched_task_id_range.0;
+        prefetched_task_id_range.0 += 1;
+        Some(task_id)
     }
 
+    /// Gets one compaction task id with best-effort batching:
+    /// 1) pop from in-memory prefetched range;
+    /// 2) if empty and `refill_capacity > 0`, refill then pop once more;
+    /// 3) fallback to single-id allocation.
     async fn next_compaction_task_id_with_prefetch(&self, refill_capacity: u32) -> Result<u64> {
         if let Some(task_id) = self.pop_prefetched_compaction_task_id() {
             return Ok(task_id);
         }
 
-        if refill_capacity > 0 {
-            self.refill_prefetched_compaction_task_id_range_if_needed(refill_capacity)
-                .await?;
-            if let Some(task_id) = self.pop_prefetched_compaction_task_id() {
-                return Ok(task_id);
-            }
+        if refill_capacity == 0 {
+            return next_compaction_task_id(&self.env).await;
         }
 
-        next_compaction_task_id(&self.env).await
+        self.refill_prefetched_compaction_task_id_range_if_needed(refill_capacity)
+            .await?;
+        match self.pop_prefetched_compaction_task_id() {
+            Some(task_id) => Ok(task_id),
+            None => next_compaction_task_id(&self.env).await,
+        }
     }
 
     pub async fn get_compact_tasks_impl(
