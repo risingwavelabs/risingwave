@@ -1762,7 +1762,7 @@ mod compaction_state_tests {
     #[test]
     fn test_basic_schedule_and_unschedule() {
         let state = CompactionState::new();
-        let group_id: CompactionGroupId = 1.into();
+        let group_id: CompactionGroupId = 1;
 
         // First schedule should succeed
         assert!(state.try_sched_compaction(group_id, TaskType::Dynamic, ScheduleTrigger::NewData));
@@ -1786,7 +1786,7 @@ mod compaction_state_tests {
     #[test]
     fn test_cooldown_blocks_periodic_trigger() {
         let state = CompactionState::new();
-        let group_id: CompactionGroupId = 1.into();
+        let group_id: CompactionGroupId = 1;
 
         // Schedule then unschedule - should add to cooldown
         assert!(state.try_sched_compaction(group_id, TaskType::Dynamic, ScheduleTrigger::NewData));
@@ -1807,7 +1807,7 @@ mod compaction_state_tests {
     #[test]
     fn test_new_data_clears_cooldown() {
         let state = CompactionState::new();
-        let group_id: CompactionGroupId = 1.into();
+        let group_id: CompactionGroupId = 1;
 
         // Put group in cooldown
         assert!(state.try_sched_compaction(group_id, TaskType::Dynamic, ScheduleTrigger::NewData));
@@ -1823,7 +1823,7 @@ mod compaction_state_tests {
     #[test]
     fn test_cooldown_only_affects_dynamic_type() {
         let state = CompactionState::new();
-        let group_id: CompactionGroupId = 1.into();
+        let group_id: CompactionGroupId = 1;
 
         // Put group in cooldown for Dynamic
         assert!(state.try_sched_compaction(group_id, TaskType::Dynamic, ScheduleTrigger::NewData));
@@ -1831,7 +1831,7 @@ mod compaction_state_tests {
         state.unschedule(group_id, TaskType::Dynamic, snapshot.snapshot_time());
 
         // Ttl unschedule should NOT add to cooldown
-        let group_id_2: CompactionGroupId = 2.into();
+        let group_id_2: CompactionGroupId = 2;
         assert!(state.try_sched_compaction(group_id_2, TaskType::Ttl, ScheduleTrigger::Periodic));
         let snapshot2 = state.snapshot();
         state.unschedule(group_id_2, TaskType::Ttl, snapshot2.snapshot_time());
@@ -1849,7 +1849,7 @@ mod compaction_state_tests {
     #[test]
     fn test_race_condition_new_data_after_snapshot() {
         let state = CompactionState::new();
-        let group_id: CompactionGroupId = 1.into();
+        let group_id: CompactionGroupId = 1;
 
         assert!(state.try_sched_compaction(group_id, TaskType::Dynamic, ScheduleTrigger::NewData));
         let snapshot = state.snapshot();
@@ -1871,7 +1871,7 @@ mod compaction_state_tests {
     #[test]
     fn test_remove_compaction_group_cleans_all_state() {
         let state = CompactionState::new();
-        let group_id: CompactionGroupId = 1.into();
+        let group_id: CompactionGroupId = 1;
 
         // Set up state
         assert!(state.try_sched_compaction(group_id, TaskType::Dynamic, ScheduleTrigger::NewData));
@@ -1892,7 +1892,7 @@ mod compaction_state_tests {
     #[test]
     fn test_snapshot_pick_type_priority() {
         let state = CompactionState::new();
-        let group_id: CompactionGroupId = 1.into();
+        let group_id: CompactionGroupId = 1;
 
         // Empty group returns None
         assert_eq!(state.snapshot().pick_type(group_id), None);
@@ -1933,8 +1933,8 @@ mod compaction_state_tests {
     #[test]
     fn test_multiple_groups_independent_cooldown() {
         let state = CompactionState::new();
-        let g1: CompactionGroupId = 1.into();
-        let g2: CompactionGroupId = 2.into();
+        let g1: CompactionGroupId = 1;
+        let g2: CompactionGroupId = 2;
 
         state.try_sched_compaction(g1, TaskType::Dynamic, ScheduleTrigger::NewData);
         state.try_sched_compaction(g2, TaskType::Dynamic, ScheduleTrigger::NewData);
@@ -1959,9 +1959,9 @@ mod compaction_state_tests {
     #[test]
     fn test_pick_compaction_groups_mixed_types() {
         let state = CompactionState::new();
-        let g1: CompactionGroupId = 1.into();
-        let g2: CompactionGroupId = 2.into();
-        let g3: CompactionGroupId = 3.into();
+        let g1: CompactionGroupId = 1;
+        let g2: CompactionGroupId = 2;
+        let g3: CompactionGroupId = 3;
 
         // g1: Dynamic, g2: Ttl, g3: Dynamic
         state.try_sched_compaction(g1, TaskType::Dynamic, ScheduleTrigger::NewData);
@@ -1988,8 +1988,8 @@ mod compaction_state_tests {
     #[test]
     fn test_pick_compaction_groups_all_dynamic() {
         let state = CompactionState::new();
-        let g1: CompactionGroupId = 1.into();
-        let g2: CompactionGroupId = 2.into();
+        let g1: CompactionGroupId = 1;
+        let g2: CompactionGroupId = 2;
 
         state.try_sched_compaction(g1, TaskType::Dynamic, ScheduleTrigger::NewData);
         state.try_sched_compaction(g2, TaskType::Dynamic, ScheduleTrigger::NewData);
@@ -2004,7 +2004,7 @@ mod compaction_state_tests {
     #[test]
     fn test_pick_compaction_groups_single_non_dynamic() {
         let state = CompactionState::new();
-        let g1: CompactionGroupId = 1.into();
+        let g1: CompactionGroupId = 1;
 
         state.try_sched_compaction(g1, TaskType::SpaceReclaim, ScheduleTrigger::Periodic);
 
