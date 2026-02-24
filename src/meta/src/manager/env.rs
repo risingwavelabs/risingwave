@@ -195,6 +195,8 @@ pub struct MetaOpts {
 
     /// Schedule `periodic_scheduling_compaction_group_split_interval_sec` for all compaction groups with this interval.
     pub periodic_scheduling_compaction_group_split_interval_sec: u64,
+    /// Whether to enable compaction group normalize in the split scheduler.
+    pub enable_compaction_group_normalize: bool,
 
     /// Whether config object storage bucket lifecycle to purge stale data.
     pub do_not_config_object_storage_lifecycle: bool,
@@ -343,6 +345,7 @@ impl MetaOpts {
             periodic_ttl_reclaim_compaction_interval_sec: 60,
             periodic_tombstone_reclaim_compaction_interval_sec: 60,
             periodic_scheduling_compaction_group_split_interval_sec: 60,
+            enable_compaction_group_normalize: false,
             compact_task_table_size_partition_threshold_low: 128 * 1024 * 1024,
             compact_task_table_size_partition_threshold_high: 512 * 1024 * 1024,
             table_high_write_throughput_threshold: 128 * 1024 * 1024,

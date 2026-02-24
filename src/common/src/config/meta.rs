@@ -350,6 +350,10 @@ pub struct MetaConfig {
     )]
     pub periodic_scheduling_compaction_group_split_interval_sec: u64,
 
+    /// Whether to enable compaction group normalize in the split scheduler.
+    #[serde(default = "default::meta::enable_compaction_group_normalize")]
+    pub enable_compaction_group_normalize: bool,
+
     /// The interval of the periodic scheduling compaction group merge job.
     #[serde(default = "default::meta::periodic_scheduling_compaction_group_merge_interval_sec")]
     pub periodic_scheduling_compaction_group_merge_interval_sec: u64,
@@ -742,6 +746,10 @@ pub mod default {
 
         pub fn periodic_scheduling_compaction_group_merge_interval_sec() -> u64 {
             60 * 10 // 10min
+        }
+
+        pub fn enable_compaction_group_normalize() -> bool {
+            false
         }
 
         pub fn compaction_group_merge_dimension_threshold() -> f64 {

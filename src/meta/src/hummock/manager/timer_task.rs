@@ -573,6 +573,26 @@ impl HummockManager {
     /// 2. `group size`: If the group size has exceeded the set upper limit, e.g. `max_group_size` * `split_group_size_ratio`
     async fn on_handle_schedule_group_split(&self) {
         let table_write_throughput = self.table_write_throughput_statistic_manager.read().clone();
+
+        if self.env.opts.enable_compaction_group_normalize {
+            match self.normalize_overlapping_compaction_groups().await {
+                Ok(split_count) => {
+                    if split_count > 0 {
+                        tracing::info!(
+                            "normalize compaction groups finished with {} split(s)",
+                            split_count
+                        );
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        error = %e.as_report(),
+                        "failed to normalize compaction groups"
+                    );
+                }
+            }
+        }
+
         let mut group_infos = self.calculate_compaction_group_statistic().await;
         group_infos.sort_by_key(|group| group.group_size);
         group_infos.reverse();
@@ -586,6 +606,11 @@ impl HummockManager {
             self.try_split_compaction_group(&table_write_throughput, group)
                 .await;
         }
+    }
+
+    #[cfg(test)]
+    pub async fn schedule_group_split_for_test(&self) {
+        self.on_handle_schedule_group_split().await;
     }
 
     async fn on_handle_trigger_multi_group(&self, task_type: compact_task::TaskType) {
