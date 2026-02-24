@@ -18,6 +18,8 @@
 //!
 //! See expr/impl/src/udf for the implementations.
 
+use std::collections::BTreeMap;
+
 use anyhow::{Context, Result, bail};
 use educe::Educe;
 use enum_as_inner::EnumAsInner;
@@ -116,6 +118,7 @@ pub struct BuildOptions<'a> {
     pub language: &'a str,
     pub is_async: Option<bool>,
     pub is_batched: Option<bool>,
+    pub options: &'a BTreeMap<String, String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, EnumAsInner)]
