@@ -22,7 +22,6 @@ use risingwave_common::catalog::{
     AlterDatabaseParam, CatalogVersion, FunctionId, IndexId, ObjectId,
 };
 use risingwave_common::id::{ConnectionId, JobId, SchemaId, SourceId, ViewId};
-use risingwave_hummock_sdk::HummockVersionId;
 use risingwave_pb::catalog::{
     PbComment, PbCreateType, PbDatabase, PbFunction, PbIndex, PbSchema, PbSink, PbSource,
     PbSubscription, PbTable, PbView,
@@ -173,7 +172,7 @@ pub trait CatalogWriter: Send + Sync {
 
     async fn drop_table(
         &self,
-        source_id: Option<u32>,
+        source_id: Option<SourceId>,
         table_id: TableId,
         cascade: bool,
     ) -> Result<()>;
@@ -201,7 +200,7 @@ pub trait CatalogWriter: Send + Sync {
 
     async fn drop_connection(&self, connection_id: ConnectionId, cascade: bool) -> Result<()>;
 
-    async fn drop_secret(&self, secret_id: SecretId) -> Result<()>;
+    async fn drop_secret(&self, secret_id: SecretId, cascade: bool) -> Result<()>;
 
     async fn alter_secret(
         &self,
@@ -232,6 +231,13 @@ pub trait CatalogWriter: Send + Sync {
         &self,
         job_id: JobId,
         parallelism: PbTableParallelism,
+        deferred: bool,
+    ) -> Result<()>;
+
+    async fn alter_backfill_parallelism(
+        &self,
+        job_id: JobId,
+        parallelism: Option<PbTableParallelism>,
         deferred: bool,
     ) -> Result<()>;
 
@@ -270,6 +276,8 @@ pub trait CatalogWriter: Send + Sync {
         iceberg_source: PbSource,
         if_not_exists: bool,
     ) -> Result<()>;
+
+    async fn wait(&self) -> Result<()>;
 }
 
 #[derive(Clone)]
@@ -510,7 +518,7 @@ impl CatalogWriter for CatalogWriterImpl {
 
     async fn drop_table(
         &self,
-        source_id: Option<u32>,
+        source_id: Option<SourceId>,
         table_id: TableId,
         cascade: bool,
     ) -> Result<()> {
@@ -589,8 +597,8 @@ impl CatalogWriter for CatalogWriterImpl {
         self.wait_version(version).await
     }
 
-    async fn drop_secret(&self, secret_id: SecretId) -> Result<()> {
-        let version = self.meta_client.drop_secret(secret_id).await?;
+    async fn drop_secret(&self, secret_id: SecretId, cascade: bool) -> Result<()> {
+        let version = self.meta_client.drop_secret(secret_id, cascade).await?;
         self.wait_version(version).await
     }
 
@@ -637,6 +645,18 @@ impl CatalogWriter for CatalogWriterImpl {
     ) -> Result<()> {
         self.meta_client
             .alter_parallelism(job_id, parallelism, deferred)
+            .await?;
+        Ok(())
+    }
+
+    async fn alter_backfill_parallelism(
+        &self,
+        job_id: JobId,
+        parallelism: Option<PbTableParallelism>,
+        deferred: bool,
+    ) -> Result<()> {
+        self.meta_client
+            .alter_backfill_parallelism(job_id, parallelism, deferred)
             .await?;
         Ok(())
     }
@@ -721,6 +741,11 @@ impl CatalogWriter for CatalogWriterImpl {
             .await?;
         self.wait_version(version).await
     }
+
+    async fn wait(&self) -> Result<()> {
+        let version = self.meta_client.wait().await.map_err(|e| anyhow!(e))?;
+        self.wait_version(version).await
+    }
 }
 
 impl CatalogWriterImpl {
@@ -742,7 +767,7 @@ impl CatalogWriterImpl {
             rx.changed().await.map_err(|e| anyhow!(e))?;
         }
         self.hummock_snapshot_manager
-            .wait(HummockVersionId::new(version.hummock_version_id))
+            .wait(version.hummock_version_id)
             .await;
         Ok(())
     }

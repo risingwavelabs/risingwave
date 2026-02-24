@@ -521,8 +521,9 @@ pub async fn handle(
                     | ObjectType::Index
                     | ObjectType::Table
                     | ObjectType::Schema
-                    | ObjectType::Connection => true,
-                    ObjectType::Database | ObjectType::User | ObjectType::Secret => {
+                    | ObjectType::Connection
+                    | ObjectType::Secret => true,
+                    ObjectType::Database | ObjectType::User => {
                         bail_not_implemented!("DROP CASCADE");
                     }
                 }
@@ -580,7 +581,8 @@ pub async fn handle(
                     .await
                 }
                 ObjectType::Secret => {
-                    drop_secret::handle_drop_secret(handler_args, object_name, if_exists).await
+                    drop_secret::handle_drop_secret(handler_args, object_name, if_exists, cascade)
+                        .await
                 }
             }
         }
@@ -838,6 +840,19 @@ pub async fn handle(
                 )
                 .await
             }
+            AlterTableOperation::SetBackfillParallelism {
+                parallelism,
+                deferred,
+            } => {
+                alter_parallelism::handle_alter_backfill_parallelism(
+                    handler_args,
+                    name,
+                    parallelism,
+                    StatementType::ALTER_TABLE,
+                    deferred,
+                )
+                .await
+            }
             AlterTableOperation::SetSchema { new_schema_name } => {
                 alter_set_schema::handle_alter_set_schema(
                     handler_args,
@@ -943,6 +958,19 @@ pub async fn handle(
                 )
                 .await
             }
+            AlterIndexOperation::SetBackfillParallelism {
+                parallelism,
+                deferred,
+            } => {
+                alter_parallelism::handle_alter_backfill_parallelism(
+                    handler_args,
+                    name,
+                    parallelism,
+                    StatementType::ALTER_INDEX,
+                    deferred,
+                )
+                .await
+            }
             AlterIndexOperation::SetConfig { entries } => {
                 alter_streaming_config::handle_alter_streaming_set_config(
                     handler_args,
@@ -994,6 +1022,22 @@ pub async fn handle(
                         bail_not_implemented!("ALTER VIEW SET PARALLELISM");
                     }
                     alter_parallelism::handle_alter_parallelism(
+                        handler_args,
+                        name,
+                        parallelism,
+                        statement_type,
+                        deferred,
+                    )
+                    .await
+                }
+                AlterViewOperation::SetBackfillParallelism {
+                    parallelism,
+                    deferred,
+                } => {
+                    if !materialized {
+                        bail_not_implemented!("ALTER VIEW SET BACKFILL PARALLELISM");
+                    }
+                    alter_parallelism::handle_alter_backfill_parallelism(
                         handler_args,
                         name,
                         parallelism,
@@ -1137,6 +1181,19 @@ pub async fn handle(
                 deferred,
             } => {
                 alter_parallelism::handle_alter_parallelism(
+                    handler_args,
+                    name,
+                    parallelism,
+                    StatementType::ALTER_SINK,
+                    deferred,
+                )
+                .await
+            }
+            AlterSinkOperation::SetBackfillParallelism {
+                parallelism,
+                deferred,
+            } => {
+                alter_parallelism::handle_alter_backfill_parallelism(
                     handler_args,
                     name,
                     parallelism,
@@ -1304,6 +1361,19 @@ pub async fn handle(
                 deferred,
             } => {
                 alter_parallelism::handle_alter_parallelism(
+                    handler_args,
+                    name,
+                    parallelism,
+                    StatementType::ALTER_SOURCE,
+                    deferred,
+                )
+                .await
+            }
+            AlterSourceOperation::SetBackfillParallelism {
+                parallelism,
+                deferred,
+            } => {
+                alter_parallelism::handle_alter_backfill_parallelism(
                     handler_args,
                     name,
                     parallelism,
@@ -1532,6 +1602,19 @@ fn check_ban_ddl_for_iceberg_engine_table(
             if table.is_iceberg_engine_table() {
                 bail!(
                     "ALTER TABLE SET PARALLELISM is not supported for iceberg table: {}.{}",
+                    schema_name,
+                    name
+                );
+            }
+        }
+        Statement::AlterTable {
+            name,
+            operation: AlterTableOperation::SetBackfillParallelism { .. },
+        } => {
+            let (table, schema_name) = get_table_catalog_by_table_name(session.as_ref(), name)?;
+            if table.is_iceberg_engine_table() {
+                bail!(
+                    "ALTER TABLE SET BACKFILL PARALLELISM is not supported for iceberg table: {}.{}",
                     schema_name,
                     name
                 );

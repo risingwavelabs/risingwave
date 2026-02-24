@@ -17,6 +17,7 @@ use futures::{StreamExt, pin_mut};
 use risingwave_common::bitmap::Bitmap;
 use risingwave_frontend::TableCatalog;
 use risingwave_hummock_sdk::HummockReadEpoch;
+use risingwave_pb::id::TableId;
 use risingwave_rpc_client::MetaClient;
 use risingwave_storage::StateStore;
 use risingwave_storage::hummock::HummockStorage;
@@ -39,7 +40,7 @@ pub async fn get_table_catalog(meta: MetaClient, mv_name: String) -> Result<Tabl
     Ok(TableCatalog::from(&mv))
 }
 
-pub async fn get_table_catalog_by_id(meta: MetaClient, table_id: u32) -> Result<TableCatalog> {
+pub async fn get_table_catalog_by_id(meta: MetaClient, table_id: TableId) -> Result<TableCatalog> {
     let mvs = meta.risectl_list_state_tables().await?;
     let mv = mvs
         .iter()
@@ -107,7 +108,7 @@ pub async fn scan(
 
 pub async fn scan_id(
     context: &CtlContext,
-    table_id: u32,
+    table_id: TableId,
     data_dir: Option<String>,
     use_new_object_prefix_strategy: bool,
 ) -> Result<()> {

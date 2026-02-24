@@ -69,6 +69,139 @@ dave NULL
 statement ok
 DROP TABLE t_distinct;
 
+# ==================== LogicalExpand Tests ====================
+
+statement ok
+CREATE TABLE t_expand(
+    id INT,
+    name VARCHAR,
+    v1 INT,
+    v2 INT,
+) WITH (commit_checkpoint_interval = 1) ENGINE = iceberg;
+
+statement ok
+INSERT INTO t_expand VALUES
+(1, 'a', 10, 100),
+(2, 'a', 20, 100),
+(3, 'b', 20, 200),
+(4, 'b', NULL, 300),
+(5, 'c', 30, NULL),
+(6, NULL, 30, 300),
+(7, NULL, NULL, NULL);
+
+statement ok
+FLUSH;
+
+sleep 5s
+
+# Multiple distinct aggregates should trigger LogicalExpand.
+query ???
+SELECT
+    count(DISTINCT name),
+    count(DISTINCT v1),
+    count(DISTINCT v2)
+FROM t_expand;
+----
+3 3 3
+
+# Mixed distinct/non-distinct aggregates with GROUP BY.
+query ?????? rowsort
+SELECT
+    id % 2 AS g,
+    count(DISTINCT name),
+    count(DISTINCT v1),
+    count(DISTINCT v2),
+    sum(v1),
+    count(*)
+FROM t_expand
+GROUP BY id % 2;
+----
+0 2 2 2 50 3
+1 3 3 2 60 4
+
+# Distinct aggregates with FILTER need original columns from Expand output.
+query ???
+SELECT
+    count(DISTINCT name) FILTER (WHERE v2 = 300),
+    count(DISTINCT v1) FILTER (WHERE name = 'a'),
+    sum(v1) FILTER (WHERE v2 = 100)
+FROM t_expand;
+----
+1 2 30
+
+statement ok
+DROP TABLE t_expand;
+
+# ==================== Grouping Sets Tests ====================
+
+statement ok
+CREATE TABLE t_grouping_sets(
+    a INT,
+    b INT,
+    v INT,
+) WITH (commit_checkpoint_interval = 1) ENGINE = iceberg;
+
+statement ok
+INSERT INTO t_grouping_sets VALUES
+(1, 10, 10),
+(1, 10, 20),
+(2, 20, 5),
+(2, 20, 10);
+
+statement ok
+FLUSH;
+
+sleep 5s
+
+# GROUPING SETS should be rewritten into Expand + Agg, and run in DataFusion engine.
+query ??? rowsort
+SELECT
+    a,
+    b,
+    sum(v)
+FROM t_grouping_sets
+GROUP BY GROUPING SETS ((a), (b));
+----
+1 NULL 30
+2 NULL 15
+NULL 10 30
+NULL 20 15
+
+# ROLLUP is equivalent to GROUPING SETS ((a, b), (a), ()).
+query ??? rowsort
+SELECT
+    a,
+    b,
+    sum(v)
+FROM t_grouping_sets
+GROUP BY ROLLUP (a, b);
+----
+1 10 30
+1 NULL 30
+2 20 15
+2 NULL 15
+NULL NULL 45
+
+# CUBE is equivalent to GROUPING SETS ((a, b), (a), (b), ()).
+query ??? rowsort
+SELECT
+    a,
+    b,
+    sum(v)
+FROM t_grouping_sets
+GROUP BY CUBE (a, b);
+----
+1 10 30
+1 NULL 30
+2 20 15
+2 NULL 15
+NULL 10 30
+NULL 20 15
+NULL NULL 45
+
+statement ok
+DROP TABLE t_grouping_sets;
+
 # ==================== Scalar Function Tests ====================
 
 statement ok

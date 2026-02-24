@@ -33,3 +33,22 @@ select pg_sleep(3);
 
 statement ok
 set statement_timeout = 0;
+
+# spawning process is not supported in simulation mode
+skipif madsim
+system ok
+psql -At "postgres://postgres@$RISEDEV_RW_FRONTEND_LISTEN_ADDRESS:$RISEDEV_RW_FRONTEND_PORT/dev?options=-c%20timezone%3DUS/Pacific" -c "show timezone;"
+----
+US/Pacific
+
+
+# https://github.com/risinglightdb/sqllogictest-rs/blob/v0.29.0/sqllogictest/src/parser.rs#L937
+# system error valid timezone
+# psql -At "postgres://postgres@$RISEDEV_RW_FRONTEND_LISTEN_ADDRESS:$RISEDEV_RW_FRONTEND_PORT/dev?options=-c%20timezone%3DUS/Pacifi" -c "show timezone;"
+
+
+skipif madsim
+system ok
+psql -At "postgres://postgres@$RISEDEV_RW_FRONTEND_LISTEN_ADDRESS:$RISEDEV_RW_FRONTEND_PORT/dev?options=-c%20statement_timeout%3D1s" -c "show statement_timeout;"
+----
+1000ms

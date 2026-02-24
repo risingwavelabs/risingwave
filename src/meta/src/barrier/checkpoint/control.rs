@@ -167,6 +167,13 @@ impl CheckpointControl {
         })
     }
 
+    pub(crate) fn database_info(&self, database_id: DatabaseId) -> Option<&InflightDatabaseInfo> {
+        self.databases
+            .get(&database_id)
+            .and_then(|database| database.running_state())
+            .map(|database| &database.database_info)
+    }
+
     pub(crate) fn may_have_snapshot_backfilling_jobs(&self) -> bool {
         self.databases
             .values()
@@ -265,7 +272,7 @@ impl CheckpointControl {
                         warn!(?command, "skip command for empty database");
                         return Ok(());
                     }
-                    Command::RescheduleFragment { .. }
+                    Command::RescheduleIntent { .. }
                     | Command::ReplaceStreamJob(_)
                     | Command::SourceChangeSplit(_)
                     | Command::Throttle { .. }
@@ -275,7 +282,8 @@ impl CheckpointControl {
                     | Command::ListFinish { .. }
                     | Command::LoadFinish { .. }
                     | Command::ResetSource { .. }
-                    | Command::ResumeBackfill { .. } => {
+                    | Command::ResumeBackfill { .. }
+                    | Command::InjectSourceOffsets { .. } => {
                         if cfg!(debug_assertions) {
                             panic!(
                                 "new database graph info can only be created for normal creating streaming job, but get command: {} {:?}",
@@ -1064,6 +1072,17 @@ impl DatabaseCheckpointControl {
             (None, vec![])
         };
 
+        debug_assert!(
+            !matches!(
+                &command,
+                Some(Command::RescheduleIntent {
+                    reschedule_plan: None,
+                    ..
+                })
+            ),
+            "reschedule intent should be resolved before injection"
+        );
+
         if let Some(Command::DropStreamingJobs {
             streaming_job_ids, ..
         }) = &command
@@ -1099,7 +1118,7 @@ impl DatabaseCheckpointControl {
             && jobs.len() > 1
             && let Some(creating_job_id) = jobs
                 .iter()
-                .find(|job| self.creating_streaming_job_controls.contains_key(job))
+                .find(|job| self.creating_streaming_job_controls.contains_key(*job))
         {
             warn!(
                 job_id = %creating_job_id,
@@ -1113,7 +1132,7 @@ impl DatabaseCheckpointControl {
             return Ok(());
         };
 
-        if let Some(Command::RescheduleFragment { .. }) = &command
+        if let Some(Command::RescheduleIntent { .. }) = &command
             && !self.creating_streaming_job_controls.is_empty()
         {
             warn!("ignore reschedule when creating streaming job with snapshot backfill");

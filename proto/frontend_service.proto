@@ -32,6 +32,37 @@ message RunningSql {
   optional string sql = 6;
 }
 
+message GetAllCursorsRequest {}
+
+message GetAllCursorsResponse {
+  repeated AllCursors all_cursors = 1;
+}
+
+message AllCursors {
+  int32 session_id = 1;
+  string user_name = 2;
+  string peer_addr = 3;
+  string database = 4;
+  repeated string cursor_names = 5;
+}
+
+message GetAllSubCursorsRequest {}
+
+message GetAllSubCursorsResponse {
+  repeated SubscriptionCursor subscription_cursors = 1;
+}
+
+message SubscriptionCursor {
+  int32 session_id = 1;
+  string user_name = 2;
+  string peer_addr = 3;
+  string database = 4;
+  repeated string states = 5;
+  repeated uint64 idle_durations = 6;
+  repeated string subscription_names = 7;
+  repeated string cursor_names = 8;
+}
+
 message CancelRunningSqlRequest {
   int32 process_id = 1;
 }
@@ -41,5 +72,7 @@ message CancelRunningSqlResponse {}
 service FrontendService {
   rpc GetTableReplacePlan(GetTableReplacePlanRequest) returns (GetTableReplacePlanResponse);
   rpc GetRunningSqls(GetRunningSqlsRequest) returns (GetRunningSqlsResponse);
+  rpc GetAllCursors(GetAllCursorsRequest) returns (GetAllCursorsResponse);
+  rpc GetAllSubCursors(GetAllSubCursorsRequest) returns (GetAllSubCursorsResponse);
   rpc CancelRunningSql(CancelRunningSqlRequest) returns (CancelRunningSqlResponse);
 }

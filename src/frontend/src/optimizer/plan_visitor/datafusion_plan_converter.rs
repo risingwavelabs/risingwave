@@ -18,18 +18,19 @@ use std::sync::Arc;
 use datafusion::arrow::datatypes::{Field as ArrowField, Schema as ArrowSchema};
 use datafusion::datasource::provider_as_source;
 use datafusion::logical_expr::{
-    Aggregate, Expr as DFExpr, ExprSchemable, Join, JoinConstraint, LogicalPlan as DFLogicalPlan,
-    LogicalPlan, TableScan, Values, build_join_schema,
+    Aggregate, Expr as DFExpr, ExprSchemable, Extension, Join, JoinConstraint,
+    LogicalPlan as DFLogicalPlan, LogicalPlan, TableScan, Values, build_join_schema,
 };
 use datafusion::prelude::lit;
 use datafusion_common::{Column, DFSchema, NullEquality, ScalarValue};
 use itertools::Itertools;
 use risingwave_common::array::arrow::IcebergArrowConvert;
 use risingwave_common::bail_not_implemented;
+use risingwave_common::catalog::Schema as RwSchema;
 
 use crate::datafusion::{
-    ColumnTrait, ConcatColumns, IcebergTableProvider, InputColumns, convert_agg_call,
-    convert_column_order, convert_expr, convert_join_type, convert_window_expr,
+    ColumnTrait, ConcatColumns, Expand as DfExpand, IcebergTableProvider, InputColumns, ProjectSet,
+    convert_agg_call, convert_column_order, convert_expr, convert_join_type, convert_window_expr,
 };
 use crate::error::{ErrorCode, Result as RwResult};
 use crate::optimizer::plan_node::generic::{GenericPlanRef, TopNLimit};
@@ -42,7 +43,7 @@ use crate::optimizer::{LogicalPlanRef, PlanVisitor};
 /// Returns an error if the plan contains unsupported nodes or expressions.
 // When you add a new plan node here, please also update `DataFusionExecuteChecker`.
 #[derive(Debug, Clone, Copy)]
-pub struct DataFusionPlanConverter;
+struct DataFusionPlanConverter;
 
 impl LogicalPlanVisitor for DataFusionPlanConverter {
     type DefaultBehavior = DefaultValueBehavior;
@@ -118,22 +119,38 @@ impl LogicalPlanVisitor for DataFusionPlanConverter {
             .map(|e| convert_expr(e, &input_columns))
             .collect::<RwResult<Vec<_>>>()?;
 
-        // DataFusion requires unique expression names in projection.
-        let mut duplicated_exprs = HashMap::new();
-        for expr in &mut df_exprs {
-            let (relation, field) = expr.to_field(df_input.schema())?;
-            let count = duplicated_exprs
-                .entry((relation.clone(), field.name().clone()))
-                .or_insert(0);
-            *count += 1;
-            if *count > 1 {
-                let take_expr = std::mem::replace(expr, DFExpr::Literal(ScalarValue::Null, None));
-                *expr = take_expr.alias_qualified(relation, format!("{}@{}", field.name(), count));
-            }
-        }
+        deduplicate_projection_expr_names(&mut df_exprs, df_input.schema().as_ref())?;
 
         let projection = datafusion::logical_expr::Projection::try_new(df_exprs, df_input)?;
         Ok(Arc::new(LogicalPlan::Projection(projection)))
+    }
+
+    fn visit_logical_expand(
+        &mut self,
+        plan: &crate::optimizer::plan_node::LogicalExpand,
+    ) -> Self::Result {
+        let df_input = self.visit(plan.input())?;
+        let df_schema = Arc::new(convert_schema(plan.schema())?);
+        let expand = DfExpand::new(df_input, plan.column_subsets().clone(), df_schema);
+        Ok(Arc::new(LogicalPlan::Extension(Extension {
+            node: Arc::new(expand),
+        })))
+    }
+
+    fn visit_logical_project_set(
+        &mut self,
+        plan: &crate::optimizer::plan_node::LogicalProjectSet,
+    ) -> Self::Result {
+        let df_input = self.visit(plan.input())?;
+        let rw_schema = plan.schema();
+        let df_schema = convert_schema(rw_schema)?;
+
+        let project_set =
+            ProjectSet::new(df_input, plan.select_list().clone(), Arc::new(df_schema));
+
+        Ok(Arc::new(LogicalPlan::Extension(Extension {
+            node: Arc::new(project_set),
+        })))
     }
 
     fn visit_logical_join(
@@ -231,15 +248,7 @@ impl LogicalPlanVisitor for DataFusionPlanConverter {
         plan: &crate::optimizer::plan_node::LogicalValues,
     ) -> Self::Result {
         let rw_schema = plan.schema();
-
-        let arrow_fields = rw_schema
-            .fields()
-            .iter()
-            .map(|f| IcebergArrowConvert.to_arrow_field(&f.name, &f.data_type))
-            .collect::<Result<Vec<ArrowField>, _>>()?;
-
-        let arrow_schema = ArrowSchema::new(arrow_fields);
-        let df_schema = DFSchema::try_from(Arc::new(arrow_schema))?;
+        let df_schema = convert_schema(rw_schema)?;
         let input_columns = InputColumns::new(&df_schema, rw_schema);
 
         let mut df_rows: Vec<Vec<DFExpr>> = Vec::with_capacity(plan.rows().len());
@@ -419,7 +428,7 @@ impl LogicalPlanVisitor for DataFusionPlanConverter {
     }
 }
 
-pub struct DefaultValueBehavior;
+struct DefaultValueBehavior;
 impl DefaultBehavior<RwResult<Arc<DFLogicalPlan>>> for DefaultValueBehavior {
     fn apply(
         &self,
@@ -438,4 +447,36 @@ pub impl LogicalPlanRef {
         let result = DataFusionPlanConverter.visit(self.clone())?;
         Ok(result)
     }
+}
+
+fn convert_schema(rw_schema: &RwSchema) -> RwResult<DFSchema> {
+    let arrow_fields = rw_schema
+        .fields()
+        .iter()
+        .map(|f| IcebergArrowConvert.to_arrow_field(&f.name, &f.data_type))
+        .collect::<Result<Vec<ArrowField>, _>>()?;
+
+    let arrow_schema = ArrowSchema::new(arrow_fields);
+    let df_schema = DFSchema::try_from(Arc::new(arrow_schema))?;
+    Ok(df_schema)
+}
+
+fn deduplicate_projection_expr_names(
+    exprs: &mut [DFExpr],
+    input_schema: &DFSchema,
+) -> RwResult<()> {
+    // DataFusion requires unique expression names in projection.
+    let mut duplicated_exprs = HashMap::new();
+    for expr in exprs {
+        let (relation, field) = expr.to_field(input_schema)?;
+        let count = duplicated_exprs
+            .entry((relation.clone(), field.name().clone()))
+            .or_insert(0);
+        *count += 1;
+        if *count > 1 {
+            let take_expr = std::mem::replace(expr, DFExpr::Literal(ScalarValue::Null, None));
+            *expr = take_expr.alias_qualified(relation, format!("{}@{}", field.name(), count));
+        }
+    }
+    Ok(())
 }

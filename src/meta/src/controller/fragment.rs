@@ -417,7 +417,7 @@ impl CatalogController {
         let mut result = HashMap::new();
         for (fragment_id, fragment) in info.iter_over_fragments() {
             if let Some(id_filter) = &id_filter
-                && !id_filter.contains(&(*fragment_id as _))
+                && !id_filter.contains(fragment_id)
             {
                 continue; // Skip fragments not in the filter
             }
@@ -2111,7 +2111,7 @@ mod tests {
             .map(|actor_id| StreamActor {
                 actor_id: actor_id.into(),
                 fragment_id: TEST_FRAGMENT_ID as _,
-                vnode_bitmap: actor_bitmaps.get(&actor_id.into()).cloned(),
+                vnode_bitmap: actor_bitmaps.get(&actor_id).cloned(),
                 mview_definition: "".to_owned(),
                 expr_context: Some(PbExprContext {
                     time_zone: String::from("America/New_York"),
@@ -2173,7 +2173,7 @@ mod tests {
                     splits: actor_splits,
                     worker_id: 0.into(),
                     vnode_bitmap: actor_bitmaps
-                        .remove(&actor_id.into())
+                        .remove(&actor_id)
                         .map(|bitmap| bitmap.to_protobuf())
                         .as_ref()
                         .map(VnodeBitmap::from),
@@ -2189,9 +2189,8 @@ mod tests {
         let stream_node = {
             let template_actor = actors.first().cloned().unwrap();
 
-            let template_upstream_actor_ids = upstream_actor_ids
-                .get(&(template_actor.actor_id as _))
-                .unwrap();
+            let template_upstream_actor_ids =
+                upstream_actor_ids.get(&template_actor.actor_id).unwrap();
 
             generate_merger_stream_node(template_upstream_actor_ids)
         };
@@ -2275,7 +2274,7 @@ mod tests {
                 if let PbNodeBody::Merge(m) = body {
                     assert!(
                         actor_upstreams
-                            .get(&(actor_id as _))
+                            .get(&actor_id)
                             .unwrap()
                             .contains_key(&m.upstream_fragment_id)
                     );

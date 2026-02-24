@@ -141,6 +141,7 @@ impl CatalogController {
                 NotificationOperation::Update,
                 NotificationInfo::ObjectGroup(PbObjectGroup {
                     objects: to_update_relations,
+                    dependencies: vec![],
                 }),
             )
             .await;
@@ -233,6 +234,7 @@ impl CatalogController {
                 NotificationOperation::Update,
                 NotificationInfo::ObjectGroup(PbObjectGroup {
                     objects: to_update_relations,
+                    dependencies: vec![],
                 }),
             )
             .await;
@@ -613,6 +615,7 @@ impl CatalogController {
                             object_info: Some(object),
                         })
                         .collect(),
+                    dependencies: vec![],
                 }),
             )
             .await;
@@ -921,6 +924,7 @@ impl CatalogController {
                             object_info: Some(relation_info),
                         })
                         .collect_vec(),
+                    dependencies: vec![],
                 }),
             )
             .await;
