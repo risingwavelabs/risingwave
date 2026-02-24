@@ -857,9 +857,9 @@ dependencies = [
 
 [[package]]
 name = "async-openai"
-version = "0.32.3"
+version = "0.33.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "16aa4b9090c12270cd0925f735958ab6f0296af7ac08ce0f53fe320bcaf1e23d"
+checksum = "b3ef6d66e53b3ec8ed4bae8e6dcdda75c0f5b4f67faba78fac1b09434cb4f2fc"
 dependencies = [
  "async-openai-macros",
  "backoff",
@@ -1107,9 +1107,9 @@ dependencies = [
 
 [[package]]
 name = "aws-lc-rs"
-version = "1.15.3"
+version = "1.16.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e84ce723ab67259cfeb9877c6a639ee9eb7a27b28123abd71db7f0d5d0cc9d86"
+checksum = "d9a7b350e3bb1767102698302bc37256cbd48422809984b98d292c40e2579aa9"
 dependencies = [
  "aws-lc-fips-sys",
  "aws-lc-sys",
@@ -1119,9 +1119,9 @@ dependencies = [
 
 [[package]]
 name = "aws-lc-sys"
-version = "0.36.0"
+version = "0.37.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "43a442ece363113bd4bd4c8b18977a7798dd4d3c3383f34fb61936960e8f4ad8"
+checksum = "b092fe214090261288111db7a2b2c2118e5a7f30dc2569f1732c4069a6840549"
 dependencies = [
  "cc",
  "cmake",
@@ -4142,7 +4142,7 @@ name = "delta_btree_map"
 version = "2.9.0-alpha"
 dependencies = [
  "educe",
- "enum-as-inner",
+ "enum-as-inner 0.7.0",
 ]
 
 [[package]]
@@ -4858,11 +4858,23 @@ dependencies = [
 
 [[package]]
 name = "enum-as-inner"
-version = "0.6.0"
+version = "0.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5ffccbb6966c05b32ef8fbac435df276c4ae4d3dc55a8cd0eb9745e6c12f546a"
+checksum = "a1e6a265c649f3f5979b601d26f1d05ada116434c87741c9493cb56218f76cbc"
 dependencies = [
- "heck 0.4.1",
+ "heck 0.5.0",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.111",
+]
+
+[[package]]
+name = "enum-as-inner"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0359ee92f81184d7985519e474bda2a5738476334edd3746c9b1265c067afe70"
+dependencies = [
+ "heck 0.5.0",
  "proc-macro2",
  "quote",
  "syn 2.0.111",
@@ -5942,8 +5954,7 @@ dependencies = [
 [[package]]
 name = "ginepro"
 version = "0.8.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1a71e958d6edde3a87f7341c81c978fccc013950257d49a8e2da2a2361946924"
+source = "git+https://github.com/risingwavelabs/ginepro.git?rev=109c6f48f1db0926f4783548250f3e31680ff98c#109c6f48f1db0926f4783548250f3e31680ff98c"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -6208,7 +6219,7 @@ dependencies = [
  "async-trait",
  "cfg-if",
  "data-encoding",
- "enum-as-inner",
+ "enum-as-inner 0.6.1",
  "futures-channel",
  "futures-io",
  "futures-util",
@@ -9958,7 +9969,7 @@ version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e7849dd7319357e220886589ea0a0760ff138cde2eedfbbfd2708caee0b15dfc"
 dependencies = [
- "enum-as-inner",
+ "enum-as-inner 0.6.1",
  "mime",
  "reqwest 0.11.20",
  "serde",
@@ -11223,7 +11234,7 @@ dependencies = [
  "easy-ext",
  "educe",
  "either",
- "enum-as-inner",
+ "enum-as-inner 0.7.0",
  "enumflags2",
  "ethnum",
  "expect-test",
@@ -11598,7 +11609,7 @@ dependencies = [
  "easy-ext",
  "either",
  "elasticsearch",
- "enum-as-inner",
+ "enum-as-inner 0.7.0",
  "expect-test",
  "fs-err",
  "futures",
@@ -11834,7 +11845,7 @@ dependencies = [
  "easy-ext",
  "educe",
  "either",
- "enum-as-inner",
+ "enum-as-inner 0.7.0",
  "expect-test",
  "futures",
  "futures-async-stream",
@@ -11950,7 +11961,7 @@ dependencies = [
  "easy-ext",
  "educe",
  "either",
- "enum-as-inner",
+ "enum-as-inner 0.7.0",
  "expect-test",
  "fancy-regex",
  "fixedbitset 0.5.7",
@@ -12201,7 +12212,7 @@ dependencies = [
  "easy-ext",
  "educe",
  "either",
- "enum-as-inner",
+ "enum-as-inner 0.7.0",
  "expect-test",
  "fail",
  "futures",
@@ -12407,7 +12418,7 @@ dependencies = [
 name = "risingwave_pb"
 version = "2.9.0-alpha"
 dependencies = [
- "enum-as-inner",
+ "enum-as-inner 0.7.0",
  "fs-err",
  "madsim-tonic",
  "madsim-tonic-build",
@@ -12666,7 +12677,7 @@ dependencies = [
  "derive_builder",
  "dyn-clone",
  "either",
- "enum-as-inner",
+ "enum-as-inner 0.7.0",
  "expect-test",
  "fail",
  "faiss",
@@ -12739,7 +12750,7 @@ dependencies = [
  "dhat",
  "educe",
  "either",
- "enum-as-inner",
+ "enum-as-inner 0.7.0",
  "expect-test",
  "fail",
  "foyer",
@@ -16120,9 +16131,9 @@ checksum = "711b9620af191e0cdc7468a8d14e709c3dcdb115b36f838e601583af800a370a"
 
 [[package]]
 name = "uuid"
-version = "1.19.0"
+version = "1.20.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e2e054861b4bd027cd373e18e8d8d8e6548085000e41290d95ce0c373a654b4a"
+checksum = "ee48d38b119b0cd71fe4141b30f5ba9c7c5d9f4e7a3a8b4a674e4b6ef789976f"
 dependencies = [
  "getrandom 0.3.1",
  "js-sys",

@@ -19,7 +19,7 @@ full_gc_interval_sec = 3600
 full_gc_object_limit = 100000
 gc_history_retention_time_sec = 21600
 max_inflight_time_travel_query = 1000
-periodic_compaction_interval_sec = 60
+periodic_compaction_interval_sec = 300
 vacuum_interval_sec = 30
 vacuum_spin_interval_ms = 100
 iceberg_gc_interval_sec = 3600
@@ -238,6 +238,7 @@ join_encoding_type = "memory_optimized"
 sync_log_store_pause_duration_ms = 64
 sync_log_store_buffer_size = 2048
 over_window_cache_policy = "full"
+enable_state_table_vnode_stats_pruning = false
 
 [streaming.developer.compute_client_config]
 connect_timeout_secs = 5

@@ -347,6 +347,8 @@ impl HummockManager {
 
         for (group_id, max_level) in groups_to_remove {
             remove_compaction_group_in_sst_stat(&self.metrics, group_id, max_level);
+            // clean up compaction schedule state for the removed group
+            self.compaction_state.remove_compaction_group(group_id);
         }
 
         new_version_delta.pre_apply();

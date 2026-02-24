@@ -46,8 +46,7 @@ use crate::controller::catalog::DropTableConnectorContext;
 use crate::controller::fragment::{InflightActorInfo, InflightFragmentInfo};
 use crate::error::bail_invalid_parameter;
 use crate::manager::{
-    ActiveStreamingWorkerNodes, MetaSrvEnv, MetadataManager, NotificationVersion, StreamingJob,
-    StreamingJobType,
+    MetaSrvEnv, MetadataManager, NotificationVersion, StreamingJob, StreamingJobType,
 };
 use crate::model::{
     ActorId, DownstreamFragmentRelation, Fragment, FragmentDownstreamRelation, FragmentId,
@@ -753,12 +752,9 @@ impl GlobalStreamManager {
             }
         }
 
-        let active_workers =
-            ActiveStreamingWorkerNodes::new_snapshot(self.metadata_manager.clone()).await?;
-
         let commands = self
             .scale_controller
-            .reschedule_inplace(HashMap::from([(job_id, policy)]), active_workers.current())
+            .reschedule_inplace(HashMap::from([(job_id, policy)]))
             .await?;
 
         if !deferred {
@@ -792,9 +788,6 @@ impl GlobalStreamManager {
                 "CDC backfill reschedule only supports fixed parallelism targets"
             ),
         };
-
-        let active_workers =
-            ActiveStreamingWorkerNodes::new_snapshot(self.metadata_manager.clone()).await?;
 
         let cdc_fragment_id = {
             let inner = self.metadata_manager.catalog_controller.inner.read().await;
@@ -835,7 +828,7 @@ impl GlobalStreamManager {
 
         let commands = self
             .scale_controller
-            .reschedule_fragment_inplace(fragment_policy, active_workers.current())
+            .reschedule_fragment_inplace(fragment_policy)
             .await?;
 
         let _source_pause_guard = self.source_manager.pause_tick().await;
@@ -859,9 +852,6 @@ impl GlobalStreamManager {
 
         let _reschedule_job_lock = self.reschedule_lock_write_guard().await;
 
-        let active_workers =
-            ActiveStreamingWorkerNodes::new_snapshot(self.metadata_manager.clone()).await?;
-
         let fragment_policy = fragment_targets
             .into_iter()
             .map(|(fragment_id, parallelism)| (fragment_id as _, parallelism))
@@ -869,7 +859,7 @@ impl GlobalStreamManager {
 
         let commands = self
             .scale_controller
-            .reschedule_fragment_inplace(fragment_policy, active_workers.current())
+            .reschedule_fragment_inplace(fragment_policy)
             .await?;
 
         let _source_pause_guard = self.source_manager.pause_tick().await;

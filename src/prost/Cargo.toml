@@ -11,7 +11,7 @@ repository = { workspace = true }
 ignored = ["enum-as-inner", "pbjson", "prost-helpers", "strum"]
 
 [dependencies]
-enum-as-inner = "0.6"
+enum-as-inner = "0.7"
 paste = "1"
 pbjson = "0.9"
 prost = { workspace = true }

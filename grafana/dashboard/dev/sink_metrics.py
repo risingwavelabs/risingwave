@@ -226,6 +226,16 @@ def _(outer_panels: Panels):
                         ),
                     ],
                 ),
+                panels.timeseries_bytes(
+                    "Kv Log Store Buffer Memory Usage",
+                    "Estimated heap bytes used by kv log store buffer (unconsumed + consumed but not truncated)",
+                    [
+                        panels.target(
+                            f"{metric('kv_log_store_buffer_memory_bytes')}",
+                            "{{sink_id}} {{sink_name}} actor {{actor_id}} ({{connector}})",
+                        ),
+                    ],
+                ),
                 panels.subheader("Buffers"),
                 panels.timeseries_bytes(
                     "Chunk Buffer Size",
