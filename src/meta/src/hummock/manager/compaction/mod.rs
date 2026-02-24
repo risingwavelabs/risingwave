@@ -1833,6 +1833,11 @@ impl GroupStateValidator {
 
 #[cfg(test)]
 mod prefetched_task_id_tests {
+    use std::collections::HashSet;
+
+    use itertools::Itertools;
+    use tokio::task::JoinSet;
+
     use crate::hummock::HummockManager;
     use crate::hummock::test_utils::setup_compute_env;
 
@@ -1973,6 +1978,70 @@ mod prefetched_task_id_tests {
             let range = hummock_manager.prefetched_compaction_task_id_range.lock();
             assert_eq!(range.bounds(), (third_id + 1, third_id + 1));
         }
+    }
+
+    #[tokio::test]
+    async fn test_prefetched_compaction_task_id_range_pop_does_not_overflow_bounds() {
+        let (_env, hummock_manager, _cluster_manager, _worker_id) = setup_compute_env(80).await;
+        {
+            let mut range = hummock_manager.prefetched_compaction_task_id_range.lock();
+            range.set_bounds(10, 13);
+        }
+
+        assert_eq!(
+            hummock_manager.pop_prefetched_compaction_task_id(),
+            Some(10)
+        );
+        assert_eq!(
+            hummock_manager.pop_prefetched_compaction_task_id(),
+            Some(11)
+        );
+        assert_eq!(
+            hummock_manager.pop_prefetched_compaction_task_id(),
+            Some(12)
+        );
+        assert_eq!(hummock_manager.pop_prefetched_compaction_task_id(), None);
+
+        let range = hummock_manager.prefetched_compaction_task_id_range.lock();
+        assert_eq!(range.bounds(), (13, 13));
+    }
+
+    #[tokio::test]
+    async fn test_next_compaction_task_id_with_prefetch_no_duplicate_under_concurrency() {
+        let (_env, hummock_manager, _cluster_manager, _worker_id) = setup_compute_env(80).await;
+        {
+            let mut range = hummock_manager.prefetched_compaction_task_id_range.lock();
+            range.set_bounds(0, 0);
+        }
+
+        let mut join_set = JoinSet::new();
+        for _ in 0..64 {
+            let hummock_manager = hummock_manager.clone();
+            join_set.spawn(async move {
+                hummock_manager
+                    .next_compaction_task_id_with_prefetch(4)
+                    .await
+                    .unwrap()
+            });
+        }
+
+        let mut ids = Vec::with_capacity(64);
+        while let Some(join_result) = join_set.join_next().await {
+            ids.push(join_result.unwrap());
+        }
+
+        assert_eq!(ids.len(), 64);
+        let unique_count = ids.iter().copied().collect::<HashSet<_>>().len();
+        assert_eq!(unique_count, 64, "duplicated task ids found: {:?}", ids);
+
+        let mut sorted_ids = ids.iter().copied().collect_vec();
+        sorted_ids.sort_unstable();
+        assert_eq!(
+            sorted_ids.windows(2).all(|w| w[0] < w[1]),
+            true,
+            "task ids are not strictly increasing after sort: {:?}",
+            sorted_ids
+        );
     }
 }
 
