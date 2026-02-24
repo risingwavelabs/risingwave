@@ -1970,6 +1970,12 @@ where
         if matches!(watermark_type, WatermarkSerdeType::PkPrefix) {
             return Ok(stream.boxed());
         }
+        if matches!(watermark_type, WatermarkSerdeType::NonPkPrefix) {
+            return Err(StreamExecutorError::from(anyhow!(
+                "WatermarkSerdeType::NonPkPrefix is not supported when iter_with_prefix_respecting_watermark. It's a bug."
+            )));
+        }
+
         let watermark_bytes = self.row_store.state_store.get_table_watermark(vnode);
         let Some(watermark_bytes) = watermark_bytes else {
             return Ok(stream.boxed());
