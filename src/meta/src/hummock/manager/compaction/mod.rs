@@ -283,6 +283,63 @@ impl HummockManager {
 }
 
 impl HummockManager {
+    fn remaining_compaction_task_id_refill_capacity(
+        max_select_count: usize,
+        picked_task_count: usize,
+    ) -> u32 {
+        max_select_count.saturating_sub(picked_task_count) as u32
+    }
+
+    async fn refill_prefetched_compaction_task_id_range_if_needed(
+        &self,
+        task_id_capacity: u32,
+    ) -> Result<()> {
+        if task_id_capacity == 0 || {
+            let prefetched_task_id_range = self.prefetched_compaction_task_id_range.lock();
+            let (next_task_id, end_task_id) = *prefetched_task_id_range;
+            next_task_id < end_task_id
+        } {
+            return Ok(());
+        }
+
+        let task_id_start = next_compaction_task_id_interval(&self.env, task_id_capacity).await?;
+        let mut prefetched_task_id_range = self.prefetched_compaction_task_id_range.lock();
+        let (next_task_id, end_task_id) = *prefetched_task_id_range;
+        if next_task_id >= end_task_id {
+            *prefetched_task_id_range =
+                (task_id_start, task_id_start + u64::from(task_id_capacity));
+        }
+        Ok(())
+    }
+
+    fn pop_prefetched_compaction_task_id(&self) -> Option<u64> {
+        let mut prefetched_task_id_range = self.prefetched_compaction_task_id_range.lock();
+        let (next_task_id, end_task_id) = &mut *prefetched_task_id_range;
+        if *next_task_id < *end_task_id {
+            let task_id = *next_task_id;
+            *next_task_id += 1;
+            Some(task_id)
+        } else {
+            None
+        }
+    }
+
+    async fn next_compaction_task_id_with_prefetch(&self, refill_capacity: u32) -> Result<u64> {
+        if let Some(task_id) = self.pop_prefetched_compaction_task_id() {
+            return Ok(task_id);
+        }
+
+        if refill_capacity > 0 {
+            self.refill_prefetched_compaction_task_id_range_if_needed(refill_capacity)
+                .await?;
+            if let Some(task_id) = self.pop_prefetched_compaction_task_id() {
+                return Ok(task_id);
+            }
+        }
+
+        next_compaction_task_id(&self.env).await
+    }
+
     pub async fn get_compact_tasks_impl(
         &self,
         compaction_groups: Vec<CompactionGroupId>,
@@ -335,6 +392,10 @@ impl HummockManager {
         let developer_config = Arc::new(CompactionDeveloperConfig::new_from_meta_opts(
             &self.env.opts,
         ));
+        // Reuse prefetched task ids from previous loops.
+        // Each group consumes at most one task_id (trivial tasks share the same id with normal
+        // task). When prefetched ids are exhausted, refill in chunks to avoid per-group SQL
+        // transactions while keeping over-prefetch bounded by current remaining budget.
         'outside: for compaction_group_id in compaction_groups {
             if pick_tasks.len() >= max_select_count {
                 break;
@@ -360,8 +421,14 @@ impl HummockManager {
                 }
             };
 
-            // StoredIdGenerator already implements ids pre-allocation by ID_PREALLOCATE_INTERVAL.
-            let task_id = next_compaction_task_id(&self.env).await?;
+            // Use prefetched task id if available; when exhausted, refill in chunks first.
+            let task_id_refill_capacity = Self::remaining_compaction_task_id_refill_capacity(
+                max_select_count,
+                pick_tasks.len(),
+            );
+            let task_id = self
+                .next_compaction_task_id_with_prefetch(task_id_refill_capacity)
+                .await?;
 
             if !compaction_statuses.contains_key(&compaction_group_id) {
                 // lazy initialize.
@@ -1750,6 +1817,151 @@ impl GroupStateValidator {
         }
 
         Self::check_single_group_emergency(levels, compaction_config)
+    }
+}
+
+#[cfg(test)]
+mod prefetched_task_id_tests {
+    use crate::hummock::HummockManager;
+    use crate::hummock::test_utils::setup_compute_env;
+
+    #[test]
+    fn test_remaining_compaction_task_id_refill_capacity() {
+        assert_eq!(
+            HummockManager::remaining_compaction_task_id_refill_capacity(8, 0),
+            8
+        );
+        assert_eq!(
+            HummockManager::remaining_compaction_task_id_refill_capacity(8, 3),
+            5
+        );
+        assert_eq!(
+            HummockManager::remaining_compaction_task_id_refill_capacity(8, 8),
+            0
+        );
+        assert_eq!(
+            HummockManager::remaining_compaction_task_id_refill_capacity(8, 9),
+            0
+        );
+    }
+
+    #[tokio::test]
+    async fn test_next_compaction_task_id_with_prefetch_reuses_cached_range() {
+        let (_env, hummock_manager, _cluster_manager, _worker_id) = setup_compute_env(80).await;
+        {
+            let mut range = hummock_manager.prefetched_compaction_task_id_range.lock();
+            *range = (100, 103);
+        }
+
+        assert_eq!(
+            hummock_manager
+                .next_compaction_task_id_with_prefetch(16)
+                .await
+                .unwrap(),
+            100
+        );
+        assert_eq!(
+            hummock_manager
+                .next_compaction_task_id_with_prefetch(16)
+                .await
+                .unwrap(),
+            101
+        );
+        assert_eq!(
+            hummock_manager
+                .next_compaction_task_id_with_prefetch(16)
+                .await
+                .unwrap(),
+            102
+        );
+
+        let range = hummock_manager.prefetched_compaction_task_id_range.lock();
+        assert_eq!(*range, (103, 103));
+    }
+
+    #[tokio::test]
+    async fn test_next_compaction_task_id_with_prefetch_refills_in_batch_when_empty() {
+        let (_env, hummock_manager, _cluster_manager, _worker_id) = setup_compute_env(80).await;
+        {
+            let mut range = hummock_manager.prefetched_compaction_task_id_range.lock();
+            *range = (0, 0);
+        }
+
+        let first_id = hummock_manager
+            .next_compaction_task_id_with_prefetch(4)
+            .await
+            .unwrap();
+        {
+            let range = hummock_manager.prefetched_compaction_task_id_range.lock();
+            assert_eq!(*range, (first_id + 1, first_id + 4));
+        }
+
+        assert_eq!(
+            hummock_manager
+                .next_compaction_task_id_with_prefetch(4)
+                .await
+                .unwrap(),
+            first_id + 1
+        );
+        assert_eq!(
+            hummock_manager
+                .next_compaction_task_id_with_prefetch(4)
+                .await
+                .unwrap(),
+            first_id + 2
+        );
+        assert_eq!(
+            hummock_manager
+                .next_compaction_task_id_with_prefetch(4)
+                .await
+                .unwrap(),
+            first_id + 3
+        );
+
+        let fifth_id = hummock_manager
+            .next_compaction_task_id_with_prefetch(4)
+            .await
+            .unwrap();
+        assert_eq!(fifth_id, first_id + 4);
+        {
+            let range = hummock_manager.prefetched_compaction_task_id_range.lock();
+            assert_eq!(*range, (fifth_id + 1, fifth_id + 4));
+        }
+    }
+
+    #[tokio::test]
+    async fn test_next_compaction_task_id_with_prefetch_respects_refill_capacity() {
+        let (_env, hummock_manager, _cluster_manager, _worker_id) = setup_compute_env(80).await;
+        {
+            let mut range = hummock_manager.prefetched_compaction_task_id_range.lock();
+            *range = (0, 0);
+        }
+
+        let first_id = hummock_manager
+            .next_compaction_task_id_with_prefetch(2)
+            .await
+            .unwrap();
+        assert_eq!(
+            hummock_manager
+                .next_compaction_task_id_with_prefetch(2)
+                .await
+                .unwrap(),
+            first_id + 1
+        );
+        {
+            let range = hummock_manager.prefetched_compaction_task_id_range.lock();
+            assert_eq!(*range, (first_id + 2, first_id + 2));
+        }
+
+        let third_id = hummock_manager
+            .next_compaction_task_id_with_prefetch(1)
+            .await
+            .unwrap();
+        assert_eq!(third_id, first_id + 2);
+        {
+            let range = hummock_manager.prefetched_compaction_task_id_range.lock();
+            assert_eq!(*range, (third_id + 1, third_id + 1));
+        }
     }
 }
 

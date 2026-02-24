@@ -150,6 +150,8 @@ pub struct HummockManager {
     inflight_time_travel_query: Semaphore,
     gc_manager: GcManager,
 
+    // In-memory cache for prefetched compaction task ids: [next, end).
+    prefetched_compaction_task_id_range: parking_lot::Mutex<(u64, u64)>,
     table_id_to_table_option: parking_lot::RwLock<HashMap<TableId, TableOption>>,
 }
 
@@ -342,6 +344,7 @@ impl HummockManager {
             now: Mutex::new(0),
             inflight_time_travel_query: Semaphore::new(inflight_time_travel_query as usize),
             gc_manager,
+            prefetched_compaction_task_id_range: parking_lot::Mutex::new((0, 0)),
             table_id_to_table_option: RwLock::new(HashMap::new()),
         };
         let instance = Arc::new(instance);
