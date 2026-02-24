@@ -916,29 +916,24 @@ impl LogicalJoin {
     ) -> Result<(StreamPlanRef, StreamPlanRef)> {
         use super::stream::prelude::*;
 
-        let lhs_join_key_idx = self.eq_indexes().into_iter().map(|(l, _)| l).collect_vec();
-        let rhs_join_key_idx = self.eq_indexes().into_iter().map(|(_, r)| r).collect_vec();
-
-        let logical_right = try_enforce_locality_requirement(self.right(), &rhs_join_key_idx);
-        let mut right = logical_right.to_stream_with_dist_required(
+        let mut right = self.right().to_stream_with_dist_required(
             &RequiredDist::shard_by_key(self.right().schema().len(), &predicate.right_eq_indexes()),
             ctx,
         )?;
-        let logical_left = try_enforce_locality_requirement(self.left(), &lhs_join_key_idx);
         let r2l =
-            predicate.r2l_eq_columns_mapping(logical_left.schema().len(), right.schema().len());
+            predicate.r2l_eq_columns_mapping(self.left().schema().len(), right.schema().len());
         let l2r =
-            predicate.l2r_eq_columns_mapping(logical_left.schema().len(), right.schema().len());
+            predicate.l2r_eq_columns_mapping(self.left().schema().len(), right.schema().len());
         let mut left;
         let right_dist = right.distribution();
         match right_dist {
             Distribution::HashShard(_) => {
                 let left_dist = r2l
                     .rewrite_required_distribution(&RequiredDist::PhysicalDist(right_dist.clone()));
-                left = logical_left.to_stream_with_dist_required(&left_dist, ctx)?;
+                left = self.left().to_stream_with_dist_required(&left_dist, ctx)?;
             }
             Distribution::UpstreamHashShard(_, _) => {
-                left = logical_left.to_stream_with_dist_required(
+                left = self.left().to_stream_with_dist_required(
                     &RequiredDist::shard_by_key(
                         self.left().schema().len(),
                         &predicate.left_eq_indexes(),
@@ -1264,13 +1259,7 @@ impl LogicalJoin {
             RequiredDist::hash_shard(&left_dist_key)
         };
 
-        let lhs_join_key_idx = predicate
-            .eq_indexes()
-            .into_iter()
-            .map(|(l, _)| l)
-            .collect_vec();
-        let logical_left = try_enforce_locality_requirement(self.left(), &lhs_join_key_idx);
-        let left = logical_left.to_stream(ctx)?;
+        let left = self.left().to_stream(ctx)?;
         // Enforce a shuffle for the temporal join LHS to let the scheduler be able to schedule the join fragment together with the RHS with a `no_shuffle` exchange.
         let left = required_dist.stream_enforce(left);
 
@@ -1667,9 +1656,28 @@ impl ToStream for LogicalJoin {
         &self,
         ctx: &mut RewriteStreamContext,
     ) -> Result<(PlanRef, ColIndexMapping)> {
-        let (left, left_col_change) = self.left().logical_rewrite_for_stream(ctx)?;
+        let eq_indexes = self.eq_indexes();
+        let (logical_left, logical_right) = if eq_indexes.is_empty() {
+            (self.left(), self.right())
+        } else {
+            let lhs_join_key_idx = eq_indexes.iter().map(|(l, _)| *l).collect_vec();
+            if self.should_be_temporal_join() {
+                (
+                    try_enforce_locality_requirement(self.left(), &lhs_join_key_idx),
+                    self.right(),
+                )
+            } else {
+                let rhs_join_key_idx = eq_indexes.iter().map(|(_, r)| *r).collect_vec();
+                (
+                    try_enforce_locality_requirement(self.left(), &lhs_join_key_idx),
+                    try_enforce_locality_requirement(self.right(), &rhs_join_key_idx),
+                )
+            }
+        };
+
+        let (left, left_col_change) = logical_left.logical_rewrite_for_stream(ctx)?;
         let left_len = left.schema().len();
-        let (right, right_col_change) = self.right().logical_rewrite_for_stream(ctx)?;
+        let (right, right_col_change) = logical_right.logical_rewrite_for_stream(ctx)?;
         let (join, out_col_change) = self.rewrite_with_left_right(
             left.clone(),
             left_col_change,
@@ -1777,25 +1785,25 @@ impl ToStream for LogicalJoin {
         Ok((plan, out_col_change))
     }
 
-    fn try_better_locality(&self, columns: &[usize]) -> Option<PlanRef> {
-        let mut ctx = ToStreamContext::new(false);
-        // only pass through the locality information if it can be converted to dynamic filter
-        if let Ok(Some(_)) = self.to_stream_dynamic_filter(self.on().clone(), &mut ctx) {
-            // since dynamic filter only supports left input ref in the output indices, we can safely use o2i mapping to convert the required columns.
-            let o2i_mapping = self.core.o2i_col_mapping();
-            let left_input_columns = columns
-                .iter()
-                .map(|&col| o2i_mapping.try_map(col))
-                .collect::<Option<Vec<usize>>>()?;
-            if let Some(better_left_plan) = self.left().try_better_locality(&left_input_columns) {
-                return Some(
-                    self.clone_with_left_right(better_left_plan, self.right())
-                        .into(),
-                );
-            }
-        }
-        None
-    }
+    // fn try_better_locality(&self, columns: &[usize]) -> Option<PlanRef> {
+    //     let mut ctx = ToStreamContext::new(false);
+    //     // only pass through the locality information if it can be converted to dynamic filter
+    //     if let Ok(Some(_)) = self.to_stream_dynamic_filter(self.on().clone(), &mut ctx) {
+    //         // since dynamic filter only supports left input ref in the output indices, we can safely use o2i mapping to convert the required columns.
+    //         let o2i_mapping = self.core.o2i_col_mapping();
+    //         let left_input_columns = columns
+    //             .iter()
+    //             .map(|&col| o2i_mapping.try_map(col))
+    //             .collect::<Option<Vec<usize>>>()?;
+    //         if let Some(better_left_plan) = self.left().try_better_locality(&left_input_columns) {
+    //             return Some(
+    //                 self.clone_with_left_right(better_left_plan, self.right())
+    //                     .into(),
+    //             );
+    //         }
+    //     }
+    //     None
+    // }
 }
 
 #[cfg(test)]

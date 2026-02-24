@@ -582,6 +582,17 @@
     INNER JOIN t3 ON t3.id=t2.t3_id;
   expected_outputs:
     - stream_plan
+- name: stream index selection with casted group key
+  sql: |
+    create table t (transacttime timestamp, mark_price double precision);
+    create index idx on t (transacttime);
+    select
+      transacttime::date as transact_date,
+      count(*) as cnt
+    from t
+    group by transacttime::date;
+  expected_outputs:
+    - stream_plan
 - name: topn index selection for scan with output column idx
   sql: |
     create table t (c int, b int, a int);
