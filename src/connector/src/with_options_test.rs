@@ -532,6 +532,13 @@ fn generate_rust_allow_alter_on_fly_fields_code_separate(
 
 // THIS FILE IS AUTO_GENERATED. DO NOT EDIT
 // UPDATE WITH: ./risedev generate-with-options
+// This file is rewritten by `tests::test_allow_alter_on_fly_fields_rust_up_to_date` with
+// `UPDATE_EXPECT=1`.
+// To update content, change source/sink/connection WITH options definitions (for example,
+// `#[with_option(allow_alter_on_fly)]` on struct fields), then run `./risedev generate-with-options`.
+// `./risedev generate-with-options` runs two UPDATE_EXPECT tests:
+// 1) refresh `with_options_{{source,sink,connection}}.yaml`;
+// 2) regenerate this file from those YAML files.
 
 #![rustfmt::skip]
 
