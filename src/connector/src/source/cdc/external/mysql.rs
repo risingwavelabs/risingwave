@@ -259,57 +259,81 @@ pub fn timestamp_val_to_timestamptz(value_text: &str) -> ConnectorResult<String>
 }
 
 pub fn type_name_to_mysql_type(ty_name: &str) -> Option<ColumnType> {
-    macro_rules! column_type {
-        ($($name:literal => $variant:ident),* $(,)?) => {
-            match ty_name.to_lowercase().as_str() {
-                $(
-                    $name => Some(ColumnType::$variant(Default::default())),
-                )*
-                "json" => Some(ColumnType::Json),
-                "date" => Some(ColumnType::Date),
-                "bool" => Some(ColumnType::Bool),
-                "tinyblob" => Some(ColumnType::TinyBlob),
-                "mediumblob" => Some(ColumnType::MediumBlob),
-                "longblob" => Some(ColumnType::LongBlob),
-                _ => None,
-            }
-        };
+    // Debezium schema change message may include extra qualifiers, e.g. `BIGINT UNSIGNED`,
+    // `BIGINT(20) UNSIGNED`, `INT UNSIGNED ZEROFILL`, etc.
+    let ty = ty_name.trim().to_lowercase();
+    let base = ty
+        .split_whitespace()
+        .next()
+        .unwrap_or_default()
+        .split('(')
+        .next()
+        .unwrap_or_default();
+    let is_unsigned = ty.contains("unsigned");
+
+    // Handle MySQL `... UNSIGNED` integer family in Debezium schema change.
+    //
+    // Notes about mapping:
+    // - `TINYINT UNSIGNED`  : 0..255            -> fits in RW Int16
+    // - `SMALLINT UNSIGNED` : 0..65535          -> needs RW Int32
+    // - `MEDIUMINT UNSIGNED`: 0..16777215       -> fits in RW Int32
+    // - `INT UNSIGNED`      : 0..4294967295     -> needs RW Int64
+    // - `BIGINT UNSIGNED`   : 0..18446744073709551615 -> needs RW Decimal
+    if is_unsigned {
+        match base {
+            // Keep as-is: RW mapping is already wide enough.
+            "tinyint" => return Some(ColumnType::TinyInt(Default::default())),
+            "mediumint" => return Some(ColumnType::MediumInt(Default::default())),
+            // Promote to a wider signed type.
+            "smallint" => return Some(ColumnType::Int(Default::default())),
+            "int" => return Some(ColumnType::BigInt(Default::default())),
+            // Promote to Decimal to avoid overflow beyond i64.
+            "bigint" => return Some(ColumnType::Decimal(Default::default())),
+            _ => {}
+        }
     }
 
-    column_type! {
-        "bit" => Bit,
-        "tinyint" => TinyInt,
-        "smallint" => SmallInt,
-        "mediumint" => MediumInt,
-        "int" => Int,
-        "bigint" => BigInt,
-        "decimal" => Decimal,
-        "float" => Float,
-        "double" => Double,
-        "time" => Time,
-        "datetime" => DateTime,
-        "timestamp" => Timestamp,
-        "char" => Char,
-        "nchar" => NChar,
-        "varchar" => Varchar,
-        "nvarchar" => NVarchar,
-        "binary" => Binary,
-        "varbinary" => Varbinary,
-        "text" => Text,
-        "tinytext" => TinyText,
-        "mediumtext" => MediumText,
-        "longtext" => LongText,
-        "blob" => Blob,
-        "enum" => Enum,
-        "set" => Set,
-        "geometry" => Geometry,
-        "point" => Point,
-        "linestring" => LineString,
-        "polygon" => Polygon,
-        "multipoint" => MultiPoint,
-        "multilinestring" => MultiLineString,
-        "multipolygon" => MultiPolygon,
-        "geometrycollection" => GeometryCollection,
+    match base {
+        "bit" => Some(ColumnType::Bit(Default::default())),
+        "tinyint" => Some(ColumnType::TinyInt(Default::default())),
+        "smallint" => Some(ColumnType::SmallInt(Default::default())),
+        "mediumint" => Some(ColumnType::MediumInt(Default::default())),
+        "int" => Some(ColumnType::Int(Default::default())),
+        "bigint" => Some(ColumnType::BigInt(Default::default())),
+        "decimal" => Some(ColumnType::Decimal(Default::default())),
+        "float" => Some(ColumnType::Float(Default::default())),
+        "double" => Some(ColumnType::Double(Default::default())),
+        "time" => Some(ColumnType::Time(Default::default())),
+        "datetime" => Some(ColumnType::DateTime(Default::default())),
+        "timestamp" => Some(ColumnType::Timestamp(Default::default())),
+        "char" => Some(ColumnType::Char(Default::default())),
+        "nchar" => Some(ColumnType::NChar(Default::default())),
+        "varchar" => Some(ColumnType::Varchar(Default::default())),
+        "nvarchar" => Some(ColumnType::NVarchar(Default::default())),
+        "binary" => Some(ColumnType::Binary(Default::default())),
+        "varbinary" => Some(ColumnType::Varbinary(Default::default())),
+        "text" => Some(ColumnType::Text(Default::default())),
+        "tinytext" => Some(ColumnType::TinyText(Default::default())),
+        "mediumtext" => Some(ColumnType::MediumText(Default::default())),
+        "longtext" => Some(ColumnType::LongText(Default::default())),
+        "blob" => Some(ColumnType::Blob(Default::default())),
+        "tinyblob" => Some(ColumnType::TinyBlob),
+        "mediumblob" => Some(ColumnType::MediumBlob),
+        "longblob" => Some(ColumnType::LongBlob),
+        "enum" => Some(ColumnType::Enum(Default::default())),
+        "set" => Some(ColumnType::Set(Default::default())),
+        "json" => Some(ColumnType::Json),
+        "date" => Some(ColumnType::Date),
+        "bool" => Some(ColumnType::Bool),
+        "geometry" => Some(ColumnType::Geometry(Default::default())),
+        "point" => Some(ColumnType::Point(Default::default())),
+        "linestring" => Some(ColumnType::LineString(Default::default())),
+        "polygon" => Some(ColumnType::Polygon(Default::default())),
+        "multipoint" => Some(ColumnType::MultiPoint(Default::default())),
+        "multilinestring" => Some(ColumnType::MultiLineString(Default::default())),
+        "multipolygon" => Some(ColumnType::MultiPolygon(Default::default())),
+        "geometrycollection" => Some(ColumnType::GeometryCollection(Default::default())),
+        _ => None,
     }
 }
 
