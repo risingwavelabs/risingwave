@@ -54,7 +54,7 @@ use crate::barrier::utils::{
 use crate::barrier::{
     BackfillProgress, Command, CreateStreamingJobType, FragmentBackfillProgress, Reschedule,
 };
-use crate::controller::scale::{build_fragment_graph_edges, find_no_shuffle_graphs};
+use crate::controller::scale::{build_no_shuffle_fragment_graph_edges, find_no_shuffle_graphs};
 use crate::manager::MetaSrvEnv;
 use crate::model::ActorId;
 use crate::rpc::metrics::GLOBAL_META_METRICS;
@@ -846,7 +846,9 @@ impl DatabaseCheckpointControl {
         no_shuffle_relations
     }
 
-    fn collect_reschedule_blocked_jobs_for_creating_jobs(&self) -> MetaResult<HashSet<JobId>> {
+    fn collect_reschedule_blocked_jobs_for_creating_jobs_inflight(
+        &self,
+    ) -> MetaResult<HashSet<JobId>> {
         let mut initial_blocked_fragment_ids = HashSet::new();
         for creating_job in self.creating_streaming_job_controls.values() {
             creating_job.collect_reschedule_blocked_fragment_ids(&mut initial_blocked_fragment_ids);
@@ -856,7 +858,8 @@ impl DatabaseCheckpointControl {
         if !initial_blocked_fragment_ids.is_empty() {
             let no_shuffle_relations =
                 self.collect_no_shuffle_fragment_relations_for_reschedule_check();
-            let (forward_edges, backward_edges) = build_fragment_graph_edges(no_shuffle_relations);
+            let (forward_edges, backward_edges) =
+                build_no_shuffle_fragment_graph_edges(no_shuffle_relations);
             let initial_blocked_fragment_ids: Vec<_> =
                 initial_blocked_fragment_ids.iter().copied().collect();
             for ensemble in find_no_shuffle_graphs(
@@ -877,7 +880,7 @@ impl DatabaseCheckpointControl {
         Ok(blocked_job_ids)
     }
 
-    fn collect_blocked_reschedule_job_ids(
+    fn collect_reschedule_blocked_job_ids(
         &self,
         reschedules: &HashMap<FragmentId, Reschedule>,
         fragment_actors: &HashMap<FragmentId, HashSet<ActorId>>,
@@ -1224,8 +1227,9 @@ impl DatabaseCheckpointControl {
         }) = &command
             && !self.creating_streaming_job_controls.is_empty()
         {
-            let blocked_job_ids = self.collect_reschedule_blocked_jobs_for_creating_jobs()?;
-            let blocked_reschedule_job_ids = self.collect_blocked_reschedule_job_ids(
+            let blocked_job_ids =
+                self.collect_reschedule_blocked_jobs_for_creating_jobs_inflight()?;
+            let blocked_reschedule_job_ids = self.collect_reschedule_blocked_job_ids(
                 &reschedule_plan.reschedules,
                 &reschedule_plan.fragment_actors,
                 &blocked_job_ids,

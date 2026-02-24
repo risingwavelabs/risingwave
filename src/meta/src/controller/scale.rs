@@ -1221,12 +1221,13 @@ pub async fn find_fragment_no_shuffle_dags_detailed(
         .all(db)
         .await?;
 
-    let (forward_edges, backward_edges) = build_fragment_graph_edges(all_no_shuffle_relations);
+    let (forward_edges, backward_edges) =
+        build_no_shuffle_fragment_graph_edges(all_no_shuffle_relations);
 
     find_no_shuffle_graphs(initial_fragment_ids, &forward_edges, &backward_edges)
 }
 
-pub(crate) fn build_fragment_graph_edges(
+pub(crate) fn build_no_shuffle_fragment_graph_edges(
     relations: impl IntoIterator<Item = (FragmentId, FragmentId)>,
 ) -> (
     HashMap<FragmentId, Vec<FragmentId>>,
