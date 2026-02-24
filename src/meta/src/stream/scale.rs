@@ -918,11 +918,6 @@ impl GlobalStreamManager {
         let active_workers =
             ActiveStreamingWorkerNodes::new_snapshot(self.metadata_manager.clone()).await?;
 
-        if job_ids.is_empty() {
-            tracing::info!("no streaming jobs for scaling, maybe an empty cluster");
-            return Ok(has_blocked_jobs);
-        }
-
         tracing::info!(
             "trigger parallelism control for jobs: {:#?}, workers {:#?}",
             job_ids,

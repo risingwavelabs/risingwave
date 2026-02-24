@@ -33,7 +33,7 @@ use risingwave_pb::id::{ActorId, FragmentId};
 use risingwave_pb::stream_plan::barrier::PbBarrierKind;
 use risingwave_pb::stream_plan::barrier_mutation::Mutation;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
-use risingwave_pb::stream_plan::{AddMutation, StopMutation, StreamScanType};
+use risingwave_pb::stream_plan::{AddMutation, StopMutation};
 use risingwave_pb::stream_service::BarrierCompleteResponse;
 use risingwave_pb::stream_service::streaming_control_stream_response::ResetPartialGraphResponse;
 use status::CreatingStreamingJobStatus;
@@ -89,7 +89,7 @@ fn fragment_has_online_unreschedulable_scan(fragment: &InflightFragmentInfo) -> 
     visit_stream_node_cont(&fragment.nodes, |node| {
         if let Some(NodeBody::StreamScan(stream_scan)) = node.node_body.as_ref() {
             let scan_type = stream_scan.stream_scan_type();
-            if scan_type != StreamScanType::Unspecified && !scan_type.is_reschedulable(true) {
+            if !scan_type.is_reschedulable(true) {
                 has_unreschedulable_scan = true;
                 return false;
             }
