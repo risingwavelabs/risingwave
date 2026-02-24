@@ -715,10 +715,19 @@ PGHOST=$PGHOST PGPORT=$PGPORT PGUSER=$PGUSER PGDATABASE=$PGDATABASE psql "$@"
 [tasks.ctl]
 category = "RiseDev - Start/Stop"
 description = "Start RiseCtl"
-dependencies = ["check-and-load-risedev-env-file"]
+dependencies = [
+    "check-and-load-risedev-env-file",
+    "build-risingwave",
+    "post-build-risingwave",
+]
 script = '''
 #!/usr/bin/env bash
-cargo run -p risingwave_cmd_all --profile "${RISINGWAVE_BUILD_PROFILE}" -- ctl "$@"
+if [[ -n "${USE_SYSTEM_RISINGWAVE}" ]]; then
+  echo "$(tput setaf 1)$(tput bold)[ERROR]$(tput sgr0) env $(tput setaf 5)USE_SYSTEM_RISINGWAVE$(tput sgr0) is set, but $(tput setaf 5)./risedev ctl$(tput sgr0) is not supported in this mode yet."
+  exit 1
+fi
+
+"${PREFIX_BIN}/risingwave/risectl" "$@"
 test $? -eq 0 || exit 1
 '''
 

@@ -1970,6 +1970,12 @@ where
         if matches!(watermark_type, WatermarkSerdeType::PkPrefix) {
             return Ok(stream.boxed());
         }
+        if matches!(watermark_type, WatermarkSerdeType::NonPkPrefix) {
+            return Err(StreamExecutorError::from(anyhow!(
+                "WatermarkSerdeType::NonPkPrefix is not supported when iter_with_prefix_respecting_watermark. It's a bug."
+            )));
+        }
+
         let watermark_bytes = self.row_store.state_store.get_table_watermark(vnode);
         let Some(watermark_bytes) = watermark_bytes else {
             return Ok(stream.boxed());
@@ -1993,13 +1999,29 @@ where
                 "Watermark serde should have at least one order type"
             ))
         })?;
+
+        // FIXME: We need to handle `WatermarkSerdeType::NonPkPrefix` case.
+        // This only handled `WatermarkSerdeType::Value`
+        let clean_watermark_index_in_value = match &self.value_indices {
+            Some(value_indices) => value_indices
+                .iter()
+                .position(|idx| *idx == clean_watermark_index)
+                .ok_or_else(|| {
+                    StreamExecutorError::from(anyhow!(
+                        "clean watermark column index {} is not included in table value indices {:?}",
+                        clean_watermark_index,
+                        value_indices
+                    ))
+                })?,
+            None => clean_watermark_index,
+        };
         let direction = if order_type.is_ascending() {
             WatermarkDirection::Ascending
         } else {
             WatermarkDirection::Descending
         };
         let stream = stream.try_filter_map(move |row| {
-            let watermark_col_value = row.datum_at(clean_watermark_index);
+            let watermark_col_value = row.datum_at(clean_watermark_index_in_value);
             let should_filter = direction.datum_filter_by_watermark(
                 watermark_col_value,
                 &watermark_value,
