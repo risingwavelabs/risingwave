@@ -425,6 +425,7 @@ define_keywords!(
     RESOURCE_GROUP,
     RESTRICT,
     RESULT,
+    RETENTION,
     RETURN,
     RETURNING,
     RETURNS,

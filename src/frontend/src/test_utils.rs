@@ -663,6 +663,30 @@ impl CatalogWriter for MockCatalogWriter {
         Err(ErrorCode::ItemNotFound(format!("object not found: {:?}", object)).into())
     }
 
+    async fn alter_subscription_retention(
+        &self,
+        subscription_id: SubscriptionId,
+        retention_seconds: u64,
+        definition: String,
+    ) -> Result<()> {
+        for database in self.catalog.read().iter_databases() {
+            for schema in database.iter_schemas() {
+                if let Some(subscription) = schema.get_subscription_by_id(subscription_id) {
+                    let mut pb_subscription = subscription.to_proto();
+                    pb_subscription.retention_seconds = retention_seconds;
+                    pb_subscription.definition = definition;
+                    self.catalog.write().update_subscription(&pb_subscription);
+                    return Ok(());
+                }
+            }
+        }
+
+        Err(
+            ErrorCode::ItemNotFound(format!("subscription not found: {:?}", subscription_id))
+                .into(),
+        )
+    }
+
     async fn alter_set_schema(
         &self,
         object: alter_set_schema_request::Object,

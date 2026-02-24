@@ -3692,8 +3692,16 @@ impl Parser<'_> {
                 AlterSubscriptionOperation::SetSchema {
                     new_schema_name: schema_name,
                 }
+            } else if self.parse_keyword(Keyword::RETENTION) {
+                if self.expect_keyword(Keyword::TO).is_err()
+                    && self.expect_token(&Token::Eq).is_err()
+                {
+                    return self.expected("TO or = after ALTER SUBSCRIPTION SET RETENTION");
+                }
+                let retention = self.ensure_parse_value()?;
+                AlterSubscriptionOperation::SetRetention { retention }
             } else {
-                return self.expected("SCHEMA after SET");
+                return self.expected("SCHEMA or RETENTION after SET");
             }
         } else if self.parse_keywords(&[Keyword::SWAP, Keyword::WITH]) {
             let target_subscription = self.parse_object_name()?;

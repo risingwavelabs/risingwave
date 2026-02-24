@@ -244,6 +244,9 @@ for_all_wrapped_id_fields! (
         AlterStreamingJobConfigRequest {
             job_id: JobId,
         }
+        AlterSubscriptionRetentionRequest {
+            subscription_id: SubscriptionId,
+        }
         AlterSwapRenameRequest.ObjectNameSwapPair {
             src_object_id: ObjectId,
             dst_object_id: ObjectId,
