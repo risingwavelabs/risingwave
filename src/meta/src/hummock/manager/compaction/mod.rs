@@ -2036,9 +2036,8 @@ mod prefetched_task_id_tests {
 
         let mut sorted_ids = ids.iter().copied().collect_vec();
         sorted_ids.sort_unstable();
-        assert_eq!(
+        assert!(
             sorted_ids.windows(2).all(|w| w[0] < w[1]),
-            true,
             "task ids are not strictly increasing after sort: {:?}",
             sorted_ids
         );
