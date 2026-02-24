@@ -71,7 +71,8 @@ use crate::model::{
 use crate::stream::cdc::parallel_cdc_table_backfill_fragment;
 use crate::stream::{
     AutoRefreshSchemaSinkContext, ConnectorPropsChange, ExtendedFragmentBackfillOrder,
-    SplitAssignment, SplitState, UpstreamSinkInfo, build_actor_connector_splits,
+    SplitAssignment, SplitState, UpstreamSinkInfo, UserDefinedFragmentBackfillOrder,
+    build_actor_connector_splits,
 };
 use crate::{MetaError, MetaResult};
 
@@ -400,6 +401,23 @@ pub struct CreateStreamingJobCommandInfo {
     pub is_serverless: bool,
 }
 
+/// Preloaded context for create-streaming-job intent, built outside the barrier worker.
+#[derive(educe::Educe, Clone)]
+#[educe(Debug)]
+pub struct CreateStreamingJobIntentContext {
+    #[educe(Debug(ignore))]
+    pub stream_job_fragments: StreamJobFragmentsToCreate,
+    pub upstream_fragment_downstreams: FragmentDownstreamRelation,
+    pub init_split_assignment: SplitAssignment,
+    pub definition: String,
+    pub job_type: StreamingJobType,
+    pub create_type: CreateType,
+    pub streaming_job: StreamingJob,
+    pub user_defined_fragment_backfill_ordering: UserDefinedFragmentBackfillOrder,
+    pub cdc_table_snapshot_splits: Option<Vec<CdcTableSnapshotSplitRaw>>,
+    pub is_serverless: bool,
+}
+
 impl StreamJobFragments {
     pub(super) fn new_fragment_info<'a>(
         &'a self,
@@ -507,6 +525,14 @@ pub enum Command {
     /// will be set to `Created`.
     CreateStreamingJob {
         info: CreateStreamingJobCommandInfo,
+        job_type: CreateStreamingJobType,
+        cross_db_snapshot_backfill_info: SnapshotBackfillInfo,
+    },
+
+    /// Create-streaming-job context. It must be resolved inside the barrier worker before
+    /// injection.
+    CreateStreamingJobIntent {
+        context: CreateStreamingJobIntentContext,
         job_type: CreateStreamingJobType,
         cross_db_snapshot_backfill_info: SnapshotBackfillInfo,
     },
@@ -619,6 +645,9 @@ impl std::fmt::Display for Command {
             }
             Command::CreateStreamingJob { info, .. } => {
                 write!(f, "CreateStreamingJob: {}", info.streaming_job)
+            }
+            Command::CreateStreamingJobIntent { context, .. } => {
+                write!(f, "CreateStreamingJobIntent: {}", context.streaming_job)
             }
             Command::RescheduleIntent {
                 reschedule_plan, ..
@@ -771,6 +800,9 @@ impl Command {
                 };
 
                 Some((Some((info.streaming_job.id(), cdc_tracker)), changes))
+            }
+            Command::CreateStreamingJobIntent { .. } => {
+                panic!("create streaming job intent should be resolved in global barrier worker")
             }
             Command::RescheduleIntent {
                 reschedule_plan, ..
@@ -943,6 +975,9 @@ impl Command {
                     cross_db_snapshot_backfill_info,
                 },
             },
+            Command::CreateStreamingJobIntent { .. } => {
+                panic!("create streaming job intent should be resolved in global barrier worker")
+            }
             Command::RescheduleIntent {
                 reschedule_plan, ..
             } => {
@@ -1346,6 +1381,9 @@ impl Command {
 
                 Some(Mutation::Add(add_mutation))
             }
+            Command::CreateStreamingJobIntent { .. } => {
+                panic!("create streaming job intent should be resolved in global barrier worker");
+            }
 
             Command::ReplaceStreamJob(ReplaceStreamJobPlan {
                 old_fragments,
@@ -1704,6 +1742,9 @@ impl Command {
                         )
                     },
                 )))
+            }
+            Command::CreateStreamingJobIntent { .. } => {
+                panic!("create streaming job intent should be resolved in global barrier worker");
             }
             Command::RescheduleIntent {
                 reschedule_plan, ..

@@ -225,15 +225,20 @@ impl BarrierScheduler {
             return false;
         };
 
-        if let Some(idx) = queue.queue.inner.iter().position(|scheduled| {
-            if let Command::CreateStreamingJob { info, .. } = &scheduled.command
-                && info.stream_job_fragments.stream_job_id() == job_id
-            {
-                true
-            } else {
-                false
-            }
-        }) {
+        if let Some(idx) = queue
+            .queue
+            .inner
+            .iter()
+            .position(|scheduled| match &scheduled.command {
+                Command::CreateStreamingJob { info, .. } => {
+                    info.stream_job_fragments.stream_job_id() == job_id
+                }
+                Command::CreateStreamingJobIntent { context, .. } => {
+                    context.stream_job_fragments.stream_job_id() == job_id
+                }
+                _ => false,
+            })
+        {
             queue.queue.inner.remove(idx).unwrap();
             true
         } else {

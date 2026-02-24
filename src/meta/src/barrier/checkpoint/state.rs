@@ -147,21 +147,25 @@ impl DatabaseCheckpointControl {
         debug_assert!(
             !matches!(
                 command,
-                Some(Command::RescheduleIntent {
-                    reschedule_plan: None,
-                    ..
-                })
+                Some(
+                    Command::RescheduleIntent {
+                        reschedule_plan: None,
+                        ..
+                    } | Command::CreateStreamingJobIntent { .. }
+                )
             ),
-            "reschedule intent must be resolved before apply"
+            "intent command must be resolved before apply"
         );
         if matches!(
             command,
-            Some(Command::RescheduleIntent {
-                reschedule_plan: None,
-                ..
-            })
+            Some(
+                Command::RescheduleIntent {
+                    reschedule_plan: None,
+                    ..
+                } | Command::CreateStreamingJobIntent { .. }
+            )
         ) {
-            bail!("reschedule intent must be resolved before apply");
+            bail!("intent command must be resolved before apply");
         }
         let mut edges = self
             .database_info

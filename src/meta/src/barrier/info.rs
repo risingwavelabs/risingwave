@@ -1114,6 +1114,7 @@ impl InflightDatabaseInfo {
                 | Command::Resume
                 | Command::DropStreamingJobs { .. }
                 | Command::RescheduleIntent { .. }
+                | Command::CreateStreamingJobIntent { .. }
                 | Command::SourceChangeSplit { .. }
                 | Command::Throttle { .. }
                 | Command::CreateSubscription { .. }

@@ -260,6 +260,26 @@ impl CheckpointControl {
                             .insert(DatabaseCheckpointControlStatus::Running(new_database))
                             .expect_running("just initialized as running")
                     }
+                    Command::CreateStreamingJobIntent { context, .. } => {
+                        if cfg!(debug_assertions) {
+                            panic!(
+                                "create streaming job intent should be resolved before creating database {} for job {}",
+                                database_id,
+                                context.streaming_job.id()
+                            );
+                        } else {
+                            for notifier in notifiers {
+                                notifier.notify_start_failed(
+                                    anyhow!(
+                                        "create streaming job intent for job {} should be resolved before injection",
+                                        context.streaming_job.id()
+                                    )
+                                    .into(),
+                                );
+                            }
+                            return Ok(());
+                        }
+                    }
                     Command::Flush
                     | Command::Pause
                     | Command::Resume
@@ -1075,12 +1095,14 @@ impl DatabaseCheckpointControl {
         debug_assert!(
             !matches!(
                 &command,
-                Some(Command::RescheduleIntent {
-                    reschedule_plan: None,
-                    ..
-                })
+                Some(
+                    Command::RescheduleIntent {
+                        reschedule_plan: None,
+                        ..
+                    } | Command::CreateStreamingJobIntent { .. }
+                )
             ),
-            "reschedule intent should be resolved before injection"
+            "intent command should be resolved before injection"
         );
 
         if let Some(Command::DropStreamingJobs {

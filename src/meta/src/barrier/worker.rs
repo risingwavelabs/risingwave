@@ -46,12 +46,14 @@ use crate::barrier::context::recovery::{RenderedDatabaseRuntimeInfo, render_runt
 use crate::barrier::context::{GlobalBarrierWorkerContext, GlobalBarrierWorkerContextImpl};
 use crate::barrier::info::InflightDatabaseInfo;
 use crate::barrier::rpc::{
-    ControlStreamManager, WorkerNodeEvent, from_partial_graph_id, merge_node_rpc_errors,
+    ControlStreamManager, WorkerNodeEvent, build_locality_fragment_state_table_mapping,
+    from_partial_graph_id, merge_node_rpc_errors,
 };
 use crate::barrier::schedule::{MarkReadyOptions, PeriodicBarriers};
 use crate::barrier::{
     BarrierManagerRequest, BarrierManagerStatus, BarrierWorkerRuntimeInfoSnapshot, Command,
-    RecoveryReason, RescheduleContext, UpdateDatabaseBarrierRequest, schedule,
+    CreateStreamingJobCommandInfo, CreateStreamingJobIntentContext, RecoveryReason,
+    RescheduleContext, UpdateDatabaseBarrierRequest, schedule,
 };
 use crate::controller::scale::render_actor_assignments;
 use crate::error::MetaErrorInner;
@@ -63,7 +65,8 @@ use crate::manager::{
 };
 use crate::rpc::metrics::GLOBAL_META_METRICS;
 use crate::stream::{
-    GlobalRefreshManagerRef, ScaleControllerRef, SourceManagerRef, build_reschedule_commands,
+    GlobalRefreshManagerRef, ScaleControllerRef, SourceManagerRef, StreamFragmentGraph,
+    build_reschedule_commands,
 };
 use crate::{MetaError, MetaResult};
 
@@ -266,6 +269,96 @@ fn resolve_reschedule_intent(
                     Ok(None)
                 }
             }
+        }
+        _ => {
+            new_barrier.command = Some((command, notifiers));
+            Ok(Some(new_barrier))
+        }
+    }
+}
+
+fn render_create_streaming_job_from_context(
+    context: CreateStreamingJobIntentContext,
+) -> CreateStreamingJobCommandInfo {
+    let CreateStreamingJobIntentContext {
+        stream_job_fragments,
+        upstream_fragment_downstreams,
+        init_split_assignment,
+        definition,
+        job_type,
+        create_type,
+        streaming_job,
+        user_defined_fragment_backfill_ordering,
+        cdc_table_snapshot_splits,
+        is_serverless,
+    } = context;
+
+    let fragment_backfill_ordering =
+        StreamFragmentGraph::extend_fragment_backfill_ordering_with_locality_backfill(
+            user_defined_fragment_backfill_ordering,
+            &upstream_fragment_downstreams,
+            || {
+                stream_job_fragments
+                    .fragments
+                    .iter()
+                    .map(|(fragment_id, fragment)| {
+                        (*fragment_id, fragment.fragment_type_mask, &fragment.nodes)
+                    })
+            },
+        );
+
+    let fragment_infos = stream_job_fragments
+        .new_fragment_info(&init_split_assignment)
+        .collect();
+    let locality_fragment_state_table_mapping =
+        build_locality_fragment_state_table_mapping(&fragment_infos);
+
+    CreateStreamingJobCommandInfo {
+        stream_job_fragments,
+        upstream_fragment_downstreams,
+        init_split_assignment,
+        definition,
+        job_type,
+        create_type,
+        streaming_job,
+        fragment_backfill_ordering,
+        cdc_table_snapshot_splits,
+        locality_fragment_state_table_mapping,
+        is_serverless,
+    }
+}
+
+fn resolve_create_streaming_job_intent(
+    mut new_barrier: schedule::NewBarrier,
+) -> MetaResult<Option<schedule::NewBarrier>> {
+    let Some((command, notifiers)) = new_barrier.command.take() else {
+        return Ok(Some(new_barrier));
+    };
+
+    match command {
+        Command::CreateStreamingJobIntent {
+            context,
+            job_type,
+            cross_db_snapshot_backfill_info,
+        } => {
+            let span = tracing::info_span!(
+                "resolve_create_streaming_job_intent",
+                database_id = %new_barrier.database_id,
+                job_id = %context.streaming_job.id()
+            );
+            let info = {
+                let _guard = span.enter();
+                render_create_streaming_job_from_context(context)
+            };
+            new_barrier.command = Some((
+                Command::CreateStreamingJob {
+                    info,
+                    job_type,
+                    cross_db_snapshot_backfill_info,
+                },
+                notifiers,
+            ));
+            Ok(Some(new_barrier))
         }
         _ => {
             new_barrier.command = Some((command, notifiers));
@@ -706,35 +799,43 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                 }
                 new_barrier = self.periodic_barriers.next_barrier(&*self.context) => {
                     let database_id = new_barrier.database_id;
-                    let new_barrier = if matches!(
-                        new_barrier.command,
-                        Some((Command::RescheduleIntent { .. }, _))
-                    ) {
-                        let env = self.env.clone();
-                        let worker_nodes = self
-                            .active_streaming_nodes
-                            .current()
-                            .iter()
-                            .map(|(worker_id, worker)| (*worker_id, worker.clone()))
-                            .collect();
-                        let adaptive_parallelism_strategy = self.adaptive_parallelism_strategy;
-                        let database_info = self.checkpoint_control.database_info(database_id);
-                        match resolve_reschedule_intent(
-                            env,
-                            worker_nodes,
-                            adaptive_parallelism_strategy,
-                            database_info,
-                            new_barrier,
-                        ) {
-                            Ok(Some(new_barrier)) => new_barrier,
-                            Ok(None) => continue,
-                            Err(err) => {
-                                self.failure_recovery(err).await;
-                                continue;
+                    let new_barrier = match new_barrier.command {
+                        Some((Command::RescheduleIntent { .. }, _)) => {
+                            let env = self.env.clone();
+                            let worker_nodes = self
+                                .active_streaming_nodes
+                                .current()
+                                .iter()
+                                .map(|(worker_id, worker)| (*worker_id, worker.clone()))
+                                .collect();
+                            let adaptive_parallelism_strategy = self.adaptive_parallelism_strategy;
+                            let database_info = self.checkpoint_control.database_info(database_id);
+                            match resolve_reschedule_intent(
+                                env,
+                                worker_nodes,
+                                adaptive_parallelism_strategy,
+                                database_info,
+                                new_barrier,
+                            ) {
+                                Ok(Some(new_barrier)) => new_barrier,
+                                Ok(None) => continue,
+                                Err(err) => {
+                                    self.failure_recovery(err).await;
+                                    continue;
+                                }
                             }
                         }
-                    } else {
-                        new_barrier
+                        Some((Command::CreateStreamingJobIntent { .. }, _)) => {
+                            match resolve_create_streaming_job_intent(new_barrier) {
+                                Ok(Some(new_barrier)) => new_barrier,
+                                Ok(None) => continue,
+                                Err(err) => {
+                                    self.failure_recovery(err).await;
+                                    continue;
+                                }
+                            }
+                        }
+                        _ => new_barrier,
                     };
                     if let Err(e) = self.checkpoint_control.handle_new_barrier(new_barrier, &mut self.control_stream_manager) {
                         if !self.enable_recovery {

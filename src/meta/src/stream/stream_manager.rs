@@ -34,16 +34,14 @@ use thiserror_ext::AsReport;
 use tokio::sync::{Mutex, OwnedSemaphorePermit, oneshot};
 use tracing::Instrument;
 
-use super::{
-    Locations, ReschedulePolicy, ScaleControllerRef, StreamFragmentGraph,
-    UserDefinedFragmentBackfillOrder,
-};
+use super::{Locations, ReschedulePolicy, ScaleControllerRef, UserDefinedFragmentBackfillOrder};
 use crate::barrier::{
-    BarrierScheduler, Command, CreateStreamingJobCommandInfo, CreateStreamingJobType,
+    BarrierScheduler, Command, CreateStreamingJobIntentContext, CreateStreamingJobType,
     ReplaceStreamJobPlan, SnapshotBackfillInfo,
 };
 use crate::controller::catalog::DropTableConnectorContext;
 use crate::controller::fragment::{InflightActorInfo, InflightFragmentInfo};
+use crate::controller::utils::get_streaming_job_extra_info;
 use crate::error::bail_invalid_parameter;
 use crate::manager::{
     MetaSrvEnv, MetadataManager, NotificationVersion, StreamingJob, StreamingJobType,
@@ -455,17 +453,13 @@ impl GlobalStreamManager {
         stream_job_fragments: StreamJobFragmentsToCreate,
         CreateStreamingJobContext {
             streaming_job,
-            upstream_fragment_downstreams,
             new_no_shuffle,
             upstream_actors,
-            definition,
             create_type,
-            job_type,
+            job_type: streaming_job_type,
             new_upstream_sink,
             snapshot_backfill_info,
             cross_db_snapshot_backfill_info,
-            fragment_backfill_ordering,
-            locality_fragment_state_table_mapping,
             cdc_table_snapshot_splits,
             is_serverless_backfill,
             ..
@@ -495,31 +489,23 @@ impl GlobalStreamManager {
                 .await?,
         );
 
-        let fragment_backfill_ordering =
-            StreamFragmentGraph::extend_fragment_backfill_ordering_with_locality_backfill(
-                fragment_backfill_ordering,
-                &stream_job_fragments.downstreams,
-                || {
-                    stream_job_fragments
-                        .fragments
-                        .iter()
-                        .map(|(fragment_id, fragment)| {
-                            (*fragment_id, fragment.fragment_type_mask, &fragment.nodes)
-                        })
-                },
-            );
+        let (upstream_fragment_downstreams, definition, user_defined_fragment_backfill_ordering) =
+            self.load_create_streaming_job_intent_meta(
+                stream_job_fragments.stream_job_id(),
+                stream_job_fragments.fragment_ids().collect(),
+            )
+            .await?;
 
-        let info = CreateStreamingJobCommandInfo {
+        let context = CreateStreamingJobIntentContext {
             stream_job_fragments,
             upstream_fragment_downstreams,
             init_split_assignment,
-            definition: definition.clone(),
+            definition,
             streaming_job: streaming_job.clone(),
-            job_type,
+            job_type: streaming_job_type,
             create_type,
-            fragment_backfill_ordering,
+            user_defined_fragment_backfill_ordering,
             cdc_table_snapshot_splits,
-            locality_fragment_state_table_mapping,
             is_serverless: is_serverless_backfill,
         };
 
@@ -538,8 +524,8 @@ impl GlobalStreamManager {
             }
         };
 
-        let command = Command::CreateStreamingJob {
-            info,
+        let command = Command::CreateStreamingJobIntent {
+            context,
             job_type,
             cross_db_snapshot_backfill_info,
         };
@@ -551,6 +537,40 @@ impl GlobalStreamManager {
         tracing::debug!(?streaming_job, "first barrier collected for stream job");
 
         Ok(streaming_job)
+    }
+
+    async fn load_create_streaming_job_intent_meta(
+        &self,
+        job_id: JobId,
+        fragment_ids: Vec<FragmentId>,
+    ) -> MetaResult<(
+        FragmentDownstreamRelation,
+        String,
+        UserDefinedFragmentBackfillOrder,
+    )> {
+        let upstream_fragment_downstreams = self
+            .metadata_manager
+            .catalog_controller
+            .get_fragment_downstream_relations(fragment_ids)
+            .await?;
+
+        let mut job_extra_info = {
+            let inner = self.metadata_manager.catalog_controller.inner.read().await;
+            get_streaming_job_extra_info(&inner.db, vec![job_id]).await?
+        };
+        let job_extra_info = job_extra_info
+            .remove(&job_id)
+            .ok_or_else(|| MetaError::catalog_id_not_found("streaming job", job_id))?;
+        let user_defined_fragment_backfill_ordering = job_extra_info
+            .backfill_orders
+            .map(|orders| UserDefinedFragmentBackfillOrder::new(orders.into_inner()))
+            .unwrap_or_default();
+
+        Ok((
+            upstream_fragment_downstreams,
+            job_extra_info.job_definition,
+            user_defined_fragment_backfill_ordering,
+        ))
     }
 
     /// Send replace job command to barrier scheduler.
