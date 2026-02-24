@@ -27,6 +27,8 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::LazyLock;
 use crate::error::ConnectorError;
+use crate::sink::remote::JdbcSink;
+use crate::sink::Sink;
 
 macro_rules! use_source_properties {
     ({ $({ $variant_name:ident, $prop_name:ty, $split:ty }),* }) => {
@@ -272,6 +274,15 @@ pub static CONNECTION_ALLOW_ALTER_ON_FLY_FIELDS: LazyLock<HashMap<String, HashSe
             "properties.sasl.password".to_owned(),
         ].into_iter().collect(),
     ).unwrap();
+    // Jdbc
+    map.try_insert(
+        JdbcSink::SINK_NAME.to_owned(),
+        [
+            "jdbc.url".to_owned(),
+            "user".to_owned(),
+            "password".to_owned(),
+        ].into_iter().collect(),
+    ).unwrap();
     map
 });
 
@@ -302,11 +313,15 @@ pub fn check_source_allow_alter_on_fly_fields(
             "Unknown source connector: {connector_name}"
         )));
     };
-    let Some(allowed_fields) = SOURCE_ALLOW_ALTER_ON_FLY_FIELDS.get(type_name) else {
-        return Err(ConnectorError::from(anyhow::anyhow!(
+    let allowed_fields = if connector_name == JdbcSink::SINK_NAME {
+        SINK_ALLOW_ALTER_ON_FLY_FIELDS.get(JdbcSink::SINK_NAME)
+    } else {
+        SOURCE_ALLOW_ALTER_ON_FLY_FIELDS.get(type_name)
+    }.ok_or_else(||{
+        ConnectorError::from(anyhow::anyhow!(
             "No allow_alter_on_fly fields registered for connector: {connector_name}"
-        )));
-    };
+        ))
+    })?;
     for field in fields {
         if !allowed_fields.contains(field) {
             return Err(ConnectorError::from(anyhow::anyhow!(
