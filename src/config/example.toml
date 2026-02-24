@@ -380,6 +380,7 @@ worker_threads = 0
 max_blocking_threads = 0
 
 [storage.cache_refill]
+meta_refill_concurrency = 0
 data_refill_levels = []
 timeout_ms = 6000
 concurrency = 10
