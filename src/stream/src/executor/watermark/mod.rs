@@ -18,10 +18,21 @@ use std::hash::Hash;
 
 use super::Watermark;
 
+const MAX_STAGED_WATERMARKS_PER_INPUT: usize = 1024;
+
 #[derive(Default, Debug)]
 pub(super) struct StagedWatermarks {
     in_heap: bool,
     staged: VecDeque<Watermark>,
+}
+
+impl StagedWatermarks {
+    fn push_with_cap(&mut self, watermark: Watermark) {
+        if self.staged.len() >= MAX_STAGED_WATERMARKS_PER_INPUT {
+            let _ = self.staged.pop_front();
+        }
+        self.staged.push_back(watermark);
+    }
 }
 
 pub(super) struct BufferedWatermarks<Id> {
@@ -71,7 +82,7 @@ impl<Id: Ord + Hash + std::fmt::Debug> BufferedWatermarks<Id> {
         let staged = self.other_buffered_watermarks.get_mut(&buffer_id).unwrap();
 
         if staged.in_heap {
-            staged.staged.push_back(watermark);
+            staged.push_with_cap(watermark);
             None
         } else {
             staged.in_heap = true;
@@ -112,5 +123,34 @@ impl<Id: Ord + Hash + std::fmt::Debug> BufferedWatermarks<Id> {
         // Call `check_watermark_heap` in case the only buffers(s) that does not have watermark in
         // heap is removed
         self.check_watermark_heap()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use risingwave_common::types::{DataType, ScalarImpl};
+
+    use super::{BufferedWatermarks, MAX_STAGED_WATERMARKS_PER_INPUT, Watermark};
+
+    fn wm(v: i64) -> Watermark {
+        Watermark::new(0, DataType::Int64, ScalarImpl::Int64(v))
+    }
+
+    #[test]
+    fn test_staged_watermarks_capped() {
+        let mut buffers = BufferedWatermarks::with_ids([1_u8, 2_u8]);
+        assert!(buffers.handle_watermark(1, wm(1)).is_none());
+
+        for i in 2..=(MAX_STAGED_WATERMARKS_PER_INPUT as i64 + 5) {
+            assert!(buffers.handle_watermark(1, wm(i)).is_none());
+        }
+
+        let staged = &buffers.other_buffered_watermarks.get(&1).unwrap().staged;
+        assert_eq!(staged.len(), MAX_STAGED_WATERMARKS_PER_INPUT);
+        assert_eq!(staged.front().unwrap().val, ScalarImpl::Int64(6));
+        assert_eq!(
+            staged.back().unwrap().val,
+            ScalarImpl::Int64(MAX_STAGED_WATERMARKS_PER_INPUT as i64 + 5)
+        );
     }
 }
