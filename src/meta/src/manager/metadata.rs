@@ -26,6 +26,7 @@ use risingwave_pb::common::worker_node::{PbResource, Property as AddNodeProperty
 use risingwave_pb::common::{HostAddress, PbWorkerNode, PbWorkerType, WorkerNode, WorkerType};
 use risingwave_pb::meta::list_rate_limits_response::RateLimitInfo;
 use risingwave_pb::stream_plan::{PbDispatcherType, PbStreamNode, PbStreamScanType};
+use sea_orm::TransactionTrait;
 use sea_orm::prelude::DateTime;
 use tokio::sync::mpsc::{UnboundedReceiver, unbounded_channel};
 use tokio::sync::oneshot;
@@ -745,11 +746,14 @@ impl MetadataManager {
             return Ok(HashSet::new());
         }
 
+        let inner = self.catalog_controller.inner.read().await;
+        let txn = inner.db.begin().await?;
+
         let mut initial_fragment_ids = HashSet::new();
         for job_id in &creating_job_ids {
             let scan_types = self
                 .catalog_controller
-                .get_job_fragment_backfill_scan_type(*job_id)
+                .get_job_fragment_backfill_scan_type_in_txn(&txn, *job_id)
                 .await?;
             initial_fragment_ids.extend(scan_types.into_iter().filter_map(
                 |(fragment_id, scan_type)| {
@@ -761,17 +765,16 @@ impl MetadataManager {
         if !initial_fragment_ids.is_empty() {
             let upstream_fragments = self
                 .catalog_controller
-                .upstream_fragments(initial_fragment_ids.iter().copied())
+                .upstream_fragments_in_txn(&txn, initial_fragment_ids.iter().copied())
                 .await?;
             initial_fragment_ids.extend(upstream_fragments.into_values().flatten());
         }
 
         let mut blocked_fragment_ids = initial_fragment_ids.clone();
         if !initial_fragment_ids.is_empty() {
-            let inner = self.catalog_controller.inner.read().await;
             let initial_fragment_ids = initial_fragment_ids.into_iter().collect_vec();
             let ensembles =
-                find_fragment_no_shuffle_dags_detailed(&inner.db, &initial_fragment_ids).await?;
+                find_fragment_no_shuffle_dags_detailed(&txn, &initial_fragment_ids).await?;
             for ensemble in ensembles {
                 blocked_fragment_ids.extend(ensemble.fragments());
             }
@@ -782,7 +785,7 @@ impl MetadataManager {
             let fragment_ids = blocked_fragment_ids.into_iter().collect_vec();
             let fragment_job_ids = self
                 .catalog_controller
-                .get_fragment_job_id(fragment_ids)
+                .get_fragment_job_id_in_txn(&txn, fragment_ids)
                 .await?;
             blocked_job_ids.extend(
                 fragment_job_ids
@@ -790,6 +793,8 @@ impl MetadataManager {
                     .map(|job_id| job_id.as_job_id()),
             );
         }
+
+        txn.commit().await?;
 
         Ok(blocked_job_ids)
     }
