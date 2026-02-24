@@ -22,13 +22,16 @@ pub async fn trigger_manual_compaction(
     context: &CtlContext,
     compaction_group_id: CompactionGroupId,
     table_id: JobId,
-    level: u32,
+    levels: Vec<u32>,
     sst_ids: Vec<HummockSstableId>,
 ) -> anyhow::Result<()> {
     let meta_client = context.meta_client().await?;
-    let result = meta_client
-        .trigger_manual_compaction(compaction_group_id, table_id, level, sst_ids)
-        .await;
-    println!("{:#?}", result);
+    for level in levels {
+        println!("Triggering manual compaction for level {level}...");
+        let result = meta_client
+            .trigger_manual_compaction(compaction_group_id, table_id, level, sst_ids.clone())
+            .await;
+        println!("Level {level}: {:#?}", result);
+    }
     Ok(())
 }
