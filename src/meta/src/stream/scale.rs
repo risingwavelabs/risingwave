@@ -924,10 +924,11 @@ impl GlobalStreamManager {
             .list_background_creating_jobs()
             .await?;
 
-        let unreschedulable_jobs = self
+        let blocked_jobs = self
             .metadata_manager
-            .collect_unreschedulable_backfill_jobs(&background_streaming_jobs, true)
+            .collect_reschedule_blocked_jobs_for_creating_jobs(&background_streaming_jobs, true)
             .await?;
+        let has_blocked_jobs = !blocked_jobs.is_empty();
 
         let database_objects: HashMap<risingwave_meta_model::DatabaseId, Vec<JobId>> = self
             .metadata_manager
@@ -947,21 +948,19 @@ impl GlobalStreamManager {
                 idx_a.cmp(idx_b).then(database_a.cmp(database_b))
             })
             .map(|(_, database_id, job_id)| (*database_id, *job_id))
-            .filter(|(_, job_id)| !unreschedulable_jobs.contains(job_id))
+            .filter(|(_, job_id)| !blocked_jobs.contains(job_id))
             .collect_vec();
 
         if job_ids.is_empty() {
             tracing::info!("no streaming jobs for scaling, maybe an empty cluster");
-            return Ok(false);
+            // Retry periodically while some jobs are temporarily blocked by creating
+            // unreschedulable backfill jobs. This allows us to scale them
+            // automatically once the creating jobs finish.
+            return Ok(has_blocked_jobs);
         }
 
         let active_workers =
             ActiveStreamingWorkerNodes::new_snapshot(self.metadata_manager.clone()).await?;
-
-        if job_ids.is_empty() {
-            tracing::info!("no streaming jobs for scaling, maybe an empty cluster");
-            return Ok(false);
-        }
 
         tracing::info!(
             "trigger parallelism control for jobs: {:#?}, workers {:#?}",
@@ -1001,7 +1000,7 @@ impl GlobalStreamManager {
             let _results = future::try_join_all(futures).await?;
         }
 
-        Ok(false)
+        Ok(has_blocked_jobs)
     }
 
     /// Handles notification of worker node activation and deletion, and triggers parallelism control.
@@ -1137,6 +1136,9 @@ impl GlobalStreamManager {
                             tracing::debug!(job_id = %job_id, "received backfill finished notification");
                             if let Err(e) = self.apply_post_backfill_parallelism(job_id).await {
                                 tracing::warn!(job_id = %job_id, error = %e.as_report(), "failed to restore parallelism after backfill");
+                                // Retry in the next periodic tick. This avoids triggering
+                                // unnecessary full control passes when restore succeeds.
+                                should_trigger = true;
                             }
                         }
 
@@ -1151,11 +1153,20 @@ impl GlobalStreamManager {
     async fn apply_post_backfill_parallelism(&self, job_id: JobId) -> MetaResult<()> {
         // Fetch both the target parallelism (final desired state) and the backfill parallelism
         // (temporary parallelism used during backfill phase) from the catalog.
-        let (target, backfill_parallelism) = self
+        let Some((target, backfill_parallelism)) = self
             .metadata_manager
             .catalog_controller
             .get_job_parallelisms(job_id)
-            .await?;
+            .await?
+        else {
+            // The job may have been dropped before this notification is processed.
+            // Treat it as a benign no-op so we don't trigger unnecessary retries.
+            tracing::debug!(
+                job_id = %job_id,
+                "streaming job not found when applying post-backfill parallelism, skip"
+            );
+            return Ok(());
+        };
 
         // Determine if we need to reschedule based on the backfill configuration.
         match backfill_parallelism {

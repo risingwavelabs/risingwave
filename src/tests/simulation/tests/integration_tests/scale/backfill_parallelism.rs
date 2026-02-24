@@ -64,7 +64,14 @@ async fn wait_parallelism(
 }
 
 async fn wait_jobs_finished(session: &mut risingwave_simulation::cluster::Session) -> Result<()> {
-    for _ in 0..(MAX_HEARTBEAT_INTERVAL_SECS_CONFIG_FOR_AUTO_SCALE * 20) {
+    wait_jobs_finished_with_multiplier(session, 20).await
+}
+
+async fn wait_jobs_finished_with_multiplier(
+    session: &mut risingwave_simulation::cluster::Session,
+    multiplier: u64,
+) -> Result<()> {
+    for _ in 0..(MAX_HEARTBEAT_INTERVAL_SECS_CONFIG_FOR_AUTO_SCALE * multiplier) {
         let res = session.run("show jobs;").await?;
         if res.trim().is_empty() {
             return Ok(());
@@ -114,6 +121,58 @@ async fn test_backfill_parallelism_switches_to_normal_after_completion() -> Resu
         .run("select distinct parallelism from rw_fragment_parallelism where name = 'm' order by parallelism;")
         .await?
         .assert_result_eq("3");
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_backfill_parallelism_switches_to_normal_for_multiple_jobs() -> Result<()> {
+    let config = Configuration::for_background_ddl();
+    let mut cluster = Cluster::start(config).await?;
+    let mut session = cluster.start_session();
+
+    session.run("set streaming_parallelism = 3;").await?;
+    session
+        .run("set streaming_parallelism_for_backfill = 2;")
+        .await?;
+    session.run("create table t(v int);").await?;
+    session
+        .run("insert into t select * from generate_series(1, 500);")
+        .await?;
+    session.run("set backfill_rate_limit = 1;").await?;
+    session.run("set background_ddl = true;").await?;
+
+    session
+        .run("create materialized view m1 as select * from t;")
+        .await?;
+    session
+        .run("create materialized view m2 as select * from t;")
+        .await?;
+
+    wait_parallelism(&mut session, "m1", "2").await?;
+    wait_parallelism(&mut session, "m2", "2").await?;
+    wait_jobs_finished_with_multiplier(&mut session, 60).await?;
+
+    wait_parallelism(&mut session, "m1", "3").await?;
+    wait_parallelism(&mut session, "m2", "3").await?;
+
+    session
+        .run("select distinct parallelism from rw_fragment_parallelism where name = 'm1' order by parallelism;")
+        .await?
+        .assert_result_eq("3");
+    session
+        .run("select distinct parallelism from rw_fragment_parallelism where name = 'm2' order by parallelism;")
+        .await?
+        .assert_result_eq("3");
+
+    session
+        .run("select count(*) from m1;")
+        .await?
+        .assert_result_eq("500");
+    session
+        .run("select count(*) from m2;")
+        .await?
+        .assert_result_eq("500");
 
     Ok(())
 }
