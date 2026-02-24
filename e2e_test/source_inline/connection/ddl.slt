@@ -64,6 +64,12 @@ drop secret sec_broker;
 statement ok
 create table data_table (a int, b varchar);
 
+statement ok
+insert into data_table values (1, 'a'), (2, 'b'), (3, 'c');
+
+statement ok
+flush;
+
 statement error missing field 'connector' in WITH clause
 create sink sink_kafka from data_table with (
   connection = conn,
@@ -80,12 +86,6 @@ create sink sink_kafka from data_table with (
 ) format plain encode json (
   force_append_only='true'
 );
-
-statement ok
-insert into data_table values (1, 'a'), (2, 'b'), (3, 'c');
-
-statement ok
-flush;
 
 sleep 3s
 

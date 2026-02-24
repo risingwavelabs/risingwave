@@ -4,7 +4,35 @@ system ok
 rpk topic create test_topic_issue_24829;
 
 system ok
-python e2e_test/source_inline/kafka/kafka_txn_backfill_issue_24829.py --db-name $__DATABASE__ --topic test_topic_issue_24829
+python e2e_test/source_inline/kafka/kafka_txn_backfill_issue_24829.py --topic test_topic_issue_24829
+
+statement ok
+set background_ddl=false;
+
+statement ok
+create source txn_src_24829 (
+    payload bytea
+)
+with (
+    ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+    topic = 'test_topic_issue_24829',
+    scan.startup.mode = 'earliest'
+) format plain encode bytes;
+
+statement ok
+create materialized view txn_mv_24829 as
+select * from txn_src_24829;
+
+query I retry 20 backoff 1s
+select count(*) from txn_mv_24829;
+----
+1
+
+statement ok
+drop materialized view txn_mv_24829;
+
+statement ok
+drop source txn_src_24829;
 
 system ok
 rpk topic delete test_topic_issue_24829;
