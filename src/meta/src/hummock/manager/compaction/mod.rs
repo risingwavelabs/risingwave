@@ -291,11 +291,6 @@ impl HummockManager {
         max_select_count.saturating_sub(picked_task_count) as u32
     }
 
-    fn prefetched_task_id_range_is_empty(range: (u64, u64)) -> bool {
-        let (next_task_id, end_task_id_exclusive) = range;
-        next_task_id >= end_task_id_exclusive
-    }
-
     async fn refill_prefetched_compaction_task_id_range_if_needed(
         &self,
         task_id_capacity: u32,
@@ -306,7 +301,7 @@ impl HummockManager {
 
         {
             let prefetched_task_id_range = self.prefetched_compaction_task_id_range.lock();
-            if !Self::prefetched_task_id_range_is_empty(*prefetched_task_id_range) {
+            if !prefetched_task_id_range.is_empty() {
                 return Ok(());
             }
         }
@@ -319,14 +314,11 @@ impl HummockManager {
         let mut prefetched_task_id_range = self.prefetched_compaction_task_id_range.lock();
         // Re-check after `await`: another concurrent picker may have already refilled and started
         // consuming the in-memory range. Do not overwrite that range.
-        if !Self::prefetched_task_id_range_is_empty(*prefetched_task_id_range) {
+        if !prefetched_task_id_range.is_empty() {
             return Ok(());
         }
 
-        *prefetched_task_id_range = (
-            new_range_start,
-            new_range_start + u64::from(task_id_capacity),
-        );
+        prefetched_task_id_range.reset(new_range_start, task_id_capacity);
         Ok(())
     }
 
@@ -335,13 +327,7 @@ impl HummockManager {
     /// The range is `[next, end)` and `next` is advanced by 1 when an id is returned.
     fn pop_prefetched_compaction_task_id(&self) -> Option<u64> {
         let mut prefetched_task_id_range = self.prefetched_compaction_task_id_range.lock();
-        if Self::prefetched_task_id_range_is_empty(*prefetched_task_id_range) {
-            return None;
-        }
-
-        let task_id = prefetched_task_id_range.0;
-        prefetched_task_id_range.0 += 1;
-        Some(task_id)
+        prefetched_task_id_range.pop()
     }
 
     /// Gets one compaction task id with best-effort batching:
@@ -1875,7 +1861,7 @@ mod prefetched_task_id_tests {
         let (_env, hummock_manager, _cluster_manager, _worker_id) = setup_compute_env(80).await;
         {
             let mut range = hummock_manager.prefetched_compaction_task_id_range.lock();
-            *range = (100, 103);
+            range.set_bounds(100, 103);
         }
 
         assert_eq!(
@@ -1901,7 +1887,7 @@ mod prefetched_task_id_tests {
         );
 
         let range = hummock_manager.prefetched_compaction_task_id_range.lock();
-        assert_eq!(*range, (103, 103));
+        assert_eq!(range.bounds(), (103, 103));
     }
 
     #[tokio::test]
@@ -1909,7 +1895,7 @@ mod prefetched_task_id_tests {
         let (_env, hummock_manager, _cluster_manager, _worker_id) = setup_compute_env(80).await;
         {
             let mut range = hummock_manager.prefetched_compaction_task_id_range.lock();
-            *range = (0, 0);
+            range.set_bounds(0, 0);
         }
 
         let first_id = hummock_manager
@@ -1918,7 +1904,7 @@ mod prefetched_task_id_tests {
             .unwrap();
         {
             let range = hummock_manager.prefetched_compaction_task_id_range.lock();
-            assert_eq!(*range, (first_id + 1, first_id + 4));
+            assert_eq!(range.bounds(), (first_id + 1, first_id + 4));
         }
 
         assert_eq!(
@@ -1950,7 +1936,7 @@ mod prefetched_task_id_tests {
         assert_eq!(fifth_id, first_id + 4);
         {
             let range = hummock_manager.prefetched_compaction_task_id_range.lock();
-            assert_eq!(*range, (fifth_id + 1, fifth_id + 4));
+            assert_eq!(range.bounds(), (fifth_id + 1, fifth_id + 4));
         }
     }
 
@@ -1959,7 +1945,7 @@ mod prefetched_task_id_tests {
         let (_env, hummock_manager, _cluster_manager, _worker_id) = setup_compute_env(80).await;
         {
             let mut range = hummock_manager.prefetched_compaction_task_id_range.lock();
-            *range = (0, 0);
+            range.set_bounds(0, 0);
         }
 
         let first_id = hummock_manager
@@ -1975,7 +1961,7 @@ mod prefetched_task_id_tests {
         );
         {
             let range = hummock_manager.prefetched_compaction_task_id_range.lock();
-            assert_eq!(*range, (first_id + 2, first_id + 2));
+            assert_eq!(range.bounds(), (first_id + 2, first_id + 2));
         }
 
         let third_id = hummock_manager
@@ -1985,7 +1971,7 @@ mod prefetched_task_id_tests {
         assert_eq!(third_id, first_id + 2);
         {
             let range = hummock_manager.prefetched_compaction_task_id_range.lock();
-            assert_eq!(*range, (third_id + 1, third_id + 1));
+            assert_eq!(range.bounds(), (third_id + 1, third_id + 1));
         }
     }
 }
