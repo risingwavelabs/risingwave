@@ -1,4 +1,4 @@
-statement ok retry 3 backoff 5s
+statement ok
 create materialized view tpch_q11 as
 select
 	ps_partkey,

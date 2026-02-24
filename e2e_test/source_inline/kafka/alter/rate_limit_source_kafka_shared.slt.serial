@@ -104,7 +104,7 @@ rl_mv2	SOURCE_BACKFILL	{SOURCE_SCAN}	0
 
 sleep 3s
 
-query I retry 10 backoff 2s
+query I
 select * from rl_mv1;
 ----
 2000
