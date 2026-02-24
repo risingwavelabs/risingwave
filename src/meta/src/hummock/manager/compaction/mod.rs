@@ -44,6 +44,7 @@ use risingwave_hummock_sdk::{
     CompactionGroupId, HummockCompactionTaskId, HummockContextId, HummockSstableId,
     HummockSstableObjectId, HummockVersionId, compact_task_to_string, statistics_compact_task,
 };
+use risingwave_meta_model::hummock_sequence::COMPACTION_TASK_ID;
 use risingwave_pb::hummock::compact_task::{TaskStatus, TaskType};
 use risingwave_pb::hummock::subscribe_compaction_event_response::Event as ResponseEvent;
 use risingwave_pb::hummock::{
@@ -302,7 +303,11 @@ impl HummockManager {
             return Ok(());
         }
 
-        let task_id_start = next_compaction_task_id_interval(&self.env, task_id_capacity).await?;
+        let task_id_start = self
+            .env
+            .hummock_seq
+            .next_interval(COMPACTION_TASK_ID, task_id_capacity)
+            .await?;
         let mut prefetched_task_id_range = self.prefetched_compaction_task_id_range.lock();
         let (next_task_id, end_task_id) = *prefetched_task_id_range;
         if next_task_id >= end_task_id {
