@@ -138,19 +138,47 @@ mod tests {
 
     #[test]
     fn test_staged_watermarks_capped() {
-        let mut buffers = BufferedWatermarks::with_ids([1_u8, 2_u8]);
-        assert!(buffers.handle_watermark(1, wm(1)).is_none());
+        // One upstream keeps sending while the other has not sent any watermark yet.
+        // Staged watermarks should be capped.
+        let mut stalled_case = BufferedWatermarks::with_ids([1_u8, 2_u8]);
+        assert!(stalled_case.handle_watermark(1, wm(1)).is_none());
 
         for i in 2..=(MAX_STAGED_WATERMARKS_PER_INPUT as i64 + 5) {
-            assert!(buffers.handle_watermark(1, wm(i)).is_none());
+            assert!(stalled_case.handle_watermark(1, wm(i)).is_none());
         }
 
-        let staged = &buffers.other_buffered_watermarks.get(&1).unwrap().staged;
+        let staged = &stalled_case
+            .other_buffered_watermarks
+            .get(&1)
+            .unwrap()
+            .staged;
         assert_eq!(staged.len(), MAX_STAGED_WATERMARKS_PER_INPUT);
         assert_eq!(staged.front().unwrap().val, ScalarImpl::Int64(6));
         assert_eq!(
             staged.back().unwrap().val,
             ScalarImpl::Int64(MAX_STAGED_WATERMARKS_PER_INPUT as i64 + 5)
         );
+
+        // If the stalled upstream becomes active again, watermark propagation should resume and
+        // eventually drain the buffered watermarks.
+        for i in 1..=(MAX_STAGED_WATERMARKS_PER_INPUT as i64 + 5) {
+            let emitted = stalled_case
+                .handle_watermark(2, wm(i))
+                .expect("watermark should be emitted when stalled upstream becomes active again");
+            assert_eq!(emitted.val, ScalarImpl::Int64(i));
+        }
+        let staged_1 = &stalled_case
+            .other_buffered_watermarks
+            .get(&1)
+            .unwrap()
+            .staged;
+        let staged_2 = &stalled_case
+            .other_buffered_watermarks
+            .get(&2)
+            .unwrap()
+            .staged;
+        assert!(staged_1.is_empty());
+        assert!(staged_2.is_empty());
+        assert!(stalled_case.first_buffered_watermarks.is_empty());
     }
 }
