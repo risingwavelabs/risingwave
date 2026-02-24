@@ -505,6 +505,56 @@ impl LogicalJoin {
     pub fn decompose(self) -> (PlanRef, PlanRef, Condition, JoinType, Vec<usize>) {
         self.core.decompose()
     }
+
+    fn dynamic_filter_candidate(&self, predicate: &Condition) -> Option<(usize, PbType)> {
+        // Dynamic filter only supports `Inner`/`LeftSemi`.
+        if !matches!(self.join_type(), JoinType::Inner | JoinType::LeftSemi) {
+            return None;
+        }
+
+        // Dynamic filter requires right side to be a scalar with one column.
+        if !self.right().max_one_row() || self.right().schema().len() != 1 {
+            return None;
+        }
+
+        // Dynamic filter only supports a single comparison predicate.
+        if predicate.conjunctions.len() > 1 {
+            return None;
+        }
+        let expr: ExprImpl = predicate.clone().into();
+        let (left_ref, comparator, right_ref) = expr.as_comparison_cond()?;
+
+        // Comparison must cross inputs: left input ref vs right scalar input ref.
+        let left_len = self.left().schema().len();
+        let condition_cross_inputs = left_ref.index < left_len && right_ref.index == left_len;
+        if !condition_cross_inputs {
+            return None;
+        }
+
+        // Comparison keys must be type aligned.
+        if self.left().schema().fields()[left_ref.index].data_type
+            != self.right().schema().fields()[0].data_type
+        {
+            return None;
+        }
+
+        // Dynamic filter output can only come from the left side.
+        if !self.output_indices().iter().all(|i| *i < left_len) {
+            return None;
+        }
+
+        Some((left_ref.index, comparator))
+    }
+
+    /// Check whether this join can be treated as a temporal filter for locality optimization.
+    ///
+    /// This is intentionally stricter than dynamic filter:
+    /// - right side must be a `LogicalNow`,
+    /// - and all dynamic filter preconditions must hold.
+    fn temporal_filter_candidate(&self) -> bool {
+        self.right().as_logical_now().is_some()
+            && self.dynamic_filter_candidate(self.on()).is_some()
+    }
 }
 
 impl PlanTreeNodeBinary<Logical> for LogicalJoin {
@@ -1358,52 +1408,9 @@ impl LogicalJoin {
         // If there is exactly one predicate, it is a comparison (<, <=, >, >=), and the
         // join is a `Inner` or `LeftSemi` join, we can convert the scalar subquery into a
         // `StreamDynamicFilter`
-
-        // Check if `Inner`/`LeftSemi`
-        if !matches!(self.join_type(), JoinType::Inner | JoinType::LeftSemi) {
+        let Some((left_key_idx, comparator)) = self.dynamic_filter_candidate(&predicate) else {
             return Ok(None);
-        }
-
-        // Check if right side is a scalar
-        if !self.right().max_one_row() {
-            return Ok(None);
-        }
-        if self.right().schema().len() != 1 {
-            return Ok(None);
-        }
-
-        // Check if the join condition is a correlated comparison
-        if predicate.conjunctions.len() > 1 {
-            return Ok(None);
-        }
-        let expr: ExprImpl = predicate.into();
-        let (left_ref, comparator, right_ref) = match expr.as_comparison_cond() {
-            Some(v) => v,
-            None => return Ok(None),
         };
-
-        let condition_cross_inputs = left_ref.index < self.left().schema().len()
-            && right_ref.index == self.left().schema().len() /* right side has only one column */;
-        if !condition_cross_inputs {
-            // Maybe we should panic here because it means some predicates are not pushed down.
-            return Ok(None);
-        }
-
-        // We align input types on all join predicates with cmp operator
-        if self.left().schema().fields()[left_ref.index].data_type
-            != self.right().schema().fields()[0].data_type
-        {
-            return Ok(None);
-        }
-
-        // Check if non of the columns from the inner side is required to output
-        let all_output_from_left = self
-            .output_indices()
-            .iter()
-            .all(|i| *i < self.left().schema().len());
-        if !all_output_from_left {
-            return Ok(None);
-        }
 
         let left = self.left().to_stream(ctx)?.enforce_concrete_distribution();
         let right = self.right().to_stream_with_dist_required(
@@ -1417,7 +1424,7 @@ impl LogicalJoin {
             Distribution::Single
         );
 
-        let core = DynamicFilter::new(comparator, left_ref.index, left, right);
+        let core = DynamicFilter::new(comparator, left_key_idx, left, right);
         let plan = StreamDynamicFilter::new(core)?.into();
         // TODO: `DynamicFilterExecutor` should support `output_indices` in `ChunkBuilder`
         if self
@@ -1785,25 +1792,26 @@ impl ToStream for LogicalJoin {
         Ok((plan, out_col_change))
     }
 
-    // fn try_better_locality(&self, columns: &[usize]) -> Option<PlanRef> {
-    //     let mut ctx = ToStreamContext::new(false);
-    //     // only pass through the locality information if it can be converted to dynamic filter
-    //     if let Ok(Some(_)) = self.to_stream_dynamic_filter(self.on().clone(), &mut ctx) {
-    //         // since dynamic filter only supports left input ref in the output indices, we can safely use o2i mapping to convert the required columns.
-    //         let o2i_mapping = self.core.o2i_col_mapping();
-    //         let left_input_columns = columns
-    //             .iter()
-    //             .map(|&col| o2i_mapping.try_map(col))
-    //             .collect::<Option<Vec<usize>>>()?;
-    //         if let Some(better_left_plan) = self.left().try_better_locality(&left_input_columns) {
-    //             return Some(
-    //                 self.clone_with_left_right(better_left_plan, self.right())
-    //                     .into(),
-    //             );
-    //         }
-    //     }
-    //     None
-    // }
+    fn try_better_locality(&self, columns: &[usize]) -> Option<PlanRef> {
+        // Only propagate locality for temporal-filter.
+        if !self.temporal_filter_candidate() {
+            return None;
+        }
+
+        // Temporal filter only outputs columns from left input, so mapping is safe.
+        let o2i_mapping = self.core.o2i_col_mapping();
+        let left_input_columns = columns
+            .iter()
+            .map(|&col| o2i_mapping.try_map(col))
+            .collect::<Option<Vec<usize>>>()?;
+        if let Some(better_left_plan) = self.left().try_better_locality(&left_input_columns) {
+            return Some(
+                self.clone_with_left_right(better_left_plan, self.right())
+                    .into(),
+            );
+        }
+        None
+    }
 }
 
 #[cfg(test)]
