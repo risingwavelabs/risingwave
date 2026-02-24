@@ -57,7 +57,9 @@ use risingwave_meta_model::DispatcherType;
 use risingwave_meta_model::fragment::DistributionType;
 use risingwave_meta_model::prelude::{Fragment, FragmentRelation, StreamingJob};
 use sea_orm::ActiveValue::Set;
-use sea_orm::{ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter, TransactionTrait};
+use sea_orm::{
+    ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter, TransactionTrait,
+};
 
 use crate::controller::fragment::{InflightActorInfo, InflightFragmentInfo};
 use crate::controller::utils::{
@@ -129,7 +131,7 @@ impl ScaleController {
         &self,
         policy: HashMap<JobId, ReschedulePolicy>,
     ) -> MetaResult<HashMap<DatabaseId, Command>> {
-        let inner = self.metadata_manager.catalog_controller.inner.read().await;
+        let inner = self.metadata_manager.catalog_controller.inner.write().await;
         let txn = inner.db.begin().await?;
 
         for (table_id, target) in &policy {
@@ -175,6 +177,48 @@ impl ScaleController {
         Ok(commands)
     }
 
+    pub async fn reschedule_backfill_parallelism_inplace(
+        &self,
+        policy: HashMap<JobId, Option<StreamingParallelism>>,
+    ) -> MetaResult<HashMap<DatabaseId, Command>> {
+        if policy.is_empty() {
+            return Ok(HashMap::new());
+        }
+
+        let inner = self.metadata_manager.catalog_controller.inner.write().await;
+        let txn = inner.db.begin().await?;
+
+        for (table_id, parallelism) in &policy {
+            let streaming_job = StreamingJob::find_by_id(*table_id)
+                .one(&txn)
+                .await?
+                .ok_or_else(|| MetaError::catalog_id_not_found("table", table_id))?;
+
+            let max_parallelism = streaming_job.max_parallelism;
+
+            let mut streaming_job = streaming_job.into_active_model();
+
+            if let Some(StreamingParallelism::Fixed(n)) = parallelism
+                && *n > max_parallelism as usize
+            {
+                bail!(format!(
+                    "specified backfill parallelism {n} should not exceed max parallelism {max_parallelism}"
+                ));
+            }
+
+            streaming_job.backfill_parallelism = Set(parallelism.clone());
+            streaming_job.update(&txn).await?;
+        }
+
+        let jobs = policy.keys().copied().collect();
+
+        let command = build_reschedule_intent_for_jobs(&txn, jobs).await?;
+
+        txn.commit().await?;
+
+        Ok(command)
+    }
+
     pub async fn reschedule_fragment_inplace(
         &self,
         policy: HashMap<risingwave_meta_model::FragmentId, Option<StreamingParallelism>>,
@@ -183,7 +227,7 @@ impl ScaleController {
             return Ok(HashMap::new());
         }
 
-        let inner = self.metadata_manager.catalog_controller.inner.read().await;
+        let inner = self.metadata_manager.catalog_controller.inner.write().await;
         let txn = inner.db.begin().await?;
 
         let fragment_id_list = policy.keys().copied().collect_vec();

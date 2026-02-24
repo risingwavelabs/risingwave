@@ -3276,6 +3276,21 @@ impl Parser<'_> {
                     parallelism: value,
                     deferred,
                 }
+            } else if self.parse_keyword(Keyword::BACKFILL_PARALLELISM) {
+                if self.expect_keyword(Keyword::TO).is_err()
+                    && self.expect_token(&Token::Eq).is_err()
+                {
+                    return self.expected("TO or = after ALTER TABLE SET BACKFILL_PARALLELISM");
+                }
+
+                let value = self.parse_set_variable()?;
+
+                let deferred = self.parse_keyword(Keyword::DEFERRED);
+
+                AlterTableOperation::SetBackfillParallelism {
+                    parallelism: value,
+                    deferred,
+                }
             } else if let Some(rate_limit) = self.parse_alter_source_rate_limit(true)? {
                 AlterTableOperation::SetSourceRateLimit { rate_limit }
             } else if let Some(rate_limit) = self.parse_alter_backfill_rate_limit()? {
@@ -3287,7 +3302,7 @@ impl Parser<'_> {
                 AlterTableOperation::SetConfig { entries }
             } else {
                 return self.expected(
-                    "SCHEMA/PARALLELISM/SOURCE_RATE_LIMIT/DML_RATE_LIMIT/CONFIG after SET",
+                    "SCHEMA/PARALLELISM/BACKFILL_PARALLELISM/SOURCE_RATE_LIMIT/DML_RATE_LIMIT/CONFIG after SET",
                 );
             }
         } else if self.parse_keyword(Keyword::RESET) {
@@ -3438,7 +3453,7 @@ impl Parser<'_> {
                 if self.expect_keyword(Keyword::TO).is_err()
                     && self.expect_token(&Token::Eq).is_err()
                 {
-                    return self.expected("TO or = after ALTER TABLE SET PARALLELISM");
+                    return self.expected("TO or = after ALTER INDEX SET PARALLELISM");
                 }
 
                 let value = self.parse_set_variable()?;
@@ -3449,11 +3464,26 @@ impl Parser<'_> {
                     parallelism: value,
                     deferred,
                 }
+            } else if self.parse_keyword(Keyword::BACKFILL_PARALLELISM) {
+                if self.expect_keyword(Keyword::TO).is_err()
+                    && self.expect_token(&Token::Eq).is_err()
+                {
+                    return self.expected("TO or = after ALTER INDEX SET BACKFILL_PARALLELISM");
+                }
+
+                let value = self.parse_set_variable()?;
+
+                let deferred = self.parse_keyword(Keyword::DEFERRED);
+
+                AlterIndexOperation::SetBackfillParallelism {
+                    parallelism: value,
+                    deferred,
+                }
             } else if self.parse_keyword(Keyword::CONFIG) {
                 let entries = self.parse_options()?;
                 AlterIndexOperation::SetConfig { entries }
             } else {
-                return self.expected("PARALLELISM or CONFIG after SET");
+                return self.expected("PARALLELISM/BACKFILL_PARALLELISM or CONFIG after SET");
             }
         } else if self.parse_keyword(Keyword::RESET) {
             if self.parse_keyword(Keyword::CONFIG) {
@@ -3511,7 +3541,7 @@ impl Parser<'_> {
                 if self.expect_keyword(Keyword::TO).is_err()
                     && self.expect_token(&Token::Eq).is_err()
                 {
-                    return self.expected("TO or = after ALTER TABLE SET PARALLELISM");
+                    return self.expected("TO or = after ALTER MATERIALIZED VIEW SET PARALLELISM");
                 }
 
                 let value = self.parse_set_variable()?;
@@ -3519,6 +3549,23 @@ impl Parser<'_> {
                 let deferred = self.parse_keyword(Keyword::DEFERRED);
 
                 AlterViewOperation::SetParallelism {
+                    parallelism: value,
+                    deferred,
+                }
+            } else if self.parse_keyword(Keyword::BACKFILL_PARALLELISM) && materialized {
+                if self.expect_keyword(Keyword::TO).is_err()
+                    && self.expect_token(&Token::Eq).is_err()
+                {
+                    return self.expected(
+                        "TO or = after ALTER MATERIALIZED VIEW SET BACKFILL_PARALLELISM",
+                    );
+                }
+
+                let value = self.parse_set_variable()?;
+
+                let deferred = self.parse_keyword(Keyword::DEFERRED);
+
+                AlterViewOperation::SetBackfillParallelism {
                     parallelism: value,
                     deferred,
                 }
@@ -3544,7 +3591,9 @@ impl Parser<'_> {
                 let entries = self.parse_options()?;
                 AlterViewOperation::SetConfig { entries }
             } else {
-                return self.expected("SCHEMA/PARALLELISM/BACKFILL_RATE_LIMIT/CONFIG after SET");
+                return self.expected(
+                    "SCHEMA/PARALLELISM/BACKFILL_PARALLELISM/BACKFILL_RATE_LIMIT/CONFIG after SET",
+                );
             }
         } else if self.parse_keyword(Keyword::RESET) {
             if self.parse_keyword(Keyword::RESOURCE_GROUP) && materialized {
@@ -3624,13 +3673,27 @@ impl Parser<'_> {
                 if self.expect_keyword(Keyword::TO).is_err()
                     && self.expect_token(&Token::Eq).is_err()
                 {
-                    return self.expected("TO or = after ALTER TABLE SET PARALLELISM");
+                    return self.expected("TO or = after ALTER SINK SET PARALLELISM");
                 }
 
                 let value = self.parse_set_variable()?;
                 let deferred = self.parse_keyword(Keyword::DEFERRED);
 
                 AlterSinkOperation::SetParallelism {
+                    parallelism: value,
+                    deferred,
+                }
+            } else if self.parse_keyword(Keyword::BACKFILL_PARALLELISM) {
+                if self.expect_keyword(Keyword::TO).is_err()
+                    && self.expect_token(&Token::Eq).is_err()
+                {
+                    return self.expected("TO or = after ALTER SINK SET BACKFILL_PARALLELISM");
+                }
+
+                let value = self.parse_set_variable()?;
+                let deferred = self.parse_keyword(Keyword::DEFERRED);
+
+                AlterSinkOperation::SetBackfillParallelism {
                     parallelism: value,
                     deferred,
                 }
@@ -3643,7 +3706,7 @@ impl Parser<'_> {
                 AlterSinkOperation::SetConfig { entries }
             } else {
                 return self.expected(
-                    "SCHEMA/PARALLELISM/SINK_RATE_LIMIT/BACKFILL_RATE_LIMIT/STREAMING_ENABLE_UNALIGNED_JOIN/CONFIG after SET",
+                    "SCHEMA/PARALLELISM/BACKFILL_PARALLELISM/SINK_RATE_LIMIT/BACKFILL_RATE_LIMIT/STREAMING_ENABLE_UNALIGNED_JOIN/CONFIG after SET",
                 );
             }
         } else if self.parse_keyword(Keyword::RESET) {
@@ -3751,11 +3814,27 @@ impl Parser<'_> {
                     parallelism: value,
                     deferred,
                 }
+            } else if self.parse_keyword(Keyword::BACKFILL_PARALLELISM) {
+                if self.expect_keyword(Keyword::TO).is_err()
+                    && self.expect_token(&Token::Eq).is_err()
+                {
+                    return self.expected("TO or = after ALTER SOURCE SET BACKFILL_PARALLELISM");
+                }
+
+                let value = self.parse_set_variable()?;
+                let deferred = self.parse_keyword(Keyword::DEFERRED);
+
+                AlterSourceOperation::SetBackfillParallelism {
+                    parallelism: value,
+                    deferred,
+                }
             } else if self.parse_keyword(Keyword::CONFIG) {
                 let entries = self.parse_options()?;
                 AlterSourceOperation::SetConfig { entries }
             } else {
-                return self.expected("SCHEMA, SOURCE_RATE_LIMIT, PARALLELISM or CONFIG after SET");
+                return self.expected(
+                    "SCHEMA, SOURCE_RATE_LIMIT, PARALLELISM, BACKFILL_PARALLELISM or CONFIG after SET",
+                );
             }
         } else if self.parse_keyword(Keyword::RESET) {
             if self.parse_keyword(Keyword::CONFIG) {
