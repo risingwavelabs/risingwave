@@ -74,7 +74,7 @@ duration-str = "0.18.0"
 easy-ext = "1"
 either = "1"
 elasticsearch = { version = "8.17.0-alpha.1", features = ["rustls-tls"] }
-enum-as-inner = "0.6"
+enum-as-inner = "0.7"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = { workspace = true }
 gcp-bigquery-client = { version = "0.18.0", optional = true }
@@ -161,8 +161,7 @@ risingwave_rpc_client = { workspace = true }
 rumqttc = { version = "0.25.0", features = ["url"] }
 rust_decimal = "1"
 rustls-native-certs = "0.8"
-rustls-pemfile = "2"
-rustls-pki-types = "1"
+rustls-pki-types = { version = "1", features = ["std"] }
 rw_futures_util = { workspace = true }
 scopeguard = "1"
 sea-orm = { workspace = true }

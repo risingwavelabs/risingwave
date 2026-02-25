@@ -122,7 +122,7 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
     async fn reload_database_runtime_info(
         &self,
         database_id: DatabaseId,
-    ) -> MetaResult<Option<DatabaseRuntimeInfoSnapshot>> {
+    ) -> MetaResult<DatabaseRuntimeInfoSnapshot> {
         self.reload_database_runtime_info_impl(database_id).await
     }
 
@@ -438,7 +438,7 @@ impl PostCollectCommand {
                     .apply_source_change(source_change)
                     .await;
             }
-            PostCollectCommand::RescheduleFragment { reschedules, .. } => {
+            PostCollectCommand::Reschedule { reschedules, .. } => {
                 let fragment_splits = reschedules
                     .iter()
                     .map(|(fragment_id, reschedule)| {

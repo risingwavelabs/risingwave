@@ -92,6 +92,7 @@ define_keywords!(
     AUTHORIZATION,
     AUTO,
     AVG,
+    BACKFILL_PARALLELISM,
     BASE64,
     BEGIN,
     BEGIN_FRAME,

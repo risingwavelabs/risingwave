@@ -329,27 +329,27 @@ fn gen_batch_query_plan(
 
     #[cfg(feature = "datafusion")]
     {
-        use crate::optimizer::DataFusionExecuteCheckerExt;
+        if session.config().enable_datafusion_engine() {
+            use thiserror_ext::AsReport;
 
-        let execute_by_datafusion = if session.config().enable_datafusion_engine() {
-            let check_result = optimized_logical.plan.check_for_datafusion();
-            if !check_result.supported && check_result.have_iceberg_scan {
-                tracing::warn!(
-                    "DataFusion execution disabled because of unsupported plan nodes in the logical plan. The performance may be degraded."
-                );
+            use crate::datafusion::{GenDataFusionPlanError, try_gen_datafusion_plan};
+
+            match try_gen_datafusion_plan(&optimized_logical) {
+                Ok(plan) => {
+                    return Ok(BatchPlanChoice::Df(DfBatchQueryPlanResult {
+                        plan,
+                        schema,
+                        stmt_type,
+                    }));
+                }
+                Err(GenDataFusionPlanError::MissingIcebergScan) => {}
+                Err(err) => {
+                    tracing::warn!(
+                        "Failed to generate DataFusion plan, fallback to RisingWave plan: {}",
+                        err.as_report()
+                    );
+                }
             }
-            check_result.supported && check_result.have_iceberg_scan
-        } else {
-            false
-        };
-
-        if execute_by_datafusion {
-            let plan = optimized_logical.gen_datafusion_logical_plan()?;
-            return Ok(BatchPlanChoice::Df(DfBatchQueryPlanResult {
-                plan,
-                schema,
-                stmt_type,
-            }));
         }
     }
 

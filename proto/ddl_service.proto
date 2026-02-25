@@ -325,6 +325,16 @@ message AlterParallelismRequest {
 
 message AlterParallelismResponse {}
 
+message AlterBackfillParallelismRequest {
+  // job id
+  uint32 table_id = 1;
+  // When `parallelism` is `None`, it indicates resetting to no backfill override.
+  optional meta.TableParallelism parallelism = 2;
+  bool deferred = 3;
+}
+
+message AlterBackfillParallelismResponse {}
+
 message AlterFragmentParallelismRequest {
   repeated uint32 fragment_ids = 1;
 
@@ -531,10 +541,12 @@ message CreateSecretResponse {
 
 message DropSecretRequest {
   uint32 secret_id = 1;
+  bool cascade = 2;
 }
 
 message DropSecretResponse {
   WaitVersion version = 1;
+  common.Status status = 2;
 }
 
 message AlterSecretRequest {
@@ -598,7 +610,9 @@ message GetTablesResponse {
 
 message WaitRequest {}
 
-message WaitResponse {}
+message WaitResponse {
+  WaitVersion version = 1;
+}
 
 message CommentOnRequest {
   catalog.Comment comment = 1;
@@ -696,6 +710,7 @@ service DdlService {
   rpc AlterOwner(AlterOwnerRequest) returns (AlterOwnerResponse);
   rpc AlterSetSchema(AlterSetSchemaRequest) returns (AlterSetSchemaResponse);
   rpc AlterParallelism(AlterParallelismRequest) returns (AlterParallelismResponse);
+  rpc AlterBackfillParallelism(AlterBackfillParallelismRequest) returns (AlterBackfillParallelismResponse);
   rpc AlterFragmentParallelism(AlterFragmentParallelismRequest) returns (AlterFragmentParallelismResponse);
   rpc AlterResourceGroup(AlterResourceGroupRequest) returns (AlterResourceGroupResponse);
   rpc DropTable(DropTableRequest) returns (DropTableResponse);

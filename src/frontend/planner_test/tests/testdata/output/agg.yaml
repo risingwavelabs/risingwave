@@ -54,7 +54,7 @@
     └─StreamProject { exprs: [t.v1, (min(t.v2) + (max(t.v3) * count(t.v1))) as $expr1] }
       └─StreamHashAgg { group_key: [t.v1], aggs: [min(t.v2), max(t.v3), count(t.v1), count] }
         └─StreamExchange { dist: HashShard(t.v1) }
-          └─StreamTableScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+          └─StreamTableScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - sql: |
     create table t(v1 int, v2 int, v3 int);
     select min(v1) + max(v2) * count(v3) as agg from t;
@@ -76,7 +76,7 @@
         └─StreamExchange { dist: Single }
           └─StreamHashAgg { group_key: [_vnode], aggs: [min(t.v1), max(t.v2), count(t.v3), count] }
             └─StreamProject { exprs: [t.v1, t.v2, t.v3, t._row_id, Vnode(t._row_id) as _vnode] }
-              └─StreamTableScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+              └─StreamTableScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - sql: |
     create table t(v1 int, v2 int);
     select v1 from t group by v2;
@@ -107,7 +107,7 @@
       └─StreamHashAgg { group_key: [t.v3], aggs: [min(t.v1), sum($expr1), count($expr1), count] }
         └─StreamExchange { dist: HashShard(t.v3) }
           └─StreamProject { exprs: [t.v3, t.v1, (t.v1 + t.v2) as $expr1, t._row_id] }
-            └─StreamTableScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+            └─StreamTableScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - name: test logical_agg with complex group expression
   sql: |
     create table t(v1 int, v2 int);
@@ -278,7 +278,7 @@
         └─StreamExchange { dist: Single }
           └─StreamStatelessSimpleAgg { aggs: [count($expr1), sum($expr1)] }
             └─StreamProject { exprs: [(t.v1 + t.v2) as $expr1, t._row_id] }
-              └─StreamTableScan { table: t, columns: [t.v1, t.v2, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+              └─StreamTableScan { table: t, columns: [t.v1, t.v2, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - sql: |
     create table t(v1 int, v2 int, v3 int);
     select v1, sum(v2 + v3) / count(v2 + v3) + max(v1) as agg from t group by v1;
@@ -295,7 +295,7 @@
       └─StreamHashAgg { group_key: [t.v1], aggs: [sum($expr1), count($expr1), max(t.v1), count] }
         └─StreamExchange { dist: HashShard(t.v1) }
           └─StreamProject { exprs: [t.v1, (t.v2 + t.v3) as $expr1, t._row_id] }
-            └─StreamTableScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+            └─StreamTableScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - sql: |
     create table t (v1 real);
     select v1, count(*) from t group by v1;
@@ -456,7 +456,7 @@
     └─StreamProject { exprs: [t.v1], noop_update_hint: true }
       └─StreamHashAgg { group_key: [t.v1], aggs: [count] }
         └─StreamExchange { dist: HashShard(t.v1) }
-          └─StreamTableScan { table: t, columns: [t.v1, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+          └─StreamTableScan { table: t, columns: [t.v1, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - name: distinct with agg
   sql: |
     create table t (v1 int, v2 int);
@@ -475,7 +475,7 @@
           └─StreamProject { exprs: [t.v2, sum(t.v1)] }
             └─StreamHashAgg { group_key: [t.v2], aggs: [sum(t.v1), count] }
               └─StreamExchange { dist: HashShard(t.v2) }
-                └─StreamTableScan { table: t, columns: [t.v1, t.v2, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+                └─StreamTableScan { table: t, columns: [t.v1, t.v2, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - name: distinct on
   sql: |
     create table t (v1 int, v2 int, v3 int);
@@ -584,7 +584,7 @@
         └─StreamExchange { dist: Single }
           └─StreamHashAgg { group_key: [_vnode], aggs: [min(t.v1), max(t.v3), count(t.v2), count] }
             └─StreamProject { exprs: [t.v1, t.v2, t.v3, t._row_id, Vnode(t._row_id) as _vnode] }
-              └─StreamTableScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+              └─StreamTableScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - name: dup group key
   sql: |
     create table t(v1 int) with (appendonly = false);
@@ -602,7 +602,7 @@
     └─StreamProject { exprs: [t.v1], noop_update_hint: true }
       └─StreamHashAgg { group_key: [t.v1], aggs: [count] }
         └─StreamExchange { dist: HashShard(t.v1) }
-          └─StreamTableScan { table: t, columns: [t.v1, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+          └─StreamTableScan { table: t, columns: [t.v1, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - name: dup group key
   sql: |
     create table t(v1 int, v2 int, v3 int) with (appendonly = false);
@@ -621,7 +621,7 @@
     └─StreamProject { exprs: [t.v2, min(t.v1), t.v3, max(t.v1)] }
       └─StreamHashAgg { group_key: [t.v2, t.v3], aggs: [min(t.v1), max(t.v1), count] }
         └─StreamExchange { dist: HashShard(t.v2, t.v3) }
-          └─StreamTableScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+          └─StreamTableScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - name: order by agg input
   sql: |
     create table t(v1 int);
@@ -640,7 +640,7 @@
       └─StreamSimpleAgg [append_only] { aggs: [sum(sum(t.v1)), count] }
         └─StreamExchange { dist: Single }
           └─StreamStatelessSimpleAgg { aggs: [sum(t.v1)] }
-            └─StreamTableScan { table: t, columns: [t.v1, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+            └─StreamTableScan { table: t, columns: [t.v1, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - name: order by other columns
   sql: |
     create table t(v1 int, v2 varchar);
@@ -659,7 +659,7 @@
       └─StreamSimpleAgg [append_only] { aggs: [sum(sum(t.v1)), count] }
         └─StreamExchange { dist: Single }
           └─StreamStatelessSimpleAgg { aggs: [sum(t.v1)] }
-            └─StreamTableScan { table: t, columns: [t.v1, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+            └─StreamTableScan { table: t, columns: [t.v1, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - name: order by ASC/DESC and default
   sql: |
     create table t(v1 int, v2 varchar, v3 int);
@@ -678,7 +678,7 @@
       └─StreamSimpleAgg [append_only] { aggs: [sum(sum(t.v1)), count] }
         └─StreamExchange { dist: Single }
           └─StreamStatelessSimpleAgg { aggs: [sum(t.v1)] }
-            └─StreamTableScan { table: t, columns: [t.v1, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+            └─StreamTableScan { table: t, columns: [t.v1, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - name: filter clause
   sql: |
     create table t(v1 int);
@@ -697,7 +697,7 @@
       └─StreamSimpleAgg [append_only] { aggs: [sum(sum(t.v1) filter((t.v1 > 0:Int32))), count] }
         └─StreamExchange { dist: Single }
           └─StreamStatelessSimpleAgg { aggs: [sum(t.v1) filter((t.v1 > 0:Int32))] }
-            └─StreamTableScan { table: t, columns: [t.v1, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+            └─StreamTableScan { table: t, columns: [t.v1, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - name: |
     filter clause
     extra calculation, should reuse result from project
@@ -733,7 +733,7 @@
         └─StreamExchange { dist: Single }
           └─StreamHashAgg { group_key: [_vnode], aggs: [max($expr1) filter((t.a < t.b) AND ((t.a + t.b) < 100:Int32) AND ((t.a * t.b) <> ((t.a + t.b) - 1:Int32))), count] }
             └─StreamProject { exprs: [t.a, t.b, (t.a * t.b) as $expr1, t._row_id, Vnode(t._row_id) as _vnode] }
-              └─StreamTableScan { table: t, columns: [t.a, t.b, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+              └─StreamTableScan { table: t, columns: [t.a, t.b, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - name: avg filter clause + group by
   sql: |
     create table t(a int, b int);
@@ -752,7 +752,7 @@
     └─StreamProject { exprs: [(sum(t.a) filter((t.a > t.b))::Decimal / count(t.a) filter((t.a > t.b))::Decimal) as $expr1, t.b] }
       └─StreamHashAgg { group_key: [t.b], aggs: [sum(t.a) filter((t.a > t.b)), count(t.a) filter((t.a > t.b)), count] }
         └─StreamExchange { dist: HashShard(t.b) }
-          └─StreamTableScan { table: t, columns: [t.a, t.b, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+          └─StreamTableScan { table: t, columns: [t.a, t.b, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - name: count filter clause
   sql: |
     create table t(a int, b int);
@@ -771,7 +771,7 @@
       └─StreamSimpleAgg [append_only] { aggs: [sum0(count filter((t.a > t.b))), count] }
         └─StreamExchange { dist: Single }
           └─StreamStatelessSimpleAgg { aggs: [count filter((t.a > t.b))] }
-            └─StreamTableScan { table: t, columns: [t.a, t.b, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+            └─StreamTableScan { table: t, columns: [t.a, t.b, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - name: filter clause + non-boolean function
   sql: |
     create table t(a int, b int);
@@ -825,7 +825,7 @@
       └─StreamSimpleAgg [append_only] { aggs: [sum(sum(t.v2) filter((t.v2 < 5:Int32))), count] }
         └─StreamExchange { dist: Single }
           └─StreamStatelessSimpleAgg { aggs: [sum(t.v2) filter((t.v2 < 5:Int32))] }
-            └─StreamTableScan { table: t, columns: [t.v2, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+            └─StreamTableScan { table: t, columns: [t.v2, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - name: distinct agg on empty args
   sql: |
     create table t(x int, y varchar);
@@ -864,7 +864,7 @@
     └─StreamProject { exprs: [t.a, count(distinct t.b), sum(t.c)] }
       └─StreamHashAgg { group_key: [t.a], aggs: [count(distinct t.b), sum(t.c), count] }
         └─StreamExchange { dist: HashShard(t.a) }
-          └─StreamTableScan { table: t, columns: [t.a, t.b, t.c, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+          └─StreamTableScan { table: t, columns: [t.a, t.b, t.c, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - name: distinct agg and non-disintct agg with intersected argument
   sql: |
     create table t(a int, b int, c int);
@@ -887,7 +887,7 @@
     └─StreamProject { exprs: [t.a, count(distinct t.b), count(distinct t.c), sum(t.c)] }
       └─StreamHashAgg { group_key: [t.a], aggs: [count(distinct t.b), count(distinct t.c), sum(t.c), count] }
         └─StreamExchange { dist: HashShard(t.a) }
-          └─StreamTableScan { table: t, columns: [t.a, t.b, t.c, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+          └─StreamTableScan { table: t, columns: [t.a, t.b, t.c, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - name: distinct & string_agg
   sql: |
     create table t(x int, y varchar);
@@ -908,7 +908,7 @@
       └─StreamSimpleAgg { aggs: [string_agg(t.y, ',':Varchar), count(distinct t.x), count] }
         └─StreamExchange { dist: Single }
           └─StreamProject { exprs: [t.y, ',':Varchar, t.x, t._row_id] }
-            └─StreamTableScan { table: t, columns: [t.x, t.y, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+            └─StreamTableScan { table: t, columns: [t.x, t.y, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - name: distinct & order by on different calls
   sql: |
     create table t(x int, y varchar);
@@ -929,7 +929,7 @@
       └─StreamSimpleAgg { aggs: [string_agg(t.y, ',':Varchar order_by(t.y ASC)), count(distinct t.x), count] }
         └─StreamExchange { dist: Single }
           └─StreamProject { exprs: [t.y, ',':Varchar, t.x, t._row_id] }
-            └─StreamTableScan { table: t, columns: [t.x, t.y, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+            └─StreamTableScan { table: t, columns: [t.x, t.y, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - name: distinct & order by on same calls
   sql: |
     create table t(x int, y varchar);
@@ -950,7 +950,7 @@
       └─StreamSimpleAgg { aggs: [string_agg(distinct t.y, ',':Varchar order_by(t.y ASC)), count(distinct t.x), count] }
         └─StreamExchange { dist: Single }
           └─StreamProject { exprs: [t.y, ',':Varchar, t.x, t._row_id] }
-            └─StreamTableScan { table: t, columns: [t.x, t.y, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+            └─StreamTableScan { table: t, columns: [t.x, t.y, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - name: distinct & invalid order by
   sql: |
     create table t(x int, y varchar);
@@ -990,7 +990,7 @@
     └─StreamProject { exprs: [t.a, count(distinct t.b) filter((t.b < 100:Int32)), sum(t.c)] }
       └─StreamHashAgg { group_key: [t.a], aggs: [count(distinct t.b) filter((t.b < 100:Int32)), sum(t.c), count] }
         └─StreamExchange { dist: HashShard(t.a) }
-          └─StreamTableScan { table: t, columns: [t.a, t.b, t.c, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+          └─StreamTableScan { table: t, columns: [t.a, t.b, t.c, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - name: non-distinct agg with filter
   sql: |
     create table t(a int, b int, c int);
@@ -1019,7 +1019,7 @@
         └─StreamExchange { dist: Single }
           └─StreamStatelessSimpleAgg { aggs: [sum($expr1) filter((t.b < 100:Int32) AND ((t.b * 2:Int32) > 10:Int32))] }
             └─StreamProject { exprs: [t.b, (Length(t.a) * t.b) as $expr1, t._row_id] }
-              └─StreamTableScan { table: t, columns: [t.a, t.b, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+              └─StreamTableScan { table: t, columns: [t.a, t.b, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - sql: |
     create table t(v1 int, v2 int);
     with z(a, b) as (select count(distinct v1), count(v2) from t) select a from z;
@@ -1041,7 +1041,7 @@
     StreamMaterialize { columns: [cnt, i.x(hidden)], stream_key: [i.x], pk_columns: [i.x], pk_conflict: NoCheck }
     └─StreamProject { exprs: [count, i.x] }
       └─StreamHashAgg { group_key: [i.x], aggs: [count] }
-        └─StreamTableScan { table: i, columns: [i.x, i.t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [i.x, i.t._row_id], pk: [x, t._row_id], dist: UpstreamHashShard(i.x) }
+        └─StreamTableScan { table: i, columns: [i.x, i.t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [i.x, i.t._row_id], pk: [x, t._row_id], dist: UpstreamHashShard(i.x) }
 - name: distinct aggregates only have one distinct argument doesn't need expand
   sql: |
     create table t(x int, y int);
@@ -1323,7 +1323,7 @@
         └─StreamExchange { dist: Single }
           └─StreamStatelessSimpleAgg { aggs: [sum($expr1), sum(t.v1), count(t.v1)] }
             └─StreamProject { exprs: [(t.v1 * t.v1) as $expr1, t.v1, t._row_id] }
-              └─StreamTableScan { table: t, columns: [t.v1, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+              └─StreamTableScan { table: t, columns: [t.v1, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - name: stddev_samp with other columns
   sql: |
     select count(''), stddev_samp(1);
@@ -1361,7 +1361,7 @@
         └─StreamExchange { dist: HashShard(t.v1, t.v2, t.v3) }
           └─StreamHashAgg { group_key: [t.v1, t.v2, t.v3, _vnode], aggs: [min(t.v3), sum(t.v1), count] }
             └─StreamProject { exprs: [t.v1, t.v2, t.v3, t._row_id, Vnode(t._row_id) as _vnode] }
-              └─StreamTableScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+              └─StreamTableScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - name: enable two phase aggregation with simple agg should have two phase agg
   sql: |
     SET QUERY_MODE TO DISTRIBUTED;
@@ -1380,7 +1380,7 @@
         └─StreamExchange { dist: Single }
           └─StreamHashAgg { group_key: [_vnode], aggs: [min(t.v1), sum(t.v2), count] }
             └─StreamProject { exprs: [t.v1, t.v2, t._row_id, Vnode(t._row_id) as _vnode] }
-              └─StreamTableScan { table: t, columns: [t.v1, t.v2, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+              └─StreamTableScan { table: t, columns: [t.v1, t.v2, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - name: disable two phase aggregation with simple agg
   sql: |
     SET QUERY_MODE TO DISTRIBUTED;
@@ -1396,7 +1396,7 @@
     └─StreamProject { exprs: [min(t.v1), sum(t.v2)] }
       └─StreamSimpleAgg { aggs: [min(t.v1), sum(t.v2), count] }
         └─StreamExchange { dist: Single }
-          └─StreamTableScan { table: t, columns: [t.v1, t.v2, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+          └─StreamTableScan { table: t, columns: [t.v1, t.v2, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - name: force two phase agg with different distributions on inner and outer agg should have exchange
   sql: |
     set QUERY_MODE to DISTRIBUTED;
@@ -1440,7 +1440,7 @@
           └─StreamHashAgg { group_key: [internal_last_seen_value(lineitem.l_commitdate), _vnode], aggs: [max(internal_last_seen_value(lineitem.l_commitdate)), count] }
             └─StreamProject { exprs: [lineitem.l_orderkey, internal_last_seen_value(lineitem.l_commitdate), Vnode(lineitem.l_orderkey) as _vnode] }
               └─StreamHashAgg { group_key: [lineitem.l_orderkey], aggs: [internal_last_seen_value(lineitem.l_commitdate), count] }
-                └─StreamTableScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_commitdate], stream_scan_type: ArrangementBackfill, stream_key: [lineitem.l_orderkey], pk: [l_orderkey], dist: UpstreamHashShard(lineitem.l_orderkey) }
+                └─StreamTableScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_commitdate], stream_scan_type: SnapshotBackfill, stream_key: [lineitem.l_orderkey], pk: [l_orderkey], dist: UpstreamHashShard(lineitem.l_orderkey) }
 - name: two phase agg on hop window input should use two phase agg
   sql: |
     SET QUERY_MODE TO DISTRIBUTED;
@@ -1485,7 +1485,7 @@
                     └─StreamProject { exprs: [bid.auction, window_start, bid._row_id, Vnode(bid._row_id) as _vnode] }
                       └─StreamHopWindow { time_col: bid.date_time, slide: 00:00:02, size: 00:00:10, output: [bid.auction, window_start, bid._row_id] }
                         └─StreamFilter { predicate: IsNotNull(bid.date_time) }
-                          └─StreamTableScan { table: bid, columns: [bid.date_time, bid.auction, bid._row_id], stream_scan_type: ArrangementBackfill, stream_key: [bid._row_id], pk: [_row_id], dist: UpstreamHashShard(bid._row_id) }
+                          └─StreamTableScan { table: bid, columns: [bid.date_time, bid.auction, bid._row_id], stream_scan_type: SnapshotBackfill, stream_key: [bid._row_id], pk: [_row_id], dist: UpstreamHashShard(bid._row_id) }
 - name: two phase agg with stream SomeShard (via index) but pk satisfies output dist should use shuffle agg
   sql: |
     SET QUERY_MODE TO DISTRIBUTED;
@@ -1507,7 +1507,7 @@
         └─StreamExchange { dist: HashShard(idx.id) }
           └─StreamHashAgg { group_key: [idx.id, _vnode], aggs: [count] }
             └─StreamProject { exprs: [idx.id, idx.col, Vnode(idx.col) as _vnode] }
-              └─StreamTableScan { table: idx, columns: [idx.id, idx.col], stream_scan_type: ArrangementBackfill, stream_key: [idx.col, idx.id], pk: [col, id], dist: UpstreamHashShard(idx.col) }
+              └─StreamTableScan { table: idx, columns: [idx.id, idx.col], stream_scan_type: SnapshotBackfill, stream_key: [idx.col, idx.id], pk: [col, id], dist: UpstreamHashShard(idx.col) }
 - name: two phase agg with stream SomeShard (via index) but pk does not satisfy output dist should use two phase agg
   sql: |
     SET QUERY_MODE TO DISTRIBUTED;
@@ -1529,7 +1529,7 @@
         └─StreamExchange { dist: HashShard(idx.col1) }
           └─StreamHashAgg { group_key: [idx.col1, _vnode], aggs: [count] }
             └─StreamProject { exprs: [idx.col1, idx.id, Vnode(idx.id) as _vnode] }
-              └─StreamTableScan { table: idx, columns: [idx.col1, idx.id], stream_scan_type: ArrangementBackfill, stream_key: [idx.id], pk: [id], dist: UpstreamHashShard(idx.id) }
+              └─StreamTableScan { table: idx, columns: [idx.col1, idx.id], stream_scan_type: SnapshotBackfill, stream_key: [idx.id], pk: [id], dist: UpstreamHashShard(idx.id) }
 - name: sort agg on an ascending index
   sql: |
     create table t (a int, b int);
@@ -1687,7 +1687,7 @@
     └─StreamProject { exprs: [first_value(t.x order_by(t.y ASC))] }
       └─StreamSimpleAgg { aggs: [first_value(t.x order_by(t.y ASC)), count] }
         └─StreamExchange { dist: Single }
-          └─StreamTableScan { table: t, columns: [t.x, t.y, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+          └─StreamTableScan { table: t, columns: [t.x, t.y, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [first_value], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
@@ -1697,19 +1697,24 @@
             └── StreamExchange Single from 1
 
     Fragment 1
-    StreamTableScan { table: t, columns: [t.x, t.y, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+    StreamTableScan { table: t, columns: [t.x, t.y, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
     ├── tables: [ StreamScan: 2 ]
     ├── Upstream
     └── BatchPlanNode
 
     Table 0 { columns: [ t_y, t__row_id, t_x, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 0 }
 
-    Table 1 { columns: [ first_value(t_x order_by(t_y ASC)), count, _rw_timestamp ], primary key: [], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 0 }
+    Table 1
+    ├── columns: [ first_value(t_x order_by(t_y ASC)), count, _rw_timestamp ]
+    ├── primary key: []
+    ├── value indices: [ 0, 1 ]
+    ├── distribution key: []
+    └── read pk prefix len hint: 0
 
     Table 2
-    ├── columns: [ vnode, _row_id, backfill_finished, row_count, _rw_timestamp ]
+    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, _row_id, _rw_timestamp ]
     ├── primary key: [ $0 ASC ]
-    ├── value indices: [ 1, 2, 3 ]
+    ├── value indices: [ 1, 2, 3, 4 ]
     ├── distribution key: [ 0 ]
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
@@ -1728,7 +1733,7 @@
             └── StreamExchange Single from 1
 
     Fragment 1
-    StreamTableScan { table: t, columns: [t.x, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+    StreamTableScan { table: t, columns: [t.x, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
     ├── tables: [ StreamScan: 3 ]
     ├── Upstream
     └── BatchPlanNode
@@ -1745,9 +1750,9 @@
     Table 2 { columns: [ t_x, count_for_agg_call_0, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1 ], distribution key: [], read pk prefix len hint: 1 }
 
     Table 3
-    ├── columns: [ vnode, _row_id, backfill_finished, row_count, _rw_timestamp ]
+    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, _row_id, _rw_timestamp ]
     ├── primary key: [ $0 ASC ]
-    ├── value indices: [ 1, 2, 3 ]
+    ├── value indices: [ 1, 2, 3, 4 ]
     ├── distribution key: [ 0 ]
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
@@ -1766,7 +1771,7 @@
     └─StreamProject { exprs: [last_value(t.x order_by(t.y DESC NULLS LAST))] }
       └─StreamSimpleAgg { aggs: [last_value(t.x order_by(t.y DESC NULLS LAST)), count] }
         └─StreamExchange { dist: Single }
-          └─StreamTableScan { table: t, columns: [t.x, t.y, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+          └─StreamTableScan { table: t, columns: [t.x, t.y, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - sql: |
     CREATE TABLE integers(i INTEGER);
     SELECT count(DISTINCT i) FROM integers;
@@ -1789,7 +1794,7 @@
     StreamMaterialize { columns: [count, t.id(hidden)], stream_key: [t.id], pk_columns: [t.id], pk_conflict: NoCheck }
     └─StreamProject { exprs: [count, t.id] }
       └─StreamHashAgg { group_key: [t.id], aggs: [count] }
-        └─StreamTableScan { table: t, columns: [t.id], stream_scan_type: ArrangementBackfill, stream_key: [t.id], pk: [id], dist: UpstreamHashShard(t.id) }
+        └─StreamTableScan { table: t, columns: [t.id], stream_scan_type: SnapshotBackfill, stream_key: [t.id], pk: [id], dist: UpstreamHashShard(t.id) }
 - sql: |
     CREATE TABLE t (a int, b int);
     SELECT a, sum((sum(b))) OVER (PARTITION BY a ORDER BY a) FROM t GROUP BY a;
@@ -1808,7 +1813,7 @@
         └─StreamProject { exprs: [t.a, sum(t.b)] }
           └─StreamHashAgg { group_key: [t.a], aggs: [sum(t.b), count] }
             └─StreamExchange { dist: HashShard(t.a) }
-              └─StreamTableScan { table: t, columns: [t.a, t.b, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+              └─StreamTableScan { table: t, columns: [t.a, t.b, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - sql: |
     CREATE TABLE t (a int, b int);
     SELECT a, row_number() OVER (PARTITION BY a ORDER BY a DESC) FROM t GROUP BY a;
@@ -1825,7 +1830,7 @@
       └─StreamProject { exprs: [t.a], noop_update_hint: true }
         └─StreamHashAgg { group_key: [t.a], aggs: [count] }
           └─StreamExchange { dist: HashShard(t.a) }
-            └─StreamTableScan { table: t, columns: [t.a, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+            └─StreamTableScan { table: t, columns: [t.a, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - sql: |
     CREATE TABLE t (a int, b int, c int);
     SELECT a, b, sum(sum(c)) OVER (PARTITION BY a ORDER BY b)
@@ -1848,7 +1853,7 @@
           └─StreamProject { exprs: [t.a, t.b, sum(t.c)] }
             └─StreamHashAgg { group_key: [t.a, t.b], aggs: [sum(t.c), count] }
               └─StreamExchange { dist: HashShard(t.a, t.b) }
-                └─StreamTableScan { table: t, columns: [t.a, t.b, t.c, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+                └─StreamTableScan { table: t, columns: [t.a, t.b, t.c, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - sql: |
     CREATE TABLE t (a int, b int, c int, d int, e int);
     SELECT a, b, sum(sum(c)) OVER (PARTITION BY a, avg(d) ORDER BY max(e), b)
@@ -1872,7 +1877,7 @@
           └─StreamProject { exprs: [t.a, t.b, sum(t.c), max(t.e), (sum(t.d)::Decimal / count(t.d)::Decimal) as $expr1] }
             └─StreamHashAgg { group_key: [t.a, t.b], aggs: [sum(t.c), sum(t.d), count(t.d), max(t.e), count] }
               └─StreamExchange { dist: HashShard(t.a, t.b) }
-                └─StreamTableScan { table: t, columns: [t.a, t.b, t.c, t.d, t.e, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+                └─StreamTableScan { table: t, columns: [t.a, t.b, t.c, t.d, t.e, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - name: test duplicate agg
   sql: |
     CREATE TABLE t (v1 int);
@@ -1888,7 +1893,7 @@
       └─StreamSimpleAgg [append_only] { aggs: [sum(sum(t.v1)), sum0(count(t.v1)), count] }
         └─StreamExchange { dist: Single }
           └─StreamStatelessSimpleAgg { aggs: [sum(t.v1), count(t.v1)] }
-            └─StreamTableScan { table: t, columns: [t.v1, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+            └─StreamTableScan { table: t, columns: [t.v1, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - name: test simple approx_percentile alone
   sql: |
     CREATE TABLE t (v1 int);
@@ -1909,7 +1914,7 @@
       └─StreamExchange { dist: Single }
         └─StreamLocalApproxPercentile { percentile_col: $expr1, quantile: 0.5:Float64, relative_error: 0.01:Float64 }
           └─StreamProject { exprs: [t.v1::Float64 as $expr1, t._row_id] }
-            └─StreamTableScan { table: t, columns: [t.v1, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+            └─StreamTableScan { table: t, columns: [t.v1, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - name: test simple approx_percentile with other simple aggs
   sql: |
     CREATE TABLE t (v1 int);
@@ -1932,13 +1937,13 @@
       │   └─StreamLocalApproxPercentile { percentile_col: $expr1, quantile: 0.5:Float64, relative_error: 0.01:Float64 }
       │     └─StreamShare { id: 2 }
       │       └─StreamProject { exprs: [t.v1::Float64 as $expr1, t.v1, t._row_id] }
-      │         └─StreamTableScan { table: t, columns: [t.v1, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+      │         └─StreamTableScan { table: t, columns: [t.v1, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
       └─StreamSimpleAgg [append_only] { aggs: [sum(sum(t.v1)), count], must_output_per_barrier: true }
         └─StreamExchange { dist: Single }
           └─StreamStatelessSimpleAgg { aggs: [sum(t.v1)] }
             └─StreamShare { id: 2 }
               └─StreamProject { exprs: [t.v1::Float64 as $expr1, t.v1, t._row_id] }
-                └─StreamTableScan { table: t, columns: [t.v1, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+                └─StreamTableScan { table: t, columns: [t.v1, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - name: test simple approx_percentile with other simple aggs (sum, count)
   sql: |
     CREATE TABLE t (v1 int);
@@ -1963,13 +1968,13 @@
         │   └─StreamLocalApproxPercentile { percentile_col: $expr1, quantile: 0.5:Float64, relative_error: 0.01:Float64 }
         │     └─StreamShare { id: 2 }
         │       └─StreamProject { exprs: [t.v1, t.v1::Float64 as $expr1, t._row_id] }
-        │         └─StreamTableScan { table: t, columns: [t.v1, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+        │         └─StreamTableScan { table: t, columns: [t.v1, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
         └─StreamSimpleAgg [append_only] { aggs: [sum(sum(t.v1)), sum0(count(t.v1)), count], must_output_per_barrier: true }
           └─StreamExchange { dist: Single }
             └─StreamStatelessSimpleAgg { aggs: [sum(t.v1), count(t.v1)] }
               └─StreamShare { id: 2 }
                 └─StreamProject { exprs: [t.v1, t.v1::Float64 as $expr1, t._row_id] }
-                  └─StreamTableScan { table: t, columns: [t.v1, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+                  └─StreamTableScan { table: t, columns: [t.v1, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - name: test simple approx_percentile with duplicate approx_percentile
   sql: |
     CREATE TABLE t (v1 int);
@@ -1986,7 +1991,7 @@
         └─StreamExchange { dist: Single }
           └─StreamLocalApproxPercentile { percentile_col: $expr1, quantile: 0.5:Float64, relative_error: 0.01:Float64 }
             └─StreamProject { exprs: [t.v1::Float64 as $expr1, t._row_id] }
-              └─StreamTableScan { table: t, columns: [t.v1, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+              └─StreamTableScan { table: t, columns: [t.v1, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - name: test simple approx_percentile with different approx_percentile
   sql: |
     CREATE TABLE t (v1 int, v2 int);
@@ -2009,13 +2014,13 @@
       │   └─StreamLocalApproxPercentile { percentile_col: $expr1, quantile: 0.5:Float64, relative_error: 0.01:Float64 }
       │     └─StreamShare { id: 2 }
       │       └─StreamProject { exprs: [t.v1::Float64 as $expr1, t.v2::Float64 as $expr2, t._row_id] }
-      │         └─StreamTableScan { table: t, columns: [t.v1, t.v2, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+      │         └─StreamTableScan { table: t, columns: [t.v1, t.v2, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
       └─StreamGlobalApproxPercentile { quantile: 0.5:Float64, relative_error: 0.01:Float64 }
         └─StreamExchange { dist: Single }
           └─StreamLocalApproxPercentile { percentile_col: $expr2, quantile: 0.5:Float64, relative_error: 0.01:Float64 }
             └─StreamShare { id: 2 }
               └─StreamProject { exprs: [t.v1::Float64 as $expr1, t.v2::Float64 as $expr2, t._row_id] }
-                └─StreamTableScan { table: t, columns: [t.v1, t.v2, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+                └─StreamTableScan { table: t, columns: [t.v1, t.v2, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - name: test simple approx_percentile with different approx_percentile interleaved with stateless simple aggs
   sql: |
     CREATE TABLE t (v1 int, v2 int);
@@ -2041,19 +2046,19 @@
         │ │   └─StreamLocalApproxPercentile { percentile_col: $expr1, quantile: 0.5:Float64, relative_error: 0.01:Float64 }
         │ │     └─StreamShare { id: 2 }
         │ │       └─StreamProject { exprs: [t.v1, t.v1::Float64 as $expr1, t.v2, t.v2::Float64 as $expr2, t._row_id] }
-        │ │         └─StreamTableScan { table: t, columns: [t.v1, t.v2, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+        │ │         └─StreamTableScan { table: t, columns: [t.v1, t.v2, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
         │ └─StreamGlobalApproxPercentile { quantile: 0.9:Float64, relative_error: 0.01:Float64 }
         │   └─StreamExchange { dist: Single }
         │     └─StreamLocalApproxPercentile { percentile_col: $expr2, quantile: 0.9:Float64, relative_error: 0.01:Float64 }
         │       └─StreamShare { id: 2 }
         │         └─StreamProject { exprs: [t.v1, t.v1::Float64 as $expr1, t.v2, t.v2::Float64 as $expr2, t._row_id] }
-        │           └─StreamTableScan { table: t, columns: [t.v1, t.v2, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+        │           └─StreamTableScan { table: t, columns: [t.v1, t.v2, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
         └─StreamSimpleAgg [append_only] { aggs: [sum(sum(t.v1)), sum0(count), sum(sum(t.v2)), count], must_output_per_barrier: true }
           └─StreamExchange { dist: Single }
             └─StreamStatelessSimpleAgg { aggs: [sum(t.v1), count, sum(t.v2)] }
               └─StreamShare { id: 2 }
                 └─StreamProject { exprs: [t.v1, t.v1::Float64 as $expr1, t.v2, t.v2::Float64 as $expr2, t._row_id] }
-                  └─StreamTableScan { table: t, columns: [t.v1, t.v2, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+                  └─StreamTableScan { table: t, columns: [t.v1, t.v2, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - name: test simple approx_percentile with duplicated approx_percentile interleaved with stateless simple aggs
   sql: |
     CREATE TABLE t (v1 int, v2 int);
@@ -2079,19 +2084,19 @@
         │ │   └─StreamLocalApproxPercentile { percentile_col: $expr1, quantile: 0.5:Float64, relative_error: 0.01:Float64 }
         │ │     └─StreamShare { id: 2 }
         │ │       └─StreamProject { exprs: [t.v1, t.v1::Float64 as $expr1, t.v2, t.v2::Float64 as $expr2, t._row_id] }
-        │ │         └─StreamTableScan { table: t, columns: [t.v1, t.v2, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+        │ │         └─StreamTableScan { table: t, columns: [t.v1, t.v2, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
         │ └─StreamGlobalApproxPercentile { quantile: 0.5:Float64, relative_error: 0.01:Float64 }
         │   └─StreamExchange { dist: Single }
         │     └─StreamLocalApproxPercentile { percentile_col: $expr2, quantile: 0.5:Float64, relative_error: 0.01:Float64 }
         │       └─StreamShare { id: 2 }
         │         └─StreamProject { exprs: [t.v1, t.v1::Float64 as $expr1, t.v2, t.v2::Float64 as $expr2, t._row_id] }
-        │           └─StreamTableScan { table: t, columns: [t.v1, t.v2, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+        │           └─StreamTableScan { table: t, columns: [t.v1, t.v2, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
         └─StreamSimpleAgg [append_only] { aggs: [sum(sum(t.v1)), sum0(count), sum(sum(t.v2)), count], must_output_per_barrier: true }
           └─StreamExchange { dist: Single }
             └─StreamStatelessSimpleAgg { aggs: [sum(t.v1), count, sum(t.v2)] }
               └─StreamShare { id: 2 }
                 └─StreamProject { exprs: [t.v1, t.v1::Float64 as $expr1, t.v2, t.v2::Float64 as $expr2, t._row_id] }
-                  └─StreamTableScan { table: t, columns: [t.v1, t.v2, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+                  └─StreamTableScan { table: t, columns: [t.v1, t.v2, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - name: test simple approx_percentile with descending order
   sql: |
     CREATE TABLE t (v1 int, v2 int);
@@ -2114,13 +2119,13 @@
       │   └─StreamLocalApproxPercentile { percentile_col: $expr1, quantile: 0.8:Float64, relative_error: 0.01:Float64 }
       │     └─StreamShare { id: 2 }
       │       └─StreamProject { exprs: [t.v1, t.v1::Float64 as $expr1, t._row_id] }
-      │         └─StreamTableScan { table: t, columns: [t.v1, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+      │         └─StreamTableScan { table: t, columns: [t.v1, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
       └─StreamSimpleAgg [append_only] { aggs: [sum(sum(t.v1)), count], must_output_per_barrier: true }
         └─StreamExchange { dist: Single }
           └─StreamStatelessSimpleAgg { aggs: [sum(t.v1)] }
             └─StreamShare { id: 2 }
               └─StreamProject { exprs: [t.v1, t.v1::Float64 as $expr1, t._row_id] }
-                └─StreamTableScan { table: t, columns: [t.v1, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+                └─StreamTableScan { table: t, columns: [t.v1, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - name: test simple approx_percentile with different approx_percentile interleaved with stateless + stateful simple aggs
   sql: |
     CREATE TABLE t (v1 int, v2 int);
@@ -2144,18 +2149,18 @@
       │ │   └─StreamLocalApproxPercentile { percentile_col: $expr1, quantile: 0.5:Float64, relative_error: 0.01:Float64 }
       │ │     └─StreamShare { id: 2 }
       │ │       └─StreamProject { exprs: [t.v1, t.v1::Float64 as $expr1, t.v2, t.v2::Float64 as $expr2, t._row_id] }
-      │ │         └─StreamTableScan { table: t, columns: [t.v1, t.v2, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+      │ │         └─StreamTableScan { table: t, columns: [t.v1, t.v2, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
       │ └─StreamGlobalApproxPercentile { quantile: 0.5:Float64, relative_error: 0.01:Float64 }
       │   └─StreamExchange { dist: Single }
       │     └─StreamLocalApproxPercentile { percentile_col: $expr2, quantile: 0.5:Float64, relative_error: 0.01:Float64 }
       │       └─StreamShare { id: 2 }
       │         └─StreamProject { exprs: [t.v1, t.v1::Float64 as $expr1, t.v2, t.v2::Float64 as $expr2, t._row_id] }
-      │           └─StreamTableScan { table: t, columns: [t.v1, t.v2, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+      │           └─StreamTableScan { table: t, columns: [t.v1, t.v2, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
       └─StreamSimpleAgg { aggs: [sum(sum(t.v1)), sum0(count), max(max(t.v2)), count], must_output_per_barrier: true }
         └─StreamExchange { dist: Single }
           └─StreamHashAgg { group_key: [_vnode], aggs: [sum(t.v1), count, max(t.v2)] }
             └─StreamProject { exprs: [t.v1, t.v1::Float64 as $expr3, t.v2, t.v2::Float64 as $expr4, t._row_id, Vnode(t._row_id) as _vnode] }
-              └─StreamTableScan { table: t, columns: [t.v1, t.v2, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+              └─StreamTableScan { table: t, columns: [t.v1, t.v2, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - name: test hash approx_percentile
   sql: |
     CREATE TABLE t (v1 int, v2 int);
@@ -2178,7 +2183,7 @@
       └─StreamHashAgg { group_key: [t.v2], aggs: [approx_percentile($expr1), count] }
         └─StreamExchange { dist: HashShard(t.v2) }
           └─StreamProject { exprs: [t.v2, t.v1::Float64 as $expr1, t._row_id] }
-            └─StreamTableScan { table: t, columns: [t.v1, t.v2, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+            └─StreamTableScan { table: t, columns: [t.v1, t.v2, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - name: test approx_percentile hash_agg forced should use single phase agg
   sql: |
     SET RW_FORCE_TWO_PHASE_AGG=true;
@@ -2207,7 +2212,7 @@
       └─StreamExchange { dist: Single }
         └─StreamLocalApproxPercentile { percentile_col: $expr1, quantile: 0.5:Float64, relative_error: 0.01:Float64 }
           └─StreamProject { exprs: [t.v1::Float64 as $expr1, t._row_id] }
-            └─StreamTableScan { table: t, columns: [t.v1, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+            └─StreamTableScan { table: t, columns: [t.v1, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - name: test approx percentile with invalid relative_error
   sql: |
     CREATE TABLE t (v1 int);
@@ -2260,7 +2265,7 @@
     FROM with_0
     WHERE false;
   logical_plan: |-
-    LogicalProject { exprs: [null:Struct(StructType { fields: [("a", Int16), ("b", Float64), ("c", Time)] }), 995:Int32, '-168:00:00':Interval, 294:Float64] }
+    LogicalProject { exprs: [null:Struct(a:Int16, b:Float64, c:Time), 995:Int32, '-168:00:00':Interval, 294:Float64] }
     └─LogicalFilter { predicate: false:Boolean }
       └─LogicalShare { id: 7 }
         └─LogicalProject { exprs: [true:Boolean, -2147483600:Float32, -10773:Int16] }
@@ -2273,6 +2278,6 @@
   batch_plan: 'BatchValues { rows: [] }'
   stream_plan: |-
     StreamMaterialize { columns: [col_0, col_1, col_2, col_3, _row_id(hidden)], stream_key: [_row_id], pk_columns: [_row_id], pk_conflict: NoCheck }
-    └─StreamProject { exprs: [null:Struct(StructType { fields: [("a", Int16), ("b", Float64), ("c", Time)] }), 995:Int32, '-168:00:00':Interval, 294:Float64, _row_id] }
+    └─StreamProject { exprs: [null:Struct(a:Int16, b:Float64, c:Time), 995:Int32, '-168:00:00':Interval, 294:Float64, _row_id] }
       └─StreamFilter { predicate: false:Boolean }
         └─StreamValues { rows: [[0:Int64]] }

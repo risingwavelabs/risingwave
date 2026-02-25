@@ -26,7 +26,7 @@ use risingwave_meta::controller::utils::FragmentDesc;
 use risingwave_meta::manager::MetadataManager;
 use risingwave_meta::stream::{GlobalRefreshManagerRef, SourceManagerRunningInfo};
 use risingwave_meta::{MetaError, model};
-use risingwave_meta_model::{ConnectionId, FragmentId, StreamingParallelism};
+use risingwave_meta_model::{ConnectionId, FragmentId, SourceId, StreamingParallelism};
 use risingwave_pb::common::ThrottleType;
 use risingwave_pb::meta::alter_connector_props_request::AlterConnectorPropsObject;
 use risingwave_pb::meta::cancel_creating_jobs_request::Jobs;
@@ -89,7 +89,7 @@ impl StreamManagerService for StreamServiceImpl {
         let version_id = self.barrier_scheduler.flush(req.database_id).await?;
         Ok(Response::new(FlushResponse {
             status: None,
-            hummock_version_id: version_id.to_u64(),
+            hummock_version_id: version_id,
         }))
     }
 
@@ -300,10 +300,8 @@ impl StreamManagerService for StreamServiceImpl {
                                     id: actor.actor_id,
                                     node: Some(fragment.nodes.clone()),
                                     dispatcher: dispatchers
-                                        .get_mut(&(fragment.fragment_id as _))
-                                        .and_then(|dispatchers| {
-                                            dispatchers.remove(&(actor.actor_id as _))
-                                        })
+                                        .get_mut(&fragment.fragment_id)
+                                        .and_then(|dispatchers| dispatchers.remove(&actor.actor_id))
                                         .unwrap_or_default(),
                                 })
                                 .collect_vec(),
@@ -371,14 +369,21 @@ impl StreamManagerService for StreamServiceImpl {
         &self,
         _request: Request<ListFragmentDistributionRequest>,
     ) -> Result<Response<ListFragmentDistributionResponse>, Status> {
-        let distributions = self
-            .metadata_manager
-            .catalog_controller
-            .list_fragment_descs(false)
-            .await?
-            .into_iter()
-            .map(|(dist, _)| dist)
-            .collect();
+        let include_node = _request.into_inner().include_node.unwrap_or(true);
+        let distributions = if include_node {
+            self.metadata_manager
+                .catalog_controller
+                .list_fragment_descs_with_node(false)
+                .await?
+        } else {
+            self.metadata_manager
+                .catalog_controller
+                .list_fragment_descs_without_node(false)
+                .await?
+        }
+        .into_iter()
+        .map(|(dist, _)| dist)
+        .collect();
 
         Ok(Response::new(ListFragmentDistributionResponse {
             distributions,
@@ -389,18 +394,46 @@ impl StreamManagerService for StreamServiceImpl {
         &self,
         _request: Request<ListCreatingFragmentDistributionRequest>,
     ) -> Result<Response<ListCreatingFragmentDistributionResponse>, Status> {
-        let distributions = self
-            .metadata_manager
-            .catalog_controller
-            .list_fragment_descs(true)
-            .await?
-            .into_iter()
-            .map(|(dist, _)| dist)
-            .collect();
+        let include_node = _request.into_inner().include_node.unwrap_or(true);
+        let distributions = if include_node {
+            self.metadata_manager
+                .catalog_controller
+                .list_fragment_descs_with_node(true)
+                .await?
+        } else {
+            self.metadata_manager
+                .catalog_controller
+                .list_fragment_descs_without_node(true)
+                .await?
+        }
+        .into_iter()
+        .map(|(dist, _)| dist)
+        .collect();
 
         Ok(Response::new(ListCreatingFragmentDistributionResponse {
             distributions,
         }))
+    }
+
+    async fn list_sink_log_store_tables(
+        &self,
+        _request: Request<ListSinkLogStoreTablesRequest>,
+    ) -> Result<Response<ListSinkLogStoreTablesResponse>, Status> {
+        let tables = self
+            .metadata_manager
+            .catalog_controller
+            .list_sink_log_store_tables()
+            .await?
+            .into_iter()
+            .map(|(sink_id, internal_table_id)| {
+                list_sink_log_store_tables_response::SinkLogStoreTable {
+                    sink_id: sink_id.as_raw_id(),
+                    internal_table_id: internal_table_id.as_raw_id(),
+                }
+            })
+            .collect();
+
+        Ok(Response::new(ListSinkLogStoreTablesResponse { tables }))
     }
 
     async fn get_fragment_by_id(
@@ -413,8 +446,8 @@ impl StreamManagerService for StreamServiceImpl {
             .catalog_controller
             .get_fragment_desc_by_id(req.fragment_id)
             .await?;
-        let distribution =
-            fragment_desc.map(|(desc, upstreams)| fragment_desc_to_distribution(desc, upstreams));
+        let distribution = fragment_desc
+            .map(|(desc, upstreams)| fragment_desc_to_distribution(desc, upstreams, true));
         Ok(Response::new(GetFragmentByIdResponse { distribution }))
     }
 
@@ -497,21 +530,6 @@ impl StreamManagerService for StreamServiceImpl {
         Ok(Response::new(ListActorStatesResponse { states }))
     }
 
-    async fn list_object_dependencies(
-        &self,
-        _request: Request<ListObjectDependenciesRequest>,
-    ) -> Result<Response<ListObjectDependenciesResponse>, Status> {
-        let dependencies = self
-            .metadata_manager
-            .catalog_controller
-            .list_created_object_dependencies()
-            .await?;
-
-        Ok(Response::new(ListObjectDependenciesResponse {
-            dependencies,
-        }))
-    }
-
     async fn recover(
         &self,
         _request: Request<RecoverRequest>,
@@ -541,7 +559,7 @@ impl StreamManagerService for StreamServiceImpl {
             let guard = self.env.shared_actor_infos().read_guard();
             guard
                 .iter_over_fragments()
-                .filter(|(frag_id, _)| all_fragment_ids.contains(frag_id))
+                .filter(|(frag_id, _)| all_fragment_ids.contains(*frag_id))
                 .flat_map(|(fragment_id, fragment_info)| {
                     fragment_info
                         .actors
@@ -561,11 +579,7 @@ impl StreamManagerService for StreamServiceImpl {
         let fragment_to_source: HashMap<_, _> = source_fragments
             .into_iter()
             .flat_map(|(source_id, fragment_ids)| {
-                let source_type = if is_shared_source
-                    .get(&(source_id as _))
-                    .copied()
-                    .unwrap_or(false)
-                {
+                let source_type = if is_shared_source.get(&source_id).copied().unwrap_or(false) {
                     FragmentType::SharedSource
                 } else {
                     FragmentType::NonSharedSource
@@ -598,12 +612,12 @@ impl StreamManagerService for StreamServiceImpl {
             .into_iter()
             .flat_map(|(actor_id, fragment_id)| {
                 let (source_id, fragment_type) = fragment_to_source
-                    .get(&(fragment_id as _))
+                    .get(&fragment_id)
                     .copied()
                     .unwrap_or_default();
 
                 actor_splits
-                    .remove(&(actor_id as _))
+                    .remove(&actor_id)
                     .unwrap_or_default()
                     .into_iter()
                     .map(move |split| list_actor_splits_response::ActorSplit {
@@ -692,6 +706,7 @@ impl StreamManagerService for StreamServiceImpl {
                         request.object_id.into(),
                         request.changed_props.clone().into_iter().collect(),
                         request.changed_secret_refs.clone().into_iter().collect(),
+                        false, // SQL ALTER SOURCE enforces alter-on-fly check
                     )
                     .await?;
 
@@ -871,12 +886,180 @@ impl StreamManagerService for StreamServiceImpl {
             tables: unmigrated_tables,
         }))
     }
+
+    /// Orchestrated source property update with pause/update/resume workflow.
+    /// This is the "safe" version that pauses sources before updating and resumes after.
+    async fn alter_source_properties_safe(
+        &self,
+        request: Request<AlterSourcePropertiesSafeRequest>,
+    ) -> Result<Response<AlterSourcePropertiesSafeResponse>, Status> {
+        let request = request.into_inner();
+        let source_id = request.source_id;
+        let options = request.options.unwrap_or_default();
+
+        tracing::info!(
+            source_id = source_id,
+            reset_splits = options.reset_splits,
+            "Starting orchestrated source property update"
+        );
+
+        // Get the database ID for the source
+        let database_id = self
+            .metadata_manager
+            .catalog_controller
+            .get_object_database_id(SourceId::from(source_id))
+            .await?;
+
+        // Step 1: Pause the stream (already commits state)
+        tracing::info!(source_id = source_id, "Pausing stream");
+        self.barrier_scheduler
+            .run_command(database_id, Command::Pause)
+            .await?;
+
+        // Step 2: Update catalog and get the new properties
+        let result = async {
+            let secret_manager = LocalSecretManager::global();
+
+            let options_with_secret = self
+                .metadata_manager
+                .catalog_controller
+                .update_source_props_by_source_id(
+                    source_id.into(),
+                    request.changed_props.clone().into_iter().collect(),
+                    request.changed_secret_refs.clone().into_iter().collect(),
+                    true, // risectl admin operation skips alter-on-fly check
+                )
+                .await?;
+
+            // Validate the source
+            self.stream_manager
+                .source_manager
+                .validate_source_once(source_id.into(), options_with_secret.clone())
+                .await?;
+
+            let (props, secret_refs) = options_with_secret.into_parts();
+            let new_props_plaintext: HashMap<String, String> = secret_manager
+                .fill_secrets(props, secret_refs)
+                .map_err(MetaError::from)?
+                .into_iter()
+                .collect();
+
+            // Step 3: Issue ConnectorPropsChange barrier
+            tracing::info!(
+                source_id = source_id,
+                "Issuing ConnectorPropsChange barrier"
+            );
+            let mut mutation = HashMap::default();
+            mutation.insert(source_id.into(), new_props_plaintext);
+            self.barrier_scheduler
+                .run_command(database_id, Command::ConnectorPropsChange(mutation))
+                .await?;
+
+            // Step 4: Optional split reset
+            if options.reset_splits {
+                tracing::info!(source_id = source_id, "Resetting source splits");
+                self.stream_manager
+                    .source_manager
+                    .reset_source_splits(source_id.into())
+                    .await?;
+            }
+
+            Ok::<_, MetaError>(())
+        }
+        .await;
+
+        // Step 5: Resume the stream (even if previous steps failed)
+        tracing::info!(source_id = source_id, "Resuming stream");
+        let resume_result = self
+            .barrier_scheduler
+            .run_command(database_id, Command::Resume)
+            .await;
+
+        // Return the first error if any
+        result?;
+        resume_result?;
+
+        tracing::info!(
+            source_id = source_id,
+            "Orchestrated source property update completed successfully"
+        );
+
+        Ok(Response::new(AlterSourcePropertiesSafeResponse {}))
+    }
+
+    /// Reset source split assignments (UNSAFE - admin only).
+    /// This clears persisted split metadata and triggers re-discovery.
+    async fn reset_source_splits(
+        &self,
+        request: Request<ResetSourceSplitsRequest>,
+    ) -> Result<Response<ResetSourceSplitsResponse>, Status> {
+        let request = request.into_inner();
+        let source_id = request.source_id;
+
+        tracing::warn!(
+            source_id = source_id,
+            "UNSAFE: Resetting source splits - this may cause data duplication or loss"
+        );
+
+        self.stream_manager
+            .source_manager
+            .reset_source_splits(source_id.into())
+            .await?;
+
+        Ok(Response::new(ResetSourceSplitsResponse {}))
+    }
+
+    /// Inject specific offsets into source splits (UNSAFE - admin only).
+    /// This can cause data duplication or loss depending on the correctness of the provided offsets.
+    async fn inject_source_offsets(
+        &self,
+        request: Request<InjectSourceOffsetsRequest>,
+    ) -> Result<Response<InjectSourceOffsetsResponse>, Status> {
+        let request = request.into_inner();
+        let source_id = request.source_id;
+        let split_offsets = request.split_offsets;
+
+        // Validate split IDs exist before proceeding
+        let applied_split_ids = self
+            .stream_manager
+            .source_manager
+            .validate_inject_source_offsets(source_id.into(), &split_offsets)
+            .await?;
+
+        tracing::warn!(
+            source_id = source_id,
+            num_offsets = split_offsets.len(),
+            "UNSAFE: Injecting source offsets - this may cause data duplication or loss"
+        );
+
+        let database_id = self
+            .metadata_manager
+            .catalog_controller
+            .get_object_database_id(SourceId::from(source_id))
+            .await?;
+
+        self.barrier_scheduler
+            .run_command(
+                database_id,
+                Command::InjectSourceOffsets {
+                    source_id: SourceId::from(source_id),
+                    split_offsets,
+                },
+            )
+            .await?;
+
+        Ok(Response::new(InjectSourceOffsetsResponse {
+            applied_split_ids,
+        }))
+    }
 }
 
 fn fragment_desc_to_distribution(
     fragment_desc: FragmentDesc,
     upstreams: Vec<FragmentId>,
+    include_node: bool,
 ) -> FragmentDistribution {
+    let node = include_node.then(|| fragment_desc.stream_node.to_protobuf());
     FragmentDistribution {
         fragment_id: fragment_desc.fragment_id,
         table_id: fragment_desc.job_id,
@@ -886,7 +1069,7 @@ fn fragment_desc_to_distribution(
         fragment_type_mask: fragment_desc.fragment_type_mask as _,
         parallelism: fragment_desc.parallelism as _,
         vnode_count: fragment_desc.vnode_count as _,
-        node: Some(fragment_desc.stream_node.to_protobuf()),
+        node,
         parallelism_policy: fragment_desc.parallelism_policy,
     }
 }

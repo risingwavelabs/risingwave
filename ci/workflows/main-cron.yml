@@ -106,7 +106,7 @@ steps:
       plugins:
         - docker-compose#v5.5.0: *docker-compose-standard
         - ./ci/plugins/upload-failure-logs
-      timeout_in_minutes: 35
+      timeout_in_minutes: 45
       retry: *auto-retry
     - label: "end-to-end preload-memory test"
       key: "e2e-preload-memory-test-release"
@@ -120,6 +120,7 @@ steps:
         - docker-compose#v5.5.0: *docker-compose-standard
         - ./ci/plugins/upload-failure-logs
       timeout_in_minutes: 35
+      parallelism: 4
       retry: *auto-retry
 
     - label: "slow end-to-end test ({{matrix.backend}} backend)"
@@ -160,7 +161,7 @@ steps:
             files: "*-junit.xml"
             format: "junit"
         - ./ci/plugins/upload-failure-logs
-      timeout_in_minutes: 18
+      timeout_in_minutes: 25
       retry: *auto-retry
 
   - group: "end-to-end connector test (release)"
@@ -181,7 +182,25 @@ steps:
             <<: *docker-compose
             run: source-test-env
         - ./ci/plugins/upload-failure-logs
-      timeout_in_minutes: 30
+      timeout_in_minutes: 40
+      retry: *auto-retry
+
+    - label: "end-to-end source cron_only test"
+      key: "e2e-test-release-source-cron-only"
+      command: "ci/scripts/e2e-source-cron-only-test.sh -p ci-release"
+      if: |
+        !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
+        || build.pull_request.labels includes "ci/run-e2e-source-cron-only-tests"
+        || build.env("CI_STEPS") =~ /(^|,)e2e-source-cron-only-tests?(,|$$)/
+      depends_on:
+        - "build"
+        - "build-other"
+      plugins:
+        - docker-compose#v5.5.0:
+            <<: *docker-compose
+            run: source-cron-only-test-env
+        - ./ci/plugins/upload-failure-logs
+      timeout_in_minutes: 20
       retry: *auto-retry
 
     - label: "end-to-end sink test ({{matrix.backend}} backend)"
@@ -217,7 +236,7 @@ steps:
       - ./ci/plugins/swapfile
       - docker-compose#v5.5.0: *docker-compose
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 20
+    timeout_in_minutes: 40
     retry: *auto-retry
 
   - label: "meta backup test (release)"
@@ -358,7 +377,7 @@ steps:
     plugins:
       - docker-compose#v5.5.0: *docker-compose
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 70
+    timeout_in_minutes: 100
     retry: *auto-retry
 
   - label: "end-to-end test (madsim)"
@@ -399,7 +418,7 @@ steps:
           environment:
           - GITHUB_TOKEN
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 60
+    timeout_in_minutes: 65
     parallelism: 4
     retry: *auto-retry
 
@@ -666,7 +685,7 @@ steps:
           <<: *docker-compose
           run: source-test-env
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 50
+    timeout_in_minutes: 70
     retry: *auto-retry
 
   - label: "e2e standalone binary test"
@@ -681,7 +700,7 @@ steps:
     plugins:
       - docker-compose#v5.5.0: *docker-compose
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 35
+    timeout_in_minutes: 40
     retry: *auto-retry
 
   - label: "e2e single-node binary test"
@@ -696,7 +715,7 @@ steps:
     plugins:
       - docker-compose#v5.5.0: *docker-compose
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 35
+    timeout_in_minutes: 40
     retry: *auto-retry
 
   - label: "end-to-end test for opendal storage backend (parallel)"
@@ -711,7 +730,7 @@ steps:
     plugins:
       - docker-compose#v5.5.0: *docker-compose
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 18
+    timeout_in_minutes: 25
     retry: *auto-retry
 
   - label: "end-to-end deltalake sink test"

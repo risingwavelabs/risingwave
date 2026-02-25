@@ -18,6 +18,7 @@ pub mod parallelism;
 mod query_mode;
 mod search_path;
 pub mod sink_decouple;
+mod statement_timeout;
 mod transaction_isolation_level;
 mod visibility_mode;
 
@@ -28,6 +29,7 @@ pub use query_mode::QueryMode;
 use risingwave_common_proc_macro::{ConfigDoc, SessionConfig};
 pub use search_path::{SearchPath, USER_NAME_WILD_CARD};
 use serde::{Deserialize, Serialize};
+pub use statement_timeout::StatementTimeout;
 use thiserror::Error;
 
 use self::non_zero64::ConfigNonZeroU64;
@@ -64,6 +66,13 @@ const DISABLE_BACKFILL_RATE_LIMIT: i32 = -1;
 const DISABLE_SOURCE_RATE_LIMIT: i32 = -1;
 const DISABLE_DML_RATE_LIMIT: i32 = -1;
 const DISABLE_SINK_RATE_LIMIT: i32 = -1;
+
+/// Default parallelism bound for tables
+const DEFAULT_TABLE_PARALLELISM_BOUND: std::num::NonZeroU64 = std::num::NonZeroU64::new(4).unwrap();
+
+/// Default parallelism bound for sources
+const DEFAULT_SOURCE_PARALLELISM_BOUND: std::num::NonZeroU64 =
+    std::num::NonZeroU64::new(4).unwrap();
 
 /// Default to bypass cluster limits iff in debug mode.
 const BYPASS_CLUSTER_LIMITS: bool = cfg!(debug_assertions);
@@ -178,8 +187,8 @@ pub struct SessionConfig {
     #[parameter(default = ConfigAdaptiveParallelismStrategy::default())]
     streaming_parallelism_strategy: ConfigAdaptiveParallelismStrategy,
 
-    /// Specific adaptive parallelism strategy for table. Falls back to `STREAMING_PARALLELISM_STRATEGY`.
-    #[parameter(default = ConfigAdaptiveParallelismStrategy::default())]
+    /// Specific adaptive parallelism strategy for table. Defaults to `BOUNDED(4)`.
+    #[parameter(default = ConfigAdaptiveParallelismStrategy::Bounded(DEFAULT_TABLE_PARALLELISM_BOUND))]
     streaming_parallelism_strategy_for_table: ConfigAdaptiveParallelismStrategy,
 
     /// Specific parallelism for table. By default, it will fall back to `STREAMING_PARALLELISM`.
@@ -202,8 +211,8 @@ pub struct SessionConfig {
     #[parameter(default = ConfigParallelism::default())]
     streaming_parallelism_for_index: ConfigParallelism,
 
-    /// Specific adaptive parallelism strategy for source. Falls back to `STREAMING_PARALLELISM_STRATEGY`.
-    #[parameter(default = ConfigAdaptiveParallelismStrategy::default())]
+    /// Specific adaptive parallelism strategy for source. Defaults to `BOUNDED(4)`.
+    #[parameter(default = ConfigAdaptiveParallelismStrategy::Bounded(DEFAULT_SOURCE_PARALLELISM_BOUND))]
     streaming_parallelism_strategy_for_source: ConfigAdaptiveParallelismStrategy,
 
     /// Specific parallelism for source. By default, it will fall back to `STREAMING_PARALLELISM`.
@@ -239,8 +248,12 @@ pub struct SessionConfig {
     #[parameter(default = true)]
     streaming_use_arrangement_backfill: bool,
 
-    #[parameter(default = false)]
+    #[parameter(default = true)]
     streaming_use_snapshot_backfill: bool,
+
+    /// Enable serverless backfill for streaming queries. Defaults to false.
+    #[parameter(default = false)]
+    enable_serverless_backfill: bool,
 
     /// Allow `jsonb` in stream key
     #[parameter(default = false, alias = "rw_streaming_allow_jsonb_in_stream_key")]
@@ -329,8 +342,8 @@ pub struct SessionConfig {
     /// `log_min_error_statement` is set to ERROR or lower, the statement that timed out will also be
     /// logged. If this value is specified without units, it is taken as milliseconds. A value of
     /// zero (the default) disables the timeout.
-    #[parameter(default = 0u32)]
-    statement_timeout: u32,
+    #[parameter(default = StatementTimeout::default())]
+    statement_timeout: StatementTimeout,
 
     /// Terminate any session that has been idle (that is, waiting for a client query) within an open transaction for longer than the specified amount of time in milliseconds.
     #[parameter(default = 60000u32)]
@@ -461,6 +474,10 @@ pub struct SessionConfig {
     #[parameter(default = true)]
     enable_index_selection: bool,
 
+    /// Enable mv selection for queries
+    #[parameter(default = false)]
+    enable_mv_selection: bool,
+
     /// Enable locality backfill for streaming queries. Defaults to false.
     #[parameter(default = false)]
     enable_locality_backfill: bool,
@@ -480,6 +497,12 @@ pub struct SessionConfig {
     /// When enabled, queries involving Iceberg tables will be executed using the DataFusion engine.
     #[parameter(default = false)]
     enable_datafusion_engine: bool,
+
+    /// Prefer hash join over sort merge join in DataFusion engine
+    /// When enabled, the DataFusion engine will prioritize hash joins for query execution plans,
+    /// potentially improving performance for certain workloads, but may cause OOM for large datasets.
+    #[parameter(default = true)]
+    datafusion_prefer_hash_join: bool,
 
     /// Emit chunks in upsert format for `UPDATE` and `DELETE` DMLs.
     /// May lead to undefined behavior if the table is created with `ON CONFLICT DO NOTHING`.

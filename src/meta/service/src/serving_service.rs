@@ -59,7 +59,6 @@ impl ServingService for ServingServiceImpl {
             .fragment_job_mapping()
             .await?
             .into_iter()
-            .map(|(fragment_id, job_id)| (fragment_id, job_id.as_raw_id()))
             .collect();
         Ok(Response::new(GetServingVnodeMappingsResponse {
             fragment_to_table,

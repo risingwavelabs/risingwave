@@ -19,7 +19,7 @@ full_gc_interval_sec = 3600
 full_gc_object_limit = 100000
 gc_history_retention_time_sec = 21600
 max_inflight_time_travel_query = 1000
-periodic_compaction_interval_sec = 60
+periodic_compaction_interval_sec = 300
 vacuum_interval_sec = 30
 vacuum_spin_interval_ms = 100
 iceberg_gc_interval_sec = 3600
@@ -212,6 +212,7 @@ memory_controller_update_interval_ms = 100
 memory_controller_sequence_tls_step = 128
 memory_controller_sequence_tls_lag = 32
 enable_arrangement_backfill = true
+enable_snapshot_backfill = true
 high_join_amplification_threshold = 2048
 enable_actor_tokio_metrics = true
 exchange_connection_pool_size = 1
@@ -222,6 +223,7 @@ max_barrier_batch_size = 1024
 hash_join_entry_state_max_rows = 30000
 now_progress_ratio = ""
 enable_explain_analyze_stats = true
+snapshot_iter_rebuild_interval_secs = 600
 iceberg_list_interval_sec = 10
 iceberg_fetch_batch_size = 1024
 iceberg_sink_positional_delete_cache_size = 1024
@@ -236,6 +238,7 @@ join_encoding_type = "memory_optimized"
 sync_log_store_pause_duration_ms = 64
 sync_log_store_buffer_size = 2048
 over_window_cache_policy = "full"
+enable_state_table_vnode_stats_pruning = false
 
 [streaming.developer.compute_client_config]
 connect_timeout_secs = 5
@@ -377,6 +380,7 @@ worker_threads = 0
 max_blocking_threads = 0
 
 [storage.cache_refill]
+meta_refill_concurrency = 0
 data_refill_levels = []
 timeout_ms = 6000
 concurrency = 10
@@ -444,7 +448,7 @@ enable_tracing = false
 use_new_object_prefix_strategy = ""
 license_key = ""
 time_travel_retention_ms = 600000
-adaptive_parallelism_strategy = "AUTO"
+adaptive_parallelism_strategy = "BOUNDED(64)"
 per_database_isolation = true
 enforce_secret = false
 
