@@ -25,7 +25,7 @@ bytes = { version = "1", features = ["serde"] }
 derive_builder = "0.20"
 dyn-clone = "1.0.14"
 either = "1"
-enum-as-inner = "0.6"
+enum-as-inner = "0.7"
 fail = "0.5"
 faiss = { workspace = true }
 foyer = { workspace = true }

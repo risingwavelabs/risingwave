@@ -118,7 +118,7 @@ fn gen_version(
     ));
     let committed_epoch = test_epoch(new_epoch_idx as _);
     let mut version = HummockVersion::from_persisted_protobuf(&PbHummockVersion {
-        id: new_epoch_idx as _,
+        id: (new_epoch_idx as u64).into(),
         ..Default::default()
     });
     version.table_watermarks = (0..table_count)
@@ -132,7 +132,7 @@ fn gen_version(
                     TableId::new(table_id as _),
                     StateTableInfoDelta {
                         committed_epoch,
-                        compaction_group_id: StaticCompactionGroupId::StateDefault as _,
+                        compaction_group_id: StaticCompactionGroupId::StateDefault,
                     },
                 )
             })

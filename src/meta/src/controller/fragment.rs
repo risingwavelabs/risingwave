@@ -417,7 +417,7 @@ impl CatalogController {
         let mut result = HashMap::new();
         for (fragment_id, fragment) in info.iter_over_fragments() {
             if let Some(id_filter) = &id_filter
-                && !id_filter.contains(&(*fragment_id as _))
+                && !id_filter.contains(fragment_id)
             {
                 continue; // Skip fragments not in the filter
             }
@@ -451,13 +451,24 @@ impl CatalogController {
         fragment_ids: Vec<FragmentId>,
     ) -> MetaResult<Vec<ObjectId>> {
         let inner = self.inner.read().await;
+        self.get_fragment_job_id_in_txn(&inner.db, fragment_ids)
+            .await
+    }
 
+    pub async fn get_fragment_job_id_in_txn<C>(
+        &self,
+        txn: &C,
+        fragment_ids: Vec<FragmentId>,
+    ) -> MetaResult<Vec<ObjectId>>
+    where
+        C: ConnectionTrait + Send,
+    {
         let object_ids: Vec<ObjectId> = FragmentModel::find()
             .select_only()
             .column(fragment::Column::JobId)
             .filter(fragment::Column::FragmentId.is_in(fragment_ids))
             .into_tuple()
-            .all(&inner.db)
+            .all(txn)
             .await?;
 
         Ok(object_ids)
@@ -753,9 +764,21 @@ impl CatalogController {
         job_id: JobId,
     ) -> MetaResult<HashMap<crate::model::FragmentId, PbStreamScanType>> {
         let inner = self.inner.read().await;
+        self.get_job_fragment_backfill_scan_type_in_txn(&inner.db, job_id)
+            .await
+    }
+
+    pub async fn get_job_fragment_backfill_scan_type_in_txn<C>(
+        &self,
+        txn: &C,
+        job_id: JobId,
+    ) -> MetaResult<HashMap<crate::model::FragmentId, PbStreamScanType>>
+    where
+        C: ConnectionTrait + Send,
+    {
         let fragments: Vec<_> = FragmentModel::find()
             .filter(fragment::Column::JobId.eq(job_id))
-            .all(&inner.db)
+            .all(txn)
             .await?;
 
         let mut result = HashMap::new();
@@ -1009,6 +1032,18 @@ impl CatalogController {
         fragment_ids: impl Iterator<Item = crate::model::FragmentId>,
     ) -> MetaResult<HashMap<crate::model::FragmentId, HashSet<crate::model::FragmentId>>> {
         let inner = self.inner.read().await;
+        self.upstream_fragments_in_txn(&inner.db, fragment_ids)
+            .await
+    }
+
+    pub async fn upstream_fragments_in_txn<C>(
+        &self,
+        txn: &C,
+        fragment_ids: impl Iterator<Item = crate::model::FragmentId>,
+    ) -> MetaResult<HashMap<crate::model::FragmentId, HashSet<crate::model::FragmentId>>>
+    where
+        C: ConnectionTrait + StreamTrait + Send,
+    {
         let mut stream = FragmentRelation::find()
             .select_only()
             .columns([
@@ -1020,7 +1055,7 @@ impl CatalogController {
                     .is_in(fragment_ids.map(|id| id as FragmentId)),
             )
             .into_tuple::<(FragmentId, FragmentId)>()
-            .stream(&inner.db)
+            .stream(txn)
             .await?;
         let mut upstream_fragments: HashMap<_, HashSet<_>> = HashMap::new();
         while let Some((upstream_fragment_id, downstream_fragment_id)) = stream.try_next().await? {
@@ -2111,7 +2146,7 @@ mod tests {
             .map(|actor_id| StreamActor {
                 actor_id: actor_id.into(),
                 fragment_id: TEST_FRAGMENT_ID as _,
-                vnode_bitmap: actor_bitmaps.get(&actor_id.into()).cloned(),
+                vnode_bitmap: actor_bitmaps.get(&actor_id).cloned(),
                 mview_definition: "".to_owned(),
                 expr_context: Some(PbExprContext {
                     time_zone: String::from("America/New_York"),
@@ -2173,7 +2208,7 @@ mod tests {
                     splits: actor_splits,
                     worker_id: 0.into(),
                     vnode_bitmap: actor_bitmaps
-                        .remove(&actor_id.into())
+                        .remove(&actor_id)
                         .map(|bitmap| bitmap.to_protobuf())
                         .as_ref()
                         .map(VnodeBitmap::from),
@@ -2189,9 +2224,8 @@ mod tests {
         let stream_node = {
             let template_actor = actors.first().cloned().unwrap();
 
-            let template_upstream_actor_ids = upstream_actor_ids
-                .get(&(template_actor.actor_id as _))
-                .unwrap();
+            let template_upstream_actor_ids =
+                upstream_actor_ids.get(&template_actor.actor_id).unwrap();
 
             generate_merger_stream_node(template_upstream_actor_ids)
         };
@@ -2275,7 +2309,7 @@ mod tests {
                 if let PbNodeBody::Merge(m) = body {
                     assert!(
                         actor_upstreams
-                            .get(&(actor_id as _))
+                            .get(&actor_id)
                             .unwrap()
                             .contains_key(&m.upstream_fragment_id)
                     );

@@ -30,7 +30,7 @@ CREATE table ck_types (
   c_date_array Array(Date32),
   c_timestamptz_array Array(DateTime64(6)),
   c_struct Nested(s_int Int32, s_boolean Bool),
-  c_jsonb: Json,
+  c_jsonb JSON,
 )ENGINE = ReplacingMergeTree
 PRIMARY KEY (types_id);
 

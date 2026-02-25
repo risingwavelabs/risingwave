@@ -9,7 +9,7 @@ repository = { workspace = true }
 
 [dependencies]
 educe = "0.6"
-enum-as-inner = "0.6"
+enum-as-inner = "0.7"
 
 [lints]
 workspace = true

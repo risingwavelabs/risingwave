@@ -112,7 +112,8 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
             // whenever a newer PG version is released, Debezium will take
             // some time to support it. So even though 18 is not released yet, we put a version
             // guard here.
-            if (pgVersion >= 18) {
+            LOG.info("Detected upstream Postgres major version: {}", pgVersion);
+            if (pgVersion > 18) {
                 throw ValidatorUtils.failedPrecondition(
                         "Postgres major version should be less than or equal to 17.");
             }
@@ -507,6 +508,28 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
             }
         }
 
+        // Query generated columns - they should be excluded from publication validation
+        // because PostgreSQL does not replicate generated columns in logical replication
+        List<String> generatedColumns = new ArrayList<>();
+        try (var stmt =
+                jdbcConnection.prepareStatement(
+                        ValidatorUtils.getSql("postgres.generated_columns"))) {
+            stmt.setString(1, schemaName);
+            stmt.setString(2, tableName);
+            var res = stmt.executeQuery();
+            while (res.next()) {
+                generatedColumns.add(res.getString("attname"));
+            }
+            if (!generatedColumns.isEmpty()) {
+                LOG.info(
+                        "Found generated columns in table '{}': {}",
+                        schemaName + "." + tableName,
+                        String.join(", ", generatedColumns));
+            }
+        } catch (SQLException e) {
+            // For PostgreSQL < 12 that doesn't support generated columns, ignore the error
+            LOG.debug("Failed to query generated columns (likely PG < 12): {}", e.getMessage());
+        }
         // PG 15 and up supports partial publication of table
         // check whether publication covers all columns of the table schema
         if (isPartialPublicationEnabled) {
@@ -522,22 +545,25 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
                     List<String> attNames = Arrays.asList(columnsPub);
                     for (int i = 0; i < tableSchema.getNumColumns(); i++) {
                         String columnName = tableSchema.getColumnNames()[i];
+                        // Skip generated columns - they are not included in publication
+                        if (generatedColumns.contains(columnName)) {
+                            LOG.info(
+                                    "Skipping generated column '{}' in publication validation",
+                                    columnName);
+                            continue;
+                        }
                         if (!attNames.contains(columnName)) {
                             throw ValidatorUtils.invalidArgument(
                                     String.format(
                                             "The publication '%s' does not cover all columns of the table '%s'",
                                             pubName, schemaName + "." + tableName));
                         }
-                        if (i == tableSchema.getNumColumns() - 1) {
-                            isPublicationCoversTable = true;
-                        }
                     }
-                    if (isPublicationCoversTable) {
-                        LOG.info(
-                                "The publication covers the table '{}'.",
-                                schemaName + "." + tableName);
-                        break;
-                    }
+                    // If we reach here, all non-generated columns are covered
+                    isPublicationCoversTable = true;
+                    LOG.info(
+                            "The publication covers the table '{}'.", schemaName + "." + tableName);
+                    break;
                 }
             }
         } else {

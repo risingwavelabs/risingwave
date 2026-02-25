@@ -126,11 +126,7 @@ pub async fn handle_swap_rename(
                 target_schema_path,
                 &target_obj_name,
             )?;
-            check_swap_rename_privilege(
-                &session,
-                src_sink.owner.user_id,
-                target_sink.owner.user_id,
-            )?;
+            check_swap_rename_privilege(&session, src_sink.owner, target_sink.owner)?;
 
             (src_sink.id, target_sink.id).into()
         }
@@ -145,8 +141,8 @@ pub async fn handle_swap_rename(
             )?;
             check_swap_rename_privilege(
                 &session,
-                src_subscription.owner.user_id,
-                target_subscription.owner.user_id,
+                src_subscription.owner,
+                target_subscription.owner,
             )?;
 
             (src_subscription.id, target_subscription.id).into()

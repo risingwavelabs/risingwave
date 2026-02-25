@@ -16,8 +16,6 @@ mod compaction_executor;
 mod compaction_filter;
 pub mod compaction_utils;
 mod iceberg_compaction;
-use parquet::basic::Compression;
-use parquet::file::properties::WriterProperties;
 use risingwave_hummock_sdk::compact_task::{CompactTask, ValidationTask};
 use risingwave_pb::compactor::{DispatchCompactionTaskRequest, dispatch_compaction_task_request};
 use risingwave_pb::hummock::PbCompactTask;
@@ -494,25 +492,13 @@ pub fn start_iceberg_compactor(
                         match event {
                             risingwave_pb::iceberg_compaction::subscribe_iceberg_compaction_event_response::Event::CompactTask(iceberg_compaction_task) => {
                                 let task_id = iceberg_compaction_task.task_id;
-                                 let write_parquet_properties = WriterProperties::builder()
-                                        .set_created_by(concat!(
-                                            "risingwave version ",
-                                            env!("CARGO_PKG_VERSION")
-                                        )
-                                        .to_owned())
-                                        .set_max_row_group_size(
-                                            compactor_context.storage_opts.iceberg_compaction_write_parquet_max_row_group_rows
-                                        )
-                                        .set_compression(Compression::SNAPPY) // TODO: make it configurable
-                                        .build();
-
+                                // Note: write_parquet_properties is now built from sink config (IcebergConfig) in create_plan_runners
                                 let compactor_runner_config = match IcebergCompactorRunnerConfigBuilder::default()
                                     .max_parallelism((worker_num as f32 * compactor_context.storage_opts.iceberg_compaction_task_parallelism_ratio) as u32)
                                     .min_size_per_partition(compactor_context.storage_opts.iceberg_compaction_min_size_per_partition_mb as u64 * 1024 * 1024)
                                     .max_file_count_per_partition(compactor_context.storage_opts.iceberg_compaction_max_file_count_per_partition)
                                     .enable_validate_compaction(compactor_context.storage_opts.iceberg_compaction_enable_validate)
                                     .max_record_batch_rows(compactor_context.storage_opts.iceberg_compaction_max_record_batch_rows)
-                                    .write_parquet_properties(write_parquet_properties)
                                     .enable_heuristic_output_parallelism(compactor_context.storage_opts.iceberg_compaction_enable_heuristic_output_parallelism)
                                     .max_concurrent_closes(compactor_context.storage_opts.iceberg_compaction_max_concurrent_closes)
                                     .enable_dynamic_size_estimation(compactor_context.storage_opts.iceberg_compaction_enable_dynamic_size_estimation)
@@ -819,10 +805,7 @@ pub fn start_compactor(
                                 .map(|sst| sst.into())
                                 .collect(),
                             table_stats_change: to_prost_table_stats_map(table_stats),
-                            object_timestamps: object_timestamps
-                                .into_iter()
-                                .map(|(object_id, timestamp)| (object_id.inner(), timestamp))
-                                .collect(),
+                            object_timestamps,
                         })),
                         create_at: SystemTime::now()
                             .duration_since(std::time::UNIX_EPOCH)
@@ -1089,10 +1072,7 @@ pub fn start_shared_compactor(
                                         event: Some(ReportCompactionTaskEvent::ReportTask(ReportSharedTask {
                                             compact_task: Some(PbCompactTask::from(&compact_task)),
                                             table_stats_change: to_prost_table_stats_map(table_stats),
-                                            object_timestamps: object_timestamps
-                                            .into_iter()
-                                            .map(|(object_id, timestamp)| (object_id.inner(), timestamp))
-                                            .collect(),
+                                            object_timestamps,
                                     })),
                                     };
 

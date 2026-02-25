@@ -24,9 +24,12 @@ pub struct CompactionGroup {
 }
 
 impl CompactionGroup {
-    pub fn new(group_id: CompactionGroupId, compaction_config: CompactionConfig) -> Self {
+    pub fn new(
+        group_id: impl Into<CompactionGroupId>,
+        compaction_config: CompactionConfig,
+    ) -> Self {
         Self {
-            group_id,
+            group_id: group_id.into(),
             compaction_config: Arc::new(compaction_config),
         }
     }

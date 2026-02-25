@@ -728,6 +728,10 @@ impl BatchPlanNodeMetadata for BatchPlanRef {
     fn order(&self) -> &Order {
         self.plan_base().order()
     }
+
+    fn orders(&self) -> Vec<Order> {
+        self.plan_base().orders()
+    }
 }
 
 /// In order to let expression display id started from 1 for explaining, hidden column names and

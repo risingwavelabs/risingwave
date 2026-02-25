@@ -68,7 +68,6 @@ pub(super) mod handlers {
     };
     use risingwave_pb::common::{WorkerNode, WorkerType};
     use risingwave_pb::hummock::TableStats;
-    use risingwave_pb::meta::list_object_dependencies_response::PbObjectDependencies;
     use risingwave_pb::meta::{
         ActorIds, FragmentIdToActorIdMap, FragmentToRelationMap, PbTableFragments, RelationIdInfos,
     };
@@ -328,7 +327,7 @@ pub(super) mod handlers {
         let mut fragment_to_relation_map = HashMap::new();
         for (relation_id, tf) in table_fragments {
             for fragment_id in tf.fragments.keys() {
-                fragment_to_relation_map.insert(*fragment_id, relation_id.as_raw_id());
+                fragment_to_relation_map.insert(*fragment_id, relation_id);
             }
         }
         let map = FragmentToRelationMap {
@@ -430,9 +429,16 @@ pub(super) mod handlers {
         Ok(Json(schemas))
     }
 
+    #[derive(Serialize)]
+    #[serde(rename_all = "camelCase")]
+    pub struct DashboardObjectDependency {
+        pub object_id: u32,
+        pub referenced_object_id: u32,
+    }
+
     pub async fn list_object_dependencies(
         Extension(srv): Extension<Service>,
-    ) -> Result<Json<Vec<PbObjectDependencies>>> {
+    ) -> Result<Json<Vec<DashboardObjectDependency>>> {
         let object_dependencies = srv
             .metadata_manager
             .catalog_controller
@@ -440,7 +446,15 @@ pub(super) mod handlers {
             .await
             .map_err(err)?;
 
-        Ok(Json(object_dependencies))
+        let result = object_dependencies
+            .into_iter()
+            .map(|dependency| DashboardObjectDependency {
+                object_id: dependency.object_id.as_raw_id(),
+                referenced_object_id: dependency.referenced_object_id.as_raw_id(),
+            })
+            .collect();
+
+        Ok(Json(result))
     }
 
     #[derive(Debug, Deserialize)]

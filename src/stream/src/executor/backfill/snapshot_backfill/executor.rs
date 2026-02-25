@@ -36,6 +36,7 @@ use risingwave_storage::table::ChangeLogRow;
 use risingwave_storage::table::batch_table::BatchTable;
 use tokio::select;
 use tokio::sync::mpsc::UnboundedReceiver;
+use tokio::time::sleep;
 
 use crate::executor::backfill::snapshot_backfill::receive_next_barrier;
 use crate::executor::backfill::snapshot_backfill::state::{
@@ -271,43 +272,74 @@ impl<S: StateStore> SnapshotBackfillExecutor<S> {
                             actor_id_str.as_str(),
                             "consuming_log_store",
                         ]);
+                    let mut pending_non_checkpoint_barrier: Vec<EpochPair> = vec![];
                     loop {
                         let barrier = receive_next_barrier(&mut self.barrier_rx).await?;
                         assert_eq!(barrier_epoch.curr, barrier.epoch.prev);
                         let is_finished = upstream_buffer.consumed_epoch(barrier.epoch).await?;
-                        {
-                            // we must call `next_epoch` after `consumed_epoch`, and otherwise in `next_epoch`
-                            // we may block the upstream, and the upstream never get a chance to finish the `next_epoch`
-                            let next_prev_epoch =
-                                self.upstream_table.next_epoch(barrier_epoch.prev).await?;
-                            assert_eq!(next_prev_epoch, barrier.epoch.prev);
-                        }
+                        // Disable calling next_epoch, because, if barrier_epoch.prev is a checkpoint epoch,
+                        // next_epoch(barrier_epoch.prev) is actually waiting for the committed epoch.
+                        // However, upstream_buffer's is_polling_epoch_data can be false, since just received
+                        // the checkpoint barrier_epoch.prev. And then the upstream_buffer may stop polling upstream
+                        // when the max_pending_epoch_lag is small. When upstream is not polled, the barrier of the next
+                        // committed epoch cannot be collected.
+                        // {
+                        //     // we must call `next_epoch` after `consumed_epoch`, and otherwise in `next_epoch`
+                        //     // we may block the upstream, and the upstream never get a chance to finish the `next_epoch`
+                        //     let next_prev_epoch = upstream_buffer
+                        //         .run_future(self.upstream_table.next_epoch(barrier_epoch.prev))
+                        //         .await?;
+                        //     assert_eq!(next_prev_epoch, barrier.epoch.prev);
+                        // }
                         barrier_epoch = barrier.epoch;
-                        trace!(?barrier_epoch, kind = ?barrier.kind, "start consume epoch change log");
-                        // use `upstream_buffer.run_future` to poll upstream concurrently so that we won't have back-pressure
-                        // on the upstream. Otherwise, in `batch_iter_log_with_pk_bounds`, we may wait upstream epoch to be committed,
-                        // and the back-pressure may cause the upstream unable to consume the barrier and then cause deadlock.
-                        let mut stream = upstream_buffer
-                            .run_future(make_log_stream(
-                                &self.upstream_table,
-                                barrier_epoch.prev,
-                                None,
-                                self.chunk_size,
-                            ))
-                            .await?;
-                        while let Some(chunk) =
-                            upstream_buffer.run_future(stream.try_next()).await?
-                        {
-                            trace!(
-                                ?barrier_epoch,
-                                size = chunk.cardinality(),
-                                "consume change log yield chunk",
-                            );
-                            consuming_log_store_row_count.inc_by(chunk.cardinality() as _);
-                            yield Message::Chunk(chunk);
-                        }
+                        if barrier.kind.is_checkpoint() {
+                            let pending_non_checkpoint_barrier =
+                                take(&mut pending_non_checkpoint_barrier);
+                            let end_epoch = barrier_epoch.prev;
+                            let start_epoch = pending_non_checkpoint_barrier
+                                .first()
+                                .map(|epoch| epoch.prev)
+                                .unwrap_or(end_epoch);
+                            trace!(?barrier_epoch, kind = ?barrier.kind, ?pending_non_checkpoint_barrier, "start consume epoch change log");
+                            // use `upstream_buffer.run_future` to poll upstream concurrently so that we won't have back-pressure
+                            // on the upstream. Otherwise, in `batch_iter_log_with_pk_bounds`, we may wait upstream epoch to be committed,
+                            // and the back-pressure may cause the upstream unable to consume the barrier and then cause deadlock.
+                            let mut stream = upstream_buffer
+                                .run_future(make_log_stream(
+                                    &self.upstream_table,
+                                    start_epoch,
+                                    end_epoch,
+                                    None,
+                                    self.chunk_size,
+                                ))
+                                .await?;
+                            while let Some(chunk) =
+                                upstream_buffer.run_future(stream.try_next()).await?
+                            {
+                                trace!(
+                                    ?barrier_epoch,
+                                    size = chunk.cardinality(),
+                                    "consume change log yield chunk",
+                                );
+                                consuming_log_store_row_count.inc_by(chunk.cardinality() as _);
+                                yield Message::Chunk(chunk);
+                            }
 
-                        trace!(?barrier_epoch, "after consume change log");
+                            trace!(?barrier_epoch, "after consume change log");
+
+                            stream
+                                .for_vnode_pk_progress(|vnode, row_count, progress| {
+                                    assert_eq!(progress, None);
+                                    backfill_state.finish_epoch(
+                                        vnode,
+                                        barrier.epoch.prev,
+                                        row_count,
+                                    );
+                                })
+                                .await?;
+                        } else {
+                            pending_non_checkpoint_barrier.push(barrier.epoch);
+                        }
 
                         if is_finished {
                             assert_eq!(upstream_buffer.pending_epoch_lag(), 0);
@@ -319,12 +351,6 @@ impl<S: StateStore> SnapshotBackfillExecutor<S> {
                             );
                         }
 
-                        stream
-                            .for_vnode_pk_progress(|vnode, row_count, progress| {
-                                assert_eq!(progress, None);
-                                backfill_state.finish_epoch(vnode, barrier.epoch.prev, row_count);
-                            })
-                            .await?;
                         let post_commit = backfill_state.commit(barrier.epoch).await?;
                         let update_vnode_bitmap = barrier.as_update_vnode_bitmap(self.actor_ctx.id);
                         yield Message::Barrier(barrier);
@@ -337,6 +363,10 @@ impl<S: StateStore> SnapshotBackfillExecutor<S> {
                         }
 
                         if is_finished {
+                            assert!(
+                                pending_non_checkpoint_barrier.is_empty(),
+                                "{pending_non_checkpoint_barrier:?}"
+                            );
                             break;
                         }
                     }
@@ -458,6 +488,7 @@ impl<S: StateStore> Execute for SnapshotBackfillExecutor<S> {
 struct ConsumingSnapshot;
 struct ConsumingLogStore;
 
+#[derive(Debug)]
 struct PendingBarriers {
     first_upstream_barrier_epoch: EpochPair,
 
@@ -542,8 +573,8 @@ struct UpstreamBuffer<'a, S> {
     consumed_epoch: u64,
     /// Barriers received from upstream but not yet received the barrier from local barrier worker.
     upstream_pending_barriers: PendingBarriers,
-    /// Whether we have started polling any upstream data before the next barrier.
-    /// When `true`, we should continue polling until the next barrier, because
+    /// Whether we have started polling any upstream data before the next checkpoint barrier.
+    /// When `true`, we should continue polling until the next checkpoint barrier, because
     /// some data in this epoch have been discarded and data in this epoch
     /// must be read from log store
     is_polling_epoch_data: bool,
@@ -616,6 +647,8 @@ impl<S> UpstreamBuffer<'_, S> {
                 if let Err(e) = try {
                     if !self.can_consume_upstream() {
                         // pause the future to block consuming upstream
+                        sleep(Duration::from_secs(30)).await;
+                        warn!(pending_barrier = ?self.upstream_pending_barriers, "not polling upstream but timeout");
                         return pending().await;
                     }
                     self.consume_until_next_checkpoint_barrier().await?;
@@ -660,6 +693,7 @@ impl<S> UpstreamBuffer<'_, S> {
 }
 
 impl UpstreamBuffer<'_, ConsumingLogStore> {
+    #[await_tree::instrument("consumed_epoch: {:?}", epoch)]
     async fn consumed_epoch(&mut self, epoch: EpochPair) -> StreamExecutorResult<bool> {
         assert!(!self.is_finished());
         if !self.upstream_pending_barriers.has_checkpoint_epoch() {
@@ -742,9 +776,11 @@ impl<S> UpstreamBuffer<'_, S> {
     }
 }
 
+#[await_tree::instrument("make_log_stream: {start_epoch}-{end_epoch} table {}", upstream_table.table_id())]
 async fn make_log_stream(
     upstream_table: &BatchTable<impl StateStore>,
-    prev_epoch: u64,
+    start_epoch: u64,
+    end_epoch: u64,
     start_pk: Option<OwnedRow>,
     chunk_size: usize,
 ) -> StreamExecutorResult<VnodeStream<impl super::vnode_stream::ChangeLogRowStream>> {
@@ -754,8 +790,8 @@ async fn make_log_stream(
     let vnode_streams = try_join_all(upstream_table.vnodes().iter_vnodes().map(move |vnode| {
         upstream_table
             .batch_iter_vnode_log(
-                prev_epoch,
-                HummockReadEpoch::Committed(prev_epoch),
+                start_epoch,
+                HummockReadEpoch::Committed(end_epoch),
                 start_pk,
                 vnode,
             )
