@@ -1363,7 +1363,7 @@ mod tests {
 
     use bytes::Bytes;
     use prometheus::Registry;
-    use risingwave_common::catalog::TableId;
+    use risingwave_common::catalog::{TableId, TableOption};
     use risingwave_common::config::MetricLevel;
     use risingwave_common::hash::VirtualNode;
     use risingwave_common::util::epoch::test_epoch;
@@ -1414,7 +1414,7 @@ mod tests {
 
         let sstable_info: SstableInfo = SstableInfoInner {
             object_id,
-            sst_id: object_id.inner().into(),
+            sst_id: object_id.as_raw_id().into(),
             key_range: KeyRange {
                 left: Bytes::from(left_full_key),
                 right: Bytes::from(right_full_key),
@@ -1464,18 +1464,15 @@ mod tests {
         let pb_levels = PbLevels {
             levels,
             l0,
-            group_id: StaticCompactionGroupId::NewCompactionGroup as u64,
-            parent_group_id: 0,
+            group_id: StaticCompactionGroupId::NewCompactionGroup,
+            parent_group_id: 0.into(),
             member_table_ids: vec![],
             compaction_group_version_id: 0,
         };
 
         let pb_version = PbHummockVersion {
-            id: 1,
-            levels: HashMap::from_iter([(
-                StaticCompactionGroupId::NewCompactionGroup as u64,
-                pb_levels,
-            )]),
+            id: 1.into(),
+            levels: HashMap::from_iter([(StaticCompactionGroupId::NewCompactionGroup, pb_levels)]),
             max_committed_epoch: 0,
             table_watermarks: HashMap::new(),
             table_change_logs: HashMap::new(),
@@ -1483,7 +1480,7 @@ mod tests {
                 table_id,
                 PbStateTableInfo {
                     committed_epoch: 0,
-                    compaction_group_id: StaticCompactionGroupId::NewCompactionGroup as u64,
+                    compaction_group_id: StaticCompactionGroupId::NewCompactionGroup,
                 },
             )]),
             vector_indexes: HashMap::new(),
@@ -1537,18 +1534,15 @@ mod tests {
         let pb_levels = PbLevels {
             levels,
             l0,
-            group_id: StaticCompactionGroupId::NewCompactionGroup as u64,
-            parent_group_id: 0,
+            group_id: StaticCompactionGroupId::NewCompactionGroup,
+            parent_group_id: 0.into(),
             member_table_ids: vec![],
             compaction_group_version_id: 0,
         };
 
         let pb_version = PbHummockVersion {
-            id: 1,
-            levels: HashMap::from_iter([(
-                StaticCompactionGroupId::NewCompactionGroup as u64,
-                pb_levels,
-            )]),
+            id: 1.into(),
+            levels: HashMap::from_iter([(StaticCompactionGroupId::NewCompactionGroup, pb_levels)]),
             max_committed_epoch: 0,
             table_watermarks: HashMap::new(),
             table_change_logs: HashMap::new(),
@@ -1556,7 +1550,7 @@ mod tests {
                 table_id,
                 PbStateTableInfo {
                     committed_epoch: 0,
-                    compaction_group_id: StaticCompactionGroupId::NewCompactionGroup as u64,
+                    compaction_group_id: StaticCompactionGroupId::NewCompactionGroup,
                 },
             )]),
             vector_indexes: HashMap::new(),
@@ -1645,6 +1639,7 @@ mod tests {
                 table_key,
                 epoch,
                 table_id,
+                TableOption::default(),
                 ReadOptions::default(),
                 (vec![], vec![], committed),
                 |_k, v| Ok(Bytes::copy_from_slice(v)),
@@ -1729,6 +1724,7 @@ mod tests {
                 table_key,
                 epoch,
                 table_id,
+                TableOption::default(),
                 ReadOptions::default(),
                 (vec![], vec![], committed),
                 |_k, v| Ok(Bytes::copy_from_slice(v)),
@@ -1848,6 +1844,7 @@ mod tests {
                 table_key,
                 epoch,
                 table_id,
+                TableOption::default(),
                 ReadOptions::default(),
                 (vec![], vec![], committed),
                 |_k, v| Ok(Bytes::copy_from_slice(v)),
