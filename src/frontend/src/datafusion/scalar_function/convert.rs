@@ -18,8 +18,8 @@ use std::sync::Arc;
 
 use datafusion::functions::{core, datetime, math, string, unicode};
 use datafusion::functions_nested::{
-    array_has, cardinality, concat, dimension, extract, flatten, length, make_array, min_max,
-    position, remove, replace, reverse, sort, string as nested_string,
+    array_has, cardinality, concat, extract, flatten, length, make_array, min_max, position,
+    remove, replace, reverse, sort, string as nested_string,
 };
 use datafusion::logical_expr::expr::ScalarFunction;
 use datafusion::logical_expr::{
@@ -342,7 +342,7 @@ fn convert_in_list_func(
     Some(logical_expr::in_list(left, list, false))
 }
 
-/// Array functions that only depend on list structure (length, cardinality, dimensions), not
+/// Array functions that only depend on list structure (length, cardinality), not
 /// element type. These can be mapped to DataFusion even when the list element type is not
 /// datafusion-native (e.g. list of jsonb), as long as the list can be represented in Arrow.
 fn convert_list_ops_func(
@@ -352,7 +352,6 @@ fn convert_list_ops_func(
     let udf_impl: Arc<ScalarUDF> = match func_call.func_type() {
         ExprType::ArrayLength => length::array_length_udf(),
         ExprType::Cardinality => cardinality::cardinality_udf(),
-        ExprType::ArrayDims => dimension::array_dims_udf(),
         _ => return None,
     };
 
@@ -502,7 +501,7 @@ fn convert_trivial_datafusion_func(
         // - FormatType — RW catalog/type name helper; no DF equivalent.
         // - TrimArray — RW trim_array(array, n) returns first length-n elements; DF has array_resize with different signature/semantics.
         // - ArrayTransform — lambda-based; DF has no direct equivalent in scalar UDF form.
-        // - ArraySum — DF nested_expressions has no array_sum。
+        // - ArraySum — DF nested_expressions has no array_sum.
         // - ArrayDims — RW array_dims returns text, DF array_dims returns int32.
         // - ArrayDistinct — DF will make extra sort for distinct, which is different from RW.
         ExprType::Array => make_array::make_array_udf(),
@@ -511,8 +510,6 @@ fn convert_trivial_datafusion_func(
         ExprType::ArrayCat => concat::array_concat_udf(),
         ExprType::ArrayAppend => concat::array_append_udf(),
         ExprType::ArrayPrepend => concat::array_prepend_udf(),
-        ExprType::ArrayLength => length::array_length_udf(),
-        ExprType::Cardinality => cardinality::cardinality_udf(),
         ExprType::ArrayRemove => remove::array_remove_udf(),
         ExprType::ArrayPositions => position::array_positions_udf(),
         ExprType::StringToArray => nested_string::string_to_array_udf(),
