@@ -24,8 +24,12 @@ use prometheus::HistogramTimer;
 use risingwave_common::catalog::{DatabaseId, TableId};
 use risingwave_common::id::JobId;
 use risingwave_common::metrics::{LabelGuardedHistogram, LabelGuardedIntGauge};
+use risingwave_common::util::stream_graph_visitor::visit_stream_node_cont;
 use risingwave_meta_model::WorkerId;
 use risingwave_pb::hummock::HummockVersionStats;
+use risingwave_pb::id::FragmentId;
+use risingwave_pb::stream_plan::DispatcherType as PbDispatcherType;
+use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_service::BarrierCompleteResponse;
 use risingwave_pb::stream_service::streaming_control_stream_response::ResetPartialGraphResponse;
 use tracing::{debug, warn};
@@ -47,8 +51,12 @@ use crate::barrier::schedule::{NewBarrier, PeriodicBarriers};
 use crate::barrier::utils::{
     NodeToCollect, collect_creating_job_commit_epoch_info, is_valid_after_worker_err,
 };
-use crate::barrier::{BackfillProgress, Command, CreateStreamingJobType};
+use crate::barrier::{
+    BackfillProgress, Command, CreateStreamingJobType, FragmentBackfillProgress, Reschedule,
+};
+use crate::controller::scale::{build_no_shuffle_fragment_graph_edges, find_no_shuffle_graphs};
 use crate::manager::MetaSrvEnv;
+use crate::model::ActorId;
 use crate::rpc::metrics::GLOBAL_META_METRICS;
 use crate::{MetaError, MetaResult};
 
@@ -167,6 +175,13 @@ impl CheckpointControl {
         })
     }
 
+    pub(crate) fn database_info(&self, database_id: DatabaseId) -> Option<&InflightDatabaseInfo> {
+        self.databases
+            .get(&database_id)
+            .and_then(|database| database.running_state())
+            .map(|database| &database.database_info)
+    }
+
     pub(crate) fn may_have_snapshot_backfilling_jobs(&self) -> bool {
         self.databases
             .values()
@@ -265,7 +280,7 @@ impl CheckpointControl {
                         warn!(?command, "skip command for empty database");
                         return Ok(());
                     }
-                    Command::RescheduleFragment { .. }
+                    Command::RescheduleIntent { .. }
                     | Command::ReplaceStreamJob(_)
                     | Command::SourceChangeSplit(_)
                     | Command::Throttle { .. }
@@ -274,7 +289,9 @@ impl CheckpointControl {
                     | Command::Refresh { .. }
                     | Command::ListFinish { .. }
                     | Command::LoadFinish { .. }
-                    | Command::ResetSource { .. } => {
+                    | Command::ResetSource { .. }
+                    | Command::ResumeBackfill { .. }
+                    | Command::InjectSourceOffsets { .. } => {
                         if cfg!(debug_assertions) {
                             panic!(
                                 "new database graph info can only be created for normal creating streaming job, but get command: {} {:?}",
@@ -350,6 +367,27 @@ impl CheckpointControl {
                 .values()
             {
                 progress.extend([(creating_job.job_id, creating_job.gen_backfill_progress())]);
+            }
+        }
+        progress
+    }
+
+    pub(crate) fn gen_fragment_backfill_progress(&self) -> Vec<FragmentBackfillProgress> {
+        let mut progress = Vec::new();
+        for status in self.databases.values() {
+            let Some(database_checkpoint_control) = status.running_state() else {
+                continue;
+            };
+            progress.extend(
+                database_checkpoint_control
+                    .database_info
+                    .gen_fragment_backfill_progress(),
+            );
+            for creating_job in database_checkpoint_control
+                .creating_streaming_job_controls
+                .values()
+            {
+                progress.extend(creating_job.gen_fragment_backfill_progress());
             }
         }
         progress
@@ -786,6 +824,87 @@ impl DatabaseCheckpointControl {
             .collect()
     }
 
+    fn collect_no_shuffle_fragment_relations_for_reschedule_check(
+        &self,
+    ) -> Vec<(FragmentId, FragmentId)> {
+        let mut no_shuffle_relations = Vec::new();
+        for fragment in self.database_info.fragment_infos() {
+            let downstream_fragment_id = fragment.fragment_id;
+            visit_stream_node_cont(&fragment.nodes, |node| {
+                if let Some(NodeBody::Merge(merge)) = node.node_body.as_ref()
+                    && merge.upstream_dispatcher_type == PbDispatcherType::NoShuffle as i32
+                {
+                    no_shuffle_relations.push((merge.upstream_fragment_id, downstream_fragment_id));
+                }
+                true
+            });
+        }
+
+        for creating_job in self.creating_streaming_job_controls.values() {
+            creating_job.collect_no_shuffle_fragment_relations(&mut no_shuffle_relations);
+        }
+        no_shuffle_relations
+    }
+
+    fn collect_reschedule_blocked_jobs_for_creating_jobs_inflight(
+        &self,
+    ) -> MetaResult<HashSet<JobId>> {
+        let mut initial_blocked_fragment_ids = HashSet::new();
+        for creating_job in self.creating_streaming_job_controls.values() {
+            creating_job.collect_reschedule_blocked_fragment_ids(&mut initial_blocked_fragment_ids);
+        }
+
+        let mut blocked_fragment_ids = initial_blocked_fragment_ids.clone();
+        if !initial_blocked_fragment_ids.is_empty() {
+            let no_shuffle_relations =
+                self.collect_no_shuffle_fragment_relations_for_reschedule_check();
+            let (forward_edges, backward_edges) =
+                build_no_shuffle_fragment_graph_edges(no_shuffle_relations);
+            let initial_blocked_fragment_ids: Vec<_> =
+                initial_blocked_fragment_ids.iter().copied().collect();
+            for ensemble in find_no_shuffle_graphs(
+                &initial_blocked_fragment_ids,
+                &forward_edges,
+                &backward_edges,
+            )? {
+                blocked_fragment_ids.extend(ensemble.fragments());
+            }
+        }
+
+        let mut blocked_job_ids = HashSet::new();
+        blocked_job_ids.extend(
+            blocked_fragment_ids
+                .into_iter()
+                .filter_map(|fragment_id| self.database_info.job_id_by_fragment(fragment_id)),
+        );
+        Ok(blocked_job_ids)
+    }
+
+    fn collect_reschedule_blocked_job_ids(
+        &self,
+        reschedules: &HashMap<FragmentId, Reschedule>,
+        fragment_actors: &HashMap<FragmentId, HashSet<ActorId>>,
+        blocked_job_ids: &HashSet<JobId>,
+    ) -> HashSet<JobId> {
+        let mut affected_fragment_ids: HashSet<FragmentId> = reschedules.keys().copied().collect();
+        affected_fragment_ids.extend(fragment_actors.keys().copied());
+        for reschedule in reschedules.values() {
+            affected_fragment_ids.extend(reschedule.downstream_fragment_ids.iter().copied());
+            affected_fragment_ids.extend(
+                reschedule
+                    .upstream_fragment_dispatcher_ids
+                    .iter()
+                    .map(|(fragment_id, _)| *fragment_id),
+            );
+        }
+
+        affected_fragment_ids
+            .into_iter()
+            .filter_map(|fragment_id| self.database_info.job_id_by_fragment(fragment_id))
+            .filter(|job_id| blocked_job_ids.contains(job_id))
+            .collect()
+    }
+
     fn next_complete_barrier_task(
         &mut self,
         task: &mut Option<CompleteBarrierTask>,
@@ -1042,6 +1161,17 @@ impl DatabaseCheckpointControl {
             (None, vec![])
         };
 
+        debug_assert!(
+            !matches!(
+                &command,
+                Some(Command::RescheduleIntent {
+                    reschedule_plan: None,
+                    ..
+                })
+            ),
+            "reschedule intent should be resolved before injection"
+        );
+
         if let Some(Command::DropStreamingJobs {
             streaming_job_ids, ..
         }) = &command
@@ -1077,7 +1207,7 @@ impl DatabaseCheckpointControl {
             && jobs.len() > 1
             && let Some(creating_job_id) = jobs
                 .iter()
-                .find(|job| self.creating_streaming_job_controls.contains_key(job))
+                .find(|job| self.creating_streaming_job_controls.contains_key(*job))
         {
             warn!(
                 job_id = %creating_job_id,
@@ -1091,19 +1221,35 @@ impl DatabaseCheckpointControl {
             return Ok(());
         };
 
-        if let Some(Command::RescheduleFragment { .. }) = &command
+        if let Some(Command::RescheduleIntent {
+            reschedule_plan: Some(reschedule_plan),
+            ..
+        }) = &command
             && !self.creating_streaming_job_controls.is_empty()
         {
-            warn!("ignore reschedule when creating streaming job with snapshot backfill");
-            for notifier in notifiers {
-                notifier.notify_start_failed(
-                    anyhow!(
-                            "cannot reschedule when creating streaming job with snapshot backfill",
+            let blocked_job_ids =
+                self.collect_reschedule_blocked_jobs_for_creating_jobs_inflight()?;
+            let blocked_reschedule_job_ids = self.collect_reschedule_blocked_job_ids(
+                &reschedule_plan.reschedules,
+                &reschedule_plan.fragment_actors,
+                &blocked_job_ids,
+            );
+            if !blocked_reschedule_job_ids.is_empty() {
+                warn!(
+                    blocked_reschedule_job_ids = ?blocked_reschedule_job_ids,
+                    "reject reschedule fragments related to creating unreschedulable backfill jobs"
+                );
+                for notifier in notifiers {
+                    notifier.notify_start_failed(
+                        anyhow!(
+                            "cannot reschedule jobs {:?} when creating jobs with unreschedulable backfill fragments",
+                            blocked_reschedule_job_ids
                         )
                         .into(),
-                );
+                    );
+                }
+                return Ok(());
             }
-            return Ok(());
         }
 
         if !matches!(&command, Some(Command::CreateStreamingJob { .. }))

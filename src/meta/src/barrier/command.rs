@@ -18,7 +18,7 @@ use std::fmt::{Display, Formatter};
 
 use itertools::Itertools;
 use risingwave_common::bitmap::Bitmap;
-use risingwave_common::catalog::TableId;
+use risingwave_common::catalog::{DatabaseId, TableId};
 use risingwave_common::hash::{ActorMapping, VnodeCountCompat};
 use risingwave_common::id::{JobId, SourceId};
 use risingwave_common::must_match;
@@ -27,7 +27,7 @@ use risingwave_common::util::epoch::Epoch;
 use risingwave_connector::source::{CdcTableSnapshotSplitRaw, SplitImpl};
 use risingwave_hummock_sdk::change_log::build_table_change_log_delta;
 use risingwave_hummock_sdk::vector_index::VectorIndexDelta;
-use risingwave_meta_model::WorkerId;
+use risingwave_meta_model::{DispatcherType, WorkerId, fragment_relation};
 use risingwave_pb::catalog::CreateType;
 use risingwave_pb::common::PbActorInfo;
 use risingwave_pb::hummock::vector_index_delta::PbVectorIndexInit;
@@ -45,14 +45,13 @@ use risingwave_pb::stream_plan::update_mutation::*;
 use risingwave_pb::stream_plan::{
     AddMutation, ConnectorPropsChangeMutation, Dispatcher, Dispatchers, DropSubscriptionsMutation,
     ListFinishMutation, LoadFinishMutation, PauseMutation, PbSinkAddColumnsOp, PbSinkSchemaChange,
-    PbUpstreamSinkInfo, ResumeMutation, SourceChangeSplitMutation, StopMutation,
-    SubscriptionUpstreamInfo, ThrottleMutation, UpdateMutation,
+    PbUpstreamSinkInfo, ResumeMutation, SourceChangeSplitMutation, StartFragmentBackfillMutation,
+    StopMutation, SubscriptionUpstreamInfo, ThrottleMutation, UpdateMutation,
 };
 use risingwave_pb::stream_service::BarrierCompleteResponse;
 use tracing::warn;
 
 use super::info::{CommandFragmentChanges, InflightDatabaseInfo};
-use crate::MetaResult;
 use crate::barrier::backfill_order_control::get_nodes_with_backfill_dependencies;
 use crate::barrier::cdc_progress::CdcTableBackfillTracker;
 use crate::barrier::edge_builder::FragmentEdgeBuildResult;
@@ -60,6 +59,8 @@ use crate::barrier::info::BarrierInfo;
 use crate::barrier::rpc::{ControlStreamManager, to_partial_graph_id};
 use crate::barrier::utils::{collect_new_vector_index_info, collect_resp_info};
 use crate::controller::fragment::{InflightActorInfo, InflightFragmentInfo};
+use crate::controller::scale::LoadedFragmentContext;
+use crate::controller::utils::StreamingJobExtraInfo;
 use crate::hummock::{CommitEpochInfo, NewTableFragmentInfo};
 use crate::manager::{StreamingJob, StreamingJobType};
 use crate::model::{
@@ -69,12 +70,13 @@ use crate::model::{
 };
 use crate::stream::cdc::parallel_cdc_table_backfill_fragment;
 use crate::stream::{
-    AutoRefreshSchemaSinkContext, ConnectorPropsChange, FragmentBackfillOrder, SplitAssignment,
-    SplitState, UpstreamSinkInfo, build_actor_connector_splits,
+    AutoRefreshSchemaSinkContext, ConnectorPropsChange, ExtendedFragmentBackfillOrder,
+    SplitAssignment, SplitState, UpstreamSinkInfo, build_actor_connector_splits,
 };
+use crate::{MetaError, MetaResult};
 
-/// [`Reschedule`] is for the [`Command::RescheduleFragment`], which is used for rescheduling actors
-/// in some fragment, like scaling or migrating.
+/// [`Reschedule`] describes per-fragment changes in a resolved reschedule plan,
+/// used for actor scaling or migration.
 #[derive(Debug, Clone)]
 pub struct Reschedule {
     /// Added actors in this fragment.
@@ -103,6 +105,184 @@ pub struct Reschedule {
     pub actor_splits: HashMap<ActorId, Vec<SplitImpl>>,
 
     pub newly_created_actors: HashMap<ActorId, (StreamActorWithDispatchers, WorkerId)>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ReschedulePlan {
+    pub reschedules: HashMap<FragmentId, Reschedule>,
+    /// Should contain the actor ids in upstream and downstream fragments referenced by
+    /// `reschedules`.
+    pub fragment_actors: HashMap<FragmentId, HashSet<ActorId>>,
+}
+
+/// Preloaded context for rescheduling, built outside the barrier worker.
+#[derive(Debug, Clone)]
+pub struct RescheduleContext {
+    pub loaded: LoadedFragmentContext,
+    pub job_extra_info: HashMap<JobId, StreamingJobExtraInfo>,
+    pub upstream_fragments: HashMap<FragmentId, HashMap<FragmentId, DispatcherType>>,
+    pub downstream_fragments: HashMap<FragmentId, HashMap<FragmentId, DispatcherType>>,
+    pub downstream_relations: HashMap<(FragmentId, FragmentId), fragment_relation::Model>,
+}
+
+impl RescheduleContext {
+    pub fn empty() -> Self {
+        Self {
+            loaded: LoadedFragmentContext::default(),
+            job_extra_info: HashMap::new(),
+            upstream_fragments: HashMap::new(),
+            downstream_fragments: HashMap::new(),
+            downstream_relations: HashMap::new(),
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.loaded.is_empty()
+    }
+
+    pub fn for_database(&self, database_id: DatabaseId) -> Option<Self> {
+        let loaded = self.loaded.for_database(database_id)?;
+        let job_ids: HashSet<JobId> = loaded.job_map.keys().copied().collect();
+        // Use the filtered loaded context as the source of truth so every side map is pruned by
+        // the same fragment set.
+        let fragment_ids: HashSet<FragmentId> = loaded
+            .job_fragments
+            .values()
+            .flat_map(|fragments| fragments.keys().copied())
+            .collect();
+
+        let job_extra_info = self
+            .job_extra_info
+            .iter()
+            .filter(|(job_id, _)| job_ids.contains(*job_id))
+            .map(|(job_id, info)| (*job_id, info.clone()))
+            .collect();
+
+        let upstream_fragments = self
+            .upstream_fragments
+            .iter()
+            .filter(|(fragment_id, _)| fragment_ids.contains(*fragment_id))
+            .map(|(fragment_id, upstreams)| (*fragment_id, upstreams.clone()))
+            .collect();
+
+        let downstream_fragments = self
+            .downstream_fragments
+            .iter()
+            .filter(|(fragment_id, _)| fragment_ids.contains(*fragment_id))
+            .map(|(fragment_id, downstreams)| (*fragment_id, downstreams.clone()))
+            .collect();
+
+        let downstream_relations = self
+            .downstream_relations
+            .iter()
+            // Ownership of this map is source-fragment based. We keep all downstream edges for
+            // selected sources because the target side can still be referenced during dispatcher
+            // reconstruction even if that target fragment is not being rescheduled.
+            .filter(|((source_fragment_id, _), _)| fragment_ids.contains(source_fragment_id))
+            .map(|(key, relation)| (*key, relation.clone()))
+            .collect();
+
+        Some(Self {
+            loaded,
+            job_extra_info,
+            upstream_fragments,
+            downstream_fragments,
+            downstream_relations,
+        })
+    }
+
+    /// Split this context into per-database contexts without cloning the large loaded graph
+    /// payloads.
+    pub fn into_database_contexts(self) -> HashMap<DatabaseId, Self> {
+        let Self {
+            loaded,
+            job_extra_info,
+            upstream_fragments,
+            downstream_fragments,
+            downstream_relations,
+        } = self;
+
+        let mut contexts: HashMap<_, _> = loaded
+            .into_database_contexts()
+            .into_iter()
+            .map(|(database_id, loaded)| {
+                (
+                    database_id,
+                    Self {
+                        loaded,
+                        job_extra_info: HashMap::new(),
+                        upstream_fragments: HashMap::new(),
+                        downstream_fragments: HashMap::new(),
+                        downstream_relations: HashMap::new(),
+                    },
+                )
+            })
+            .collect();
+
+        if contexts.is_empty() {
+            return contexts;
+        }
+
+        let mut job_databases = HashMap::new();
+        let mut fragment_databases = HashMap::new();
+        for (&database_id, context) in &contexts {
+            for job_id in context.loaded.job_map.keys().copied() {
+                job_databases.insert(job_id, database_id);
+            }
+            for fragment_id in context
+                .loaded
+                .job_fragments
+                .values()
+                .flat_map(|fragments| fragments.keys().copied())
+            {
+                fragment_databases.insert(fragment_id, database_id);
+            }
+        }
+
+        for (job_id, info) in job_extra_info {
+            if let Some(database_id) = job_databases.get(&job_id).copied() {
+                contexts
+                    .get_mut(&database_id)
+                    .expect("database context should exist for job")
+                    .job_extra_info
+                    .insert(job_id, info);
+            }
+        }
+
+        for (fragment_id, upstreams) in upstream_fragments {
+            if let Some(database_id) = fragment_databases.get(&fragment_id).copied() {
+                contexts
+                    .get_mut(&database_id)
+                    .expect("database context should exist for fragment")
+                    .upstream_fragments
+                    .insert(fragment_id, upstreams);
+            }
+        }
+
+        for (fragment_id, downstreams) in downstream_fragments {
+            if let Some(database_id) = fragment_databases.get(&fragment_id).copied() {
+                contexts
+                    .get_mut(&database_id)
+                    .expect("database context should exist for fragment")
+                    .downstream_fragments
+                    .insert(fragment_id, downstreams);
+            }
+        }
+
+        for ((source_fragment_id, target_fragment_id), relation) in downstream_relations {
+            // Route by source fragment ownership. A target may be outside of current reschedule
+            // set, but this edge still belongs to the source-side command.
+            if let Some(database_id) = fragment_databases.get(&source_fragment_id).copied() {
+                contexts
+                    .get_mut(&database_id)
+                    .expect("database context should exist for relation source")
+                    .downstream_relations
+                    .insert((source_fragment_id, target_fragment_id), relation);
+            }
+        }
+
+        contexts
+    }
 }
 
 /// Replacing an old job with a new one. All actors in the job will be rebuilt.
@@ -214,7 +394,7 @@ pub struct CreateStreamingJobCommandInfo {
     pub job_type: StreamingJobType,
     pub create_type: CreateType,
     pub streaming_job: StreamingJob,
-    pub fragment_backfill_ordering: FragmentBackfillOrder,
+    pub fragment_backfill_ordering: ExtendedFragmentBackfillOrder,
     pub cdc_table_snapshot_splits: Option<Vec<CdcTableSnapshotSplitRaw>>,
     pub locality_fragment_state_table_mapping: HashMap<FragmentId, Vec<TableId>>,
     pub is_serverless: bool,
@@ -331,22 +511,21 @@ pub enum Command {
         cross_db_snapshot_backfill_info: SnapshotBackfillInfo,
     },
 
-    /// `Reschedule` command generates a `Update` barrier by the [`Reschedule`] of each fragment.
-    /// Mainly used for scaling and migration.
-    ///
-    /// Barriers from which actors should be collected, and the post behavior of this command are
-    /// very similar to `Create` and `Drop` commands, for added and removed actors, respectively.
-    RescheduleFragment {
-        reschedules: HashMap<FragmentId, Reschedule>,
-        // Should contain the actor ids in upstream and downstream fragment of `reschedules`
-        fragment_actors: HashMap<FragmentId, HashSet<ActorId>>,
+    /// Reschedule context. It must be resolved inside the barrier worker before injection.
+    RescheduleIntent {
+        context: RescheduleContext,
+        /// Filled by the barrier worker after resolving `context` against current worker topology.
+        ///
+        /// We keep unresolved `context` outside of checkpoint state and only materialize this
+        /// execution plan right before injection, then drop `context` to release memory earlier.
+        reschedule_plan: Option<ReschedulePlan>,
     },
 
     /// `ReplaceStreamJob` command generates a `Update` barrier with the given `replace_upstream`. This is
     /// essentially switching the downstream of the old job fragments to the new ones, and
     /// dropping the old job fragments. Used for schema change.
     ///
-    /// This can be treated as a special case of `RescheduleFragment`, while the upstream fragment
+    /// This can be treated as a special case of reschedule, while the upstream fragment
     /// of the Merge executors are changed additionally.
     ReplaceStreamJob(ReplaceStreamJobPlan),
 
@@ -399,6 +578,27 @@ pub enum Command {
     ResetSource {
         source_id: SourceId,
     },
+
+    /// `ResumeBackfill` command generates a `StartFragmentBackfill` barrier to force backfill
+    /// to resume for troubleshooting.
+    ResumeBackfill {
+        target: ResumeBackfillTarget,
+    },
+
+    /// `InjectSourceOffsets` command generates a barrier to inject specific offsets
+    /// into source splits (UNSAFE - admin only).
+    /// This can cause data duplication or loss depending on the correctness of the provided offsets.
+    InjectSourceOffsets {
+        source_id: SourceId,
+        /// Split ID -> offset (JSON-encoded based on connector type)
+        split_offsets: HashMap<String, String>,
+    },
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum ResumeBackfillTarget {
+    Job(JobId),
+    Fragment(FragmentId),
 }
 
 // For debugging and observability purposes. Can add more details later if needed.
@@ -420,7 +620,15 @@ impl std::fmt::Display for Command {
             Command::CreateStreamingJob { info, .. } => {
                 write!(f, "CreateStreamingJob: {}", info.streaming_job)
             }
-            Command::RescheduleFragment { .. } => write!(f, "RescheduleFragment"),
+            Command::RescheduleIntent {
+                reschedule_plan, ..
+            } => {
+                if reschedule_plan.is_some() {
+                    write!(f, "RescheduleIntent(planned)")
+                } else {
+                    write!(f, "RescheduleIntent")
+                }
+            }
             Command::ReplaceStreamJob(plan) => {
                 write!(f, "ReplaceStreamJob: {}", plan.streaming_job)
             }
@@ -458,6 +666,23 @@ impl std::fmt::Display for Command {
                 table_id, associated_source_id
             ),
             Command::ResetSource { source_id } => write!(f, "ResetSource: {source_id}"),
+            Command::ResumeBackfill { target } => match target {
+                ResumeBackfillTarget::Job(job_id) => {
+                    write!(f, "ResumeBackfill: job={job_id}")
+                }
+                ResumeBackfillTarget::Fragment(fragment_id) => {
+                    write!(f, "ResumeBackfill: fragment={fragment_id}")
+                }
+            },
+            Command::InjectSourceOffsets {
+                source_id,
+                split_offsets,
+            } => write!(
+                f,
+                "InjectSourceOffsets: {} ({} splits)",
+                source_id,
+                split_offsets.len()
+            ),
         }
     }
 }
@@ -547,57 +772,64 @@ impl Command {
 
                 Some((Some((info.streaming_job.id(), cdc_tracker)), changes))
             }
-            Command::RescheduleFragment { reschedules, .. } => Some((
-                None,
-                reschedules
-                    .iter()
-                    .map(|(fragment_id, reschedule)| {
-                        (
-                            *fragment_id,
-                            CommandFragmentChanges::Reschedule {
-                                new_actors: reschedule
-                                    .added_actors
-                                    .iter()
-                                    .flat_map(|(node_id, actors)| {
-                                        actors.iter().map(|actor_id| {
-                                            (
-                                                *actor_id,
-                                                InflightActorInfo {
-                                                    worker_id: *node_id,
-                                                    vnode_bitmap: reschedule
-                                                        .newly_created_actors
-                                                        .get(actor_id)
-                                                        .expect("should exist")
-                                                        .0
-                                                        .0
-                                                        .vnode_bitmap
-                                                        .clone(),
-                                                    splits: reschedule
-                                                        .actor_splits
-                                                        .get(actor_id)
-                                                        .cloned()
-                                                        .unwrap_or_default(),
-                                                },
-                                            )
+            Command::RescheduleIntent {
+                reschedule_plan, ..
+            } => {
+                let ReschedulePlan { reschedules, .. } = reschedule_plan
+                    .as_ref()
+                    .expect("reschedule intent should be resolved in global barrier worker");
+                Some((
+                    None,
+                    reschedules
+                        .iter()
+                        .map(|(fragment_id, reschedule)| {
+                            (
+                                *fragment_id,
+                                CommandFragmentChanges::Reschedule {
+                                    new_actors: reschedule
+                                        .added_actors
+                                        .iter()
+                                        .flat_map(|(node_id, actors)| {
+                                            actors.iter().map(|actor_id| {
+                                                (
+                                                    *actor_id,
+                                                    InflightActorInfo {
+                                                        worker_id: *node_id,
+                                                        vnode_bitmap: reschedule
+                                                            .newly_created_actors
+                                                            .get(actor_id)
+                                                            .expect("should exist")
+                                                            .0
+                                                            .0
+                                                            .vnode_bitmap
+                                                            .clone(),
+                                                        splits: reschedule
+                                                            .actor_splits
+                                                            .get(actor_id)
+                                                            .cloned()
+                                                            .unwrap_or_default(),
+                                                    },
+                                                )
+                                            })
                                         })
-                                    })
-                                    .collect(),
-                                actor_update_vnode_bitmap: reschedule
-                                    .vnode_bitmap_updates
-                                    .iter()
-                                    .filter(|(actor_id, _)| {
-                                        // only keep the existing actors
-                                        !reschedule.newly_created_actors.contains_key(actor_id)
-                                    })
-                                    .map(|(actor_id, bitmap)| (*actor_id, bitmap.clone()))
-                                    .collect(),
-                                to_remove: reschedule.removed_actors.iter().cloned().collect(),
-                                actor_splits: reschedule.actor_splits.clone(),
-                            },
-                        )
-                    })
-                    .collect(),
-            )),
+                                        .collect(),
+                                    actor_update_vnode_bitmap: reschedule
+                                        .vnode_bitmap_updates
+                                        .iter()
+                                        .filter(|(actor_id, _)| {
+                                            // only keep the existing actors
+                                            !reschedule.newly_created_actors.contains_key(*actor_id)
+                                        })
+                                        .map(|(actor_id, bitmap)| (*actor_id, bitmap.clone()))
+                                        .collect(),
+                                    to_remove: reschedule.removed_actors.iter().cloned().collect(),
+                                    actor_splits: reschedule.actor_splits.clone(),
+                                },
+                            )
+                        })
+                        .collect(),
+                ))
+            }
             Command::ReplaceStreamJob(plan) => Some((None, plan.fragment_changes())),
             Command::SourceChangeSplit(SplitState {
                 split_assignment, ..
@@ -623,6 +855,8 @@ impl Command {
             Command::ListFinish { .. } => None, // ListFinish doesn't change fragment structure
             Command::LoadFinish { .. } => None, // LoadFinish doesn't change fragment structure
             Command::ResetSource { .. } => None, // ResetSource doesn't change fragment structure
+            Command::ResumeBackfill { .. } => None, /* ResumeBackfill doesn't change fragment structure */
+            Command::InjectSourceOffsets { .. } => None, /* InjectSourceOffsets doesn't change fragment structure */
         }
     }
 
@@ -644,7 +878,7 @@ pub enum PostCollectCommand {
         job_type: CreateStreamingJobType,
         cross_db_snapshot_backfill_info: SnapshotBackfillInfo,
     },
-    RescheduleFragment {
+    Reschedule {
         reschedules: HashMap<FragmentId, Reschedule>,
     },
     ReplaceStreamJob(ReplaceStreamJobPlan),
@@ -655,6 +889,9 @@ pub enum PostCollectCommand {
         subscription_id: SubscriptionId,
     },
     ConnectorPropsChange(ConnectorPropsChange),
+    ResumeBackfill {
+        target: ResumeBackfillTarget,
+    },
 }
 
 impl PostCollectCommand {
@@ -667,11 +904,12 @@ impl PostCollectCommand {
             PostCollectCommand::Command(name) => name.as_str(),
             PostCollectCommand::DropStreamingJobs { .. } => "DropStreamingJobs",
             PostCollectCommand::CreateStreamingJob { .. } => "CreateStreamingJob",
-            PostCollectCommand::RescheduleFragment { .. } => "RescheduleFragment",
+            PostCollectCommand::Reschedule { .. } => "Reschedule",
             PostCollectCommand::ReplaceStreamJob(_) => "ReplaceStreamJob",
             PostCollectCommand::SourceChangeSplit { .. } => "SourceChangeSplit",
             PostCollectCommand::CreateSubscription { .. } => "CreateSubscription",
             PostCollectCommand::ConnectorPropsChange(_) => "ConnectorPropsChange",
+            PostCollectCommand::ResumeBackfill { .. } => "ResumeBackfill",
         }
     }
 }
@@ -705,8 +943,12 @@ impl Command {
                     cross_db_snapshot_backfill_info,
                 },
             },
-            Command::RescheduleFragment { reschedules, .. } => {
-                PostCollectCommand::RescheduleFragment { reschedules }
+            Command::RescheduleIntent {
+                reschedule_plan, ..
+            } => {
+                let ReschedulePlan { reschedules, .. } = reschedule_plan
+                    .expect("reschedule intent should be resolved in global barrier worker");
+                PostCollectCommand::Reschedule { reschedules }
             }
             Command::ReplaceStreamJob(plan) => PostCollectCommand::ReplaceStreamJob(plan),
             Command::SourceChangeSplit(SplitState { split_assignment }) => {
@@ -729,6 +971,10 @@ impl Command {
             Command::ListFinish { .. } => PostCollectCommand::Command("ListFinish".to_owned()),
             Command::LoadFinish { .. } => PostCollectCommand::Command("LoadFinish".to_owned()),
             Command::ResetSource { .. } => PostCollectCommand::Command("ResetSource".to_owned()),
+            Command::ResumeBackfill { target } => PostCollectCommand::ResumeBackfill { target },
+            Command::InjectSourceOffsets { .. } => {
+                PostCollectCommand::Command("InjectSourceOffsets".to_owned())
+            }
         }
     }
 }
@@ -1145,11 +1391,15 @@ impl Command {
                 )
             }
 
-            Command::RescheduleFragment {
-                reschedules,
-                fragment_actors,
-                ..
+            Command::RescheduleIntent {
+                reschedule_plan, ..
             } => {
+                let ReschedulePlan {
+                    reschedules,
+                    fragment_actors,
+                } = reschedule_plan
+                    .as_ref()
+                    .expect("reschedule intent should be resolved in global barrier worker");
                 let mut dispatcher_update = HashMap::new();
                 for reschedule in reschedules.values() {
                     for &(upstream_fragment_id, dispatcher_id) in
@@ -1388,6 +1638,44 @@ impl Command {
                     source_id: source_id.as_raw_id(),
                 },
             )),
+            Command::ResumeBackfill { target } => {
+                let fragment_ids: HashSet<_> = match target {
+                    ResumeBackfillTarget::Job(job_id) => {
+                        database_info.backfill_fragment_ids_for_job(*job_id)?
+                    }
+                    ResumeBackfillTarget::Fragment(fragment_id) => {
+                        if !database_info.is_backfill_fragment(*fragment_id)? {
+                            return Err(MetaError::invalid_parameter(format!(
+                                "fragment {} is not a backfill node",
+                                fragment_id
+                            )));
+                        }
+                        HashSet::from([*fragment_id])
+                    }
+                };
+                if fragment_ids.is_empty() {
+                    warn!(
+                        ?target,
+                        "resume backfill command ignored because no backfill fragments found"
+                    );
+                    None
+                } else {
+                    Some(Mutation::StartFragmentBackfill(
+                        StartFragmentBackfillMutation {
+                            fragment_ids: fragment_ids.into_iter().collect(),
+                        },
+                    ))
+                }
+            }
+            Command::InjectSourceOffsets {
+                source_id,
+                split_offsets,
+            } => Some(Mutation::InjectSourceOffsets(
+                risingwave_pb::stream_plan::InjectSourceOffsetsMutation {
+                    source_id: source_id.as_raw_id(),
+                    split_offsets: split_offsets.clone(),
+                },
+            )),
         };
         Ok(mutation)
     }
@@ -1417,11 +1705,15 @@ impl Command {
                     },
                 )))
             }
-            Command::RescheduleFragment {
-                reschedules,
-                fragment_actors,
-                ..
+            Command::RescheduleIntent {
+                reschedule_plan, ..
             } => {
+                let ReschedulePlan {
+                    reschedules,
+                    fragment_actors,
+                } = reschedule_plan
+                    .as_ref()
+                    .expect("reschedule intent should be resolved in global barrier worker");
                 // we assume that we only scale the actors in database partial graph
                 let mut actor_upstreams = Self::collect_database_partial_graph_actor_upstreams(
                     reschedules.iter().map(|(fragment_id, reschedule)| {

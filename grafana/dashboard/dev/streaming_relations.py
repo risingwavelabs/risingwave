@@ -1,19 +1,66 @@
 from ..common import *
 from . import section
-from .streaming_common import _actor_busy_rate_expr
+from .streaming_common import _actor_busy_rate_expr, relabel_materialized_view_id_as_id
+from .streaming_fragments import (
+    _kv_log_store_buffer_usage_by_fragment_expr,
+    _sync_kv_log_store_buffer_usage_by_fragment_expr,
+)
 
-def _relation_busy_rate_expr(rate_interval: str):
+def _relation_busy_rate_expr_by_mv(rate_interval: str):
+    """Return per-relation busy rate (by materialized_view_id), based on busiest actor."""
     actor_busy_rate_expr = _actor_busy_rate_expr(rate_interval)
-    relation_busy_rate_expr = (
+    return (
         f"topk(1,"
         f"  ({actor_busy_rate_expr}) * on (fragment_id) group_right {metric('table_info')}"
         f") by (materialized_view_id)"
     )
+
+def _relation_busy_rate_expr(rate_interval: str):
+    """Return per-relation busy rate with relation metadata labels attached."""
+    relation_busy_rate_expr = _relation_busy_rate_expr_by_mv(rate_interval)
     relation_busy_rate_with_metadata_expr = (
-        f"label_replace(({relation_busy_rate_expr}), 'id', '$1', 'materialized_view_id', '(.*)')"
+        f"label_replace(({relation_busy_rate_expr}), 'id', '$1', 'materialized_view_id', '(.+)')"
         f"* on (id) group_left (name, type) {metric('relation_info')}"
     )
     return relation_busy_rate_with_metadata_expr
+
+def _relation_metric_with_id(expr: str) -> str:
+    """Attach `id` label from materialized_view_id for relation-level tables."""
+    return f"label_replace(({expr}), 'id', '$1', 'materialized_view_id', '(.+)')"
+
+def _relation_metric_with_metadata(expr: str) -> str:
+    """Join relation_info to add name/type labels after peak computation."""
+    return f"({expr}) * on (id) group_left (name, type) {metric('relation_info')}"
+
+def _relation_busy_peak_topk_expr(rate_interval: str) -> str:
+    """Compute top-k peak busy rate for relations over the dashboard range."""
+    per_mv_busy_expr = _relation_busy_rate_expr_by_mv(rate_interval)
+    per_mv_busy_with_id_expr = _relation_metric_with_id(per_mv_busy_expr)
+    with_metadata_expr = _relation_metric_with_metadata(per_mv_busy_with_id_expr)
+    peak_expr = f"max_over_time(({with_metadata_expr})[$__range:$__interval])"
+    return f"topk(10, (100 * ({peak_expr})))"
+
+def _relation_cpu_peak_topk_expr(
+    poll_duration_rate_expr: str, actor_count_expr: str
+) -> str:
+    """Compute top-k peak CPU rate for relations, normalized by actor count."""
+    per_fragment_rate_expr = (
+        f"({poll_duration_rate_expr}) / on(fragment_id) {actor_count_expr}"
+    )
+    per_mv_rate_expr = _sum_fragment_metric_by_mv(per_fragment_rate_expr)
+    per_mv_rate_expr = f"({per_mv_rate_expr}) / 1000000000"
+    per_mv_rate_with_id_expr = (
+        f"label_replace(({per_mv_rate_expr}), "
+        f"'id', '$1', 'materialized_view_id', '(.+)')"
+    )
+    with_metadata_expr = (
+        f"({per_mv_rate_with_id_expr}) * on (id) group_left (name, type)"
+        f" {metric('relation_info')}"
+    )
+    peak_expr = (
+        f"max_over_time(({with_metadata_expr})[$__range:$__interval])"
+    )
+    return f"topk(10, (100 * ({peak_expr})))"
 
 def _relation_busy_rate_target(panels: Panels, rate_interval: str):
     return panels.target(
@@ -33,14 +80,75 @@ def _sum_fragment_metric_by_mv(expr: str) -> str:
 @section
 def _(outer_panels: Panels):
     panels = outer_panels.sub_panel()
+    actor_count_expr = (
+        f"clamp_min(sum({metric('stream_actor_count')}) by (fragment_id), 1)"
+    )
+    poll_duration_rate_expr = (
+        f"sum(rate({metric('stream_actor_poll_duration')}[$__rate_interval])) by (fragment_id)"
+    )
     poll_duration_expr = (
-        f"sum(rate({metric('stream_actor_poll_duration')}[$__rate_interval])) by (fragment_id) "
-        f"/ on(fragment_id) sum({metric('stream_actor_count')}) by (fragment_id)"
+        f"{poll_duration_rate_expr} / on(fragment_id) {actor_count_expr}"
+    )
+    zero_for_all_mvs_expr = f"0 * max by (materialized_view_id) ({metric('table_info')})"
+    def _coalesce_mv(expr: str) -> str:
+        return f"(({expr}) or on(materialized_view_id) {zero_for_all_mvs_expr})"
+    executor_cache_usage_expr = (
+        f"sum({metric('stream_memory_usage')} * on(table_id) group_left(materialized_view_id) "
+        f"{metric('table_info')}) by (materialized_view_id)"
+    )
+    shared_buffer_usage_expr = _sum_fragment_metric_by_mv(
+        metric("state_store_per_table_imm_size")
+    )
+    kv_log_store_buffer_usage_expr = _sum_fragment_metric_by_mv(
+        _kv_log_store_buffer_usage_by_fragment_expr()
+    )
+    sync_kv_log_store_buffer_usage_expr = _sum_fragment_metric_by_mv(
+        _sync_kv_log_store_buffer_usage_by_fragment_expr()
+    )
+    total_memory_usage_expr = " + ".join(
+        map(
+            _coalesce_mv,
+            [
+                executor_cache_usage_expr,
+                shared_buffer_usage_expr,
+                kv_log_store_buffer_usage_expr,
+                sync_kv_log_store_buffer_usage_expr,
+            ],
+        )
     )
     return [
         outer_panels.row_collapsed(
             "Streaming Relation Metrics",
             [
+                panels.subheader("Overview"),
+                panels.table_info(
+                    "Top Relations by Busy Rate",
+                    "Top 10 relations with the highest peak busy rate (%).",
+                    [
+                        panels.table_target(
+                            _relation_busy_peak_topk_expr("$__rate_interval")
+                        )
+                    ],
+                    ["id", "name", "Value", "type"],
+                    dict.fromkeys(["Time"], True),
+                    {"Value": "rate"},
+                    {"rate": "percent"},
+                ),
+                panels.table_info(
+                    "Top Relations by CPU Rate",
+                    "Top 10 relations with the highest peak CPU rate (%).",
+                    [
+                        panels.table_target(
+                            _relation_cpu_peak_topk_expr(
+                                poll_duration_rate_expr, actor_count_expr
+                            )
+                        )
+                    ],
+                    ["id", "name", "Value", "type"],
+                    dict.fromkeys(["Time"], True),
+                    {"Value": "rate"},
+                    {"rate": "percent"},
+                ),
                 panels.subheader("CPU Usage By Relation"),
                 panels.timeseries_percentage(
                     "CPU Usage Per Streaming Job",
@@ -135,14 +243,42 @@ def _(outer_panels: Panels):
                         ),
                     ],
                 ),
-                panels.subheader("Cache Memory Usage By Relation"),
+                panels.subheader("Memory Usage By Relation"),
+                panels.timeseries_bytes(
+                    "Total Memory Usage",
+                    "Sum of executor cache, shared buffer imm size, and log store buffer memory",
+                    [
+                        panels.target(
+                            _relation_metric_with_metadata(
+                                relabel_materialized_view_id_as_id(
+                                    total_memory_usage_expr
+                                )
+                            ),
+                            "relation {{name}} (id={{id}} type={{type}})",
+                        ),
+                    ],
+                ),
                 panels.timeseries_bytes(
                     "Executor Cache Memory Usage of Materialized Views",
                     "Memory usage aggregated by materialized views",
                     [
                         panels.target(
-                            f"sum({metric('stream_memory_usage')} * on(table_id) group_left(materialized_view_id) {metric('table_info')}) by (materialized_view_id)",
+                            executor_cache_usage_expr,
                             "materialized view {{materialized_view_id}}",
+                        ),
+                    ],
+                ),
+                panels.timeseries_bytes(
+                    "Shared Buffer Memory Usage",
+                    "Shared buffer imm size aggregated by relation.",
+                    [
+                        panels.target(
+                            _relation_metric_with_metadata(
+                                relabel_materialized_view_id_as_id(
+                                    shared_buffer_usage_expr
+                                )
+                            ),
+                            "relation {{name}} (id={{id}} type={{type}})",
                         ),
                     ],
                 ),

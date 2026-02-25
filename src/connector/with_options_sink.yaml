@@ -664,6 +664,11 @@ IcebergConfig:
     comments: The iceberg write mode, can be `merge-on-read` or `copy-on-write`.
     required: false
     default: 'IcebergWriteMode :: MergeOnRead'
+  - name: format_version
+    field_type: FormatVersion
+    comments: Iceberg format version for table creation.
+    required: false
+    default: 'FormatVersion :: V2'
   - name: snapshot_expiration_max_age_millis
     field_type: i64
     comments: |-
@@ -1421,10 +1426,14 @@ RedShiftConfig:
     field_type: bool
     required: false
     default: Default::default
-  - name: schedule_seconds
+  - name: writer_target_interval_seconds
     field_type: u64
     required: false
     default: '3600'
+  - name: write_intermediate_interval_seconds
+    field_type: u64
+    required: false
+    default: '1800'
   - name: batch_insert_rows
     field_type: u32
     required: false
@@ -1554,10 +1563,14 @@ SnowflakeV2Config:
   - name: schema
     field_type: String
     required: false
-  - name: snowflake_schedule_seconds
+  - name: writer_target_interval_seconds
     field_type: u64
     required: false
     default: '3600'
+  - name: write_intermediate_interval_seconds
+    field_type: u64
+    required: false
+    default: '1800'
   - name: warehouse
     field_type: String
     required: false

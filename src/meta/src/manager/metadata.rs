@@ -26,6 +26,7 @@ use risingwave_pb::common::worker_node::{PbResource, Property as AddNodeProperty
 use risingwave_pb::common::{HostAddress, PbWorkerNode, PbWorkerType, WorkerNode, WorkerType};
 use risingwave_pb::meta::list_rate_limits_response::RateLimitInfo;
 use risingwave_pb::stream_plan::{PbDispatcherType, PbStreamNode, PbStreamScanType};
+use sea_orm::TransactionTrait;
 use sea_orm::prelude::DateTime;
 use tokio::sync::mpsc::{UnboundedReceiver, unbounded_channel};
 use tokio::sync::oneshot;
@@ -36,6 +37,7 @@ use crate::barrier::SharedFragmentInfo;
 use crate::controller::catalog::CatalogControllerRef;
 use crate::controller::cluster::{ClusterControllerRef, StreamingClusterInfo, WorkerExtraInfo};
 use crate::controller::fragment::FragmentParallelismInfo;
+use crate::controller::scale::find_fragment_no_shuffle_dags_detailed;
 use crate::manager::{LocalNotification, NotificationVersion};
 use crate::model::{ActorId, ClusterId, FragmentId, StreamJobFragments, SubscriptionId};
 use crate::stream::SplitAssignment;
@@ -98,7 +100,10 @@ impl ActiveStreamingWorkerNodes {
             .subscribe_active_streaming_compute_nodes()
             .await?;
         Ok(Self {
-            worker_nodes: nodes.into_iter().map(|node| (node.id, node)).collect(),
+            worker_nodes: nodes
+                .into_iter()
+                .filter_map(|node| node.is_streaming_schedulable().then_some((node.id, node)))
+                .collect(),
             rx,
             meta_manager: Some(meta_manager),
         })
@@ -115,12 +120,16 @@ impl ActiveStreamingWorkerNodes {
                 .recv()
                 .await
                 .expect("notification stopped or uninitialized");
+            fn is_target_worker_node(worker: &WorkerNode) -> bool {
+                worker.r#type == WorkerType::ComputeNode as i32
+                    && worker.property.as_ref().unwrap().is_streaming
+                    && worker.is_streaming_schedulable()
+            }
             match notification {
                 LocalNotification::WorkerNodeDeleted(worker) => {
-                    let is_streaming_compute_node = worker.r#type == WorkerType::ComputeNode as i32
-                        && worker.property.as_ref().unwrap().is_streaming;
+                    let is_target_worker_node = is_target_worker_node(&worker);
                     let Some(prev_worker) = self.worker_nodes.remove(&worker.id) else {
-                        if is_streaming_compute_node {
+                        if is_target_worker_node {
                             warn!(
                                 ?worker,
                                 "notify to delete an non-existing streaming compute worker"
@@ -128,7 +137,7 @@ impl ActiveStreamingWorkerNodes {
                         }
                         continue;
                     };
-                    if !is_streaming_compute_node {
+                    if !is_target_worker_node {
                         warn!(
                             ?worker,
                             ?prev_worker,
@@ -146,9 +155,7 @@ impl ActiveStreamingWorkerNodes {
                     break ActiveStreamingWorkerChange::Remove(prev_worker);
                 }
                 LocalNotification::WorkerNodeActivated(worker) => {
-                    if worker.r#type != WorkerType::ComputeNode as i32
-                        || !worker.property.as_ref().unwrap().is_streaming
-                    {
+                    if !is_target_worker_node(&worker) {
                         if let Some(prev_worker) = self.worker_nodes.remove(&worker.id) {
                             warn!(
                                 ?worker,
@@ -709,6 +716,7 @@ impl MetadataManager {
     pub async fn collect_unreschedulable_backfill_jobs(
         &self,
         job_ids: impl IntoIterator<Item = &JobId>,
+        is_online: bool,
     ) -> MetaResult<HashSet<JobId>> {
         let mut unreschedulable = HashSet::new();
 
@@ -719,13 +727,76 @@ impl MetadataManager {
                 .await?;
             if scan_types
                 .values()
-                .any(|scan_type| !scan_type.is_reschedulable())
+                .any(|scan_type| !scan_type.is_reschedulable(is_online))
             {
                 unreschedulable.insert(*job_id);
             }
         }
 
         Ok(unreschedulable)
+    }
+
+    pub async fn collect_reschedule_blocked_jobs_for_creating_jobs(
+        &self,
+        creating_job_ids: impl IntoIterator<Item = &JobId>,
+        is_online: bool,
+    ) -> MetaResult<HashSet<JobId>> {
+        let creating_job_ids: HashSet<_> = creating_job_ids.into_iter().copied().collect();
+        if creating_job_ids.is_empty() {
+            return Ok(HashSet::new());
+        }
+
+        let inner = self.catalog_controller.inner.read().await;
+        let txn = inner.db.begin().await?;
+
+        let mut initial_fragment_ids = HashSet::new();
+        for job_id in &creating_job_ids {
+            let scan_types = self
+                .catalog_controller
+                .get_job_fragment_backfill_scan_type_in_txn(&txn, *job_id)
+                .await?;
+            initial_fragment_ids.extend(scan_types.into_iter().filter_map(
+                |(fragment_id, scan_type)| {
+                    (!scan_type.is_reschedulable(is_online)).then_some(fragment_id)
+                },
+            ));
+        }
+
+        if !initial_fragment_ids.is_empty() {
+            let upstream_fragments = self
+                .catalog_controller
+                .upstream_fragments_in_txn(&txn, initial_fragment_ids.iter().copied())
+                .await?;
+            initial_fragment_ids.extend(upstream_fragments.into_values().flatten());
+        }
+
+        let mut blocked_fragment_ids = initial_fragment_ids.clone();
+        if !initial_fragment_ids.is_empty() {
+            let initial_fragment_ids = initial_fragment_ids.into_iter().collect_vec();
+            let ensembles =
+                find_fragment_no_shuffle_dags_detailed(&txn, &initial_fragment_ids).await?;
+            for ensemble in ensembles {
+                blocked_fragment_ids.extend(ensemble.fragments());
+            }
+        }
+
+        let mut blocked_job_ids = HashSet::new();
+        if !blocked_fragment_ids.is_empty() {
+            let fragment_ids = blocked_fragment_ids.into_iter().collect_vec();
+            let fragment_job_ids = self
+                .catalog_controller
+                .get_fragment_job_id_in_txn(&txn, fragment_ids)
+                .await?;
+            blocked_job_ids.extend(
+                fragment_job_ids
+                    .into_iter()
+                    .map(|job_id| job_id.as_job_id()),
+            );
+        }
+
+        txn.commit().await?;
+
+        Ok(blocked_job_ids)
     }
 }
 
@@ -741,7 +812,7 @@ impl MetadataManager {
         tracing::debug!("wait_streaming_job_finished: {id:?}");
         let mut mgr = self.catalog_controller.get_inner_write_guard().await;
         if mgr.streaming_job_is_finished(id).await? {
-            return Ok(self.catalog_controller.current_notification_version().await);
+            return Ok(self.catalog_controller.notify_frontend_trivial().await);
         }
         let (tx, rx) = oneshot::channel();
 

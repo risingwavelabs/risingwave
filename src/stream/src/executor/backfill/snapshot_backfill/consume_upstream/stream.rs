@@ -14,6 +14,7 @@
 
 mod upstream_table_ext {
     use std::collections::HashMap;
+    use std::time::Duration;
 
     use futures::future::{BoxFuture, try_join_all};
     use futures::{TryFutureExt, TryStreamExt};
@@ -40,13 +41,14 @@ mod upstream_table_ext {
         snapshot_epoch: u64,
         rate_limit: RateLimit,
         chunk_size: usize,
+        rebuild_interval: Duration,
         vnode_progresses: HashMap<VirtualNode, (Option<OwnedRow>, usize)>,
     ) -> UpstreamTableSnapshotStreamFuture<'_, T> {
         Box::pin(async move {
             let streams = try_join_all(vnode_progresses.into_iter().map(
                 |(vnode, (start_pk, row_count))| {
                     upstream_table
-                        .snapshot_stream(vnode, snapshot_epoch, start_pk)
+                        .snapshot_stream(vnode, snapshot_epoch, start_pk, rebuild_interval)
                         .map_ok(move |stream| {
                             (vnode, stream.map_ok(ChangeLogRow::Insert), row_count)
                         })
@@ -104,6 +106,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::mem::take;
 use std::pin::Pin;
 use std::task::{Context, Poll, ready};
+use std::time::Duration;
 
 use risingwave_common::array::StreamChunk;
 use risingwave_common::hash::VirtualNode;
@@ -400,6 +403,7 @@ impl<'a, T: UpstreamTable> ConsumeUpstreamStream<'a, T> {
         snapshot_epoch: u64,
         chunk_size: usize,
         rate_limit: RateLimit,
+        snapshot_rebuild_interval: Duration,
     ) -> Self {
         let mut ongoing_snapshot_epoch_vnodes = HashMap::new();
         let mut finished_snapshot_epoch_vnodes = HashMap::new();
@@ -455,6 +459,7 @@ impl<'a, T: UpstreamTable> ConsumeUpstreamStream<'a, T> {
                             snapshot_epoch,
                             rate_limit,
                             chunk_size,
+                            snapshot_rebuild_interval,
                             ongoing_snapshot_epoch_vnodes,
                         ),
                         snapshot_epoch,

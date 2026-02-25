@@ -42,6 +42,7 @@ use tokio_openssl::SslStream;
 use tracing::Instrument;
 
 use crate::error::{PsqlError, PsqlResult};
+use crate::error_or_notice::Severity;
 use crate::memory_manager::{MessageMemoryGuard, MessageMemoryManagerRef};
 use crate::net::AddressRef;
 use crate::pg_extended::ResultCache;
@@ -58,13 +59,7 @@ use crate::types::Format;
 static RW_QUERY_LOG_TRUNCATE_LEN: LazyLock<usize> =
     LazyLock::new(|| match std::env::var("RW_QUERY_LOG_TRUNCATE_LEN") {
         Ok(len) if len.parse::<usize>().is_ok() => len.parse::<usize>().unwrap(),
-        _ => {
-            if cfg!(debug_assertions) {
-                65536
-            } else {
-                1024
-            }
-        }
+        _ => 65536,
     });
 
 tokio::task_local! {
@@ -473,6 +468,7 @@ where
                                 // At this time we're not in a session, use compact error message for
                                 // better alignment with Postgres' UI.
                                 pretty: false,
+                                severity: Some(Severity::Fatal),
                             })
                             .ok()?;
                         let _ = self.stream.flush().await;
@@ -484,6 +480,7 @@ where
                             .write_no_flush(BeMessage::ErrorResponse {
                                 error: &e,
                                 pretty: true,
+                                severity: None,
                             })
                             .ok()?;
                         self.ready_for_query().ok()?;
@@ -494,6 +491,7 @@ where
                             .write_no_flush(BeMessage::ErrorResponse {
                                 error: &e,
                                 pretty: true,
+                                severity: None,
                             })
                             .ok()?;
                         let _ = self.stream.flush().await;
@@ -512,6 +510,7 @@ where
                             .write_no_flush(BeMessage::ErrorResponse {
                                 error: &e,
                                 pretty: true,
+                                severity: None,
                             })
                             .ok()?;
                     }
@@ -690,6 +689,14 @@ where
             .connect(&db_name, &user_name, self.peer_addr.clone())
             .map_err(|e| PsqlError::StartupError(e.into()))?;
 
+        if let Some(options) = msg.config.get("options") {
+            for (key, value) in parse_options(options)? {
+                session
+                    .set_config(&key, value)
+                    .map_err(|e| PsqlError::StartupError(e.into()))?;
+            }
+        }
+        // dedicated `application_name` has higher priority than `options`
         let application_name = msg.config.get("application_name");
         if let Some(application_name) = application_name {
             session
@@ -1513,6 +1520,76 @@ pub mod truncated_fmt {
     }
 }
 
+/// Handle `options` in `StartupMessage` from client
+///
+/// It is like shell arguments but only respects backslash-escape and space;
+/// quotes have no special meaning and are handled literally.
+///
+/// PostgreSQL allows both `-c key=value` and `--key=value`.
+///
+/// `key-name` is normalized as `key_name`.
+///
+/// * <https://github.com/postgres/postgres/blob/REL_18_1/src/backend/utils/init/postinit.c#L487>
+/// * <https://github.com/postgres/postgres/blob/REL_18_1/src/backend/tcop/postgres.c#L3866>
+/// * <https://github.com/postgres/postgres/blob/REL_18_1/src/backend/utils/misc/guc.c#L6361>
+fn parse_options(options: &str) -> PsqlResult<Vec<(String, String)>> {
+    let mut args = Vec::new();
+    let mut current_arg = String::new();
+    let mut chars = options.chars().peekable();
+
+    while let Some(c) = chars.next() {
+        if c == '\\' {
+            if let Some(next_c) = chars.next() {
+                current_arg.push(next_c);
+            }
+        } else if c.is_ascii_whitespace() {
+            if !current_arg.is_empty() {
+                args.push(std::mem::take(&mut current_arg));
+            }
+        } else {
+            current_arg.push(c);
+        }
+    }
+    if !current_arg.is_empty() {
+        args.push(current_arg);
+    }
+
+    let mut args_iter = args.into_iter();
+    let mut config = Vec::new();
+
+    while let Some(arg) = args_iter.next() {
+        if arg == "-c" {
+            if let Some(config_str) = args_iter.next() {
+                if let Some((key, value)) = config_str.split_once('=') {
+                    let key = key.replace("-", "_");
+                    config.push((key, value.to_owned()));
+                } else {
+                    return Err(PsqlError::StartupError(
+                        format!("invalid config format: {}", config_str).into(),
+                    ));
+                }
+            } else {
+                return Err(PsqlError::StartupError("missing argument for -c".into()));
+            }
+        } else if let Some(config_str) = arg.strip_prefix("--") {
+            if let Some((key, value)) = config_str.split_once('=') {
+                let key = key.replace("-", "_");
+                config.push((key, value.to_owned()));
+            } else {
+                return Err(PsqlError::StartupError(
+                    format!("invalid config format: {}", config_str).into(),
+                ));
+            }
+        } else {
+            tracing::warn!(
+                arg,
+                "ignoring unrecognized option for backward compatibility"
+            );
+        }
+    }
+    Ok(config)
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::HashSet;
@@ -1534,6 +1611,56 @@ mod tests {
         assert_eq!(
             redact_sql(sql, keywords),
             "CREATE SOURCE temp (k BIGINT, v CHARACTER VARYING) WITH (connector = 'datagen', v1 = 123, v2 = [REDACTED], v3 = false, v4 = [REDACTED]) FORMAT PLAIN ENCODE JSON (a = '1', b = [REDACTED])"
+        );
+    }
+
+    #[test]
+    fn test_parse_options() {
+        assert_eq!(parse_options("").unwrap(), vec![]);
+        assert_eq!(
+            parse_options("-c a=1 -c b=2").unwrap(),
+            vec![("a".into(), "1".into()), ("b".into(), "2".into())]
+        );
+        assert_eq!(
+            parse_options("-c   key=value").unwrap(),
+            vec![("key".into(), "value".into())]
+        );
+        // Custom parser treats quotes as normal characters, so they are included in value
+        assert_eq!(
+            parse_options("-c key='value'").unwrap(),
+            vec![("key".into(), "'value'".into())]
+        );
+
+        // Test backslash escaping for spaces (standard Postgres way)
+        assert_eq!(
+            parse_options(r#"-c key=value\ with\ spaces"#).unwrap(),
+            vec![("key".into(), "value with spaces".into())]
+        );
+        assert_eq!(
+            parse_options(r#"-c search_path=my\ schema"#).unwrap(),
+            vec![("search_path".into(), "my schema".into())]
+        );
+
+        assert!(parse_options("-c").is_err());
+        assert!(parse_options("-c foo").is_err()); // missing =
+        assert!(parse_options("--foo").is_err()); // missing = in -- option
+
+        assert_eq!(
+            parse_options("--foo=bar").unwrap(),
+            vec![("foo".into(), "bar".into())]
+        );
+        assert_eq!(
+            parse_options(r#"--foo=bar\ baz"#).unwrap(),
+            vec![("foo".into(), "bar baz".into())]
+        );
+        assert_eq!(
+            parse_options("-c a=1 --b=2").unwrap(),
+            vec![("a".into(), "1".into()), ("b".into(), "2".into())]
+        );
+        // Unpaired trailing backslash is silently dropped, same as PostgreSQL
+        assert_eq!(
+            parse_options(r#"-c a=b\"#).unwrap(),
+            vec![("a".into(), "b".into())]
         );
     }
 }

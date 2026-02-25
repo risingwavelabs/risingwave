@@ -25,12 +25,14 @@ use risingwave_common::catalog::{DatabaseId, TableId};
 use risingwave_common::id::JobId;
 use risingwave_common::metrics::LabelGuardedIntGauge;
 use risingwave_common::util::epoch::Epoch;
-use risingwave_meta_model::WorkerId;
+use risingwave_common::util::stream_graph_visitor::visit_stream_node_cont;
+use risingwave_meta_model::{DispatcherType, WorkerId};
 use risingwave_pb::ddl_service::PbBackfillType;
 use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::id::{ActorId, FragmentId};
 use risingwave_pb::stream_plan::barrier::PbBarrierKind;
 use risingwave_pb::stream_plan::barrier_mutation::Mutation;
+use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{AddMutation, StopMutation};
 use risingwave_pb::stream_service::BarrierCompleteResponse;
 use risingwave_pb::stream_service::streaming_control_stream_response::ResetPartialGraphResponse;
@@ -45,15 +47,17 @@ use crate::barrier::context::CreateSnapshotBackfillJobCommandInfo;
 use crate::barrier::edge_builder::FragmentEdgeBuildResult;
 use crate::barrier::info::{BarrierInfo, InflightStreamingJobInfo};
 use crate::barrier::notifier::Notifier;
-use crate::barrier::progress::{CreateMviewProgressTracker, TrackingJob};
+use crate::barrier::progress::{CreateMviewProgressTracker, TrackingJob, collect_done_fragments};
 use crate::barrier::rpc::{
     ControlStreamManager, build_locality_fragment_state_table_mapping, to_partial_graph_id,
 };
-use crate::barrier::{BackfillOrderState, BackfillProgress, BarrierKind, TracedEpoch};
+use crate::barrier::{
+    BackfillOrderState, BackfillProgress, BarrierKind, FragmentBackfillProgress, TracedEpoch,
+};
 use crate::controller::fragment::InflightFragmentInfo;
 use crate::model::{FragmentDownstreamRelation, StreamActor, StreamJobActorsToCreate};
 use crate::rpc::metrics::GLOBAL_META_METRICS;
-use crate::stream::{FragmentBackfillOrder, build_actor_connector_splits};
+use crate::stream::{ExtendedFragmentBackfillOrder, build_actor_connector_splits};
 
 #[derive(Debug)]
 pub(crate) struct CreatingJobInfo {
@@ -78,6 +82,33 @@ pub(crate) struct CreatingStreamingJobControl {
     status: CreatingStreamingJobStatus,
 
     upstream_lag: LabelGuardedIntGauge,
+}
+
+fn fragment_has_online_unreschedulable_scan(fragment: &InflightFragmentInfo) -> bool {
+    let mut has_unreschedulable_scan = false;
+    visit_stream_node_cont(&fragment.nodes, |node| {
+        if let Some(NodeBody::StreamScan(stream_scan)) = node.node_body.as_ref() {
+            let scan_type = stream_scan.stream_scan_type();
+            if !scan_type.is_reschedulable(true) {
+                has_unreschedulable_scan = true;
+                return false;
+            }
+        }
+        true
+    });
+    has_unreschedulable_scan
+}
+
+fn collect_fragment_upstream_fragment_ids(
+    fragment: &InflightFragmentInfo,
+    upstream_fragment_ids: &mut HashSet<FragmentId>,
+) {
+    visit_stream_node_cont(&fragment.nodes, |node| {
+        if let Some(NodeBody::Merge(merge)) = node.node_body.as_ref() {
+            upstream_fragment_ids.insert(merge.upstream_fragment_id);
+        }
+        true
+    });
 }
 
 impl CreatingStreamingJobControl {
@@ -230,6 +261,22 @@ impl CreatingStreamingJobControl {
             node_actors,
             state_table_ids,
         })
+    }
+
+    pub(super) fn gen_fragment_backfill_progress(&self) -> Vec<FragmentBackfillProgress> {
+        match &self.status {
+            CreatingStreamingJobStatus::ConsumingSnapshot {
+                create_mview_tracker,
+                info,
+                ..
+            } => create_mview_tracker.collect_fragment_progress(&info.fragment_infos, true),
+            CreatingStreamingJobStatus::ConsumingLogStore { info, .. } => {
+                collect_done_fragments(self.job_id, &info.fragment_infos)
+            }
+            CreatingStreamingJobStatus::Finishing(_, _)
+            | CreatingStreamingJobStatus::Resetting(_, _)
+            | CreatingStreamingJobStatus::PlaceHolder => vec![],
+        }
     }
 
     fn resolve_upstream_log_epochs(
@@ -386,7 +433,7 @@ impl CreatingStreamingJobControl {
         committed_epoch: u64,
         upstream_barrier_info: &BarrierInfo,
         fragment_infos: HashMap<FragmentId, InflightFragmentInfo>,
-        backfill_order: FragmentBackfillOrder,
+        backfill_order: ExtendedFragmentBackfillOrder,
         fragment_relations: &FragmentDownstreamRelation,
         version_stat: &HummockVersionStats,
         new_actors: StreamJobActorsToCreate,
@@ -801,6 +848,49 @@ impl CreatingStreamingJobControl {
             .fragment_infos()
             .into_iter()
             .flat_map(|fragments| fragments.values().map(|fragment| (fragment, self.job_id)))
+    }
+
+    pub(super) fn collect_reschedule_blocked_fragment_ids(
+        &self,
+        blocked_fragment_ids: &mut HashSet<FragmentId>,
+    ) {
+        let Some(info) = self.status.creating_job_info() else {
+            return;
+        };
+
+        for (fragment_id, fragment) in &info.fragment_infos {
+            if fragment_has_online_unreschedulable_scan(fragment) {
+                blocked_fragment_ids.insert(*fragment_id);
+                collect_fragment_upstream_fragment_ids(fragment, blocked_fragment_ids);
+            }
+        }
+    }
+
+    pub(super) fn collect_no_shuffle_fragment_relations(
+        &self,
+        no_shuffle_relations: &mut Vec<(FragmentId, FragmentId)>,
+    ) {
+        let Some(info) = self.status.creating_job_info() else {
+            return;
+        };
+
+        for (upstream_fragment_id, downstreams) in &info.upstream_fragment_downstreams {
+            no_shuffle_relations.extend(
+                downstreams
+                    .iter()
+                    .filter(|downstream| downstream.dispatcher_type == DispatcherType::NoShuffle)
+                    .map(|downstream| (*upstream_fragment_id, downstream.downstream_fragment_id)),
+            );
+        }
+
+        for (fragment_id, downstreams) in &info.downstreams {
+            no_shuffle_relations.extend(
+                downstreams
+                    .iter()
+                    .filter(|downstream| downstream.dispatcher_type == DispatcherType::NoShuffle)
+                    .map(|downstream| (*fragment_id, downstream.downstream_fragment_id)),
+            );
+        }
     }
 
     pub fn into_tracking_job(self) -> TrackingJob {

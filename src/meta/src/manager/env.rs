@@ -124,6 +124,7 @@ pub struct MetaOpts {
     /// Interval of invoking iceberg garbage collection, to expire old snapshots.
     pub iceberg_gc_interval_sec: u64,
     pub time_travel_vacuum_interval_sec: u64,
+    pub time_travel_vacuum_max_version_count: Option<u32>,
     /// Interval of hummock version checkpoint.
     pub hummock_version_checkpoint_interval_sec: u64,
     pub enable_hummock_data_archive: bool,
@@ -308,6 +309,7 @@ impl MetaOpts {
             default_parallelism: DefaultParallelism::Full,
             vacuum_interval_sec: 30,
             time_travel_vacuum_interval_sec: 30,
+            time_travel_vacuum_max_version_count: None,
             vacuum_spin_interval_ms: 0,
             iceberg_gc_interval_sec: 3600,
             hummock_version_checkpoint_interval_sec: 30,
@@ -328,7 +330,7 @@ impl MetaOpts {
             gc_history_retention_time_sec: 3600 * 24 * 7,
             max_inflight_time_travel_query: 1000,
             enable_committed_sst_sanity_check: false,
-            periodic_compaction_interval_sec: 60,
+            periodic_compaction_interval_sec: 300,
             node_num_monitor_interval_sec: 10,
             protect_drop_table_with_incoming_sink: false,
             prometheus_endpoint: None,

@@ -1,0 +1,338 @@
+statement ok
+set enable_datafusion_engine = true;
+
+statement ok
+create secret my_secret with (
+  backend = 'meta'
+) as 'hummockadmin';
+
+statement ok
+create connection my_conn
+with (
+    type = 'iceberg',
+    warehouse.path = 's3://hummock001/iceberg_connection',
+    s3.access.key = secret my_secret,
+    s3.secret.key = secret my_secret,
+    s3.endpoint = 'http://127.0.0.1:9301',
+    s3.region = 'us-west-2',
+    catalog.type = 'storage',
+);
+
+statement ok
+set iceberg_engine_connection = 'public.my_conn';
+
+# ==================== Datetime Table ====================
+
+statement ok
+CREATE TABLE t_datetime (
+    id INT PRIMARY KEY,
+    v_date DATE,
+    v_time TIME,
+    v_timestamp TIMESTAMP,
+    v_timestamptz TIMESTAMPTZ,
+    v_interval INTERVAL
+) WITH (commit_checkpoint_interval = 1) ENGINE = iceberg;
+
+statement ok
+INSERT INTO t_datetime VALUES
+(1, '2024-01-15', '08:30:00', '2024-01-15 08:30:00', '2024-01-15 08:30:00+00:00', INTERVAL '1 day'),
+(2, '2024-02-20', '12:45:30', '2024-02-20 12:45:30', '2024-02-20 12:45:30+08:00', INTERVAL '2 hours 30 minutes'),
+(3, '2024-03-25', '18:00:00', '2024-03-25 18:00:00', '2024-03-25 18:00:00-05:00', INTERVAL '3 months'),
+(4, '2024-06-30', '23:59:59', '2024-06-30 23:59:59', '2024-06-30 23:59:59+00:00', INTERVAL '1 year 6 months'),
+(5, '2024-12-31', '00:00:00', '2024-12-31 00:00:00', '2024-12-31 00:00:00+00:00', INTERVAL '45 seconds');
+
+statement ok
+FLUSH;
+
+sleep 5s
+
+# ==================== Basic SELECT Tests ====================
+
+query ????? rowsort
+SELECT * FROM t_datetime;
+----
+1 2024-01-15 08:30:00 2024-01-15 08:30:00 2024-01-15 08:30:00+00:00 1 day
+2 2024-02-20 12:45:30 2024-02-20 12:45:30 2024-02-20 04:45:30+00:00 02:30:00
+3 2024-03-25 18:00:00 2024-03-25 18:00:00 2024-03-25 23:00:00+00:00 3 mons
+4 2024-06-30 23:59:59 2024-06-30 23:59:59 2024-06-30 23:59:59+00:00 1 year 6 mons
+5 2024-12-31 00:00:00 2024-12-31 00:00:00 2024-12-31 00:00:00+00:00 00:00:45
+
+# ==================== DATE_TRUNC Function Tests ====================
+# date_trunc(precision, source) truncates timestamp to specified precision
+
+# Truncate timestamp to day
+query T
+SELECT date_trunc('day', v_timestamp) FROM t_datetime WHERE id = 1;
+----
+2024-01-15 00:00:00
+
+# Truncate timestamp to hour
+query T
+SELECT date_trunc('hour', v_timestamp) FROM t_datetime WHERE id = 2;
+----
+2024-02-20 12:00:00
+
+# Truncate timestamp to month
+query T
+SELECT date_trunc('month', v_timestamp) FROM t_datetime WHERE id = 3;
+----
+2024-03-01 00:00:00
+
+# Truncate timestamp to year
+query T
+SELECT date_trunc('year', v_timestamp) FROM t_datetime WHERE id = 4;
+----
+2024-01-01 00:00:00
+
+# Truncate timestamp to minute
+query T
+SELECT date_trunc('minute', v_timestamp) FROM t_datetime WHERE id = 2;
+----
+2024-02-20 12:45:00
+
+# Truncate timestamp to second
+query T
+SELECT date_trunc('second', v_timestamp) FROM t_datetime WHERE id = 4;
+----
+2024-06-30 23:59:59
+
+# Truncate timestamptz to day
+query T
+SELECT date_trunc('day', v_timestamptz) FROM t_datetime WHERE id = 1;
+----
+2024-01-15 00:00:00+00:00
+
+# Truncate timestamptz to week
+query T
+SELECT date_trunc('week', v_timestamptz) FROM t_datetime WHERE id = 3;
+----
+2024-03-25 00:00:00+00:00
+
+# ==================== DATE_BIN Function Tests ====================
+# date_bin(stride, source, origin) bins timestamps into intervals
+
+# Bin into 1-hour intervals
+query T
+SELECT date_bin(INTERVAL '1 hour', v_timestamp, TIMESTAMP '2024-01-01 00:00:00') FROM t_datetime WHERE id = 1;
+----
+2024-01-15 08:00:00
+
+# Bin into 15-minute intervals
+query T
+SELECT date_bin(INTERVAL '15 minutes', v_timestamp, TIMESTAMP '2024-01-01 00:00:00') FROM t_datetime WHERE id = 2;
+----
+2024-02-20 12:45:00
+
+# Bin into 1-day intervals
+query T
+SELECT date_bin(INTERVAL '1 day', v_timestamp, TIMESTAMP '2024-01-01 00:00:00') FROM t_datetime WHERE id = 3;
+----
+2024-03-25 00:00:00
+
+# Bin into 6-hour intervals
+query T
+SELECT date_bin(INTERVAL '6 hours', v_timestamp, TIMESTAMP '2024-01-01 00:00:00') FROM t_datetime WHERE id = 4;
+----
+2024-06-30 18:00:00
+
+# Bin timestamptz into 2-hour intervals
+query T
+SELECT date_bin(INTERVAL '2 hours', v_timestamptz, '2024-01-01 00:00:00+00:00'::timestamptz) FROM t_datetime WHERE id = 2;
+----
+2024-02-20 04:00:00+00:00
+
+# Multiple rows with date_bin
+query IT rowsort
+SELECT id, date_bin(INTERVAL '1 day', v_timestamp, TIMESTAMP '2024-01-01 00:00:00') FROM t_datetime;
+----
+1 2024-01-15 00:00:00
+2 2024-02-20 00:00:00
+3 2024-03-25 00:00:00
+4 2024-06-30 00:00:00
+5 2024-12-31 00:00:00
+
+# ==================== MAKE_DATE Function Tests ====================
+# make_date(year, month, day) constructs a date
+
+query T
+SELECT make_date(2024, 6, 15);
+----
+2024-06-15
+
+query T
+SELECT make_date(2000, 1, 1);
+----
+2000-01-01
+
+query T
+SELECT make_date(2024, 12, 31);
+----
+2024-12-31
+
+# Leap year date
+query T
+SELECT make_date(2024, 2, 29);
+----
+2024-02-29
+
+# ==================== Date Arithmetic ====================
+
+query T
+SELECT v_date + INTERVAL '7 days' FROM t_datetime WHERE id = 1;
+----
+2024-01-22 00:00:00
+
+query T
+SELECT v_date - INTERVAL '1 month' FROM t_datetime WHERE id = 2;
+----
+2024-01-20 00:00:00
+
+query T
+SELECT v_timestamp + INTERVAL '1 day 2 hours' FROM t_datetime WHERE id = 1;
+----
+2024-01-16 10:30:00
+
+query T
+SELECT v_timestamp - INTERVAL '30 minutes' FROM t_datetime WHERE id = 2;
+----
+2024-02-20 12:15:30
+
+# ==================== Date/Time Comparisons ====================
+
+query I? rowsort
+SELECT id, v_date FROM t_datetime WHERE v_date > '2024-03-01';
+----
+3 2024-03-25
+4 2024-06-30
+5 2024-12-31
+
+query I? rowsort
+SELECT id, v_timestamp FROM t_datetime WHERE v_timestamp BETWEEN '2024-02-01 00:00:00' AND '2024-06-30 23:59:59';
+----
+2 2024-02-20 12:45:30
+3 2024-03-25 18:00:00
+4 2024-06-30 23:59:59
+
+query I? rowsort
+SELECT id, v_time FROM t_datetime WHERE v_time >= '12:00:00';
+----
+2 12:45:30
+3 18:00:00
+4 23:59:59
+
+# ==================== Aggregate Functions on Datetime ====================
+
+query TT
+SELECT min(v_date), max(v_date) FROM t_datetime;
+----
+2024-01-15 2024-12-31
+
+query TT
+SELECT min(v_timestamp), max(v_timestamp) FROM t_datetime;
+----
+2024-01-15 08:30:00 2024-12-31 00:00:00
+
+query TT
+SELECT min(v_timestamptz), max(v_timestamptz) FROM t_datetime;
+----
+2024-01-15 08:30:00+00:00 2024-12-31 00:00:00+00:00
+
+query TT
+SELECT min(v_time), max(v_time) FROM t_datetime;
+----
+00:00:00 23:59:59
+
+query I
+SELECT count(v_date) FROM t_datetime;
+----
+5
+
+# ==================== Group By with Datetime ====================
+
+statement ok
+CREATE TABLE t_events (
+    id INT PRIMARY KEY,
+    event_date DATE,
+    event_hour INT,
+    value INT
+) WITH (commit_checkpoint_interval = 1) ENGINE = iceberg;
+
+statement ok
+INSERT INTO t_events VALUES
+(1, '2024-01-15', 8, 100),
+(2, '2024-01-15', 8, 150),
+(3, '2024-01-15', 12, 200),
+(4, '2024-01-16', 8, 120),
+(5, '2024-01-16', 12, 180),
+(6, '2024-01-16', 12, 220);
+
+statement ok
+FLUSH;
+
+sleep 5s
+
+query TII
+SELECT event_date, count(*), sum(value) FROM t_events GROUP BY event_date ORDER BY event_date;
+----
+2024-01-15 3 450
+2024-01-16 3 520
+
+query TIIR rowsort
+SELECT event_date, event_hour, count(*), avg(value) FROM t_events GROUP BY event_date, event_hour;
+----
+2024-01-15 12 1 200.00000000000000
+2024-01-15 8 2 125.00000000000000
+2024-01-16 12 2 200.00000000000000
+2024-01-16 8 1 120.00000000000000
+
+# ==================== Interval Arithmetic ====================
+
+query T
+SELECT v_interval * 2 FROM t_datetime WHERE id = 1;
+----
+2 days
+
+query I? rowsort
+SELECT id, v_interval FROM t_datetime WHERE v_interval > INTERVAL '1 day';
+----
+3 3 mons
+4 1 year 6 mons
+
+# ==================== NULL Handling ====================
+
+statement ok
+INSERT INTO t_datetime VALUES (6, NULL, NULL, NULL, NULL, NULL);
+
+statement ok
+FLUSH;
+
+sleep 5s
+
+query I
+SELECT count(*) FROM t_datetime WHERE v_date IS NULL;
+----
+1
+
+query T
+SELECT coalesce(v_date, '1970-01-01'::date) FROM t_datetime WHERE id = 6;
+----
+1970-01-01
+
+query II
+SELECT count(v_date), count(*) FROM t_datetime;
+----
+5 6
+
+# ==================== Cleanup ====================
+
+statement ok
+DROP TABLE t_datetime;
+
+statement ok
+DROP TABLE t_events;
+
+statement ok
+DROP CONNECTION my_conn;
+
+statement ok
+DROP SECRET my_secret;

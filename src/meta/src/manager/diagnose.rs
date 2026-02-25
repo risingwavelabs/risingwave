@@ -24,8 +24,8 @@ use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::types::Timestamptz;
 use risingwave_common::util::StackTraceResponseExt;
 use risingwave_common::util::epoch::Epoch;
-use risingwave_hummock_sdk::HummockSstableId;
 use risingwave_hummock_sdk::level::Level;
+use risingwave_hummock_sdk::{CompactionGroupId, HummockSstableId};
 use risingwave_license::LicenseManager;
 use risingwave_meta_model::{JobStatus, StreamingParallelism};
 use risingwave_pb::catalog::table::PbTableType;
@@ -518,7 +518,7 @@ impl DiagnoseCommand {
 
         #[derive(PartialEq, Eq)]
         struct SstableSort {
-            compaction_group_id: u64,
+            compaction_group_id: CompactionGroupId,
             sst_id: HummockSstableId,
             delete_ratio: u64,
         }

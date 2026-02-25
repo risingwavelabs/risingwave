@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use risingwave_common::catalog::CreateType;
+use risingwave_common::id::{SchemaId, TableId, UserId};
 use risingwave_common::types::{Fields, Timestamptz};
 use risingwave_frontend_macro::system_catalog;
 
@@ -22,10 +23,10 @@ use crate::error::Result;
 #[derive(Fields)]
 struct RwMaterializedView {
     #[primary_key]
-    id: i32,
+    id: TableId,
     name: String,
-    schema_id: i32,
-    owner: i32,
+    schema_id: SchemaId,
+    owner: UserId,
     definition: String,
     append_only: bool,
     acl: Vec<String>,
@@ -53,10 +54,10 @@ fn read_rw_materialized_views(reader: &SysCatalogReaderImpl) -> Result<Vec<RwMat
             schema
                 .iter_all_mvs_with_acl(current_user)
                 .map(|table| RwMaterializedView {
-                    id: table.id.as_i32_id(),
+                    id: table.id,
                     name: table.name().into(),
-                    schema_id: schema.id().as_i32_id(),
-                    owner: table.owner as i32,
+                    schema_id: schema.id(),
+                    owner: table.owner,
                     definition: table.create_sql(),
                     append_only: table.append_only,
                     acl: get_acl_items(table.id, true, &users, username_map),

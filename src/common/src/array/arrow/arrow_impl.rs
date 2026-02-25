@@ -562,6 +562,7 @@ pub trait FromArrow {
             Timestamp(Nanosecond, Some(_)) => DataType::Timestamptz,
             Interval(MonthDayNano) => DataType::Interval,
             Utf8 => DataType::Varchar,
+            Utf8View => DataType::Varchar,
             Binary => DataType::Bytea,
             LargeUtf8 => self.from_large_utf8()?,
             LargeBinary => self.from_large_binary()?,
@@ -686,6 +687,7 @@ pub trait FromArrow {
                 self.from_interval_array(array.as_any().downcast_ref().unwrap())
             }
             Utf8 => self.from_utf8_array(array.as_any().downcast_ref().unwrap()),
+            Utf8View => self.from_utf8_view_array(array.as_any().downcast_ref().unwrap()),
             Binary => self.from_binary_array(array.as_any().downcast_ref().unwrap()),
             LargeUtf8 => self.from_large_utf8_array(array.as_any().downcast_ref().unwrap()),
             LargeBinary => self.from_large_binary_array(array.as_any().downcast_ref().unwrap()),
@@ -874,6 +876,13 @@ pub trait FromArrow {
     }
 
     fn from_utf8_array(&self, array: &arrow_array::StringArray) -> Result<ArrayImpl, ArrayError> {
+        Ok(ArrayImpl::Utf8(array.into()))
+    }
+
+    fn from_utf8_view_array(
+        &self,
+        array: &arrow_array::StringViewArray,
+    ) -> Result<ArrayImpl, ArrayError> {
         Ok(ArrayImpl::Utf8(array.into()))
     }
 
@@ -1156,6 +1165,7 @@ converts!(BytesArray, arrow_array::BinaryArray);
 converts!(BytesArray, arrow_array::LargeBinaryArray);
 converts!(Utf8Array, arrow_array::StringArray);
 converts!(Utf8Array, arrow_array::LargeStringArray);
+converts!(Utf8Array, arrow_array::StringViewArray);
 converts!(DateArray, arrow_array::Date32Array, @map);
 converts!(TimeArray, arrow_array::Time64MicrosecondArray, @map);
 converts!(IntervalArray, arrow_array::IntervalMonthDayNanoArray, @map);

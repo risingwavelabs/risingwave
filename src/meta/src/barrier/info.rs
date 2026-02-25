@@ -38,17 +38,20 @@ use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_service::BarrierCompleteResponse;
 use tracing::{info, warn};
 
-use crate::MetaResult;
 use crate::barrier::cdc_progress::{CdcProgress, CdcTableBackfillTracker};
 use crate::barrier::command::PostCollectCommand;
 use crate::barrier::edge_builder::{FragmentEdgeBuildResult, FragmentEdgeBuilder};
 use crate::barrier::progress::{CreateMviewProgressTracker, StagingCommitInfo};
 use crate::barrier::rpc::{ControlStreamManager, to_partial_graph_id};
-use crate::barrier::{BackfillProgress, BarrierKind, Command, CreateStreamingJobType, TracedEpoch};
+use crate::barrier::{
+    BackfillProgress, BarrierKind, Command, CreateStreamingJobType, FragmentBackfillProgress,
+    TracedEpoch,
+};
 use crate::controller::fragment::{InflightActorInfo, InflightFragmentInfo};
 use crate::controller::utils::rebuild_fragment_mapping;
 use crate::manager::NotificationManagerRef;
 use crate::model::{ActorId, BackfillUpstreamType, FragmentId, StreamJobFragments};
+use crate::{MetaError, MetaResult};
 
 #[derive(Debug, Clone)]
 pub struct SharedActorInfo {
@@ -477,6 +480,10 @@ impl InflightDatabaseInfo {
         self.jobs.contains_key(&job_id)
     }
 
+    pub(super) fn job_id_by_fragment(&self, fragment_id: FragmentId) -> Option<JobId> {
+        self.fragment_location.get(&fragment_id).copied()
+    }
+
     pub fn fragment(&self, fragment_id: FragmentId) -> &InflightFragmentInfo {
         let job_id = self.fragment_location[&fragment_id];
         self.jobs
@@ -485,6 +492,48 @@ impl InflightDatabaseInfo {
             .fragment_infos
             .get(&fragment_id)
             .expect("should exist")
+    }
+
+    pub(super) fn backfill_fragment_ids_for_job(
+        &self,
+        job_id: JobId,
+    ) -> MetaResult<HashSet<FragmentId>> {
+        let job = self
+            .jobs
+            .get(&job_id)
+            .ok_or_else(|| MetaError::invalid_parameter(format!("job {} not found", job_id)))?;
+        Ok(job
+            .fragment_infos
+            .iter()
+            .filter_map(|(fragment_id, fragment)| {
+                fragment
+                    .fragment_type_mask
+                    .contains_any([
+                        FragmentTypeFlag::StreamScan,
+                        FragmentTypeFlag::SourceScan,
+                        FragmentTypeFlag::LocalityProvider,
+                    ])
+                    .then_some(*fragment_id)
+            })
+            .collect())
+    }
+
+    pub(super) fn is_backfill_fragment(&self, fragment_id: FragmentId) -> MetaResult<bool> {
+        let job_id = self.fragment_location.get(&fragment_id).ok_or_else(|| {
+            MetaError::invalid_parameter(format!("fragment {} not found", fragment_id))
+        })?;
+        let fragment = self
+            .jobs
+            .get(job_id)
+            .expect("should exist")
+            .fragment_infos
+            .get(&fragment_id)
+            .expect("should exist");
+        Ok(fragment.fragment_type_mask.contains_any([
+            FragmentTypeFlag::StreamScan,
+            FragmentTypeFlag::SourceScan,
+            FragmentTypeFlag::LocalityProvider,
+        ]))
     }
 
     pub fn gen_backfill_progress(&self) -> impl Iterator<Item = (JobId, BackfillProgress)> + '_ {
@@ -512,6 +561,18 @@ impl InflightDatabaseInfo {
                 .as_ref()
                 .map(|tracker| (*job_id, tracker.gen_cdc_progress()))
         })
+    }
+
+    pub fn gen_fragment_backfill_progress(&self) -> Vec<FragmentBackfillProgress> {
+        let mut result = Vec::new();
+        for job in self.jobs.values() {
+            let CreateStreamingJobStatus::Creating { tracker } = &job.status else {
+                continue;
+            };
+            let fragment_progress = tracker.collect_fragment_progress(&job.fragment_infos, true);
+            result.extend(fragment_progress);
+        }
+        result
     }
 
     pub(super) fn may_assign_fragment_cdc_backfill_splits(
@@ -582,13 +643,13 @@ impl InflightDatabaseInfo {
                 }
             }
         }
-        if let PostCollectCommand::RescheduleFragment { reschedules, .. } = command {
+        if let PostCollectCommand::Reschedule { reschedules, .. } = command {
             // During reschedule we expect fragments to be rebuilt with new actors and no vnode bitmap update.
             debug_assert!(
                 reschedules
                     .values()
                     .all(|reschedule| reschedule.vnode_bitmap_updates.is_empty()),
-                "RescheduleFragment should not carry vnode bitmap updates when actors are rebuilt"
+                "Reschedule should not carry vnode bitmap updates when actors are rebuilt"
             );
 
             // Collect jobs that own the rescheduled fragments; de-duplicate via HashSet.
@@ -1056,7 +1117,7 @@ impl InflightDatabaseInfo {
                 | Command::Pause
                 | Command::Resume
                 | Command::DropStreamingJobs { .. }
-                | Command::RescheduleFragment { .. }
+                | Command::RescheduleIntent { .. }
                 | Command::SourceChangeSplit { .. }
                 | Command::Throttle { .. }
                 | Command::CreateSubscription { .. }
@@ -1064,7 +1125,8 @@ impl InflightDatabaseInfo {
                 | Command::ConnectorPropsChange(_)
                 | Command::Refresh { .. }
                 | Command::ListFinish { .. }
-                | Command::LoadFinish { .. } => {
+                | Command::LoadFinish { .. }
+                | Command::ResumeBackfill { .. } => {
                     return None;
                 }
                 Command::CreateStreamingJob { info, job_type, .. } => {
@@ -1082,6 +1144,7 @@ impl InflightDatabaseInfo {
                 }
                 Command::ReplaceStreamJob(replace_job) => (None, Some(replace_job), None),
                 Command::ResetSource { .. } => (None, None, None),
+                Command::InjectSourceOffsets { .. } => (None, None, None),
             },
         };
         // `existing_fragment_ids` consists of
@@ -1103,7 +1166,7 @@ impl InflightDatabaseInfo {
                             !info
                                 .stream_job_fragments
                                 .fragments
-                                .contains_key(fragment_id)
+                                .contains_key(*fragment_id)
                         })
                         .unwrap_or(true)
                     })

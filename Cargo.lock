@@ -857,9 +857,9 @@ dependencies = [
 
 [[package]]
 name = "async-openai"
-version = "0.32.3"
+version = "0.33.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "16aa4b9090c12270cd0925f735958ab6f0296af7ac08ce0f53fe320bcaf1e23d"
+checksum = "b3ef6d66e53b3ec8ed4bae8e6dcdda75c0f5b4f67faba78fac1b09434cb4f2fc"
 dependencies = [
  "async-openai-macros",
  "backoff",
@@ -1107,9 +1107,9 @@ dependencies = [
 
 [[package]]
 name = "aws-lc-rs"
-version = "1.15.3"
+version = "1.16.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e84ce723ab67259cfeb9877c6a639ee9eb7a27b28123abd71db7f0d5d0cc9d86"
+checksum = "d9a7b350e3bb1767102698302bc37256cbd48422809984b98d292c40e2579aa9"
 dependencies = [
  "aws-lc-fips-sys",
  "aws-lc-sys",
@@ -1119,9 +1119,9 @@ dependencies = [
 
 [[package]]
 name = "aws-lc-sys"
-version = "0.36.0"
+version = "0.37.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "43a442ece363113bd4bd4c8b18977a7798dd4d3c3383f34fb61936960e8f4ad8"
+checksum = "b092fe214090261288111db7a2b2c2118e5a7f30dc2569f1732c4069a6840549"
 dependencies = [
  "cc",
  "cmake",
@@ -2207,9 +2207,9 @@ checksum = "1fd0f2584146f6f2ef48085050886acf353beff7305ebd1ae69500e27c67f64b"
 
 [[package]]
 name = "bytes"
-version = "1.11.0"
+version = "1.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b35204fbdc0b3f4446b89fc1ac2cf84a8a68971995d0bf2e925ec7cd960f9cb3"
+checksum = "1e748733b7cbc798e1434b6ac524f0c1ff2ab456fe201501e6497c8417a4fc33"
 dependencies = [
  "serde",
 ]
@@ -4139,10 +4139,10 @@ dependencies = [
 
 [[package]]
 name = "delta_btree_map"
-version = "2.8.0-alpha"
+version = "2.9.0-alpha"
 dependencies = [
  "educe",
- "enum-as-inner",
+ "enum-as-inner 0.7.0",
 ]
 
 [[package]]
@@ -4858,11 +4858,23 @@ dependencies = [
 
 [[package]]
 name = "enum-as-inner"
-version = "0.6.0"
+version = "0.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5ffccbb6966c05b32ef8fbac435df276c4ae4d3dc55a8cd0eb9745e6c12f546a"
+checksum = "a1e6a265c649f3f5979b601d26f1d05ada116434c87741c9493cb56218f76cbc"
 dependencies = [
- "heck 0.4.1",
+ "heck 0.5.0",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.111",
+]
+
+[[package]]
+name = "enum-as-inner"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0359ee92f81184d7985519e474bda2a5738476334edd3746c9b1265c067afe70"
+dependencies = [
+ "heck 0.5.0",
  "proc-macro2",
  "quote",
  "syn 2.0.111",
@@ -5819,6 +5831,32 @@ dependencies = [
 ]
 
 [[package]]
+name = "gcp_auth"
+version = "0.12.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c2b3d0b409a042a380111af38136310839af8ac1a0917fb6e84515ed1e4bf3ee"
+dependencies = [
+ "async-trait",
+ "base64 0.22.1",
+ "bytes",
+ "chrono",
+ "http 1.4.0",
+ "http-body-util",
+ "hyper 1.6.0",
+ "hyper-rustls 0.27.5",
+ "hyper-util",
+ "ring",
+ "rustls-pki-types",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.17",
+ "tokio",
+ "tracing",
+ "tracing-futures",
+ "url",
+]
+
+[[package]]
 name = "genawaiter2"
 version = "0.100.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5916,8 +5954,7 @@ dependencies = [
 [[package]]
 name = "ginepro"
 version = "0.8.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1a71e958d6edde3a87f7341c81c978fccc013950257d49a8e2da2a2361946924"
+source = "git+https://github.com/risingwavelabs/ginepro.git?rev=109c6f48f1db0926f4783548250f3e31680ff98c#109c6f48f1db0926f4783548250f3e31680ff98c"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -6182,7 +6219,7 @@ dependencies = [
  "async-trait",
  "cfg-if",
  "data-encoding",
- "enum-as-inner",
+ "enum-as-inner 0.6.1",
  "futures-channel",
  "futures-io",
  "futures-util",
@@ -6533,7 +6570,7 @@ dependencies = [
 [[package]]
 name = "iceberg"
 version = "0.7.0"
-source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=da0a554ac6de294e2a04d96fdf6dd4c535aa8d2a#da0a554ac6de294e2a04d96fdf6dd4c535aa8d2a"
+source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=4d5f635572a8e90c77a3c56c12aa40d5362f0d68#4d5f635572a8e90c77a3c56c12aa40d5362f0d68"
 dependencies = [
  "anyhow",
  "apache-avro 0.20.0",
@@ -6554,6 +6591,7 @@ dependencies = [
  "bimap",
  "bytes",
  "chrono",
+ "crc32fast",
  "derive_builder",
  "expect-test",
  "flate2",
@@ -6591,7 +6629,7 @@ dependencies = [
 [[package]]
 name = "iceberg-catalog-glue"
 version = "0.7.0"
-source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=da0a554ac6de294e2a04d96fdf6dd4c535aa8d2a#da0a554ac6de294e2a04d96fdf6dd4c535aa8d2a"
+source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=4d5f635572a8e90c77a3c56c12aa40d5362f0d68#4d5f635572a8e90c77a3c56c12aa40d5362f0d68"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -6606,10 +6644,12 @@ dependencies = [
 [[package]]
 name = "iceberg-catalog-rest"
 version = "0.7.0"
-source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=da0a554ac6de294e2a04d96fdf6dd4c535aa8d2a#da0a554ac6de294e2a04d96fdf6dd4c535aa8d2a"
+source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=4d5f635572a8e90c77a3c56c12aa40d5362f0d68#4d5f635572a8e90c77a3c56c12aa40d5362f0d68"
 dependencies = [
  "async-trait",
+ "base64 0.22.1",
  "chrono",
+ "gcp_auth",
  "http 1.4.0",
  "iceberg",
  "itertools 0.13.0",
@@ -6626,7 +6666,7 @@ dependencies = [
 [[package]]
 name = "iceberg-compaction-core"
 version = "0.1.0"
-source = "git+https://github.com/nimtable/iceberg-compaction.git?rev=084c897cda8f259640a331a5896c4c9b561bf7c9#084c897cda8f259640a331a5896c4c9b561bf7c9"
+source = "git+https://github.com/nimtable/iceberg-compaction.git?rev=e5b75408cef82ce25d70ab1b05e42d46aaabd22b#e5b75408cef82ce25d70ab1b05e42d46aaabd22b"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -6656,7 +6696,7 @@ dependencies = [
 [[package]]
 name = "iceberg-datafusion"
 version = "0.7.0"
-source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=da0a554ac6de294e2a04d96fdf6dd4c535aa8d2a#da0a554ac6de294e2a04d96fdf6dd4c535aa8d2a"
+source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=4d5f635572a8e90c77a3c56c12aa40d5362f0d68#4d5f635572a8e90c77a3c56c12aa40d5362f0d68"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -7098,9 +7138,9 @@ dependencies = [
 
 [[package]]
 name = "jsonwebtoken"
-version = "10.2.0"
+version = "10.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c76e1c7d7df3e34443b3621b459b066a7b79644f059fc8b2db7070c825fd417e"
+checksum = "0529410abe238729a60b108898784df8984c87f6054c9c4fcacc47e4803c1ce1"
 dependencies = [
  "aws-lc-rs",
  "base64 0.22.1",
@@ -8508,18 +8548,18 @@ dependencies = [
 
 [[package]]
 name = "objc2-core-foundation"
-version = "0.3.1"
+version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1c10c2894a6fed806ade6027bcd50662746363a9589d3ec9d9bef30a4e4bc166"
+checksum = "2a180dd8642fa45cdb7dd721cd4c11b1cadd4929ce112ebd8b9f5803cc79d536"
 dependencies = [
  "bitflags 2.10.0",
 ]
 
 [[package]]
 name = "objc2-io-kit"
-version = "0.3.1"
+version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "71c1c64d6120e51cd86033f67176b1cb66780c2efe34dec55176f77befd93c0a"
+checksum = "33fafba39597d6dc1fb709123dfa8289d39406734be322956a69f0931c73bb15"
 dependencies = [
  "libc",
  "objc2-core-foundation",
@@ -8607,7 +8647,7 @@ checksum = "0ab1bc2a289d34bd04a330323ac98a1b4bc82c9d9fcb1e66b63caa84da26b575"
 
 [[package]]
 name = "openai_embedding_service"
-version = "2.8.0-alpha"
+version = "2.9.0-alpha"
 dependencies = [
  "async-openai",
  "axum 0.7.4",
@@ -9312,7 +9352,7 @@ dependencies = [
 
 [[package]]
 name = "pgwire"
-version = "2.8.0-alpha"
+version = "2.9.0-alpha"
 dependencies = [
  "anyhow",
  "auto_enums",
@@ -9321,7 +9361,7 @@ dependencies = [
  "bytes",
  "futures",
  "itertools 0.14.0",
- "jsonwebtoken 10.2.0",
+ "jsonwebtoken 10.3.0",
  "ldap3",
  "madsim-tokio",
  "openssl",
@@ -9336,7 +9376,7 @@ dependencies = [
  "rsa",
  "rustls 0.23.35",
  "rustls-native-certs 0.8.1",
- "rustls-pemfile 2.2.0",
+ "rustls-pki-types",
  "serde",
  "serde_json",
  "socket2 0.6.0",
@@ -9929,7 +9969,7 @@ version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e7849dd7319357e220886589ea0a0760ff138cde2eedfbbfd2708caee0b15dfc"
 dependencies = [
- "enum-as-inner",
+ "enum-as-inner 0.6.1",
  "mime",
  "reqwest 0.11.20",
  "serde",
@@ -9950,7 +9990,7 @@ dependencies = [
 [[package]]
 name = "prost"
 version = "0.13.4"
-source = "git+https://github.com/risingwavelabs/prost.git?rev=4a442caf7c0a43feb4aea64bde6aea4488d9917f#4a442caf7c0a43feb4aea64bde6aea4488d9917f"
+source = "git+https://github.com/risingwavelabs/prost.git?rev=d7baf5f4d4c12d82987bd86a91a8663005881bdd#d7baf5f4d4c12d82987bd86a91a8663005881bdd"
 dependencies = [
  "bytes",
  "prost-derive 0.13.4",
@@ -9991,7 +10031,7 @@ dependencies = [
 [[package]]
 name = "prost-build"
 version = "0.13.4"
-source = "git+https://github.com/risingwavelabs/prost.git?rev=4a442caf7c0a43feb4aea64bde6aea4488d9917f#4a442caf7c0a43feb4aea64bde6aea4488d9917f"
+source = "git+https://github.com/risingwavelabs/prost.git?rev=d7baf5f4d4c12d82987bd86a91a8663005881bdd#d7baf5f4d4c12d82987bd86a91a8663005881bdd"
 dependencies = [
  "heck 0.5.0",
  "itertools 0.13.0",
@@ -10023,7 +10063,7 @@ dependencies = [
 [[package]]
 name = "prost-derive"
 version = "0.13.4"
-source = "git+https://github.com/risingwavelabs/prost.git?rev=4a442caf7c0a43feb4aea64bde6aea4488d9917f#4a442caf7c0a43feb4aea64bde6aea4488d9917f"
+source = "git+https://github.com/risingwavelabs/prost.git?rev=d7baf5f4d4c12d82987bd86a91a8663005881bdd#d7baf5f4d4c12d82987bd86a91a8663005881bdd"
 dependencies = [
  "anyhow",
  "itertools 0.13.0",
@@ -10081,7 +10121,7 @@ dependencies = [
 [[package]]
 name = "prost-types"
 version = "0.13.4"
-source = "git+https://github.com/risingwavelabs/prost.git?rev=4a442caf7c0a43feb4aea64bde6aea4488d9917f#4a442caf7c0a43feb4aea64bde6aea4488d9917f"
+source = "git+https://github.com/risingwavelabs/prost.git?rev=d7baf5f4d4c12d82987bd86a91a8663005881bdd#d7baf5f4d4c12d82987bd86a91a8663005881bdd"
 dependencies = [
  "prost 0.13.4",
 ]
@@ -10923,7 +10963,7 @@ dependencies = [
 
 [[package]]
 name = "risedev"
-version = "2.8.0-alpha"
+version = "2.9.0-alpha"
 dependencies = [
  "anyhow",
  "chrono",
@@ -10955,7 +10995,7 @@ dependencies = [
 
 [[package]]
 name = "risedev-config"
-version = "2.8.0-alpha"
+version = "2.9.0-alpha"
 dependencies = [
  "anyhow",
  "clap",
@@ -10968,7 +11008,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave-fields-derive"
-version = "2.8.0-alpha"
+version = "2.9.0-alpha"
 dependencies = [
  "expect-test",
  "indoc",
@@ -10980,7 +11020,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_backup"
-version = "2.8.0-alpha"
+version = "2.9.0-alpha"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -11001,7 +11041,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_batch"
-version = "2.8.0-alpha"
+version = "2.9.0-alpha"
 dependencies = [
  "anyhow",
  "assert_matches",
@@ -11046,7 +11086,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_batch_executors"
-version = "2.8.0-alpha"
+version = "2.9.0-alpha"
 dependencies = [
  "anyhow",
  "assert_matches",
@@ -11059,6 +11099,7 @@ dependencies = [
  "futures-async-stream",
  "futures-util",
  "hashbrown 0.16.0",
+ "iceberg",
  "itertools 0.14.0",
  "linkme",
  "madsim-tokio",
@@ -11089,7 +11130,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_bench"
-version = "2.8.0-alpha"
+version = "2.9.0-alpha"
 dependencies = [
  "anyhow",
  "clap",
@@ -11110,7 +11151,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_cmd"
-version = "2.8.0-alpha"
+version = "2.9.0-alpha"
 dependencies = [
  "clap",
  "madsim-tokio",
@@ -11130,7 +11171,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_cmd_all"
-version = "2.8.0-alpha"
+version = "2.9.0-alpha"
 dependencies = [
  "clap",
  "console",
@@ -11163,7 +11204,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_common"
-version = "2.8.0-alpha"
+version = "2.9.0-alpha"
 dependencies = [
  "ahash 0.8.11",
  "anyhow",
@@ -11193,7 +11234,7 @@ dependencies = [
  "easy-ext",
  "educe",
  "either",
- "enum-as-inner",
+ "enum-as-inner 0.7.0",
  "enumflags2",
  "ethnum",
  "expect-test",
@@ -11251,6 +11292,7 @@ dependencies = [
  "rw_resource_util",
  "ryu",
  "serde",
+ "serde-content",
  "serde_bytes",
  "serde_default",
  "serde_json",
@@ -11284,7 +11326,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_common_estimate_size"
-version = "2.8.0-alpha"
+version = "2.9.0-alpha"
 dependencies = [
  "bytes",
  "educe",
@@ -11298,12 +11340,17 @@ dependencies = [
 
 [[package]]
 name = "risingwave_common_heap_profiling"
-version = "2.8.0-alpha"
+version = "2.9.0-alpha"
 dependencies = [
  "chrono",
+ "itertools 0.14.0",
  "madsim-tokio",
+ "madsim-tonic",
  "parking_lot 0.12.5",
+ "pprof",
  "risingwave_common",
+ "risingwave_pb",
+ "risingwave_rpc_client",
  "thiserror 2.0.17",
  "thiserror-ext",
  "tikv-jemalloc-ctl",
@@ -11312,7 +11359,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_common_log"
-version = "2.8.0-alpha"
+version = "2.9.0-alpha"
 dependencies = [
  "governor",
  "madsim-tokio",
@@ -11322,7 +11369,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_common_metrics"
-version = "2.8.0-alpha"
+version = "2.9.0-alpha"
 dependencies = [
  "auto_impl",
  "bytes",
@@ -11358,7 +11405,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_common_proc_macro"
-version = "2.8.0-alpha"
+version = "2.9.0-alpha"
 dependencies = [
  "bae",
  "itertools 0.14.0",
@@ -11370,7 +11417,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_common_rate_limit"
-version = "2.8.0-alpha"
+version = "2.9.0-alpha"
 dependencies = [
  "arc-swap",
  "madsim-tokio",
@@ -11384,7 +11431,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_common_secret"
-version = "2.8.0-alpha"
+version = "2.9.0-alpha"
 dependencies = [
  "anyhow",
  "aws-lc-rs",
@@ -11408,27 +11455,22 @@ dependencies = [
 
 [[package]]
 name = "risingwave_common_service"
-version = "2.8.0-alpha"
+version = "2.9.0-alpha"
 dependencies = [
  "async-trait",
  "axum 0.7.4",
  "axum-extra",
- "chrono",
  "futures",
  "http 1.4.0",
- "itertools 0.14.0",
  "madsim-tokio",
  "madsim-tonic",
- "pprof",
  "prometheus",
  "risingwave_common",
- "risingwave_common_heap_profiling",
  "risingwave_pb",
  "risingwave_rpc_client",
  "serde",
  "thiserror 2.0.17",
  "thiserror-ext",
- "tikv-jemalloc-ctl",
  "tower 0.5.2",
  "tower-http",
  "tracing",
@@ -11437,7 +11479,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_compaction_test"
-version = "2.8.0-alpha"
+version = "2.9.0-alpha"
 dependencies = [
  "anyhow",
  "bytes",
@@ -11458,7 +11500,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_compactor"
-version = "2.8.0-alpha"
+version = "2.9.0-alpha"
 dependencies = [
  "async-trait",
  "await-tree",
@@ -11482,7 +11524,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_compute"
-version = "2.8.0-alpha"
+version = "2.9.0-alpha"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -11528,7 +11570,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_connector"
-version = "2.8.0-alpha"
+version = "2.9.0-alpha"
 dependencies = [
  "adbc_core",
  "adbc_snowflake",
@@ -11567,7 +11609,7 @@ dependencies = [
  "easy-ext",
  "either",
  "elasticsearch",
- "enum-as-inner",
+ "enum-as-inner 0.7.0",
  "expect-test",
  "fs-err",
  "futures",
@@ -11628,7 +11670,6 @@ dependencies = [
  "rumqttc",
  "rust_decimal",
  "rustls-native-certs 0.8.1",
- "rustls-pemfile 2.2.0",
  "rustls-pki-types",
  "rw_futures_util",
  "scopeguard",
@@ -11668,7 +11709,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_connector_codec"
-version = "2.8.0-alpha"
+version = "2.9.0-alpha"
 dependencies = [
  "anyhow",
  "apache-avro 0.16.0",
@@ -11703,7 +11744,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_ctl"
-version = "2.8.0-alpha"
+version = "2.9.0-alpha"
 dependencies = [
  "anyhow",
  "bytes",
@@ -11743,7 +11784,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_dml"
-version = "2.8.0-alpha"
+version = "2.9.0-alpha"
 dependencies = [
  "assert_matches",
  "futures",
@@ -11761,7 +11802,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_e2e_extended_mode_test"
-version = "2.8.0-alpha"
+version = "2.9.0-alpha"
 dependencies = [
  "anyhow",
  "chrono",
@@ -11776,7 +11817,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_error"
-version = "2.8.0-alpha"
+version = "2.9.0-alpha"
 dependencies = [
  "anyhow",
  "bincode 1.3.3",
@@ -11792,7 +11833,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_expr"
-version = "2.8.0-alpha"
+version = "2.9.0-alpha"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -11804,7 +11845,7 @@ dependencies = [
  "easy-ext",
  "educe",
  "either",
- "enum-as-inner",
+ "enum-as-inner 0.7.0",
  "expect-test",
  "futures",
  "futures-async-stream",
@@ -11830,7 +11871,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_expr_impl"
-version = "2.8.0-alpha"
+version = "2.9.0-alpha"
 dependencies = [
  "aho-corasick",
  "anyhow",
@@ -11898,7 +11939,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_frontend"
-version = "2.8.0-alpha"
+version = "2.9.0-alpha"
 dependencies = [
  "anyhow",
  "arc-swap",
@@ -11920,7 +11961,7 @@ dependencies = [
  "easy-ext",
  "educe",
  "either",
- "enum-as-inner",
+ "enum-as-inner 0.7.0",
  "expect-test",
  "fancy-regex",
  "fixedbitset 0.5.7",
@@ -11996,7 +12037,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_frontend_macro"
-version = "2.8.0-alpha"
+version = "2.9.0-alpha"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -12005,12 +12046,11 @@ dependencies = [
 
 [[package]]
 name = "risingwave_hummock_sdk"
-version = "2.8.0-alpha"
+version = "2.9.0-alpha"
 dependencies = [
  "bytes",
  "hex",
  "itertools 0.14.0",
- "parse-display",
  "risingwave_common",
  "risingwave_common_estimate_size",
  "risingwave_pb",
@@ -12021,7 +12061,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_hummock_test"
-version = "2.8.0-alpha"
+version = "2.9.0-alpha"
 dependencies = [
  "async-trait",
  "bytes",
@@ -12053,7 +12093,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_hummock_trace"
-version = "2.8.0-alpha"
+version = "2.9.0-alpha"
 dependencies = [
  "async-trait",
  "bincode 2.0.1",
@@ -12125,13 +12165,13 @@ dependencies = [
 
 [[package]]
 name = "risingwave_license"
-version = "2.8.0-alpha"
+version = "2.9.0-alpha"
 dependencies = [
  "auto_enums",
  "expect-test",
  "humansize",
  "jsonbb",
- "jsonwebtoken 10.2.0",
+ "jsonwebtoken 10.3.0",
  "risingwave_pb",
  "risingwave_telemetry_event",
  "serde",
@@ -12144,7 +12184,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_mem_table_spill_test"
-version = "2.8.0-alpha"
+version = "2.9.0-alpha"
 dependencies = [
  "madsim-tokio",
  "risingwave_common",
@@ -12155,7 +12195,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_meta"
-version = "2.8.0-alpha"
+version = "2.9.0-alpha"
 dependencies = [
  "anyhow",
  "arc-swap",
@@ -12172,7 +12212,7 @@ dependencies = [
  "easy-ext",
  "educe",
  "either",
- "enum-as-inner",
+ "enum-as-inner 0.7.0",
  "expect-test",
  "fail",
  "futures",
@@ -12196,7 +12236,7 @@ dependencies = [
  "rand 0.9.2",
  "risingwave_backup",
  "risingwave_common",
- "risingwave_common_service",
+ "risingwave_common_heap_profiling",
  "risingwave_connector",
  "risingwave_hummock_sdk",
  "risingwave_license",
@@ -12232,7 +12272,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_meta_dashboard"
-version = "2.8.0-alpha"
+version = "2.9.0-alpha"
 dependencies = [
  "anyhow",
  "axum 0.7.4",
@@ -12253,7 +12293,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_meta_model"
-version = "2.8.0-alpha"
+version = "2.9.0-alpha"
 dependencies = [
  "prost 0.13.4",
  "risingwave_common",
@@ -12265,7 +12305,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_meta_model_migration"
-version = "2.8.0-alpha"
+version = "2.9.0-alpha"
 dependencies = [
  "easy-ext",
  "madsim-tokio",
@@ -12278,7 +12318,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_meta_node"
-version = "2.8.0-alpha"
+version = "2.9.0-alpha"
 dependencies = [
  "clap",
  "educe",
@@ -12305,7 +12345,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_meta_service"
-version = "2.8.0-alpha"
+version = "2.9.0-alpha"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -12318,7 +12358,7 @@ dependencies = [
  "rand 0.9.2",
  "regex",
  "risingwave_common",
- "risingwave_common_service",
+ "risingwave_common_heap_profiling",
  "risingwave_connector",
  "risingwave_hummock_sdk",
  "risingwave_meta",
@@ -12334,7 +12374,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_mysql_test"
-version = "2.8.0-alpha"
+version = "2.9.0-alpha"
 dependencies = [
  "futures",
  "madsim-tokio",
@@ -12343,7 +12383,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_object_store"
-version = "2.8.0-alpha"
+version = "2.9.0-alpha"
 dependencies = [
  "async-trait",
  "await-tree",
@@ -12376,9 +12416,9 @@ dependencies = [
 
 [[package]]
 name = "risingwave_pb"
-version = "2.8.0-alpha"
+version = "2.9.0-alpha"
 dependencies = [
- "enum-as-inner",
+ "enum-as-inner 0.7.0",
  "fs-err",
  "madsim-tonic",
  "madsim-tonic-build",
@@ -12402,7 +12442,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_planner_test"
-version = "2.8.0-alpha"
+version = "2.9.0-alpha"
 dependencies = [
  "anyhow",
  "expect-test",
@@ -12424,7 +12464,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_regress_test"
-version = "2.8.0-alpha"
+version = "2.9.0-alpha"
 dependencies = [
  "anyhow",
  "clap",
@@ -12438,7 +12478,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_rpc_client"
-version = "2.8.0-alpha"
+version = "2.9.0-alpha"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -12469,7 +12509,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_rt"
-version = "2.8.0-alpha"
+version = "2.9.0-alpha"
 dependencies = [
  "await-tree",
  "console",
@@ -12552,7 +12592,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_sqlparser"
-version = "2.8.0-alpha"
+version = "2.9.0-alpha"
 dependencies = [
  "anyhow",
  "console",
@@ -12573,7 +12613,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_sqlsmith"
-version = "2.8.0-alpha"
+version = "2.9.0-alpha"
 dependencies = [
  "anyhow",
  "chrono",
@@ -12604,7 +12644,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_state_cleaning_test"
-version = "2.8.0-alpha"
+version = "2.9.0-alpha"
 dependencies = [
  "anyhow",
  "clap",
@@ -12623,7 +12663,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_storage"
-version = "2.8.0-alpha"
+version = "2.9.0-alpha"
 dependencies = [
  "ahash 0.8.11",
  "anyhow",
@@ -12637,7 +12677,7 @@ dependencies = [
  "derive_builder",
  "dyn-clone",
  "either",
- "enum-as-inner",
+ "enum-as-inner 0.7.0",
  "expect-test",
  "fail",
  "faiss",
@@ -12694,7 +12734,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_stream"
-version = "2.8.0-alpha"
+version = "2.9.0-alpha"
 dependencies = [
  "anyhow",
  "assert_matches",
@@ -12710,7 +12750,7 @@ dependencies = [
  "dhat",
  "educe",
  "either",
- "enum-as-inner",
+ "enum-as-inner 0.7.0",
  "expect-test",
  "fail",
  "foyer",
@@ -12769,7 +12809,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_telemetry_event"
-version = "2.8.0-alpha"
+version = "2.9.0-alpha"
 dependencies = [
  "jsonbb",
  "madsim-tokio",
@@ -12783,7 +12823,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_test_runner"
-version = "2.8.0-alpha"
+version = "2.9.0-alpha"
 dependencies = [
  "fail",
  "sync-point",
@@ -12792,7 +12832,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_variables"
-version = "2.8.0-alpha"
+version = "2.9.0-alpha"
 dependencies = [
  "chrono",
  "workspace-hack",
@@ -13687,6 +13727,15 @@ checksum = "9a8e94ea7f378bd32cbbd37198a4a91436180c5bb472411e48b5ec2e2124ae9e"
 dependencies = [
  "serde_core",
  "serde_derive",
+]
+
+[[package]]
+name = "serde-content"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3753ca04f350fa92d00b6146a3555e63c55388c9ef2e11e09bce2ff1c0b509c6"
+dependencies = [
+ "serde",
 ]
 
 [[package]]
@@ -14841,16 +14890,16 @@ dependencies = [
 
 [[package]]
 name = "sysinfo"
-version = "0.37.2"
+version = "0.38.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "16607d5caffd1c07ce073528f9ed972d88db15dd44023fa57142963be3feb11f"
+checksum = "fe840c5b1afe259a5657392a4dbb74473a14c8db999c3ec2f4ae812e028a94da"
 dependencies = [
  "libc",
  "memchr",
  "ntapi",
  "objc2-core-foundation",
  "objc2-io-kit",
- "windows 0.61.1",
+ "windows 0.62.2",
 ]
 
 [[package]]
@@ -14931,9 +14980,9 @@ dependencies = [
 
 [[package]]
 name = "tempfile"
-version = "3.24.0"
+version = "3.25.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "655da9c7eb6305c55742045d5a8d2037996d61d8de95806335c7c86ce0f82e9c"
+checksum = "0136791f7c95b1f6dd99f9cc786b91bb81c3800b639b3478e561ddb7be95e5f1"
 dependencies = [
  "fastrand",
  "getrandom 0.3.1",
@@ -16082,9 +16131,9 @@ checksum = "711b9620af191e0cdc7468a8d14e709c3dcdb115b36f838e601583af800a370a"
 
 [[package]]
 name = "uuid"
-version = "1.19.0"
+version = "1.20.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e2e054861b4bd027cd373e18e8d8d8e6548085000e41290d95ce0c373a654b4a"
+checksum = "ee48d38b119b0cd71fe4141b30f5ba9c7c5d9f4e7a3a8b4a674e4b6ef789976f"
 dependencies = [
  "getrandom 0.3.1",
  "js-sys",
@@ -16851,24 +16900,23 @@ dependencies = [
 
 [[package]]
 name = "windows"
-version = "0.61.1"
+version = "0.62.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c5ee8f3d025738cb02bad7868bbb5f8a6327501e870bf51f1b455b0a2454a419"
+checksum = "527fadee13e0c05939a6a05d5bd6eec6cd2e3dbd648b9f8e447c6518133d8580"
 dependencies = [
  "windows-collections",
- "windows-core 0.61.0",
+ "windows-core 0.62.2",
  "windows-future",
- "windows-link 0.1.1",
  "windows-numerics",
 ]
 
 [[package]]
 name = "windows-collections"
-version = "0.2.0"
+version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3beeceb5e5cfd9eb1d76b381630e82c4241ccd0d27f1a39ed41b2760b255c5e8"
+checksum = "23b2d95af1a8a14a3c7367e1ed4fc9c20e0a26e79551b1454d72583c97cc6610"
 dependencies = [
- "windows-core 0.61.0",
+ "windows-core 0.62.2",
 ]
 
 [[package]]
@@ -16890,21 +16938,35 @@ version = "0.61.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4763c1de310c86d75a878046489e2e5ba02c649d185f21c67d4cf8a56d098980"
 dependencies = [
- "windows-implement 0.60.0",
- "windows-interface 0.59.1",
+ "windows-implement 0.60.2",
+ "windows-interface 0.59.3",
  "windows-link 0.1.1",
  "windows-result 0.3.2",
  "windows-strings 0.4.0",
 ]
 
 [[package]]
-name = "windows-future"
-version = "0.2.0"
+name = "windows-core"
+version = "0.62.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7a1d6bbefcb7b60acd19828e1bc965da6fcf18a7e39490c5f8be71e54a19ba32"
+checksum = "b8e83a14d34d0623b51dce9581199302a221863196a1dde71a7663a4c2be9deb"
 dependencies = [
- "windows-core 0.61.0",
- "windows-link 0.1.1",
+ "windows-implement 0.60.2",
+ "windows-interface 0.59.3",
+ "windows-link 0.2.1",
+ "windows-result 0.4.1",
+ "windows-strings 0.5.1",
+]
+
+[[package]]
+name = "windows-future"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e1d6f90251fe18a279739e78025bd6ddc52a7e22f921070ccdc67dde84c605cb"
+dependencies = [
+ "windows-core 0.62.2",
+ "windows-link 0.2.1",
+ "windows-threading",
 ]
 
 [[package]]
@@ -16920,9 +16982,9 @@ dependencies = [
 
 [[package]]
 name = "windows-implement"
-version = "0.60.0"
+version = "0.60.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a47fddd13af08290e67f4acabf4b459f647552718f683a7b415d290ac744a836"
+checksum = "053e2e040ab57b9dc951b72c264860db7eb3b0200ba345b4e4c3b14f67855ddf"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -16942,9 +17004,9 @@ dependencies = [
 
 [[package]]
 name = "windows-interface"
-version = "0.59.1"
+version = "0.59.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bd9211b69f8dcdfa817bfd14bf1c97c9188afa36f4750130fcdf3f400eca9fa8"
+checksum = "3f316c4a2570ba26bbec722032c4099d8c8bc095efccdc15688708623367e358"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -16965,12 +17027,12 @@ checksum = "f0805222e57f7521d6a62e36fa9163bc891acd422f971defe97d64e70d0a4fe5"
 
 [[package]]
 name = "windows-numerics"
-version = "0.2.0"
+version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9150af68066c4c5c07ddc0ce30421554771e528bde427614c61038bc2c92c2b1"
+checksum = "6e2e40844ac143cdb44aead537bbf727de9b044e107a0f1220392177d15b0f26"
 dependencies = [
- "windows-core 0.61.0",
- "windows-link 0.1.1",
+ "windows-core 0.62.2",
+ "windows-link 0.2.1",
 ]
 
 [[package]]
@@ -17165,6 +17227,15 @@ dependencies = [
  "windows_x86_64_gnu 0.53.1",
  "windows_x86_64_gnullvm 0.53.1",
  "windows_x86_64_msvc 0.53.1",
+]
+
+[[package]]
+name = "windows-threading"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3949bd5b99cafdf1c7ca86b43ca564028dfe27d66958f2470940f73d86d75b37"
+dependencies = [
+ "windows-link 0.2.1",
 ]
 
 [[package]]
@@ -17423,7 +17494,7 @@ dependencies = [
 
 [[package]]
 name = "with_options"
-version = "2.8.0-alpha"
+version = "2.9.0-alpha"
 dependencies = [
  "quote",
  "syn 2.0.111",
@@ -17443,7 +17514,7 @@ dependencies = [
 
 [[package]]
 name = "workspace-config"
-version = "2.8.0-alpha"
+version = "2.9.0-alpha"
 dependencies = [
  "aws-lc-rs",
  "libz-sys",
@@ -17457,7 +17528,7 @@ dependencies = [
 
 [[package]]
 name = "workspace-hack"
-version = "2.8.0-alpha"
+version = "2.9.0-alpha"
 
 [[package]]
 name = "wyz"

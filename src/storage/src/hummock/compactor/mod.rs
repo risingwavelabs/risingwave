@@ -805,10 +805,7 @@ pub fn start_compactor(
                                 .map(|sst| sst.into())
                                 .collect(),
                             table_stats_change: to_prost_table_stats_map(table_stats),
-                            object_timestamps: object_timestamps
-                                .into_iter()
-                                .map(|(object_id, timestamp)| (object_id.inner(), timestamp))
-                                .collect(),
+                            object_timestamps,
                         })),
                         create_at: SystemTime::now()
                             .duration_since(std::time::UNIX_EPOCH)
@@ -1075,10 +1072,7 @@ pub fn start_shared_compactor(
                                         event: Some(ReportCompactionTaskEvent::ReportTask(ReportSharedTask {
                                             compact_task: Some(PbCompactTask::from(&compact_task)),
                                             table_stats_change: to_prost_table_stats_map(table_stats),
-                                            object_timestamps: object_timestamps
-                                            .into_iter()
-                                            .map(|(object_id, timestamp)| (object_id.inner(), timestamp))
-                                            .collect(),
+                                            object_timestamps,
                                     })),
                                     };
 

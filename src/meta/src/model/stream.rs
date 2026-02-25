@@ -23,6 +23,8 @@ use risingwave_common::hash::{
     ActorAlignmentId, IsSingleton, VirtualNode, VnodeCount, VnodeCountCompat,
 };
 use risingwave_common::id::JobId;
+use risingwave_common::system_param::AdaptiveParallelismStrategy;
+use risingwave_common::system_param::adaptive_parallelism_strategy::parse_strategy;
 use risingwave_common::util::stream_graph_visitor::{self, visit_stream_node_body};
 use risingwave_meta_model::{DispatcherType, SourceId, StreamingParallelism, WorkerId};
 use risingwave_pb::catalog::Table;
@@ -43,6 +45,7 @@ use risingwave_pb::stream_plan::{
     DispatchStrategy, Dispatcher, PbDispatchOutputMapping, PbDispatcher, PbStreamActor,
     PbStreamContext, StreamNode,
 };
+use strum::Display;
 
 use super::{ActorId, FragmentId};
 
@@ -213,7 +216,7 @@ impl Fragment {
                 .map(|actor| {
                     actor.to_protobuf(
                         dispatchers
-                            .and_then(|dispatchers| dispatchers.get(&(actor.actor_id as _)))
+                            .and_then(|dispatchers| dispatchers.get(&actor.actor_id))
                             .into_iter()
                             .flatten()
                             .cloned(),
@@ -285,6 +288,9 @@ pub struct StreamContext {
 
     /// The partial config of this job to override the global config.
     pub config_override: Arc<str>,
+
+    /// The adaptive parallelism strategy for this job if it overrides the system default.
+    pub adaptive_parallelism_strategy: Option<AdaptiveParallelismStrategy>,
 }
 
 impl StreamContext {
@@ -292,6 +298,11 @@ impl StreamContext {
         PbStreamContext {
             timezone: self.timezone.clone().unwrap_or("".into()),
             config_override: self.config_override.to_string(),
+            adaptive_parallelism_strategy: self
+                .adaptive_parallelism_strategy
+                .as_ref()
+                .map(ToString::to_string)
+                .unwrap_or_default(),
         }
     }
 
@@ -311,6 +322,14 @@ impl StreamContext {
                 Some(prost.get_timezone().clone())
             },
             config_override: prost.get_config_override().as_str().into(),
+            adaptive_parallelism_strategy: if prost.get_adaptive_parallelism_strategy().is_empty() {
+                None
+            } else {
+                Some(
+                    parse_strategy(prost.get_adaptive_parallelism_strategy())
+                        .expect("adaptive parallelism strategy should be validated in frontend"),
+                )
+            },
         }
     }
 }
@@ -321,6 +340,9 @@ impl risingwave_meta_model::streaming_job::Model {
         StreamContext {
             timezone: self.timezone.clone(),
             config_override: self.config_override.clone().unwrap_or_default().into(),
+            adaptive_parallelism_strategy: self.adaptive_parallelism_strategy.as_deref().map(|s| {
+                parse_strategy(s).expect("strategy should be validated before persisting")
+            }),
         }
     }
 }
@@ -342,7 +364,7 @@ impl StreamJobFragments {
                         *id,
                         fragment.to_protobuf(
                             fragment_upstreams.get(id).into_iter().flatten().cloned(),
-                            fragment_dispatchers.get(&(*id as _)),
+                            fragment_dispatchers.get(id),
                         ),
                     )
                 })
@@ -770,7 +792,7 @@ impl StreamJobFragments {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Display, Clone, Copy, PartialEq, Eq)]
 pub enum BackfillUpstreamType {
     MView,
     Values,
