@@ -365,13 +365,23 @@ pub fn check_sink_allow_alter_on_fly_fields(
     sink_name: &str,
     fields: &[String],
 ) -> crate::error::ConnectorResult<()> {
-    // Convert sink name to the type name key
-    let Some(type_name) = sink_properties::sink_name_to_config_type_name(sink_name) else {
-        return Err(ConnectorError::from(anyhow::anyhow!(
-            "Unknown sink connector: {sink_name}"
-        )));
+    // TODO(#24846): JDBC sink currently uses `()` as sink config type in `for_all_sinks!`,
+    // so it cannot have an isolated key in `SINK_ALLOW_ALTER_ON_FLY_FIELDS`.
+    // Reuse the JDBC entry in `CONNECTION_ALLOW_ALTER_ON_FLY_FIELDS` for now.
+    // TODO(#24846): remove this special case after JDBC sink has a dedicated config type
+    // and allow-alter fields are generated directly into `SINK_ALLOW_ALTER_ON_FLY_FIELDS`.
+    let allowed_fields = if sink_name == JdbcSink::SINK_NAME {
+        CONNECTION_ALLOW_ALTER_ON_FLY_FIELDS.get(JdbcSink::SINK_NAME)
+    } else {
+        // Convert sink name to the type name key
+        let Some(type_name) = sink_properties::sink_name_to_config_type_name(sink_name) else {
+            return Err(ConnectorError::from(anyhow::anyhow!(
+                "Unknown sink connector: {sink_name}"
+            )));
+        };
+        SINK_ALLOW_ALTER_ON_FLY_FIELDS.get(type_name)
     };
-    let Some(allowed_fields) = SINK_ALLOW_ALTER_ON_FLY_FIELDS.get(type_name) else {
+    let Some(allowed_fields) = allowed_fields else {
         return Err(ConnectorError::from(anyhow::anyhow!(
             "No allow_alter_on_fly fields registered for sink: {sink_name}"
         )));
