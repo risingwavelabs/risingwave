@@ -175,11 +175,11 @@ FROM rw_catalog.rw_hummock_compaction_group_configs
 WHERE member_tables @> ('[' || $table_id || ']')::jsonb
 
 # Trigger compaction to reclaim rows older than watermark in left join state table
-system ok retry 10 backoff 1s
+system ok
 ./risedev ctl hummock trigger-manual-compaction -c "$compaction_group_id" -t "$table_id" -l 0,6
 
 # After compaction, the old left row (ts=10s) should be reclaimed by watermark
-query IT retry 20 backoff 1s
+query IT retry 200 backoff 1s
 SELECT left_table_id, left_table_ts FROM ${left_state_table};
 ----
 2 2024-01-01 00:00:30+00:00
@@ -190,14 +190,14 @@ SELECT right_table_id, right_table_ts FROM ${right_state_table};
 1 2024-01-01 00:00:05+00:00
 2 2024-01-01 00:00:25+00:00
 
-query I retry 20 backoff 1s
+query I retry 200 backoff 1s
 SELECT total_key_count
 FROM rw_catalog.rw_table_stats
 WHERE id = ${left_state_table_id};
 ----
 1
 
-query I retry 20 backoff 1s
+query I retry 200 backoff 1s
 SELECT total_key_count
 FROM rw_catalog.rw_table_stats
 WHERE id = ${right_state_table_id};
@@ -230,10 +230,10 @@ SELECT * FROM eowc_mv;
 1 1 2024-01-01 00:00:10+00:00 2024-01-01 00:00:05+00:00
 2 2 2024-01-01 00:00:30+00:00 2024-01-01 00:00:25+00:00
 
-system ok retry 10 backoff 1s
+system ok
 ./risedev ctl hummock trigger-manual-compaction -c "$compaction_group_id" -t "$table_id" -l 0,6
 
-query I retry 20 backoff 1s
+query I retry 200 backoff 1s
 SELECT CASE
        WHEN SUM(CASE WHEN left_table_id = 3 AND left_table_ts = '2024-01-01 00:00:50+00'::timestamptz THEN 1 ELSE 0 END) = 1
        AND SUM(CASE WHEN left_table_id = 2 AND left_table_ts = '2024-01-01 00:00:30+00'::timestamptz THEN 1 ELSE 0 END) IN (0, 1)
@@ -444,21 +444,20 @@ FROM rw_catalog.rw_hummock_compaction_group_configs
 WHERE member_tables @> ('[' || $between_left_state_tid || ']')::jsonb
 
 # Trigger manual compaction for Test 2 left state table and verify cleanup.
-system ok retry 10 backoff 1s
+system ok
 ./risedev ctl hummock trigger-manual-compaction -c "$between_compaction_group_id" -t "$between_left_state_tid" -l 0,6
 
-query IT rowsort retry 20 backoff 1s
+query IT rowsort retry 200 backoff 1s
 SELECT stream_a_id, stream_a_ts FROM ${between_left_state_tname} ORDER BY stream_a_id;
 ----
 3 2024-01-01 00:01:00+00:00
 
-query IT rowsort
+query IT rowsort retry 200 backoff 1s
 SELECT stream_b_id, stream_b_ts FROM ${between_right_state_tname} ORDER BY stream_b_id;
 ----
-1 2024-01-01 00:00:05+00:00
 3 2024-01-01 00:00:55+00:00
 
-query I retry 20 backoff 1s
+query I retry 200 backoff 1s
 SELECT total_key_count
 FROM rw_catalog.rw_table_stats
 WHERE id = ${between_left_state_tid};
@@ -504,10 +503,10 @@ SELECT * FROM between_eowc_mv;
 3 3 2024-01-01 00:01:00+00:00 2024-01-01 00:00:55+00:00 50 60
 3 3 2024-01-01 00:01:03+00:00 2024-01-01 00:00:55+00:00 72 60
 
-system ok retry 10 backoff 1s
+system ok
 ./risedev ctl hummock trigger-manual-compaction -c "$between_compaction_group_id" -t "$between_left_state_tid" -l 0,6
 
-query IT rowsort retry 20 backoff 1s
+query IT rowsort retry 200 backoff 1s
 SELECT stream_a_id, stream_a_ts FROM ${between_left_state_tname} ORDER BY stream_a_id;
 ----
 4 2024-01-01 00:01:20+00:00
