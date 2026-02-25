@@ -3076,7 +3076,7 @@ impl Parser<'_> {
 
     /// Parse a single-value config param.
     ///
-    /// This differs from [`parse_config_param`] in that it does **not** allow a comma-separated
+    /// This differs from [`Self::parse_config_param`] in that it does **not** allow a comma-separated
     /// list on the RHS, so it can be safely used in constructs where comma separates multiple
     /// assignments (e.g. `... SET a = 1, b = 2`).
     fn parse_config_param_no_list(&mut self) -> ModalResult<ConfigParam> {
