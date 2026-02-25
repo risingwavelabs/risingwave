@@ -18,6 +18,7 @@ use arrow_udf_runtime::python::Runtime;
 use futures_util::StreamExt;
 use risingwave_common::array::arrow::{UdfArrowConvert, UdfToArrow, arrow_schema_udf};
 
+use super::runtime_options::prepend_python_udf_options;
 use super::*;
 
 #[linkme::distributed_slice(UDF_IMPLS)]
@@ -32,6 +33,8 @@ static PYTHON: UdfImplDescriptor = UdfImplDescriptor {
     },
     build_fn: |opts| {
         let mut runtime = Runtime::builder().build()?;
+        let body = opts.body.context("body is required")?;
+        let body = prepend_python_udf_options(body, opts.options)?;
         if opts.kind.is_aggregate() {
             runtime.add_aggregate(
                 opts.name_in_runtime,
@@ -40,14 +43,14 @@ static PYTHON: UdfImplDescriptor = UdfImplDescriptor {
                 ),
                 UdfArrowConvert::default().to_arrow_field("", opts.return_type)?,
                 CallMode::CalledOnNullInput,
-                opts.body.context("body is required")?,
+                body.as_ref(),
             )?;
         } else {
             runtime.add_function(
                 opts.name_in_runtime,
                 UdfArrowConvert::default().to_arrow_field("", opts.return_type)?,
                 CallMode::CalledOnNullInput,
-                opts.body.context("body is required")?,
+                body.as_ref(),
             )?;
         }
         Ok(Box::new(PythonFunction {
