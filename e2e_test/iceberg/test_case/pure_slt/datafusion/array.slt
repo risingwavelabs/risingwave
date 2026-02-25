@@ -1,0 +1,370 @@
+statement ok
+set enable_datafusion_engine = true;
+
+statement ok
+create secret my_secret with (
+  backend = 'meta'
+) as 'hummockadmin';
+
+statement ok
+create connection my_conn
+with (
+    type = 'iceberg',
+    warehouse.path = 's3://hummock001/iceberg_connection',
+    s3.access.key = secret my_secret,
+    s3.secret.key = secret my_secret,
+    s3.endpoint = 'http://127.0.0.1:9301',
+    s3.region = 'us-west-2',
+    catalog.type = 'storage',
+);
+
+statement ok
+set iceberg_engine_connection = 'public.my_conn';
+
+# ==================== Array Table ====================
+
+statement ok
+CREATE TABLE t_array (
+    id INT PRIMARY KEY,
+    arr_int INT[],
+    arr_2d INT[][]
+) WITH (commit_checkpoint_interval = 1) ENGINE = iceberg;
+
+statement ok
+INSERT INTO t_array VALUES
+(1, array[1, 2, 3], NULL),
+(2, array[4, 5, 4, 5], NULL),
+(3, array[]::int[], NULL),
+(4, NULL, NULL),
+(5, array[3, 1, 2], NULL),
+(6, array[1, NULL, 2], NULL),
+(7, array[1, 2, 3, 4], NULL),
+(8, NULL, array[array[1, 2], array[3, 4]]::int[][]);
+
+statement ok
+FLUSH;
+
+sleep 5s
+
+# ==================== ARRAY / make_array ====================
+
+query ? rowsort
+SELECT array[id, id + 1] FROM t_array;
+----
+{1,2}
+{2,3}
+{3,4}
+{4,5}
+{5,6}
+{6,7}
+{7,8}
+{8,9}
+
+# ==================== ArrayAccess (arr[i]) ====================
+
+query III rowsort
+SELECT arr_int[1], arr_int[2], arr_int[3] FROM t_array;
+----
+1 2 3
+1 2 3
+1 NULL 2
+3 1 2
+4 5 4
+NULL NULL NULL
+NULL NULL NULL
+NULL NULL NULL
+
+# ==================== ArrayRangeAccess (arr[start:end]) ====================
+
+query ? rowsort
+SELECT arr_int[1:2] FROM t_array;
+----
+NULL
+NULL
+{1,2}
+{1,2}
+{1,NULL}
+{3,1}
+{4,5}
+{}
+
+# ==================== array_cat / || ====================
+
+query ? rowsort
+SELECT array_cat(arr_int, array[4, 5]) FROM t_array;
+----
+{1,2,3,4,4,5}
+{1,2,3,4,5}
+{1,NULL,2,4,5}
+{3,1,2,4,5}
+{4,5,4,5,4,5}
+{4,5}
+{4,5}
+{4,5}
+
+query ? rowsort
+SELECT arr_int || array[0] FROM t_array;
+----
+{0}
+{0}
+{0}
+{1,2,3,0}
+{1,2,3,4,0}
+{1,NULL,2,0}
+{3,1,2,0}
+{4,5,4,5,0}
+
+# ==================== array_append / array_prepend ====================
+
+query ? rowsort
+SELECT array_append(arr_int, 4) FROM t_array;
+----
+{1,2,3,4,4}
+{1,2,3,4}
+{1,NULL,2,4}
+{3,1,2,4}
+{4,5,4,5,4}
+{4}
+{4}
+{4}
+
+query ? rowsort
+SELECT array_prepend(0, arr_int) FROM t_array;
+----
+{0,1,2,3,4}
+{0,1,2,3}
+{0,1,NULL,2}
+{0,3,1,2}
+{0,4,5,4,5}
+{0}
+{0}
+{0}
+
+# ==================== array_length / cardinality / array_dims ====================
+
+query I rowsort
+SELECT array_length(arr_int) FROM t_array;
+----
+0
+3
+3
+3
+4
+4
+NULL
+NULL
+
+query I rowsort
+SELECT cardinality(arr_int) FROM t_array;
+----
+3
+3
+3
+4
+4
+NULL
+NULL
+NULL
+
+# ==================== array_remove / array_replace ====================
+
+query ? rowsort
+SELECT array_remove(arr_int, 2) FROM t_array;
+----
+NULL
+NULL
+{1,3,4}
+{1,3}
+{1,NULL}
+{3,1}
+{4,5,4,5}
+{}
+
+query ? rowsort
+SELECT array_replace(arr_int, 2, 20) FROM t_array;
+----
+NULL
+NULL
+{1,20,3,4}
+{1,20,3}
+{1,NULL,20}
+{3,1,20}
+{4,5,4,5}
+{}
+
+# ==================== array_position / array_positions ====================
+
+query I rowsort
+SELECT array_position(arr_int, 2) FROM t_array;
+----
+2
+2
+3
+3
+NULL
+NULL
+NULL
+NULL
+
+query ? rowsort
+SELECT array_positions(arr_int, 4) FROM t_array;
+----
+NULL
+NULL
+{1,3}
+{4}
+{}
+{}
+{}
+{}
+
+# ==================== string_to_array / array_to_string ====================
+
+query ?
+SELECT string_to_array('a,b,c', ',') FROM t_array WHERE id = 1;
+----
+{a,b,c}
+
+query T
+SELECT array_to_string(array['x', 'y', 'z'], ',') FROM t_array WHERE id = 1;
+----
+x,y,z
+
+query T rowsort
+SELECT array_to_string(arr_int, '-') FROM t_array;
+----
+(empty)
+1-2
+1-2-3
+1-2-3-4
+3-1-2
+4-5-4-5
+NULL
+NULL
+
+# ==================== array_min / array_max / array_sort ====================
+
+query I rowsort
+SELECT array_min(arr_int) FROM t_array;
+----
+1
+1
+1
+1
+4
+NULL
+NULL
+NULL
+
+query I rowsort
+SELECT array_max(arr_int) FROM t_array;
+----
+2
+3
+3
+4
+5
+NULL
+NULL
+NULL
+
+query ? rowsort
+SELECT array_sort(arr_int) FROM t_array;
+----
+NULL
+NULL
+{1,2,3,4}
+{1,2,3}
+{1,2,3}
+{1,2,NULL}
+{4,4,5,5}
+{}
+
+# ==================== array_contains (@>) / array_contained (<@) ====================
+
+query B rowsort
+SELECT arr_int @> array[1, 2] FROM t_array;
+----
+NULL
+NULL
+f
+f
+t
+t
+t
+t
+
+query B rowsort
+SELECT array[1, 2] <@ arr_int FROM t_array;
+----
+NULL
+NULL
+f
+f
+t
+t
+t
+t
+
+# ==================== array_flatten ====================
+
+query ? rowsort
+SELECT array_flatten(arr_2d) FROM t_array;
+----
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+{1,2,3,4}
+
+# ==================== array_reverse ====================
+
+query ? rowsort
+SELECT array_reverse(arr_int) FROM t_array;
+----
+NULL
+NULL
+{2,1,3}
+{2,NULL,1}
+{3,2,1}
+{4,3,2,1}
+{5,4,5,4}
+{}
+
+# ==================== IN list (convert_in_list_func) ====================
+
+query I rowsort
+SELECT id FROM t_array WHERE id IN (1, 2, 3);
+----
+1
+2
+3
+
+query I rowsort
+SELECT id FROM t_array WHERE id IN (1, 2, 5, 7);
+----
+1
+2
+5
+7
+
+query ? rowsort
+SELECT arr_int FROM t_array WHERE id IN (1, 5, 7);
+----
+{1,2,3,4}
+{1,2,3}
+{3,1,2}
+
+# ==================== Cleanup ====================
+
+statement ok
+DROP TABLE t_array;
+
+statement ok
+DROP CONNECTION my_conn;
+
+statement ok
+DROP SECRET my_secret;
