@@ -553,11 +553,9 @@ impl IcebergConfig {
     }
 
     /// Get the parquet compression codec
-    /// Default is "snappy"
+    /// Default is "zstd"
     pub fn write_parquet_compression(&self) -> &str {
-        self.write_parquet_compression
-            .as_deref()
-            .unwrap_or("snappy")
+        self.write_parquet_compression.as_deref().unwrap_or("zstd")
     }
 
     /// Get the maximum number of rows in a Parquet row group
