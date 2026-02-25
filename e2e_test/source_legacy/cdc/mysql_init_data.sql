@@ -1,6 +1,6 @@
 
 INSERT INTO products
-VALUES (default,"scooter","Small 2-wheel scooter"),
+VALUES (default,"scooter",null),
        (default,"car battery","12V car battery"),
        (default,"12-pack drill bits","12-pack of drill bits with sizes ranging from #40 to #3"),
        (default,"hammer","12oz carpenter's hammer"),
