@@ -28,7 +28,7 @@ use risingwave_common::catalog::{CDC_OFFSET_COLUMN_NAME, ColumnDesc, ColumnId, F
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum, Decimal, F32, ScalarImpl};
 use risingwave_common::util::iter_util::ZipEqFast;
-use sea_schema::mysql::def::{ColumnDefault, ColumnKey, ColumnType};
+use sea_schema::mysql::def::{ColumnDefault, ColumnKey, ColumnType, NumericAttr};
 use sea_schema::mysql::discovery::SchemaDiscovery;
 use sea_schema::mysql::query::SchemaQueryBuilder;
 use sea_schema::sea_query::{Alias, IntoIden};
@@ -270,39 +270,29 @@ pub fn type_name_to_mysql_type(ty_name: &str) -> Option<ColumnType> {
         .next()
         .unwrap_or_default();
     let is_unsigned = ty.contains("unsigned");
+    let is_zero_fill = ty.contains("zerofill");
 
-    // Handle MySQL `... UNSIGNED` integer family in Debezium schema change.
-    //
-    // Notes about mapping:
-    // - `TINYINT UNSIGNED`  : 0..255            -> fits in RW Int16
-    // - `SMALLINT UNSIGNED` : 0..65535          -> needs RW Int32
-    // - `MEDIUMINT UNSIGNED`: 0..16777215       -> fits in RW Int32
-    // - `INT UNSIGNED`      : 0..4294967295     -> needs RW Int64
-    // - `BIGINT UNSIGNED`   : 0..18446744073709551615 -> needs RW Decimal
-    if is_unsigned {
-        match base {
-            // Keep as-is: RW mapping is already wide enough.
-            "tinyint" => return Some(ColumnType::TinyInt(Default::default())),
-            "mediumint" => return Some(ColumnType::MediumInt(Default::default())),
-            // Promote to a wider signed type.
-            "smallint" => return Some(ColumnType::Int(Default::default())),
-            "int" => return Some(ColumnType::BigInt(Default::default())),
-            // Promote to Decimal to avoid overflow beyond i64.
-            "bigint" => return Some(ColumnType::Decimal(Default::default())),
-            _ => {}
+    let make_numeric_attr = || {
+        let mut attr = NumericAttr::default();
+        if is_unsigned {
+            attr.unsigned = Some(true);
         }
-    }
+        if is_zero_fill {
+            attr.zero_fill = Some(true);
+        }
+        attr
+    };
 
     match base {
-        "bit" => Some(ColumnType::Bit(Default::default())),
-        "tinyint" => Some(ColumnType::TinyInt(Default::default())),
-        "smallint" => Some(ColumnType::SmallInt(Default::default())),
-        "mediumint" => Some(ColumnType::MediumInt(Default::default())),
-        "int" => Some(ColumnType::Int(Default::default())),
-        "bigint" => Some(ColumnType::BigInt(Default::default())),
-        "decimal" => Some(ColumnType::Decimal(Default::default())),
-        "float" => Some(ColumnType::Float(Default::default())),
-        "double" => Some(ColumnType::Double(Default::default())),
+        "bit" => Some(ColumnType::Bit(make_numeric_attr())),
+        "tinyint" => Some(ColumnType::TinyInt(make_numeric_attr())),
+        "smallint" => Some(ColumnType::SmallInt(make_numeric_attr())),
+        "mediumint" => Some(ColumnType::MediumInt(make_numeric_attr())),
+        "int" => Some(ColumnType::Int(make_numeric_attr())),
+        "bigint" => Some(ColumnType::BigInt(make_numeric_attr())),
+        "decimal" => Some(ColumnType::Decimal(make_numeric_attr())),
+        "float" => Some(ColumnType::Float(make_numeric_attr())),
+        "double" => Some(ColumnType::Double(make_numeric_attr())),
         "time" => Some(ColumnType::Time(Default::default())),
         "datetime" => Some(ColumnType::DateTime(Default::default())),
         "timestamp" => Some(ColumnType::Timestamp(Default::default())),
@@ -349,11 +339,31 @@ pub fn mysql_type_to_rw_type(col_type: &ColumnType) -> ConnectorResult<DataType>
                 );
             }
         }
-        ColumnType::TinyInt(_) | ColumnType::SmallInt(_) => DataType::Int16,
+        // Unsigned integer family needs promotion to avoid overflow.
+        ColumnType::TinyInt(_) => DataType::Int16,
+        ColumnType::SmallInt(attr) => {
+            if attr.unsigned == Some(true) {
+                DataType::Int32
+            } else {
+                DataType::Int16
+            }
+        }
         ColumnType::Bool => DataType::Boolean,
         ColumnType::MediumInt(_) => DataType::Int32,
-        ColumnType::Int(_) => DataType::Int32,
-        ColumnType::BigInt(_) => DataType::Int64,
+        ColumnType::Int(attr) => {
+            if attr.unsigned == Some(true) {
+                DataType::Int64
+            } else {
+                DataType::Int32
+            }
+        }
+        ColumnType::BigInt(attr) => {
+            if attr.unsigned == Some(true) {
+                DataType::Decimal
+            } else {
+                DataType::Int64
+            }
+        }
         ColumnType::Decimal(_) => DataType::Decimal,
         ColumnType::Float(_) => DataType::Float32,
         ColumnType::Double(_) => DataType::Float64,
