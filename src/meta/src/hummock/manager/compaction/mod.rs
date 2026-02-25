@@ -1836,7 +1836,6 @@ mod prefetched_task_id_tests {
     use std::collections::HashSet;
 
     use itertools::Itertools;
-    use tokio::task::JoinSet;
 
     use crate::hummock::HummockManager;
     use crate::hummock::test_utils::setup_compute_env;
@@ -2014,20 +2013,22 @@ mod prefetched_task_id_tests {
             range.set_bounds(0, 0);
         }
 
-        let mut join_set = JoinSet::new();
+        // `tokio::task::JoinSet` is not available in `madsim`'s tokio.
+        // Using a vector of `JoinHandle`s works in both environments.
+        let mut handles = Vec::with_capacity(64);
         for _ in 0..64 {
             let hummock_manager = hummock_manager.clone();
-            join_set.spawn(async move {
+            handles.push(tokio::spawn(async move {
                 hummock_manager
                     .next_compaction_task_id_with_prefetch(4)
                     .await
                     .unwrap()
-            });
+            }));
         }
 
         let mut ids = Vec::with_capacity(64);
-        while let Some(join_result) = join_set.join_next().await {
-            ids.push(join_result.unwrap());
+        for handle in handles {
+            ids.push(handle.await.unwrap());
         }
 
         assert_eq!(ids.len(), 64);
