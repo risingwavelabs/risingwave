@@ -3629,7 +3629,7 @@ mod test {
 
         let config = IcebergConfig::from_btreemap(values).unwrap();
         assert_eq!(config.target_file_size_mb(), 1024); // Default
-        assert_eq!(config.write_parquet_compression(), "snappy"); // Default
+        assert_eq!(config.write_parquet_compression(), "zstd"); // Default
         assert_eq!(config.write_parquet_max_row_group_rows(), 122880); // Default
     }
 
