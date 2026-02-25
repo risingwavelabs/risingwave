@@ -82,6 +82,24 @@ SELECT (compaction_config::jsonb)->>'enableEmergencyPicker' FROM rw_hummock_comp
 ----
 true
 
+# Test boolean config using unquoted identifier literal
+statement ok
+ALTER COMPACTION GROUP 2 SET enable_emergency_picker = off;
+
+query T
+SELECT (compaction_config::jsonb)->>'enableEmergencyPicker' FROM rw_hummock_compaction_group_configs WHERE id = 2;
+----
+false
+
+# Test boolean config using numeric literal
+statement ok
+ALTER COMPACTION GROUP 2 SET enable_emergency_picker = 1;
+
+query T
+SELECT (compaction_config::jsonb)->>'enableEmergencyPicker' FROM rw_hummock_compaction_group_configs WHERE id = 2;
+----
+true
+
 # Reject comma-separated list RHS (comma is reserved for separating assignments)
 statement error
 ALTER COMPACTION GROUP 2 SET max_bytes_for_level_base = 1,2;

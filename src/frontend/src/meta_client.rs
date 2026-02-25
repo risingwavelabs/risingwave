@@ -25,6 +25,7 @@ use risingwave_pb::backup_service::MetaSnapshotMetadata;
 use risingwave_pb::catalog::Table;
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::ddl_service::DdlProgress;
+use risingwave_pb::hummock::rise_ctl_update_compaction_config_request::mutable_config::MutableConfig as PbMutableConfig;
 use risingwave_pb::hummock::write_limits::WriteLimit;
 use risingwave_pb::hummock::{
     BranchedObject, CompactTaskAssignment, CompactTaskProgress, CompactionGroupInfo,
@@ -221,8 +222,8 @@ pub trait FrontendMetaClient: Send + Sync {
 
     async fn update_compaction_config(
         &self,
-        compaction_group_ids: Vec<u64>,
-        configs: Vec<risingwave_pb::hummock::rise_ctl_update_compaction_config_request::mutable_config::MutableConfig>,
+        compaction_group_ids: Vec<CompactionGroupId>,
+        configs: Vec<PbMutableConfig>,
     ) -> Result<()>;
 }
 
@@ -552,8 +553,8 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
 
     async fn update_compaction_config(
         &self,
-        compaction_group_ids: Vec<u64>,
-        configs: Vec<risingwave_pb::hummock::rise_ctl_update_compaction_config_request::mutable_config::MutableConfig>,
+        compaction_group_ids: Vec<CompactionGroupId>,
+        configs: Vec<PbMutableConfig>,
     ) -> Result<()> {
         self.0
             .risectl_update_compaction_config(&compaction_group_ids, &configs)

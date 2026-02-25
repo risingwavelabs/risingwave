@@ -4308,4 +4308,26 @@ fn parse_alter_compaction_group() {
         }
         _ => panic!("unexpected statement kind"),
     }
+
+    // Boolean config using unquoted identifier literal
+    match verified_stmt("ALTER COMPACTION GROUP 2 SET enable_emergency_picker = on") {
+        Statement::AlterCompactionGroup {
+            group_ids,
+            operation,
+        } => {
+            assert_eq!(group_ids, vec![2]);
+            match operation {
+                AlterCompactionGroupOperation::Set { configs } => {
+                    assert_eq!(configs.len(), 1);
+                    assert_eq!(configs[0].param.real_value(), "enable_emergency_picker");
+                    assert!(matches!(
+                        configs[0].value,
+                        SetVariableValue::Single(SetVariableValueSingle::Ident(ref ident))
+                            if ident.real_value() == "on"
+                    ));
+                }
+            }
+        }
+        _ => panic!("unexpected statement kind"),
+    }
 }

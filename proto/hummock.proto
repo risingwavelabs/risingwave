@@ -799,6 +799,8 @@ message RiseCtlUpdateCompactionConfigRequest {
       uint64 vnode_aligned_level_size_threshold = 31;
       // The maximum key-value count threshold for using Xor16 filter
       uint64 max_kv_count_for_xor16 = 32;
+      // Reset compression algorithm for all levels to defaults according to group max_level.
+      bool reset_compression_algorithm = 33;
     }
   }
   repeated uint64 compaction_group_ids = 1;

@@ -14,6 +14,7 @@
 
 use pgwire::pg_response::StatementType;
 use risingwave_common::config::meta::default::compaction_config;
+use risingwave_hummock_sdk::CompactionGroupId;
 use risingwave_pb::hummock::rise_ctl_update_compaction_config_request::CompressionAlgorithm;
 use risingwave_pb::hummock::rise_ctl_update_compaction_config_request::mutable_config::MutableConfig;
 use risingwave_sqlparser::ast::{
@@ -57,7 +58,14 @@ pub async fn handle_alter_compaction_group(
 
     let meta_client = handler_args.session.env().meta_client();
     meta_client
-        .update_compaction_config(group_ids.clone(), configs)
+        .update_compaction_config(
+            group_ids
+                .iter()
+                .copied()
+                .map(CompactionGroupId::from)
+                .collect(),
+            configs,
+        )
         .await?;
 
     Ok(RwPgResponse::builder(StatementType::ALTER_COMPACTION_GROUP)
@@ -170,22 +178,8 @@ fn build_compaction_config_from_params(params: &[ConfigParam]) -> Result<Vec<Mut
                 // Format: 'level:algorithm' e.g., '3:lz4' or '6:zstd'
                 // This sets the compression algorithm for a specific LSM-tree level
                 match value {
-                    // For DEFAULT, reset *all* levels to the built-in defaults.
-                    // (This matches meta's `CompactionConfigBuilder::new()` default behavior.)
-                    SetVariableValue::Default => {
-                        let max_level = compaction_config::max_level();
-                        for level in 0..=max_level {
-                            configs.push(MutableConfig::CompressionAlgorithm(
-                                CompressionAlgorithm {
-                                    level,
-                                    compression_algorithm:
-                                        compaction_config::compression_algorithm_for_level(level)
-                                            .to_owned(),
-                                },
-                            ));
-                        }
-                        continue;
-                    }
+                    // Let meta expand defaults by each group's max_level.
+                    SetVariableValue::Default => MutableConfig::ResetCompressionAlgorithm(true),
                     _ => {
                         let algorithm = parse_compression_algorithm_with_level(value, &name)?;
                         MutableConfig::CompressionAlgorithm(algorithm)
@@ -274,6 +268,13 @@ fn build_compaction_config_from_params(params: &[ConfigParam]) -> Result<Vec<Mut
                     compaction_config::max_kv_count_for_xor16(),
                 )?)
             }
+            "split_weight_by_vnode" => {
+                return Err(ErrorCode::InvalidInputSyntax(
+                    "split_weight_by_vnode is managed by the system and cannot be altered via SQL"
+                        .to_owned(),
+                )
+                .into());
+            }
             _ => {
                 return Err(ErrorCode::InvalidInputSyntax(format!(
                     "unknown compaction config parameter: {}",
@@ -340,23 +341,31 @@ fn parse_bool_value(value: &SetVariableValue, name: &str, default_value: bool) -
         return Ok(default_value);
     }
 
+    if let SetVariableValue::Single(SetVariableValueSingle::Ident(ident)) = value {
+        return parse_bool_str(name, &ident.real_value());
+    }
+
     let v = expect_single_literal(value, name)?;
     match v {
         Value::Boolean(b) => Ok(*b),
-        Value::SingleQuotedString(s) | Value::DoubleQuotedString(s) => {
-            match s.to_ascii_lowercase().as_str() {
-                "true" | "on" | "1" => Ok(true),
-                "false" | "off" | "0" => Ok(false),
-                _ => Err(ErrorCode::InvalidInputSyntax(format!(
-                    "invalid boolean value for {}: {}",
-                    name, s
-                ))
-                .into()),
-            }
+        Value::SingleQuotedString(s) | Value::DoubleQuotedString(s) | Value::Number(s) => {
+            parse_bool_str(name, s)
         }
         _ => Err(ErrorCode::InvalidInputSyntax(format!(
             "expected boolean value for {}, got {}",
             name, v
+        ))
+        .into()),
+    }
+}
+
+fn parse_bool_str(name: &str, raw: &str) -> Result<bool> {
+    match raw.to_ascii_lowercase().as_str() {
+        "true" | "on" | "1" => Ok(true),
+        "false" | "off" | "0" => Ok(false),
+        _ => Err(ErrorCode::InvalidInputSyntax(format!(
+            "invalid boolean value for {}: {}",
+            name, raw
         ))
         .into()),
     }
