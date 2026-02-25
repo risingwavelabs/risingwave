@@ -663,31 +663,32 @@ impl<L> tonic::transport::server::Router<L> {
     ) -> impl Future<Output = ()>
     where
         L: tower_layer::Layer<tonic::service::Routes>,
-        L::Service: Service<http::Request<tonic::body::BoxBody>, Response = http::Response<ResBody>>
+        L::Service: Service<http::Request<tonic::body::Body>, Response = http::Response<ResBody>>
             + Clone
             + Send
             + 'static,
         <<L as tower_layer::Layer<tonic::service::Routes>>::Service as Service<
-            http::Request<tonic::body::BoxBody>,
+            http::Request<tonic::body::Body>,
         >>::Future: Send + 'static,
         <<L as tower_layer::Layer<tonic::service::Routes>>::Service as Service<
-            http::Request<tonic::body::BoxBody>,
+            http::Request<tonic::body::Body>,
         >>::Error: Into<Box<dyn std::error::Error + Send + Sync>> + Send,
         ResBody: http_body::Body<Data = bytes::Bytes> + Send + 'static,
         ResBody::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
     {
         let connection_type = connection_type.into();
-        let incoming = tonic::transport::server::TcpIncoming::new(
-            listen_addr,
-            config.tcp_nodelay,
-            config.keepalive_duration,
-        )
-        .unwrap_or_else(|err| {
-            panic!(
-                "failed to bind `{connection_type}` to `{listen_addr}`: {}",
-                err.as_report()
-            )
-        });
+        let incoming = tonic::transport::server::TcpIncoming::bind(listen_addr)
+            .map(|incoming| {
+                incoming
+                    .with_nodelay(Some(config.tcp_nodelay))
+                    .with_keepalive(config.keepalive_duration)
+            })
+            .unwrap_or_else(|err| {
+                panic!(
+                    "failed to bind `{connection_type}` to `{listen_addr}`: {}",
+                    err.as_report()
+                )
+            });
         let incoming =
             MonitoredConnection::new(incoming, MonitorNewConnectionImpl { connection_type });
 

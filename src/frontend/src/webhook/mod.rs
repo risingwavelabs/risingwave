@@ -267,7 +267,7 @@ impl WebhookService {
             .allow_methods(vec![Method::POST]);
 
         let api_router: Router = Router::new()
-            .route("/:database/:schema/:table", post(handle_post_request))
+            .route("/{database}/{schema}/{table}", post(handle_post_request))
             .layer(
                 ServiceBuilder::new()
                     .layer(AddExtensionLayer::new(srv.clone()))

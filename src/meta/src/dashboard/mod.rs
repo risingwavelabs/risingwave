@@ -940,9 +940,9 @@ impl DashboardService {
 
         let api_router = Router::new()
             .route("/version", get(get_version))
-            .route("/clusters/:ty", get(list_clusters))
+            .route("/clusters/{ty}", get(list_clusters))
             .route("/streaming_jobs", get(list_streaming_jobs))
-            .route("/fragments/job_id/:job_id", get(list_fragments_by_job_id))
+            .route("/fragments/job_id/{job_id}", get(list_fragments_by_job_id))
             .route("/relation_id_infos", get(get_relation_id_infos))
             .route(
                 "/fragment_to_relation_map",
@@ -969,15 +969,15 @@ impl DashboardService {
                 get(get_streaming_stats_from_prometheus),
             )
             // /monitor/await_tree/{worker_id}/?format={text or json}
-            .route("/monitor/await_tree/:worker_id", get(dump_await_tree))
+            .route("/monitor/await_tree/{worker_id}", get(dump_await_tree))
             // /monitor/await_tree/?format={text or json}
             .route("/monitor/await_tree/", get(dump_await_tree_all))
-            .route("/monitor/dump_heap_profile/:worker_id", get(heap_profile))
+            .route("/monitor/dump_heap_profile/{worker_id}", get(heap_profile))
             .route(
-                "/monitor/list_heap_profile/:worker_id",
+                "/monitor/list_heap_profile/{worker_id}",
                 get(list_heap_profile),
             )
-            .route("/monitor/analyze/:worker_id/*path", get(analyze_heap))
+            .route("/monitor/analyze/{worker_id}/{*path}", get(analyze_heap))
             // /monitor/diagnose/?format={text or json}
             .route("/monitor/diagnose/", get(diagnose))
             .layer(
