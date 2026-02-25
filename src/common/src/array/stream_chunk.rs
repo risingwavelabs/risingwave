@@ -366,6 +366,20 @@ impl StreamChunk {
                 prev_r = Some(curr);
             }
         }
+
+        // Normalize update pairs that became partially invisible.
+        // If only U- is visible, turn it into Delete; if only U+ is visible, turn it into Insert.
+        for idx in 0..len.saturating_sub(1) {
+            if c.op(idx) == Op::UpdateDelete && c.op(idx + 1) == Op::UpdateInsert {
+                let delete_vis = c.vis(idx);
+                let insert_vis = c.vis(idx + 1);
+                if delete_vis && !insert_vis {
+                    c.set_op(idx, Op::Delete);
+                } else if !delete_vis && insert_vis {
+                    c.set_op(idx + 1, Op::Insert);
+                }
+            }
+        }
         c.into()
     }
 
