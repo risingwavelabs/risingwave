@@ -402,13 +402,13 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             });
         }
 
-        let extract_key = self
+        let filter_key = self
             .compaction_catalog_agent_ref
             .extract(user_key(&self.raw_key));
         // add bloom_filter check
-        if !extract_key.is_empty() {
+        if !filter_key.is_empty() {
             self.filter_builder
-                .add_key(extract_key, table_id.as_raw_id());
+                .add_key(filter_key, table_id.as_raw_id());
         }
         // Use pre-encoded key to avoid redundant encoding
         self.block_builder.add(

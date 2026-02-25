@@ -38,7 +38,7 @@ use crate::row_serde::value_serde::ValueRowSerdeNew;
 
 /// `FilterKeyExtractor` generally used to extract key which will store in BloomFilter
 pub trait FilterKeyExtractor: Send + Sync {
-    fn extract<'a>(&self, full_key: &'a [u8]) -> &'a [u8];
+    fn extract<'a>(&self, user_key: &'a [u8]) -> &'a [u8];
 }
 
 pub enum FilterKeyExtractorImpl {
@@ -66,9 +66,9 @@ impl FilterKeyExtractorImpl {
 macro_rules! impl_filter_key_extractor {
     ($( { $variant_name:ident } ),*) => {
         impl FilterKeyExtractorImpl {
-            pub fn extract<'a>(&self, full_key: &'a [u8]) -> &'a [u8]{
+            pub fn extract<'a>(&self, user_key: &'a [u8]) -> &'a [u8]{
                 match self {
-                    $( Self::$variant_name(inner) => inner.extract(full_key), )*
+                    $( Self::$variant_name(inner) => inner.extract(user_key), )*
                 }
             }
         }
@@ -102,20 +102,20 @@ impl FilterKeyExtractor for FullKeyFilterKeyExtractor {
 #[derive(Default)]
 pub struct DummyFilterKeyExtractor;
 impl FilterKeyExtractor for DummyFilterKeyExtractor {
-    fn extract<'a>(&self, _full_key: &'a [u8]) -> &'a [u8] {
+    fn extract<'a>(&self, _user_key: &'a [u8]) -> &'a [u8] {
         &[]
     }
 }
 
-/// [`SchemaFilterKeyExtractor`] build from `table_catalog` and extract a `full_key` to prefix for
+/// [`SchemaFilterKeyExtractor`] build from `table_catalog` and extract a `user_key` to prefix for
 #[derive(Default)]
 pub struct FixedLengthFilterKeyExtractor {
     fixed_length: usize,
 }
 
 impl FilterKeyExtractor for FixedLengthFilterKeyExtractor {
-    fn extract<'a>(&self, full_key: &'a [u8]) -> &'a [u8] {
-        &full_key[0..self.fixed_length]
+    fn extract<'a>(&self, user_key: &'a [u8]) -> &'a [u8] {
+        &user_key[0..self.fixed_length]
     }
 }
 
@@ -125,7 +125,7 @@ impl FixedLengthFilterKeyExtractor {
     }
 }
 
-/// [`SchemaFilterKeyExtractor`] build from `table_catalog` and transform a `full_key` to prefix for
+/// [`SchemaFilterKeyExtractor`] build from `table_catalog` and transform a `user_key` to prefix for
 /// `prefix_bloom_filter`
 pub struct SchemaFilterKeyExtractor {
     /// Each stateful operator has its own read pattern, partly using prefix scan.
@@ -139,12 +139,12 @@ pub struct SchemaFilterKeyExtractor {
 }
 
 impl FilterKeyExtractor for SchemaFilterKeyExtractor {
-    fn extract<'a>(&self, full_key: &'a [u8]) -> &'a [u8] {
-        if full_key.len() < TABLE_PREFIX_LEN + VirtualNode::SIZE {
+    fn extract<'a>(&self, user_key: &'a [u8]) -> &'a [u8] {
+        if user_key.len() < TABLE_PREFIX_LEN + VirtualNode::SIZE {
             return &[];
         }
 
-        let (_table_prefix, key) = full_key.split_at(TABLE_PREFIX_LEN);
+        let (_table_prefix, key) = user_key.split_at(TABLE_PREFIX_LEN);
         let (_vnode_prefix, pk) = key.split_at(VirtualNode::SIZE);
 
         // if the key with table_id deserializer fail from schema, that should panic here for early
@@ -156,7 +156,7 @@ impl FilterKeyExtractor for SchemaFilterKeyExtractor {
             .unwrap();
 
         let end_position = TABLE_PREFIX_LEN + VirtualNode::SIZE + bloom_filter_key_len;
-        &full_key[TABLE_PREFIX_LEN + VirtualNode::SIZE..end_position]
+        &user_key[TABLE_PREFIX_LEN + VirtualNode::SIZE..end_position]
     }
 }
 
@@ -216,16 +216,16 @@ impl Debug for MultiFilterKeyExtractor {
 }
 
 impl FilterKeyExtractor for MultiFilterKeyExtractor {
-    fn extract<'a>(&self, full_key: &'a [u8]) -> &'a [u8] {
-        if full_key.len() < TABLE_PREFIX_LEN + VirtualNode::SIZE {
-            return full_key;
+    fn extract<'a>(&self, user_key: &'a [u8]) -> &'a [u8] {
+        if user_key.len() < TABLE_PREFIX_LEN + VirtualNode::SIZE {
+            return user_key;
         }
 
-        let table_id = get_table_id(full_key);
+        let table_id = get_table_id(user_key).into();
         self.id_to_filter_key_extractor
             .get(&table_id)
             .unwrap()
-            .extract(full_key)
+            .extract(user_key)
     }
 }
 
@@ -497,8 +497,8 @@ impl CompactionCatalogAgent {
 }
 
 impl CompactionCatalogAgent {
-    pub fn extract<'a>(&self, full_key: &'a [u8]) -> &'a [u8] {
-        self.filter_key_extractor_manager.extract(full_key)
+    pub fn extract<'a>(&self, user_key: &'a [u8]) -> &'a [u8] {
+        self.filter_key_extractor_manager.extract(user_key)
     }
 
     pub fn vnode_count(&self, table_id: StateTableId) -> usize {
