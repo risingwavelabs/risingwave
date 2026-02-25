@@ -201,6 +201,8 @@ pub static SINK_ALLOW_ALTER_ON_FLY_FIELDS: LazyLock<HashMap<String, HashSet<Stri
             "compaction.trigger_snapshot_count".to_owned(),
             "compaction.target_file_size_mb".to_owned(),
             "compaction.type".to_owned(),
+            "compaction.write_parquet_compression".to_owned(),
+            "compaction.write_parquet_max_row_group_rows".to_owned(),
         ].into_iter().collect(),
     ).unwrap();
     // KafkaConfig
