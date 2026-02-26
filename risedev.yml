@@ -489,7 +489,6 @@ profile:
       #   port: 9092
       #   persist-data: true
 
-
   #################################
   ### Configurations used on CI ###
   #################################
@@ -1096,6 +1095,20 @@ profile:
       - use: compactor
       - use: moat
 
+  dashboard:
+    steps:
+      - use: minio
+      - use: sqlite
+      - use: meta-node
+        port: 5690
+        dashboard-port: 5691
+        exporter-port: 1250
+        meta-backend: sqlite
+      - use: compactor
+      - use: compute-node
+      - use: frontend
+      - use: prometheus
+
 # The `use` field specified in the above `risedev` section will refer to the templates below.
 template:
   minio:
@@ -1558,7 +1571,7 @@ template:
     user-managed: false
 
     # New optional field for latency
-    latency-ms: 0  # Optional: latency in milliseconds
+    latency-ms: 0 # Optional: latency in milliseconds
 
   # Sql Server service backed by docker.
   sqlserver:

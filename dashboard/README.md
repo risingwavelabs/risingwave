@@ -32,9 +32,8 @@ Start a RisingWave cluster, create some tables and materialized views for testin
 
 ```bash
 # Start full cluster so prometheus is available.
-./risedev k
-./risedev clean-data
-./risedev d full
+./risedev down
+./risedev d dashboard
 # We maintain our own separate test data for testing the dashboard's rendering
 # It provides nested MV-on-MV structures (nexmark and tpch only have 1-deep MV-on-MV).
 # It also provides backpressure and lag scenarios.
