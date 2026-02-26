@@ -58,7 +58,9 @@ impl SpillOp {
 
     pub fn create(path: impl AsRef<Path>, spill_backend: SpillBackend) -> Result<SpillOp> {
         let path = path.as_ref();
-        assert!(path.is_relative());
+        if !path.is_relative() {
+            bail!("Spill path must be relative, but got {:?}", path);
+        }
 
         let root = Self::batch_spill_root().join(path);
 

@@ -12,16 +12,22 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 
 const RW_BATCH_SPILL_DIR_ENV: &str = "RW_BATCH_SPILL_DIR";
 const DEFAULT_SPILL_DIR: &str = "/tmp";
 
-/// Returns the base directory for spill (env value or default), without trailing slash.
+/// Returns the base directory for spill (env value or default)
 pub fn batch_spill_base_dir() -> &'static Path {
-    static BASE_DIR: LazyLock<String> = LazyLock::new(|| {
-        std::env::var(RW_BATCH_SPILL_DIR_ENV).unwrap_or_else(|_| DEFAULT_SPILL_DIR.to_owned())
+    static BASE_DIR: LazyLock<PathBuf> = LazyLock::new(|| {
+        let raw =
+            std::env::var(RW_BATCH_SPILL_DIR_ENV).unwrap_or_else(|_| DEFAULT_SPILL_DIR.to_owned());
+        let mut dir = PathBuf::from(raw.trim());
+        if dir.is_relative() {
+            dir = std::env::current_dir().unwrap().join(dir);
+        }
+        dir
     });
-    Path::new(&*BASE_DIR)
+    BASE_DIR.as_path()
 }
