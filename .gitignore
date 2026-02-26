@@ -95,3 +95,7 @@ book/
 
 # Build caches
 .m2/
+
+# Local OpenSpec artifacts (keep local, exclude from git/PR)
+.codex/skills/openspec-*/
+openspec/
