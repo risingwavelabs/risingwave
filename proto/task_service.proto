@@ -130,6 +130,10 @@ message GetStreamRequest {
     uint32 down_fragment_id = 4;
     uint64 up_partial_graph_id = 5;
     string term_id = 6;
+    // When non-empty, activates multiplexed mode: the server merges outputs from
+    // all listed upstream actors onto a single response stream. When empty, falls
+    // back to existing single-actor behavior using `up_actor_id`.
+    repeated uint32 up_actor_ids = 7;
   }
 
   oneof value {

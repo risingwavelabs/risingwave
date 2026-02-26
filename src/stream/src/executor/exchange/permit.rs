@@ -117,6 +117,7 @@ impl Permits {
 }
 
 /// The sender of the exchange service with permit-based back-pressure.
+#[derive(Clone)]
 pub struct Sender {
     tx: mpsc::UnboundedSender<MessageWithPermits>,
     permits: Arc<Permits>,

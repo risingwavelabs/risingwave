@@ -249,12 +249,20 @@ message StreamMessage {
 message StreamMessageBatch {
   message BarrierBatch {
     repeated Barrier barriers = 1;
+    // In multiplexed mode, lists which upstream actors this coalesced barrier
+    // represents. The receiver expands it into one barrier per actor.
+    // Empty in the legacy non-multiplexed path (barrier represents a single actor).
+    repeated uint32 coalesced_actor_ids = 2;
   }
   oneof stream_message_batch {
     data.StreamChunk stream_chunk = 1;
     BarrierBatch barrier_batch = 2;
     Watermark watermark = 3;
   }
+  // In multiplexed mode, tags each chunk/watermark with its source upstream actor
+  // so the receiver can route to the correct logical input.
+  // Zero (default) in the legacy non-multiplexed path.
+  uint32 source_actor_id = 4;
 }
 
 // Hash mapping for compute node. Stores mapping from virtual node to actor id.

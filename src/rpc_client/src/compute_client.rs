@@ -117,6 +117,59 @@ impl ComputeClient {
         Streaming<GetStreamResponse>,
         mpsc::UnboundedSender<permits::Value>,
     )> {
+        self.get_stream_inner(
+            up_actor_id,
+            down_actor_id,
+            up_fragment_id,
+            down_fragment_id,
+            up_partial_graph_id,
+            term_id,
+            vec![], // no multiplexing
+        )
+        .await
+    }
+
+    /// Open a multiplexed stream exchange that merges N upstream actors into a single gRPC
+    /// stream. The server will coalesce barriers from all `up_actor_ids` and tag data
+    /// messages with `source_actor_id`.
+    pub async fn get_stream_multiplexed(
+        &self,
+        up_actor_ids: Vec<ActorId>,
+        down_actor_id: ActorId,
+        up_fragment_id: FragmentId,
+        down_fragment_id: FragmentId,
+        up_partial_graph_id: PartialGraphId,
+        term_id: String,
+    ) -> Result<(
+        Streaming<GetStreamResponse>,
+        mpsc::UnboundedSender<permits::Value>,
+    )> {
+        let representative = up_actor_ids.first().copied().unwrap_or(0.into());
+        self.get_stream_inner(
+            representative,
+            down_actor_id,
+            up_fragment_id,
+            down_fragment_id,
+            up_partial_graph_id,
+            term_id,
+            up_actor_ids,
+        )
+        .await
+    }
+
+    async fn get_stream_inner(
+        &self,
+        up_actor_id: ActorId,
+        down_actor_id: ActorId,
+        up_fragment_id: FragmentId,
+        down_fragment_id: FragmentId,
+        up_partial_graph_id: PartialGraphId,
+        term_id: String,
+        up_actor_ids: Vec<ActorId>,
+    ) -> Result<(
+        Streaming<GetStreamResponse>,
+        mpsc::UnboundedSender<permits::Value>,
+    )> {
         use risingwave_pb::task_service::get_stream_request::*;
 
         // Create channel used for the downstream to add back the permits to the upstream.
@@ -132,6 +185,7 @@ impl ComputeClient {
                     down_fragment_id,
                     up_partial_graph_id,
                     term_id,
+                    up_actor_ids,
                 })),
             },
         ))
