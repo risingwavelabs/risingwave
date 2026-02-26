@@ -103,6 +103,7 @@ pub struct StorageOpts {
 
     pub cache_refill_data_refill_levels: Vec<u32>,
     pub cache_refill_timeout_ms: u64,
+    pub cache_refill_meta_refill_concurrency: usize,
     pub cache_refill_concurrency: usize,
     pub cache_refill_recent_filter_shards: usize,
     pub cache_refill_recent_filter_layers: usize,
@@ -273,6 +274,7 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
             sst_skip_bloom_filter_in_serde: c.storage.sst_skip_bloom_filter_in_serde,
             cache_refill_data_refill_levels: c.storage.cache_refill.data_refill_levels.clone(),
             cache_refill_timeout_ms: c.storage.cache_refill.timeout_ms,
+            cache_refill_meta_refill_concurrency: c.storage.cache_refill.meta_refill_concurrency,
             cache_refill_concurrency: c.storage.cache_refill.concurrency,
             cache_refill_recent_filter_shards: c.storage.cache_refill.recent_filter_shards,
             cache_refill_recent_filter_layers: c.storage.cache_refill.recent_filter_layers,
@@ -313,6 +315,7 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
             iceberg_compaction_max_record_batch_rows: c
                 .storage
                 .iceberg_compaction_max_record_batch_rows,
+            #[allow(deprecated)]
             iceberg_compaction_write_parquet_max_row_group_rows: c
                 .storage
                 .iceberg_compaction_write_parquet_max_row_group_rows,

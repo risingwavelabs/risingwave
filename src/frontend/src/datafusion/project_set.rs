@@ -58,10 +58,6 @@ impl ProjectSet {
             schema,
         }
     }
-
-    pub fn select_list(&self) -> &Vec<ExprImpl> {
-        &self.select_list
-    }
 }
 
 impl PartialOrd for ProjectSet {
@@ -389,7 +385,7 @@ impl ExtensionPlanner for ProjectSetPlanner {
             return exec_err!("ProjectSetPlanner: unexpected number of physical inputs");
         }
         let chunk_size = session_state.config().batch_size();
-        let select_list = build_select_items(project_set.select_list(), chunk_size)?;
+        let select_list = build_select_items(&project_set.select_list, chunk_size)?;
         let schema = project_set.schema().inner().clone();
         Ok(Some(Arc::new(ProjectSetExec::new(
             physical_inputs[0].clone(),

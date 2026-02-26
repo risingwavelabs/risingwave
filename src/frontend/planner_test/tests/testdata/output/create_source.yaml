@@ -11,6 +11,21 @@
   sql: |
     create source s with(connector='kafka') FORMAT PLAIN ENCODE JSON;
   planner_error: 'Protocol error: Schema definition is required, either from SQL or schema registry.'
+- id: parquet_case_insensitive_invalid_value
+  sql: |
+    create source s (
+      id int,
+      age int
+    ) with (
+      connector = 's3',
+      match_pattern = 'data.parquet',
+      s3.region_name = 'custom',
+      s3.bucket_name = 'hummock001',
+      s3.credentials.access = 'hummockadmin',
+      s3.credentials.secret = 'hummockadmin',
+      s3.endpoint_url = 'http://127.0.0.1:9301',
+      parquet.case_insensitive = 'maybe'
+    ) FORMAT PLAIN ENCODE PARQUET;
 - id: csv_delimiter_comma
   sql: |
     explain create table s0 (v1 int, v2 varchar) with (

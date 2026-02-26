@@ -480,6 +480,10 @@ impl InflightDatabaseInfo {
         self.jobs.contains_key(&job_id)
     }
 
+    pub(super) fn job_id_by_fragment(&self, fragment_id: FragmentId) -> Option<JobId> {
+        self.fragment_location.get(&fragment_id).copied()
+    }
+
     pub fn fragment(&self, fragment_id: FragmentId) -> &InflightFragmentInfo {
         let job_id = self.fragment_location[&fragment_id];
         self.jobs
@@ -639,13 +643,13 @@ impl InflightDatabaseInfo {
                 }
             }
         }
-        if let PostCollectCommand::RescheduleFragment { reschedules, .. } = command {
+        if let PostCollectCommand::Reschedule { reschedules, .. } = command {
             // During reschedule we expect fragments to be rebuilt with new actors and no vnode bitmap update.
             debug_assert!(
                 reschedules
                     .values()
                     .all(|reschedule| reschedule.vnode_bitmap_updates.is_empty()),
-                "RescheduleFragment should not carry vnode bitmap updates when actors are rebuilt"
+                "Reschedule should not carry vnode bitmap updates when actors are rebuilt"
             );
 
             // Collect jobs that own the rescheduled fragments; de-duplicate via HashSet.
@@ -1113,7 +1117,7 @@ impl InflightDatabaseInfo {
                 | Command::Pause
                 | Command::Resume
                 | Command::DropStreamingJobs { .. }
-                | Command::RescheduleFragment { .. }
+                | Command::RescheduleIntent { .. }
                 | Command::SourceChangeSplit { .. }
                 | Command::Throttle { .. }
                 | Command::CreateSubscription { .. }
@@ -1140,6 +1144,7 @@ impl InflightDatabaseInfo {
                 }
                 Command::ReplaceStreamJob(replace_job) => (None, Some(replace_job), None),
                 Command::ResetSource { .. } => (None, None, None),
+                Command::InjectSourceOffsets { .. } => (None, None, None),
             },
         };
         // `existing_fragment_ids` consists of

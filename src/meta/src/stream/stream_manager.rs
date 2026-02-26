@@ -46,8 +46,7 @@ use crate::controller::catalog::DropTableConnectorContext;
 use crate::controller::fragment::{InflightActorInfo, InflightFragmentInfo};
 use crate::error::bail_invalid_parameter;
 use crate::manager::{
-    ActiveStreamingWorkerNodes, MetaSrvEnv, MetadataManager, NotificationVersion, StreamingJob,
-    StreamingJobType,
+    MetaSrvEnv, MetadataManager, NotificationVersion, StreamingJob, StreamingJobType,
 };
 use crate::model::{
     ActorId, DownstreamFragmentRelation, Fragment, FragmentDownstreamRelation, FragmentId,
@@ -740,6 +739,51 @@ impl GlobalStreamManager {
             .await?;
 
         if !background_jobs.is_empty() {
+            let blocked_jobs = self
+                .metadata_manager
+                .collect_reschedule_blocked_jobs_for_creating_jobs(&background_jobs, !deferred)
+                .await?;
+
+            if blocked_jobs.contains(&job_id) {
+                bail!(
+                    "Cannot alter the job {} because it is blocked by creating unreschedulable backfill jobs",
+                    job_id,
+                );
+            }
+        }
+
+        let commands = self
+            .scale_controller
+            .reschedule_inplace(HashMap::from([(job_id, policy)]))
+            .await?;
+
+        if !deferred {
+            let _source_pause_guard = self.source_manager.pause_tick().await;
+
+            for (database_id, command) in commands {
+                self.barrier_scheduler
+                    .run_command(database_id, command)
+                    .await?;
+            }
+        }
+
+        Ok(())
+    }
+
+    pub(crate) async fn reschedule_streaming_job_backfill_parallelism(
+        &self,
+        job_id: JobId,
+        parallelism: Option<StreamingParallelism>,
+        deferred: bool,
+    ) -> MetaResult<()> {
+        let _reschedule_job_lock = self.reschedule_lock_write_guard().await;
+
+        let background_jobs = self
+            .metadata_manager
+            .list_background_creating_jobs()
+            .await?;
+
+        if !background_jobs.is_empty() {
             let unreschedulable = self
                 .metadata_manager
                 .collect_unreschedulable_backfill_jobs(&background_jobs, !deferred)
@@ -753,12 +797,9 @@ impl GlobalStreamManager {
             }
         }
 
-        let active_workers =
-            ActiveStreamingWorkerNodes::new_snapshot(self.metadata_manager.clone()).await?;
-
         let commands = self
             .scale_controller
-            .reschedule_inplace(HashMap::from([(job_id, policy)]), active_workers.current())
+            .reschedule_backfill_parallelism_inplace(HashMap::from([(job_id, parallelism)]))
             .await?;
 
         if !deferred {
@@ -792,9 +833,6 @@ impl GlobalStreamManager {
                 "CDC backfill reschedule only supports fixed parallelism targets"
             ),
         };
-
-        let active_workers =
-            ActiveStreamingWorkerNodes::new_snapshot(self.metadata_manager.clone()).await?;
 
         let cdc_fragment_id = {
             let inner = self.metadata_manager.catalog_controller.inner.read().await;
@@ -835,7 +873,7 @@ impl GlobalStreamManager {
 
         let commands = self
             .scale_controller
-            .reschedule_fragment_inplace(fragment_policy, active_workers.current())
+            .reschedule_fragment_inplace(fragment_policy)
             .await?;
 
         let _source_pause_guard = self.source_manager.pause_tick().await;
@@ -859,9 +897,6 @@ impl GlobalStreamManager {
 
         let _reschedule_job_lock = self.reschedule_lock_write_guard().await;
 
-        let active_workers =
-            ActiveStreamingWorkerNodes::new_snapshot(self.metadata_manager.clone()).await?;
-
         let fragment_policy = fragment_targets
             .into_iter()
             .map(|(fragment_id, parallelism)| (fragment_id as _, parallelism))
@@ -869,7 +904,7 @@ impl GlobalStreamManager {
 
         let commands = self
             .scale_controller
-            .reschedule_fragment_inplace(fragment_policy, active_workers.current())
+            .reschedule_fragment_inplace(fragment_policy)
             .await?;
 
         let _source_pause_guard = self.source_manager.pause_tick().await;

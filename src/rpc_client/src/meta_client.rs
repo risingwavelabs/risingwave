@@ -91,7 +91,6 @@ use risingwave_pb::meta::list_actor_splits_response::ActorSplit;
 use risingwave_pb::meta::list_actor_states_response::ActorState;
 use risingwave_pb::meta::list_cdc_progress_response::PbCdcProgress;
 use risingwave_pb::meta::list_iceberg_tables_response::IcebergTable;
-use risingwave_pb::meta::list_object_dependencies_response::PbObjectDependencies;
 use risingwave_pb::meta::list_refresh_table_states_response::RefreshTableState;
 use risingwave_pb::meta::list_streaming_job_states_response::StreamingJobState;
 use risingwave_pb::meta::list_table_fragments_response::TableFragmentInfo;
@@ -248,8 +247,8 @@ impl MetaClient {
             .ok_or_else(|| anyhow!("wait version not set"))?)
     }
 
-    pub async fn drop_secret(&self, secret_id: SecretId) -> Result<WaitVersion> {
-        let request = DropSecretRequest { secret_id };
+    pub async fn drop_secret(&self, secret_id: SecretId, cascade: bool) -> Result<WaitVersion> {
+        let request = DropSecretRequest { secret_id, cascade };
         let resp = self.inner.drop_secret(request).await?;
         Ok(resp
             .version
@@ -378,8 +377,16 @@ impl MetaClient {
     }
 
     /// Send heartbeat signal to meta service.
-    pub async fn send_heartbeat(&self, node_id: WorkerId) -> Result<()> {
-        let request = HeartbeatRequest { node_id };
+    pub async fn send_heartbeat(&self) -> Result<()> {
+        let request = HeartbeatRequest {
+            node_id: self.worker_id,
+            resource: Some(risingwave_pb::common::worker_node::Resource {
+                rw_version: RW_VERSION.to_owned(),
+                total_memory_bytes: system_memory_available_bytes() as _,
+                total_cpu_cores: total_cpu_available() as _,
+                hostname: hostname(),
+            }),
+        };
         let resp = self.inner.heartbeat(request).await?;
         if let Some(status) = resp.status
             && status.code() == risingwave_pb::common::status::Code::UnknownWorker
@@ -646,6 +653,22 @@ impl MetaClient {
         Ok(())
     }
 
+    pub async fn alter_backfill_parallelism(
+        &self,
+        job_id: JobId,
+        parallelism: Option<PbTableParallelism>,
+        deferred: bool,
+    ) -> Result<()> {
+        let request = AlterBackfillParallelismRequest {
+            table_id: job_id,
+            parallelism,
+            deferred,
+        };
+
+        self.inner.alter_backfill_parallelism(request).await?;
+        Ok(())
+    }
+
     pub async fn alter_streaming_job_config(
         &self,
         job_id: JobId,
@@ -807,7 +830,7 @@ impl MetaClient {
 
     pub async fn drop_table(
         &self,
-        source_id: Option<u32>,
+        source_id: Option<SourceId>,
         table_id: TableId,
         cascade: bool,
     ) -> Result<WaitVersion> {
@@ -1087,7 +1110,7 @@ impl MetaClient {
                 match tokio::time::timeout(
                     // TODO: decide better min_interval for timeout
                     min_interval * 3,
-                    meta_client.send_heartbeat(meta_client.worker_id()),
+                    meta_client.send_heartbeat(),
                 )
                 .await
                 {
@@ -1124,10 +1147,12 @@ impl MetaClient {
         Ok(resp.hummock_version_id)
     }
 
-    pub async fn wait(&self) -> Result<()> {
+    pub async fn wait(&self) -> Result<WaitVersion> {
         let request = WaitRequest {};
-        self.inner.wait(request).await?;
-        Ok(())
+        let resp = self.inner.wait(request).await?;
+        Ok(resp
+            .version
+            .ok_or_else(|| anyhow!("wait version not set"))?)
     }
 
     pub async fn recover(&self) -> Result<()> {
@@ -1233,14 +1258,6 @@ impl MetaClient {
             .await?;
 
         Ok(resp.actor_splits)
-    }
-
-    pub async fn list_object_dependencies(&self) -> Result<Vec<PbObjectDependencies>> {
-        let resp = self
-            .inner
-            .list_object_dependencies(ListObjectDependenciesRequest {})
-            .await?;
-        Ok(resp.dependencies)
     }
 
     pub async fn pause(&self) -> Result<PauseResponse> {
@@ -1556,6 +1573,50 @@ impl MetaClient {
         Ok(())
     }
 
+    /// Orchestrated source property update with pause/update/resume workflow.
+    /// This is the "safe" version that pauses sources before updating and resumes after.
+    pub async fn alter_source_properties_safe(
+        &self,
+        source_id: SourceId,
+        changed_props: BTreeMap<String, String>,
+        changed_secret_refs: BTreeMap<String, PbSecretRef>,
+        reset_splits: bool,
+    ) -> Result<()> {
+        let req = AlterSourcePropertiesSafeRequest {
+            source_id: source_id.as_raw_id(),
+            changed_props: changed_props.into_iter().collect(),
+            changed_secret_refs: changed_secret_refs.into_iter().collect(),
+            options: Some(PropertyUpdateOptions { reset_splits }),
+        };
+        let _resp = self.inner.alter_source_properties_safe(req).await?;
+        Ok(())
+    }
+
+    /// Reset source split assignments (UNSAFE - admin only).
+    /// This clears persisted split metadata and triggers re-discovery.
+    pub async fn reset_source_splits(&self, source_id: SourceId) -> Result<()> {
+        let req = ResetSourceSplitsRequest {
+            source_id: source_id.as_raw_id(),
+        };
+        let _resp = self.inner.reset_source_splits(req).await?;
+        Ok(())
+    }
+
+    /// Inject specific offsets into source splits (UNSAFE - admin only).
+    /// This can cause data duplication or loss depending on the correctness of the provided offsets.
+    pub async fn inject_source_offsets(
+        &self,
+        source_id: SourceId,
+        split_offsets: HashMap<String, String>,
+    ) -> Result<Vec<String>> {
+        let req = InjectSourceOffsetsRequest {
+            source_id: source_id.as_raw_id(),
+            split_offsets,
+        };
+        let resp = self.inner.inject_source_offsets(req).await?;
+        Ok(resp.applied_split_ids)
+    }
+
     pub async fn set_system_param(
         &self,
         param: String,
@@ -1614,7 +1675,7 @@ impl MetaClient {
 
     pub async fn list_serving_vnode_mappings(
         &self,
-    ) -> Result<HashMap<FragmentId, (u32, WorkerSlotMapping)>> {
+    ) -> Result<HashMap<FragmentId, (JobId, WorkerSlotMapping)>> {
         let req = GetServingVnodeMappingsRequest {};
         let resp = self.inner.get_serving_vnode_mappings(req).await?;
         let mappings = resp
@@ -1627,7 +1688,7 @@ impl MetaClient {
                         resp.fragment_to_table
                             .get(&p.fragment_id)
                             .cloned()
-                            .unwrap_or(0),
+                            .unwrap_or_default(),
                         WorkerSlotMapping::from_protobuf(p.mapping.as_ref().unwrap()),
                     ),
                 )
@@ -2529,12 +2590,14 @@ macro_rules! for_all_meta_rpc {
             ,{ stream_client, list_sink_log_store_tables, ListSinkLogStoreTablesRequest, ListSinkLogStoreTablesResponse }
             ,{ stream_client, list_actor_states, ListActorStatesRequest, ListActorStatesResponse }
             ,{ stream_client, list_actor_splits, ListActorSplitsRequest, ListActorSplitsResponse }
-            ,{ stream_client, list_object_dependencies, ListObjectDependenciesRequest, ListObjectDependenciesResponse }
             ,{ stream_client, recover, RecoverRequest, RecoverResponse }
             ,{ stream_client, list_rate_limits, ListRateLimitsRequest, ListRateLimitsResponse }
             ,{ stream_client, list_cdc_progress, ListCdcProgressRequest, ListCdcProgressResponse }
             ,{ stream_client, list_refresh_table_states, ListRefreshTableStatesRequest, ListRefreshTableStatesResponse }
             ,{ stream_client, alter_connector_props, AlterConnectorPropsRequest, AlterConnectorPropsResponse }
+            ,{ stream_client, alter_source_properties_safe, AlterSourcePropertiesSafeRequest, AlterSourcePropertiesSafeResponse }
+            ,{ stream_client, reset_source_splits, ResetSourceSplitsRequest, ResetSourceSplitsResponse }
+            ,{ stream_client, inject_source_offsets, InjectSourceOffsetsRequest, InjectSourceOffsetsResponse }
             ,{ stream_client, get_fragment_by_id, GetFragmentByIdRequest, GetFragmentByIdResponse }
             ,{ stream_client, get_fragment_vnodes, GetFragmentVnodesRequest, GetFragmentVnodesResponse }
             ,{ stream_client, get_actor_vnodes, GetActorVnodesRequest, GetActorVnodesResponse }
@@ -2546,6 +2609,7 @@ macro_rules! for_all_meta_rpc {
             ,{ ddl_client, alter_owner, AlterOwnerRequest, AlterOwnerResponse }
             ,{ ddl_client, alter_set_schema, AlterSetSchemaRequest, AlterSetSchemaResponse }
             ,{ ddl_client, alter_parallelism, AlterParallelismRequest, AlterParallelismResponse }
+            ,{ ddl_client, alter_backfill_parallelism, AlterBackfillParallelismRequest, AlterBackfillParallelismResponse }
             ,{ ddl_client, alter_streaming_job_config, AlterStreamingJobConfigRequest, AlterStreamingJobConfigResponse }
             ,{ ddl_client, alter_fragment_parallelism, AlterFragmentParallelismRequest, AlterFragmentParallelismResponse }
             ,{ ddl_client, alter_cdc_table_backfill_parallelism, AlterCdcTableBackfillParallelismRequest, AlterCdcTableBackfillParallelismResponse }

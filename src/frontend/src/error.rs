@@ -154,6 +154,8 @@ pub enum ErrorCode {
     InvalidReference(String),
     #[error("Item not found: {0}")]
     ItemNotFound(String),
+    #[error("Duplicate Relation Name: {0}")]
+    DuplicateRelationName(String),
     #[error("Invalid input syntax: {0}")]
     InvalidInputSyntax(#[message] String),
     #[error("Can not compare in memory: {0}")]

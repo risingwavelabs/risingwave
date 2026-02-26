@@ -991,6 +991,21 @@
         │     └─StreamTableScan { table: t2, columns: [t2.id, t2.t3_id], stream_scan_type: SnapshotBackfill, stream_key: [t2.id], pk: [id], dist: UpstreamHashShard(t2.id) }
         └─StreamExchange { dist: HashShard(t3.id) }
           └─StreamTableScan { table: t3, columns: [t3.id], stream_scan_type: SnapshotBackfill, stream_key: [t3.id], pk: [id], dist: UpstreamHashShard(t3.id) }
+- name: stream index selection with casted group key
+  sql: |
+    create table t (transacttime timestamp, mark_price double precision);
+    create index idx on t (transacttime);
+    select
+      transacttime::date as transact_date,
+      count(*) as cnt
+    from t
+    group by transacttime::date;
+  stream_plan: |-
+    StreamMaterialize { columns: [transact_date, cnt], stream_key: [transact_date], pk_columns: [transact_date], pk_conflict: NoCheck }
+    └─StreamHashAgg { group_key: [$expr1], aggs: [count] }
+      └─StreamExchange { dist: HashShard($expr1) }
+        └─StreamProject { exprs: [idx.transacttime::Date as $expr1, idx.transacttime, idx.t._row_id] }
+          └─StreamTableScan { table: idx, columns: [idx.transacttime, idx.t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [idx.transacttime, idx.t._row_id], pk: [transacttime, t._row_id], dist: UpstreamHashShard(idx.transacttime) }
 - name: topn index selection for scan with output column idx
   sql: |
     create table t (c int, b int, a int);
@@ -1016,3 +1031,37 @@
           └─BatchExchange { order: [], dist: Single }
             └─BatchLimit { limit: 1, offset: 0 }
               └─BatchScan { table: t, columns: [t.c, t.b, t.a], scan_ranges: [t.a = Int32(1)], limit: 1, distribution: UpstreamHashShard(t.a, t.b, t.c) }
+- name: batch sort elimination with eq-prefix-derived orders
+  sql: |
+    create table t (a int, b int, c int, d int, primary key (a, b, c, d));
+    select a, b, c, d from t where a = 1 and b = 2 and c between 3 and 5 order by c;
+  batch_plan: |-
+    BatchExchange { order: [t.c ASC], dist: Single }
+    └─BatchScan { table: t, columns: [t.a, t.b, t.c, t.d], scan_ranges: [t.a = Int32(1) AND t.b = Int32(2) AND t.c >= Int32(3) AND t.c <= Int32(5)], distribution: UpstreamHashShard(t.a, t.b, t.c, t.d) }
+- name: batch sort elimination with eq-prefix-derived orders
+  sql: |
+    create table t (a int, b int, c int, d int, primary key (a, b, c, d));
+    select a, b, c, d from t where a = 1 and b = 2 and c between 3 and 5 order by c limit 5;
+  batch_plan: |-
+    BatchSort { order: [t.c ASC] }
+    └─BatchTopN { order: [t.a ASC, t.b ASC, t.c ASC], limit: 5, offset: 0 }
+      └─BatchExchange { order: [], dist: Single }
+        └─BatchLimit { limit: 5, offset: 0 }
+          └─BatchScan { table: t, columns: [t.a, t.b, t.c, t.d], scan_ranges: [t.a = Int32(1) AND t.b = Int32(2) AND t.c >= Int32(3) AND t.c <= Int32(5)], limit: 5, distribution: UpstreamHashShard(t.a, t.b, t.c, t.d) }
+- name: batch sort elimination with eq-prefix-derived orders
+  sql: |
+    create table t (a int, b int, c int, d int, primary key (a, b, c, d));
+    select a, b, c, d from t where a = 1 and b = 2 and c between 3 and 5 order by a, b, c;
+  batch_plan: |-
+    BatchExchange { order: [t.a ASC, t.b ASC, t.c ASC], dist: Single }
+    └─BatchScan { table: t, columns: [t.a, t.b, t.c, t.d], scan_ranges: [t.a = Int32(1) AND t.b = Int32(2) AND t.c >= Int32(3) AND t.c <= Int32(5)], distribution: UpstreamHashShard(t.a, t.b, t.c, t.d) }
+- name: batch sort elimination with eq-prefix-derived orders
+  sql: |
+    create table t (a int, b int, c int, d int, primary key (a, b, c, d));
+    select a, b, c, d from t where a = 1 and b = 2 and c between 3 and 5 order by a, b, c limit 5;
+  batch_plan: |-
+    BatchSort { order: [t.c ASC] }
+    └─BatchTopN { order: [t.a ASC, t.b ASC, t.c ASC], limit: 5, offset: 0 }
+      └─BatchExchange { order: [], dist: Single }
+        └─BatchLimit { limit: 5, offset: 0 }
+          └─BatchScan { table: t, columns: [t.a, t.b, t.c, t.d], scan_ranges: [t.a = Int32(1) AND t.b = Int32(2) AND t.c >= Int32(3) AND t.c <= Int32(5)], limit: 5, distribution: UpstreamHashShard(t.a, t.b, t.c, t.d) }

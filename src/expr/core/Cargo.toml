@@ -22,7 +22,7 @@ downcast-rs = "2.0"
 easy-ext = "1"
 educe = "0.6"
 either = "1"
-enum-as-inner = "0.6"
+enum-as-inner = "0.7"
 futures = "0.3"
 futures-async-stream = { workspace = true }
 futures-util = "0.3"

@@ -33,7 +33,7 @@ use crate::optimizer::plan_visitor::{
 };
 use crate::optimizer::rule::*;
 use crate::utils::Condition;
-use crate::{Explain, OptimizerContextRef};
+use crate::{Binder, Explain, OptimizerContextRef, Planner};
 
 impl<C: ConventionMarker> PlanRef<C> {
     fn optimize_by_rules_inner(
@@ -107,9 +107,16 @@ impl<C: ConventionMarker> OptimizationStage<C> {
     }
 }
 
+use std::collections::{HashMap, HashSet};
 use std::sync::LazyLock;
 
+use risingwave_common::id::ObjectId;
+use risingwave_pb::common::PbObjectType;
+use risingwave_sqlparser::ast::Statement;
+
 use crate::optimizer::plan_node::generic::GenericPlanRef;
+use crate::optimizer::plan_visitor::RelationCollectorVisitor;
+use crate::session::SessionImpl;
 
 pub struct LogicalOptimizer {}
 
@@ -589,6 +596,14 @@ static CORRELATED_TOP_N_TO_VECTOR_SEARCH_FOR_STREAM: LazyLock<OptimizationStage>
         )
     });
 
+static BATCH_MV_SELECTION: LazyLock<OptimizationStage> = LazyLock::new(|| {
+    OptimizationStage::new(
+        "Batch Mv Selection",
+        vec![MvSelectionRule::create()],
+        ApplyOrder::TopDown,
+    )
+});
+
 impl LogicalOptimizer {
     pub fn predicate_pushdown(
         plan: LogicalPlanRef,
@@ -829,6 +844,13 @@ impl LogicalOptimizer {
             ctx.trace(plan.explain_to_string());
         }
 
+        if ctx.session_ctx().config().enable_mv_selection() {
+            let query_relations =
+                RelationCollectorVisitor::collect_with(HashSet::new(), plan.clone());
+            Self::register_batch_mview_candidates(ctx.session_ctx(), &ctx, &query_relations);
+            plan = plan.optimize_by_rules(&BATCH_MV_SELECTION)?;
+        }
+
         // Inline `NOW()` and `PROCTIME()`, only for batch queries.
         plan = Self::inline_now_proc_time(plan, &ctx);
 
@@ -940,5 +962,67 @@ impl LogicalOptimizer {
         ctx.may_store_explain_logical(&plan);
 
         Ok(plan)
+    }
+
+    fn register_batch_mview_candidates(
+        session: &SessionImpl,
+        context: &OptimizerContextRef,
+        query_relations: &HashSet<ObjectId>,
+    ) {
+        let catalog_reader = session.env().catalog_reader().read_guard();
+        let user_reader = session.env().user_info_reader().read_guard();
+        let Some(current_user) = user_reader.get_user_by_name(&session.user_name()) else {
+            return;
+        };
+        let mut mv_dependencies: HashMap<ObjectId, HashSet<ObjectId>> = HashMap::new();
+        let mut mviews_with_source_dependency: HashSet<ObjectId> = HashSet::new();
+        for dep in catalog_reader.iter_object_dependencies() {
+            mv_dependencies
+                .entry(dep.object_id)
+                .or_default()
+                .insert(dep.referenced_object_id);
+            if dep.referenced_object_type == PbObjectType::Source {
+                mviews_with_source_dependency.insert(dep.object_id);
+            }
+        }
+        let db_name = session.database();
+        let Ok(schemas) = catalog_reader.iter_schemas(&db_name) else {
+            return;
+        };
+
+        for schema in schemas {
+            for mv in schema.iter_created_mvs_with_acl(current_user) {
+                let mv_object_id = mv.id().as_object_id();
+                if mviews_with_source_dependency.contains(&mv_object_id) {
+                    continue;
+                }
+                let is_subset = mv_dependencies
+                    .get(&mv_object_id)
+                    .is_some_and(|deps| deps.is_subset(query_relations));
+                if !is_subset {
+                    continue;
+                }
+                let Ok(stmt) = mv.create_sql_ast() else {
+                    continue;
+                };
+                let Statement::CreateView {
+                    materialized: true,
+                    query,
+                    ..
+                } = stmt
+                else {
+                    continue;
+                };
+                let mut binder = Binder::new_for_batch(session);
+                let Ok(bound_query) = binder.bind_query(&query) else {
+                    continue;
+                };
+                let mut planner = Planner::new_for_batch_dql(context.clone());
+                let Ok(plan_root) = planner.plan_query(bound_query) else {
+                    continue;
+                };
+                context.add_batch_mview_candidate(mv.clone(), plan_root.plan.clone());
+            }
+        }
     }
 }

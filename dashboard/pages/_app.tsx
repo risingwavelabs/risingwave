@@ -22,6 +22,7 @@ import { ChakraProvider } from "@chakra-ui/react"
 import { loader as monacoLoader } from "@monaco-editor/react"
 import type { AppProps } from "next/app"
 import { useRouter } from "next/router"
+import { NuqsAdapter } from "nuqs/adapters/next/pages"
 import { useEffect, useState } from "react"
 import Layout from "../components/Layout"
 import SpinnerOverlay from "../components/SpinnerOverlay"
@@ -47,11 +48,13 @@ function App({ Component, pageProps }: AppProps) {
   })
 
   return (
-    <ChakraProvider>
-      <Layout>
-        {isLoading ? <SpinnerOverlay /> : <Component {...pageProps} />}
-      </Layout>
-    </ChakraProvider>
+    <NuqsAdapter>
+      <ChakraProvider>
+        <Layout>
+          {isLoading ? <SpinnerOverlay /> : <Component {...pageProps} />}
+        </Layout>
+      </ChakraProvider>
+    </NuqsAdapter>
   )
 }
 

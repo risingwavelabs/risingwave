@@ -272,7 +272,7 @@ impl HummockManager {
                     sst_infos: sst_infos.into_iter().map(|sst| sst.into()).collect_vec(),
                     sst_id_to_worker_id: sst_to_context
                         .iter()
-                        .map(|(object_id, worker_id)| (*object_id, worker_id.as_raw_id()))
+                        .map(|(object_id, worker_id)| (*object_id, *worker_id))
                         .collect(),
                 }))
                 .is_err()
