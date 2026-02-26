@@ -107,10 +107,8 @@ impl MemoryPool for RwMemoryPool {
                 self.spillable_ctx.add(-self.unspillable_mem_reserved);
                 success = true;
             }
-        } else {
-            if self.unspillable_ctx.add(additional as i64) {
-                success = true;
-            }
+        } else if self.unspillable_ctx.add(additional as i64) {
+            success = true;
         }
 
         if success {
@@ -164,12 +162,10 @@ mod tests {
         Arc::new(RwMemoryPool::new(parent))
     }
 
-    /// Unspillable consumer (default): uses unspillable_ctx, can use full pool limit.
     fn unspillable_consumer(name: &str) -> MemoryConsumer {
         MemoryConsumer::new(name)
     }
 
-    /// Spillable consumer: uses spillable_ctx, limited to (limit - unspillable_mem_reserved).
     fn spillable_consumer(name: &str) -> MemoryConsumer {
         MemoryConsumer::new(name).with_can_spill(true)
     }
