@@ -1417,11 +1417,7 @@ impl ToStream for LogicalAgg {
         use super::stream::prelude::*;
 
         let eowc = ctx.emit_on_window_close();
-        let input = if self.group_key().is_empty() {
-            self.input()
-        } else {
-            try_enforce_locality_requirement(self.input(), &self.group_key().to_vec())
-        };
+        let input = self.input();
 
         let stream_input = input.to_stream(ctx)?;
 
@@ -1543,7 +1539,12 @@ impl ToStream for LogicalAgg {
         &self,
         ctx: &mut RewriteStreamContext,
     ) -> Result<(PlanRef, ColIndexMapping)> {
-        let (input, input_col_change) = self.input().logical_rewrite_for_stream(ctx)?;
+        let logical_input = if self.group_key().is_empty() {
+            self.input()
+        } else {
+            try_enforce_locality_requirement(self.input(), &self.group_key().to_vec())
+        };
+        let (input, input_col_change) = logical_input.logical_rewrite_for_stream(ctx)?;
         let (agg, out_col_change) = self.rewrite_with_input(input, input_col_change);
         let (map, _) = out_col_change.into_parts();
         let out_col_change = ColIndexMapping::new(map, agg.schema().len());
