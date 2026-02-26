@@ -323,8 +323,7 @@ impl ToStream for LogicalTopN {
             )));
         }
         Ok(if !self.group_key().is_empty() {
-            let logical_input = try_enforce_locality_requirement(self.input(), self.group_key());
-            let input = logical_input.to_stream(ctx)?;
+            let input = self.input().to_stream(ctx)?;
             let input = RequiredDist::shard_by_key(self.input().schema().len(), self.group_key())
                 .streaming_enforce_if_not_satisfies(input)?;
             let core = self.core.clone_with_input(input);
@@ -338,7 +337,12 @@ impl ToStream for LogicalTopN {
         &self,
         ctx: &mut RewriteStreamContext,
     ) -> Result<(PlanRef, ColIndexMapping)> {
-        let (input, input_col_change) = self.input().logical_rewrite_for_stream(ctx)?;
+        let logical_input = if self.group_key().is_empty() {
+            self.input()
+        } else {
+            try_enforce_locality_requirement(self.input(), self.group_key())
+        };
+        let (input, input_col_change) = logical_input.logical_rewrite_for_stream(ctx)?;
         let (top_n, out_col_change) = self.rewrite_with_input(input, input_col_change);
 
         if self.limit_attr().max_one_row() {
