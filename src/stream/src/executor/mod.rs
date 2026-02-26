@@ -1357,11 +1357,13 @@ impl DispatcherMessageBatch {
             }
             Self::BarrierBatch(barrier_batch) => StreamMessageBatch::BarrierBatch(BarrierBatch {
                 barriers: barrier_batch.iter().map(|b| b.to_protobuf()).collect(),
+                coalesced_actor_ids: vec![],
             }),
             Self::Watermark(watermark) => StreamMessageBatch::Watermark(watermark.to_protobuf()),
         };
         PbStreamMessageBatch {
             stream_message_batch: Some(prost),
+            source_actor_id: 0.into(),
         }
     }
 

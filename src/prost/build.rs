@@ -847,6 +847,12 @@ for_all_wrapped_id_fields! (
             source_id: SourceId,
             associated_table_id: TableId,
         }
+        StreamMessageBatch {
+            source_actor_id: ActorId,
+        }
+        StreamMessageBatch.BarrierBatch {
+            coalesced_actor_ids: ActorId,
+        }
         StreamNode {
             operator_id: StreamNodeLocalOperatorId,
         }
@@ -968,6 +974,7 @@ for_all_wrapped_id_fields! (
             down_fragment_id: FragmentId,
             up_actor_id: ActorId,
             down_actor_id: ActorId,
+            up_actor_ids: ActorId,
         }
     }
     user {

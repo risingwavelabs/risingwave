@@ -872,6 +872,7 @@ mod tests {
                             stream_chunk,
                         ),
                     ),
+                    source_actor_id: 0,
                 }),
                 permits: Some(PbPermits::default()),
             }))
@@ -885,9 +886,11 @@ mod tests {
                         risingwave_pb::stream_plan::stream_message_batch::StreamMessageBatch::BarrierBatch(
                             BarrierBatch {
                                 barriers: vec![barrier.to_protobuf()],
+                                coalesced_actor_ids: vec![],
                             },
                         ),
                     ),
+                    source_actor_id: 0,
                 }),
                 permits: Some(PbPermits::default()),
             }))
