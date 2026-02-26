@@ -211,6 +211,8 @@ pub struct MetaMetrics {
     /// supervisor for which source is still up.
     pub source_is_up: LabelGuardedIntGaugeVec,
     pub source_enumerator_metrics: Arc<SourceEnumeratorMetrics>,
+    /// Number of split updates that were skipped because fragment IDs were already removed.
+    pub skipped_stale_fragment_split_updates: IntCounterVec,
 
     // ********************************** Fragment ************************************
     /// A dummy gauge metrics with its label to be the mapping from actor id to fragment id
@@ -716,6 +718,13 @@ impl MetaMetrics {
         )
         .unwrap();
         let source_enumerator_metrics = Arc::new(SourceEnumeratorMetrics::default());
+        let skipped_stale_fragment_split_updates = register_int_counter_vec_with_registry!(
+            "meta_skipped_stale_fragment_split_updates",
+            "number of stale fragment split updates skipped due to missing fragments",
+            &["reason"],
+            registry
+        )
+        .unwrap();
 
         let actor_info = register_int_gauge_vec_with_registry!(
             "actor_info",
@@ -1007,6 +1016,7 @@ impl MetaMetrics {
             object_store_metric,
             source_is_up,
             source_enumerator_metrics,
+            skipped_stale_fragment_split_updates,
             actor_info,
             table_info,
             sink_info,

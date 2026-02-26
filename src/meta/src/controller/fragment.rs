@@ -85,6 +85,7 @@ use crate::model::{
     TableParallelism,
 };
 use crate::rpc::ddl_controller::build_upstream_sink_info;
+use crate::rpc::metrics::GLOBAL_META_METRICS;
 use crate::stream::UpstreamSinkInfo;
 use crate::{MetaResult, model};
 
@@ -1986,6 +1987,30 @@ impl CatalogController {
         Ok(upstream_sink_infos)
     }
 
+    fn build_fragment_split_models(
+        fragment_splits: &HashMap<FragmentId, Vec<SplitImpl>>,
+        existing_fragment_ids: &HashSet<FragmentId>,
+    ) -> (Vec<fragment_splits::ActiveModel>, Vec<FragmentId>) {
+        let mut models = Vec::with_capacity(fragment_splits.len());
+        let mut skipped_fragment_ids = Vec::new();
+
+        for (fragment_id, splits) in fragment_splits {
+            if !existing_fragment_ids.contains(fragment_id) {
+                skipped_fragment_ids.push(*fragment_id);
+                continue;
+            }
+
+            models.push(fragment_splits::ActiveModel {
+                fragment_id: Set(*fragment_id as _),
+                splits: Set(Some(ConnectorSplits::from(&PbConnectorSplits {
+                    splits: splits.iter().map(Into::into).collect_vec(),
+                }))),
+            });
+        }
+
+        (models, skipped_fragment_ids)
+    }
+
     pub async fn get_mview_fragment_by_id(&self, job_id: JobId) -> MetaResult<FragmentId> {
         let inner = self.inner.read().await;
         let txn = inner.db.begin().await?;
@@ -2032,15 +2057,34 @@ impl CatalogController {
             return Ok(());
         }
 
-        let models: Vec<fragment_splits::ActiveModel> = fragment_splits
-            .iter()
-            .map(|(fragment_id, splits)| fragment_splits::ActiveModel {
-                fragment_id: Set(*fragment_id as _),
-                splits: Set(Some(ConnectorSplits::from(&PbConnectorSplits {
-                    splits: splits.iter().map(Into::into).collect_vec(),
-                }))),
-            })
+        let existing_fragment_ids: HashSet<FragmentId> = FragmentModel::find()
+            .select_only()
+            .column(fragment::Column::FragmentId)
+            .filter(fragment::Column::FragmentId.is_in(fragment_splits.keys().copied()))
+            .into_tuple()
+            .all(txn)
+            .await?
+            .into_iter()
             .collect();
+
+        let (models, skipped_fragment_ids) =
+            Self::build_fragment_split_models(fragment_splits, &existing_fragment_ids);
+
+        if !skipped_fragment_ids.is_empty() {
+            tracing::warn!(
+                skipped_fragment_ids = ?skipped_fragment_ids,
+                total_fragment_ids = fragment_splits.len(),
+                "skipping stale fragment split updates for missing fragments"
+            );
+            GLOBAL_META_METRICS
+                .skipped_stale_fragment_split_updates
+                .with_label_values(&["missing_fragment"])
+                .inc_by(skipped_fragment_ids.len() as u64);
+        }
+
+        if models.is_empty() {
+            return Ok(());
+        }
 
         FragmentSplits::insert_many(models)
             .on_conflict(
@@ -2089,6 +2133,37 @@ mod tests {
     const TEST_JOB_ID: JobId = JobId::new(1);
 
     const TEST_STATE_TABLE_ID: TableId = TableId::new(1000);
+
+    #[test]
+    fn test_build_fragment_split_models_skips_stale_fragments() {
+        let fragment_splits = HashMap::from([
+            (FragmentId::new(1), Vec::new()),
+            (FragmentId::new(2), Vec::new()),
+        ]);
+        let existing_fragment_ids = HashSet::from([FragmentId::new(1)]);
+
+        let (models, skipped_fragment_ids) = CatalogController::build_fragment_split_models(
+            &fragment_splits,
+            &existing_fragment_ids,
+        );
+
+        assert_eq!(models.len(), 1);
+        assert_eq!(skipped_fragment_ids, vec![FragmentId::new(2)]);
+    }
+
+    #[test]
+    fn test_build_fragment_split_models_all_stale() {
+        let fragment_splits = HashMap::from([(FragmentId::new(1), Vec::new())]);
+        let existing_fragment_ids = HashSet::new();
+
+        let (models, skipped_fragment_ids) = CatalogController::build_fragment_split_models(
+            &fragment_splits,
+            &existing_fragment_ids,
+        );
+
+        assert!(models.is_empty());
+        assert_eq!(skipped_fragment_ids, vec![FragmentId::new(1)]);
+    }
 
     fn generate_upstream_actor_ids_for_actor(actor_id: ActorId) -> ActorUpstreams {
         let mut upstream_actor_ids = BTreeMap::new();

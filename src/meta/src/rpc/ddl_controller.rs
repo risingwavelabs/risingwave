@@ -1250,6 +1250,11 @@ impl DdlController {
         drop_mode: DropMode,
     ) -> MetaResult<NotificationVersion> {
         let object_id = object_id.into();
+        // Fence reschedule and source tick before catalog deletion so post-collect split updates
+        // cannot race with dropped fragments.
+        let _reschedule_job_lock = self.stream_manager.reschedule_lock_read_guard().await;
+        let _source_tick_pause_guard = self.source_manager.pause_tick().await;
+
         let (release_ctx, version) = self
             .metadata_manager
             .catalog_controller
@@ -1275,7 +1280,6 @@ impl DdlController {
             removed_iceberg_table_sinks,
         } = release_ctx;
 
-        let _guard = self.source_manager.pause_tick().await;
         self.stream_manager
             .drop_streaming_jobs(
                 database_id,
