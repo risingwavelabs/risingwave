@@ -53,6 +53,11 @@ CREATE TABLE t_types (
     jsonb_column JSONB
 );
 
+CREATE TABLE t_jdbc_alter_props (
+    id INTEGER PRIMARY KEY,
+    v1 INTEGER
+);
+
 CREATE TABLE t1_uuid (v1 int primary key, v2 uuid, v3 varchar);
 
 CREATE SCHEMA biz;
