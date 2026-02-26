@@ -515,17 +515,17 @@ impl RedshiftSinkCommitter {
     ) -> Result<()> {
         let all_path = format!("s3://{}/{}", s3_inner.bucket_name, manifest);
 
-        let table = if is_append_only {
-            &config.table
+        let (table,schema_name) = if is_append_only {
+            (&config.table, config.schema.as_deref())
         } else {
-            config.cdc_table.as_ref().ok_or_else(|| {
+            (config.cdc_table.as_ref().ok_or_else(|| {
                 SinkError::Config(anyhow!(
                     "intermediate.table.name is required for non-append-only sink"
                 ))
-            })?
+            })?, config.intermediate_schema.as_deref().or(config.schema.as_deref()))
         };
         let copy_into_sql = build_copy_into_sql(
-            config.schema.as_deref(),
+            schema_name,
             table,
             &all_path,
             &s3_inner.access,
