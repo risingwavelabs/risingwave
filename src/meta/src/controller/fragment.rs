@@ -85,7 +85,6 @@ use crate::model::{
     TableParallelism,
 };
 use crate::rpc::ddl_controller::build_upstream_sink_info;
-use crate::rpc::metrics::GLOBAL_META_METRICS;
 use crate::stream::UpstreamSinkInfo;
 use crate::{MetaResult, model};
 
@@ -2076,10 +2075,6 @@ impl CatalogController {
                 total_fragment_ids = fragment_splits.len(),
                 "skipping stale fragment split updates for missing fragments"
             );
-            GLOBAL_META_METRICS
-                .skipped_stale_fragment_split_updates
-                .with_label_values(&["missing_fragment"])
-                .inc_by(skipped_fragment_ids.len() as u64);
         }
 
         if models.is_empty() {
