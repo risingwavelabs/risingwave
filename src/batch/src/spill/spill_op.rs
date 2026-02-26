@@ -14,6 +14,7 @@
 
 use std::hash::BuildHasher;
 use std::ops::{Deref, DerefMut};
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, LazyLock};
 
 use anyhow::anyhow;
@@ -23,6 +24,7 @@ use opendal::Operator;
 use opendal::layers::RetryLayer;
 use opendal::services::{Fs, Memory};
 use risingwave_common::array::DataChunk;
+use risingwave_common::util::batch_spill_config::batch_spill_base_dir;
 use risingwave_pb::Message;
 use risingwave_pb::data::DataChunk as PbDataChunk;
 use thiserror_ext::AsReport;
@@ -32,10 +34,8 @@ use twox_hash::XxHash64;
 use crate::error::{BatchError, Result};
 use crate::monitor::BatchSpillMetrics;
 
-const RW_BATCH_SPILL_DIR_ENV: &str = "RW_BATCH_SPILL_DIR";
 pub const DEFAULT_SPILL_PARTITION_NUM: usize = 20;
-const DEFAULT_SPILL_DIR: &str = "/tmp/";
-const RW_MANAGED_SPILL_DIR: &str = "/rw_batch_spill/";
+const RW_MANAGED_SPILL_DIR: &str = "rw_batch_spill/";
 const DEFAULT_IO_BUFFER_SIZE: usize = 256 * 1024;
 const DEFAULT_IO_CONCURRENT_TASK: usize = 8;
 
@@ -52,22 +52,25 @@ pub struct SpillOp {
 }
 
 impl SpillOp {
-    pub fn create(path: String, spill_backend: SpillBackend) -> Result<SpillOp> {
-        assert!(path.ends_with('/'));
+    fn batch_spill_root() -> PathBuf {
+        batch_spill_base_dir().join(RW_MANAGED_SPILL_DIR)
+    }
 
-        let spill_dir =
-            std::env::var(RW_BATCH_SPILL_DIR_ENV).unwrap_or_else(|_| DEFAULT_SPILL_DIR.to_owned());
-        let root = format!("/{}/{}/{}/", spill_dir, RW_MANAGED_SPILL_DIR, path);
+    pub fn create(path: impl AsRef<Path>, spill_backend: SpillBackend) -> Result<SpillOp> {
+        let path = path.as_ref();
+        assert!(path.is_relative());
+
+        let root = Self::batch_spill_root().join(path);
 
         let op = match spill_backend {
             SpillBackend::Disk => {
-                let builder = Fs::default().root(&root);
+                let builder = Fs::default().root(&root.to_string_lossy());
                 Operator::new(builder)?
                     .layer(RetryLayer::default())
                     .finish()
             }
             SpillBackend::Memory => {
-                let builder = Memory::default().root(&root);
+                let builder = Memory::default().root(&root.to_string_lossy());
                 Operator::new(builder)?
                     .layer(RetryLayer::default())
                     .finish()
@@ -80,11 +83,9 @@ impl SpillOp {
         static LOCK: LazyLock<Mutex<usize>> = LazyLock::new(|| Mutex::new(0));
         let _guard = LOCK.lock().await;
 
-        let spill_dir =
-            std::env::var(RW_BATCH_SPILL_DIR_ENV).unwrap_or_else(|_| DEFAULT_SPILL_DIR.to_owned());
-        let root = format!("/{}/{}/", spill_dir, RW_MANAGED_SPILL_DIR);
+        let root = Self::batch_spill_root();
 
-        let builder = Fs::default().root(&root);
+        let builder = Fs::default().root(&root.to_string_lossy());
 
         let op: Operator = Operator::new(builder)?
             .layer(RetryLayer::default())

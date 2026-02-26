@@ -28,6 +28,7 @@ use risingwave_common::array::DataChunk;
 use risingwave_common::array::arrow::IcebergArrowConvert;
 use risingwave_common::catalog::Schema as RwSchema;
 use risingwave_common::error::BoxedError;
+use risingwave_common::util::batch_spill_config::batch_spill_base_dir;
 use thiserror::Error;
 use tokio::sync::mpsc;
 
@@ -45,6 +46,8 @@ use crate::utils::DropGuard;
 
 mod memory_ctx;
 mod query_planner;
+
+const DF_MANAGED_SPILL_DIR: &str = "df_batch_spill/";
 
 #[derive(Clone)]
 pub struct DfBatchQueryPlanResult {
@@ -85,8 +88,10 @@ pub fn try_gen_datafusion_plan(
 pub fn create_datafusion_context(session: &SessionImpl) -> RwResult<DFSessionContext> {
     let df_config = create_config(session);
     let memory_pool = Arc::new(RwMemoryPool::new(session.env().mem_context()));
+    let temp_path = batch_spill_base_dir().join(DF_MANAGED_SPILL_DIR);
     let runtime = RuntimeEnvBuilder::new()
         .with_memory_pool(memory_pool)
+        .with_temp_file_path(temp_path)
         .build_arc()?;
     let state = SessionStateBuilder::new()
         .with_config(df_config)
