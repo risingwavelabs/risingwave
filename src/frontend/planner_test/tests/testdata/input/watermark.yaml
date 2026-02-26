@@ -51,6 +51,7 @@
     select t1.ts as t1_ts, t1.v1 as t1_v1, t1.v2 as t1_v2, t2.ts as t2_ts, t2.v1 as t2_v1, t2.v2 as t2_v2 from t1 join t2 on (t1.v1 = t2.v1 and (t1.ts >= t2.ts + INTERVAL '1' SECOND) and (t2.ts >= t1.ts + INTERVAL '1' SECOND));
   expected_outputs:
   - stream_plan
+  - stream_dist_plan
   - logical_plan
 - name: union all
   sql: |
@@ -116,3 +117,21 @@
     select t1.ts as t1_ts, t2.ts as t2_ts, t1.v1 as t1_v1, t1.v2 as t1_v2, t2.v1 as t2_v1, t2.v2 as t2_v2 from t1 asof left join t2 on t1.v1 = t2.v1 and t1.ts < t2.ts;
   expected_outputs:
   - stream_plan
+- name: window join with multiple watermark columns in join key
+  sql: |
+    create table t1 (ts timestamp with time zone, v1 int, watermark for ts as ts - INTERVAL '1' SECOND) append only;
+    create table t2 (ts timestamp with time zone, v1 int, watermark for ts as ts - INTERVAL '1' SECOND) append only;
+    create materialized view mv1 as select ts as ts1, ts as ts2, v1 from t1;
+    create materialized view mv2 as select ts as ts1, ts as ts2, v1 from t2;
+    select mv1.ts1 as mv1ts1, mv1.ts2 as mv1ts2, mv2.ts1 as mv2ts1, mv2.ts2 as mv2ts2 from mv1, mv2 where mv1.ts1 = mv2.ts1 and mv1.ts2 = mv2.ts2;
+  expected_outputs:
+  - stream_dist_plan
+- name: window join with watermark in join key and inequality
+  sql: |
+    create table t1 (ts timestamp with time zone, v1 int, watermark for ts as ts - INTERVAL '1' SECOND) append only;
+    create table t2 (ts timestamp with time zone, v1 int, watermark for ts as ts - INTERVAL '1' SECOND) append only;
+    create materialized view mv1 as select ts as ts1, ts as ts2, v1 from t1;
+    create materialized view mv2 as select ts as ts1, ts as ts2, v1 from t2;
+    select mv1.ts1 as mv1ts1, mv1.ts2 as mv1ts2, mv2.ts1 as mv2ts1, mv2.ts2 as mv2ts2 from mv1, mv2 where mv1.ts1 = mv2.ts1 and mv1.ts2 >= mv2.ts2 and mv1.ts2 <= mv2.ts2 + INTERVAL '1' HOUR;
+  expected_outputs:
+  - stream_dist_plan

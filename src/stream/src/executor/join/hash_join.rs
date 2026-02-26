@@ -24,7 +24,7 @@ use join_row_set::JoinRowSet;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::hash::{HashKey, PrecomputedBuildHasher};
 use risingwave_common::metrics::LabelGuardedIntCounter;
-use risingwave_common::row::{OwnedRow, Row, RowExt, once};
+use risingwave_common::row::{OwnedRow, Row, RowExt};
 use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::iter_util::ZipEqFast;
@@ -36,7 +36,7 @@ use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::table::KeyedRow;
 use thiserror_ext::AsReport;
 
-use super::row::{CachedJoinRow, DegreeType};
+use super::row::{CachedJoinRow, DegreeType, build_degree_row};
 use crate::cache::ManagedLruCache;
 use crate::common::metrics::MetricsInfo;
 use crate::common::table::state_table::{StateTable, StateTablePostCommit};
@@ -284,7 +284,7 @@ pub(crate) async fn into_stream<'a, K: HashKey, S: StateStore>(
     let sub_range: &(Bound<OwnedRow>, Bound<OwnedRow>) = &(Bound::Unbounded, Bound::Unbounded);
     let decoded_key = key.deserialize(join_key_data_types)?;
     let table_iter = state_table
-        .iter_with_prefix(&decoded_key, sub_range, PrefetchOptions::default())
+        .iter_with_prefix_respecting_watermark(&decoded_key, sub_range, PrefetchOptions::default())
         .await?;
 
     #[for_await]
@@ -331,17 +331,34 @@ async fn fetch_degrees<K: HashKey, S: StateStore>(
     let mut degrees = vec![];
     let sub_range: &(Bound<OwnedRow>, Bound<OwnedRow>) = &(Bound::Unbounded, Bound::Unbounded);
     let table_iter = degree_state_table
-        .iter_with_prefix(key, sub_range, PrefetchOptions::default())
+        .iter_with_prefix_respecting_watermark(key, sub_range, PrefetchOptions::default())
         .await?;
+    let degree_col_idx = degree_col_idx_in_row(degree_state_table);
     #[for_await]
     for entry in table_iter {
         let degree_row = entry?;
+        debug_assert!(
+            degree_row.len() > degree_col_idx,
+            "degree row should have at least pk_len + 1 columns"
+        );
         let degree_i64 = degree_row
-            .datum_at(degree_row.len() - 1)
+            .datum_at(degree_col_idx)
             .expect("degree should not be NULL");
         degrees.push(degree_i64.into_int64() as u64);
     }
     Ok(degrees)
+}
+
+fn degree_col_idx_in_row<S: StateStore>(degree_state_table: &StateTable<S>) -> usize {
+    // Degree column is at index pk_len in the full schema: [pk..., _degree, inequality?].
+    let degree_col_idx = degree_state_table.pk_indices().len();
+    match degree_state_table.value_indices() {
+        Some(value_indices) => value_indices
+            .iter()
+            .position(|idx| *idx == degree_col_idx)
+            .expect("degree column should be included in value indices"),
+        None => degree_col_idx,
+    }
 }
 
 // NOTE(kwannoel): This is not really specific to `TableInner`.
@@ -352,18 +369,25 @@ pub(crate) fn update_degree<S: StateStore, const INCREMENT: bool>(
     degree_state: &mut TableInner<S>,
     matched_row: &mut JoinRow<impl Row>,
 ) {
-    let old_degree_row = (&matched_row.row)
-        .project(order_key_indices)
-        .chain(once(Some(ScalarImpl::Int64(matched_row.degree as i64))));
+    let inequality_idx = degree_state.degree_inequality_idx;
+    let old_degree_row = build_degree_row(
+        order_key_indices,
+        matched_row.degree,
+        inequality_idx,
+        &matched_row.row,
+    );
     if INCREMENT {
         matched_row.degree += 1;
     } else {
         // DECREMENT
         matched_row.degree -= 1;
     }
-    let new_degree_row = (&matched_row.row)
-        .project(order_key_indices)
-        .chain(once(Some(ScalarImpl::Int64(matched_row.degree as i64))));
+    let new_degree_row = build_degree_row(
+        order_key_indices,
+        matched_row.degree,
+        inequality_idx,
+        &matched_row.row,
+    );
     degree_state.table.update(old_degree_row, new_degree_row);
 }
 
@@ -377,16 +401,26 @@ pub struct TableInner<S: StateStore> {
     /// Where `join_key` contains all the columns not in the pk.
     /// It should be a superset of the pk.
     order_key_indices: Vec<usize>,
+    /// Optional: index of inequality column in the input row for degree table.
+    /// Used for inequality-based watermark cleaning of degree tables.
+    /// When present, the degree table schema is: [pk..., _degree, `inequality_val`].
+    pub(crate) degree_inequality_idx: Option<usize>,
     pub(crate) table: StateTable<S>,
 }
 
 impl<S: StateStore> TableInner<S> {
-    pub fn new(pk_indices: Vec<usize>, join_key_indices: Vec<usize>, table: StateTable<S>) -> Self {
+    pub fn new(
+        pk_indices: Vec<usize>,
+        join_key_indices: Vec<usize>,
+        table: StateTable<S>,
+        degree_inequality_idx: Option<usize>,
+    ) -> Self {
         let order_key_indices = table.pk_indices().to_vec();
         Self {
             pk_indices,
             join_key_indices,
             order_key_indices,
+            degree_inequality_idx,
             table,
         }
     }
@@ -446,6 +480,7 @@ impl<K: HashKey, S: StateStore, E: JoinEncoding> JoinHashMap<K, S, E> {
             pk_indices: state_pk_indices,
             join_key_indices: state_join_key_indices,
             order_key_indices: state_table.pk_indices().to_vec(),
+            degree_inequality_idx: inequality_key_idx,
             table: state_table,
         };
 
@@ -574,6 +609,7 @@ impl<K: HashKey, S: StateStore, E: JoinEncoding> JoinHashMap<K, S, E> {
                 PrefetchOptions::default(),
             );
             let degree_state = self.degree_state.as_ref().unwrap();
+            let degree_col_idx = degree_col_idx_in_row(&degree_state.table);
             let degree_table_iter_fut = degree_state.table.iter_keyed_row_with_prefix(
                 &key,
                 sub_range,
@@ -652,7 +688,7 @@ impl<K: HashKey, S: StateStore, E: JoinEncoding> JoinHashMap<K, S, E> {
                                     .project(&self.state.pk_indices)
                                     .memcmp_serialize(&self.pk_serializer);
                                 let degree_i64 = degree_row
-                                    .datum_at(degree_row.len() - 1)
+                                    .datum_at(degree_col_idx)
                                     .expect("degree should not be NULL");
                                 let inequality_key = self
                                     .inequality_key_desc
@@ -701,7 +737,7 @@ impl<K: HashKey, S: StateStore, E: JoinEncoding> JoinHashMap<K, S, E> {
                         .as_ref()
                         .map(|desc| desc.serialize_inequal_key_from_row(row.row()));
                     let degree_i64 = degree_row
-                        .datum_at(degree_row.len() - 1)
+                        .datum_at(degree_col_idx)
                         .expect("degree should not be NULL");
                     entry_state
                         .insert(
@@ -808,7 +844,10 @@ impl<K: HashKey, S: StateStore, E: JoinEncoding> JoinHashMap<K, S, E> {
 
         // Update the flush buffer.
         if let Some(degree_state) = self.degree_state.as_mut() {
-            let (row, degree) = value.to_table_rows(&self.state.order_key_indices);
+            let (row, degree) = value.to_table_rows(
+                &self.state.order_key_indices,
+                degree_state.degree_inequality_idx,
+            );
             self.state.table.insert(row);
             degree_state.table.insert(degree);
         } else {
@@ -853,9 +892,12 @@ impl<K: HashKey, S: StateStore, E: JoinEncoding> JoinHashMap<K, S, E> {
         }
 
         // If no cache maintained, only update the state table.
-        let (row, degree) = value.to_table_rows(&self.state.order_key_indices);
-        self.state.table.delete(row);
         let degree_state = self.degree_state.as_mut().expect("degree table missing");
+        let (row, degree) = value.to_table_rows(
+            &self.state.order_key_indices,
+            degree_state.degree_inequality_idx,
+        );
+        self.state.table.delete(row);
         degree_state.table.delete(degree);
         Ok(())
     }

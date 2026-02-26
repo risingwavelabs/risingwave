@@ -1,0 +1,237 @@
+# Test hash join with watermark propagation and state cleaning.
+
+control substitution on
+
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+SET streaming_parallelism = 1;
+
+statement ok
+CREATE TABLE hwm_left (
+    id INT,
+    ts TIMESTAMPTZ,
+    WATERMARK FOR ts AS ts - INTERVAL '5' SECOND
+) APPEND ONLY;
+
+statement ok
+CREATE TABLE hwm_right (
+    id INT,
+    ts TIMESTAMPTZ,
+    WATERMARK FOR ts AS ts - INTERVAL '5' SECOND
+) APPEND ONLY;
+
+statement ok
+CREATE MATERIALIZED VIEW hash_join_wm_mv AS
+SELECT l.id AS l_id, r.id AS r_id, l.ts
+FROM hwm_left l
+LEFT JOIN hwm_right r
+ON l.ts = r.ts;
+
+statement ok
+CREATE MATERIALIZED VIEW hash_join_wm_eowc_mv AS
+SELECT * FROM hash_join_wm_mv
+EMIT ON WINDOW CLOSE;
+
+let right_state_tid, right_state_tname
+SELECT id, name
+FROM rw_catalog.rw_internal_table_info
+WHERE job_name = 'hash_join_wm_mv' AND name LIKE '%hashjoinright%'
+ORDER BY id
+LIMIT 1
+
+let left_degree_tid, left_degree_tname
+SELECT id, name
+FROM rw_catalog.rw_internal_table_info
+WHERE job_name = 'hash_join_wm_mv' AND name LIKE '%hashjoindegreeleft%'
+ORDER BY id
+LIMIT 1
+
+let right_state_compaction_group_id
+SELECT id
+FROM rw_catalog.rw_hummock_compaction_group_configs
+WHERE member_tables @> ('[' || $right_state_tid || ']')::jsonb
+
+let left_degree_compaction_group_id
+SELECT id
+FROM rw_catalog.rw_hummock_compaction_group_configs
+WHERE member_tables @> ('[' || $left_degree_tid || ']')::jsonb
+
+# Insert one old pair first.
+statement ok
+INSERT INTO hwm_right VALUES (100, '2024-01-01 00:00:00+00');
+
+statement ok
+INSERT INTO hwm_left VALUES (1, '2024-01-01 00:00:00+00');
+
+query IIT rowsort
+SELECT * FROM hash_join_wm_mv;
+----
+1 100 2024-01-01 00:00:00+00:00
+
+# Watermark has not advanced enough to close the first row.
+query I
+SELECT count(*) FROM hash_join_wm_eowc_mv;
+----
+0
+
+# Before watermark advances, manual compaction should not reclaim the only old row.
+system ok
+./risedev ctl hummock trigger-manual-compaction -c "$right_state_compaction_group_id" -t "$right_state_tid" -l 0,6
+
+system ok
+./risedev ctl hummock trigger-manual-compaction -c "$left_degree_compaction_group_id" -t "$left_degree_tid" -l 0,6
+
+# Check exact state rows instead of only row counts.
+query IT rowsort retry 20 backoff 1s
+SELECT hwm_right_id, hwm_right_ts FROM ${right_state_tname};
+----
+100 2024-01-01 00:00:00+00:00
+
+query TI rowsort retry 20 backoff 1s
+SELECT hwm_left_ts, _degree FROM ${left_degree_tname};
+----
+2024-01-01 00:00:00+00:00 1
+
+# Insert a newer left row first.
+statement ok
+INSERT INTO hwm_left VALUES (2, '2024-01-01 00:00:10+00');
+
+# Watermark should still be blocked by the right side at this point.
+
+query I
+SELECT count(*) FROM hash_join_wm_eowc_mv;
+----
+0
+
+# Right state has not changed yet, and left degree should hold both left rows.
+query IT rowsort retry 20 backoff 1s
+SELECT hwm_right_id, hwm_right_ts FROM ${right_state_tname};
+----
+100 2024-01-01 00:00:00+00:00
+
+query TI rowsort retry 20 backoff 1s
+SELECT hwm_left_ts, _degree FROM ${left_degree_tname};
+----
+2024-01-01 00:00:00+00:00 1
+2024-01-01 00:00:10+00:00 0
+
+# Insert the corresponding right row so aligned join watermark reaches 00:00:05.
+# This should make the first row reclaimable on BOTH sides after compaction.
+statement ok
+INSERT INTO hwm_right VALUES (200, '2024-01-01 00:00:10+00');
+
+query IIT rowsort
+SELECT * FROM hash_join_wm_mv;
+----
+1 100 2024-01-01 00:00:00+00:00
+2 200 2024-01-01 00:00:10+00:00
+
+# Verify watermark reaches downstream.
+query IIT rowsort retry 11 backoff 1s
+SELECT * FROM hash_join_wm_eowc_mv;
+----
+1 100 2024-01-01 00:00:00+00:00
+
+system ok
+./risedev ctl hummock trigger-manual-compaction -c "$right_state_compaction_group_id" -t "$right_state_tid" -l 0,6
+
+system ok
+./risedev ctl hummock trigger-manual-compaction -c "$left_degree_compaction_group_id" -t "$left_degree_tid" -l 0,6
+
+# After compaction, only the newer (00:00:10) state should remain.
+query IT rowsort retry 20 backoff 1s
+SELECT hwm_right_id, hwm_right_ts FROM ${right_state_tname};
+----
+200 2024-01-01 00:00:10+00:00
+
+query TI rowsort retry 20 backoff 1s
+SELECT hwm_left_ts, _degree FROM ${left_degree_tname};
+----
+2024-01-01 00:00:10+00:00 1
+
+query I retry 200 backoff 1s
+SELECT total_key_count
+FROM rw_catalog.rw_table_stats
+WHERE id = ${right_state_tid};
+----
+1
+
+query I retry 200 backoff 1s
+SELECT total_key_count
+FROM rw_catalog.rw_table_stats
+WHERE id = ${left_degree_tid};
+----
+1
+
+# Insert rows around the current watermark after compaction.
+statement ok
+INSERT INTO hwm_left VALUES (3, '2024-01-01 00:00:04+00');
+
+statement ok
+INSERT INTO hwm_left VALUES (3, '2024-01-01 00:00:10+00');
+
+# The below-watermark row is dropped, and the above-watermark row matches
+# the uncompacted right-state row at ts=00:00:10.
+query IIT rowsort
+SELECT * FROM hash_join_wm_mv;
+----
+1 100 2024-01-01 00:00:00+00:00
+2 200 2024-01-01 00:00:10+00:00
+3 200 2024-01-01 00:00:10+00:00
+
+# Insert one more matched pair after compaction to verify the join still advances
+# watermark and keeps only the latest state after the next compaction.
+statement ok
+INSERT INTO hwm_left VALUES (4, '2024-01-01 00:00:20+00');
+
+statement ok
+INSERT INTO hwm_right VALUES (400, '2024-01-01 00:00:20+00');
+
+query IIT rowsort
+SELECT * FROM hash_join_wm_mv;
+----
+1 100 2024-01-01 00:00:00+00:00
+2 200 2024-01-01 00:00:10+00:00
+3 200 2024-01-01 00:00:10+00:00
+4 400 2024-01-01 00:00:20+00:00
+
+query IIT rowsort retry 11 backoff 1s
+SELECT * FROM hash_join_wm_eowc_mv;
+----
+1 100 2024-01-01 00:00:00+00:00
+2 200 2024-01-01 00:00:10+00:00
+3 200 2024-01-01 00:00:10+00:00
+
+system ok
+./risedev ctl hummock trigger-manual-compaction -c "$right_state_compaction_group_id" -t "$right_state_tid" -l 0,6
+
+system ok
+./risedev ctl hummock trigger-manual-compaction -c "$left_degree_compaction_group_id" -t "$left_degree_tid" -l 0,6
+
+# Compact again after next watermark advance and keep only the latest state.
+query IT rowsort retry 20 backoff 1s
+SELECT hwm_right_id, hwm_right_ts FROM ${right_state_tname};
+----
+400 2024-01-01 00:00:20+00:00
+
+query TI rowsort retry 20 backoff 1s
+SELECT hwm_left_ts, _degree FROM ${left_degree_tname};
+----
+2024-01-01 00:00:20+00:00 1
+
+statement ok
+DROP MATERIALIZED VIEW hash_join_wm_eowc_mv;
+
+statement ok
+DROP MATERIALIZED VIEW hash_join_wm_mv;
+
+statement ok
+DROP TABLE hwm_left;
+
+statement ok
+DROP TABLE hwm_right;
+
+statement ok
+SET streaming_parallelism = 0;

@@ -77,7 +77,7 @@
   stream_plan: |-
     StreamMaterialize { columns: [foo, win1, win2, t._row_id(hidden), t._row_id#1(hidden)], stream_key: [t._row_id, t._row_id#1, win1], pk_columns: [t._row_id, t._row_id#1, win1], pk_conflict: NoCheck, watermark_columns: [win1, win2] }
     └─StreamProject { exprs: [(t.foo + $expr2) as $expr4, $expr1, $expr3, t._row_id, t._row_id], output_watermarks: [[$expr1], [$expr3]] }
-      └─StreamHashJoin [window, append_only] { type: Inner, predicate: $expr1 = $expr3, output_watermarks: [[$expr1], [$expr3]], output: [t.foo, $expr1, $expr2, $expr3, t._row_id, t._row_id] }
+      └─StreamHashJoin [window, append_only] { type: Inner, predicate: $expr1 = $expr3, conditions_to_clean_state_in_join_key: [($expr1 = $expr3)], output_watermarks: [[$expr1], [$expr3]], output: [t.foo, $expr1, $expr2, $expr3, t._row_id, t._row_id] }
         ├─StreamExchange { dist: HashShard($expr1) }
         │ └─StreamProject { exprs: [t.foo, TumbleStart(t.ts, '00:05:00':Interval) as $expr1, t._row_id], output_watermarks: [[$expr1]] }
         │   └─StreamTableScan { table: t, columns: [t.foo, t.ts, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
@@ -88,7 +88,7 @@
     StreamMaterialize { columns: [foo, win1, win2, t._row_id(hidden), t._row_id#1(hidden)], stream_key: [t._row_id, t._row_id#1, win1], pk_columns: [t._row_id, t._row_id#1, win1], pk_conflict: NoCheck, watermark_columns: [win1] }
     └─StreamEowcSort { sort_column: $expr1 }
       └─StreamProject { exprs: [(t.foo + $expr2) as $expr4, $expr1, $expr3, t._row_id, t._row_id], output_watermarks: [[$expr1], [$expr3]] }
-        └─StreamHashJoin [window, append_only] { type: Inner, predicate: $expr1 = $expr3, output_watermarks: [[$expr1], [$expr3]], output: [t.foo, $expr1, $expr2, $expr3, t._row_id, t._row_id] }
+        └─StreamHashJoin [window, append_only] { type: Inner, predicate: $expr1 = $expr3, conditions_to_clean_state_in_join_key: [($expr1 = $expr3)], output_watermarks: [[$expr1], [$expr3]], output: [t.foo, $expr1, $expr2, $expr3, t._row_id, t._row_id] }
           ├─StreamExchange { dist: HashShard($expr1) }
           │ └─StreamProject { exprs: [t.foo, TumbleStart(t.ts, '00:05:00':Interval) as $expr1, t._row_id], output_watermarks: [[$expr1]] }
           │   └─StreamTableScan { table: t, columns: [t.foo, t.ts, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
@@ -118,7 +118,7 @@
   stream_plan: |-
     StreamMaterialize { columns: [foo, win1, win2, t._row_id(hidden), t._row_id#1(hidden)], stream_key: [t._row_id, t._row_id#1, win1], pk_columns: [t._row_id, t._row_id#1, win1], pk_conflict: NoCheck, watermark_columns: [win1, win2] }
     └─StreamProject { exprs: [(t.foo + $expr2) as $expr4, $expr1, $expr3, t._row_id, t._row_id], output_watermarks: [[$expr1, $expr3]] }
-      └─StreamHashJoin [window, append_only] { type: Inner, predicate: $expr1 = $expr3, output_watermarks: [[$expr1, $expr3]], output: [t.foo, $expr1, $expr2, $expr3, t._row_id, t._row_id] }
+      └─StreamHashJoin [window, append_only] { type: Inner, predicate: $expr1 = $expr3, conditions_to_clean_state_in_join_key: [($expr1 = $expr3)], output_watermarks: [[$expr1, $expr3]], output: [t.foo, $expr1, $expr2, $expr3, t._row_id, t._row_id] }
         ├─StreamExchange { dist: HashShard($expr1) }
         │ └─StreamProject { exprs: [t.foo, TumbleStart(t.ts, '00:05:00':Interval) as $expr1, t._row_id], output_watermarks: [[$expr1]] }
         │   └─StreamShare { id: 1 }
@@ -131,7 +131,7 @@
     StreamMaterialize { columns: [foo, win1, win2, t._row_id(hidden), t._row_id#1(hidden)], stream_key: [t._row_id, t._row_id#1, win1], pk_columns: [t._row_id, t._row_id#1, win1], pk_conflict: NoCheck, watermark_columns: [win1] }
     └─StreamEowcSort { sort_column: $expr1 }
       └─StreamProject { exprs: [(t.foo + $expr2) as $expr4, $expr1, $expr3, t._row_id, t._row_id], output_watermarks: [[$expr1, $expr3]] }
-        └─StreamHashJoin [window, append_only] { type: Inner, predicate: $expr1 = $expr3, output_watermarks: [[$expr1, $expr3]], output: [t.foo, $expr1, $expr2, $expr3, t._row_id, t._row_id] }
+        └─StreamHashJoin [window, append_only] { type: Inner, predicate: $expr1 = $expr3, conditions_to_clean_state_in_join_key: [($expr1 = $expr3)], output_watermarks: [[$expr1, $expr3]], output: [t.foo, $expr1, $expr2, $expr3, t._row_id, t._row_id] }
           ├─StreamExchange { dist: HashShard($expr1) }
           │ └─StreamProject { exprs: [t.foo, TumbleStart(t.ts, '00:05:00':Interval) as $expr1, t._row_id], output_watermarks: [[$expr1]] }
           │   └─StreamShare { id: 1 }
