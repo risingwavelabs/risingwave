@@ -1185,3 +1185,89 @@ impl MongodbCommon {
         Ok(client)
     }
 }
+
+#[serde_as]
+#[derive(Deserialize, Debug, Clone, WithOptions)]
+pub struct SqsCommon {
+    /// The URL of the SQS queue
+    #[serde(rename = "queue_url", alias = "sqs.queue_url")]
+    pub queue_url: String,
+
+    /// AWS region for the SQS queue
+    #[serde(rename = "aws.region", alias = "sqs.region")]
+    pub region: String,
+
+    /// Optional endpoint URL (for LocalStack or custom endpoints)
+    #[serde(rename = "endpoint", alias = "sqs.endpoint")]
+    pub endpoint: Option<String>,
+
+    /// AWS access key ID
+    #[serde(
+        rename = "aws.credentials.access_key_id",
+        alias = "sqs.credentials.access"
+    )]
+    pub credentials_access_key: Option<String>,
+
+    /// AWS secret access key
+    #[serde(
+        rename = "aws.credentials.secret_access_key",
+        alias = "sqs.credentials.secret"
+    )]
+    pub credentials_secret_access_key: Option<String>,
+
+    /// AWS session token (for temporary credentials)
+    #[serde(
+        rename = "aws.credentials.session_token",
+        alias = "sqs.credentials.session_token"
+    )]
+    pub session_token: Option<String>,
+
+    /// IAM role ARN for assume role
+    #[serde(rename = "aws.credentials.role.arn", alias = "sqs.assumerole.arn")]
+    pub assume_role_arn: Option<String>,
+
+    /// External ID for assume role
+    #[serde(
+        rename = "aws.credentials.role.external_id",
+        alias = "sqs.assumerole.external_id"
+    )]
+    pub assume_role_external_id: Option<String>,
+
+    /// Message group ID for FIFO queues
+    /// Required for FIFO queues to ensure message ordering within the group
+    #[serde(rename = "message_group_id", alias = "sqs.message_group_id")]
+    pub message_group_id: Option<String>,
+}
+
+impl EnforceSecret for SqsCommon {
+    const ENFORCE_SECRET_PROPERTIES: Set<&'static str> = phf_set! {
+        "sqs.credentials.access",
+        "aws.credentials.access_key_id",
+        "sqs.credentials.secret",
+        "aws.credentials.secret_access_key",
+        "sqs.credentials.session_token",
+        "aws.credentials.session_token",
+    };
+}
+
+impl SqsCommon {
+    pub(crate) async fn build_client(&self) -> ConnectorResult<aws_sdk_sqs::Client> {
+        let config = AwsAuthProps {
+            region: Some(self.region.clone()),
+            endpoint: self.endpoint.clone(),
+            access_key: self.credentials_access_key.clone(),
+            secret_key: self.credentials_secret_access_key.clone(),
+            session_token: self.session_token.clone(),
+            arn: self.assume_role_arn.clone(),
+            external_id: self.assume_role_external_id.clone(),
+            profile: Default::default(),
+            msk_signer_timeout_sec: Default::default(),
+        };
+        let aws_config = config.build_config().await?;
+        let mut builder = aws_sdk_sqs::config::Builder::from(&aws_config);
+        if let Some(endpoint) = &config.endpoint {
+            builder = builder.endpoint_url(endpoint);
+        }
+        Ok(aws_sdk_sqs::Client::from_conf(builder.build()))
+    }
+}

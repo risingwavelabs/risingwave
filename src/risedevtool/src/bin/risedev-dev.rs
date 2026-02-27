@@ -30,8 +30,8 @@ use risedev::util::{begin_spin, complete_spin, fail_spin};
 use risedev::{
     CompactorService, ComputeNodeService, ConfigExpander, ConfigureTmuxTask, DummyService,
     EnsureStopService, ExecuteContext, FrontendService, GrafanaService, KafkaService,
-    LakekeeperService, MetaNodeService, MinioService, MoatService, MySqlService, PostgresService,
-    PrometheusService, PubsubService, PulsarService, RISEDEV_NAME, RedisService,
+    LakekeeperService, LocalStackService, MetaNodeService, MinioService, MoatService, MySqlService,
+    PostgresService, PrometheusService, PubsubService, PulsarService, RISEDEV_NAME, RedisService,
     SchemaRegistryService, ServiceConfig, SqlServerService, SqliteConfig, Task, TaskGroup,
     TempoService, generate_risedev_env, preflight_check,
 };
@@ -374,6 +374,14 @@ fn task_main(
                     task.execute(&mut ctx)?;
                     ctx.pb
                         .set_message(format!("moat http://{}:{}/", c.address, c.port));
+                }
+                ServiceConfig::LocalStack(c) => {
+                    LocalStackService::new(c.clone()).execute(&mut ctx)?;
+                    let mut task =
+                        risedev::TcpReadyCheckTask::new(c.address.clone(), c.port, c.user_managed)?;
+                    task.execute(&mut ctx)?;
+                    ctx.pb
+                        .set_message(format!("localstack http://{}:{}/", c.address, c.port));
                 }
             }
 

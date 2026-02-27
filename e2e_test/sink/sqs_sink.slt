@@ -1,0 +1,29 @@
+statement ok
+CREATE TABLE t_sqs (
+  id int,
+  name varchar
+);
+
+statement error missing field `queue_url`
+create sink sink_sqs_error1 from t_sqs with (
+  connector = 'sqs',
+  aws.region = 'us-east-1'
+)
+format plain encode json;
+
+statement error missing field `aws.region`
+create sink sink_sqs_error2 from t_sqs with (
+  connector = 'sqs',
+  sqs.queue_url = 'https://sqs.us-east-1.amazonaws.com/123456789012/my-queue'
+)
+format plain encode json;
+
+statement error missing FORMAT
+create sink sink_sqs_error3 from t_sqs with (
+  connector = 'sqs',
+  sqs.queue_url = 'https://sqs.us-east-1.amazonaws.com/123456789012/my-queue',
+  sqs.region = 'us-east-1'
+);
+
+statement ok
+DROP TABLE t_sqs;
