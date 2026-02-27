@@ -3,10 +3,10 @@
 Here is a gallery of demos that present how to use RisingWave alongwith the ecosystem tools.
 
 - `ad-click/`: [Build and Maintain Real-time Applications Faster and Easier with Redpanda and RisingWave](https://singularity-data.com/blog/build-with-Redpanda-and-RisingWave)
-- `ad-ctr`: [Perform real-time ad performance analysis](https://docs.risingwave.com/demos/overview)
-- `cdn-metrics`: [Server performance anomaly detection](https://docs.risingwave.com/demos/overview)
-- `clickstream`: [Clickstream analysis](https://docs.risingwave.com/demos/overview)
-- `twitter`: [Fast Twitter events processing](https://docs.risingwave.com/demos/overview)
+- `ad-ctr`: Perform real-time ad performance analysis
+- `cdn-metrics`: Server performance anomaly detection
+- `clickstream`: Clickstream analysis
+- `twitter`: Fast Twitter events processing
 - `twitter-pulsar`: [Tutorial: Pulsar + RisingWave for Fast Twitter Event Processing](https://www.risingwave.com/blog/tutorial-pulsar-risingwave-for-fast-twitter-events-processing/)
 - `live-stream`: [Live stream metrics analysis](https://docs.risingwave.com/demos/live-stream-metrics-analysis)
 
