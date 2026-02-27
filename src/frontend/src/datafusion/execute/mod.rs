@@ -46,6 +46,8 @@ use crate::utils::DropGuard;
 mod memory_ctx;
 mod query_planner;
 
+pub(crate) use memory_ctx::create_df_spillable_budget_ctx;
+
 #[derive(Clone)]
 pub struct DfBatchQueryPlanResult {
     pub(crate) plan: Arc<LogicalPlan>,
@@ -84,7 +86,10 @@ pub fn try_gen_datafusion_plan(
 
 pub fn create_datafusion_context(session: &SessionImpl) -> RwResult<DFSessionContext> {
     let df_config = create_config(session);
-    let memory_pool = Arc::new(RwMemoryPool::new(session.env().mem_context()));
+    let memory_pool = Arc::new(RwMemoryPool::new(
+        session.env().mem_context(),
+        session.env().df_spillable_budget_ctx(),
+    ));
     let runtime = RuntimeEnvBuilder::new()
         .with_memory_pool(memory_pool)
         .build_arc()?;
