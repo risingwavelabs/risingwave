@@ -141,6 +141,7 @@ impl PostgresQueryExecutor {
             &self.params.database,
             &self.params.ssl_mode,
             &self.params.ssl_root_cert,
+            None,
         )
         .await?;
 

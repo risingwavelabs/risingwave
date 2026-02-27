@@ -246,6 +246,7 @@ impl PostgresExternalTableReader {
             &config.database,
             &config.ssl_mode,
             &config.ssl_root_cert,
+            None, // No TCP keepalive for CDC source
         )
         .await?;
         let field_names = rw_schema

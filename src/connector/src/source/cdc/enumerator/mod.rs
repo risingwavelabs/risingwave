@@ -233,6 +233,7 @@ impl<T: CdcSourceTypeTrait> DebeziumSplitEnumerator<T> {
             database,
             &ssl_mode,
             &ssl_root_cert,
+            None, // No TCP keepalive for CDC enumerator
         )
         .await
         .context("Failed to create PostgreSQL client")?;
