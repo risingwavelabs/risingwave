@@ -1935,7 +1935,7 @@ dependencies = [
  "bitflags 2.10.0",
  "cexpr",
  "clang-sys",
- "itertools 0.13.0",
+ "itertools 0.10.5",
  "log",
  "prettyplease 0.2.15",
  "proc-macro2",
@@ -10034,7 +10034,7 @@ version = "0.13.4"
 source = "git+https://github.com/risingwavelabs/prost.git?rev=d7baf5f4d4c12d82987bd86a91a8663005881bdd#d7baf5f4d4c12d82987bd86a91a8663005881bdd"
 dependencies = [
  "heck 0.5.0",
- "itertools 0.13.0",
+ "itertools 0.10.5",
  "log",
  "multimap 0.10.0",
  "once_cell",
@@ -10066,7 +10066,7 @@ version = "0.13.4"
 source = "git+https://github.com/risingwavelabs/prost.git?rev=d7baf5f4d4c12d82987bd86a91a8663005881bdd#d7baf5f4d4c12d82987bd86a91a8663005881bdd"
 dependencies = [
  "anyhow",
- "itertools 0.13.0",
+ "itertools 0.10.5",
  "proc-macro2",
  "quote",
  "syn 2.0.111",
@@ -10096,15 +10096,25 @@ dependencies = [
 
 [[package]]
 name = "prost-reflect"
-version = "0.15.1"
+version = "0.15.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "134584672a2f89128da60df70d4b9d2eddfeb3ab00ab9c854ee7ee360ea7a7fc"
+checksum = "37587d5a8a1b3dc9863403d084fc2254b91ab75a702207098837950767e2260b"
 dependencies = [
- "base64 0.22.1",
  "logos",
  "miette",
  "prost 0.13.4",
  "prost-types 0.13.4",
+]
+
+[[package]]
+name = "prost-reflect"
+version = "0.16.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b89455ef41ed200cafc47c76c552ee7792370ac420497e551f16123a9135f76e"
+dependencies = [
+ "base64 0.22.1",
+ "prost 0.14.1",
+ "prost-types 0.14.1",
  "serde",
  "serde-value",
 ]
@@ -10164,7 +10174,7 @@ dependencies = [
  "bytes",
  "miette",
  "prost 0.13.4",
- "prost-reflect",
+ "prost-reflect 0.15.3",
  "prost-types 0.13.4",
  "protox-parse",
  "thiserror 2.0.17",
@@ -11651,7 +11661,7 @@ dependencies = [
  "prost 0.11.9",
  "prost 0.13.4",
  "prost 0.14.1",
- "prost-reflect",
+ "prost-reflect 0.16.3",
  "prost-types 0.13.4",
  "prost-types 0.14.1",
  "pulsar",
@@ -11726,7 +11736,7 @@ dependencies = [
  "num-bigint",
  "prost 0.13.4",
  "prost-build 0.13.4",
- "prost-reflect",
+ "prost-reflect 0.16.3",
  "prost-types 0.13.4",
  "protox",
  "reqwest 0.12.25",
@@ -11920,7 +11930,7 @@ dependencies = [
  "sql-json-path",
  "thiserror 2.0.17",
  "thiserror-ext",
- "tonic 0.12.3",
+ "tonic 0.14.2",
  "tracing",
  "workspace-hack",
  "zstd 0.13.3",

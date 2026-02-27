@@ -124,7 +124,7 @@ prometheus = { version = "0.14", features = ["process"] }
 prost = { workspace = true, features = ["no-recursion-limit"] }
 prost-011 = { package = "prost", version = "0.11" }
 prost-014 = { package = "prost", version = "0.14" }
-prost-reflect = { version = "0.15", features = ["serde"] }
+prost-reflect = { version = "0.16", features = ["serde"] }
 prost-types = "0.13"
 prost-types-014 = { package = "prost-types", version = "0.14" }
 pulsar = { version = "6.3", default-features = false, features = [
