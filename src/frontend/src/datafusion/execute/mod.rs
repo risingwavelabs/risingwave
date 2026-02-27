@@ -47,6 +47,7 @@ use crate::utils::DropGuard;
 mod memory_ctx;
 mod query_planner;
 
+pub(crate) use memory_ctx::create_df_spillable_budget_ctx;
 const DF_MANAGED_SPILL_DIR: &str = "df_batch_spill/";
 
 #[derive(Clone)]
@@ -87,7 +88,10 @@ pub fn try_gen_datafusion_plan(
 
 pub fn create_datafusion_context(session: &SessionImpl) -> RwResult<DFSessionContext> {
     let df_config = create_config(session);
-    let memory_pool = Arc::new(RwMemoryPool::new(session.env().mem_context()));
+    let memory_pool = Arc::new(RwMemoryPool::new(
+        session.env().mem_context(),
+        session.env().df_spillable_budget_ctx(),
+    ));
     let temp_path = batch_spill_base_dir().join(DF_MANAGED_SPILL_DIR);
     let runtime = RuntimeEnvBuilder::new()
         .with_memory_pool(memory_pool)
