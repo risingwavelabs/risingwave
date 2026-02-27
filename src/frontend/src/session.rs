@@ -191,6 +191,7 @@ pub(crate) struct FrontendEnv {
     /// Memory context used for batch executors in frontend.
     mem_context: MemoryContext,
 
+    #[cfg(feature = "datafusion")]
     /// Shared budget context for **DataFusion** spillable operators.
     /// Created by [`crate::datafusion::execute::memory_ctx::create_df_spillable_budget_ctx`];
     /// caps total spillable usage so unspillable operators always have headroom.
@@ -289,6 +290,7 @@ impl FrontendEnv {
             creating_streaming_job_tracker: Arc::new(creating_streaming_tracker),
             compute_runtime,
             mem_context: MemoryContext::none(),
+            #[cfg(feature = "datafusion")]
             df_spillable_budget_ctx: MemoryContext::none(),
             serverless_backfill_controller_addr: Default::default(),
             prometheus_client: None,
@@ -513,6 +515,7 @@ impl FrontendEnv {
             frontend_metrics.batch_total_mem.clone(),
             batch_memory_limit as u64,
         );
+        #[cfg(feature = "datafusion")]
         let df_spillable_budget_ctx =
             crate::datafusion::create_df_spillable_budget_ctx(&mem_context);
 
@@ -574,6 +577,7 @@ impl FrontendEnv {
                 creating_streaming_job_tracker,
                 compute_runtime,
                 mem_context,
+                #[cfg(feature = "datafusion")]
                 df_spillable_budget_ctx,
                 prometheus_client,
                 prometheus_selector,
@@ -719,6 +723,7 @@ impl FrontendEnv {
         self.mem_context.clone()
     }
 
+    #[cfg(feature = "datafusion")]
     pub fn df_spillable_budget_ctx(&self) -> MemoryContext {
         self.df_spillable_budget_ctx.clone()
     }
