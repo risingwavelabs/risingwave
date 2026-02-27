@@ -25,6 +25,16 @@ def _fragment_peak_rate_per_actor_with_id_at_step(per_actor_expr: str) -> str:
         f"'id', '$1', 'fragment_id', '(.+)')"
     )
 
+def _kv_log_store_buffer_usage_by_fragment_expr() -> str:
+    return (
+        f"sum({metric('kv_log_store_buffer_memory_bytes')}"
+        f"  * on(actor_id) group_left(fragment_id) {metric('actor_info')})"
+        f" by (fragment_id)"
+    )
+
+def _sync_kv_log_store_buffer_usage_by_fragment_expr() -> str:
+    return f"sum({metric('sync_kv_log_store_buffer_memory_bytes')}) by (fragment_id)"
+
 @section
 def _(outer_panels: Panels):
     # The actor_id can be masked due to metrics level settings.
@@ -51,6 +61,37 @@ def _(outer_panels: Panels):
     )
     scheduled_duration_expr = (
         f"{scheduled_duration_rate_expr} / on(fragment_id) {actor_count_expr}"
+    )
+    zero_for_all_fragments_expr = f"0 * sum({metric('stream_actor_count')}) by (fragment_id)"
+    def _coalesce_fragment(expr: str) -> str:
+        return f"(({expr}) or on(fragment_id) {zero_for_all_fragments_expr})"
+
+    executor_cache_usage_expr = (
+        f"sum("
+        f"  ({metric('stream_memory_usage')})"
+        f"  * on (table_id) group_left(fragment_id)"
+        f"    {metric('table_info')}"
+        f") by (fragment_id)"
+    )
+    shared_buffer_usage_expr = (
+        f"sum({metric('state_store_per_table_imm_size')}) by (fragment_id)"
+    )
+    kv_log_store_buffer_by_fragment_usage_expr = (
+        _kv_log_store_buffer_usage_by_fragment_expr()
+    )
+    sync_kv_log_store_buffer_by_fragment_usage_expr = (
+        _sync_kv_log_store_buffer_usage_by_fragment_expr()
+    )
+    total_memory_usage_expr = " + ".join(
+        map(
+            _coalesce_fragment,
+            [
+                executor_cache_usage_expr,
+                shared_buffer_usage_expr,
+                kv_log_store_buffer_by_fragment_usage_expr,
+                sync_kv_log_store_buffer_by_fragment_usage_expr,
+            ],
+        )
     )
     return [
         outer_panels.row_collapsed(
@@ -278,6 +319,37 @@ def _(outer_panels: Panels):
                         panels.target_hidden(
                             f"rate({metric('stream_actor_out_record_cnt', actor_level_filter)}[$__rate_interval])",
                             "actor {{actor_id}}",
+                        ),
+                    ],
+                ),
+                panels.subheader("Memory Usage by Fragment"),
+                panels.timeseries_bytes(
+                    "Total Memory Usage",
+                    "Sum of executor cache memory, shared buffer imm size, and log store buffer memory",
+                    [
+                        panels.target(
+                            total_memory_usage_expr,
+                            "fragment {{fragment_id}}",
+                        ),
+                    ],
+                ),
+                panels.timeseries_bytes(
+                    "Executor Cache Memory Usage",
+                    "",
+                    [
+                        panels.target(
+                            executor_cache_usage_expr,
+                            "fragment {{fragment_id}}",
+                        ),
+                    ],
+                ),
+                panels.timeseries_bytes(
+                    "Shared Buffer Memory Usage",
+                    "",
+                    [
+                        panels.target(
+                            shared_buffer_usage_expr,
+                            "fragment {{fragment_id}}",
                         ),
                     ],
                 ),

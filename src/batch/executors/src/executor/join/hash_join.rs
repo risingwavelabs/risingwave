@@ -283,7 +283,7 @@ impl JoinSpillManager {
         spill_metrics: Arc<BatchSpillMetrics>,
     ) -> Result<Self> {
         let suffix_uuid = uuid::Uuid::new_v4();
-        let dir = format!("/{}-{}/", join_identity, suffix_uuid);
+        let dir = format!("{}-{}/", join_identity, suffix_uuid);
         let op = SpillOp::create(dir, spill_backend)?;
         let probe_side_writers = Vec::with_capacity(partition_num);
         let build_side_writers = Vec::with_capacity(partition_num);

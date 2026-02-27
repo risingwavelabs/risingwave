@@ -43,7 +43,7 @@ use risingwave_pb::catalog::{
     PbComment, PbDatabase, PbFunction, PbIndex, PbSchema, PbSink, PbSource, PbStreamJobStatus,
     PbSubscription, PbTable, PbView, Table,
 };
-use risingwave_pb::common::WorkerNode;
+use risingwave_pb::common::{PbObjectType, WorkerNode};
 use risingwave_pb::ddl_service::alter_owner_request::Object;
 use risingwave_pb::ddl_service::create_iceberg_table_request::{PbSinkJobInfo, PbTableJobInfo};
 use risingwave_pb::ddl_service::{
@@ -65,8 +65,9 @@ use risingwave_pb::meta::list_refresh_table_states_response::RefreshTableState;
 use risingwave_pb::meta::list_streaming_job_states_response::StreamingJobState;
 use risingwave_pb::meta::list_table_fragments_response::TableFragmentInfo;
 use risingwave_pb::meta::{
-    EventLog, FragmentDistribution, PbTableParallelism, PbThrottleTarget, RecoveryStatus,
-    RefreshRequest, RefreshResponse, SystemParams, list_sink_log_store_tables_response,
+    EventLog, FragmentDistribution, ObjectDependency as PbObjectDependency, PbTableParallelism,
+    PbThrottleTarget, RecoveryStatus, RefreshRequest, RefreshResponse, SystemParams,
+    list_sink_log_store_tables_response,
 };
 use risingwave_pb::secret::PbSecretRef;
 use risingwave_pb::stream_plan::StreamFragmentGraph;
@@ -298,7 +299,7 @@ impl CatalogWriter for MockCatalogWriter {
         &self,
         mut table: PbTable,
         _graph: StreamFragmentGraph,
-        _dependencies: HashSet<ObjectId>,
+        dependencies: HashSet<ObjectId>,
         _resource_type: streaming_job_resource_type::ResourceType,
         _if_not_exists: bool,
     ) -> Result<()> {
@@ -307,6 +308,7 @@ impl CatalogWriter for MockCatalogWriter {
         table.maybe_vnode_count = VnodeCount::for_test().to_protobuf();
         self.catalog.write().create_table(&table);
         self.add_table_or_source_id(table.id.as_raw_id(), table.schema_id, table.database_id);
+        self.insert_object_dependencies(table.id.as_object_id(), dependencies);
         self.hummock_snapshot_manager.add_table_for_test(table.id);
         Ok(())
     }
@@ -322,10 +324,11 @@ impl CatalogWriter for MockCatalogWriter {
         Ok(())
     }
 
-    async fn create_view(&self, mut view: PbView, _dependencies: HashSet<ObjectId>) -> Result<()> {
+    async fn create_view(&self, mut view: PbView, dependencies: HashSet<ObjectId>) -> Result<()> {
         view.id = self.gen_id();
         self.catalog.write().create_view(&view);
         self.add_table_or_source_id(view.id.as_raw_id(), view.schema_id, view.database_id);
+        self.insert_object_dependencies(view.id.as_object_id(), dependencies);
         Ok(())
     }
 
@@ -336,7 +339,7 @@ impl CatalogWriter for MockCatalogWriter {
         graph: StreamFragmentGraph,
         _job_type: PbTableJobType,
         if_not_exists: bool,
-        _dependencies: HashSet<ObjectId>,
+        dependencies: HashSet<ObjectId>,
     ) -> Result<()> {
         if let Some(source) = source {
             let source_id = self.create_source_inner(source)?;
@@ -345,7 +348,7 @@ impl CatalogWriter for MockCatalogWriter {
         self.create_materialized_view(
             table,
             graph,
-            HashSet::new(),
+            dependencies,
             streaming_job_resource_type::ResourceType::Regular(true),
             if_not_exists,
         )
@@ -384,10 +387,12 @@ impl CatalogWriter for MockCatalogWriter {
         &self,
         sink: PbSink,
         graph: StreamFragmentGraph,
-        _dependencies: HashSet<ObjectId>,
+        dependencies: HashSet<ObjectId>,
         _if_not_exists: bool,
     ) -> Result<()> {
-        self.create_sink_inner(sink, graph)
+        let sink_id = self.create_sink_inner(sink, graph)?;
+        self.insert_object_dependencies(sink_id.as_object_id(), dependencies);
+        Ok(())
     }
 
     async fn create_subscription(&self, subscription: PbSubscription) -> Result<()> {
@@ -695,6 +700,15 @@ impl CatalogWriter for MockCatalogWriter {
         todo!()
     }
 
+    async fn alter_backfill_parallelism(
+        &self,
+        _job_id: JobId,
+        _parallelism: Option<PbTableParallelism>,
+        _deferred: bool,
+    ) -> Result<()> {
+        todo!()
+    }
+
     async fn alter_config(
         &self,
         _job_id: JobId,
@@ -900,12 +914,12 @@ impl MockCatalogWriter {
         Ok(source.id)
     }
 
-    fn create_sink_inner(&self, mut sink: PbSink, _graph: StreamFragmentGraph) -> Result<()> {
+    fn create_sink_inner(&self, mut sink: PbSink, _graph: StreamFragmentGraph) -> Result<SinkId> {
         sink.id = self.gen_id();
         sink.stream_job_status = PbStreamJobStatus::Created as _;
         self.catalog.write().create_sink(&sink);
         self.add_table_or_sink_id(sink.id.as_raw_id(), sink.schema_id, sink.database_id);
-        Ok(())
+        Ok(sink.id)
     }
 
     fn create_subscription_inner(&self, mut subscription: PbSubscription) -> Result<()> {
@@ -925,6 +939,48 @@ impl MockCatalogWriter {
             .read()
             .get(&schema_id)
             .unwrap()
+    }
+
+    fn get_object_type(&self, object_id: ObjectId) -> PbObjectType {
+        let catalog = self.catalog.read();
+        for database in catalog.iter_databases() {
+            for schema in database.iter_schemas() {
+                if let Some(table) = schema.get_created_table_by_id(object_id.as_table_id()) {
+                    return if table.is_mview() {
+                        PbObjectType::Mview
+                    } else {
+                        PbObjectType::Table
+                    };
+                }
+                if schema.get_source_by_id(object_id.as_source_id()).is_some() {
+                    return PbObjectType::Source;
+                }
+                if schema.get_view_by_id(object_id.as_view_id()).is_some() {
+                    return PbObjectType::View;
+                }
+                if schema.get_index_by_id(object_id.as_index_id()).is_some() {
+                    return PbObjectType::Index;
+                }
+            }
+        }
+        PbObjectType::Unspecified
+    }
+
+    fn insert_object_dependencies(&self, object_id: ObjectId, dependencies: HashSet<ObjectId>) {
+        if dependencies.is_empty() {
+            return;
+        }
+        let dependencies = dependencies
+            .into_iter()
+            .map(|referenced_object_id| PbObjectDependency {
+                object_id,
+                referenced_object_id,
+                referenced_object_type: self.get_object_type(referenced_object_id) as i32,
+            })
+            .collect();
+        self.catalog
+            .write()
+            .insert_object_dependencies(dependencies);
     }
 }
 

@@ -31,12 +31,14 @@ mod backfill_order_control;
 pub mod cdc_progress;
 mod checkpoint;
 mod command;
+pub use command::RescheduleContext;
 mod complete_task;
 pub(super) mod context;
 mod edge_builder;
 mod info;
 mod manager;
 mod notifier;
+mod partial_graph;
 mod progress;
 mod rpc;
 mod schedule;
@@ -52,7 +54,7 @@ use risingwave_pb::ddl_service::PbBackfillType;
 
 pub use self::command::{
     BarrierKind, Command, CreateStreamingJobCommandInfo, CreateStreamingJobType,
-    ReplaceStreamJobPlan, Reschedule, ResumeBackfillTarget, SnapshotBackfillInfo,
+    ReplaceStreamJobPlan, Reschedule, ReschedulePlan, ResumeBackfillTarget, SnapshotBackfillInfo,
 };
 pub(crate) use self::info::{SharedActorInfos, SharedFragmentInfo};
 pub use self::manager::{BarrierManagerRef, GlobalBarrierManager};

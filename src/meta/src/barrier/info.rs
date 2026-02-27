@@ -23,6 +23,7 @@ use parking_lot::lock_api::RwLockReadGuard;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{DatabaseId, FragmentTypeFlag, FragmentTypeMask, TableId};
 use risingwave_common::id::JobId;
+use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::stream_graph_visitor::visit_stream_node_mut;
 use risingwave_connector::source::{SplitImpl, SplitMetaData};
 use risingwave_meta_model::WorkerId;
@@ -371,6 +372,13 @@ impl BarrierInfo {
     pub(super) fn curr_epoch(&self) -> u64 {
         self.curr_epoch.value().0
     }
+
+    pub(super) fn epoch(&self) -> EpochPair {
+        EpochPair {
+            curr: self.curr_epoch(),
+            prev: self.prev_epoch(),
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -478,6 +486,10 @@ impl InflightDatabaseInfo {
 
     pub fn contains_job(&self, job_id: JobId) -> bool {
         self.jobs.contains_key(&job_id)
+    }
+
+    pub(super) fn job_id_by_fragment(&self, fragment_id: FragmentId) -> Option<JobId> {
+        self.fragment_location.get(&fragment_id).copied()
     }
 
     pub fn fragment(&self, fragment_id: FragmentId) -> &InflightFragmentInfo {
@@ -639,13 +651,13 @@ impl InflightDatabaseInfo {
                 }
             }
         }
-        if let PostCollectCommand::RescheduleFragment { reschedules, .. } = command {
+        if let PostCollectCommand::Reschedule { reschedules, .. } = command {
             // During reschedule we expect fragments to be rebuilt with new actors and no vnode bitmap update.
             debug_assert!(
                 reschedules
                     .values()
                     .all(|reschedule| reschedule.vnode_bitmap_updates.is_empty()),
-                "RescheduleFragment should not carry vnode bitmap updates when actors are rebuilt"
+                "Reschedule should not carry vnode bitmap updates when actors are rebuilt"
             );
 
             // Collect jobs that own the rescheduled fragments; de-duplicate via HashSet.
@@ -1113,7 +1125,7 @@ impl InflightDatabaseInfo {
                 | Command::Pause
                 | Command::Resume
                 | Command::DropStreamingJobs { .. }
-                | Command::RescheduleFragment { .. }
+                | Command::RescheduleIntent { .. }
                 | Command::SourceChangeSplit { .. }
                 | Command::Throttle { .. }
                 | Command::CreateSubscription { .. }

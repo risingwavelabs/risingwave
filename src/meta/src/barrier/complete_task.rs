@@ -35,8 +35,8 @@ use crate::barrier::command::CommandContext;
 use crate::barrier::context::{CreateSnapshotBackfillJobCommandInfo, GlobalBarrierWorkerContext};
 use crate::barrier::info::BarrierInfo;
 use crate::barrier::notifier::Notifier;
+use crate::barrier::partial_graph::PartialGraphManager;
 use crate::barrier::progress::TrackingJob;
-use crate::barrier::rpc::ControlStreamManager;
 use crate::barrier::schedule::PeriodicBarriers;
 use crate::hummock::CommitEpochInfo;
 use crate::manager::MetaSrvEnv;
@@ -245,7 +245,7 @@ impl CompletingTask {
         &'a mut self,
         periodic_barriers: &mut PeriodicBarriers,
         checkpoint_control: &mut CheckpointControl,
-        control_stream_manager: &mut ControlStreamManager,
+        partial_graph_manager: &mut PartialGraphManager,
         context: &Arc<impl GlobalBarrierWorkerContext>,
         env: &MetaSrvEnv,
     ) -> impl Future<Output = MetaResult<BarrierCompleteOutput>> + 'a {
@@ -253,7 +253,7 @@ impl CompletingTask {
         // it has been collected.
         if let CompletingTask::None = self
             && let Some(task) = checkpoint_control
-                .next_complete_barrier_task(Some((periodic_barriers, control_stream_manager)))
+                .next_complete_barrier_task(Some((periodic_barriers, partial_graph_manager)))
         {
             {
                 let epochs_to_ack = task.epochs_to_ack();

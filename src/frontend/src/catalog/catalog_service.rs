@@ -234,6 +234,13 @@ pub trait CatalogWriter: Send + Sync {
         deferred: bool,
     ) -> Result<()>;
 
+    async fn alter_backfill_parallelism(
+        &self,
+        job_id: JobId,
+        parallelism: Option<PbTableParallelism>,
+        deferred: bool,
+    ) -> Result<()>;
+
     async fn alter_config(
         &self,
         job_id: JobId,
@@ -638,6 +645,18 @@ impl CatalogWriter for CatalogWriterImpl {
     ) -> Result<()> {
         self.meta_client
             .alter_parallelism(job_id, parallelism, deferred)
+            .await?;
+        Ok(())
+    }
+
+    async fn alter_backfill_parallelism(
+        &self,
+        job_id: JobId,
+        parallelism: Option<PbTableParallelism>,
+        deferred: bool,
+    ) -> Result<()> {
+        self.meta_client
+            .alter_backfill_parallelism(job_id, parallelism, deferred)
             .await?;
         Ok(())
     }

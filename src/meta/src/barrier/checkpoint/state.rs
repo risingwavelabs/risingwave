@@ -13,9 +13,11 @@
 // limitations under the License.
 
 use std::assert_matches::assert_matches;
+use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
 use std::mem::take;
 
+use risingwave_common::bail;
 use risingwave_common::catalog::TableId;
 use risingwave_common::id::JobId;
 use risingwave_common::util::epoch::Epoch;
@@ -37,8 +39,8 @@ use crate::barrier::info::{
     BarrierInfo, CreateStreamingJobStatus, InflightStreamingJobInfo, SubscriberType,
 };
 use crate::barrier::notifier::Notifier;
-use crate::barrier::rpc::{ControlStreamManager, to_partial_graph_id};
-use crate::barrier::utils::NodeToCollect;
+use crate::barrier::partial_graph::PartialGraphManager;
+use crate::barrier::rpc::to_partial_graph_id;
 use crate::barrier::{BarrierKind, Command, CreateStreamingJobType, TracedEpoch};
 use crate::controller::fragment::InflightFragmentInfo;
 use crate::stream::{GlobalActorIdGen, fill_snapshot_backfill_epoch};
@@ -128,7 +130,6 @@ pub(super) struct ApplyCommandInfo {
     pub mv_subscription_max_retention: HashMap<TableId, u64>,
     pub table_ids_to_commit: HashSet<TableId>,
     pub jobs_to_wait: HashSet<JobId>,
-    pub node_to_collect: NodeToCollect,
     pub command: PostCollectCommand,
 }
 
@@ -140,12 +141,32 @@ impl DatabaseCheckpointControl {
         mut command: Option<Command>,
         notifiers: &mut Vec<Notifier>,
         barrier_info: &BarrierInfo,
-        control_stream_manager: &mut ControlStreamManager,
+        partial_graph_manager: &mut PartialGraphManager,
         hummock_version_stats: &HummockVersionStats,
     ) -> MetaResult<ApplyCommandInfo> {
-        let mut edges = self
-            .database_info
-            .build_edge(command.as_ref(), &*control_stream_manager);
+        debug_assert!(
+            !matches!(
+                command,
+                Some(Command::RescheduleIntent {
+                    reschedule_plan: None,
+                    ..
+                })
+            ),
+            "reschedule intent must be resolved before apply"
+        );
+        if matches!(
+            command,
+            Some(Command::RescheduleIntent {
+                reschedule_plan: None,
+                ..
+            })
+        ) {
+            bail!("reschedule intent must be resolved before apply");
+        }
+        let mut edges = self.database_info.build_edge(
+            command.as_ref(),
+            partial_graph_manager.control_stream_manager(),
+        );
 
         // Insert newly added snapshot backfill job
         if let &mut Some(Command::CreateStreamingJob {
@@ -192,7 +213,13 @@ impl DatabaseCheckpointControl {
                         .cloned()
                         .collect();
 
+                    let Entry::Vacant(entry) = self.creating_streaming_job_controls.entry(job_id)
+                    else {
+                        panic!("duplicated creating snapshot backfill job {job_id}");
+                    };
+
                     let job = CreatingStreamingJobControl::new(
+                        entry,
                         CreateSnapshotBackfillJobCommandInfo {
                             info: info.clone(),
                             snapshot_backfill_info: snapshot_backfill_info.clone(),
@@ -203,15 +230,13 @@ impl DatabaseCheckpointControl {
                         snapshot_backfill_upstream_tables,
                         snapshot_epoch,
                         hummock_version_stats,
-                        control_stream_manager,
+                        partial_graph_manager,
                         edges.as_mut().expect("should exist"),
                     )?;
 
                     self.database_info
                         .shared_actor_infos
                         .upsert(self.database_id, job.fragment_infos_with_job_id());
-
-                    self.creating_streaming_job_controls.insert(job_id, job);
                 }
             }
         }
@@ -264,7 +289,11 @@ impl DatabaseCheckpointControl {
 
         let mut table_ids_to_commit: HashSet<_> = self.database_info.existing_table_ids().collect();
         let mut actors_to_create = command.as_ref().and_then(|command| {
-            command.actors_to_create(&self.database_info, &mut edges, control_stream_manager)
+            command.actors_to_create(
+                &self.database_info,
+                &mut edges,
+                partial_graph_manager.control_stream_manager(),
+            )
         });
         let mut node_actors =
             InflightFragmentInfo::actor_ids_to_collect(self.database_info.fragment_infos());
@@ -285,7 +314,7 @@ impl DatabaseCheckpointControl {
             c.to_mutation(
                 prev_is_paused,
                 &mut edges,
-                control_stream_manager,
+                partial_graph_manager.control_stream_manager(),
                 &mut self.database_info,
             )?
         } else {
@@ -301,7 +330,7 @@ impl DatabaseCheckpointControl {
                     for (&job_id, creating_job) in &mut self.creating_streaming_job_controls {
                         if creating_job.should_merge_to_upstream() {
                             let info = creating_job
-                                .start_consume_upstream(control_stream_manager, barrier_info)?;
+                                .start_consume_upstream(partial_graph_manager, barrier_info)?;
                             finished_snapshot_backfill_job_info
                                 .try_insert(job_id, info)
                                 .expect("non-duplicated");
@@ -347,7 +376,10 @@ impl DatabaseCheckpointControl {
                             .map(|fragment| fragment.actors.len() as u64)
                             .sum();
                         let id_gen = GlobalActorIdGen::new(
-                            control_stream_manager.env.actor_id_generator(),
+                            partial_graph_manager
+                                .control_stream_manager()
+                                .env
+                                .actor_id_generator(),
                             actor_len,
                         );
                         let mut next_local_actor_id = 0;
@@ -414,7 +446,7 @@ impl DatabaseCheckpointControl {
                                 })
                                 .chain(new_fragment_info.values())
                                 .map(|info| (info, partial_graph_id)),
-                            control_stream_manager,
+                            partial_graph_manager.control_stream_manager(),
                         );
                         edge_builder.add_relations(&info.upstream_fragment_downstreams);
                         edge_builder.add_relations(&info.downstreams);
@@ -556,16 +588,15 @@ impl DatabaseCheckpointControl {
                     None
                 };
                 creating_job.on_new_upstream_barrier(
-                    control_stream_manager,
+                    partial_graph_manager,
                     barrier_info,
                     throttle_mutation,
                 )?;
             }
         }
 
-        let node_to_collect = control_stream_manager.inject_barrier(
-            self.database_id,
-            None,
+        partial_graph_manager.inject_barrier(
+            to_partial_graph_id(self.database_id, None),
             mutation,
             barrier_info,
             &node_actors,
@@ -578,7 +609,6 @@ impl DatabaseCheckpointControl {
             mv_subscription_max_retention: self.database_info.max_subscription_retention(),
             table_ids_to_commit,
             jobs_to_wait: finished_snapshot_backfill_jobs,
-            node_to_collect,
             command: command
                 .map(Command::into_post_collect)
                 .unwrap_or(PostCollectCommand::barrier()),

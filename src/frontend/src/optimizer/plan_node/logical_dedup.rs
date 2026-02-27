@@ -93,7 +93,8 @@ impl ToStream for LogicalDedup {
         &self,
         ctx: &mut RewriteStreamContext,
     ) -> Result<(PlanRef, ColIndexMapping)> {
-        let (input, input_col_change) = self.input().logical_rewrite_for_stream(ctx)?;
+        let logical_input = try_enforce_locality_requirement(self.input(), self.dedup_cols());
+        let (input, input_col_change) = logical_input.logical_rewrite_for_stream(ctx)?;
         let (logical, out_col_change) = self.rewrite_with_input(input, input_col_change);
         Ok((logical.into(), out_col_change))
     }
@@ -104,8 +105,7 @@ impl ToStream for LogicalDedup {
     ) -> Result<crate::optimizer::plan_node::StreamPlanRef> {
         use super::stream::prelude::*;
 
-        let logical_input = try_enforce_locality_requirement(self.input(), self.dedup_cols());
-        let input = logical_input.to_stream(ctx)?;
+        let input = self.input().to_stream(ctx)?;
         let input = RequiredDist::hash_shard(self.dedup_cols())
             .streaming_enforce_if_not_satisfies(input)?;
         if input.append_only() {

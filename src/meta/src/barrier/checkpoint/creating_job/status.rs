@@ -31,7 +31,6 @@ use risingwave_pb::stream_service::barrier_complete_response::{
 use tracing::warn;
 
 use crate::barrier::checkpoint::creating_job::CreatingJobInfo;
-use crate::barrier::checkpoint::recovery::ResetPartialGraphCollector;
 use crate::barrier::notifier::Notifier;
 use crate::barrier::progress::{CreateMviewProgressTracker, TrackingJob};
 use crate::barrier::{BarrierInfo, BarrierKind, TracedEpoch};
@@ -131,7 +130,7 @@ pub(super) enum CreatingStreamingJobStatus {
     /// will be finished when all previously injected barriers have been collected
     /// Store the `prev_epoch` that will finish at.
     Finishing(u64, TrackingJob),
-    Resetting(ResetPartialGraphCollector, Vec<Notifier>),
+    Resetting(Vec<Notifier>),
     PlaceHolder,
 }
 
@@ -202,7 +201,7 @@ impl CreatingStreamingJobStatus {
                 log_store_progress_tracker.update(create_mview_progress);
             }
             CreatingStreamingJobStatus::Finishing(..)
-            | CreatingStreamingJobStatus::Resetting(_, _) => {}
+            | CreatingStreamingJobStatus::Resetting(..) => {}
             CreatingStreamingJobStatus::PlaceHolder => {
                 unreachable!()
             }
@@ -233,7 +232,7 @@ impl CreatingStreamingJobStatus {
             CreatingStreamingJobStatus::Finishing { .. } => {
                 unreachable!("should not start consuming upstream for a job again")
             }
-            CreatingStreamingJobStatus::Resetting(_, _) => {
+            CreatingStreamingJobStatus::Resetting(..) => {
                 unreachable!("unlikely to start consume upstream when resetting")
             }
             CreatingStreamingJobStatus::PlaceHolder => {
@@ -295,7 +294,7 @@ impl CreatingStreamingJobStatus {
                 .map(|barrier_info| (barrier_info, None))
                 .collect(),
             CreatingStreamingJobStatus::Finishing { .. }
-            | CreatingStreamingJobStatus::Resetting(_, _) => {
+            | CreatingStreamingJobStatus::Resetting(..) => {
                 vec![]
             }
             CreatingStreamingJobStatus::PlaceHolder => {
@@ -316,17 +315,20 @@ impl CreatingStreamingJobStatus {
                 *prev_epoch_fake_physical_time += 1;
                 let curr_epoch =
                     TracedEpoch::new(Epoch::from_physical_time(*prev_epoch_fake_physical_time));
-                pending_non_checkpoint_barriers.push(prev_epoch.value().0);
                 let kind = match kind {
                     PbBarrierKind::Unspecified => {
                         unreachable!()
                     }
                     PbBarrierKind::Initial => {
-                        pending_non_checkpoint_barriers.clear();
+                        assert!(pending_non_checkpoint_barriers.is_empty());
                         BarrierKind::Initial
                     }
-                    PbBarrierKind::Barrier => BarrierKind::Barrier,
+                    PbBarrierKind::Barrier => {
+                        pending_non_checkpoint_barriers.push(prev_epoch.value().0);
+                        BarrierKind::Barrier
+                    }
                     PbBarrierKind::Checkpoint => {
+                        pending_non_checkpoint_barriers.push(prev_epoch.value().0);
                         BarrierKind::Checkpoint(take(pending_non_checkpoint_barriers))
                     }
                 };
@@ -346,7 +348,19 @@ impl CreatingStreamingJobStatus {
                 Some(&info.fragment_infos)
             }
             CreatingStreamingJobStatus::Finishing(..)
-            | CreatingStreamingJobStatus::Resetting(_, _) => None,
+            | CreatingStreamingJobStatus::Resetting(..) => None,
+            CreatingStreamingJobStatus::PlaceHolder => {
+                unreachable!()
+            }
+        }
+    }
+
+    pub(super) fn creating_job_info(&self) -> Option<&CreatingJobInfo> {
+        match self {
+            CreatingStreamingJobStatus::ConsumingSnapshot { info, .. }
+            | CreatingStreamingJobStatus::ConsumingLogStore { info, .. } => Some(info),
+            CreatingStreamingJobStatus::Finishing(..)
+            | CreatingStreamingJobStatus::Resetting(_) => None,
             CreatingStreamingJobStatus::PlaceHolder => {
                 unreachable!()
             }
