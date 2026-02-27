@@ -112,7 +112,7 @@ impl Rule<Logical> for OverWindowToTopNRule {
 
         if offset > 0 && with_ties {
             tracing::warn!("Failed to optimize with ties and offset");
-            ctx.warn_to_user("group topN with ties and offset is not supported, see https://www.risingwave.dev/docs/current/sql-pattern-topn/ for more information");
+            ctx.warn_to_user("group topN with ties and offset is not supported, see https://docs.risingwave.com/processing/sql/top-n-by-group for more information");
             return None;
         }
 
@@ -143,7 +143,7 @@ impl Rule<Logical> for OverWindowToTopNRule {
             }
         } else {
             // Ranking Output, without project
-            ctx.warn_to_user("It can be inefficient to output ranking number in Top-N, see https://www.risingwave.dev/docs/current/sql-pattern-topn/ for more information");
+            ctx.warn_to_user("It can be inefficient to output ranking number in Top-N, see https://docs.risingwave.com/processing/sql/top-n-by-group for more information");
             let over_window = over_window.clone_with_input(filter).into();
             add_rank_offset_if_needed(over_window, offset, window_func_pos, output_len)
         };

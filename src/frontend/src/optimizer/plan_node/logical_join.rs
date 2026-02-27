@@ -1619,7 +1619,7 @@ impl ToStream for LogicalJoin {
         {
             return Err(ErrorCode::NotSupported(
                 "optimizer has tried to separate the temporal predicate(with now() expression) from the on condition, but it still reminded in on join's condition. Considering move it into WHERE clause?".to_owned(),
-                 "please refer to https://www.risingwave.dev/docs/current/sql-pattern-temporal-filters/ for more information".to_owned()).into());
+                 "please refer to https://docs.risingwave.com/processing/sql/temporal-filters for more information".to_owned()).into());
         }
 
         let predicate = EqJoinPredicate::create(
@@ -1654,7 +1654,7 @@ impl ToStream for LogicalJoin {
                 "streaming nested-loop join".to_owned(),
                 "The non-equal join in the query requires a nested-loop join executor, which could be very expensive to run. \
                  Consider rewriting the query to use dynamic filter as a substitute if possible.\n\
-                 See also: https://docs.risingwave.com/docs/current/sql-pattern-dynamic-filters/".to_owned(),
+                 See also: https://docs.risingwave.com/processing/sql/dynamic-filters".to_owned(),
             )))
         }
     }
