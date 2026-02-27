@@ -169,7 +169,7 @@ create table t_refresh_composite_pk (
   id1 int,
   name varchar,
   primary key (id1, id2)
-) with (commit_checkpoint_interval = 10) engine = iceberg;
+) with (commit_checkpoint_interval = 2) engine = iceberg;
 
 statement ok
 insert into t_refresh_composite_pk values
