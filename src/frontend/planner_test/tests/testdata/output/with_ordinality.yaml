@@ -179,4 +179,4 @@
   stream_error: |-
     Not supported: streaming nested-loop join
     HINT: The non-equal join in the query requires a nested-loop join executor, which could be very expensive to run. Consider rewriting the query to use dynamic filter as a substitute if possible.
-    See also: https://docs.risingwave.com/docs/current/sql-pattern-dynamic-filters/
+    See also: https://docs.risingwave.com/processing/sql/dynamic-filters
