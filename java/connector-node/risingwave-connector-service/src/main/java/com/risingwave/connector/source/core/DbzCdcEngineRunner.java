@@ -157,8 +157,12 @@ public class DbzCdcEngineRunner {
     }
 
     public void stop() throws Exception {
-        if (isRunning()) {
+        if (!running.compareAndSet(true, false)) {
+            return;
+        }
+        try {
             engine.stop();
+        } finally {
             cleanUp();
             LOG.info("engine#{} terminated", engine.getId());
         }
@@ -177,7 +181,6 @@ public class DbzCdcEngineRunner {
     }
 
     private void cleanUp() {
-        running.set(false);
         // interrupt the runner thread if it is still running
         executor.shutdownNow();
     }
