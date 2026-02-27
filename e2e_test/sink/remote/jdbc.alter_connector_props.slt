@@ -29,7 +29,7 @@ select count(*)
 from rw_sinks
 where name = 's_jdbc_alter_props'
   and definition ILIKE '%jdbc.url = ''jdbc:postgresql://db:5432/test''%'
-  and definition ILIKE '%"user" = ''test''%'
+  and definition ILIKE '%user = ''test''%'
   and definition ILIKE '%password = ''connector''%';
 ----
 1
