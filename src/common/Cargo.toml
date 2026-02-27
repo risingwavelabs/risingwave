@@ -102,8 +102,8 @@ smallvec = { workspace = true }
 speedate = "0.15.0"
 stacker = "0.1"
 static_assertions = "1"
-strum = "0.27"
-strum_macros = "0.27"
+strum = "0.28"
+strum_macros = "0.28"
 sysinfo = { version = "0.38", default-features = false, features = ["system"] }
 thiserror = { workspace = true }
 thiserror-ext = { workspace = true }

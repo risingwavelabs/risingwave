@@ -176,8 +176,8 @@ serde_with = { version = "3", features = ["json"] }
 simd-json = { version = "0.17.0", features = ["hints"] }
 smallvec = { workspace = true }
 sqlx = { workspace = true }
-strum = "0.27"
-strum_macros = "0.27"
+strum = "0.28"
+strum_macros = "0.28"
 tempfile = "3"
 thiserror = { workspace = true }
 thiserror-ext = { workspace = true }
