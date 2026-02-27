@@ -18,7 +18,7 @@ use std::sync::Arc;
 
 use anyhow::{Context, anyhow};
 use futures::TryStreamExt;
-use itertools::Itertools;
+use itertools::{Either, Itertools};
 use risingwave_common::bail;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{FragmentTypeFlag, FragmentTypeMask};
@@ -1986,30 +1986,6 @@ impl CatalogController {
         Ok(upstream_sink_infos)
     }
 
-    fn build_fragment_split_models(
-        fragment_splits: &HashMap<FragmentId, Vec<SplitImpl>>,
-        existing_fragment_ids: &HashSet<FragmentId>,
-    ) -> (Vec<fragment_splits::ActiveModel>, Vec<FragmentId>) {
-        let mut models = Vec::with_capacity(fragment_splits.len());
-        let mut skipped_fragment_ids = Vec::new();
-
-        for (fragment_id, splits) in fragment_splits {
-            if !existing_fragment_ids.contains(fragment_id) {
-                skipped_fragment_ids.push(*fragment_id);
-                continue;
-            }
-
-            models.push(fragment_splits::ActiveModel {
-                fragment_id: Set(*fragment_id as _),
-                splits: Set(Some(ConnectorSplits::from(&PbConnectorSplits {
-                    splits: splits.iter().map(Into::into).collect_vec(),
-                }))),
-            });
-        }
-
-        (models, skipped_fragment_ids)
-    }
-
     pub async fn get_mview_fragment_by_id(&self, job_id: JobId) -> MetaResult<FragmentId> {
         let inner = self.inner.read().await;
         let txn = inner.db.begin().await?;
@@ -2066,8 +2042,21 @@ impl CatalogController {
             .into_iter()
             .collect();
 
-        let (models, skipped_fragment_ids) =
-            Self::build_fragment_split_models(fragment_splits, &existing_fragment_ids);
+        // Filter out stale fragment ids to avoid FK violations when split updates race with drop.
+        let (models, skipped_fragment_ids): (Vec<_>, Vec<_>) = fragment_splits
+            .iter()
+            .partition_map(|(fragment_id, splits)| {
+                if existing_fragment_ids.contains(fragment_id) {
+                    Either::Left(fragment_splits::ActiveModel {
+                        fragment_id: Set(*fragment_id as _),
+                        splits: Set(Some(ConnectorSplits::from(&PbConnectorSplits {
+                            splits: splits.iter().map(Into::into).collect_vec(),
+                        }))),
+                    })
+                } else {
+                    Either::Right(*fragment_id)
+                }
+            });
 
         if !skipped_fragment_ids.is_empty() {
             tracing::warn!(
@@ -2128,37 +2117,6 @@ mod tests {
     const TEST_JOB_ID: JobId = JobId::new(1);
 
     const TEST_STATE_TABLE_ID: TableId = TableId::new(1000);
-
-    #[test]
-    fn test_build_fragment_split_models_skips_stale_fragments() {
-        let fragment_splits = HashMap::from([
-            (FragmentId::new(1), Vec::new()),
-            (FragmentId::new(2), Vec::new()),
-        ]);
-        let existing_fragment_ids = HashSet::from([FragmentId::new(1)]);
-
-        let (models, skipped_fragment_ids) = CatalogController::build_fragment_split_models(
-            &fragment_splits,
-            &existing_fragment_ids,
-        );
-
-        assert_eq!(models.len(), 1);
-        assert_eq!(skipped_fragment_ids, vec![FragmentId::new(2)]);
-    }
-
-    #[test]
-    fn test_build_fragment_split_models_all_stale() {
-        let fragment_splits = HashMap::from([(FragmentId::new(1), Vec::new())]);
-        let existing_fragment_ids = HashSet::new();
-
-        let (models, skipped_fragment_ids) = CatalogController::build_fragment_split_models(
-            &fragment_splits,
-            &existing_fragment_ids,
-        );
-
-        assert!(models.is_empty());
-        assert_eq!(skipped_fragment_ids, vec![FragmentId::new(1)]);
-    }
 
     fn generate_upstream_actor_ids_for_actor(actor_id: ActorId) -> ActorUpstreams {
         let mut upstream_actor_ids = BTreeMap::new();
