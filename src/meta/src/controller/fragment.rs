@@ -63,6 +63,7 @@ use sea_orm::{
     QueryFilter, QuerySelect, RelationTrait, SelectGetableTuple, Selector, TransactionTrait, Value,
 };
 use serde::{Deserialize, Serialize};
+use tracing::debug;
 
 use crate::barrier::SnapshotBackfillInfo;
 use crate::controller::catalog::{CatalogController, CatalogControllerInner};
