@@ -18,15 +18,19 @@ use risingwave_common::array::ArrayImpl::Bool;
 use risingwave_common::array::DataChunk;
 use risingwave_common::bail;
 use risingwave_common::bitmap::Bitmap;
+use risingwave_common::catalog::Schema;
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_expr::aggregate::{AggCall, AggType, PbAggKind};
 use risingwave_expr::expr::{LogReport, NonStrictExpression};
 use risingwave_pb::stream_plan::PbAggNodeVersion;
+use risingwave_storage::StateStore;
 
 use crate::executor::prelude::*;
 
 mod agg_group;
 mod agg_state;
 mod agg_state_cache;
+mod append_only_first_last_value;
 mod distinct;
 mod hash_agg;
 mod minput;
@@ -35,8 +39,37 @@ mod stateless_simple_agg;
 
 pub use agg_state::AggStateStorage;
 pub use hash_agg::HashAggExecutor;
+use risingwave_expr::aggregate::{BoxedAggregateFunction, build_retractable};
 pub use simple_agg::SimpleAggExecutor;
 pub use stateless_simple_agg::StatelessSimpleAggExecutor;
+
+use self::append_only_first_last_value::build_append_only_first_last_value_agg;
+
+/// Build aggregate functions for streaming executors.
+///
+/// Most aggs use the retractable implementation as the executor handles `DISTINCT`, `FILTER`,
+/// and `ORDER BY` semantics outside of the aggregate function.
+///
+/// For append-only `first_value`/`last_value` value-state (storage = `Value`), we need a special
+/// aggregate function that can see `ORDER BY` + stream key columns and persist state as `BYTEA`.
+pub(super) fn build_streaming_agg_funcs<S: StateStore>(
+    agg_calls: &[AggCall],
+    storages: &[AggStateStorage<S>],
+    input_stream_key: &[usize],
+    input_schema: &Schema,
+) -> StreamResult<Vec<BoxedAggregateFunction>> {
+    Ok(agg_calls
+        .iter()
+        .zip_eq_fast(storages)
+        .map(|(call, storage)| match (storage, &call.agg_type) {
+            (
+                AggStateStorage::Value,
+                AggType::Builtin(PbAggKind::FirstValue | PbAggKind::LastValue),
+            ) => build_append_only_first_last_value_agg(call, input_stream_key, input_schema),
+            _ => build_retractable(call),
+        })
+        .try_collect()?)
+}
 
 /// Arguments needed to construct an `XxxAggExecutor`.
 pub struct AggExecutorArgs<S: StateStore, E: AggExecutorExtraArgs> {
