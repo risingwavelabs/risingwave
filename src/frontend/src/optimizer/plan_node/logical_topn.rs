@@ -200,7 +200,7 @@ impl PlanTreeNodeUnary<Logical> for LogicalTopN {
         core.input = input;
         core.order = input_col_change
             .rewrite_required_order(self.topn_order())
-            .unwrap();
+            .unwrap_or_else(|| panic!("topn panic sql: {}", self.ctx().sql()));
         for key in &mut core.group_key {
             *key = input_col_change.map(*key)
         }
