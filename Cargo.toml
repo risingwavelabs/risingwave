@@ -193,7 +193,7 @@ mysql_async = { version = "0.36", features = [
     "native-tls-tls",
     "rust_decimal",
 ] }
-opendal = "0.53"
+opendal = "0.54"
 opentelemetry = "0.29"
 opentelemetry-otlp = { version = "0.29", features = ["grpc-tonic"] }
 opentelemetry-semantic-conventions = "0.16"
