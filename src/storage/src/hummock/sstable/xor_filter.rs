@@ -213,23 +213,33 @@ impl FilterBuilder for BlockedXor16FilterBuilder {
 }
 
 pub struct BlockBasedXor16Filter {
-    filters: Vec<(Vec<u8>, Xor16)>,
+    key_prefixes: Vec<u64>,
+    keys: Vec<Vec<u8>>,
+    filters: Vec<Xor16>,
+}
+
+fn to_prefix(key: &[u8]) -> u64 {
+    let mut buf = [0u8; 8];
+    let len = key.len().min(8);
+    buf[..len].copy_from_slice(&key[..len]);
+    u64::from_be_bytes(buf)
 }
 
 impl Clone for BlockBasedXor16Filter {
     fn clone(&self) -> Self {
         let mut filters = Vec::with_capacity(self.filters.len());
-        for (key, filter) in &self.filters {
-            filters.push((
-                key.clone(),
-                Xor16 {
-                    seed: filter.seed,
-                    block_length: filter.block_length,
-                    fingerprints: filter.fingerprints.clone(),
-                },
-            ));
+        for filter in &self.filters {
+            filters.push(Xor16 {
+                seed: filter.seed,
+                block_length: filter.block_length,
+                fingerprints: filter.fingerprints.clone(),
+            });
         }
-        Self { filters }
+        Self {
+            key_prefixes: self.key_prefixes.clone(),
+            keys: self.keys.clone(),
+            filters,
+        }
     }
 }
 
@@ -237,35 +247,54 @@ impl BlockBasedXor16Filter {
     pub fn may_exist(&self, user_key_range: &UserKeyRangeRef<'_>, h: u64) -> bool {
         let mut block_idx = match user_key_range.0 {
             Bound::Unbounded => 0,
-            Bound::Included(left) | Bound::Excluded(left) => self
-                .filters
-                .partition_point(|(smallest_key, _)| {
-                    let ord = FullKey::decode(smallest_key).user_key.cmp(&left);
-                    ord == Ordering::Less || ord == Ordering::Equal
-                })
-                .saturating_sub(1),
+            Bound::Included(left) | Bound::Excluded(left) => {
+                let target_prefix = to_prefix(left);
+                let mut left_idx = 0;
+                let mut right_idx = self.key_prefixes.len();
+                while left_idx < right_idx {
+                    let mid = left_idx + (right_idx - left_idx) / 2;
+                    let p = self.key_prefixes[mid];
+                    
+                    let pred = if p < target_prefix {
+                        true
+                    } else if p > target_prefix {
+                        false
+                    } else {
+                        // Tie-break with full key comparison
+                        let ord = FullKey::decode(&self.keys[mid]).user_key.cmp(left);
+                        ord == Ordering::Less || ord == Ordering::Equal
+                    };
+                    
+                    if pred {
+                        left_idx = mid + 1;
+                    } else {
+                        right_idx = mid;
+                    }
+                }
+                left_idx.saturating_sub(1)
+            }
         };
 
         while block_idx < self.filters.len() {
             let read_bound = match user_key_range.1 {
                 Bound::Unbounded => false,
                 Bound::Included(right) => {
-                    let ord = FullKey::decode(&self.filters[block_idx].0)
+                    let ord = FullKey::decode(&self.keys[block_idx])
                         .user_key
-                        .cmp(&right);
+                        .cmp(right);
                     ord == Ordering::Greater
                 }
                 Bound::Excluded(right) => {
-                    let ord = FullKey::decode(&self.filters[block_idx].0)
+                    let ord = FullKey::decode(&self.keys[block_idx])
                         .user_key
-                        .cmp(&right);
+                        .cmp(right);
                     ord != Ordering::Less
                 }
             };
             if read_bound {
                 break;
             }
-            if self.filters[block_idx].1.contains(&h) {
+            if self.filters[block_idx].contains(&h) {
                 return true;
             }
             block_idx += 1;
@@ -357,28 +386,38 @@ impl XorFilterReader {
         let block_count = reader.get_u32_le() as usize;
         assert_eq!(block_count, metas.len());
         let reader = &mut data;
+        
+        let mut key_prefixes = Vec::with_capacity(block_count);
+        let mut keys = Vec::with_capacity(block_count);
         let mut filters = Vec::with_capacity(block_count);
+        
         for meta in metas {
             let len = reader.get_u32_le() as usize;
             let xor16 = Self::to_xor16(&reader[..len]);
             reader.advance(len);
-            filters.push((meta.smallest_key.clone(), xor16));
+            
+            let user_key = FullKey::decode(&meta.smallest_key).user_key;
+            key_prefixes.push(to_prefix(user_key));
+            keys.push(meta.smallest_key.clone());
+            filters.push(xor16);
         }
-        BlockBasedXor16Filter { filters }
+        BlockBasedXor16Filter { key_prefixes, keys, filters }
     }
 
     pub fn estimate_size(&self) -> usize {
         match &self.filter {
             XorFilter::Xor8(filter) => filter.fingerprints.len(),
             XorFilter::Xor16(filter) => filter.fingerprints.len() * std::mem::size_of::<u16>(),
-            XorFilter::BlockXor16(reader) => reader
-                .filters
-                .iter()
-                .map(|filter| {
-                    filter.0.len() + // smallest_key size
-                    filter.1.fingerprints.len() * std::mem::size_of::<u16>()
-                })
-                .sum(),
+            XorFilter::BlockXor16(reader) => {
+                let keys_size: usize = reader.keys.iter().map(|k| k.len()).sum();
+                let filters_size: usize = reader
+                    .filters
+                    .iter()
+                    .map(|f| f.fingerprints.len() * std::mem::size_of::<u16>())
+                    .sum();
+                let prefixes_size = reader.key_prefixes.len() * std::mem::size_of::<u64>();
+                keys_size + filters_size + prefixes_size
+            },
         }
     }
 
@@ -411,7 +450,7 @@ impl XorFilterReader {
 
     pub fn get_block_raw_filter(&self, block_index: usize) -> Vec<u8> {
         let reader = must_match!(&self.filter, XorFilter::BlockXor16(reader) => reader);
-        Xor16FilterBuilder::build_from_xor16(&reader.filters[block_index].1)
+        Xor16FilterBuilder::build_from_xor16(&reader.filters[block_index])
     }
 
     pub fn is_block_based_filter(&self) -> bool {
@@ -424,7 +463,7 @@ impl XorFilterReader {
             XorFilter::Xor16(filter) => Xor16FilterBuilder::build_from_xor16(filter),
             XorFilter::BlockXor16(reader) => {
                 let mut data = Vec::with_capacity(4 + reader.filters.len() * 1024);
-                for (_, filter) in &reader.filters {
+                for filter in &reader.filters {
                     let block = Xor16FilterBuilder::build_from_xor16(filter);
                     data.put_u32_le(block.len() as u32);
                     data.extend(block);
@@ -555,7 +594,7 @@ mod tests {
                         &k,
                         iter.key().user_key.table_id.as_raw_id(),
                     );
-                    assert!(reader.filters[idx].1.contains(&h));
+                    assert!(reader.filters[idx].contains(&h));
                     iter.next();
                 }
             }
@@ -629,5 +668,25 @@ mod tests {
             blocked_bytes, blocked_encoded,
             "BlockedXor16 builder and reader should produce identical bytes"
         );
+    }
+    
+    #[test]
+    fn test_prefix_compare() {
+        let k1 = vec![0u8, 1, 2, 3];
+        let k2 = vec![0u8, 1, 2, 4];
+        let p1 = to_prefix(&k1);
+        let p2 = to_prefix(&k2);
+        assert!(p1 < p2);
+        
+        let k3 = vec![1u8, 0, 0, 0];
+        let p3 = to_prefix(&k3);
+        assert!(p2 < p3);
+        
+        let k_long = vec![0u8, 0, 0, 0, 0, 0, 0, 1, 5];
+        let k_short = vec![0u8, 0, 0, 0, 0, 0, 0, 1];
+        let p_long = to_prefix(&k_long);
+        let p_short = to_prefix(&k_short);
+        // p_long should equal p_short because they share first 8 bytes.
+        assert_eq!(p_long, p_short);
     }
 }
