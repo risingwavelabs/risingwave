@@ -130,10 +130,6 @@ name = "bench_row"
 harness = false
 
 [[bench]]
-name = "bench_imm_compact"
-harness = false
-
-[[bench]]
 name = "bench_table_watermarks"
 harness = false
 

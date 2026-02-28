@@ -25,12 +25,12 @@ use futures::future::try_join;
 use futures::{FutureExt, StreamExt, stream};
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
-use risingwave_hummock_sdk::key::{EPOCH_LEN, FullKey, FullKeyTracker, UserKey};
+use risingwave_hummock_sdk::key::{EPOCH_LEN, FullKey};
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::{EpochWithGap, KeyComparator, LocalSstableInfo};
 use risingwave_pb::hummock::compact_task;
 use thiserror_ext::AsReport;
-use tracing::{error, warn};
+use tracing::error;
 
 use crate::compaction_catalog_manager::{CompactionCatalogAgentRef, CompactionCatalogManagerRef};
 use crate::hummock::compactor::compaction_filter::DummyCompactionFilter;
@@ -38,10 +38,6 @@ use crate::hummock::compactor::context::{CompactorContext, await_tree_key};
 use crate::hummock::compactor::{CompactOutput, Compactor, check_flush_result};
 use crate::hummock::event_handler::uploader::UploadTaskOutput;
 use crate::hummock::iterator::{Forward, HummockIterator, MergeIterator, UserIterator};
-use crate::hummock::shared_buffer::shared_buffer_batch::{
-    SharedBufferBatch, SharedBufferBatchInner, SharedBufferBatchOldValues, SharedBufferKeyEntry,
-    VersionedSharedBufferValue,
-};
 use crate::hummock::{
     CachePolicy, GetObjectId, HummockError, HummockResult, ObjectIdManagerRef,
     SstableBuilderOptions,
@@ -216,8 +212,7 @@ async fn compact_shared_buffer<const IS_NEW_VALUE: bool>(
                         "Compact Shared Buffer: {:?}",
                         payload
                             .iter()
-                            .flat_map(|imm| imm.epochs().iter())
-                            .copied()
+                            .map(|imm| imm.epoch())
                             .collect::<BTreeSet<_>>()
                     ),
                 )
@@ -319,144 +314,6 @@ async fn compact_shared_buffer<const IS_NEW_VALUE: bool>(
         Ok(level0)
     } else {
         Err(err.unwrap())
-    }
-}
-
-/// Merge multiple batches into a larger one
-pub async fn merge_imms_in_memory(
-    table_id: TableId,
-    imms: Vec<ImmutableMemtable>,
-) -> ImmutableMemtable {
-    let mut epochs = vec![];
-    let mut merged_size = 0;
-    assert!(imms.iter().rev().map(|imm| imm.batch_id()).is_sorted());
-    let max_imm_id = imms[0].batch_id();
-
-    let has_old_value = imms[0].has_old_value();
-    // TODO: make sure that the corner case on switch_op_consistency is handled
-    // If the imm of a table id contains old value, all other imm of the same table id should have old value
-    assert!(imms.iter().all(|imm| imm.has_old_value() == has_old_value));
-
-    let (old_value_size, global_old_value_size) = if has_old_value {
-        (
-            imms.iter()
-                .map(|imm| imm.old_values().expect("has old value").size)
-                .sum(),
-            Some(
-                imms[0]
-                    .old_values()
-                    .expect("has old value")
-                    .global_old_value_size
-                    .clone(),
-            ),
-        )
-    } else {
-        (0, None)
-    };
-
-    let mut imm_iters = Vec::with_capacity(imms.len());
-    let key_count = imms.iter().map(|imm| imm.key_count()).sum();
-    let value_count = imms.iter().map(|imm| imm.value_count()).sum();
-    for imm in imms {
-        assert!(imm.key_count() > 0, "imm should not be empty");
-        assert_eq!(
-            table_id,
-            imm.table_id(),
-            "should only merge data belonging to the same table"
-        );
-
-        epochs.push(imm.min_epoch());
-        merged_size += imm.size();
-
-        imm_iters.push(imm.into_forward_iter());
-    }
-    epochs.sort();
-
-    // use merge iterator to merge input imms
-    let mut mi = MergeIterator::new(imm_iters);
-    mi.rewind_no_await();
-    assert!(mi.is_valid());
-
-    let first_item_key = mi.current_key_entry().key.clone();
-
-    let mut merged_entries: Vec<SharedBufferKeyEntry> = Vec::with_capacity(key_count);
-    let mut values: Vec<VersionedSharedBufferValue> = Vec::with_capacity(value_count);
-    let mut old_values: Option<Vec<Bytes>> = if has_old_value {
-        Some(Vec::with_capacity(value_count))
-    } else {
-        None
-    };
-
-    merged_entries.push(SharedBufferKeyEntry {
-        key: first_item_key.clone(),
-        value_offset: 0,
-    });
-
-    // Use first key, max epoch to initialize the tracker to ensure that the check first call to full_key_tracker.observe will succeed
-    let mut full_key_tracker = FullKeyTracker::<Bytes>::new(FullKey::new_with_gap_epoch(
-        table_id,
-        first_item_key,
-        EpochWithGap::new_max_epoch(),
-    ));
-
-    while mi.is_valid() {
-        let key_entry = mi.current_key_entry();
-        let user_key = UserKey {
-            table_id,
-            table_key: key_entry.key.clone(),
-        };
-        if full_key_tracker.observe_multi_version(
-            user_key,
-            key_entry
-                .new_values
-                .iter()
-                .map(|(epoch_with_gap, _)| *epoch_with_gap),
-        ) {
-            let last_entry = merged_entries.last_mut().expect("non-empty");
-            if last_entry.value_offset == values.len() {
-                warn!(key = ?last_entry.key, "key has no value in imm compact. skipped");
-                last_entry.key = full_key_tracker.latest_user_key().table_key.clone();
-            } else {
-                // Record kv entries
-                merged_entries.push(SharedBufferKeyEntry {
-                    key: full_key_tracker.latest_user_key().table_key.clone(),
-                    value_offset: values.len(),
-                });
-            }
-        }
-        values.extend(
-            key_entry
-                .new_values
-                .iter()
-                .map(|(epoch_with_gap, value)| (*epoch_with_gap, value.clone())),
-        );
-        if let Some(old_values) = &mut old_values {
-            old_values.extend(key_entry.old_values.expect("should exist").iter().cloned())
-        }
-        mi.advance_peek_to_next_key();
-        // Since there is no blocking point in this method, but it is cpu intensive, we call this method
-        // to do cooperative scheduling
-        tokio::task::consume_budget().await;
-    }
-
-    let old_values = old_values.map(|old_values| {
-        SharedBufferBatchOldValues::new(
-            old_values,
-            old_value_size,
-            global_old_value_size.expect("should exist when has old value"),
-        )
-    });
-
-    SharedBufferBatch {
-        inner: Arc::new(SharedBufferBatchInner::new_with_multi_epoch_batches(
-            epochs,
-            merged_entries,
-            values,
-            old_values,
-            merged_size,
-            max_imm_id,
-        )),
-        table_id,
     }
 }
 
