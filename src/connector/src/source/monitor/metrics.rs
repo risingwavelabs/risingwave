@@ -117,6 +117,9 @@ pub struct SourceMetrics {
     pub kinesis_rebuild_shard_iter_count: LabelGuardedIntCounterVec,
     pub kinesis_early_terminate_shard_count: LabelGuardedIntCounterVec,
     pub kinesis_lag_latency_ms: LabelGuardedHistogramVec,
+
+    // nats source
+    pub nats_source_connections: LabelGuardedIntGaugeVec,
 }
 
 pub static GLOBAL_SOURCE_METRICS: LazyLock<SourceMetrics> =
@@ -239,6 +242,14 @@ impl SourceMetrics {
         )
         .unwrap();
 
+        let nats_source_connections = register_guarded_int_gauge_vec_with_registry!(
+            "nats_source_connections",
+            "Number of active NATS source connections (ports used)",
+            &["source_id", "source_name", "fragment_id"],
+            registry
+        )
+        .unwrap();
+
         SourceMetrics {
             partition_input_count,
             partition_input_bytes,
@@ -255,6 +266,8 @@ impl SourceMetrics {
             kinesis_rebuild_shard_iter_count,
             kinesis_early_terminate_shard_count,
             kinesis_lag_latency_ms,
+
+            nats_source_connections,
         }
     }
 }
