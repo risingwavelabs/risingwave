@@ -1821,13 +1821,15 @@ mod tests {
 
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::{DataType, Datum};
+    use risingwave_expr::aggregate::PbAggKind;
     use risingwave_pb::expr::expr_node::Type;
 
     use super::*;
-    use crate::expr::{FunctionCall, Literal, assert_eq_input_ref};
+    use crate::expr::{AggCall, FunctionCall, Literal, OrderBy, assert_eq_input_ref};
     use crate::optimizer::optimizer_context::OptimizerContext;
-    use crate::optimizer::plan_node::LogicalValues;
+    use crate::optimizer::plan_node::{LogicalAgg, LogicalValues, RewriteStreamContext};
     use crate::optimizer::property::FunctionalDependency;
+    use crate::utils::GroupBy;
 
     /// Pruning
     /// ```text
@@ -2133,6 +2135,80 @@ mod tests {
                 .unwrap(),
             non_eq_cond
         );
+    }
+
+    #[tokio::test]
+    async fn test_full_outer_join_rewrite_with_global_agg_inputs() {
+        let ctx = OptimizerContext::mock().await;
+
+        let schema = Schema {
+            fields: vec![
+                Field::with_name(DataType::Varchar, "key"),
+                Field::with_name(DataType::Int32, "amount"),
+            ],
+        };
+
+        let left_input: PlanRef = LogicalValues::new(vec![], schema.clone(), ctx.clone()).into();
+        let right_input: PlanRef = LogicalValues::new(vec![], schema, ctx).into();
+
+        let max_key = AggCall::new(
+            PbAggKind::Max.into(),
+            vec![InputRef::new(0, DataType::Varchar).into()],
+            false,
+            OrderBy::any(),
+            Condition::true_cond(),
+            vec![],
+        )
+        .unwrap();
+        let sum_amount = AggCall::new(
+            PbAggKind::Sum.into(),
+            vec![InputRef::new(1, DataType::Int32).into()],
+            false,
+            OrderBy::any(),
+            Condition::true_cond(),
+            vec![],
+        )
+        .unwrap();
+
+        let (left_agg, _, _) = LogicalAgg::create(
+            vec![max_key.clone().into(), sum_amount.clone().into()],
+            GroupBy::GroupKey(vec![]),
+            None,
+            left_input,
+        )
+        .unwrap();
+        let (right_agg, _, _) = LogicalAgg::create(
+            vec![max_key.into(), sum_amount.into()],
+            GroupBy::GroupKey(vec![]),
+            None,
+            right_input,
+        )
+        .unwrap();
+
+        assert!(left_agg.expect_stream_key().is_empty());
+        assert!(right_agg.expect_stream_key().is_empty());
+
+        let on = FunctionCall::new(
+            Type::Equal,
+            vec![
+                InputRef::new(0, DataType::Varchar).into(),
+                InputRef::new(2, DataType::Varchar).into(),
+            ],
+        )
+        .unwrap()
+        .into();
+        let join: PlanRef = LogicalJoin::new(
+            left_agg,
+            right_agg,
+            JoinType::FullOuter,
+            Condition::with_expr(on),
+        )
+        .into();
+
+        let (rewritten, _) = join
+            .logical_rewrite_for_stream(&mut RewriteStreamContext::default())
+            .unwrap();
+        assert!(rewritten.as_logical_join().is_some());
     }
 
     /// Convert
