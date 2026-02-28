@@ -129,9 +129,10 @@ pub enum AlterTableOperation {
     /// `DROP CONNECTOR`
     DropConnector,
 
-    /// `ALTER CONNECTOR WITH (<connector_props>)`
+    /// `ALTER CONNECTOR [FORCE] WITH (<connector_props>)`
     AlterConnectorProps {
         alter_props: Vec<SqlOption>,
+        force: bool,
     },
 }
 
@@ -253,6 +254,7 @@ pub enum AlterSinkOperation {
     },
     AlterConnectorProps {
         alter_props: Vec<SqlOption>,
+        force: bool,
     },
     SetStreamingEnableUnalignedJoin {
         enable: bool,
@@ -480,10 +482,11 @@ impl fmt::Display for AlterTableOperation {
             AlterTableOperation::DropConnector => {
                 write!(f, "DROP CONNECTOR")
             }
-            AlterTableOperation::AlterConnectorProps { alter_props } => {
+            AlterTableOperation::AlterConnectorProps { alter_props, force } => {
                 write!(
                     f,
-                    "CONNECTOR WITH ({})",
+                    "CONNECTOR {}WITH ({})",
+                    if *force { "FORCE " } else { "" },
                     display_comma_separated(alter_props)
                 )
             }
@@ -648,10 +651,12 @@ impl fmt::Display for AlterSinkOperation {
             }
             AlterSinkOperation::AlterConnectorProps {
                 alter_props: changed_props,
+                force,
             } => {
                 write!(
                     f,
-                    "CONNECTOR WITH ({})",
+                    "CONNECTOR {}WITH ({})",
+                    if *force { "FORCE " } else { "" },
                     display_comma_separated(changed_props)
                 )
             }

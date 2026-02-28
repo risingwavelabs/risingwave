@@ -594,10 +594,11 @@ impl MetadataManager {
         &self,
         sink_id: SinkId,
         props: BTreeMap<String, String>,
+        force: bool,
     ) -> MetaResult<HashMap<String, String>> {
         let new_props = self
             .catalog_controller
-            .update_sink_props_by_sink_id(sink_id, props)
+            .update_sink_props_by_sink_id(sink_id, props, force)
             .await?;
         Ok(new_props)
     }
@@ -609,10 +610,11 @@ impl MetadataManager {
         alter_iceberg_table_props: Option<
             risingwave_pb::meta::alter_connector_props_request::PbExtraOptions,
         >,
+        force: bool,
     ) -> MetaResult<(HashMap<String, String>, SinkId)> {
         let (new_props, sink_id) = self
             .catalog_controller
-            .update_iceberg_table_props_by_table_id(table_id, props, alter_iceberg_table_props)
+            .update_iceberg_table_props_by_table_id(table_id, props, alter_iceberg_table_props, force)
             .await?;
         Ok((new_props, sink_id))
     }

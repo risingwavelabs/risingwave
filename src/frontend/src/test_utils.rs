@@ -1325,6 +1325,7 @@ impl FrontendMetaClient for MockFrontendMetaClient {
         _changed_props: BTreeMap<String, String>,
         _changed_secret_refs: BTreeMap<String, PbSecretRef>,
         _connector_conn_ref: Option<ConnectionId>,
+        _force: bool,
     ) -> RpcResult<()> {
         unimplemented!()
     }
@@ -1337,6 +1338,7 @@ impl FrontendMetaClient for MockFrontendMetaClient {
         _changed_props: BTreeMap<String, String>,
         _changed_secret_refs: BTreeMap<String, PbSecretRef>,
         _connector_conn_ref: Option<ConnectionId>,
+        _force: bool,
     ) -> RpcResult<()> {
         unimplemented!()
     }

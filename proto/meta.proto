@@ -402,6 +402,7 @@ message AlterConnectorPropsRequest {
   oneof extra_options {
     AlterIcebergTableIds alter_iceberg_table_ids = 6;
   }
+  bool force = 7;
 }
 
 message AlterConnectorPropsResponse {}

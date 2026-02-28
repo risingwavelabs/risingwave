@@ -1516,6 +1516,7 @@ impl MetaClient {
         changed_props: BTreeMap<String, String>,
         changed_secret_refs: BTreeMap<String, PbSecretRef>,
         connector_conn_ref: Option<ConnectionId>,
+        force: bool,
     ) -> Result<()> {
         let req = AlterConnectorPropsRequest {
             object_id: sink_id.as_raw_id(),
@@ -1524,6 +1525,7 @@ impl MetaClient {
             connector_conn_ref,
             object_type: AlterConnectorPropsObject::Sink as i32,
             extra_options: None,
+            force,
         };
         let _resp = self.inner.alter_connector_props(req).await?;
         Ok(())
@@ -1537,6 +1539,7 @@ impl MetaClient {
         changed_props: BTreeMap<String, String>,
         changed_secret_refs: BTreeMap<String, PbSecretRef>,
         connector_conn_ref: Option<ConnectionId>,
+        force: bool,
     ) -> Result<()> {
         let req = AlterConnectorPropsRequest {
             object_id: table_id.as_raw_id(),
@@ -1548,6 +1551,7 @@ impl MetaClient {
                 sink_id,
                 source_id,
             })),
+            force,
         };
         let _resp = self.inner.alter_connector_props(req).await?;
         Ok(())
@@ -1567,6 +1571,7 @@ impl MetaClient {
             connector_conn_ref,
             object_type: AlterConnectorPropsObject::Source as i32,
             extra_options: None,
+            force: false,
         };
         let _resp = self.inner.alter_connector_props(req).await?;
         Ok(())
@@ -1585,6 +1590,7 @@ impl MetaClient {
             connector_conn_ref: None, // Connections don't reference other connections
             object_type: AlterConnectorPropsObject::Connection as i32,
             extra_options: None,
+            force: false,
         };
         let _resp = self.inner.alter_connector_props(req).await?;
         Ok(())

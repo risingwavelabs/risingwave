@@ -3357,9 +3357,11 @@ impl Parser<'_> {
             let target_table = self.parse_object_name()?;
             AlterTableOperation::SwapRenameTable { target_table }
         } else if self.parse_keyword(Keyword::CONNECTOR) {
+            let force = self.parse_keyword(Keyword::FORCE);
             let with_options = self.parse_with_properties()?;
             AlterTableOperation::AlterConnectorProps {
                 alter_props: with_options,
+                force,
             }
         } else {
             return self.expected(
@@ -3720,13 +3722,15 @@ impl Parser<'_> {
             let target_sink = self.parse_object_name()?;
             AlterSinkOperation::SwapRenameSink { target_sink }
         } else if self.parse_keyword(Keyword::CONNECTOR) {
+            let force = self.parse_keyword(Keyword::FORCE);
             let changed_props = self.parse_with_properties()?;
             AlterSinkOperation::AlterConnectorProps {
                 alter_props: changed_props,
+                force,
             }
         } else {
             return self
-                .expected("RENAME or OWNER TO or SET or RESET or CONNECTOR WITH after ALTER SINK");
+                .expected("RENAME or OWNER TO or SET or RESET or CONNECTOR [FORCE] WITH after ALTER SINK");
         };
 
         Ok(Statement::AlterSink {
