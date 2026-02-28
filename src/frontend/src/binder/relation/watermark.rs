@@ -75,8 +75,9 @@ impl Binder {
             .map(|c| (c.is_hidden, c.field))
             .collect_vec();
 
-        let (_, table_name) = Self::resolve_schema_qualified_name(&self.db_name, &table_name)?;
-        self.bind_table_to_context(columns, table_name, alias)?;
+        let (schema_name, table_name) =
+            Self::resolve_schema_qualified_name(&self.db_name, &table_name)?;
+        self.bind_table_to_context(columns, table_name, schema_name, alias)?;
 
         // Other arguments are validated in `plan_watermark`
         let exprs: Vec<_> = args
