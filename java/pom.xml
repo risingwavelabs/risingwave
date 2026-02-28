@@ -346,7 +346,7 @@
             <dependency>
                 <groupId>org.apache.hive</groupId>
                 <artifactId>hive-metastore</artifactId>
-                <version>4.1.0</version>
+                <version>4.2.0</version>
             </dependency>
             <!-- Enforce jetty version to avoid security vulnerabilities -->
             <dependency>
