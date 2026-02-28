@@ -40,6 +40,7 @@ use risingwave_pb::common::worker_node::Property;
 use risingwave_pb::common::{HostAddress, WorkerType};
 use risingwave_pb::hummock::HummockPinnedVersion;
 use risingwave_pb::hummock::compact_task::TaskStatus;
+use risingwave_pb::hummock::rise_ctl_update_compaction_config_request::mutable_config::MutableConfig;
 use risingwave_rpc_client::HummockMetaClient;
 use thiserror_ext::AsReport;
 
@@ -2698,4 +2699,116 @@ async fn test_try_merge_compaction_group_error_propagation() {
         result.is_err(),
         "try_merge_compaction_group must return Err for overlapping groups, got Ok",
     );
+}
+
+#[tokio::test]
+async fn test_normalize_overlapping_compaction_groups_cascading() {
+    let (_env, hummock_manager, _, _worker_id) = setup_compute_env(80).await;
+
+    // StateDefault(2): [64,80], MaterializedView(3): [65,81,83]
+    hummock_manager
+        .register_table_ids_for_test(&[(64, 2.into()), (80, 2.into())])
+        .await
+        .unwrap();
+    hummock_manager
+        .register_table_ids_for_test(&[(65, 3.into()), (81, 3.into()), (83, 3.into())])
+        .await
+        .unwrap();
+
+    let cg_64 = get_compaction_group_id_by_table_id(hummock_manager.clone(), 64).await;
+    let cg_65 = get_compaction_group_id_by_table_id(hummock_manager.clone(), 65).await;
+
+    let split_count = hummock_manager
+        .normalize_overlapping_compaction_groups()
+        .await
+        .unwrap();
+    assert_eq!(split_count, 2);
+
+    let current_version = hummock_manager.get_current_version().await;
+
+    let members_64 = current_version
+        .state_table_info
+        .compaction_group_member_table_ids(cg_64)
+        .iter()
+        .map(|table_id| table_id.as_raw_id())
+        .collect_vec();
+    let members_65 = current_version
+        .state_table_info
+        .compaction_group_member_table_ids(cg_65)
+        .iter()
+        .map(|table_id| table_id.as_raw_id())
+        .collect_vec();
+    assert_eq!(members_64, vec![64]);
+    assert_eq!(members_65, vec![65]);
+
+    let mut ranges = current_version
+        .levels
+        .keys()
+        .filter_map(|group_id| {
+            let members = current_version
+                .state_table_info
+                .compaction_group_member_table_ids(*group_id)
+                .iter()
+                .map(|table_id| table_id.as_raw_id())
+                .collect_vec();
+            (!members.is_empty()).then(|| (*members.first().unwrap(), *members.last().unwrap()))
+        })
+        .collect_vec();
+    ranges.sort_by_key(|(min_table_id, _)| *min_table_id);
+    assert!(ranges.windows(2).all(|window| window[0].1 < window[1].0));
+}
+
+#[tokio::test]
+async fn test_normalize_overlapping_compaction_groups_respects_disable_auto_group_scheduling() {
+    let (_env, hummock_manager, _, _worker_id) = setup_compute_env(80).await;
+
+    hummock_manager
+        .register_table_ids_for_test(&[(64, 2.into()), (80, 2.into())])
+        .await
+        .unwrap();
+    hummock_manager
+        .register_table_ids_for_test(&[(65, 3.into()), (81, 3.into())])
+        .await
+        .unwrap();
+
+    let cg_64 = get_compaction_group_id_by_table_id(hummock_manager.clone(), 64).await;
+    hummock_manager
+        .update_compaction_config(&[cg_64], &[MutableConfig::DisableAutoGroupScheduling(true)])
+        .await
+        .unwrap();
+
+    let split_count = hummock_manager
+        .normalize_overlapping_compaction_groups()
+        .await
+        .unwrap();
+    assert_eq!(split_count, 0);
+
+    let current_version = hummock_manager.get_current_version().await;
+    let members = current_version
+        .state_table_info
+        .compaction_group_member_table_ids(cg_64)
+        .iter()
+        .map(|table_id| table_id.as_raw_id())
+        .collect_vec();
+    assert_eq!(members, vec![64, 80]);
+}
+
+#[tokio::test]
+async fn test_normalize_overlapping_compaction_groups_noop_on_non_overlapping_input() {
+    let (_env, hummock_manager, _, _worker_id) = setup_compute_env(80).await;
+
+    hummock_manager
+        .register_table_ids_for_test(&[(10, 2.into()), (11, 2.into())])
+        .await
+        .unwrap();
+    hummock_manager
+        .register_table_ids_for_test(&[(20, 3.into()), (21, 3.into())])
+        .await
+        .unwrap();
+
+    let split_count = hummock_manager
+        .normalize_overlapping_compaction_groups()
+        .await
+        .unwrap();
+    assert_eq!(split_count, 0);
 }
