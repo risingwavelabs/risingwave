@@ -21,7 +21,7 @@ panic-message = "0.3"
 parking_lot = { workspace = true }
 peekable = { version = "0.4", features = ["tokio"] }
 postgres-types = { version = "0.2.6" }
-reqwest = "0.12.2"
+reqwest = "0.13.2"
 risingwave_common = { workspace = true }
 risingwave_sqlparser = { workspace = true }
 rustls = "0.23"
