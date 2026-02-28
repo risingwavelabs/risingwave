@@ -89,11 +89,13 @@ impl SplitEnumerator for PulsarSplitEnumerator {
         // MessageId is only used when recovering from a State
         assert!(!matches!(offset, PulsarEnumeratorOffset::MessageId(_)));
 
-        let topic_partitions = self
-            .client
-            .lookup_partitioned_topic_number(&self.topic.to_string())
-            .await
-            .map_err(|e| anyhow!(e))?;
+        // Reduce async state machine size (see `clippy::large_futures`).
+        let topic_partitions = Box::pin(
+            self.client
+                .lookup_partitioned_topic_number(&self.topic.to_string()),
+        )
+        .await
+        .map_err(|e| anyhow!(e))?;
 
         let splits = if topic_partitions > 0 {
             // partitioned topic
@@ -111,7 +113,8 @@ impl SplitEnumerator for PulsarSplitEnumerator {
             // unless there's a live producer/consumer, the broker may not be aware of the non-persistent topic.
             if self.topic.domain == PERSISTENT_DOMAIN {
                 // if the topic is non-partitioned, we need to check if the topic exists on the broker
-                check_topic_exists(&self.client, &self.topic).await?;
+                // Reduce async state machine size (see `clippy::large_futures`).
+                Box::pin(check_topic_exists(&self.client, &self.topic)).await?;
             }
             // non partitioned topic
             vec![PulsarSplit {

@@ -42,18 +42,19 @@ use aws_sdk_s3::types::{
     CompletedPart, Delete, ExpirationStatus, LifecycleRule, LifecycleRuleFilter, ObjectIdentifier,
 };
 use aws_smithy_http::futures_stream_adapter::FuturesStreamCompatByteStream;
-use aws_smithy_runtime::client::http::hyper_014::HyperClientBuilder;
+use aws_smithy_http_client::{
+    Builder as SmithyHttpClientBuilder, Connector as SmithyConnector, tls,
+};
 use aws_smithy_runtime_api::client::http::HttpClient;
 use aws_smithy_runtime_api::client::result::SdkError;
 use aws_smithy_types::body::SdkBody;
 use aws_smithy_types::error::metadata::ProvideErrorMetadata;
+use bytes::BytesMut;
 use fail::fail_point;
 use futures::future::{BoxFuture, FutureExt, try_join_all};
-use futures::{Stream, StreamExt, TryStreamExt, stream};
-use hyper::Body;
+use futures::{Stream, StreamExt, TryStreamExt};
 use itertools::Itertools;
 use risingwave_common::config::ObjectStoreConfig;
-use risingwave_common::monitor::monitor_connector;
 use risingwave_common::range::RangeBoundsExt;
 use thiserror_ext::AsReport;
 use tokio::task::JoinHandle;
@@ -404,10 +405,14 @@ impl StreamingUploader for S3StreamingUploader {
 }
 
 fn get_upload_body(data: Vec<Bytes>) -> ByteStream {
-    SdkBody::retryable(move || {
-        Body::wrap_stream(stream::iter(data.clone().into_iter().map(ObjectResult::Ok))).into()
-    })
-    .into()
+    // `ByteStream` is retryable when created from in-memory data.
+    // This code path is used for non-multipart uploads, so a copy is acceptable.
+    let total_len: usize = data.iter().map(|b| b.len()).sum();
+    let mut buf = BytesMut::with_capacity(total_len);
+    for chunk in data {
+        buf.extend_from_slice(&chunk);
+    }
+    ByteStream::from(buf.freeze())
 }
 
 /// Object store with S3 backend
@@ -647,36 +652,29 @@ impl ObjectStore for S3ObjectStore {
 
 impl S3ObjectStore {
     pub fn new_http_client(config: &ObjectStoreConfig) -> impl HttpClient + use<> {
-        let mut http = hyper::client::HttpConnector::new();
+        let nodelay = config.s3.nodelay;
+        let pool_idle_timeout = config.s3.keepalive_ms.map(Duration::from_millis);
 
-        // connection config
-        if let Some(keepalive_ms) = config.s3.keepalive_ms.as_ref() {
-            http.set_keepalive(Some(Duration::from_millis(*keepalive_ms)));
-        }
+        // Use the Smithy default (hyper 1.x) client stack. This avoids the deprecated hyper 0.14
+        // connector path (`aws-smithy-runtime/tls-rustls`).
+        let tls_provider = tls::Provider::Rustls(tls::rustls_provider::CryptoMode::AwsLc);
+        SmithyHttpClientBuilder::new().build_with_connector_fn(move |settings, _components| {
+            let mut builder = SmithyConnector::builder();
 
-        if let Some(nodelay) = config.s3.nodelay.as_ref() {
-            http.set_nodelay(*nodelay);
-        }
+            if let Some(settings) = settings {
+                builder = builder.connector_settings(settings.clone());
+            }
 
-        if let Some(recv_buffer_size) = config.s3.recv_buffer_size.as_ref() {
-            http.set_recv_buffer_size(Some(*recv_buffer_size));
-        }
+            if let Some(nodelay) = nodelay {
+                builder = builder.enable_tcp_nodelay(nodelay);
+            }
 
-        if let Some(send_buffer_size) = config.s3.send_buffer_size.as_ref() {
-            http.set_send_buffer_size(Some(*send_buffer_size));
-        }
+            if let Some(pool_idle_timeout) = pool_idle_timeout {
+                builder = builder.pool_idle_timeout(pool_idle_timeout);
+            }
 
-        http.enforce_http(false);
-
-        let conn = hyper_rustls::HttpsConnectorBuilder::new()
-            .with_webpki_roots()
-            .https_or_http()
-            .enable_all_versions()
-            .wrap_connector(http);
-
-        let conn = monitor_connector(conn, "S3");
-
-        HyperClientBuilder::new().build(conn)
+            builder.tls_provider(tls_provider.clone()).build()
+        })
     }
 
     /// Creates an S3 object store from environment variable.
@@ -876,12 +874,24 @@ impl S3ObjectStore {
                         // 2a
                         None => true,
                         // 2b
-                        Some(LifecycleRuleFilter::Prefix(prefix))
-                            if data_directory.starts_with(prefix) =>
-                        {
-                            true
+                        Some(filter) => {
+                            // `LifecycleRuleFilter` is a struct in newer aws-sdk-s3 versions.
+                            //
+                            // Treat an "empty filter" as applying to the entire bucket, which is
+                            // considered risky for RisingWave data deletion.
+                            let is_empty = filter.prefix().is_none()
+                                && filter.tag().is_none()
+                                && filter.and().is_none()
+                                && filter.object_size_greater_than().is_none()
+                                && filter.object_size_less_than().is_none();
+                            if is_empty {
+                                true
+                            } else {
+                                filter
+                                    .prefix()
+                                    .is_some_and(|prefix| data_directory.starts_with(prefix))
+                            }
                         }
-                        _ => false,
                     };
 
                     if matches!(rule.status(), ExpirationStatus::Enabled)
@@ -903,7 +913,8 @@ impl S3ObjectStore {
             let bucket_lifecycle_rule = LifecycleRule::builder()
                 .id("abort-incomplete-multipart-upload")
                 .status(ExpirationStatus::Enabled)
-                .filter(LifecycleRuleFilter::Prefix(String::new()))
+                // Empty prefix means "all objects".
+                .filter(LifecycleRuleFilter::builder().prefix("").build())
                 .abort_incomplete_multipart_upload(
                     AbortIncompleteMultipartUpload::builder()
                         .days_after_initiation(S3_INCOMPLETE_MULTIPART_UPLOAD_RETENTION_DAYS)
