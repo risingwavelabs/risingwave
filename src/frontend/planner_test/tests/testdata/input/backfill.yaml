@@ -102,6 +102,27 @@
     select * from joined1234;
   expected_outputs:
     - explain_output
+- name: backfill order, auto, right join
+  sql: |
+    create table r1(v1 int);
+    create table r2(v2 int);
+    select * from r1 right join r2 on r1.v1 = r2.v2;
+  expected_outputs:
+    - backfill_order_plan
+- name: backfill order, auto, asof join
+  sql: |
+    create table t1(v1 int, v2 int);
+    create table t2(v1 int, v2 int);
+    select * from t1 asof join t2 on t1.v1 = t2.v1 and t1.v2 < t2.v2;
+  expected_outputs:
+    - backfill_order_plan
+- name: backfill order, auto, temporal join
+  sql: |
+    create table stream(id1 int, a1 int);
+    create table version(id2 int, a2 int, primary key (id2));
+    select id1, a1, id2, a2 from stream left join version FOR SYSTEM_TIME AS OF PROCTIME() on id1 = id2;
+  expected_outputs:
+    - backfill_order_plan
 - name: |
     Test backfill order, auto, stream share cycle.
     For auto derived backfill order with cycle, it should not return any order plan, and return a NOTICE
