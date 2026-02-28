@@ -1067,6 +1067,48 @@ impl CatalogController {
         Ok((version, database))
     }
 
+    pub async fn alter_subscription_retention(
+        &self,
+        subscription_id: SubscriptionId,
+        retention_seconds: u64,
+        definition: String,
+    ) -> MetaResult<(NotificationVersion, PbSubscription)> {
+        let inner = self.inner.write().await;
+        let txn = inner.db.begin().await?;
+
+        let obj = Object::find_by_id(subscription_id)
+            .one(&txn)
+            .await?
+            .ok_or_else(|| MetaError::catalog_id_not_found("subscription", subscription_id))?;
+
+        let active_model = subscription::ActiveModel {
+            subscription_id: Set(subscription_id),
+            retention_seconds: Set(retention_seconds as i64),
+            definition: Set(definition),
+            ..Default::default()
+        };
+        let subscription = active_model.update(&txn).await?;
+
+        txn.commit().await?;
+
+        let pb_subscription: PbSubscription = ObjectModel(subscription, obj, None).into();
+        let subscription_info = PbObjectInfo::Subscription(pb_subscription.clone());
+
+        let version = self
+            .notify_frontend(
+                NotificationOperation::Update,
+                NotificationInfo::ObjectGroup(PbObjectGroup {
+                    objects: vec![PbObject {
+                        object_info: Some(subscription_info),
+                    }],
+                    dependencies: vec![],
+                }),
+            )
+            .await;
+
+        Ok((version, pb_subscription))
+    }
+
     pub async fn alter_streaming_job_config(
         &self,
         job_id: JobId,

@@ -27,6 +27,7 @@ struct RwSubscription {
     schema_id: SchemaId,
     owner: UserId,
     definition: String,
+    retention_seconds: i64,
     acl: Vec<String>,
     initialized_at: Option<Timestamptz>,
     created_at: Option<Timestamptz>,
@@ -55,6 +56,7 @@ fn read_rw_subscriptions_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwSub
                     schema_id: schema.id(),
                     owner: subscription.owner,
                     definition: subscription.definition.clone(),
+                    retention_seconds: subscription.retention_seconds as i64,
                     acl: get_acl_items(subscription.id, false, &users, username_map),
                     initialized_at: subscription
                         .initialized_at_epoch

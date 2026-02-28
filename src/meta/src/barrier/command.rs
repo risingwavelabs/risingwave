@@ -556,6 +556,13 @@ pub enum Command {
         upstream_mv_table_id: TableId,
     },
 
+    /// `AlterSubscriptionRetention` command updates the subscription retention time.
+    AlterSubscriptionRetention {
+        subscription_id: SubscriptionId,
+        upstream_mv_table_id: TableId,
+        retention_second: u64,
+    },
+
     ConnectorPropsChange(ConnectorPropsChange),
 
     /// `Refresh` command generates a barrier to refresh a table by truncating state
@@ -640,6 +647,14 @@ impl std::fmt::Display for Command {
             Command::DropSubscription {
                 subscription_id, ..
             } => write!(f, "DropSubscription: {subscription_id}"),
+            Command::AlterSubscriptionRetention {
+                subscription_id,
+                retention_second,
+                ..
+            } => write!(
+                f,
+                "AlterSubscriptionRetention: {subscription_id} -> {retention_second}"
+            ),
             Command::ConnectorPropsChange(_) => write!(f, "ConnectorPropsChange"),
             Command::Refresh {
                 table_id,
@@ -850,6 +865,7 @@ impl Command {
             Command::Throttle { .. } => None,
             Command::CreateSubscription { .. } => None,
             Command::DropSubscription { .. } => None,
+            Command::AlterSubscriptionRetention { .. } => None,
             Command::ConnectorPropsChange(_) => None,
             Command::Refresh { .. } => None, // Refresh doesn't change fragment structure
             Command::ListFinish { .. } => None, // ListFinish doesn't change fragment structure
@@ -957,6 +973,9 @@ impl Command {
             Command::CreateSubscription {
                 subscription_id, ..
             } => PostCollectCommand::CreateSubscription { subscription_id },
+            Command::AlterSubscriptionRetention { .. } => {
+                PostCollectCommand::Command("AlterSubscriptionRetention".to_owned())
+            }
             Command::ConnectorPropsChange(connector_props_change) => {
                 PostCollectCommand::ConnectorPropsChange(connector_props_change)
             }
@@ -1596,6 +1615,7 @@ impl Command {
                     upstream_mv_table_id: *upstream_mv_table_id,
                 }],
             })),
+            Command::AlterSubscriptionRetention { .. } => None,
             Command::ConnectorPropsChange(config) => {
                 let mut connector_props_infos = HashMap::default();
                 for (k, v) in config {

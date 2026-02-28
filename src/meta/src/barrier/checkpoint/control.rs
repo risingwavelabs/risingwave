@@ -290,6 +290,7 @@ impl CheckpointControl {
                     | Command::SourceChangeSplit(_)
                     | Command::Throttle { .. }
                     | Command::CreateSubscription { .. }
+                    | Command::AlterSubscriptionRetention { .. }
                     | Command::ConnectorPropsChange(_)
                     | Command::Refresh { .. }
                     | Command::ListFinish { .. }

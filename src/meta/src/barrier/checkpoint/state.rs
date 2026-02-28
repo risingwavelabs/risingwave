@@ -268,6 +268,17 @@ impl DatabaseCheckpointControl {
                     SubscriberType::Subscription(*retention_second),
                 );
             }
+            Some(Command::AlterSubscriptionRetention {
+                subscription_id,
+                upstream_mv_table_id,
+                retention_second,
+            }) => {
+                self.database_info.update_subscription_retention(
+                    upstream_mv_table_id.as_job_id(),
+                    subscription_id.as_subscriber_id(),
+                    *retention_second,
+                );
+            }
             Some(Command::CreateStreamingJob {
                 info,
                 job_type: CreateStreamingJobType::SnapshotBackfill(snapshot_backfill_info),

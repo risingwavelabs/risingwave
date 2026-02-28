@@ -852,6 +852,30 @@ impl InflightDatabaseInfo {
             .remove(&subscriber_id)
     }
 
+    pub fn update_subscription_retention(
+        &mut self,
+        job_id: JobId,
+        subscriber_id: SubscriberId,
+        retention_second: u64,
+    ) {
+        let job = self.jobs.get_mut(&job_id).expect("should exist");
+        match job.subscribers.get_mut(&subscriber_id) {
+            Some(SubscriberType::Subscription(current_retention)) => {
+                *current_retention = retention_second;
+            }
+            Some(SubscriberType::SnapshotBackfill) => {
+                warn!(
+                    %job_id,
+                    %subscriber_id,
+                    "cannot update retention for snapshot backfill subscriber"
+                );
+            }
+            None => {
+                warn!(%job_id, %subscriber_id, "subscription subscriber not found");
+            }
+        }
+    }
+
     fn fragment_mut(&mut self, fragment_id: FragmentId) -> (&mut InflightFragmentInfo, JobId) {
         let job_id = self.fragment_location[&fragment_id];
         let fragment = self
@@ -1130,6 +1154,7 @@ impl InflightDatabaseInfo {
                 | Command::Throttle { .. }
                 | Command::CreateSubscription { .. }
                 | Command::DropSubscription { .. }
+                | Command::AlterSubscriptionRetention { .. }
                 | Command::ConnectorPropsChange(_)
                 | Command::Refresh { .. }
                 | Command::ListFinish { .. }
