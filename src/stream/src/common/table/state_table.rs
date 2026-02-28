@@ -2018,7 +2018,7 @@ where
                         let pk_cols = self.pk_serde
                         .deserialize(&pk)
                         .unwrap_or_else(|e| {
-                            panic!("Failed to deserialize pk {:?} error: {:?}", pk, e);
+                            panic!("Failed to deserialize table {} pk {:?} error: {:?}", self.table_id(), pk, e.as_report());
                         });
                         direction.datum_filter_by_watermark(
                             pk_cols.datum_at(clean_watermark_index_in_pk.unwrap()),
