@@ -150,7 +150,7 @@ pub mod metrics {
             actor_id: ActorId,
             fragment_id: FragmentId,
             name: &str,
-            target: &'static str,
+            target: &str,
         ) -> Self {
             let actor_id_str = actor_id.to_string();
             let fragment_id_str = fragment_id.to_string();

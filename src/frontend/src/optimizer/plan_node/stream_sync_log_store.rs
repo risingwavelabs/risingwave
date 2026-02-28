@@ -13,8 +13,8 @@
 // limitations under the License.
 
 use pretty_xmlish::XmlNode;
-use risingwave_pb::stream_plan::SyncLogStoreNode;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
+use risingwave_pb::stream_plan::{SyncLogStoreNode, SyncLogStoreTarget};
 
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::generic::PhysicalPlanRef;
@@ -31,10 +31,11 @@ use crate::stream_fragmenter::BuildFragmentGraphState;
 pub struct StreamSyncLogStore {
     pub base: PlanBase<Stream>,
     pub input: PlanRef,
+    pub metrics_target: SyncLogStoreTarget,
 }
 
 impl StreamSyncLogStore {
-    pub fn new(input: PlanRef) -> Self {
+    pub fn new_with_target(input: PlanRef, metrics_target: SyncLogStoreTarget) -> Self {
         let base = PlanBase::new_stream(
             input.ctx(),
             input.schema().clone(),
@@ -47,7 +48,11 @@ impl StreamSyncLogStore {
             input.columns_monotonicity().clone(),
         );
 
-        Self { base, input }
+        Self {
+            base,
+            input,
+            metrics_target,
+        }
     }
 }
 
@@ -63,7 +68,7 @@ impl PlanTreeNodeUnary<Stream> for StreamSyncLogStore {
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        Self::new(input)
+        Self::new_with_target(input, self.metrics_target)
     }
 }
 
@@ -76,16 +81,19 @@ impl StreamNode for StreamSyncLogStore {
             .with_id(state.gen_table_id_wrapped())
             .to_internal_table_prost()
             .into();
-        NodeBody::SyncLogStore(Box::new(SyncLogStoreNode {
+        let mut node = SyncLogStoreNode {
             log_store_table,
             aligned: false,
-
-            // The following fields should now be read from per-job config override.
-            #[allow(deprecated)]
-            pause_duration_ms: None,
-            #[allow(deprecated)]
-            buffer_size: None,
-        }))
+            target: self.metrics_target as i32,
+            ..Default::default()
+        };
+        // The following fields should now be read from per-job config override.
+        #[allow(deprecated)]
+        {
+            node.pause_duration_ms = None;
+            node.buffer_size = None;
+        }
+        NodeBody::SyncLogStore(Box::new(node))
     }
 }
 

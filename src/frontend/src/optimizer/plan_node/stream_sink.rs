@@ -33,8 +33,8 @@ use risingwave_connector::sink::{
 };
 use risingwave_connector::{WithPropertiesExt, match_sink_name_str};
 use risingwave_pb::expr::expr_node::Type;
-use risingwave_pb::stream_plan::SinkLogStoreType;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
+use risingwave_pb::stream_plan::{SinkLogStoreType, SyncLogStoreTarget};
 
 use super::derive::{derive_columns, derive_pk};
 use super::stream::prelude::*;
@@ -562,7 +562,7 @@ impl StreamSink {
 
         // sink into table should have logstore for sink_decouple
         let input = if sink_decouple && target_table.is_some() {
-            StreamSyncLogStore::new(input).into()
+            StreamSyncLogStore::new_with_target(input, SyncLogStoreTarget::SinkIntoTable).into()
         } else {
             input
         };

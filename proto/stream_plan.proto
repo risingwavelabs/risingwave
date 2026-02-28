@@ -1034,6 +1034,12 @@ message RowMergeNode {
   catalog.ColIndexMapping rhs_mapping = 2;
 }
 
+enum SyncLogStoreTarget {
+  SYNC_LOG_STORE_TARGET_UNSPECIFIED = 0;
+  SYNC_LOG_STORE_TARGET_UNALIGNED_HASH_JOIN = 1;
+  SYNC_LOG_STORE_TARGET_SINK_INTO_TABLE = 2;
+}
+
 message SyncLogStoreNode {
   catalog.Table log_store_table = 1;
   // Deprecated. Use the one from `StreamingDeveloperConfig` instead.
@@ -1041,6 +1047,7 @@ message SyncLogStoreNode {
   // Deprecated. Use the one from `StreamingDeveloperConfig` instead.
   optional uint32 buffer_size = 3 [deprecated = true];
   bool aligned = 4;
+  SyncLogStoreTarget target = 5;
 }
 
 message MaterializedExprsNode {
