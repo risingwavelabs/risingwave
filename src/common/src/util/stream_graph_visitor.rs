@@ -247,6 +247,10 @@ pub fn visit_stream_node_tables_inner<F>(
             // EOWC over window
             NodeBody::EowcOverWindow(node) => {
                 always!(node.state_table, "EowcOverWindow");
+                optional!(
+                    node.intermediate_state_table,
+                    "EowcOverWindowIntermediateState"
+                );
             }
 
             NodeBody::OverWindow(node) => {
