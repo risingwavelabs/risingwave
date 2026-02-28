@@ -15,15 +15,45 @@ message SubscribeIcebergCompactionEventRequest {
     uint32 pull_task_count = 1;
   }
 
+  // ReportPlan reports plan execution result to meta.
+  message ReportPlan {
+    PlanKey key = 1;
+
+    enum Status {
+      STATUS_UNSPECIFIED = 0;
+      SUCCESS = 1;
+      FAILED = 2;
+      // Reserved for future use. The compactor does not emit CANCELED until explicit
+      // cancellation handling is implemented end-to-end.
+      CANCELED = 3;
+    }
+    Status status = 2;
+
+    string error_message = 3;
+
+    PlanResult result = 4;
+
+    // Attempt number for deduplication on meta.
+    uint32 attempt = 5;
+  }
+
   oneof event {
     // Compactor will register its own context_id with Meta via Register and establish a bi-directional streaming rpc.
     Register register = 1;
 
     // Compactor will recalculate the number of tasks needed locally after receiving the PullTaskAck and get the next batch of tasks from Meta via PullTask.
     PullTask pull_task = 2;
+
+    // Compactor will report plan completion to meta.
+    ReportPlan report_plan = 4;
   }
 
   uint64 create_at = 3;
+}
+
+message PlanKey {
+  uint64 task_id = 1;
+  uint32 plan_index = 2;
 }
 
 message IcebergCompactionTask {
@@ -44,6 +74,27 @@ message IcebergCompactionTask {
   }
 
   TaskType task_type = 3;
+}
+
+message SerializedDataFile {
+  // JSON serialized iceberg::spec::manifest::SerializedDataFile.
+  bytes json = 1;
+  // Partition spec id for decoding.
+  int32 partition_spec_id = 2;
+}
+
+message PlanResult {
+  repeated SerializedDataFile added_data_files = 1;
+  repeated SerializedDataFile added_position_delete_files = 2;
+  repeated SerializedDataFile added_equality_delete_files = 3;
+
+  message RewriteStats {
+    int64 input_data_files = 1;
+    int64 input_delete_files = 2;
+    int64 output_files = 3;
+    int64 output_bytes = 4;
+  }
+  RewriteStats stats = 4;
 }
 
 message SubscribeIcebergCompactionEventResponse {

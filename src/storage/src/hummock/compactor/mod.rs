@@ -376,6 +376,8 @@ pub fn start_iceberg_compactor(
         // Channel for task completion notifications
         let (task_completion_tx, mut task_completion_rx) =
             tokio::sync::mpsc::unbounded_channel::<TaskKey>();
+        let (task_report_tx, mut task_report_rx) =
+            tokio::sync::mpsc::unbounded_channel::<(TaskKey, Result<(), String>)>();
 
         let mut min_interval = tokio::time::interval(stream_retry_interval);
         let mut periodic_event_interval = tokio::time::interval(periodic_event_update_interval);
@@ -441,6 +443,41 @@ pub fn start_iceberg_compactor(
                         task_queue.finish_running(completed_task_key);
                         continue 'consume_stream;
                     }
+                    Some((task_key, report_result)) = task_report_rx.recv() => {
+                        let (status, error_message) = match report_result {
+                            Ok(()) => (
+                                subscribe_iceberg_compaction_event_request::report_plan::Status::Success,
+                                String::new(),
+                            ),
+                            Err(err) => (
+                                subscribe_iceberg_compaction_event_request::report_plan::Status::Failed,
+                                err,
+                            ),
+                        };
+                        let report = subscribe_iceberg_compaction_event_request::ReportPlan {
+                            key: Some(risingwave_pb::iceberg_compaction::PlanKey {
+                                task_id: task_key.0,
+                                plan_index: task_key.1 as u32,
+                            }),
+                            status: status as i32,
+                            error_message,
+                            result: None,
+                            // Reserved for future use. In PR1, compactor does not implement retries
+                            // and always reports attempt=0.
+                            attempt: 0,
+                        };
+                        if let Err(e) = request_sender.send(SubscribeIcebergCompactionEventRequest {
+                            event: Some(subscribe_iceberg_compaction_event_request::Event::ReportPlan(report)),
+                            create_at: SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .expect("Clock may have gone backwards")
+                                .as_millis() as u64,
+                        }) {
+                            tracing::warn!(error = %e.as_report(), task_id = task_key.0, plan_index = task_key.1, "Failed to report iceberg plan result");
+                            continue 'start_stream;
+                        }
+                        continue 'consume_stream;
+                    }
 
                     // Event-driven task scheduling - wait for tasks to become schedulable
                     _ = task_queue.wait_schedulable() => {
@@ -449,6 +486,7 @@ pub fn start_iceberg_compactor(
                             &compactor_context,
                             &shutdown_map,
                             &task_completion_tx,
+                            &task_report_tx,
                         );
                         continue 'consume_stream;
                     }
@@ -1157,6 +1195,7 @@ fn schedule_queued_tasks(
     compactor_context: &CompactorContext,
     shutdown_map: &Arc<Mutex<HashMap<TaskKey, Sender<()>>>>,
     task_completion_tx: &tokio::sync::mpsc::UnboundedSender<TaskKey>,
+    task_report_tx: &tokio::sync::mpsc::UnboundedSender<(TaskKey, Result<(), String>)>,
 ) {
     while let Some(popped_task) = task_queue.pop() {
         let task_id = popped_task.meta.task_id;
@@ -1179,6 +1218,7 @@ fn schedule_queued_tasks(
         let executor = compactor_context.compaction_executor.clone();
         let shutdown_map_clone = shutdown_map.clone();
         let completion_tx_clone = task_completion_tx.clone();
+        let report_tx_clone = task_report_tx.clone();
 
         tracing::info!(
             task_id = task_id,
@@ -1210,8 +1250,15 @@ fn schedule_queued_tasks(
                 },
             );
 
-            if let Err(e) = runner.compact(rx).await {
-                tracing::warn!(error = %e.as_report(), task_id = task_key.0, plan_index = task_key.1, "Failed to compact iceberg runner");
+            let report_result = match runner.compact(rx).await {
+                Ok(_) => Ok(()),
+                Err(e) => {
+                    tracing::warn!(error = %e.as_report(), task_id = task_key.0, plan_index = task_key.1, "Failed to compact iceberg runner");
+                    Err(e.as_report().to_string())
+                }
+            };
+            if report_tx_clone.send((task_key, report_result)).is_err() {
+                tracing::warn!(task_id = task_key.0, plan_index = task_key.1, "Failed to send iceberg plan report");
             }
         });
     }
