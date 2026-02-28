@@ -357,15 +357,15 @@ impl HummockManager {
     }
 
     async fn handle_timer_report(&self) {
-        let (current_version, id_to_config, version_stats) = {
+        // Avoid holding the `versioning` lock across await points to prevent potential deadlocks.
+        let (current_version, version_stats) = {
             let versioning_guard = self.versioning.read().await;
-            let configs = self.get_compaction_group_map().await;
             (
                 versioning_guard.current_version.clone(),
-                configs,
                 versioning_guard.version_stats.clone(),
             )
         };
+        let id_to_config = self.get_compaction_group_map().await;
 
         if let Some(mv_id_to_all_table_ids) = self
             .metadata_manager
@@ -376,7 +376,13 @@ impl HummockManager {
         }
 
         for compaction_group_id in get_compaction_group_ids(&current_version) {
-            let compaction_group_config = &id_to_config[&compaction_group_id];
+            let Some(compaction_group_config) = id_to_config.get(&compaction_group_id) else {
+                warn!(
+                    compaction_group_id = %compaction_group_id,
+                    "Missing compaction group config when reporting metrics. Skip."
+                );
+                continue;
+            };
 
             let group_levels =
                 current_version.get_compaction_group_levels(compaction_group_config.group_id());
@@ -469,9 +475,10 @@ impl HummockManager {
     async fn check_dead_task(&self) {
         const MAX_COMPACTION_L0_MULTIPLIER: u64 = 32;
         const MAX_COMPACTION_DURATION_SEC: u64 = 20 * 60;
-        let (groups, configs) = {
+        // Avoid holding the `versioning` lock across await points to prevent potential deadlocks.
+        let groups = {
             let versioning_guard = self.versioning.read().await;
-            let g = versioning_guard
+            versioning_guard
                 .current_version
                 .levels
                 .iter()
@@ -486,14 +493,19 @@ impl HummockManager {
                             .sum::<u64>(),
                     )
                 })
-                .collect_vec();
-            let c = self.get_compaction_group_map().await;
-            (g, c)
+                .collect_vec()
         };
+        let configs = self.get_compaction_group_map().await;
         let mut slowdown_groups: HashMap<CompactionGroupId, u64> = HashMap::default();
         {
             for (group_id, l0_file_size) in groups {
-                let group = &configs[&group_id];
+                let Some(group) = configs.get(&group_id) else {
+                    warn!(
+                        group_id = %group_id,
+                        "Missing compaction group config when checking dead task. Skip."
+                    );
+                    continue;
+                };
                 if l0_file_size
                     > MAX_COMPACTION_L0_MULTIPLIER
                         * group.compaction_config.max_bytes_for_level_base
