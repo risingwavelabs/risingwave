@@ -48,8 +48,8 @@ use crate::error::{Result, RwError};
 use crate::handler::HandlerArgs;
 use crate::handler::create_connection::print_connection_params;
 use crate::session::{SessionImpl, WorkerProcessId};
-use crate::user::has_access_to_object;
 use crate::user::user_catalog::UserCatalog;
+use crate::user::{has_access_to_object, has_schema_usage_privilege};
 
 pub fn get_columns_from_table(
     session: &SessionImpl,
@@ -152,8 +152,11 @@ where
         .filter_map(|schema| {
             if let Ok(schema_catalog) =
                 reader.get_schema_by_name(&session.database(), schema.as_ref())
-                && (current_user.is_super
-                    || current_user.has_schema_usage_privilege(schema_catalog.id()))
+                && (has_schema_usage_privilege(
+                    current_user,
+                    schema_catalog.id(),
+                    schema_catalog.owner,
+                ))
             {
                 Some(schema_catalog)
             } else {

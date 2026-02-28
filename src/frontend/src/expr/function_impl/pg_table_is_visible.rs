@@ -21,6 +21,7 @@ use crate::catalog::CatalogReader;
 use crate::catalog::system_catalog::is_system_catalog;
 use crate::expr::function_impl::has_privilege::user_not_found_err;
 use crate::session::AuthContext;
+use crate::user::has_schema_usage_privilege;
 use crate::user::user_service::UserInfoReader;
 
 #[function("pg_table_is_visible(int4) -> boolean")]
@@ -56,7 +57,7 @@ fn pg_table_is_visible_impl(
         if let Ok(schema) = catalog_reader.get_schema_by_name(db_name, schema)
             && schema.contains_object(oid)
         {
-            return if user_info.is_super || user_info.has_schema_usage_privilege(schema.id()) {
+            return if has_schema_usage_privilege(user_info, schema.id(), schema.owner) {
                 Ok(Some(true))
             } else {
                 Ok(Some(false))
