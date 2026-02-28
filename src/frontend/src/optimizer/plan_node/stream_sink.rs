@@ -18,7 +18,9 @@ use std::sync::Arc;
 use iceberg::spec::Transform;
 use itertools::Itertools;
 use pretty_xmlish::{Pretty, XmlNode};
-use risingwave_common::catalog::{ColumnCatalog, CreateType, FieldLike};
+use risingwave_common::catalog::{
+    ColumnCatalog, CreateType, FieldLike, RISINGWAVE_ICEBERG_ROW_ID, ROW_ID_COLUMN_NAME,
+};
 use risingwave_common::types::{DataType, StructType};
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_connector::sink::catalog::desc::SinkDesc;
@@ -392,7 +394,18 @@ impl StreamSink {
                 .map(|&column_index| columns[column_index].name())
                 .collect_vec();
             if upstream_table_pk_col_names != sink_pk_col_names {
-                return Err(ErrorCode::InvalidInputSyntax(format!("sink with auto schema change should have same pk as upstream table {:?}, but got {:?}", upstream_table_pk_col_names, sink_pk_col_names)).into());
+                let is_iceberg_row_id_alias = properties.is_iceberg_connector()
+                    && upstream_table_pk_col_names.len() == 1
+                    && upstream_table_pk_col_names[0] == ROW_ID_COLUMN_NAME
+                    && sink_pk_col_names.len() == 1
+                    && sink_pk_col_names[0] == RISINGWAVE_ICEBERG_ROW_ID;
+                if !is_iceberg_row_id_alias {
+                    return Err(ErrorCode::InvalidInputSyntax(format!(
+                        "sink with auto schema change should have same pk as upstream table {:?}, but got {:?}",
+                        upstream_table_pk_col_names, sink_pk_col_names
+                    ))
+                    .into());
+                }
             }
         }
         let mut extra_partition_col_idx = None;

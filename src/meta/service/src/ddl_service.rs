@@ -1640,6 +1640,7 @@ impl DdlService for DdlServiceImpl {
 
         // Mark sink as background creation, so that it won't block source creation.
         sink.create_type = PbCreateType::Background as _;
+        sink.auto_refresh_schema_from_table = Some(table_catalog.id);
 
         let mut fragment_graph = fragment_graph.unwrap();
 
