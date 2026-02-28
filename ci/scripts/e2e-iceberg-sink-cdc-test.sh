@@ -254,4 +254,177 @@ verify_iceberg_source iceberg_s3 <<'EOF'
 6 60 600
 7 70 700 700
 EOF
+
+echo "--- Testing Iceberg Sink schema change with partition shuffle"
+
+ICEBERG_PARTITION_DB_NAME="public"
+ICEBERG_PARTITION_TABLE_NAME="t_partitioned"
+RW_PARTITION_SOURCE_NAME="s_partitioned_cdc"
+RW_PARTITION_TABLE_NAME="t_partitioned_upstream"
+
+echo "Creating PostgreSQL CDC source for partitioned test (fresh backfill)..."
+risedev psql -c "
+    DROP SOURCE IF EXISTS ${RW_PARTITION_SOURCE_NAME};
+    CREATE SOURCE ${RW_PARTITION_SOURCE_NAME} WITH (
+        username = 'postgres',
+        connector='postgres-cdc',
+        hostname='db',
+        port='5432',
+        password = 'post\\tgres',
+        database.name = 'postgres',
+        schema.name = 'public',
+        slot.name = 'rw_cdc_test_slot_partitioned',
+        auto.schema.change = 'true'
+    );
+"
+
+sleep 5
+
+echo "Creating CDC table for partitioned test..."
+risedev psql -c "
+    DROP TABLE IF EXISTS ${RW_PARTITION_TABLE_NAME};
+    CREATE TABLE ${RW_PARTITION_TABLE_NAME} (
+        id int primary key,
+        v1 int,
+        v2 int,
+        v3 int
+    ) FROM ${RW_PARTITION_SOURCE_NAME} TABLE 'public.t';
+"
+
+sleep 5
+
+echo "Preparing a partitioned Iceberg table..."
+# NOTE: `StreamSink` will only add `StreamProject` + shuffle `StreamExchange` if the target Iceberg
+# table exists and has sparse partitions (identity/bucket/truncate). So we create the table first
+# with `partition_by` and without writing any data (id < 0).
+risedev psql -c "
+    DROP SINK IF EXISTS iceberg_partition_prepare;
+    CREATE SINK iceberg_partition_prepare AS
+    SELECT id, v1, v2, v3 FROM ${RW_PARTITION_TABLE_NAME} WHERE id < 0
+    WITH (
+        connector = 'iceberg',
+        type = 'append-only',
+        database.name = '${ICEBERG_PARTITION_DB_NAME}',
+        table.name = '${ICEBERG_PARTITION_TABLE_NAME}',
+        catalog.name = 'iceberg',
+        catalog.type = 'storage',
+        warehouse.path = 's3a://hummock001/iceberg-data',
+        s3.endpoint = 'http://127.0.0.1:9301',
+        s3.region = 'custom',
+        s3.access.key = 'hummockadmin',
+        s3.secret.key = 'hummockadmin',
+        create_table_if_not_exists = 'true',
+        partition_by = 'bucket(16,id)',
+        force_append_only='true'
+    );
+"
+
+sleep 5
+risedev psql -c "DROP SINK iceberg_partition_prepare;"
+
+echo "Creating Iceberg sink (partitioned table exists, should shuffle by partition)..."
+risedev psql -c "
+    DROP SINK IF EXISTS s_partitioned;
+    CREATE SINK s_partitioned from ${RW_PARTITION_TABLE_NAME} WITH (
+        connector = 'iceberg',
+        type = 'append-only',
+        database.name = '${ICEBERG_PARTITION_DB_NAME}',
+        table.name = '${ICEBERG_PARTITION_TABLE_NAME}',
+        catalog.name = 'iceberg',
+        catalog.type = 'storage',
+        warehouse.path = 's3a://hummock001/iceberg-data',
+        s3.endpoint = 'http://127.0.0.1:9301',
+        s3.region = 'custom',
+        s3.access.key = 'hummockadmin',
+        s3.secret.key = 'hummockadmin',
+        commit_checkpoint_interval = 2,
+        primary_key = 'id',
+        force_append_only='true',
+        auto.schema.change = 'true',
+        is_exactly_once = 'true',
+    );
+"
+
+echo "DESCRIBE FRAGMENTS s_partitioned (Iceberg partition shuffle)..."
+risedev psql -c 'DESCRIBE FRAGMENTS s_partitioned;'
+
+echo "Creating iceberg_p1 to verify initial backfill..."
+risedev psql -c "
+    DROP SOURCE IF EXISTS iceberg_p1;
+    CREATE SOURCE iceberg_p1
+    WITH (
+        connector = 'iceberg',
+        s3.endpoint = 'http://127.0.0.1:9301',
+        s3.region = 'us-east-1',
+        s3.access.key = 'hummockadmin',
+        s3.secret.key = 'hummockadmin',
+        s3.path.style.access = 'true',
+        catalog.type = 'storage',
+        warehouse.path = 's3a://hummock001/iceberg-data',
+        database.name = '${ICEBERG_PARTITION_DB_NAME}',
+        table.name = '${ICEBERG_PARTITION_TABLE_NAME}',
+    );
+"
+
+echo "Waiting for data to sync to Iceberg..."
+sleep 5
+
+echo "Verifying initial data in iceberg_p1..."
+risedev psql -c "select * from iceberg_p1 ORDER BY id;"
+verify_iceberg_source iceberg_p1 <<'EOF'
+1 10 0 10
+2 20 0 10
+3 30 0 10
+4 40 100 10
+5 50 200 10
+6 60 600 10
+7 70 700 700
+EOF
+
+echo "Performing third schema change: ADD COLUMN v4 INT..."
+psql -c "
+    INSERT INTO t (id, v1, v2, v3) VALUES (8, 80, 800, 800);
+    ALTER TABLE t ADD COLUMN v4 INT DEFAULT 0;
+    INSERT INTO t (id, v1, v2, v3, v4) VALUES (9, 90, 900, 900, 900);
+"
+sleep 5
+
+echo "DESCRIBE FRAGMENTS s_partitioned (Iceberg partition shuffle)..."
+risedev psql -c 'DESCRIBE FRAGMENTS s_partitioned;'
+
+echo "Creating iceberg_p2 to verify schema change..."
+risedev psql -c "
+    DROP SOURCE IF EXISTS iceberg_p2;
+    CREATE SOURCE iceberg_p2
+    WITH (
+        connector = 'iceberg',
+        s3.endpoint = 'http://127.0.0.1:9301',
+        s3.region = 'us-east-1',
+        s3.access.key = 'hummockadmin',
+        s3.secret.key = 'hummockadmin',
+        s3.path.style.access = 'true',
+        catalog.type = 'storage',
+        warehouse.path = 's3a://hummock001/iceberg-data',
+        database.name = '${ICEBERG_PARTITION_DB_NAME}',
+        table.name = '${ICEBERG_PARTITION_TABLE_NAME}',
+    );
+"
+
+echo "Waiting for data to sync to Iceberg..."
+sleep 5
+
+echo "Verifying data after third schema change..."
+risedev psql -c "select * from iceberg_p2 ORDER BY id";
+verify_iceberg_source iceberg_p2 <<'EOF'
+1 10 0 10
+2 20 0 10
+3 30 0 10
+4 40 100 10
+5 50 200 10
+6 60 600 10
+7 70 700 700
+8 80 800 800
+9 90 900 900 900
+EOF
+
 echo "✅ PostgreSQL CDC with Iceberg sink schema change test completed successfully!"

@@ -31,6 +31,7 @@ use risingwave_common::hash::VnodeCountCompat;
 use risingwave_common::id::{JobId, TableId};
 use risingwave_common::secret::{LocalSecretManager, SecretEncryption};
 use risingwave_common::system_param::reader::SystemParamsRead;
+use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_common::util::stream_graph_visitor::visit_stream_node_cont_mut;
 use risingwave_common::{bail, bail_not_implemented};
 use risingwave_connector::WithOptionsSecResolved;
@@ -83,9 +84,8 @@ use crate::manager::{
     NotificationVersion, StreamingJob, StreamingJobType,
 };
 use crate::model::{
-    DownstreamFragmentRelation, Fragment, FragmentDownstreamRelation,
-    FragmentId as CatalogFragmentId, StreamContext, StreamJobFragments, StreamJobFragmentsToCreate,
-    TableParallelism,
+    DownstreamFragmentRelation, Fragment, FragmentId as CatalogFragmentId, StreamContext,
+    StreamJobFragments, StreamJobFragmentsToCreate, TableParallelism,
 };
 use crate::stream::cdc::{
     parallel_cdc_table_backfill_fragment, try_init_parallel_cdc_table_snapshot_splits,
@@ -1433,18 +1433,11 @@ impl DdlController {
                         .metadata_manager
                         .get_job_fragments_by_id(sink.id.as_job_id())
                         .await?;
-                    if sink_job_fragments.fragments.len() != 1 {
-                        return Err(anyhow!(
-                            "auto schema refresh sink must have only one fragment, but got {}",
-                            sink_job_fragments.fragments.len()
-                        )
-                        .into());
-                    }
-                    let original_sink_fragment =
-                        sink_job_fragments.fragments.into_values().next().unwrap();
-                    let (new_sink_fragment, new_schema, new_log_store_table) =
+                    let original_sink_fragments =
+                        sink_job_fragments.fragments.into_values().collect_vec();
+                    let (new_sink_fragments, fragment_id_mapping, new_schema, new_log_store_table) =
                         rewrite_refresh_schema_sink_fragment(
-                            &original_sink_fragment,
+                            &original_sink_fragments,
                             &sink,
                             &newly_added_columns,
                             table,
@@ -1453,24 +1446,64 @@ impl DdlController {
                             self.env.actor_id_generator(),
                         )?;
 
-                    assert_eq!(
-                        original_sink_fragment.actors.len(),
-                        new_sink_fragment.actors.len()
-                    );
-                    let actor_status = (0..original_sink_fragment.actors.len())
-                        .map(|i| {
-                            let worker_node_id = sink_job_fragments.actor_status
-                                [&original_sink_fragment.actors[i].actor_id]
-                                .location
-                                .as_ref()
-                                .unwrap()
-                                .worker_node_id;
-                            (
-                                new_sink_fragment.actors[i].actor_id,
-                                PbActorStatus {
-                                    location: Some(PbActorLocation { worker_node_id }),
-                                },
-                            )
+                    let new_fragment_output_len: HashMap<_, _> = new_sink_fragments
+                        .iter()
+                        .map(|f| (f.fragment_id, f.nodes.fields.len()))
+                        .collect();
+                    let original_fragment_relation = self
+                        .metadata_manager
+                        .catalog_controller
+                        .get_fragment_downstream_relations(
+                            original_sink_fragments
+                                .iter()
+                                .map(|fragment| fragment.fragment_id as _)
+                                .collect_vec(),
+                        )
+                        .await?;
+                    let new_fragment_relation = original_fragment_relation
+                        .into_iter()
+                        .map(|(original_source_id, mut downstreams)| {
+                            let new_source_id = *fragment_id_mapping
+                                .get(&original_source_id)
+                                .expect("source fragment should exist in mapping");
+                            let new_output_len = *new_fragment_output_len
+                                .get(&new_source_id)
+                                .expect("new source fragment should exist in output len map");
+                            downstreams.iter_mut().for_each(|relation| {
+                                let new_downstream_id = fragment_id_mapping
+                                    .get(&relation.downstream_fragment_id)
+                                    .expect("downstream fragment should exist in mapping");
+                                relation.downstream_fragment_id = *new_downstream_id;
+                                relation.output_mapping.indices =
+                                    (0..new_output_len as _).collect();
+                            });
+                            (new_source_id, downstreams)
+                        })
+                        .collect();
+
+                    let actor_status = new_sink_fragments
+                        .iter()
+                        .zip_eq_debug(original_sink_fragments.iter())
+                        .flat_map(|(new_sink_fragment, original_sink_fragment)| {
+                            assert_eq!(
+                                new_sink_fragment.actors.len(),
+                                original_sink_fragment.actors.len(),
+                                "number of actors should be unchanged"
+                            );
+                            (0..original_sink_fragment.actors.len()).map(|i| {
+                                let worker_node_id = sink_job_fragments.actor_status
+                                    [&original_sink_fragment.actors[i].actor_id]
+                                    .location
+                                    .as_ref()
+                                    .unwrap()
+                                    .worker_node_id;
+                                (
+                                    new_sink_fragment.actors[i].actor_id,
+                                    PbActorStatus {
+                                        location: Some(PbActorLocation { worker_node_id }),
+                                    },
+                                )
+                            })
                         })
                         .collect();
 
@@ -1489,13 +1522,14 @@ impl DdlController {
                     sinks.push(AutoRefreshSchemaSinkContext {
                         tmp_sink_id,
                         original_sink: sink,
-                        original_fragment: original_sink_fragment,
                         new_schema,
                         newly_add_fields: newly_added_columns
                             .iter()
                             .map(|col| Field::from(&col.column_desc))
                             .collect(),
-                        new_fragment: new_sink_fragment,
+                        original_fragments: original_sink_fragments,
+                        new_fragments: new_sink_fragments,
+                        new_fragment_relation,
                         new_log_store_table,
                         actor_status,
                     });
@@ -1582,14 +1616,13 @@ impl DdlController {
             let replace_upstream = ctx.replace_upstream.clone();
 
             if let Some(sinks) = &ctx.auto_refresh_schema_sinks {
-                let empty_downstreams = FragmentDownstreamRelation::default();
                 for sink in sinks {
                     self.metadata_manager
                         .catalog_controller
                         .prepare_streaming_job(
                             sink.tmp_sink_id.as_job_id(),
-                            || [&sink.new_fragment].into_iter(),
-                            &empty_downstreams,
+                            || sink.new_fragments.iter(),
+                            &sink.new_fragment_relation,
                             true,
                             None,
                             None,
@@ -2109,28 +2142,26 @@ impl DdlController {
             self.metadata_manager.get_downstream_fragments(id).await?;
 
         if let Some(auto_refresh_schema_sinks) = &auto_refresh_schema_sinks {
-            let mut remaining_fragment: HashSet<_> = auto_refresh_schema_sinks
-                .iter()
-                .map(|sink| sink.original_fragment.fragment_id)
-                .collect();
             for (_, downstream_fragment, nodes) in &mut downstream_fragments {
-                if let Some(sink) = auto_refresh_schema_sinks.iter().find(|sink| {
-                    sink.original_fragment.fragment_id == downstream_fragment.fragment_id
-                }) {
-                    assert!(remaining_fragment.remove(&downstream_fragment.fragment_id));
+                if let Some((sink, new_fragment_info)) =
+                    auto_refresh_schema_sinks.iter().find_map(|sink| {
+                        sink.new_fragment_info_by_original_id(downstream_fragment.fragment_id)
+                            .map(|new_fragment| (sink, new_fragment))
+                    })
+                {
                     for actor_id in downstream_fragment.actors.keys() {
                         downstream_actor_location.remove(actor_id);
                     }
-                    for (actor_id, status) in &sink.actor_status {
+                    for actor_id in new_fragment_info.actors.keys() {
+                        let status = &sink.actor_status[actor_id];
                         downstream_actor_location
                             .insert(*actor_id, status.location.as_ref().unwrap().worker_node_id);
                     }
 
-                    *downstream_fragment = (&sink.new_fragment_info(), stream_job.id()).into();
-                    *nodes = sink.new_fragment.nodes.clone();
+                    *downstream_fragment = (&new_fragment_info, stream_job.id()).into();
+                    *nodes = new_fragment_info.nodes.clone();
                 }
             }
-            assert!(remaining_fragment.is_empty());
         }
 
         // build complete graph based on the table job type
@@ -2224,8 +2255,9 @@ impl DdlController {
 
         if let Some(sinks) = &auto_refresh_schema_sinks {
             for sink in sinks {
+                let downstream_fragment = sink.new_stream_scan_fragment().expect("should exist");
                 replace_upstream
-                    .remove(&sink.new_fragment.fragment_id)
+                    .remove(&downstream_fragment.fragment_id)
                     .expect("should exist");
             }
         }

@@ -1235,12 +1235,7 @@ impl InflightDatabaseInfo {
                                     .as_ref()
                                     .into_iter()
                                     .flat_map(|sinks| {
-                                        sinks.iter().map(|sink| {
-                                            (
-                                                sink.new_fragment.fragment_id,
-                                                sink.new_fragment_info(),
-                                            )
-                                        })
+                                        sinks.iter().flat_map(|sink| sink.new_fragment_infos())
                                     }),
                             )
                     })
@@ -1276,6 +1271,11 @@ impl InflightDatabaseInfo {
         if let Some(replace_job) = replace_job {
             builder.add_relations(&replace_job.upstream_fragment_downstreams);
             builder.add_relations(&replace_job.new_fragments.downstreams);
+            if let Some(sinks) = &replace_job.auto_refresh_schema_sinks {
+                for sink in sinks {
+                    builder.add_relations(&sink.new_fragment_relation);
+                }
+            }
         }
         if let Some(new_upstream_sink) = new_upstream_sink {
             let sink_fragment_id = new_upstream_sink.sink_fragment_id;
