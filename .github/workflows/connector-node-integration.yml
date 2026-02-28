@@ -44,6 +44,9 @@ jobs:
             lld libopenblas-dev liblapack-dev
       - name: run integration tests
         if: steps.filter.outputs.java == 'true' || steps.filter.outputs.proto == 'true'
+        env:
+          # docker-java 3.4.x defaults to API version 1.32, but Docker 28+ requires >= 1.44
+          DOCKER_API_VERSION: "1.44"
         run: |
           set -ex
 
