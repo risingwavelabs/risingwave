@@ -84,6 +84,16 @@ public class DbzConnectorConfig {
     public static class MongoDb {
         public static final String MONGO_URL = "mongodb.url";
         public static final String MONGO_COLLECTION_NAME = "collection.name";
+
+        // SSL/X509 authentication support
+        public static final String MONGO_SSL_ENABLED = "mongodb.ssl.enabled";
+        public static final String MONGO_SSL_KEYSTORE = "mongodb.ssl.keystore.location";
+        public static final String MONGO_SSL_KEYSTORE_PASSWORD = "mongodb.ssl.keystore.password";
+        public static final String MONGO_SSL_KEYSTORE_TYPE = "mongodb.ssl.keystore.type";
+        public static final String MONGO_SSL_TRUSTSTORE = "mongodb.ssl.truststore.location";
+        public static final String MONGO_SSL_TRUSTSTORE_PASSWORD = "mongodb.ssl.truststore.password";
+        public static final String MONGO_SSL_INVALID_HOSTNAME_ALLOWED = "mongodb.ssl.invalid.hostname.allowed";
+        public static final String MONGO_AUTH_MECHANISM = "mongodb.auth.mechanism";
     }
 
     private static Map<String, String> extractDebeziumProperties(
