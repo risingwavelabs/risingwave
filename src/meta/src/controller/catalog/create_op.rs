@@ -212,6 +212,17 @@ impl CatalogController {
         let source: source::ActiveModel = pb_source.clone().into();
         Source::insert(source).exec(&txn).await?;
 
+        if let Some(external_schema) = &pb_source.external_schema {
+            let external_schema = source_external_schema::ActiveModel {
+                source_id: Set(source_id),
+                version: Set(external_schema.version.clone()),
+                content: Set(external_schema.content.clone()),
+            };
+            source_external_schema::Entity::insert(external_schema)
+                .exec(&txn)
+                .await?;
+        }
+
         // add secret and connection dependency
         let dep_relation_ids = secret_ids
             .iter()

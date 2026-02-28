@@ -61,6 +61,7 @@ pub mod serde_seaql_migration;
 pub mod session_parameter;
 pub mod sink;
 pub mod source;
+pub mod source_external_schema;
 pub mod streaming_job;
 pub mod subscription;
 pub mod system_parameter;
@@ -358,6 +359,7 @@ derive_array_from_blob!(
     PbColumnCatalogArray
 );
 derive_from_blob!(StreamSourceInfo, risingwave_pb::catalog::PbStreamSourceInfo);
+derive_from_blob!(StreamSourceExternalSchema, risingwave_pb::catalog::StreamSourceExternalSchema);
 derive_from_blob!(
     WebhookSourceInfo,
     risingwave_pb::catalog::PbWebhookSourceInfo

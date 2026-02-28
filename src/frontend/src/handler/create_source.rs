@@ -1130,7 +1130,7 @@ pub async fn handle_create_source(
         bind_connector_props(&handler_args, &format_encode, true)?;
 
     let create_source_type = CreateSourceType::for_newly_created(&session, &*with_properties);
-    let (columns_from_resolve_source, source_info) = bind_columns_from_source(
+    let (columns_from_resolve_source, source_info, external_schema) = bind_columns_from_source(
         &session,
         &format_encode,
         Either::Left(&with_properties),

@@ -15,6 +15,7 @@
 //! bind columns from external schema
 
 use risingwave_connector::source::ADBC_SNOWFLAKE_CONNECTOR;
+use risingwave_pb::catalog::StreamSourceExternalSchema;
 
 use super::*;
 
@@ -74,8 +75,8 @@ pub async fn bind_columns_from_source(
     format_encode: &FormatEncodeOptions,
     with_properties: Either<&WithOptions, &WithOptionsSecResolved>,
     create_source_type: CreateSourceType,
-) -> Result<(Option<Vec<ColumnCatalog>>, StreamSourceInfo)> {
-    let (columns_from_resolve_source, mut source_info) =
+) -> Result<(Option<Vec<ColumnCatalog>>, StreamSourceInfo, Option<StreamSourceExternalSchema>)> {
+    let (columns_from_resolve_source, mut source_info, external_schema) =
         if create_source_type == CreateSourceType::SharedCdc {
             bind_columns_from_source_for_cdc(session, format_encode)?
         } else {
@@ -86,14 +87,14 @@ pub async fn bind_columns_from_source(
         source_info.cdc_source_job = true;
         source_info.is_distributed = create_source_type == CreateSourceType::SharedNonCdc;
     }
-    Ok((columns_from_resolve_source, source_info))
+    Ok((columns_from_resolve_source, source_info, external_schema))
 }
 
 async fn bind_columns_from_source_for_non_cdc(
     session: &SessionImpl,
     format_encode: &FormatEncodeOptions,
     with_properties: Either<&WithOptions, &WithOptionsSecResolved>,
-) -> Result<(Option<Vec<ColumnCatalog>>, StreamSourceInfo)> {
+) -> Result<(Option<Vec<ColumnCatalog>>, StreamSourceInfo, Option<StreamSourceExternalSchema>)> {
     const MESSAGE_NAME_KEY: &str = "message";
     const KEY_MESSAGE_NAME_KEY: &str = "key.message";
     const NAME_STRATEGY_KEY: &str = "schema.registry.name.strategy";
@@ -169,10 +170,10 @@ async fn bind_columns_from_source_for_non_cdc(
         try_consume_string_from_options(&mut format_encode_options_to_consume, DEBEZIUM_IGNORE_KEY);
     }
 
-    let columns = match (&format_encode.format, &format_encode.row_encode) {
+    let (columns, external_schema) = match (&format_encode.format, &format_encode.row_encode) {
         (Format::Native, Encode::Native)
         | (Format::Plain, Encode::Bytes)
-        | (Format::DebeziumMongo, Encode::Json) => None,
+        | (Format::DebeziumMongo, Encode::Json) => (None, None),
         (Format::Plain, Encode::Protobuf) | (Format::Upsert, Encode::Protobuf) => {
             let (row_schema_location, use_schema_registry) =
                 get_schema_location(&mut format_encode_options_to_consume)?;
@@ -197,14 +198,7 @@ async fn bind_columns_from_source_for_non_cdc(
             stream_source_info.name_strategy =
                 name_strategy.unwrap_or(PbSchemaRegistryNameStrategy::Unspecified as i32);
 
-            Some(
-                extract_protobuf_table_schema(
-                    &stream_source_info,
-                    &options_with_secret,
-                    &mut format_encode_options_to_consume,
-                )
-                .await?,
-            )
+            (Some(extract_protobuf_table_schema(&stream_source_info, &options_with_secret, &mut format_encode_options_to_consume).await?), None)
         }
         (format @ (Format::Plain | Format::Upsert | Format::Debezium), Encode::Avro) => {
             if format_encode_options_to_consume
@@ -245,15 +239,7 @@ async fn bind_columns_from_source_for_non_cdc(
                     name_strategy.unwrap_or(PbSchemaRegistryNameStrategy::Unspecified as i32);
             }
 
-            Some(
-                extract_avro_table_schema(
-                    &stream_source_info,
-                    &options_with_secret,
-                    &mut format_encode_options_to_consume,
-                    matches!(format, Format::Debezium),
-                )
-                .await?,
-            )
+            let (columns, version, content) = extract_avro_table_schema(&stream_source_info, &options_with_secret, &mut format_encode_options_to_consume, matches!(format, Format::Debezium)).await?; stream_source_info.external_schema_version = version.clone(); stream_source_info.external_schema_content = content.clone(); (Some(columns), Some(StreamSourceExternalSchema { version, content }))
         }
         (Format::Plain, Encode::Csv) => {
             let chars =
@@ -276,10 +262,9 @@ async fn bind_columns_from_source_for_non_cdc(
             stream_source_info.csv_delimiter = delimiter as i32;
             stream_source_info.csv_has_header = has_header;
 
-            None
-        }
+            (None, None) }
         // For parquet format, this step is implemented in parquet parser.
-        (Format::Plain, Encode::Parquet) => None,
+        (Format::Plain, Encode::Parquet) => (None, None),
         (
             Format::Plain | Format::Upsert | Format::Maxwell | Format::Canal | Format::Debezium,
             Encode::Json,
@@ -304,31 +289,18 @@ async fn bind_columns_from_source_for_non_cdc(
             stream_source_info.use_schema_registry =
                 json_schema_infer_use_schema_registry(&schema_config);
 
-            extract_json_table_schema(
-                &schema_config,
-                &options_with_secret,
-                &mut format_encode_options_to_consume,
-            )
-            .await?
+            (extract_json_table_schema(&schema_config, &options_with_secret, &mut format_encode_options_to_consume).await?, None)
         }
         (Format::None, Encode::None) => {
             if options_with_secret.is_iceberg_connector() {
-                Some(
-                    extract_iceberg_columns(&options_with_secret)
-                        .await
-                        .map_err(|err| ProtocolError(err.to_report_string()))?,
-                )
+                (Some(extract_iceberg_columns(&options_with_secret).await.map_err(|err| ProtocolError(err.to_report_string()))?), None)
             } else if options_with_secret
                 .get(UPSTREAM_SOURCE_KEY)
                 .is_some_and(|s| s.eq_ignore_ascii_case(ADBC_SNOWFLAKE_CONNECTOR))
             {
-                Some(
-                    extract_adbc_snowflake_columns(&options_with_secret)
-                        .await
-                        .map_err(|err| ProtocolError(err.to_report_string()))?,
-                )
+                (Some(extract_adbc_snowflake_columns(&options_with_secret).await.map_err(|err| ProtocolError(err.to_report_string()))?), None)
             } else {
-                None
+                (None, None)
             }
         }
         (format, encoding) => {
@@ -352,13 +324,13 @@ async fn bind_columns_from_source_for_non_cdc(
         );
         session.notice_to_user(err_string);
     }
-    Ok((columns, stream_source_info))
+    Ok((columns, stream_source_info, external_schema))
 }
 
 fn bind_columns_from_source_for_cdc(
     session: &SessionImpl,
     format_encode: &FormatEncodeOptions,
-) -> Result<(Option<Vec<ColumnCatalog>>, StreamSourceInfo)> {
+) -> Result<(Option<Vec<ColumnCatalog>>, StreamSourceInfo, Option<StreamSourceExternalSchema>)> {
     let with_options = WithOptions::try_from(format_encode.row_options())?;
     if !with_options.connection_ref().is_empty() {
         return Err(RwError::from(NotSupported(
@@ -412,7 +384,7 @@ fn bind_columns_from_source_for_cdc(
         );
         session.notice_to_user(err_string);
     }
-    Ok((Some(columns), stream_source_info))
+    Ok((Some(columns), stream_source_info, None))
 }
 
 fn format_to_prost(format: &Format) -> FormatType {
@@ -475,7 +447,6 @@ fn get_name_strategy_or_default(name_strategy: Option<AstString>) -> Result<Opti
     match name_strategy {
         None => Ok(None),
         Some(name) => Ok(Some(name_strategy_from_str(name.0.as_str())
-            .ok_or_else(|| RwError::from(ProtocolError(format!("\
-            expect strategy name in topic_name_strategy, record_name_strategy and topic_record_name_strategy, but got {}", name))))? as i32)),
+            .ok_or_else(|| RwError::from(ProtocolError(format!("            expect strategy name in topic_name_strategy, record_name_strategy and topic_record_name_strategy, but got {}", name))))? as i32)),
     }
 }
