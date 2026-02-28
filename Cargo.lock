@@ -11820,7 +11820,7 @@ name = "risingwave_error"
 version = "2.9.0-alpha"
 dependencies = [
  "anyhow",
- "bincode 1.3.3",
+ "bincode 2.0.1",
  "easy-ext",
  "iceberg",
  "madsim-tonic",
@@ -12671,7 +12671,7 @@ dependencies = [
  "async-trait",
  "auto_enums",
  "await-tree",
- "bincode 1.3.3",
+ "bincode 2.0.1",
  "bytes",
  "criterion",
  "derive_builder",
