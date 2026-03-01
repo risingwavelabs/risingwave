@@ -378,6 +378,7 @@ pub(crate) async fn new_input(
 /// Local inputs are always created individually (no change from the existing behavior).
 /// Remote inputs are grouped by upstream host address and multiplexed when the group has
 /// more than one actor.
+#[expect(clippy::too_many_arguments)]
 pub(crate) async fn new_inputs(
     local_barrier_manager: &LocalBarrierManager,
     metrics: Arc<StreamingMetrics>,

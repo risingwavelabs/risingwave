@@ -243,6 +243,13 @@ pub(super) enum LocalActorOperation {
         ids: UpDownActorIds,
         request: TakeReceiverRequest,
     },
+    TakeMultiplexedReceiver {
+        partial_graph_id: PartialGraphId,
+        term_id: String,
+        up_actor_ids: Vec<ActorId>,
+        down_actor_id: ActorId,
+        result_sender: oneshot::Sender<StreamResult<Receiver>>,
+    },
     #[cfg(test)]
     GetCurrentLocalBarrierManager(oneshot::Sender<LocalBarrierManager>),
     #[cfg(test)]
@@ -530,7 +537,7 @@ impl LocalBarrierWorker {
                     match self.state.partial_graphs.entry(partial_graph_id) {
                         Entry::Occupied(mut entry) => match entry.get_mut() {
                             PartialGraphStatus::ReceivedExchangeRequest(pending_requests) => {
-                                pending_requests.push((ids, request));
+                                pending_requests.push(managed_state::PendingExchangeRequest::Individual(ids, request));
                                 return;
                             }
                             PartialGraphStatus::Running(graph) => {
@@ -553,9 +560,9 @@ impl LocalBarrierWorker {
                             }
                         },
                         Entry::Vacant(entry) => {
-                            entry.insert(PartialGraphStatus::ReceivedExchangeRequest(vec![(
-                                ids, request,
-                            )]));
+                            entry.insert(PartialGraphStatus::ReceivedExchangeRequest(vec![
+                                managed_state::PendingExchangeRequest::Individual(ids, request),
+                            ]));
                             return;
                         }
                     }
@@ -563,6 +570,69 @@ impl LocalBarrierWorker {
                 if let TakeReceiverRequest::Remote(result_sender) = request {
                     let _ = result_sender.send(Err(err.into()));
                 }
+            }
+            LocalActorOperation::TakeMultiplexedReceiver {
+                partial_graph_id,
+                term_id,
+                up_actor_ids,
+                down_actor_id,
+                result_sender,
+            } => {
+                let err = if self.term_id != term_id {
+                    warn!(
+                        ?up_actor_ids,
+                        ?down_actor_id,
+                        term_id,
+                        current_term_id = self.term_id,
+                        "take multiplexed receiver on unmatched term_id"
+                    );
+                    anyhow!(
+                        "take multiplexed receiver on unmatched term_id {} to current term_id {}",
+                        term_id,
+                        self.term_id
+                    )
+                } else {
+                    match self.state.partial_graphs.entry(partial_graph_id) {
+                        Entry::Occupied(mut entry) => match entry.get_mut() {
+                            PartialGraphStatus::ReceivedExchangeRequest(pending_requests) => {
+                                pending_requests.push(managed_state::PendingExchangeRequest::Multiplexed {
+                                    up_actor_ids,
+                                    down_actor_id,
+                                    result_sender,
+                                });
+                                return;
+                            }
+                            PartialGraphStatus::Running(graph) => {
+                                graph.new_multiplexed_actor_output_request(
+                                    up_actor_ids,
+                                    down_actor_id,
+                                    result_sender,
+                                );
+                                return;
+                            }
+                            PartialGraphStatus::Suspended(_) => {
+                                anyhow!("partial graph suspended")
+                            }
+                            PartialGraphStatus::Resetting => {
+                                anyhow!("partial graph resetting")
+                            }
+                            PartialGraphStatus::Unspecified => {
+                                unreachable!()
+                            }
+                        },
+                        Entry::Vacant(entry) => {
+                            entry.insert(PartialGraphStatus::ReceivedExchangeRequest(vec![
+                                managed_state::PendingExchangeRequest::Multiplexed {
+                                    up_actor_ids,
+                                    down_actor_id,
+                                    result_sender,
+                                },
+                            ]));
+                            return;
+                        }
+                    }
+                };
+                let _ = result_sender.send(Err(err.into()));
             }
             #[cfg(test)]
             LocalActorOperation::GetCurrentLocalBarrierManager(sender) => {
@@ -941,8 +1011,30 @@ impl LocalBarrierWorker {
                         self.term_id.clone(),
                         self.actor_manager.clone(),
                     );
-                    for ((upstream_actor_id, actor_id), request) in pending_requests.drain(..) {
-                        graph.new_actor_output_request(actor_id, upstream_actor_id, request);
+                    for request in pending_requests.drain(..) {
+                        match request {
+                            managed_state::PendingExchangeRequest::Individual(
+                                (upstream_actor_id, actor_id),
+                                take_request,
+                            ) => {
+                                graph.new_actor_output_request(
+                                    actor_id,
+                                    upstream_actor_id,
+                                    take_request,
+                                );
+                            }
+                            managed_state::PendingExchangeRequest::Multiplexed {
+                                up_actor_ids,
+                                down_actor_id,
+                                result_sender,
+                            } => {
+                                graph.new_multiplexed_actor_output_request(
+                                    up_actor_ids,
+                                    down_actor_id,
+                                    result_sender,
+                                );
+                            }
+                        }
                     }
                     *status = PartialGraphStatus::Running(graph);
                 } else {
@@ -1133,6 +1225,7 @@ impl<T> EventSender<T> {
 pub(crate) enum NewOutputRequest {
     Local(permit::Sender),
     Remote(permit::Sender),
+    MultiplexedRemote(crate::executor::exchange::multiplexed::MultiplexedActorOutput),
 }
 
 #[cfg(test)]
