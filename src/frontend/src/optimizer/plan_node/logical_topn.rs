@@ -12,6 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashSet;
+use std::fmt::Write;
+
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::bail_not_implemented;
@@ -20,9 +23,9 @@ use risingwave_common::util::sort_util::ColumnOrder;
 use super::generic::{GenericPlanRef, TopNLimit};
 use super::utils::impl_distill_by_unit;
 use super::{
-    BatchGroupTopN, ColPrunable, ExprRewritable, Logical, LogicalPlanRef as PlanRef, PlanBase,
-    PlanTreeNodeUnary, PredicatePushdown, StreamGroupTopN, StreamPlanRef, StreamProject, ToBatch,
-    ToStream, gen_filter_and_pushdown, generic, try_enforce_locality_requirement,
+    BatchGroupTopN, ColPrunable, Explain, ExprRewritable, Logical, LogicalPlanRef as PlanRef,
+    PlanBase, PlanTreeNodeUnary, PredicatePushdown, StreamGroupTopN, StreamPlanRef, StreamProject,
+    ToBatch, ToStream, gen_filter_and_pushdown, generic, try_enforce_locality_requirement,
 };
 use crate::error::{ErrorCode, Result, RwError};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
@@ -30,6 +33,7 @@ use crate::optimizer::plan_node::{
     BatchTopN, ColumnPruningContext, LogicalProject, PredicatePushdownContext,
     RewriteStreamContext, StreamTopN, ToStreamContext,
 };
+use crate::optimizer::plan_visitor::RelationCollectorVisitor;
 use crate::optimizer::property::{Distribution, Order, RequiredDist};
 use crate::planner::LIMIT_ALL_COUNT;
 use crate::utils::{ColIndexMapping, ColIndexMappingRewriteExt, Condition};
@@ -178,6 +182,143 @@ impl LogicalTopN {
         core.order = prefix.concat(core.order);
         core.into()
     }
+
+    fn topn_rewrite_panic_context(&self, input_col_change: &ColIndexMapping) -> String {
+        let mut detail = String::new();
+        let ctx = self.ctx();
+        let session = ctx.session_ctx();
+        let input = self.input();
+        let related_relations =
+            RelationCollectorVisitor::collect_with(HashSet::new(), input.clone());
+
+        let _ = writeln!(detail, "TopN rewrite_required_order returned None.");
+        let _ = writeln!(detail, "sql: {}", ctx.sql());
+        let _ = writeln!(detail, "normalized_sql: {}", ctx.normalized_sql());
+        let _ = writeln!(detail, "session_user: {}", session.user_name());
+        let _ = writeln!(detail, "session_database: {}", session.database());
+        let _ = writeln!(
+            detail,
+            "topn limit={}, offset={}, with_ties={}",
+            self.limit_attr().limit(),
+            self.offset(),
+            self.limit_attr().with_ties()
+        );
+        let _ = writeln!(detail, "topn_order: {:?}", self.topn_order());
+        let _ = writeln!(detail, "group_key: {:?}", self.group_key());
+        let _ = writeln!(detail, "input_col_change: {:?}", input_col_change);
+        let _ = writeln!(detail, "input_schema: {:?}", input.schema());
+        let _ = writeln!(detail, "input_stream_key: {:?}", input.stream_key());
+        let _ = writeln!(detail, "input_plan:\n{}", input.explain_to_string());
+        let _ = writeln!(detail, "related_relations: {:?}", related_relations);
+
+        let catalog_reader = session.env().catalog_reader().read_guard();
+        for object_id in related_relations.iter().sorted_by_key(|id| id.as_raw_id()) {
+            let table_id = object_id.as_table_id();
+            match catalog_reader.get_any_table_by_id(table_id) {
+                Ok(table) => {
+                    let schema_name = catalog_reader
+                        .get_schema_by_id(table.database_id, table.schema_id)
+                        .map(|schema| schema.name())
+                        .unwrap_or_else(|_| "<schema-not-found>".to_owned());
+                    let _ = writeln!(
+                        detail,
+                        "table[id={} name={}.{}.{}, type={:?}, created={}, append_only={}, owner={}, fragment_id={}, dml_fragment_id={:?}]",
+                        table.id().as_raw_id(),
+                        table.database_id,
+                        schema_name,
+                        table.name(),
+                        table.table_type(),
+                        table.is_created(),
+                        table.append_only,
+                        table.owner,
+                        table.fragment_id,
+                        table.dml_fragment_id
+                    );
+                    let _ = writeln!(
+                        detail,
+                        "table_keys[pk={:?}, stream_key={:?}, distribution_key={:?}, dist_key_in_pk={:?}]",
+                        table.pk(),
+                        table.stream_key(),
+                        table.distribution_key(),
+                        table.dist_key_in_pk
+                    );
+                    let _ = writeln!(
+                        detail,
+                        "table_state[stream_job_status={:?}, create_type={:?}, vnode_col_index={:?}, row_id_index={:?}, read_prefix_len_hint={}, version_id={:?}, cardinality={:?}]",
+                        table.stream_job_status,
+                        table.create_type,
+                        table.vnode_col_index,
+                        table.row_id_index,
+                        table.read_prefix_len_hint,
+                        table.version_id(),
+                        table.cardinality
+                    );
+                    let _ = writeln!(
+                        detail,
+                        "table_columns: {}",
+                        table
+                            .columns()
+                            .iter()
+                            .enumerate()
+                            .map(|(idx, col)| format!(
+                                "#{idx} {}:{} hidden={} generated={}",
+                                col.name(),
+                                col.data_type(),
+                                col.is_hidden,
+                                col.is_generated()
+                            ))
+                            .join(", ")
+                    );
+                    let _ = writeln!(detail, "table_definition: {}", table.create_sql());
+
+                    if let Ok(schema) =
+                        catalog_reader.get_schema_by_id(table.database_id, table.schema_id)
+                    {
+                        let related_indexes = schema.get_any_indexes_by_table_id(table.id());
+                        let _ = writeln!(detail, "related_index_count: {}", related_indexes.len());
+                        for index in related_indexes {
+                            let _ = writeln!(
+                                detail,
+                                "index[id={}, name={}, created={}, primary_table_id={}, index_table_id={}]",
+                                index.id.as_raw_id(),
+                                index.name,
+                                index.is_created(),
+                                index.primary_table.id().as_raw_id(),
+                                index.index_table().id().as_raw_id()
+                            );
+                            let _ = writeln!(
+                                detail,
+                                "index_display[index_columns={:?}, include_columns={:?}, distributed_by_columns={:?}]",
+                                index.display().index_columns_with_ordering,
+                                index.display().include_columns,
+                                index.display().distributed_by_columns
+                            );
+                            let _ = writeln!(
+                                detail,
+                                "index_table_definition: {}",
+                                index.index_table().create_sql()
+                            );
+                            let _ = writeln!(
+                                detail,
+                                "index_primary_table_definition: {}",
+                                index.primary_table.create_sql()
+                            );
+                        }
+                    }
+                }
+                Err(err) => {
+                    let _ = writeln!(
+                        detail,
+                        "relation[id={}] is not a table or not visible in catalog: {}",
+                        object_id.as_raw_id(),
+                        err
+                    );
+                }
+            }
+        }
+
+        detail
+    }
 }
 
 impl PlanTreeNodeUnary<Logical> for LogicalTopN {
@@ -200,7 +341,7 @@ impl PlanTreeNodeUnary<Logical> for LogicalTopN {
         core.input = input;
         core.order = input_col_change
             .rewrite_required_order(self.topn_order())
-            .unwrap_or_else(|| panic!("topn panic sql: {}", self.ctx().sql()));
+            .unwrap_or_else(|| panic!("{}", self.topn_rewrite_panic_context(&input_col_change)));
         for key in &mut core.group_key {
             *key = input_col_change.map(*key)
         }
