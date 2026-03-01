@@ -920,8 +920,8 @@ impl DdlController {
             })?;
         fn assert_parallelism(stream_scan_fragment: &Fragment, node_body: &Option<NodeBody>) {
             if let Some(NodeBody::StreamCdcScan(node)) = node_body {
-                if let Some(o) = node.options
-                    && CdcScanOptions::from_proto(&o).is_parallelized_backfill()
+                if let Some(o) = &node.options
+                    && CdcScanOptions::from_proto(o).is_parallelized_backfill()
                 {
                     // Use parallel CDC backfill.
                 } else {
