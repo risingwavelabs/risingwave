@@ -1,0 +1,62 @@
+control substitution on
+
+# Prerequisites:
+#   Start RisingWave with a LocalStack profile, e.g.:
+#     risedev d sqs-sink
+#   Then run this test with:
+#     risedev slt e2e_test/sink/sqs_sink_localstack.slt
+
+# Create the SQS queue in LocalStack
+system ok
+AWS_ACCESS_KEY_ID=test AWS_SECRET_ACCESS_KEY=test aws \
+  --endpoint-url=${RISEDEV_LOCALSTACK_ENDPOINT} \
+  --region us-east-1 \
+  sqs create-queue --queue-name test-rw-sqs-sink
+
+# Verify the queue was created
+system ok
+AWS_ACCESS_KEY_ID=test AWS_SECRET_ACCESS_KEY=test aws \
+  --endpoint-url=${RISEDEV_LOCALSTACK_ENDPOINT} \
+  --region us-east-1 \
+  sqs get-queue-url --queue-name test-rw-sqs-sink
+
+statement ok
+CREATE TABLE t_sqs (id int, name varchar);
+
+statement ok
+CREATE SINK sink_sqs FROM t_sqs WITH (
+  connector = 'sqs',
+  sqs.queue_url = '${RISEDEV_LOCALSTACK_ENDPOINT}/000000000000/test-rw-sqs-sink',
+  ${RISEDEV_SQS_WITH_OPTIONS_COMMON}
+) FORMAT PLAIN ENCODE JSON;
+
+statement ok
+INSERT INTO t_sqs VALUES (1, 'Alice'), (2, 'Bob'), (3, 'Charlie');
+
+# Allow time for the sink to deliver messages
+sleep 5s
+
+# Receive messages and verify at least one was delivered
+system ok
+AWS_ACCESS_KEY_ID=test AWS_SECRET_ACCESS_KEY=test aws \
+  --endpoint-url=${RISEDEV_LOCALSTACK_ENDPOINT} \
+  --region us-east-1 \
+  sqs receive-message \
+  --queue-url ${RISEDEV_LOCALSTACK_ENDPOINT}/000000000000/test-rw-sqs-sink \
+  --max-number-of-messages 10 \
+  --wait-time-seconds 5 \
+  | grep -q '"Body"'
+
+statement ok
+DROP SINK sink_sqs;
+
+statement ok
+DROP TABLE t_sqs;
+
+# Cleanup the queue
+system ok
+AWS_ACCESS_KEY_ID=test AWS_SECRET_ACCESS_KEY=test aws \
+  --endpoint-url=${RISEDEV_LOCALSTACK_ENDPOINT} \
+  --region us-east-1 \
+  sqs delete-queue \
+  --queue-url ${RISEDEV_LOCALSTACK_ENDPOINT}/000000000000/test-rw-sqs-sink
