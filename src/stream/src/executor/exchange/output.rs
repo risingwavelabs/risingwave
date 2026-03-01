@@ -35,6 +35,8 @@ pub enum Output {
         ch: Sender,
     },
     Multiplexed {
+        /// The downstream actor ID (used for hash-based routing and output management).
+        actor_id: ActorId,
         inner: MultiplexedActorOutput,
         span: await_tree::Span,
     },
@@ -47,9 +49,10 @@ impl fmt::Debug for Output {
                 .debug_struct("Output::Direct")
                 .field("actor_id", actor_id)
                 .finish(),
-            Output::Multiplexed { inner, .. } => f
+            Output::Multiplexed { actor_id, inner, .. } => f
                 .debug_struct("Output::Multiplexed")
-                .field("actor_id", &inner.actor_id())
+                .field("downstream_actor_id", actor_id)
+                .field("upstream_actor_id", &inner.actor_id())
                 .finish(),
         }
     }
@@ -64,10 +67,10 @@ impl Output {
         }
     }
 
-    pub fn new_multiplexed(inner: MultiplexedActorOutput) -> Self {
-        let actor_id = inner.actor_id();
+    pub fn new_multiplexed(actor_id: ActorId, inner: MultiplexedActorOutput) -> Self {
         Output::Multiplexed {
             span: await_tree::span!("Output (actor {:?}, multiplexed)", actor_id).verbose(),
+            actor_id,
             inner,
         }
     }
@@ -79,7 +82,7 @@ impl Output {
                 .instrument_await(span.clone())
                 .await
                 .map_err(|_| ExchangeChannelClosed::output(*actor_id).into()),
-            Output::Multiplexed { inner, span } => {
+            Output::Multiplexed { inner, span, .. } => {
                 inner.send(message).instrument_await(span.clone()).await
             }
         }
@@ -87,8 +90,7 @@ impl Output {
 
     pub fn actor_id(&self) -> ActorId {
         match self {
-            Output::Direct { actor_id, .. } => *actor_id,
-            Output::Multiplexed { inner, .. } => inner.actor_id(),
+            Output::Direct { actor_id, .. } | Output::Multiplexed { actor_id, .. } => *actor_id,
         }
     }
 }
