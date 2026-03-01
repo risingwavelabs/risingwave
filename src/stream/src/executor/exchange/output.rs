@@ -49,7 +49,9 @@ impl fmt::Debug for Output {
                 .debug_struct("Output::Direct")
                 .field("actor_id", actor_id)
                 .finish(),
-            Output::Multiplexed { actor_id, inner, .. } => f
+            Output::Multiplexed {
+                actor_id, inner, ..
+            } => f
                 .debug_struct("Output::Multiplexed")
                 .field("downstream_actor_id", actor_id)
                 .field("upstream_actor_id", &inner.actor_id())
