@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2026 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,9 +14,10 @@
 
 //! Multiplexed exchange for node-level barrier relay.
 //!
-//! This module provides [`MultiplexedOutput`] (sender side) and [`MultiplexedRemoteInput`]
-//! (receiver side) to reduce barrier messages from N×M to M per exchange per epoch, where
-//! N is the number of upstream actors on one node and M is the number of downstream actors.
+//! This module provides [`MultiplexedActorOutput`] (sender side) and
+//! [`run_multiplexed_remote_input`] (receiver side) to reduce barrier messages from N×M to
+//! M per exchange per epoch, where N is the number of upstream actors on one node and M is
+//! the number of downstream actors.
 //!
 //! See `docs/dev/src/design/node-level-barrier-relay.md` for the full design.
 
@@ -123,7 +124,7 @@ impl BarrierCoalescer {
     }
 }
 
-/// A handle for one upstream actor to send messages into a [`MultiplexedOutput`].
+/// A handle for one upstream actor to send messages into a multiplexed output channel.
 ///
 /// Each upstream actor's `DispatchExecutor` holds one of these instead of a direct `Output`.
 /// Data chunks and watermarks are forwarded immediately (tagged with the actor ID).
@@ -240,8 +241,7 @@ impl MultiplexedOutputCoordinator {
     /// when all expected actors have reached the same epoch.
     pub async fn run(mut self) -> StreamResult<()> {
         while let Some((actor_id, barrier)) = self.barrier_rx.recv().await {
-            if let Some((coalesced_barrier, actor_ids)) =
-                self.coalescer.collect(actor_id, barrier)
+            if let Some((coalesced_barrier, actor_ids)) = self.coalescer.collect(actor_id, barrier)
             {
                 let epoch = coalesced_barrier.epoch.curr;
 
@@ -281,16 +281,17 @@ pub fn create_multiplexed_output(
     // Scale record permits proportional to the number of upstream actors.
     let scaled_initial_permits = initial_permits * upstream_actor_ids.len();
     let scaled_batched_permits = batched_permits * upstream_actor_ids.len();
-    // Allow more barrier permits than `concurrent_barriers` to avoid pipeline stalls.
-    // With N actors sharing one channel, the coordinator must acquire a barrier permit
-    // for each coalesced barrier. If permits == concurrent_barriers (typically 1), the
-    // coordinator blocks until the downstream returns the permit, which serializes
-    // barrier propagation and amplifies tail latency. Using a higher value (≥5) lets
-    // multiple coalesced barriers be in-flight simultaneously, decoupling the
-    // coordinator from downstream processing speed.
-    let barrier_permits = concurrent_barriers.max(5);
+    // Barrier permits control how many coalesced barriers can be in-flight simultaneously
+    // in the shared channel. This value comes from the `concurrent_barriers` config
+    // (`stream_exchange_concurrent_barriers`). At high parallelism, consider raising it
+    // (e.g. to 10) to avoid serializing barrier propagation through the coordinator.
+    let barrier_permits = concurrent_barriers;
 
-    let (tx, rx) = permit::channel(scaled_initial_permits, scaled_batched_permits, barrier_permits);
+    let (tx, rx) = permit::channel(
+        scaled_initial_permits,
+        scaled_batched_permits,
+        barrier_permits,
+    );
 
     let (barrier_tx, barrier_rx) = mpsc::unbounded_channel();
 
@@ -368,9 +369,9 @@ pub async fn run_multiplexed_remote_input(
                     Some(permits::Value::Barrier(p)) => Some(permits::Value::Barrier(p)),
                     None => None,
                 } {
-                    permits_tx
-                        .send(add_back_permits)
-                        .map_err(|_| anyhow::anyhow!("MultiplexedRemoteInput backward permits channel closed"))?;
+                    permits_tx.send(add_back_permits).map_err(|_| {
+                        anyhow::anyhow!("MultiplexedRemoteInput backward permits channel closed")
+                    })?;
                 }
 
                 let msg_batch = DispatcherMessageBatch::from_protobuf(&msg)
@@ -390,10 +391,8 @@ pub async fn run_multiplexed_remote_input(
                     }
                     DispatcherMessageBatch::BarrierBatch(barriers) => {
                         // Check for coalesced_actor_ids in the protobuf
-                        let coalesced_actor_ids = msg
-                            .stream_message_batch
-                            .as_ref()
-                            .and_then(|smb| match smb {
+                        let coalesced_actor_ids =
+                            msg.stream_message_batch.as_ref().and_then(|smb| match smb {
                                 PbStreamMessageBatchInner::BarrierBatch(bb) => {
                                     if bb.coalesced_actor_ids.is_empty() {
                                         None
@@ -409,9 +408,8 @@ pub async fn run_multiplexed_remote_input(
                             for &actor_id in actor_ids {
                                 if let Some(tx) = logical_outputs.get(&actor_id) {
                                     for barrier in &barriers {
-                                        let _ = tx.send(DispatcherMessage::Barrier(
-                                            barrier.clone(),
-                                        ));
+                                        let _ =
+                                            tx.send(DispatcherMessage::Barrier(barrier.clone()));
                                     }
                                 }
                             }
@@ -503,7 +501,10 @@ mod tests {
         let (barrier, mut actor_ids) = result.unwrap();
         assert_eq!(barrier.epoch.curr, test_epoch(2));
         actor_ids.sort();
-        assert_eq!(actor_ids, vec![ActorId::new(1), ActorId::new(2), ActorId::new(3)]);
+        assert_eq!(
+            actor_ids,
+            vec![ActorId::new(1), ActorId::new(2), ActorId::new(3)]
+        );
     }
 
     #[test]

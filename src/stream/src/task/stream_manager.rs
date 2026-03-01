@@ -31,11 +31,10 @@ use crate::error::StreamResult;
 use crate::executor::ActorContextRef;
 use crate::executor::exchange::permit::Receiver;
 use crate::executor::monitor::StreamingMetrics;
-use crate::task::ActorId;
 use crate::task::barrier_worker::{
     ControlStreamHandle, EventSender, LocalActorOperation, LocalBarrierWorker, TakeReceiverRequest,
 };
-use crate::task::{StreamEnvironment, UpDownActorIds};
+use crate::task::{ActorId, StreamEnvironment, UpDownActorIds};
 
 #[cfg(test)]
 pub static LOCAL_TEST_ADDR: std::sync::LazyLock<risingwave_common::util::addr::HostAddr> =
@@ -163,15 +162,15 @@ impl LocalStreamManager {
         down_actor_id: ActorId,
     ) -> StreamResult<Receiver> {
         self.actor_op_tx
-            .send_and_await(|result_sender| {
-                LocalActorOperation::TakeMultiplexedReceiver {
+            .send_and_await(
+                |result_sender| LocalActorOperation::TakeMultiplexedReceiver {
                     partial_graph_id,
                     term_id,
                     up_actor_ids,
                     down_actor_id,
                     result_sender,
-                }
-            })
+                },
+            )
             .await?
     }
 

@@ -189,8 +189,7 @@ impl StreamExchangeServiceImpl {
                     proto.source_actor_id = source_actor_id;
                     if !coalesced_actor_ids.is_empty() {
                         use risingwave_pb::stream_plan::stream_message_batch::StreamMessageBatch as SmBatch;
-                        if let Some(SmBatch::BarrierBatch(bb)) =
-                            proto.stream_message_batch.as_mut()
+                        if let Some(SmBatch::BarrierBatch(bb)) = proto.stream_message_batch.as_mut()
                         {
                             bb.coalesced_actor_ids = coalesced_actor_ids;
                         }

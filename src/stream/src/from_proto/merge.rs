@@ -35,10 +35,8 @@ impl MergeExecutorBuilder {
     ) -> StreamResult<MergeExecutorInput> {
         let upstream_fragment_id = node.get_upstream_fragment_id();
 
-        let enable_multiplexing = matches!(
-            node.get_upstream_dispatcher_type()?,
-            DispatcherType::Hash
-        );
+        let enable_multiplexing =
+            matches!(node.get_upstream_dispatcher_type()?, DispatcherType::Hash);
 
         let upstream_actors = actor_context
             .initial_upstream_actors

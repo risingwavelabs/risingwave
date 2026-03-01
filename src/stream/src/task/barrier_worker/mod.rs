@@ -537,7 +537,9 @@ impl LocalBarrierWorker {
                     match self.state.partial_graphs.entry(partial_graph_id) {
                         Entry::Occupied(mut entry) => match entry.get_mut() {
                             PartialGraphStatus::ReceivedExchangeRequest(pending_requests) => {
-                                pending_requests.push(managed_state::PendingExchangeRequest::Individual(ids, request));
+                                pending_requests.push(
+                                    managed_state::PendingExchangeRequest::Individual(ids, request),
+                                );
                                 return;
                             }
                             PartialGraphStatus::Running(graph) => {
@@ -595,11 +597,13 @@ impl LocalBarrierWorker {
                     match self.state.partial_graphs.entry(partial_graph_id) {
                         Entry::Occupied(mut entry) => match entry.get_mut() {
                             PartialGraphStatus::ReceivedExchangeRequest(pending_requests) => {
-                                pending_requests.push(managed_state::PendingExchangeRequest::Multiplexed {
-                                    up_actor_ids,
-                                    down_actor_id,
-                                    result_sender,
-                                });
+                                pending_requests.push(
+                                    managed_state::PendingExchangeRequest::Multiplexed {
+                                        up_actor_ids,
+                                        down_actor_id,
+                                        result_sender,
+                                    },
+                                );
                                 return;
                             }
                             PartialGraphStatus::Running(graph) => {
