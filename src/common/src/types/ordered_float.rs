@@ -53,6 +53,7 @@ use std::error::Error;
 use std::fmt::{Debug, Formatter};
 
 use bytes::BytesMut;
+use musli_zerocopy::ZeroCopy;
 pub use num_traits::Float;
 use num_traits::{
     Bounded, CheckedAdd, CheckedDiv, CheckedMul, CheckedNeg, CheckedRem, CheckedSub, Num, One, Pow,
@@ -96,8 +97,9 @@ const CANONICAL_ZERO_BITS: u64 = 0x0u64;
 /// s.insert(OrderedFloat(NAN));
 /// assert!(s.contains(&OrderedFloat(NAN)));
 /// ```
-#[derive(Default, Clone, Copy, Serialize)]
+#[derive(Default, Clone, Copy, Serialize, ZeroCopy)]
 #[repr(transparent)]
+#[zero_copy(bounds = {T: ZeroCopy})]
 pub struct OrderedFloat<T>(pub T);
 
 impl<T: Debug> Debug for OrderedFloat<T> {
