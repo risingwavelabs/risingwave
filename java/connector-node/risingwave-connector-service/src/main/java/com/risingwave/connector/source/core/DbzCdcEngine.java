@@ -74,7 +74,13 @@ public class DbzCdcEngine implements Runnable {
     }
 
     public void stop() throws Exception {
-        engine.close();
+        try {
+            engine.close();
+        } catch (IllegalStateException e) {
+            // Debezium's AsyncEmbeddedEngine.close() throws IllegalStateException when called
+            // multiple times. Treat stop as idempotent.
+            return;
+        }
     }
 
     public BlockingQueue<ConnectorServiceProto.GetEventStreamResponse> getOutputChannel() {
