@@ -43,16 +43,14 @@ pub enum Output {
 impl fmt::Debug for Output {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Output::Direct { actor_id, .. } => {
-                f.debug_struct("Output::Direct")
-                    .field("actor_id", actor_id)
-                    .finish()
-            }
-            Output::Multiplexed { inner, .. } => {
-                f.debug_struct("Output::Multiplexed")
-                    .field("actor_id", &inner.actor_id())
-                    .finish()
-            }
+            Output::Direct { actor_id, .. } => f
+                .debug_struct("Output::Direct")
+                .field("actor_id", actor_id)
+                .finish(),
+            Output::Multiplexed { inner, .. } => f
+                .debug_struct("Output::Multiplexed")
+                .field("actor_id", &inner.actor_id())
+                .finish(),
         }
     }
 }
@@ -76,19 +74,14 @@ impl Output {
 
     pub async fn send(&mut self, message: Message) -> StreamResult<()> {
         match self {
-            Output::Direct {
-                actor_id,
-                span,
-                ch,
-            } => ch
+            Output::Direct { actor_id, span, ch } => ch
                 .send(message)
                 .instrument_await(span.clone())
                 .await
                 .map_err(|_| ExchangeChannelClosed::output(*actor_id).into()),
-            Output::Multiplexed { inner, span } => inner
-                .send(message)
-                .instrument_await(span.clone())
-                .await,
+            Output::Multiplexed { inner, span } => {
+                inner.send(message).instrument_await(span.clone()).await
+            }
         }
     }
 

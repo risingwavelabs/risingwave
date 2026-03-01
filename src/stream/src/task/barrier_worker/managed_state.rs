@@ -427,12 +427,16 @@ impl PartialGraphStatus {
             PartialGraphStatus::ReceivedExchangeRequest(pending_requests) => {
                 for request in pending_requests.drain(..) {
                     match request {
-                        PendingExchangeRequest::Individual(_, TakeReceiverRequest::Remote(sender)) => {
+                        PendingExchangeRequest::Individual(
+                            _,
+                            TakeReceiverRequest::Remote(sender),
+                        ) => {
                             let _ = sender.send(Err(anyhow!("partial graph aborted").into()));
                         }
                         PendingExchangeRequest::Individual(_, TakeReceiverRequest::Local(_)) => {}
                         PendingExchangeRequest::Multiplexed { result_sender, .. } => {
-                            let _ = result_sender.send(Err(anyhow!("partial graph aborted").into()));
+                            let _ =
+                                result_sender.send(Err(anyhow!("partial graph aborted").into()));
                         }
                     }
                 }
@@ -504,7 +508,10 @@ impl PartialGraphStatus {
             PartialGraphStatus::ReceivedExchangeRequest(pending_requests) => {
                 for request in pending_requests {
                     match request {
-                        PendingExchangeRequest::Individual(_, TakeReceiverRequest::Remote(sender)) => {
+                        PendingExchangeRequest::Individual(
+                            _,
+                            TakeReceiverRequest::Remote(sender),
+                        ) => {
                             let _ = sender.send(Err(anyhow!("partial graph reset").into()));
                         }
                         PendingExchangeRequest::Individual(_, TakeReceiverRequest::Local(_)) => {}

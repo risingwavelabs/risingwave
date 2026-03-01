@@ -225,7 +225,9 @@ impl Receiver {
     ///
     /// Returns `None` if the channel has been closed.
     pub async fn recv(&mut self) -> Option<Message> {
-        let MessageWithPermits { message, permits, .. } = self.recv_raw().await?;
+        let MessageWithPermits {
+            message, permits, ..
+        } = self.recv_raw().await?;
 
         if let Some(permits) = permits {
             self.permits.add_permits(permits);
@@ -239,7 +241,9 @@ impl Receiver {
     ///
     /// Returns error if the channel is currently empty.
     pub fn try_recv(&mut self) -> Result<Message, mpsc::error::TryRecvError> {
-        let MessageWithPermits { message, permits, .. } = self.rx.try_recv()?;
+        let MessageWithPermits {
+            message, permits, ..
+        } = self.rx.try_recv()?;
 
         if let Some(permits) = permits {
             self.permits.add_permits(permits);
