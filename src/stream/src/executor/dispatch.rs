@@ -130,7 +130,7 @@ impl DispatchExecutorInner {
                     Output::new(downstream_actor, tx)
                 }
                 NewOutputRequest::MultiplexedRemote(actor_output) => {
-                    Output::new_multiplexed(actor_output)
+                    Output::new_multiplexed(downstream_actor, actor_output)
                 }
             }
         }

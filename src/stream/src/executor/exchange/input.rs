@@ -22,6 +22,7 @@ use local_input::LocalInputStreamInner;
 use pin_project::pin_project;
 use risingwave_common::config::StreamingConfig;
 use risingwave_common::util::addr::{HostAddr, is_local_address};
+use thiserror_ext::AsReport;
 
 use super::multiplexed::{LogicalInput, run_multiplexed_remote_input};
 use super::permit::Receiver;
@@ -495,7 +496,7 @@ pub(crate) async fn new_inputs(
                 )
                 .await
                 {
-                    tracing::error!("multiplexed remote input error: {}", e);
+                    tracing::error!(error = %e.as_report(), "multiplexed remote input error");
                 }
             });
         }
