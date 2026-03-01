@@ -2,9 +2,28 @@
 
 Document the different Keys in RisingWave.
 
+## Order Key
+
+The order key is user-specified, in SQL. For example:
+
+```sql
+create materialized view m1 as select * from t1 order by i, id;
+```
+
+The order key is `i, id`, which is the order of the columns in the `order by` clause.
+
+It is used to ensure locality of records in storage, and locality of record updates in streaming.
+To ensure storage locality, when deriving the storage key, we will use the order key as a prefix.
+To ensure streaming locality, we will use the order key as a prefix of the stream key.
+
+## Group Key
+
+Similar to the order key, the group key is also user-specified in SQL.
+We also apply the same derivations of group key in stream key, to ensure storage and streaming locality.
+
 ## Stream Key
 
-The key which can identify records in the RisingWave stream.
+The key which uniquely identifies records in the RisingWave stream.
 
 For example, given the following stream chunk, where stream key is `k1, k2`:
 ```text
@@ -23,15 +42,39 @@ The record corresponding to key `(0, 1)` has been inserted with `(0, 1, 2, 3)`.
 It may not be the minimal set of columns required to identify a record,
 for instance `group key` could be part of the stream key, to specify the distribution of records.
 
-## Primary Key (Storage)
+## Distribution key
+
+This key specifies the distribution of the data streams, as mentioned in [Consistent Hash - Streaming](../design/consistent-hash.md#streaming).
+We want data to be distributed in a way that minimizes data skew,
+and maximizes data locality, for more efficient stateful processing.
+
+To ensure data consistency of updates (U-, U+),
+the distribution key must always be a prefix of the stream key.
+See [issue #21668](https://github.com/risingwavelabs/risingwave/issues/21668) for an example.
+This ensures that updates on the same key are not sent to different partitions.
+Otherwise if they are exchanged back to the same partition,
+the order of updates may be different from the order of the original stream.
+
+## Primary Key
+
+### User Specified Primary Key
+
+When the user specifies primary key in their `create table` statement,
+it is used to ensure that the records are unique in the table.
+We will always use the user-specified primary key as the stream key and storage primary key
+
+For other streaming jobs such as sinks, materialized views and indexes,
+we will use the user-specified primary key in our derivation of the stream key and storage primary key.
+
+### Storage Primary Key
 
 This discusses the internal primary key (pk) which we often see in streaming operators.
-It is different from the primary key in SQL.
+It is different from the user-specified primary key in SQL.
 
 A more appropriate name for this would be `Storage Primary Key`.
 
-Besides uniquely identifying a record in storage, this key may also be used
-to provide ordering properties.
+This key uniquely identifies a record in storage.
+It also can be used to provide ordering properties.
 
 Let's use the following query as an example:
 
@@ -58,7 +101,9 @@ Because the materialized view contains an `order by i, id`,
 the storage primary key is `[i, id]` to ensure they are ordered in storage.
 Importantly, `i` will be a prefix of the key.
 
-Then when iterating over the keys from storage, the records are returned in the correct order per partition.
+Then when iterating over the keys from storage,
+the records are ordered by i first,
+then by id, even though the upstream primary key is just `id`.
 
 When the update stream comes, we can just use `id` to identify the records that need to be updated.
 We can get the whole record corresponding to the `id` and get the `i` from there.
