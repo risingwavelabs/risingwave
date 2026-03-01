@@ -201,23 +201,32 @@ impl MultiplexedActorOutput {
     /// barrier N+1 could reach the coalescer before barrier N finishes coalescing
     /// (because other actors haven't submitted barrier N yet), causing an epoch mismatch.
     ///
-    /// For barriers: additionally sends to the coordinator for coalescing and records
-    /// the epoch so subsequent sends will block.
+    /// For barriers: sends each barrier **individually** to the coordinator, waiting
+    /// for the previous barrier to be coalesced before sending the next. This is
+    /// necessary because `try_batch_barriers` in `DispatchExecutor` uses `now_or_never()`
+    /// to opportunistically batch consecutive barriers, and different actors can form
+    /// differently-sized batches. Decomposing ensures all actors submit one epoch at a
+    /// time to the coalescer, preventing batch length or epoch mismatch panics.
     pub async fn send(&mut self, message: Message) -> StreamResult<()> {
         // Gate: wait for any previously-submitted barrier to complete coalescing.
         self.wait_for_pending_barrier().await?;
 
-        match &message {
+        match message {
             Message::BarrierBatch(barriers) => {
-                // Send the entire barrier batch atomically to the coalescer.
-                // The coalescer collects full batches from all actors before coalescing.
-                let last_epoch = barriers.last().map(|b| b.epoch.curr);
-                self.barrier_tx
-                    .send((self.actor_id, barriers.clone()))
-                    .map_err(|_| ExchangeChannelClosed::output(self.actor_id))?;
-                // Record the epoch — the next `send()` call will block until the
-                // coordinator has committed this barrier batch to the shared channel.
-                if let Some(epoch) = last_epoch {
+                // Send each barrier individually to the coordinator, waiting between
+                // each to synchronize with other actors. This prevents the batch-length
+                // mismatch panic when actors form differently-sized batches.
+                for (i, barrier) in barriers.into_iter().enumerate() {
+                    if i > 0 {
+                        // Wait for the previous barrier to be coalesced before sending
+                        // the next one. This ensures all actors advance one epoch at a
+                        // time through the coalescer.
+                        self.wait_for_pending_barrier().await?;
+                    }
+                    let epoch = barrier.epoch.curr;
+                    self.barrier_tx
+                        .send((self.actor_id, vec![barrier]))
+                        .map_err(|_| ExchangeChannelClosed::output(self.actor_id))?;
                     self.pending_barrier_epoch = Some(epoch);
                 }
                 Ok(())
