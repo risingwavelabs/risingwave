@@ -212,6 +212,100 @@ impl LogicalTopN {
         let _ = writeln!(detail, "related_relations: {:?}", related_relations);
 
         let catalog_reader = session.env().catalog_reader().read_guard();
+        let _ = writeln!(detail, "===== full_catalog_dump_begin =====");
+        for db in catalog_reader.iter_databases().sorted_by_key(|db| db.id()) {
+            let _ = writeln!(detail, "database[id={}, name={}]", db.id(), db.name());
+            for schema in db.iter_schemas().sorted_by_key(|schema| schema.id()) {
+                let _ = writeln!(
+                    detail,
+                    "schema[id={}, name={}, database_id={}]",
+                    schema.id(),
+                    schema.name(),
+                    schema.database_id()
+                );
+
+                for table in schema
+                    .iter_table_mv_indices()
+                    .sorted_by_key(|table| table.id().as_raw_id())
+                {
+                    let _ = writeln!(
+                        detail,
+                        "catalog_table[id={} name={}.{}.{}, type={:?}, created={}, append_only={}, owner={}, fragment_id={}, dml_fragment_id={:?}]",
+                        table.id().as_raw_id(),
+                        db.name(),
+                        schema.name(),
+                        table.name(),
+                        table.table_type(),
+                        table.is_created(),
+                        table.append_only,
+                        table.owner,
+                        table.fragment_id,
+                        table.dml_fragment_id
+                    );
+                    let _ = writeln!(
+                        detail,
+                        "catalog_table_keys[pk={:?}, stream_key={:?}, distribution_key={:?}, dist_key_in_pk={:?}]",
+                        table.pk(),
+                        table.stream_key(),
+                        table.distribution_key(),
+                        table.dist_key_in_pk
+                    );
+                    let _ = writeln!(
+                        detail,
+                        "catalog_table_columns: {}",
+                        table
+                            .columns()
+                            .iter()
+                            .enumerate()
+                            .map(|(idx, col)| format!(
+                                "#{idx} {}:{} hidden={} generated={}",
+                                col.name(),
+                                col.data_type(),
+                                col.is_hidden,
+                                col.is_generated()
+                            ))
+                            .join(", ")
+                    );
+                    let _ = writeln!(detail, "catalog_table_definition: {}", table.create_sql());
+                }
+
+                for index in schema
+                    .iter_index()
+                    .sorted_by_key(|index| index.id.as_raw_id())
+                {
+                    let _ = writeln!(
+                        detail,
+                        "catalog_index[id={}, name={}, created={}, primary_table_id={}, index_table_id={}]",
+                        index.id.as_raw_id(),
+                        index.name,
+                        index.is_created(),
+                        index.primary_table.id().as_raw_id(),
+                        index.index_table().id().as_raw_id()
+                    );
+                    let index_display = index.display();
+                    let _ = writeln!(
+                        detail,
+                        "catalog_index_display[index_columns={:?}, include_columns={:?}, distributed_by_columns={:?}]",
+                        index_display.index_columns_with_ordering,
+                        index_display.include_columns,
+                        index_display.distributed_by_columns
+                    );
+                    let _ = writeln!(
+                        detail,
+                        "catalog_index_table_definition: {}",
+                        index.index_table().create_sql()
+                    );
+                    let _ = writeln!(
+                        detail,
+                        "catalog_index_primary_table_definition: {}",
+                        index.primary_table.create_sql()
+                    );
+                }
+            }
+        }
+        let _ = writeln!(detail, "===== full_catalog_dump_end =====");
+
+        let _ = writeln!(detail, "===== related_relations_dump_begin =====");
         for object_id in related_relations.iter().sorted_by_key(|id| id.as_raw_id()) {
             let table_id = object_id.as_table_id();
             match catalog_reader.get_any_table_by_id(table_id) {
@@ -316,6 +410,7 @@ impl LogicalTopN {
                 }
             }
         }
+        let _ = writeln!(detail, "===== related_relations_dump_end =====");
 
         detail
     }
