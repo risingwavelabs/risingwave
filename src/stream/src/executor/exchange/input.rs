@@ -341,15 +341,13 @@ pub(crate) async fn new_input(
     let upstream_addr = upstream_actor_info.get_host()?.into();
 
     let input = if is_local_address(local_barrier_manager.env.server_address(), &upstream_addr) {
-        LocalInput::new(
-            local_barrier_manager.register_local_upstream_output(
-                actor_id,
-                upstream_actor_id,
-                upstream_actor_info.partial_graph_id,
-            ),
+        let rx = local_barrier_manager.register_local_upstream_output(
+            actor_id,
             upstream_actor_id,
-        )
-        .boxed_input()
+            upstream_actor_info.partial_graph_id,
+            metrics,
+        );
+        LocalInput::new(rx, upstream_actor_id).boxed_input()
     } else {
         RemoteInput::new(
             local_barrier_manager,
