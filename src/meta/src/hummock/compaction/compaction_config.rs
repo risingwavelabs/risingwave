@@ -37,15 +37,9 @@ impl CompactionConfigBuilder {
                 // support compression setting per level
                 // L0/L1 and L2 do not use compression algorithms
                 // L3 - L4 use Lz4, else use Zstd
-                compression_algorithm: vec![
-                    "None".to_owned(),
-                    "None".to_owned(),
-                    "None".to_owned(),
-                    "Lz4".to_owned(),
-                    "Lz4".to_owned(),
-                    "Zstd".to_owned(),
-                    "Zstd".to_owned(),
-                ],
+                compression_algorithm: compaction_config::compression_algorithm_vec(
+                    compaction_config::max_level(),
+                ),
                 compaction_filter_mask: compaction_config::compaction_filter_mask(),
                 max_sub_compaction: compaction_config::max_sub_compaction(),
                 max_space_reclaim_bytes: compaction_config::max_space_reclaim_bytes(),
