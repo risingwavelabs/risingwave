@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::net::SocketAddr;
+use std::pin::Pin;
 use std::sync::Arc;
 
 use either::Either;
@@ -62,6 +63,7 @@ impl StreamExchangeService for StreamExchangeServiceImpl {
             down_fragment_id,
             up_partial_graph_id,
             term_id,
+            up_actor_ids,
         } = {
             let req = request_stream
                 .next()
@@ -73,24 +75,54 @@ impl StreamExchangeService for StreamExchangeServiceImpl {
             }
         };
 
-        let receiver = self
-            .stream_mgr
-            .take_receiver(up_partial_graph_id, term_id, (up_actor_id, down_actor_id))
-            .await?;
-
         // Map the remaining stream to add-permits.
         let add_permits_stream = request_stream.map_ok(|req| match req.value.unwrap() {
             Value::Get(_) => unreachable!("the following messages must be `AddPermits`"),
             Value::AddPermits(add_permits) => add_permits.value.unwrap(),
         });
 
-        Ok(Response::new(Self::get_stream_impl(
-            self.metrics.clone(),
-            peer_addr,
-            receiver,
-            add_permits_stream,
-            (up_fragment_id, down_fragment_id),
-        )))
+        if !up_actor_ids.is_empty() {
+            // Multiplexed mode: sender-side barrier coalescing. The barrier worker
+            // creates a single shared channel for all upstream actors, so we take
+            // just ONE receiver here.
+            let receiver = self
+                .stream_mgr
+                .take_multiplexed_receiver(
+                    up_partial_graph_id,
+                    term_id,
+                    up_actor_ids,
+                    down_actor_id,
+                )
+                .await?;
+
+            let stream: Pin<
+                Box<dyn Stream<Item = std::result::Result<GetStreamResponse, Status>> + Send>,
+            > = Box::pin(Self::get_stream_impl(
+                self.metrics.clone(),
+                peer_addr,
+                receiver,
+                add_permits_stream,
+                (up_fragment_id, down_fragment_id),
+            ));
+            Ok(Response::new(stream))
+        } else {
+            // Legacy single-actor mode.
+            let receiver = self
+                .stream_mgr
+                .take_receiver(up_partial_graph_id, term_id, (up_actor_id, down_actor_id))
+                .await?;
+
+            let stream: Pin<
+                Box<dyn Stream<Item = std::result::Result<GetStreamResponse, Status>> + Send>,
+            > = Box::pin(Self::get_stream_impl(
+                self.metrics.clone(),
+                peer_addr,
+                receiver,
+                add_permits_stream,
+                (up_fragment_id, down_fragment_id),
+            ));
+            Ok(Response::new(stream))
+        }
     }
 }
 
@@ -137,7 +169,12 @@ impl StreamExchangeServiceImpl {
                 Either::Left(permits_to_add) => {
                     permits.add_permits(permits_to_add);
                 }
-                Either::Right(MessageWithPermits { message, permits }) => {
+                Either::Right(MessageWithPermits {
+                    message,
+                    permits,
+                    source_actor_id,
+                    coalesced_actor_ids,
+                }) => {
                     let message = match message {
                         DispatcherMessageBatch::Chunk(chunk) => {
                             DispatcherMessageBatch::Chunk(chunk.compact_vis())
@@ -145,7 +182,19 @@ impl StreamExchangeServiceImpl {
                         msg @ (DispatcherMessageBatch::Watermark(_)
                         | DispatcherMessageBatch::BarrierBatch(_)) => msg,
                     };
-                    let proto = message.to_protobuf();
+                    let mut proto = message.to_protobuf();
+
+                    // Forward multiplexing metadata from the sender side.
+                    // For non-multiplexed exchanges these are 0 and empty respectively.
+                    proto.source_actor_id = source_actor_id;
+                    if !coalesced_actor_ids.is_empty() {
+                        use risingwave_pb::stream_plan::stream_message_batch::StreamMessageBatch as SmBatch;
+                        if let Some(SmBatch::BarrierBatch(bb)) = proto.stream_message_batch.as_mut()
+                        {
+                            bb.coalesced_actor_ids = coalesced_actor_ids;
+                        }
+                    }
+
                     // forward the acquired permit to the downstream
                     let response = GetStreamResponse {
                         message: Some(proto),

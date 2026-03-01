@@ -12,15 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
 use either::Either;
+use futures::future::try_join_all;
 use local_input::LocalInputStreamInner;
 use pin_project::pin_project;
 use risingwave_common::config::StreamingConfig;
 use risingwave_common::util::addr::{HostAddr, is_local_address};
+use thiserror_ext::AsReport;
 
+use super::multiplexed::{LogicalInput, run_multiplexed_remote_input};
 use super::permit::Receiver;
 use crate::executor::prelude::*;
 use crate::executor::{
@@ -365,6 +369,140 @@ pub(crate) async fn new_input(
     };
 
     Ok(input)
+}
+
+/// Create inputs for a set of upstream actors, with optional multiplexing for remote actors
+/// on the same node. When multiplexing is enabled, remote actors co-located on the same
+/// upstream node share a single gRPC stream with barrier coalescing, reducing the number
+/// of barrier messages from N×M to M per exchange per epoch.
+///
+/// Local inputs are always created individually (no change from the existing behavior).
+/// Remote inputs are grouped by upstream host address and multiplexed when the group has
+/// more than one actor.
+#[expect(clippy::too_many_arguments)]
+pub(crate) async fn new_inputs(
+    local_barrier_manager: &LocalBarrierManager,
+    metrics: Arc<StreamingMetrics>,
+    actor_id: ActorId,
+    fragment_id: FragmentId,
+    upstream_actors: &[ActorInfo],
+    upstream_fragment_id: FragmentId,
+    actor_config: Arc<StreamingConfig>,
+    enable_multiplexing: bool,
+) -> StreamExecutorResult<Vec<BoxedActorInput>> {
+    if !enable_multiplexing || upstream_actors.len() <= 1 {
+        // Fall back to per-actor inputs when multiplexing is disabled or there's only one actor.
+        let inputs = try_join_all(upstream_actors.iter().map(|upstream_actor| {
+            new_input(
+                local_barrier_manager,
+                metrics.clone(),
+                actor_id,
+                fragment_id,
+                upstream_actor,
+                upstream_fragment_id,
+                actor_config.clone(),
+            )
+        }))
+        .await?;
+        return Ok(inputs);
+    }
+
+    // Separate local and remote actors, grouping remote actors by node address.
+    let local_addr = local_barrier_manager.env.server_address();
+    let mut local_actors = Vec::new();
+    let mut remote_groups: HashMap<HostAddr, Vec<&ActorInfo>> = HashMap::new();
+
+    for actor in upstream_actors {
+        let addr: HostAddr = actor.get_host()?.into();
+        if is_local_address(local_addr, &addr) {
+            local_actors.push(actor);
+        } else {
+            remote_groups.entry(addr).or_default().push(actor);
+        }
+    }
+
+    let mut inputs: Vec<BoxedActorInput> = Vec::with_capacity(upstream_actors.len());
+
+    // Create local inputs (unchanged — each local actor gets its own LocalInput).
+    for actor in &local_actors {
+        let input = new_input(
+            local_barrier_manager,
+            metrics.clone(),
+            actor_id,
+            fragment_id,
+            actor,
+            upstream_fragment_id,
+            actor_config.clone(),
+        )
+        .await?;
+        inputs.push(input);
+    }
+
+    // Create remote inputs, multiplexed per node.
+    for (addr, actors) in remote_groups {
+        if actors.len() == 1 {
+            // Single remote actor on this node — use regular RemoteInput.
+            let input = new_input(
+                local_barrier_manager,
+                metrics.clone(),
+                actor_id,
+                fragment_id,
+                actors[0],
+                upstream_fragment_id,
+                actor_config.clone(),
+            )
+            .await?;
+            inputs.push(input);
+        } else {
+            // Multiple remote actors on this node — create a multiplexed stream.
+            let up_actor_ids: Vec<ActorId> = actors.iter().map(|a| a.actor_id).collect();
+            let partial_graph_id = actors[0].partial_graph_id;
+
+            let client = local_barrier_manager
+                .env
+                .client_pool()
+                .get_by_addr(addr)
+                .await?;
+
+            let (stream, permits_tx) = client
+                .get_stream_multiplexed(
+                    up_actor_ids.clone(),
+                    actor_id,
+                    upstream_fragment_id,
+                    fragment_id,
+                    partial_graph_id,
+                    local_barrier_manager.term_id.clone(),
+                )
+                .await?;
+
+            // Create per-actor logical inputs.
+            let mut logical_outputs = HashMap::new();
+            for &up_actor_id in &up_actor_ids {
+                let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+                logical_outputs.insert(up_actor_id, tx);
+                let logical_input = LogicalInput::new(up_actor_id, rx);
+                inputs.push(logical_input.boxed_input());
+            }
+
+            // Spawn the demuxer task that reads from the multiplexed gRPC stream
+            // and dispatches to the per-actor logical inputs.
+            let batched_permits_limit = actor_config.developer.exchange_batched_permits;
+            tokio::spawn(async move {
+                if let Err(e) = run_multiplexed_remote_input(
+                    stream,
+                    permits_tx,
+                    logical_outputs,
+                    batched_permits_limit,
+                )
+                .await
+                {
+                    tracing::error!(error = %e.as_report(), "multiplexed remote input error");
+                }
+            });
+        }
+    }
+
+    Ok(inputs)
 }
 
 impl DispatcherMessageBatch {

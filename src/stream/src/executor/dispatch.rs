@@ -125,10 +125,14 @@ impl DispatchExecutorInner {
         downstream_actors: &[ActorId],
     ) -> StreamResult<Vec<Output>> {
         fn resolve_output(downstream_actor: ActorId, request: NewOutputRequest) -> Output {
-            let tx = match request {
-                NewOutputRequest::Local(tx) | NewOutputRequest::Remote(tx) => tx,
-            };
-            Output::new(downstream_actor, tx)
+            match request {
+                NewOutputRequest::Local(tx) | NewOutputRequest::Remote(tx) => {
+                    Output::new(downstream_actor, tx)
+                }
+                NewOutputRequest::MultiplexedRemote(actor_output) => {
+                    Output::new_multiplexed(downstream_actor, actor_output)
+                }
+            }
         }
         let mut outputs = Vec::with_capacity(downstream_actors.len());
         for &downstream_actor in downstream_actors {

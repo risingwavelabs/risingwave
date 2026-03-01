@@ -774,7 +774,7 @@ mod tests {
         let (_, req) = output_req.pop().unwrap();
         let tx = match req {
             NewOutputRequest::Local(tx) => tx,
-            NewOutputRequest::Remote(_) => unreachable!(),
+            NewOutputRequest::Remote(_) | NewOutputRequest::MultiplexedRemote(_) => unreachable!(),
         };
 
         tx.send(MessageInner::Barrier(b2.clone().into_dispatcher()).into())

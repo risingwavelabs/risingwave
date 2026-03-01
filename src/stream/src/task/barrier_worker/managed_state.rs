@@ -24,6 +24,7 @@ use anyhow::anyhow;
 use futures::future::BoxFuture;
 use futures::stream::{FuturesOrdered, FuturesUnordered};
 use futures::{FutureExt, StreamExt};
+use itertools::Itertools;
 use prometheus::HistogramTimer;
 use risingwave_common::catalog::TableId;
 use risingwave_common::id::SourceId;
@@ -34,6 +35,7 @@ use risingwave_pb::stream_service::barrier_complete_response::{
     PbListFinishedSource, PbLoadFinishedSource,
 };
 use risingwave_storage::StateStoreImpl;
+use thiserror_ext::AsReport;
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 use tokio::task::JoinHandle;
@@ -96,6 +98,18 @@ use crate::executor::exchange::permit;
 use crate::executor::exchange::permit::channel_from_config;
 use crate::task::barrier_worker::await_epoch_completed_future::AwaitEpochCompletedFuture;
 use crate::task::barrier_worker::{ScoredStreamError, TakeReceiverRequest};
+
+/// A pending exchange request buffered before the partial graph starts running.
+pub(in crate::task) enum PendingExchangeRequest {
+    /// Individual per-actor channel request.
+    Individual(UpDownActorIds, TakeReceiverRequest),
+    /// Multiplexed request: multiple upstream actors share one channel.
+    Multiplexed {
+        up_actor_ids: Vec<ActorId>,
+        down_actor_id: ActorId,
+        result_sender: tokio::sync::oneshot::Sender<StreamResult<permit::Receiver>>,
+    },
+}
 use crate::task::cdc_progress::CdcTableBackfillState;
 
 pub(super) struct ManagedBarrierStateDebugInfo<'a> {
@@ -400,7 +414,7 @@ pub(crate) struct ResetPartialGraphOutput {
 }
 
 pub(in crate::task) enum PartialGraphStatus {
-    ReceivedExchangeRequest(Vec<(UpDownActorIds, TakeReceiverRequest)>),
+    ReceivedExchangeRequest(Vec<PendingExchangeRequest>),
     Running(PartialGraphState),
     Suspended(SuspendedPartialGraphState),
     Resetting,
@@ -412,9 +426,19 @@ impl PartialGraphStatus {
     pub(crate) async fn abort(&mut self) {
         match self {
             PartialGraphStatus::ReceivedExchangeRequest(pending_requests) => {
-                for (_, request) in pending_requests.drain(..) {
-                    if let TakeReceiverRequest::Remote(sender) = request {
-                        let _ = sender.send(Err(anyhow!("partial graph aborted").into()));
+                for request in pending_requests.drain(..) {
+                    match request {
+                        PendingExchangeRequest::Individual(
+                            _,
+                            TakeReceiverRequest::Remote(sender),
+                        ) => {
+                            let _ = sender.send(Err(anyhow!("partial graph aborted").into()));
+                        }
+                        PendingExchangeRequest::Individual(_, TakeReceiverRequest::Local(_)) => {}
+                        PendingExchangeRequest::Multiplexed { result_sender, .. } => {
+                            let _ =
+                                result_sender.send(Err(anyhow!("partial graph aborted").into()));
+                        }
                     }
                 }
             }
@@ -483,9 +507,18 @@ impl PartialGraphStatus {
     ) -> BoxFuture<'static, ResetPartialGraphOutput> {
         match replace(self, PartialGraphStatus::Resetting) {
             PartialGraphStatus::ReceivedExchangeRequest(pending_requests) => {
-                for (_, request) in pending_requests {
-                    if let TakeReceiverRequest::Remote(sender) = request {
-                        let _ = sender.send(Err(anyhow!("partial graph reset").into()));
+                for request in pending_requests {
+                    match request {
+                        PendingExchangeRequest::Individual(
+                            _,
+                            TakeReceiverRequest::Remote(sender),
+                        ) => {
+                            let _ = sender.send(Err(anyhow!("partial graph reset").into()));
+                        }
+                        PendingExchangeRequest::Individual(_, TakeReceiverRequest::Local(_)) => {}
+                        PendingExchangeRequest::Multiplexed { result_sender, .. } => {
+                            let _ = result_sender.send(Err(anyhow!("partial graph reset").into()));
+                        }
                     }
                 }
                 async move { ResetPartialGraphOutput { root_err: None } }.boxed()
@@ -820,6 +853,54 @@ impl PartialGraphState {
                 .entry(upstream_actor_id)
                 .or_default()
                 .push((actor_id, request));
+        }
+    }
+
+    /// Create a multiplexed output channel shared by multiple upstream actors targeting one
+    /// downstream actor. This is the sender-side of multiplexed exchange:
+    /// - Creates ONE shared `permit::channel` with scaled permits
+    /// - Returns the `Receiver` to the gRPC server via `result_sender`
+    /// - Distributes `MultiplexedActorOutput` handles to each upstream actor
+    /// - Spawns the `MultiplexedOutputCoordinator` as a background task for barrier coalescing
+    pub(super) fn new_multiplexed_actor_output_request(
+        &mut self,
+        up_actor_ids: Vec<ActorId>,
+        down_actor_id: ActorId,
+        result_sender: tokio::sync::oneshot::Sender<StreamResult<permit::Receiver>>,
+    ) {
+        use crate::executor::exchange::multiplexed::create_multiplexed_output;
+
+        let config = self.local_barrier_manager.env.global_config();
+        let (actor_outputs, coordinator, rx) = create_multiplexed_output(
+            &up_actor_ids,
+            config.developer.exchange_initial_permits,
+            config.developer.exchange_batched_permits,
+            config.developer.exchange_concurrent_barriers,
+        );
+
+        // Return the single receiver to the gRPC server.
+        let _ = result_sender.send(Ok(rx));
+
+        // Spawn the coordinator as a background task for barrier coalescing.
+        tokio::spawn(async move {
+            if let Err(e) = coordinator.run().await {
+                tracing::warn!(error = %e.as_report(), "MultiplexedOutputCoordinator exited with error");
+            }
+        });
+
+        // Distribute MultiplexedActorOutput handles to each upstream actor.
+        for (actor_output, &upstream_actor_id) in
+            actor_outputs.into_iter().zip_eq(up_actor_ids.iter())
+        {
+            let request = NewOutputRequest::MultiplexedRemote(actor_output);
+            if let Some(actor) = self.actor_states.get_mut(&upstream_actor_id) {
+                let _ = actor.new_output_request_tx.send((down_actor_id, request));
+            } else {
+                self.actor_pending_new_output_requests
+                    .entry(upstream_actor_id)
+                    .or_default()
+                    .push((down_actor_id, request));
+            }
         }
     }
 
