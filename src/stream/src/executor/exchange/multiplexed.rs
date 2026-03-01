@@ -281,8 +281,14 @@ pub fn create_multiplexed_output(
     // Scale record permits proportional to the number of upstream actors.
     let scaled_initial_permits = initial_permits * upstream_actor_ids.len();
     let scaled_batched_permits = batched_permits * upstream_actor_ids.len();
-    // Only 1 barrier permit needed — we send one coalesced barrier per epoch.
-    let barrier_permits = concurrent_barriers;
+    // Allow more barrier permits than `concurrent_barriers` to avoid pipeline stalls.
+    // With N actors sharing one channel, the coordinator must acquire a barrier permit
+    // for each coalesced barrier. If permits == concurrent_barriers (typically 1), the
+    // coordinator blocks until the downstream returns the permit, which serializes
+    // barrier propagation and amplifies tail latency. Using a higher value (≥5) lets
+    // multiple coalesced barriers be in-flight simultaneously, decoupling the
+    // coordinator from downstream processing speed.
+    let barrier_permits = concurrent_barriers.max(5);
 
     let (tx, rx) = permit::channel(scaled_initial_permits, scaled_batched_permits, barrier_permits);
 
