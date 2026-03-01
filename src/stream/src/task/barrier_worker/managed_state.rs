@@ -35,6 +35,7 @@ use risingwave_pb::stream_service::barrier_complete_response::{
     PbListFinishedSource, PbLoadFinishedSource,
 };
 use risingwave_storage::StateStoreImpl;
+use thiserror_ext::AsReport;
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 use tokio::task::JoinHandle;
@@ -883,7 +884,7 @@ impl PartialGraphState {
         // Spawn the coordinator as a background task for barrier coalescing.
         tokio::spawn(async move {
             if let Err(e) = coordinator.run().await {
-                tracing::warn!(error = %e, "MultiplexedOutputCoordinator exited with error");
+                tracing::warn!(error = %e.as_report(), "MultiplexedOutputCoordinator exited with error");
             }
         });
 
