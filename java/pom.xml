@@ -68,7 +68,7 @@
         <log4j.version>2.25.3</log4j.version>
         <slf4j.version>2.0.17</slf4j.version>
         <debezium.version>3.2.4.Final</debezium.version>
-        <jackson.version>2.19.2</jackson.version>
+        <jackson.version>2.21.1</jackson.version>
         <hadoop.version>3.4.1</hadoop.version>
         <testcontainers.version>1.21.3</testcontainers.version>
         <aws.version>2.32.19</aws.version>
