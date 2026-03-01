@@ -278,10 +278,15 @@ impl MultiplexedOutputCoordinator {
 
                 // All actors reached the barrier batch — send the coalesced batch,
                 // tagged with the full set of coalesced actor IDs.
+                //
+                // Use `send_barrier_bypassing_permits` instead of `send_tagged` to avoid
+                // deadlock: all upstream actors are gated on the coordinator via
+                // `wait_for_pending_barrier()`, so if we blocked here on barrier permits
+                // (which are returned by the downstream), and the downstream is itself
+                // waiting for these actors' data to make progress, we'd deadlock.
                 let coalesced = DispatcherMessageBatch::BarrierBatch(coalesced_batch);
                 self.ch
-                    .send_tagged(coalesced, ActorId::default(), actor_ids)
-                    .await
+                    .send_barrier_bypassing_permits(coalesced, actor_ids)
                     .map_err(|_| ExchangeChannelClosed::output(0.into()))?;
 
                 // Ungate all actors: the coalesced barrier batch is now in the shared
