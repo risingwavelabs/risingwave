@@ -644,15 +644,10 @@ impl std::fmt::Debug for meta::SystemParams {
 impl std::fmt::Debug for data::DataType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let data::DataType {
-            precision,
-            scale,
-            interval_type,
             field_type,
             field_names,
             field_ids,
             type_name,
-            // currently all data types are nullable
-            is_nullable: _,
         } = self;
 
         let type_name = data::data_type::TypeName::try_from(*type_name)
@@ -660,15 +655,6 @@ impl std::fmt::Debug for data::DataType {
             .unwrap_or("Unknown");
 
         let mut s = f.debug_struct(type_name);
-        if self.precision != 0 {
-            s.field("precision", precision);
-        }
-        if self.scale != 0 {
-            s.field("scale", scale);
-        }
-        if self.interval_type != 0 {
-            s.field("interval_type", interval_type);
-        }
         if !self.field_type.is_empty() {
             s.field("field_type", field_type);
         }
@@ -797,21 +783,24 @@ impl streaming_job_resource_type::ResourceType {
 
 #[cfg(test)]
 mod tests {
-    use crate::data::{DataType, data_type};
+    use crate::data::{DataChunk, DataType, data_type};
     use crate::plan_common::Field;
     use crate::stream_plan::stream_node::NodeBody;
 
     #[test]
     fn test_getter() {
         let data_type: DataType = DataType {
-            is_nullable: true,
+            type_name: data_type::TypeName::Double.into(),
             ..Default::default()
         };
         let field = Field {
             data_type: Some(data_type),
             name: "".to_owned(),
         };
-        assert!(field.get_data_type().unwrap().is_nullable);
+        assert_eq!(
+            field.get_data_type().unwrap().type_name(),
+            data_type::TypeName::Double
+        );
     }
 
     #[test]
@@ -833,12 +822,12 @@ mod tests {
 
     #[test]
     fn test_primitive_getter() {
-        let data_type: DataType = DataType::default();
-        let new_data_type = DataType {
-            is_nullable: data_type.get_is_nullable(),
+        let chunk = DataChunk::default();
+        let new_chunk = DataChunk {
+            cardinality: chunk.get_cardinality(),
             ..Default::default()
         };
-        assert!(!new_data_type.is_nullable);
+        assert_eq!(new_chunk.cardinality, 0);
     }
 
     #[test]
