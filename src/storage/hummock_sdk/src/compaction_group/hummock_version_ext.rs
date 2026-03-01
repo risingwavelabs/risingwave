@@ -292,15 +292,7 @@ impl<L: Clone> HummockVersionCommon<SstableInfo, L> {
                 // whenever another compaction task is finished.
                 let insert_table_infos =
                     split_sst_info_for_level(&member_table_ids, sub_level, &mut new_sst_id);
-                sub_level
-                    .table_infos
-                    .extract_if(.., |sst_info| sst_info.table_ids.is_empty())
-                    .for_each(|sst_info| {
-                        sub_level.total_file_size -= sst_info.sst_size;
-                        sub_level.uncompressed_file_size -= sst_info.uncompressed_file_size;
-                        l0.total_file_size -= sst_info.sst_size;
-                        l0.uncompressed_file_size -= sst_info.uncompressed_file_size;
-                    });
+                sub_level.normalize();
                 if insert_table_infos.is_empty() {
                     continue;
                 }
@@ -319,8 +311,7 @@ impl<L: Clone> HummockVersionCommon<SstableInfo, L> {
                     }
                 }
             }
-
-            l0.sub_levels.retain(|level| !level.table_infos.is_empty());
+            l0.normalize();
         }
         for (idx, level) in parent_levels.levels.iter_mut().enumerate() {
             let insert_table_infos =
@@ -340,13 +331,7 @@ impl<L: Clone> HummockVersionCommon<SstableInfo, L> {
                 .table_infos
                 .sort_by(|sst1, sst2| sst1.key_range.cmp(&sst2.key_range));
             assert!(can_concat(&cur_levels.levels[idx].table_infos));
-            level
-                .table_infos
-                .extract_if(.., |sst_info| sst_info.table_ids.is_empty())
-                .for_each(|sst_info| {
-                    level.total_file_size -= sst_info.sst_size;
-                    level.uncompressed_file_size -= sst_info.uncompressed_file_size;
-                });
+            level.normalize();
         }
 
         assert!(
@@ -633,36 +618,19 @@ impl<L: Clone> HummockVersionCommon<SstableInfo, L> {
                     }
 
                     GroupDeltaCommon::TruncateTables(table_ids) => {
-                        // iterate all levels and truncate the specified tables with the given table ids
-                        let levels =
-                            self.levels.get_mut(compaction_group_id).unwrap_or_else(|| {
+                        self.levels
+                            .get_mut(compaction_group_id)
+                            .unwrap_or_else(|| {
                                 panic!("compaction group {} does not exist", compaction_group_id)
-                            });
-
-                        for sub_level in &mut levels.l0.sub_levels {
-                            sub_level.table_infos.iter_mut().for_each(|sstable_info| {
-                                let mut inner = sstable_info.get_inner();
-                                inner.table_ids.retain(|id| !table_ids.contains(id));
-                                sstable_info.set_inner(inner);
-                            });
-                        }
-
-                        for level in &mut levels.levels {
-                            level.table_infos.iter_mut().for_each(|sstable_info| {
-                                let mut inner = sstable_info.get_inner();
-                                inner.table_ids.retain(|id| !table_ids.contains(id));
-                                sstable_info.set_inner(inner);
-                            });
-                        }
-
-                        levels.compaction_group_version_id += 1;
+                            })
+                            .truncate_tables(table_ids);
                     }
                 }
             }
 
             if is_applied_l0_compact && let Some(levels) = self.levels.get_mut(compaction_group_id)
             {
-                levels.post_apply_l0_compact();
+                levels.l0.normalize();
             }
         }
         self.id = version_delta.id;
@@ -915,15 +883,7 @@ impl<L: Clone> HummockVersionCommon<SstableInfo, L> {
                     continue;
                 }
 
-                sub_level
-                    .table_infos
-                    .extract_if(.., |sst_info| sst_info.table_ids.is_empty())
-                    .for_each(|sst_info| {
-                        sub_level.total_file_size -= sst_info.sst_size;
-                        sub_level.uncompressed_file_size -= sst_info.uncompressed_file_size;
-                        l0.total_file_size -= sst_info.sst_size;
-                        l0.uncompressed_file_size -= sst_info.uncompressed_file_size;
-                    });
+                sub_level.normalize();
                 match group_split::get_sub_level_insert_hint(&target_l0.sub_levels, sub_level) {
                     Ok(idx) => {
                         add_ssts_to_sub_level(target_l0, idx, insert_table_infos);
@@ -939,8 +899,7 @@ impl<L: Clone> HummockVersionCommon<SstableInfo, L> {
                     }
                 }
             }
-
-            l0.sub_levels.retain(|level| !level.table_infos.is_empty());
+            l0.normalize();
         }
 
         for (idx, level) in parent_levels.levels.iter_mut().enumerate() {
@@ -969,13 +928,7 @@ impl<L: Clone> HummockVersionCommon<SstableInfo, L> {
                 .table_infos
                 .sort_by(|sst1, sst2| sst1.key_range.cmp(&sst2.key_range));
             assert!(can_concat(&cur_levels.levels[idx].table_infos));
-            level
-                .table_infos
-                .extract_if(.., |sst_info| sst_info.table_ids.is_empty())
-                .for_each(|sst_info| {
-                    level.total_file_size -= sst_info.sst_size;
-                    level.uncompressed_file_size -= sst_info.uncompressed_file_size;
-                });
+            level.normalize();
         }
 
         assert!(
@@ -1095,11 +1048,11 @@ impl Levels {
         if !delete_sst_ids_set.is_empty() {
             if *level_idx == 0 {
                 for level in &mut self.l0.sub_levels {
-                    level_delete_ssts(level, delete_sst_ids_set);
+                    level.delete_ssts(delete_sst_ids_set);
                 }
             } else {
                 let idx = *level_idx as usize - 1;
-                level_delete_ssts(&mut self.levels[idx], delete_sst_ids_set);
+                self.levels[idx].delete_ssts(delete_sst_ids_set);
             }
         }
 
@@ -1154,24 +1107,14 @@ impl Levels {
         }
     }
 
-    pub(crate) fn post_apply_l0_compact(&mut self) {
-        {
-            self.l0
-                .sub_levels
-                .retain(|level| !level.table_infos.is_empty());
-            self.l0.total_file_size = self
-                .l0
-                .sub_levels
-                .iter()
-                .map(|level| level.total_file_size)
-                .sum::<u64>();
-            self.l0.uncompressed_file_size = self
-                .l0
-                .sub_levels
-                .iter()
-                .map(|level| level.uncompressed_file_size)
-                .sum::<u64>();
+    /// Truncate specified table ids from all levels, remove emptied SSTs and sub-levels,
+    /// then bump `compaction_group_version_id`.
+    pub(crate) fn truncate_tables(&mut self, table_ids: &HashSet<TableId>) {
+        for level in self.l0.sub_levels.iter_mut().chain(self.levels.iter_mut()) {
+            level.truncate_tables(table_ids);
         }
+        self.l0.normalize();
+        self.compaction_group_version_id += 1;
     }
 }
 
@@ -1394,28 +1337,64 @@ pub fn insert_new_sub_level(
     l0.sub_levels.insert(insert_pos, level);
 }
 
-/// Delete sstables if the table id is in the id set.
-///
-/// Return `true` if some sst is deleted, and `false` is the deletion is trivial
-fn level_delete_ssts(
-    operand: &mut Level,
-    delete_sst_ids_superset: &HashSet<HummockSstableId>,
-) -> bool {
-    let original_len = operand.table_infos.len();
-    operand
-        .table_infos
-        .retain(|table| !delete_sst_ids_superset.contains(&table.sst_id));
-    operand.total_file_size = operand
-        .table_infos
-        .iter()
-        .map(|table| table.sst_size)
-        .sum::<u64>();
-    operand.uncompressed_file_size = operand
-        .table_infos
-        .iter()
-        .map(|table| table.uncompressed_file_size)
-        .sum::<u64>();
-    original_len != operand.table_infos.len()
+impl Level {
+    fn recompute_size(&mut self) {
+        self.total_file_size = self
+            .table_infos
+            .iter()
+            .map(|table| table.sst_size)
+            .sum::<u64>();
+        self.uncompressed_file_size = self
+            .table_infos
+            .iter()
+            .map(|table| table.uncompressed_file_size)
+            .sum::<u64>();
+    }
+
+    /// Remove SSTs with empty `table_ids`, then recompute sizes.
+    fn normalize(&mut self) {
+        self.table_infos
+            .retain(|sst_info| !sst_info.table_ids.is_empty());
+        self.recompute_size();
+    }
+
+    /// Return `true` if any SST was actually removed.
+    fn delete_ssts(&mut self, ids: &HashSet<HummockSstableId>) -> bool {
+        let original_len = self.table_infos.len();
+        self.table_infos
+            .retain(|table| !ids.contains(&table.sst_id));
+        self.recompute_size();
+        original_len != self.table_infos.len()
+    }
+
+    /// Truncate specified `table_ids` from each SST's metadata,
+    /// remove SSTs that become empty, then recompute sizes.
+    fn truncate_tables(&mut self, table_ids: &HashSet<TableId>) {
+        for sstable_info in &mut self.table_infos {
+            let mut inner = sstable_info.get_inner();
+            inner.table_ids.retain(|id| !table_ids.contains(id));
+            sstable_info.set_inner(inner);
+        }
+        self.normalize();
+    }
+}
+
+impl OverlappingLevel {
+    /// Remove empty sub-levels, then recompute aggregated sizes.
+    fn normalize(&mut self) {
+        self.sub_levels
+            .retain(|level| !level.table_infos.is_empty());
+        self.total_file_size = self
+            .sub_levels
+            .iter()
+            .map(|level| level.total_file_size)
+            .sum::<u64>();
+        self.uncompressed_file_size = self
+            .sub_levels
+            .iter()
+            .map(|level| level.uncompressed_file_size)
+            .sum::<u64>();
+    }
 }
 
 fn level_insert_ssts(operand: &mut Level, insert_table_infos: &Vec<SstableInfo>) {
@@ -2720,5 +2699,450 @@ mod tests {
                 cg1.levels[0].table_infos[1].table_ids
             );
         }
+    }
+
+    fn make_sst(sst_id: u64, table_ids: Vec<u32>, sst_size: u64) -> SstableInfo {
+        SstableInfoInner {
+            sst_id: sst_id.into(),
+            object_id: sst_id.into(),
+            table_ids: table_ids.into_iter().map(TableId::new).collect(),
+            file_size: sst_size,
+            sst_size,
+            uncompressed_file_size: sst_size * 2,
+            ..Default::default()
+        }
+        .into()
+    }
+
+    #[test]
+    fn test_level_normalize() {
+        // Mixed: some SSTs empty, some not.
+        let mut level = Level {
+            level_idx: 1,
+            level_type: LevelType::Nonoverlapping,
+            table_infos: vec![
+                make_sst(1, vec![1, 2], 100),
+                make_sst(2, vec![], 200), // empty → removed
+                make_sst(3, vec![3], 300),
+                make_sst(4, vec![], 400), // empty → removed
+            ],
+            total_file_size: 9999, // intentionally wrong
+            uncompressed_file_size: 9999,
+            ..Default::default()
+        };
+
+        level.normalize();
+
+        assert_eq!(level.table_infos.len(), 2);
+        assert_eq!(1, level.table_infos[0].sst_id);
+        assert_eq!(3, level.table_infos[1].sst_id);
+        assert_eq!(level.total_file_size, 400);
+        assert_eq!(level.uncompressed_file_size, 800);
+
+        // No empty SSTs: just recompute sizes.
+        level.total_file_size = 0;
+        level.uncompressed_file_size = 0;
+        level.normalize();
+        assert_eq!(level.table_infos.len(), 2);
+        assert_eq!(level.total_file_size, 400);
+        assert_eq!(level.uncompressed_file_size, 800);
+
+        // All empty → level becomes empty.
+        level.table_infos = vec![make_sst(10, vec![], 100), make_sst(11, vec![], 200)];
+        level.normalize();
+        assert!(level.table_infos.is_empty());
+        assert_eq!(level.total_file_size, 0);
+        assert_eq!(level.uncompressed_file_size, 0);
+    }
+
+    #[test]
+    fn test_level_delete_ssts() {
+        let mut level = Level {
+            level_idx: 1,
+            level_type: LevelType::Nonoverlapping,
+            table_infos: vec![
+                make_sst(1, vec![1], 100),
+                make_sst(2, vec![2], 200),
+                make_sst(3, vec![3], 300),
+            ],
+            total_file_size: 600,
+            uncompressed_file_size: 1200,
+            ..Default::default()
+        };
+
+        let delete_ids: HashSet<crate::HummockSstableId> = HashSet::from([2.into()]);
+        let changed = level.delete_ssts(&delete_ids);
+
+        assert!(changed);
+        assert_eq!(level.table_infos.len(), 2);
+        assert_eq!(1, level.table_infos[0].sst_id);
+        assert_eq!(3, level.table_infos[1].sst_id);
+        assert_eq!(level.total_file_size, 400);
+        assert_eq!(level.uncompressed_file_size, 800);
+
+        // Delete non-existent id → no change, returns false.
+        let delete_ids: HashSet<crate::HummockSstableId> = HashSet::from([999.into()]);
+        let changed = level.delete_ssts(&delete_ids);
+        assert!(!changed);
+        assert_eq!(level.table_infos.len(), 2);
+    }
+
+    #[test]
+    fn test_level_truncate_tables() {
+        let mut level = Level {
+            level_idx: 1,
+            level_type: LevelType::Nonoverlapping,
+            table_infos: vec![
+                make_sst(1, vec![1, 2], 100),
+                make_sst(2, vec![2, 3], 200),
+                make_sst(3, vec![2], 300),
+            ],
+            total_file_size: 600,
+            uncompressed_file_size: 1200,
+            ..Default::default()
+        };
+
+        let truncate_ids = HashSet::from([TableId::new(2)]);
+        level.truncate_tables(&truncate_ids);
+
+        // SST 3 should be removed (was only table_id=2)
+        assert_eq!(level.table_infos.len(), 2);
+        assert_eq!(level.table_infos[0].table_ids, vec![TableId::new(1)]);
+        assert_eq!(level.table_infos[1].table_ids, vec![TableId::new(3)]);
+        assert_eq!(level.total_file_size, 100 + 200);
+        assert_eq!(level.uncompressed_file_size, 200 + 400);
+
+        // Truncate remaining tables → all SSTs removed.
+        let truncate_ids = HashSet::from([TableId::new(1), TableId::new(3)]);
+        level.truncate_tables(&truncate_ids);
+        assert!(level.table_infos.is_empty());
+        assert_eq!(level.total_file_size, 0);
+        assert_eq!(level.uncompressed_file_size, 0);
+    }
+
+    #[test]
+    fn test_overlapping_level_normalize() {
+        let mut l0 = OverlappingLevel {
+            sub_levels: vec![
+                Level {
+                    level_idx: 0,
+                    table_infos: vec![make_sst(1, vec![1], 100)],
+                    total_file_size: 100,
+                    uncompressed_file_size: 200,
+                    sub_level_id: 1,
+                    ..Default::default()
+                },
+                Level {
+                    level_idx: 0,
+                    table_infos: vec![], // empty → should be removed
+                    total_file_size: 0,
+                    uncompressed_file_size: 0,
+                    sub_level_id: 2,
+                    ..Default::default()
+                },
+                Level {
+                    level_idx: 0,
+                    table_infos: vec![make_sst(3, vec![3], 300)],
+                    total_file_size: 300,
+                    uncompressed_file_size: 600,
+                    sub_level_id: 3,
+                    ..Default::default()
+                },
+            ],
+            total_file_size: 9999, // intentionally wrong
+            uncompressed_file_size: 9999,
+        };
+
+        l0.normalize();
+
+        assert_eq!(l0.sub_levels.len(), 2);
+        assert_eq!(l0.sub_levels[0].sub_level_id, 1);
+        assert_eq!(l0.sub_levels[1].sub_level_id, 3);
+        assert_eq!(l0.total_file_size, 100 + 300);
+        assert_eq!(l0.uncompressed_file_size, 200 + 600);
+
+        // All sub-levels empty → normalize clears everything.
+        l0.sub_levels = vec![Level {
+            level_idx: 0,
+            table_infos: vec![],
+            ..Default::default()
+        }];
+        l0.normalize();
+        assert!(l0.sub_levels.is_empty());
+        assert_eq!(l0.total_file_size, 0);
+        assert_eq!(l0.uncompressed_file_size, 0);
+    }
+
+    #[test]
+    fn test_levels_truncate_tables() {
+        #[expect(deprecated)]
+        let mut levels = Levels {
+            l0: OverlappingLevel {
+                sub_levels: vec![
+                    Level {
+                        level_idx: 0,
+                        table_infos: vec![
+                            make_sst(1, vec![10], 100), // table 10
+                            make_sst(2, vec![20], 200), // table 20
+                        ],
+                        total_file_size: 300,
+                        uncompressed_file_size: 600,
+                        sub_level_id: 1,
+                        ..Default::default()
+                    },
+                    Level {
+                        level_idx: 0,
+                        table_infos: vec![
+                            make_sst(3, vec![10], 150), // table 10
+                        ],
+                        total_file_size: 150,
+                        uncompressed_file_size: 300,
+                        sub_level_id: 2,
+                        ..Default::default()
+                    },
+                ],
+                total_file_size: 450,
+                uncompressed_file_size: 900,
+            },
+            levels: vec![Level {
+                level_idx: 1,
+                level_type: LevelType::Nonoverlapping,
+                table_infos: vec![
+                    make_sst(4, vec![10, 20], 400), // shared SST
+                    make_sst(5, vec![10], 500),     // table 10 only
+                ],
+                total_file_size: 900,
+                uncompressed_file_size: 1800,
+                ..Default::default()
+            }],
+            group_id: 1.into(),
+            parent_group_id: 0.into(),
+            member_table_ids: vec![],
+            compaction_group_version_id: 0,
+        };
+
+        // Truncate table 10
+        levels.truncate_tables(&HashSet::from([TableId::new(10)]));
+
+        assert_eq!(levels.l0.sub_levels.len(), 1);
+        assert_eq!(levels.l0.sub_levels[0].sub_level_id, 1);
+        assert_eq!(levels.l0.sub_levels[0].table_infos.len(), 1);
+        assert_eq!(2, levels.l0.sub_levels[0].table_infos[0].sst_id);
+        assert_eq!(levels.l0.sub_levels[0].total_file_size, 200);
+        assert_eq!(levels.l0.sub_levels[0].uncompressed_file_size, 400);
+
+        assert_eq!(levels.l0.total_file_size, 200);
+        assert_eq!(levels.l0.uncompressed_file_size, 400);
+
+        assert_eq!(levels.levels[0].table_infos.len(), 1);
+        assert_eq!(4, levels.levels[0].table_infos[0].sst_id);
+        assert_eq!(
+            levels.levels[0].table_infos[0].table_ids,
+            vec![TableId::new(20)]
+        );
+        assert_eq!(levels.levels[0].total_file_size, 400);
+        assert_eq!(levels.levels[0].uncompressed_file_size, 800);
+
+        assert_eq!(levels.compaction_group_version_id, 1);
+    }
+
+    #[test]
+    fn test_apply_version_delta_truncate_tables() {
+        let mut version = HummockVersion {
+            id: HummockVersionId::new(0),
+            levels: HashMap::from_iter([(1.into(), {
+                #[expect(deprecated)]
+                let levels = Levels {
+                    l0: OverlappingLevel {
+                        sub_levels: vec![
+                            Level {
+                                level_idx: 0,
+                                level_type: LevelType::Overlapping,
+                                table_infos: vec![
+                                    make_sst(1, vec![100], 50), // only table 100
+                                    make_sst(2, vec![200], 60), // only table 200
+                                ],
+                                total_file_size: 110,
+                                uncompressed_file_size: 220,
+                                sub_level_id: 1,
+                                ..Default::default()
+                            },
+                            Level {
+                                level_idx: 0,
+                                level_type: LevelType::Overlapping,
+                                table_infos: vec![
+                                    make_sst(3, vec![100], 70), // only table 100
+                                ],
+                                total_file_size: 70,
+                                uncompressed_file_size: 140,
+                                sub_level_id: 2,
+                                ..Default::default()
+                            },
+                        ],
+                        total_file_size: 180,
+                        uncompressed_file_size: 360,
+                    },
+                    levels: vec![Level {
+                        level_idx: 1,
+                        level_type: LevelType::Nonoverlapping,
+                        table_infos: vec![
+                            make_sst(4, vec![100, 200], 80), // shared
+                            make_sst(5, vec![100], 90),      // only table 100
+                        ],
+                        total_file_size: 170,
+                        uncompressed_file_size: 340,
+                        ..Default::default()
+                    }],
+                    group_id: 1.into(),
+                    parent_group_id: 0.into(),
+                    member_table_ids: vec![],
+                    compaction_group_version_id: 0,
+                };
+                levels
+            })]),
+            ..Default::default()
+        };
+
+        let version_delta = HummockVersionDelta {
+            id: HummockVersionId::new(1),
+            group_deltas: HashMap::from_iter([(
+                1.into(),
+                GroupDeltas {
+                    group_deltas: vec![GroupDelta::TruncateTables(HashSet::from([TableId::new(
+                        100,
+                    )]))],
+                },
+            )]),
+            ..Default::default()
+        };
+
+        version.apply_version_delta(&version_delta);
+
+        let cg = version.get_compaction_group_levels(1.into());
+
+        assert_eq!(
+            cg.l0.sub_levels.len(),
+            1,
+            "empty sub-level should be removed"
+        );
+        assert_eq!(cg.l0.sub_levels[0].sub_level_id, 1);
+        assert_eq!(cg.l0.sub_levels[0].table_infos.len(), 1);
+        assert_eq!(2, cg.l0.sub_levels[0].table_infos[0].sst_id);
+        for sub_level in &cg.l0.sub_levels {
+            for sst in &sub_level.table_infos {
+                assert!(
+                    !sst.table_ids.is_empty(),
+                    "SST {} should not have empty table_ids",
+                    sst.sst_id
+                );
+            }
+        }
+
+        assert_eq!(cg.l0.total_file_size, 60);
+        assert_eq!(cg.l0.uncompressed_file_size, 120);
+
+        assert_eq!(cg.levels[0].table_infos.len(), 1);
+        assert_eq!(4, cg.levels[0].table_infos[0].sst_id);
+        assert_eq!(
+            cg.levels[0].table_infos[0].table_ids,
+            vec![TableId::new(200)]
+        );
+        assert_eq!(cg.levels[0].total_file_size, 80);
+        assert_eq!(cg.levels[0].uncompressed_file_size, 160);
+
+        assert_eq!(cg.compaction_group_version_id, 1);
+    }
+
+    #[test]
+    fn test_apply_version_delta_compact_l0() {
+        let mut version = HummockVersion {
+            id: HummockVersionId::new(0),
+            levels: HashMap::from_iter([(1.into(), {
+                #[expect(deprecated)]
+                let levels = Levels {
+                    l0: OverlappingLevel {
+                        sub_levels: vec![
+                            Level {
+                                level_idx: 0,
+                                level_type: LevelType::Nonoverlapping,
+                                table_infos: vec![
+                                    make_sst(1, vec![1], 100),
+                                    make_sst(2, vec![2], 200),
+                                ],
+                                total_file_size: 300,
+                                uncompressed_file_size: 600,
+                                sub_level_id: 1,
+                                ..Default::default()
+                            },
+                            Level {
+                                level_idx: 0,
+                                level_type: LevelType::Nonoverlapping,
+                                table_infos: vec![make_sst(3, vec![3], 300)],
+                                total_file_size: 300,
+                                uncompressed_file_size: 600,
+                                sub_level_id: 2,
+                                ..Default::default()
+                            },
+                        ],
+                        total_file_size: 600,
+                        uncompressed_file_size: 1200,
+                    },
+                    levels: vec![Level {
+                        level_idx: 1,
+                        level_type: LevelType::Nonoverlapping,
+                        table_infos: vec![],
+                        total_file_size: 0,
+                        uncompressed_file_size: 0,
+                        ..Default::default()
+                    }],
+                    group_id: 1.into(),
+                    parent_group_id: 0.into(),
+                    member_table_ids: vec![],
+                    compaction_group_version_id: 0,
+                };
+                levels
+            })]),
+            ..Default::default()
+        };
+
+        let version_delta = HummockVersionDelta {
+            id: HummockVersionId::new(1),
+            group_deltas: HashMap::from_iter([(
+                1.into(),
+                GroupDeltas {
+                    group_deltas: vec![
+                        GroupDelta::IntraLevel(IntraLevelDelta::new(
+                            0, // L0
+                            0,
+                            HashSet::from([1.into(), 2.into(), 3.into()]),
+                            vec![],
+                            0,
+                            0,
+                        )),
+                        GroupDelta::IntraLevel(IntraLevelDelta::new(
+                            1, // L1
+                            0,
+                            HashSet::new(),
+                            vec![make_sst(10, vec![1, 2, 3], 500)],
+                            0,
+                            0,
+                        )),
+                    ],
+                },
+            )]),
+            ..Default::default()
+        };
+
+        version.apply_version_delta(&version_delta);
+
+        let cg = version.get_compaction_group_levels(1.into());
+
+        assert!(cg.l0.sub_levels.is_empty());
+        assert_eq!(cg.l0.total_file_size, 0);
+        assert_eq!(cg.l0.uncompressed_file_size, 0);
+
+        assert_eq!(cg.levels[0].table_infos.len(), 1);
+        assert_eq!(10, cg.levels[0].table_infos[0].sst_id);
+        assert_eq!(cg.levels[0].total_file_size, 500);
     }
 }
