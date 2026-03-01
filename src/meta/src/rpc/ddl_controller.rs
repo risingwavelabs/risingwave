@@ -187,6 +187,11 @@ pub enum DdlCommand {
     CommentOn(Comment),
     CreateSubscription(Subscription),
     DropSubscription(SubscriptionId, DropMode),
+    AlterSubscriptionRetention {
+        subscription_id: SubscriptionId,
+        retention_seconds: u64,
+        definition: String,
+    },
     AlterDatabaseParam(DatabaseId, AlterDatabaseParam),
     AlterStreamingJobConfig(JobId, HashMap<String, String>, Vec<String>),
 }
@@ -223,6 +228,9 @@ impl DdlCommand {
             DdlCommand::CommentOn(comment) => Right(comment.table_id.into()),
             DdlCommand::CreateSubscription(subscription) => Left(subscription.name.clone()),
             DdlCommand::DropSubscription(id, _) => Right(id.as_object_id()),
+            DdlCommand::AlterSubscriptionRetention {
+                subscription_id, ..
+            } => Right(subscription_id.as_object_id()),
             DdlCommand::AlterDatabaseParam(id, _) => Right(id.as_object_id()),
             DdlCommand::AlterStreamingJobConfig(job_id, _, _) => Right(job_id.as_object_id()),
         }
@@ -252,7 +260,8 @@ impl DdlCommand {
             | DdlCommand::AlterSecret(_)
             | DdlCommand::AlterSwapRename(_)
             | DdlCommand::AlterDatabaseParam(_, _)
-            | DdlCommand::AlterStreamingJobConfig(_, _, _) => true,
+            | DdlCommand::AlterStreamingJobConfig(_, _, _)
+            | DdlCommand::AlterSubscriptionRetention { .. } => true,
             DdlCommand::CreateStreamingJob { .. }
             | DdlCommand::CreateNonSharedSource(_)
             | DdlCommand::ReplaceStreamJob(_)
@@ -463,6 +472,18 @@ impl DdlController {
                 }
                 DdlCommand::DropSubscription(subscription_id, drop_mode) => {
                     ctrl.drop_subscription(subscription_id, drop_mode).await
+                }
+                DdlCommand::AlterSubscriptionRetention {
+                    subscription_id,
+                    retention_seconds,
+                    definition,
+                } => {
+                    ctrl.alter_subscription_retention(
+                        subscription_id,
+                        retention_seconds,
+                        definition,
+                    )
+                    .await
                 }
                 DdlCommand::AlterSwapRename(objects) => ctrl.alter_swap_rename(objects).await,
                 DdlCommand::AlterDatabaseParam(database_id, param) => {
@@ -846,6 +867,31 @@ impl DdlController {
             .drop_subscription(database_id, subscription_id, table_id)
             .await;
         tracing::debug!("finish drop subscription");
+        Ok(version)
+    }
+
+    async fn alter_subscription_retention(
+        &self,
+        subscription_id: SubscriptionId,
+        retention_seconds: u64,
+        definition: String,
+    ) -> MetaResult<NotificationVersion> {
+        tracing::debug!("alter subscription retention");
+        let _reschedule_job_lock = self.stream_manager.reschedule_lock_read_guard().await;
+        let (version, subscription) = self
+            .metadata_manager
+            .catalog_controller
+            .alter_subscription_retention(subscription_id, retention_seconds, definition)
+            .await?;
+        self.stream_manager
+            .alter_subscription_retention(
+                subscription.database_id,
+                subscription.id,
+                subscription.dependent_table_id,
+                subscription.retention_seconds,
+            )
+            .await?;
+        tracing::debug!("finish alter subscription retention");
         Ok(version)
     }
 

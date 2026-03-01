@@ -909,6 +909,29 @@ impl DdlService for DdlServiceImpl {
         }))
     }
 
+    async fn alter_subscription_retention(
+        &self,
+        request: Request<AlterSubscriptionRetentionRequest>,
+    ) -> Result<Response<AlterSubscriptionRetentionResponse>, Status> {
+        let AlterSubscriptionRetentionRequest {
+            subscription_id,
+            retention_seconds,
+            definition,
+        } = request.into_inner();
+        let version = self
+            .ddl_controller
+            .run_command(DdlCommand::AlterSubscriptionRetention {
+                subscription_id,
+                retention_seconds,
+                definition,
+            })
+            .await?;
+        Ok(Response::new(AlterSubscriptionRetentionResponse {
+            status: None,
+            version,
+        }))
+    }
+
     async fn alter_set_schema(
         &self,
         request: Request<AlterSetSchemaRequest>,

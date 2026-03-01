@@ -364,6 +364,17 @@ message AlterOwnerResponse {
   WaitVersion version = 2;
 }
 
+message AlterSubscriptionRetentionRequest {
+  uint32 subscription_id = 1;
+  uint64 retention_seconds = 2;
+  string definition = 3;
+}
+
+message AlterSubscriptionRetentionResponse {
+  common.Status status = 1;
+  WaitVersion version = 2;
+}
+
 message AlterSwapRenameRequest {
   message ObjectNameSwapPair {
     uint32 src_object_id = 1;
@@ -708,6 +719,7 @@ service DdlService {
   rpc AlterSource(AlterSourceRequest) returns (AlterSourceResponse);
   rpc ResetSource(ResetSourceRequest) returns (ResetSourceResponse);
   rpc AlterOwner(AlterOwnerRequest) returns (AlterOwnerResponse);
+  rpc AlterSubscriptionRetention(AlterSubscriptionRetentionRequest) returns (AlterSubscriptionRetentionResponse);
   rpc AlterSetSchema(AlterSetSchemaRequest) returns (AlterSetSchemaResponse);
   rpc AlterParallelism(AlterParallelismRequest) returns (AlterParallelismResponse);
   rpc AlterBackfillParallelism(AlterBackfillParallelismRequest) returns (AlterBackfillParallelismResponse);

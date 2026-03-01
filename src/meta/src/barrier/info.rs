@@ -23,6 +23,7 @@ use parking_lot::lock_api::RwLockReadGuard;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{DatabaseId, FragmentTypeFlag, FragmentTypeMask, TableId};
 use risingwave_common::id::JobId;
+use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::stream_graph_visitor::visit_stream_node_mut;
 use risingwave_connector::source::{SplitImpl, SplitMetaData};
 use risingwave_meta_model::WorkerId;
@@ -370,6 +371,13 @@ impl BarrierInfo {
 
     pub(super) fn curr_epoch(&self) -> u64 {
         self.curr_epoch.value().0
+    }
+
+    pub(super) fn epoch(&self) -> EpochPair {
+        EpochPair {
+            curr: self.curr_epoch(),
+            prev: self.prev_epoch(),
+        }
     }
 }
 
@@ -844,6 +852,30 @@ impl InflightDatabaseInfo {
             .remove(&subscriber_id)
     }
 
+    pub fn update_subscription_retention(
+        &mut self,
+        job_id: JobId,
+        subscriber_id: SubscriberId,
+        retention_second: u64,
+    ) {
+        let job = self.jobs.get_mut(&job_id).expect("should exist");
+        match job.subscribers.get_mut(&subscriber_id) {
+            Some(SubscriberType::Subscription(current_retention)) => {
+                *current_retention = retention_second;
+            }
+            Some(SubscriberType::SnapshotBackfill) => {
+                warn!(
+                    %job_id,
+                    %subscriber_id,
+                    "cannot update retention for snapshot backfill subscriber"
+                );
+            }
+            None => {
+                warn!(%job_id, %subscriber_id, "subscription subscriber not found");
+            }
+        }
+    }
+
     fn fragment_mut(&mut self, fragment_id: FragmentId) -> (&mut InflightFragmentInfo, JobId) {
         let job_id = self.fragment_location[&fragment_id];
         let fragment = self
@@ -1122,6 +1154,7 @@ impl InflightDatabaseInfo {
                 | Command::Throttle { .. }
                 | Command::CreateSubscription { .. }
                 | Command::DropSubscription { .. }
+                | Command::AlterSubscriptionRetention { .. }
                 | Command::ConnectorPropsChange(_)
                 | Command::Refresh { .. }
                 | Command::ListFinish { .. }
