@@ -33,7 +33,8 @@ use risingwave_pb::common::PbActorInfo;
 use risingwave_pb::hummock::vector_index_delta::PbVectorIndexInit;
 use risingwave_pb::plan_common::PbField;
 use risingwave_pb::source::{
-    ConnectorSplit, ConnectorSplits, PbCdcTableSnapshotSplitsWithGeneration,
+    ConnectorSplit, ConnectorSplits, PbCdcTableSnapshotSplits,
+    PbCdcTableSnapshotSplitsWithGeneration,
 };
 use risingwave_pb::stream_plan::add_mutation::PbNewUpstreamSink;
 use risingwave_pb::stream_plan::barrier::BarrierKind as PbBarrierKind;
@@ -41,7 +42,7 @@ use risingwave_pb::stream_plan::barrier_mutation::Mutation;
 use risingwave_pb::stream_plan::connector_props_change_mutation::ConnectorPropsInfo;
 use risingwave_pb::stream_plan::sink_schema_change::Op as PbSinkSchemaChangeOp;
 use risingwave_pb::stream_plan::throttle_mutation::ThrottleConfig;
-use risingwave_pb::stream_plan::update_mutation::*;
+use risingwave_pb::stream_plan::update_mutation::{DispatcherUpdate, MergeUpdate};
 use risingwave_pb::stream_plan::{
     AddMutation, ConnectorPropsChangeMutation, Dispatcher, Dispatchers, DropSubscriptionsMutation,
     ListFinishMutation, LoadFinishMutation, PauseMutation, PbSinkAddColumnsOp, PbSinkSchemaChange,
@@ -51,9 +52,8 @@ use risingwave_pb::stream_plan::{
 use risingwave_pb::stream_service::BarrierCompleteResponse;
 use tracing::warn;
 
-use super::info::{CommandFragmentChanges, InflightDatabaseInfo};
+use super::info::InflightDatabaseInfo;
 use crate::barrier::backfill_order_control::get_nodes_with_backfill_dependencies;
-use crate::barrier::cdc_progress::CdcTableBackfillTracker;
 use crate::barrier::edge_builder::FragmentEdgeBuildResult;
 use crate::barrier::info::BarrierInfo;
 use crate::barrier::rpc::{ControlStreamManager, to_partial_graph_id};
@@ -68,7 +68,6 @@ use crate::model::{
     FragmentId, FragmentReplaceUpstream, StreamActorWithDispatchers, StreamJobActorsToCreate,
     StreamJobFragments, StreamJobFragmentsToCreate, SubscriptionId,
 };
-use crate::stream::cdc::parallel_cdc_table_backfill_fragment;
 use crate::stream::{
     AutoRefreshSchemaSinkContext, ConnectorPropsChange, ExtendedFragmentBackfillOrder,
     SplitAssignment, SplitState, UpstreamSinkInfo, build_actor_connector_splits,
@@ -315,53 +314,6 @@ pub struct ReplaceStreamJobPlan {
 }
 
 impl ReplaceStreamJobPlan {
-    fn fragment_changes(&self) -> HashMap<FragmentId, CommandFragmentChanges> {
-        let mut fragment_changes = HashMap::new();
-        for (fragment_id, new_fragment) in self
-            .new_fragments
-            .new_fragment_info(&self.init_split_assignment)
-        {
-            let fragment_change = CommandFragmentChanges::NewFragment {
-                job_id: self.streaming_job.id(),
-                info: new_fragment,
-            };
-            fragment_changes
-                .try_insert(fragment_id, fragment_change)
-                .expect("non-duplicate");
-        }
-        for fragment in self.old_fragments.fragments.values() {
-            fragment_changes
-                .try_insert(fragment.fragment_id, CommandFragmentChanges::RemoveFragment)
-                .expect("non-duplicate");
-        }
-        for (fragment_id, replace_map) in &self.replace_upstream {
-            fragment_changes
-                .try_insert(
-                    *fragment_id,
-                    CommandFragmentChanges::ReplaceNodeUpstream(replace_map.clone()),
-                )
-                .expect("non-duplicate");
-        }
-        if let Some(sinks) = &self.auto_refresh_schema_sinks {
-            for sink in sinks {
-                let fragment_change = CommandFragmentChanges::NewFragment {
-                    job_id: sink.original_sink.id.as_job_id(),
-                    info: sink.new_fragment_info(),
-                };
-                fragment_changes
-                    .try_insert(sink.new_fragment.fragment_id, fragment_change)
-                    .expect("non-duplicate");
-                fragment_changes
-                    .try_insert(
-                        sink.original_fragment.fragment_id,
-                        CommandFragmentChanges::RemoveFragment,
-                    )
-                    .expect("non-duplicate");
-            }
-        }
-        fragment_changes
-    }
-
     /// `old_fragment_id` -> `new_fragment_id`
     pub fn fragment_replacements(&self) -> HashMap<FragmentId, FragmentId> {
         let mut fragment_replacements = HashMap::new();
@@ -711,171 +663,6 @@ impl Command {
         Self::Resume
     }
 
-    #[expect(clippy::type_complexity)]
-    pub(super) fn fragment_changes(
-        &self,
-    ) -> Option<(
-        Option<(JobId, Option<CdcTableBackfillTracker>)>,
-        HashMap<FragmentId, CommandFragmentChanges>,
-    )> {
-        match self {
-            Command::Flush => None,
-            Command::Pause => None,
-            Command::Resume => None,
-            Command::DropStreamingJobs {
-                unregistered_fragment_ids,
-                dropped_sink_fragment_by_targets,
-                ..
-            } => {
-                let changes = unregistered_fragment_ids
-                    .iter()
-                    .map(|fragment_id| (*fragment_id, CommandFragmentChanges::RemoveFragment))
-                    .chain(dropped_sink_fragment_by_targets.iter().map(
-                        |(target_fragment, sink_fragments)| {
-                            (
-                                *target_fragment,
-                                CommandFragmentChanges::DropNodeUpstream(sink_fragments.clone()),
-                            )
-                        },
-                    ))
-                    .collect();
-
-                Some((None, changes))
-            }
-            Command::CreateStreamingJob { info, job_type, .. } => {
-                assert!(
-                    !matches!(job_type, CreateStreamingJobType::SnapshotBackfill(_)),
-                    "should handle fragment changes separately for snapshot backfill"
-                );
-                let mut changes: HashMap<_, _> = info
-                    .stream_job_fragments
-                    .new_fragment_info(&info.init_split_assignment)
-                    .map(|(fragment_id, fragment_infos)| {
-                        (
-                            fragment_id,
-                            CommandFragmentChanges::NewFragment {
-                                job_id: info.streaming_job.id(),
-                                info: fragment_infos,
-                            },
-                        )
-                    })
-                    .collect();
-
-                if let CreateStreamingJobType::SinkIntoTable(ctx) = job_type {
-                    let downstream_fragment_id = ctx.new_sink_downstream.downstream_fragment_id;
-                    changes.insert(
-                        downstream_fragment_id,
-                        CommandFragmentChanges::AddNodeUpstream(PbUpstreamSinkInfo {
-                            upstream_fragment_id: ctx.sink_fragment_id,
-                            sink_output_schema: ctx.sink_output_fields.clone(),
-                            project_exprs: ctx.project_exprs.clone(),
-                        }),
-                    );
-                }
-
-                let cdc_tracker = if let Some(splits) = &info.cdc_table_snapshot_splits {
-                    let (fragment, _) =
-                        parallel_cdc_table_backfill_fragment(info.stream_job_fragments.fragments())
-                            .expect("should have parallel cdc fragment");
-                    Some(CdcTableBackfillTracker::new(
-                        fragment.fragment_id,
-                        splits.clone(),
-                    ))
-                } else {
-                    None
-                };
-
-                Some((Some((info.streaming_job.id(), cdc_tracker)), changes))
-            }
-            Command::RescheduleIntent {
-                reschedule_plan, ..
-            } => {
-                let ReschedulePlan { reschedules, .. } = reschedule_plan
-                    .as_ref()
-                    .expect("reschedule intent should be resolved in global barrier worker");
-                Some((
-                    None,
-                    reschedules
-                        .iter()
-                        .map(|(fragment_id, reschedule)| {
-                            (
-                                *fragment_id,
-                                CommandFragmentChanges::Reschedule {
-                                    new_actors: reschedule
-                                        .added_actors
-                                        .iter()
-                                        .flat_map(|(node_id, actors)| {
-                                            actors.iter().map(|actor_id| {
-                                                (
-                                                    *actor_id,
-                                                    InflightActorInfo {
-                                                        worker_id: *node_id,
-                                                        vnode_bitmap: reschedule
-                                                            .newly_created_actors
-                                                            .get(actor_id)
-                                                            .expect("should exist")
-                                                            .0
-                                                            .0
-                                                            .vnode_bitmap
-                                                            .clone(),
-                                                        splits: reschedule
-                                                            .actor_splits
-                                                            .get(actor_id)
-                                                            .cloned()
-                                                            .unwrap_or_default(),
-                                                    },
-                                                )
-                                            })
-                                        })
-                                        .collect(),
-                                    actor_update_vnode_bitmap: reschedule
-                                        .vnode_bitmap_updates
-                                        .iter()
-                                        .filter(|(actor_id, _)| {
-                                            // only keep the existing actors
-                                            !reschedule.newly_created_actors.contains_key(*actor_id)
-                                        })
-                                        .map(|(actor_id, bitmap)| (*actor_id, bitmap.clone()))
-                                        .collect(),
-                                    to_remove: reschedule.removed_actors.iter().cloned().collect(),
-                                    actor_splits: reschedule.actor_splits.clone(),
-                                },
-                            )
-                        })
-                        .collect(),
-                ))
-            }
-            Command::ReplaceStreamJob(plan) => Some((None, plan.fragment_changes())),
-            Command::SourceChangeSplit(SplitState {
-                split_assignment, ..
-            }) => Some((
-                None,
-                split_assignment
-                    .iter()
-                    .map(|(&fragment_id, splits)| {
-                        (
-                            fragment_id,
-                            CommandFragmentChanges::SplitAssignment {
-                                actor_splits: splits.clone(),
-                            },
-                        )
-                    })
-                    .collect(),
-            )),
-            Command::Throttle { .. } => None,
-            Command::CreateSubscription { .. } => None,
-            Command::DropSubscription { .. } => None,
-            Command::AlterSubscriptionRetention { .. } => None,
-            Command::ConnectorPropsChange(_) => None,
-            Command::Refresh { .. } => None, // Refresh doesn't change fragment structure
-            Command::ListFinish { .. } => None, // ListFinish doesn't change fragment structure
-            Command::LoadFinish { .. } => None, // LoadFinish doesn't change fragment structure
-            Command::ResetSource { .. } => None, // ResetSource doesn't change fragment structure
-            Command::ResumeBackfill { .. } => None, /* ResumeBackfill doesn't change fragment structure */
-            Command::InjectSourceOffsets { .. } => None, /* InjectSourceOffsets doesn't change fragment structure */
-        }
-    }
-
     pub fn need_checkpoint(&self) -> bool {
         // todo! Reviewing the flow of different command to reduce the amount of checkpoint
         !matches!(self, Command::Resume)
@@ -933,68 +720,6 @@ impl PostCollectCommand {
 impl Display for PostCollectCommand {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(self.command_name())
-    }
-}
-
-impl Command {
-    pub(super) fn into_post_collect(self) -> PostCollectCommand {
-        match self {
-            Command::DropStreamingJobs {
-                streaming_job_ids,
-                unregistered_state_table_ids,
-                ..
-            } => PostCollectCommand::DropStreamingJobs {
-                streaming_job_ids,
-                unregistered_state_table_ids,
-            },
-            Command::CreateStreamingJob {
-                info,
-                job_type,
-                cross_db_snapshot_backfill_info,
-            } => match job_type {
-                CreateStreamingJobType::SnapshotBackfill(_) => PostCollectCommand::barrier(),
-                job_type => PostCollectCommand::CreateStreamingJob {
-                    info,
-                    job_type,
-                    cross_db_snapshot_backfill_info,
-                },
-            },
-            Command::RescheduleIntent {
-                reschedule_plan, ..
-            } => {
-                let ReschedulePlan { reschedules, .. } = reschedule_plan
-                    .expect("reschedule intent should be resolved in global barrier worker");
-                PostCollectCommand::Reschedule { reschedules }
-            }
-            Command::ReplaceStreamJob(plan) => PostCollectCommand::ReplaceStreamJob(plan),
-            Command::SourceChangeSplit(SplitState { split_assignment }) => {
-                PostCollectCommand::SourceChangeSplit { split_assignment }
-            }
-            Command::CreateSubscription {
-                subscription_id, ..
-            } => PostCollectCommand::CreateSubscription { subscription_id },
-            Command::AlterSubscriptionRetention { .. } => {
-                PostCollectCommand::Command("AlterSubscriptionRetention".to_owned())
-            }
-            Command::ConnectorPropsChange(connector_props_change) => {
-                PostCollectCommand::ConnectorPropsChange(connector_props_change)
-            }
-            Command::Flush => PostCollectCommand::Command("Flush".to_owned()),
-            Command::Pause => PostCollectCommand::Command("Pause".to_owned()),
-            Command::Resume => PostCollectCommand::Command("Resume".to_owned()),
-            Command::Throttle { .. } => PostCollectCommand::Command("Throttle".to_owned()),
-            Command::DropSubscription { .. } => {
-                PostCollectCommand::Command("DropSubscription".to_owned())
-            }
-            Command::Refresh { .. } => PostCollectCommand::Command("Refresh".to_owned()),
-            Command::ListFinish { .. } => PostCollectCommand::Command("ListFinish".to_owned()),
-            Command::LoadFinish { .. } => PostCollectCommand::Command("LoadFinish".to_owned()),
-            Command::ResetSource { .. } => PostCollectCommand::Command("ResetSource".to_owned()),
-            Command::ResumeBackfill { target } => PostCollectCommand::ResumeBackfill { target },
-            Command::InjectSourceOffsets { .. } => {
-                PostCollectCommand::Command("InjectSourceOffsets".to_owned())
-            }
-        }
     }
 }
 
@@ -1191,21 +916,10 @@ impl CommandContext {
 }
 
 impl Command {
-    /// Generate a mutation for the given command.
-    ///
-    /// `edges` contains the information of `dispatcher`s of `DispatchExecutor` and `actor_upstreams`s of `MergeNode`
-    pub(super) fn to_mutation(
-        &self,
-        is_currently_paused: bool,
-        edges: &mut Option<FragmentEdgeBuildResult>,
-        control_stream_manager: &ControlStreamManager,
-        database_info: &mut InflightDatabaseInfo,
-    ) -> MetaResult<Option<Mutation>> {
-        let database_id = database_info.database_id;
-        let mutation = match self {
-            Command::Flush => None,
-
-            Command::Pause => {
+    /// Build the `Pause` mutation.
+    pub(super) fn pause_to_mutation(is_currently_paused: bool) -> Option<Mutation> {
+        {
+            {
                 // Only pause when the cluster is not already paused.
                 // XXX: what if pause(r1) - pause(r2) - resume(r1) - resume(r2)??
                 if !is_currently_paused {
@@ -1214,8 +928,13 @@ impl Command {
                     None
                 }
             }
+        }
+    }
 
-            Command::Resume => {
+    /// Build the `Resume` mutation.
+    pub(super) fn resume_to_mutation(is_currently_paused: bool) -> Option<Mutation> {
+        {
+            {
                 // Only resume when the cluster is paused with the same reason.
                 if is_currently_paused {
                     Some(Mutation::Resume(ResumeMutation {}))
@@ -1223,54 +942,75 @@ impl Command {
                     None
                 }
             }
+        }
+    }
 
-            Command::SourceChangeSplit(SplitState {
-                split_assignment, ..
-            }) => {
+    /// Build the `Splits` mutation for `SourceChangeSplit`.
+    pub(super) fn source_change_split_to_mutation(split_assignment: &SplitAssignment) -> Mutation {
+        {
+            {
                 let mut diff = HashMap::new();
 
                 for actor_splits in split_assignment.values() {
                     diff.extend(actor_splits.clone());
                 }
 
-                Some(Mutation::Splits(SourceChangeSplitMutation {
+                Mutation::Splits(SourceChangeSplitMutation {
                     actor_splits: build_actor_connector_splits(&diff),
-                }))
+                })
             }
+        }
+    }
 
-            Command::Throttle { config, .. } => {
+    /// Build the `Throttle` mutation.
+    pub(super) fn throttle_to_mutation(config: &HashMap<FragmentId, ThrottleConfig>) -> Mutation {
+        {
+            {
                 let config = config.clone();
-                Some(Mutation::Throttle(ThrottleMutation {
+                Mutation::Throttle(ThrottleMutation {
                     fragment_throttle: config,
-                }))
+                })
             }
+        }
+    }
 
-            Command::DropStreamingJobs {
-                actors,
-                dropped_sink_fragment_by_targets,
-                ..
-            } => Some(Mutation::Stop(StopMutation {
+    /// Build the `Stop` mutation for `DropStreamingJobs`.
+    pub(super) fn drop_streaming_jobs_to_mutation(
+        actors: &Vec<ActorId>,
+        dropped_sink_fragment_by_targets: &HashMap<FragmentId, Vec<FragmentId>>,
+    ) -> Mutation {
+        {
+            Mutation::Stop(StopMutation {
                 actors: actors.clone(),
                 dropped_sink_fragments: dropped_sink_fragment_by_targets
                     .values()
                     .flatten()
                     .cloned()
                     .collect(),
-            })),
+            })
+        }
+    }
 
-            Command::CreateStreamingJob {
-                info:
-                    CreateStreamingJobCommandInfo {
-                        stream_job_fragments,
-                        init_split_assignment: split_assignment,
-                        upstream_fragment_downstreams,
-                        fragment_backfill_ordering,
-                        ..
-                    },
-                job_type,
-                ..
-            } => {
-                let edges = edges.as_mut().expect("should exist");
+    /// Build the `Add` mutation for `CreateStreamingJob`.
+    pub(super) fn create_streaming_job_to_mutation(
+        info: &CreateStreamingJobCommandInfo,
+        job_type: &CreateStreamingJobType,
+        is_currently_paused: bool,
+        edges: &mut FragmentEdgeBuildResult,
+        control_stream_manager: &ControlStreamManager,
+        actor_cdc_table_snapshot_splits: Option<HashMap<ActorId, PbCdcTableSnapshotSplits>>,
+    ) -> MetaResult<Mutation> {
+        {
+            {
+                let CreateStreamingJobCommandInfo {
+                    stream_job_fragments,
+                    init_split_assignment: split_assignment,
+                    upstream_fragment_downstreams,
+                    fragment_backfill_ordering,
+                    streaming_job,
+                    ..
+                } = info;
+                let database_id = streaming_job.database_id();
                 let added_actors = stream_job_fragments.actor_ids().collect();
                 let actor_splits = split_assignment
                     .values()
@@ -1335,14 +1075,8 @@ impl Command {
                         HashMap::new()
                     };
 
-                let actor_cdc_table_snapshot_splits =
-                    if !matches!(job_type, CreateStreamingJobType::SnapshotBackfill(_)) {
-                        database_info
-                            .assign_cdc_backfill_splits(stream_job_fragments.stream_job_id)?
-                            .map(|splits| PbCdcTableSnapshotSplitsWithGeneration { splits })
-                    } else {
-                        None
-                    };
+                let actor_cdc_table_snapshot_splits = actor_cdc_table_snapshot_splits
+                    .map(|splits| PbCdcTableSnapshotSplitsWithGeneration { splits });
 
                 let add_mutation = AddMutation {
                     actor_dispatchers: edges
@@ -1363,18 +1097,26 @@ impl Command {
                     new_upstream_sinks,
                 };
 
-                Some(Mutation::Add(add_mutation))
+                Ok(Mutation::Add(add_mutation))
             }
+        }
+    }
 
-            Command::ReplaceStreamJob(ReplaceStreamJobPlan {
-                old_fragments,
-                replace_upstream,
-                upstream_fragment_downstreams,
-                init_split_assignment,
-                auto_refresh_schema_sinks,
-                ..
-            }) => {
-                let edges = edges.as_mut().expect("should exist");
+    /// Build the `Update` mutation for `ReplaceStreamJob`.
+    pub(super) fn replace_stream_job_to_mutation(
+        ReplaceStreamJobPlan {
+            old_fragments,
+            replace_upstream,
+            upstream_fragment_downstreams,
+            init_split_assignment,
+            auto_refresh_schema_sinks,
+            ..
+        }: &ReplaceStreamJobPlan,
+        edges: &mut FragmentEdgeBuildResult,
+        database_info: &mut InflightDatabaseInfo,
+    ) -> MetaResult<Option<Mutation>> {
+        {
+            {
                 let merge_updates = edges
                     .merge_updates
                     .extract_if(|fragment_id, _| replace_upstream.contains_key(fragment_id))
@@ -1388,7 +1130,7 @@ impl Command {
                 let actor_cdc_table_snapshot_splits = database_info
                     .assign_cdc_backfill_splits(old_fragments.stream_job_id)?
                     .map(|splits| PbCdcTableSnapshotSplitsWithGeneration { splits });
-                Self::generate_update_mutation_for_replace_table(
+                Ok(Self::generate_update_mutation_for_replace_table(
                     old_fragments.actor_ids().chain(
                         auto_refresh_schema_sinks
                             .as_ref()
@@ -1407,18 +1149,21 @@ impl Command {
                     init_split_assignment,
                     actor_cdc_table_snapshot_splits,
                     auto_refresh_schema_sinks.as_ref(),
-                )
+                ))
             }
+        }
+    }
 
-            Command::RescheduleIntent {
-                reschedule_plan, ..
-            } => {
-                let ReschedulePlan {
-                    reschedules,
-                    fragment_actors,
-                } = reschedule_plan
-                    .as_ref()
-                    .expect("reschedule intent should be resolved in global barrier worker");
+    /// Build the `Update` mutation for `RescheduleIntent`.
+    pub(super) fn reschedule_to_mutation(
+        reschedules: &HashMap<FragmentId, Reschedule>,
+        fragment_actors: &HashMap<FragmentId, HashSet<ActorId>>,
+        control_stream_manager: &ControlStreamManager,
+        database_info: &mut InflightDatabaseInfo,
+    ) -> MetaResult<Option<Mutation>> {
+        {
+            {
+                let database_id = database_info.database_id;
                 let mut dispatcher_update = HashMap::new();
                 for reschedule in reschedules.values() {
                     for &(upstream_fragment_id, dispatcher_id) in
@@ -1586,37 +1331,52 @@ impl Command {
                     subscriptions_to_drop: vec![],
                 });
                 tracing::debug!("update mutation: {mutation:?}");
-                Some(mutation)
+                Ok(Some(mutation))
             }
+        }
+    }
 
-            Command::CreateSubscription {
-                upstream_mv_table_id,
-                subscription_id,
-                ..
-            } => Some(Mutation::Add(AddMutation {
+    /// Build the `Add` mutation for `CreateSubscription`.
+    pub(super) fn create_subscription_to_mutation(
+        upstream_mv_table_id: TableId,
+        subscription_id: SubscriptionId,
+    ) -> Mutation {
+        {
+            Mutation::Add(AddMutation {
                 actor_dispatchers: Default::default(),
                 added_actors: vec![],
                 actor_splits: Default::default(),
                 pause: false,
                 subscriptions_to_add: vec![SubscriptionUpstreamInfo {
-                    upstream_mv_table_id: *upstream_mv_table_id,
+                    upstream_mv_table_id,
                     subscriber_id: subscription_id.as_subscriber_id(),
                 }],
                 backfill_nodes_to_pause: vec![],
                 actor_cdc_table_snapshot_splits: None,
                 new_upstream_sinks: Default::default(),
-            })),
-            Command::DropSubscription {
-                upstream_mv_table_id,
-                subscription_id,
-            } => Some(Mutation::DropSubscriptions(DropSubscriptionsMutation {
+            })
+        }
+    }
+
+    /// Build the `DropSubscriptions` mutation for `DropSubscription`.
+    pub(super) fn drop_subscription_to_mutation(
+        upstream_mv_table_id: TableId,
+        subscription_id: SubscriptionId,
+    ) -> Mutation {
+        {
+            Mutation::DropSubscriptions(DropSubscriptionsMutation {
                 info: vec![SubscriptionUpstreamInfo {
                     subscriber_id: subscription_id.as_subscriber_id(),
-                    upstream_mv_table_id: *upstream_mv_table_id,
+                    upstream_mv_table_id,
                 }],
-            })),
-            Command::AlterSubscriptionRetention { .. } => None,
-            Command::ConnectorPropsChange(config) => {
+            })
+        }
+    }
+
+    /// Build the `ConnectorPropsChange` mutation.
+    pub(super) fn connector_props_change_to_mutation(config: &ConnectorPropsChange) -> Mutation {
+        {
+            {
                 let mut connector_props_infos = HashMap::default();
                 for (k, v) in config {
                     connector_props_infos.insert(
@@ -1626,39 +1386,52 @@ impl Command {
                         },
                     );
                 }
-                Some(Mutation::ConnectorPropsChange(
-                    ConnectorPropsChangeMutation {
-                        connector_props_infos,
-                    },
-                ))
+                Mutation::ConnectorPropsChange(ConnectorPropsChangeMutation {
+                    connector_props_infos,
+                })
             }
-            Command::Refresh {
-                table_id,
-                associated_source_id,
-            } => Some(Mutation::RefreshStart(
-                risingwave_pb::stream_plan::RefreshStartMutation {
-                    table_id: *table_id,
-                    associated_source_id: *associated_source_id,
-                },
-            )),
-            Command::ListFinish {
-                table_id: _,
-                associated_source_id,
-            } => Some(Mutation::ListFinish(ListFinishMutation {
-                associated_source_id: *associated_source_id,
-            })),
-            Command::LoadFinish {
-                table_id: _,
-                associated_source_id,
-            } => Some(Mutation::LoadFinish(LoadFinishMutation {
-                associated_source_id: *associated_source_id,
-            })),
-            Command::ResetSource { source_id } => Some(Mutation::ResetSource(
-                risingwave_pb::stream_plan::ResetSourceMutation {
-                    source_id: source_id.as_raw_id(),
-                },
-            )),
-            Command::ResumeBackfill { target } => {
+        }
+    }
+
+    /// Build the `RefreshStart` mutation.
+    pub(super) fn refresh_to_mutation(
+        table_id: TableId,
+        associated_source_id: SourceId,
+    ) -> Mutation {
+        Mutation::RefreshStart(risingwave_pb::stream_plan::RefreshStartMutation {
+            table_id,
+            associated_source_id,
+        })
+    }
+
+    /// Build the `ListFinish` mutation.
+    pub(super) fn list_finish_to_mutation(associated_source_id: SourceId) -> Mutation {
+        Mutation::ListFinish(ListFinishMutation {
+            associated_source_id,
+        })
+    }
+
+    /// Build the `LoadFinish` mutation.
+    pub(super) fn load_finish_to_mutation(associated_source_id: SourceId) -> Mutation {
+        Mutation::LoadFinish(LoadFinishMutation {
+            associated_source_id,
+        })
+    }
+
+    /// Build the `ResetSource` mutation.
+    pub(super) fn reset_source_to_mutation(source_id: SourceId) -> Mutation {
+        Mutation::ResetSource(risingwave_pb::stream_plan::ResetSourceMutation {
+            source_id: source_id.as_raw_id(),
+        })
+    }
+
+    /// Build the `StartFragmentBackfill` mutation for `ResumeBackfill`.
+    pub(super) fn resume_backfill_to_mutation(
+        target: &ResumeBackfillTarget,
+        database_info: &InflightDatabaseInfo,
+    ) -> MetaResult<Option<Mutation>> {
+        {
+            {
                 let fragment_ids: HashSet<_> = match target {
                     ResumeBackfillTarget::Job(job_id) => {
                         database_info.backfill_fragment_ids_for_job(*job_id)?
@@ -1678,43 +1451,38 @@ impl Command {
                         ?target,
                         "resume backfill command ignored because no backfill fragments found"
                     );
-                    None
+                    Ok(None)
                 } else {
-                    Some(Mutation::StartFragmentBackfill(
+                    Ok(Some(Mutation::StartFragmentBackfill(
                         StartFragmentBackfillMutation {
                             fragment_ids: fragment_ids.into_iter().collect(),
                         },
-                    ))
+                    )))
                 }
             }
-            Command::InjectSourceOffsets {
-                source_id,
-                split_offsets,
-            } => Some(Mutation::InjectSourceOffsets(
-                risingwave_pb::stream_plan::InjectSourceOffsetsMutation {
-                    source_id: source_id.as_raw_id(),
-                    split_offsets: split_offsets.clone(),
-                },
-            )),
-        };
-        Ok(mutation)
+        }
     }
 
-    pub(super) fn actors_to_create(
-        &self,
-        database_info: &InflightDatabaseInfo,
-        edges: &mut Option<FragmentEdgeBuildResult>,
-        control_stream_manager: &ControlStreamManager,
-    ) -> Option<StreamJobActorsToCreate> {
-        match self {
-            Command::CreateStreamingJob { info, job_type, .. } => {
-                if let CreateStreamingJobType::SnapshotBackfill(_) = job_type {
-                    // for snapshot backfill, the actors to create is measured separately
-                    return None;
-                }
+    /// Build the `InjectSourceOffsets` mutation.
+    pub(super) fn inject_source_offsets_to_mutation(
+        source_id: SourceId,
+        split_offsets: &HashMap<String, String>,
+    ) -> Mutation {
+        Mutation::InjectSourceOffsets(risingwave_pb::stream_plan::InjectSourceOffsetsMutation {
+            source_id: source_id.as_raw_id(),
+            split_offsets: split_offsets.clone(),
+        })
+    }
+
+    /// Collect actors to create for `CreateStreamingJob` (non-snapshot-backfill).
+    pub(super) fn create_streaming_job_actors_to_create(
+        info: &CreateStreamingJobCommandInfo,
+        edges: &mut FragmentEdgeBuildResult,
+    ) -> StreamJobActorsToCreate {
+        {
+            {
                 let actors_to_create = info.stream_job_fragments.actors_to_create();
-                let edges = edges.as_mut().expect("should exist");
-                Some(edges.collect_actors_to_create(actors_to_create.map(
+                edges.collect_actors_to_create(actors_to_create.map(
                     |(fragment_id, node, actors)| {
                         (
                             fragment_id,
@@ -1723,18 +1491,20 @@ impl Command {
                             [], // no subscriber for new job to create
                         )
                     },
-                )))
+                ))
             }
-            Command::RescheduleIntent {
-                reschedule_plan, ..
-            } => {
-                let ReschedulePlan {
-                    reschedules,
-                    fragment_actors,
-                } = reschedule_plan
-                    .as_ref()
-                    .expect("reschedule intent should be resolved in global barrier worker");
-                // we assume that we only scale the actors in database partial graph
+        }
+    }
+
+    /// Collect actors to create for `RescheduleIntent`.
+    pub(super) fn reschedule_actors_to_create(
+        reschedules: &HashMap<FragmentId, Reschedule>,
+        fragment_actors: &HashMap<FragmentId, HashSet<ActorId>>,
+        database_info: &InflightDatabaseInfo,
+        control_stream_manager: &ControlStreamManager,
+    ) -> StreamJobActorsToCreate {
+        {
+            {
                 let mut actor_upstreams = Self::collect_database_partial_graph_actor_upstreams(
                     reschedules.iter().map(|(fragment_id, reschedule)| {
                         (
@@ -1772,10 +1542,19 @@ impl Command {
                         .1
                         .push((actor.clone(), upstreams, dispatchers.clone()));
                 }
-                Some(map)
+                map
             }
-            Command::ReplaceStreamJob(replace_table) => {
-                let edges = edges.as_mut().expect("should exist");
+        }
+    }
+
+    /// Collect actors to create for `ReplaceStreamJob`.
+    pub(super) fn replace_stream_job_actors_to_create(
+        replace_table: &ReplaceStreamJobPlan,
+        edges: &mut FragmentEdgeBuildResult,
+        database_info: &InflightDatabaseInfo,
+    ) -> StreamJobActorsToCreate {
+        {
+            {
                 let mut actors = edges.collect_actors_to_create(
                     replace_table.new_fragments.actors_to_create().map(
                         |(fragment_id, node, actors)| {
@@ -1811,9 +1590,8 @@ impl Command {
                         actors.entry(worker_id).or_default().extend(fragment_actors);
                     }
                 }
-                Some(actors)
+                actors
             }
-            _ => None,
         }
     }
 
