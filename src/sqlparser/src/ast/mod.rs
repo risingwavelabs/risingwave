@@ -3263,7 +3263,11 @@ impl TryFrom<(&String, &String)> for SqlOption {
         let name_parts: Vec<&str> = name.split('.').collect();
         let object_name = ObjectName(name_parts.into_iter().map(Ident::from_real_value).collect());
 
-        let query = format!("{} = {}", object_name, value);
+        // Wrap the value in single quotes so it is always parsed as a string literal.
+        // This prevents values containing special characters (e.g., "jdbc:postgresql://...")
+        // from being incorrectly tokenized. Escape any embedded single quotes.
+        let escaped_value = value.replace('\'', "''");
+        let query = format!("{} = '{}'", object_name, escaped_value);
         let mut tokenizer = Tokenizer::new(query.as_str());
         let tokens = tokenizer.tokenize_with_location()?;
         let mut parser = Parser(&tokens);
