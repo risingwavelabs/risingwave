@@ -342,11 +342,11 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         Self::touch_agg_groups(this, vars, group_visibilities.iter().map(|(k, _)| k)).await?;
 
         // Calculate the row visibility for every agg call.
-        let mut call_visibilities = Vec::with_capacity(this.agg_calls.len());
-        for agg_call in &this.agg_calls {
-            let agg_call_filter_res = agg_call_filter_res(agg_call, &chunk).await?;
-            call_visibilities.push(agg_call_filter_res);
-        }
+        let filter_futures = this
+            .agg_calls
+            .iter()
+            .map(|agg_call| agg_call_filter_res(agg_call, &chunk));
+        let call_visibilities: Vec<_> = try_join_all(filter_futures).await?;
 
         // Materialize input chunk if needed and possible.
         // For aggregations without distinct, we can materialize before grouping.
@@ -363,8 +363,9 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         }
 
         // Apply chunk to each of the state (per agg_call), for each group.
+        let mut agg_groups = Vec::new();
         for (key, visibility) in group_visibilities {
-            let agg_group: &mut BoxedAggGroup<_> = &mut vars.dirty_groups.get_mut(&key).unwrap();
+            let agg_group: BoxedAggGroup<_> = vars.dirty_groups.remove(&key).unwrap();
 
             let visibilities = call_visibilities
                 .iter()
@@ -392,9 +393,34 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                     table.write_chunk(chunk);
                 }
             }
-            agg_group
-                .apply_chunk(&chunk, &this.agg_calls, &this.agg_funcs, visibilities)
-                .await?;
+            agg_groups.push((key, agg_group, visibilities));
+        }
+
+        let concurrency = 10;
+
+        while !agg_groups.is_empty() {
+            // Drain up to `concurrency` items into a batch
+            let batch: Vec<_> = agg_groups
+                .drain(..concurrency.min(agg_groups.len()))
+                .collect();
+
+            // Now batch is owned, nothing is borrowed from agg_groups!
+            let futs = batch
+                .into_iter()
+                .map(|(key, mut agg_group, visibilities)| async {
+                    agg_group
+                        .apply_chunk(&chunk, &this.agg_calls, &this.agg_funcs, visibilities)
+                        .await
+                        .map(|()| (key, agg_group))
+                });
+
+            let agg_groups = try_join_all(futs).await?;
+
+            // we removed agg_group from dirty_groups at for loop of group_visibilities
+            // to enable concurrency, now we insert it back
+            for (key, agg_group) in agg_groups {
+                vars.dirty_groups.insert(key, agg_group);
+            }
         }
 
         // Update the metrics.
