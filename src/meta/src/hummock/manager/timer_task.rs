@@ -13,27 +13,78 @@
 // limitations under the License.
 
 use std::collections::{BTreeSet, HashMap, HashSet};
+use std::future::Future;
 use std::sync::Arc;
 use std::time::Duration;
 
-use futures::future::Either;
-use futures::stream::BoxStream;
-use futures::{FutureExt, StreamExt};
 use itertools::Itertools;
 use risingwave_hummock_sdk::CompactionGroupId;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::get_compaction_group_ids;
 use risingwave_pb::hummock::compact_task::{self, TaskStatus};
 use risingwave_pb::hummock::level_handler::RunningCompactTask;
-use rw_futures_util::select_all;
 use thiserror_ext::AsReport;
 use tokio::sync::oneshot::Sender;
+use tokio::sync::{Mutex, watch};
 use tokio::task::JoinHandle;
-use tokio_stream::wrappers::IntervalStream;
 use tracing::warn;
 
 use crate::backup_restore::BackupManagerRef;
 use crate::hummock::metrics_utils::{trigger_lsm_stat, trigger_mv_stat};
 use crate::hummock::{HummockManager, TASK_NORMAL};
+
+/// Spawn a periodic background loop.
+///
+/// Notes on shutdown and cancellation:
+/// - At most one handler future is in-flight at any time. If the handler runs longer than the
+///   period, the next tick will be delayed (see `MissedTickBehavior::Delay`).
+/// - Shutdown can preempt a running handler by dropping its future. Therefore, the handler should
+///   avoid long-running synchronous/blocking code and prefer cancellation-safe async operations.
+fn spawn_periodic_loop<F, Fut>(
+    name: &'static str,
+    period: Duration,
+    mut shutdown_rx: watch::Receiver<bool>,
+    mut handler: F,
+) -> JoinHandle<()>
+where
+    F: FnMut() -> Fut + Send + 'static,
+    Fut: Future<Output = ()> + Send + 'static,
+{
+    tokio::spawn(async move {
+        // `shutdown_rx` is used for the inner select when running the handler. We need another
+        // receiver for the outer select to avoid mutable-borrow conflicts.
+        let mut shutdown_rx_idle = shutdown_rx.clone();
+
+        let mut trigger_interval = tokio::time::interval(period);
+        trigger_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        trigger_interval.reset();
+
+        loop {
+            tokio::select! {
+                _ = trigger_interval.tick() => {
+                    // Allow shutdown to preempt a running handler.
+                    let handler_fut = handler();
+                    tokio::pin!(handler_fut);
+
+                    tokio::select! {
+                        _ = &mut handler_fut => {}
+                        changed = shutdown_rx.changed() => {
+                            if changed.is_err() || *shutdown_rx.borrow() {
+                                tracing::info!("Hummock timer handler loop [{}] is stopped", name);
+                                break;
+                            }
+                        }
+                    }
+                }
+                changed = shutdown_rx_idle.changed() => {
+                    if changed.is_err() || *shutdown_rx_idle.borrow() {
+                        tracing::info!("Hummock timer handler loop [{}] is stopped", name);
+                        break;
+                    }
+                }
+            }
+        }
+    })
+}
 
 impl HummockManager {
     pub fn hummock_timer_task(
@@ -46,152 +97,14 @@ impl HummockManager {
             const STAT_REPORT_PERIOD_SEC: u64 = 20;
             const COMPACTION_HEARTBEAT_PERIOD_SEC: u64 = 1;
 
-            pub enum HummockTimerEvent {
-                GroupScheduleSplit,
-                CheckDeadTask,
-                Report,
-                CompactionHeartBeatExpiredCheck,
-
-                DynamicCompactionTrigger,
-                SpaceReclaimCompactionTrigger,
-                TtlCompactionTrigger,
-                TombstoneCompactionTrigger,
-
-                FullGc,
-
-                GroupScheduleMerge,
-            }
-            let mut check_compact_trigger_interval =
-                tokio::time::interval(Duration::from_secs(CHECK_PENDING_TASK_PERIOD_SEC));
-            check_compact_trigger_interval
-                .set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-            check_compact_trigger_interval.reset();
-
-            let check_compact_trigger = IntervalStream::new(check_compact_trigger_interval)
-                .map(|_| HummockTimerEvent::CheckDeadTask);
-
-            let mut stat_report_interval =
-                tokio::time::interval(std::time::Duration::from_secs(STAT_REPORT_PERIOD_SEC));
-            stat_report_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-            stat_report_interval.reset();
-            let stat_report_trigger =
-                IntervalStream::new(stat_report_interval).map(|_| HummockTimerEvent::Report);
-
-            let mut compaction_heartbeat_interval = tokio::time::interval(
-                std::time::Duration::from_secs(COMPACTION_HEARTBEAT_PERIOD_SEC),
-            );
-            compaction_heartbeat_interval
-                .set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-            compaction_heartbeat_interval.reset();
-            let compaction_heartbeat_trigger = IntervalStream::new(compaction_heartbeat_interval)
-                .map(|_| HummockTimerEvent::CompactionHeartBeatExpiredCheck);
-
-            let mut min_trigger_interval = tokio::time::interval(Duration::from_secs(
-                hummock_manager.env.opts.periodic_compaction_interval_sec,
-            ));
-            min_trigger_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-            min_trigger_interval.reset();
-            let dynamic_tick_trigger = IntervalStream::new(min_trigger_interval)
-                .map(|_| HummockTimerEvent::DynamicCompactionTrigger);
-
-            let mut min_space_reclaim_trigger_interval =
-                tokio::time::interval(Duration::from_secs(
-                    hummock_manager
-                        .env
-                        .opts
-                        .periodic_space_reclaim_compaction_interval_sec,
-                ));
-            min_space_reclaim_trigger_interval
-                .set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-            min_space_reclaim_trigger_interval.reset();
-            let space_reclaim_trigger = IntervalStream::new(min_space_reclaim_trigger_interval)
-                .map(|_| HummockTimerEvent::SpaceReclaimCompactionTrigger);
-
-            let mut min_ttl_reclaim_trigger_interval = tokio::time::interval(Duration::from_secs(
-                hummock_manager
-                    .env
-                    .opts
-                    .periodic_ttl_reclaim_compaction_interval_sec,
-            ));
-            min_ttl_reclaim_trigger_interval
-                .set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-            min_ttl_reclaim_trigger_interval.reset();
-            let ttl_reclaim_trigger = IntervalStream::new(min_ttl_reclaim_trigger_interval)
-                .map(|_| HummockTimerEvent::TtlCompactionTrigger);
-
-            let mut full_gc_interval = tokio::time::interval(Duration::from_secs(
-                hummock_manager.env.opts.full_gc_interval_sec,
-            ));
-            full_gc_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-            full_gc_interval.reset();
-            let full_gc_trigger =
-                IntervalStream::new(full_gc_interval).map(|_| HummockTimerEvent::FullGc);
-
-            let mut tombstone_reclaim_trigger_interval =
-                tokio::time::interval(Duration::from_secs(
-                    hummock_manager
-                        .env
-                        .opts
-                        .periodic_tombstone_reclaim_compaction_interval_sec,
-                ));
-            tombstone_reclaim_trigger_interval
-                .set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-            tombstone_reclaim_trigger_interval.reset();
-            let tombstone_reclaim_trigger = IntervalStream::new(tombstone_reclaim_trigger_interval)
-                .map(|_| HummockTimerEvent::TombstoneCompactionTrigger);
-
-            let mut triggers: Vec<BoxStream<'static, HummockTimerEvent>> = vec![
-                Box::pin(check_compact_trigger),
-                Box::pin(stat_report_trigger),
-                Box::pin(compaction_heartbeat_trigger),
-                Box::pin(dynamic_tick_trigger),
-                Box::pin(space_reclaim_trigger),
-                Box::pin(ttl_reclaim_trigger),
-                Box::pin(full_gc_trigger),
-                Box::pin(tombstone_reclaim_trigger),
-            ];
-
             let periodic_scheduling_compaction_group_split_interval_sec = hummock_manager
                 .env
                 .opts
                 .periodic_scheduling_compaction_group_split_interval_sec;
-
-            if periodic_scheduling_compaction_group_split_interval_sec > 0 {
-                let mut scheduling_compaction_group_trigger_interval = tokio::time::interval(
-                    Duration::from_secs(periodic_scheduling_compaction_group_split_interval_sec),
-                );
-                scheduling_compaction_group_trigger_interval
-                    .set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-                scheduling_compaction_group_trigger_interval.reset();
-                let group_scheduling_split_trigger =
-                    IntervalStream::new(scheduling_compaction_group_trigger_interval)
-                        .map(|_| HummockTimerEvent::GroupScheduleSplit);
-                triggers.push(Box::pin(group_scheduling_split_trigger));
-            }
-
             let periodic_scheduling_compaction_group_merge_interval_sec = hummock_manager
                 .env
                 .opts
                 .periodic_scheduling_compaction_group_merge_interval_sec;
-
-            if periodic_scheduling_compaction_group_merge_interval_sec > 0 {
-                let mut scheduling_compaction_group_merge_trigger_interval = tokio::time::interval(
-                    Duration::from_secs(periodic_scheduling_compaction_group_merge_interval_sec),
-                );
-                scheduling_compaction_group_merge_trigger_interval
-                    .set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-                scheduling_compaction_group_merge_trigger_interval.reset();
-                let group_scheduling_merge_trigger =
-                    IntervalStream::new(scheduling_compaction_group_merge_trigger_interval)
-                        .map(|_| HummockTimerEvent::GroupScheduleMerge);
-                triggers.push(Box::pin(group_scheduling_merge_trigger));
-            }
-
-            let event_stream = select_all(triggers);
-            use futures::pin_mut;
-            pin_mut!(event_stream);
-
-            let shutdown_rx_shared = shutdown_rx.shared();
 
             tracing::info!(
                 "Hummock timer task [GroupSchedulingSplit interval {} sec] [GroupSchedulingMerge interval {} sec] [CheckDeadTask interval {} sec] [Report interval {} sec] [CompactionHeartBeat interval {} sec]",
@@ -202,286 +115,359 @@ impl HummockManager {
                 COMPACTION_HEARTBEAT_PERIOD_SEC
             );
 
-            loop {
-                let item =
-                    futures::future::select(event_stream.next(), shutdown_rx_shared.clone()).await;
+            let (child_shutdown_tx, child_shutdown_rx) = watch::channel(false);
+            let split_merge_mutex = Arc::new(Mutex::new(()));
+            let mut child_handles: Vec<(&'static str, JoinHandle<()>)> = Vec::new();
 
-                match item {
-                    Either::Left((event, _)) => {
-                        if let Some(event) = event {
-                            match event {
-                                HummockTimerEvent::CheckDeadTask => {
-                                    if hummock_manager.env.opts.compaction_deterministic_test {
-                                        continue;
-                                    }
+            macro_rules! spawn_loop {
+                ($name:literal, $period:expr, $handler:expr $(,)?) => {{
+                    child_handles.push((
+                        $name,
+                        spawn_periodic_loop($name, $period, child_shutdown_rx.clone(), $handler),
+                    ));
+                }};
+            }
 
-                                    hummock_manager.check_dead_task().await;
-                                }
-
-                                HummockTimerEvent::GroupScheduleSplit => {
-                                    if hummock_manager.env.opts.compaction_deterministic_test {
-                                        continue;
-                                    }
-
-                                    hummock_manager.on_handle_schedule_group_split().await;
-                                }
-
-                                HummockTimerEvent::GroupScheduleMerge => {
-                                    if hummock_manager.env.opts.compaction_deterministic_test {
-                                        continue;
-                                    }
-
-                                    hummock_manager.on_handle_schedule_group_merge().await;
-                                }
-
-                                HummockTimerEvent::Report => {
-                                    let (current_version, id_to_config, version_stats) = {
-                                        let versioning_guard =
-                                            hummock_manager.versioning.read().await;
-
-                                        let configs =
-                                            hummock_manager.get_compaction_group_map().await;
-                                        let versioning_deref = versioning_guard;
-                                        (
-                                            versioning_deref.current_version.clone(),
-                                            configs,
-                                            versioning_deref.version_stats.clone(),
-                                        )
-                                    };
-
-                                    if let Some(mv_id_to_all_table_ids) = hummock_manager
-                                        .metadata_manager
-                                        .get_job_id_to_internal_table_ids_mapping()
-                                        .await
-                                    {
-                                        trigger_mv_stat(
-                                            &hummock_manager.metrics,
-                                            &version_stats,
-                                            mv_id_to_all_table_ids,
-                                        );
-                                    }
-
-                                    for compaction_group_id in
-                                        get_compaction_group_ids(&current_version)
-                                    {
-                                        let compaction_group_config =
-                                            &id_to_config[&compaction_group_id];
-
-                                        let group_levels = current_version
-                                            .get_compaction_group_levels(
-                                                compaction_group_config.group_id(),
-                                            );
-
-                                        trigger_lsm_stat(
-                                            &hummock_manager.metrics,
-                                            compaction_group_config.compaction_config(),
-                                            group_levels,
-                                            compaction_group_config.group_id(),
-                                        )
-                                    }
-
-                                    {
-                                        let group_infos = hummock_manager
-                                            .calculate_compaction_group_statistic()
-                                            .await;
-                                        let compaction_group_count = group_infos.len();
-                                        hummock_manager
-                                            .metrics
-                                            .compaction_group_count
-                                            .set(compaction_group_count as i64);
-
-                                        let table_write_throughput_statistic_manager =
-                                            hummock_manager
-                                                .table_write_throughput_statistic_manager
-                                                .read()
-                                                .clone();
-
-                                        let current_version_levels = &hummock_manager
-                                            .versioning
-                                            .read()
-                                            .await
-                                            .current_version
-                                            .levels;
-
-                                        for group_info in group_infos {
-                                            hummock_manager
-                                                .metrics
-                                                .compaction_group_size
-                                                .with_label_values(&[&group_info
-                                                    .group_id
-                                                    .to_string()])
-                                                .set(group_info.group_size as _);
-                                            // accumulate the throughput of all tables in the group
-                                            let mut avg_throuput = 0;
-                                            let max_statistic_expired_time = std::cmp::max(
-                                                hummock_manager
-                                                    .env
-                                                    .opts
-                                                    .table_stat_throuput_window_seconds_for_split,
-                                                hummock_manager
-                                                    .env
-                                                    .opts
-                                                    .table_stat_throuput_window_seconds_for_merge,
-                                            );
-                                            for table_id in group_info.table_statistic.keys() {
-                                                avg_throuput +=
-                                                    table_write_throughput_statistic_manager
-                                                        .avg_write_throughput(
-                                                            *table_id,
-                                                            max_statistic_expired_time as i64,
-                                                        )
-                                                        as u64;
-                                            }
-
-                                            hummock_manager
-                                                .metrics
-                                                .compaction_group_throughput
-                                                .with_label_values(&[&group_info
-                                                    .group_id
-                                                    .to_string()])
-                                                .set(avg_throuput as _);
-
-                                            if let Some(group_levels) =
-                                                current_version_levels.get(&group_info.group_id)
-                                            {
-                                                let file_count = group_levels.count_ssts();
-                                                hummock_manager
-                                                    .metrics
-                                                    .compaction_group_file_count
-                                                    .with_label_values(&[&group_info
-                                                        .group_id
-                                                        .to_string()])
-                                                    .set(file_count as _);
-                                            }
-                                        }
-                                    }
-                                }
-
-                                HummockTimerEvent::CompactionHeartBeatExpiredCheck => {
-                                    let compactor_manager =
-                                        hummock_manager.compactor_manager.clone();
-
-                                    // TODO: add metrics to track expired tasks
-                                    // The cancel task has two paths
-                                    // 1. compactor heartbeat cancels the expired task based on task
-                                    // progress (meta + compactor)
-                                    // 2. meta periodically scans the task and performs a cancel on
-                                    // the meta side for tasks that are not updated by heartbeat
-                                    let expired_tasks: Vec<u64> = compactor_manager
-                                        .get_heartbeat_expired_tasks()
-                                        .into_iter()
-                                        .map(|task| task.task_id)
-                                        .collect();
-                                    if !expired_tasks.is_empty() {
-                                        tracing::info!(
-                                            expired_tasks = ?expired_tasks,
-                                            "Heartbeat expired compaction tasks detected. Attempting to cancel tasks.",
-                                        );
-                                        if let Err(e) = hummock_manager
-                                            .cancel_compact_tasks(
-                                                expired_tasks.clone(),
-                                                TaskStatus::HeartbeatCanceled,
-                                            )
-                                            .await
-                                        {
-                                            tracing::error!(
-                                                expired_tasks = ?expired_tasks,
-                                                error = %e.as_report(),
-                                                "Attempt to remove compaction task due to elapsed heartbeat failed. We will continue to track its heartbeat
-                                                until we can successfully report its status",
-                                            );
-                                        }
-                                    }
-                                }
-
-                                HummockTimerEvent::DynamicCompactionTrigger => {
-                                    // Disable periodic trigger for compaction_deterministic_test.
-                                    if hummock_manager.env.opts.compaction_deterministic_test {
-                                        continue;
-                                    }
-
-                                    hummock_manager
-                                        .on_handle_trigger_multi_group(
-                                            compact_task::TaskType::Dynamic,
-                                        )
-                                        .await;
-                                }
-
-                                HummockTimerEvent::SpaceReclaimCompactionTrigger => {
-                                    // Disable periodic trigger for compaction_deterministic_test.
-                                    if hummock_manager.env.opts.compaction_deterministic_test {
-                                        continue;
-                                    }
-
-                                    hummock_manager
-                                        .on_handle_trigger_multi_group(
-                                            compact_task::TaskType::SpaceReclaim,
-                                        )
-                                        .await;
-
-                                    // share the same trigger with SpaceReclaim
-                                    hummock_manager
-                                        .on_handle_trigger_multi_group(
-                                            compact_task::TaskType::VnodeWatermark,
-                                        )
-                                        .await;
-                                }
-
-                                HummockTimerEvent::TtlCompactionTrigger => {
-                                    // Disable periodic trigger for compaction_deterministic_test.
-                                    if hummock_manager.env.opts.compaction_deterministic_test {
-                                        continue;
-                                    }
-
-                                    hummock_manager
-                                        .on_handle_trigger_multi_group(compact_task::TaskType::Ttl)
-                                        .await;
-                                }
-
-                                HummockTimerEvent::TombstoneCompactionTrigger => {
-                                    // Disable periodic trigger for compaction_deterministic_test.
-                                    if hummock_manager.env.opts.compaction_deterministic_test {
-                                        continue;
-                                    }
-
-                                    hummock_manager
-                                        .on_handle_trigger_multi_group(
-                                            compact_task::TaskType::Tombstone,
-                                        )
-                                        .await;
-                                }
-
-                                HummockTimerEvent::FullGc => {
-                                    let retention_sec =
-                                        hummock_manager.env.opts.min_sst_retention_time_sec;
-                                    let backup_manager_2 = backup_manager.clone();
-                                    let hummock_manager_2 = hummock_manager.clone();
-                                    tokio::task::spawn(async move {
-                                        use thiserror_ext::AsReport;
-                                        let _ = hummock_manager_2
-                                            .start_full_gc(
-                                                Duration::from_secs(retention_sec),
-                                                None,
-                                                backup_manager_2,
-                                            )
-                                            .await
-                                            .inspect_err(|e| {
-                                                warn!(error = %e.as_report(), "Failed to start GC.")
-                                            });
-                                    });
-                                }
+            {
+                let hummock_manager = hummock_manager.clone();
+                spawn_loop!(
+                    "check_dead_task",
+                    Duration::from_secs(CHECK_PENDING_TASK_PERIOD_SEC),
+                    move || {
+                        let hummock_manager = hummock_manager.clone();
+                        async move {
+                            if hummock_manager.env.opts.compaction_deterministic_test {
+                                return;
                             }
+                            hummock_manager.check_dead_task().await;
                         }
-                    }
+                    },
+                );
+            }
 
-                    Either::Right((_, _shutdown)) => {
-                        tracing::info!("Hummock timer loop is stopped");
-                        break;
-                    }
+            {
+                let hummock_manager = hummock_manager.clone();
+                spawn_loop!(
+                    "report",
+                    Duration::from_secs(STAT_REPORT_PERIOD_SEC),
+                    move || {
+                        let hummock_manager = hummock_manager.clone();
+                        async move {
+                            hummock_manager.handle_timer_report().await;
+                        }
+                    },
+                );
+            }
+
+            {
+                let hummock_manager = hummock_manager.clone();
+                spawn_loop!(
+                    "compaction_heartbeat_expired_check",
+                    Duration::from_secs(COMPACTION_HEARTBEAT_PERIOD_SEC),
+                    move || {
+                        let hummock_manager = hummock_manager.clone();
+                        async move {
+                            hummock_manager
+                                .handle_timer_compaction_heartbeat_expired_check()
+                                .await;
+                        }
+                    },
+                );
+            }
+
+            {
+                let hummock_manager = hummock_manager.clone();
+                spawn_loop!(
+                    "dynamic_compaction_trigger",
+                    Duration::from_secs(hummock_manager.env.opts.periodic_compaction_interval_sec),
+                    move || {
+                        let hummock_manager = hummock_manager.clone();
+                        async move {
+                            if hummock_manager.env.opts.compaction_deterministic_test {
+                                return;
+                            }
+                            hummock_manager
+                                .on_handle_trigger_multi_group(compact_task::TaskType::Dynamic)
+                                .await;
+                        }
+                    },
+                );
+            }
+
+            {
+                let hummock_manager = hummock_manager.clone();
+                spawn_loop!(
+                    "space_reclaim_compaction_trigger",
+                    Duration::from_secs(
+                        hummock_manager
+                            .env
+                            .opts
+                            .periodic_space_reclaim_compaction_interval_sec,
+                    ),
+                    move || {
+                        let hummock_manager = hummock_manager.clone();
+                        async move {
+                            if hummock_manager.env.opts.compaction_deterministic_test {
+                                return;
+                            }
+                            hummock_manager
+                                .on_handle_trigger_multi_group(compact_task::TaskType::SpaceReclaim)
+                                .await;
+                            // share the same trigger with SpaceReclaim
+                            hummock_manager
+                                .on_handle_trigger_multi_group(
+                                    compact_task::TaskType::VnodeWatermark,
+                                )
+                                .await;
+                        }
+                    },
+                );
+            }
+
+            {
+                let hummock_manager = hummock_manager.clone();
+                spawn_loop!(
+                    "ttl_compaction_trigger",
+                    Duration::from_secs(
+                        hummock_manager
+                            .env
+                            .opts
+                            .periodic_ttl_reclaim_compaction_interval_sec,
+                    ),
+                    move || {
+                        let hummock_manager = hummock_manager.clone();
+                        async move {
+                            if hummock_manager.env.opts.compaction_deterministic_test {
+                                return;
+                            }
+                            hummock_manager
+                                .on_handle_trigger_multi_group(compact_task::TaskType::Ttl)
+                                .await;
+                        }
+                    },
+                );
+            }
+
+            {
+                let hummock_manager = hummock_manager.clone();
+                spawn_loop!(
+                    "tombstone_compaction_trigger",
+                    Duration::from_secs(
+                        hummock_manager
+                            .env
+                            .opts
+                            .periodic_tombstone_reclaim_compaction_interval_sec,
+                    ),
+                    move || {
+                        let hummock_manager = hummock_manager.clone();
+                        async move {
+                            if hummock_manager.env.opts.compaction_deterministic_test {
+                                return;
+                            }
+                            hummock_manager
+                                .on_handle_trigger_multi_group(compact_task::TaskType::Tombstone)
+                                .await;
+                        }
+                    },
+                );
+            }
+
+            {
+                let hummock_manager = hummock_manager.clone();
+                let backup_manager = backup_manager.clone();
+                spawn_loop!(
+                    "full_gc",
+                    Duration::from_secs(hummock_manager.env.opts.full_gc_interval_sec),
+                    move || {
+                        let hummock_manager = hummock_manager.clone();
+                        let backup_manager = backup_manager.clone();
+                        async move {
+                            let retention_sec = hummock_manager.env.opts.min_sst_retention_time_sec;
+                            let _ = hummock_manager
+                                .start_full_gc(
+                                    Duration::from_secs(retention_sec),
+                                    None,
+                                    backup_manager,
+                                )
+                                .await
+                                .inspect_err(
+                                    |e| warn!(error = %e.as_report(), "Failed to start GC."),
+                                );
+                        }
+                    },
+                );
+            }
+
+            if periodic_scheduling_compaction_group_split_interval_sec > 0 {
+                let hummock_manager = hummock_manager.clone();
+                let split_merge_mutex = split_merge_mutex.clone();
+                spawn_loop!(
+                    "group_schedule_split",
+                    Duration::from_secs(periodic_scheduling_compaction_group_split_interval_sec),
+                    move || {
+                        let hummock_manager = hummock_manager.clone();
+                        let split_merge_mutex = split_merge_mutex.clone();
+                        async move {
+                            if hummock_manager.env.opts.compaction_deterministic_test {
+                                return;
+                            }
+                            let _guard = split_merge_mutex.lock().await;
+                            hummock_manager.on_handle_schedule_group_split().await;
+                        }
+                    },
+                );
+            }
+
+            if periodic_scheduling_compaction_group_merge_interval_sec > 0 {
+                let hummock_manager = hummock_manager.clone();
+                let split_merge_mutex = split_merge_mutex.clone();
+                spawn_loop!(
+                    "group_schedule_merge",
+                    Duration::from_secs(periodic_scheduling_compaction_group_merge_interval_sec),
+                    move || {
+                        let hummock_manager = hummock_manager.clone();
+                        let split_merge_mutex = split_merge_mutex.clone();
+                        async move {
+                            if hummock_manager.env.opts.compaction_deterministic_test {
+                                return;
+                            }
+                            let _guard = split_merge_mutex.lock().await;
+                            hummock_manager.on_handle_schedule_group_merge().await;
+                        }
+                    },
+                );
+            }
+
+            let _ = shutdown_rx.await;
+            let _ = child_shutdown_tx.send(true);
+
+            for (name, handle) in child_handles {
+                if let Err(e) = handle.await {
+                    warn!(
+                        handler = name,
+                        error = %e.as_report(),
+                        "Hummock timer handler loop failed"
+                    );
                 }
             }
+
+            tracing::info!("Hummock timer loop is stopped");
         });
         (join_handle, shutdown_tx)
+    }
+
+    async fn handle_timer_report(&self) {
+        // Avoid holding the `versioning` lock across await points to prevent potential deadlocks.
+        let (current_version, version_stats) = {
+            let versioning_guard = self.versioning.read().await;
+            (
+                versioning_guard.current_version.clone(),
+                versioning_guard.version_stats.clone(),
+            )
+        };
+        let id_to_config = self.get_compaction_group_map().await;
+
+        if let Some(mv_id_to_all_table_ids) = self
+            .metadata_manager
+            .get_job_id_to_internal_table_ids_mapping()
+            .await
+        {
+            trigger_mv_stat(&self.metrics, &version_stats, mv_id_to_all_table_ids);
+        }
+
+        for compaction_group_id in get_compaction_group_ids(&current_version) {
+            let Some(compaction_group_config) = id_to_config.get(&compaction_group_id) else {
+                warn!(
+                    compaction_group_id = %compaction_group_id,
+                    "Missing compaction group config when reporting metrics. Skip."
+                );
+                continue;
+            };
+
+            let group_levels =
+                current_version.get_compaction_group_levels(compaction_group_config.group_id());
+
+            trigger_lsm_stat(
+                &self.metrics,
+                compaction_group_config.compaction_config(),
+                group_levels,
+                compaction_group_config.group_id(),
+            )
+        }
+
+        let group_infos = self.calculate_compaction_group_statistic().await;
+        let compaction_group_count = group_infos.len();
+        self.metrics
+            .compaction_group_count
+            .set(compaction_group_count as i64);
+
+        let table_write_throughput_statistic_manager =
+            self.table_write_throughput_statistic_manager.read().clone();
+        let versioning_guard = self.versioning.read().await;
+        let current_version_levels = &versioning_guard.current_version.levels;
+
+        for group_info in group_infos {
+            self.metrics
+                .compaction_group_size
+                .with_label_values(&[&group_info.group_id.to_string()])
+                .set(group_info.group_size as _);
+            // accumulate the throughput of all tables in the group
+            let mut avg_throuput = 0;
+            let max_statistic_expired_time = std::cmp::max(
+                self.env.opts.table_stat_throuput_window_seconds_for_split,
+                self.env.opts.table_stat_throuput_window_seconds_for_merge,
+            );
+            for table_id in group_info.table_statistic.keys() {
+                avg_throuput += table_write_throughput_statistic_manager
+                    .avg_write_throughput(*table_id, max_statistic_expired_time as i64)
+                    as u64;
+            }
+
+            self.metrics
+                .compaction_group_throughput
+                .with_label_values(&[&group_info.group_id.to_string()])
+                .set(avg_throuput as _);
+
+            if let Some(group_levels) = current_version_levels.get(&group_info.group_id) {
+                let file_count = group_levels.count_ssts();
+                self.metrics
+                    .compaction_group_file_count
+                    .with_label_values(&[&group_info.group_id.to_string()])
+                    .set(file_count as _);
+            }
+        }
+    }
+
+    async fn handle_timer_compaction_heartbeat_expired_check(&self) {
+        // TODO: add metrics to track expired tasks
+        // The cancel task has two paths
+        // 1. compactor heartbeat cancels the expired task based on task
+        // progress (meta + compactor)
+        // 2. meta periodically scans the task and performs a cancel on
+        // the meta side for tasks that are not updated by heartbeat
+        let expired_tasks: Vec<u64> = self
+            .compactor_manager
+            .get_heartbeat_expired_tasks()
+            .into_iter()
+            .map(|task| task.task_id)
+            .collect();
+        if !expired_tasks.is_empty() {
+            tracing::info!(
+                expired_tasks = ?expired_tasks,
+                "Heartbeat expired compaction tasks detected. Attempting to cancel tasks.",
+            );
+            if let Err(e) = self
+                .cancel_compact_tasks(expired_tasks.clone(), TaskStatus::HeartbeatCanceled)
+                .await
+            {
+                tracing::error!(
+                    expired_tasks = ?expired_tasks,
+                    error = %e.as_report(),
+                    "Attempt to remove compaction task due to elapsed heartbeat failed. We will continue to track its heartbeat
+                    until we can successfully report its status",
+                );
+            }
+        }
     }
 }
 
@@ -489,9 +475,10 @@ impl HummockManager {
     async fn check_dead_task(&self) {
         const MAX_COMPACTION_L0_MULTIPLIER: u64 = 32;
         const MAX_COMPACTION_DURATION_SEC: u64 = 20 * 60;
-        let (groups, configs) = {
+        // Avoid holding the `versioning` lock across await points to prevent potential deadlocks.
+        let groups = {
             let versioning_guard = self.versioning.read().await;
-            let g = versioning_guard
+            versioning_guard
                 .current_version
                 .levels
                 .iter()
@@ -506,14 +493,19 @@ impl HummockManager {
                             .sum::<u64>(),
                     )
                 })
-                .collect_vec();
-            let c = self.get_compaction_group_map().await;
-            (g, c)
+                .collect_vec()
         };
+        let configs = self.get_compaction_group_map().await;
         let mut slowdown_groups: HashMap<CompactionGroupId, u64> = HashMap::default();
         {
             for (group_id, l0_file_size) in groups {
-                let group = &configs[&group_id];
+                let Some(group) = configs.get(&group_id) else {
+                    warn!(
+                        group_id = %group_id,
+                        "Missing compaction group config when checking dead task. Skip."
+                    );
+                    continue;
+                };
                 if l0_file_size
                     > MAX_COMPACTION_L0_MULTIPLIER
                         * group.compaction_config.max_bytes_for_level_base
@@ -655,5 +647,152 @@ impl HummockManager {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::future::pending;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::time::Duration;
+
+    use tokio::sync::{Mutex, Notify, watch};
+
+    use super::spawn_periodic_loop;
+
+    #[tokio::test]
+    async fn test_spawn_periodic_loop_isolated_progress() {
+        let (shutdown_tx, shutdown_rx) = watch::channel(false);
+        let slow_counter = Arc::new(AtomicUsize::new(0));
+        let fast_counter = Arc::new(AtomicUsize::new(0));
+
+        let slow_handle = spawn_periodic_loop(
+            "test_slow",
+            Duration::from_millis(10),
+            shutdown_rx.clone(),
+            {
+                let slow_counter = slow_counter.clone();
+                move || {
+                    let slow_counter = slow_counter.clone();
+                    async move {
+                        slow_counter.fetch_add(1, Ordering::Relaxed);
+                        tokio::time::sleep(Duration::from_millis(30)).await;
+                    }
+                }
+            },
+        );
+
+        let fast_handle =
+            spawn_periodic_loop("test_fast", Duration::from_millis(10), shutdown_rx, {
+                let fast_counter = fast_counter.clone();
+                move || {
+                    let fast_counter = fast_counter.clone();
+                    async move {
+                        fast_counter.fetch_add(1, Ordering::Relaxed);
+                    }
+                }
+            });
+
+        tokio::time::sleep(Duration::from_millis(120)).await;
+        shutdown_tx.send(true).unwrap();
+        slow_handle.await.unwrap();
+        fast_handle.await.unwrap();
+
+        let slow = slow_counter.load(Ordering::Relaxed);
+        let fast = fast_counter.load(Ordering::Relaxed);
+        assert!(fast > 0);
+        assert!(fast > slow);
+    }
+
+    #[tokio::test]
+    async fn test_shared_mutex_guards_concurrent_handlers() {
+        struct DecrOnDrop(Arc<AtomicUsize>);
+
+        impl Drop for DecrOnDrop {
+            fn drop(&mut self) {
+                self.0.fetch_sub(1, Ordering::SeqCst);
+            }
+        }
+
+        let (shutdown_tx, shutdown_rx) = watch::channel(false);
+        let scheduling_mutex = Arc::new(Mutex::new(()));
+        let in_critical = Arc::new(AtomicUsize::new(0));
+        let max_in_critical = Arc::new(AtomicUsize::new(0));
+
+        let split_handle = spawn_periodic_loop(
+            "test_split",
+            Duration::from_millis(10),
+            shutdown_rx.clone(),
+            {
+                let scheduling_mutex = scheduling_mutex.clone();
+                let in_critical = in_critical.clone();
+                let max_in_critical = max_in_critical.clone();
+                move || {
+                    let scheduling_mutex = scheduling_mutex.clone();
+                    let in_critical = in_critical.clone();
+                    let max_in_critical = max_in_critical.clone();
+                    async move {
+                        let _guard = scheduling_mutex.lock().await;
+                        let now = in_critical.fetch_add(1, Ordering::SeqCst) + 1;
+                        let _decr = DecrOnDrop(in_critical);
+                        max_in_critical.fetch_max(now, Ordering::SeqCst);
+                        tokio::time::sleep(Duration::from_millis(15)).await;
+                    }
+                }
+            },
+        );
+
+        let merge_handle =
+            spawn_periodic_loop("test_merge", Duration::from_millis(10), shutdown_rx, {
+                let scheduling_mutex = scheduling_mutex.clone();
+                let in_critical = in_critical.clone();
+                let max_in_critical = max_in_critical.clone();
+                move || {
+                    let scheduling_mutex = scheduling_mutex.clone();
+                    let in_critical = in_critical.clone();
+                    let max_in_critical = max_in_critical.clone();
+                    async move {
+                        let _guard = scheduling_mutex.lock().await;
+                        let now = in_critical.fetch_add(1, Ordering::SeqCst) + 1;
+                        let _decr = DecrOnDrop(in_critical);
+                        max_in_critical.fetch_max(now, Ordering::SeqCst);
+                        tokio::time::sleep(Duration::from_millis(15)).await;
+                    }
+                }
+            });
+
+        tokio::time::sleep(Duration::from_millis(120)).await;
+        shutdown_tx.send(true).unwrap();
+        split_handle.await.unwrap();
+        merge_handle.await.unwrap();
+
+        assert_eq!(max_in_critical.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn test_spawn_periodic_loop_shutdown_preempts_handler() {
+        let (shutdown_tx, shutdown_rx) = watch::channel(false);
+        let started = Arc::new(Notify::new());
+
+        let handle = spawn_periodic_loop("test_preempt", Duration::from_millis(10), shutdown_rx, {
+            let started = started.clone();
+            move || {
+                let started = started.clone();
+                async move {
+                    started.notify_one();
+                    // A never-ending handler which should be cancelled by shutdown.
+                    pending::<()>().await;
+                }
+            }
+        });
+
+        started.notified().await;
+        shutdown_tx.send(true).unwrap();
+
+        tokio::time::timeout(Duration::from_secs(1), handle)
+            .await
+            .expect("handler loop should stop promptly")
+            .unwrap();
     }
 }
