@@ -10,6 +10,9 @@ def _(outer_panels: Panels):
     data_miss_filter = "type='data_miss'"
     data_total_filter = "type='data_total'"
     file_cache_get_filter = "op='get'"
+    vnode_get_filter = "operation='get'"
+    vnode_get_pruned_filter = "operation='get', result='pruned'"
+    vnode_get_checked_filter = "operation='get', result='checked'"
 
     return [
         outer_panels.row_collapsed(
@@ -203,6 +206,36 @@ def _(outer_panels: Panels):
                         panels.target(
                             f"(((sum(rate({table_metric('state_store_read_req_positive_but_non_exist_counts')}[$__rate_interval])) by (table_id,type))) / (sum(rate({table_metric('state_store_read_req_check_bloom_filter_counts')}[$__rate_interval])) by (table_id,type))) >= 0",
                             "read req bloom filter false positive rate - {{table_id}} - {{type}}",
+                        ),
+                    ],
+                ),
+                panels.timeseries_ops(
+                    "Vnode Pruning Ops",
+                    "Total number of SST pruning operations by vnode key range hints",
+                    [
+                        panels.target(
+                            f"sum(rate({table_metric('state_store_vnode_pruning_counts', vnode_get_filter)}[$__rate_interval])) by (table_id, result)",
+                            "{{result}} - {{table_id}}",
+                        ),
+                    ],
+                ),
+                panels.timeseries_percentage(
+                    "Vnode Pruning Rate",
+                    "Pruned / Checked - The ratio of SSTs skipped by vnode key range filtering",
+                    [
+                        panels.target(
+                            f"(sum(rate({table_metric('state_store_vnode_pruning_counts', vnode_get_pruned_filter)}[$__rate_interval])) by (table_id)) / (sum(rate({table_metric('state_store_vnode_pruning_counts', vnode_get_checked_filter)}[$__rate_interval])) by (table_id)) >= 0",
+                            "pruning rate - {{table_id}}",
+                        ),
+                    ],
+                ),
+                panels.timeseries_count(
+                    "Slow Fetch Meta Unhits",
+                    "",
+                    [
+                        panels.target(
+                            f"{metric('state_store_iter_slow_fetch_meta_cache_unhits')}",
+                            "",
                         ),
                     ],
                 ),

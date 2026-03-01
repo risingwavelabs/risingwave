@@ -89,6 +89,7 @@ impl CompactorRunner {
         };
 
         options.capacity = estimate_task_output_capacity(context.clone(), &task);
+        options.max_vnode_key_range_bytes = task.effective_max_vnode_key_range_bytes();
         let use_block_based_filter = task.should_use_block_based_filter();
 
         let key_range = KeyRange {
@@ -106,7 +107,6 @@ impl CompactorRunner {
                 gc_delete_keys: task.gc_delete_keys,
                 retain_multiple_version: false,
                 stats_target_table_ids: Some(HashSet::from_iter(task.existing_table_ids.clone())),
-                task_type: task.task_type,
                 use_block_based_filter,
                 table_vnode_partition: task.table_vnode_partition.clone(),
                 table_schemas: task

@@ -77,6 +77,7 @@ pub fn build_compaction_config_vec(
     enable_optimize_l0_interval_selection: Option<bool>,
     vnode_aligned_level_size_threshold: Option<u64>,
     max_kv_count_for_xor16: Option<u64>,
+    max_vnode_key_range_bytes: Option<u64>,
 ) -> Vec<MutableConfig> {
     let mut configs = vec![];
     if let Some(c) = max_bytes_for_level_base {
@@ -162,6 +163,9 @@ pub fn build_compaction_config_vec(
     }
     if let Some(c) = max_kv_count_for_xor16 {
         configs.push(MutableConfig::MaxKvCountForXor16(c))
+    }
+    if let Some(c) = max_vnode_key_range_bytes {
+        configs.push(MutableConfig::MaxVnodeKeyRangeBytes(c))
     }
 
     configs
