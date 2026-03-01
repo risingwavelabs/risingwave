@@ -17,19 +17,29 @@
 use std::sync::Arc;
 
 use risingwave_common::config::StreamingConfig;
+use risingwave_pb::id::ActorId;
 use risingwave_pb::task_service::permits;
 use tokio::sync::{AcquireError, Semaphore, SemaphorePermit, mpsc};
 
 use crate::executor::DispatcherMessageBatch as Message;
 
-/// Message with its required permits.
+/// Message with its required permits and optional multiplexing metadata.
 ///
 /// We store the `permits` in the struct instead of implying it from the `message` so that the
 /// permit number is totally determined by the sender and the downstream only needs to give the
 /// `permits` back verbatim, in case the version of the upstream and the downstream are different.
+///
+/// For multiplexed exchanges, `source_actor_id` identifies the originating upstream actor for
+/// data chunks and watermarks, and `coalesced_actor_ids` lists all actors whose barriers were
+/// merged into a single coalesced barrier.
 pub struct MessageWithPermits {
     pub message: Message,
     pub permits: Option<permits::Value>,
+    /// The upstream actor that produced this message. Non-zero in multiplexed exchanges.
+    pub source_actor_id: ActorId,
+    /// For coalesced barriers: the set of actor IDs whose barriers were merged.
+    /// Empty for non-barrier messages and non-multiplexed exchanges.
+    pub coalesced_actor_ids: Vec<ActorId>,
 }
 
 /// Create a channel for the exchange service.
@@ -153,7 +163,52 @@ impl Sender {
         }
 
         self.tx
-            .send(MessageWithPermits { message, permits })
+            .send(MessageWithPermits {
+                message,
+                permits,
+                source_actor_id: ActorId::default(),
+                coalesced_actor_ids: vec![],
+            })
+            .map_err(|e| mpsc::error::SendError(e.0.message))
+    }
+
+    /// Send a message tagged with multiplexing metadata, waiting until there are enough permits.
+    ///
+    /// Used by [`MultiplexedActorOutput`](super::multiplexed::MultiplexedActorOutput) to tag
+    /// data chunks with the originating actor ID, and by
+    /// [`MultiplexedOutputCoordinator`](super::multiplexed::MultiplexedOutputCoordinator) to
+    /// tag coalesced barriers with the set of merged actor IDs.
+    pub async fn send_tagged(
+        &self,
+        message: Message,
+        source_actor_id: ActorId,
+        coalesced_actor_ids: Vec<ActorId>,
+    ) -> Result<(), mpsc::error::SendError<Message>> {
+        let permits = match &message {
+            Message::Chunk(c) => {
+                let card = c.cardinality().clamp(1, self.max_chunk_permits);
+                if card == self.max_chunk_permits {
+                    tracing::warn!(cardinality = c.cardinality(), "large chunk in exchange")
+                }
+                Some(permits::Value::Record(card as _))
+            }
+            Message::BarrierBatch(_) => Some(permits::Value::Barrier(1)),
+            Message::Watermark(_) => None,
+        };
+
+        if let Some(permits) = &permits
+            && self.permits.acquire_permits(permits).await.is_err()
+        {
+            return Err(mpsc::error::SendError(message));
+        }
+
+        self.tx
+            .send(MessageWithPermits {
+                message,
+                permits,
+                source_actor_id,
+                coalesced_actor_ids,
+            })
             .map_err(|e| mpsc::error::SendError(e.0.message))
     }
 }
@@ -170,7 +225,7 @@ impl Receiver {
     ///
     /// Returns `None` if the channel has been closed.
     pub async fn recv(&mut self) -> Option<Message> {
-        let MessageWithPermits { message, permits } = self.recv_raw().await?;
+        let MessageWithPermits { message, permits, .. } = self.recv_raw().await?;
 
         if let Some(permits) = permits {
             self.permits.add_permits(permits);
@@ -184,7 +239,7 @@ impl Receiver {
     ///
     /// Returns error if the channel is currently empty.
     pub fn try_recv(&mut self) -> Result<Message, mpsc::error::TryRecvError> {
-        let MessageWithPermits { message, permits } = self.rx.try_recv()?;
+        let MessageWithPermits { message, permits, .. } = self.rx.try_recv()?;
 
         if let Some(permits) = permits {
             self.permits.add_permits(permits);

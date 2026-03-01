@@ -872,7 +872,7 @@ mod tests {
                             stream_chunk,
                         ),
                     ),
-                    source_actor_id: 0,
+                    source_actor_id: 0.into(),
                 }),
                 permits: Some(PbPermits::default()),
             }))
@@ -890,7 +890,7 @@ mod tests {
                             },
                         ),
                     ),
-                    source_actor_id: 0,
+                    source_actor_id: 0.into(),
                 }),
                 permits: Some(PbPermits::default()),
             }))

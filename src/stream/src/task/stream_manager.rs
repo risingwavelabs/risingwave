@@ -31,6 +31,7 @@ use crate::error::StreamResult;
 use crate::executor::ActorContextRef;
 use crate::executor::exchange::permit::Receiver;
 use crate::executor::monitor::StreamingMetrics;
+use crate::task::ActorId;
 use crate::task::barrier_worker::{
     ControlStreamHandle, EventSender, LocalActorOperation, LocalBarrierWorker, TakeReceiverRequest,
 };
@@ -150,6 +151,26 @@ impl LocalStreamManager {
                 term_id,
                 ids,
                 request: TakeReceiverRequest::Remote(result_sender),
+            })
+            .await?
+    }
+
+    pub async fn take_multiplexed_receiver(
+        &self,
+        partial_graph_id: PartialGraphId,
+        term_id: String,
+        up_actor_ids: Vec<ActorId>,
+        down_actor_id: ActorId,
+    ) -> StreamResult<Receiver> {
+        self.actor_op_tx
+            .send_and_await(|result_sender| {
+                LocalActorOperation::TakeMultiplexedReceiver {
+                    partial_graph_id,
+                    term_id,
+                    up_actor_ids,
+                    down_actor_id,
+                    result_sender,
+                }
             })
             .await?
     }
