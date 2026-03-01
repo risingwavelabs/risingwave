@@ -177,6 +177,7 @@ pub async fn handle_create_sql_function(
         is_batched: None,
         created_at_epoch: None,
         created_at_cluster_version: None,
+        secret_refs: Default::default(),
     };
 
     let catalog_writer = session.catalog_writer()?;

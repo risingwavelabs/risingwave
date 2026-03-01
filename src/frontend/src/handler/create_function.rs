@@ -21,6 +21,7 @@ use risingwave_pb::catalog::PbFunction;
 use risingwave_pb::catalog::function::{Kind, ScalarFunction, TableFunction};
 
 use super::*;
+use crate::utils::resolve_secret_refs_inner;
 use crate::{Binder, bind_data_type};
 
 pub async fn handle_create_function(
@@ -120,9 +121,16 @@ pub async fn handle_create_function(
 
     // resolve database and schema id
     let session = &handler_args.session;
+    let CreateFunctionWithOptions {
+        always_retry_on_network_error,
+        r#async,
+        batch,
+        secret_refs,
+    } = with_options;
     let db_name = &session.database();
     let (schema_name, function_name) = Binder::resolve_schema_qualified_name(db_name, &name)?;
     let (database_id, schema_id) = session.get_database_and_schema_id_for_create(schema_name)?;
+    let resolved_secret_refs = resolve_secret_refs_inner(secret_refs, session)?;
 
     // check if the function exists in the catalog
     if let Either::Right(resp) = session.check_function_name_duplicated(
@@ -182,13 +190,12 @@ pub async fn handle_create_function(
         body: output.body,
         compressed_binary: output.compressed_binary,
         owner: session.user_id(),
-        always_retry_on_network_error: with_options
-            .always_retry_on_network_error
-            .unwrap_or_default(),
-        is_async: with_options.r#async,
-        is_batched: with_options.batch,
+        always_retry_on_network_error: always_retry_on_network_error.unwrap_or_default(),
+        is_async: r#async,
+        is_batched: batch,
         created_at_epoch: None,
         created_at_cluster_version: None,
+        secret_refs: resolved_secret_refs.into_iter().collect(),
     };
 
     let catalog_writer = session.catalog_writer()?;

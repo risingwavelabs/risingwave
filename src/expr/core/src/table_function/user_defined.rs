@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use anyhow::Context;
@@ -19,6 +20,7 @@ use risingwave_common::array::I32Array;
 use risingwave_common::array::arrow::arrow_schema_udf::{Fields, Schema, SchemaRef};
 use risingwave_common::array::arrow::{UdfArrowConvert, UdfFromArrow, UdfToArrow};
 use risingwave_common::bail;
+use risingwave_common::secret::LocalSecretManager;
 
 use super::*;
 use crate::sig::{BuildOptions, UdfImpl, UdfKind};
@@ -133,6 +135,12 @@ pub fn new_user_defined(prost: &PbTableFunction, chunk_size: usize) -> Result<Bo
     let name_in_runtime = udf
         .name_in_runtime()
         .expect("SQL UDF won't get here, other UDFs must have `name_in_runtime`");
+    let options = LocalSecretManager::global()
+        .fill_secrets(
+            BTreeMap::new(),
+            udf.secret_refs.clone().into_iter().collect(),
+        )
+        .context("failed to resolve table UDF secret options")?;
 
     let build_fn = crate::sig::find_udf_impl(language, runtime, link)?.build_fn;
     let runtime = build_fn(BuildOptions {
@@ -148,6 +156,7 @@ pub fn new_user_defined(prost: &PbTableFunction, chunk_size: usize) -> Result<Bo
         language,
         is_async: udf.is_async,
         is_batched: udf.is_batched,
+        options: &options,
     })
     .context("failed to build UDF runtime")?;
 

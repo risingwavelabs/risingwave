@@ -494,6 +494,10 @@ impl From<ObjectModel<connection::Model>> for PbConnection {
 
 impl From<ObjectModel<function::Model>> for PbFunction {
     fn from(value: ObjectModel<function::Model>) -> Self {
+        let mut secret_ref_map = BTreeMap::new();
+        if let Some(secret_ref) = value.0.secret_ref {
+            secret_ref_map = secret_ref.to_protobuf();
+        }
         Self {
             id: value.0.function_id as _,
             schema_id: value.1.schema_id.unwrap(),
@@ -521,6 +525,7 @@ impl From<ObjectModel<function::Model>> for PbFunction {
                 .options
                 .as_ref()
                 .and_then(|o| o.0.get("batch").map(|v| v == "true")),
+            secret_refs: secret_ref_map,
             created_at_epoch: Some(
                 Epoch::from_unix_millis(datetime_to_timestamp_millis(value.1.created_at) as _).0,
             ),

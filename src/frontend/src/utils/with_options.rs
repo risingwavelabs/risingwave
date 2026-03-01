@@ -384,7 +384,7 @@ pub(crate) fn resolve_secret_ref_in_with_options(
     Ok(WithOptionsSecResolved::new(options, resolved_secret_refs))
 }
 
-fn resolve_secret_refs_inner(
+pub(crate) fn resolve_secret_refs_inner(
     secret_refs: BTreeMap<String, SecretRefValue>,
     session: &SessionImpl,
 ) -> RwResult<BTreeMap<String, PbSecretRef>> {

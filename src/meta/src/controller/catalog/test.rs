@@ -14,7 +14,11 @@
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
+
     use risingwave_pb::catalog::StreamSourceInfo;
+    use risingwave_pb::secret::PbSecretRef;
+    use risingwave_pb::secret::secret_ref::RefAsType;
 
     use crate::controller::catalog::*;
 
@@ -167,6 +171,88 @@ mod tests {
                 .await?
                 .is_none()
         );
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_function_secret_dependency() -> MetaResult<()> {
+        let mgr = CatalogController::new(MetaSrvEnv::for_test().await).await?;
+        let pb_secret = PbSecret {
+            schema_id: TEST_SCHEMA_ID,
+            database_id: TEST_DATABASE_ID,
+            name: "test_udf_secret".to_owned(),
+            owner: TEST_OWNER_ID as _,
+            value: b"encrypted".to_vec(),
+            ..Default::default()
+        };
+        mgr.create_secret(pb_secret, b"plain_secret_value".to_vec())
+            .await?;
+
+        let secret_id: SecretId = Secret::find()
+            .select_only()
+            .column(secret::Column::SecretId)
+            .filter(secret::Column::Name.eq("test_udf_secret"))
+            .into_tuple()
+            .one(&mgr.inner.read().await.db)
+            .await?
+            .unwrap();
+
+        let test_data_type = risingwave_pb::data::DataType {
+            type_name: risingwave_pb::data::data_type::TypeName::Int32 as _,
+            ..Default::default()
+        };
+        let pb_function = PbFunction {
+            schema_id: TEST_SCHEMA_ID,
+            database_id: TEST_DATABASE_ID,
+            name: "test_function_with_secret".to_owned(),
+            owner: TEST_OWNER_ID as _,
+            arg_types: vec![test_data_type.clone()],
+            return_type: Some(test_data_type),
+            language: "python".to_owned(),
+            kind: Some(risingwave_pb::catalog::function::Kind::Scalar(
+                Default::default(),
+            )),
+            secret_refs: BTreeMap::from([(
+                "api_token".to_owned(),
+                PbSecretRef {
+                    secret_id,
+                    ref_as: RefAsType::Text as _,
+                },
+            )]),
+            ..Default::default()
+        };
+        mgr.create_function(pb_function).await?;
+
+        let function_id: FunctionId = Function::find()
+            .select_only()
+            .column(function::Column::FunctionId)
+            .filter(function::Column::Name.eq("test_function_with_secret"))
+            .into_tuple()
+            .one(&mgr.inner.read().await.db)
+            .await?
+            .unwrap();
+
+        let dep = ObjectDependency::find()
+            .filter(
+                object_dependency::Column::Oid
+                    .eq(secret_id.as_object_id())
+                    .and(object_dependency::Column::UsedBy.eq(function_id.as_object_id())),
+            )
+            .one(&mgr.inner.read().await.db)
+            .await?;
+        assert!(dep.is_some());
+
+        assert!(
+            mgr.drop_object(ObjectType::Secret, secret_id, DropMode::Restrict)
+                .await
+                .is_err()
+        );
+
+        mgr.drop_object(ObjectType::Function, function_id, DropMode::Restrict)
+            .await?;
+        mgr.drop_object(ObjectType::Secret, secret_id, DropMode::Restrict)
+            .await?;
 
         Ok(())
     }

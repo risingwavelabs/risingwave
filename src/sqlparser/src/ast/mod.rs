@@ -20,7 +20,7 @@ mod query;
 mod statement;
 mod value;
 
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 use std::fmt;
 use std::fmt::Display;
 use std::sync::Arc;
@@ -3685,6 +3685,8 @@ pub struct CreateFunctionWithOptions {
     pub r#async: Option<bool>,
     /// Call in batch mode (only available for JS UDF)
     pub batch: Option<bool>,
+    /// Secret-backed UDF options in WITH (...), keyed by option name.
+    pub secret_refs: BTreeMap<String, SecretRefValue>,
 }
 
 /// TODO(kwannoel): Generate from the struct definition instead.
@@ -3694,27 +3696,52 @@ impl TryFrom<Vec<SqlOption>> for CreateFunctionWithOptions {
     fn try_from(with_options: Vec<SqlOption>) -> Result<Self, Self::Error> {
         let mut options = Self::default();
         for option in with_options {
-            match option.name.to_string().to_lowercase().as_str() {
+            let option_name = option.name.real_value();
+            match option_name.to_lowercase().as_str() {
                 "always_retry_on_network_error" => {
-                    options.always_retry_on_network_error = Some(matches!(
-                        option.value,
-                        SqlOptionValue::Value(Value::Boolean(true))
-                    ));
+                    if let SqlOptionValue::Value(Value::Boolean(v)) = option.value {
+                        options.always_retry_on_network_error = Some(v);
+                    } else {
+                        return Err(StrError(format!(
+                            "option {} only accepts boolean values",
+                            option_name
+                        )));
+                    }
                 }
                 "async" => {
-                    options.r#async = Some(matches!(
-                        option.value,
-                        SqlOptionValue::Value(Value::Boolean(true))
-                    ))
+                    if let SqlOptionValue::Value(Value::Boolean(v)) = option.value {
+                        options.r#async = Some(v);
+                    } else {
+                        return Err(StrError(format!(
+                            "option {} only accepts boolean values",
+                            option_name
+                        )));
+                    }
                 }
                 "batch" => {
-                    options.batch = Some(matches!(
-                        option.value,
-                        SqlOptionValue::Value(Value::Boolean(true))
-                    ))
+                    if let SqlOptionValue::Value(Value::Boolean(v)) = option.value {
+                        options.batch = Some(v);
+                    } else {
+                        return Err(StrError(format!(
+                            "option {} only accepts boolean values",
+                            option_name
+                        )));
+                    }
                 }
                 _ => {
-                    return Err(StrError(format!("unknown option: {}", option.name)));
+                    let SqlOptionValue::SecretRef(secret_ref) = option.value else {
+                        return Err(StrError(format!(
+                            "unknown option: {} (only secret references are supported for custom UDF options)",
+                            option_name
+                        )));
+                    };
+                    if options
+                        .secret_refs
+                        .insert(option_name.clone(), secret_ref)
+                        .is_some()
+                    {
+                        return Err(StrError(format!("Duplicated option: {}", option_name)));
+                    }
                 }
             }
         }
@@ -3736,6 +3763,9 @@ impl Display for CreateFunctionWithOptions {
         }
         if let Some(v) = self.batch {
             options.push(format!("batch = {}", v));
+        }
+        for (k, v) in &self.secret_refs {
+            options.push(format!("{} = secret {}", k, v));
         }
         write!(f, " WITH ( {} )", display_comma_separated(&options))
     }
@@ -4074,6 +4104,7 @@ mod tests {
                 always_retry_on_network_error: None,
                 r#async: None,
                 batch: None,
+                secret_refs: Default::default(),
             },
         };
         assert_eq!(
@@ -4099,10 +4130,49 @@ mod tests {
                 always_retry_on_network_error: Some(true),
                 r#async: None,
                 batch: None,
+                secret_refs: Default::default(),
             },
         };
         assert_eq!(
             "CREATE FUNCTION foo(INT) RETURNS INT LANGUAGE python IMMUTABLE AS 'SELECT 1' WITH ( always_retry_on_network_error = true )",
+            format!("{}", create_function)
+        );
+
+        let mut secret_refs = BTreeMap::new();
+        secret_refs.insert(
+            "api_token".to_owned(),
+            SecretRefValue {
+                secret_name: ObjectName(vec![
+                    Ident::new_unchecked("my_schema"),
+                    Ident::new_unchecked("my_secret"),
+                ]),
+                ref_as: SecretRefAsType::Text,
+            },
+        );
+        let create_function = Statement::CreateFunction {
+            or_replace: false,
+            temporary: false,
+            if_not_exists: false,
+            name: ObjectName(vec![Ident::new_unchecked("foo")]),
+            args: Some(vec![OperateFunctionArg::unnamed(DataType::Int)]),
+            returns: Some(CreateFunctionReturns::Value(DataType::Int)),
+            params: CreateFunctionBody {
+                language: Some(Ident::new_unchecked("python")),
+                runtime: None,
+                behavior: Some(FunctionBehavior::Immutable),
+                as_: Some(FunctionDefinition::SingleQuotedDef("SELECT 1".to_owned())),
+                return_: None,
+                using: None,
+            },
+            with_options: CreateFunctionWithOptions {
+                always_retry_on_network_error: None,
+                r#async: None,
+                batch: None,
+                secret_refs,
+            },
+        };
+        assert_eq!(
+            "CREATE FUNCTION foo(INT) RETURNS INT LANGUAGE python IMMUTABLE AS 'SELECT 1' WITH ( api_token = secret my_schema.my_secret )",
             format!("{}", create_function)
         );
     }
