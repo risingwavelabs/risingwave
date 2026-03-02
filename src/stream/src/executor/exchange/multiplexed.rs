@@ -285,17 +285,19 @@ impl MultiplexedOutputCoordinator {
                     .epoch
                     .curr;
 
-                // All actors reached the barrier batch — send the coalesced batch,
+                // All actors reached the barrier — send the coalesced batch,
                 // tagged with the full set of coalesced actor IDs.
                 //
-                // Use `send_barrier_bypassing_permits` instead of `send_tagged` to avoid
-                // deadlock: all upstream actors are gated on the coordinator via
-                // `wait_for_pending_barrier()`, so if we blocked here on barrier permits
-                // (which are returned by the downstream), and the downstream is itself
-                // waiting for these actors' data to make progress, we'd deadlock.
+                // This acquires barrier permits via `send_tagged`, providing normal
+                // barrier backpressure. This is safe (no deadlock) because all actors
+                // have already sent the previous epoch's data and barriers to ALL their
+                // outputs before they gated on `wait_for_pending_barrier()`. The
+                // downstream can therefore process the previous barrier (returning the
+                // permit) without needing any new data from the gated actors.
                 let coalesced = DispatcherMessageBatch::BarrierBatch(coalesced_batch);
                 self.ch
-                    .send_barrier_bypassing_permits(coalesced, actor_ids)
+                    .send_tagged(coalesced, 0.into(), actor_ids)
+                    .await
                     .map_err(|_| ExchangeChannelClosed::output(0.into()))?;
 
                 // Ungate all actors: the coalesced barrier batch is now in the shared
@@ -514,9 +516,10 @@ impl futures::Stream for LogicalInput {
                 // Return an error instead of ending the stream, matching the behavior
                 // of `LocalInput` and `RemoteInput`. Downstream executors like
                 // `MergeExecutor` assume inputs never end and would panic on `None`.
-                Poll::Ready(Some(Err(
-                    ExchangeChannelClosed::multiplexed_input(self.actor_id).into(),
-                )))
+                Poll::Ready(Some(Err(ExchangeChannelClosed::multiplexed_input(
+                    self.actor_id,
+                )
+                .into())))
             }
             Poll::Pending => Poll::Pending,
         }

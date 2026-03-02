@@ -209,36 +209,6 @@ impl Sender {
             })
             .map_err(|e| mpsc::error::SendError(e.0.message))
     }
-
-    /// Send a coalesced barrier **without acquiring barrier permits**.
-    ///
-    /// Used exclusively by
-    /// [`MultiplexedOutputCoordinator`](super::multiplexed::MultiplexedOutputCoordinator).
-    /// The coordinator must never block on barrier permits because all upstream actors are
-    /// gated on the coordinator's progress — blocking here would deadlock the entire
-    /// multiplexed exchange.
-    ///
-    /// The message is still tagged with `Barrier(1)` permits so that the downstream returns
-    /// the permit back to the semaphore, keeping the accounting balanced.
-    pub fn send_barrier_bypassing_permits(
-        &self,
-        message: Message,
-        coalesced_actor_ids: Vec<ActorId>,
-    ) -> Result<(), mpsc::error::SendError<Message>> {
-        debug_assert!(
-            matches!(&message, Message::BarrierBatch(_)),
-            "send_barrier_bypassing_permits must only be used with BarrierBatch messages"
-        );
-
-        self.tx
-            .send(MessageWithPermits {
-                message,
-                permits: Some(permits::Value::Barrier(1)),
-                source_actor_id: ActorId::default(),
-                coalesced_actor_ids,
-            })
-            .map_err(|e| mpsc::error::SendError(e.0.message))
-    }
 }
 
 /// The receiver of the exchange service with permit-based back-pressure.
