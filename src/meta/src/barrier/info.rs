@@ -40,18 +40,20 @@ use risingwave_pb::stream_service::BarrierCompleteResponse;
 use tracing::{info, warn};
 
 use crate::barrier::cdc_progress::{CdcProgress, CdcTableBackfillTracker};
-use crate::barrier::command::PostCollectCommand;
+use crate::barrier::command::{
+    CreateStreamingJobCommandInfo, PostCollectCommand, ReplaceStreamJobPlan,
+};
 use crate::barrier::edge_builder::{FragmentEdgeBuildResult, FragmentEdgeBuilder};
 use crate::barrier::progress::{CreateMviewProgressTracker, StagingCommitInfo};
 use crate::barrier::rpc::{ControlStreamManager, to_partial_graph_id};
 use crate::barrier::{
-    BackfillProgress, BarrierKind, Command, CreateStreamingJobType, FragmentBackfillProgress,
-    TracedEpoch,
+    BackfillProgress, BarrierKind, CreateStreamingJobType, FragmentBackfillProgress, TracedEpoch,
 };
 use crate::controller::fragment::{InflightActorInfo, InflightFragmentInfo};
 use crate::controller::utils::rebuild_fragment_mapping;
 use crate::manager::NotificationManagerRef;
 use crate::model::{ActorId, BackfillUpstreamType, FragmentId, StreamJobFragments};
+use crate::stream::UpstreamSinkInfo;
 use crate::{MetaError, MetaResult};
 
 #[derive(Debug, Clone)]
@@ -379,35 +381,6 @@ impl BarrierInfo {
             prev: self.prev_epoch(),
         }
     }
-}
-
-#[derive(Debug)]
-pub(super) enum CommandFragmentChanges {
-    NewFragment {
-        job_id: JobId,
-        info: InflightFragmentInfo,
-    },
-    AddNodeUpstream(PbUpstreamSinkInfo),
-    DropNodeUpstream(Vec<FragmentId>),
-    ReplaceNodeUpstream(
-        /// old `fragment_id` -> new `fragment_id`
-        HashMap<FragmentId, FragmentId>,
-    ),
-    Reschedule {
-        new_actors: HashMap<ActorId, InflightActorInfo>,
-        actor_update_vnode_bitmap: HashMap<ActorId, Bitmap>,
-        to_remove: HashSet<ActorId>,
-        actor_splits: HashMap<ActorId, Vec<SplitImpl>>,
-    },
-    RemoveFragment,
-    SplitAssignment {
-        actor_splits: HashMap<ActorId, Vec<SplitImpl>>,
-    },
-}
-
-pub(super) enum PostApplyFragmentChanges {
-    Reschedule { to_remove: HashSet<ActorId> },
-    RemoveFragment,
 }
 
 #[derive(Clone, Debug)]
@@ -929,37 +902,30 @@ impl InflightDatabaseInfo {
         } = job;
         self.jobs
             .try_insert(
-                job.job_id,
+                job_id,
                 InflightStreamingJobInfo {
                     job_id,
                     subscribers,
-                    fragment_infos: Default::default(), // fill in later in apply_add
+                    fragment_infos: Default::default(), // fill in later in pre_apply_new_fragments
                     status,
                     cdc_table_backfill_tracker,
                 },
             )
             .expect("non-duplicate");
-        let post_apply_changes =
-            self.apply_add(fragment_infos.into_iter().map(|(fragment_id, info)| {
-                (
-                    fragment_id,
-                    CommandFragmentChanges::NewFragment {
-                        job_id: job.job_id,
-                        info,
-                    },
-                )
-            }));
-        self.post_apply(post_apply_changes);
+        self.pre_apply_new_fragments(
+            fragment_infos
+                .into_iter()
+                .map(|(fragment_id, info)| (fragment_id, job_id, info)),
+        );
     }
 
-    /// Apply some actor changes before issuing a barrier command, if the command contains any new added actors, we should update
-    /// the info correspondingly.
-    pub(crate) fn pre_apply(
+    /// Register a new streaming job entry (with empty `fragment_infos`).
+    pub(crate) fn pre_apply_new_job(
         &mut self,
-        new_job: Option<(JobId, Option<CdcTableBackfillTracker>)>,
-        fragment_changes: HashMap<FragmentId, CommandFragmentChanges>,
-    ) -> HashMap<FragmentId, PostApplyFragmentChanges> {
-        if let Some((job_id, cdc_table_backfill_tracker)) = new_job {
+        job_id: JobId,
+        cdc_table_backfill_tracker: Option<CdcTableBackfillTracker>,
+    ) {
+        {
             self.jobs
                 .try_insert(
                     job_id,
@@ -973,20 +939,19 @@ impl InflightDatabaseInfo {
                 )
                 .expect("non-duplicate");
         }
-        self.apply_add(fragment_changes.into_iter())
     }
 
-    fn apply_add(
+    /// Add new fragment infos and update shared actor infos.
+    pub(crate) fn pre_apply_new_fragments(
         &mut self,
-        fragment_changes: impl Iterator<Item = (FragmentId, CommandFragmentChanges)>,
-    ) -> HashMap<FragmentId, PostApplyFragmentChanges> {
-        let mut post_apply = HashMap::new();
+        fragments: impl IntoIterator<Item = (FragmentId, JobId, InflightFragmentInfo)>,
+    ) {
         {
             let shared_infos = self.shared_actor_infos.clone();
             let mut shared_actor_writer = shared_infos.start_writer(self.database_id);
-            for (fragment_id, change) in fragment_changes {
-                match change {
-                    CommandFragmentChanges::NewFragment { job_id, info } => {
+            for (fragment_id, job_id, info) in fragments {
+                {
+                    {
                         let fragment_infos = self.jobs.get_mut(&job_id).expect("should exist");
                         shared_actor_writer.upsert([(&info, job_id)]);
                         fragment_infos
@@ -997,12 +962,25 @@ impl InflightDatabaseInfo {
                             .try_insert(fragment_id, job_id)
                             .expect("non duplicate");
                     }
-                    CommandFragmentChanges::Reschedule {
-                        new_actors,
-                        actor_update_vnode_bitmap,
-                        to_remove,
-                        actor_splits,
-                    } => {
+                }
+            }
+            shared_actor_writer.finish();
+        }
+    }
+
+    /// Pre-apply reschedule: update actors, vnode bitmaps, and splits.
+    /// The actual removal of old actors happens in `post_apply_reschedules`.
+    pub(crate) fn pre_apply_reschedule(
+        &mut self,
+        fragment_id: FragmentId,
+        new_actors: HashMap<ActorId, InflightActorInfo>,
+        actor_update_vnode_bitmap: HashMap<ActorId, Bitmap>,
+        actor_splits: HashMap<ActorId, Vec<SplitImpl>>,
+    ) {
+        {
+            {
+                {
+                    {
                         let (info, _) = self.fragment_mut(fragment_id);
                         let actors = &mut info.actors;
                         for (actor_id, new_vnodes) in actor_update_vnode_bitmap {
@@ -1019,18 +997,23 @@ impl InflightDatabaseInfo {
                         for (actor_id, splits) in actor_splits {
                             actors.get_mut(&actor_id).expect("should exist").splits = splits;
                         }
-
-                        post_apply.insert(
-                            fragment_id,
-                            PostApplyFragmentChanges::Reschedule { to_remove },
-                        );
-
                         // info will be upserted into shared_actor_infos in post_apply stage
                     }
-                    CommandFragmentChanges::RemoveFragment => {
-                        post_apply.insert(fragment_id, PostApplyFragmentChanges::RemoveFragment);
-                    }
-                    CommandFragmentChanges::ReplaceNodeUpstream(replace_map) => {
+                }
+            }
+        }
+    }
+
+    /// Replace upstream fragment IDs in merge nodes of a fragment's stream graph.
+    pub(crate) fn pre_apply_replace_node_upstream(
+        &mut self,
+        fragment_id: FragmentId,
+        replace_map: &HashMap<FragmentId, FragmentId>,
+    ) {
+        {
+            {
+                {
+                    {
                         let mut remaining_fragment_ids: HashSet<_> =
                             replace_map.keys().cloned().collect();
                         let (info, _) = self.fragment_mut(fragment_id);
@@ -1064,7 +1047,21 @@ impl InflightDatabaseInfo {
                             warn!(?remaining_fragment_ids, node = ?info.nodes, ?replace_map, "non-existing fragment to replace");
                         }
                     }
-                    CommandFragmentChanges::AddNodeUpstream(new_upstream_info) => {
+                }
+            }
+        }
+    }
+
+    /// Add a new upstream sink node to a fragment's `UpstreamSinkUnion`.
+    pub(crate) fn pre_apply_add_node_upstream(
+        &mut self,
+        fragment_id: FragmentId,
+        new_upstream_info: &PbUpstreamSinkInfo,
+    ) {
+        {
+            {
+                {
+                    {
                         let (info, _) = self.fragment_mut(fragment_id);
                         let mut injected = false;
                         visit_stream_node_mut(&mut info.nodes, |node| {
@@ -1090,7 +1087,21 @@ impl InflightDatabaseInfo {
                         });
                         assert!(injected, "should inject upstream into UpstreamSinkUnion");
                     }
-                    CommandFragmentChanges::DropNodeUpstream(drop_upstream_fragment_ids) => {
+                }
+            }
+        }
+    }
+
+    /// Remove upstream sink nodes from a fragment's `UpstreamSinkUnion`.
+    pub(crate) fn pre_apply_drop_node_upstream(
+        &mut self,
+        fragment_id: FragmentId,
+        drop_upstream_fragment_ids: &[FragmentId],
+    ) {
+        {
+            {
+                {
+                    {
                         let (info, _) = self.fragment_mut(fragment_id);
                         let mut removed = false;
                         visit_stream_node_mut(&mut info.nodes, |node| {
@@ -1101,7 +1112,7 @@ impl InflightDatabaseInfo {
                                         .iter()
                                         .map(|upstream| upstream.upstream_fragment_id)
                                         .collect::<HashSet<FragmentId>>();
-                                    for drop_fragment_id in &drop_upstream_fragment_ids {
+                                    for drop_fragment_id in drop_upstream_fragment_ids {
                                         if !current_upstream_fragment_ids.contains(drop_fragment_id)
                                         {
                                             panic!(
@@ -1120,7 +1131,22 @@ impl InflightDatabaseInfo {
                         });
                         assert!(removed, "should remove upstream from UpstreamSinkUnion");
                     }
-                    CommandFragmentChanges::SplitAssignment { actor_splits } => {
+                }
+            }
+        }
+    }
+
+    /// Update split assignments for actors in fragments.
+    pub(crate) fn pre_apply_split_assignments(
+        &mut self,
+        assignments: impl IntoIterator<Item = (FragmentId, HashMap<ActorId, Vec<SplitImpl>>)>,
+    ) {
+        {
+            let shared_infos = self.shared_actor_infos.clone();
+            let mut shared_actor_writer = shared_infos.start_writer(self.database_id);
+            {
+                {
+                    for (fragment_id, actor_splits) in assignments {
                         let (info, job_id) = self.fragment_mut(fragment_id);
                         let actors = &mut info.actors;
                         for (actor_id, splits) in actor_splits {
@@ -1132,54 +1158,15 @@ impl InflightDatabaseInfo {
             }
             shared_actor_writer.finish();
         }
-        post_apply
     }
 
     pub(super) fn build_edge(
         &self,
-        command: Option<&Command>,
+        info: Option<(&CreateStreamingJobCommandInfo, bool)>,
+        replace_job: Option<&ReplaceStreamJobPlan>,
+        new_upstream_sink: Option<&UpstreamSinkInfo>,
         control_stream_manager: &ControlStreamManager,
-    ) -> Option<FragmentEdgeBuildResult> {
-        let (info, replace_job, new_upstream_sink) = match command {
-            None => {
-                return None;
-            }
-            Some(command) => match command {
-                Command::Flush
-                | Command::Pause
-                | Command::Resume
-                | Command::DropStreamingJobs { .. }
-                | Command::RescheduleIntent { .. }
-                | Command::SourceChangeSplit { .. }
-                | Command::Throttle { .. }
-                | Command::CreateSubscription { .. }
-                | Command::DropSubscription { .. }
-                | Command::AlterSubscriptionRetention { .. }
-                | Command::ConnectorPropsChange(_)
-                | Command::Refresh { .. }
-                | Command::ListFinish { .. }
-                | Command::LoadFinish { .. }
-                | Command::ResumeBackfill { .. } => {
-                    return None;
-                }
-                Command::CreateStreamingJob { info, job_type, .. } => {
-                    let new_upstream_sink = if let CreateStreamingJobType::SinkIntoTable(
-                        new_upstream_sink,
-                    ) = job_type
-                    {
-                        Some(new_upstream_sink)
-                    } else {
-                        None
-                    };
-                    let is_snapshot_backfill =
-                        matches!(job_type, CreateStreamingJobType::SnapshotBackfill(_));
-                    (Some((info, is_snapshot_backfill)), None, new_upstream_sink)
-                }
-                Command::ReplaceStreamJob(replace_job) => (None, Some(replace_job), None),
-                Command::ResetSource { .. } => (None, None, None),
-                Command::InjectSourceOffsets { .. } => (None, None, None),
-            },
-        };
+    ) -> FragmentEdgeBuildResult {
         // `existing_fragment_ids` consists of
         //  - keys of `info.upstream_fragment_downstreams`, which are the `fragment_id` the upstream fragment of the newly created job
         //  - keys of `replace_job.upstream_fragment_downstreams`, which are the `fragment_id` of upstream fragment of replace_job,
@@ -1295,21 +1282,20 @@ impl InflightDatabaseInfo {
                 }
             }
         }
-        Some(builder.build())
+        builder.build()
     }
 
-    /// Apply some actor changes after the barrier command is collected, if the command contains any actors that are dropped, we should
-    /// remove that from the snapshot correspondingly.
-    pub(crate) fn post_apply(
+    /// Post-apply reschedule: remove actors that were marked for removal.
+    pub(crate) fn post_apply_reschedules(
         &mut self,
-        fragment_changes: HashMap<FragmentId, PostApplyFragmentChanges>,
+        reschedules: impl IntoIterator<Item = (FragmentId, HashSet<ActorId>)>,
     ) {
         let inner = self.shared_actor_infos.clone();
         let mut shared_actor_writer = inner.start_writer(self.database_id);
         {
-            for (fragment_id, changes) in fragment_changes {
-                match changes {
-                    PostApplyFragmentChanges::Reschedule { to_remove } => {
+            {
+                {
+                    for (fragment_id, to_remove) in reschedules {
                         let job_id = self.fragment_location[&fragment_id];
                         let info = self
                             .jobs
@@ -1323,7 +1309,23 @@ impl InflightDatabaseInfo {
                         }
                         shared_actor_writer.upsert([(&*info, job_id)]);
                     }
-                    PostApplyFragmentChanges::RemoveFragment => {
+                }
+            }
+        }
+        shared_actor_writer.finish();
+    }
+
+    /// Post-apply fragment removal: remove fragments and their jobs if empty.
+    pub(crate) fn post_apply_remove_fragments(
+        &mut self,
+        fragment_ids: impl IntoIterator<Item = FragmentId>,
+    ) {
+        let inner = self.shared_actor_infos.clone();
+        let mut shared_actor_writer = inner.start_writer(self.database_id);
+        {
+            {
+                {
+                    for fragment_id in fragment_ids {
                         let job_id = self
                             .fragment_location
                             .remove(&fragment_id)
