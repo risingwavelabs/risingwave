@@ -558,7 +558,7 @@
       └─StreamProject { exprs: [(2:Int32 * $expr1) as $expr2, ($expr1 + $expr1) as $expr3, a._row_id, b._row_id, a.x, b.x] }
         └─StreamProject { exprs: [a.x, b.x, Coalesce(a.x, b.x) as $expr1, a._row_id, b._row_id] }
           └─StreamFilter { predicate: ((2:Int32 * Coalesce(a.x, b.x)) < 10:Int32) }
-            └─StreamFilter { predicate: (IsNotNull(a._row_id) OR IsNotNull(b._row_id)) }
+            └─StreamFilter { predicate: ((IsNotNull(a._row_id) OR IsNotNull(b._row_id)) OR (IsNotNull(a.x) OR IsNotNull(b.x))) }
               └─StreamHashJoin { type: FullOuter, predicate: a.x = b.x, output: [a.x, b.x, a._row_id, b._row_id] }
                 ├─StreamExchange { dist: HashShard(a.x) }
                 │ └─StreamTableScan { table: a, columns: [a.x, a._row_id], stream_scan_type: SnapshotBackfill, stream_key: [a._row_id], pk: [_row_id], dist: UpstreamHashShard(a._row_id) }

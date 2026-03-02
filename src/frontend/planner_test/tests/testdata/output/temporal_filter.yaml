@@ -580,7 +580,7 @@
       │     ├─StreamExchange { dist: HashShard(t1.ta, t2.tb, t1._row_id, t2._row_id) }
       │     │ └─StreamFilter { predicate: Not(IsNull(t1.ta)) }
       │     │   └─StreamShare { id: 5 }
-      │     │     └─StreamFilter { predicate: (IsNotNull(t1._row_id) OR IsNotNull(t2._row_id)) }
+      │     │     └─StreamFilter { predicate: ((IsNotNull(t1._row_id) OR IsNotNull(t2._row_id)) OR (IsNotNull(t1.ta) OR IsNotNull(t2.tb))) }
       │     │       └─StreamHashJoin { type: FullOuter, predicate: t1.ta = t2.tb, output: [t1.a, t1.ta, t2.b, t2.tb, t1._row_id, t2._row_id] }
       │     │         ├─StreamExchange { dist: HashShard(t1.ta) }
       │     │         │ └─StreamTableScan { table: t1, columns: [t1.a, t1.ta, t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
@@ -593,7 +593,7 @@
         └─StreamProject { exprs: [t1.a, t1.ta, t2.b, t2.tb, t1._row_id, t2._row_id, t1.ta, t2.tb, 1:Int32] }
           └─StreamFilter { predicate: IsNull(t1.ta) }
             └─StreamShare { id: 5 }
-              └─StreamFilter { predicate: (IsNotNull(t1._row_id) OR IsNotNull(t2._row_id)) }
+              └─StreamFilter { predicate: ((IsNotNull(t1._row_id) OR IsNotNull(t2._row_id)) OR (IsNotNull(t1.ta) OR IsNotNull(t2.tb))) }
                 └─StreamHashJoin { type: FullOuter, predicate: t1.ta = t2.tb, output: [t1.a, t1.ta, t2.b, t2.tb, t1._row_id, t2._row_id] }
                   ├─StreamExchange { dist: HashShard(t1.ta) }
                   │ └─StreamTableScan { table: t1, columns: [t1.a, t1.ta, t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
@@ -617,7 +617,7 @@
     └── StreamExchange NoShuffle from 3
 
     Fragment 3
-    StreamFilter { predicate: (IsNotNull(t1._row_id) OR IsNotNull(t2._row_id)) }
+    StreamFilter { predicate: ((IsNotNull(t1._row_id) OR IsNotNull(t2._row_id)) OR (IsNotNull(t1.ta) OR IsNotNull(t2.tb))) }
     └── StreamHashJoin { type: FullOuter, predicate: t1.ta = t2.tb, output: [t1.a, t1.ta, t2.b, t2.tb, t1._row_id, t2._row_id] } { tables: [ HashJoinLeft: 2, HashJoinDegreeLeft: 3, HashJoinRight: 4, HashJoinDegreeRight: 5 ] }
         ├── StreamExchange Hash([1]) from 4
         └── StreamExchange Hash([1]) from 5
