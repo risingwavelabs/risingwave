@@ -102,6 +102,7 @@ level0_stop_write_threshold_max_size = 322122547200
 enable_optimize_l0_interval_selection = true
 vnode_aligned_level_size_threshold = ""
 max_kv_count_for_xor16 = 262144
+max_vnode_key_range_bytes = ""
 
 [meta.developer]
 cached_traces_num = 256

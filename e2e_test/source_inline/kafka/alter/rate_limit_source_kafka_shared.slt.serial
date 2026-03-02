@@ -1,5 +1,11 @@
 control substitution on
 
+system ok
+rpk topic delete test_rate_limit_shared || true
+
+system ok
+rpk topic create test_rate_limit_shared -p 1
+
 ############## Create kafka seed data
 
 statement ok
@@ -29,6 +35,7 @@ statement ok
 create source kafka_source (v1 int) with (
   ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
   topic = 'test_rate_limit_shared',
+  scan.startup.mode = 'earliest',
   source_rate_limit = 0,
 ) FORMAT PLAIN ENCODE JSON
 
@@ -162,3 +169,6 @@ drop source kafka_source cascade;
 
 statement ok
 drop table kafka_seed_data cascade;
+
+system ok
+rpk topic delete test_rate_limit_shared || true

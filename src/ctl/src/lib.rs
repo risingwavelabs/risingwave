@@ -218,6 +218,8 @@ enum HummockCommands {
         vnode_aligned_level_size_threshold: Option<u64>,
         #[clap(long)]
         max_kv_count_for_xor16: Option<u64>,
+        #[clap(long)]
+        max_vnode_key_range_bytes: Option<u64>,
     },
     /// Split given compaction group into two. Moves the given tables to the new group.
     SplitCompactionGroup {
@@ -733,6 +735,7 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
             enable_optimize_l0_interval_selection,
             vnode_aligned_level_size_threshold,
             max_kv_count_for_xor16,
+            max_vnode_key_range_bytes,
         }) => {
             cmd_impl::hummock::update_compaction_config(
                 context,
@@ -774,6 +777,7 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
                     enable_optimize_l0_interval_selection,
                     vnode_aligned_level_size_threshold,
                     max_kv_count_for_xor16,
+                    max_vnode_key_range_bytes,
                 ),
             )
             .await?
