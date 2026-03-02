@@ -1973,11 +1973,6 @@ where
                 .await
                 .map(|s| s.boxed());
         }
-        if matches!(watermark_type, WatermarkSerdeType::NonPkPrefix) {
-            return Err(StreamExecutorError::from(anyhow!(
-                "WatermarkSerdeType::NonPkPrefix is not supported when iter_with_prefix_respecting_watermark. It's a bug."
-            )));
-        }
 
         let watermark_bytes = self.row_store.state_store.get_table_watermark(vnode);
         let Some(watermark_bytes) = watermark_bytes else {
@@ -2006,8 +2001,15 @@ where
             ))
         })?;
 
-        // FIXME: We need to handle `WatermarkSerdeType::NonPkPrefix` case.
-        // This only handled `WatermarkSerdeType::Value`
+        let direction = if order_type.is_ascending() {
+            WatermarkDirection::Ascending
+        } else {
+            WatermarkDirection::Descending
+        };
+        let clean_watermark_index_in_pk = self
+            .pk_indices
+            .iter()
+            .position(|&i| i == clean_watermark_index);
         let clean_watermark_index_in_value = match &self.value_indices {
             Some(value_indices) => value_indices
                 .iter()
@@ -2021,16 +2023,7 @@ where
                 })?,
             None => clean_watermark_index,
         };
-        let direction = if order_type.is_ascending() {
-            WatermarkDirection::Ascending
-        } else {
-            WatermarkDirection::Descending
-        };
-<<<<<<< HEAD
-        let clean_watermark_index_in_pk = self
-            .pk_indices
-            .iter()
-            .position(|&i| i == clean_watermark_index);
+
         let stream = self
             .iter_with_prefix_inner::</* REVERSE */ false, Bytes>(pk_prefix, sub_range, prefetch_options)
             .await?
@@ -2051,7 +2044,7 @@ where
                     },
                     WatermarkSerdeType::Value => {
                         direction.datum_filter_by_watermark(
-                            row.datum_at(clean_watermark_index),
+                            row.datum_at(clean_watermark_index_in_value),
                             &watermark_value,
                             *order_type,
                         )
@@ -2063,21 +2056,6 @@ where
                     ready(Ok(Some(row)))
                 }
             });
-=======
-        let stream = stream.try_filter_map(move |row| {
-            let watermark_col_value = row.datum_at(clean_watermark_index_in_value);
-            let should_filter = direction.datum_filter_by_watermark(
-                watermark_col_value,
-                &watermark_value,
-                *order_type,
-            );
-            if should_filter {
-                ready(Ok(None))
-            } else {
-                ready(Ok(Some(row)))
-            }
-        });
->>>>>>> 007badd1c7 (yuhao/fix-iter_with_prefix_respecting_watermark)
         Ok(stream.boxed())
     }
 
