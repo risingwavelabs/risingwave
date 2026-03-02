@@ -185,10 +185,13 @@ impl MultiplexedActorOutput {
                 if *self.barrier_committed_rx.borrow() >= epoch {
                     break;
                 }
-                self.barrier_committed_rx
-                    .changed()
-                    .await
-                    .map_err(|_| ExchangeChannelClosed::output(self.actor_id))?;
+                self.barrier_committed_rx.changed().await.map_err(|_| {
+                    anyhow::anyhow!(
+                        "barrier committed watch channel closed while upstream actor {} was waiting for epoch {}",
+                        self.actor_id,
+                        epoch
+                    )
+                })?;
             }
             self.pending_barrier_epoch = None;
         }
@@ -262,6 +265,8 @@ impl MultiplexedActorOutput {
 /// gate themselves after sending a barrier, waiting for this coordinator to confirm
 /// the coalesced barrier is in the shared channel before sending more data.
 pub struct MultiplexedOutputCoordinator {
+    /// The downstream actor ID this coordinator targets (for error reporting).
+    downstream_actor_id: ActorId,
     /// Receives barrier batch notifications from all upstream actors.
     barrier_rx: mpsc::UnboundedReceiver<(ActorId, Vec<DispatcherBarrier>)>,
     /// Coalesces barrier batches from multiple actors.
@@ -300,7 +305,7 @@ impl MultiplexedOutputCoordinator {
                 self.ch
                     .send_tagged(coalesced, 0.into(), actor_ids)
                     .await
-                    .map_err(|_| ExchangeChannelClosed::output(0.into()))?;
+                    .map_err(|_| ExchangeChannelClosed::output(self.downstream_actor_id))?;
 
                 // Ungate all actors: the coalesced barrier batch is now in the shared
                 // channel, so actors can safely send post-barrier data.
@@ -319,6 +324,7 @@ impl MultiplexedOutputCoordinator {
 /// - A `permit::Receiver` that the gRPC server reads from
 pub fn create_multiplexed_output(
     upstream_actor_ids: &[ActorId],
+    downstream_actor_id: ActorId,
     initial_permits: usize,
     batched_permits: usize,
     concurrent_barriers: usize,
@@ -366,6 +372,7 @@ pub fn create_multiplexed_output(
     drop(barrier_tx);
 
     let coordinator = MultiplexedOutputCoordinator {
+        downstream_actor_id,
         barrier_rx,
         coalescer,
         ch: tx,

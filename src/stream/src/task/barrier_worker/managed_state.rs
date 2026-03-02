@@ -873,6 +873,7 @@ impl PartialGraphState {
         let config = self.local_barrier_manager.env.global_config();
         let (actor_outputs, coordinator, rx) = create_multiplexed_output(
             &up_actor_ids,
+            down_actor_id,
             config.developer.exchange_initial_permits,
             config.developer.exchange_batched_permits,
             config.developer.exchange_concurrent_barriers,
