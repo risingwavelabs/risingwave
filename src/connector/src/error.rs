@@ -22,7 +22,9 @@ use risingwave_rpc_client::error::RpcError;
 use crate::enforce_secret::EnforceSecretError;
 use crate::parser::AccessError;
 use crate::schema::InvalidOptionError;
-use crate::schema::schema_registry::{ConcurrentRequestError, WireFormatError};
+use crate::schema::schema_registry::{
+    ConcurrentRequestError, SchemaRegistryClientError, WireFormatError,
+};
 use crate::sink::SinkError;
 use crate::source::mqtt::MqttError;
 use crate::source::nats::NatsJetStreamError;
@@ -84,6 +86,7 @@ def_anyhow_newtype! {
     openssl::error::ErrorStack => "OpenSSL error",
     risingwave_common::secret::SecretError => "Secret error",
     EnforceSecretError => transparent,
+    SchemaRegistryClientError => "Schema registry client error",
 }
 
 pub type ConnectorResult<T, E = ConnectorError> = std::result::Result<T, E>;
