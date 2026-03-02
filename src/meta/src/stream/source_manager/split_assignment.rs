@@ -167,7 +167,7 @@ impl SourceManager {
     /// re-allocate splits fresh by delegating to [`Self::discover_splits`].
     /// When there are existing downstream, returns `None` — the actual
     /// split alignment happens in Phase 2 inside the barrier worker via
-    /// [`resolve_replace_source_splits`].
+    /// [`Self::resolve_replace_source_splits`].
     pub async fn discover_splits_for_replace_source(
         &self,
         table_fragments: &StreamJobFragments,
@@ -600,7 +600,7 @@ where
 ///
 /// The `get_upstream_actor_splits` closure looks up the current splits for a given
 /// upstream actor ID. How exactly this lookup works depends on the caller:
-/// - Inside the barrier worker, it reads from [`InflightDatabaseInfo`].
+/// - Inside the barrier worker, it reads from `InflightDatabaseInfo`.
 /// - During reassignment, it reads from the pending upstream assignment.
 ///
 /// illustration:

@@ -634,12 +634,13 @@ impl DatabaseCheckpointControl {
                             &plan.new_fragments,
                             &plan.replace_upstream,
                             new_no_shuffle,
-                            |fragment_id, actor_id| {
-                                self.database_info
-                                    .fragment(fragment_id)
-                                    .actors
-                                    .get(&actor_id)
-                                    .map(|info| info.splits.clone())
+                            |_fragment_id, actor_id| {
+                                self.database_info.fragment_infos().find_map(|fragment| {
+                                    fragment
+                                        .actors
+                                        .get(&actor_id)
+                                        .map(|info| info.splits.clone())
+                                })
                             },
                         )?
                     }
