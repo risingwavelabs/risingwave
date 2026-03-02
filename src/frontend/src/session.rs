@@ -1347,7 +1347,7 @@ impl SessionImpl {
         };
         Ok(e.iter()
             .flat_map(|l| l.epochs())
-            .filter(|e| *e >= min_epoch)
+            .filter(|e| *e >= min_epoch && *e <= max_epoch)
             .take(max_count as usize)
             .collect())
     }

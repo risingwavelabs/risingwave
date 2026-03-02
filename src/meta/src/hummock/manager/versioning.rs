@@ -302,6 +302,18 @@ impl HummockManager {
     pub async fn may_fill_backward_table_change_logs(&self) -> Result<()> {
         let mut versioning = self.versioning.write().await;
         let version = &mut versioning.current_version;
+
+        use sea_orm::PaginatorTrait;
+        let meta_store_table_change_log_count =
+            risingwave_meta_model::hummock_table_change_log::Entity::find()
+                .count(&self.env.meta_store_ref().conn)
+                .await?;
+        #[expect(deprecated)]
+        if version.table_change_log.is_empty() || meta_store_table_change_log_count > 0 {
+            // Either there are no table change logs to commit to the metastore, or the operation has already been completed.
+            return Ok(());
+        }
+
         // Remove table change log from version.
         #[expect(deprecated)]
         let table_change_logs = {
@@ -334,7 +346,6 @@ impl HummockManager {
                 })
                 .collect::<Vec<_>>();
             risingwave_meta_model::hummock_table_change_log::Entity::insert_many(insert_many)
-                .on_conflict_do_nothing()
                 .exec(&txn)
                 .await?;
         }

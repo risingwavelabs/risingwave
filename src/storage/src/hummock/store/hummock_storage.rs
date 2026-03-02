@@ -785,7 +785,7 @@ impl StateStoreReadLog for HummockStorage {
         }
         {
             // fast path
-            let max_epoch = self
+            if let Some(max_epoch) = self
                 .recent_versions
                 .load()
                 .latest_version()
@@ -794,47 +794,48 @@ impl StateStoreReadLog for HummockStorage {
                 .info()
                 .get(&options.table_id)
                 .map(|i| i.committed_epoch)
-                .unwrap_or(u64::MAX);
-            // The next epoch exists either in the same `EpochNewChangeLog` or the next `EpochNewChangeLog`, so we fetch 2 `EpochNewChangeLogCommon`.
-            let table_change_log = self
-                .table_change_log_manager
-                .fetch_table_change_logs(options.table_id, (epoch, max_epoch), true, Some(2))
-                .await?;
-            if let Some(next_epoch) = next_epoch(&table_change_log, epoch, options.table_id)? {
-                return Ok(next_epoch);
-            }
-        }
-        let next_epoch_ret = Arc::new(ArcSwap::from_pointee(None));
-        let inspect_fn = |version: &PinnedVersion| {
-            let next_epoch_ret_clone = next_epoch_ret.clone();
-            let table_change_log_manager = self.table_change_log_manager.clone();
-            let max_epoch = version
-                .state_table_info
-                .info()
-                .get(&options.table_id)
-                .map(|i| i.committed_epoch)
-                .unwrap_or(u64::MAX);
-            async move {
+                && max_epoch > epoch
+            {
                 // The next epoch exists either in the same `EpochNewChangeLog` or the next `EpochNewChangeLog`, so we fetch 2 `EpochNewChangeLogCommon`.
-                let table_change_log = table_change_log_manager
+                let table_change_log = self
+                    .table_change_log_manager
                     .fetch_table_change_logs(options.table_id, (epoch, max_epoch), true, Some(2))
                     .await?;
                 if let Some(next_epoch) = next_epoch(&table_change_log, epoch, options.table_id)? {
-                    next_epoch_ret_clone.store(Arc::new(Some(next_epoch)));
-                    Ok(true)
-                } else {
-                    Ok(false)
+                    return Ok(next_epoch);
                 }
             }
-        };
-        wait_for_update(&self.version_update_notifier_tx, inspect_fn, || {
-            format!("wait next_epoch: epoch: {} {}", epoch, options.table_id)
-        })
+        }
+        let mut max_epoch = None;
+        wait_for_update(
+            &self.version_update_notifier_tx,
+            |version| {
+                let Some(mce) = version
+                    .state_table_info
+                    .info()
+                    .get(&options.table_id)
+                    .map(|i| i.committed_epoch)
+                else {
+                    return Ok(false);
+                };
+                max_epoch = Some(mce);
+                Ok(mce > epoch)
+            },
+            || format!("wait next_epoch: epoch: {} {}", epoch, options.table_id),
+        )
         .await?;
-        Ok(next_epoch_ret
-            .load()
-            .as_ref()
-            .expect("should be set before wait_for_update returns"))
+        // The next epoch exists either in the same `EpochNewChangeLog` or the next `EpochNewChangeLog`, so we fetch 2 `EpochNewChangeLogCommon`.
+        let table_change_log = self
+            .table_change_log_manager
+            .fetch_table_change_logs(
+                options.table_id,
+                (epoch, max_epoch.unwrap_or(u64::MAX)),
+                true,
+                Some(2),
+            )
+            .await?;
+        let next_epoch_ret = next_epoch(&table_change_log, epoch, options.table_id)?;
+        Ok(next_epoch_ret.expect("should be set after wait_for_update returns"))
     }
 
     async fn iter_log(
@@ -891,13 +892,11 @@ impl HummockStorage {
                 wait_for_update(
                     &self.version_update_notifier_tx,
                     |version| {
-                        let version_id = version.id();
-                        let table_committed_epoch = version.table_committed_epoch(table_id);
-                        async move {
-                            if wait_version_id > version_id {
-                                return Ok(false);
-                            }
-                            let committed_epoch = table_committed_epoch.ok_or_else(|| {
+                        if wait_version_id > version.id() {
+                            return Ok(false);
+                        }
+                        let committed_epoch =
+                            version.table_committed_epoch(table_id).ok_or_else(|| {
                                 // In batch query, since we have ensured that the current version must be after the
                                 // `wait_version_id`, when seeing that the table_id not exist in the latest version,
                                 // the table must have been dropped.
@@ -906,8 +905,7 @@ impl HummockStorage {
                                     table_id
                                 ))
                             })?;
-                            Ok(committed_epoch >= wait_epoch)
-                        }
+                        Ok(committed_epoch >= wait_epoch)
                     },
                     || {
                         format!(

@@ -68,8 +68,9 @@ impl<T> TableChangeLogCommon<T> {
 }
 
 impl<T> IntoIterator for TableChangeLogCommon<T> {
-    type IntoIter = std::collections::vec_deque::IntoIter<EpochNewChangeLogCommon<T>>;
     type Item = EpochNewChangeLogCommon<T>;
+
+    type IntoIter = impl Iterator<Item = EpochNewChangeLogCommon<T>>;
 
     fn into_iter(self) -> Self::IntoIter {
         self.0.into_iter()
