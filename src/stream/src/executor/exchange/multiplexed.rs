@@ -22,6 +22,7 @@
 //! See `docs/dev/src/design/node-level-barrier-relay.md` for the full design.
 
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 
 use anyhow::Context;
 use itertools::Itertools;
@@ -32,10 +33,11 @@ use tokio::sync::mpsc;
 use super::error::ExchangeChannelClosed;
 use super::permit;
 use crate::error::StreamResult;
+use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{
     DispatcherBarrier, DispatcherMessageBatch, DispatcherMessageBatch as Message,
 };
-use crate::task::ActorId;
+use crate::task::{ActorId, FragmentId};
 
 // ============================================================================
 // Sender side: BarrierCoalescer + MultiplexedOutput
@@ -391,8 +393,15 @@ pub async fn run_multiplexed_remote_input(
     permits_tx: mpsc::UnboundedSender<permits::Value>,
     logical_outputs: HashMap<ActorId, mpsc::UnboundedSender<crate::executor::DispatcherMessage>>,
     batched_permits_limit: usize,
+    up_fragment_id: FragmentId,
+    down_fragment_id: FragmentId,
+    metrics: Arc<StreamingMetrics>,
 ) -> StreamResult<()> {
     use crate::executor::DispatcherMessage;
+
+    let exchange_frag_recv_size_metrics = metrics
+        .exchange_frag_recv_size
+        .with_guarded_label_values(&[&up_fragment_id.to_string(), &down_fragment_id.to_string()]);
 
     let mut batched_permits_accumulated: u32 = 0;
 
@@ -400,6 +409,8 @@ pub async fn run_multiplexed_remote_input(
         match data_res {
             Ok(GetStreamResponse { message, permits }) => {
                 let msg = message.unwrap();
+                let bytes = DispatcherMessageBatch::get_encoded_len(&msg);
+                exchange_frag_recv_size_metrics.inc_by(bytes as u64);
                 let source_actor_id = msg.source_actor_id;
 
                 // Handle permit return
@@ -427,14 +438,22 @@ pub async fn run_multiplexed_remote_input(
                 match msg_batch {
                     DispatcherMessageBatch::Chunk(chunk) => {
                         // Route to the correct actor's logical input
-                        if let Some(tx) = logical_outputs.get(&source_actor_id) {
-                            let _ = tx.send(DispatcherMessage::Chunk(chunk));
-                        }
+                        let tx = logical_outputs.get(&source_actor_id).ok_or_else(|| {
+                            anyhow::anyhow!(
+                                "MultiplexedRemoteInput received chunk for unknown source actor {}",
+                                source_actor_id
+                            )
+                        })?;
+                        let _ = tx.send(DispatcherMessage::Chunk(chunk));
                     }
                     DispatcherMessageBatch::Watermark(watermark) => {
-                        if let Some(tx) = logical_outputs.get(&source_actor_id) {
-                            let _ = tx.send(DispatcherMessage::Watermark(watermark));
-                        }
+                        let tx = logical_outputs.get(&source_actor_id).ok_or_else(|| {
+                            anyhow::anyhow!(
+                                "MultiplexedRemoteInput received watermark for unknown source actor {}",
+                                source_actor_id
+                            )
+                        })?;
+                        let _ = tx.send(DispatcherMessage::Watermark(watermark));
                     }
                     DispatcherMessageBatch::BarrierBatch(barriers) => {
                         // Check for coalesced_actor_ids in the protobuf
@@ -453,19 +472,26 @@ pub async fn run_multiplexed_remote_input(
                         if let Some(actor_ids) = coalesced_actor_ids {
                             // Multiplexed mode: expand the barrier to all listed actors
                             for &actor_id in actor_ids {
-                                if let Some(tx) = logical_outputs.get(&actor_id) {
-                                    for barrier in &barriers {
-                                        let _ =
-                                            tx.send(DispatcherMessage::Barrier(barrier.clone()));
-                                    }
+                                let tx = logical_outputs.get(&actor_id).ok_or_else(|| {
+                                    anyhow::anyhow!(
+                                        "MultiplexedRemoteInput received coalesced barrier for unknown actor {}",
+                                        actor_id
+                                    )
+                                })?;
+                                for barrier in &barriers {
+                                    let _ = tx.send(DispatcherMessage::Barrier(barrier.clone()));
                                 }
                             }
                         } else {
                             // Legacy mode: send to source_actor_id
-                            if let Some(tx) = logical_outputs.get(&source_actor_id) {
-                                for barrier in barriers {
-                                    let _ = tx.send(DispatcherMessage::Barrier(barrier));
-                                }
+                            let tx = logical_outputs.get(&source_actor_id).ok_or_else(|| {
+                                anyhow::anyhow!(
+                                    "MultiplexedRemoteInput received barrier for unknown source actor {}",
+                                    source_actor_id
+                                )
+                            })?;
+                            for barrier in barriers {
+                                let _ = tx.send(DispatcherMessage::Barrier(barrier));
                             }
                         }
                     }

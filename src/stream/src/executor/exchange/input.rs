@@ -487,12 +487,16 @@ pub(crate) async fn new_inputs(
             // Spawn the demuxer task that reads from the multiplexed gRPC stream
             // and dispatches to the per-actor logical inputs.
             let batched_permits_limit = actor_config.developer.exchange_batched_permits;
+            let metrics = metrics.clone();
             tokio::spawn(async move {
                 if let Err(e) = run_multiplexed_remote_input(
                     stream,
                     permits_tx,
                     logical_outputs,
                     batched_permits_limit,
+                    upstream_fragment_id,
+                    fragment_id,
+                    metrics,
                 )
                 .await
                 {

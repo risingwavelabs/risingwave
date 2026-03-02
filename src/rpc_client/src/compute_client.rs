@@ -144,6 +144,10 @@ impl ComputeClient {
         Streaming<GetStreamResponse>,
         mpsc::UnboundedSender<permits::Value>,
     )> {
+        debug_assert!(
+            !up_actor_ids.is_empty(),
+            "get_stream_multiplexed called with empty up_actor_ids"
+        );
         let representative = up_actor_ids.first().copied().unwrap_or(0.into());
         self.get_stream_inner(
             representative,
