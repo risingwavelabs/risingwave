@@ -83,6 +83,17 @@ impl ExchangeChannelClosed {
         }
     }
 
+    /// Creates a new error indicating that the multiplexed exchange channel from a
+    /// remote upstream actor is closed unexpectedly (e.g. the demuxer task exited).
+    pub fn multiplexed_input(upstream: ActorId) -> Self {
+        Self {
+            message: format!(
+                "multiplexed exchange channel from remote upstream actor {upstream} closed unexpectedly"
+            ),
+            source: None,
+        }
+    }
+
     /// Creates a new error indicating that the exchange channel to the downstream
     /// actor is closed unexpectedly.
     pub fn output(downstream: ActorId) -> Self {

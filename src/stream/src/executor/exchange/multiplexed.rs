@@ -505,7 +505,21 @@ impl futures::Stream for LogicalInput {
         mut self: std::pin::Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Option<Self::Item>> {
-        self.rx.poll_recv(cx).map(|opt| opt.map(Ok))
+        use std::task::Poll;
+
+        match self.rx.poll_recv(cx) {
+            Poll::Ready(Some(msg)) => Poll::Ready(Some(Ok(msg))),
+            Poll::Ready(None) => {
+                // The underlying channel was closed (e.g. the demuxer task exited).
+                // Return an error instead of ending the stream, matching the behavior
+                // of `LocalInput` and `RemoteInput`. Downstream executors like
+                // `MergeExecutor` assume inputs never end and would panic on `None`.
+                Poll::Ready(Some(Err(
+                    ExchangeChannelClosed::multiplexed_input(self.actor_id).into(),
+                )))
+            }
+            Poll::Pending => Poll::Pending,
+        }
     }
 }
 
