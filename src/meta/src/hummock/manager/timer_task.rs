@@ -664,7 +664,7 @@ mod tests {
 
     use super::spawn_periodic_loop;
 
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn test_spawn_periodic_loop_isolated_progress() {
         let (shutdown_tx, shutdown_rx) = watch::channel(false);
         let slow_counter = Arc::new(AtomicUsize::new(0));
@@ -708,7 +708,7 @@ mod tests {
         assert!(fast > slow);
     }
 
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn test_shared_mutex_guards_concurrent_handlers() {
         struct DecrOnDrop(Arc<AtomicUsize>);
 
