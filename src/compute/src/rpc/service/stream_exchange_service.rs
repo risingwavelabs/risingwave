@@ -174,6 +174,7 @@ impl StreamExchangeServiceImpl {
                     permits,
                     source_actor_id,
                     coalesced_actor_ids,
+                    epoch,
                 }) => {
                     let message = match message {
                         DispatcherMessageBatch::Chunk(chunk) => {
@@ -187,6 +188,8 @@ impl StreamExchangeServiceImpl {
                     // Forward multiplexing metadata from the sender side.
                     // For non-multiplexed exchanges these are 0 and empty respectively.
                     proto.source_actor_id = source_actor_id;
+                    // Forward the epoch tag for epoch-tagged pipelining.
+                    proto.epoch = epoch;
                     if !coalesced_actor_ids.is_empty() {
                         use risingwave_pb::stream_plan::stream_message_batch::StreamMessageBatch as SmBatch;
                         if let Some(SmBatch::BarrierBatch(bb)) = proto.stream_message_batch.as_mut()

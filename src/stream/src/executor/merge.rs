@@ -873,6 +873,7 @@ mod tests {
                         ),
                     ),
                     source_actor_id: 0.into(),
+                    epoch: 0,
                 }),
                 permits: Some(PbPermits::default()),
             }))
@@ -891,6 +892,7 @@ mod tests {
                         ),
                     ),
                     source_actor_id: 0.into(),
+                    epoch: 0,
                 }),
                 permits: Some(PbPermits::default()),
             }))

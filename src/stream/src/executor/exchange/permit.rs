@@ -40,6 +40,10 @@ pub struct MessageWithPermits {
     /// For coalesced barriers: the set of actor IDs whose barriers were merged.
     /// Empty for non-barrier messages and non-multiplexed exchanges.
     pub coalesced_actor_ids: Vec<ActorId>,
+    /// The epoch this data/watermark belongs to (epoch-tagged pipelining).
+    /// Non-zero in multiplexed exchanges for data/watermark messages.
+    /// Zero for barriers and non-multiplexed exchanges.
+    pub epoch: u64,
 }
 
 /// Create a channel for the exchange service.
@@ -168,6 +172,7 @@ impl Sender {
                 permits,
                 source_actor_id: ActorId::default(),
                 coalesced_actor_ids: vec![],
+                epoch: 0,
             })
             .map_err(|e| mpsc::error::SendError(e.0.message))
     }
@@ -181,6 +186,7 @@ impl Sender {
         message: Message,
         source_actor_id: ActorId,
         coalesced_actor_ids: Vec<ActorId>,
+        epoch: u64,
     ) -> Result<(), mpsc::error::SendError<Message>> {
         let permits = match &message {
             Message::Chunk(c) => {
@@ -206,6 +212,7 @@ impl Sender {
                 permits,
                 source_actor_id,
                 coalesced_actor_ids,
+                epoch,
             })
             .map_err(|e| mpsc::error::SendError(e.0.message))
     }

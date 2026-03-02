@@ -1364,6 +1364,7 @@ impl DispatcherMessageBatch {
         PbStreamMessageBatch {
             stream_message_batch: Some(prost),
             source_actor_id: 0.into(),
+            epoch: 0,
         }
     }
 

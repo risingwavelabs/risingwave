@@ -263,6 +263,12 @@ message StreamMessageBatch {
   // so the receiver can route to the correct logical input.
   // Zero (default) in the legacy non-multiplexed path.
   uint32 source_actor_id = 4;
+  // In multiplexed epoch-tagged pipelining mode, the epoch that this data chunk
+  // or watermark belongs to. The receiver uses this to determine whether the
+  // corresponding barrier has already been delivered for this actor, buffering
+  // ahead-of-barrier data until the barrier arrives.
+  // Zero for barrier messages and non-multiplexed exchanges.
+  uint64 epoch = 5;
 }
 
 // Hash mapping for compute node. Stores mapping from virtual node to actor id.

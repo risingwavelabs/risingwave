@@ -12,16 +12,22 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Multiplexed exchange for node-level barrier relay.
+//! Multiplexed exchange for node-level barrier relay with epoch-tagged pipelining.
 //!
 //! This module provides [`MultiplexedActorOutput`] (sender side) and
 //! [`run_multiplexed_remote_input`] (receiver side) to reduce barrier messages from N×M to
 //! M per exchange per epoch, where N is the number of upstream actors on one node and M is
 //! the number of downstream actors.
 //!
+//! **Epoch-tagged pipelining**: Unlike the blocking approach where actors wait for barrier
+//! coalescing before sending more data, each actor tags data with its current epoch and
+//! sends it immediately. The receiver buffers ahead-of-barrier data and flushes it once
+//! the coalesced barrier arrives. This preserves correctness while eliminating sender-side
+//! head-of-line blocking.
+//!
 //! See `docs/dev/src/design/node-level-barrier-relay.md` for the full design.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 
 use anyhow::Context;
@@ -43,40 +49,44 @@ use crate::task::{ActorId, FragmentId};
 // Sender side: BarrierCoalescer + MultiplexedOutput
 // ============================================================================
 
-/// Collects barrier batches from multiple upstream actors and emits a single coalesced
-/// barrier batch once all expected actors have reached the same set of epochs.
+/// Queue-based barrier coalescer that collects barrier batches from multiple upstream actors
+/// and emits a single coalesced barrier batch once all expected actors have reached the same
+/// set of epochs.
 ///
-/// This implements "sender-side barrier alignment": the same waiting that `MergeExecutor`
-/// does on the receiver side, but performed locally on the sender node to avoid N
-/// barrier messages crossing the network.
+/// With epoch-tagged pipelining, fast actors can submit barriers for epoch E+1 before slow
+/// actors have submitted epoch E. The coalescer queues per-actor barriers and coalesces them
+/// in FIFO order (epoch E before epoch E+1).
 ///
-/// **Batch-aware**: each actor sends its entire `Vec<DispatcherBarrier>` batch atomically.
+/// **Batch-aware**: each actor sends its `Vec<DispatcherBarrier>` batch atomically.
 /// The coalescer waits for all actors to submit the same batch (verified by epoch list),
 /// then emits one copy of the batch along with the full set of actor IDs.
 pub struct BarrierCoalescer {
     /// The set of upstream actor IDs that must all deliver a barrier batch before we coalesce.
     expected_actors: HashSet<ActorId>,
-    /// Actors that have already delivered their barrier batch for the current epoch(s).
-    arrived: HashSet<ActorId>,
-    /// The first barrier batch received (used as the template for the coalesced output).
-    pending_batch: Option<Vec<DispatcherBarrier>>,
+    /// Per-actor queue of barrier batches. Fast actors can queue multiple batches ahead of
+    /// slow actors. The coalescer only coalesces the front of each queue.
+    queued: HashMap<ActorId, VecDeque<Vec<DispatcherBarrier>>>,
 }
 
 impl BarrierCoalescer {
     pub fn new(expected_actors: HashSet<ActorId>) -> Self {
-        let capacity = expected_actors.len();
+        let queued = expected_actors
+            .iter()
+            .map(|&id| (id, VecDeque::new()))
+            .collect();
         Self {
             expected_actors,
-            arrived: HashSet::with_capacity(capacity),
-            pending_batch: None,
+            queued,
         }
     }
 
-    /// Record that `actor_id` has reached its barrier batch for the current epoch(s).
+    /// Record that `actor_id` has reached its barrier batch for some epoch(s).
     ///
-    /// Returns `Some((batch, actor_ids))` when all expected actors have arrived,
-    /// containing the barrier batch and the full set of coalesced actor IDs.
-    /// Returns `None` if we're still waiting for more actors.
+    /// The barrier is queued. If all expected actors now have at least one queued barrier,
+    /// and the front barriers all match in epoch, the coalesced result is returned.
+    ///
+    /// Returns `Some((batch, actor_ids))` when all expected actors have arrived for the
+    /// same epoch. Returns `None` if we're still waiting for more actors.
     pub fn collect(
         &mut self,
         actor_id: ActorId,
@@ -89,71 +99,87 @@ impl BarrierCoalescer {
             self.expected_actors
         );
 
-        if let Some(pending) = &self.pending_batch {
-            // Verify batch consistency — all actors must have the same barrier epochs.
-            assert_eq!(
-                pending.len(),
-                barriers.len(),
-                "barrier batch length mismatch in coalescer: actor {} has {} barriers, expected {}",
-                actor_id,
-                barriers.len(),
-                pending.len()
-            );
-            for (p, b) in pending.iter().zip_eq(barriers.iter()) {
+        self.queued.get_mut(&actor_id).unwrap().push_back(barriers);
+
+        self.try_coalesce()
+    }
+
+    /// Try to produce a coalesced barrier batch from the front of all queues.
+    ///
+    /// Returns `Some` if all expected actors have at least one queued barrier and the
+    /// front barriers all have matching epochs. Returns `None` otherwise.
+    pub fn try_coalesce(&mut self) -> Option<(Vec<DispatcherBarrier>, Vec<ActorId>)> {
+        // Check if all expected actors have at least one queued barrier.
+        if !self
+            .expected_actors
+            .iter()
+            .all(|id| self.queued.get(id).is_some_and(|q| !q.is_empty()))
+        {
+            return None;
+        }
+
+        // Verify epoch consistency across all actors' front barriers.
+        let mut template: Option<&Vec<DispatcherBarrier>> = None;
+        for id in &self.expected_actors {
+            let front = self.queued.get(id).unwrap().front().unwrap();
+            if let Some(t) = &template {
                 assert_eq!(
-                    p.epoch, b.epoch,
-                    "barrier epoch mismatch in coalescer: actor {} has epoch {:?}, expected {:?}",
-                    actor_id, b.epoch, p.epoch
+                    t.len(),
+                    front.len(),
+                    "barrier batch length mismatch in coalescer: actor {} has {} barriers, expected {}",
+                    id,
+                    front.len(),
+                    t.len()
                 );
+                for (p, b) in t.iter().zip_eq(front.iter()) {
+                    assert_eq!(
+                        p.epoch, b.epoch,
+                        "barrier epoch mismatch in coalescer: actor {} has epoch {:?}, expected {:?}",
+                        id, b.epoch, p.epoch
+                    );
+                }
+            } else {
+                template = Some(front);
             }
-        } else {
-            self.pending_batch = Some(barriers);
         }
 
-        let newly_inserted = self.arrived.insert(actor_id);
-        assert!(
-            newly_inserted,
-            "actor {} sent barrier batch twice for the same epoch(s)",
-            actor_id
-        );
-
-        if self.arrived.len() == self.expected_actors.len() {
-            // All actors have arrived — coalesce!
-            let batch = self.pending_batch.take().unwrap();
-            let actor_ids: Vec<ActorId> = self.arrived.drain().collect();
-            Some((batch, actor_ids))
-        } else {
-            None
+        // All actors match — dequeue from all and emit the coalesced batch.
+        let actor_ids: Vec<ActorId> = self.expected_actors.iter().copied().collect();
+        let mut batch = None;
+        for id in &actor_ids {
+            let barriers = self.queued.get_mut(id).unwrap().pop_front().unwrap();
+            if batch.is_none() {
+                batch = Some(barriers);
+            }
         }
+
+        Some((batch.unwrap(), actor_ids))
     }
 
     /// Add a new upstream actor to the expected set.
     /// Called when actors are added at a barrier boundary during scaling.
     pub fn add_actor(&mut self, actor_id: ActorId) {
         self.expected_actors.insert(actor_id);
+        self.queued.entry(actor_id).or_default();
     }
 
     /// Remove an upstream actor from the expected set.
     /// Called when actors are removed at a barrier boundary during scaling.
     pub fn remove_actor(&mut self, actor_id: ActorId) {
         self.expected_actors.remove(&actor_id);
-        // Also remove from arrived in case it already arrived this epoch
-        self.arrived.remove(&actor_id);
+        self.queued.remove(&actor_id);
     }
 }
 
 /// A handle for one upstream actor to send messages into a multiplexed output channel.
 ///
 /// Each upstream actor's `DispatchExecutor` holds one of these instead of a direct `Output`.
-/// Data chunks and watermarks are forwarded immediately (tagged with the actor ID).
-/// Barriers are collected by the shared `BarrierCoalescer`.
+/// Data chunks and watermarks are forwarded immediately (tagged with the actor ID and epoch).
+/// Barriers are sent to the shared `BarrierCoalescer` for coalescing.
 ///
-/// **Ordering invariant**: before sending ANY message (including a new barrier), the actor
-/// waits until its previously submitted barrier has been coalesced and committed to the
-/// shared channel. This guarantees:
-/// 1. No post-barrier data overtakes the barrier (snapshot consistency).
-/// 2. No barrier N+1 reaches the coalescer before barrier N finishes coalescing across
-///    all actors (prevents epoch mismatch when `in_flight_barrier_nums > 1`).
+/// **Epoch-tagged pipelining**: after sending a barrier, the actor immediately continues
+/// sending data for the next epoch. The actor is never blocked by other actors. Data is
+/// tagged with `current_epoch` so the receiver can buffer ahead-of-barrier data.
 pub struct MultiplexedActorOutput {
     /// The upstream actor ID this handle belongs to.
     actor_id: ActorId,
@@ -162,85 +188,42 @@ pub struct MultiplexedActorOutput {
     ch: permit::Sender,
     /// Channel to send barrier batches to the coordinator for coalescing.
     barrier_tx: mpsc::UnboundedSender<(ActorId, Vec<DispatcherBarrier>)>,
-    /// Receives the epoch number of the latest coalesced barrier that was committed
-    /// to the shared channel. Used as a gate: after sending a barrier, this actor
-    /// must wait here until the coordinator confirms the coalesced barrier is in the
-    /// shared channel before sending any more data.
-    barrier_committed_rx: tokio::sync::watch::Receiver<u64>,
-    /// The epoch of the barrier this actor is waiting for. `Some(epoch)` means we sent
-    /// a barrier and must wait for the coordinator to commit it before sending more data.
-    pending_barrier_epoch: Option<u64>,
+    /// The current epoch this actor is in. Data sent after the last barrier is tagged
+    /// with this epoch. Initialized to 0 (sentinel for "before any real barrier") and
+    /// updated to `barrier.epoch.curr` after each barrier is sent to the coalescer.
+    current_epoch: u64,
 }
 
 impl MultiplexedActorOutput {
-    /// Wait until the previously submitted barrier has been coalesced and committed
-    /// to the shared channel. This prevents:
-    /// - Data/watermarks from overtaking a pending barrier (snapshot consistency).
-    /// - A new barrier from reaching the coalescer before the previous one completes
-    ///   (which would cause an epoch mismatch panic, since the coalescer expects all
-    ///   actors to submit the same epoch before any actor advances).
-    async fn wait_for_pending_barrier(&mut self) -> StreamResult<()> {
-        if let Some(epoch) = self.pending_barrier_epoch {
-            loop {
-                if *self.barrier_committed_rx.borrow() >= epoch {
-                    break;
-                }
-                self.barrier_committed_rx.changed().await.map_err(|_| {
-                    anyhow::anyhow!(
-                        "barrier committed watch channel closed while upstream actor {} was waiting for epoch {}",
-                        self.actor_id,
-                        epoch
-                    )
-                })?;
-            }
-            self.pending_barrier_epoch = None;
-        }
-        Ok(())
-    }
-
     /// Send a message to the downstream via the shared channel.
     ///
-    /// For ALL message types: waits for any pending barrier to be committed first.
-    /// This is critical for barriers too — with `in_flight_barrier_nums > 1`, an actor
-    /// can receive consecutive barriers without data between them. Without the gate,
-    /// barrier N+1 could reach the coalescer before barrier N finishes coalescing
-    /// (because other actors haven't submitted barrier N yet), causing an epoch mismatch.
+    /// For barriers: decomposes the batch and sends each barrier individually to the
+    /// coordinator for coalescing. Updates `current_epoch` after each barrier. The actor
+    /// does NOT wait for coalescing to complete — it continues immediately.
     ///
-    /// For barriers: sends each barrier **individually** to the coordinator, waiting
-    /// for the previous barrier to be coalesced before sending the next. This is
-    /// necessary because `try_batch_barriers` in `DispatchExecutor` uses `now_or_never()`
-    /// to opportunistically batch consecutive barriers, and different actors can form
-    /// differently-sized batches. Decomposing ensures all actors submit one epoch at a
-    /// time to the coalescer, preventing batch length or epoch mismatch panics.
+    /// For data/watermarks: sends immediately on the shared channel, tagged with the
+    /// source actor ID and the current epoch.
     pub async fn send(&mut self, message: Message) -> StreamResult<()> {
-        // Gate: wait for any previously-submitted barrier to complete coalescing.
-        self.wait_for_pending_barrier().await?;
-
         match message {
             Message::BarrierBatch(barriers) => {
-                // Send each barrier individually to the coordinator, waiting between
-                // each to synchronize with other actors. This prevents the batch-length
-                // mismatch panic when actors form differently-sized batches.
-                for (i, barrier) in barriers.into_iter().enumerate() {
-                    if i > 0 {
-                        // Wait for the previous barrier to be coalesced before sending
-                        // the next one. This ensures all actors advance one epoch at a
-                        // time through the coalescer.
-                        self.wait_for_pending_barrier().await?;
-                    }
-                    let epoch = barrier.epoch.curr;
+                // Send each barrier individually to the coordinator. This ensures all
+                // actors submit one epoch at a time, preventing batch length or epoch
+                // mismatch panics in the coalescer.
+                for barrier in barriers {
+                    let next_epoch = barrier.epoch.curr;
                     self.barrier_tx
                         .send((self.actor_id, vec![barrier]))
                         .map_err(|_| ExchangeChannelClosed::output(self.actor_id))?;
-                    self.pending_barrier_epoch = Some(epoch);
+                    // Update epoch: subsequent data belongs to the new epoch.
+                    self.current_epoch = next_epoch;
                 }
                 Ok(())
             }
             Message::Chunk(_) | Message::Watermark(_) => {
-                // Data and watermarks are sent immediately on the shared channel,
-                // tagged with the source actor ID so the receiver can route them.
+                // Data and watermarks are sent immediately, tagged with both the source
+                // actor ID and the current epoch for receiver-side buffering.
                 self.ch
-                    .send_tagged(message, self.actor_id, vec![])
+                    .send_tagged(message, self.actor_id, vec![], self.current_epoch)
                     .await
                     .map_err(|_| ExchangeChannelClosed::output(self.actor_id).into())
             }
@@ -256,60 +239,54 @@ impl MultiplexedActorOutput {
 ///
 /// This runs as a background task that:
 /// 1. Receives barrier notifications from all upstream actors via `barrier_rx`
-/// 2. Coalesces them using `BarrierCoalescer`
+/// 2. Coalesces them using `BarrierCoalescer` (queue-based, handles fast actors)
 /// 3. Sends the coalesced barrier on the physical channel
-/// 4. **Broadcasts the committed epoch** to ungate all actors
 ///
-/// Data chunks and watermarks bypass this coordinator entirely — they go directly
-/// from `MultiplexedActorOutput` to the `permit::Sender` channel. However, actors
-/// gate themselves after sending a barrier, waiting for this coordinator to confirm
-/// the coalesced barrier is in the shared channel before sending more data.
+/// With epoch-tagged pipelining, there is no watch channel for ungating actors.
+/// Actors send data independently without waiting for the coordinator.
 pub struct MultiplexedOutputCoordinator {
     /// The downstream actor ID this coordinator targets (for error reporting).
     downstream_actor_id: ActorId,
     /// Receives barrier batch notifications from all upstream actors.
     barrier_rx: mpsc::UnboundedReceiver<(ActorId, Vec<DispatcherBarrier>)>,
-    /// Coalesces barrier batches from multiple actors.
+    /// Queue-based coalescer for barrier batches from multiple actors.
     coalescer: BarrierCoalescer,
     /// The shared physical channel sender.
     ch: permit::Sender,
-    /// Broadcasts the epoch of the coalesced barrier after it has been written to `ch`.
-    /// All `MultiplexedActorOutput` handles watch this to ungate after a barrier.
-    barrier_committed_tx: tokio::sync::watch::Sender<u64>,
 }
 
 impl MultiplexedOutputCoordinator {
+    /// Send a coalesced barrier batch on the shared channel.
+    async fn send_coalesced(
+        &self,
+        coalesced_batch: Vec<DispatcherBarrier>,
+        actor_ids: Vec<ActorId>,
+    ) -> StreamResult<()> {
+        let coalesced = DispatcherMessageBatch::BarrierBatch(coalesced_batch);
+        self.ch
+            .send_tagged(coalesced, 0.into(), actor_ids, 0)
+            .await
+            .map_err(|_| ExchangeChannelClosed::output(self.downstream_actor_id))?;
+        Ok(())
+    }
+
     /// Run the coordinator loop. This should be spawned as a background task.
     ///
     /// It continuously receives barrier notifications and sends coalesced barriers
-    /// when all expected actors have reached the same epoch.
+    /// when all expected actors have reached the same epoch. After each coalescing,
+    /// it drains any additional ready batches (in case a slow actor catching up
+    /// unblocks multiple epochs).
     pub async fn run(mut self) -> StreamResult<()> {
         while let Some((actor_id, barriers)) = self.barrier_rx.recv().await {
             if let Some((coalesced_batch, actor_ids)) = self.coalescer.collect(actor_id, barriers) {
-                let last_epoch = coalesced_batch
-                    .last()
-                    .expect("barrier batch should not be empty")
-                    .epoch
-                    .curr;
+                self.send_coalesced(coalesced_batch, actor_ids).await?;
 
-                // All actors reached the barrier — send the coalesced batch,
-                // tagged with the full set of coalesced actor IDs.
-                //
-                // This acquires barrier permits via `send_tagged`, providing normal
-                // barrier backpressure. This is safe (no deadlock) because all actors
-                // have already sent the previous epoch's data and barriers to ALL their
-                // outputs before they gated on `wait_for_pending_barrier()`. The
-                // downstream can therefore process the previous barrier (returning the
-                // permit) without needing any new data from the gated actors.
-                let coalesced = DispatcherMessageBatch::BarrierBatch(coalesced_batch);
-                self.ch
-                    .send_tagged(coalesced, 0.into(), actor_ids)
-                    .await
-                    .map_err(|_| ExchangeChannelClosed::output(self.downstream_actor_id))?;
-
-                // Ungate all actors: the coalesced barrier batch is now in the shared
-                // channel, so actors can safely send post-barrier data.
-                let _ = self.barrier_committed_tx.send(last_epoch);
+                // After sending one coalesced barrier, check if more are ready.
+                // This can happen when a slow actor catches up and multiple epochs
+                // become coalesceable in sequence.
+                while let Some((coalesced_batch, actor_ids)) = self.coalescer.try_coalesce() {
+                    self.send_coalesced(coalesced_batch, actor_ids).await?;
+                }
             }
         }
         Ok(())
@@ -338,8 +315,8 @@ pub fn create_multiplexed_output(
     let scaled_batched_permits = batched_permits * upstream_actor_ids.len();
     // Barrier permits control how many coalesced barriers can be in-flight simultaneously
     // in the shared channel. This value comes from the `concurrent_barriers` config
-    // (`stream_exchange_concurrent_barriers`). At high parallelism, consider raising it
-    // (e.g. to 10) to avoid serializing barrier propagation through the coordinator.
+    // (`stream_exchange_concurrent_barriers`). With epoch-tagged pipelining, consider
+    // raising it (e.g. to 10) to allow multiple epochs to be in-flight.
     let barrier_permits = concurrent_barriers;
 
     let (tx, rx) = permit::channel(
@@ -350,10 +327,6 @@ pub fn create_multiplexed_output(
 
     let (barrier_tx, barrier_rx) = mpsc::unbounded_channel();
 
-    // Watch channel for the barrier gate: coordinator broadcasts the committed epoch,
-    // actors wait for it before sending post-barrier data.
-    let (barrier_committed_tx, barrier_committed_rx) = tokio::sync::watch::channel(0u64);
-
     let expected_actors: HashSet<ActorId> = upstream_actor_ids.iter().copied().collect();
     let coalescer = BarrierCoalescer::new(expected_actors);
 
@@ -363,8 +336,7 @@ pub fn create_multiplexed_output(
             actor_id,
             ch: tx.clone(),
             barrier_tx: barrier_tx.clone(),
-            barrier_committed_rx: barrier_committed_rx.clone(),
-            pending_barrier_epoch: None,
+            current_epoch: 0,
         })
         .collect();
 
@@ -376,22 +348,45 @@ pub fn create_multiplexed_output(
         barrier_rx,
         coalescer,
         ch: tx,
-        barrier_committed_tx,
     };
 
     (actor_outputs, coordinator, rx)
 }
 
 // ============================================================================
-// Receiver side: MultiplexedRemoteInput
+// Receiver side: MultiplexedRemoteInput with epoch-tagged buffering
 // ============================================================================
+
+/// Flush buffered messages that are now deliverable after a barrier advanced the epoch.
+///
+/// Pops all entries from the front of the buffer whose epoch is <= `delivered_epoch`
+/// and sends them to the logical input channel.
+fn flush_buffer(
+    buf: &mut VecDeque<(u64, crate::executor::DispatcherMessage)>,
+    delivered_epoch: u64,
+    tx: &mpsc::UnboundedSender<crate::executor::DispatcherMessage>,
+) {
+    while let Some(&(epoch, _)) = buf.front() {
+        if epoch <= delivered_epoch {
+            let (_, msg) = buf.pop_front().unwrap();
+            let _ = tx.send(msg);
+        } else {
+            break;
+        }
+    }
+}
 
 /// Demultiplexes a single multiplexed gRPC stream into per-actor logical inputs.
 ///
+/// With epoch-tagged pipelining, this function also handles buffering: when data for
+/// epoch E+1 arrives from a fast actor before the coalesced barrier for epoch E has
+/// arrived, the data is buffered. Once the barrier arrives, buffered data is flushed
+/// to the logical input in the correct order.
+///
 /// This reads from the multiplexed response stream and routes:
-/// - Data chunks → to the logical input for the tagged `source_actor_id`
-/// - Watermarks → to the logical input for the tagged `source_actor_id`
-/// - Coalesced barriers → expanded into one barrier per actor in `coalesced_actor_ids`
+/// - Data chunks → to the logical input for the tagged `source_actor_id` (buffered if ahead)
+/// - Watermarks → to the logical input for the tagged `source_actor_id` (buffered if ahead)
+/// - Coalesced barriers → expanded into one barrier per actor, then buffered data flushed
 ///
 /// Each logical output is an `mpsc::UnboundedSender<DispatcherMessage>` that feeds
 /// into a `LogicalInput` (which implements `Input` / `ActorInput`).
@@ -412,6 +407,20 @@ pub async fn run_multiplexed_remote_input(
 
     let mut batched_permits_accumulated: u32 = 0;
 
+    // Per-actor epoch tracking for epoch-tagged pipelining.
+    // `delivered_barrier_curr[actor]`: the `curr` epoch of the last barrier delivered to
+    // this actor's logical input. Data with epoch <= this value can be forwarded
+    // immediately; data with epoch > this value must be buffered.
+    // Initialized to 0 (matches sender's initial `current_epoch`).
+    let mut delivered_barrier_curr: HashMap<ActorId, u64> =
+        logical_outputs.keys().map(|&id| (id, 0)).collect();
+
+    // Per-actor buffer for data that arrived ahead of its barrier.
+    let mut buffered: HashMap<ActorId, VecDeque<(u64, DispatcherMessage)>> = logical_outputs
+        .keys()
+        .map(|&id| (id, VecDeque::new()))
+        .collect();
+
     while let Some(data_res) = stream.message().await.transpose() {
         match data_res {
             Ok(GetStreamResponse { message, permits }) => {
@@ -419,6 +428,7 @@ pub async fn run_multiplexed_remote_input(
                 let bytes = DispatcherMessageBatch::get_encoded_len(&msg);
                 exchange_frag_recv_size_metrics.inc_by(bytes as u64);
                 let source_actor_id = msg.source_actor_id;
+                let data_epoch = msg.epoch;
 
                 // Handle permit return
                 if let Some(add_back_permits) = match permits.unwrap().value {
@@ -444,23 +454,44 @@ pub async fn run_multiplexed_remote_input(
 
                 match msg_batch {
                     DispatcherMessageBatch::Chunk(chunk) => {
-                        // Route to the correct actor's logical input
-                        let tx = logical_outputs.get(&source_actor_id).ok_or_else(|| {
-                            anyhow::anyhow!(
-                                "MultiplexedRemoteInput received chunk for unknown source actor {}",
-                                source_actor_id
-                            )
-                        })?;
-                        let _ = tx.send(DispatcherMessage::Chunk(chunk));
+                        let delivered = delivered_barrier_curr.get(&source_actor_id).copied()
+                            .ok_or_else(|| {
+                                anyhow::anyhow!(
+                                    "MultiplexedRemoteInput received chunk for unknown source actor {}",
+                                    source_actor_id
+                                )
+                            })?;
+
+                        let tx = logical_outputs.get(&source_actor_id).unwrap();
+                        if data_epoch <= delivered {
+                            // Data belongs to current or past epoch — deliver immediately.
+                            let _ = tx.send(DispatcherMessage::Chunk(chunk));
+                        } else {
+                            // Data is ahead of the barrier — buffer it.
+                            buffered
+                                .get_mut(&source_actor_id)
+                                .unwrap()
+                                .push_back((data_epoch, DispatcherMessage::Chunk(chunk)));
+                        }
                     }
                     DispatcherMessageBatch::Watermark(watermark) => {
-                        let tx = logical_outputs.get(&source_actor_id).ok_or_else(|| {
-                            anyhow::anyhow!(
-                                "MultiplexedRemoteInput received watermark for unknown source actor {}",
-                                source_actor_id
-                            )
-                        })?;
-                        let _ = tx.send(DispatcherMessage::Watermark(watermark));
+                        let delivered = delivered_barrier_curr.get(&source_actor_id).copied()
+                            .ok_or_else(|| {
+                                anyhow::anyhow!(
+                                    "MultiplexedRemoteInput received watermark for unknown source actor {}",
+                                    source_actor_id
+                                )
+                            })?;
+
+                        let tx = logical_outputs.get(&source_actor_id).unwrap();
+                        if data_epoch <= delivered {
+                            let _ = tx.send(DispatcherMessage::Watermark(watermark));
+                        } else {
+                            buffered
+                                .get_mut(&source_actor_id)
+                                .unwrap()
+                                .push_back((data_epoch, DispatcherMessage::Watermark(watermark)));
+                        }
                     }
                     DispatcherMessageBatch::BarrierBatch(barriers) => {
                         // Check for coalesced_actor_ids in the protobuf
@@ -476,8 +507,15 @@ pub async fn run_multiplexed_remote_input(
                                 _ => None,
                             });
 
+                        let last_barrier_curr = barriers
+                            .last()
+                            .expect("barrier batch should not be empty")
+                            .epoch
+                            .curr;
+
                         if let Some(actor_ids) = coalesced_actor_ids {
-                            // Multiplexed mode: expand the barrier to all listed actors
+                            // Multiplexed mode: expand the barrier to all listed actors,
+                            // then flush any buffered ahead-of-barrier data.
                             for &actor_id in actor_ids {
                                 let tx = logical_outputs.get(&actor_id).ok_or_else(|| {
                                     anyhow::anyhow!(
@@ -488,6 +526,15 @@ pub async fn run_multiplexed_remote_input(
                                 for barrier in &barriers {
                                     let _ = tx.send(DispatcherMessage::Barrier(barrier.clone()));
                                 }
+                                // Update delivered epoch for this actor.
+                                *delivered_barrier_curr.get_mut(&actor_id).unwrap() =
+                                    last_barrier_curr;
+                                // Flush buffered data that is now deliverable.
+                                flush_buffer(
+                                    buffered.get_mut(&actor_id).unwrap(),
+                                    last_barrier_curr,
+                                    tx,
+                                );
                             }
                         } else {
                             // Legacy mode: send to source_actor_id
@@ -500,6 +547,13 @@ pub async fn run_multiplexed_remote_input(
                             for barrier in barriers {
                                 let _ = tx.send(DispatcherMessage::Barrier(barrier));
                             }
+                            *delivered_barrier_curr.get_mut(&source_actor_id).unwrap() =
+                                last_barrier_curr;
+                            flush_buffer(
+                                buffered.get_mut(&source_actor_id).unwrap(),
+                                last_barrier_curr,
+                                tx,
+                            );
                         }
                     }
                 }
@@ -617,7 +671,7 @@ mod tests {
         let result = coalescer.collect(20.into(), vec![b2]);
         assert!(result.is_some());
 
-        // Epoch 2 — coalescer should be reset
+        // Epoch 2 — coalescer should handle it after draining epoch 1
         let b3 = DispatcherBarrier::with_prev_epoch_for_test(test_epoch(3), test_epoch(2));
         let b4 = DispatcherBarrier::with_prev_epoch_for_test(test_epoch(3), test_epoch(2));
         assert!(coalescer.collect(10.into(), vec![b3]).is_none());
@@ -637,20 +691,66 @@ mod tests {
         let b2 = DispatcherBarrier::with_prev_epoch_for_test(test_epoch(3), test_epoch(2));
 
         coalescer.collect(1.into(), vec![b1]);
-        coalescer.collect(2.into(), vec![b2]); // Should panic: epoch mismatch
+        coalescer.collect(2.into(), vec![b2]); // Should panic: epoch mismatch at front
     }
 
     #[test]
-    #[should_panic(expected = "sent barrier batch twice")]
-    fn test_barrier_coalescer_duplicate_actor() {
+    fn test_barrier_coalescer_queued_barriers() {
+        // Test epoch-tagged pipelining: actor 1 (fast) submits epochs E1 and E2 before
+        // actor 2 (slow) submits E1.
         let actors: HashSet<ActorId> = [1u32, 2].into_iter().map(ActorId::new).collect();
         let mut coalescer = BarrierCoalescer::new(actors);
 
-        let b1 = DispatcherBarrier::with_prev_epoch_for_test(test_epoch(2), test_epoch(1));
-        let b2 = DispatcherBarrier::with_prev_epoch_for_test(test_epoch(2), test_epoch(1));
+        let b1_e1 = DispatcherBarrier::with_prev_epoch_for_test(test_epoch(2), test_epoch(1));
+        let b1_e2 = DispatcherBarrier::with_prev_epoch_for_test(test_epoch(3), test_epoch(2));
+        let b2_e1 = DispatcherBarrier::with_prev_epoch_for_test(test_epoch(2), test_epoch(1));
+        let b2_e2 = DispatcherBarrier::with_prev_epoch_for_test(test_epoch(3), test_epoch(2));
 
-        coalescer.collect(1.into(), vec![b1]);
-        coalescer.collect(1.into(), vec![b2]); // Should panic: duplicate
+        // Fast actor submits E1 — not enough
+        assert!(coalescer.collect(1.into(), vec![b1_e1]).is_none());
+        // Fast actor submits E2 — still not enough (slow actor hasn't submitted E1)
+        assert!(coalescer.collect(1.into(), vec![b1_e2]).is_none());
+
+        // Slow actor submits E1 — now E1 can coalesce
+        let result = coalescer.collect(2.into(), vec![b2_e1]);
+        assert!(result.is_some());
+        let (batch, _) = result.unwrap();
+        assert_eq!(batch[0].epoch.curr, test_epoch(2));
+
+        // E2 is not ready yet (only actor 1 has it)
+        assert!(coalescer.try_coalesce().is_none());
+
+        // Slow actor submits E2 — now E2 can coalesce
+        let result = coalescer.collect(2.into(), vec![b2_e2]);
+        assert!(result.is_some());
+        let (batch, _) = result.unwrap();
+        assert_eq!(batch[0].epoch.curr, test_epoch(3));
+    }
+
+    #[test]
+    fn test_barrier_coalescer_queued_drain_multiple() {
+        // Test that when a slow actor catches up, multiple epochs can be drained.
+        let actors: HashSet<ActorId> = [1u32, 2].into_iter().map(ActorId::new).collect();
+        let mut coalescer = BarrierCoalescer::new(actors);
+
+        let b1_e1 = DispatcherBarrier::with_prev_epoch_for_test(test_epoch(2), test_epoch(1));
+        let b1_e2 = DispatcherBarrier::with_prev_epoch_for_test(test_epoch(3), test_epoch(2));
+        let b2_e1 = DispatcherBarrier::with_prev_epoch_for_test(test_epoch(2), test_epoch(1));
+        let b2_e2 = DispatcherBarrier::with_prev_epoch_for_test(test_epoch(3), test_epoch(2));
+
+        // Fast actor queues E1 and E2
+        assert!(coalescer.collect(1.into(), vec![b1_e1]).is_none());
+        assert!(coalescer.collect(1.into(), vec![b1_e2]).is_none());
+
+        // Slow actor queues E1 — coalesces E1
+        let result = coalescer.collect(2.into(), vec![b2_e1]);
+        assert!(result.is_some());
+
+        // Slow actor queues E2 — coalesces E2
+        let result = coalescer.collect(2.into(), vec![b2_e2]);
+        assert!(result.is_some());
+        let (batch, _) = result.unwrap();
+        assert_eq!(batch[0].epoch.curr, test_epoch(3));
     }
 
     #[test]
@@ -658,7 +758,8 @@ mod tests {
         let actors: HashSet<ActorId> = [1u32, 2].into_iter().map(ActorId::new).collect();
         let mut coalescer = BarrierCoalescer::new(actors);
 
-        // Each actor sends a batch of two barriers
+        // Each actor sends a batch of two barriers (decomposed by MultiplexedActorOutput,
+        // but tested here as atomic batches for the coalescer)
         let b1_e1 = DispatcherBarrier::with_prev_epoch_for_test(test_epoch(2), test_epoch(1));
         let b1_e2 = DispatcherBarrier::with_prev_epoch_for_test(test_epoch(3), test_epoch(2));
         let b2_e1 = DispatcherBarrier::with_prev_epoch_for_test(test_epoch(2), test_epoch(1));
