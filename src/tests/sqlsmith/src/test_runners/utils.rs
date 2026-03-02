@@ -19,9 +19,10 @@ use rand::{Rng, SeedableRng};
 #[cfg(madsim)]
 use rand_chacha::ChaChaRng;
 use risingwave_sqlparser::ast::Statement;
+use risingwave_sqlparser::parser::Parser;
 use tokio::time::{Duration, sleep, timeout};
 use tokio_postgres::error::Error as PgError;
-use tokio_postgres::{Client, SimpleQueryMessage};
+use tokio_postgres::{Client, NoTls, SimpleQueryMessage};
 
 use crate::config::Configuration;
 use crate::utils::read_file_contents;
@@ -229,9 +230,9 @@ pub(super) async fn create_mviews(
             mview_sql_gen(rng, mvs_and_base_tables.clone(), &format!("m{}", i), config);
         tracing::info!("[EXECUTING CREATE MVIEW]: {}", &create_sql);
         let skip_count = run_query(6, client, &create_sql).await?;
+        mviews.push(table.clone());
         if skip_count == 0 {
             mvs_and_base_tables.push(table.clone());
-            mviews.push(table);
         }
     }
     Ok((mvs_and_base_tables, mviews))
@@ -312,6 +313,8 @@ pub(super) async fn run_query_inner(
         Ok(r) => r,
         Err(_) => {
             if skip_timeout {
+                cancel_timed_out_query(client).await;
+                cleanup_timed_out_query(client, query).await;
                 return Ok((1, vec![]));
             } else {
                 bail!(
@@ -352,6 +355,51 @@ pub(super) async fn run_query_inner(
     }
     let rows = response?;
     Ok((0, rows))
+}
+
+fn extract_materialized_view_name(query: &str) -> Option<String> {
+    let statements = Parser::parse_sql(query).ok()?;
+    if statements.len() != 1 {
+        return None;
+    }
+    match &statements[0] {
+        Statement::CreateView {
+            name,
+            materialized: true,
+            ..
+        } => Some(name.to_string()),
+        _ => None,
+    }
+}
+
+async fn cancel_timed_out_query(client: &Client) {
+    let cancel_token = client.cancel_token();
+    if let Err(err) = cancel_token.cancel_query(NoTls).await {
+        tracing::warn!("[TIMEOUT CANCEL FAILED]: {err}");
+    }
+}
+
+async fn cleanup_timed_out_query(client: &Client, query: &str) {
+    let Some(name) = extract_materialized_view_name(query) else {
+        return;
+    };
+    let drop_sql = format!("DROP MATERIALIZED VIEW IF EXISTS {}", name);
+    for _ in 0..3 {
+        match client.simple_query(&drop_sql).await {
+            Ok(_) => {
+                tracing::info!("[TIMEOUT CLEANUP]: {}", drop_sql);
+                return;
+            }
+            Err(err) => {
+                if is_recovery_in_progress_error(&err.to_string()) {
+                    sleep(Duration::from_secs(1)).await;
+                    continue;
+                }
+                tracing::warn!("[TIMEOUT CLEANUP FAILED]: {err}");
+                return;
+            }
+        }
+    }
 }
 
 pub(super) fn generate_rng(seed: Option<u64>) -> impl Rng {
