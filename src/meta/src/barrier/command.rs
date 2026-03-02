@@ -414,7 +414,7 @@ pub enum CreateStreamingJobType {
 }
 
 /// [`Command`] is the input of [`crate::barrier::worker::GlobalBarrierWorker`]. For different commands,
-/// it will [build different barriers to send](Self::to_mutation),
+/// it will build different barriers to send via corresponding `*_to_mutation` helpers,
 /// and may [do different stuffs after the barrier is collected](PostCollectCommand::post_collect).
 // FIXME: this enum is significantly large on stack, box it
 #[derive(Debug)]
