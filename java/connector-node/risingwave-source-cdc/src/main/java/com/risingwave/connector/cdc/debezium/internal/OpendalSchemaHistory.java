@@ -59,6 +59,9 @@ public class OpendalSchemaHistory extends AbstractFileBasedSchemaHistory {
     // Cache the latest file information to avoid listing files on every store operation
     private String cachedLatestFile = null;
     private int cachedFileRecordCount = 0;
+    // Cache the actual records from the latest file to avoid redundant getObject() calls.
+    // Note: guarded by `storeLock`.
+    private List<HistoryRecord> cachedLatestFileRecords = null;
 
     /**
      * Debezium may store schema history from different threads (snapshot / streaming / restarts).
@@ -160,22 +163,38 @@ public class OpendalSchemaHistory extends AbstractFileBasedSchemaHistory {
 
     @Override
     protected void doStoreRecord(HistoryRecord record) {
-        LOGGER.debug("Storing new schema history record.");
+        final String threadName = Thread.currentThread().getName();
+        LOGGER.info(
+                "Schema history store begin. sourceId={}, thread={}, cachedLatestFile={}, cachedFileRecordCount={}, maxRecordsPerFile={}",
+                sourceId,
+                threadName,
+                cachedLatestFile,
+                cachedFileRecordCount,
+                maxRecordsPerFile);
         synchronized (storeLock) {
             try {
                 // Use cached information to avoid expensive list operations.
                 if (cachedLatestFile != null && cachedFileRecordCount < maxRecordsPerFile) {
                     try {
-                        byte[] data = getObject(cachedLatestFile);
-                        List<HistoryRecord> records = toHistoryRecords(data);
-                        records.add(record);
-                        putObject(cachedLatestFile, fromHistoryRecords(records));
+                        if (cachedLatestFileRecords == null) {
+                            byte[] data = getObject(cachedLatestFile);
+                            cachedLatestFileRecords = toHistoryRecords(data);
+                            cachedFileRecordCount = cachedLatestFileRecords.size();
+                        }
+                        final int beforeCount = cachedLatestFileRecords.size();
+                        cachedLatestFileRecords.add(record);
+                        putObject(cachedLatestFile, fromHistoryRecords(cachedLatestFileRecords));
 
-                        cachedFileRecordCount++;
-                        LOGGER.debug(
-                                "Appended record to existing file: {} (now {} records)",
+                        final int afterCount = cachedLatestFileRecords.size();
+                        cachedFileRecordCount = afterCount;
+                        LOGGER.info(
+                                "Schema history appended. sourceId={}, thread={}, file={}, beforeRecords={}, afterRecords={}, maxRecordsPerFile={}",
+                                sourceId,
+                                threadName,
                                 cachedLatestFile,
-                                cachedFileRecordCount);
+                                beforeCount,
+                                afterCount,
+                                maxRecordsPerFile);
                         return;
                     } catch (Exception appendErr) {
                         // The cached file may have been deleted externally or temporarily
@@ -186,19 +205,26 @@ public class OpendalSchemaHistory extends AbstractFileBasedSchemaHistory {
                                 appendErr);
                         cachedLatestFile = null;
                         cachedFileRecordCount = 0;
+                        cachedLatestFileRecords = null;
                     }
                 }
 
                 long nextSequence = sequenceNumber.incrementAndGet();
                 String newFile = String.format("%s/schema_history_%d.dat", objectDir, nextSequence);
-                putObject(newFile, fromHistoryRecords(Collections.singletonList(record)));
+                List<HistoryRecord> newRecords = new ArrayList<>(1);
+                newRecords.add(record);
+                putObject(newFile, fromHistoryRecords(newRecords));
 
                 cachedLatestFile = newFile;
                 cachedFileRecordCount = 1;
-                LOGGER.debug(
-                        "Created new schema history file: {} (sequence: {})",
+                cachedLatestFileRecords = newRecords;
+                LOGGER.info(
+                        "Schema history created new file. sourceId={}, thread={}, file={}, sequence={}, records=1, maxRecordsPerFile={}",
+                        sourceId,
+                        threadName,
                         newFile,
-                        nextSequence);
+                        nextSequence,
+                        maxRecordsPerFile);
             } catch (Exception e) {
                 throw new SchemaHistoryException("Failed to store schema history record", e);
             }
@@ -332,6 +358,7 @@ public class OpendalSchemaHistory extends AbstractFileBasedSchemaHistory {
                 if (i == historyFiles.size() - 1) {
                     cachedLatestFile = filePath;
                     cachedFileRecordCount = records.size();
+                    cachedLatestFileRecords = new ArrayList<>(records);
                     LOGGER.debug(
                             "Initialized cache: latest file {} with {} records",
                             cachedLatestFile,
@@ -348,6 +375,7 @@ public class OpendalSchemaHistory extends AbstractFileBasedSchemaHistory {
         if (historyFiles.isEmpty()) {
             cachedLatestFile = null;
             cachedFileRecordCount = 0;
+            cachedLatestFileRecords = null;
             LOGGER.debug("No existing history files found, cache initialized as empty");
         }
 
