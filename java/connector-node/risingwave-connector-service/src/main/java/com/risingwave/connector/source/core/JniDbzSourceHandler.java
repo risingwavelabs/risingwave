@@ -28,6 +28,7 @@ import com.risingwave.java.binding.CdcSourceChannel;
 import com.risingwave.metrics.ConnectorNodeMetrics;
 import com.risingwave.proto.ConnectorServiceProto;
 import com.risingwave.proto.ConnectorServiceProto.GetEventStreamResponse;
+import io.debezium.config.CommonConnectorConfig;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
@@ -136,6 +137,16 @@ public class JniDbzSourceHandler {
                 return;
             }
 
+            // For streaming-only mode, use Connected as a best-effort health signal to avoid silent
+            // failures where Debezium is stuck retrying but emits nothing and does not terminate.
+            final boolean enableConnectedWatchdog = config.shouldWaitForStreamingStart();
+            final int connectedTimeoutSecs = config.getWaitStreamingStartTimeout();
+            final String dbServerName =
+                    config.getResolvedDebeziumProps()
+                            .getProperty(CommonConnectorConfig.TOPIC_PREFIX.name());
+            long disconnectedSinceMs = -1L;
+            long lastConnectedCheckMs = 0L;
+
             LOG.info("Start consuming events of table {}", config.getSourceId());
             while (runner.isRunning()) {
                 // check whether the send queue has room for new messages
@@ -155,6 +166,44 @@ public class JniDbzSourceHandler {
                 } else {
                     // If resp is null means just check whether channel is closed.
                     success = channel.send(null);
+                }
+
+                // Periodically check whether streaming is connected.
+                if (enableConnectedWatchdog && dbServerName != null) {
+                    long now = System.currentTimeMillis();
+                    if (now - lastConnectedCheckMs >= 1000L) {
+                        lastConnectedCheckMs = now;
+                        boolean connected =
+                                DbzSourceUtils.isStreamingConnected(
+                                        config.getSourceType(), dbServerName);
+                        if (!connected) {
+                            if (disconnectedSinceMs < 0) {
+                                disconnectedSinceMs = now;
+                            } else if (now - disconnectedSinceMs
+                                    > TimeUnit.SECONDS.toMillis(connectedTimeoutSecs)) {
+                                String errMsg =
+                                        String.format(
+                                                "Debezium streaming is disconnected for %d seconds (timeout=%d). sourceId=%d",
+                                                TimeUnit.MILLISECONDS.toSeconds(
+                                                        now - disconnectedSinceMs),
+                                                connectedTimeoutSecs,
+                                                config.getSourceId());
+                                LOG.error(errMsg);
+                                channel.sendError(errMsg);
+                                try {
+                                    runner.stop();
+                                } catch (Exception e) {
+                                    LOG.warn(
+                                            "Failed to stop Engine#{} after disconnected timeout",
+                                            config.getSourceId(),
+                                            e);
+                                }
+                                return;
+                            }
+                        } else {
+                            disconnectedSinceMs = -1L;
+                        }
+                    }
                 }
                 // When user drops the connector, the channel rx will be dropped and we fail to
                 // send the message. We should stop the engine in this case.
