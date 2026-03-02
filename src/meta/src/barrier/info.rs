@@ -54,6 +54,7 @@ use crate::controller::utils::rebuild_fragment_mapping;
 use crate::manager::NotificationManagerRef;
 use crate::model::{ActorId, BackfillUpstreamType, FragmentId, StreamJobFragments};
 use crate::stream::UpstreamSinkInfo;
+use crate::stream::source_manager::SplitAssignment;
 use crate::{MetaError, MetaResult};
 
 #[derive(Debug, Clone)]
@@ -1166,6 +1167,7 @@ impl InflightDatabaseInfo {
         replace_job: Option<&ReplaceStreamJobPlan>,
         new_upstream_sink: Option<&UpstreamSinkInfo>,
         control_stream_manager: &ControlStreamManager,
+        split_assignment: &SplitAssignment,
     ) -> FragmentEdgeBuildResult {
         // `existing_fragment_ids` consists of
         //  - keys of `info.upstream_fragment_downstreams`, which are the `fragment_id` the upstream fragment of the newly created job
@@ -1206,7 +1208,7 @@ impl InflightDatabaseInfo {
                     is_snapshot_backfill.then_some(info.streaming_job.id()),
                 );
                 info.stream_job_fragments
-                    .new_fragment_info(&info.init_split_assignment)
+                    .new_fragment_info(split_assignment)
                     .map(move |(fragment_id, info)| (fragment_id, info, partial_graph_id))
             })
             .chain(
@@ -1215,7 +1217,7 @@ impl InflightDatabaseInfo {
                     .flat_map(|replace_job| {
                         replace_job
                             .new_fragments
-                            .new_fragment_info(&replace_job.init_split_assignment)
+                            .new_fragment_info(split_assignment)
                             .chain(
                                 replace_job
                                     .auto_refresh_schema_sinks
