@@ -27,7 +27,7 @@ pub async fn trigger_manual_compaction(
 ) -> anyhow::Result<()> {
     let meta_client = context.meta_client().await?;
     for level in levels {
-        println!("Triggering manual compaction for level {level}...");
+        tracing::info!("Triggering manual compaction for level {level}...");
         let result = meta_client
             .trigger_manual_compaction(compaction_group_id, table_id, level, sst_ids.clone())
             .await;
