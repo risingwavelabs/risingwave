@@ -64,46 +64,69 @@ use crate::hummock::sequence::next_raw_object_id;
 impl HummockManager {
     #[cfg(test)]
     pub(super) async fn check_state_consistency(&self) {
-        use crate::hummock::manager::compaction::Compaction;
-        use crate::hummock::manager::context::ContextInfo;
-        use crate::hummock::manager::versioning::Versioning;
-        let mut compaction_guard = self.compaction.write().await;
-        let mut versioning_guard = self.versioning.write().await;
-        let mut context_info_guard = self.context_info.write().await;
         // We don't check `checkpoint` because it's allowed to update its in memory state without
         // persisting to object store.
-        let get_state = |compaction_guard: &mut Compaction,
-                         versioning_guard: &mut Versioning,
-                         context_info_guard: &mut ContextInfo| {
-            let compact_statuses_copy = compaction_guard.compaction_statuses.clone();
-            let compact_task_assignment_copy = compaction_guard.compact_task_assignment.clone();
-            let pinned_versions_copy = context_info_guard.pinned_versions.clone();
-            let hummock_version_deltas_copy = versioning_guard.hummock_version_deltas.clone();
-            let version_stats_copy = versioning_guard.version_stats.clone();
-            ((
-                compact_statuses_copy,
-                compact_task_assignment_copy,
-                pinned_versions_copy,
-                hummock_version_deltas_copy,
-                version_stats_copy,
-            ),)
+        let get_state =
+            |compact_statuses_copy, compact_task_assignment_copy, non_compaction_state| {
+                ((
+                    compact_statuses_copy,
+                    compact_task_assignment_copy,
+                    non_compaction_state,
+                ),)
+            };
+        let get_non_compaction_state =
+            |pinned_versions_copy, hummock_version_deltas_copy, version_stats_copy| {
+                ((
+                    pinned_versions_copy,
+                    hummock_version_deltas_copy,
+                    version_stats_copy,
+                ),)
+            };
+
+        let mem_compact_statuses = self.compaction.snapshot_statuses().await;
+        let mem_compact_task_assignment = self.compaction.snapshot_assignments().await;
+        let (mem_pinned_versions, mem_hummock_version_deltas, mem_version_stats) = {
+            let versioning_guard = self.versioning.read().await;
+            let context_info_guard = self.context_info.read().await;
+            (
+                context_info_guard.pinned_versions.clone(),
+                versioning_guard.hummock_version_deltas.clone(),
+                versioning_guard.version_stats.clone(),
+            )
         };
         let mem_state = get_state(
-            &mut compaction_guard,
-            &mut versioning_guard,
-            &mut context_info_guard,
+            mem_compact_statuses,
+            mem_compact_task_assignment,
+            get_non_compaction_state(
+                mem_pinned_versions,
+                mem_hummock_version_deltas,
+                mem_version_stats,
+            ),
         );
-        self.load_meta_store_state_impl(
-            &mut compaction_guard,
-            &mut versioning_guard,
-            &mut context_info_guard,
-        )
-        .await
-        .expect("Failed to load state from meta store");
+
+        self.load_meta_store_state()
+            .await
+            .expect("Failed to load state from meta store");
+
+        let loaded_compact_statuses = self.compaction.snapshot_statuses().await;
+        let loaded_compact_task_assignment = self.compaction.snapshot_assignments().await;
+        let (loaded_pinned_versions, loaded_hummock_version_deltas, loaded_version_stats) = {
+            let versioning_guard = self.versioning.read().await;
+            let context_info_guard = self.context_info.read().await;
+            (
+                context_info_guard.pinned_versions.clone(),
+                versioning_guard.hummock_version_deltas.clone(),
+                versioning_guard.version_stats.clone(),
+            )
+        };
         let loaded_state = get_state(
-            &mut compaction_guard,
-            &mut versioning_guard,
-            &mut context_info_guard,
+            loaded_compact_statuses,
+            loaded_compact_task_assignment,
+            get_non_compaction_state(
+                loaded_pinned_versions,
+                loaded_hummock_version_deltas,
+                loaded_version_stats,
+            ),
         );
         assert_eq!(
             mem_state, loaded_state,

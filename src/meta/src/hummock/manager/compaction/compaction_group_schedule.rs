@@ -72,7 +72,6 @@ impl HummockManager {
         group_2: CompactionGroupId,
         created_tables: Option<HashSet<TableId>>,
     ) -> Result<()> {
-        let compaction_guard = self.compaction.write().await;
         let mut versioning_guard = self.versioning.write().await;
         let versioning = versioning_guard.deref_mut();
         // Validate parameters.
@@ -341,8 +340,11 @@ impl HummockManager {
         let mut canceled_tasks = vec![];
         // after merge, all tasks in right_group_id should be canceled
         // Failure of cancel does not cause correctness problems, the report task will have better interception, and the operation here is designed to free up compactor compute resources more quickly.
-        let compact_task_assignments =
-            compaction_guard.get_compact_task_assignments_by_group_id(right_group_id);
+        drop(versioning_guard);
+        let compact_task_assignments = self
+            .compaction
+            .get_compact_task_assignments_by_group_id(right_group_id)
+            .await;
         compact_task_assignments
             .into_iter()
             .for_each(|task_assignment| {
@@ -359,9 +361,9 @@ impl HummockManager {
             });
 
         if !canceled_tasks.is_empty() {
-            self.report_compact_tasks_impl(canceled_tasks, compaction_guard, versioning_guard)
-                .await?;
+            self.report_compact_tasks(canceled_tasks).await?;
         }
+        self.compaction.remove_group(right_group_id).await;
 
         self.metrics
             .merge_compaction_group_count
@@ -393,7 +395,6 @@ impl HummockManager {
         partition_vnode_count: Option<u32>,
     ) -> Result<Vec<(CompactionGroupId, Vec<StateTableId>)>> {
         let mut result = vec![];
-        let compaction_guard = self.compaction.write().await;
         let mut versioning_guard = self.versioning.write().await;
         let versioning = versioning_guard.deref_mut();
         // Validate parameters.
@@ -567,19 +568,24 @@ impl HummockManager {
 
         // The expired compact tasks will be canceled.
         // Failure of cancel does not cause correctness problems, the report task will have better interception, and the operation here is designed to free up compactor compute resources more quickly.
-        let mut canceled_tasks = vec![];
-        let compact_task_assignments =
-            compaction_guard.get_compact_task_assignments_by_group_id(parent_group_id);
-        let levels = versioning
+        let parent_group_version_id = versioning
             .current_version
-            .get_compaction_group_levels(parent_group_id);
+            .get_compaction_group_levels(parent_group_id)
+            .compaction_group_version_id;
+        drop(versioning_guard);
+
+        let mut canceled_tasks = vec![];
+        let compact_task_assignments = self
+            .compaction
+            .get_compact_task_assignments_by_group_id(parent_group_id)
+            .await;
         compact_task_assignments
             .into_iter()
             .for_each(|task_assignment| {
                 if let Some(task) = task_assignment.compact_task.as_ref() {
                     let is_expired = is_compaction_task_expired(
                         task.compaction_group_version_id,
-                        levels.compaction_group_version_id,
+                        parent_group_version_id,
                     );
                     if is_expired {
                         canceled_tasks.push(ReportTask {
@@ -594,8 +600,7 @@ impl HummockManager {
             });
 
         if !canceled_tasks.is_empty() {
-            self.report_compact_tasks_impl(canceled_tasks, compaction_guard, versioning_guard)
-                .await?;
+            self.report_compact_tasks(canceled_tasks).await?;
         }
 
         self.metrics

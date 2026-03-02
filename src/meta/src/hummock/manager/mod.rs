@@ -114,10 +114,13 @@ pub struct HummockManager {
     pub env: MetaSrvEnv,
 
     metadata_manager: MetadataManager,
-    /// Lock order: `compaction`, `versioning`, `compaction_group_manager`, `context_info`
-    /// - Lock `compaction` first, then `versioning`, then `compaction_group_manager` and finally `context_info`.
+    /// Lock order: `compaction.groups/task_to_group`, `versioning`, `compaction_group_manager`,
+    /// `context_info`.
+    /// - For compaction runtime internals, acquire `groups` first, then `task_to_group`, then
+    ///   per-group inner locks in ascending `CompactionGroupId`.
+    /// - Then lock `versioning`, `compaction_group_manager`, and finally `context_info`.
     /// - This order should be strictly followed to prevent deadlock.
-    compaction: MonitoredRwLock<Compaction>,
+    compaction: CompactionRuntime,
     versioning: MonitoredRwLock<Versioning>,
     /// `CompactionGroupManager` manages compaction configs for compaction groups.
     compaction_group_manager: MonitoredRwLock<CompactionGroupManager>,
@@ -304,10 +307,9 @@ impl HummockManager {
                 Default::default(),
                 "hummock_manager::versioning",
             ),
-            compaction: MonitoredRwLock::new(
+            compaction: CompactionRuntime::new(
                 metrics.hummock_manager_lock_time.clone(),
-                Default::default(),
-                "hummock_manager::compaction",
+                deterministic_mode,
             ),
             compaction_group_manager: MonitoredRwLock::new(
                 metrics.hummock_manager_lock_time.clone(),
@@ -363,25 +365,35 @@ impl HummockManager {
         let now = self.load_now().await?;
         *self.now.lock().await = now.unwrap_or(0);
 
-        let mut compaction_guard = self.compaction.write().await;
+        let (compaction_statuses, compact_task_assignment) =
+            self.load_compaction_state_from_meta_store().await?;
+        self.compaction
+            .rebuild_from_maps(compaction_statuses, compact_task_assignment)
+            .await;
+        let default_compaction_config = self
+            .compaction_group_manager
+            .read()
+            .await
+            .default_compaction_config();
+
         let mut versioning_guard = self.versioning.write().await;
         let mut context_info_guard = self.context_info.write().await;
         self.load_meta_store_state_impl(
-            &mut compaction_guard,
             &mut versioning_guard,
             &mut context_info_guard,
+            default_compaction_config,
         )
         .await
     }
 
-    /// Load state from meta store.
-    async fn load_meta_store_state_impl(
+    async fn load_compaction_state_from_meta_store(
         &self,
-        compaction_guard: &mut Compaction,
-        versioning_guard: &mut Versioning,
-        context_info: &mut ContextInfo,
-    ) -> Result<()> {
+    ) -> Result<(
+        BTreeMap<CompactionGroupId, CompactStatus>,
+        BTreeMap<HummockCompactionTaskId, PbCompactTaskAssignment>,
+    )> {
         use sea_orm::EntityTrait;
+
         let meta_store = self.meta_store_ref();
         let compaction_statuses: BTreeMap<CompactionGroupId, CompactStatus> =
             compaction_status::Entity::find()
@@ -391,22 +403,31 @@ impl HummockManager {
                 .into_iter()
                 .map(|m| (m.compaction_group_id as CompactionGroupId, m.into()))
                 .collect();
-        if !compaction_statuses.is_empty() {
-            compaction_guard.compaction_statuses = compaction_statuses;
-        }
+        let compact_task_assignment: BTreeMap<HummockCompactionTaskId, PbCompactTaskAssignment> =
+            compaction_task::Entity::find()
+                .all(&meta_store.conn)
+                .await
+                .map_err(MetadataModelError::from)?
+                .into_iter()
+                .map(|m| {
+                    (
+                        m.id as HummockCompactionTaskId,
+                        PbCompactTaskAssignment::from(m),
+                    )
+                })
+                .collect();
+        Ok((compaction_statuses, compact_task_assignment))
+    }
 
-        compaction_guard.compact_task_assignment = compaction_task::Entity::find()
-            .all(&meta_store.conn)
-            .await
-            .map_err(MetadataModelError::from)?
-            .into_iter()
-            .map(|m| {
-                (
-                    m.id as HummockCompactionTaskId,
-                    PbCompactTaskAssignment::from(m),
-                )
-            })
-            .collect();
+    /// Load state from meta store.
+    async fn load_meta_store_state_impl(
+        &self,
+        versioning_guard: &mut Versioning,
+        context_info: &mut ContextInfo,
+        default_compaction_config: Arc<risingwave_pb::hummock::CompactionConfig>,
+    ) -> Result<()> {
+        use sea_orm::EntityTrait;
+        let meta_store = self.meta_store_ref();
 
         let hummock_version_deltas: BTreeMap<HummockVersionId, HummockVersionDelta> =
             hummock_version_delta::Entity::find()
@@ -427,11 +448,6 @@ impl HummockManager {
             versioning_guard.checkpoint = c;
             versioning_guard.checkpoint.version.clone()
         } else {
-            let default_compaction_config = self
-                .compaction_group_manager
-                .read()
-                .await
-                .default_compaction_config();
             let checkpoint_version = HummockVersion::create_init_version(default_compaction_config);
             tracing::info!("init hummock version checkpoint");
             versioning_guard.checkpoint = HummockVersionCheckpoint {
