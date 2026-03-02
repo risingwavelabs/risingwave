@@ -22,7 +22,9 @@ use risingwave_rpc_client::error::RpcError;
 use crate::enforce_secret::EnforceSecretError;
 use crate::parser::AccessError;
 use crate::schema::InvalidOptionError;
-use crate::schema::schema_registry::{ConcurrentRequestError, WireFormatError};
+use crate::schema::schema_registry::{
+    ConcurrentRequestError, SchemaRegistryClientError, WireFormatError,
+};
 use crate::sink::SinkError;
 use crate::source::mqtt::MqttError;
 use crate::source::nats::NatsJetStreamError;
@@ -88,6 +90,7 @@ def_anyhow_newtype! {
     // ADBC errors
     #[cfg(feature = "source-adbc_snowflake")]
     adbc_core::error::Error => "ADBC error",
+    SchemaRegistryClientError => "Schema registry client error",
 }
 
 pub type ConnectorResult<T, E = ConnectorError> = std::result::Result<T, E>;
