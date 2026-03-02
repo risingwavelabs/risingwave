@@ -18,7 +18,7 @@ use std::sync::Arc;
 
 use anyhow::{Context, anyhow};
 use futures::TryStreamExt;
-use itertools::Itertools;
+use itertools::{Either, Itertools};
 use risingwave_common::bail;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{FragmentTypeFlag, FragmentTypeMask};
@@ -2032,15 +2032,43 @@ impl CatalogController {
             return Ok(());
         }
 
-        let models: Vec<fragment_splits::ActiveModel> = fragment_splits
-            .iter()
-            .map(|(fragment_id, splits)| fragment_splits::ActiveModel {
-                fragment_id: Set(*fragment_id as _),
-                splits: Set(Some(ConnectorSplits::from(&PbConnectorSplits {
-                    splits: splits.iter().map(Into::into).collect_vec(),
-                }))),
-            })
+        let existing_fragment_ids: HashSet<FragmentId> = FragmentModel::find()
+            .select_only()
+            .column(fragment::Column::FragmentId)
+            .filter(fragment::Column::FragmentId.is_in(fragment_splits.keys().copied()))
+            .into_tuple()
+            .all(txn)
+            .await?
+            .into_iter()
             .collect();
+
+        // Filter out stale fragment ids to avoid FK violations when split updates race with drop.
+        let (models, skipped_fragment_ids): (Vec<_>, Vec<_>) = fragment_splits
+            .iter()
+            .partition_map(|(fragment_id, splits)| {
+                if existing_fragment_ids.contains(fragment_id) {
+                    Either::Left(fragment_splits::ActiveModel {
+                        fragment_id: Set(*fragment_id as _),
+                        splits: Set(Some(ConnectorSplits::from(&PbConnectorSplits {
+                            splits: splits.iter().map(Into::into).collect_vec(),
+                        }))),
+                    })
+                } else {
+                    Either::Right(*fragment_id)
+                }
+            });
+
+        if !skipped_fragment_ids.is_empty() {
+            tracing::warn!(
+                skipped_fragment_ids = ?skipped_fragment_ids,
+                total_fragment_ids = fragment_splits.len(),
+                "skipping stale fragment split updates for missing fragments"
+            );
+        }
+
+        if models.is_empty() {
+            return Ok(());
+        }
 
         FragmentSplits::insert_many(models)
             .on_conflict(
