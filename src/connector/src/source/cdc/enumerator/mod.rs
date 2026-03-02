@@ -155,40 +155,54 @@ where
 
 impl<T: CdcSourceTypeTrait> DebeziumSplitEnumerator<T> {
     async fn monitor_postgres_confirmed_flush_lsn(&mut self) -> ConnectorResult<()> {
-        // Query confirmed flush LSN and update metrics
-        match self.query_confirmed_flush_lsn().await {
-            Ok(Some((lsn, slot_name))) => {
-                // Update metrics
+        // Query upstream LSNs and update metrics.
+        match self.query_postgres_lsns().await {
+            Ok(Some((confirmed_flush_lsn, upstream_max_lsn, slot_name))) => {
+                let labels = [&self.source_id.to_string(), &slot_name.to_owned()];
+
                 self.metrics
-                    .pg_cdc_confirmed_flush_lsn
-                    .with_guarded_label_values(&[
-                        &self.source_id.to_string(),
-                        &slot_name.to_owned(),
-                    ])
-                    .set(lsn as i64);
-                tracing::debug!(
-                    "Updated confirm_flush_lsn for source {} slot {}: {}",
-                    self.source_id,
-                    slot_name,
-                    lsn
-                );
+                    .pg_cdc_upstream_max_lsn
+                    .with_guarded_label_values(&labels)
+                    .set(upstream_max_lsn as i64);
+
+                if let Some(lsn) = confirmed_flush_lsn {
+                    self.metrics
+                        .pg_cdc_confirmed_flush_lsn
+                        .with_guarded_label_values(&labels)
+                        .set(lsn as i64);
+                    tracing::debug!(
+                        "Updated confirmed_flush_lsn for source {} slot {}: {}",
+                        self.source_id,
+                        slot_name,
+                        lsn
+                    );
+                } else {
+                    tracing::warn!(
+                        "confirmed_flush_lsn is NULL for source {} slot {}",
+                        self.source_id,
+                        slot_name
+                    );
+                }
             }
             Ok(None) => {
-                tracing::warn!("No confirmed_flush_lsn found for source {}", self.source_id);
+                tracing::warn!(
+                    "No replication slot found when querying LSNs for source {}",
+                    self.source_id
+                );
             }
             Err(e) => {
                 tracing::error!(
-                    "Failed to query confirmed_flush_lsn for source {}: {}",
+                    "Failed to query PostgreSQL LSNs for source {}: {}",
                     self.source_id,
                     e.as_report()
                 );
             }
-        }
+        };
         Ok(())
     }
 
-    /// Query confirmed flush LSN from PostgreSQL, return the slot name and the confirmed flush LSN.
-    async fn query_confirmed_flush_lsn(&self) -> ConnectorResult<Option<(u64, &str)>> {
+    /// Query LSNs from PostgreSQL, return (`confirmed_flush_lsn`, `upstream_max_lsn`, `slot_name`).
+    async fn query_postgres_lsns(&self) -> ConnectorResult<Option<(Option<u64>, u64, &str)>> {
         // Extract connection parameters from CDC properties
         let hostname = self
             .properties
@@ -238,20 +252,21 @@ impl<T: CdcSourceTypeTrait> DebeziumSplitEnumerator<T> {
         .await
         .context("Failed to create PostgreSQL client")?;
 
-        let query = "SELECT confirmed_flush_lsn FROM pg_replication_slots WHERE slot_name = $1";
+        let query = "SELECT confirmed_flush_lsn, pg_current_wal_lsn() \
+            FROM pg_replication_slots WHERE slot_name = $1";
         let row = client
             .query_opt(query, &[&slot_name])
             .await
-            .context("PostgreSQL query confirmed flush lsn error")?;
-
+            .context("PostgreSQL query LSNs error")?;
         match row {
             Some(row) => {
-                let confirm_flush_lsn: Option<PgLsn> = row.get(0);
-                if let Some(lsn) = confirm_flush_lsn {
-                    Ok(Some((lsn.into(), slot_name.as_str())))
-                } else {
-                    Ok(None)
-                }
+                let confirmed_flush_lsn: Option<PgLsn> = row.get(0);
+                let upstream_max_lsn: PgLsn = row.get(1);
+                Ok(Some((
+                    confirmed_flush_lsn.map(Into::into),
+                    upstream_max_lsn.into(),
+                    slot_name.as_str(),
+                )))
             }
             None => {
                 tracing::warn!("No replication slot found with name: {}", slot_name);
