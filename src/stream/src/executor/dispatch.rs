@@ -48,12 +48,13 @@ use crate::executor::{StopMutation, StreamConsumer};
 use crate::task::{DispatcherId, NewOutputRequest};
 
 mod output_mapping;
-pub use output_mapping::DispatchOutputMapping;
-#[path = "dispatch_sync_log_store.rs"]
 mod dispatch_sync_log_store;
-pub use dispatch_sync_log_store::{SyncLogStoreDispatchConfig, SyncLogStoreDispatchExecutor};
+
+pub use dispatch_sync_log_store::SyncLogStoreDispatchExecutor;
+pub use output_mapping::DispatchOutputMapping;
 use risingwave_common::id::FragmentId;
 
+pub(crate) use super::sync_log_store_impl::SyncedKvLogStoreContext;
 use crate::error::StreamError;
 
 /// [`DispatchExecutor`] consumes messages and send them into downstream actors. Usually,
@@ -112,7 +113,7 @@ impl DispatchExecutorMetrics {
     }
 }
 
-struct DispatchExecutorInner {
+pub struct DispatchExecutorInner {
     dispatchers: Vec<DispatcherWithMetrics>,
     actor_id: ActorId,
     actor_config: Arc<StreamingConfig>,
