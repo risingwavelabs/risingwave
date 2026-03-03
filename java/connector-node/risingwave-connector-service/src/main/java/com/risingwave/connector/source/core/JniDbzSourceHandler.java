@@ -139,7 +139,7 @@ public class JniDbzSourceHandler {
 
             // For streaming-only mode, use Connected as a best-effort health signal to avoid silent
             // failures where Debezium is stuck retrying but emits nothing and does not terminate.
-            final boolean enableConnectedWatchdog = config.shouldWaitForStreamingStart();
+            final boolean enableConnectedWatchdog = config.isBackfillSource();
             final int connectedTimeoutSecs = config.getWaitStreamingStartTimeout();
             final String dbServerName =
                     config.getResolvedDebeziumProps()

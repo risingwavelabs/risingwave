@@ -126,15 +126,6 @@ public class DbzConnectorConfig {
         return waitStreamingStartTimeout;
     }
 
-    /**
-     * Whether we should wait for Debezium streaming to be connected during startup.
-     *
-     * <p>Currently, this is only enabled for backfill mode (rw_cdc_backfill).
-     */
-    public boolean shouldWaitForStreamingStart() {
-        return isBackfillSource;
-    }
-
     public DbzConnectorConfig(
             SourceTypeE source,
             long sourceId,
