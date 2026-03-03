@@ -835,7 +835,13 @@ impl StateStoreReadLog for HummockStorage {
             )
             .await?;
         let next_epoch_ret = next_epoch(&table_change_log, epoch, options.table_id)?;
-        Ok(next_epoch_ret.expect("should be set after wait_for_update returns"))
+        next_epoch_ret.ok_or_else(|| {
+            HummockError::next_epoch(format!(
+                "next_epoch for {} {} should be valid",
+                options.table_id, epoch
+            ))
+            .into()
+        })
     }
 
     async fn iter_log(
