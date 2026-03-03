@@ -15,9 +15,3 @@ e2e_test/source_legacy/pulsar/**/*.slt*
 
 # Manually executed in `e2e_test/subscription/main.py`
 e2e_test/subscription/**/*.slt*
-
-# Manually executed local monitoring stress tests (not part of CI)
-e2e_test/monitoring/create_big_single_col_in_a_row.slt.part
-e2e_test/monitoring/drop_big_single_col_in_a_row.slt.part
-e2e_test/monitoring/create_many_cols_in_a_row.slt.part
-e2e_test/monitoring/drop_many_cols_in_a_row.slt.part
