@@ -27,6 +27,7 @@ use futures_async_stream::try_stream;
 use gcp_bigquery_client::Client;
 use gcp_bigquery_client::error::BQError;
 use gcp_bigquery_client::model::query_request::QueryRequest;
+use gcp_bigquery_client::model::query_response::ResultSet;
 use gcp_bigquery_client::model::table::Table;
 use gcp_bigquery_client::model::table_field_schema::TableFieldSchema;
 use gcp_bigquery_client::model::table_schema::TableSchema;
@@ -559,7 +560,7 @@ impl Sink for BigQuerySink {
             }
         }
 
-        let mut rs = client
+        let rs = client
             .job()
             .query(
                 &self.config.common.project,
@@ -568,6 +569,7 @@ impl Sink for BigQuerySink {
                     project_id, dataset_id, table_id,
                 )),
             ).await.map_err(|e| SinkError::BigQuery(e.into()))?;
+        let mut rs = ResultSet::new_from_query_response(rs);
 
         let mut big_query_schema = HashMap::default();
         while rs.next_row() {
