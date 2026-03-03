@@ -1346,7 +1346,7 @@ mod tests {
     async fn test_get_skips_sst_by_table_id_filter() {
         let query_table_id = TableId::new(100);
         let epoch: u64 = (31 * 1000) << 16;
-        let compaction_group_id = StaticCompactionGroupId::StateDefault;
+        let compaction_group_id: u64 = StaticCompactionGroupId::StateDefault.into();
 
         // SST key range: table_id 50..150, but table_ids = [50, 150] (no 100).
         let sst_info = SstableInfoInner {
@@ -1388,7 +1388,7 @@ mod tests {
         };
 
         let mut version = HummockVersion::from_persisted_protobuf(&PbHummockVersion {
-            id: 1u64.into(),
+            id: 1u64,
             ..Default::default()
         });
         version.levels.insert(compaction_group_id, levels);
