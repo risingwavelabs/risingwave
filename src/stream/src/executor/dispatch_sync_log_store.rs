@@ -138,13 +138,13 @@ enum WriteFuture<S: LocalStateStore> {
         stream: BoxedMessageStream,
         write_state: LogStoreWriteState<S>,
     },
+    EndOfStream,
     Empty,
 }
 
 enum WriteFutureEvent {
     UpstreamMessageReceived(Message),
     ChunkFlushed(FlushedChunkInfo),
-    EndOfStream,
 }
 
 impl<S: LocalStateStore> WriteFuture<S> {
@@ -211,26 +211,20 @@ impl<S: LocalStateStore> WriteFuture<S> {
         match self {
             WriteFuture::ReceiveFromUpstream { future, .. } => {
                 let (opt, stream) = future.await;
-
-                match opt {
-                    Some(result) => {
-                        must_match!(replace(self, WriteFuture::Empty), WriteFuture::ReceiveFromUpstream { write_state, .. } => {
-                            result.map(|item| {
+                must_match!(replace(self, WriteFuture::Empty), WriteFuture::ReceiveFromUpstream { write_state, .. } => {
+                    match opt {
+                        Some(result) => result
+                            .map(|item| {
                                 (
                                     stream,
                                     write_state,
                                     WriteFutureEvent::UpstreamMessageReceived(item),
                                 )
                             })
-                            .map_err(Into::into)
-                        })
+                            .map_err(Into::into),
+                        None => Err(anyhow!("end of upstream input").into()),
                     }
-                    None => {
-                        must_match!(replace(self, WriteFuture::Empty), WriteFuture::ReceiveFromUpstream { write_state, .. } => {
-                            Ok((stream, write_state, WriteFutureEvent::EndOfStream))
-                        })
-                    }
-                }
+                })
             }
             WriteFuture::FlushingChunk { future, .. } => {
                 let (write_state, result) = future.await;
@@ -272,6 +266,7 @@ impl<S: LocalStateStore> WriteFuture<S> {
             WriteFuture::Empty => {
                 unreachable!("should not be polled after ready")
             }
+            WriteFuture::EndOfStream => pending().await,
         }
     }
 }
@@ -544,8 +539,6 @@ impl<S: StateStore> StreamConsumer for SyncLogStoreDispatchExecutor<S> {
     type BarrierStream = impl Stream<Item = StreamResult<Barrier>> + Send;
 
     fn execute(mut self: Box<Self>) -> Self::BarrierStream {
-        let _max_barrier_count_per_batch = self.inner.actor_config.developer.max_barrier_batch_size;
-
         #[try_stream]
         async move {
             let actor_id = self.inner.actor_id;
@@ -703,11 +696,10 @@ impl<S: StateStore> StreamConsumer for SyncLogStoreDispatchExecutor<S> {
 
             let mut write_future_state =
                 WriteFuture::receive_from_upstream(input, initial_write_state);
-            let mut write_done = false;
 
             loop {
                 // Avoid a busy-loop when there's no buffered data to dispatch. In that case we
-                // should wait for upstream, but still exit promptly once upstream is done.
+                // should wait for upstream.
                 let consumer_idle = matches!(
                     &consumer_future_state,
                     ConsumerFuture::ReadingChunk {
@@ -715,9 +707,6 @@ impl<S: StateStore> StreamConsumer for SyncLogStoreDispatchExecutor<S> {
                         ..
                     }
                 );
-                if write_done && barriers.is_empty() && buffer.is_empty() && consumer_idle {
-                    break;
-                }
 
                 let select_result = {
                     let should_wait_for_upstream =
@@ -745,13 +734,9 @@ impl<S: StateStore> StreamConsumer for SyncLogStoreDispatchExecutor<S> {
                     };
                     pin_mut!(consumer_future);
                     let write_future = async {
-                        if write_done {
-                            pending().await
-                        } else {
-                            write_future_state
-                                .next_event(&log_store_config.metrics)
-                                .await
-                        }
+                        write_future_state
+                            .next_event(&log_store_config.metrics)
+                            .await
                     };
                     pin_mut!(write_future);
                     let output = select(write_future, consumer_future).await;
@@ -839,12 +824,20 @@ impl<S: StateStore> StreamConsumer for SyncLogStoreDispatchExecutor<S> {
                                             return Err(anyhow!("vnode bitmap update during dispatch is not supported.").into());
                                         }
 
+                                        let is_stop_barrier = barrier.is_stop(actor_id);
                                         barriers.push_front(Message::Barrier(barrier));
                                         write_state_post_write_barrier
                                             .post_yield_barrier(None)
                                             .await?;
-                                        write_future_state =
-                                            WriteFuture::receive_from_upstream(stream, write_state);
+                                        if is_stop_barrier {
+                                            write_future_state = WriteFuture::EndOfStream;
+                                        } else {
+                                            write_future_state =
+                                                WriteFuture::receive_from_upstream(
+                                                    stream,
+                                                    write_state,
+                                                );
+                                        }
                                     }
                                 }
                                 Message::Watermark(_watermark) => {
@@ -869,11 +862,6 @@ impl<S: StateStore> StreamConsumer for SyncLogStoreDispatchExecutor<S> {
                                     .inc_by(info.flush_info.flush_size as _);
                                 write_future_state =
                                     WriteFuture::receive_from_upstream(stream, write_state);
-                            }
-                            WriteFutureEvent::EndOfStream => {
-                                write_done = true;
-                                write_future_state = WriteFuture::Empty;
-                                continue;
                             }
                         }
                     }
@@ -916,9 +904,6 @@ impl<S: StateStore> StreamConsumer for SyncLogStoreDispatchExecutor<S> {
                                     ConsumerFuture::read_chunk(inner, read_future);
                             }
                             ConsumerFutureEvent::WaitingForChunks => {
-                                if write_done {
-                                    break;
-                                };
                                 consumer_future_state =
                                     ConsumerFuture::read_chunk(inner, read_future);
                             }
