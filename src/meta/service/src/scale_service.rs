@@ -62,7 +62,7 @@ impl ScaleService for ScaleServiceImpl {
             .await?;
 
         let mut table_fragments = Vec::with_capacity(stream_job_fragments.len());
-        for (_, stream_job_fragments) in stream_job_fragments {
+        for (_, (stream_job_fragments, fragment_actors)) in stream_job_fragments {
             let upstreams = self
                 .metadata_manager
                 .catalog_controller
@@ -78,7 +78,11 @@ impl ScaleService for ScaleServiceImpl {
                         .collect(),
                 )
                 .await?;
-            table_fragments.push(stream_job_fragments.to_protobuf(&upstreams, &dispatchers))
+            table_fragments.push(stream_job_fragments.to_protobuf(
+                &fragment_actors,
+                &upstreams,
+                &dispatchers,
+            ))
         }
 
         let worker_nodes = self

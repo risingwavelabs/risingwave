@@ -16,7 +16,6 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::num::NonZeroUsize;
 use std::ops::{Deref, DerefMut};
 use std::sync::LazyLock;
-use std::sync::atomic::AtomicU32;
 
 use anyhow::{Context, anyhow};
 use enum_as_inner::EnumAsInner;
@@ -33,7 +32,6 @@ use risingwave_common::util::stream_graph_visitor::{
     self, visit_stream_node_cont, visit_stream_node_cont_mut,
 };
 use risingwave_connector::sink::catalog::SinkType;
-use risingwave_meta_model::WorkerId;
 use risingwave_meta_model::streaming_job::BackfillOrders;
 use risingwave_pb::catalog::{PbSink, PbTable, Table};
 use risingwave_pb::ddl_service::TableJobType;
@@ -50,13 +48,11 @@ use risingwave_pb::stream_plan::{
     StreamScanType,
 };
 
-use crate::barrier::{SharedFragmentInfo, SnapshotBackfillInfo};
+use crate::barrier::SnapshotBackfillInfo;
 use crate::controller::id::IdGeneratorManager;
 use crate::manager::{MetaSrvEnv, StreamingJob, StreamingJobType};
-use crate::model::{ActorId, Fragment, FragmentDownstreamRelation, FragmentId, StreamActor};
-use crate::stream::stream_graph::id::{
-    GlobalActorIdGen, GlobalFragmentId, GlobalFragmentIdGen, GlobalTableIdGen,
-};
+use crate::model::{Fragment, FragmentDownstreamRelation, FragmentId};
+use crate::stream::stream_graph::id::{GlobalFragmentId, GlobalFragmentIdGen, GlobalTableIdGen};
 use crate::stream::stream_graph::schedule::Distribution;
 use crate::{MetaError, MetaResult};
 
@@ -370,32 +366,14 @@ impl StreamFragmentEdge {
     }
 }
 
-fn clone_fragment(
-    fragment: &Fragment,
-    id_generator_manager: &IdGeneratorManager,
-    actor_id_counter: &AtomicU32,
-) -> Fragment {
+fn clone_fragment(fragment: &Fragment, id_generator_manager: &IdGeneratorManager) -> Fragment {
     let fragment_id = GlobalFragmentIdGen::new(id_generator_manager, 1)
         .to_global_id(0)
         .as_global_id();
-    let actor_id_gen = GlobalActorIdGen::new(actor_id_counter, fragment.actors.len() as _);
     Fragment {
         fragment_id,
         fragment_type_mask: fragment.fragment_type_mask,
         distribution_type: fragment.distribution_type,
-        actors: fragment
-            .actors
-            .iter()
-            .enumerate()
-            .map(|(i, actor)| StreamActor {
-                actor_id: actor_id_gen.to_global_id(i as _).as_global_id(),
-                fragment_id,
-                vnode_bitmap: actor.vnode_bitmap.clone(),
-                mview_definition: actor.mview_definition.clone(),
-                expr_context: actor.expr_context.clone(),
-                config_override: actor.config_override.clone(),
-            })
-            .collect(),
         state_table_ids: fragment.state_table_ids.clone(),
         maybe_vnode_count: fragment.maybe_vnode_count,
         nodes: fragment.nodes.clone(),
@@ -458,7 +436,6 @@ pub fn rewrite_refresh_schema_sink_fragment(
     upstream_table: &PbTable,
     upstream_table_fragment_id: FragmentId,
     id_generator_manager: &IdGeneratorManager,
-    actor_id_counter: &AtomicU32,
 ) -> MetaResult<(Fragment, Vec<PbColumnCatalog>, Option<PbTable>)> {
     let mut new_sink_columns = sink.columns.clone();
     fn extend_sink_columns(
@@ -483,11 +460,7 @@ pub fn rewrite_refresh_schema_sink_fragment(
         name.clone()
     });
 
-    let mut new_sink_fragment = clone_fragment(
-        original_sink_fragment,
-        id_generator_manager,
-        actor_id_counter,
-    );
+    let mut new_sink_fragment = clone_fragment(original_sink_fragment, id_generator_manager);
     let sink_node = &mut new_sink_fragment.nodes;
     let PbNodeBody::Sink(sink_node_body) = sink_node.node_body.as_mut().unwrap() else {
         return Err(anyhow!("expect PbNodeBody::Sink but got: {:?}", sink_node.node_body).into());
@@ -1414,7 +1387,7 @@ pub(super) enum EitherFragment {
     Building(BuildingFragment),
 
     /// An existing fragment that is external but connected to the fragments being built.
-    Existing(SharedFragmentInfo),
+    Existing,
 }
 
 /// A wrapper of [`StreamFragmentGraph`] that contains the additional information of pre-existing
@@ -1431,10 +1404,7 @@ pub struct CompleteStreamFragmentGraph {
     building_graph: StreamFragmentGraph,
 
     /// The required information of existing fragments.
-    existing_fragments: HashMap<GlobalFragmentId, SharedFragmentInfo>,
-
-    /// The location of the actors in the existing fragments.
-    existing_actor_location: HashMap<ActorId, WorkerId>,
+    existing_fragments: HashMap<GlobalFragmentId, Fragment>,
 
     /// Extra edges between existing fragments and the building fragments.
     extra_downstreams: HashMap<GlobalFragmentId, HashMap<GlobalFragmentId, StreamFragmentEdge>>,
@@ -1446,14 +1416,12 @@ pub struct CompleteStreamFragmentGraph {
 pub struct FragmentGraphUpstreamContext {
     /// Root fragment is the root of upstream stream graph, which can be a
     /// mview fragment or source fragment for cdc source job
-    pub upstream_root_fragments: HashMap<JobId, (SharedFragmentInfo, PbStreamNode)>,
-    pub upstream_actor_location: HashMap<ActorId, WorkerId>,
+    pub upstream_root_fragments: HashMap<JobId, Fragment>,
 }
 
 pub struct FragmentGraphDownstreamContext {
     pub original_root_fragment_id: FragmentId,
-    pub downstream_fragments: Vec<(DispatcherType, SharedFragmentInfo, PbStreamNode)>,
-    pub downstream_actor_location: HashMap<ActorId, WorkerId>,
+    pub downstream_fragments: Vec<(DispatcherType, Fragment)>,
 }
 
 impl CompleteStreamFragmentGraph {
@@ -1464,7 +1432,6 @@ impl CompleteStreamFragmentGraph {
         Self {
             building_graph: graph,
             existing_fragments: Default::default(),
-            existing_actor_location: Default::default(),
             extra_downstreams: Default::default(),
             extra_upstreams: Default::default(),
         }
@@ -1517,18 +1484,15 @@ impl CompleteStreamFragmentGraph {
         let mut extra_upstreams = HashMap::new();
         let mut existing_fragments = HashMap::new();
 
-        let mut existing_actor_location = HashMap::new();
-
         if let Some(FragmentGraphUpstreamContext {
             upstream_root_fragments,
-            upstream_actor_location,
         }) = upstream_ctx
         {
             for (&id, fragment) in &mut graph.fragments {
                 let uses_shuffled_backfill = fragment.has_shuffled_backfill();
 
                 for (&upstream_job_id, required_columns) in &fragment.upstream_job_columns {
-                    let (upstream_fragment, nodes) = upstream_root_fragments
+                    let upstream_fragment = upstream_root_fragments
                         .get(&upstream_job_id)
                         .context("upstream fragment not found")?;
                     let upstream_root_fragment_id =
@@ -1581,8 +1545,14 @@ impl CompleteStreamFragmentGraph {
                             {
                                 // Resolve the required output columns from the upstream materialized view.
                                 let (dist_key_indices, output_mapping) = {
-                                    let mview_node =
-                                        nodes.get_node_body().unwrap().as_materialize().unwrap();
+                                    let mview_node = fragment
+                                        .node
+                                        .as_ref()
+                                        .unwrap()
+                                        .get_node_body()
+                                        .unwrap()
+                                        .as_materialize()
+                                        .unwrap();
                                     let all_columns = mview_node.column_descs();
                                     let dist_key_indices = mview_node.dist_key_indices();
                                     let output_mapping = gen_output_mapping(
@@ -1615,8 +1585,14 @@ impl CompleteStreamFragmentGraph {
                                 .contains(FragmentTypeFlag::Source)
                             {
                                 let output_mapping = {
-                                    let source_node =
-                                        nodes.get_node_body().unwrap().as_source().unwrap();
+                                    let source_node = fragment
+                                        .node
+                                        .as_ref()
+                                        .unwrap()
+                                        .get_node_body()
+                                        .unwrap()
+                                        .as_source()
+                                        .unwrap();
 
                                     let all_columns = source_node.column_descs().unwrap();
                                     gen_output_mapping(required_columns, &all_columns).context(
@@ -1669,16 +1645,13 @@ impl CompleteStreamFragmentGraph {
             existing_fragments.extend(
                 upstream_root_fragments
                     .into_values()
-                    .map(|(f, _)| (GlobalFragmentId::new(f.fragment_id), f)),
+                    .map(|f| (GlobalFragmentId::new(f.fragment_id), f)),
             );
-
-            existing_actor_location.extend(upstream_actor_location);
         }
 
         if let Some(FragmentGraphDownstreamContext {
             original_root_fragment_id,
             downstream_fragments,
-            downstream_actor_location,
         }) = downstream_ctx
         {
             let original_table_fragment_id = GlobalFragmentId::new(original_root_fragment_id);
@@ -1686,14 +1659,14 @@ impl CompleteStreamFragmentGraph {
 
             // Build the extra edges between the `Materialize` and the downstream `StreamScan` of the
             // existing materialized views.
-            for (dispatcher_type, fragment, nodes) in &downstream_fragments {
+            for (dispatcher_type, fragment) in &downstream_fragments {
                 let id = GlobalFragmentId::new(fragment.fragment_id);
 
                 // Similar to `extract_upstream_columns_except_cross_db_backfill`.
                 let output_columns = {
                     let mut res = None;
 
-                    stream_graph_visitor::visit_stream_node_body(nodes, |node_body| {
+                    stream_graph_visitor::visit_stream_node_body(&fragment.nodes, |node_body| {
                         let columns = match node_body {
                             NodeBody::StreamScan(stream_scan) => stream_scan.upstream_columns(),
                             NodeBody::SourceBackfill(source_backfill) => {
@@ -1773,16 +1746,13 @@ impl CompleteStreamFragmentGraph {
             existing_fragments.extend(
                 downstream_fragments
                     .into_iter()
-                    .map(|(_, f, _)| (GlobalFragmentId::new(f.fragment_id), f)),
+                    .map(|(_, f)| (GlobalFragmentId::new(f.fragment_id), f)),
             );
-
-            existing_actor_location.extend(downstream_actor_location);
         }
 
         Ok(Self {
             building_graph: graph,
             existing_fragments,
-            existing_actor_location,
             extra_downstreams,
             extra_upstreams,
         })
@@ -1874,12 +1844,7 @@ impl CompleteStreamFragmentGraph {
     pub(super) fn existing_distribution(&self) -> HashMap<GlobalFragmentId, Distribution> {
         self.existing_fragments
             .iter()
-            .map(|(&id, f)| {
-                (
-                    id,
-                    Distribution::from_fragment(f, &self.existing_actor_location),
-                )
-            })
+            .map(|(&id, f)| (id, Distribution::from_fragment(f)))
             .collect()
     }
 
@@ -1931,7 +1896,6 @@ impl CompleteStreamFragmentGraph {
     pub(super) fn seal_fragment(
         &self,
         id: GlobalFragmentId,
-        actors: Vec<StreamActor>,
         distribution: Distribution,
         stream_node: StreamNode,
     ) -> Fragment {
@@ -1971,7 +1935,6 @@ impl CompleteStreamFragmentGraph {
             fragment_id: inner.fragment_id,
             fragment_type_mask: inner.fragment_type_mask.into(),
             distribution_type,
-            actors,
             state_table_ids,
             maybe_vnode_count: VnodeCount::set(vnode_count).to_protobuf(),
             nodes: stream_node,
@@ -1981,8 +1944,8 @@ impl CompleteStreamFragmentGraph {
     /// Get a fragment from the complete graph, which can be either a building fragment or an
     /// existing fragment.
     pub(super) fn get_fragment(&self, fragment_id: GlobalFragmentId) -> EitherFragment {
-        if let Some(fragment) = self.existing_fragments.get(&fragment_id) {
-            EitherFragment::Existing(fragment.clone())
+        if self.existing_fragments.contains_key(&fragment_id) {
+            EitherFragment::Existing
         } else {
             EitherFragment::Building(
                 self.building_graph

@@ -1227,7 +1227,8 @@ impl InflightDatabaseInfo {
                                         sinks.iter().map(|sink| {
                                             (
                                                 sink.new_fragment.fragment_id,
-                                                sink.new_fragment_info(),
+                                                // TODO(render): Fill auto-refresh sink actors.
+                                                sink.new_fragment_info(HashMap::new()),
                                             )
                                         })
                                     }),

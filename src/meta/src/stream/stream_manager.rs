@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use await_tree::span;
@@ -27,7 +27,6 @@ use risingwave_meta_model::prelude::Fragment as FragmentModel;
 use risingwave_meta_model::{StreamingParallelism, fragment};
 use risingwave_pb::catalog::{CreateType, PbSink, PbTable, Subscription};
 use risingwave_pb::expr::PbExprNode;
-use risingwave_pb::meta::table_fragments::ActorStatus;
 use risingwave_pb::plan_common::{PbColumnCatalog, PbField};
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QuerySelect};
 use thiserror_ext::AsReport;
@@ -35,8 +34,7 @@ use tokio::sync::{Mutex, OwnedSemaphorePermit, oneshot};
 use tracing::Instrument;
 
 use super::{
-    Locations, ReplaceJobSplitPlan, ReschedulePolicy, ScaleControllerRef, StreamFragmentGraph,
-    UserDefinedFragmentBackfillOrder,
+    ReschedulePolicy, ScaleControllerRef, StreamFragmentGraph, UserDefinedFragmentBackfillOrder,
 };
 use crate::barrier::{
     BarrierScheduler, Command, CreateStreamingJobCommandInfo, CreateStreamingJobType,
@@ -53,7 +51,7 @@ use crate::model::{
     FragmentNewNoShuffle, FragmentReplaceUpstream, StreamJobFragments, StreamJobFragmentsToCreate,
     SubscriptionId,
 };
-use crate::stream::SourceManagerRef;
+use crate::stream::{ReplaceJobSplitPlan, SourceManagerRef};
 use crate::{MetaError, MetaResult};
 
 pub type GlobalStreamManagerRef = Arc<GlobalStreamManager>;
@@ -81,9 +79,6 @@ pub struct CreateStreamingJobContext {
     /// New fragment relation to add from upstream fragments to downstream fragments.
     pub upstream_fragment_downstreams: FragmentDownstreamRelation,
     pub new_no_shuffle: FragmentNewNoShuffle,
-
-    /// The locations of the actors to build in the streaming job.
-    pub building_locations: Locations,
 
     /// DDL definition.
     pub definition: String,
@@ -192,36 +187,20 @@ pub struct AutoRefreshSchemaSinkContext {
     pub newly_add_fields: Vec<Field>,
     pub new_fragment: Fragment,
     pub new_log_store_table: Option<PbTable>,
-    pub actor_status: BTreeMap<ActorId, ActorStatus>,
 }
 
 impl AutoRefreshSchemaSinkContext {
-    pub fn new_fragment_info(&self) -> InflightFragmentInfo {
+    pub fn new_fragment_info(
+        &self,
+        actors: HashMap<ActorId, InflightActorInfo>,
+    ) -> InflightFragmentInfo {
         InflightFragmentInfo {
             fragment_id: self.new_fragment.fragment_id,
             distribution_type: self.new_fragment.distribution_type.into(),
             fragment_type_mask: self.new_fragment.fragment_type_mask,
             vnode_count: self.new_fragment.vnode_count(),
             nodes: self.new_fragment.nodes.clone(),
-            actors: self
-                .new_fragment
-                .actors
-                .iter()
-                .map(|actor| {
-                    (
-                        actor.actor_id as _,
-                        InflightActorInfo {
-                            worker_id: self.actor_status[&actor.actor_id]
-                                .location
-                                .as_ref()
-                                .unwrap()
-                                .worker_node_id,
-                            vnode_bitmap: actor.vnode_bitmap.clone(),
-                            splits: vec![],
-                        },
-                    )
-                })
-                .collect(),
+            actors,
             state_table_ids: self.new_fragment.state_table_ids.iter().copied().collect(),
         }
     }
@@ -240,9 +219,6 @@ pub struct ReplaceStreamJobContext {
 
     /// New fragment relation to add from existing upstream fragment to downstream fragment.
     pub upstream_fragment_downstreams: FragmentDownstreamRelation,
-
-    /// The locations of the actors to build in the new job to replace.
-    pub building_locations: Locations,
 
     pub streaming_job: StreamingJob,
 
@@ -609,23 +585,18 @@ impl GlobalStreamManager {
     pub async fn drop_streaming_jobs(
         &self,
         database_id: DatabaseId,
-        removed_actors: Vec<ActorId>,
         streaming_job_ids: Vec<JobId>,
         state_table_ids: Vec<TableId>,
         fragment_ids: HashSet<FragmentId>,
         dropped_sink_fragment_by_targets: HashMap<FragmentId, Vec<FragmentId>>,
     ) {
-        if !removed_actors.is_empty()
-            || !streaming_job_ids.is_empty()
-            || !state_table_ids.is_empty()
-        {
+        if !streaming_job_ids.is_empty() || !state_table_ids.is_empty() {
             let _ = self
                 .barrier_scheduler
                 .run_command(
                     database_id,
                     Command::DropStreamingJobs {
                         streaming_job_ids: streaming_job_ids.into_iter().collect(),
-                        actors: removed_actors,
                         unregistered_state_table_ids: state_table_ids.iter().copied().collect(),
                         unregistered_fragment_ids: fragment_ids,
                         dropped_sink_fragment_by_targets,

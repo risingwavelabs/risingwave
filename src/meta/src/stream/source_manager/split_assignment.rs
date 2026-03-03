@@ -17,7 +17,7 @@ use itertools::Itertools;
 use risingwave_connector::source::fill_adaptive_split;
 
 use super::*;
-use crate::model::{FragmentNewNoShuffle, FragmentReplaceUpstream, StreamJobFragments};
+use crate::model::{ActorNewNoShuffle, FragmentReplaceUpstream, StreamJobFragments};
 
 #[derive(Debug, Clone)]
 pub struct SplitState {
@@ -108,13 +108,15 @@ impl SourceManager {
 
     /// Resolve a [`SourceSplitAssignment`] (source-level, containing [`DiscoveredSplits`])
     /// into an actor-level [`SplitAssignment`] using the source→fragment mapping and
-    /// the actors defined in the given [`StreamJobFragments`].
+    /// the rendered actor IDs for each fragment.
     ///
+    /// `fragment_actor_ids` provides the actor IDs assigned to each fragment from rendering.
     /// For `Fixed` splits, splits are distributed across actors via [`reassign_splits`].
     /// For `Adaptive` splits, `fill_adaptive_split` expands the template per actor count.
     pub fn resolve_fragment_to_actor_splits(
         table_fragments: &StreamJobFragments,
         source_assignment: &SourceSplitAssignment,
+        fragment_actor_ids: &HashMap<FragmentId, Vec<ActorId>>,
     ) -> MetaResult<SplitAssignment> {
         let source_fragments = table_fragments.stream_source_fragments();
         let mut result: SplitAssignment = HashMap::new();
@@ -123,19 +125,15 @@ impl SourceManager {
                 panic!("source {} not found in stream job fragments", source_id)
             });
             for fragment_id in fragment_ids {
-                let fragment = table_fragments
-                    .fragments
-                    .get(fragment_id)
-                    .unwrap_or_else(|| {
-                        panic!("fragment {} not found in stream job fragments", fragment_id)
-                    });
-                let actor_count = fragment.actors.len();
+                let actor_ids = fragment_actor_ids.get(fragment_id).unwrap_or_else(|| {
+                    panic!("fragment {} not found in rendered actor IDs", fragment_id)
+                });
+                let actor_count = actor_ids.len();
                 match discovered {
                     DiscoveredSplits::Fixed(splits) => {
-                        let empty_actor_splits: HashMap<ActorId, Vec<SplitImpl>> = fragment
-                            .actors
+                        let empty_actor_splits: HashMap<ActorId, Vec<SplitImpl>> = actor_ids
                             .iter()
-                            .map(|actor| (actor.actor_id, vec![]))
+                            .map(|actor_id| (*actor_id, vec![]))
                             .collect();
                         if let Some(diff) = reassign_splits(
                             *fragment_id,
@@ -150,8 +148,8 @@ impl SourceManager {
                         let expanded = fill_adaptive_split(template, actor_count)?;
                         let expanded_splits: Vec<SplitImpl> = expanded.into_values().collect();
                         let mut actor_splits = HashMap::new();
-                        for (i, actor) in fragment.actors.iter().enumerate() {
-                            actor_splits.insert(actor.actor_id, vec![expanded_splits[i].clone()]);
+                        for (i, actor_id) in actor_ids.iter().enumerate() {
+                            actor_splits.insert(*actor_id, vec![expanded_splits[i].clone()]);
                         }
                         result.insert(*fragment_id, actor_splits);
                     }
@@ -188,12 +186,12 @@ impl SourceManager {
     pub fn resolve_replace_source_splits(
         table_fragments: &StreamJobFragments,
         upstream_updates: &FragmentReplaceUpstream,
-        // new_no_shuffle:
+        // actor_no_shuffle:
         //     upstream fragment_id ->
         //     downstream fragment_id ->
         //     upstream actor_id ->
         //     downstream actor_id
-        new_no_shuffle: &FragmentNewNoShuffle,
+        actor_no_shuffle: &ActorNewNoShuffle,
         get_upstream_actor_splits: impl Fn(FragmentId, ActorId) -> Option<Vec<SplitImpl>>,
     ) -> MetaResult<SplitAssignment> {
         tracing::debug!(?upstream_updates, "allocate_splits_for_replace_source");
@@ -247,7 +245,7 @@ impl SourceManager {
         //
         // Note: we can choose any backfill actor to align here.
         // We use `HashMap` to dedup.
-        let aligned_actors: HashMap<ActorId, ActorId> = new_no_shuffle
+        let aligned_actors: HashMap<ActorId, ActorId> = actor_no_shuffle
             .get(&fragment_id)
             .map(HashMap::values)
             .into_iter()
@@ -269,7 +267,7 @@ impl SourceManager {
     /// the existing split assignment looked up via the provided closure.
     pub fn resolve_backfill_splits(
         table_fragments: &StreamJobFragments,
-        upstream_new_no_shuffle: &FragmentNewNoShuffle,
+        actor_no_shuffle: &ActorNewNoShuffle,
         get_upstream_actor_splits: impl Fn(FragmentId, ActorId) -> Option<Vec<SplitImpl>>,
     ) -> MetaResult<SplitAssignment> {
         let source_backfill_fragments = table_fragments.source_backfill_fragments();
@@ -278,8 +276,8 @@ impl SourceManager {
 
         for (_source_id, fragments) in source_backfill_fragments {
             for (fragment_id, upstream_source_fragment_id) in fragments {
-                // Get upstream actors from new_no_shuffle mapping
-                let upstream_actors: HashSet<ActorId> = upstream_new_no_shuffle
+                // Get upstream actors from actor_no_shuffle mapping
+                let upstream_actors: HashSet<ActorId> = actor_no_shuffle
                     .get(&upstream_source_fragment_id)
                     .and_then(|m| m.get(&fragment_id))
                     .ok_or_else(|| {
@@ -291,17 +289,17 @@ impl SourceManager {
                     })?.keys().copied().collect();
 
                 let mut backfill_actors = vec![];
-                let Some(source_new_no_shuffle) = upstream_new_no_shuffle
+                let Some(source_new_no_shuffle) = actor_no_shuffle
                     .get(&upstream_source_fragment_id)
-                    .and_then(|source_upstream_new_no_shuffle| {
-                        source_upstream_new_no_shuffle.get(&fragment_id)
+                    .and_then(|source_upstream_actor_no_shuffle| {
+                        source_upstream_actor_no_shuffle.get(&fragment_id)
                     })
                 else {
                     return Err(anyhow::anyhow!(
-                            "source backfill fragment's upstream fragment should have one-on-one no_shuffle mapping, fragment_id: {fragment_id}, upstream_fragment_id: {upstream_source_fragment_id}, upstream_new_no_shuffle: {upstream_new_no_shuffle:?}",
+                            "source backfill fragment's upstream fragment should have one-on-one no_shuffle mapping, fragment_id: {fragment_id}, upstream_fragment_id: {upstream_source_fragment_id}, actor_no_shuffle: {actor_no_shuffle:?}",
                             fragment_id = fragment_id,
                             upstream_source_fragment_id = upstream_source_fragment_id,
-                            upstream_new_no_shuffle = upstream_new_no_shuffle,
+                            actor_no_shuffle = actor_no_shuffle,
                         ).into());
                 };
                 for upstream_actor in &upstream_actors {

@@ -25,7 +25,7 @@ use risingwave_pb::catalog::{PbSource, PbTable};
 use risingwave_pb::common::worker_node::{PbResource, Property as AddNodeProperty, State};
 use risingwave_pb::common::{HostAddress, PbWorkerNode, PbWorkerType, WorkerNode, WorkerType};
 use risingwave_pb::meta::list_rate_limits_response::RateLimitInfo;
-use risingwave_pb::stream_plan::{PbDispatcherType, PbStreamNode, PbStreamScanType};
+use risingwave_pb::stream_plan::{PbDispatcherType, PbStreamScanType};
 use sea_orm::TransactionTrait;
 use sea_orm::prelude::DateTime;
 use tokio::sync::mpsc::{UnboundedReceiver, unbounded_channel};
@@ -33,13 +33,12 @@ use tokio::sync::oneshot;
 use tracing::warn;
 
 use crate::MetaResult;
-use crate::barrier::SharedFragmentInfo;
 use crate::controller::catalog::CatalogControllerRef;
 use crate::controller::cluster::{ClusterControllerRef, StreamingClusterInfo, WorkerExtraInfo};
 use crate::controller::fragment::FragmentParallelismInfo;
 use crate::controller::scale::find_fragment_no_shuffle_dags_detailed;
 use crate::manager::{LocalNotification, NotificationVersion};
-use crate::model::{ActorId, ClusterId, FragmentId, StreamJobFragments, SubscriptionId};
+use crate::model::{ActorId, ClusterId, Fragment, FragmentId, StreamJobFragments, SubscriptionId};
 use crate::stream::SplitAssignment;
 use crate::telemetry::MetaTelemetryJobDesc;
 
@@ -381,16 +380,13 @@ impl MetadataManager {
     pub async fn get_upstream_root_fragments(
         &self,
         upstream_table_ids: &HashSet<TableId>,
-    ) -> MetaResult<(
-        HashMap<JobId, (SharedFragmentInfo, PbStreamNode)>,
-        HashMap<ActorId, WorkerId>,
-    )> {
-        let (upstream_root_fragments, actors) = self
+    ) -> MetaResult<HashMap<JobId, Fragment>> {
+        let upstream_root_fragments = self
             .catalog_controller
             .get_root_fragments(upstream_table_ids.iter().map(|id| id.as_job_id()).collect())
             .await?;
 
-        Ok((upstream_root_fragments, actors))
+        Ok(upstream_root_fragments)
     }
 
     pub async fn get_streaming_cluster_info(&self) -> MetaResult<StreamingClusterInfo> {
@@ -484,16 +480,10 @@ impl MetadataManager {
     pub async fn get_downstream_fragments(
         &self,
         job_id: JobId,
-    ) -> MetaResult<(
-        Vec<(PbDispatcherType, SharedFragmentInfo, PbStreamNode)>,
-        HashMap<ActorId, WorkerId>,
-    )> {
-        let (fragments, actors) = self
-            .catalog_controller
+    ) -> MetaResult<Vec<(PbDispatcherType, Fragment)>> {
+        self.catalog_controller
             .get_downstream_fragments(job_id)
-            .await?;
-
-        Ok((fragments, actors))
+            .await
     }
 
     pub async fn get_job_id_to_internal_table_ids_mapping(
@@ -503,9 +493,11 @@ impl MetadataManager {
     }
 
     pub async fn get_job_fragments_by_id(&self, job_id: JobId) -> MetaResult<StreamJobFragments> {
-        self.catalog_controller
+        Ok(self
+            .catalog_controller
             .get_job_fragments_by_id(job_id)
-            .await
+            .await?
+            .0)
     }
 
     pub fn get_running_actors_of_fragment(&self, id: FragmentId) -> MetaResult<HashSet<ActorId>> {

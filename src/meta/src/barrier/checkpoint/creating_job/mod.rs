@@ -151,17 +151,9 @@ impl CreatingStreamingJobControl {
             version_stat,
         );
 
-        let actors_to_create =
-            edges.collect_actors_to_create(info.stream_job_fragments.actors_to_create().map(
-                |(fragment_id, node, actors)| {
-                    (
-                        fragment_id,
-                        node,
-                        actors,
-                        [], // no subscribers for newly creating job
-                    )
-                },
-            ));
+        // TODO(render): Collect actors to create from renderer output.
+        let _ = edges;
+        let actors_to_create = StreamJobActorsToCreate::default();
 
         let barrier_control = CreatingStreamingJobBarrierControl::new(job_id, snapshot_epoch, None);
 
@@ -174,7 +166,8 @@ impl CreatingStreamingJobControl {
             PbBarrierKind::Checkpoint,
         );
 
-        let added_actors = info.stream_job_fragments.actor_ids().collect();
+        // TODO(render): Fill added actors from rendered actor infos.
+        let added_actors = Vec::new();
         let actor_splits = split_assignment
             .values()
             .flat_map(build_actor_connector_splits)
@@ -243,17 +236,8 @@ impl CreatingStreamingJobControl {
                 upstream_fragment_downstreams: info.upstream_fragment_downstreams.clone(),
                 downstreams: info.stream_job_fragments.downstreams.clone(),
                 snapshot_backfill_upstream_tables: job.snapshot_backfill_upstream_tables.clone(),
-                stream_actors: info
-                    .stream_job_fragments
-                    .fragments
-                    .values()
-                    .flat_map(|fragment| {
-                        fragment
-                            .actors
-                            .iter()
-                            .map(|actor| (actor.actor_id, actor.clone()))
-                    })
-                    .collect(),
+                // TODO(render): Fill stream actors from renderer output.
+                stream_actors: HashMap::new(),
             };
             job.status = CreatingStreamingJobStatus::ConsumingSnapshot {
                 prev_epoch_fake_physical_time,

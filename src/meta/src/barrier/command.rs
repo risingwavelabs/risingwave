@@ -359,12 +359,9 @@ impl StreamJobFragments {
         &'a self,
         assignment: &'a SplitAssignment,
     ) -> impl Iterator<Item = (FragmentId, InflightFragmentInfo)> + 'a {
+        // TODO(render): Populate actor infos from the renderer output.
+        let _ = assignment;
         self.fragments.values().map(|fragment| {
-            let mut fragment_splits = assignment
-                .get(&fragment.fragment_id)
-                .cloned()
-                .unwrap_or_default();
-
             (
                 fragment.fragment_id,
                 InflightFragmentInfo {
@@ -373,26 +370,7 @@ impl StreamJobFragments {
                     fragment_type_mask: fragment.fragment_type_mask,
                     vnode_count: fragment.vnode_count(),
                     nodes: fragment.nodes.clone(),
-                    actors: fragment
-                        .actors
-                        .iter()
-                        .map(|actor| {
-                            (
-                                actor.actor_id,
-                                InflightActorInfo {
-                                    worker_id: self
-                                        .actor_status
-                                        .get(&actor.actor_id)
-                                        .expect("should exist")
-                                        .worker_id(),
-                                    vnode_bitmap: actor.vnode_bitmap.clone(),
-                                    splits: fragment_splits
-                                        .remove(&actor.actor_id)
-                                        .unwrap_or_default(),
-                                },
-                            )
-                        })
-                        .collect(),
+                    actors: HashMap::new(),
                     state_table_ids: fragment.state_table_ids.iter().copied().collect(),
                 },
             )
@@ -443,7 +421,6 @@ pub enum Command {
     /// drop actors, and then delete the job fragments info from meta store.
     DropStreamingJobs {
         streaming_job_ids: HashSet<JobId>,
-        actors: Vec<ActorId>,
         unregistered_state_table_ids: HashSet<TableId>,
         unregistered_fragment_ids: HashSet<FragmentId>,
         // target_fragment -> [sink_fragments]
@@ -1017,7 +994,8 @@ impl Command {
                     ..
                 } = info;
                 let database_id = streaming_job.database_id();
-                let added_actors = stream_job_fragments.actor_ids().collect();
+                // TODO(render): Fill added actors from rendered actor infos.
+                let added_actors = Vec::new();
                 let actor_splits = split_assignment
                     .values()
                     .flat_map(build_actor_connector_splits)
@@ -1053,25 +1031,15 @@ impl Command {
                         ..
                     }) = job_type
                     {
-                        let new_sink_actors = stream_job_fragments
-                            .actors_to_create()
-                            .filter(|(fragment_id, _, _)| *fragment_id == *sink_fragment_id)
-                            .exactly_one()
-                            .map(|(_, _, actors)| {
-                                actors.into_iter().map(|(actor, worker_id)| PbActorInfo {
-                                    actor_id: actor.actor_id,
-                                    host: Some(control_stream_manager.host_addr(worker_id)),
-                                    partial_graph_id: to_partial_graph_id(database_id, None),
-                                })
-                            })
-                            .unwrap_or_else(|_| panic!("should have exactly one sink actor"));
+                        // TODO(render): Populate sink actor locations from render output.
+                        let new_sink_actors: Vec<PbActorInfo> = Vec::new();
                         let new_upstream_sink = PbNewUpstreamSink {
                             info: Some(PbUpstreamSinkInfo {
                                 upstream_fragment_id: *sink_fragment_id,
                                 sink_output_schema: sink_output_fields.clone(),
                                 project_exprs: project_exprs.clone(),
                             }),
-                            upstream_actors: new_sink_actors.collect(),
+                            upstream_actors: new_sink_actors,
                         };
                         HashMap::from([(
                             new_sink_downstream.downstream_fragment_id,
@@ -1136,20 +1104,24 @@ impl Command {
                 let actor_cdc_table_snapshot_splits = database_info
                     .assign_cdc_backfill_splits(old_fragments.stream_job_id)?
                     .map(|splits| PbCdcTableSnapshotSplitsWithGeneration { splits });
+                let old_actor_ids = old_fragments
+                    .fragments
+                    .keys()
+                    .flat_map(|fragment_id| database_info.fragment(*fragment_id).actors.keys())
+                    .copied();
+                let auto_refresh_actor_ids = auto_refresh_schema_sinks
+                    .as_ref()
+                    .into_iter()
+                    .flat_map(|sinks| sinks.iter())
+                    .flat_map(|sink| {
+                        database_info
+                            .fragment(sink.original_fragment.fragment_id)
+                            .actors
+                            .keys()
+                            .copied()
+                    });
                 Ok(Self::generate_update_mutation_for_replace_table(
-                    old_fragments.actor_ids().chain(
-                        auto_refresh_schema_sinks
-                            .as_ref()
-                            .into_iter()
-                            .flat_map(|sinks| {
-                                sinks.iter().flat_map(|sink| {
-                                    sink.original_fragment
-                                        .actors
-                                        .iter()
-                                        .map(|actor| actor.actor_id)
-                                })
-                            }),
-                    ),
+                    old_actor_ids.chain(auto_refresh_actor_ids),
                     merge_updates,
                     dispatchers,
                     split_assignment,
@@ -1485,21 +1457,9 @@ impl Command {
         info: &CreateStreamingJobCommandInfo,
         edges: &mut FragmentEdgeBuildResult,
     ) -> StreamJobActorsToCreate {
-        {
-            {
-                let actors_to_create = info.stream_job_fragments.actors_to_create();
-                edges.collect_actors_to_create(actors_to_create.map(
-                    |(fragment_id, node, actors)| {
-                        (
-                            fragment_id,
-                            node,
-                            actors,
-                            [], // no subscriber for new job to create
-                        )
-                    },
-                ))
-            }
-        }
+        // TODO(render): Collect actors to create from renderer output.
+        let _ = (info, edges);
+        StreamJobActorsToCreate::default()
     }
 
     /// Collect actors to create for `RescheduleIntent`.
@@ -1559,46 +1519,9 @@ impl Command {
         edges: &mut FragmentEdgeBuildResult,
         database_info: &InflightDatabaseInfo,
     ) -> StreamJobActorsToCreate {
-        {
-            {
-                let mut actors = edges.collect_actors_to_create(
-                    replace_table.new_fragments.actors_to_create().map(
-                        |(fragment_id, node, actors)| {
-                            (
-                                fragment_id,
-                                node,
-                                actors,
-                                database_info
-                                    .job_subscribers(replace_table.old_fragments.stream_job_id),
-                            )
-                        },
-                    ),
-                );
-                if let Some(sinks) = &replace_table.auto_refresh_schema_sinks {
-                    let sink_actors = edges.collect_actors_to_create(sinks.iter().map(|sink| {
-                        (
-                            sink.new_fragment.fragment_id,
-                            &sink.new_fragment.nodes,
-                            sink.new_fragment.actors.iter().map(|actor| {
-                                (
-                                    actor,
-                                    sink.actor_status[&actor.actor_id]
-                                        .location
-                                        .as_ref()
-                                        .unwrap()
-                                        .worker_node_id,
-                                )
-                            }),
-                            database_info.job_subscribers(sink.original_sink.id.as_job_id()),
-                        )
-                    }));
-                    for (worker_id, fragment_actors) in sink_actors {
-                        actors.entry(worker_id).or_default().extend(fragment_actors);
-                    }
-                }
-                actors
-            }
-        }
+        // TODO(render): Collect replacement actors from renderer output.
+        let _ = (replace_table, edges, database_info);
+        StreamJobActorsToCreate::default()
     }
 
     fn generate_update_mutation_for_replace_table(

@@ -325,7 +325,7 @@ pub(super) mod handlers {
             .await
             .map_err(err)?;
         let mut fragment_to_relation_map = HashMap::new();
-        for (relation_id, tf) in table_fragments {
+        for (relation_id, (tf, _)) in table_fragments {
             for fragment_id in tf.fragments.keys() {
                 fragment_to_relation_map.insert(*fragment_id, relation_id);
             }
@@ -347,10 +347,14 @@ pub(super) mod handlers {
             .await
             .map_err(err)?;
         let mut map = HashMap::new();
-        for (id, tf) in table_fragments {
+        for (id, (tf, fragment_actors)) in table_fragments {
             let mut fragment_id_to_actor_ids = HashMap::new();
-            for (fragment_id, fragment) in &tf.fragments {
-                let actor_ids = fragment.actors.iter().map(|a| a.actor_id).collect_vec();
+            for fragment_id in tf.fragments.keys() {
+                let actor_ids = fragment_actors
+                    .get(fragment_id)
+                    .into_iter()
+                    .flat_map(|actors| actors.iter().map(|a| a.actor_id))
+                    .collect_vec();
                 fragment_id_to_actor_ids.insert(*fragment_id, ActorIds { ids: actor_ids });
             }
             map.insert(
@@ -390,7 +394,8 @@ pub(super) mod handlers {
             .await
             .map_err(err)?;
         Ok(Json(
-            table_fragments.to_protobuf(&upstream_fragments, &dispatchers),
+            // TODO: pass rendered fragment actors from barrier worker rendering.
+            table_fragments.to_protobuf(&Default::default(), &upstream_fragments, &dispatchers),
         ))
     }
 

@@ -218,22 +218,9 @@ impl DatabaseCheckpointControl {
             info: &CreateStreamingJobCommandInfo,
             database_info: &InflightDatabaseInfo,
         ) -> MetaResult<SplitAssignment> {
-            let mut resolved = SourceManager::resolve_fragment_to_actor_splits(
-                &info.stream_job_fragments,
-                &info.init_split_assignment,
-            )?;
-            resolved.extend(SourceManager::resolve_backfill_splits(
-                &info.stream_job_fragments,
-                &info.new_no_shuffle,
-                |fragment_id, actor_id| {
-                    database_info
-                        .fragment(fragment_id)
-                        .actors
-                        .get(&actor_id)
-                        .map(|info| info.splits.clone())
-                },
-            )?);
-            Ok(resolved)
+            // TODO(render): Resolve source splits with rendered actor ids and no-shuffle mapping.
+            let _ = (info, database_info);
+            Ok(SplitAssignment::default())
         }
 
         // Throttle data for creating jobs (set only in the Throttle arm)
@@ -495,11 +482,21 @@ impl DatabaseCheckpointControl {
 
             Some(Command::DropStreamingJobs {
                 streaming_job_ids,
-                actors,
                 unregistered_state_table_ids,
                 unregistered_fragment_ids,
                 dropped_sink_fragment_by_targets,
             }) => {
+                let actors = self
+                    .database_info
+                    .fragment_infos()
+                    .filter(|fragment| {
+                        self.database_info
+                            .job_id_by_fragment(fragment.fragment_id)
+                            .is_some_and(|job_id| streaming_job_ids.contains(&job_id))
+                    })
+                    .flat_map(|fragment| fragment.actors.keys().copied())
+                    .collect::<Vec<_>>();
+
                 // pre_apply: drop node upstream for sink targets
                 for (target_fragment, sink_fragments) in &dropped_sink_fragment_by_targets {
                     self.database_info
@@ -622,29 +619,9 @@ impl DatabaseCheckpointControl {
 
             Some(Command::ReplaceStreamJob(plan)) => {
                 // Phase 2: Resolve splits to actor-level assignment.
-                let resolved_split_assignment = match &plan.split_plan {
-                    ReplaceJobSplitPlan::Discovered(discovered) => {
-                        SourceManager::resolve_fragment_to_actor_splits(
-                            &plan.new_fragments,
-                            discovered,
-                        )?
-                    }
-                    ReplaceJobSplitPlan::AlignFromPrevious(new_no_shuffle) => {
-                        SourceManager::resolve_replace_source_splits(
-                            &plan.new_fragments,
-                            &plan.replace_upstream,
-                            new_no_shuffle,
-                            |_fragment_id, actor_id| {
-                                self.database_info.fragment_infos().find_map(|fragment| {
-                                    fragment
-                                        .actors
-                                        .get(&actor_id)
-                                        .map(|info| info.splits.clone())
-                                })
-                            },
-                        )?
-                    }
-                };
+                // TODO(render): Resolve replace-job splits after actor rendering.
+                let _ = &plan.split_plan;
+                let resolved_split_assignment = SplitAssignment::default();
 
                 // Build edges
                 let mut edges = self.database_info.build_edge(
@@ -673,7 +650,8 @@ impl DatabaseCheckpointControl {
                             (
                                 sink.new_fragment.fragment_id,
                                 sink.original_sink.id.as_job_id(),
-                                sink.new_fragment_info(),
+                                // TODO(render): Fill auto-refresh sink actors.
+                                sink.new_fragment_info(HashMap::new()),
                             )
                         }));
                 }

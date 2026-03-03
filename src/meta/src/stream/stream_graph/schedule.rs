@@ -22,26 +22,22 @@ use std::collections::{BTreeMap, HashMap};
 use std::num::NonZeroUsize;
 
 use anyhow::Context;
-use either::Either;
 use enum_as_inner::EnumAsInner;
 use itertools::Itertools;
-use risingwave_common::hash::{
-    ActorAlignmentId, ActorAlignmentMapping, ActorMapping, VnodeCountCompat,
-};
+use risingwave_common::bail;
+use risingwave_common::hash::{ActorAlignmentId, VnodeCountCompat};
 use risingwave_common::id::JobId;
 use risingwave_common::util::stream_graph_visitor::visit_fragment;
-use risingwave_common::{bail, hash};
 use risingwave_connector::source::cdc::{CDC_BACKFILL_MAX_PARALLELISM, CdcScanOptions};
 use risingwave_meta_model::WorkerId;
-use risingwave_meta_model::fragment::DistributionType;
 use risingwave_pb::common::WorkerNode;
-use risingwave_pb::meta::table_fragments::fragment::PbFragmentDistributionType;
+use risingwave_pb::meta::table_fragments::fragment::{
+    FragmentDistributionType, PbFragmentDistributionType,
+};
 use risingwave_pb::stream_plan::DispatcherType::{self, *};
 
 use crate::MetaResult;
-use crate::barrier::SharedFragmentInfo;
-use crate::model::ActorId;
-use crate::stream::AssignerBuilder;
+use crate::model::{ActorId, Fragment};
 use crate::stream::stream_graph::fragment::CompleteStreamFragmentGraph;
 use crate::stream::stream_graph::id::GlobalFragmentId as Id;
 
@@ -51,7 +47,7 @@ type HashMappingId = usize;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 enum Req {
     /// The fragment must be singleton and is scheduled to the given worker id.
-    Singleton(WorkerId),
+    Singleton,
     /// The fragment must be hash-distributed and is scheduled by the given hash mapping.
     Hash(HashMappingId),
     /// The fragment must have the given vnode count, but can be scheduled anywhere.
@@ -70,7 +66,7 @@ impl Req {
     fn merge(a: Self, b: Self, mapping_len: impl Fn(HashMappingId) -> usize) -> MetaResult<Self> {
         // Note that a and b are always different, as they come from a set.
         let merge = |a, b| match (a, b) {
-            (Self::AnySingleton, Self::Singleton(id)) => Some(Self::Singleton(id)),
+            (Self::AnySingleton, Self::Singleton) => Some(Self::Singleton),
             (Self::AnyVnodeCount(count), Self::Hash(id)) if mapping_len(id) == count => {
                 Some(Self::Hash(id))
             }
@@ -122,64 +118,28 @@ crepe::crepe! {
 #[derive(Debug, Clone, EnumAsInner)]
 pub(super) enum Distribution {
     /// The fragment is singleton and is scheduled to the given worker slot.
-    Singleton(WorkerId),
+    Singleton,
 
     /// The fragment is hash-distributed and is scheduled by the given hash mapping.
-    Hash(ActorAlignmentMapping),
+    Hash(usize),
 }
 
 impl Distribution {
-    /// The parallelism required by the distribution.
-    pub fn parallelism(&self) -> usize {
-        self.actors().count()
-    }
-
-    /// All worker slots required by the distribution.
-    pub fn actors(&self) -> impl Iterator<Item = ActorAlignmentId> + '_ {
-        match self {
-            Distribution::Singleton(p) => {
-                Either::Left(std::iter::once(ActorAlignmentId::new(*p, 0)))
-            }
-            Distribution::Hash(mapping) => Either::Right(mapping.iter_unique()),
-        }
-    }
-
     /// Get the vnode count of the distribution.
     pub fn vnode_count(&self) -> usize {
         match self {
-            Distribution::Singleton(_) => 1, // only `SINGLETON_VNODE`
-            Distribution::Hash(mapping) => mapping.len(),
+            Distribution::Singleton => 1, // only `SINGLETON_VNODE`
+            Distribution::Hash(vnode_count) => *vnode_count,
         }
     }
 
     /// Create a distribution from a persisted protobuf `Fragment`.
-    pub fn from_fragment(
-        fragment: &SharedFragmentInfo,
-        actor_location: &HashMap<ActorId, WorkerId>,
-    ) -> Self {
+    pub fn from_fragment(fragment: &Fragment) -> Self {
         match fragment.distribution_type {
-            DistributionType::Single => {
-                let (actor_id, _) = fragment.actors.iter().exactly_one().unwrap();
-                let location = actor_location.get(actor_id).unwrap();
-                Distribution::Singleton(*location)
-            }
-            DistributionType::Hash => {
-                let actor_bitmaps: HashMap<_, _> = fragment
-                    .actors
-                    .iter()
-                    .map(|(actor_id, actor_info)| {
-                        (
-                            *actor_id as hash::ActorId,
-                            actor_info.vnode_bitmap.clone().unwrap(),
-                        )
-                    })
-                    .collect();
-
-                let actor_mapping = ActorMapping::from_bitmaps(&actor_bitmaps);
-                let actor_location = actor_location.iter().map(|(&k, &v)| (k, v)).collect();
-                let mapping = actor_mapping.to_actor_alignment(&actor_location);
-
-                Distribution::Hash(mapping)
+            FragmentDistributionType::Single => Distribution::Singleton,
+            FragmentDistributionType::Hash => Distribution::Hash(fragment.vnode_count()),
+            PbFragmentDistributionType::Unspecified => {
+                unreachable!()
             }
         }
     }
@@ -187,7 +147,7 @@ impl Distribution {
     /// Convert the distribution to [`PbFragmentDistributionType`].
     pub fn to_distribution_type(&self) -> PbFragmentDistributionType {
         match self {
-            Distribution::Singleton(_) => PbFragmentDistributionType::Single,
+            Distribution::Singleton => PbFragmentDistributionType::Single,
             Distribution::Hash(_) => PbFragmentDistributionType::Hash,
         }
     }
@@ -196,13 +156,7 @@ impl Distribution {
 /// [`Scheduler`] schedules the distribution of fragments in a stream graph.
 pub(super) struct Scheduler {
     /// The default hash mapping for hash-distributed fragments, if there's no requirement derived.
-    default_hash_mapping: ActorAlignmentMapping,
-
-    /// The default worker for singleton fragments, if there's no requirement derived.
-    default_singleton_worker: WorkerId,
-
-    /// Use to generate mapping if a vnode count other than the default is required.
-    dynamic_mapping_fn: Box<dyn Fn(usize, Option<usize>) -> anyhow::Result<ActorAlignmentMapping>>,
+    default_vnode_count: usize,
 }
 
 impl Scheduler {
@@ -215,65 +169,17 @@ impl Scheduler {
     /// For different streaming jobs, we even out possible scheduling skew by using the streaming job id as the salt for the scheduling algorithm.
     pub fn new(
         streaming_job_id: JobId,
-        workers: &HashMap<WorkerId, WorkerNode>,
         default_parallelism: NonZeroUsize,
         expected_vnode_count: usize,
     ) -> MetaResult<Self> {
         let parallelism = default_parallelism.get();
         assert!(
             parallelism <= expected_vnode_count,
-            "parallelism should be limited by vnode count in previous steps"
+            "parallelism should be limited by vnode count in previous steps for job {streaming_job_id}"
         );
 
-        let assigner = AssignerBuilder::new(streaming_job_id).build();
-
-        let worker_weights = workers
-            .iter()
-            .map(|(worker_id, worker)| {
-                (
-                    *worker_id,
-                    NonZeroUsize::new(worker.compute_node_parallelism()).unwrap(),
-                )
-            })
-            .collect();
-
-        let actor_idxes = (0..parallelism).collect_vec();
-        let vnodes = (0..expected_vnode_count).collect_vec();
-
-        let assignment = assigner.assign_hierarchical(&worker_weights, &actor_idxes, &vnodes)?;
-
-        let default_hash_mapping =
-            ActorAlignmentMapping::from_assignment(assignment, expected_vnode_count);
-
-        let single_actor_idxes = std::iter::once(0).collect_vec();
-
-        let single_assignment =
-            assigner.assign_hierarchical(&worker_weights, &single_actor_idxes, &vnodes)?;
-
-        let default_singleton_worker =
-            single_assignment.keys().exactly_one().cloned().unwrap() as _;
-
-        let dynamic_mapping_fn = Box::new(
-            move |limited_count: usize, force_parallelism: Option<usize>| {
-                let parallelism = if let Some(force_parallelism) = force_parallelism {
-                    force_parallelism.min(limited_count)
-                } else {
-                    parallelism.min(limited_count)
-                };
-                let assignment = assigner.assign_hierarchical(
-                    &worker_weights,
-                    &(0..parallelism).collect_vec(),
-                    &(0..limited_count).collect_vec(),
-                )?;
-
-                let mapping = ActorAlignmentMapping::from_assignment(assignment, limited_count);
-                Ok(mapping)
-            },
-        );
         Ok(Self {
-            default_hash_mapping,
-            default_singleton_worker,
-            dynamic_mapping_fn,
+            default_vnode_count: expected_vnode_count,
         })
     }
 
@@ -295,7 +201,7 @@ impl Scheduler {
         let hash_mapping_id: HashMap<_, _> = all_hash_mappings
             .iter()
             .enumerate()
-            .map(|(i, m)| (m.clone(), i))
+            .map(|(i, m)| (*m, i))
             .collect();
 
         let mut facts = Vec::new();
@@ -368,7 +274,7 @@ impl Scheduler {
         // Distributions of existing fragments.
         for (id, dist) in existing_distribution {
             let req = match dist {
-                Distribution::Singleton(worker_id) => Req::Singleton(worker_id),
+                Distribution::Singleton => Req::Singleton,
                 Distribution::Hash(mapping) => Req::Hash(hash_mapping_id[&mapping]),
             };
             facts.push(Fact::Req { id, req });
@@ -398,7 +304,7 @@ impl Scheduler {
                 // Merge all requirements.
                 Some(reqs) => {
                     let req = (reqs.iter().copied())
-                        .try_reduce(|a, b| Req::merge(a, b, |id| all_hash_mappings[id].len()))
+                        .try_reduce(|a, b| Req::merge(a, b, |id| all_hash_mappings[id]))
                         .with_context(|| {
                             format!("cannot fulfill scheduling requirements for fragment {id:?}")
                         })?
@@ -406,27 +312,14 @@ impl Scheduler {
 
                     // Derive distribution from the merged requirement.
                     match req {
-                        Req::Singleton(worker_id) => Distribution::Singleton(worker_id),
-                        Req::Hash(mapping) => {
-                            Distribution::Hash(all_hash_mappings[mapping].clone())
-                        }
-                        Req::AnySingleton => Distribution::Singleton(self.default_singleton_worker),
-                        Req::AnyVnodeCount(vnode_count) => {
-                            let force_parallelism =
-                                force_parallelism_fragment_ids.get(&id).copied();
-                            let mapping = (self.dynamic_mapping_fn)(vnode_count, force_parallelism)
-                                .with_context(|| {
-                                    format!(
-                                        "failed to build dynamic mapping for fragment {id:?} with vnode count {vnode_count}"
-                                    )
-                                })?;
-
-                            Distribution::Hash(mapping)
-                        }
+                        Req::Singleton => Distribution::Singleton,
+                        Req::Hash(mapping) => Distribution::Hash(all_hash_mappings[mapping]),
+                        Req::AnySingleton => Distribution::Singleton,
+                        Req::AnyVnodeCount(vnode_count) => Distribution::Hash(vnode_count),
                     }
                 }
                 // No requirement, use the default.
-                None => Distribution::Hash(self.default_hash_mapping.clone()),
+                None => Distribution::Hash(self.default_vnode_count),
             };
 
             distributions.insert(id, dist);
@@ -551,7 +444,7 @@ mod tests {
         #[rustfmt::skip]
         let facts = [
             Fact::Req { id: 1.into(), req: Req::Hash(1) },
-            Fact::Req { id: 2.into(), req: Req::Singleton(0.into()) },
+            Fact::Req { id: 2.into(), req: Req::Singleton },
             Fact::Edge { from: 1.into(), to: 101.into(), dt: NoShuffle },
             Fact::Edge { from: 2.into(), to: 102.into(), dt: NoShuffle },
             Fact::Edge { from: 101.into(), to: 103.into(), dt: Hash },
@@ -561,7 +454,7 @@ mod tests {
 
         let expected = maplit::hashmap! {
             101.into() => Result::Required(Req::Hash(1)),
-            102.into() => Result::Required(Req::Singleton(0.into())),
+            102.into() => Result::Required(Req::Singleton),
             103.into() => Result::DefaultHash,
             104.into() => Result::DefaultSingleton,
         };
@@ -644,12 +537,12 @@ mod tests {
         #[rustfmt::skip]
         let facts = [
             Fact::Req { id: 1.into(), req: Req::Hash(1) },
-            Fact::Req { id: 101.into(), req: Req::AnyVnodeCount(128) },
+            Fact::Req { id: 101.into(), req: Req::AnyVnodeCount(128.try_into().unwrap()) },
             Fact::Edge { from: 1.into(), to: 101.into(), dt: Hash },
         ];
 
         let expected = maplit::hashmap! {
-            101.into() => Result::Required(Req::AnyVnodeCount(128)),
+            101.into() => Result::Required(Req::AnyVnodeCount(128.try_into().unwrap())),
         };
 
         test_success(facts, expected);
@@ -661,7 +554,7 @@ mod tests {
         #[rustfmt::skip]
         let facts = [
             Fact::Req { id: 1.into(), req: Req::Hash(1) },
-            Fact::Req { id: 101.into(), req: Req::AnyVnodeCount(128) },
+            Fact::Req { id: 101.into(), req: Req::AnyVnodeCount(128.try_into().unwrap()) },
             Fact::Edge { from: 1.into(), to: 101.into(), dt: NoShuffle },
         ];
 
@@ -681,7 +574,7 @@ mod tests {
         #[rustfmt::skip]
         let facts = [
             Fact::Req { id: 1.into(), req: Req::Hash(1) },
-            Fact::Req { id: 101.into(), req: Req::AnyVnodeCount(128) },
+            Fact::Req { id: 101.into(), req: Req::AnyVnodeCount(128.try_into().unwrap()) },
             Fact::Edge { from: 1.into(), to: 101.into(), dt: NoShuffle },
         ];
 
@@ -694,13 +587,13 @@ mod tests {
     fn test_backfill_singleton_vnode_count() {
         #[rustfmt::skip]
         let facts = [
-            Fact::Req { id: 1.into(), req: Req::Singleton(0.into()) },
+            Fact::Req { id: 1.into(), req: Req::Singleton },
             Fact::Req { id: 101.into(), req: Req::AnySingleton },
             Fact::Edge { from: 1.into(), to: 101.into(), dt: NoShuffle }, // or `Simple`
         ];
 
         let expected = maplit::hashmap! {
-            101.into() => Result::Required(Req::Singleton(0.into())),
+            101.into() => Result::Required(Req::Singleton),
         };
 
         test_success(facts, expected);

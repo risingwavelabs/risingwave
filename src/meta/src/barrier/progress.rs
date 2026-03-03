@@ -732,7 +732,8 @@ impl CreateMviewProgressTracker {
             ..
         } = info;
         let job_id = stream_job_fragments.stream_job_id();
-        let actors = stream_job_fragments.tracking_progress_actor_ids();
+        // TODO(render): Derive tracking actors from rendered actor infos.
+        let actors = Vec::new();
         let tracking_job = TrackingJob::new(&info.stream_job_fragments);
         if actors.is_empty() {
             // NOTE: This CDC source detection uses hardcoded property checks and should be replaced

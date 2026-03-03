@@ -64,7 +64,8 @@ impl BackfillOrderState {
         locality_fragment_state_table_mapping: HashMap<FragmentId, Vec<TableId>>,
     ) -> Self {
         tracing::debug!(?backfill_orders, "initialize backfill order state");
-        let actor_to_fragment_id = stream_job_fragments.actor_fragment_mapping();
+        // TODO(render): Rebuild actor-to-fragment mapping from renderer output.
+        let actor_to_fragment_id = HashMap::new();
 
         let mut backfill_nodes: HashMap<FragmentId, BackfillNode> = HashMap::new();
 
@@ -79,11 +80,8 @@ impl BackfillOrderState {
                     fragment_id,
                     BackfillNode {
                         fragment_id,
-                        remaining_actors: stream_job_fragments
-                            .fragment_actors(fragment_id)
-                            .iter()
-                            .map(|actor| actor.actor_id)
-                            .collect(),
+                        // TODO(render): Fill actor ids for each fragment after actor rendering.
+                        remaining_actors: HashSet::new(),
                         remaining_dependencies: Default::default(),
                         children: backfill_orders
                             .get(&fragment_id)
