@@ -697,18 +697,12 @@ impl<L: Clone> HummockVersionCommon<SstableInfo, L> {
         changed_table_info
     }
 
-    /// Returns the enriched table change log delta. It's used to apply the change log delta to the meta store.
     pub fn apply_change_log_delta<T: Clone>(
         table_change_log: &mut HashMap<TableId, TableChangeLogCommon<T>>,
         change_log_delta: &HashMap<TableId, ChangeLogDeltaCommon<T>>,
-        removed_table_ids: &HashSet<TableId>,
-        state_table_info_delta: &HashMap<TableId, StateTableInfoDelta>,
-        changed_table_info: &HashMap<TableId, Option<StateTableInfo>>,
-    ) -> HashMap<TableId, ChangeLogDeltaCommon<T>> {
-        let mut enriched_change_log_delta = HashMap::new();
+    ) {
         for (table_id, change_log_delta) in change_log_delta {
             let new_change_log = &change_log_delta.new_log;
-            enriched_change_log_delta.insert(*table_id, change_log_delta.clone());
             match table_change_log.entry(*table_id) {
                 Entry::Occupied(entry) => {
                     let change_log = entry.into_mut();
@@ -720,24 +714,43 @@ impl<L: Clone> HummockVersionCommon<SstableInfo, L> {
             };
         }
 
+        // truncate the remaining table change log
+        for (table_id, change_log_delta) in change_log_delta {
+            if let Some(change_log) = table_change_log.get_mut(table_id) {
+                change_log.truncate(change_log_delta.truncate_epoch);
+            }
+        }
+    }
+
+    /// Returns the log deltas required to truncate the entire change log for a table.
+    pub fn collect_gc_change_log_delta<'a, T: Clone>(
+        current_change_log_table_ids: impl Iterator<Item = &'a TableId>,
+        change_log_delta: &HashMap<TableId, ChangeLogDeltaCommon<T>>,
+        removed_table_ids: &HashSet<TableId>,
+        state_table_info_delta: &HashMap<TableId, StateTableInfoDelta>,
+        changed_table_info: &HashMap<TableId, Option<StateTableInfo>>,
+    ) -> HashSet<TableId> {
+        let mut gc_change_log_delta = HashSet::new();
         // If a table has no new change log entry (even an empty one), it means we have stopped maintained
         // the change log for the table, and then we will remove the table change log.
         // The table change log will also be removed when the table id is removed.
-        table_change_log.retain(|table_id, _| {
+        for table_id in current_change_log_table_ids {
             if removed_table_ids.contains(table_id) {
-                enriched_change_log_delta.insert(*table_id, ChangeLogDeltaCommon::truncate_all_table_logs());
-                return false;
+                gc_change_log_delta.insert(*table_id);
+                continue;
             }
             if let Some(table_info_delta) = state_table_info_delta.get(table_id)
-                && let Some(Some(prev_table_info)) = changed_table_info.get(table_id) && table_info_delta.committed_epoch > prev_table_info.committed_epoch {
+                && let Some(Some(prev_table_info)) = changed_table_info.get(table_id)
+                && table_info_delta.committed_epoch > prev_table_info.committed_epoch
+            {
                 // the table exists previously, and its committed epoch has progressed.
             } else {
                 // otherwise, the table change log should be kept anyway
-                return true;
+                continue;
             }
             let contains = change_log_delta.contains_key(table_id);
             if !contains {
-                enriched_change_log_delta.insert(*table_id, ChangeLogDeltaCommon::truncate_all_table_logs());
+                gc_change_log_delta.insert(*table_id);
                 static LOG_SUPPRESSOR: LazyLock<LogSuppressor> =
                     LazyLock::new(|| LogSuppressor::per_second(1));
                 if let Ok(suppressed_count) = LOG_SUPPRESSOR.check() {
@@ -748,17 +761,8 @@ impl<L: Clone> HummockVersionCommon<SstableInfo, L> {
                     );
                 }
             }
-            contains
-        });
-
-        // truncate the remaining table change log
-        for (table_id, change_log_delta) in change_log_delta {
-            if let Some(change_log) = table_change_log.get_mut(table_id) {
-                change_log.truncate(change_log_delta.truncate_epoch);
-            }
         }
-
-        enriched_change_log_delta
+        gc_change_log_delta
     }
 
     pub fn build_branched_sst_info(&self) -> BTreeMap<HummockSstableObjectId, BranchedSstInfo> {

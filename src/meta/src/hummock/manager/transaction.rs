@@ -64,13 +64,7 @@ pub(super) struct HummockVersionTransaction<'a> {
     table_committed_epoch_notifiers: Option<&'a Mutex<TableCommittedEpochNotifiers>>,
     meta_metrics: &'a MetaMetrics,
 
-    #[expect(clippy::type_complexity)]
-    pre_applied_version: Option<(
-        HummockVersion,
-        Vec<HummockVersionDelta>,
-        HashMap<TableId, TableChangeLog>,
-        HashMap<TableId, ChangeLogDelta>,
-    )>,
+    pre_applied_version: Option<(HummockVersion, Vec<HummockVersionDelta>, HashSet<TableId>)>,
     disable_apply_to_txn: bool,
     opts: &'a MetaOpts,
 }
@@ -107,7 +101,7 @@ impl<'a> HummockVersionTransaction<'a> {
     }
 
     pub(super) fn latest_version(&self) -> &HummockVersion {
-        if let Some((version, _, _, _)) = &self.pre_applied_version {
+        if let Some((version, _, _)) = &self.pre_applied_version {
             version
         } else {
             self.orig_version
@@ -123,23 +117,27 @@ impl<'a> HummockVersionTransaction<'a> {
     }
 
     fn pre_apply(&mut self, delta: HummockVersionDelta) {
-        let (version, deltas, table_change_log, table_change_log_delta) =
+        let (version, deltas, gc_change_log_deltas) =
             self.pre_applied_version.get_or_insert_with(|| {
                 (
                     self.orig_version.clone(),
                     Vec::with_capacity(1),
-                    self.orig_table_change_log.clone(),
-                    HashMap::new(),
+                    HashSet::new(),
                 )
             });
         let changed_table_info = version.apply_version_delta(&delta);
-        *table_change_log_delta = HummockVersion::apply_change_log_delta(
-            table_change_log,
+        // Ideally, the first parameter should be the cumulative state (orig_table_change_log + all applied deltas).
+        // However, currently, we use orig_table_change_log directly because deltas are only applied after a successful metastore write in the end of the transaction.
+        // Consequently, some table eligible for GC are not returned by collect_gc_change_log_delta and are deferred to the next transaction.
+        // This delay is acceptable and does not impact system correctness.
+        let gc_change_log_delta = HummockVersion::collect_gc_change_log_delta(
+            self.orig_table_change_log.keys(),
             &delta.change_log_delta,
             &delta.removed_table_ids,
             &delta.state_table_info_delta,
             &changed_table_info,
         );
+        gc_change_log_deltas.extend(gc_change_log_delta);
         deltas.push(delta);
     }
 
@@ -248,9 +246,17 @@ impl<'a> HummockVersionTransaction<'a> {
 
 impl InMemValTransaction for HummockVersionTransaction<'_> {
     fn commit(self) {
-        if let Some((version, deltas, table_change_log, _)) = self.pre_applied_version {
+        if let Some((version, deltas, gc_change_log_deltas)) = self.pre_applied_version {
             *self.orig_version = version;
-            *self.orig_table_change_log = table_change_log;
+            for delta in deltas {
+                HummockVersion::apply_change_log_delta(
+                    self.orig_table_change_log,
+                    &delta.change_log_delta,
+                );
+            }
+            self.orig_table_change_log
+                .retain(|table_id, _| !gc_change_log_deltas.contains(table_id));
+
             if !self.disable_apply_to_txn {
                 let pb_deltas = deltas.iter().map(|delta| delta.to_protobuf()).collect();
                 self.notification_manager.notify_hummock_without_version(
@@ -277,6 +283,7 @@ impl InMemValTransaction for HummockVersionTransaction<'_> {
                         .notify_deltas(&deltas);
                 }
             }
+
             for delta in deltas {
                 assert!(self.orig_deltas.insert(delta.id, delta.clone()).is_none());
             }
@@ -297,7 +304,7 @@ where
         if self.disable_apply_to_txn {
             return Ok(());
         }
-        if let Some((_, deltas, _, table_change_log_delta)) = &self.pre_applied_version {
+        if let Some((_, deltas, gc_change_log_deltas)) = &self.pre_applied_version {
             // These upsert_in_transaction can be batched. However, we know len(deltas) is always 1 currently.
             for delta in deltas {
                 delta.upsert_in_transaction(txn).await?;
@@ -306,15 +313,10 @@ where
             let insert_batch_size = self.opts.table_change_log_insert_batch_size as usize;
             use futures::stream::{self, StreamExt};
             use sea_orm::{ColumnTrait, Condition, QueryFilter};
-            let insert_iter =
-                table_change_log_delta
-                    .iter()
-                    .filter_map(|(table_id, change_log_delta)| {
-                        if change_log_delta.is_truncate_all_table_logs() {
-                            return None;
-                        }
-                        Some((*table_id, &change_log_delta.new_log))
-                    });
+            let insert_iter = deltas
+                .iter()
+                .flat_map(|i| i.change_log_delta.iter())
+                .map(|(table_id, change_log_delta)| (*table_id, &change_log_delta.new_log));
             let mut stream = stream::iter(insert_iter).chunks(insert_batch_size);
             while let Some(change_log_batch) = stream.next().await {
                 let insert_many = change_log_batch
@@ -330,9 +332,16 @@ where
             }
 
             let delete_batch_size = self.opts.table_change_log_delete_batch_size as usize;
-            let delete_iter = table_change_log_delta
+            let delete_iter = deltas
                 .iter()
-                .map(|(table_id, change_log_delta)| (*table_id, change_log_delta.truncate_epoch));
+                .flat_map(|i| i.change_log_delta.iter())
+                .map(|(table_id, change_log_delta)| (*table_id, change_log_delta.truncate_epoch))
+                .chain(
+                    gc_change_log_deltas
+                        .iter()
+                        .map(|table_id| (*table_id, u64::MAX)),
+                );
+
             let mut stream = stream::iter(delete_iter).chunks(delete_batch_size);
             while let Some(change_log_batch) = stream.next().await {
                 let mut condition = Condition::any();
