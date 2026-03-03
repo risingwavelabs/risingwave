@@ -796,7 +796,7 @@ extern "system" fn Java_com_risingwave_java_binding_Binding_iteratorGetDecimalVa
             .unwrap()
             .into_decimal();
 
-        match decimal_value {
+        match decimal_value.to_owned_scalar() {
             Decimal::NaN | Decimal::NegativeInf | Decimal::PositiveInf => {
                 return Ok(JObject::null());
             }

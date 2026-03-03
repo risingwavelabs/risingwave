@@ -528,9 +528,10 @@ impl HashKeyDe for F64 {
     }
 }
 
-impl HashKeySer<'_> for Decimal {
+impl<'a> HashKeySer<'a> for crate::types::DecimalRef<'a> {
     fn serialize_into(self, mut buf: impl BufMut) {
-        let b = Decimal::unordered_serialize(&self.normalize());
+        use crate::types::DecimalRef;
+        let b = Decimal::unordered_serialize(&DecimalRef::to_owned_scalar(&self).normalize());
         buf.put_slice(b.as_ref());
     }
 

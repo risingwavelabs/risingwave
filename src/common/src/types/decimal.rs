@@ -26,9 +26,9 @@ use risingwave_common_estimate_size::ZeroHeapSize;
 use rust_decimal::prelude::FromStr;
 use rust_decimal::{Decimal as RustDecimal, Error, MathematicalOps as _, RoundingStrategy};
 
-use super::DataType;
 use super::to_text::ToText;
-use crate::array::ArrayResult;
+use super::{DataType, ScalarRefImpl};
+use crate::array::{ArrayError, ArrayResult};
 use crate::types::Decimal::Normalized;
 use crate::types::ordered_float::OrderedFloat;
 
@@ -60,11 +60,87 @@ impl ToText for Decimal {
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct DecimalRef<'a>(&'a Decimal);
+pub struct DecimalRef<'a>(pub &'a Decimal);
+
+impl<'a> From<DecimalRef<'a>> for Decimal {
+    fn from(r: DecimalRef<'a>) -> Self {
+        *r.0
+    }
+}
+
+use crate::types::{F32, F64};
+
+impl<'a> TryFrom<DecimalRef<'a>> for F64 {
+    type Error = ArrayError;
+
+    fn try_from(val: DecimalRef<'a>) -> Result<Self, Self::Error> {
+        val.to_owned_scalar()
+            .try_into()
+            .map_err(|_| ArrayError::internal("failed to convert Decimal to F64"))
+    }
+}
+
+impl<'a> TryFrom<DecimalRef<'a>> for F32 {
+    type Error = ArrayError;
+
+    fn try_from(val: DecimalRef<'a>) -> Result<Self, Self::Error> {
+        val.to_owned_scalar()
+            .try_into()
+            .map_err(|_| ArrayError::internal("failed to convert Decimal to F32"))
+    }
+}
+
+impl<'a> TryFrom<DecimalRef<'a>> for i16 {
+    type Error = ArrayError;
+
+    fn try_from(val: DecimalRef<'a>) -> Result<Self, Self::Error> {
+        val.to_owned_scalar()
+            .try_into()
+            .map_err(|_| ArrayError::internal("failed to convert Decimal to i16"))
+    }
+}
+
+impl<'a> TryFrom<DecimalRef<'a>> for i32 {
+    type Error = ArrayError;
+
+    fn try_from(val: DecimalRef<'a>) -> Result<Self, Self::Error> {
+        val.to_owned_scalar()
+            .try_into()
+            .map_err(|_| ArrayError::internal("failed to convert Decimal to i32"))
+    }
+}
+
+impl<'a> TryFrom<DecimalRef<'a>> for i64 {
+    type Error = ArrayError;
+
+    fn try_from(val: DecimalRef<'a>) -> Result<Self, Self::Error> {
+        val.to_owned_scalar()
+            .try_into()
+            .map_err(|_| ArrayError::internal("failed to convert Decimal to i64"))
+    }
+}
+
+impl<'a> TryFrom<ScalarRefImpl<'a>> for Decimal {
+    type Error = ArrayError;
+
+    fn try_from(val: ScalarRefImpl<'a>) -> Result<Self, Self::Error> {
+        match val {
+            ScalarRefImpl::Decimal(scalar_ref) => Ok(scalar_ref.into()),
+            other => Err(ArrayError::internal(format!(
+                "cannot convert ScalarRefImpl::{} to Decimal",
+                other.get_ident()
+            ))),
+        }
+    }
+}
 
 impl<'a> DecimalRef<'a> {
     pub fn to_owned_scalar(&self) -> Decimal {
         *self.0
+    }
+
+    pub fn to_protobuf(self, output: &mut impl std::io::Write) -> crate::array::ArrayResult<usize> {
+        self.0.to_protobuf(output)
     }
 }
 
@@ -101,6 +177,14 @@ impl ToSql for DecimalRef<'_> {
         Self: Sized,
     {
         self.0.to_sql(ty, out)
+    }
+}
+
+impl Sub for DecimalRef<'_> {
+    type Output = Decimal;
+
+    fn sub(self, rhs: Self) -> Self::Output {
+        *self.0 - *rhs.0
     }
 }
 
@@ -789,11 +873,17 @@ pub enum PowError {
 impl From<Decimal> for memcomparable::Decimal {
     fn from(d: Decimal) -> Self {
         match d {
-            Decimal::Normalized(d) => Self::Normalized(d),
-            Decimal::PositiveInf => Self::Inf,
-            Decimal::NegativeInf => Self::NegInf,
-            Decimal::NaN => Self::NaN,
+            Decimal::Normalized(d) => d.into(),
+            Decimal::PositiveInf => memcomparable::Decimal::Inf,
+            Decimal::NegativeInf => memcomparable::Decimal::NegInf,
+            Decimal::NaN => memcomparable::Decimal::NaN,
         }
+    }
+}
+
+impl<'a> From<DecimalRef<'a>> for memcomparable::Decimal {
+    fn from(d: DecimalRef<'a>) -> Self {
+        d.to_owned_scalar().into()
     }
 }
 

@@ -436,9 +436,10 @@ fn array_to_vector(array: ListRef<'_>, ctx: &Context) -> Result<VectorVal> {
             };
             let val = match scalar {
                 ScalarRefImpl::Int32(val) => val.into(),
-                ScalarRefImpl::Decimal(val) => {
-                    val.try_into().map_err(|_| ExprError::NumericOverflow)?
-                }
+                ScalarRefImpl::Decimal(val) => val
+                    .to_owned_scalar()
+                    .try_into()
+                    .map_err(|_| ExprError::NumericOverflow)?,
                 ScalarRefImpl::Float32(val) => val,
                 ScalarRefImpl::Float64(val) => {
                     val.try_into().map_err(|_| ExprError::NumericOverflow)?

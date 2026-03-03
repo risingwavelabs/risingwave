@@ -17,7 +17,7 @@ use std::fmt::Debug;
 use chrono::{Duration, NaiveDateTime};
 use num_traits::{CheckedDiv, CheckedMul, CheckedNeg, CheckedRem, CheckedSub, Zero};
 use risingwave_common::types::{
-    CheckedAdd, Date, Decimal, F64, FloatExt, Interval, IsNegative, Time, Timestamp,
+    CheckedAdd, Date, Decimal, DecimalRef, F64, FloatExt, Interval, IsNegative, Time, Timestamp,
 };
 use risingwave_expr::{ExprError, Result, function};
 use rust_decimal::MathematicalOps;
@@ -108,9 +108,15 @@ where
 
 #[function("neg(*int) -> auto")]
 #[function("neg(*float) -> auto")]
-#[function("neg(decimal) -> decimal")]
 pub fn general_neg<T1: CheckedNeg>(expr: T1) -> Result<T1> {
     expr.checked_neg().ok_or(ExprError::NumericOutOfRange)
+}
+
+#[function("neg(decimal) -> decimal")]
+pub fn decimal_neg<'a>(expr: DecimalRef<'a>) -> Result<Decimal> {
+    expr.to_owned_scalar()
+        .checked_neg()
+        .ok_or(ExprError::NumericOutOfRange)
 }
 
 #[function("neg(int256) -> int256")]
@@ -153,8 +159,8 @@ where
 }
 
 #[function("abs(decimal) -> decimal")]
-pub fn decimal_abs(decimal: Decimal) -> Decimal {
-    Decimal::abs(&decimal)
+pub fn decimal_abs<'a>(decimal: DecimalRef<'a>) -> Decimal {
+    Decimal::abs(&decimal.to_owned_scalar())
 }
 
 fn err_pow_zero_negative() -> ExprError {
@@ -190,8 +196,10 @@ pub fn pow_f64(l: F64, r: F64) -> Result<F64> {
 }
 
 #[function("pow(decimal, decimal) -> decimal")]
-pub fn pow_decimal(l: Decimal, r: Decimal) -> Result<Decimal> {
+pub fn pow_decimal<'a>(l: DecimalRef<'a>, r: DecimalRef<'a>) -> Result<Decimal> {
     use risingwave_common::types::DecimalPowError as PowError;
+    let l = l.to_owned_scalar();
+    let r = r.to_owned_scalar();
 
     l.checked_powd(&r).map_err(|e| match e {
         PowError::ZeroNegative => err_pow_zero_negative(),
@@ -384,7 +392,8 @@ pub fn sqrt_f64(expr: F64) -> Result<F64> {
 }
 
 #[function("sqrt(decimal) -> decimal")]
-pub fn sqrt_decimal(expr: Decimal) -> Result<Decimal> {
+pub fn sqrt_decimal<'a>(expr: DecimalRef<'a>) -> Result<Decimal> {
+    let expr = expr.to_owned_scalar();
     match expr {
         Decimal::NaN | Decimal::PositiveInf => Ok(expr),
         Decimal::Normalized(value) => match value.sqrt() {
@@ -417,23 +426,23 @@ pub fn sign_f64(input: F64) -> F64 {
 }
 
 #[function("sign(decimal) -> decimal")]
-pub fn sign_dec(input: Decimal) -> Decimal {
-    input.sign()
+pub fn sign_dec<'a>(input: DecimalRef<'a>) -> Decimal {
+    input.to_owned_scalar().sign()
 }
 
 #[function("scale(decimal) -> int4")]
-pub fn decimal_scale(d: Decimal) -> Option<i32> {
-    d.scale()
+pub fn decimal_scale<'a>(d: DecimalRef<'a>) -> Option<i32> {
+    d.to_owned_scalar().scale()
 }
 
 #[function("min_scale(decimal) -> int4")]
-pub fn decimal_min_scale(d: Decimal) -> Option<i32> {
-    d.normalize().scale()
+pub fn decimal_min_scale<'a>(d: DecimalRef<'a>) -> Option<i32> {
+    d.to_owned_scalar().normalize().scale()
 }
 
 #[function("trim_scale(decimal) -> decimal")]
-pub fn decimal_trim_scale(d: Decimal) -> Decimal {
-    d.normalize()
+pub fn decimal_trim_scale<'a>(d: DecimalRef<'a>) -> Decimal {
+    d.to_owned_scalar().normalize()
 }
 
 #[cfg(test)]

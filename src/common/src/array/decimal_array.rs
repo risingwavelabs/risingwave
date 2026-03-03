@@ -22,7 +22,7 @@ use risingwave_pb::data::{ArrayType, PbArray};
 
 use super::{Array, ArrayBuilder};
 use crate::bitmap::{Bitmap, BitmapBuilder};
-use crate::types::{DataType, Decimal};
+use crate::types::{DataType, Decimal, DecimalRef};
 
 /// `DecimalArray` is a collection of `Decimal`.
 #[derive(Debug, Clone, PartialEq, Eq, EstimateSize)]
@@ -36,7 +36,7 @@ impl FromIterator<Option<Decimal>> for DecimalArray {
         let iter = iter.into_iter();
         let mut builder = <Self as Array>::Builder::new(iter.size_hint().0);
         for i in iter {
-            builder.append(i);
+            builder.append_owned(i);
         }
         builder.finish()
     }
@@ -82,14 +82,14 @@ impl DecimalArray {
 impl Array for DecimalArray {
     type Builder = DecimalArrayBuilder;
     type OwnedItem = Decimal;
-    type RefItem<'a> = Decimal;
+    type RefItem<'a> = DecimalRef<'a>;
 
     unsafe fn raw_value_at_unchecked(&self, idx: usize) -> Self::RefItem<'_> {
-        unsafe { *self.data.get_unchecked(idx) }
+        unsafe { DecimalRef(self.data.get_unchecked(idx)) }
     }
 
     fn raw_iter(&self) -> impl ExactSizeIterator<Item = Self::RefItem<'_>> {
-        self.data.iter().cloned()
+        self.data.iter().map(DecimalRef)
     }
 
     fn len(&self) -> usize {
@@ -156,11 +156,12 @@ impl ArrayBuilder for DecimalArrayBuilder {
         Self::new(capacity)
     }
 
-    fn append_n(&mut self, n: usize, value: Option<Decimal>) {
+    fn append_n(&mut self, n: usize, value: Option<DecimalRef<'_>>) {
         match value {
             Some(x) => {
                 self.bitmap.append_n(n, true);
-                self.data.extend(std::iter::repeat_n(x, n));
+                self.data
+                    .extend(std::iter::repeat_n(x.to_owned_scalar(), n));
             }
             None => {
                 self.bitmap.append_n(n, false);
@@ -192,6 +193,21 @@ impl ArrayBuilder for DecimalArrayBuilder {
     }
 }
 
+impl DecimalArrayBuilder {
+    pub fn append_owned(&mut self, value: Option<Decimal>) {
+        match value {
+            Some(x) => {
+                self.bitmap.append(true);
+                self.data.push(x);
+            }
+            None => {
+                self.bitmap.append(false);
+                self.data.push(Decimal::default());
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::hash::Hash;
@@ -208,10 +224,13 @@ mod tests {
         let v = (0..1000).map(Decimal::from).collect_vec();
         let mut builder = DecimalArrayBuilder::new(0);
         for i in &v {
-            builder.append(Some(*i));
+            builder.append(Some(DecimalRef(i)));
         }
         let a = builder.finish();
-        let res = v.iter().zip_eq_fast(a.iter()).all(|(a, b)| Some(*a) == b);
+        let res = v
+            .iter()
+            .zip_eq_fast(a.iter())
+            .all(|(a, b)| Some(DecimalRef(a)) == b);
         assert!(res);
     }
 
@@ -284,7 +303,7 @@ mod tests {
             .map(|v| {
                 let mut builder = DecimalArrayBuilder::new(0);
                 for i in v {
-                    builder.append(*i);
+                    builder.append_owned(*i);
                 }
                 builder.finish()
             })

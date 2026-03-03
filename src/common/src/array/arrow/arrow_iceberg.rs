@@ -167,7 +167,7 @@ impl ToArrow for IcebergArrowConvert {
         let values: Vec<Option<i128>> = array
             .iter()
             .map(|e| {
-                e.and_then(|e| match e {
+                e.and_then(|e| match e.to_owned_scalar() {
                     crate::array::Decimal::Normalized(e) => {
                         let value = e.mantissa();
                         let scale = e.scale() as i8;
@@ -326,6 +326,7 @@ mod test {
     use super::arrow_schema::DataType;
     use super::*;
     use crate::array::{Decimal, DecimalArray};
+    use crate::types::DecimalRef;
 
     #[test]
     fn decimal() {
@@ -471,21 +472,33 @@ mod test {
         assert_eq!(original_array.len(), roundtrip_array.len());
 
         // PositiveInf -> max value -> PositiveInf
-        assert_eq!(roundtrip_array.value_at(0), Some(Decimal::PositiveInf));
+        assert_eq!(
+            roundtrip_array.value_at(0).map(|r| r.to_owned_scalar()),
+            Some(Decimal::PositiveInf)
+        );
 
         // NegativeInf -> min value -> NegativeInf
-        assert_eq!(roundtrip_array.value_at(1), Some(Decimal::NegativeInf));
+        assert_eq!(
+            roundtrip_array.value_at(1).map(|r| r.to_owned_scalar()),
+            Some(Decimal::NegativeInf)
+        );
 
         // NaN -> NULL -> None (NaN cannot roundtrip, becomes NULL in Arrow)
-        assert_eq!(roundtrip_array.value_at(2), None);
+        assert_eq!(
+            roundtrip_array.value_at(2).map(|r| r.to_owned_scalar()),
+            None
+        );
 
         // Normal value roundtrips correctly (scale may be adjusted)
         assert!(matches!(
-            roundtrip_array.value_at(3),
+            roundtrip_array.value_at(3).map(|r| r.to_owned_scalar()),
             Some(Decimal::Normalized(_))
         ));
 
         // NULL -> NULL -> None
-        assert_eq!(roundtrip_array.value_at(4), None);
+        assert_eq!(
+            roundtrip_array.value_at(4).map(|r| r.to_owned_scalar()),
+            None
+        );
     }
 }

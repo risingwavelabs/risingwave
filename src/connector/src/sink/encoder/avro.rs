@@ -569,7 +569,7 @@ fn on_field<D: MaybeData>(
         DataType::Decimal => match inner {
             AvroSchema::Decimal(decimal_schema) => {
                 maybe.on_base(|s| {
-                    match s.into_decimal() {
+                    match s.into_decimal().to_owned_scalar() {
                         risingwave_common::types::Decimal::Normalized(decimal) => {
                             // convert to bigint with scale
                             // rescale the rust_decimal to the scale of the avro decimal

@@ -12,11 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::types::{Decimal, F64};
+use risingwave_common::types::{Decimal, DecimalRef, F64};
 use risingwave_expr::{ExprError, Result, function};
 
 #[function("round_digit(decimal, int4) -> decimal")]
-pub fn round_digits(input: Decimal, digits: i32) -> Result<Decimal> {
+pub fn round_digits<'a>(input: DecimalRef<'a>, digits: i32) -> Result<Decimal> {
+    let input = input.to_owned_scalar();
     if digits < 0 {
         input
             .round_left_ties_away(digits.unsigned_abs())
@@ -33,8 +34,8 @@ pub fn ceil_f64(input: F64) -> F64 {
 }
 
 #[function("ceil(decimal) -> decimal")]
-pub fn ceil_decimal(input: Decimal) -> Decimal {
-    input.ceil()
+pub fn ceil_decimal<'a>(input: DecimalRef<'a>) -> Decimal {
+    input.to_owned_scalar().ceil()
 }
 
 #[function("floor(float8) -> float8")]
@@ -43,8 +44,8 @@ pub fn floor_f64(input: F64) -> F64 {
 }
 
 #[function("floor(decimal) -> decimal")]
-pub fn floor_decimal(input: Decimal) -> Decimal {
-    input.floor()
+pub fn floor_decimal<'a>(input: DecimalRef<'a>) -> Decimal {
+    input.to_owned_scalar().floor()
 }
 
 #[function("trunc(float8) -> float8")]
@@ -53,8 +54,8 @@ pub fn trunc_f64(input: F64) -> F64 {
 }
 
 #[function("trunc(decimal) -> decimal")]
-pub fn trunc_decimal(input: Decimal) -> Decimal {
-    input.trunc()
+pub fn trunc_decimal<'a>(input: DecimalRef<'a>) -> Decimal {
+    input.to_owned_scalar().trunc()
 }
 
 // Ties are broken by rounding away from zero
@@ -65,19 +66,22 @@ pub fn round_f64(input: F64) -> F64 {
 
 // Ties are broken by rounding away from zero
 #[function("round(decimal) -> decimal")]
-pub fn round_decimal(input: Decimal) -> Decimal {
-    input.round_dp_ties_away(0)
+pub fn round_decimal<'a>(input: DecimalRef<'a>) -> Decimal {
+    input.to_owned_scalar().round_dp_ties_away(0)
 }
 
 #[cfg(test)]
 mod tests {
     use std::str::FromStr;
 
+    use risingwave_common::types::DecimalRef;
+
     use crate::scalar::round::*;
 
+    #[test]
     fn do_test(input: &str, digits: i32, expected_output: Option<&str>) {
         let v = Decimal::from_str(input).unwrap();
-        let rounded_value = round_digits(v, digits).ok();
+        let rounded_value = round_digits(DecimalRef(&v), digits).ok();
         assert_eq!(
             expected_output,
             rounded_value.as_ref().map(ToString::to_string).as_deref()
@@ -129,15 +133,26 @@ mod tests {
 
     #[test]
     fn test_round_decimal() {
-        assert_eq!(ceil_decimal(dec(42.2)), dec(43.0));
-        assert_eq!(ceil_decimal(dec(-42.8)), dec(-42.0));
+        let v42_2 = dec(42.2);
+        let v43_0 = dec(43.0);
+        let v_neg_42_8 = dec(-42.8);
+        let v_neg_42_0 = dec(-42.0);
+        let v_neg_43_0 = dec(-43.0);
+        let v42_0 = dec(42.0);
+        let v42_4 = dec(42.4);
+        let v42_5 = dec(42.5);
+        let v_neg_6_5 = dec(-6.5);
+        let v_neg_7_0 = dec(-7.0);
 
-        assert_eq!(floor_decimal(dec(42.2)), dec(42.0));
-        assert_eq!(floor_decimal(dec(-42.8)), dec(-43.0));
+        assert_eq!(ceil_decimal(DecimalRef(&v42_2)), v43_0);
+        assert_eq!(ceil_decimal(DecimalRef(&v_neg_42_8)), v_neg_42_0);
 
-        assert_eq!(round_decimal(dec(42.4)), dec(42.0));
-        assert_eq!(round_decimal(dec(42.5)), dec(43.0));
-        assert_eq!(round_decimal(dec(-6.5)), dec(-7.0));
+        assert_eq!(floor_decimal(DecimalRef(&v42_2)), v42_0);
+        assert_eq!(floor_decimal(DecimalRef(&v_neg_42_8)), v_neg_43_0);
+
+        assert_eq!(round_decimal(DecimalRef(&v42_4)), v42_0);
+        assert_eq!(round_decimal(DecimalRef(&v42_5)), v43_0);
+        assert_eq!(round_decimal(DecimalRef(&v_neg_6_5)), v_neg_7_0);
     }
 
     fn dec(f: f64) -> Decimal {

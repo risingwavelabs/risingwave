@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use num_traits::Zero;
-use risingwave_common::types::{Decimal, F64, FloatExt};
+use risingwave_common::types::{Decimal, DecimalRef, F64, FloatExt};
 use risingwave_expr::{ExprError, Result, function};
 
 fn err_logarithm_input() -> ExprError {
@@ -68,18 +68,27 @@ pub fn log10_f64(input: F64) -> Result<F64> {
 }
 
 #[function("exp(decimal) -> decimal")]
-pub fn exp_decimal(input: Decimal) -> Result<Decimal> {
-    input.checked_exp().ok_or(ExprError::NumericOverflow)
+pub fn exp_decimal<'a>(input: DecimalRef<'a>) -> Result<Decimal> {
+    input
+        .to_owned_scalar()
+        .checked_exp()
+        .ok_or(ExprError::NumericOverflow)
 }
 
 #[function("ln(decimal) -> decimal")]
-pub fn ln_decimal(input: Decimal) -> Result<Decimal> {
-    input.checked_ln().ok_or_else(err_logarithm_input)
+pub fn ln_decimal<'a>(input: DecimalRef<'a>) -> Result<Decimal> {
+    input
+        .to_owned_scalar()
+        .checked_ln()
+        .ok_or_else(err_logarithm_input)
 }
 
 #[function("log10(decimal) -> decimal")]
-pub fn log10_decimal(input: Decimal) -> Result<Decimal> {
-    input.checked_log10().ok_or_else(err_logarithm_input)
+pub fn log10_decimal<'a>(input: DecimalRef<'a>) -> Result<Decimal> {
+    input
+        .to_owned_scalar()
+        .checked_log10()
+        .ok_or_else(err_logarithm_input)
 }
 
 #[cfg(test)]

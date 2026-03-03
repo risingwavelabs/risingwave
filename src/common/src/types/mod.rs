@@ -893,6 +893,8 @@ macro_rules! impl_convert {
                 }
             }
 
+
+
             paste! {
                 impl ScalarImpl {
                     /// # Panics
