@@ -208,6 +208,7 @@ pin-project-lite = "0.2"
 prost = { version = "=0.14.3" }
 prost-build = { version = "=0.14.3" }
 prost-derive = { version = "=0.14.3" }
+prost-reflect = { version = "0.16.3", features = ["serde"] }
 prost-types = { version = "=0.14.3" }
 rand = { version = "0.9", features = ["small_rng"] }
 rdkafka = { package = "madsim-rdkafka", version = "0.4.4", features = [
