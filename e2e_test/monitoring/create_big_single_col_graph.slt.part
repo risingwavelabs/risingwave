@@ -1,0 +1,83 @@
+# Build a streaming graph that is easy to create sustained backpressure:
+# - datagen continuously generates rows
+# - large payload (`fields.p.length`) makes StreamChunks large
+# - low-cardinality join key (`k`) creates join amplification
+# - downstream `pg_sleep` slows consumption and pushes backpressure upstream
+
+statement ok
+drop materialized view if exists mv2;
+
+statement ok
+drop materialized view if exists mv1;
+
+statement ok
+drop table if exists c;
+
+statement ok
+drop table if exists b;
+
+statement ok
+drop table if exists a;
+
+statement ok
+create table a(id int, k int, p varchar) with (
+  connector = 'datagen',
+  fields.id.kind = 'sequence',
+  fields.id.start = 1,
+  fields.id.end = 1000000,
+  fields.k.kind = 'random',
+  fields.k.min = 1,
+  fields.k.max = 200,
+  fields.k.seed = 1,
+  fields.p = 4096,
+  datagen.rows.per.second = 100
+);
+
+statement ok
+create table b(id int, k int, p varchar) with (
+  connector = 'datagen',
+  fields.id.kind = 'sequence',
+  fields.id.start = 1,
+  fields.id.end = 1000000,
+  fields.k.kind = 'random',
+  fields.k.min = 1,
+  fields.k.max = 200,
+  fields.k.seed = 2,
+  fields.p.length = 4096,
+  datagen.rows.per.second = 100
+);
+
+statement ok
+create table c(id int, k int, p varchar) with (
+  connector = 'datagen',
+  fields.id.kind = 'sequence',
+  fields.id.start = 1,
+  fields.id.end = 1000000,
+  fields.k.kind = 'random',
+  fields.k.min = 1,
+  fields.k.max = 200,
+  fields.k.seed = 3,
+  fields.p.length = 4096,
+  datagen.rows.per.second = 100
+);
+
+statement ok
+create materialized view mv1 as
+select
+  a.k,
+  a.id as a_id,
+  b.id as b_id,
+  jsonb_build_object('a', a.p, 'b', b.p) as js
+from a join b
+on a.k = b.k;
+
+statement ok
+create materialized view mv2 as
+select
+  mv1.k,
+  mv1.a_id,
+  mv1.b_id,
+  c.id as c_id,
+  jsonb_build_object('mv1', mv1.js, 'c', c.p)
+from mv1 join c as c
+on mv1.k = c.k;
