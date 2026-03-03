@@ -17,12 +17,14 @@ use std::ops::Bound::{Excluded, Included};
 use std::ops::{Deref, DerefMut};
 use std::sync::atomic::Ordering;
 
+use bytes::BytesMut;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::object_size_map;
 use risingwave_hummock_sdk::version::HummockVersion;
 use risingwave_hummock_sdk::{HummockObjectId, HummockVersionId, get_stale_object_ids};
 use risingwave_pb::hummock::hummock_version_checkpoint::{PbStaleObjects, StaleObjects};
 use risingwave_pb::hummock::{
-    PbHummockVersion, PbHummockVersionArchive, PbHummockVersionCheckpoint, PbVectorIndexObject,
+    CheckpointCompressionAlgorithm, PbHummockVersion, PbHummockVersionArchive,
+    PbHummockVersionCheckpoint, PbHummockVersionCheckpointEnvelope, PbVectorIndexObject,
     PbVectorIndexObjectType,
 };
 use thiserror_ext::AsReport;
@@ -82,14 +84,17 @@ impl HummockVersionCheckpoint {
 /// objects from those delta logs.
 impl HummockManager {
     /// Returns Ok(None) if not found.
+    ///
+    /// Uses streaming read to avoid global read timeout issues for large checkpoints.
+    /// Supports both compressed (envelope) and uncompressed (legacy) checkpoint formats.
     pub async fn try_read_checkpoint(&self) -> Result<Option<HummockVersionCheckpoint>> {
-        use prost::Message;
-        let data = match self
+        // 1. Get file metadata to learn the size (needed for streaming_read range).
+        let object_metadata = match self
             .object_store
-            .read(&self.version_checkpoint_path, ..)
+            .metadata(&self.version_checkpoint_path)
             .await
         {
-            Ok(data) => data,
+            Ok(metadata) => metadata,
             Err(e) => {
                 if e.is_object_not_found_error() {
                     return Ok(None);
@@ -97,8 +102,131 @@ impl HummockManager {
                 return Err(e.into());
             }
         };
-        let ckpt = PbHummockVersionCheckpoint::decode(data).map_err(|e| anyhow::anyhow!(e))?;
+        let total_size = object_metadata.total_size;
+        if total_size == 0 {
+            return Ok(None);
+        }
+
+        // 2. Streaming read: per-chunk timeout instead of whole-file timeout.
+        let download_start = std::time::Instant::now();
+        let mut reader = self
+            .object_store
+            .streaming_read(&self.version_checkpoint_path, 0..total_size)
+            .await?;
+        let mut buf = BytesMut::with_capacity(total_size);
+        while let Some(chunk) = reader.read_bytes().await {
+            let chunk = chunk?;
+            buf.extend_from_slice(&chunk);
+        }
+        let data = buf.freeze();
+        let download_duration = download_start.elapsed();
+
+        // 3. Decode: try envelope format first, fallback to legacy format.
+        let decode_start = std::time::Instant::now();
+        let ckpt = Self::decode_checkpoint_data(&data)?;
+        let decode_duration = decode_start.elapsed();
+
+        tracing::info!(
+            total_size,
+            download_ms = download_duration.as_millis() as u64,
+            decode_ms = decode_duration.as_millis() as u64,
+            "checkpoint read complete"
+        );
+
         Ok(Some(HummockVersionCheckpoint::from_protobuf_owned(ckpt)))
+    }
+
+    /// Decodes checkpoint data, supporting both envelope (compressed) and legacy (raw) formats.
+    ///
+    /// Format detection: tries `HummockVersionCheckpointEnvelope` first. The two formats are
+    /// distinguishable because field 1 of the envelope is a VARINT (enum), while field 1 of
+    /// the legacy `HummockVersionCheckpoint` is a LEN (message). If envelope decoding succeeds
+    /// and the payload is non-empty, we treat it as the new format.
+    fn decode_checkpoint_data(
+        data: &bytes::Bytes,
+    ) -> std::result::Result<PbHummockVersionCheckpoint, anyhow::Error> {
+        use anyhow::Context;
+        use prost::Message;
+
+        // Try envelope format
+        if let Ok(envelope) = PbHummockVersionCheckpointEnvelope::decode(data.clone())
+            && !envelope.payload.is_empty()
+        {
+            let algo = CheckpointCompressionAlgorithm::try_from(envelope.compression_algorithm)
+                .unwrap_or(CheckpointCompressionAlgorithm::CheckpointCompressionUnspecified);
+            let decompressed = Self::decompress_payload(algo, &envelope.payload)?;
+            let ckpt = PbHummockVersionCheckpoint::decode(decompressed.as_ref())
+                .context("failed to decode checkpoint payload")?;
+            tracing::info!(
+                compression = ?algo,
+                compressed_size = envelope.payload.len(),
+                decompressed_size = decompressed.len(),
+                compression_ratio =
+                    format!("{:.2}x", decompressed.len() as f64 / envelope.payload.len().max(1) as f64),
+                "decoded compressed checkpoint"
+            );
+            return Ok(ckpt);
+        }
+
+        // Fallback: legacy raw PbHummockVersionCheckpoint
+        tracing::info!(
+            data_size = data.len(),
+            "decoding checkpoint in legacy uncompressed format"
+        );
+        PbHummockVersionCheckpoint::decode(data.clone())
+            .context("failed to decode legacy checkpoint")
+    }
+
+    /// Decompresses payload bytes according to the specified algorithm.
+    fn decompress_payload(
+        algo: CheckpointCompressionAlgorithm,
+        payload: &[u8],
+    ) -> std::result::Result<Vec<u8>, anyhow::Error> {
+        use anyhow::Context;
+
+        match algo {
+            CheckpointCompressionAlgorithm::CheckpointCompressionUnspecified => {
+                Ok(payload.to_vec())
+            }
+            CheckpointCompressionAlgorithm::CheckpointCompressionZstd => {
+                zstd::stream::decode_all(payload).context("zstd decompression failed")
+            }
+            CheckpointCompressionAlgorithm::CheckpointCompressionLz4 => {
+                let mut decoder = lz4::Decoder::new(payload).context("lz4 decoder init failed")?;
+                let mut decompressed = Vec::new();
+                std::io::Read::read_to_end(&mut decoder, &mut decompressed)
+                    .context("lz4 decompression failed")?;
+                Ok(decompressed)
+            }
+        }
+    }
+
+    /// Compresses payload bytes according to the specified algorithm.
+    fn compress_payload(
+        algo: CheckpointCompressionAlgorithm,
+        data: &[u8],
+    ) -> std::result::Result<Vec<u8>, anyhow::Error> {
+        use anyhow::Context;
+
+        match algo {
+            CheckpointCompressionAlgorithm::CheckpointCompressionUnspecified => Ok(data.to_vec()),
+            CheckpointCompressionAlgorithm::CheckpointCompressionZstd => {
+                // Level 3: good balance between compression ratio and speed
+                zstd::stream::encode_all(data, 3).context("zstd compression failed")
+            }
+            CheckpointCompressionAlgorithm::CheckpointCompressionLz4 => {
+                let mut compressed = Vec::new();
+                let mut encoder = lz4::EncoderBuilder::new()
+                    .level(4)
+                    .build(&mut compressed)
+                    .context("lz4 encoder init failed")?;
+                std::io::Write::write_all(&mut encoder, data)
+                    .context("lz4 compression write failed")?;
+                let (_writer, result) = encoder.finish();
+                result.context("lz4 compression finish failed")?;
+                Ok(compressed)
+            }
+        }
     }
 
     pub(super) async fn write_checkpoint(
@@ -106,7 +234,27 @@ impl HummockManager {
         checkpoint: &HummockVersionCheckpoint,
     ) -> Result<()> {
         use prost::Message;
-        let buf = checkpoint.to_protobuf().encode_to_vec();
+        let raw_bytes = checkpoint.to_protobuf().encode_to_vec();
+        let raw_size = raw_bytes.len();
+
+        // Compress with zstd by default
+        let algo = CheckpointCompressionAlgorithm::CheckpointCompressionZstd;
+        let compressed = Self::compress_payload(algo, &raw_bytes)?;
+
+        tracing::info!(
+            raw_size,
+            compressed_size = compressed.len(),
+            compression_ratio =
+                format!("{:.2}x", raw_size as f64 / compressed.len().max(1) as f64),
+            compression = ?algo,
+            "writing compressed checkpoint"
+        );
+
+        let envelope = PbHummockVersionCheckpointEnvelope {
+            compression_algorithm: algo as i32,
+            payload: compressed,
+        };
+        let buf = envelope.encode_to_vec();
         self.object_store
             .upload(&self.version_checkpoint_path, buf.into())
             .await?;
