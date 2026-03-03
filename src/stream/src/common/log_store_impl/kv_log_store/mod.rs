@@ -628,12 +628,16 @@ mod tests {
     async fn test_basic() {
         for count in (0..20).step_by(5) {
             #[expect(deprecated)]
-            test_basic_inner(
+            Box::pin(test_basic_inner(
                 count * TEST_DATA_SIZE,
                 &crate::common::log_store_impl::kv_log_store::v1::KV_LOG_STORE_V1_INFO,
-            )
+            ))
             .await;
-            test_basic_inner(count * TEST_DATA_SIZE, &KV_LOG_STORE_V2_INFO).await;
+            Box::pin(test_basic_inner(
+                count * TEST_DATA_SIZE,
+                &KV_LOG_STORE_V2_INFO,
+            ))
+            .await;
         }
     }
 
@@ -745,12 +749,16 @@ mod tests {
     async fn test_recovery() {
         for count in (0..20).step_by(5) {
             #[expect(deprecated)]
-            test_recovery_inner(
+            Box::pin(test_recovery_inner(
                 count * TEST_DATA_SIZE,
                 &crate::common::log_store_impl::kv_log_store::v1::KV_LOG_STORE_V1_INFO,
-            )
+            ))
             .await;
-            test_recovery_inner(count * TEST_DATA_SIZE, &KV_LOG_STORE_V2_INFO).await;
+            Box::pin(test_recovery_inner(
+                count * TEST_DATA_SIZE,
+                &KV_LOG_STORE_V2_INFO,
+            ))
+            .await;
         }
     }
 
@@ -929,12 +937,12 @@ mod tests {
     async fn test_truncate() {
         for count in (2..10).step_by(3) {
             #[expect(deprecated)]
-            test_truncate_inner(
+            Box::pin(test_truncate_inner(
                 count,
                 &crate::common::log_store_impl::kv_log_store::v1::KV_LOG_STORE_V1_INFO,
-            )
+            ))
             .await;
-            test_truncate_inner(count, &KV_LOG_STORE_V2_INFO).await;
+            Box::pin(test_truncate_inner(count, &KV_LOG_STORE_V2_INFO)).await;
         }
     }
 
@@ -1887,12 +1895,12 @@ mod tests {
     #[tokio::test]
     async fn test_truncate_historical() {
         #[expect(deprecated)]
-        test_truncate_historical_inner(
+        Box::pin(test_truncate_historical_inner(
             10,
             &crate::common::log_store_impl::kv_log_store::v1::KV_LOG_STORE_V1_INFO,
-        )
+        ))
         .await;
-        test_truncate_historical_inner(10, &KV_LOG_STORE_V2_INFO).await;
+        Box::pin(test_truncate_historical_inner(10, &KV_LOG_STORE_V2_INFO)).await;
     }
 
     async fn test_truncate_historical_inner(

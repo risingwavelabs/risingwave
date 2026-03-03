@@ -414,7 +414,7 @@ impl GlobalBarrierWorker<GlobalBarrierWorkerContextImpl> {
                 .await;
         }
 
-        self.run_inner(shutdown_rx).await
+        Box::pin(self.run_inner(shutdown_rx)).await
     }
 }
 
