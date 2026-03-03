@@ -48,7 +48,7 @@ use crate::hummock::manager::context::ContextInfo;
 use crate::hummock::manager::transaction::HummockVersionTransaction;
 use crate::hummock::metrics_utils::{LocalTableMetrics, trigger_write_stop_stats};
 use crate::hummock::model::CompactionGroup;
-use crate::hummock::model::ext::{to_table_change_log, to_table_change_log_meta_store_model};
+use crate::hummock::model::ext::to_table_change_log_meta_store_model;
 use crate::model::VarTransaction;
 
 #[derive(Default)]
@@ -350,34 +350,6 @@ impl HummockManager {
                 .await?;
         }
         txn.commit().await?;
-        Ok(())
-    }
-
-    pub async fn load_table_change_log(&self) -> Result<()> {
-        use sea_orm::EntityTrait;
-
-        use crate::model::MetadataModelError;
-        let mut versioning = self.versioning.write().await;
-        versioning.table_change_log =
-            risingwave_meta_model::hummock_table_change_log::Entity::find()
-                .all(&self.env.meta_store_ref().conn)
-                .await
-                .map_err(MetadataModelError::from)?
-                .into_iter()
-                .map(|m| (m.table_id, to_table_change_log(m)))
-                .into_group_map()
-                .into_iter()
-                .map(|(table_id, unordered_change_logs)| {
-                    (
-                        table_id,
-                        TableChangeLog::new(
-                            unordered_change_logs
-                                .into_iter()
-                                .sorted_by_key(|l| l.checkpoint_epoch),
-                        ),
-                    )
-                })
-                .collect();
         Ok(())
     }
 
