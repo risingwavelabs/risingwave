@@ -248,7 +248,7 @@ impl InMemValTransaction for HummockVersionTransaction<'_> {
     fn commit(self) {
         if let Some((version, deltas, gc_change_log_deltas)) = self.pre_applied_version {
             *self.orig_version = version;
-            for delta in deltas {
+            for delta in &deltas {
                 HummockVersion::apply_change_log_delta(
                     self.orig_table_change_log,
                     &delta.change_log_delta,
