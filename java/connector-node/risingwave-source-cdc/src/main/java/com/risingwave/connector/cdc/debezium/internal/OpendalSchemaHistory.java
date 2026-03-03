@@ -38,7 +38,9 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.locks.ReentrantLock;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import org.slf4j.Logger;
@@ -46,6 +48,18 @@ import org.slf4j.LoggerFactory;
 
 public class OpendalSchemaHistory extends AbstractFileBasedSchemaHistory {
     private static final Logger LOGGER = LoggerFactory.getLogger(OpendalSchemaHistory.class);
+
+    /**
+     * Process-wide lock map to serialize schema history object-store operations per source id.
+     *
+     * <p>Goal: for the same {@code sourceId}, at any point in time, only one {@link
+     * OpendalSchemaHistory} instance is allowed to write schema history to the object store (and we
+     * also serialize start-time initialization reads to avoid observing/deriving state concurrently
+     * with writes).
+     */
+    private static final ConcurrentHashMap<String, ReentrantLock> SOURCE_LOCKS =
+            new ConcurrentHashMap<>();
+
     private String sourceId = "";
     public static final String SOURCE_ID = "schema.history.internal.source.id";
     public static final String MAX_RECORDS_PER_FILE_CONFIG =
@@ -63,6 +77,12 @@ public class OpendalSchemaHistory extends AbstractFileBasedSchemaHistory {
 
     // Atomic sequence number for thread-safe increment
     private AtomicLong sequenceNumber = new AtomicLong(0);
+
+    private ReentrantLock sourceLock() {
+        // configure() validates sourceId is present, and Debezium calls start/store after
+        // configure.
+        return SOURCE_LOCKS.computeIfAbsent(sourceId, ignored -> new ReentrantLock());
+    }
 
     // Override ALL_FIELDS to include our custom configuration fields
     // This ensures that our custom fields are properly validated by Debezium
@@ -124,23 +144,32 @@ public class OpendalSchemaHistory extends AbstractFileBasedSchemaHistory {
 
     @Override
     protected void doStart() {
+        final ReentrantLock lock = sourceLock();
         try {
-            // 1. List and sort history files by sequence number
-            List<String> historyFiles = listAndSortHistoryFiles();
+            lock.lockInterruptibly();
+            try {
+                // 1. List and sort history files by sequence number
+                List<String> historyFiles = listAndSortHistoryFiles();
 
-            // 2. Initialize sequence number from existing files
-            initializeSequenceNumber(historyFiles);
+                // 2. Initialize sequence number from existing files
+                initializeSequenceNumber(historyFiles);
 
-            // 3. Load all records and initialize cache
-            // loadAllHistoryRecords will also initialize the cache for the latest file
-            this.records = loadAllHistoryRecords(historyFiles);
+                // 3. Load all records and initialize cache
+                // loadAllHistoryRecords will also initialize the cache for the latest file
+                this.records = loadAllHistoryRecords(historyFiles);
 
-            LOGGER.info(
-                    "Loaded schema history with {} total records from {} files. Current sequence number: {}",
-                    this.records.size(),
-                    historyFiles.size(),
-                    sequenceNumber.get());
-
+                LOGGER.info(
+                        "Loaded schema history with {} total records from {} files. Current sequence number: {}",
+                        this.records.size(),
+                        historyFiles.size(),
+                        sequenceNumber.get());
+            } finally {
+                lock.unlock();
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new SchemaHistoryException(
+                    "Interrupted while initializing schema history for source id " + sourceId, e);
         } catch (Exception e) {
             throw new SchemaHistoryException("Failed to initialize schema history", e);
         }
@@ -155,35 +184,47 @@ public class OpendalSchemaHistory extends AbstractFileBasedSchemaHistory {
     @Override
     protected void doStoreRecord(HistoryRecord record) {
         LOGGER.info("Storing new schema history record.");
+        final ReentrantLock lock = sourceLock();
         try {
-            // Use cached information to avoid expensive list operations and getObject() calls
-            if (cachedLatestFile != null && cachedLatestFileRecords.size() < maxRecordsPerFile) {
-                // 1. Append to existing file using cached records (no getObject() needed!)
-                cachedLatestFileRecords.add(record);
-                putObject(cachedLatestFile, fromHistoryRecords(cachedLatestFileRecords));
+            lock.lockInterruptibly();
+            try {
+                // Use cached information to avoid expensive list operations and getObject() calls
+                if (cachedLatestFile != null
+                        && cachedLatestFileRecords.size() < maxRecordsPerFile) {
+                    // 1. Append to existing file using cached records (no getObject() needed!)
+                    cachedLatestFileRecords.add(record);
+                    putObject(cachedLatestFile, fromHistoryRecords(cachedLatestFileRecords));
 
-                LOGGER.info(
-                        "Appended record to existing file: {} (now {} records)",
-                        cachedLatestFile,
-                        cachedLatestFileRecords.size());
-            } else {
-                // 2. Create new file with next sequence number when current file is full or doesn't
-                // exist
-                long nextSequence = sequenceNumber.incrementAndGet();
-                String newFile = String.format("%s/schema_history_%d.dat", objectDir, nextSequence);
-                List<HistoryRecord> newRecords = new ArrayList<>();
-                newRecords.add(record);
-                putObject(newFile, fromHistoryRecords(newRecords));
+                    LOGGER.info(
+                            "Appended record to existing file: {} (now {} records)",
+                            cachedLatestFile,
+                            cachedLatestFileRecords.size());
+                } else {
+                    // 2. Create new file with next sequence number when current file is full or
+                    // doesn't exist
+                    long nextSequence = sequenceNumber.incrementAndGet();
+                    String newFile =
+                            String.format("%s/schema_history_%d.dat", objectDir, nextSequence);
+                    List<HistoryRecord> newRecords = new ArrayList<>();
+                    newRecords.add(record);
+                    putObject(newFile, fromHistoryRecords(newRecords));
 
-                // Update cache to point to new file
-                cachedLatestFile = newFile;
-                cachedLatestFileRecords = newRecords;
+                    // Update cache to point to new file
+                    cachedLatestFile = newFile;
+                    cachedLatestFileRecords = newRecords;
 
-                LOGGER.info(
-                        "Created new schema history file: {} (sequence: {})",
-                        newFile,
-                        nextSequence);
+                    LOGGER.info(
+                            "Created new schema history file: {} (sequence: {})",
+                            newFile,
+                            nextSequence);
+                }
+            } finally {
+                lock.unlock();
             }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new SchemaHistoryException(
+                    "Interrupted while storing schema history record for source id " + sourceId, e);
         } catch (Exception e) {
             throw new SchemaHistoryException("Failed to store schema history record", e);
         }
