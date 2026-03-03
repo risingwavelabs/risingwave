@@ -9,7 +9,7 @@ The demo was modified from the `pinot-upsert` project of https://github.com/duni
 2. Create a kafka topic named `orders.upsert.log` for data to sink to.
 ```shell
 docker compose exec kafka \
-kafka-topics --create --topic orders.upsert.log --bootstrap-server localhost:9092
+kafka-topics --create --topic orders.upsert.log --bootstrap-server kafka:9092
 ```
 3. Connect the RisingWave frontend via the psql client. Create RisingWave table and sink.
 ```shell
@@ -96,7 +96,10 @@ pinot-broker -brokerPort 8099 -query "SELECT * FROM orders"
 psql -h localhost -p 4566 -d dev -U root
 
 # Within the psql client
-UPDATE orders SET status = 'PROCESSING' WHERE id = 1;
+UPDATE orders
+SET status = 'PROCESSING',
+    updated_at = updated_at + 1000
+WHERE id = 1;
 flush;
 ```
 After updating the data, query the pinot table with pinot cli
@@ -132,7 +135,7 @@ pinot-broker -brokerPort 8099 -query "SELECT * FROM orders"
             1,
             "PROCESSING",
             1.0,
-            1685421033000,
+            1685421034000,
             10
         ]
     ]
@@ -152,5 +155,5 @@ The payload is like the following:
 {"created_at":1685421033000,"id":1,"product_id":100,"quantity":1,"status":"INIT","total":1.0,"updated_at":1685421033000,"user_id":10}
 {"created_at":1685421033000,"id":2,"product_id":100,"quantity":1,"status":"INIT","total":1.0,"updated_at":1685421033000,"user_id":10}
 {"created_at":1685421033000,"id":3,"product_id":100,"quantity":1,"status":"INIT","total":1.0,"updated_at":1685421033000,"user_id":10}
-{"created_at":1685421033000,"id":1,"product_id":100,"quantity":1,"status":"PROCESSING","total":1.0,"updated_at":1685421033000,"user_id":10}
+{"created_at":1685421033000,"id":1,"product_id":100,"quantity":1,"status":"PROCESSING","total":1.0,"updated_at":1685421034000,"user_id":10}
 ```

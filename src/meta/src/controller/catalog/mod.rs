@@ -208,8 +208,23 @@ impl CatalogController {
             .await
     }
 
-    pub(crate) async fn current_notification_version(&self) -> NotificationVersion {
-        self.env.notification_manager().current_version().await
+    /// Trivially advance the notification version and notify to frontend,
+    /// return the notification version for frontend to wait for.
+    ///
+    /// Cannot simply return the current version, because the current version may not be sent
+    /// to frontend, and the frontend may endlessly wait for this version, until a frontend
+    /// related notification is sent.
+    pub(crate) async fn notify_frontend_trivial(&self) -> NotificationVersion {
+        self.env
+            .notification_manager()
+            .notify_frontend(
+                NotificationOperation::Update,
+                NotificationInfo::ObjectGroup(PbObjectGroup {
+                    objects: vec![],
+                    dependencies: vec![],
+                }),
+            )
+            .await
     }
 }
 

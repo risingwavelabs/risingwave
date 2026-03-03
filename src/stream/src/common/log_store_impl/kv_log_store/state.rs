@@ -326,6 +326,7 @@ mod tests {
                     .storage
                     .new_local(NewLocalOptions {
                         table_id: TEST_TABLE_ID,
+                        fragment_id: 1.into(),
                         op_consistency_level: OpConsistencyLevel::Inconsistent,
                         table_option: Default::default(),
                         is_replicated: false,

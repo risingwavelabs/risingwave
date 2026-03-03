@@ -428,6 +428,10 @@ pub mod default {
         pub fn table_change_log_delete_batch_size() -> u64 {
             1000
         }
+
+        pub fn enable_state_table_vnode_stats_pruning() -> bool {
+            false
+        }
     }
 }
 
