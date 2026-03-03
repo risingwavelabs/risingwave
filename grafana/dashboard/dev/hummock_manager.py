@@ -199,6 +199,16 @@ Additionally, a metric on all objects (including dangling ones) is updated with 
                     ],
                 ),
                 panels.timeseries_count(
+                    "Table Change Log Min Epoch",
+                    "Per table change log minimum retained epoch",
+                    [
+                        panels.target(
+                            f"{metric('storage_table_change_log_min_epoch')}",
+                            "{{table_id}}",
+                        ),
+                    ],
+                ),
+                panels.timeseries_count(
                     "Delta Log Total Number",
                     "total number of hummock version delta log",
                     [

@@ -73,6 +73,7 @@ use risingwave_common::array::StreamChunk;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_common::must_match;
+use risingwave_common_estimate_size::EstimateSize;
 use risingwave_connector::sink::log_store::{ChunkId, LogStoreResult};
 use risingwave_storage::StateStore;
 use risingwave_storage::store::timeout_auto_rebuild::TimeoutAutoRebuildIter;
@@ -126,6 +127,7 @@ pub mod metrics {
         pub buffer_unconsumed_row_count: LabelGuardedIntGauge,
         pub buffer_unconsumed_epoch_count: LabelGuardedIntGauge,
         pub buffer_unconsumed_min_epoch: LabelGuardedIntGauge,
+        pub buffer_memory_bytes: LabelGuardedIntGauge,
         pub buffer_read_count: LabelGuardedIntCounter,
         pub buffer_read_size: LabelGuardedIntCounter,
 
@@ -193,6 +195,9 @@ pub mod metrics {
                 .with_guarded_label_values(labels);
             let buffer_unconsumed_min_epoch = metrics
                 .sync_kv_log_store_buffer_unconsumed_min_epoch
+                .with_guarded_label_values(labels);
+            let buffer_memory_bytes = metrics
+                .sync_kv_log_store_buffer_memory_bytes
                 .with_guarded_label_values(labels);
             let buffer_read_count = metrics
                 .sync_kv_log_store_read_count
@@ -288,6 +293,7 @@ pub mod metrics {
                 buffer_unconsumed_row_count,
                 buffer_unconsumed_epoch_count,
                 buffer_unconsumed_min_epoch,
+                buffer_memory_bytes,
                 buffer_read_count,
                 buffer_read_size,
                 total_read_count,
@@ -316,6 +322,7 @@ pub mod metrics {
                 buffer_unconsumed_row_count: LabelGuardedIntGauge::test_int_gauge::<4>(),
                 buffer_unconsumed_epoch_count: LabelGuardedIntGauge::test_int_gauge::<4>(),
                 buffer_unconsumed_min_epoch: LabelGuardedIntGauge::test_int_gauge::<4>(),
+                buffer_memory_bytes: LabelGuardedIntGauge::test_int_gauge::<4>(),
                 buffer_read_count: LabelGuardedIntCounter::test_int_counter::<5>(),
                 buffer_read_size: LabelGuardedIntCounter::test_int_counter::<5>(),
                 total_read_count: LabelGuardedIntCounter::test_int_counter::<5>(),
@@ -559,6 +566,7 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
             .state_store
             .new_local(NewLocalOptions {
                 table_id: self.table_id,
+                fragment_id: self.actor_context.fragment_id,
                 op_consistency_level: OpConsistencyLevel::Inconsistent,
                 table_option: TableOption {
                     retention_seconds: None,
@@ -1053,7 +1061,7 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
             },
         ));
         buffer.next_chunk_id = 0;
-        buffer.update_unconsumed_buffer_metrics();
+        buffer.update_buffer_metrics();
 
         Ok(post_seal)
     }
@@ -1155,7 +1163,7 @@ impl SyncedLogStoreBuffer {
             );
         }
         // FIXME(kwannoel): Seems these metrics are updated _after_ the flush info is reported.
-        self.update_unconsumed_buffer_metrics();
+        self.update_buffer_metrics();
     }
 
     fn add_chunk_to_buffer(
@@ -1178,7 +1186,7 @@ impl SyncedLogStoreBuffer {
                 chunk_id,
             },
         ));
-        self.update_unconsumed_buffer_metrics();
+        self.update_buffer_metrics();
     }
 
     fn pop_front(&mut self) -> Option<(u64, LogStoreBufferItem)> {
@@ -1192,13 +1200,14 @@ impl SyncedLogStoreBuffer {
             }
             _ => {}
         }
-        self.update_unconsumed_buffer_metrics();
+        self.update_buffer_metrics();
         item
     }
 
-    fn update_unconsumed_buffer_metrics(&self) {
+    fn update_buffer_metrics(&self) {
         let mut epoch_count = 0;
         let mut row_count = 0;
+        let mut memory_bytes = 0;
         for (_, item) in &self.buffer {
             match item {
                 LogStoreBufferItem::StreamChunk { chunk, .. } => {
@@ -1215,6 +1224,7 @@ impl SyncedLogStoreBuffer {
                     epoch_count += 1;
                 }
             }
+            memory_bytes += item.estimated_size();
         }
         self.metrics.buffer_unconsumed_epoch_count.set(epoch_count);
         self.metrics.buffer_unconsumed_row_count.set(row_count as _);
@@ -1227,6 +1237,7 @@ impl SyncedLogStoreBuffer {
                 .map(|(epoch, _)| *epoch)
                 .unwrap_or_default() as _,
         );
+        self.metrics.buffer_memory_bytes.set(memory_bytes as _);
     }
 }
 

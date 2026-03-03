@@ -187,6 +187,9 @@ for_all_wrapped_id_fields! (
         }
     }
     ddl_service {
+        AlterBackfillParallelismRequest {
+            table_id: JobId,
+        }
         AlterCdcTableBackfillParallelismRequest {
             table_id: JobId,
         }
@@ -243,6 +246,9 @@ for_all_wrapped_id_fields! (
         }
         AlterStreamingJobConfigRequest {
             job_id: JobId,
+        }
+        AlterSubscriptionRetentionRequest {
+            subscription_id: SubscriptionId,
         }
         AlterSwapRenameRequest.ObjectNameSwapPair {
             src_object_id: ObjectId,

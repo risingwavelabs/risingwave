@@ -1063,6 +1063,35 @@
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
 
+- name: Separate consecutive StreamHashJoin should preserve join predicate bindings
+  sql: |
+    set streaming_separate_consecutive_join = true;
+    create table p (merchant_id int, product_id int, payload int);
+    create table pe (merchant_id int, product_id int, supplier_id int, extra int);
+    create table s (merchant_id int, supplier_id int, ts1 int, ts2 int);
+    select pj.merchant_id, pj.product_id, s.supplier_id
+    from (
+      select p.merchant_id, p.product_id, pe.supplier_id
+      from p
+      left join pe
+      on p.merchant_id = pe.merchant_id
+      and p.product_id = pe.product_id
+    ) as pj
+    left join s
+    on pj.merchant_id = s.merchant_id
+    and pj.supplier_id = s.supplier_id;
+  stream_plan: |-
+    StreamMaterialize { columns: [merchant_id, product_id, supplier_id, p._row_id(hidden), pe._row_id(hidden), pe.supplier_id(hidden), s._row_id(hidden)], stream_key: [p._row_id, pe._row_id, merchant_id, product_id, s._row_id, pe.supplier_id], pk_columns: [p._row_id, pe._row_id, merchant_id, product_id, s._row_id, pe.supplier_id], pk_conflict: NoCheck }
+    └─StreamExchange { dist: HashShard(p.merchant_id, p.product_id, p._row_id, pe._row_id, pe.supplier_id, s._row_id) }
+      └─StreamHashJoin { type: LeftOuter, predicate: p.merchant_id = s.merchant_id AND pe.supplier_id = s.supplier_id, output: [p.merchant_id, p.product_id, s.supplier_id, p._row_id, pe._row_id, pe.supplier_id, s._row_id] }
+        ├─StreamExchange { dist: HashShard(p.merchant_id, pe.supplier_id) }
+        │ └─StreamHashJoin { type: LeftOuter, predicate: p.merchant_id = pe.merchant_id AND p.product_id = pe.product_id, output: [p.merchant_id, p.product_id, pe.supplier_id, p._row_id, pe._row_id] }
+        │   ├─StreamExchange { dist: HashShard(p.merchant_id, p.product_id) }
+        │   │ └─StreamTableScan { table: p, columns: [p.merchant_id, p.product_id, p._row_id], stream_scan_type: SnapshotBackfill, stream_key: [p._row_id], pk: [_row_id], dist: UpstreamHashShard(p._row_id) }
+        │   └─StreamExchange { dist: HashShard(pe.merchant_id, pe.product_id) }
+        │     └─StreamTableScan { table: pe, columns: [pe.merchant_id, pe.product_id, pe.supplier_id, pe._row_id], stream_scan_type: SnapshotBackfill, stream_key: [pe._row_id], pk: [_row_id], dist: UpstreamHashShard(pe._row_id) }
+        └─StreamExchange { dist: HashShard(s.merchant_id, s.supplier_id) }
+          └─StreamTableScan { table: s, columns: [s.merchant_id, s.supplier_id, s._row_id], stream_scan_type: SnapshotBackfill, stream_key: [s._row_id], pk: [_row_id], dist: UpstreamHashShard(s._row_id) }
 - name: Repro stream join dist_key / stream_key mismatch (other_cond=false), issue 24434
   sql: |
     create table t1 (k int, v int);

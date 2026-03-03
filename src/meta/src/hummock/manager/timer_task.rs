@@ -617,27 +617,20 @@ impl HummockManager {
 
     async fn on_handle_trigger_multi_group(&self, task_type: compact_task::TaskType) {
         for cg_id in self.compaction_group_ids().await {
-            if let Err(e) = self.compaction_state.try_sched_compaction(cg_id, task_type) {
-                tracing::error!(
-                    error = %e.as_report(),
-                    "Failed to schedule {:?} compaction for compaction group {}",
-                    task_type,
-                    cg_id,
-                );
-            }
+            self.compaction_state.try_sched_compaction(
+                cg_id,
+                task_type,
+                super::compaction::ScheduleTrigger::Periodic,
+            );
         }
     }
 
     fn on_handle_trigger_table_change_log(&self) {
-        if let Err(e) = self.compaction_state.try_sched_compaction(
+        self.compaction_state.try_sched_compaction(
             StaticCompactionGroupId::TableChangeLog,
             compact_task::TaskType::TableChangeLog,
-        ) {
-            tracing::error!(
-                error = %e.as_report(),
-                "Failed to schedule table change log compaction"
-            );
-        }
+            super::compaction::ScheduleTrigger::Periodic,
+        );
     }
 
     /// Try to schedule a compaction merge for the given compaction groups.

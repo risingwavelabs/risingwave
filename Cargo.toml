@@ -114,7 +114,7 @@ apache-avro = { git = "https://github.com/risingwavelabs/avro", rev = "25113ba88
 ] }
 arc-swap = "1"
 arrow-udf-runtime = "0.8.0"
-async-openai = { version = "0.32.3", features = ["embedding"] }
+async-openai = { version = "0.33.0", features = ["embedding"] }
 auto_enums = { version = "0.8", features = ["futures03", "tokio1"] }
 await-tree = { version = "0.3.2-alpha.2", features = ["serde", "attributes"] }
 aws-config = { version = "1", default-features = false, features = [
@@ -169,14 +169,14 @@ hashbrown0_15 = { package = "hashbrown", version = "0.15", features = [
 ] }
 hytra = "0.1"
 # branch dev_rebase_main_20251111
-iceberg = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "4d5f635572a8e90c77a3c56c12aa40d5362f0d68", features = [
+iceberg = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "10410fa883791d3b38d3751d050c79223ad4317f", features = [
     "storage-s3",
     "storage-gcs",
     "storage-azblob",
     "storage-azdls",
 ] }
-iceberg-catalog-glue = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "4d5f635572a8e90c77a3c56c12aa40d5362f0d68" }
-iceberg-catalog-rest = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "4d5f635572a8e90c77a3c56c12aa40d5362f0d68" }
+iceberg-catalog-glue = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "10410fa883791d3b38d3751d050c79223ad4317f" }
+iceberg-catalog-rest = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "10410fa883791d3b38d3751d050c79223ad4317f" }
 
 adbc_core = { version = "0.22" }
 adbc_snowflake = { version = "0.22", default-features = false }
@@ -299,7 +299,7 @@ tokio-stream = { git = "https://github.com/madsim-rs/tokio.git", rev = "0dd1055"
     "fs",
 ] }
 tokio-util = "0.7"
-toml = "0.9"
+toml = "1.0"
 tonic = { package = "madsim-tonic", version = "0.5.1" }
 tonic-build = { package = "madsim-tonic-build", version = "0.5" }
 tracing-opentelemetry = "0.30"

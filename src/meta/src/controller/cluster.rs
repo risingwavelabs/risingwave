@@ -229,12 +229,16 @@ impl ClusterController {
     }
 
     /// Invoked when it receives a heartbeat from a worker node.
-    pub async fn heartbeat(&self, worker_id: WorkerId) -> MetaResult<()> {
+    pub async fn heartbeat(
+        &self,
+        worker_id: WorkerId,
+        resource: Option<PbResource>,
+    ) -> MetaResult<()> {
         tracing::trace!(target: "events::meta::server_heartbeat", %worker_id, "receive heartbeat");
         self.inner
             .write()
             .await
-            .heartbeat(worker_id, self.max_heartbeat_interval)
+            .heartbeat(worker_id, self.max_heartbeat_interval, resource)
     }
 
     pub fn start_heartbeat_checker(
@@ -915,9 +919,17 @@ impl ClusterControllerInner {
         Ok(worker)
     }
 
-    pub fn heartbeat(&mut self, worker_id: WorkerId, ttl: Duration) -> MetaResult<()> {
+    pub fn heartbeat(
+        &mut self,
+        worker_id: WorkerId,
+        ttl: Duration,
+        resource: Option<PbResource>,
+    ) -> MetaResult<()> {
         if let Some(worker_info) = self.worker_extra_info.get_mut(&worker_id) {
             worker_info.update_ttl(ttl);
+            if let Some(resource) = resource {
+                worker_info.resource = resource;
+            }
             Ok(())
         } else {
             Err(MetaError::invalid_worker(worker_id, "worker not found"))
@@ -1231,6 +1243,121 @@ mod tests {
             .await?;
         assert!(workers.is_empty());
 
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_heartbeat_updates_resource() -> MetaResult<()> {
+        let env = MetaSrvEnv::for_test().await;
+        let cluster_ctl = ClusterController::new(env, Duration::from_secs(1)).await?;
+
+        let host = HostAddress {
+            host: "localhost".to_owned(),
+            port: 5010,
+        };
+        let property = AddNodeProperty {
+            is_streaming: true,
+            is_serving: true,
+            is_unschedulable: false,
+            parallelism: 4,
+            ..Default::default()
+        };
+
+        let resource_v1 = PbResource {
+            rw_version: "rw-v1".to_owned(),
+            total_memory_bytes: 1024,
+            total_cpu_cores: 4,
+            hostname: "host-v1".to_owned(),
+        };
+        let worker_id = cluster_ctl
+            .add_worker(
+                PbWorkerType::ComputeNode,
+                host.clone(),
+                property,
+                resource_v1,
+            )
+            .await?;
+
+        let resource_v2 = PbResource {
+            rw_version: "rw-v2".to_owned(),
+            total_memory_bytes: 2048,
+            total_cpu_cores: 8,
+            hostname: "host-v2".to_owned(),
+        };
+        cluster_ctl
+            .heartbeat(worker_id, Some(resource_v2.clone()))
+            .await?;
+
+        let worker = cluster_ctl
+            .get_worker_by_id(worker_id)
+            .await?
+            .expect("worker should exist");
+        assert_eq!(
+            worker.resource.expect("worker resource should exist"),
+            resource_v2
+        );
+
+        cluster_ctl.delete_worker(host).await?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_reregister_compute_node_updates_resource() -> MetaResult<()> {
+        let env = MetaSrvEnv::for_test().await;
+        let cluster_ctl = ClusterController::new(env, Duration::from_secs(1)).await?;
+
+        let host = HostAddress {
+            host: "localhost".to_owned(),
+            port: 5011,
+        };
+        let property = AddNodeProperty {
+            is_streaming: true,
+            is_serving: true,
+            is_unschedulable: false,
+            parallelism: 4,
+            ..Default::default()
+        };
+
+        let resource_v1 = PbResource {
+            rw_version: "rw-v1".to_owned(),
+            total_memory_bytes: 1024,
+            total_cpu_cores: 4,
+            hostname: "host-v1".to_owned(),
+        };
+        let worker_id = cluster_ctl
+            .add_worker(
+                PbWorkerType::ComputeNode,
+                host.clone(),
+                property.clone(),
+                resource_v1,
+            )
+            .await?;
+
+        let resource_v2 = PbResource {
+            rw_version: "rw-v2".to_owned(),
+            total_memory_bytes: 2048,
+            total_cpu_cores: 8,
+            hostname: "host-v2".to_owned(),
+        };
+        cluster_ctl
+            .add_worker(
+                PbWorkerType::ComputeNode,
+                host.clone(),
+                property,
+                resource_v2.clone(),
+            )
+            .await?;
+
+        let worker = cluster_ctl
+            .get_worker_by_id(worker_id)
+            .await?
+            .expect("worker should exist");
+        assert_eq!(
+            worker.resource.expect("worker resource should exist"),
+            resource_v2
+        );
+
+        cluster_ctl.delete_worker(host).await?;
         Ok(())
     }
 }

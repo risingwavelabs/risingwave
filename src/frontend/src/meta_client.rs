@@ -60,8 +60,6 @@ pub trait FrontendMetaClient: Send + Sync {
 
     async fn flush(&self, database_id: DatabaseId) -> Result<HummockVersionId>;
 
-    async fn wait(&self) -> Result<()>;
-
     async fn recover(&self) -> Result<()>;
 
     async fn cancel_creating_jobs(&self, jobs: PbJobs) -> Result<Vec<u32>>;
@@ -232,10 +230,6 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
 
     async fn flush(&self, database_id: DatabaseId) -> Result<HummockVersionId> {
         self.0.flush(database_id).await
-    }
-
-    async fn wait(&self) -> Result<()> {
-        self.0.wait().await
     }
 
     async fn recover(&self) -> Result<()> {

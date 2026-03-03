@@ -909,6 +909,29 @@ impl DdlService for DdlServiceImpl {
         }))
     }
 
+    async fn alter_subscription_retention(
+        &self,
+        request: Request<AlterSubscriptionRetentionRequest>,
+    ) -> Result<Response<AlterSubscriptionRetentionResponse>, Status> {
+        let AlterSubscriptionRetentionRequest {
+            subscription_id,
+            retention_seconds,
+            definition,
+        } = request.into_inner();
+        let version = self
+            .ddl_controller
+            .run_command(DdlCommand::AlterSubscriptionRetention {
+                subscription_id,
+                retention_seconds,
+                definition,
+            })
+            .await?;
+        Ok(Response::new(AlterSubscriptionRetentionResponse {
+            status: None,
+            version,
+        }))
+    }
+
     async fn alter_set_schema(
         &self,
         request: Request<AlterSetSchemaRequest>,
@@ -1046,8 +1069,10 @@ impl DdlService for DdlServiceImpl {
     }
 
     async fn wait(&self, _request: Request<WaitRequest>) -> Result<Response<WaitResponse>, Status> {
-        self.ddl_controller.wait().await?;
-        Ok(Response::new(WaitResponse {}))
+        let version = self.ddl_controller.wait().await?;
+        Ok(Response::new(WaitResponse {
+            version: Some(version),
+        }))
     }
 
     async fn alter_cdc_table_backfill_parallelism(
@@ -1104,6 +1129,38 @@ impl DdlService for DdlServiceImpl {
             .await?;
 
         Ok(Response::new(AlterParallelismResponse {}))
+    }
+
+    async fn alter_backfill_parallelism(
+        &self,
+        request: Request<AlterBackfillParallelismRequest>,
+    ) -> Result<Response<AlterBackfillParallelismResponse>, Status> {
+        let req = request.into_inner();
+
+        let job_id = req.get_table_id();
+        let deferred = req.get_deferred();
+
+        let parallelism = match req.parallelism {
+            None => None,
+            Some(parallelism) => {
+                let parallelism = match parallelism.get_parallelism()? {
+                    Parallelism::Fixed(FixedParallelism { parallelism }) => {
+                        StreamingParallelism::Fixed(*parallelism as _)
+                    }
+                    Parallelism::Auto(_) | Parallelism::Adaptive(_) => {
+                        StreamingParallelism::Adaptive
+                    }
+                    _ => bail_unavailable!(),
+                };
+                Some(parallelism)
+            }
+        };
+
+        self.ddl_controller
+            .reschedule_streaming_job_backfill_parallelism(job_id, parallelism, deferred)
+            .await?;
+
+        Ok(Response::new(AlterBackfillParallelismResponse {}))
     }
 
     async fn alter_fragment_parallelism(
