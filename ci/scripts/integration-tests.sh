@@ -66,8 +66,25 @@ if [ "${case}" == "client-library" ]; then
   exit 0
 fi
 
-echo "~~~ install postgresql"
-sudo yum install -y postgresql15
+echo "~~~ install postgresql client"
+pg_client_pkg="postgresql15"
+
+# For postgres-cdc tests, align local psql major version with the upstream image when possible.
+if [[ "${case}" == "postgres-cdc" && -n "${POSTGRES_CDC_IMAGE:-}" ]]; then
+  if [[ "${POSTGRES_CDC_IMAGE}" =~ ^postgres:([0-9]+)([.-].*)?$ ]]; then
+    pg_candidate="postgresql${BASH_REMATCH[1]}"
+    echo "Detected POSTGRES_CDC_IMAGE=${POSTGRES_CDC_IMAGE}, probing ${pg_candidate}"
+    if yum info "${pg_candidate}" >/dev/null 2>&1; then
+      pg_client_pkg="${pg_candidate}"
+    else
+      echo "WARN: ${pg_candidate} is unavailable on this runner; fallback to ${pg_client_pkg}"
+    fi
+  else
+    echo "WARN: cannot parse postgres major version from POSTGRES_CDC_IMAGE=${POSTGRES_CDC_IMAGE}; fallback to ${pg_client_pkg}"
+  fi
+fi
+
+sudo yum install -y "${pg_client_pkg}"
 
 echo "~~~ install poetry"
 curl -sSL https://install.python-poetry.org | POETRY_VERSION=1.8.0 python3 -
