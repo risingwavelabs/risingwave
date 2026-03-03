@@ -34,7 +34,7 @@ use anyhow::Context;
 use itertools::Itertools;
 use risingwave_pb::stream_plan::stream_message_batch::StreamMessageBatch as PbStreamMessageBatchInner;
 use risingwave_pb::task_service::{GetStreamResponse, permits};
-use tokio::sync::mpsc;
+use tokio::sync::{Semaphore, SemaphorePermit, mpsc};
 
 use super::error::ExchangeChannelClosed;
 use super::permit;
@@ -180,12 +180,20 @@ impl BarrierCoalescer {
 /// **Epoch-tagged pipelining**: after sending a barrier, the actor immediately continues
 /// sending data for the next epoch. The actor is never blocked by other actors. Data is
 /// tagged with `current_epoch` so the receiver can buffer ahead-of-barrier data.
+///
+/// **Per-actor record permits**: each actor has its own record semaphore, preventing fast
+/// actors from starving slow actors of backpressure permits.
 pub struct MultiplexedActorOutput {
     /// The upstream actor ID this handle belongs to.
     actor_id: ActorId,
     /// Shared sender — sends tagged messages to the physical gRPC stream.
-    /// Uses `permit::Sender` for backpressure.
     ch: permit::Sender,
+    /// Per-actor record permit semaphore. This actor acquires record permits from its own
+    /// semaphore instead of the shared one, ensuring fair backpressure across actors.
+    record_permits: Arc<Semaphore>,
+    /// The maximum permits that a single chunk can acquire, equal to
+    /// `initial_permits_per_actor - batched_permits`.
+    max_chunk_permits: usize,
     /// Channel to send barrier batches to the coordinator for coalescing.
     barrier_tx: mpsc::UnboundedSender<(ActorId, Vec<DispatcherBarrier>)>,
     /// The current epoch this actor is in. Data sent after the last barrier is tagged
@@ -201,8 +209,8 @@ impl MultiplexedActorOutput {
     /// coordinator for coalescing. Updates `current_epoch` after each barrier. The actor
     /// does NOT wait for coalescing to complete — it continues immediately.
     ///
-    /// For data/watermarks: sends immediately on the shared channel, tagged with the
-    /// source actor ID and the current epoch.
+    /// For data/watermarks: acquires record permits from this actor's per-actor semaphore,
+    /// then sends on the shared channel tagged with the source actor ID and epoch.
     pub async fn send(&mut self, message: Message) -> StreamResult<()> {
         match message {
             Message::BarrierBatch(barriers) => {
@@ -219,13 +227,47 @@ impl MultiplexedActorOutput {
                 }
                 Ok(())
             }
-            Message::Chunk(_) | Message::Watermark(_) => {
-                // Data and watermarks are sent immediately, tagged with both the source
-                // actor ID and the current epoch for receiver-side buffering.
-                self.ch
-                    .send_tagged(message, self.actor_id, vec![], self.current_epoch)
+            Message::Chunk(ref chunk) => {
+                // Acquire record permits from this actor's dedicated semaphore.
+                let card = chunk.cardinality().clamp(1, self.max_chunk_permits);
+                if card == self.max_chunk_permits {
+                    tracing::warn!(
+                        cardinality = chunk.cardinality(),
+                        "large chunk in multiplexed exchange"
+                    );
+                }
+                let permits_val = permits::Value::Record(card as u32);
+
+                // Acquire from per-actor semaphore (blocks if this actor has too much
+                // in-flight data, without affecting other actors).
+                if self
+                    .record_permits
+                    .acquire_many(card as u32)
                     .await
-                    .map_err(|_| ExchangeChannelClosed::output(self.actor_id).into())
+                    .map(SemaphorePermit::forget)
+                    .is_err()
+                {
+                    return Err(ExchangeChannelClosed::output(self.actor_id).into());
+                }
+
+                // Send with pre-acquired permits (no shared semaphore acquisition).
+                self.ch
+                    .send_preacquired(
+                        message,
+                        Some(permits_val),
+                        self.actor_id,
+                        vec![],
+                        self.current_epoch,
+                    )
+                    .map_err(|_| ExchangeChannelClosed::output(self.actor_id))?;
+                Ok(())
+            }
+            Message::Watermark(_) => {
+                // Watermarks don't require permits — send immediately.
+                self.ch
+                    .send_preacquired(message, None, self.actor_id, vec![], self.current_epoch)
+                    .map_err(|_| ExchangeChannelClosed::output(self.actor_id))?;
+                Ok(())
             }
         }
     }
@@ -295,6 +337,10 @@ impl MultiplexedOutputCoordinator {
 
 /// Creates a multiplexed output for a set of upstream actors targeting a single downstream actor.
 ///
+/// Each actor gets its own record permit semaphore with `initial_permits` permits, preventing
+/// fast actors from starving slow actors. Barrier permits remain shared since barriers are
+/// coalesced by the coordinator.
+///
 /// Returns:
 /// - A vec of `MultiplexedActorOutput` handles, one per upstream actor
 /// - A `MultiplexedOutputCoordinator` that must be spawned as a background task
@@ -310,21 +356,18 @@ pub fn create_multiplexed_output(
     MultiplexedOutputCoordinator,
     permit::Receiver,
 ) {
-    // Scale record permits proportional to the number of upstream actors.
-    let scaled_initial_permits = initial_permits * upstream_actor_ids.len();
-    let scaled_batched_permits = batched_permits * upstream_actor_ids.len();
-    // Barrier permits control how many coalesced barriers can be in-flight simultaneously
-    // in the shared channel. This value comes from the `concurrent_barriers` config
-    // (`stream_exchange_concurrent_barriers`). With epoch-tagged pipelining, consider
-    // raising it (e.g. to 10) to allow multiple epochs to be in-flight.
-    let barrier_permits = concurrent_barriers;
-
-    let (tx, rx) = permit::channel(
-        scaled_initial_permits,
-        scaled_batched_permits,
-        barrier_permits,
+    // Create channel with per-actor record permits. Each actor gets `initial_permits` worth
+    // of record capacity in its own semaphore. Returned permits are distributed fairly
+    // across all actors.
+    let num_actors = upstream_actor_ids.len();
+    let (tx, rx, per_actor_semaphores) = permit::channel_multiplexed(
+        initial_permits,
+        batched_permits,
+        concurrent_barriers,
+        num_actors,
     );
 
+    let max_chunk_permits = tx.max_chunk_permits();
     let (barrier_tx, barrier_rx) = mpsc::unbounded_channel();
 
     let expected_actors: HashSet<ActorId> = upstream_actor_ids.iter().copied().collect();
@@ -332,9 +375,12 @@ pub fn create_multiplexed_output(
 
     let actor_outputs: Vec<MultiplexedActorOutput> = upstream_actor_ids
         .iter()
-        .map(|&actor_id| MultiplexedActorOutput {
+        .zip_eq(per_actor_semaphores)
+        .map(|(&actor_id, record_permits)| MultiplexedActorOutput {
             actor_id,
             ch: tx.clone(),
+            record_permits,
+            max_chunk_permits,
             barrier_tx: barrier_tx.clone(),
             current_epoch: 0,
         })

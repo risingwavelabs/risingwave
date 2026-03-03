@@ -15,6 +15,7 @@
 //! Channel implementation for permit-based back-pressure.
 
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use risingwave_common::config::StreamingConfig;
 use risingwave_pb::id::ActorId;
@@ -57,7 +58,11 @@ pub fn channel(
 
     let records = Semaphore::new(initial_permits);
     let barriers = Semaphore::new(concurrent_barriers);
-    let permits = Arc::new(Permits { records, barriers });
+    let permits = Arc::new(Permits {
+        records,
+        barriers,
+        per_actor_records: None,
+    });
 
     let max_chunk_permits: usize = initial_permits - batched_permits;
 
@@ -68,6 +73,49 @@ pub fn channel(
             max_chunk_permits,
         },
         Receiver { rx, permits },
+    )
+}
+
+/// Create a channel for multiplexed exchange with per-actor record permits.
+///
+/// Each actor gets its own record semaphore with `initial_permits_per_actor` permits, preventing
+/// fast actors from starving slow actors. Returned record permits are distributed fairly across
+/// all actor semaphores.
+///
+/// Returns `(Sender, Receiver, Vec<Arc<Semaphore>>)` where the semaphore vec has one entry per
+/// actor (in the same order as `num_actors`).
+pub fn channel_multiplexed(
+    initial_permits_per_actor: usize,
+    batched_permits: usize,
+    concurrent_barriers: usize,
+    num_actors: usize,
+) -> (Sender, Receiver, Vec<Arc<Semaphore>>) {
+    let (tx, rx) = mpsc::unbounded_channel();
+
+    // Create per-actor record semaphores.
+    let per_actor_semaphores: Vec<Arc<Semaphore>> = (0..num_actors)
+        .map(|_| Arc::new(Semaphore::new(initial_permits_per_actor)))
+        .collect();
+
+    // Shared records semaphore is unused for multiplexed sends (set to 0).
+    let records = Semaphore::new(0);
+    let barriers = Semaphore::new(concurrent_barriers);
+    let permits = Arc::new(Permits {
+        records,
+        barriers,
+        per_actor_records: Some(PerActorRecordPermits::new(per_actor_semaphores.clone())),
+    });
+
+    let max_chunk_permits: usize = initial_permits_per_actor - batched_permits;
+
+    (
+        Sender {
+            tx,
+            permits: permits.clone(),
+            max_chunk_permits,
+        },
+        Receiver { rx, permits },
+        per_actor_semaphores,
     )
 }
 
@@ -95,18 +143,79 @@ pub fn channel_for_test() -> (Sender, Receiver) {
 /// Semaphore-based permits to control the back-pressure.
 ///
 /// The number of messages in the exchange channel is limited by these semaphores.
+///
+/// For multiplexed exchanges with per-actor record permits, `per_actor_records` is `Some`.
+/// Returned record permits are distributed fairly (round-robin) across actor semaphores.
 pub struct Permits {
     /// The permits for records in chunks.
+    /// Used directly for non-multiplexed exchanges. For multiplexed exchanges with per-actor
+    /// permits, this semaphore is unused (initialized to 0) — per-actor semaphores are used
+    /// instead.
     records: Semaphore,
     /// The permits for barriers.
     barriers: Semaphore,
+    /// Per-actor record semaphores for multiplexed exchanges. When present, returned record
+    /// permits are distributed across these semaphores instead of `records`.
+    per_actor_records: Option<PerActorRecordPermits>,
+}
+
+/// Distributes returned record permits fairly across per-actor semaphores.
+struct PerActorRecordPermits {
+    semaphores: Vec<Arc<Semaphore>>,
+    /// Round-robin index for distributing returned permits.
+    return_idx: AtomicUsize,
+}
+
+impl PerActorRecordPermits {
+    fn new(semaphores: Vec<Arc<Semaphore>>) -> Self {
+        Self {
+            semaphores,
+            return_idx: AtomicUsize::new(0),
+        }
+    }
+
+    /// Distribute `total` returned record permits fairly across all actor semaphores.
+    fn distribute(&self, total: u32) {
+        let n = self.semaphores.len();
+        if n == 0 {
+            return;
+        }
+        let per_actor = total as usize / n;
+        let remainder = total as usize % n;
+        // Start from the current round-robin position for fairness.
+        let start = self.return_idx.fetch_add(remainder, Ordering::Relaxed) % n;
+        for (i, sem) in self.semaphores.iter().enumerate() {
+            let extra = if remainder > 0 && {
+                // Check if this semaphore should get an extra permit.
+                let offset = (i + n - start) % n;
+                offset < remainder
+            } {
+                1
+            } else {
+                0
+            };
+            sem.add_permits(per_actor + extra);
+        }
+    }
+
+    fn close(&self) {
+        for sem in &self.semaphores {
+            sem.close();
+        }
+    }
 }
 
 impl Permits {
     /// Add permits back to the semaphores.
     pub fn add_permits(&self, permits: permits::Value) {
         match permits {
-            permits::Value::Record(p) => self.records.add_permits(p as usize),
+            permits::Value::Record(p) => {
+                if let Some(per_actor) = &self.per_actor_records {
+                    per_actor.distribute(p);
+                } else {
+                    self.records.add_permits(p as usize);
+                }
+            }
             permits::Value::Barrier(p) => self.barriers.add_permits(p as usize),
         }
     }
@@ -127,6 +236,9 @@ impl Permits {
     fn close(&self) {
         self.records.close();
         self.barriers.close();
+        if let Some(per_actor) = &self.per_actor_records {
+            per_actor.close();
+        }
     }
 }
 
@@ -175,6 +287,36 @@ impl Sender {
                 epoch: 0,
             })
             .map_err(|e| mpsc::error::SendError(e.0.message))
+    }
+
+    /// Send a message with pre-acquired permits (caller already acquired from an external
+    /// semaphore). No permit acquisition is performed — the caller is responsible for having
+    /// acquired the permits beforehand.
+    ///
+    /// Used by [`MultiplexedActorOutput`](super::multiplexed::MultiplexedActorOutput) when
+    /// per-actor record semaphores are used instead of the shared record semaphore.
+    pub fn send_preacquired(
+        &self,
+        message: Message,
+        permits: Option<permits::Value>,
+        source_actor_id: ActorId,
+        coalesced_actor_ids: Vec<ActorId>,
+        epoch: u64,
+    ) -> Result<(), mpsc::error::SendError<Message>> {
+        self.tx
+            .send(MessageWithPermits {
+                message,
+                permits,
+                source_actor_id,
+                coalesced_actor_ids,
+                epoch,
+            })
+            .map_err(|e| mpsc::error::SendError(e.0.message))
+    }
+
+    /// The maximum permits that a single chunk can acquire.
+    pub fn max_chunk_permits(&self) -> usize {
+        self.max_chunk_permits
     }
 
     /// Send a message tagged with multiplexing metadata, waiting until there are enough permits.
