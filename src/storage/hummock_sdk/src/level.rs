@@ -254,6 +254,22 @@ impl Levels {
             .map(|level| level.table_infos.len())
             .sum()
     }
+
+    pub fn unused() -> Self {
+        Self {
+            l0: OverlappingLevel {
+                sub_levels: vec![],
+                total_file_size: 0,
+                uncompressed_file_size: 0,
+            },
+            levels: vec![],
+            group_id: 0.into(),
+            parent_group_id: 0.into(),
+            #[expect(deprecated)]
+            member_table_ids: vec![],
+            compaction_group_version_id: 0,
+        }
+    }
 }
 
 impl<T> LevelsCommon<T>

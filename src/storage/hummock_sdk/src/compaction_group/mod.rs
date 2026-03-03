@@ -37,6 +37,8 @@ pub mod StaticCompactionGroupId {
     pub const MaterializedView: CompactionGroupId = CompactionGroupId::new(3);
     /// Larger than any `StaticCompactionGroupId`.
     pub const End: CompactionGroupId = CompactionGroupId::new(4);
+    /// Table change log compaction group.
+    pub const TableChangeLog: CompactionGroupId = CompactionGroupId::new(u64::MAX - 1);
 }
 
 /// The split will follow the following rules:

@@ -38,6 +38,10 @@ impl<T> TableChangeLogCommon<T> {
         self.0.iter()
     }
 
+    pub fn iter_rev(&self) -> impl Iterator<Item = &EpochNewChangeLogCommon<T>> + Clone {
+        self.0.iter().rev()
+    }
+
     pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut EpochNewChangeLogCommon<T>> {
         self.0.iter_mut()
     }
@@ -55,6 +59,12 @@ impl<T> TableChangeLogCommon<T> {
             .flat_map(|epoch_change_log| epoch_change_log.epochs())
     }
 
+    pub fn max_checkpoint_epoch(&self) -> Option<u64> {
+        self.0
+            .back()
+            .map(|epoch_change_log| epoch_change_log.checkpoint_epoch)
+    }
+
     pub(crate) fn change_log_into_iter(self) -> impl Iterator<Item = EpochNewChangeLogCommon<T>> {
         self.0.into_iter()
     }
@@ -63,6 +73,21 @@ impl<T> TableChangeLogCommon<T> {
         &mut self,
     ) -> impl Iterator<Item = &mut EpochNewChangeLogCommon<T>> {
         self.0.iter_mut()
+    }
+
+    pub fn split_by_checkpoint_epoch(
+        &self,
+        checkpoint_epoch: u64,
+    ) -> (
+        impl Iterator<Item = &EpochNewChangeLogCommon<T>> + Clone,
+        impl Iterator<Item = &EpochNewChangeLogCommon<T>> + Clone,
+    ) {
+        let split_point = self.0.partition_point(|epoch_change_log| {
+            epoch_change_log.checkpoint_epoch <= checkpoint_epoch
+        });
+        let clean_part = self.0.iter().take(split_point).rev();
+        let dirty_part = self.0.iter().skip(split_point);
+        (clean_part, dirty_part)
     }
 }
 
@@ -247,6 +272,29 @@ impl<T> TableChangeLogCommon<T> {
                 .non_checkpoint_epochs
                 .retain(|epoch| *epoch >= truncate_epoch);
         }
+    }
+
+    pub fn truncate_compacted_log(&mut self, raw_log_min_epoch: u64) {
+        while let Some(change_log) = self.0.front()
+            && change_log.first_epoch() < raw_log_min_epoch
+        {
+            // The reader never query with epoch < raw_log_min_epoch, so this compacted log is not needed.
+            let _change_log = self.0.pop_front().expect("non-empty");
+        }
+    }
+
+    pub fn apply_compacted_log(&mut self, new_compacted_log: EpochNewChangeLogCommon<T>) {
+        let new_start = new_compacted_log.first_epoch();
+        let new_end = new_compacted_log.checkpoint_epoch;
+        while let Some(old_change_log) = self.0.back() {
+            let old_start = old_change_log.first_epoch();
+            let old_end = old_change_log.checkpoint_epoch;
+            if old_end < new_start || old_start > new_end {
+                break;
+            }
+            self.0.pop_back().expect("non-empty");
+        }
+        self.0.push_back(new_compacted_log);
     }
 }
 

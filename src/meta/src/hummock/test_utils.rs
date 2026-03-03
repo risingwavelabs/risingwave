@@ -22,6 +22,7 @@ use bytes::Bytes;
 use itertools::Itertools;
 use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_common::util::epoch::test_epoch;
+use risingwave_hummock_sdk::change_log::TableChangeLog;
 use risingwave_hummock_sdk::key::key_with_epoch;
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::level::Levels;
@@ -42,6 +43,7 @@ use crate::controller::catalog::CatalogController;
 use crate::controller::cluster::{ClusterController, ClusterControllerRef};
 use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
 use crate::hummock::compaction::selector::{LocalSelectorStatistic, default_compaction_selector};
+use crate::hummock::compaction::table_change_log::TableChangeLogCompactionTaskTracker;
 use crate::hummock::compaction::{CompactionDeveloperConfig, CompactionSelectorContext};
 use crate::hummock::level_handler::LevelHandler;
 pub use crate::hummock::manager::CommitEpochInfo;
@@ -406,6 +408,7 @@ pub async fn add_ssts(
     test_tables
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn compaction_selector_context<'a>(
     group: &'a CompactionGroup,
     levels: &'a Levels,
@@ -416,6 +419,9 @@ pub fn compaction_selector_context<'a>(
     developer_config: Arc<CompactionDeveloperConfig>,
     table_watermarks: &'a HashMap<TableId, Arc<TableWatermarks>>,
     state_table_info: &'a HummockVersionStateTableInfo,
+    table_change_log: &'a HashMap<TableId, TableChangeLog>,
+    compacted_table_change_logs: &'a HashMap<TableId, TableChangeLog>,
+    table_change_log_compaction_task_tracker: &'a TableChangeLogCompactionTaskTracker,
 ) -> CompactionSelectorContext<'a> {
     CompactionSelectorContext {
         group,
@@ -427,6 +433,9 @@ pub fn compaction_selector_context<'a>(
         developer_config,
         table_watermarks,
         state_table_info,
+        table_change_log,
+        compacted_table_change_logs,
+        table_change_log_compaction_task_tracker,
     }
 }
 

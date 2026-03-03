@@ -417,6 +417,7 @@ for_all_wrapped_id_fields! (
             table_change_logs: TableId,
             state_table_info: TableId,
             vector_indexes: TableId,
+            compacted_table_change_logs: TableId,
             levels: CompactionGroupId,
         }
         HummockVersion.Levels {
@@ -437,6 +438,7 @@ for_all_wrapped_id_fields! (
             change_log_delta: TableId,
             state_table_info_delta: TableId,
             vector_index_delta: TableId,
+            change_log_compaction_delta: TableId,
             group_deltas: CompactionGroupId,
         }
         HummockVersionStats {
@@ -1266,8 +1268,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .type_attribute("hummock.InputLevel", "#[derive(Eq)]")
         .type_attribute("hummock.TableSchema", "#[derive(Eq)]")
         .type_attribute("hummock.CompactTask", "#[derive(Eq)]")
+        .type_attribute("hummock.TableChangeLog", "#[derive(Eq)]")
+        .type_attribute("hummock.EpochNewChangeLog", "#[derive(Eq)]")
         .type_attribute("hummock.TableWatermarks", "#[derive(Eq)]")
         .type_attribute("hummock.VnodeWatermark", "#[derive(Eq)]")
+        .type_attribute("hummock.CompactTask.TableChangeLogCompactionInput", "#[derive(Eq)]")
+        .type_attribute("hummock.CompactTask.TableChangeLogCompactionOutput", "#[derive(Eq)]")
         .type_attribute(
             "hummock.TableWatermarks.EpochNewWatermarks",
             "#[derive(Eq)]",
