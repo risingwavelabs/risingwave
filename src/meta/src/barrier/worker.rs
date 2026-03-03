@@ -30,7 +30,6 @@ use risingwave_meta_model::WorkerId;
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::meta::Recovery;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
-use risingwave_pb::stream_service::streaming_control_stream_response::Response;
 use thiserror_ext::AsReport;
 use tokio::select;
 use tokio::sync::mpsc;
@@ -38,7 +37,6 @@ use tokio::sync::oneshot::{Receiver, Sender};
 use tokio::task::JoinHandle;
 use tonic::Status;
 use tracing::{Instrument, debug, error, info, warn};
-use uuid::Uuid;
 
 use crate::barrier::checkpoint::{CheckpointControl, CheckpointControlEvent};
 use crate::barrier::complete_task::{BarrierCompleteOutput, CompletingTask};
@@ -46,7 +44,8 @@ use crate::barrier::context::recovery::{RenderedDatabaseRuntimeInfo, render_runt
 use crate::barrier::context::{GlobalBarrierWorkerContext, GlobalBarrierWorkerContextImpl};
 use crate::barrier::info::InflightDatabaseInfo;
 use crate::barrier::rpc::{
-    ControlStreamManager, WorkerNodeEvent, from_partial_graph_id, merge_node_rpc_errors,
+    DatabaseInitialBarrierCollector, database_partial_graphs, from_partial_graph_id,
+    merge_node_rpc_errors,
 };
 use crate::barrier::schedule::{MarkReadyOptions, PeriodicBarriers};
 use crate::barrier::{
@@ -102,9 +101,7 @@ pub(super) struct GlobalBarrierWorker<C> {
 
     active_streaming_nodes: ActiveStreamingWorkerNodes,
 
-    control_stream_manager: ControlStreamManager,
-
-    term_id: String,
+    partial_graph_manager: PartialGraphManager,
 }
 
 #[cfg(test)]
@@ -168,7 +165,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
 
         let active_streaming_nodes = ActiveStreamingWorkerNodes::uninitialized();
 
-        let control_stream_manager = ControlStreamManager::new(env.clone());
+        let partial_graph_manager = PartialGraphManager::uninitialized(env.clone());
 
         let reader = env.system_params_reader().await;
         let system_enable_per_database_isolation = reader.per_database_isolation();
@@ -188,8 +185,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
             completing_task: CompletingTask::None,
             request_rx,
             active_streaming_nodes,
-            control_stream_manager,
-            term_id: "uninitialized".into(),
+            partial_graph_manager,
         }
     }
 }
@@ -521,10 +517,10 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
 
                     match changed_worker {
                         ActiveStreamingWorkerChange::Add(node) | ActiveStreamingWorkerChange::Update(node) => {
-                            self.control_stream_manager.add_worker(node, self.checkpoint_control.inflight_infos(), self.term_id.clone(), &*self.context).await;
+                            self.partial_graph_manager.add_worker(node, &*self.context).await;
                         }
                         ActiveStreamingWorkerChange::Remove(node) => {
-                            self.control_stream_manager.remove_worker(node);
+                            self.partial_graph_manager.remove_worker(node);
                         }
                     }
                 }
@@ -546,7 +542,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                     .next_completed_barrier(
                         &mut self.periodic_barriers,
                         &mut self.checkpoint_control,
-                        &mut self.control_stream_manager,
+                        &mut self.partial_graph_manager,
                         &self.context,
                         &self.env,
                 ) => {
@@ -609,7 +605,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                                         entering_initializing.enter(
                                             runtime_info,
                                             rendered_info,
-                                            &mut self.control_stream_manager,
+                                            &mut self.partial_graph_manager,
                                         );
                                     }
                                     Ok(None) => {
@@ -633,36 +629,41 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                         self.failure_recovery(e).await;
                     }
                 }
-                (worker_id, event) = self.control_stream_manager.next_event(&self.term_id, &self.context) => {
-                    let resp_result = match event {
-                        WorkerNodeEvent::Response(result) => {
-                            result
-                        }
-                        WorkerNodeEvent::Connected(connected) => {
-                            connected.initialize(self.checkpoint_control.inflight_infos());
-                            continue;
-                        }
-                    };
+                event = self.partial_graph_manager.next_event(&self.context) => {
                     let result: MetaResult<()> = try {
-                        let resp = match resp_result {
-                            Err(err) => {
-                                let failed_databases = self.checkpoint_control.databases_failed_at_worker_err(worker_id);
+                        match event {
+                            PartialGraphManagerEvent::Worker(_worker_id, WorkerEvent::WorkerConnected) => {
+                                // no handling on new worker connected event yet
+                            }
+                            PartialGraphManagerEvent::Worker(worker_id, WorkerEvent::WorkerError { err, affected_partial_graphs }) => {
+                                let failed_databases = self
+                                    .checkpoint_control
+                                    .databases_failed_at_worker_err(worker_id)
+                                    .chain(
+                                        affected_partial_graphs
+                                        .into_iter()
+                                        .map(|partial_graph_id| {
+                                            let (database_id, _) = from_partial_graph_id(partial_graph_id);
+                                            database_id
+                                        })
+                                    )
+                                    .collect::<HashSet<_>>();
                                 if !failed_databases.is_empty() {
                                     if !self.enable_recovery {
-                                        panic!("control stream to worker {} failed but recovery not enabled: {:?}", worker_id, err.as_report());
+                                        panic!("control stream to worker {} failed but recovery not enabled: {}", worker_id, err.as_report());
                                     }
                                     if !self.enable_per_database_isolation() {
                                         Err(err.clone())?;
                                     }
                                     Self::report_collect_failure(&self.env, &err);
                                     for database_id in failed_databases {
-                                        if let Some(entering_recovery) = self.checkpoint_control.on_report_failure(database_id, &mut self.control_stream_manager) {
+                                        if let Some(entering_recovery) = self.checkpoint_control.on_report_failure(database_id, &mut self.partial_graph_manager) {
                                             warn!(%worker_id, %database_id, "database entering recovery on node failure");
                                             self.context.abort_and_mark_blocked(Some(database_id), RecoveryReason::Failover(anyhow!("reset database: {}", database_id).into()));
                                             self.context.notify_creating_job_failed(Some(database_id), format!("database {} reset due to node {} failure: {}", database_id, worker_id, err.as_report())).await;
                                             // TODO: add log on blocking time
                                             let output = self.completing_task.wait_completing_task().await?;
-                                            entering_recovery.enter(output, &mut self.control_stream_manager);
+                                            entering_recovery.enter(output, &mut self.partial_graph_manager);
                                         }
                                     }
                                 }  else {
@@ -670,35 +671,36 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                                 }
                                 continue;
                             }
-                            Ok(resp) => resp,
-                        };
-                        match resp {
-                            Response::CompleteBarrier(resp) => {
-                                self.checkpoint_control.barrier_collected(resp, &mut self.periodic_barriers)?;
-                            },
-                            Response::ReportPartialGraphFailure(resp) => {
-                                if !self.enable_recovery {
-                                    panic!("database failure reported but recovery not enabled: {:?}", resp)
-                                }
-                                let (database_id, _) = from_partial_graph_id(resp.partial_graph_id);
-                                if !self.enable_per_database_isolation() {
-                                        Err(anyhow!("database {} reset", database_id))?;
+                            PartialGraphManagerEvent::PartialGraph(partial_graph_id, event) => {
+                                let (database_id, _creating_job_id) = from_partial_graph_id(partial_graph_id);
+                                match event {
+                                    PartialGraphEvent::BarrierCollected(collected_barrier) => {
+                                        self.checkpoint_control.barrier_collected(partial_graph_id, collected_barrier, &mut self.periodic_barriers)?;
                                     }
-                                if let Some(entering_recovery) = self.checkpoint_control.on_report_failure(database_id, &mut self.control_stream_manager) {
-                                    warn!(%database_id, "database entering recovery");
-                                    self.context.abort_and_mark_blocked(Some(database_id), RecoveryReason::Failover(anyhow!("reset database: {}", database_id).into()));
-                                    // TODO: add log on blocking time
-                                    let output = self.completing_task.wait_completing_task().await?;
-                                    entering_recovery.enter(output, &mut self.control_stream_manager);
+                                    PartialGraphEvent::Error(worker_id) => {
+                                        if !self.enable_recovery {
+                                            panic!("database {database_id} failure reported from {worker_id} but recovery not enabled")
+                                        }
+                                        if !self.enable_per_database_isolation() {
+                                                Err(anyhow!("database {database_id} report failure from {worker_id}"))?;
+                                            }
+                                        if let Some(entering_recovery) = self.checkpoint_control.on_report_failure(database_id, &mut self.partial_graph_manager) {
+                                            warn!(%database_id, "database entering recovery");
+                                            self.context.abort_and_mark_blocked(Some(database_id), RecoveryReason::Failover(anyhow!("reset database: {}", database_id).into()));
+                                            // TODO: add log on blocking time
+                                            let output = self.completing_task.wait_completing_task().await?;
+                                            entering_recovery.enter(output, &mut self.partial_graph_manager);
+                                        }
+                                    }
+                                    PartialGraphEvent::Reset(reset_resps) => {
+                                        self.checkpoint_control.on_partial_graph_reset(partial_graph_id, reset_resps);
+                                    }
+                                    PartialGraphEvent::Initialized => {
+                                        self.checkpoint_control.on_partial_graph_initialized(partial_graph_id);
+                                    }
                                 }
                             }
-                            Response::ResetPartialGraph(resp) => {
-                                self.checkpoint_control.on_reset_partial_graph_resp(worker_id, resp);
-                            }
-                            other @ Response::Init(_) | other @ Response::Shutdown(_) => {
-                                Err(anyhow!("get expected response: {:?}", other))?;
-                            }
-                        }
+                        };
                     };
                     if let Err(e) = result {
                         self.failure_recovery(e).await;
@@ -736,7 +738,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                     } else {
                         new_barrier
                     };
-                    if let Err(e) = self.checkpoint_control.handle_new_barrier(new_barrier, &mut self.control_stream_manager) {
+                    if let Err(e) = self.checkpoint_control.handle_new_barrier(new_barrier, &mut self.partial_graph_manager) {
                         if !self.enable_recovery {
                             panic!(
                                 "failed to inject barrier to some databases but recovery not enabled: {:?}", (
@@ -749,12 +751,12 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                             if !self.enable_per_database_isolation() {
                                 let err = anyhow!("failed to inject barrier to databases: {:?}", (database_id, e.as_report()));
                                 Err(err)?;
-                            } else if let Some(entering_recovery) = self.checkpoint_control.on_report_failure(database_id, &mut self.control_stream_manager) {
+                            } else if let Some(entering_recovery) = self.checkpoint_control.on_report_failure(database_id, &mut self.partial_graph_manager) {
                                 warn!(%database_id, e = %e.as_report(),"database entering recovery on inject failure");
                                 self.context.abort_and_mark_blocked(Some(database_id), RecoveryReason::Failover(anyhow!(e).context("inject barrier failure").into()));
                                 // TODO: add log on blocking time
                                 let output = self.completing_task.wait_completing_task().await?;
-                                entering_recovery.enter(output, &mut self.control_stream_manager);
+                                entering_recovery.enter(output, &mut self.partial_graph_manager);
                             }
                         };
                         if let Err(e) = result {
@@ -960,6 +962,10 @@ pub(crate) use retry_strategy::*;
 use risingwave_common::error::tonic::extra::{Score, ScoredError};
 use risingwave_pb::meta::event_log::{Event, EventRecovery};
 
+use crate::barrier::partial_graph::{
+    PartialGraphEvent, PartialGraphManager, PartialGraphManagerEvent, WorkerEvent,
+};
+
 impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
     /// Recovery the whole cluster from the latest epoch.
     ///
@@ -970,7 +976,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
     /// Returns the new state of the barrier manager after recovery.
     pub async fn recovery(&mut self, is_paused: bool, recovery_reason: RecoveryReason) {
         // Clear all control streams to release resources (connections to compute nodes) first.
-        self.control_stream_manager.clear();
+        self.partial_graph_manager.clear_worker();
 
         let reason_str = match &recovery_reason {
             RecoveryReason::Bootstrap => "bootstrap".to_owned(),
@@ -1033,13 +1039,9 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                 mut cdc_table_snapshot_splits,
             } = runtime_info_snapshot;
 
-            let term_id = Uuid::new_v4().to_string();
-
-
-            let mut control_stream_manager = ControlStreamManager::recover(
+            let mut partial_graph_manager = PartialGraphManager::recover(
                     self.env.clone(),
                     active_streaming_nodes.current(),
-                    &term_id,
                     self.context.clone(),
                 )
                 .await;
@@ -1049,7 +1051,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                 let mut collecting_databases = HashMap::new();
                 let mut failed_databases = HashMap::new();
                 for &database_id in recovery_context.fragment_context.database_map.keys() {
-                    let mut injected_creating_jobs = HashSet::new();
+                    let mut recoverer = partial_graph_manager.start_recover();
                     let result: MetaResult<_> = try {
                         let Some(rendered_info) = render_runtime_info(
                             self.env.actor_id_generator(),
@@ -1079,7 +1081,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                             stream_actors,
                             mut source_splits,
                         } = rendered_info;
-                        control_stream_manager.inject_database_initial_barrier(
+                        recoverer.inject_database_initial_barrier(
                             database_id,
                             job_infos,
                             &recovery_context.job_extra_info,
@@ -1093,82 +1095,95 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                             is_paused,
                             &hummock_version_stats,
                             &mut cdc_table_snapshot_splits,
-                            &mut injected_creating_jobs,
                         )?
                     };
-                    let node_to_collect = match result {
-                        Ok(info) => {
-                            info
+                    let collector = match result {
+                        Ok(database) => {
+                            DatabaseInitialBarrierCollector {
+                                database_id,
+                                initializing_partial_graphs: recoverer.all_initializing(),
+                                database,
+                            }
                         }
                         Err(e) => {
                             warn!(%database_id, e = %e.as_report(), "failed to inject database initial barrier");
-                            assert!(failed_databases.insert(database_id, injected_creating_jobs).is_none(), "non-duplicate");
+                            assert!(failed_databases.insert(database_id, recoverer.failed()).is_none(), "non-duplicate");
                             continue;
                         }
                     };
-                    if !node_to_collect.is_collected() {
-                        assert!(collecting_databases.insert(database_id, node_to_collect).is_none());
+                    if !collector.is_collected() {
+                        assert!(collecting_databases.insert(database_id, collector).is_none());
                     } else {
                         warn!(%database_id, "database has no node to inject initial barrier");
-                        assert!(collected_databases.insert(database_id, node_to_collect.finish()).is_none());
+                        assert!(collected_databases.insert(database_id, collector.finish()).is_none());
                     }
                 }
                 if !empty_databases.is_empty() {
                     info!(?empty_databases, "empty database in global recovery");
                 }
                 while !collecting_databases.is_empty() {
-                    let (worker_id, result) =
-                        control_stream_manager.next_response(&term_id, &self.context).await;
-                    let resp = match result {
-                        Err(e) => {
-                            warn!(%worker_id, err = %e.as_report(), "worker node failure during recovery");
-                            for (failed_database_id, collector) in collecting_databases.extract_if(|_, collector| {
-                                !collector.is_valid_after_worker_err(worker_id)
+                    match partial_graph_manager.next_event(&self.context).await {
+                        PartialGraphManagerEvent::Worker(_, WorkerEvent::WorkerConnected) => {
+                            // not handle WorkerConnected yet
+                        }
+                        PartialGraphManagerEvent::Worker(worker_id, WorkerEvent::WorkerError { err, affected_partial_graphs }) => {
+                            let affected_databases: HashSet<_> = affected_partial_graphs.into_iter().map(|partial_graph_id| {
+                                let (database_id, _) = from_partial_graph_id(partial_graph_id);
+                                database_id
+                            }).collect();
+                            warn!(%worker_id, err = %err.as_report(), "worker node failure during recovery");
+                            for (failed_database_id, collector) in collecting_databases.extract_if(|database_id, collector| {
+                                !collector.is_valid_after_worker_err(worker_id) || affected_databases.contains(database_id)
                             }) {
                                 warn!(%failed_database_id, %worker_id, "database failed to recovery in global recovery due to worker node err");
-                                assert!(failed_databases.insert(failed_database_id, collector.creating_job_ids().collect()).is_none());
+                                let resetting_partial_graphs: HashSet<_> = collector.all_partial_graphs().collect();
+                                partial_graph_manager.reset_partial_graphs(resetting_partial_graphs.iter().copied());
+                                assert!(failed_databases.insert(failed_database_id, resetting_partial_graphs).is_none());
                             }
-                            continue;
                         }
-                        Ok(resp) => {
-                            match resp {
-                                Response::CompleteBarrier(resp) => {
-                                    resp
+                        PartialGraphManagerEvent::PartialGraph(partial_graph_id, event) => {
+                            match event {
+                                PartialGraphEvent::BarrierCollected(_) => {
+                                    unreachable!("no barrier collected event on initializing")
                                 }
-                                Response::ReportPartialGraphFailure(resp) => {
-                                    let (database_id, _) = from_partial_graph_id(resp.partial_graph_id);
+                                PartialGraphEvent::Reset(_) => {
+                                    unreachable!("no partial graph reset on initializing")
+                                }
+                                PartialGraphEvent::Error(worker_id) => {
+                                    let (database_id, _) = from_partial_graph_id(partial_graph_id);
                                     if let Some(collector) = collecting_databases.remove(&database_id) {
                                         warn!(%database_id, %worker_id, "database reset during global recovery");
-                                        assert!(failed_databases.insert(database_id, collector.creating_job_ids().collect()).is_none());
+                                        let resetting_partial_graphs: HashSet<_> = collector.all_partial_graphs().collect();
+                                        partial_graph_manager.reset_partial_graphs(resetting_partial_graphs.iter().copied());
+                                        assert!(failed_databases.insert(database_id, resetting_partial_graphs).is_none());
                                     } else if let Some(database) = collected_databases.remove(&database_id) {
                                         warn!(%database_id, %worker_id, "database initialized but later reset during global recovery");
-                                        assert!(failed_databases.insert(database_id, database.creating_streaming_job_controls.keys().copied().collect()).is_none());
+                                        let resetting_partial_graphs: HashSet<_> = database_partial_graphs(database_id, database.creating_streaming_job_controls.keys().copied()).collect();
+                                        partial_graph_manager.reset_partial_graphs(resetting_partial_graphs.iter().copied());
+                                        assert!(failed_databases.insert(database_id, resetting_partial_graphs).is_none());
                                     } else {
                                         assert!(failed_databases.contains_key(&database_id));
                                     }
-                                    continue;
                                 }
-                                other @ (Response::Init(_) | Response::Shutdown(_) | Response::ResetPartialGraph(_)) => {
-                                    return Err(anyhow!("get unexpected resp {:?}", other).into());
+                                PartialGraphEvent::Initialized => {
+                                    let (database_id, _) = from_partial_graph_id(partial_graph_id);
+                                    if failed_databases.contains_key(&database_id) {
+                                        assert!(!collecting_databases.contains_key(&database_id));
+                                        // ignore the lately initialized partial graph of failed database
+                                        continue;
+                                    }
+                                    let Entry::Occupied(mut entry) = collecting_databases.entry(database_id) else {
+                                        unreachable!("should exist")
+                                    };
+                                    let collector = entry.get_mut();
+                                    collector.partial_graph_initialized(partial_graph_id);
+                                    if collector.is_collected() {
+                                        let collector = entry.remove();
+                                        assert!(collected_databases.insert(database_id, collector.finish()).is_none());
+                                    }
                                 }
                             }
                         }
-                    };
-                    assert_eq!(worker_id, resp.worker_id);
-                    let (database_id, _) = from_partial_graph_id(resp.partial_graph_id);
-                    if failed_databases.contains_key(&database_id) {
-                        assert!(!collecting_databases.contains_key(&database_id));
-                        // ignore the lately arrived collect resp of failed database
-                        continue;
-                    }
-                    let Entry::Occupied(mut entry) = collecting_databases.entry(database_id) else {
-                        unreachable!("should exist")
-                    };
-                    let node_to_collect = entry.get_mut();
-                    node_to_collect.collect_resp(resp);
-                    if node_to_collect.is_collected() {
-                        let node_to_collect = entry.remove();
-                        assert!(collected_databases.insert(database_id, node_to_collect.finish()).is_none());
                     }
                 }
                 debug!("collected initial barrier");
@@ -1190,7 +1205,6 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                 let checkpoint_control = CheckpointControl::recover(
                     collected_databases,
                     failed_databases,
-                    &mut control_stream_manager,
                     hummock_version_stats,
                     self.env.clone(),
                 );
@@ -1206,9 +1220,8 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
 
                 Ok((
                     active_streaming_nodes,
-                    control_stream_manager,
+                    partial_graph_manager,
                     checkpoint_control,
-                    term_id,
                     periodic_barriers,
                 ))
             }
@@ -1266,9 +1279,8 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
 
         (
             self.active_streaming_nodes,
-            self.control_stream_manager,
+            self.partial_graph_manager,
             self.checkpoint_control,
-            self.term_id,
             self.periodic_barriers,
         ) = new_state;
 

@@ -1955,11 +1955,11 @@ where
         prefetch_options: PrefetchOptions,
     ) -> StreamExecutorResult<BoxedRowStream<'_>> {
         let vnode = self.compute_prefix_vnode(&pk_prefix);
-        let stream = self
-            .iter_with_prefix(pk_prefix, sub_range, prefetch_options)
-            .await?;
         let Some(clean_watermark_index) = self.clean_watermark_index else {
-            return Ok(stream.boxed());
+            return self
+                .iter_with_prefix(pk_prefix, sub_range, prefetch_options)
+                .await
+                .map(|s| s.boxed());
         };
         let Some((watermark_serde, watermark_type)) = &self.watermark_serde else {
             return Err(StreamExecutorError::from(anyhow!(
@@ -1968,11 +1968,17 @@ where
         };
         // Fast path. TableWatermarksIndex::rewrite_range_with_table_watermark has already filtered the rows.
         if matches!(watermark_type, WatermarkSerdeType::PkPrefix) {
-            return Ok(stream.boxed());
+            return self
+                .iter_with_prefix(pk_prefix, sub_range, prefetch_options)
+                .await
+                .map(|s| s.boxed());
         }
         let watermark_bytes = self.row_store.state_store.get_table_watermark(vnode);
         let Some(watermark_bytes) = watermark_bytes else {
-            return Ok(stream.boxed());
+            return self
+                .iter_with_prefix(pk_prefix, sub_range, prefetch_options)
+                .await
+                .map(|s| s.boxed());
         };
         let watermark_row = watermark_serde.deserialize(&watermark_bytes)?;
         if watermark_row.len() != 1 {
@@ -1998,19 +2004,42 @@ where
         } else {
             WatermarkDirection::Descending
         };
-        let stream = stream.try_filter_map(move |row| {
-            let watermark_col_value = row.datum_at(clean_watermark_index);
-            let should_filter = direction.datum_filter_by_watermark(
-                watermark_col_value,
-                &watermark_value,
-                *order_type,
-            );
-            if should_filter {
-                ready(Ok(None))
-            } else {
-                ready(Ok(Some(row)))
-            }
-        });
+        let clean_watermark_index_in_pk = self
+            .pk_indices
+            .iter()
+            .position(|&i| i == clean_watermark_index);
+        let stream = self
+            .iter_with_prefix_inner::</* REVERSE */ false, Bytes>(pk_prefix, sub_range, prefetch_options)
+            .await?
+            .try_filter_map(move |(pk, row)| {
+                let should_filter =  match watermark_type {
+                    WatermarkSerdeType::PkPrefix => unreachable!(),
+                    WatermarkSerdeType::NonPkPrefix => {
+                        let pk_cols = self.pk_serde
+                        .deserialize(&pk)
+                        .unwrap_or_else(|e| {
+                            panic!("Failed to deserialize table {} pk {:?} error: {:?}", self.table_id(), pk, e.as_report());
+                        });
+                        direction.datum_filter_by_watermark(
+                            pk_cols.datum_at(clean_watermark_index_in_pk.unwrap()),
+                            &watermark_value,
+                            *order_type,
+                        )
+                    },
+                    WatermarkSerdeType::Value => {
+                        direction.datum_filter_by_watermark(
+                            row.datum_at(clean_watermark_index),
+                            &watermark_value,
+                            *order_type,
+                        )
+                    }
+                };
+                if should_filter {
+                    ready(Ok(None))
+                } else {
+                    ready(Ok(Some(row)))
+                }
+            });
         Ok(stream.boxed())
     }
 

@@ -1221,18 +1221,39 @@ pub async fn find_fragment_no_shuffle_dags_detailed(
         .all(db)
         .await?;
 
-    let mut forward_edges: HashMap<FragmentId, Vec<FragmentId>> = HashMap::new();
-    let mut backward_edges: HashMap<FragmentId, Vec<FragmentId>> = HashMap::new();
-
-    for (src, dst) in all_no_shuffle_relations {
-        forward_edges.entry(src).or_default().push(dst);
-        backward_edges.entry(dst).or_default().push(src);
-    }
+    let (forward_edges, backward_edges) =
+        build_no_shuffle_fragment_graph_edges(all_no_shuffle_relations);
 
     find_no_shuffle_graphs(initial_fragment_ids, &forward_edges, &backward_edges)
 }
 
-fn find_no_shuffle_graphs(
+pub(crate) fn build_no_shuffle_fragment_graph_edges(
+    relations: impl IntoIterator<Item = (FragmentId, FragmentId)>,
+) -> (
+    HashMap<FragmentId, Vec<FragmentId>>,
+    HashMap<FragmentId, Vec<FragmentId>>,
+) {
+    let mut forward_edges: HashMap<FragmentId, HashSet<FragmentId>> = HashMap::new();
+    let mut backward_edges: HashMap<FragmentId, HashSet<FragmentId>> = HashMap::new();
+
+    for (src, dst) in relations {
+        forward_edges.entry(src).or_default().insert(dst);
+        backward_edges.entry(dst).or_default().insert(src);
+    }
+
+    let forward_edges = forward_edges
+        .into_iter()
+        .map(|(src, dst_set)| (src, dst_set.into_iter().collect()))
+        .collect();
+    let backward_edges = backward_edges
+        .into_iter()
+        .map(|(dst, src_set)| (dst, src_set.into_iter().collect()))
+        .collect();
+
+    (forward_edges, backward_edges)
+}
+
+pub(crate) fn find_no_shuffle_graphs(
     initial_fragment_ids: &[impl Into<FragmentId> + Copy],
     forward_edges: &HashMap<FragmentId, Vec<FragmentId>>,
     backward_edges: &HashMap<FragmentId, Vec<FragmentId>>,

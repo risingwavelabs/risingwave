@@ -212,6 +212,13 @@ pub trait CatalogWriter: Send + Sync {
         payload: Vec<u8>,
     ) -> Result<()>;
 
+    async fn alter_subscription_retention(
+        &self,
+        subscription_id: SubscriptionId,
+        retention_seconds: u64,
+        definition: String,
+    ) -> Result<()>;
+
     async fn alter_name(
         &self,
         object_id: alter_name_request::Object,
@@ -231,6 +238,13 @@ pub trait CatalogWriter: Send + Sync {
         &self,
         job_id: JobId,
         parallelism: PbTableParallelism,
+        deferred: bool,
+    ) -> Result<()>;
+
+    async fn alter_backfill_parallelism(
+        &self,
+        job_id: JobId,
+        parallelism: Option<PbTableParallelism>,
         deferred: bool,
     ) -> Result<()>;
 
@@ -642,6 +656,18 @@ impl CatalogWriter for CatalogWriterImpl {
         Ok(())
     }
 
+    async fn alter_backfill_parallelism(
+        &self,
+        job_id: JobId,
+        parallelism: Option<PbTableParallelism>,
+        deferred: bool,
+    ) -> Result<()> {
+        self.meta_client
+            .alter_backfill_parallelism(job_id, parallelism, deferred)
+            .await?;
+        Ok(())
+    }
+
     async fn alter_config(
         &self,
         job_id: JobId,
@@ -678,6 +704,19 @@ impl CatalogWriter for CatalogWriterImpl {
                 owner_id,
                 payload,
             )
+            .await?;
+        self.wait_version(version).await
+    }
+
+    async fn alter_subscription_retention(
+        &self,
+        subscription_id: SubscriptionId,
+        retention_seconds: u64,
+        definition: String,
+    ) -> Result<()> {
+        let version = self
+            .meta_client
+            .alter_subscription_retention(subscription_id, retention_seconds, definition)
             .await?;
         self.wait_version(version).await
     }

@@ -271,7 +271,7 @@
     select * from t1 left join t2 on a = b AND ta < now() - interval '1 hour' and ta >= now() - interval '2 hour';
   stream_error: |-
     Not supported: optimizer has tried to separate the temporal predicate(with now() expression) from the on condition, but it still reminded in on join's condition. Considering move it into WHERE clause?
-    HINT: please refer to https://www.risingwave.dev/docs/current/sql-pattern-temporal-filters/ for more information
+    HINT: please refer to https://docs.risingwave.com/processing/sql/temporal-filters for more information
 - name: Temporal filter in on clause for right join's left side
   sql: |
     create table t1 (a int, ta timestamp with time zone);
@@ -300,7 +300,7 @@
     select * from t1 full join t2 on a = b AND ta < now() - interval '1 hour' and ta >= now() - interval '2 hour';
   stream_error: |-
     Not supported: optimizer has tried to separate the temporal predicate(with now() expression) from the on condition, but it still reminded in on join's condition. Considering move it into WHERE clause?
-    HINT: please refer to https://www.risingwave.dev/docs/current/sql-pattern-temporal-filters/ for more information
+    HINT: please refer to https://docs.risingwave.com/processing/sql/temporal-filters for more information
 - name: Temporal filter in on clause for left join's right side
   sql: |
     create table t1 (a int, ta timestamp with time zone);
@@ -329,7 +329,7 @@
     select * from t1 right join t2 on a = b AND tb < now() - interval '1 hour' and tb >= now() - interval '2 hour';
   stream_error: |-
     Not supported: optimizer has tried to separate the temporal predicate(with now() expression) from the on condition, but it still reminded in on join's condition. Considering move it into WHERE clause?
-    HINT: please refer to https://www.risingwave.dev/docs/current/sql-pattern-temporal-filters/ for more information
+    HINT: please refer to https://docs.risingwave.com/processing/sql/temporal-filters for more information
 - name: Temporal filter after temporal join
   sql: |
     create table stream(id1 int, a1 int, b1 int, v1 timestamp with time zone) APPEND ONLY;
