@@ -1387,7 +1387,7 @@ mod tests {
             compaction_group_version_id: 0,
         };
 
-        let mut version = HummockVersion::from_persisted_protobuf(&PbHummockVersion {
+        let mut version = HummockVersion::from_persisted_protobuf_owned(PbHummockVersion {
             id: 1u64.into(),
             ..Default::default()
         });
