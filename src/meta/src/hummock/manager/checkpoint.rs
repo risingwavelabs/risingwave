@@ -130,8 +130,6 @@ impl HummockManager {
         let versioning: &Versioning = versioning_guard.deref();
         let current_version: &HummockVersion = &versioning.current_version;
         let old_checkpoint: &HummockVersionCheckpoint = &versioning.checkpoint;
-        let old_checkpoint_table_change_log_object_size =
-            &versioning.checkpoint_table_change_log_object_size;
         let new_checkpoint_id = current_version.id;
         let old_checkpoint_id = old_checkpoint.version.id;
         if new_checkpoint_id < old_checkpoint_id + min_delta_log_num {
@@ -145,7 +143,6 @@ impl HummockManager {
             trigger_gc_stat(
                 &self.metrics,
                 &versioning.checkpoint,
-                &versioning.checkpoint_table_change_log_object_size,
                 min_pinned_version_id,
                 &versioning.table_change_log,
             );
@@ -156,13 +153,8 @@ impl HummockManager {
         let mut stale_objects = old_checkpoint.stale_objects.clone();
         // `object_sizes` is used to calculate size of stale objects.
         let mut object_sizes = version_object_size_map(&old_checkpoint.version);
-        object_sizes.extend(old_checkpoint_table_change_log_object_size.iter());
         // The set of object ids that once exist in any hummock version
-        let mut versions_object_ids: HashSet<_> = old_checkpoint
-            .version
-            .get_object_ids()
-            .chain(old_checkpoint_table_change_log_object_size.keys().copied())
-            .collect();
+        let mut versions_object_ids: HashSet<_> = old_checkpoint.version.get_object_ids().collect();
         for (_, version_delta) in versioning
             .hummock_version_deltas
             .range((Excluded(old_checkpoint_id), Included(new_checkpoint_id)))
@@ -279,21 +271,10 @@ impl HummockManager {
         let versioning = versioning_guard.deref_mut();
         assert!(new_checkpoint.version.id > versioning.checkpoint.version.id);
         versioning.checkpoint = new_checkpoint;
-        versioning.checkpoint_table_change_log_object_size = versioning
-            .table_change_log
-            .values()
-            .flat_map(|change_log| {
-                change_log.iter().flat_map(|s| {
-                    s.change_log_ssts()
-                        .map(|s| (HummockObjectId::Sstable(s.object_id), s.file_size))
-                })
-            })
-            .collect();
         let min_pinned_version_id = self.context_info.read().await.min_pinned_version_id();
         trigger_gc_stat(
             &self.metrics,
             &versioning.checkpoint,
-            &versioning.checkpoint_table_change_log_object_size,
             min_pinned_version_id,
             &versioning.table_change_log,
         );

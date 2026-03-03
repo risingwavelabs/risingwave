@@ -454,13 +454,21 @@ pub fn trigger_pin_unpin_version_state(
 pub fn trigger_gc_stat(
     metrics: &MetaMetrics,
     checkpoint: &HummockVersionCheckpoint,
-    checkpoint_table_change_log_object_size: &HashMap<HummockObjectId, u64>,
     min_pinned_version_id: HummockVersionId,
     current_table_change_log: &HashMap<TableId, TableChangeLog>,
 ) {
     let mut current_version_object_size_map: HashMap<_, _> =
         version_object_size_map(&checkpoint.version);
-    current_version_object_size_map.extend(checkpoint_table_change_log_object_size);
+    // Note: Because table change logs do not support MVCC, their objects are tracked
+    // exclusively in current_version_object, rather than in old_version_object or stale_object.
+    current_version_object_size_map.extend(current_table_change_log.values().flat_map(
+        |change_log| {
+            change_log.iter().flat_map(|s| {
+                s.change_log_ssts()
+                    .map(|s| (HummockObjectId::Sstable(s.object_id), s.file_size))
+            })
+        },
+    ));
     let current_version_object_size = current_version_object_size_map.values().sum::<u64>();
     let current_version_object_count = current_version_object_size_map.len();
     let mut old_version_object_size = 0;
