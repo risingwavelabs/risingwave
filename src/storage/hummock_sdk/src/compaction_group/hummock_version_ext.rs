@@ -2915,8 +2915,8 @@ mod tests {
                 uncompressed_file_size: 1800,
                 ..Default::default()
             }],
-            group_id: 1.into(),
-            parent_group_id: 0.into(),
+            group_id: 1,
+            parent_group_id: 0,
             member_table_ids: vec![],
             compaction_group_version_id: 0,
         };
@@ -2950,7 +2950,7 @@ mod tests {
     fn test_apply_version_delta_truncate_tables() {
         let mut version = HummockVersion {
             id: HummockVersionId::new(0),
-            levels: HashMap::from_iter([(1.into(), {
+            levels: HashMap::from_iter([(1, {
                 #[expect(deprecated)]
                 let levels = Levels {
                     l0: OverlappingLevel {
@@ -2993,8 +2993,8 @@ mod tests {
                         uncompressed_file_size: 340,
                         ..Default::default()
                     }],
-                    group_id: 1.into(),
-                    parent_group_id: 0.into(),
+                    group_id: 1,
+                    parent_group_id: 0,
                     member_table_ids: vec![],
                     compaction_group_version_id: 0,
                 };
@@ -3006,7 +3006,7 @@ mod tests {
         let version_delta = HummockVersionDelta {
             id: HummockVersionId::new(1),
             group_deltas: HashMap::from_iter([(
-                1.into(),
+                1,
                 GroupDeltas {
                     group_deltas: vec![GroupDelta::TruncateTables(HashSet::from([TableId::new(
                         100,
@@ -3018,7 +3018,7 @@ mod tests {
 
         version.apply_version_delta(&version_delta);
 
-        let cg = version.get_compaction_group_levels(1.into());
+        let cg = version.get_compaction_group_levels(1);
 
         assert_eq!(
             cg.l0.sub_levels.len(),
@@ -3057,7 +3057,7 @@ mod tests {
     fn test_apply_version_delta_compact_l0() {
         let mut version = HummockVersion {
             id: HummockVersionId::new(0),
-            levels: HashMap::from_iter([(1.into(), {
+            levels: HashMap::from_iter([(1, {
                 #[expect(deprecated)]
                 let levels = Levels {
                     l0: OverlappingLevel {
@@ -3095,8 +3095,8 @@ mod tests {
                         uncompressed_file_size: 0,
                         ..Default::default()
                     }],
-                    group_id: 1.into(),
-                    parent_group_id: 0.into(),
+                    group_id: 1,
+                    parent_group_id: 0,
                     member_table_ids: vec![],
                     compaction_group_version_id: 0,
                 };
@@ -3108,7 +3108,7 @@ mod tests {
         let version_delta = HummockVersionDelta {
             id: HummockVersionId::new(1),
             group_deltas: HashMap::from_iter([(
-                1.into(),
+                1,
                 GroupDeltas {
                     group_deltas: vec![
                         GroupDelta::IntraLevel(IntraLevelDelta::new(
@@ -3135,7 +3135,7 @@ mod tests {
 
         version.apply_version_delta(&version_delta);
 
-        let cg = version.get_compaction_group_levels(1.into());
+        let cg = version.get_compaction_group_levels(1);
 
         assert!(cg.l0.sub_levels.is_empty());
         assert_eq!(cg.l0.total_file_size, 0);
