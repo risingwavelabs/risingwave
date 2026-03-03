@@ -12,14 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{HashMap, HashSet};
 
 use risingwave_common::bitmap::Bitmap;
 use risingwave_meta_model::WorkerId;
 use risingwave_meta_model::fragment::DistributionType;
 use risingwave_pb::common::{ActorInfo, HostAddress};
 use risingwave_pb::id::{PartialGraphId, SubscriberId};
-use risingwave_pb::meta::table_fragments::ActorStatus;
 use risingwave_pb::stream_plan::update_mutation::MergeUpdate;
 use risingwave_pb::stream_plan::{PbDispatcherType, StreamNode};
 use tracing::warn;
@@ -72,19 +71,21 @@ impl EdgeBuilderFragmentInfo {
     /// Build from a model `Fragment` with separately provided actors and locations.
     pub fn from_fragment(
         fragment: &Fragment,
-        actor_status: &BTreeMap<ActorId, ActorStatus>,
+        stream_actors: &HashMap<FragmentId, Vec<StreamActor>>,
+        actor_worker: &HashMap<ActorId, WorkerId>,
         partial_graph_id: PartialGraphId,
         control_stream_manager: &ControlStreamManager,
     ) -> Self {
-        let (actors, actor_location) = fragment
-            .actors
-            .iter()
+        let (actors, actor_location) = stream_actors
+            .get(&fragment.fragment_id)
+            .into_iter()
+            .flatten()
             .map(|actor| {
                 (
                     (actor.actor_id, actor.vnode_bitmap.clone()),
                     (
                         actor.actor_id,
-                        control_stream_manager.host_addr(actor_status[&actor.actor_id].worker_id()),
+                        control_stream_manager.host_addr(actor_worker[&actor.actor_id]),
                     ),
                 )
             })

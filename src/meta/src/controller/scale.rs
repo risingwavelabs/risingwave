@@ -962,6 +962,72 @@ impl EnsembleActorTemplate {
         })
     }
 
+    pub(crate) fn from_existing_inflight_fragment(fragment: &InflightFragmentInfo) -> Self {
+        if fragment.actors.is_empty() {
+            return Self {
+                assignment: BTreeMap::new(),
+                actor_count: 0,
+                vnode_count: fragment.vnode_count,
+            };
+        }
+
+        let actor_id_base: ActorId = *fragment.actors.keys().min().unwrap();
+        let actor_count = fragment.actors.len() as u32;
+
+        let mut assignment: BTreeMap<WorkerId, BTreeMap<u32, Vec<usize>>> = BTreeMap::new();
+        for (&actor_id, actor_info) in &fragment.actors {
+            let actor_idx = actor_id - actor_id_base;
+            let vnodes: Vec<usize> = actor_info
+                .vnode_bitmap
+                .as_ref()
+                .map(|bitmap| bitmap.iter_ones().collect())
+                .unwrap_or_default();
+            assignment
+                .entry(actor_info.worker_id)
+                .or_default()
+                .insert(actor_idx, vnodes);
+        }
+
+        Self {
+            assignment,
+            actor_count,
+            vnode_count: fragment.vnode_count,
+        }
+    }
+
+    /// Assert that two `EnsembleActorTemplate` are aligned: same actor count and same
+    /// worker-to-actor-index mapping. Used to verify that multiple existing fragments
+    /// within the same no-shuffle ensemble are consistent.
+    pub(crate) fn assert_aligned_with(
+        &self,
+        other: &Self,
+        self_fragment_id: FragmentId,
+        other_fragment_id: FragmentId,
+    ) {
+        assert_eq!(
+            self.actor_count, other.actor_count,
+            "existing fragments {} and {} in the same no-shuffle ensemble have \
+             different actor counts: {} vs {}",
+            self_fragment_id, other_fragment_id, self.actor_count, other.actor_count,
+        );
+        for (worker_id, actors) in &self.assignment {
+            let other_actors = other.assignment.get(worker_id).unwrap_or_else(|| {
+                panic!(
+                    "existing fragment {} has actors on worker {} but fragment {} does not",
+                    self_fragment_id, worker_id, other_fragment_id,
+                )
+            });
+            assert_eq!(
+                actors.keys().collect::<BTreeSet<_>>(),
+                other_actors.keys().collect::<BTreeSet<_>>(),
+                "existing fragments {} and {} have different actor indices on worker {}",
+                self_fragment_id,
+                other_fragment_id,
+                worker_id,
+            );
+        }
+    }
+
     fn assign_splits(
         &self,
         entry_fragment_id: FragmentId,
@@ -1214,6 +1280,14 @@ pub struct NoShuffleEnsemble {
 }
 
 impl NoShuffleEnsemble {
+    /// Create a single-fragment ensemble (for standalone fragments with no `NoShuffle` edges).
+    pub(crate) fn singleton(fragment_id: FragmentId) -> Self {
+        Self {
+            entries: HashSet::from_iter([fragment_id]),
+            components: HashSet::from_iter([fragment_id]),
+        }
+    }
+
     #[cfg(test)]
     pub fn for_test(
         entries: impl IntoIterator<Item = FragmentId>,

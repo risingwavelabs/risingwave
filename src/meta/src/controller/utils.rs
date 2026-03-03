@@ -73,7 +73,7 @@ use sea_orm::{
 use thiserror_ext::AsReport;
 use tracing::warn;
 
-use crate::barrier::{SharedActorInfos, SharedFragmentInfo};
+use crate::barrier::SharedFragmentInfo;
 use crate::controller::ObjectModel;
 use crate::controller::fragment::FragmentTypeMaskExt;
 use crate::controller::scale::resolve_streaming_job_definition;
@@ -1719,24 +1719,17 @@ pub fn rebuild_fragment_mapping(fragment: &SharedFragmentInfo) -> PbFragmentWork
 /// - All fragments
 pub async fn get_fragments_for_jobs<C>(
     db: &C,
-    actor_info: &SharedActorInfos,
     streaming_jobs: Vec<JobId>,
 ) -> MetaResult<(
     HashMap<SourceId, BTreeSet<FragmentId>>,
     HashSet<FragmentId>,
-    HashSet<ActorId>,
     HashSet<FragmentId>,
 )>
 where
     C: ConnectionTrait,
 {
     if streaming_jobs.is_empty() {
-        return Ok((
-            HashMap::default(),
-            HashSet::default(),
-            HashSet::default(),
-            HashSet::default(),
-        ));
+        return Ok((HashMap::default(), HashSet::default(), HashSet::default()));
     }
 
     let fragments: Vec<(FragmentId, i32, StreamNode)> = Fragment::find()
@@ -1756,15 +1749,6 @@ where
         .map(|(fragment_id, _, _)| *fragment_id)
         .collect();
 
-    let actors = {
-        let guard = actor_info.read_guard();
-        fragment_ids
-            .iter()
-            .flat_map(|id| guard.get_fragment(*id as _))
-            .flat_map(|f| f.actors.keys().cloned().map(|id| id as _))
-            .collect::<HashSet<_>>()
-    };
-
     let mut source_fragment_ids: HashMap<SourceId, BTreeSet<FragmentId>> = HashMap::new();
     let mut sink_fragment_ids: HashSet<FragmentId> = HashSet::new();
     for (fragment_id, mask, stream_node) in fragments {
@@ -1781,12 +1765,7 @@ where
         }
     }
 
-    Ok((
-        source_fragment_ids,
-        sink_fragment_ids,
-        actors.into_iter().collect(),
-        fragment_ids,
-    ))
+    Ok((source_fragment_ids, sink_fragment_ids, fragment_ids))
 }
 
 /// Build a object group for notifying the deletion of the given objects.
