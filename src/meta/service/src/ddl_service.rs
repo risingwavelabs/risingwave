@@ -969,6 +969,7 @@ impl DdlService for DdlServiceImpl {
         }
 
         match req.payload.unwrap() {
+            #[expect(deprecated)]
             create_connection_request::Payload::PrivateLink(_) => {
                 panic!("Private Link Connection has been deprecated")
             }

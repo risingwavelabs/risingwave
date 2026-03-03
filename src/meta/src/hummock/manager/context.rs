@@ -268,13 +268,16 @@ impl HummockManager {
                 .map(|LocalSstableInfo { sst_info, .. }| sst_info.clone())
                 .collect_vec();
             if compactor
-                .send_event(ResponseEvent::ValidationTask(ValidationTask {
-                    sst_infos: sst_infos.into_iter().map(|sst| sst.into()).collect_vec(),
-                    sst_id_to_worker_id: sst_to_context
-                        .iter()
-                        .map(|(object_id, worker_id)| (*object_id, *worker_id))
-                        .collect(),
-                }))
+                .send_event(
+                    #[expect(deprecated)]
+                    ResponseEvent::ValidationTask(ValidationTask {
+                        sst_infos: sst_infos.into_iter().map(|sst| sst.into()).collect_vec(),
+                        sst_id_to_worker_id: sst_to_context
+                            .iter()
+                            .map(|(object_id, worker_id)| (*object_id, *worker_id))
+                            .collect(),
+                    }),
+                )
                 .is_err()
             {
                 tracing::warn!("Skip committed SST sanity check due to send failure");
