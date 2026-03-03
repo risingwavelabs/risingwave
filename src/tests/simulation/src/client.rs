@@ -18,7 +18,10 @@ use indexmap::IndexMap;
 use itertools::Itertools;
 use risingwave_sqlparser::ast::Statement;
 use risingwave_sqlparser::parser::Parser;
+use shell_words::split;
 use sqllogictest::{DBOutput, DefaultColumnType};
+
+use crate::ctl_ext::start_ctl;
 
 /// A RisingWave client.
 pub struct RisingWave {
@@ -127,6 +130,46 @@ impl Drop for RisingWave {
     }
 }
 
+fn parse_risedev_ctl_args(command: &std::process::Command) -> Option<Vec<String>> {
+    let program = command.get_program().to_str()?;
+    if program != "bash" && !program.ends_with("/bash") {
+        return None;
+    }
+
+    let mut args = command.get_args();
+    if args.next()?.to_str()? != "-c" {
+        return None;
+    }
+    let script = args.next()?.to_str()?;
+    if args.next().is_some() {
+        return None;
+    }
+
+    let mut parts = split(script).ok()?;
+    if parts.len() < 2 || parts[0] != "./risedev" || parts[1] != "ctl" {
+        return None;
+    }
+    Some(parts.split_off(2))
+}
+
+fn command_output(exit_code: i32, stderr: Vec<u8>) -> std::process::Output {
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::ExitStatusExt;
+
+        std::process::Output {
+            status: std::process::ExitStatus::from_raw(exit_code << 8),
+            stdout: vec![],
+            stderr,
+        }
+    }
+
+    #[cfg(not(unix))]
+    {
+        unimplemented!("simulation mode does not support non-unix platforms")
+    }
+}
+
 #[async_trait::async_trait]
 impl sqllogictest::AsyncDB for RisingWave {
     type ColumnType = DefaultColumnType;
@@ -194,7 +237,28 @@ impl sqllogictest::AsyncDB for RisingWave {
         tokio::time::sleep(dur).await
     }
 
-    async fn run_command(_command: std::process::Command) -> std::io::Result<std::process::Output> {
+    async fn run_command(command: std::process::Command) -> std::io::Result<std::process::Output> {
+        if let Some(ctl_args) = parse_risedev_ctl_args(&command) {
+            let output = match start_ctl(ctl_args).await {
+                Ok(()) => command_output(0, vec![]),
+                Err(err) => command_output(1, format!("{err:#}\n").into_bytes()),
+            };
+            return Ok(output);
+        }
         unimplemented!("spawning process is not supported in simulation mode")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn command_output_uses_exit_code_and_stderr() {
+        let output = command_output(1, b"ctl failed\n".to_vec());
+
+        assert!(!output.status.success());
+        assert_eq!(output.status.code(), Some(1));
+        assert_eq!(output.stderr, b"ctl failed\n");
     }
 }
