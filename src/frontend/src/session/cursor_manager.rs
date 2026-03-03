@@ -648,7 +648,8 @@ impl SubscriptionCursor {
                         break;
                     }
                     let State::InitLogStoreQuery { seek_timestamp, .. } = &self.state else {
-                        unreachable!("Unexpected cursor state.");
+                        // Triggered when previous next_row returns None while self.state is State::Fetch.
+                        continue;
                     };
                     // It's only blocked when there's no data
                     // This method will only be called once, either to trigger a timeout or to get the return value in the next loop via `next_row`.
