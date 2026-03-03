@@ -152,15 +152,15 @@ fn parse_risedev_ctl_args(command: &std::process::Command) -> Option<Vec<String>
     Some(parts.split_off(2))
 }
 
-fn success_output() -> std::process::Output {
+fn command_output(exit_code: i32, stderr: Vec<u8>) -> std::process::Output {
     #[cfg(unix)]
     {
         use std::os::unix::process::ExitStatusExt;
 
         std::process::Output {
-            status: std::process::ExitStatus::from_raw(0),
+            status: std::process::ExitStatus::from_raw(exit_code << 8),
             stdout: vec![],
-            stderr: vec![],
+            stderr,
         }
     }
 
@@ -239,11 +239,26 @@ impl sqllogictest::AsyncDB for RisingWave {
 
     async fn run_command(command: std::process::Command) -> std::io::Result<std::process::Output> {
         if let Some(ctl_args) = parse_risedev_ctl_args(&command) {
-            start_ctl(ctl_args)
-                .await
-                .map_err(|err| std::io::Error::other(err.to_string()))?;
-            return Ok(success_output());
+            let output = match start_ctl(ctl_args).await {
+                Ok(()) => command_output(0, vec![]),
+                Err(err) => command_output(1, format!("{err:#}\n").into_bytes()),
+            };
+            return Ok(output);
         }
         unimplemented!("spawning process is not supported in simulation mode")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn command_output_uses_exit_code_and_stderr() {
+        let output = command_output(1, b"ctl failed\n".to_vec());
+
+        assert!(!output.status.success());
+        assert_eq!(output.status.code(), Some(1));
+        assert_eq!(output.stderr, b"ctl failed\n");
     }
 }
