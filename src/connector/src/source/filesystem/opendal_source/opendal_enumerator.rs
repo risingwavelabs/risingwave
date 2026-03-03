@@ -28,6 +28,14 @@ use crate::source::filesystem::file_common::CompressionFormat;
 use crate::source::filesystem::{FsPageItem, OpendalFsSplit};
 use crate::source::{SourceEnumeratorContextRef, SplitEnumerator};
 
+#[inline]
+fn to_timestamptz(ts: Option<opendal::raw::Timestamp>) -> Timestamptz {
+    let system_time = ts
+        .map(std::time::SystemTime::from)
+        .unwrap_or(std::time::UNIX_EPOCH);
+    Timestamptz::from(DateTime::<Utc>::from(system_time))
+}
+
 #[derive(Debug, Clone)]
 pub struct OpendalEnumerator<Src: OpendalSource> {
     pub op: Operator,
@@ -88,7 +96,6 @@ impl<Src: OpendalSource> OpendalEnumerator<Src> {
         let object_lister = self.op.lister_with(&list_prefix).recursive(true).await?;
 
         let op = self.op.clone();
-        let full_capability = op.info().full_capability();
         let stream = stream::unfold(object_lister, move |mut object_lister| {
             let op = op.clone();
 
@@ -97,30 +104,18 @@ impl<Src: OpendalSource> OpendalEnumerator<Src> {
                     Some(Ok(object)) => {
                         let name = object.path().to_owned();
 
-                        // Check if we need to call stat() to get complete metadata
-                        let (t, size) = if !full_capability.list_has_content_length
-                            || !full_capability.list_has_last_modified
-                        {
-                            // Need complete metadata, call stat()
+                        // OpenDAL 0.55 removed list metadata capability flags.
+                        // Use listed metadata first, and call stat() only if timestamp is missing.
+                        let meta = object.metadata();
+                        let mut t = meta.last_modified();
+                        let mut size = meta.content_length() as i64;
+                        if t.is_none() {
                             let stat_meta = op.stat(&name).await.ok()?;
-                            let t = match stat_meta.last_modified() {
-                                Some(t) => t,
-                                None => DateTime::<Utc>::from_timestamp(0, 0).unwrap_or_default(),
-                            };
-                            let size = stat_meta.content_length() as i64;
-                            (t, size)
-                        } else {
-                            // Use metadata from list operation
-                            let meta = object.metadata();
-                            let t = match meta.last_modified() {
-                                Some(t) => t,
-                                None => DateTime::<Utc>::from_timestamp(0, 0).unwrap_or_default(),
-                            };
-                            let size = meta.content_length() as i64;
-                            (t, size)
-                        };
+                            t = stat_meta.last_modified();
+                            size = stat_meta.content_length() as i64;
+                        }
 
-                        let timestamp = Timestamptz::from(t);
+                        let timestamp = to_timestamptz(t);
                         let metadata = FsPageItem {
                             name,
                             size,

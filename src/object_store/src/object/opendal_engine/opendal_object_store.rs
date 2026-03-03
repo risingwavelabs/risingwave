@@ -89,6 +89,11 @@ impl OpendalObjectStore {
     }
 }
 
+#[inline]
+fn timestamp_to_secs(t: opendal::raw::Timestamp) -> f64 {
+    t.into_inner().as_second() as f64
+}
+
 #[async_trait::async_trait]
 impl ObjectStore for OpendalObjectStore {
     type StreamingUploader = OpendalStreamingUploader;
@@ -206,7 +211,7 @@ impl ObjectStore for OpendalObjectStore {
         let opendal_metadata = self.op.stat(path).await?;
         let key = path.to_owned();
         let last_modified = match opendal_metadata.last_modified() {
-            Some(t) => t.timestamp() as f64,
+            Some(t) => timestamp_to_secs(t),
             None => 0_f64,
         };
 
@@ -244,7 +249,6 @@ impl ObjectStore for OpendalObjectStore {
         let object_lister = object_lister.await?;
 
         let op = self.op.clone();
-        let full_capability = op.info().full_capability();
         let stream = stream::unfold(object_lister, move |mut object_lister| {
             let op = op.clone();
 
@@ -253,33 +257,20 @@ impl ObjectStore for OpendalObjectStore {
                     Some(Ok(object)) => {
                         let key = object.path().to_owned();
 
-                        // Check if we need to call stat() to get complete metadata.
-                        let (last_modified, total_size) = if !full_capability
-                            .list_has_content_length
-                            || !full_capability.list_has_last_modified
-                        {
-                            // Need complete metadata, call stat()
+                        // OpenDAL 0.55 removed list metadata capability flags.
+                        // Use listed metadata first, and call stat() only if the timestamp is missing.
+                        let meta = object.metadata();
+                        let mut last_modified = meta.last_modified().map(timestamp_to_secs);
+                        let mut total_size = meta.content_length() as usize;
+                        if last_modified.is_none() {
                             let stat_meta = op.stat(&key).await.ok()?;
-                            let last_modified = match stat_meta.last_modified() {
-                                Some(t) => t.timestamp() as f64,
-                                None => 0_f64,
-                            };
-                            let total_size = stat_meta.content_length() as usize;
-                            (last_modified, total_size)
-                        } else {
-                            // Use metadata from list operation
-                            let meta = object.metadata();
-                            let last_modified = match meta.last_modified() {
-                                Some(t) => t.timestamp() as f64,
-                                None => 0_f64,
-                            };
-                            let total_size = meta.content_length() as usize;
-                            (last_modified, total_size)
-                        };
+                            last_modified = stat_meta.last_modified().map(timestamp_to_secs);
+                            total_size = stat_meta.content_length() as usize;
+                        }
 
                         let metadata = ObjectMetadata {
                             key,
-                            last_modified,
+                            last_modified: last_modified.unwrap_or(0_f64),
                             total_size,
                         };
                         Some((Ok(metadata), object_lister))
