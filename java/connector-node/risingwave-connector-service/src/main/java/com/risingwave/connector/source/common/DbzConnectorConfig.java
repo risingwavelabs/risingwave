@@ -105,7 +105,6 @@ public class DbzConnectorConfig {
     private final Properties resolvedDbzProps;
     private final boolean isBackfillSource;
     private final int waitStreamingStartTimeout;
-    private final boolean snapshotDone;
 
     public long getSourceId() {
         return sourceId;
@@ -130,13 +129,10 @@ public class DbzConnectorConfig {
     /**
      * Whether we should wait for Debezium streaming to be connected during startup.
      *
-     * <p>In RisingWave, for shareable CDC sources we always run Debezium in "streaming-only" mode
-     * while backfill is handled elsewhere. After backfill/snapshot is done, we may also restart the
-     * connector in streaming-only mode. In both cases, a bounded wait is preferred to avoid silent
-     * failures.
+     * <p>Currently, this is only enabled for backfill mode (rw_cdc_backfill).
      */
     public boolean shouldWaitForStreamingStart() {
-        return isBackfillSource || snapshotDone;
+        return isBackfillSource;
     }
 
     public DbzConnectorConfig(
@@ -369,7 +365,6 @@ public class DbzConnectorConfig {
         this.resolvedDbzProps = dbzProps;
         this.isBackfillSource = isCdcBackfill;
         this.waitStreamingStartTimeout = waitStreamingStartTimeout;
-        this.snapshotDone = snapshotDone;
     }
 
     private Properties initiateDbConfig(String fileName, StringSubstitutor substitutor) {
