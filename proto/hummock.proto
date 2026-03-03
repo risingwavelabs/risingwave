@@ -352,6 +352,29 @@ message HummockVersionCheckpoint {
   map<uint64, StaleObjects> stale_objects = 2;
 }
 
+// Compression algorithm used for checkpoint data serialization.
+enum CheckpointCompressionAlgorithm {
+  CHECKPOINT_COMPRESSION_UNSPECIFIED = 0;
+  CHECKPOINT_COMPRESSION_ZSTD = 1;
+  CHECKPOINT_COMPRESSION_LZ4 = 2;
+}
+
+// Envelope message wrapping a compressed or uncompressed HummockVersionCheckpoint.
+// When compression_algorithm is NONE, payload contains raw PbHummockVersionCheckpoint bytes.
+// Otherwise, payload contains the compressed PbHummockVersionCheckpoint bytes.
+//
+// Backward compatibility:
+// - Old code (unaware of this message) writes raw PbHummockVersionCheckpoint directly.
+// - New code tries to decode as HummockVersionCheckpointEnvelope first.
+//   If it fails (old format), it falls back to decoding as PbHummockVersionCheckpoint.
+// - The two formats can be distinguished by protobuf wire type of field 1:
+//   HummockVersionCheckpoint field 1 is a message (wire type 2/LEN),
+//   HummockVersionCheckpointEnvelope field 1 is an enum (wire type 0/VARINT).
+message HummockVersionCheckpointEnvelope {
+  CheckpointCompressionAlgorithm compression_algorithm = 1;
+  bytes payload = 2;
+}
+
 message HummockVersionArchive {
   HummockVersion version = 1;
   // some version_deltas since version
