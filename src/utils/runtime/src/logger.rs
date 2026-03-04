@@ -461,13 +461,9 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
                     Resource::builder()
                         .with_attributes([
                             KeyValue::new(resource::SERVICE_NAME, service_name.clone()),
-                            // `SERVICE_INSTANCE_ID` is gated behind `semconv_experimental`
-                            // in opentelemetry-semantic-conventions >= 0.31.
-                            KeyValue::new("service.instance.id", id.clone()),
+                            KeyValue::new(resource::SERVICE_INSTANCE_ID, id.clone()),
                             KeyValue::new(resource::SERVICE_VERSION, env!("CARGO_PKG_VERSION")),
-                            // `PROCESS_PID` is gated behind `semconv_experimental`
-                            // in opentelemetry-semantic-conventions >= 0.31.
-                            KeyValue::new("process.pid", std::process::id().to_string()),
+                            KeyValue::new(resource::PROCESS_PID, std::process::id().to_string()),
                         ])
                         .build(),
                 )
