@@ -895,6 +895,100 @@ pub enum ReschedulePolicy {
     Both(ParallelismPolicy, ResourceGroupPolicy),
 }
 
+#[derive(Debug)]
+struct ParallelismControlSnapshot {
+    database_objects: HashMap<DatabaseId, Vec<JobId>>,
+    blocked_jobs: HashSet<JobId>,
+    has_blocked_jobs: bool,
+    batch_size: usize,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct ParallelismControlPlan {
+    ordered_jobs: Vec<(DatabaseId, JobId)>,
+    batches: Vec<Vec<JobId>>,
+    has_blocked_jobs: bool,
+    effective_batch_size: usize,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+enum ParallelismControlScope {
+    All,
+    Jobs(HashSet<JobId>),
+}
+
+impl ParallelismControlScope {
+    fn single_job(job_id: JobId) -> Self {
+        Self::Jobs(HashSet::from([job_id]))
+    }
+}
+
+fn merge_parallelism_control_scope(
+    pending_scope: &mut Option<ParallelismControlScope>,
+    incoming_scope: ParallelismControlScope,
+) {
+    match (pending_scope.take(), incoming_scope) {
+        (None, incoming_scope) => {
+            *pending_scope = Some(incoming_scope);
+        }
+        (Some(ParallelismControlScope::All), _) => {
+            *pending_scope = Some(ParallelismControlScope::All);
+        }
+        (Some(ParallelismControlScope::Jobs(_)), ParallelismControlScope::All) => {
+            *pending_scope = Some(ParallelismControlScope::All);
+        }
+        (
+            Some(ParallelismControlScope::Jobs(mut pending_jobs)),
+            ParallelismControlScope::Jobs(incoming_jobs),
+        ) => {
+            pending_jobs.extend(incoming_jobs);
+            *pending_scope = Some(ParallelismControlScope::Jobs(pending_jobs));
+        }
+    }
+}
+
+fn build_parallelism_control_plan(snapshot: &ParallelismControlSnapshot) -> ParallelismControlPlan {
+    let ordered_jobs = snapshot
+        .database_objects
+        .iter()
+        .flat_map(|(database_id, job_ids)| {
+            job_ids
+                .iter()
+                .enumerate()
+                .map(move |(idx, job_id)| (idx, *database_id, *job_id))
+        })
+        .sorted_by(|(idx_a, database_a, _), (idx_b, database_b, _)| {
+            idx_a.cmp(idx_b).then(database_a.cmp(database_b))
+        })
+        .map(|(_, database_id, job_id)| (database_id, job_id))
+        .filter(|(_, job_id)| !snapshot.blocked_jobs.contains(job_id))
+        .collect_vec();
+
+    let effective_batch_size = match snapshot.batch_size {
+        0 => ordered_jobs.len(),
+        n => n,
+    };
+
+    let batches = if effective_batch_size == 0 {
+        vec![]
+    } else {
+        ordered_jobs
+            .iter()
+            .map(|(_, job_id)| *job_id)
+            .chunks(effective_batch_size)
+            .into_iter()
+            .map(|chunk| chunk.collect_vec())
+            .collect_vec()
+    };
+
+    ParallelismControlPlan {
+        ordered_jobs,
+        batches,
+        has_blocked_jobs: snapshot.has_blocked_jobs,
+        effective_batch_size,
+    }
+}
+
 impl GlobalStreamManager {
     #[await_tree::instrument("acquire_reschedule_read_guard")]
     pub async fn reschedule_lock_read_guard(&self) -> RwLockReadGuard<'_, ()> {
@@ -910,53 +1004,21 @@ impl GlobalStreamManager {
     /// examines if there are any jobs can be scaled, and scales them if found.
     ///
     /// This method will iterate over all `CREATED` jobs, and can be repeatedly called.
-    ///
-    /// Returns
-    /// - `Ok(false)` if no jobs can be scaled;
-    /// - `Ok(true)` if some jobs are scaled, and it is possible that there are more jobs can be scaled.
-    async fn trigger_parallelism_control(&self) -> MetaResult<bool> {
-        tracing::info!("trigger parallelism control");
+    async fn trigger_parallelism_control(&self, scope: &ParallelismControlScope) -> MetaResult<()> {
+        tracing::info!(?scope, "trigger parallelism control");
 
         let _reschedule_job_lock = self.reschedule_lock_write_guard().await;
 
-        let background_streaming_jobs = self
-            .metadata_manager
-            .list_background_creating_jobs()
-            .await?;
+        let snapshot = self.collect_parallelism_control_snapshot(scope).await?;
+        let plan = build_parallelism_control_plan(&snapshot);
 
-        let blocked_jobs = self
-            .metadata_manager
-            .collect_reschedule_blocked_jobs_for_creating_jobs(&background_streaming_jobs, true)
-            .await?;
-        let has_blocked_jobs = !blocked_jobs.is_empty();
-
-        let database_objects: HashMap<risingwave_meta_model::DatabaseId, Vec<JobId>> = self
-            .metadata_manager
-            .catalog_controller
-            .list_streaming_job_with_database()
-            .await?;
-
-        let job_ids = database_objects
-            .iter()
-            .flat_map(|(database_id, job_ids)| {
-                job_ids
-                    .iter()
-                    .enumerate()
-                    .map(move |(idx, job_id)| (idx, database_id, job_id))
-            })
-            .sorted_by(|(idx_a, database_a, _), (idx_b, database_b, _)| {
-                idx_a.cmp(idx_b).then(database_a.cmp(database_b))
-            })
-            .map(|(_, database_id, job_id)| (*database_id, *job_id))
-            .filter(|(_, job_id)| !blocked_jobs.contains(job_id))
-            .collect_vec();
-
-        if job_ids.is_empty() {
-            tracing::info!("no streaming jobs for scaling, maybe an empty cluster");
-            // Retry periodically while some jobs are temporarily blocked by creating
-            // unreschedulable backfill jobs. This allows us to scale them
-            // automatically once the creating jobs finish.
-            return Ok(has_blocked_jobs);
+        if plan.ordered_jobs.is_empty() {
+            tracing::info!(
+                ?scope,
+                has_blocked_jobs = plan.has_blocked_jobs,
+                "no schedulable streaming jobs for scaling"
+            );
+            return Ok(());
         }
 
         let active_workers =
@@ -964,32 +1026,70 @@ impl GlobalStreamManager {
 
         tracing::info!(
             "trigger parallelism control for jobs: {:#?}, workers {:#?}",
-            job_ids,
+            plan.ordered_jobs,
             active_workers.current()
         );
-
-        let batch_size = match self.env.opts.parallelism_control_batch_size {
-            0 => job_ids.len(),
-            n => n,
-        };
 
         tracing::info!(
             "total {} streaming jobs, batch size {}, schedulable worker ids: {:?}",
-            job_ids.len(),
-            batch_size,
+            plan.ordered_jobs.len(),
+            plan.effective_batch_size,
             active_workers.current()
         );
 
-        let batches: Vec<_> = job_ids
-            .into_iter()
-            .chunks(batch_size)
-            .into_iter()
-            .map(|chunk| chunk.collect_vec())
-            .collect();
+        self.execute_parallelism_control_plan(&plan).await?;
 
-        for batch in batches {
-            let jobs = batch.iter().map(|(_, job_id)| *job_id).collect();
+        Ok(())
+    }
 
+    async fn collect_parallelism_control_snapshot(
+        &self,
+        scope: &ParallelismControlScope,
+    ) -> MetaResult<ParallelismControlSnapshot> {
+        let background_streaming_jobs = self
+            .metadata_manager
+            .list_background_creating_jobs()
+            .await?;
+
+        let mut blocked_jobs = self
+            .metadata_manager
+            .collect_reschedule_blocked_jobs_for_creating_jobs(&background_streaming_jobs, true)
+            .await?;
+
+        let mut database_objects = self
+            .metadata_manager
+            .catalog_controller
+            .list_streaming_job_with_database()
+            .await?;
+
+        if let ParallelismControlScope::Jobs(target_jobs) = scope {
+            blocked_jobs.retain(|job_id| target_jobs.contains(job_id));
+            database_objects = database_objects
+                .into_iter()
+                .filter_map(|(database_id, job_ids)| {
+                    let job_ids: Vec<_> = job_ids
+                        .into_iter()
+                        .filter(|job_id| target_jobs.contains(job_id))
+                        .collect();
+                    (!job_ids.is_empty()).then_some((database_id, job_ids))
+                })
+                .collect();
+        }
+
+        Ok(ParallelismControlSnapshot {
+            database_objects,
+            has_blocked_jobs: !blocked_jobs.is_empty(),
+            blocked_jobs,
+            batch_size: self.env.opts.parallelism_control_batch_size,
+        })
+    }
+
+    async fn execute_parallelism_control_plan(
+        &self,
+        plan: &ParallelismControlPlan,
+    ) -> MetaResult<()> {
+        for batch in &plan.batches {
+            let jobs = batch.iter().copied().collect();
             let commands = self.scale_controller.rerender(jobs).await?;
 
             let futures = commands.into_iter().map(|(database_id, command)| {
@@ -1000,7 +1100,94 @@ impl GlobalStreamManager {
             let _results = future::try_join_all(futures).await?;
         }
 
-        Ok(has_blocked_jobs)
+        Ok(())
+    }
+
+    fn worker_is_streaming_compute(worker: &WorkerNode) -> bool {
+        worker.get_type() == Ok(WorkerType::ComputeNode)
+            && worker
+                .property
+                .as_ref()
+                .is_some_and(|property| property.is_streaming)
+    }
+
+    async fn handle_parallelism_control_notification(
+        &self,
+        notification: LocalNotification,
+        worker_cache: &mut BTreeMap<WorkerId, WorkerNode>,
+        previous_adaptive_parallelism_strategy: &mut AdaptiveParallelismStrategy,
+    ) -> Option<ParallelismControlScope> {
+        match notification {
+            LocalNotification::SystemParamsChange(reader) => {
+                let new_strategy = reader.adaptive_parallelism_strategy();
+                if new_strategy != *previous_adaptive_parallelism_strategy {
+                    tracing::info!(
+                        "adaptive parallelism strategy changed from {:?} to {:?}",
+                        previous_adaptive_parallelism_strategy,
+                        new_strategy
+                    );
+                    *previous_adaptive_parallelism_strategy = new_strategy;
+                    return Some(ParallelismControlScope::All);
+                }
+            }
+            LocalNotification::WorkerNodeActivated(worker) => {
+                if !Self::worker_is_streaming_compute(&worker) {
+                    return None;
+                }
+
+                tracing::info!(worker = %worker.id, "worker activated notification received");
+
+                let prev_worker = worker_cache.insert(worker.id, worker.clone());
+
+                match prev_worker {
+                    Some(prev_worker)
+                        if prev_worker.compute_node_parallelism()
+                            != worker.compute_node_parallelism() =>
+                    {
+                        tracing::info!(worker = %worker.id, "worker parallelism changed");
+                        return Some(ParallelismControlScope::All);
+                    }
+                    Some(prev_worker)
+                        if prev_worker.resource_group() != worker.resource_group() =>
+                    {
+                        tracing::info!(worker = %worker.id, "worker label changed");
+                        return Some(ParallelismControlScope::All);
+                    }
+                    None => {
+                        tracing::info!(worker = %worker.id, "new worker joined");
+                        return Some(ParallelismControlScope::All);
+                    }
+                    _ => {}
+                }
+            }
+            // Since our logic for handling passive scale-in is within the barrier manager,
+            // there’s not much we can do here. All we can do is proactively remove the entries from our cache.
+            LocalNotification::WorkerNodeDeleted(worker) => {
+                if !Self::worker_is_streaming_compute(&worker) {
+                    return None;
+                }
+
+                match worker_cache.remove(&worker.id) {
+                    Some(prev_worker) => {
+                        tracing::info!(worker = %prev_worker.id, "worker removed from stream manager cache");
+                    }
+                    None => {
+                        tracing::warn!(worker = %worker.id, "worker not found in stream manager cache, but it was removed");
+                    }
+                }
+            }
+            LocalNotification::StreamingJobBackfillFinished(job_id) => {
+                tracing::debug!(job_id = %job_id, "received backfill finished notification");
+                let scope = ParallelismControlScope::single_job(job_id);
+                if let Err(e) = self.apply_post_backfill_parallelism(job_id).await {
+                    tracing::warn!(job_id = %job_id, error = %e.as_report(), "failed to restore parallelism after backfill");
+                }
+                return Some(scope);
+            }
+            _ => {}
+        }
+
+        None
     }
 
     /// Handles notification of worker node activation and deletion, and triggers parallelism control.
@@ -1009,6 +1196,7 @@ impl GlobalStreamManager {
 
         let check_period =
             Duration::from_secs(self.env.opts.parallelism_control_trigger_period_sec);
+        let fallback_period = check_period.max(Duration::from_secs(300));
 
         let mut ticker = tokio::time::interval_at(
             Instant::now()
@@ -1016,6 +1204,9 @@ impl GlobalStreamManager {
             check_period,
         );
         ticker.set_missed_tick_behavior(MissedTickBehavior::Skip);
+        let mut fallback_ticker =
+            tokio::time::interval_at(Instant::now() + fallback_period, fallback_period);
+        fallback_ticker.set_missed_tick_behavior(MissedTickBehavior::Skip);
 
         let (local_notification_tx, mut local_notification_rx) =
             tokio::sync::mpsc::unbounded_channel();
@@ -1039,8 +1230,7 @@ impl GlobalStreamManager {
             .collect();
 
         let mut previous_adaptive_parallelism_strategy = AdaptiveParallelismStrategy::default();
-
-        let mut should_trigger = false;
+        let mut pending_scope = Some(ParallelismControlScope::All);
 
         loop {
             tokio::select! {
@@ -1051,98 +1241,45 @@ impl GlobalStreamManager {
                     break;
                 }
 
-                _ = ticker.tick(), if should_trigger => {
+                _ = ticker.tick(), if pending_scope.is_some() => {
                     let include_workers = worker_cache.keys().copied().collect_vec();
+                    let scope = pending_scope
+                        .take()
+                        .expect("pending scope must exist for ticker branch");
 
                     if include_workers.is_empty() {
-                        tracing::debug!("no available worker nodes");
-                        should_trigger = false;
+                        tracing::debug!(?scope, "no available worker nodes, skip parallelism control");
                         continue;
                     }
 
-                    match self.trigger_parallelism_control().await {
-                        Ok(cont) => {
-                            should_trigger = cont;
-                        }
+                    match self.trigger_parallelism_control(&scope).await {
+                        Ok(()) => {}
                         Err(e) => {
                             tracing::warn!(error = %e.as_report(), "Failed to trigger scale out, waiting for next tick to retry after {}s", ticker.period().as_secs());
+                            merge_parallelism_control_scope(&mut pending_scope, scope);
                             ticker.reset();
                         }
                     }
                 }
 
+                _ = fallback_ticker.tick() => {
+                    merge_parallelism_control_scope(&mut pending_scope, ParallelismControlScope::All);
+                }
+
                 notification = local_notification_rx.recv() => {
-                    let notification = notification.expect("local notification channel closed in loop of stream manager");
-
-                    // Only maintain the cache for streaming compute nodes.
-                    let worker_is_streaming_compute = |worker: &WorkerNode| {
-                        worker.get_type() == Ok(WorkerType::ComputeNode)
-                            && worker.property.as_ref().unwrap().is_streaming
+                    let Some(notification) = notification else {
+                        tracing::warn!("local notification channel closed in loop of stream manager");
+                        break;
                     };
-
-                    match notification {
-                        LocalNotification::SystemParamsChange(reader) => {
-                            let new_strategy = reader.adaptive_parallelism_strategy();
-                            if new_strategy != previous_adaptive_parallelism_strategy {
-                                tracing::info!("adaptive parallelism strategy changed from {:?} to {:?}", previous_adaptive_parallelism_strategy, new_strategy);
-                                should_trigger = true;
-                                previous_adaptive_parallelism_strategy = new_strategy;
-                            }
-                        }
-                        LocalNotification::WorkerNodeActivated(worker) => {
-                            if !worker_is_streaming_compute(&worker) {
-                                continue;
-                            }
-
-                            tracing::info!(worker = %worker.id, "worker activated notification received");
-
-                            let prev_worker = worker_cache.insert(worker.id, worker.clone());
-
-                            match prev_worker {
-                                Some(prev_worker) if prev_worker.compute_node_parallelism() != worker.compute_node_parallelism()  => {
-                                    tracing::info!(worker = %worker.id, "worker parallelism changed");
-                                    should_trigger = true;
-                                }
-                                Some(prev_worker) if prev_worker.resource_group() != worker.resource_group()  => {
-                                    tracing::info!(worker = %worker.id, "worker label changed");
-                                    should_trigger = true;
-                                }
-                                None => {
-                                    tracing::info!(worker = %worker.id, "new worker joined");
-                                    should_trigger = true;
-                                }
-                                _ => {}
-                            }
-                        }
-
-                        // Since our logic for handling passive scale-in is within the barrier manager,
-                        // there’s not much we can do here. All we can do is proactively remove the entries from our cache.
-                        LocalNotification::WorkerNodeDeleted(worker) => {
-                            if !worker_is_streaming_compute(&worker) {
-                                continue;
-                            }
-
-                            match worker_cache.remove(&worker.id) {
-                                Some(prev_worker) => {
-                                    tracing::info!(worker = %prev_worker.id, "worker removed from stream manager cache");
-                                }
-                                None => {
-                                    tracing::warn!(worker = %worker.id, "worker not found in stream manager cache, but it was removed");
-                                }
-                            }
-                        }
-
-                        LocalNotification::StreamingJobBackfillFinished(job_id) => {
-                            tracing::debug!(job_id = %job_id, "received backfill finished notification");
-                            if let Err(e) = self.apply_post_backfill_parallelism(job_id).await {
-                                tracing::warn!(job_id = %job_id, error = %e.as_report(), "failed to restore parallelism after backfill");
-                                // Retry in the next periodic tick. This avoids triggering
-                                // unnecessary full control passes when restore succeeds.
-                                should_trigger = true;
-                            }
-                        }
-
-                        _ => {}
+                    let scope_from_notification = self
+                        .handle_parallelism_control_notification(
+                            notification,
+                            &mut worker_cache,
+                            &mut previous_adaptive_parallelism_strategy,
+                        )
+                        .await;
+                    if let Some(scope_from_notification) = scope_from_notification {
+                        merge_parallelism_control_scope(&mut pending_scope, scope_from_notification);
                     }
                 }
             }
@@ -1225,5 +1362,154 @@ impl GlobalStreamManager {
         });
 
         (join_handle, shutdown_tx)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::{HashMap, HashSet};
+
+    use risingwave_common::catalog::DatabaseId;
+    use risingwave_common::id::JobId;
+
+    use super::{
+        ParallelismControlScope, ParallelismControlSnapshot, build_parallelism_control_plan,
+        merge_parallelism_control_scope,
+    };
+
+    #[test]
+    fn test_build_parallelism_control_plan_order_and_batch() {
+        let snapshot = ParallelismControlSnapshot {
+            database_objects: HashMap::from([
+                (
+                    DatabaseId::new(1),
+                    vec![JobId::new(11), JobId::new(12), JobId::new(13)],
+                ),
+                (DatabaseId::new(2), vec![JobId::new(21), JobId::new(22)]),
+                (DatabaseId::new(3), vec![JobId::new(31)]),
+            ]),
+            blocked_jobs: HashSet::new(),
+            has_blocked_jobs: false,
+            batch_size: 2,
+        };
+
+        let plan = build_parallelism_control_plan(&snapshot);
+
+        assert_eq!(
+            plan.ordered_jobs,
+            vec![
+                (DatabaseId::new(1), JobId::new(11)),
+                (DatabaseId::new(2), JobId::new(21)),
+                (DatabaseId::new(3), JobId::new(31)),
+                (DatabaseId::new(1), JobId::new(12)),
+                (DatabaseId::new(2), JobId::new(22)),
+                (DatabaseId::new(1), JobId::new(13)),
+            ]
+        );
+        assert_eq!(
+            plan.batches,
+            vec![
+                vec![JobId::new(11), JobId::new(21)],
+                vec![JobId::new(31), JobId::new(12)],
+                vec![JobId::new(22), JobId::new(13)],
+            ]
+        );
+        assert!(!plan.has_blocked_jobs);
+    }
+
+    #[test]
+    fn test_build_parallelism_control_plan_filters_blocked_jobs() {
+        let snapshot = ParallelismControlSnapshot {
+            database_objects: HashMap::from([
+                (
+                    DatabaseId::new(1),
+                    vec![JobId::new(11), JobId::new(12), JobId::new(13)],
+                ),
+                (DatabaseId::new(2), vec![JobId::new(21), JobId::new(22)]),
+                (DatabaseId::new(3), vec![JobId::new(31)]),
+            ]),
+            blocked_jobs: HashSet::from([JobId::new(21), JobId::new(13)]),
+            has_blocked_jobs: true,
+            batch_size: 3,
+        };
+
+        let plan = build_parallelism_control_plan(&snapshot);
+
+        assert_eq!(
+            plan.ordered_jobs,
+            vec![
+                (DatabaseId::new(1), JobId::new(11)),
+                (DatabaseId::new(3), JobId::new(31)),
+                (DatabaseId::new(1), JobId::new(12)),
+                (DatabaseId::new(2), JobId::new(22)),
+            ]
+        );
+        assert_eq!(
+            plan.batches,
+            vec![
+                vec![JobId::new(11), JobId::new(31), JobId::new(12)],
+                vec![JobId::new(22)],
+            ]
+        );
+        assert!(plan.has_blocked_jobs);
+    }
+
+    #[test]
+    fn test_build_parallelism_control_plan_retry_when_all_blocked() {
+        let snapshot = ParallelismControlSnapshot {
+            database_objects: HashMap::from([
+                (DatabaseId::new(1), vec![JobId::new(11), JobId::new(12)]),
+                (DatabaseId::new(2), vec![JobId::new(21)]),
+            ]),
+            blocked_jobs: HashSet::from([JobId::new(11), JobId::new(12), JobId::new(21)]),
+            has_blocked_jobs: true,
+            batch_size: 0,
+        };
+
+        let plan = build_parallelism_control_plan(&snapshot);
+
+        assert!(plan.ordered_jobs.is_empty());
+        assert!(plan.batches.is_empty());
+        assert!(plan.has_blocked_jobs);
+    }
+
+    #[test]
+    fn test_merge_parallelism_control_scope_union_jobs() {
+        let mut pending_scope = Some(ParallelismControlScope::Jobs(HashSet::from([JobId::new(
+            1,
+        )])));
+        merge_parallelism_control_scope(
+            &mut pending_scope,
+            ParallelismControlScope::Jobs(HashSet::from([JobId::new(2)])),
+        );
+        let pending_jobs = match pending_scope {
+            Some(ParallelismControlScope::Jobs(jobs)) => jobs,
+            _ => panic!("expected Jobs scope"),
+        };
+        assert_eq!(pending_jobs, HashSet::from([JobId::new(1), JobId::new(2)]));
+    }
+
+    #[test]
+    fn test_merge_parallelism_control_scope_all_dominates() {
+        let mut pending_scope = Some(ParallelismControlScope::Jobs(HashSet::from([JobId::new(
+            1,
+        )])));
+        merge_parallelism_control_scope(&mut pending_scope, ParallelismControlScope::All);
+        assert_eq!(pending_scope, Some(ParallelismControlScope::All));
+
+        merge_parallelism_control_scope(
+            &mut pending_scope,
+            ParallelismControlScope::Jobs(HashSet::from([JobId::new(2)])),
+        );
+        assert_eq!(pending_scope, Some(ParallelismControlScope::All));
+    }
+
+    #[test]
+    fn test_single_job_scope() {
+        let scope = ParallelismControlScope::single_job(JobId::new(42));
+        assert_eq!(
+            scope,
+            ParallelismControlScope::Jobs(HashSet::from([JobId::new(42)]))
+        );
     }
 }

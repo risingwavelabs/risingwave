@@ -95,7 +95,11 @@ pub(crate) type GlobalActorIdGen = GlobalIdGen<GlobalActorId>;
 impl GlobalIdGen<GlobalActorId> {
     pub fn new(counter: &AtomicU32, len: u64) -> Self {
         let len_u32 = u32::try_from(len).expect("actor count exceeds u32::MAX");
-        let offset = counter.fetch_add(len_u32, Ordering::Relaxed);
+        let offset = counter
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
+                current.checked_add(len_u32)
+            })
+            .expect("global actor id exhausted: u32 overflow");
         Self {
             offset,
             len: len_u32,
