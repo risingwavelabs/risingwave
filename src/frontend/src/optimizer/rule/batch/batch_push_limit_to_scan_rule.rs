@@ -29,11 +29,12 @@ impl Rule<Batch> for BatchPushLimitToScanRule {
             return None;
         }
         let pushed_limit = limit.limit() + limit.offset();
-        let new_scan = BatchSeqScan::new_with_dist(
+        let new_scan = BatchSeqScan::new_with_dist_and_direction(
             scan.core().clone(),
             scan.base.distribution().clone(),
             scan.scan_ranges().iter().cloned().collect_vec(),
             Some(pushed_limit),
+            scan.reverse(),
         );
         Some(limit.clone_with_input(new_scan.into()).into())
     }

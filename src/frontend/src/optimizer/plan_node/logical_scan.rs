@@ -519,8 +519,15 @@ impl PredicatePushdown for LogicalScan {
 impl LogicalScan {
     fn to_batch_inner_with_required(&self, required_order: &Order) -> Result<BatchPlanRef> {
         if self.predicate().always_true() {
-            required_order
-                .enforce_if_not_satisfies(BatchSeqScan::new(self.core.clone(), vec![], None).into())
+            let mut seq_scan = BatchSeqScan::new(self.core.clone(), vec![], None);
+            if !required_order.is_any() && !seq_scan.order().satisfies(required_order) {
+                let reverse_seq_scan =
+                    BatchSeqScan::new_with_direction(self.core.clone(), vec![], None, true);
+                if reverse_seq_scan.order().satisfies(required_order) {
+                    seq_scan = reverse_seq_scan;
+                }
+            }
+            required_order.enforce_if_not_satisfies(seq_scan.into())
         } else {
             let (scan_ranges, predicate) = self.predicate().clone().split_to_scan_ranges(
                 self.table(),
@@ -534,7 +541,15 @@ impl LogicalScan {
             } else {
                 let (scan, predicate, project_expr) = scan.predicate_pull_up();
 
-                let mut plan: BatchPlanRef = BatchSeqScan::new(scan, scan_ranges, None).into();
+                let mut seq_scan = BatchSeqScan::new(scan.clone(), scan_ranges.clone(), None);
+                if !required_order.is_any() && !seq_scan.order().satisfies(required_order) {
+                    let reverse_seq_scan =
+                        BatchSeqScan::new_with_direction(scan, scan_ranges, None, true);
+                    if reverse_seq_scan.order().satisfies(required_order) {
+                        seq_scan = reverse_seq_scan;
+                    }
+                }
+                let mut plan: BatchPlanRef = seq_scan.into();
                 if !predicate.always_true() {
                     plan = BatchFilter::new(generic::Filter::new(predicate, plan)).into();
                 }
