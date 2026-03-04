@@ -384,6 +384,7 @@ async fn test_cdc_backfill() -> StreamResult<()> {
         "RowSeqExecutor2".to_owned(),
         None,
         None,
+        false,
     ));
 
     // check result
@@ -1064,6 +1065,7 @@ async fn assert_mv(
         "RowSeqExecutor2".to_owned(),
         None,
         None,
+        false,
     ));
     let mut stream = scan.execute();
     match expect {
