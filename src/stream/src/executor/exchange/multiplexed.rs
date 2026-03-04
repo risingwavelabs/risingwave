@@ -206,24 +206,34 @@ impl MultiplexedOutputCoordinator {
     /// Run the coordinator loop. This consumes the coordinator.
     pub async fn run(mut self) {
         while let Some((actor_id, barrier, msg_count)) = self.barrier_rx.recv().await {
-            // Submit to coalescer.
-            self.coalescer.collect(actor_id, barrier, msg_count);
+            // Submit to coalescer. This may return one coalesced result if all actors
+            // have submitted for the oldest pending epoch.
+            if let Some(result) = self.coalescer.collect(actor_id, barrier, msg_count)
+                && self.send_coalesced_barrier(result).await.is_err()
+            {
+                return;
+            }
 
-            // Drain all ready epochs.
-            let ready = self.coalescer.drain_all();
-            for (barrier, actor_ids, data_counts) in ready {
-                let message = DispatcherMessageBatch::BarrierBatch(vec![barrier]);
-                if self
-                    .barrier_ch
-                    .send_coalesced(message, actor_ids, data_counts)
-                    .await
-                    .is_err()
-                {
-                    tracing::warn!("barrier channel closed in MultiplexedOutputCoordinator");
+            // Drain any additional ready epochs (fast actors may have queued multiple).
+            for result in self.coalescer.drain_all() {
+                if self.send_coalesced_barrier(result).await.is_err() {
                     return;
                 }
             }
         }
+    }
+
+    async fn send_coalesced_barrier(
+        &self,
+        (barrier, actor_ids, data_counts): CoalescedBarrierResult,
+    ) -> Result<(), ()> {
+        let message = DispatcherMessageBatch::BarrierBatch(vec![barrier]);
+        self.barrier_ch
+            .send_coalesced(message, actor_ids, data_counts)
+            .await
+            .map_err(|_| {
+                tracing::warn!("barrier channel closed in MultiplexedOutputCoordinator");
+            })
     }
 }
 
@@ -788,5 +798,150 @@ mod tests {
             counting.next().await.unwrap().unwrap(),
             DispatcherMessage::Barrier(_)
         ));
+    }
+
+    /// End-to-end test: verifies that the full pipeline from `create_multiplexed_output()`
+    /// through `Output::send()` to the coordinator produces coalesced barriers with the
+    /// correct upstream actor IDs and data counts.
+    ///
+    /// This test would fail if `Output::CoalescedBarrier` were constructed with the wrong
+    /// `actor_id` (e.g., the downstream actor ID instead of the upstream actor ID), because
+    /// the coalescer is keyed by upstream actor IDs and will panic on unknown IDs.
+    ///
+    /// Regression test for: <https://github.com/risingwavelabs/risingwave/pull/24951>
+    #[tokio::test]
+    async fn test_output_sends_upstream_actor_id_to_coalescer() {
+        let upstream_ids = [aid(10), aid(20)];
+
+        // Create per-actor data channels.
+        let mut data_senders = Vec::new();
+        let mut data_receivers = Vec::new();
+        for _ in &upstream_ids {
+            let (tx, rx) = permit::channel_for_test();
+            data_senders.push(tx);
+            data_receivers.push(rx);
+        }
+
+        // Create the multiplexed output setup.
+        let (outputs, coordinator, mut barrier_rx) =
+            create_multiplexed_output(&upstream_ids, data_senders, 4);
+
+        // Spawn the coordinator.
+        tokio::spawn(coordinator.run());
+
+        // Extract the Output handles (keyed by upstream actor ID).
+        let mut output_map: HashMap<ActorId, Output> = outputs.into_iter().collect();
+
+        // Verify that the Output handles have the correct (upstream) actor IDs.
+        assert_eq!(output_map[&aid(10)].actor_id(), aid(10));
+        assert_eq!(output_map[&aid(20)].actor_id(), aid(20));
+
+        // Send data through actor 10: 2 chunks.
+        let out10 = output_map.get_mut(&aid(10)).unwrap();
+        out10
+            .send(DispatcherMessageBatch::Chunk(StreamChunk::default()))
+            .await
+            .unwrap();
+        out10
+            .send(DispatcherMessageBatch::Chunk(StreamChunk::default()))
+            .await
+            .unwrap();
+
+        // Send data through actor 20: 1 chunk.
+        let out20 = output_map.get_mut(&aid(20)).unwrap();
+        out20
+            .send(DispatcherMessageBatch::Chunk(StreamChunk::default()))
+            .await
+            .unwrap();
+
+        // Send barrier from both actors.
+        output_map
+            .get_mut(&aid(10))
+            .unwrap()
+            .send(DispatcherMessageBatch::BarrierBatch(vec![test_barrier(1)]))
+            .await
+            .unwrap();
+        output_map
+            .get_mut(&aid(20))
+            .unwrap()
+            .send(DispatcherMessageBatch::BarrierBatch(vec![test_barrier(1)]))
+            .await
+            .unwrap();
+
+        // Read the coalesced barrier from the barrier channel.
+        let msg = barrier_rx.recv_raw().await.unwrap();
+
+        // Verify coalesced_actor_ids contains upstream actor IDs.
+        assert!(msg.coalesced_actor_ids.contains(&aid(10)));
+        assert!(msg.coalesced_actor_ids.contains(&aid(20)));
+
+        // Verify actor_data_counts has correct counts keyed by upstream actor IDs.
+        assert_eq!(msg.actor_data_counts[&aid(10)], 2);
+        assert_eq!(msg.actor_data_counts[&aid(20)], 1);
+
+        // Verify the barrier itself is present.
+        assert!(matches!(
+            msg.message,
+            DispatcherMessageBatch::BarrierBatch(_)
+        ));
+    }
+
+    /// Regression test: if `Output::CoalescedBarrier` is constructed with the wrong `actor_id`
+    /// (downstream ID instead of upstream ID), the coalescer panics with "unknown actor".
+    ///
+    /// This simulates the bug where `dispatch.rs::resolve_output()` used `downstream_actor`
+    /// as the `actor_id` for `Output::new_coalesced_barrier()`, but the coalescer was initialized
+    /// with upstream actor IDs. Without the fix (adding `upstream_actor_id` field to
+    /// `NewOutputRequest::CoalescedBarrierRemote`), this test would panic.
+    #[tokio::test]
+    async fn test_output_wrong_actor_id_panics_in_coalescer() {
+        let upstream_ids = [aid(10), aid(20)];
+        let wrong_downstream_id = aid(99); // This is the downstream actor ID — wrong!
+
+        // Create per-actor data channels.
+        let mut data_senders = Vec::new();
+        for _ in &upstream_ids {
+            let (tx, _rx) = permit::channel_for_test();
+            data_senders.push(tx);
+        }
+
+        // Create the multiplexed output setup (coalescer keyed by upstream_ids [10, 20]).
+        let (outputs, coordinator, _barrier_rx) =
+            create_multiplexed_output(&upstream_ids, data_senders, 4);
+
+        // Spawn the coordinator.
+        let handle = tokio::spawn(coordinator.run());
+
+        // Simulate the old bug: destructure the Output, discard the actor_id,
+        // and recreate it with the wrong (downstream) actor_id.
+        let (_correct_actor_id, correct_output) = outputs.into_iter().next().unwrap();
+
+        // Extract data_ch and barrier_tx from the correct output.
+        let (data_ch, barrier_tx) = match correct_output {
+            Output::CoalescedBarrier {
+                data_ch,
+                barrier_tx,
+                ..
+            } => (data_ch, barrier_tx),
+            _ => unreachable!(),
+        };
+
+        // Recreate with wrong actor_id (downstream instead of upstream).
+        let mut wrong_output =
+            Output::new_coalesced_barrier(wrong_downstream_id, data_ch, barrier_tx);
+
+        // Sending a barrier through the wrong output sends (wrong_downstream_id=99, barrier, 0)
+        // to the coalescer, which only knows about actors 10 and 20 → panic.
+        wrong_output
+            .send(DispatcherMessageBatch::BarrierBatch(vec![test_barrier(1)]))
+            .await
+            .unwrap();
+
+        // The coordinator task should have panicked.
+        let result = handle.await;
+        assert!(
+            result.is_err(),
+            "coordinator should have panicked due to unknown actor ID in coalescer"
+        );
     }
 }
