@@ -34,8 +34,8 @@ use risingwave_pb::stream_service::barrier_complete_response::{
     PbListFinishedSource, PbLoadFinishedSource,
 };
 use risingwave_storage::StateStoreImpl;
-use tokio::sync::mpsc;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
+use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
 
 use crate::error::{StreamError, StreamResult};
@@ -399,8 +399,33 @@ pub(crate) struct ResetPartialGraphOutput {
     pub(crate) root_err: Option<ScoredStreamError>,
 }
 
+/// A pending exchange request that arrived before the partial graph was created.
+pub(in crate::task) enum PendingExchangeRequest {
+    TakeReceiver(UpDownActorIds, TakeReceiverRequest),
+    CreateBarrierGroup {
+        up_actor_ids: Vec<ActorId>,
+        down_actor_id: ActorId,
+        result_sender: oneshot::Sender<StreamResult<permit::Receiver>>,
+    },
+}
+
+impl PendingExchangeRequest {
+    /// Reject this pending request with an error.
+    fn reject(self, msg: &str) {
+        match self {
+            Self::TakeReceiver(_, TakeReceiverRequest::Remote(sender)) => {
+                let _ = sender.send(Err(anyhow!("{msg}").into()));
+            }
+            Self::TakeReceiver(_, TakeReceiverRequest::Local(_)) => {}
+            Self::CreateBarrierGroup { result_sender, .. } => {
+                let _ = result_sender.send(Err(anyhow!("{msg}").into()));
+            }
+        }
+    }
+}
+
 pub(in crate::task) enum PartialGraphStatus {
-    ReceivedExchangeRequest(Vec<(UpDownActorIds, TakeReceiverRequest)>),
+    ReceivedExchangeRequest(Vec<PendingExchangeRequest>),
     Running(PartialGraphState),
     Suspended(SuspendedPartialGraphState),
     Resetting,
@@ -412,10 +437,8 @@ impl PartialGraphStatus {
     pub(crate) async fn abort(&mut self) {
         match self {
             PartialGraphStatus::ReceivedExchangeRequest(pending_requests) => {
-                for (_, request) in pending_requests.drain(..) {
-                    if let TakeReceiverRequest::Remote(sender) = request {
-                        let _ = sender.send(Err(anyhow!("partial graph aborted").into()));
-                    }
+                for request in pending_requests.drain(..) {
+                    request.reject("partial graph aborted");
                 }
             }
             PartialGraphStatus::Running(state) => {
@@ -483,10 +506,8 @@ impl PartialGraphStatus {
     ) -> BoxFuture<'static, ResetPartialGraphOutput> {
         match replace(self, PartialGraphStatus::Resetting) {
             PartialGraphStatus::ReceivedExchangeRequest(pending_requests) => {
-                for (_, request) in pending_requests {
-                    if let TakeReceiverRequest::Remote(sender) = request {
-                        let _ = sender.send(Err(anyhow!("partial graph reset").into()));
-                    }
+                for request in pending_requests {
+                    request.reject("partial graph reset");
                 }
                 async move { ResetPartialGraphOutput { root_err: None } }.boxed()
             }

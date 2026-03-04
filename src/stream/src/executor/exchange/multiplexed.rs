@@ -1061,6 +1061,10 @@ mod tests {
     /// This simulates a hypothetical bug where the wrong actor ID is used for coalescer
     /// submission. The coalescer is keyed by upstream actor IDs, so submitting with an
     /// unknown ID causes a panic.
+    ///
+    /// Skipped under madsim: madsim intercepts panics in spawned tasks via `catch_unwind`,
+    /// so `JoinHandle::await` does not return `Err(JoinError::Panic)` as real tokio does.
+    #[cfg(not(madsim))]
     #[tokio::test]
     async fn test_output_wrong_actor_id_panics_in_coalescer() {
         use super::super::output::Output;

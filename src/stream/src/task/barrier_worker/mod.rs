@@ -44,7 +44,9 @@ use self::managed_state::ManagedBarrierState;
 use crate::error::{ScoredStreamError, StreamError, StreamResult};
 #[cfg(test)]
 use crate::task::LocalBarrierManager;
-use crate::task::managed_state::{BarrierToComplete, ResetPartialGraphOutput};
+use crate::task::managed_state::{
+    BarrierToComplete, PendingExchangeRequest, ResetPartialGraphOutput,
+};
 use crate::task::{
     ActorId, AtomicU64Ref, CONFIG_OVERRIDE_CACHE_DEFAULT_CAPACITY, ConfigOverrideCache,
     PartialGraphId, StreamActorManager, StreamEnvironment, UpDownActorIds,
@@ -540,7 +542,8 @@ impl LocalBarrierWorker {
                     match self.state.partial_graphs.entry(partial_graph_id) {
                         Entry::Occupied(mut entry) => match entry.get_mut() {
                             PartialGraphStatus::ReceivedExchangeRequest(pending_requests) => {
-                                pending_requests.push((ids, request));
+                                pending_requests
+                                    .push(PendingExchangeRequest::TakeReceiver(ids, request));
                                 return;
                             }
                             PartialGraphStatus::Running(graph) => {
@@ -563,9 +566,9 @@ impl LocalBarrierWorker {
                             }
                         },
                         Entry::Vacant(entry) => {
-                            entry.insert(PartialGraphStatus::ReceivedExchangeRequest(vec![(
-                                ids, request,
-                            )]));
+                            entry.insert(PartialGraphStatus::ReceivedExchangeRequest(vec![
+                                PendingExchangeRequest::TakeReceiver(ids, request),
+                            ]));
                             return;
                         }
                     }
@@ -581,26 +584,52 @@ impl LocalBarrierWorker {
                 down_actor_id,
                 result_sender,
             } => {
-                let result = if self.term_id != term_id {
-                    Err(anyhow!(
+                let err = if self.term_id != term_id {
+                    anyhow!(
                         "create barrier group on unmatched term_id {} to current term_id {}",
                         term_id,
                         self.term_id
                     )
-                    .into())
                 } else {
-                    match self.state.partial_graphs.get_mut(&partial_graph_id) {
-                        Some(PartialGraphStatus::Running(graph)) => {
-                            graph.create_barrier_group(&up_actor_ids, down_actor_id)
+                    match self.state.partial_graphs.entry(partial_graph_id) {
+                        Entry::Occupied(mut entry) => match entry.get_mut() {
+                            PartialGraphStatus::ReceivedExchangeRequest(pending_requests) => {
+                                pending_requests.push(PendingExchangeRequest::CreateBarrierGroup {
+                                    up_actor_ids,
+                                    down_actor_id,
+                                    result_sender,
+                                });
+                                return;
+                            }
+                            PartialGraphStatus::Running(graph) => {
+                                let result =
+                                    graph.create_barrier_group(&up_actor_ids, down_actor_id);
+                                let _ = result_sender.send(result);
+                                return;
+                            }
+                            PartialGraphStatus::Suspended(_) => {
+                                anyhow!("partial graph suspended")
+                            }
+                            PartialGraphStatus::Resetting => {
+                                anyhow!("partial graph resetting")
+                            }
+                            PartialGraphStatus::Unspecified => {
+                                unreachable!()
+                            }
+                        },
+                        Entry::Vacant(entry) => {
+                            entry.insert(PartialGraphStatus::ReceivedExchangeRequest(vec![
+                                PendingExchangeRequest::CreateBarrierGroup {
+                                    up_actor_ids,
+                                    down_actor_id,
+                                    result_sender,
+                                },
+                            ]));
+                            return;
                         }
-                        _ => Err(anyhow!(
-                            "partial graph {} not running for create_barrier_group",
-                            partial_graph_id
-                        )
-                        .into()),
                     }
                 };
-                let _ = result_sender.send(result);
+                let _ = result_sender.send(Err(err.into()));
             }
             #[cfg(test)]
             LocalActorOperation::GetCurrentLocalBarrierManager(sender) => {
@@ -979,8 +1008,28 @@ impl LocalBarrierWorker {
                         self.term_id.clone(),
                         self.actor_manager.clone(),
                     );
-                    for ((upstream_actor_id, actor_id), request) in pending_requests.drain(..) {
-                        graph.new_actor_output_request(actor_id, upstream_actor_id, request);
+                    for request in pending_requests.drain(..) {
+                        match request {
+                            PendingExchangeRequest::TakeReceiver(
+                                (upstream_actor_id, actor_id),
+                                take_req,
+                            ) => {
+                                graph.new_actor_output_request(
+                                    actor_id,
+                                    upstream_actor_id,
+                                    take_req,
+                                );
+                            }
+                            PendingExchangeRequest::CreateBarrierGroup {
+                                up_actor_ids,
+                                down_actor_id,
+                                result_sender,
+                            } => {
+                                let result =
+                                    graph.create_barrier_group(&up_actor_ids, down_actor_id);
+                                let _ = result_sender.send(result);
+                            }
+                        }
                     }
                     *status = PartialGraphStatus::Running(graph);
                 } else {
