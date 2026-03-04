@@ -1182,11 +1182,8 @@ pub(crate) enum NewOutputRequest {
     /// via `barrier_tx`.
     CoalescedBarrierRemote {
         data_tx: permit::Sender,
-        barrier_tx: tokio::sync::mpsc::UnboundedSender<(
-            ActorId,
-            Vec<crate::executor::DispatcherBarrier>,
-            u64,
-        )>,
+        barrier_tx:
+            tokio::sync::mpsc::UnboundedSender<(ActorId, crate::executor::DispatcherBarrier, u64)>,
     },
 }
 

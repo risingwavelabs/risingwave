@@ -370,7 +370,7 @@ pub(crate) async fn new_input(
 ///
 /// Groups remote actors by host address. For groups with multiple actors on the same
 /// remote host, creates a barrier-only gRPC stream and wraps individual data `RemoteInput`s
-/// with [`CountingMergeInput`] to inject barriers from the shared barrier stream.
+/// with [`CountingMergeInput`](super::multiplexed::CountingMergeInput) to inject barriers from the shared barrier stream.
 ///
 /// Local actors and single-actor remote groups use the standard [`new_input`] path.
 pub(crate) async fn new_inputs(
