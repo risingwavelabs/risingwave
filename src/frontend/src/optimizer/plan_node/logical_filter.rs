@@ -66,6 +66,11 @@ impl LogicalFilter {
 
     /// Create a `LogicalFilter` to filter out rows where all keys are null.
     pub fn filter_out_all_null_keys(input: PlanRef, key: &[usize]) -> PlanRef {
+        // No key means no "all-null key" row to filter. `ExprImpl::or([])` is `false`,
+        // which would incorrectly drop all rows.
+        if key.is_empty() {
+            return input;
+        }
         let schema = input.schema();
         let cond = ExprImpl::or(key.iter().unique().map(|&i| {
             FunctionCall::new_unchecked(
@@ -238,6 +243,22 @@ mod tests {
     use crate::optimizer::optimizer_context::OptimizerContext;
     use crate::optimizer::plan_node::LogicalValues;
     use crate::optimizer::property::FunctionalDependency;
+
+    #[tokio::test]
+    async fn test_filter_out_all_null_keys_empty_key() {
+        let ctx = OptimizerContext::mock().await;
+        let input: PlanRef = LogicalValues::new(
+            vec![],
+            Schema {
+                fields: vec![Field::with_name(DataType::Varchar, "k")],
+            },
+            ctx,
+        )
+        .into();
+
+        let plan = LogicalFilter::filter_out_all_null_keys(input, &[]);
+        assert!(plan.as_logical_values().is_some());
+    }
 
     #[tokio::test]
     /// Pruning
