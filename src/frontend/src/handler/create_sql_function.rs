@@ -31,6 +31,7 @@ pub async fn handle_create_sql_function(
     args: Option<Vec<OperateFunctionArg>>,
     returns: Option<CreateFunctionReturns>,
     params: CreateFunctionBody,
+    with_options: CreateFunctionWithOptions,
 ) -> Result<RwPgResponse> {
     if or_replace {
         bail_not_implemented!("CREATE OR REPLACE FUNCTION");
@@ -38,6 +39,17 @@ pub async fn handle_create_sql_function(
 
     if temporary {
         bail_not_implemented!("CREATE TEMPORARY FUNCTION");
+    }
+
+    if with_options.always_retry_on_network_error.is_some()
+        || with_options.r#async.is_some()
+        || with_options.batch.is_some()
+        || !with_options.secret_refs.is_empty()
+    {
+        return Err(ErrorCode::InvalidParameterValue(
+            "SQL UDF does not support WITH options yet".to_owned(),
+        )
+        .into());
     }
 
     let language = "sql".to_owned();
