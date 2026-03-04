@@ -1213,7 +1213,7 @@ fn schedule_queued_tasks(
                 },
             );
 
-            if let Err(e) = runner.compact(rx).await {
+            if let Err(e) = Box::pin(runner.compact(rx)).await {
                 tracing::warn!(error = %e.as_report(), task_id = task_key.0, plan_index = task_key.1, "Failed to compact iceberg runner");
             }
         });

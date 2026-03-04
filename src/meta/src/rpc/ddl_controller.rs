@@ -388,6 +388,7 @@ impl DdlController {
     /// would be a huge hassle and pain if we don't spawn here.
     ///
     /// Though returning `Option`, it's always `Some`, to simplify the handling logic
+    #[allow(clippy::large_stack_frames)]
     pub async fn run_command(&self, command: DdlCommand) -> MetaResult<Option<WaitVersion>> {
         if !command.allow_in_recovery() {
             self.barrier_manager.check_status_running()?;
@@ -397,7 +398,7 @@ impl DdlController {
         let await_tree_span = await_tree::span!("{command}({})", command.object());
 
         let ctrl = self.clone();
-        let fut = async move {
+        let fut = Box::pin(async move {
             match command {
                 DdlCommand::CreateDatabase(database) => ctrl.create_database(database).await,
                 DdlCommand::DropDatabase(database_id) => ctrl.drop_database(database_id).await,
@@ -494,7 +495,7 @@ impl DdlController {
                         .await
                 }
             }
-        }
+        })
         .in_current_span();
         let fut = (self.env.await_tree_reg())
             .register(await_tree_key, await_tree_span)

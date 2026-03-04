@@ -1531,7 +1531,7 @@ pub async fn handle_create_table(
         Engine::Iceberg => {
             let hummock_table_name = hummock_table.name.clone();
             session.create_staging_table(hummock_table.clone());
-            let res = create_iceberg_engine_table(
+            let res = Box::pin(create_iceberg_engine_table(
                 session.clone(),
                 handler_args,
                 source.map(|s| s.to_prost()),
@@ -1540,7 +1540,7 @@ pub async fn handle_create_table(
                 table_name,
                 job_type,
                 if_not_exists,
-            )
+            ))
             .await;
             session.drop_staging_table(&hummock_table_name);
             res?

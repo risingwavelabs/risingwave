@@ -1973,7 +1973,7 @@ impl MetaClient {
             if_not_exists,
         };
 
-        let resp = self.inner.create_iceberg_table(request).await?;
+        let resp = Box::pin(self.inner.create_iceberg_table(request)).await?;
         Ok(resp
             .version
             .ok_or_else(|| anyhow!("wait version not set"))?)
