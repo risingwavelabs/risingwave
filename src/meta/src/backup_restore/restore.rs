@@ -124,9 +124,12 @@ async fn restore_hummock_version(
     let compressed = zstd::stream::encode_all(raw_bytes.as_slice(), 3)
         .context("zstd compression failed")
         .map_err(BackupError::Other)?;
+    let checksum = crate::hummock::xxhash64_checksum(&compressed);
+    // Restore always uses zstd — this is a one-shot operation not driven by runtime config.
     let envelope = PbHummockVersionCheckpointEnvelope {
         compression_algorithm: CheckpointCompressionAlgorithm::CheckpointCompressionZstd as i32,
         payload: compressed,
+        checksum: Some(checksum),
     };
     let buf = envelope.encode_to_vec();
     object_store

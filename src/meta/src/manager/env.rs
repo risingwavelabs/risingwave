@@ -128,6 +128,8 @@ pub struct MetaOpts {
     /// Interval of hummock version checkpoint.
     pub hummock_version_checkpoint_interval_sec: u64,
     pub enable_hummock_data_archive: bool,
+    /// Compression algorithm for hummock version checkpoint: "zstd", "lz4", or "none".
+    pub checkpoint_compression_algorithm: risingwave_common::config::CheckpointCompression,
     pub hummock_time_travel_snapshot_interval: u64,
     pub hummock_time_travel_sst_info_fetch_batch_size: usize,
     pub hummock_time_travel_sst_info_insert_batch_size: usize,
@@ -314,6 +316,8 @@ impl MetaOpts {
             iceberg_gc_interval_sec: 3600,
             hummock_version_checkpoint_interval_sec: 30,
             enable_hummock_data_archive: false,
+            checkpoint_compression_algorithm:
+                risingwave_common::config::CheckpointCompression::Zstd,
             hummock_time_travel_snapshot_interval: 0,
             hummock_time_travel_sst_info_fetch_batch_size: 10_000,
             hummock_time_travel_sst_info_insert_batch_size: 10,
