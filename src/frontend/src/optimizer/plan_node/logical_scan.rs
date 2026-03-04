@@ -21,6 +21,7 @@ use risingwave_common::catalog::{ColumnDesc, Schema};
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_sqlparser::ast::AsOf;
 
+use super::batch::BatchPlanNodeMetadata;
 use super::generic::{GenericPlanNode, GenericPlanRef};
 use super::utils::{Distill, childless_record};
 use super::{
