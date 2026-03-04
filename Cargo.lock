@@ -11545,6 +11545,7 @@ dependencies = [
 name = "risingwave_batch_executors"
 version = "2.9.0-alpha"
 dependencies = [
+ "allocator-api2",
  "anyhow",
  "assert_matches",
  "async-trait",
