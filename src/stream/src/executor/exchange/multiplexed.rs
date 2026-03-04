@@ -344,7 +344,12 @@ async fn run_counting_merge(
     // Since data and barriers arrive on separate channels, data may arrive
     // before the first barrier if we don't explicitly wait for it.
     match barrier_rx.recv().await {
-        Some((first_barrier, _expected_count)) => {
+        Some((first_barrier, expected_count)) => {
+            debug_assert_eq!(
+                expected_count, 0,
+                "first barrier should always have expected_count=0 because the \
+                 Output::CoalescedBarrier starts with epoch_msg_count=0"
+            );
             yield DispatcherMessage::Barrier(first_barrier);
         }
         None => {
@@ -352,15 +357,13 @@ async fn run_counting_merge(
         }
     }
 
-    // We use a state machine: either we're forwarding data freely (no pending barrier),
-    // or we have a barrier waiting and we need to drain to expected_count.
-    //
-    // Buffer to hold a pending barrier and its expected count.
+    // State machine: when a barrier arrives with expected_count > msg_count,
+    // we set `pending_barrier` and drain data from `inner` until the count matches.
     let mut pending_barrier: Option<(DispatcherBarrier, u64)> = None;
 
     loop {
+        // Drain pending barrier: wait for remaining data messages from `inner`.
         if let Some((barrier, expected_count)) = pending_barrier.take() {
-            // We have a barrier waiting. Drain data from inner until count matches.
             while msg_count < expected_count {
                 match inner.next().await {
                     Some(Ok(msg)) => {
@@ -373,63 +376,55 @@ async fn run_counting_merge(
                     }
                 }
             }
-            // Count matches; deliver the barrier.
             yield DispatcherMessage::Barrier(barrier);
-            msg_count = 0; // Reset for next epoch.
+            // Carry over excess: data from the next epoch may have arrived before
+            // this barrier (data and barriers travel on separate gRPC streams).
+            msg_count -= expected_count;
         }
 
-        // No pending barrier. Race between barrier channel and data using
-        // futures::future::select (tokio::select! is not compatible with #[try_stream]).
-        use futures::future::{self, Either as FutEither};
-
-        // First, try a non-blocking receive from barrier_rx (biased toward barriers).
+        // No pending barrier. Try non-blocking barrier receive first (biased toward barriers).
         match barrier_rx.try_recv() {
             Ok((barrier, expected_count)) => {
                 if msg_count >= expected_count {
                     yield DispatcherMessage::Barrier(barrier);
-                    msg_count = 0;
+                    msg_count -= expected_count;
                 } else {
                     pending_barrier = Some((barrier, expected_count));
                 }
                 continue;
             }
             Err(tokio::sync::mpsc::error::TryRecvError::Disconnected) => {
-                // Barrier channel disconnected unexpectedly (e.g., run_barrier_receiver
-                // failed due to gRPC error). Return an error so the MergeExecutor can
-                // trigger recovery, rather than silently closing the stream.
                 return Err(ExchangeChannelClosed::remote_input(actor_id, None).into());
             }
             Err(tokio::sync::mpsc::error::TryRecvError::Empty) => {}
         }
 
+        // Race barrier channel vs data channel.
+        // (tokio::select! is not usable inside #[try_stream], so we use future::select.)
+        use futures::future::{self, Either as FutEither};
         let barrier_fut = std::pin::pin!(barrier_rx.recv());
         let data_fut = std::pin::pin!(inner.next());
 
         match future::select(barrier_fut, data_fut).await {
-            FutEither::Left((barrier, _)) => match barrier {
-                Some((barrier, expected_count)) => {
-                    if msg_count >= expected_count {
-                        yield DispatcherMessage::Barrier(barrier);
-                        msg_count = 0;
-                    } else {
-                        pending_barrier = Some((barrier, expected_count));
-                    }
+            FutEither::Left((Some((barrier, expected_count)), _)) => {
+                if msg_count >= expected_count {
+                    yield DispatcherMessage::Barrier(barrier);
+                    msg_count -= expected_count;
+                } else {
+                    pending_barrier = Some((barrier, expected_count));
                 }
-                None => {
-                    // Barrier channel disconnected unexpectedly.
-                    return Err(ExchangeChannelClosed::remote_input(actor_id, None).into());
-                }
-            },
-            FutEither::Right((msg, _)) => match msg {
-                Some(Ok(msg)) => {
-                    msg_count += 1;
-                    yield msg;
-                }
-                Some(Err(e)) => return Err(e),
-                None => {
-                    return Err(ExchangeChannelClosed::remote_input(actor_id, None).into());
-                }
-            },
+            }
+            FutEither::Left((None, _)) => {
+                return Err(ExchangeChannelClosed::remote_input(actor_id, None).into());
+            }
+            FutEither::Right((Some(Ok(msg)), _)) => {
+                msg_count += 1;
+                yield msg;
+            }
+            FutEither::Right((Some(Err(e)), _)) => return Err(e),
+            FutEither::Right((None, _)) => {
+                return Err(ExchangeChannelClosed::remote_input(actor_id, None).into());
+            }
         }
     }
 }
@@ -749,7 +744,7 @@ mod tests {
     }
 
     /// Helper that creates a `CountingMergeInput` and sends+consumes the required
-    /// initial barrier (expected_count=0). Tests can focus on steady-state behavior.
+    /// initial barrier (`expected_count=0`). Tests can focus on steady-state behavior.
     async fn make_counting_input(
         actor_id: ActorId,
     ) -> (
@@ -1108,6 +1103,120 @@ mod tests {
 
         assert!(all_closed);
         assert!(txs.is_empty());
+    }
+
+    /// Regression test for the deadlock caused by data arriving before barriers.
+    ///
+    /// Data and barriers flow through separate gRPC streams. The barrier path goes
+    /// through the coalescer (waits for ALL actors), making it slower. So data from
+    /// epoch E+1 can arrive at `CountingMergeInput` BEFORE barrier E.
+    ///
+    /// The bug: when `msg_count >= expected_count`, the code reset `msg_count = 0`,
+    /// losing track of excess messages already consumed from the next epoch. The next
+    /// barrier's `expected_count` could then never be satisfied → deadlock.
+    ///
+    /// The fix: `msg_count -= expected_count` (carry over excess).
+    #[tokio::test]
+    async fn test_counting_merge_data_arrives_before_barrier() {
+        let (mut counting, data_tx, barrier_tx) = make_counting_input(aid(42)).await;
+
+        // Send all data for epochs 1 AND 2 before any barrier arrives.
+        // Epoch 1: 5 data messages, Epoch 2: 3 data messages.
+        for _ in 0..8 {
+            data_tx
+                .send(DispatcherMessage::Chunk(StreamChunk::default()))
+                .unwrap();
+        }
+
+        // Now send barrier 1 with expected_count=5.
+        barrier_tx.send((test_barrier(1), 5)).unwrap();
+        // Then barrier 2 with expected_count=3.
+        barrier_tx.send((test_barrier(2), 3)).unwrap();
+
+        // Read all messages. Should get: 5 chunks, barrier 1, 3 chunks, barrier 2.
+        // test_barrier(n) produces epoch curr = n*10+1.
+        let mut chunks_before_b1 = 0;
+        loop {
+            let msg = counting.next().await.unwrap().unwrap();
+            match msg {
+                DispatcherMessage::Chunk(_) => chunks_before_b1 += 1,
+                DispatcherMessage::Barrier(b) => {
+                    assert_eq!(b.epoch.curr, 11);
+                    break;
+                }
+                _ => panic!("unexpected message"),
+            }
+        }
+        assert_eq!(
+            chunks_before_b1, 5,
+            "should get exactly 5 chunks before barrier 1"
+        );
+
+        let mut chunks_before_b2 = 0;
+        loop {
+            let msg = counting.next().await.unwrap().unwrap();
+            match msg {
+                DispatcherMessage::Chunk(_) => chunks_before_b2 += 1,
+                DispatcherMessage::Barrier(b) => {
+                    assert_eq!(b.epoch.curr, 21);
+                    break;
+                }
+                _ => panic!("unexpected message"),
+            }
+        }
+        assert_eq!(
+            chunks_before_b2, 3,
+            "should get exactly 3 chunks before barrier 2"
+        );
+    }
+
+    /// Similar to `test_counting_merge_data_arrives_before_barrier`, but with more
+    /// epochs and varying data counts to ensure carry-over works across many epochs.
+    #[tokio::test]
+    async fn test_counting_merge_carry_over_multiple_epochs() {
+        let (mut counting, data_tx, barrier_tx) = make_counting_input(aid(42)).await;
+
+        // Send all data for 4 epochs upfront: 2, 0, 7, 1 messages respectively.
+        let counts = [2u64, 0, 7, 1];
+        let total: u64 = counts.iter().sum();
+        for _ in 0..total {
+            data_tx
+                .send(DispatcherMessage::Chunk(StreamChunk::default()))
+                .unwrap();
+        }
+
+        // Send all barriers.
+        for (i, &count) in counts.iter().enumerate() {
+            barrier_tx
+                .send((test_barrier((i + 1) as u64), count))
+                .unwrap();
+        }
+
+        // Read and verify ordering.
+        // test_barrier(n) produces epoch curr = n*10+1.
+        for (i, &expected_chunks) in counts.iter().enumerate() {
+            let expected_epoch_curr = ((i + 1) as u64) * 10 + 1;
+            let mut chunk_count = 0u64;
+            loop {
+                let msg = counting.next().await.unwrap().unwrap();
+                match msg {
+                    DispatcherMessage::Chunk(_) => chunk_count += 1,
+                    DispatcherMessage::Barrier(b) => {
+                        assert_eq!(b.epoch.curr, expected_epoch_curr, "barrier epoch mismatch");
+                        break;
+                    }
+                    _ => panic!("unexpected message"),
+                }
+            }
+            assert_eq!(
+                chunk_count,
+                expected_chunks,
+                "epoch {}: expected {} chunks, got {}",
+                i + 1,
+                expected_chunks,
+                chunk_count
+            );
+        }
     }
 
     /// Regression test: if `Output::CoalescedBarrier` is constructed with the wrong
