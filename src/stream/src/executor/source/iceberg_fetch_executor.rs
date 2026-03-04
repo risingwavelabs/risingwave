@@ -90,6 +90,10 @@ mod state {
     use serde::{Deserialize, Serialize};
 
     use crate::executor::StreamExecutorResult;
+
+    fn default_case_sensitive() -> bool {
+        true
+    }
     /// This corresponds to the actually persisted `FileScanTask` in the state table.
     ///
     /// We introduce this in case the definition of [`FileScanTask`] changes in the iceberg-rs crate.
@@ -134,6 +138,9 @@ mod state {
         pub equality_ids: Option<Vec<i32>>,
 
         pub file_size_in_bytes: u64,
+
+        #[serde(default = "default_case_sensitive")]
+        pub case_sensitive: bool,
     }
 
     impl PersistedFileScanTask {
@@ -167,6 +174,7 @@ mod state {
                 sequence_number,
                 equality_ids,
                 file_size_in_bytes,
+                case_sensitive,
             }: Self,
         ) -> FileScanTask {
             FileScanTask {
@@ -189,6 +197,7 @@ mod state {
                 partition: None,
                 partition_spec: None,
                 name_mapping: None,
+                case_sensitive,
             }
         }
 
@@ -208,6 +217,7 @@ mod state {
                 sequence_number,
                 equality_ids,
                 file_size_in_bytes,
+                case_sensitive,
                 ..
             }: FileScanTask,
         ) -> Self {
@@ -228,6 +238,7 @@ mod state {
                 sequence_number,
                 equality_ids,
                 file_size_in_bytes,
+                case_sensitive,
             }
         }
 
@@ -251,6 +262,7 @@ mod state {
                 sequence_number: task.sequence_number,
                 equality_ids: task.equality_ids.clone(),
                 file_size_in_bytes: task.file_size_in_bytes,
+                case_sensitive: task.case_sensitive,
             }
         }
     }

@@ -587,6 +587,7 @@ fn fallback_rw_expr_builder(
         signature: Signature {
             type_signature: TypeSignature::Any(input_columns.len()),
             volatility,
+            parameter_names: None,
         },
     };
     Some(DFExpr::ScalarFunction(ScalarFunction {

@@ -1199,7 +1199,7 @@ impl IcebergWriterBuilder<Vec<PositionDeleteInput>> for PositionDeleteWriterBuil
     type R = PositionDeleteWriterType;
 
     async fn build(
-        self,
+        &self,
         partition_key: Option<iceberg::spec::PartitionKey>,
     ) -> iceberg::Result<Self::R> {
         match self {
@@ -1231,8 +1231,23 @@ impl IcebergWriter<Vec<PositionDeleteInput>> for PositionDeleteWriterType {
 }
 
 #[derive(Clone)]
+struct SharedIcebergWriterBuilder<B>(Arc<B>);
+
+#[async_trait]
+impl<B: IcebergWriterBuilder> IcebergWriterBuilder for SharedIcebergWriterBuilder<B> {
+    type R = B::R;
+
+    async fn build(
+        &self,
+        partition_key: Option<iceberg::spec::PartitionKey>,
+    ) -> iceberg::Result<Self::R> {
+        self.0.build(partition_key).await
+    }
+}
+
+#[derive(Clone)]
 struct TaskWriterBuilderWrapper<B: IcebergWriterBuilder> {
-    inner: B,
+    inner: Arc<B>,
     fanout_enabled: bool,
     schema: IcebergSchemaRef,
     partition_spec: PartitionSpecRef,
@@ -1248,7 +1263,7 @@ impl<B: IcebergWriterBuilder> TaskWriterBuilderWrapper<B> {
         compute_partition: bool,
     ) -> Self {
         Self {
-            inner,
+            inner: Arc::new(inner),
             fanout_enabled,
             schema,
             partition_spec,
@@ -1256,27 +1271,27 @@ impl<B: IcebergWriterBuilder> TaskWriterBuilderWrapper<B> {
         }
     }
 
-    fn build(self) -> iceberg::Result<TaskWriter<B>> {
+    fn build(&self) -> iceberg::Result<TaskWriter<SharedIcebergWriterBuilder<B>>> {
         let partition_splitter = match (
             self.partition_spec.is_unpartitioned(),
             self.compute_partition,
         ) {
             (true, _) => None,
-            (false, true) => Some(RecordBatchPartitionSplitter::new_with_computed_values(
+            (false, true) => Some(RecordBatchPartitionSplitter::try_new_with_computed_values(
                 self.schema.clone(),
                 self.partition_spec.clone(),
             )?),
-            (false, false) => Some(RecordBatchPartitionSplitter::new_with_precomputed_values(
+            (false, false) => Some(RecordBatchPartitionSplitter::try_new_with_precomputed_values(
                 self.schema.clone(),
                 self.partition_spec.clone(),
             )?),
         };
 
         Ok(TaskWriter::new_with_partition_splitter(
-            self.inner,
+            SharedIcebergWriterBuilder(self.inner.clone()),
             self.fanout_enabled,
-            self.schema,
-            self.partition_spec,
+            self.schema.clone(),
+            self.partition_spec.clone(),
             partition_splitter,
         ))
     }
@@ -1439,7 +1454,6 @@ impl IcebergSinkWriterInner {
         );
         let inner_writer = Some(Box::new(
             writer_builder
-                .clone()
                 .build()
                 .map_err(|err| SinkError::Iceberg(anyhow!(err)))?,
         ) as Box<dyn IcebergWriter>);
@@ -1630,7 +1644,6 @@ impl IcebergSinkWriterInner {
         );
         let inner_writer = Some(Box::new(
             writer_builder
-                .clone()
                 .build()
                 .map_err(|err| SinkError::Iceberg(anyhow!(err)))?,
         ) as Box<dyn IcebergWriter>);
@@ -1700,7 +1713,6 @@ impl SinkWriter for IcebergSinkWriter {
                 if writer.is_none() {
                     *writer = Some(Box::new(
                         writer_builder
-                            .clone()
                             .build()
                             .map_err(|err| SinkError::Iceberg(anyhow!(err)))?,
                     ));
@@ -1714,7 +1726,6 @@ impl SinkWriter for IcebergSinkWriter {
                 if writer.is_none() {
                     *writer = Some(Box::new(
                         writer_builder
-                            .clone()
                             .build()
                             .map_err(|err| SinkError::Iceberg(anyhow!(err)))?,
                     ));
@@ -1812,7 +1823,7 @@ impl SinkWriter for IcebergSinkWriter {
                     }
                     _ => None,
                 };
-                match writer_builder.clone().build() {
+                match writer_builder.build() {
                     Ok(new_writer) => {
                         *writer = Some(Box::new(new_writer));
                     }
@@ -1835,7 +1846,7 @@ impl SinkWriter for IcebergSinkWriter {
                     }
                     _ => None,
                 };
-                match writer_builder.clone().build() {
+                match writer_builder.build() {
                     Ok(new_writer) => {
                         *writer = Some(Box::new(new_writer));
                     }

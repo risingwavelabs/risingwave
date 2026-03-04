@@ -561,7 +561,7 @@ impl SinglePhaseCommitCoordinator for DeltaLakeSinkCommitter {
             )
             .await?
             .version();
-        self.table.update().await?;
+        self.table.update_state().await?;
         tracing::debug!(
             "Succeeded to commit to DeltaLake table in epoch {epoch}, version {version}."
         );

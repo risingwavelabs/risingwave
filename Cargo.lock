@@ -11664,6 +11664,7 @@ name = "risingwave_common"
 version = "2.9.0-alpha"
 dependencies = [
  "ahash 0.8.11",
+ "allocator-api2",
  "anyhow",
  "arc-swap",
  "arrow-array 54.3.1",
@@ -12101,7 +12102,7 @@ dependencies = [
  "opensearch",
  "openssl",
  "parking_lot 0.12.5",
- "parquet 56.2.0",
+ "parquet 57.3.0",
  "paste",
  "pg_bigdecimal",
  "phf 0.13.1",
@@ -13159,6 +13160,7 @@ dependencies = [
  "num-integer",
  "parking_lot 0.12.5",
  "parquet 56.2.0",
+ "parquet 57.3.0",
  "prometheus",
  "prost 0.14.3",
  "rand 0.9.2",

@@ -339,10 +339,7 @@ impl Catalog for StorageCatalog {
     /// Drop a table from the catalog.
     async fn drop_table(&self, table: &TableIdent) -> iceberg::Result<()> {
         let table = self.load_table(table).await?;
-        table
-            .file_io()
-            .remove_dir_all(table.metadata().location())
-            .await
+        table.file_io().delete_prefix(table.metadata().location()).await
     }
 
     /// Check if a table exists in the catalog.

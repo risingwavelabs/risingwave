@@ -10,6 +10,7 @@ repository = { workspace = true }
 [dependencies]
 ahash = "0.8"
 anyhow = "1"
+allocator-api2 = "0.2"
 arc-swap = { workspace = true }
 arrow-54-array = { package = "arrow-array", version = "54" }
 arrow-54-buffer = { package = "arrow-buffer", version = "54" }
