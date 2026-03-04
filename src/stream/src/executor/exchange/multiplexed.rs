@@ -695,6 +695,7 @@ mod tests {
 
     /// Helper to create a `CountingMergeInput` with a channel-backed inner stream.
     /// Returns `(pinned_counting, data_tx, barrier_tx)`.
+    #[allow(clippy::type_complexity)]
     fn make_counting_input_raw(
         actor_id: ActorId,
     ) -> (
@@ -745,6 +746,7 @@ mod tests {
 
     /// Helper that creates a `CountingMergeInput` and sends+consumes the required
     /// initial barrier (`expected_count=0`). Tests can focus on steady-state behavior.
+    #[allow(clippy::type_complexity)]
     async fn make_counting_input(
         actor_id: ActorId,
     ) -> (
