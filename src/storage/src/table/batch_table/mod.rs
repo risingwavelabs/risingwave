@@ -904,7 +904,14 @@ impl<S: StateStore, SD: ValueRowSerde> BatchTableInner<S, SD> {
         reverse: bool,
     ) -> StorageResult<impl Stream<Item = StorageResult<(Vec<ArrayRef>, usize)>> + Send> {
         let iter = self
-            .iter_with_pk_bounds(epoch, pk_prefix, range_bounds, ordered, prefetch_options, reverse)
+            .iter_with_pk_bounds(
+                epoch,
+                pk_prefix,
+                range_bounds,
+                ordered,
+                prefetch_options,
+                reverse,
+            )
             .await?;
 
         Ok(Self::convert_row_stream_to_array_vec_stream(
@@ -924,8 +931,15 @@ impl<S: StateStore, SD: ValueRowSerde> BatchTableInner<S, SD> {
         ordered: bool,
         prefetch_options: PrefetchOptions,
     ) -> StorageResult<impl Stream<Item = StorageResult<OwnedRow>> + Send> {
-        self.iter_with_pk_bounds(epoch, pk_prefix, range_bounds, ordered, prefetch_options, false)
-            .await
+        self.iter_with_pk_bounds(
+            epoch,
+            pk_prefix,
+            range_bounds,
+            ordered,
+            prefetch_options,
+            false,
+        )
+        .await
     }
 
     // The returned iterator will iterate data from a snapshot corresponding to the given `epoch`.
