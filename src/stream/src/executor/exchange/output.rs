@@ -41,12 +41,16 @@ pub enum Output {
     /// Coalesced barrier output: data goes through per-actor channel,
     /// barriers go to coalescer with message count.
     CoalescedBarrier {
+        /// Downstream actor ID. Used for dispatch matching (hash mapping, `remove_outputs`, etc.).
         actor_id: ActorId,
+        /// Upstream (self) actor ID. Used for coalescer submission so the coalescer
+        /// knows which upstream actor submitted this barrier.
+        upstream_actor_id: ActorId,
         span: await_tree::Span,
         /// Per-actor data channel (same type as Direct's ch).
         data_ch: Sender,
         /// Channel to send barriers to the coalescer.
-        /// Tuple: (`actor_id`, single barrier, `epoch_msg_count`)
+        /// Tuple: (`upstream_actor_id`, single barrier, `epoch_msg_count`)
         ///
         /// Each barrier is sent individually (not as a batch) to ensure the
         /// coalescer's FIFO queue stays aligned across actors even when different
@@ -75,13 +79,20 @@ impl Output {
     }
 
     pub fn new_coalesced_barrier(
-        actor_id: ActorId,
+        downstream_actor_id: ActorId,
+        upstream_actor_id: ActorId,
         data_ch: Sender,
         barrier_tx: mpsc::UnboundedSender<(ActorId, DispatcherBarrier, u64)>,
     ) -> Self {
         Self::CoalescedBarrier {
-            actor_id,
-            span: await_tree::span!("Output (actor {:?}, coalesced barrier)", actor_id).verbose(),
+            actor_id: downstream_actor_id,
+            upstream_actor_id,
+            span: await_tree::span!(
+                "Output (actor {:?} -> {:?}, coalesced barrier)",
+                upstream_actor_id,
+                downstream_actor_id
+            )
+            .verbose(),
             data_ch,
             barrier_tx,
             epoch_msg_count: 0,
@@ -100,6 +111,7 @@ impl Output {
 
             Self::CoalescedBarrier {
                 actor_id,
+                upstream_actor_id,
                 span,
                 data_ch,
                 barrier_tx,
@@ -126,8 +138,9 @@ impl Output {
                         } else {
                             0
                         };
+                        // Use upstream_actor_id for the coalescer (it tracks by upstream actor).
                         barrier_tx
-                            .send((*actor_id, barrier, count))
+                            .send((*upstream_actor_id, barrier, count))
                             .map_err(|_| ExchangeChannelClosed::output(*actor_id))?;
                     }
                     Ok(())

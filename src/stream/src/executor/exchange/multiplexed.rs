@@ -54,7 +54,6 @@ use tokio::sync::mpsc;
 
 use super::error::ExchangeChannelClosed;
 use super::input::{BoxedActorInput, Input};
-use super::output::Output;
 use super::permit;
 use crate::error::StreamResult;
 use crate::executor::monitor::StreamingMetrics;
@@ -237,7 +236,17 @@ impl MultiplexedOutputCoordinator {
     }
 }
 
-/// Create the multiplexed output setup: per-actor `Output::CoalescedBarrier` handles,
+/// Per-actor channels for constructing `Output::CoalescedBarrier` in the `DispatchExecutor`.
+pub struct CoalescedBarrierChannels {
+    /// Upstream actor ID for coalescer submission.
+    pub upstream_actor_id: ActorId,
+    /// Per-actor data channel sender.
+    pub data_tx: permit::Sender,
+    /// Shared channel to send barriers to the coalescer.
+    pub barrier_tx: mpsc::UnboundedSender<(ActorId, DispatcherBarrier, u64)>,
+}
+
+/// Create the multiplexed output setup: per-actor channel sets,
 /// a `MultiplexedOutputCoordinator`, and the barrier channel receiver.
 ///
 /// # Arguments
@@ -246,7 +255,8 @@ impl MultiplexedOutputCoordinator {
 /// - `barrier_concurrent`: Max concurrent barriers on the barrier-only channel.
 ///
 /// # Returns
-/// - `Vec<(ActorId, Output)>`: Per-actor `CoalescedBarrier` outputs.
+/// - `Vec<CoalescedBarrierChannels>`: Per-actor channel sets for building
+///   `NewOutputRequest::CoalescedBarrierRemote`.
 /// - `MultiplexedOutputCoordinator`: Background task to run.
 /// - `permit::Receiver`: Barrier channel receiver.
 pub fn create_multiplexed_output(
@@ -254,7 +264,7 @@ pub fn create_multiplexed_output(
     data_senders: Vec<permit::Sender>,
     barrier_concurrent: usize,
 ) -> (
-    Vec<(ActorId, Output)>,
+    Vec<CoalescedBarrierChannels>,
     MultiplexedOutputCoordinator,
     permit::Receiver,
 ) {
@@ -266,14 +276,15 @@ pub fn create_multiplexed_output(
     // Create the shared barrier submission channel (individual barriers, not batches).
     let (coalescer_tx, coalescer_rx) = mpsc::unbounded_channel();
 
-    // Create per-actor Output::CoalescedBarrier handles.
-    let outputs: Vec<(ActorId, Output)> = upstream_actor_ids
+    // Create per-actor channel sets.
+    let channels: Vec<CoalescedBarrierChannels> = upstream_actor_ids
         .iter()
         .copied()
         .zip_eq_fast(data_senders)
-        .map(|(actor_id, data_ch)| {
-            let output = Output::new_coalesced_barrier(actor_id, data_ch, coalescer_tx.clone());
-            (actor_id, output)
+        .map(|(actor_id, data_tx)| CoalescedBarrierChannels {
+            upstream_actor_id: actor_id,
+            data_tx,
+            barrier_tx: coalescer_tx.clone(),
         })
         .collect();
 
@@ -283,7 +294,7 @@ pub fn create_multiplexed_output(
         barrier_tx,
     );
 
-    (outputs, coordinator, barrier_rx)
+    (channels, coordinator, barrier_rx)
 }
 
 /// `CountingMergeInput` wraps an inner `BoxedActorInput` (typically a `RemoteInput`)
@@ -836,37 +847,53 @@ mod tests {
     /// through `Output::send()` to the coordinator produces coalesced barriers with the
     /// correct upstream actor IDs and data counts.
     ///
-    /// This test would fail if `Output::CoalescedBarrier` were constructed with the wrong
-    /// `actor_id` (e.g., the downstream actor ID instead of the upstream actor ID), because
-    /// the coalescer is keyed by upstream actor IDs and will panic on unknown IDs.
+    /// This test also verifies the dual-actor-id fix: `Output::actor_id()` returns the
+    /// **downstream** actor ID (for dispatch matching), while the coalescer submission
+    /// uses the **upstream** actor ID internally.
     ///
     /// Regression test for: <https://github.com/risingwavelabs/risingwave/pull/24951>
     #[tokio::test]
     async fn test_output_sends_upstream_actor_id_to_coalescer() {
+        use super::super::output::Output;
+
         let upstream_ids = [aid(10), aid(20)];
+        let downstream_id = aid(99);
 
         // Create per-actor data channels.
         let mut data_senders = Vec::new();
-        let mut data_receivers = Vec::new();
+        let mut _data_receivers = Vec::new();
         for _ in &upstream_ids {
             let (tx, rx) = permit::channel_for_test();
             data_senders.push(tx);
-            data_receivers.push(rx);
+            _data_receivers.push(rx);
         }
 
         // Create the multiplexed output setup.
-        let (outputs, coordinator, mut barrier_rx) =
+        let (channels, coordinator, mut barrier_rx) =
             create_multiplexed_output(&upstream_ids, data_senders, 4);
 
         // Spawn the coordinator.
         tokio::spawn(coordinator.run());
 
-        // Extract the Output handles (keyed by upstream actor ID).
-        let mut output_map: HashMap<ActorId, Output> = outputs.into_iter().collect();
+        // Build Output handles from the returned channels.
+        // In production, this happens in dispatch.rs::resolve_output().
+        let mut output_map: HashMap<ActorId, Output> = channels
+            .into_iter()
+            .map(|chs| {
+                let up_id = chs.upstream_actor_id;
+                let output = Output::new_coalesced_barrier(
+                    downstream_id,
+                    chs.upstream_actor_id,
+                    chs.data_tx,
+                    chs.barrier_tx,
+                );
+                (up_id, output)
+            })
+            .collect();
 
-        // Verify that the Output handles have the correct (upstream) actor IDs.
-        assert_eq!(output_map[&aid(10)].actor_id(), aid(10));
-        assert_eq!(output_map[&aid(20)].actor_id(), aid(20));
+        // Verify that Output::actor_id() returns the DOWNSTREAM actor ID (for dispatch matching).
+        assert_eq!(output_map[&aid(10)].actor_id(), downstream_id);
+        assert_eq!(output_map[&aid(20)].actor_id(), downstream_id);
 
         // Send data through actor 10: 2 chunks.
         let out10 = output_map.get_mut(&aid(10)).unwrap();
@@ -903,9 +930,10 @@ mod tests {
         // Read the coalesced barrier from the barrier channel.
         let msg = barrier_rx.recv_raw().await.unwrap();
 
-        // Verify coalesced_actor_ids contains upstream actor IDs.
+        // Verify coalesced_actor_ids contains UPSTREAM actor IDs (10, 20), not downstream (99).
         assert!(msg.coalesced_actor_ids.contains(&aid(10)));
         assert!(msg.coalesced_actor_ids.contains(&aid(20)));
+        assert!(!msg.coalesced_actor_ids.contains(&downstream_id));
 
         // Verify actor_data_counts has correct counts keyed by upstream actor IDs.
         assert_eq!(msg.actor_data_counts[&aid(10)], 2);
@@ -927,7 +955,7 @@ mod tests {
     /// active, so the `MergeExecutor` would incorrectly believe this input has ended normally
     /// instead of triggering error recovery.
     ///
-    /// Regression test for: barrier_rx disconnect must be an error, not silent stream end.
+    /// Regression test for: `barrier_rx` disconnect must be an error, not silent stream end.
     #[tokio::test]
     async fn test_counting_merge_input_errors_on_barrier_disconnect() {
         let (barrier_tx, barrier_rx) = mpsc::unbounded_channel();
@@ -1027,17 +1055,19 @@ mod tests {
         assert!(txs.is_empty());
     }
 
-    /// Regression test: if `Output::CoalescedBarrier` is constructed with the wrong `actor_id`
-    /// (downstream ID instead of upstream ID), the coalescer panics with "unknown actor".
+    /// Regression test: if `Output::CoalescedBarrier` is constructed with the wrong
+    /// `upstream_actor_id`, the coalescer panics with "unknown actor".
     ///
-    /// This simulates the bug where `dispatch.rs::resolve_output()` used `downstream_actor`
-    /// as the `actor_id` for `Output::new_coalesced_barrier()`, but the coalescer was initialized
-    /// with upstream actor IDs. Without the fix (adding `upstream_actor_id` field to
-    /// `NewOutputRequest::CoalescedBarrierRemote`), this test would panic.
+    /// This simulates a hypothetical bug where the wrong actor ID is used for coalescer
+    /// submission. The coalescer is keyed by upstream actor IDs, so submitting with an
+    /// unknown ID causes a panic.
     #[tokio::test]
     async fn test_output_wrong_actor_id_panics_in_coalescer() {
+        use super::super::output::Output;
+
         let upstream_ids = [aid(10), aid(20)];
-        let wrong_downstream_id = aid(99); // This is the downstream actor ID — wrong!
+        let downstream_id = aid(50);
+        let wrong_upstream_id = aid(99); // Not in the coalescer's actor set!
 
         // Create per-actor data channels.
         let mut data_senders = Vec::new();
@@ -1047,31 +1077,24 @@ mod tests {
         }
 
         // Create the multiplexed output setup (coalescer keyed by upstream_ids [10, 20]).
-        let (outputs, coordinator, _barrier_rx) =
+        let (channels, coordinator, _barrier_rx) =
             create_multiplexed_output(&upstream_ids, data_senders, 4);
 
         // Spawn the coordinator.
         let handle = tokio::spawn(coordinator.run());
 
-        // Simulate the old bug: destructure the Output, discard the actor_id,
-        // and recreate it with the wrong (downstream) actor_id.
-        let (_correct_actor_id, correct_output) = outputs.into_iter().next().unwrap();
+        // Take one channel set and recreate the Output with a wrong upstream_actor_id.
+        let chs = channels.into_iter().next().unwrap();
 
-        // Extract data_ch and barrier_tx from the correct output.
-        let (data_ch, barrier_tx) = match correct_output {
-            Output::CoalescedBarrier {
-                data_ch,
-                barrier_tx,
-                ..
-            } => (data_ch, barrier_tx),
-            _ => unreachable!(),
-        };
+        // Construct Output with wrong upstream_actor_id (99 instead of 10).
+        let mut wrong_output = Output::new_coalesced_barrier(
+            downstream_id,
+            wrong_upstream_id,
+            chs.data_tx,
+            chs.barrier_tx,
+        );
 
-        // Recreate with wrong actor_id (downstream instead of upstream).
-        let mut wrong_output =
-            Output::new_coalesced_barrier(wrong_downstream_id, data_ch, barrier_tx);
-
-        // Sending a barrier through the wrong output sends (wrong_downstream_id=99, barrier, 0)
+        // Sending a barrier through the wrong output sends (wrong_upstream_id=99, barrier, 0)
         // to the coalescer, which only knows about actors 10 and 20 → panic.
         wrong_output
             .send(DispatcherMessageBatch::BarrierBatch(vec![test_barrier(1)]))
