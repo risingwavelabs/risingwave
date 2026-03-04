@@ -1630,8 +1630,11 @@ impl CatalogController {
                 if let Some((log_store_table_id, new_log_store_table_columns)) =
                     finish_sink_context.new_log_store_table
                 {
+                    // Keep log store value layout aligned with updated sink schema.
+                    let new_length = new_log_store_table_columns.len();
                     let new_log_store_table_columns: ColumnCatalogArray =
                         new_log_store_table_columns.into();
+                    let new_value_indices: Vec<u32> = (0..new_length as u32).collect();
                     let (mut table, table_obj) = Table::find_by_id(log_store_table_id)
                         .find_also_related(Object)
                         .one(txn)
@@ -1640,11 +1643,13 @@ impl CatalogController {
                     Table::update(table::ActiveModel {
                         table_id: Set(log_store_table_id),
                         columns: Set(new_log_store_table_columns.clone()),
+                        value_indices: Set(I32Array::from(new_value_indices.clone())),
                         ..Default::default()
                     })
                     .exec(txn)
                     .await?;
                     table.columns = new_log_store_table_columns;
+                    table.value_indices = I32Array::from(new_value_indices);
                     objects.push(PbObject {
                         object_info: Some(PbObjectInfo::Table(
                             ObjectModel(table, table_obj.unwrap(), sink_streaming_job.clone())
