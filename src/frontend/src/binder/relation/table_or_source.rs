@@ -266,7 +266,12 @@ impl Binder {
             }
         };
 
-        self.bind_table_to_context(columns, table_name.to_owned(), alias)?;
+        self.bind_table_to_context_with_schema(
+            columns,
+            table_name.to_owned(),
+            schema_name.map(|s| s.to_owned()),
+            alias,
+        )?;
         Ok(ret)
     }
 
@@ -489,11 +494,12 @@ impl Binder {
 
         let columns = table_catalog.columns.clone();
 
-        self.bind_table_to_context(
+        self.bind_table_to_context_with_schema(
             columns
                 .iter()
                 .map(|c| (c.is_hidden, (&c.column_desc).into())),
             table_name.to_owned(),
+            Some(schema_name.to_owned()),
             None,
         )?;
 

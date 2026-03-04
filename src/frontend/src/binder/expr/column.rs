@@ -22,7 +22,7 @@ use crate::expr::{CorrelatedInputRef, ExprImpl, ExprType, FunctionCall, InputRef
 impl Binder {
     pub fn bind_column(&mut self, idents: &[Ident]) -> Result<ExprImpl> {
         // TODO: check quote style of `ident`.
-        let (_schema_name, table_name, column_name) = match idents {
+        let (schema_name, table_name, column_name) = match idents {
             [column] => (None, None, column.real_value()),
             [table, column] => (None, Some(table.real_value()), column.real_value()),
             [schema, table, column] => (
@@ -44,10 +44,11 @@ impl Binder {
             return self.bind_sql_udf_parameter(&column_name);
         }
 
-        match self
-            .context
-            .get_column_binding_indices(&table_name, &column_name)
-        {
+        match self.context.get_column_binding_indices_with_schema(
+            &schema_name,
+            &table_name,
+            &column_name,
+        ) {
             Ok(mut indices) => {
                 match indices.len() {
                     0 => unreachable!(),
@@ -91,7 +92,11 @@ impl Binder {
                 }
                 // input ref from lateral context `depth` starts from 1.
                 let depth = i + 1;
-                match context.get_column_binding_index(&table_name, &column_name) {
+                match context.get_column_binding_index_with_schema(
+                    &schema_name,
+                    &table_name,
+                    &column_name,
+                ) {
                     Ok(index) => {
                         let column = &context.columns[index];
                         return Ok(CorrelatedInputRef::new(
@@ -116,7 +121,11 @@ impl Binder {
             }
             // `depth` starts from 1.
             let depth = i + 1;
-            match context.get_column_binding_index(&table_name, &column_name) {
+            match context.get_column_binding_index_with_schema(
+                &schema_name,
+                &table_name,
+                &column_name,
+            ) {
                 Ok(index) => {
                     let column = &context.columns[index];
                     return Ok(CorrelatedInputRef::new(
@@ -139,7 +148,11 @@ impl Binder {
                     }
                     // correlated input ref from lateral context `depth` starts from 1.
                     let depth = i + j + 1;
-                    match context.get_column_binding_index(&table_name, &column_name) {
+                    match context.get_column_binding_index_with_schema(
+                        &schema_name,
+                        &table_name,
+                        &column_name,
+                    ) {
                         Ok(index) => {
                             let column = &context.columns[index];
                             return Ok(CorrelatedInputRef::new(
