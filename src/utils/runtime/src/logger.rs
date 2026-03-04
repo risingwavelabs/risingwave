@@ -38,7 +38,7 @@ use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::prelude::*;
 use tracing_subscriber::{EnvFilter, filter, reload};
 
-/// Parse a comma-separated list of `key=value` pairs into OpenTelemetry `KeyValue` attributes.
+/// Parse a comma-separated list of `key=value` pairs into `OpenTelemetry` `KeyValue` attributes.
 ///
 /// - Splits by comma to get pairs.
 /// - Each pair must contain exactly one `=`.
@@ -70,7 +70,6 @@ fn parse_extra_tracing_attributes(input: &str) -> Vec<opentelemetry::KeyValue> {
                 eprintln!("warning: ignoring tracing attribute with empty key: {pair:?}");
                 return None;
             }
-            println!("parsed extra tracing attribute: {key}={value}");
             Some(KeyValue::new(key.to_owned(), value.to_owned()))
         })
         .collect()
@@ -93,7 +92,7 @@ pub struct LoggerSettings {
     default_level: Option<tracing::metadata::LevelFilter>,
     /// The endpoint of the tracing collector in OTLP gRPC protocol.
     tracing_endpoint: Option<String>,
-    /// Extra key/value attributes to attach to OpenTelemetry trace resources.
+    /// Extra key/value attributes to attach to `OpenTelemetry` trace resources.
     extra_tracing_attributes: Vec<opentelemetry::KeyValue>,
 }
 
