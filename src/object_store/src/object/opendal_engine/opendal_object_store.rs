@@ -257,12 +257,14 @@ impl ObjectStore for OpendalObjectStore {
                     Some(Ok(object)) => {
                         let key = object.path().to_owned();
 
-                        // OpenDAL 0.55 removed list metadata capability flags.
-                        // Use listed metadata first, and call stat() only if the timestamp is missing.
+                        // OpenDAL 0.55 removed list metadata capability flags and reports
+                        // unknown content length as 0. Use listed metadata first, and call
+                        // stat() if timestamp is missing or size is 0 to avoid treating
+                        // unknown sizes as real zero-byte objects.
                         let meta = object.metadata();
                         let mut last_modified = meta.last_modified().map(timestamp_to_secs);
                         let mut total_size = meta.content_length() as usize;
-                        if last_modified.is_none() {
+                        if last_modified.is_none() || total_size == 0 {
                             let stat_meta = op.stat(&key).await.ok()?;
                             last_modified = stat_meta.last_modified().map(timestamp_to_secs);
                             total_size = stat_meta.content_length() as usize;

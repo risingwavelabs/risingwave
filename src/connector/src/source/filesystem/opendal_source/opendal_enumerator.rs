@@ -104,12 +104,14 @@ impl<Src: OpendalSource> OpendalEnumerator<Src> {
                     Some(Ok(object)) => {
                         let name = object.path().to_owned();
 
-                        // OpenDAL 0.55 removed list metadata capability flags.
-                        // Use listed metadata first, and call stat() only if timestamp is missing.
+                        // OpenDAL 0.55 removed list metadata capability flags and reports
+                        // unknown content length as 0. Use listed metadata first, and call
+                        // stat() if timestamp is missing or size is 0 to avoid treating
+                        // unknown sizes as real zero-byte objects.
                         let meta = object.metadata();
                         let mut t = meta.last_modified();
                         let mut size = meta.content_length() as i64;
-                        if t.is_none() {
+                        if t.is_none() || size == 0 {
                             let stat_meta = op.stat(&name).await.ok()?;
                             t = stat_meta.last_modified();
                             size = stat_meta.content_length() as i64;
