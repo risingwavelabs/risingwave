@@ -21,7 +21,7 @@ use std::time::Duration;
 use await_tree::{InstrumentAwait, SpanExt};
 use bytes::{Bytes, BytesMut};
 use foyer::Hint;
-use futures::future::try_join_all;
+use futures::future::{Either, try_join_all};
 use futures::{Stream, StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
@@ -605,6 +605,7 @@ impl<S: StateStore, SD: ValueRowSerde> BatchTableInner<S, SD> {
         vnode_hint: Option<VirtualNode>,
         ordered: bool,
         prefetch_options: PrefetchOptions,
+        reverse: bool,
     ) -> StorageResult<impl Stream<Item = StorageResult<OwnedRow>> + Send + 'static + use<S, SD>>
     {
         let vnodes = match vnode_hint {
@@ -641,6 +642,7 @@ impl<S: StateStore, SD: ValueRowSerde> BatchTableInner<S, SD> {
                     (start_bound.as_ref(), end_bound.as_ref()),
                     vnode,
                     prefetch_options,
+                    reverse,
                 )
             },
             |vnode| {
@@ -650,6 +652,7 @@ impl<S: StateStore, SD: ValueRowSerde> BatchTableInner<S, SD> {
                     (start_bound.as_ref(), end_bound.as_ref()),
                     vnode,
                     prefetch_options,
+                    reverse,
                 )
             },
             &vnodes,
@@ -665,13 +668,25 @@ impl<S: StateStore, SD: ValueRowSerde> BatchTableInner<S, SD> {
         encoded_key_range: (Bound<&Bytes>, Bound<&Bytes>),
         vnode: VirtualNode,
         prefetch_options: PrefetchOptions,
+        reverse: bool,
     ) -> StorageResult<impl Stream<Item = StorageResult<(K, OwnedRow)>> + Send + use<K, S, SD>>
     {
         let (table_key_range, read_options, pk_serializer) =
             self.vnode_read_context(prefix_hint, encoded_key_range, vnode, prefetch_options);
 
-        let iter = read_snapshot.iter(table_key_range, read_options).await?;
-        Ok(self.iter_stream_from_state_store_iter::<K, _>(iter, pk_serializer))
+        if reverse {
+            let iter = read_snapshot
+                .rev_iter(table_key_range, read_options)
+                .await?;
+            Ok(Either::Left(
+                self.iter_stream_from_state_store_iter::<K, _>(iter, pk_serializer),
+            ))
+        } else {
+            let iter = read_snapshot.iter(table_key_range, read_options).await?;
+            Ok(Either::Right(
+                self.iter_stream_from_state_store_iter::<K, _>(iter, pk_serializer),
+            ))
+        }
     }
 
     fn vnode_read_context(
@@ -783,6 +798,7 @@ impl<S: StateStore, SD: ValueRowSerde> BatchTableInner<S, SD> {
         range_bounds: impl RangeBounds<OwnedRow>,
         ordered: bool,
         prefetch_options: PrefetchOptions,
+        reverse: bool,
     ) -> StorageResult<impl Stream<Item = StorageResult<OwnedRow>> + Send> {
         let start_key = self.serialize_pk_bound(&pk_prefix, range_bounds.start_bound(), true);
         let end_key = self.serialize_pk_bound(&pk_prefix, range_bounds.end_bound(), false);
@@ -823,6 +839,7 @@ impl<S: StateStore, SD: ValueRowSerde> BatchTableInner<S, SD> {
             self.distribution.try_compute_vnode_by_pk_prefix(pk_prefix),
             ordered,
             prefetch_options,
+            reverse,
         )
         .await
     }
@@ -884,9 +901,10 @@ impl<S: StateStore, SD: ValueRowSerde> BatchTableInner<S, SD> {
         ordered: bool,
         chunk_size: usize,
         prefetch_options: PrefetchOptions,
+        reverse: bool,
     ) -> StorageResult<impl Stream<Item = StorageResult<(Vec<ArrayRef>, usize)>> + Send> {
         let iter = self
-            .iter_with_pk_bounds(epoch, pk_prefix, range_bounds, ordered, prefetch_options)
+            .iter_with_pk_bounds(epoch, pk_prefix, range_bounds, ordered, prefetch_options, reverse)
             .await?;
 
         Ok(Self::convert_row_stream_to_array_vec_stream(
@@ -906,7 +924,7 @@ impl<S: StateStore, SD: ValueRowSerde> BatchTableInner<S, SD> {
         ordered: bool,
         prefetch_options: PrefetchOptions,
     ) -> StorageResult<impl Stream<Item = StorageResult<OwnedRow>> + Send> {
-        self.iter_with_pk_bounds(epoch, pk_prefix, range_bounds, ordered, prefetch_options)
+        self.iter_with_pk_bounds(epoch, pk_prefix, range_bounds, ordered, prefetch_options, false)
             .await
     }
 
@@ -1077,6 +1095,7 @@ impl<S: StateStore, SD: ValueRowSerde> BatchTableInner<S, SD> {
         ordered: bool,
         chunk_size: usize,
         prefetch_options: PrefetchOptions,
+        reverse: bool,
     ) -> StorageResult<impl Stream<Item = StorageResult<DataChunk>> + Send> {
         let iter = self
             .chunk_iter_with_pk_bounds(
@@ -1086,6 +1105,7 @@ impl<S: StateStore, SD: ValueRowSerde> BatchTableInner<S, SD> {
                 ordered,
                 chunk_size,
                 prefetch_options,
+                reverse,
             )
             .await?;
 

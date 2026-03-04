@@ -54,6 +54,7 @@ pub struct RowSeqScanExecutor<S: StateStore> {
     ordered: bool,
     query_epoch: BatchQueryEpoch,
     limit: Option<u64>,
+    reverse: bool,
 }
 
 impl<S: StateStore> RowSeqScanExecutor<S> {
@@ -66,6 +67,7 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
         identity: String,
         limit: Option<u64>,
         metrics: Option<BatchMetrics>,
+        reverse: bool,
     ) -> Self {
         Self {
             chunk_size,
@@ -76,6 +78,7 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
             ordered,
             query_epoch,
             limit,
+            reverse,
         }
     }
 }
@@ -114,6 +117,7 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
 
         let ordered = seq_scan_node.ordered;
         let limit = seq_scan_node.limit;
+        let reverse = seq_scan_node.reverse;
         let query_epoch = seq_scan_node
             .query_epoch
             .ok_or_else(|| anyhow!("query_epoch not set in distributed lookup join"))?;
@@ -136,6 +140,7 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
                 source.plan_node().get_identity().clone(),
                 limit,
                 metrics,
+                reverse,
             )))
         })
     }
@@ -166,6 +171,7 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
             ordered,
             query_epoch,
             limit,
+            reverse,
             ..
         } = *self;
         let table = Arc::new(table);
@@ -232,6 +238,7 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
                 chunk_size,
                 limit,
                 histogram,
+                reverse,
             );
             #[for_await]
             for chunk in stream {
@@ -277,6 +284,7 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
         chunk_size: usize,
         limit: Option<u64>,
         histogram: Option<impl Deref<Target = Histogram>>,
+        reverse: bool,
     ) {
         let pk_prefix = scan_range.pk_prefix.clone();
         let range_bounds = scan_range.convert_to_range_bounds(&table);
@@ -290,6 +298,7 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
                 ordered,
                 chunk_size,
                 PrefetchOptions::new(limit.is_none(), true),
+                reverse,
             )
             .await?;
 

@@ -212,6 +212,7 @@ impl TryToBatchPb for BatchSeqScan {
             ordered: !self.order().is_any(),
             limit: *self.limit(),
             query_epoch: to_batch_query_epoch(&self.as_of)?,
+            reverse: false,
         }))
     }
 }
