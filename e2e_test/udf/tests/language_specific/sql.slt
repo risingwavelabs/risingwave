@@ -326,7 +326,7 @@ Caused by these errors (recent errors listed first):
 
 # SQL udf currently does not support WITH options.
 statement error
-create function sql_udf_with_options(INT) returns int language sql with (x = 'y') as 'select $1 + 1';
+create function sql_udf_with_options(INT) returns int language sql with (always_retry_on_network_error = true) as 'select $1 + 1';
 ----
 db error: ERROR: Invalid input syntax: SQL UDF does not support WITH options yet
 
