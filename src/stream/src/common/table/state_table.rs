@@ -2038,11 +2038,14 @@ where
                         .unwrap_or_else(|e| {
                             panic!("Failed to deserialize table {} vnode {:?} key {:?} error: {:?}", self.table_id(), vnode, key, e.as_report());
                         });
-                        direction.datum_filter_by_watermark(
-                            pk_cols.datum_at(clean_watermark_index_in_pk.unwrap()),
+                        let val = pk_cols.datum_at(clean_watermark_index_in_pk.unwrap());
+                        let ret = direction.datum_filter_by_watermark(
+                            &val,
                             &watermark_value,
                             *order_type,
-                        )
+                        );
+                        tracing::info!(ret, table_id = ?self.table_id(), ?clean_watermark_index_in_pk, ?val, ?watermark_value, ?order_type, "!!!");
+                        ret
                     },
                     WatermarkSerdeType::Value => {
                         direction.datum_filter_by_watermark(
