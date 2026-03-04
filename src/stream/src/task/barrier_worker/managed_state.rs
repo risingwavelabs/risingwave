@@ -587,6 +587,11 @@ pub(crate) struct PartialGraphState {
     pub(super) actor_pending_new_output_requests:
         HashMap<ActorId, Vec<(ActorId, NewOutputRequest)>>,
 
+    /// Pre-created data channel receivers for multiplexed barrier coalescing.
+    /// Keyed by `(upstream_actor_id, downstream_actor_id)`.
+    /// These are created during `create_barrier_group` and consumed during `new_actor_output_request`.
+    pre_created_data_receivers: HashMap<(ActorId, ActorId), permit::Receiver>,
+
     pub(crate) graph_state: PartialGraphManagedBarrierState,
 
     table_ids: HashSet<TableId>,
@@ -612,6 +617,7 @@ impl PartialGraphState {
             partial_graph_id,
             actor_states: Default::default(),
             actor_pending_new_output_requests: Default::default(),
+            pre_created_data_receivers: Default::default(),
             graph_state: PartialGraphManagedBarrierState::new(&actor_manager),
             table_ids: Default::default(),
             actor_manager,
@@ -807,6 +813,16 @@ impl PartialGraphState {
     ) {
         let request = match request {
             TakeReceiverRequest::Remote(result_sender) => {
+                // Check if there's a pre-created data receiver from create_barrier_group.
+                if let Some(rx) = self
+                    .pre_created_data_receivers
+                    .remove(&(upstream_actor_id, actor_id))
+                {
+                    let _ = result_sender.send(Ok(rx));
+                    // The CoalescedBarrierRemote output request was already sent during
+                    // create_barrier_group, so we don't need to send another one.
+                    return;
+                }
                 let (tx, rx) = channel_from_config(self.local_barrier_manager.env.global_config());
                 let _ = result_sender.send(Ok(rx));
                 NewOutputRequest::Remote(tx)
@@ -821,6 +837,66 @@ impl PartialGraphState {
                 .or_default()
                 .push((actor_id, request));
         }
+    }
+
+    /// Create a barrier group for multiplexed barrier coalescing.
+    ///
+    /// Creates per-actor data channels, a barrier-only channel with coalescer + coordinator,
+    /// and sends `CoalescedBarrierRemote` output requests to each upstream actor's `DispatchExecutor`.
+    ///
+    /// The data channel receivers are stored in `pre_created_data_receivers` so that subsequent
+    /// `TakeReceiver(Remote)` requests (for per-actor data gRPC streams) will find them.
+    pub(super) fn create_barrier_group(
+        &mut self,
+        up_actor_ids: &[ActorId],
+        down_actor_id: ActorId,
+    ) -> StreamResult<permit::Receiver> {
+        use crate::executor::exchange::multiplexed::create_multiplexed_output;
+
+        let config = self.local_barrier_manager.env.global_config();
+
+        // Create N per-actor data channels.
+        let mut data_senders = Vec::with_capacity(up_actor_ids.len());
+        for &up_id in up_actor_ids {
+            let (tx, rx) = channel_from_config(config);
+            data_senders.push(tx);
+            self.pre_created_data_receivers
+                .insert((up_id, down_actor_id), rx);
+        }
+
+        // Create multiplexed output (barrier channel + coalescer + coordinator).
+        let barrier_concurrent = config.developer.exchange_concurrent_barriers;
+        let (outputs, coordinator, barrier_rx) =
+            create_multiplexed_output(up_actor_ids, data_senders, barrier_concurrent);
+
+        // Spawn the coordinator task.
+        tokio::spawn(coordinator.run());
+
+        // Send CoalescedBarrierRemote output requests to each upstream actor's DispatchExecutor.
+        for (actor_id, output) in outputs {
+            let (data_tx, barrier_tx) = match output {
+                crate::executor::exchange::output::Output::CoalescedBarrier {
+                    data_ch,
+                    barrier_tx,
+                    ..
+                } => (data_ch, barrier_tx),
+                _ => unreachable!("create_multiplexed_output always returns CoalescedBarrier"),
+            };
+            let request = NewOutputRequest::CoalescedBarrierRemote {
+                data_tx,
+                barrier_tx,
+            };
+            if let Some(actor) = self.actor_states.get_mut(&actor_id) {
+                let _ = actor.new_output_request_tx.send((down_actor_id, request));
+            } else {
+                self.actor_pending_new_output_requests
+                    .entry(actor_id)
+                    .or_default()
+                    .push((down_actor_id, request));
+            }
+        }
+
+        Ok(barrier_rx)
     }
 
     /// Handles [`LocalBarrierEvent`] from [`crate::task::barrier_manager::LocalBarrierManager`].
