@@ -246,6 +246,17 @@ pub(super) enum LocalActorOperation {
         ids: UpDownActorIds,
         request: TakeReceiverRequest,
     },
+    /// Create a barrier group for multiplexed barrier coalescing.
+    /// This creates per-actor data channels, a barrier-only channel,
+    /// and sends `CoalescedBarrierRemote` output requests to each upstream actor.
+    CreateBarrierGroup {
+        partial_graph_id: PartialGraphId,
+        term_id: String,
+        up_actor_ids: Vec<ActorId>,
+        down_actor_id: ActorId,
+        upstream_fragment_id: FragmentId,
+        result_sender: oneshot::Sender<StreamResult<permit::Receiver>>,
+    },
     #[cfg(test)]
     GetCurrentLocalBarrierManager(oneshot::Sender<LocalBarrierManager>),
     #[cfg(test)]
@@ -566,6 +577,37 @@ impl LocalBarrierWorker {
                 if let TakeReceiverRequest::Remote { result_sender, .. } = request {
                     let _ = result_sender.send(Err(err.into()));
                 }
+            }
+            LocalActorOperation::CreateBarrierGroup {
+                partial_graph_id,
+                term_id,
+                up_actor_ids,
+                down_actor_id,
+                upstream_fragment_id,
+                result_sender,
+            } => {
+                let result = if self.term_id != term_id {
+                    Err(anyhow!(
+                        "create barrier group on unmatched term_id {} to current term_id {}",
+                        term_id,
+                        self.term_id
+                    )
+                    .into())
+                } else {
+                    match self.state.partial_graphs.get_mut(&partial_graph_id) {
+                        Some(PartialGraphStatus::Running(graph)) => graph.create_barrier_group(
+                            &up_actor_ids,
+                            down_actor_id,
+                            upstream_fragment_id,
+                        ),
+                        _ => Err(anyhow!(
+                            "partial graph {} not running for create_barrier_group",
+                            partial_graph_id
+                        )
+                        .into()),
+                    }
+                };
+                let _ = result_sender.send(result);
             }
             #[cfg(test)]
             LocalActorOperation::GetCurrentLocalBarrierManager(sender) => {
@@ -1136,6 +1178,16 @@ impl<T> EventSender<T> {
 pub(crate) enum NewOutputRequest {
     Local(permit::Sender),
     Remote(permit::Sender),
+    /// Coalesced barrier remote output: data goes through `data_tx`, barriers go to coalescer
+    /// via `barrier_tx`.
+    CoalescedBarrierRemote {
+        data_tx: permit::Sender,
+        barrier_tx: tokio::sync::mpsc::UnboundedSender<(
+            ActorId,
+            Vec<crate::executor::DispatcherBarrier>,
+            u64,
+        )>,
+    },
 }
 
 #[cfg(test)]

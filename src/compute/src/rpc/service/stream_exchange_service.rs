@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::net::SocketAddr;
+use std::pin::Pin;
 use std::sync::Arc;
 
 use either::Either;
@@ -62,6 +63,7 @@ impl StreamExchangeService for StreamExchangeServiceImpl {
             down_fragment_id,
             up_partial_graph_id,
             term_id,
+            up_actor_ids,
         } = {
             let req = request_stream
                 .next()
@@ -73,29 +75,66 @@ impl StreamExchangeService for StreamExchangeServiceImpl {
             }
         };
 
-        let receiver = self
-            .stream_mgr
-            .take_receiver(
-                up_partial_graph_id,
-                term_id,
-                (up_actor_id, down_actor_id),
-                up_fragment_id,
-            )
-            .await?;
-
         // Map the remaining stream to add-permits.
         let add_permits_stream = request_stream.map_ok(|req| match req.value.unwrap() {
             Value::Get(_) => unreachable!("the following messages must be `AddPermits`"),
             Value::AddPermits(add_permits) => add_permits.value.unwrap(),
         });
 
-        Ok(Response::new(Self::get_stream_impl(
-            self.metrics.clone(),
-            peer_addr,
-            receiver,
-            add_permits_stream,
-            (up_fragment_id, down_fragment_id),
-        )))
+        if !up_actor_ids.is_empty() {
+            // Multiplexed barrier coalescing mode.
+            // Create the barrier group on the sender side, which:
+            // - Creates per-actor data channels (stored for later take_receiver calls)
+            // - Creates a barrier-only channel with coalescer
+            // - Sends CoalescedBarrierRemote output requests to each upstream actor
+            let up_actor_ids = up_actor_ids
+                .into_iter()
+                .map(risingwave_pb::id::ActorId::from)
+                .collect();
+            let barrier_receiver = self
+                .stream_mgr
+                .create_barrier_group(
+                    up_partial_graph_id,
+                    term_id,
+                    up_actor_ids,
+                    down_actor_id,
+                    up_fragment_id,
+                )
+                .await?;
+
+            let stream: Pin<
+                Box<dyn Stream<Item = std::result::Result<GetStreamResponse, Status>> + Send>,
+            > = Box::pin(Self::get_barrier_stream_impl(
+                self.metrics.clone(),
+                peer_addr,
+                barrier_receiver,
+                add_permits_stream,
+                (up_fragment_id, down_fragment_id),
+            ));
+            Ok(Response::new(stream))
+        } else {
+            // Standard single-actor mode.
+            let receiver = self
+                .stream_mgr
+                .take_receiver(
+                    up_partial_graph_id,
+                    term_id,
+                    (up_actor_id, down_actor_id),
+                    up_fragment_id,
+                )
+                .await?;
+
+            let stream: Pin<
+                Box<dyn Stream<Item = std::result::Result<GetStreamResponse, Status>> + Send>,
+            > = Box::pin(Self::get_stream_impl(
+                self.metrics.clone(),
+                peer_addr,
+                receiver,
+                add_permits_stream,
+                (up_fragment_id, down_fragment_id),
+            ));
+            Ok(Response::new(stream))
+        }
     }
 }
 
@@ -107,6 +146,7 @@ impl StreamExchangeServiceImpl {
         }
     }
 
+    /// Standard data stream handler for single-actor (non-multiplexed) exchanges.
     #[try_stream(ok = GetStreamResponse, error = Status)]
     async fn get_stream_impl(
         metrics: Arc<StreamExchangeServiceMetrics>,
@@ -142,7 +182,9 @@ impl StreamExchangeServiceImpl {
                 Either::Left(permits_to_add) => {
                     permits.add_permits(permits_to_add);
                 }
-                Either::Right(MessageWithPermits { message, permits }) => {
+                Either::Right(MessageWithPermits {
+                    message, permits, ..
+                }) => {
                     let message = match message {
                         DispatcherMessageBatch::Chunk(chunk) => {
                             DispatcherMessageBatch::Chunk(chunk.compact_vis())
@@ -152,6 +194,83 @@ impl StreamExchangeServiceImpl {
                     };
                     let proto = message.to_protobuf();
                     // forward the acquired permit to the downstream
+                    let response = GetStreamResponse {
+                        message: Some(proto),
+                        permits: Some(PbPermits { value: permits }),
+                    };
+                    let bytes = DispatcherMessageBatch::get_encoded_len(&response);
+
+                    yield response;
+
+                    exchange_frag_send_size_metrics.inc_by(bytes as u64);
+                }
+            }
+        }
+    }
+
+    /// Barrier-only stream handler for multiplexed barrier coalescing.
+    ///
+    /// Only forwards coalesced barrier messages (no data). The data flows through
+    /// separate per-actor gRPC streams handled by the standard `get_stream_impl`.
+    #[try_stream(ok = GetStreamResponse, error = Status)]
+    async fn get_barrier_stream_impl(
+        metrics: Arc<StreamExchangeServiceMetrics>,
+        peer_addr: SocketAddr,
+        mut receiver: Receiver,
+        add_permits_stream: impl Stream<Item = std::result::Result<permits::Value, tonic::Status>>,
+        up_down_fragment_ids: (FragmentId, FragmentId),
+    ) {
+        tracing::debug!(
+            target: "events::compute::exchange",
+            peer_addr = %peer_addr,
+            "serve barrier-only stream exchange RPC"
+        );
+        let up_fragment_id = up_down_fragment_ids.0.to_string();
+        let down_fragment_id = up_down_fragment_ids.1.to_string();
+
+        let permits = receiver.permits();
+
+        let select_stream = futures::stream::select(
+            add_permits_stream.map_ok(Either::Left),
+            #[try_stream]
+            async move {
+                while let Some(m) = receiver.recv_raw().await {
+                    yield Either::Right(m);
+                }
+            },
+        );
+        pin_mut!(select_stream);
+
+        let exchange_frag_send_size_metrics = metrics
+            .stream_fragment_exchange_bytes
+            .with_label_values(&[&up_fragment_id, &down_fragment_id]);
+
+        while let Some(r) = select_stream.try_next().await? {
+            match r {
+                Either::Left(permits_to_add) => {
+                    permits.add_permits(permits_to_add);
+                }
+                Either::Right(MessageWithPermits {
+                    message,
+                    permits,
+                    coalesced_actor_ids,
+                    actor_data_counts,
+                }) => {
+                    let mut proto = message.to_protobuf();
+
+                    // Embed coalesced metadata into the protobuf.
+                    use risingwave_pb::stream_plan::stream_message_batch::StreamMessageBatch as SmBatch;
+                    if let Some(SmBatch::BarrierBatch(bb)) = proto.stream_message_batch.as_mut() {
+                        bb.coalesced_actor_ids = coalesced_actor_ids
+                            .into_iter()
+                            .map(|id| id.as_raw_id())
+                            .collect();
+                        bb.actor_data_counts = actor_data_counts
+                            .into_iter()
+                            .map(|(k, v)| (k.as_raw_id(), v))
+                            .collect();
+                    }
+
                     let response = GetStreamResponse {
                         message: Some(proto),
                         permits: Some(PbPermits { value: permits }),
