@@ -12003,6 +12003,8 @@ dependencies = [
  "chrono",
  "chrono-tz",
  "constant_time_eq 0.4.2",
+ "crc32c",
+ "crc32fast",
  "criterion",
  "educe",
  "expect-test",
