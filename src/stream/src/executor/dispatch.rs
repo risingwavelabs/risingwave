@@ -130,9 +130,10 @@ impl DispatchExecutorInner {
                     Output::new(downstream_actor, tx)
                 }
                 NewOutputRequest::CoalescedBarrierRemote {
+                    upstream_actor_id,
                     data_tx,
                     barrier_tx,
-                } => Output::new_coalesced_barrier(downstream_actor, data_tx, barrier_tx),
+                } => Output::new_coalesced_barrier(upstream_actor_id, data_tx, barrier_tx),
             }
         }
         let mut outputs = Vec::with_capacity(downstream_actors.len());

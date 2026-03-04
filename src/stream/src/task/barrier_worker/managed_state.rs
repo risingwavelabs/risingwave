@@ -883,6 +883,7 @@ impl PartialGraphState {
                 _ => unreachable!("create_multiplexed_output always returns CoalescedBarrier"),
             };
             let request = NewOutputRequest::CoalescedBarrierRemote {
+                upstream_actor_id: actor_id,
                 data_tx,
                 barrier_tx,
             };

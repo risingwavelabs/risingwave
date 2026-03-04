@@ -1172,8 +1172,10 @@ pub(crate) enum NewOutputRequest {
     Local(permit::Sender),
     Remote(permit::Sender),
     /// Coalesced barrier remote output: data goes through `data_tx`, barriers go to coalescer
-    /// via `barrier_tx`.
+    /// via `barrier_tx`. The `upstream_actor_id` identifies this actor in the coalescer (which
+    /// is keyed by upstream actor IDs, not downstream).
     CoalescedBarrierRemote {
+        upstream_actor_id: ActorId,
         data_tx: permit::Sender,
         barrier_tx:
             tokio::sync::mpsc::UnboundedSender<(ActorId, crate::executor::DispatcherBarrier, u64)>,
