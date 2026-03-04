@@ -2031,10 +2031,12 @@ where
                 let should_filter =  match watermark_type {
                     WatermarkSerdeType::PkPrefix => unreachable!(),
                     WatermarkSerdeType::NonPkPrefix => {
+                        let table_key = TableKey(pk);
+                        let (vnode, key) = table_key.split_vnode();
                         let pk_cols = self.pk_serde
-                        .deserialize(&pk)
+                        .deserialize(key)
                         .unwrap_or_else(|e| {
-                            panic!("Failed to deserialize table {} pk {:?} error: {:?}", self.table_id(), pk, e.as_report());
+                            panic!("Failed to deserialize table {} vnode {:?} key {:?} error: {:?}", self.table_id(), vnode, key, e.as_report());
                         });
                         direction.datum_filter_by_watermark(
                             pk_cols.datum_at(clean_watermark_index_in_pk.unwrap()),
