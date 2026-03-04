@@ -26,6 +26,45 @@ pub enum MetaBackend {
     Mysql,
 }
 
+/// Compression algorithm for hummock version checkpoint serialization.
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+#[repr(i32)]
+pub enum CheckpointCompression {
+    /// No compression.
+    ///
+    /// NOTE: The numeric values are aligned with protobuf `CheckpointCompressionAlgorithm`.
+    None = 0,
+    /// Zstd compression (default, good balance between ratio and speed).
+    #[default]
+    Zstd = 1,
+    /// Lz4 compression (faster but lower ratio).
+    Lz4 = 2,
+}
+
+#[cfg(test)]
+mod tests {
+    use risingwave_pb::hummock::CheckpointCompressionAlgorithm;
+
+    use super::CheckpointCompression;
+
+    #[test]
+    fn checkpoint_compression_numeric_values_align_with_pb() {
+        assert_eq!(
+            CheckpointCompression::None as i32,
+            CheckpointCompressionAlgorithm::CheckpointCompressionUnspecified as i32
+        );
+        assert_eq!(
+            CheckpointCompression::Zstd as i32,
+            CheckpointCompressionAlgorithm::CheckpointCompressionZstd as i32
+        );
+        assert_eq!(
+            CheckpointCompression::Lz4 as i32,
+            CheckpointCompressionAlgorithm::CheckpointCompressionLz4 as i32
+        );
+    }
+}
+
 #[derive(Copy, Clone, Debug, Default)]
 pub enum DefaultParallelism {
     #[default]
@@ -134,6 +173,10 @@ pub struct MetaConfig {
     /// Interval of hummock version checkpoint.
     #[serde(default = "default::meta::hummock_version_checkpoint_interval_sec")]
     pub hummock_version_checkpoint_interval_sec: u64,
+
+    /// Compression algorithm for hummock version checkpoint.
+    #[serde(default)]
+    pub checkpoint_compression_algorithm: CheckpointCompression,
 
     /// If enabled, `SSTable` object file and version delta will be retained.
     ///

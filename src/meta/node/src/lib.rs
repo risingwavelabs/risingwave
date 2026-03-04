@@ -393,6 +393,7 @@ pub fn start(
                     .meta
                     .hummock_version_checkpoint_interval_sec,
                 enable_hummock_data_archive: config.meta.enable_hummock_data_archive,
+                checkpoint_compression_algorithm: config.meta.checkpoint_compression_algorithm,
                 hummock_time_travel_snapshot_interval: config
                     .meta
                     .hummock_time_travel_snapshot_interval,

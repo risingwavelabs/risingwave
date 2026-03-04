@@ -24,6 +24,7 @@ vacuum_interval_sec = 30
 vacuum_spin_interval_ms = 100
 iceberg_gc_interval_sec = 3600
 hummock_version_checkpoint_interval_sec = 30
+checkpoint_compression_algorithm = "zstd"
 enable_hummock_data_archive = false
 hummock_time_travel_snapshot_interval = 100
 min_delta_log_num_for_hummock_version_checkpoint = 10

@@ -373,6 +373,8 @@ enum CheckpointCompressionAlgorithm {
 message HummockVersionCheckpointEnvelope {
   CheckpointCompressionAlgorithm compression_algorithm = 1;
   bytes payload = 2;
+  // xxhash64 checksum of the payload bytes (compressed data) for integrity verification.
+  optional uint64 checksum = 3;
 }
 
 message HummockVersionArchive {
