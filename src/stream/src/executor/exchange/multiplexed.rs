@@ -370,7 +370,10 @@ async fn run_counting_merge(
                 continue;
             }
             Err(tokio::sync::mpsc::error::TryRecvError::Disconnected) => {
-                return Ok(());
+                // Barrier channel disconnected unexpectedly (e.g., run_barrier_receiver
+                // failed due to gRPC error). Return an error so the MergeExecutor can
+                // trigger recovery, rather than silently closing the stream.
+                return Err(ExchangeChannelClosed::remote_input(actor_id, None).into());
             }
             Err(tokio::sync::mpsc::error::TryRecvError::Empty) => {}
         }
@@ -388,7 +391,10 @@ async fn run_counting_merge(
                         pending_barrier = Some((barrier, expected_count));
                     }
                 }
-                None => return Ok(()),
+                None => {
+                    // Barrier channel disconnected unexpectedly.
+                    return Err(ExchangeChannelClosed::remote_input(actor_id, None).into());
+                }
             },
             FutEither::Right((msg, _)) => match msg {
                 Some(Ok(msg)) => {
@@ -420,6 +426,32 @@ impl Input for CountingMergeInput {
     }
 }
 
+/// Distribute a barrier to per-actor channels, removing actors whose channels have
+/// been closed. Returns `true` if all actors have been removed (caller should terminate).
+fn distribute_barrier_to_actors(
+    barrier: &DispatcherBarrier,
+    actor_data_counts: &HashMap<u32, u64>,
+    actor_barrier_txs: &mut HashMap<ActorId, mpsc::UnboundedSender<(DispatcherBarrier, u64)>>,
+) -> bool {
+    let mut closed_actors = Vec::new();
+    for (&actor_id_raw, &expected_count) in actor_data_counts {
+        let actor_id: ActorId = actor_id_raw.into();
+        if let Some(tx) = actor_barrier_txs.get(&actor_id)
+            && tx.send((barrier.clone(), expected_count)).is_err()
+        {
+            closed_actors.push(actor_id);
+        }
+    }
+    for id in &closed_actors {
+        tracing::info!(
+            actor_id = %id,
+            "removing closed actor from barrier receiver"
+        );
+        actor_barrier_txs.remove(id);
+    }
+    actor_barrier_txs.is_empty()
+}
+
 /// Background task that reads coalesced barriers from a barrier-only gRPC stream
 /// and distributes them to per-actor `CountingMergeInput` channels.
 ///
@@ -434,7 +466,7 @@ impl Input for CountingMergeInput {
 pub async fn run_barrier_receiver(
     stream: tonic::Streaming<GetStreamResponse>,
     permits_tx: mpsc::UnboundedSender<permits::Value>,
-    actor_barrier_txs: HashMap<ActorId, mpsc::UnboundedSender<(DispatcherBarrier, u64)>>,
+    mut actor_barrier_txs: HashMap<ActorId, mpsc::UnboundedSender<(DispatcherBarrier, u64)>>,
     up_down_frag: UpDownFragmentIds,
     metrics: Arc<StreamingMetrics>,
     batched_permits_limit: usize,
@@ -503,17 +535,17 @@ pub async fn run_barrier_receiver(
                                 Ok(())
                             })?;
 
-                        // Distribute to each actor's `CountingMergeInput`.
-                        for (&actor_id_raw, &expected_count) in &bb.actor_data_counts {
-                            let actor_id: ActorId = actor_id_raw.into();
-                            if let Some(tx) = actor_barrier_txs.get(&actor_id)
-                                && tx.send((barrier.clone(), expected_count)).is_err()
-                            {
-                                tracing::warn!(
-                                    %actor_id,
-                                    "actor barrier channel closed in run_barrier_receiver"
-                                );
-                            }
+                        // Distribute to each actor's `CountingMergeInput`,
+                        // removing actors whose channels have been closed.
+                        if distribute_barrier_to_actors(
+                            &barrier,
+                            &bb.actor_data_counts,
+                            &mut actor_barrier_txs,
+                        ) {
+                            tracing::info!(
+                                "all actor barrier channels closed, terminating barrier receiver"
+                            );
+                            return Ok(());
                         }
                     }
                     other => {
@@ -884,6 +916,115 @@ mod tests {
             msg.message,
             DispatcherMessageBatch::BarrierBatch(_)
         ));
+    }
+
+    /// Test that `CountingMergeInput` returns an **error** (not `None`) when the barrier
+    /// channel disconnects unexpectedly. This simulates `run_barrier_receiver` failing
+    /// (e.g., gRPC broken pipe).
+    ///
+    /// Without the fix, `run_counting_merge` returns `Ok(())` on `barrier_rx` disconnect,
+    /// making the stream end with `None`. This is incorrect: the data channel may still be
+    /// active, so the `MergeExecutor` would incorrectly believe this input has ended normally
+    /// instead of triggering error recovery.
+    ///
+    /// Regression test for: barrier_rx disconnect must be an error, not silent stream end.
+    #[tokio::test]
+    async fn test_counting_merge_input_errors_on_barrier_disconnect() {
+        let (barrier_tx, barrier_rx) = mpsc::unbounded_channel();
+        let (mut counting, _data_tx) = make_counting_input(aid(42), barrier_rx);
+
+        // Drop barrier_tx to simulate run_barrier_receiver failure.
+        drop(barrier_tx);
+
+        // The CountingMergeInput should return an error, not None.
+        let result = counting.next().await;
+
+        // Fixed code: Some(Err(_)) — barrier channel disconnected is an error.
+        // Buggy code: None — silently closes the stream (test fails).
+        assert!(
+            matches!(result, Some(Err(_))),
+            "CountingMergeInput should return error when barrier channel disconnects, \
+             got None (silent stream close)"
+        );
+    }
+
+    /// Test that `CountingMergeInput` returns an error when the barrier channel disconnects
+    /// while data is actively flowing. This is a realistic scenario: data arrives normally,
+    /// but the barrier receiver task has failed, so no barrier will ever come.
+    ///
+    /// Without the fix, after yielding buffered data, the next poll returns `None` instead
+    /// of `Err`, causing the `MergeExecutor` to see a normal input end.
+    #[tokio::test]
+    async fn test_counting_merge_input_errors_on_barrier_disconnect_with_data() {
+        let (barrier_tx, barrier_rx) = mpsc::unbounded_channel();
+        let (mut counting, data_tx) = make_counting_input(aid(42), barrier_rx);
+
+        // Send data while barrier_tx is still alive.
+        data_tx
+            .send(DispatcherMessage::Chunk(StreamChunk::default()))
+            .unwrap();
+
+        // Read the data message (barrier_tx still alive, so try_recv → Empty, not Disconnected).
+        let msg = counting.next().await.unwrap().unwrap();
+        assert!(matches!(msg, DispatcherMessage::Chunk(_)));
+
+        // NOW drop barrier_tx to simulate run_barrier_receiver failure.
+        drop(barrier_tx);
+
+        // Next poll: try_recv → Disconnected. Should be an error.
+        let result = counting.next().await;
+        assert!(
+            matches!(result, Some(Err(_))),
+            "CountingMergeInput should return error when barrier channel disconnects mid-stream"
+        );
+    }
+
+    /// Test the barrier distribution helper: closed actor channels are removed, and
+    /// the function returns `true` when all actors are gone.
+    #[test]
+    fn test_distribute_barrier_removes_closed_actors() {
+        let (tx1, mut rx1) = mpsc::unbounded_channel();
+        let (tx2, rx2) = mpsc::unbounded_channel();
+
+        let mut txs: HashMap<ActorId, mpsc::UnboundedSender<(Barrier, u64)>> = HashMap::new();
+        txs.insert(aid(1), tx1);
+        txs.insert(aid(2), tx2);
+
+        // Close actor 2's receiving end.
+        drop(rx2);
+
+        let counts: HashMap<u32, u64> = [(1, 5), (2, 3)].into_iter().collect();
+        let all_closed = distribute_barrier_to_actors(&test_barrier(1), &counts, &mut txs);
+
+        // Actor 2 should be removed, actor 1 remains.
+        assert!(!all_closed);
+        assert_eq!(txs.len(), 1);
+        assert!(txs.contains_key(&aid(1)));
+
+        // Actor 1 should have received the barrier with correct count.
+        let (_, count) = rx1.try_recv().unwrap();
+        assert_eq!(count, 5);
+    }
+
+    /// Test that barrier distribution returns `true` (all closed) when all actors are gone.
+    #[test]
+    fn test_distribute_barrier_all_actors_closed() {
+        let (tx1, rx1) = mpsc::unbounded_channel();
+        let (tx2, rx2) = mpsc::unbounded_channel();
+
+        let mut txs: HashMap<ActorId, mpsc::UnboundedSender<(Barrier, u64)>> = HashMap::new();
+        txs.insert(aid(1), tx1);
+        txs.insert(aid(2), tx2);
+
+        // Close both receiving ends.
+        drop(rx1);
+        drop(rx2);
+
+        let counts: HashMap<u32, u64> = [(1, 5), (2, 3)].into_iter().collect();
+        let all_closed = distribute_barrier_to_actors(&test_barrier(1), &counts, &mut txs);
+
+        assert!(all_closed);
+        assert!(txs.is_empty());
     }
 
     /// Regression test: if `Output::CoalescedBarrier` is constructed with the wrong `actor_id`
