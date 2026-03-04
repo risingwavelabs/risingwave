@@ -478,11 +478,7 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
         );
 
         let extra_attributes = &settings.extra_tracing_attributes;
-        if extra_attributes.is_empty() {
-            println!(
-                "no extra tracing resource attributes configured (set RW_TRACING_EXTRA_ATTRIBUTES to add custom attributes)"
-            );
-        } else {
+        if !extra_attributes.is_empty() {
             println!(
                 "extra tracing resource attributes: {:?}",
                 extra_attributes
