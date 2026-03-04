@@ -111,7 +111,8 @@ impl DeleteExecutor {
 
         let table_dml_handle = self
             .dml_manager
-            .table_dml_handle(self.table_id, self.table_version_id)?;
+            .table_dml_handle_with_retry(self.table_id, self.table_version_id)
+            .await?;
         assert_eq!(
             table_dml_handle
                 .column_descs()

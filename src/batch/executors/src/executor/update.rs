@@ -114,7 +114,8 @@ impl UpdateExecutor {
     async fn do_execute(self: Box<Self>) {
         let table_dml_handle = self
             .dml_manager
-            .table_dml_handle(self.table_id, self.table_version_id)?;
+            .table_dml_handle_with_retry(self.table_id, self.table_version_id)
+            .await?;
 
         let data_types = table_dml_handle
             .column_descs()
