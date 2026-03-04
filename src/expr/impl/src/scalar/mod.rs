@@ -41,6 +41,7 @@ mod cmp;
 mod coalesce;
 mod concat;
 mod concat_op;
+mod crc;
 mod concat_ws;
 mod conjunction;
 mod date_bin;
