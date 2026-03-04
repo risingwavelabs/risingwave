@@ -196,7 +196,7 @@ mysql_async = { version = "0.36", features = [
 opendal = "0.53"
 opentelemetry = "0.31"
 opentelemetry-otlp = { version = "0.31", features = ["grpc-tonic"] }
-opentelemetry-semantic-conventions = "0.16"
+opentelemetry-semantic-conventions = "0.31"
 opentelemetry_sdk = { version = "0.31", default-features = false, features = ["trace"] }
 otlp-embedded = "0.0.2"
 parking_lot = { version = "0.12", features = [
