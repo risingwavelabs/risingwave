@@ -138,8 +138,8 @@ enum HummockCommands {
         #[clap(short, long = "table-id", default_value_t = 0)]
         table_id: u32,
 
-        #[clap(short, long = "level", default_value_t = 1)]
-        level: u32,
+        #[clap(short, long = "level", value_delimiter = ',', default_values_t = vec![1u32])]
+        levels: Vec<u32>,
 
         #[clap(short, long = "sst-ids", value_delimiter = ',')]
         sst_ids: Vec<HummockSstableId>,
@@ -680,14 +680,14 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
         Commands::Hummock(HummockCommands::TriggerManualCompaction {
             compaction_group_id,
             table_id,
-            level,
+            levels,
             sst_ids,
         }) => {
             cmd_impl::hummock::trigger_manual_compaction(
                 context,
                 compaction_group_id,
                 table_id.into(),
-                level,
+                levels,
                 sst_ids,
             )
             .await?

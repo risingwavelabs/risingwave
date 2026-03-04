@@ -408,7 +408,7 @@ impl Cluster {
 }
 
 #[cfg_attr(not(madsim), allow(dead_code))]
-async fn start_ctl<S, I>(args: I) -> Result<()>
+pub(crate) async fn start_ctl<S, I>(args: I) -> Result<()>
 where
     S: Into<OsString>,
     I: IntoIterator<Item = S>,
