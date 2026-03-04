@@ -52,7 +52,7 @@ use risingwave_pb::expr::{PbExprNode, expr_node};
 use risingwave_pb::meta::object::PbObjectInfo;
 use risingwave_pb::meta::subscribe_response::Info as NotificationInfo;
 use risingwave_pb::meta::{
-    ObjectDependency as PbObjectDependency, PbFragmentWorkerMapping, PbObject, PbObjectGroup,
+    ObjectDependency as PbObjectDependency, PbFragmentWorkerSlotMapping, PbObject, PbObjectGroup,
 };
 use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
 use risingwave_pb::plan_common::{ColumnCatalog, DefaultColumnDesc};
@@ -1673,7 +1673,7 @@ pub fn resolve_no_shuffle_actor_dispatcher(
     }
 }
 
-pub fn rebuild_fragment_mapping(fragment: &SharedFragmentInfo) -> PbFragmentWorkerMapping {
+pub fn rebuild_fragment_mapping(fragment: &SharedFragmentInfo) -> PbFragmentWorkerSlotMapping {
     let fragment_worker_mapping = match fragment.distribution_type {
         DistributionType::Single => {
             let actor = fragment.actors.values().exactly_one().unwrap();
@@ -1706,7 +1706,7 @@ pub fn rebuild_fragment_mapping(fragment: &SharedFragmentInfo) -> PbFragmentWork
         }
     };
 
-    PbFragmentWorkerMapping {
+    PbFragmentWorkerSlotMapping {
         fragment_id: fragment.fragment_id,
         mapping: Some(fragment_worker_mapping.to_protobuf()),
     }

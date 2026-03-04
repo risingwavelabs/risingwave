@@ -123,15 +123,15 @@ where
             Info::HummockStats(_) => true,
             Info::Recovery(_) => true,
             Info::ClusterResource(_) => true,
-            Info::StreamingWorkerMapping(_) => {
+            Info::StreamingWorkerSlotMapping(_) => {
                 notification.version
                     > info
                         .version
                         .as_ref()
                         .unwrap()
-                        .streaming_worker_mapping_version
+                        .streaming_worker_slot_mapping_version
             }
-            Info::ServingWorkerMappings(_) => true,
+            Info::ServingWorkerSlotMappings(_) => true,
         });
 
         self.observer_states

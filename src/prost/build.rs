@@ -616,7 +616,7 @@ for_all_wrapped_id_fields! (
         FragmentToRelationMap {
             fragment_to_relation_map: FragmentId->JobId,
         }
-        FragmentWorkerMapping {
+        FragmentWorkerSlotMapping {
             fragment_id: FragmentId,
         }
         GetActorVnodesRequest {

@@ -30,7 +30,7 @@ use risingwave_pb::common::{WorkerNode, WorkerType};
 use risingwave_pb::hummock::{HummockVersionDeltas, HummockVersionStats};
 use risingwave_pb::meta::object::{ObjectInfo, PbObjectInfo};
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
-use risingwave_pb::meta::{FragmentWorkerMapping, MetaSnapshot, SubscribeResponse};
+use risingwave_pb::meta::{FragmentWorkerSlotMapping, MetaSnapshot, SubscribeResponse};
 use risingwave_rpc_client::ComputeClientPoolRef;
 use tokio::sync::watch::Sender;
 
@@ -107,8 +107,8 @@ impl ObserverState for FrontendObserverNode {
             Info::HummockStats(stats) => {
                 self.handle_table_stats_notification(stats);
             }
-            Info::StreamingWorkerMapping(_) => self.handle_fragment_mapping_notification(resp),
-            Info::ServingWorkerMappings(m) => {
+            Info::StreamingWorkerSlotMapping(_) => self.handle_fragment_mapping_notification(resp),
+            Info::ServingWorkerSlotMappings(m) => {
                 self.handle_fragment_serving_mapping_notification(m.mappings, resp.operation())
             }
             Info::Recovery(_) => {
@@ -145,8 +145,8 @@ impl ObserverState for FrontendObserverNode {
             hummock_version,
             meta_backup_manifest_id: _,
             hummock_write_limits: _,
-            streaming_worker_mappings,
-            serving_worker_mappings,
+            streaming_worker_slot_mappings,
+            serving_worker_slot_mappings,
             session_params,
             version,
             secrets,
@@ -195,8 +195,8 @@ impl ObserverState for FrontendObserverNode {
 
         self.worker_node_manager.refresh(
             nodes,
-            convert_worker_mapping(&streaming_worker_mappings, &worker_parallelisms),
-            convert_worker_mapping(&serving_worker_mappings, &worker_parallelisms),
+            convert_worker_mapping(&streaming_worker_slot_mappings, &worker_parallelisms),
+            convert_worker_mapping(&serving_worker_slot_mappings, &worker_parallelisms),
         );
         self.hummock_snapshot_manager
             .init(FrontendHummockVersion::from_protobuf(
@@ -469,7 +469,7 @@ impl FrontendObserverNode {
             return;
         };
         match info {
-            Info::StreamingWorkerMapping(streaming_worker_mapping) => {
+            Info::StreamingWorkerSlotMapping(streaming_worker_mapping) => {
                 let fragment_id = streaming_worker_mapping.fragment_id;
                 let worker_parallelisms =
                     build_worker_parallelisms(&self.worker_node_manager.list_compute_nodes());
@@ -502,7 +502,7 @@ impl FrontendObserverNode {
 
     fn handle_fragment_serving_mapping_notification(
         &mut self,
-        mappings: Vec<FragmentWorkerMapping>,
+        mappings: Vec<FragmentWorkerSlotMapping>,
         op: Operation,
     ) {
         let worker_parallelisms =
@@ -577,13 +577,13 @@ impl FrontendObserverNode {
 }
 
 fn convert_worker_mapping(
-    worker_mappings: &[FragmentWorkerMapping],
+    worker_slot_mappings: &[FragmentWorkerSlotMapping],
     worker_parallelisms: &HashMap<u32, u32>,
 ) -> HashMap<FragmentId, WorkerSlotMapping> {
-    worker_mappings
+    worker_slot_mappings
         .iter()
         .map(
-            |FragmentWorkerMapping {
+            |FragmentWorkerSlotMapping {
                  fragment_id,
                  mapping,
              }| {

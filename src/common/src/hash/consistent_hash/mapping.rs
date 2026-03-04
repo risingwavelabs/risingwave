@@ -19,7 +19,7 @@ use std::ops::Index;
 
 use educe::Educe;
 use itertools::Itertools;
-use risingwave_pb::common::PbWorkerMapping;
+use risingwave_pb::common::PbWorkerSlotMapping;
 use risingwave_pb::stream_plan::ActorMapping as ActorMappingProto;
 
 use super::bitmap::VnodeBitmapExt;
@@ -475,7 +475,7 @@ impl WorkerSlotMapping {
     /// Create a worker mapping from the protobuf representation.
     ///
     /// For legacy payloads that still carry encoded worker slot ids, original slot ids are kept.
-    pub fn from_protobuf(proto: &PbWorkerMapping) -> Self {
+    pub fn from_protobuf(proto: &PbWorkerSlotMapping) -> Self {
         assert_eq!(proto.original_indices.len(), proto.data.len());
         Self {
             original_indices: proto.original_indices.clone(),
@@ -492,7 +492,7 @@ impl WorkerSlotMapping {
     /// This is used by frontend to restore worker-level mapping to synthetic slot-level mapping,
     /// so parallelism remains unchanged after removing worker slot ids from RPC payload.
     pub fn from_protobuf_with_worker_parallelisms(
-        proto: &PbWorkerMapping,
+        proto: &PbWorkerSlotMapping,
         worker_parallelisms: &HashMap<u32, u32>,
     ) -> Self {
         assert_eq!(proto.original_indices.len(), proto.data.len());
@@ -547,8 +547,8 @@ impl WorkerSlotMapping {
     ///
     /// Only worker ids are persisted in protobuf. Slot index is intentionally dropped for
     /// meta/frontend RPC deprecation of worker slot semantics.
-    pub fn to_protobuf(&self) -> PbWorkerMapping {
-        PbWorkerMapping {
+    pub fn to_protobuf(&self) -> PbWorkerSlotMapping {
+        PbWorkerSlotMapping {
             original_indices: self.original_indices.clone(),
             data: self
                 .data
@@ -721,7 +721,7 @@ mod tests {
         let worker_1 = WorkerId::new(1);
         let slot_0 = WorkerSlotId::new(worker_1, 0);
         let slot_3 = WorkerSlotId::new(worker_1, 3);
-        let proto = PbWorkerMapping {
+        let proto = PbWorkerSlotMapping {
             original_indices: vec![0, 1],
             data: vec![u64::from(slot_0), u64::from(slot_3)],
         };

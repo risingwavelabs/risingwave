@@ -117,10 +117,11 @@ message Buffer {
   bytes body = 2;
 }
 
-// Vnode mapping for stream fragments. Stores mapping from virtual node to worker placement.
+// Vnode mapping for stream fragments.
+// Legacy message name is kept for protobuf compatibility.
 // The payload stores worker ids only.
 // Legacy payload may still contain encoded worker slot ids for compatibility.
-message WorkerMapping {
+message WorkerSlotMapping {
   repeated uint32 original_indices = 1;
   repeated uint64 data = 2;
 }

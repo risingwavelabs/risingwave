@@ -21,7 +21,7 @@ use risingwave_common::vnode_mapping::vnode_placement::place_vnode;
 use risingwave_pb::common::{WorkerNode, WorkerType};
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
-use risingwave_pb::meta::{FragmentWorkerMapping, FragmentWorkerMappings};
+use risingwave_pb::meta::{FragmentWorkerSlotMapping, FragmentWorkerSlotMappings};
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
 
@@ -88,10 +88,10 @@ impl ServingVnodeMapping {
 
 pub(crate) fn to_fragment_worker_mapping(
     mappings: &HashMap<FragmentId, WorkerSlotMapping>,
-) -> Vec<FragmentWorkerMapping> {
+) -> Vec<FragmentWorkerSlotMapping> {
     mappings
         .iter()
-        .map(|(&fragment_id, mapping)| FragmentWorkerMapping {
+        .map(|(&fragment_id, mapping)| FragmentWorkerSlotMapping {
             fragment_id,
             mapping: Some(mapping.to_protobuf()),
         })
@@ -100,10 +100,10 @@ pub(crate) fn to_fragment_worker_mapping(
 
 pub(crate) fn to_deleted_fragment_worker_mapping(
     fragment_ids: &[FragmentId],
-) -> Vec<FragmentWorkerMapping> {
+) -> Vec<FragmentWorkerSlotMapping> {
     fragment_ids
         .iter()
-        .map(|&fragment_id| FragmentWorkerMapping {
+        .map(|&fragment_id| FragmentWorkerSlotMapping {
             fragment_id,
             mapping: None,
         })
@@ -135,7 +135,7 @@ pub async fn on_meta_start(
     }
     notification_manager.notify_frontend_without_version(
         Operation::Snapshot,
-        Info::ServingWorkerMappings(FragmentWorkerMappings {
+        Info::ServingWorkerSlotMappings(FragmentWorkerSlotMappings {
             mappings: to_fragment_worker_mapping(&mappings),
         }),
     );
@@ -200,7 +200,7 @@ pub fn start_serving_vnode_mapping_worker(
             }
             notification_manager.notify_frontend_without_version(
                 Operation::Snapshot,
-                Info::ServingWorkerMappings(FragmentWorkerMappings {
+                Info::ServingWorkerSlotMappings(FragmentWorkerSlotMappings {
                     mappings: to_fragment_worker_mapping(&mappings),
                 }),
             );
@@ -242,11 +242,11 @@ pub fn start_serving_vnode_mapping_worker(
                                     let (upserted, failed) = serving_vnode_mapping.upsert(filtered_streaming_parallelisms, &workers, max_serving_parallelism);
                                     if !upserted.is_empty() {
                                         tracing::debug!("Update serving vnode mapping for fragments {:?}.", upserted.keys());
-                                        notification_manager.notify_frontend_without_version(Operation::Update, Info::ServingWorkerMappings(FragmentWorkerMappings{ mappings: to_fragment_worker_mapping(&upserted) }));
+                                        notification_manager.notify_frontend_without_version(Operation::Update, Info::ServingWorkerSlotMappings(FragmentWorkerSlotMappings{ mappings: to_fragment_worker_mapping(&upserted) }));
                                     }
                                     if !failed.is_empty() {
                                         tracing::warn!("Fail to update serving vnode mapping for fragments {:?}.", failed);
-                                        notification_manager.notify_frontend_without_version(Operation::Delete, Info::ServingWorkerMappings(FragmentWorkerMappings{ mappings: to_deleted_fragment_worker_mapping(&failed)}));
+                                        notification_manager.notify_frontend_without_version(Operation::Delete, Info::ServingWorkerSlotMappings(FragmentWorkerSlotMappings{ mappings: to_deleted_fragment_worker_mapping(&failed)}));
                                     }
                                 }
                                 LocalNotification::FragmentMappingsDelete(fragment_ids) => {
@@ -255,7 +255,7 @@ pub fn start_serving_vnode_mapping_worker(
                                     }
                                     tracing::debug!("Delete serving vnode mapping for fragments {:?}.", fragment_ids);
                                     serving_vnode_mapping.remove(&fragment_ids);
-                                    notification_manager.notify_frontend_without_version(Operation::Delete, Info::ServingWorkerMappings(FragmentWorkerMappings{ mappings: to_deleted_fragment_worker_mapping(&fragment_ids) }));
+                                    notification_manager.notify_frontend_without_version(Operation::Delete, Info::ServingWorkerSlotMappings(FragmentWorkerSlotMappings{ mappings: to_deleted_fragment_worker_mapping(&fragment_ids) }));
                                 }
                                 _ => {}
                             }
