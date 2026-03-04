@@ -32,9 +32,7 @@ use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::row_serde::OrderedRowSerde;
 use risingwave_common::util::value_encoding;
-use risingwave_common::util::value_encoding::{
-    BasicSerde, ValueRowDeserializer, ValueRowSerializer,
-};
+use risingwave_common::util::value_encoding::{BasicSerde, ValueRowSerializer};
 use risingwave_connector::sink::log_store::LogStoreResult;
 use risingwave_hummock_sdk::HummockEpoch;
 use risingwave_hummock_sdk::key::{TableKey, next_key};
@@ -377,7 +375,11 @@ impl LogStoreRowSerde {
 
 impl LogStoreRowSerde {
     fn deserialize(&self, value_bytes: &[u8]) -> value_encoding::Result<(Epoch, LogStoreRowOp)> {
-        let row_data = self.row_serde.deserialize(value_bytes)?;
+        let row_data = self
+            .row_serde
+            .deserializer
+            .deserialize_with_padding(value_bytes)?;
+        let row_data = row_data.as_inner();
 
         let payload_row = OwnedRow::new(row_data[self.pk_info.predefined_column_len()..].to_vec());
         let epoch = Self::decode_epoch(
