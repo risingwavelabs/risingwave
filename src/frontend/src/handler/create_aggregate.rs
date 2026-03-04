@@ -147,6 +147,7 @@ pub async fn handle_create_aggregate(
         is_batched: None,
         created_at_epoch: None,
         created_at_cluster_version: None,
+        // TODO: support secret refs for `CREATE AGGREGATE`.
         secret_refs: Default::default(),
     };
 
