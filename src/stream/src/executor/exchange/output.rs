@@ -46,8 +46,12 @@ pub enum Output {
         /// Per-actor data channel (same type as Direct's ch).
         data_ch: Sender,
         /// Channel to send barriers to the coalescer.
-        /// Tuple: (`actor_id`, barriers, `epoch_msg_count`)
-        barrier_tx: mpsc::UnboundedSender<(ActorId, Vec<DispatcherBarrier>, u64)>,
+        /// Tuple: (`actor_id`, single barrier, `epoch_msg_count`)
+        ///
+        /// Each barrier is sent individually (not as a batch) to ensure the
+        /// coalescer's FIFO queue stays aligned across actors even when different
+        /// actors batch barriers differently via `try_batch_barriers`.
+        barrier_tx: mpsc::UnboundedSender<(ActorId, DispatcherBarrier, u64)>,
         /// Count of data messages (chunks + watermarks) sent in the current epoch.
         epoch_msg_count: u64,
     },
@@ -73,7 +77,7 @@ impl Output {
     pub fn new_coalesced_barrier(
         actor_id: ActorId,
         data_ch: Sender,
-        barrier_tx: mpsc::UnboundedSender<(ActorId, Vec<DispatcherBarrier>, u64)>,
+        barrier_tx: mpsc::UnboundedSender<(ActorId, DispatcherBarrier, u64)>,
     ) -> Self {
         Self::CoalescedBarrier {
             actor_id,
@@ -102,12 +106,30 @@ impl Output {
                 epoch_msg_count,
             } => match message {
                 Message::BarrierBatch(barriers) => {
-                    // Send barriers to the coalescer with the current epoch message count.
-                    let count = *epoch_msg_count;
-                    *epoch_msg_count = 0; // Reset for next epoch.
-                    barrier_tx
-                        .send((*actor_id, barriers, count))
-                        .map_err(|_| ExchangeChannelClosed::output(*actor_id))?;
+                    // Split the barrier batch into individual submissions to the coalescer.
+                    //
+                    // This is critical for correctness: `try_batch_barriers` may batch
+                    // consecutive barriers differently for different actors (e.g., Actor A1
+                    // batches [b1, b2] while Actor A2 sends b1 and b2 separately). If we
+                    // submit the entire batch as one coalescer entry, the FIFO queue pairing
+                    // becomes misaligned between actors, causing wrong epoch-count
+                    // associations and potential deadlocks.
+                    //
+                    // Since barrier batching only groups consecutive barriers with NO data
+                    // between them, the first barrier carries the accumulated data count
+                    // and subsequent barriers carry count=0.
+                    let mut first = true;
+                    for barrier in barriers {
+                        let count = if first {
+                            first = false;
+                            std::mem::take(epoch_msg_count)
+                        } else {
+                            0
+                        };
+                        barrier_tx
+                            .send((*actor_id, barrier, count))
+                            .map_err(|_| ExchangeChannelClosed::output(*actor_id))?;
+                    }
                     Ok(())
                 }
                 msg @ (Message::Chunk(_) | Message::Watermark(_)) => {
