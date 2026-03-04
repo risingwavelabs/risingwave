@@ -514,7 +514,7 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
                 KeyValue::new(resource::SERVICE_VERSION, env!("CARGO_PKG_VERSION")),
                 KeyValue::new(resource::PROCESS_PID, std::process::id().to_string()),
             ];
-            resource_attrs.extend(extra_attributes.clone());
+            resource_attrs.extend(extra_attributes.iter().cloned());
 
             let otel_tracer = TracerProviderBuilder::default()
                 .with_batch_exporter(
