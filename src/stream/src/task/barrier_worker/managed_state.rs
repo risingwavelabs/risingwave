@@ -866,26 +866,19 @@ impl PartialGraphState {
 
         // Create multiplexed output (barrier channel + coalescer + coordinator).
         let barrier_concurrent = config.developer.exchange_concurrent_barriers;
-        let (outputs, coordinator, barrier_rx) =
+        let (channels, coordinator, barrier_rx) =
             create_multiplexed_output(up_actor_ids, data_senders, barrier_concurrent);
 
         // Spawn the coordinator task.
         tokio::spawn(coordinator.run());
 
         // Send CoalescedBarrierRemote output requests to each upstream actor's DispatchExecutor.
-        for (actor_id, output) in outputs {
-            let (data_tx, barrier_tx) = match output {
-                crate::executor::exchange::output::Output::CoalescedBarrier {
-                    data_ch,
-                    barrier_tx,
-                    ..
-                } => (data_ch, barrier_tx),
-                _ => unreachable!("create_multiplexed_output always returns CoalescedBarrier"),
-            };
+        for chs in channels {
+            let actor_id = chs.upstream_actor_id;
             let request = NewOutputRequest::CoalescedBarrierRemote {
-                upstream_actor_id: actor_id,
-                data_tx,
-                barrier_tx,
+                upstream_actor_id: chs.upstream_actor_id,
+                data_tx: chs.data_tx,
+                barrier_tx: chs.barrier_tx,
             };
             if let Some(actor) = self.actor_states.get_mut(&actor_id) {
                 let _ = actor.new_output_request_tx.send((down_actor_id, request));
