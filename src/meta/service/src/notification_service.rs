@@ -26,8 +26,7 @@ use risingwave_pb::hummock::WriteLimits;
 use risingwave_pb::meta::meta_snapshot::SnapshotVersion;
 use risingwave_pb::meta::notification_service_server::NotificationService;
 use risingwave_pb::meta::{
-    FragmentWorkerSlotMapping, GetSessionParamsResponse, MetaSnapshot, SubscribeRequest,
-    SubscribeType,
+    FragmentWorkerMapping, GetSessionParamsResponse, MetaSnapshot, SubscribeRequest, SubscribeType,
 };
 use risingwave_pb::user::UserInfo;
 use tokio::sync::mpsc;
@@ -153,23 +152,23 @@ impl NotificationServiceImpl {
         Ok(decrypted_secrets)
     }
 
-    async fn get_worker_slot_mapping_snapshot(
+    async fn get_worker_mapping_snapshot(
         &self,
-    ) -> MetaResult<(Vec<FragmentWorkerSlotMapping>, NotificationVersion)> {
+    ) -> MetaResult<(Vec<FragmentWorkerMapping>, NotificationVersion)> {
         let mappings = self
             .metadata_manager
             .catalog_controller
-            .get_worker_slot_mappings();
+            .get_worker_mappings();
 
         let notification_version = self.env.notification_manager().current_version().await;
         Ok((mappings, notification_version))
     }
 
-    fn get_serving_vnode_mappings(&self) -> Vec<FragmentWorkerSlotMapping> {
+    fn get_serving_vnode_mappings(&self) -> Vec<FragmentWorkerMapping> {
         self.serving_vnode_mapping
             .all()
             .iter()
-            .map(|(&fragment_id, mapping)| FragmentWorkerSlotMapping {
+            .map(|(&fragment_id, mapping)| FragmentWorkerMapping {
                 fragment_id,
                 mapping: Some(mapping.to_protobuf()),
             })
@@ -258,18 +257,18 @@ impl NotificationServiceImpl {
         // Use the plain text secret value for frontend. The secret value will be masked in frontend handle.
         let decrypted_secrets = self.decrypt_secrets(secrets)?;
 
-        let (streaming_worker_slot_mappings, streaming_worker_slot_mapping_version) =
-            self.get_worker_slot_mapping_snapshot().await?;
+        let (streaming_worker_mappings, streaming_worker_mapping_version) =
+            self.get_worker_mapping_snapshot().await?;
 
         let streaming_job_count = self.metadata_manager.count_streaming_job().await?;
-        if streaming_job_count > 0 && streaming_worker_slot_mappings.is_empty() {
+        if streaming_job_count > 0 && streaming_worker_mappings.is_empty() {
             tracing::warn!(
                 streaming_job_count,
-                "frontend subscribe returns empty streaming_worker_slot_mappings while streaming jobs exist; meta may still be recovering"
+                "frontend subscribe returns empty streaming_worker_mappings while streaming jobs exist; meta may still be recovering"
             );
         }
 
-        let serving_worker_slot_mappings = self.get_serving_vnode_mappings();
+        let serving_worker_mappings = self.get_serving_vnode_mappings();
 
         let (nodes, worker_node_version) = self.get_worker_node_snapshot().await?;
 
@@ -311,10 +310,10 @@ impl NotificationServiceImpl {
             version: Some(SnapshotVersion {
                 catalog_version,
                 worker_node_version,
-                streaming_worker_slot_mapping_version,
+                streaming_worker_mapping_version,
             }),
-            serving_worker_slot_mappings,
-            streaming_worker_slot_mappings,
+            serving_worker_mappings,
+            streaming_worker_mappings,
             session_params,
             object_dependencies,
             cluster_resource: Some(cluster_resource),

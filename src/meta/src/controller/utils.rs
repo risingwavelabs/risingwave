@@ -52,7 +52,7 @@ use risingwave_pb::expr::{PbExprNode, expr_node};
 use risingwave_pb::meta::object::PbObjectInfo;
 use risingwave_pb::meta::subscribe_response::Info as NotificationInfo;
 use risingwave_pb::meta::{
-    ObjectDependency as PbObjectDependency, PbFragmentWorkerSlotMapping, PbObject, PbObjectGroup,
+    ObjectDependency as PbObjectDependency, PbFragmentWorkerMapping, PbObject, PbObjectGroup,
 };
 use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
 use risingwave_pb::plan_common::{ColumnCatalog, DefaultColumnDesc};
@@ -1673,8 +1673,8 @@ pub fn resolve_no_shuffle_actor_dispatcher(
     }
 }
 
-pub fn rebuild_fragment_mapping(fragment: &SharedFragmentInfo) -> PbFragmentWorkerSlotMapping {
-    let fragment_worker_slot_mapping = match fragment.distribution_type {
+pub fn rebuild_fragment_mapping(fragment: &SharedFragmentInfo) -> PbFragmentWorkerMapping {
+    let fragment_worker_mapping = match fragment.distribution_type {
         DistributionType::Single => {
             let actor = fragment.actors.values().exactly_one().unwrap();
             WorkerSlotMapping::new_single(WorkerSlotId::new(actor.worker_id as _, 0))
@@ -1706,9 +1706,9 @@ pub fn rebuild_fragment_mapping(fragment: &SharedFragmentInfo) -> PbFragmentWork
         }
     };
 
-    PbFragmentWorkerSlotMapping {
+    PbFragmentWorkerMapping {
         fragment_id: fragment.fragment_id,
-        mapping: Some(fragment_worker_slot_mapping.to_protobuf()),
+        mapping: Some(fragment_worker_mapping.to_protobuf()),
     }
 }
 

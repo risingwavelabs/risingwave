@@ -15,7 +15,7 @@
 use risingwave_meta::manager::MetadataManager;
 use risingwave_pb::meta::serving_service_server::ServingService;
 use risingwave_pb::meta::{
-    FragmentWorkerSlotMapping, GetServingVnodeMappingsRequest, GetServingVnodeMappingsResponse,
+    FragmentWorkerMapping, GetServingVnodeMappingsRequest, GetServingVnodeMappingsResponse,
 };
 use tonic::{Request, Response, Status};
 
@@ -48,7 +48,7 @@ impl ServingService for ServingServiceImpl {
             .serving_vnode_mapping
             .all()
             .into_iter()
-            .map(|(fragment_id, mapping)| FragmentWorkerSlotMapping {
+            .map(|(fragment_id, mapping)| FragmentWorkerMapping {
                 fragment_id,
                 mapping: Some(mapping.to_protobuf()),
             })
@@ -62,7 +62,7 @@ impl ServingService for ServingServiceImpl {
             .collect();
         Ok(Response::new(GetServingVnodeMappingsResponse {
             fragment_to_table,
-            worker_slot_mappings: mappings,
+            worker_mappings: mappings,
         }))
     }
 }

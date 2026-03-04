@@ -1696,7 +1696,7 @@ impl MetaClient {
         let req = GetServingVnodeMappingsRequest {};
         let resp = self.inner.get_serving_vnode_mappings(req).await?;
         let mappings = resp
-            .worker_slot_mappings
+            .worker_mappings
             .into_iter()
             .map(|p| {
                 (

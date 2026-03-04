@@ -19,7 +19,7 @@ use std::ops::Index;
 
 use educe::Educe;
 use itertools::Itertools;
-use risingwave_pb::common::PbWorkerSlotMapping;
+use risingwave_pb::common::PbWorkerMapping;
 use risingwave_pb::stream_plan::ActorMapping as ActorMappingProto;
 
 use super::bitmap::VnodeBitmapExt;
@@ -443,25 +443,118 @@ impl ActorMapping {
 }
 
 impl WorkerSlotMapping {
+    /// Decode worker slot id from protobuf payload.
+    ///
+    /// New format stores plain `worker_id` in `data` and will be expanded to slot index `0`.
+    /// Legacy format stores encoded `worker_slot_id` in `data`.
+    fn decode_worker_slot_id(encoded: u64) -> WorkerSlotId {
+        if encoded > u32::MAX as u64 {
+            WorkerSlotId::from(encoded)
+        } else {
+            WorkerSlotId::new(WorkerId::new(encoded as u32), 0)
+        }
+    }
+
+    /// Decode worker id from protobuf payload.
+    ///
+    /// New format stores plain `worker_id` in `data`.
+    /// Legacy format stores encoded `worker_slot_id` in `data`.
+    fn decode_worker_id(encoded: u64) -> WorkerId {
+        if encoded > u32::MAX as u64 {
+            WorkerId::new((encoded >> 32) as u32)
+        } else {
+            WorkerId::new(encoded as u32)
+        }
+    }
+
     /// Create a uniform worker mapping from the given worker ids
     pub fn build_from_ids(worker_slot_ids: &[WorkerSlotId], vnode_count: usize) -> Self {
         Self::new_uniform(worker_slot_ids.iter().cloned(), vnode_count)
     }
 
     /// Create a worker mapping from the protobuf representation.
-    pub fn from_protobuf(proto: &PbWorkerSlotMapping) -> Self {
+    ///
+    /// For legacy payloads that still carry encoded worker slot ids, original slot ids are kept.
+    pub fn from_protobuf(proto: &PbWorkerMapping) -> Self {
         assert_eq!(proto.original_indices.len(), proto.data.len());
         Self {
             original_indices: proto.original_indices.clone(),
-            data: proto.data.iter().map(|&id| WorkerSlotId(id)).collect(),
+            data: proto
+                .data
+                .iter()
+                .map(|&id| Self::decode_worker_slot_id(id))
+                .collect(),
         }
     }
 
+    /// Create a worker mapping from protobuf and explicit per-worker parallelisms.
+    ///
+    /// This is used by frontend to restore worker-level mapping to synthetic slot-level mapping,
+    /// so parallelism remains unchanged after removing worker slot ids from RPC payload.
+    pub fn from_protobuf_with_worker_parallelisms(
+        proto: &PbWorkerMapping,
+        worker_parallelisms: &HashMap<u32, u32>,
+    ) -> Self {
+        assert_eq!(proto.original_indices.len(), proto.data.len());
+
+        if worker_parallelisms.is_empty() {
+            return Self::from_protobuf(proto);
+        }
+
+        let vnode_count = proto
+            .original_indices
+            .last()
+            .map(|idx| *idx as usize + 1)
+            .unwrap_or(0);
+        let mut expanded = Vec::with_capacity(vnode_count);
+        let mut next_slot_idx = HashMap::<WorkerId, u32>::new();
+        let mut left = 0u32;
+
+        for (&right, &encoded_worker) in proto.original_indices.iter().zip_eq(proto.data.iter()) {
+            let worker_id = Self::decode_worker_id(encoded_worker);
+            let parallelism = worker_parallelisms
+                .get(&worker_id.as_raw_id())
+                .copied()
+                .filter(|parallelism| *parallelism > 0)
+                .unwrap_or(1);
+
+            let slot_idx = next_slot_idx.entry(worker_id).or_insert(0);
+            for _ in left..=right {
+                expanded.push(WorkerSlotId::new(
+                    worker_id,
+                    (*slot_idx % parallelism) as usize,
+                ));
+                *slot_idx += 1;
+            }
+            left = right + 1;
+        }
+
+        Self::from_expanded(&expanded)
+    }
+
+    /// Get per-worker parallelisms from the mapping.
+    pub fn worker_parallelisms(&self) -> HashMap<u32, u32> {
+        let mut worker_parallelisms = HashMap::new();
+        for worker_slot in self.iter_unique() {
+            *worker_parallelisms
+                .entry(worker_slot.worker_id().as_raw_id())
+                .or_insert(0) += 1;
+        }
+        worker_parallelisms
+    }
+
     /// Convert this worker mapping to the protobuf representation.
-    pub fn to_protobuf(&self) -> PbWorkerSlotMapping {
-        PbWorkerSlotMapping {
+    ///
+    /// Only worker ids are persisted in protobuf. Slot index is intentionally dropped for
+    /// meta/frontend RPC deprecation of worker slot semantics.
+    pub fn to_protobuf(&self) -> PbWorkerMapping {
+        PbWorkerMapping {
             original_indices: self.original_indices.clone(),
-            data: self.data.iter().map(|id| id.0).collect(),
+            data: self
+                .data
+                .iter()
+                .map(|id| id.worker_id().as_raw_id() as u64)
+                .collect(),
         }
     }
 }
@@ -601,5 +694,39 @@ mod tests {
 
             assert_eq!(vnode_mapping, new_vnode_mapping);
         }
+    }
+
+    #[test]
+    fn test_worker_mapping_restore_parallelisms() {
+        let worker_1 = WorkerId::new(1);
+        let worker_2 = WorkerId::new(2);
+        let mapping = WorkerSlotMapping::from_expanded(&[
+            WorkerSlotId::new(worker_1, 0),
+            WorkerSlotId::new(worker_1, 1),
+            WorkerSlotId::new(worker_1, 0),
+            WorkerSlotId::new(worker_1, 1),
+            WorkerSlotId::new(worker_2, 0),
+            WorkerSlotId::new(worker_2, 0),
+        ]);
+        let worker_parallelisms = mapping.worker_parallelisms();
+        let proto = mapping.to_protobuf();
+
+        let restored =
+            WorkerSlotMapping::from_protobuf_with_worker_parallelisms(&proto, &worker_parallelisms);
+        assert_eq!(restored.worker_parallelisms(), worker_parallelisms);
+    }
+
+    #[test]
+    fn test_worker_mapping_from_legacy_payload() {
+        let worker_1 = WorkerId::new(1);
+        let slot_0 = WorkerSlotId::new(worker_1, 0);
+        let slot_3 = WorkerSlotId::new(worker_1, 3);
+        let proto = PbWorkerMapping {
+            original_indices: vec![0, 1],
+            data: vec![u64::from(slot_0), u64::from(slot_3)],
+        };
+
+        let restored = WorkerSlotMapping::from_protobuf(&proto);
+        assert_eq!(restored.to_expanded(), vec![slot_0, slot_3]);
     }
 }

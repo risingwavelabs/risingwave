@@ -49,7 +49,7 @@ use risingwave_pb::meta::table_fragments::fragment::{
     FragmentDistributionType, PbFragmentDistributionType,
 };
 use risingwave_pb::meta::table_fragments::{PbActorStatus, PbState};
-use risingwave_pb::meta::{FragmentDistribution, PbFragmentWorkerSlotMapping};
+use risingwave_pb::meta::{FragmentDistribution, PbFragmentWorkerMapping};
 use risingwave_pb::source::{ConnectorSplit, PbConnectorSplits};
 use risingwave_pb::stream_plan;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
@@ -177,7 +177,7 @@ impl NotificationManager {
     pub(crate) fn notify_fragment_mapping(
         &self,
         operation: NotificationOperation,
-        fragment_mappings: Vec<PbFragmentWorkerSlotMapping>,
+        fragment_mappings: Vec<PbFragmentWorkerMapping>,
     ) {
         let fragment_ids = fragment_mappings
             .iter()
@@ -190,7 +190,7 @@ impl NotificationManager {
         for fragment_mapping in fragment_mappings {
             self.notify_frontend_without_version(
                 operation,
-                NotificationInfo::StreamingWorkerSlotMapping(fragment_mapping),
+                NotificationInfo::StreamingWorkerMapping(fragment_mapping),
             );
         }
 
@@ -1133,7 +1133,7 @@ impl CatalogController {
         Ok(actor_infos)
     }
 
-    pub fn get_worker_slot_mappings(&self) -> Vec<PbFragmentWorkerSlotMapping> {
+    pub fn get_worker_mappings(&self) -> Vec<PbFragmentWorkerMapping> {
         let guard = self.env.shared_actor_info.read_guard();
         guard
             .iter_over_fragments()

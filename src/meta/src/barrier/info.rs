@@ -31,7 +31,7 @@ use risingwave_meta_model::fragment::DistributionType;
 use risingwave_pb::ddl_service::PbBackfillType;
 use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::id::SubscriberId;
-use risingwave_pb::meta::PbFragmentWorkerSlotMapping;
+use risingwave_pb::meta::PbFragmentWorkerMapping;
 use risingwave_pb::meta::subscribe_response::Operation;
 use risingwave_pb::source::PbCdcTableSnapshotSplits;
 use risingwave_pb::stream_plan::PbUpstreamSinkInfo;
@@ -302,9 +302,9 @@ pub(super) struct SharedActorInfoWriter<'a> {
     database_id: DatabaseId,
     write_guard: parking_lot::RwLockWriteGuard<'a, SharedActorInfosInner>,
     notification_manager: &'a NotificationManagerRef,
-    added_fragment_mapping: Option<Vec<PbFragmentWorkerSlotMapping>>,
-    updated_fragment_mapping: Option<Vec<PbFragmentWorkerSlotMapping>>,
-    deleted_fragment_mapping: Option<Vec<PbFragmentWorkerSlotMapping>>,
+    added_fragment_mapping: Option<Vec<PbFragmentWorkerMapping>>,
+    updated_fragment_mapping: Option<Vec<PbFragmentWorkerMapping>>,
+    deleted_fragment_mapping: Option<Vec<PbFragmentWorkerMapping>>,
 }
 
 impl SharedActorInfoWriter<'_> {

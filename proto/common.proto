@@ -117,8 +117,10 @@ message Buffer {
   bytes body = 2;
 }
 
-// Vnode mapping for stream fragments. Stores mapping from virtual node to (worker id, slot index).
-message WorkerSlotMapping {
+// Vnode mapping for stream fragments. Stores mapping from virtual node to worker placement.
+// The payload stores worker ids only.
+// Legacy payload may still contain encoded worker slot ids for compatibility.
+message WorkerMapping {
   repeated uint32 original_indices = 1;
   repeated uint64 data = 2;
 }
