@@ -164,10 +164,13 @@ impl HummockManager {
                 (group_2, group_1)
             };
 
-        // We can only merge two groups with non-overlapping member table ids
+        // We can only merge two groups with non-overlapping member table ids.
+        // After the swap above, member_table_ids_1 has the smaller first element.
+        // If the last element of member_table_ids_1 >= the first element of member_table_ids_2,
+        // the two groups' table id ranges overlap and cannot be merged.
         if member_table_ids_1.last().unwrap() >= member_table_ids_2.first().unwrap() {
             return Err(Error::CompactionGroup(format!(
-                "invalid merge group_1 {} group_2 {}",
+                "invalid merge group_1 {} group_2 {}: table id ranges overlap",
                 left_group_id, right_group_id
             )));
         }
@@ -305,6 +308,10 @@ impl HummockManager {
                     right_group_max_level,
                 );
             }
+
+            // clean up compaction schedule state for the merged group
+            self.compaction_state
+                .remove_compaction_group(right_group_id);
 
             // clear `partition_vnode_count` for the hybrid group
             {
@@ -893,10 +900,11 @@ impl HummockManager {
         )
         .await?;
 
-        match self
+        let result = self
             .merge_compaction_group(group.group_id, next_group.group_id)
-            .await
-        {
+            .await;
+
+        match &result {
             Ok(()) => {
                 tracing::info!(
                     "merge group-{} to group-{}",
@@ -915,11 +923,11 @@ impl HummockManager {
                     "failed to merge group-{} group-{}",
                     next_group.group_id,
                     group.group_id,
-                )
+                );
             }
         }
 
-        Ok(())
+        result
     }
 }
 
@@ -927,6 +935,29 @@ impl HummockManager {
 struct GroupMergeValidator {}
 
 impl GroupMergeValidator {
+    /// Check if two groups have compatible compaction configs for merging.
+    /// Ignores `split_weight_by_vnode` since it's per-table and will be reset after merge.
+    fn is_merge_compatible_by_semantics(
+        group: &CompactionGroupStatistic,
+        next_group: &CompactionGroupStatistic,
+    ) -> bool {
+        let (mut left, mut right) = (
+            group
+                .compaction_group_config
+                .compaction_config
+                .as_ref()
+                .clone(),
+            next_group
+                .compaction_group_config
+                .compaction_config
+                .as_ref()
+                .clone(),
+        );
+        left.split_weight_by_vnode = 0;
+        right.split_weight_by_vnode = 0;
+        left == right
+    }
+
     /// Check if the table is high write throughput with the given threshold and ratio.
     pub fn is_table_high_write_throughput(
         table_throughput: impl Iterator<Item = &TableWriteThroughputStatistic>,
@@ -1034,6 +1065,27 @@ impl GroupMergeValidator {
             )));
         }
 
+        // Check non-overlapping table ids early to avoid acquiring heavyweight write locks
+        // in merge_compaction_group_impl only to fail at the overlap check.
+        // Sort both sides and ensure table_ids_1 has the smaller first element,
+        // then reject if table_ids_1's last element >= table_ids_2's first element (overlap).
+        {
+            let mut table_ids_1: Vec<TableId> = group.table_statistic.keys().cloned().collect_vec();
+            let mut table_ids_2: Vec<TableId> =
+                next_group.table_statistic.keys().cloned().collect_vec();
+            table_ids_1.sort();
+            table_ids_2.sort();
+            if table_ids_1.first().unwrap() > table_ids_2.first().unwrap() {
+                std::mem::swap(&mut table_ids_1, &mut table_ids_2);
+            }
+            if table_ids_1.last().unwrap() >= table_ids_2.first().unwrap() {
+                return Err(Error::CompactionGroup(format!(
+                    "group-{} and group-{} have overlapping table id ranges, not mergeable",
+                    group.group_id, next_group.group_id
+                )));
+            }
+        }
+
         if group
             .compaction_group_config
             .compaction_config
@@ -1051,18 +1103,9 @@ impl GroupMergeValidator {
             )));
         }
 
-        // Do not merge compaction groups with different compaction configs.
-        // Different configs lead to different max_estimated_group_size calculations,
-        // which can cause scheduling conflicts (continuous split/merge cycles).
-        // The following fields in CompactionConfig affect max_estimated_group_size:
-        //   - max_bytes_for_level_base
-        //   - max_bytes_for_level_multiplier
-        //   - max_compaction_bytes
-        //   - sub_level_max_compaction_bytes
-        // If any of these fields differ, the groups may have incompatible scheduling.
-        if group.compaction_group_config.compaction_config
-            != next_group.compaction_group_config.compaction_config
-        {
+        // Keep merge compatibility as a feature, but ignore split_weight_by_vnode, because it is
+        // only used for per-table split behavior and will be reset after merge.
+        if !Self::is_merge_compatible_by_semantics(group, next_group) {
             let left_config = group.compaction_group_config.compaction_config.as_ref();
             let right_config = next_group
                 .compaction_group_config
@@ -1074,11 +1117,11 @@ impl GroupMergeValidator {
                 next_group_id = %next_group.group_id,
                 left_config = ?left_config,
                 right_config = ?right_config,
-                "compaction config mismatch detected while merging compaction groups"
+                "compaction config semantic mismatch detected while merging compaction groups"
             );
 
             return Err(Error::CompactionGroup(format!(
-                "Cannot merge group {} and next_group {} with different compaction configs. left_config: {:?}, right_config: {:?}",
+                "Cannot merge group {} and next_group {} with different compaction config (split_weight_by_vnode is excluded from comparison). left_config: {:?}, right_config: {:?}",
                 group.group_id, next_group.group_id, left_config, right_config
             )));
         }

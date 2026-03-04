@@ -772,6 +772,15 @@ impl HummockVersionReader {
                         continue;
                     }
                     table_info_idx = table_info_idx.saturating_sub(1);
+
+                    if level.table_infos[table_info_idx]
+                        .table_ids
+                        .binary_search(&table_id)
+                        .is_err()
+                    {
+                        continue;
+                    }
+
                     let ord = level.table_infos[table_info_idx]
                         .key_range
                         .compare_right_with_user_key(full_key.user_key.as_ref());
@@ -1305,5 +1314,115 @@ impl HummockVersionReader {
                 Ok(items)
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::{HashMap, HashSet};
+    use std::sync::Arc;
+
+    use bytes::Bytes;
+    use risingwave_common::catalog::{TableId, TableOption};
+    use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
+    use risingwave_hummock_sdk::key::{FullKey, TableKey};
+    use risingwave_hummock_sdk::key_range::KeyRange;
+    use risingwave_hummock_sdk::level::{Level, Levels, OverlappingLevel};
+    use risingwave_hummock_sdk::sstable_info::SstableInfoInner;
+    use risingwave_hummock_sdk::version::HummockVersion;
+    use risingwave_pb::hummock::{PbHummockVersion, PbLevelType, StateTableInfoDelta};
+    use tokio::sync::mpsc::unbounded_channel;
+
+    use crate::hummock::iterator::test_utils::mock_sstable_store;
+    use crate::hummock::local_version::pinned_version::PinnedVersion;
+    use crate::hummock::store::version::HummockVersionReader;
+    use crate::monitor::HummockStateStoreMetrics;
+    use crate::store::ReadOptions;
+
+    /// In a nonoverlapping level, `search_sst_idx` may locate an SST whose key range covers
+    /// the query user key but whose `table_ids` does not contain the queried table. The get
+    /// path must skip such SSTs instead of reading them.
+    #[tokio::test]
+    async fn test_get_skips_sst_by_table_id_filter() {
+        let query_table_id = TableId::new(100);
+        let epoch: u64 = (31 * 1000) << 16;
+        let compaction_group_id = StaticCompactionGroupId::StateDefault;
+
+        // SST key range: table_id 50..150, but table_ids = [50, 150] (no 100).
+        let sst_info = SstableInfoInner {
+            sst_id: 1.into(),
+            object_id: 1.into(),
+            key_range: KeyRange {
+                left: Bytes::from(
+                    FullKey::for_test(TableId::new(50), b"aaa".to_vec(), epoch).encode(),
+                ),
+                right: Bytes::from(
+                    FullKey::for_test(TableId::new(150), b"zzz".to_vec(), epoch).encode(),
+                ),
+                right_exclusive: false,
+            },
+            table_ids: vec![TableId::new(50), TableId::new(150)],
+            file_size: 1024,
+            ..Default::default()
+        }
+        .into();
+
+        let level = Level {
+            level_idx: 1,
+            level_type: PbLevelType::Nonoverlapping,
+            table_infos: vec![sst_info],
+            total_file_size: 0,
+            sub_level_id: 0,
+            uncompressed_file_size: 0,
+            vnode_partition_count: 0,
+        };
+
+        #[allow(deprecated)]
+        let levels = Levels {
+            levels: vec![level],
+            l0: OverlappingLevel::default(),
+            group_id: compaction_group_id,
+            parent_group_id: compaction_group_id,
+            member_table_ids: vec![],
+            compaction_group_version_id: 0,
+        };
+
+        let mut version = HummockVersion::from_persisted_protobuf(&PbHummockVersion {
+            id: 1u64.into(),
+            ..Default::default()
+        });
+        version.levels.insert(compaction_group_id, levels);
+        version.state_table_info.apply_delta(
+            &HashMap::from([(
+                query_table_id,
+                StateTableInfoDelta {
+                    committed_epoch: epoch,
+                    compaction_group_id,
+                },
+            )]),
+            &HashSet::new(),
+        );
+
+        let pinned_version = PinnedVersion::new(version, unbounded_channel().0);
+        let reader = HummockVersionReader::new(
+            mock_sstable_store().await,
+            Arc::new(HummockStateStoreMetrics::unused()),
+            0,
+        );
+
+        let result = reader
+            .get(
+                TableKey(Bytes::from("test_key")),
+                epoch,
+                query_table_id,
+                TableOption::default(),
+                ReadOptions::default(),
+                (vec![], vec![], pinned_version),
+                |_key, _value| Ok(()),
+            )
+            .await
+            .unwrap();
+
+        assert!(result.is_none());
     }
 }

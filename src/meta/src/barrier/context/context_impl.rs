@@ -438,7 +438,7 @@ impl PostCollectCommand {
                     .apply_source_change(source_change)
                     .await;
             }
-            PostCollectCommand::RescheduleFragment { reschedules, .. } => {
+            PostCollectCommand::Reschedule { reschedules, .. } => {
                 let fragment_splits = reschedules
                     .iter()
                     .map(|(fragment_id, reschedule)| {

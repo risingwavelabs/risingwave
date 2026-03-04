@@ -159,7 +159,7 @@ pub async fn rpc_serve(
         }
     };
 
-    rpc_serve_with_store(
+    Box::pin(rpc_serve_with_store(
         meta_store_impl,
         election_client,
         address_info,
@@ -170,7 +170,7 @@ pub async fn rpc_serve(
         init_system_params,
         init_session_config,
         shutdown,
-    )
+    ))
     .await
 }
 

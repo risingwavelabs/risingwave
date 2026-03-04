@@ -28,21 +28,27 @@ use risingwave_common::array::DataChunk;
 use risingwave_common::array::arrow::IcebergArrowConvert;
 use risingwave_common::catalog::Schema as RwSchema;
 use risingwave_common::error::BoxedError;
+use risingwave_common::util::batch_spill_config::batch_spill_base_dir;
+use thiserror::Error;
 use tokio::sync::mpsc;
 
 use crate::PgResponseStream;
 use crate::datafusion::CastExecutor;
 use crate::datafusion::execute::memory_ctx::RwMemoryPool;
 use crate::datafusion::execute::query_planner::RwCustomQueryPlanner;
-use crate::error::Result as RwResult;
+use crate::error::{Result as RwResult, RwError};
 use crate::handler::RwPgResponse;
 use crate::handler::util::{DataChunkToRowSetAdapter, to_pg_field};
+use crate::optimizer::BatchOptimizedLogicalPlanRoot;
 use crate::scheduler::SchedulerError;
 use crate::session::SessionImpl;
 use crate::utils::DropGuard;
 
 mod memory_ctx;
 mod query_planner;
+
+pub(crate) use memory_ctx::create_df_spillable_budget_ctx;
+const DF_MANAGED_SPILL_DIR: &str = "df_batch_spill/";
 
 #[derive(Clone)]
 pub struct DfBatchQueryPlanResult {
@@ -51,11 +57,45 @@ pub struct DfBatchQueryPlanResult {
     pub(crate) stmt_type: StatementType,
 }
 
+#[derive(Debug, Error)]
+pub enum GenDataFusionPlanError {
+    #[error("Missing Iceberg Scan")]
+    MissingIcebergScan,
+    #[error("Unsupported Plan Node")]
+    UnsupportedPlanNode,
+    #[error("Generating plan error: {0}")]
+    Generating(#[source] RwError),
+}
+
+pub fn try_gen_datafusion_plan(
+    optimized_logical: &BatchOptimizedLogicalPlanRoot,
+) -> Result<Arc<LogicalPlan>, GenDataFusionPlanError> {
+    use crate::optimizer::DataFusionExecuteCheckerExt;
+
+    let check_result = optimized_logical.plan.check_for_datafusion();
+    if !check_result.have_iceberg_scan {
+        return Err(GenDataFusionPlanError::MissingIcebergScan);
+    }
+    if !check_result.supported {
+        return Err(GenDataFusionPlanError::UnsupportedPlanNode);
+    }
+
+    let plan = optimized_logical
+        .gen_datafusion_logical_plan()
+        .map_err(GenDataFusionPlanError::Generating)?;
+    Ok(plan)
+}
+
 pub fn create_datafusion_context(session: &SessionImpl) -> RwResult<DFSessionContext> {
     let df_config = create_config(session);
-    let memory_pool = Arc::new(RwMemoryPool::new(session.env().mem_context()));
+    let memory_pool = Arc::new(RwMemoryPool::new(
+        session.env().mem_context(),
+        session.env().df_spillable_budget_ctx(),
+    ));
+    let temp_path = batch_spill_base_dir().join(DF_MANAGED_SPILL_DIR);
     let runtime = RuntimeEnvBuilder::new()
         .with_memory_pool(memory_pool)
+        .with_temp_file_path(temp_path)
         .build_arc()?;
     let state = SessionStateBuilder::new()
         .with_config(df_config)

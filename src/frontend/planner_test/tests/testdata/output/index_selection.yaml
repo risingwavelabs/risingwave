@@ -991,6 +991,21 @@
         │     └─StreamTableScan { table: t2, columns: [t2.id, t2.t3_id], stream_scan_type: SnapshotBackfill, stream_key: [t2.id], pk: [id], dist: UpstreamHashShard(t2.id) }
         └─StreamExchange { dist: HashShard(t3.id) }
           └─StreamTableScan { table: t3, columns: [t3.id], stream_scan_type: SnapshotBackfill, stream_key: [t3.id], pk: [id], dist: UpstreamHashShard(t3.id) }
+- name: stream index selection with casted group key
+  sql: |
+    create table t (transacttime timestamp, mark_price double precision);
+    create index idx on t (transacttime);
+    select
+      transacttime::date as transact_date,
+      count(*) as cnt
+    from t
+    group by transacttime::date;
+  stream_plan: |-
+    StreamMaterialize { columns: [transact_date, cnt], stream_key: [transact_date], pk_columns: [transact_date], pk_conflict: NoCheck }
+    └─StreamHashAgg { group_key: [$expr1], aggs: [count] }
+      └─StreamExchange { dist: HashShard($expr1) }
+        └─StreamProject { exprs: [idx.transacttime::Date as $expr1, idx.transacttime, idx.t._row_id] }
+          └─StreamTableScan { table: idx, columns: [idx.transacttime, idx.t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [idx.transacttime, idx.t._row_id], pk: [transacttime, t._row_id], dist: UpstreamHashShard(idx.transacttime) }
 - name: topn index selection for scan with output column idx
   sql: |
     create table t (c int, b int, a int);

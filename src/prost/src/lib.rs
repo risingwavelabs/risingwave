@@ -14,6 +14,7 @@
 
 #![allow(unfulfilled_lint_expectations)]
 #![allow(clippy::doc_overindented_list_items)]
+#![allow(clippy::doc_lazy_continuation)]
 // for derived code of `Message`
 #![expect(clippy::doc_markdown)]
 #![expect(clippy::upper_case_acronyms)]
