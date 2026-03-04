@@ -38,7 +38,7 @@ use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
 pub use split_assignment::{SplitDiffOptions, SplitState, reassign_splits};
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
-use tokio::sync::{Mutex, MutexGuard, oneshot};
+use tokio::sync::{Mutex, MutexGuard};
 use tokio::task::JoinHandle;
 use tokio::time::MissedTickBehavior;
 use tokio::{select, time};
@@ -105,58 +105,26 @@ impl SourceManagerCore {
 
     /// Updates states after all kinds of source change.
     pub fn apply_source_change(&mut self, source_change: SourceChange) {
-        let mut added_source_fragments = Default::default();
-        let mut added_backfill_fragments = Default::default();
-        let mut finished_backfill_fragments = Default::default();
-        let mut fragment_replacements = Default::default();
-        let mut dropped_source_fragments = Default::default();
-        let mut dropped_source_ids = Default::default();
-        let mut recreate_source_id_map_new_props: Vec<(SourceId, HashMap<String, String>)> =
-            Default::default();
+        let SourceChangeSet {
+            added_source_fragments,
+            added_backfill_fragments,
+            finished_backfill_fragments,
+            fragment_replacements,
+            dropped_source_fragments,
+            dropped_source_ids,
+            recreate_source_id_map_new_props,
+        } = SourceChangeSet::from(source_change);
 
-        match source_change {
-            SourceChange::CreateJob {
-                added_source_fragments: added_source_fragments_,
-                added_backfill_fragments: added_backfill_fragments_,
-            } => {
-                added_source_fragments = added_source_fragments_;
-                added_backfill_fragments = added_backfill_fragments_;
-            }
-            SourceChange::CreateJobFinished {
-                finished_backfill_fragments: finished_backfill_fragments_,
-            } => {
-                finished_backfill_fragments = finished_backfill_fragments_;
-            }
+        self.remove_dropped_sources(dropped_source_ids);
+        self.extend_source_fragments(added_source_fragments);
+        self.extend_backfill_fragments(added_backfill_fragments);
+        self.finish_backfill_fragments(finished_backfill_fragments);
+        self.remove_dropped_fragments(dropped_source_fragments);
+        self.apply_fragment_replacements(fragment_replacements);
+        self.update_source_properties(recreate_source_id_map_new_props);
+    }
 
-            SourceChange::DropMv {
-                dropped_source_fragments: dropped_source_fragments_,
-            } => {
-                dropped_source_fragments = dropped_source_fragments_;
-            }
-            SourceChange::ReplaceJob {
-                dropped_source_fragments: dropped_source_fragments_,
-                added_source_fragments: added_source_fragments_,
-                fragment_replacements: fragment_replacements_,
-            } => {
-                dropped_source_fragments = dropped_source_fragments_;
-                added_source_fragments = added_source_fragments_;
-                fragment_replacements = fragment_replacements_;
-            }
-            SourceChange::DropSource {
-                dropped_source_ids: dropped_source_ids_,
-            } => {
-                dropped_source_ids = dropped_source_ids_;
-            }
-
-            SourceChange::UpdateSourceProps {
-                source_id_map_new_props,
-            } => {
-                for (source_id, new_props) in source_id_map_new_props {
-                    recreate_source_id_map_new_props.push((source_id, new_props));
-                }
-            }
-        }
-
+    fn remove_dropped_sources(&mut self, dropped_source_ids: Vec<SourceId>) {
         for source_id in dropped_source_ids {
             let dropped_fragments = self.source_fragments.remove(&source_id);
 
@@ -172,21 +140,36 @@ impl SourceManagerCore {
                 // );
             }
         }
+    }
 
+    fn extend_source_fragments(
+        &mut self,
+        added_source_fragments: HashMap<SourceId, BTreeSet<FragmentId>>,
+    ) {
         for (source_id, fragments) in added_source_fragments {
             self.source_fragments
                 .entry(source_id)
                 .or_default()
                 .extend(fragments);
         }
+    }
 
+    fn extend_backfill_fragments(
+        &mut self,
+        added_backfill_fragments: HashMap<SourceId, BTreeSet<(FragmentId, FragmentId)>>,
+    ) {
         for (source_id, fragments) in added_backfill_fragments {
             self.backfill_fragments
                 .entry(source_id)
                 .or_default()
                 .extend(fragments);
         }
+    }
 
+    fn finish_backfill_fragments(
+        &self,
+        finished_backfill_fragments: HashMap<SourceId, BTreeSet<(FragmentId, FragmentId)>>,
+    ) {
         for (source_id, fragments) in finished_backfill_fragments {
             let handle = self.managed_sources.get(&source_id).unwrap_or_else(|| {
                 panic!(
@@ -196,11 +179,21 @@ impl SourceManagerCore {
             });
             handle.finish_backfill(fragments.iter().map(|(id, _up_id)| *id).collect());
         }
+    }
 
+    fn remove_dropped_fragments(
+        &mut self,
+        dropped_source_fragments: HashMap<SourceId, BTreeSet<FragmentId>>,
+    ) {
         for (source_id, fragment_ids) in dropped_source_fragments {
             self.drop_source_fragments(Some(source_id), fragment_ids);
         }
+    }
 
+    fn apply_fragment_replacements(
+        &mut self,
+        fragment_replacements: HashMap<FragmentId, FragmentId>,
+    ) {
         for (old_fragment_id, new_fragment_id) in fragment_replacements {
             // TODO: add source_id to the fragment_replacements to avoid iterating all sources
             self.drop_source_fragments(None, BTreeSet::from([old_fragment_id]));
@@ -220,14 +213,28 @@ impl SourceManagerCore {
                 *fragment_ids = new_backfill_fragment_ids;
             }
         }
+    }
 
+    fn update_source_properties(
+        &self,
+        recreate_source_id_map_new_props: Vec<(SourceId, HashMap<String, String>)>,
+    ) {
         for (source_id, new_props) in recreate_source_id_map_new_props {
-            if let Some(handle) = self.managed_sources.get_mut(&source_id) {
+            if let Some(handle) = self.managed_sources.get(&source_id) {
                 // the update here should not involve fragments change and split change
                 // Or we need to drop and recreate the source worker instead of updating inplace
                 let props_wrapper =
                     WithOptionsSecResolved::without_secrets(new_props.into_iter().collect());
-                let props = ConnectorProperties::extract(props_wrapper, false).unwrap(); // already checked when sending barrier
+                let props = match ConnectorProperties::extract(props_wrapper, false) {
+                    Ok(props) => props,
+                    Err(err) => {
+                        tracing::error!(
+                            error = %err.as_report(),
+                            "failed to parse updated source properties for source {source_id}",
+                        );
+                        continue;
+                    }
+                };
                 handle.update_props(props);
                 tracing::info!("update source {source_id} properties in source manager");
             } else {
@@ -243,18 +250,17 @@ impl SourceManagerCore {
     ) {
         if let Some(source_id) = source_id {
             if let Entry::Occupied(mut entry) = self.source_fragments.entry(source_id) {
-                let mut dropped_ids = vec![];
                 let managed_fragment_ids = entry.get_mut();
-                for fragment_id in &dropped_fragment_ids {
-                    managed_fragment_ids.remove(fragment_id);
-                    dropped_ids.push(*fragment_id);
-                }
-                if let Some(handle) = self.managed_sources.get(&source_id) {
-                    handle.drop_fragments(dropped_ids);
-                } else {
-                    panic_if_debug!(
-                        "source {source_id} not found when dropping fragment {dropped_ids:?}",
-                    );
+                let dropped_ids =
+                    remove_managed_fragments(managed_fragment_ids, &dropped_fragment_ids);
+                if !dropped_ids.is_empty() {
+                    if let Some(handle) = self.managed_sources.get(&source_id) {
+                        handle.drop_fragments(dropped_ids);
+                    } else {
+                        panic_if_debug!(
+                            "source {source_id} not found when dropping fragment {dropped_ids:?}",
+                        );
+                    }
                 }
                 if managed_fragment_ids.is_empty() {
                     entry.remove();
@@ -262,12 +268,7 @@ impl SourceManagerCore {
             }
         } else {
             for (source_id, fragment_ids) in &mut self.source_fragments {
-                let mut dropped_ids = vec![];
-                for fragment_id in &dropped_fragment_ids {
-                    if fragment_ids.remove(fragment_id) {
-                        dropped_ids.push(*fragment_id);
-                    }
-                }
+                let dropped_ids = remove_managed_fragments(fragment_ids, &dropped_fragment_ids);
                 if !dropped_ids.is_empty() {
                     if let Some(handle) = self.managed_sources.get(source_id) {
                         handle.drop_fragments(dropped_ids);
@@ -280,6 +281,75 @@ impl SourceManagerCore {
             }
         }
     }
+}
+
+#[derive(Default)]
+struct SourceChangeSet {
+    added_source_fragments: HashMap<SourceId, BTreeSet<FragmentId>>,
+    added_backfill_fragments: HashMap<SourceId, BTreeSet<(FragmentId, FragmentId)>>,
+    finished_backfill_fragments: HashMap<SourceId, BTreeSet<(FragmentId, FragmentId)>>,
+    fragment_replacements: HashMap<FragmentId, FragmentId>,
+    dropped_source_fragments: HashMap<SourceId, BTreeSet<FragmentId>>,
+    dropped_source_ids: Vec<SourceId>,
+    recreate_source_id_map_new_props: Vec<(SourceId, HashMap<String, String>)>,
+}
+
+impl From<SourceChange> for SourceChangeSet {
+    fn from(source_change: SourceChange) -> Self {
+        let mut change_set = SourceChangeSet::default();
+        match source_change {
+            SourceChange::CreateJob {
+                added_source_fragments,
+                added_backfill_fragments,
+            } => {
+                change_set.added_source_fragments = added_source_fragments;
+                change_set.added_backfill_fragments = added_backfill_fragments;
+            }
+            SourceChange::CreateJobFinished {
+                finished_backfill_fragments,
+            } => {
+                change_set.finished_backfill_fragments = finished_backfill_fragments;
+            }
+            SourceChange::DropMv {
+                dropped_source_fragments,
+            } => {
+                change_set.dropped_source_fragments = dropped_source_fragments;
+            }
+            SourceChange::ReplaceJob {
+                dropped_source_fragments,
+                added_source_fragments,
+                fragment_replacements,
+            } => {
+                change_set.dropped_source_fragments = dropped_source_fragments;
+                change_set.added_source_fragments = added_source_fragments;
+                change_set.fragment_replacements = fragment_replacements;
+            }
+            SourceChange::DropSource { dropped_source_ids } => {
+                change_set.dropped_source_ids = dropped_source_ids;
+            }
+            SourceChange::UpdateSourceProps {
+                source_id_map_new_props,
+            } => {
+                change_set.recreate_source_id_map_new_props =
+                    source_id_map_new_props.into_iter().collect();
+            }
+        }
+        change_set
+    }
+}
+
+fn remove_managed_fragments(
+    managed_fragment_ids: &mut BTreeSet<FragmentId>,
+    dropped_fragment_ids: &BTreeSet<FragmentId>,
+) -> Vec<FragmentId> {
+    dropped_fragment_ids
+        .iter()
+        .filter_map(|fragment_id| {
+            managed_fragment_ids
+                .remove(fragment_id)
+                .then_some(*fragment_id)
+        })
+        .collect()
 }
 
 impl SourceManager {
@@ -493,20 +563,35 @@ impl SourceManager {
 
     /// Force tick for specific updated source workers after properties update.
     async fn force_tick_updated_sources(&self, updated_source_ids: Vec<SourceId>) {
-        let core = self.core.lock().await;
-        for source_id in updated_source_ids {
-            if let Some(handle) = core.managed_sources.get(&source_id) {
-                tracing::info!("forcing tick for updated source {}", source_id.as_raw_id());
-                if let Err(e) = handle.force_tick().await {
+        let pending_ticks = {
+            let core = self.core.lock().await;
+            let mut pending_ticks = Vec::new();
+            for source_id in updated_source_ids {
+                if let Some(handle) = core.managed_sources.get(&source_id) {
+                    tracing::info!("forcing tick for updated source {}", source_id.as_raw_id());
+                    match handle.force_tick_async() {
+                        Ok(receiver) => pending_ticks.push((source_id, receiver)),
+                        Err(e) => tracing::warn!(
+                            error = %e.as_report(),
+                            "failed to send force tick command for source {} after properties update",
+                            source_id.as_raw_id()
+                        ),
+                    }
+                } else {
                     tracing::warn!(
-                        error = %e.as_report(),
-                        "failed to force tick for source {} after properties update",
+                        "source {} not found when trying to force tick after update",
                         source_id.as_raw_id()
                     );
                 }
-            } else {
+            }
+            pending_ticks
+        };
+
+        for (source_id, receiver) in pending_ticks {
+            if let Err(e) = ConnectorSourceWorkerHandle::wait_force_tick(receiver).await {
                 tracing::warn!(
-                    "source {} not found when trying to force tick after update",
+                    error = %e.as_report(),
+                    "failed to force tick for source {} after properties update",
                     source_id.as_raw_id()
                 );
             }
@@ -708,4 +793,53 @@ pub fn build_actor_split_impls(
             )
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_source_change_set_from_replace_job() {
+        let source_id = SourceId::new(1);
+        let old_fragment_id = FragmentId::new(10);
+        let new_fragment_id = FragmentId::new(11);
+        let source_change = SourceChange::ReplaceJob {
+            dropped_source_fragments: HashMap::from([(
+                source_id,
+                BTreeSet::from([old_fragment_id]),
+            )]),
+            added_source_fragments: HashMap::from([(source_id, BTreeSet::from([new_fragment_id]))]),
+            fragment_replacements: HashMap::from([(old_fragment_id, new_fragment_id)]),
+        };
+
+        let change_set = SourceChangeSet::from(source_change);
+        assert_eq!(
+            change_set.dropped_source_fragments.get(&source_id),
+            Some(&BTreeSet::from([old_fragment_id]))
+        );
+        assert_eq!(
+            change_set.added_source_fragments.get(&source_id),
+            Some(&BTreeSet::from([new_fragment_id]))
+        );
+        assert_eq!(
+            change_set.fragment_replacements.get(&old_fragment_id),
+            Some(&new_fragment_id)
+        );
+    }
+
+    #[test]
+    fn test_remove_managed_fragments_only_remove_existing() {
+        let fragment_1 = FragmentId::new(1);
+        let fragment_2 = FragmentId::new(2);
+        let fragment_3 = FragmentId::new(3);
+
+        let mut managed = BTreeSet::from([fragment_1, fragment_2]);
+        let dropped = BTreeSet::from([fragment_2, fragment_3]);
+
+        let removed = remove_managed_fragments(&mut managed, &dropped);
+
+        assert_eq!(removed, vec![fragment_2]);
+        assert_eq!(managed, BTreeSet::from([fragment_1]));
+    }
 }
