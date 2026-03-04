@@ -338,7 +338,7 @@ pub async fn read_parquet_file(
         for col in schema_descr.columns() {
             let path = col.path().string();
             let physical = col.physical_type();
-            let logical = col.logical_type();
+            let logical = col.logical_type_ref();
             tracing::debug!(
                 file = %file_name,
                 column_path = path,
