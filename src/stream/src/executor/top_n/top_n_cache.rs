@@ -37,6 +37,9 @@ pub type Cache = EstimatedBTreeMap<CacheKey, CompactedRow>;
 const TOPN_CACHE_HIGH_CAPACITY_FACTOR: usize = 2;
 const TOPN_CACHE_MIN_CAPACITY: usize = 10;
 
+// Note: These constants are kept for backward compatibility and tests.
+// In production, values from StreamingConfig.developer should be used.
+
 /// Cache for [`ManagedTopNState`].
 ///
 /// The key in the maps [`CacheKey`] is `[ order_by + remaining columns of pk ]`. `group_key` is not
@@ -176,6 +179,36 @@ impl<const WITH_TIES: bool> TopNCache<WITH_TIES> {
     /// `min_capacity` -- Minimum capacity for the high cache. When not provided, defaults to `TOPN_CACHE_MIN_CAPACITY`.
     pub fn new(offset: usize, limit: usize, data_types: Vec<DataType>) -> Self {
         Self::with_min_capacity(offset, limit, data_types, TOPN_CACHE_MIN_CAPACITY)
+    }
+
+    /// Create a new `TopNCache` with configurable capacity parameters from config.
+    /// This should be used in production to allow tuning without recompilation.
+    pub fn new_with_config(
+        offset: usize,
+        limit: usize,
+        data_types: Vec<DataType>,
+        min_capacity: usize,
+        high_capacity_factor: usize,
+    ) -> Self {
+        assert!(limit > 0);
+        if WITH_TIES {
+            assert!(offset == 0, "OFFSET is not supported with WITH TIES");
+        }
+        let high_cache_capacity = offset
+            .checked_add(limit)
+            .and_then(|v| v.checked_mul(high_capacity_factor))
+            .unwrap_or(usize::MAX)
+            .max(min_capacity);
+        Self {
+            low: if offset > 0 { Some(Cache::new()) } else { None },
+            middle: Cache::new(),
+            high: Cache::new(),
+            high_cache_capacity,
+            offset,
+            limit,
+            table_row_count: None,
+            data_types,
+        }
     }
 
     /// `data_types` -- Data types for the full row.
