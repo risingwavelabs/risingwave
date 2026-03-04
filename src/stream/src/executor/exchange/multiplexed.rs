@@ -339,6 +339,19 @@ async fn run_counting_merge(
 ) {
     let mut msg_count: u64 = 0;
 
+    // Wait for the first barrier before forwarding any data messages.
+    // The streaming protocol requires the first message to be a barrier.
+    // Since data and barriers arrive on separate channels, data may arrive
+    // before the first barrier if we don't explicitly wait for it.
+    match barrier_rx.recv().await {
+        Some((first_barrier, _expected_count)) => {
+            yield DispatcherMessage::Barrier(first_barrier);
+        }
+        None => {
+            return Err(ExchangeChannelClosed::remote_input(actor_id, None).into());
+        }
+    }
+
     // We use a state machine: either we're forwarding data freely (no pending barrier),
     // or we have a barrier waiting and we need to drain to expected_count.
     //
@@ -686,15 +699,16 @@ mod tests {
     }
 
     /// Helper to create a `CountingMergeInput` with a channel-backed inner stream.
-    /// Returns `(pinned_counting, data_tx)`.
-    fn make_counting_input(
+    /// Returns `(pinned_counting, data_tx, barrier_tx)`.
+    fn make_counting_input_raw(
         actor_id: ActorId,
-        barrier_rx: mpsc::UnboundedReceiver<(DispatcherBarrier, u64)>,
     ) -> (
         Pin<Box<CountingMergeInput>>,
         mpsc::UnboundedSender<DispatcherMessage>,
+        mpsc::UnboundedSender<(DispatcherBarrier, u64)>,
     ) {
         let (data_tx, data_rx) = mpsc::unbounded_channel();
+        let (barrier_tx, barrier_rx) = mpsc::unbounded_channel();
 
         let inner_stream = tokio_stream::wrappers::UnboundedReceiverStream::new(data_rx)
             .map(|msg: DispatcherMessage| Ok(msg));
@@ -731,13 +745,59 @@ mod tests {
             simple_input.boxed_input(),
             barrier_rx,
         ));
-        (counting, data_tx)
+        (counting, data_tx, barrier_tx)
+    }
+
+    /// Helper that creates a `CountingMergeInput` and sends+consumes the required
+    /// initial barrier (expected_count=0). Tests can focus on steady-state behavior.
+    async fn make_counting_input(
+        actor_id: ActorId,
+    ) -> (
+        Pin<Box<CountingMergeInput>>,
+        mpsc::UnboundedSender<DispatcherMessage>,
+        mpsc::UnboundedSender<(DispatcherBarrier, u64)>,
+    ) {
+        let (mut counting, data_tx, barrier_tx) = make_counting_input_raw(actor_id);
+
+        // Send the required initial barrier with expected_count=0.
+        barrier_tx.send((test_barrier(0), 0)).unwrap();
+
+        // Consume the initial barrier.
+        let msg = counting.next().await.unwrap().unwrap();
+        assert!(
+            matches!(msg, DispatcherMessage::Barrier(_)),
+            "first message must be the initial barrier"
+        );
+
+        (counting, data_tx, barrier_tx)
+    }
+
+    #[tokio::test]
+    async fn test_counting_merge_first_barrier() {
+        // Verify that the first message yielded is always a barrier,
+        // even if data messages arrive on the data channel first.
+        let (mut counting, data_tx, barrier_tx) = make_counting_input_raw(aid(42));
+
+        // Send data BEFORE the first barrier.
+        data_tx
+            .send(DispatcherMessage::Chunk(StreamChunk::default()))
+            .unwrap();
+
+        // Now send the first barrier with expected_count=0.
+        // (The data message sent above is NOT counted toward this barrier's epoch.)
+        barrier_tx.send((test_barrier(0), 0)).unwrap();
+
+        // The first message MUST be the barrier, not the data.
+        let msg = counting.next().await.unwrap().unwrap();
+        assert!(
+            matches!(msg, DispatcherMessage::Barrier(_)),
+            "first message must be a barrier"
+        );
     }
 
     #[tokio::test]
     async fn test_counting_merge_input_basic() {
-        let (barrier_tx, barrier_rx) = mpsc::unbounded_channel();
-        let (mut counting, data_tx) = make_counting_input(aid(42), barrier_rx);
+        let (mut counting, data_tx, barrier_tx) = make_counting_input(aid(42)).await;
 
         // Send 3 data messages
         for _ in 0..3 {
@@ -762,8 +822,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_counting_merge_input_idle_actor() {
-        let (barrier_tx, barrier_rx) = mpsc::unbounded_channel();
-        let (mut counting, _data_tx) = make_counting_input(aid(42), barrier_rx);
+        let (mut counting, _data_tx, barrier_tx) = make_counting_input(aid(42)).await;
 
         // Send barrier with expected_count=0 (idle actor)
         barrier_tx.send((test_barrier(1), 0)).unwrap();
@@ -775,8 +834,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_counting_merge_input_barrier_before_data() {
-        let (barrier_tx, barrier_rx) = mpsc::unbounded_channel();
-        let (mut counting, data_tx) = make_counting_input(aid(42), barrier_rx);
+        let (mut counting, data_tx, barrier_tx) = make_counting_input(aid(42)).await;
 
         // Send barrier first with expected_count=2
         barrier_tx.send((test_barrier(1), 2)).unwrap();
@@ -800,8 +858,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_counting_merge_input_multiple_epochs() {
-        let (barrier_tx, barrier_rx) = mpsc::unbounded_channel();
-        let (mut counting, data_tx) = make_counting_input(aid(42), barrier_rx);
+        let (mut counting, data_tx, barrier_tx) = make_counting_input(aid(42)).await;
 
         // Epoch 1: 2 data messages
         data_tx
@@ -950,25 +1007,19 @@ mod tests {
     /// channel disconnects unexpectedly. This simulates `run_barrier_receiver` failing
     /// (e.g., gRPC broken pipe).
     ///
-    /// Without the fix, `run_counting_merge` returns `Ok(())` on `barrier_rx` disconnect,
-    /// making the stream end with `None`. This is incorrect: the data channel may still be
-    /// active, so the `MergeExecutor` would incorrectly believe this input has ended normally
-    /// instead of triggering error recovery.
+    /// Test that disconnecting the barrier channel before ANY barrier is sent results
+    /// in an error (not a silent stream close).
     ///
     /// Regression test for: `barrier_rx` disconnect must be an error, not silent stream end.
     #[tokio::test]
     async fn test_counting_merge_input_errors_on_barrier_disconnect() {
-        let (barrier_tx, barrier_rx) = mpsc::unbounded_channel();
-        let (mut counting, _data_tx) = make_counting_input(aid(42), barrier_rx);
+        let (mut counting, _data_tx, barrier_tx) = make_counting_input_raw(aid(42));
 
-        // Drop barrier_tx to simulate run_barrier_receiver failure.
+        // Drop barrier_tx immediately — the first `barrier_rx.recv()` returns None.
         drop(barrier_tx);
 
-        // The CountingMergeInput should return an error, not None.
+        // The CountingMergeInput should return an error during first-barrier wait.
         let result = counting.next().await;
-
-        // Fixed code: Some(Err(_)) — barrier channel disconnected is an error.
-        // Buggy code: None — silently closes the stream (test fails).
         assert!(
             matches!(result, Some(Err(_))),
             "CountingMergeInput should return error when barrier channel disconnects, \
@@ -984,8 +1035,12 @@ mod tests {
     /// of `Err`, causing the `MergeExecutor` to see a normal input end.
     #[tokio::test]
     async fn test_counting_merge_input_errors_on_barrier_disconnect_with_data() {
-        let (barrier_tx, barrier_rx) = mpsc::unbounded_channel();
-        let (mut counting, data_tx) = make_counting_input(aid(42), barrier_rx);
+        let (mut counting, data_tx, barrier_tx) = make_counting_input_raw(aid(42));
+
+        // Send the required first barrier so we can get past initialization.
+        barrier_tx.send((test_barrier(0), 0)).unwrap();
+        let msg = counting.next().await.unwrap().unwrap();
+        assert!(matches!(msg, DispatcherMessage::Barrier(_)));
 
         // Send data while barrier_tx is still alive.
         data_tx
