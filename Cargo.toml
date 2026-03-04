@@ -106,12 +106,7 @@ development = ["expect-test", "pretty_assertions"]
 libraries = [{ path = "./lints" }]
 
 [workspace.dependencies]
-apache-avro = { git = "https://github.com/risingwavelabs/avro", rev = "25113ba88234a9ae23296e981d8302c290fdaa4b", features = [
-    "snappy",
-    "zstandard",
-    "bzip",
-    "xz",
-] }
+apache-avro = { git = "https://github.com/risingwavelabs/avro-rs", rev = "1f2723802d4fb77b97fa084f7bb81e3b60b9e03f" }
 arc-swap = "1"
 arrow-udf-runtime = "0.8.0"
 async-openai = { version = "0.33.0", features = ["embedding"] }
