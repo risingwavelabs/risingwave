@@ -1281,10 +1281,12 @@ impl<B: IcebergWriterBuilder> TaskWriterBuilderWrapper<B> {
                 self.schema.clone(),
                 self.partition_spec.clone(),
             )?),
-            (false, false) => Some(RecordBatchPartitionSplitter::try_new_with_precomputed_values(
-                self.schema.clone(),
-                self.partition_spec.clone(),
-            )?),
+            (false, false) => Some(
+                RecordBatchPartitionSplitter::try_new_with_precomputed_values(
+                    self.schema.clone(),
+                    self.partition_spec.clone(),
+                )?,
+            ),
         };
 
         Ok(TaskWriter::new_with_partition_splitter(
