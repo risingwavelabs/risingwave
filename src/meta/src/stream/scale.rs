@@ -1230,7 +1230,7 @@ impl GlobalStreamManager {
             .collect();
 
         let mut previous_adaptive_parallelism_strategy = AdaptiveParallelismStrategy::default();
-        let mut pending_scope = Some(ParallelismControlScope::All);
+        let mut pending_scope = None;
 
         loop {
             tokio::select! {
