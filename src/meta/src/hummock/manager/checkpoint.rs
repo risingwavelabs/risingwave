@@ -94,9 +94,6 @@ fn decode_checkpoint_data(
 
     let data_size = data.len();
 
-    // Try envelope format. The discriminator is `checksum.is_some()`:
-    // our writer always sets a checksum, and legacy bytes decoded as envelope
-    // never produce one (no field 3 in the legacy proto).
     if let Ok(envelope) = PbHummockVersionCheckpointEnvelope::decode(data.clone())
         && let Some(expected) = envelope.checksum
     {
@@ -151,7 +148,6 @@ fn decode_checkpoint_data(
     Ok(ckpt)
 }
 
-/// Decompresses payload bytes according to the specified algorithm.
 fn decompress_payload(
     algo: CheckpointCompressionAlgorithm,
     payload: &[u8],
@@ -175,7 +171,6 @@ fn decompress_payload(
     }
 }
 
-/// Compresses payload bytes according to the specified algorithm.
 fn compress_payload(
     algo: risingwave_common::config::CheckpointCompression,
     data: &[u8],
@@ -260,7 +255,6 @@ impl HummockManager {
         const CHUNK_SIZE: usize = 128 * 1024 * 1024; // 128MB
         const MAX_IN_FLIGHT_CHUNKS: usize = 4;
 
-        // 1. Get file metadata to learn the total size.
         let object_metadata = match self
             .object_store
             .metadata(&self.version_checkpoint_path)
@@ -279,7 +273,6 @@ impl HummockManager {
             return Ok(None);
         }
 
-        // 2. Read data: single read for small files, parallel chunked reads for large files.
         let download_start = std::time::Instant::now();
         let data = if total_size <= CHUNK_SIZE {
             self.object_store
@@ -311,7 +304,6 @@ impl HummockManager {
         };
         let download_duration = download_start.elapsed();
 
-        // 3. Decode: try envelope format first, fallback to legacy format.
         let decode_start = std::time::Instant::now();
         let ckpt = decode_checkpoint_data(data)?;
         let decode_duration = decode_start.elapsed();
@@ -334,7 +326,6 @@ impl HummockManager {
         let raw_bytes = checkpoint.to_protobuf().encode_to_vec();
         let raw_size = raw_bytes.len();
 
-        // Use compression algorithm from config
         let compression = self.env.opts.checkpoint_compression_algorithm;
         let compressed = compress_payload(compression, &raw_bytes)?;
         let checksum = xxhash64_checksum(&compressed);
@@ -404,7 +395,6 @@ impl HummockManager {
         assert!(new_checkpoint_id > old_checkpoint_id);
         let mut archive: Option<PbHummockVersionArchive> = None;
         let mut stale_objects = old_checkpoint.stale_objects.clone();
-        // `object_sizes` is used to calculate size of stale objects.
         let mut object_sizes = object_size_map(&old_checkpoint.version);
         // The set of object ids that once exist in any hummock version
         let mut versions_object_ids: HashSet<_> =
@@ -501,7 +491,6 @@ impl HummockManager {
             stale_objects,
         };
         drop(versioning_guard);
-        // 2. persist the new checkpoint without holding lock
         self.write_checkpoint(&new_checkpoint).await?;
         if let Some(archive) = archive
             && let Err(e) = self.write_version_archive(&archive).await
@@ -512,7 +501,6 @@ impl HummockManager {
                 archive.version.as_ref().unwrap().id
             );
         }
-        // 3. hold write lock and update in memory state
         let mut versioning_guard = self.versioning.write().await;
         let versioning = versioning_guard.deref_mut();
         assert!(new_checkpoint.version.id > versioning.checkpoint.version.id);
