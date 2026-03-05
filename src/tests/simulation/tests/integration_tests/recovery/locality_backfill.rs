@@ -22,8 +22,7 @@ const SET_LOCALITY_BACKFILL: &str = "SET enable_locality_backfill = true;";
 const SET_BACKGROUND_DDL: &str = "SET background_ddl = true;";
 const CREATE_TABLE: &str = "CREATE TABLE t(a int);";
 const SEED_TABLE: &str = "INSERT INTO t SELECT * FROM generate_series(1, 10000, 1);";
-const CREATE_MV: &str =
-    "CREATE MATERIALIZED VIEW mv WITH (backfill_rate_limit = 1) AS SELECT count(*) FROM t GROUP BY a;";
+const CREATE_MV: &str = "CREATE MATERIALIZED VIEW mv WITH (backfill_rate_limit = 1) AS SELECT count(*) FROM t GROUP BY a;";
 const ALTER_RATE_LIMIT_DEFAULT: &str =
     "ALTER MATERIALIZED VIEW mv SET BACKFILL_RATE_LIMIT = DEFAULT;";
 const WAIT: &str = "WAIT;";
