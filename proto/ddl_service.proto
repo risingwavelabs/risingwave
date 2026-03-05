@@ -88,6 +88,7 @@ message AlterSourceResponse {
 // Reset CDC source offset to latest (for handling expired binlog/oplog)
 message ResetSourceRequest {
   uint32 source_id = 1;
+  optional string reset_offset = 2;
 }
 
 message ResetSourceResponse {

@@ -3849,8 +3849,14 @@ impl Parser<'_> {
                 let keys = self.parse_parenthesized_object_name_list()?;
                 AlterSourceOperation::ResetConfig { keys }
             } else {
-                // RESET without CONFIG means reset CDC source offset to latest
-                AlterSourceOperation::ResetSource
+                // RESET without CONFIG means reset CDC source offset.
+                // `RESET OFFSET '<offset>'` sets source offset to the given value.
+                let offset = if self.parse_keyword(Keyword::OFFSET) {
+                    Some(self.parse_literal_string()?)
+                } else {
+                    None
+                };
+                AlterSourceOperation::ResetSource { offset }
             }
         } else if self.peek_nth_any_of_keywords(0, &[Keyword::FORMAT]) {
             let format_encode = self.parse_schema()?.unwrap();

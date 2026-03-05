@@ -310,8 +310,10 @@ pub enum AlterSourceOperation {
     ResetConfig {
         keys: Vec<ObjectName>,
     },
-    /// `RESET` - Reset CDC source offset to latest
-    ResetSource,
+    /// `RESET` - Reset CDC source offset, optionally to a specified offset string.
+    ResetSource {
+        offset: Option<String>,
+    },
     AlterConnectorProps {
         alter_props: Vec<SqlOption>,
     },
@@ -741,8 +743,12 @@ impl fmt::Display for AlterSourceOperation {
             AlterSourceOperation::ResetConfig { keys } => {
                 write!(f, "RESET CONFIG ({})", display_comma_separated(keys))
             }
-            AlterSourceOperation::ResetSource => {
-                write!(f, "RESET")
+            AlterSourceOperation::ResetSource { offset } => {
+                write!(f, "RESET")?;
+                if let Some(offset) = offset {
+                    write!(f, " OFFSET '{}'", offset)?;
+                }
+                Ok(())
             }
             AlterSourceOperation::AlterConnectorProps { alter_props } => {
                 write!(

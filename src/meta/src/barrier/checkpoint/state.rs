@@ -773,8 +773,11 @@ impl DatabaseCheckpointControl {
                 self.apply_simple_command(mutation, "LoadFinish")
             }
 
-            Some(Command::ResetSource { source_id }) => {
-                let mutation = Some(Command::reset_source_to_mutation(source_id));
+            Some(Command::ResetSource {
+                source_id,
+                reset_offset,
+            }) => {
+                let mutation = Some(Command::reset_source_to_mutation(source_id, reset_offset));
                 self.apply_simple_command(mutation, "ResetSource")
             }
 

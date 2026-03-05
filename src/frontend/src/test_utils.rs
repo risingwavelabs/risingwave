@@ -530,7 +530,7 @@ impl CatalogWriter for MockCatalogWriter {
         Ok(())
     }
 
-    async fn reset_source(&self, _source_id: SourceId) -> Result<()> {
+    async fn reset_source(&self, _source_id: SourceId, _offset: Option<String>) -> Result<()> {
         Ok(())
     }
 
