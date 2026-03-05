@@ -707,6 +707,21 @@ mod tests {
     }
 
     #[test]
+    fn decode_checkpoint_data_decodes_envelope_without_checksum_and_no_compression() {
+        let checkpoint = make_checkpoint(42);
+        let payload = checkpoint.encode_to_vec();
+        let envelope = PbHummockVersionCheckpointEnvelope {
+            compression_algorithm: CheckpointCompression::None as i32,
+            payload,
+            checksum: None,
+        };
+        let data = Bytes::from(envelope.encode_to_vec());
+        let decoded =
+            decode_checkpoint_data(data).expect("envelope without checksum should decode");
+        assert_eq!(decoded, checkpoint);
+    }
+
+    #[test]
     fn decode_checkpoint_data_returns_error_on_checksum_mismatch() {
         let checkpoint = make_checkpoint(42);
         let raw = checkpoint.encode_to_vec();
@@ -722,6 +737,25 @@ mod tests {
         let data = Bytes::from(envelope.encode_to_vec());
         let err = decode_checkpoint_data(data).expect_err("checksum mismatch should error");
         assert!(err.to_string().contains("checksum mismatch"), "{err:?}");
+    }
+
+    #[test]
+    fn decode_checkpoint_data_returns_error_on_unknown_compression_algorithm() {
+        let checkpoint = make_checkpoint(42);
+        let payload = checkpoint.encode_to_vec();
+        let envelope = PbHummockVersionCheckpointEnvelope {
+            compression_algorithm: 123,
+            payload,
+            checksum: None,
+        };
+        let data = Bytes::from(envelope.encode_to_vec());
+        let err =
+            decode_checkpoint_data(data).expect_err("unknown compression algorithm should error");
+        assert!(
+            err.to_string()
+                .contains("unknown checkpoint compression algorithm"),
+            "{err:?}"
+        );
     }
 
     #[tokio::test]
