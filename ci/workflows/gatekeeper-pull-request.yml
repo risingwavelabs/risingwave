@@ -1,0 +1,247 @@
+# Gatekeeper Pipeline for External PR Security Approval
+# This pipeline acts as a security checkpoint for forked PRs before running CI.
+#
+# Workflow:
+#   Fork PR → Webhook → Gatekeeper → Block Step (if fork) → Approval → Full CI
+#   Internal PR → Webhook → Gatekeeper → Direct Upload → Full CI
+#
+# Configure this as the default pipeline in Buildkite UI.
+# It will dynamically upload the actual CI pipeline after security checks.
+
+# No additional env vars needed - using Buildkite's built-in vars:
+# BUILDKITE_REPO - The main repository
+# BUILDKITE_PULL_REQUEST_REPO - The PR source repository (empty if branch push)
+
+steps:
+  - label: ":detective: Detect PR Source"
+    key: "detect-fork"
+    command: |
+      echo "=== PR Source Detection ==="
+      echo "PR Repository: $$BUILDKITE_PULL_REQUEST_REPO"
+      echo "Main Repository: $$BUILDKITE_REPO"
+      echo "PR Number: $$BUILDKITE_PULL_REQUEST"
+      
+      # Detect if this is a fork PR
+      IS_FORK="false"
+      if [[ -n "$$BUILDKITE_PULL_REQUEST_REPO" ]]; then
+        # Normalize URLs for comparison
+        PR_REPO_NORMALIZED=$$(echo "$$BUILDKITE_PULL_REQUEST_REPO" | sed 's|https://||' | sed 's|git://||' | sed 's|github.com/||' | tr '[:upper:]' '[:lower:]')
+        MAIN_REPO_NORMALIZED=$$(echo "$$BUILDKITE_REPO" | sed 's|https://||' | sed 's|git://||' | sed 's|github.com/||' | tr '[:upper:]' '[:lower:]')
+        
+        if [[ "$$PR_REPO_NORMALIZED" != "$$MAIN_REPO_NORMALIZED" && "$$PR_REPO_NORMALIZED" != "risingwavelabs/risingwave" ]]; then
+          IS_FORK="true"
+          echo "⚠️  Fork PR detected: $$BUILDKITE_PULL_REQUEST_REPO"
+        else
+          echo "✅ Internal PR detected"
+        fi
+      else
+        echo "✅ Branch push (not PR) - treating as internal"
+      fi
+      
+      # Store detection result
+      echo "is_fork=$$IS_FORK" | tee -a /tmp/pr_metadata
+      buildkite-agent meta-data set "is_fork" "$$IS_FORK"
+      
+      # Fetch PR author information for display
+      if [[ -n "$$BUILDKITE_PULL_REQUEST" && "$$BUILDKITE_PULL_REQUEST" != "false" ]]; then
+        PR_INFO=$$(curl -s -H "Authorization: token $$GITHUB_TOKEN" \
+          "https://api.github.com/repos/risingwavelabs/risingwave/pulls/$$BUILDKITE_PULL_REQUEST")
+        PR_AUTHOR=$$(echo "$$PR_INFO" | jq -r '.user.login // "unknown"')
+        PR_TITLE=$$(echo "$$PR_INFO" | jq -r '.title // "unknown"')
+        
+        echo "pr_author=$$PR_AUTHOR" | tee -a /tmp/pr_metadata
+        echo "pr_title=$$PR_TITLE" | tee -a /tmp/pr_metadata
+        buildkite-agent meta-data set "pr_author" "$$PR_AUTHOR"
+        
+        echo ""
+        echo "PR Author: @$$PR_AUTHOR"
+        echo "PR Title: $$PR_TITLE"
+      fi
+      
+      echo ""
+      echo "=== Detection Result: IS_FORK=$$IS_FORK ==="
+    plugins:
+      - seek-oss/aws-sm#v2.3.2:
+          env:
+            GITHUB_TOKEN: github-token
+
+  - label: ":lock: Security Review Required"
+    key: "security-block"
+    depends_on: "detect-fork"
+    if: build.meta_data("is_fork") == "true"
+    block: ":warning: External Contributor PR Approval Required"
+    prompt: |
+      ## 🔒 Security Review Required
+
+      This is a pull request from a **forked repository** (external contributor).
+      CI requires manual approval before execution to prevent supply chain attacks.
+
+      ### 📋 Pre-Approval Checklist
+
+      Please review the PR for potential security risks:
+
+      - [ ] **Code Review**: Check for malicious code, backdoors, or suspicious logic
+      - [ ] **Dependency Changes**: Verify no malicious dependencies added
+      - [ ] **CI Script Changes**: Check if `.buildkite/`, `ci/`, or `.github/` files are modified
+      - [ ] **Secret Exfiltration**: Look for code that might leak secrets or tokens
+      - [ ] **Resource Abuse**: Check for crypto mining, network scanning, etc.
+      - [ ] **Author Reputation**: Verify the contributor's GitHub profile and history
+
+      ### ⚠️ Security Reminders
+
+      - **Secrets Access**: Approved CI will have access to AWS credentials, Docker tokens, and other secrets
+      - **Resource Cost**: CI will consume compute resources on your infrastructure
+      - **Audit Trail**: Your approval will be logged for security auditing
+
+      ### 📝 Approval Notes
+
+      If you have any concerns or observations, please document them below.
+
+    fields:
+      - select: "Approval Decision"
+        key: "approval_decision"
+        required: true
+        options:
+          - label: "✅ Approve - Run Full CI"
+            value: "approve"
+          - label: "❌ Reject - Do Not Run CI"
+            value: "reject"
+          - label: "📝 Request Changes - Wait for Updates"
+            value: "request_changes"
+      - text: "Security Review Notes"
+        key: "approval_notes"
+        required: false
+        hint: "Document any security concerns or observations (optional)"
+
+  - label: ":white_check_mark: Approval Verification"
+    key: "verify-approval"
+    depends_on: "security-block"
+    if: build.meta_data("is_fork") == "true"
+    command: |
+      DECISION="$${BUILDKITE_UNBLOCKER_APPROVAL_DECISION:-}"
+      NOTES="$${BUILDKITE_UNBLOCKER_APPROVAL_NOTES:-}"
+      APPROVER="$${BUILDKITE_UNBLOCKER_NAME:-unknown}"
+      
+      echo "=== Approval Verification ==="
+      echo "Decision: $$DECISION"
+      echo "Approver: $$APPROVER"
+      echo "Notes: $$NOTES"
+      
+      # Log approval for audit trail
+      echo ""
+      echo "=== Security Audit Log ==="
+      echo "Timestamp: $$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+      echo "PR: #$${BUILDKITE_PULL_REQUEST:-N/A}"
+      echo "Author: $$(buildkite-agent meta-data get pr_author 2>/dev/null || echo 'unknown')"
+      echo "Approver: $$APPROVER"
+      echo "Decision: $$DECISION"
+      echo "Notes: $$NOTES"
+      
+      case "$$DECISION" in
+        "approve")
+          echo "✅ CI approved by $$APPROVER"
+          buildkite-agent meta-data set "ci_approved" "true"
+          buildkite-agent meta-data set "approved_by" "$$APPROVER"
+          ;;
+        "reject")
+          echo "❌ CI rejected by $$APPROVER"
+          buildkite-agent meta-data set "ci_approved" "false"
+          echo ""
+          echo "This PR has been rejected for CI execution."
+          echo "Reason: $$NOTES"
+          exit 1
+          ;;
+        "request_changes")
+          echo "📝 Changes requested by $$APPROVER"
+          buildkite-agent meta-data set "ci_approved" "false"
+          echo ""
+          echo "The contributor needs to update this PR before CI can run."
+          echo "Required changes: $$NOTES"
+          exit 1
+          ;;
+        *)
+          echo "❌ Invalid or missing approval decision"
+          exit 1
+          ;;
+      esac
+
+  - label: ":pipeline: Upload CI Pipeline"
+    key: "upload-pipeline"
+    depends_on: 
+      - "detect-fork"
+      - "verify-approval"
+    command: |
+      IS_FORK="$$(buildkite-agent meta-data get is_fork 2>/dev/null || echo 'false')"
+      CI_APPROVED="$$(buildkite-agent meta-data get ci_approved 2>/dev/null || echo 'true')"
+      
+      echo "=== Pipeline Upload ==="
+      echo "Is Fork: $$IS_FORK"
+      echo "CI Approved: $$CI_APPROVED"
+      
+      # Determine which pipeline to upload
+      PIPELINE_FILE=""
+      
+      if [[ "$$IS_FORK" == "true" ]]; then
+        if [[ "$$CI_APPROVED" != "true" ]]; then
+          echo "❌ Fork PR not approved. Cannot proceed."
+          exit 1
+        fi
+        echo "✅ Fork PR approved. Uploading pull-request pipeline..."
+        PIPELINE_FILE="ci/workflows/pull-request.yml"
+      else
+        echo "✅ Internal PR. Uploading pull-request pipeline..."
+        PIPELINE_FILE="ci/workflows/pull-request.yml"
+      fi
+      
+      # Verify pipeline file exists
+      if [[ ! -f "$$PIPELINE_FILE" ]]; then
+        echo "❌ Pipeline file not found: $$PIPELINE_FILE"
+        exit 1
+      fi
+      
+      echo "Uploading: $$PIPELINE_FILE"
+      buildkite-agent pipeline upload "$$PIPELINE_FILE"
+      
+      echo ""
+      echo "=== Pipeline uploaded successfully ==="
+    plugins:
+      - seek-oss/aws-sm#v2.3.2:
+          env:
+            GITHUB_TOKEN: github-token
+
+  # Post status to GitHub PR
+  - label: ":github: Update PR Status"
+    key: "update-status"
+    depends_on: "upload-pipeline"
+    command: |
+      IS_FORK="$$(buildkite-agent meta-data get is_fork 2>/dev/null || echo 'false')"
+      
+      if [[ "$$IS_FORK" == "true" && -n "$$BUILDKITE_PULL_REQUEST" ]]; then
+        APPROVER="$$(buildkite-agent meta-data get approved_by 2>/dev/null || echo 'unknown')"
+        
+        # Post approval confirmation comment
+        curl -s -X POST \
+          -H "Authorization: token $$GITHUB_TOKEN" \
+          -H "Content-Type: application/json" \
+          -d "{\"body\":\"✅ **CI Approved** by @$$APPROVER\\n\\nThe full CI pipeline has been triggered. Results will be posted as separate status checks.\"}" \
+          "https://api.github.com/repos/risingwavelabs/risingwave/issues/$$BUILDKITE_PULL_REQUEST/comments" \
+          > /dev/null
+        
+        # Remove pending label, add approved label
+        curl -s -X DELETE \
+          -H "Authorization: token $$GITHUB_TOKEN" \
+          "https://api.github.com/repos/risingwavelabs/risingwave/issues/$$BUILDKITE_PULL_REQUEST/labels/ci/pending-approval" \
+          > /dev/null 2>&1 || true
+        
+        curl -s -X POST \
+          -H "Authorization: token $$GITHUB_TOKEN" \
+          -H "Content-Type: application/json" \
+          -d '{"labels":["ci/approved"]}' \
+          "https://api.github.com/repos/risingwavelabs/risingwave/issues/$$BUILDKITE_PULL_REQUEST/labels" \
+          > /dev/null || true
+      fi
+    plugins:
+      - seek-oss/aws-sm#v2.3.2:
+          env:
+            GITHUB_TOKEN: github-token
+    soft_fail: true
