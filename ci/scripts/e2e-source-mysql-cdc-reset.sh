@@ -86,6 +86,42 @@ else
     exit 1
 fi
 
+echo "\n\n\n-------------Phase 1.5: Verify CDC inject-source-offsets path------------\n\n\n"
+SOURCE_ID=$(risedev psql -t -A -c "SELECT id FROM rw_sources WHERE name = 's';")
+STATE_TABLE=$(risedev psql -t -A -c "SELECT name FROM rw_catalog.rw_internal_table_info WHERE job_name = 's' AND job_type = 'source' LIMIT 1;")
+
+if [ -z "$SOURCE_ID" ] || [ -z "$STATE_TABLE" ]; then
+    echo "✗ FAIL: Failed to locate source id or source state table"
+    echo "SOURCE_ID=$SOURCE_ID, STATE_TABLE=$STATE_TABLE"
+    exit 1
+fi
+
+echo "Source id: $SOURCE_ID, state table: $STATE_TABLE"
+STATE_ROW=$(risedev psql -t -A -F '|' -c "SELECT partition_id, offset_info->'split_info'->'inner'->>'start_offset' FROM ${STATE_TABLE} WHERE offset_info->'split_info'->'inner'->>'start_offset' IS NOT NULL LIMIT 1;")
+
+if [ -z "$STATE_ROW" ]; then
+    echo "✗ FAIL: No non-null CDC start_offset found before inject-source-offsets"
+    risedev psql -c "SELECT partition_id, offset_info FROM ${STATE_TABLE};"
+    exit 1
+fi
+
+SPLIT_ID="${STATE_ROW%%|*}"
+CURRENT_OFFSET="${STATE_ROW#*|}"
+OFFSETS_JSON=$(python3 -c 'import json,sys; print(json.dumps({sys.argv[1]: sys.argv[2]}))' "$SPLIT_ID" "$CURRENT_OFFSET")
+
+echo "Injecting current offset back for split ${SPLIT_ID}"
+./risedev ctl meta inject-source-offsets --source-id "$SOURCE_ID" --offsets "$OFFSETS_JSON"
+
+OFFSET_AFTER_INJECT=$(risedev psql -t -A -c "SELECT offset_info->'split_info'->'inner'->>'start_offset' FROM ${STATE_TABLE} WHERE partition_id = '${SPLIT_ID}' LIMIT 1;")
+if [ "$OFFSET_AFTER_INJECT" = "$CURRENT_OFFSET" ]; then
+    echo "✓ PASS: inject-source-offsets accepted CDC split offset and kept state consistent"
+else
+    echo "✗ FAIL: CDC split offset changed unexpectedly after inject-source-offsets"
+    echo "Before: $CURRENT_OFFSET"
+    echo "After:  $OFFSET_AFTER_INJECT"
+    exit 1
+fi
+
 echo "\n\n\n-------------Phase 2: Pause source------------\n\n\n"
 echo "Pausing source with rate_limit=0..."
 risedev psql -c "ALTER SOURCE s SET source_rate_limit = 0;"
