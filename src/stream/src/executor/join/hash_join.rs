@@ -864,6 +864,23 @@ impl<K: HashKey, S: StateStore, E: JoinEncoding> JoinHashMap<K, S, E> {
         Ok(())
     }
 
+    pub fn delete_row_in_mem(&mut self, key: &K, value: &impl Row) -> StreamExecutorResult<()> {
+        if let Some(mut entry) = self.inner.get_mut(key) {
+            let pk = (&value)
+                .project(&self.state.pk_indices)
+                .memcmp_serialize(&self.pk_serializer);
+
+            let inequality_key = self
+                .inequality_key_desc
+                .as_ref()
+                .map(|desc| desc.serialize_inequal_key_from_row(value));
+            entry
+                .remove(pk, inequality_key.as_ref())
+                .with_context(|| self.state.error_context(&value))?;
+        }
+        Ok(())
+    }
+
     pub fn delete_handle_degree(
         &mut self,
         key: &K,
@@ -878,18 +895,7 @@ impl<K: HashKey, S: StateStore, E: JoinEncoding> JoinHashMap<K, S, E> {
 
     /// Delete a join row
     pub fn delete(&mut self, key: &K, value: JoinRow<impl Row>) -> StreamExecutorResult<()> {
-        if let Some(mut entry) = self.inner.get_mut(key) {
-            let pk = (&value.row)
-                .project(&self.state.pk_indices)
-                .memcmp_serialize(&self.pk_serializer);
-            let inequality_key = self
-                .inequality_key_desc
-                .as_ref()
-                .map(|desc| desc.serialize_inequal_key_from_row(&value.row));
-            entry
-                .remove(pk, inequality_key.as_ref())
-                .with_context(|| self.state.error_context(&value.row))?;
-        }
+        self.delete_row_in_mem(key, &value.row)?;
 
         // If no cache maintained, only update the state table.
         let degree_state = self.degree_state.as_mut().expect("degree table missing");
@@ -905,19 +911,7 @@ impl<K: HashKey, S: StateStore, E: JoinEncoding> JoinHashMap<K, S, E> {
     /// Delete a row
     /// Used when the side does not need to update degree.
     pub fn delete_row(&mut self, key: &K, value: impl Row) -> StreamExecutorResult<()> {
-        if let Some(mut entry) = self.inner.get_mut(key) {
-            let pk = (&value)
-                .project(&self.state.pk_indices)
-                .memcmp_serialize(&self.pk_serializer);
-
-            let inequality_key = self
-                .inequality_key_desc
-                .as_ref()
-                .map(|desc| desc.serialize_inequal_key_from_row(&value));
-            entry
-                .remove(pk, inequality_key.as_ref())
-                .with_context(|| self.state.error_context(&value))?;
-        }
+        self.delete_row_in_mem(key, &value)?;
 
         // If no cache maintained, only update the state table.
         self.state.table.delete(value);
