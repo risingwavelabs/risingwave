@@ -2,11 +2,15 @@
 # This pipeline acts as a security checkpoint for forked PRs before running CI.
 #
 # Workflow:
-#   Fork PR → Webhook → Gatekeeper → Block Step (if fork) → Approval → Full CI
-#   Internal PR → Webhook → Gatekeeper → Direct Upload → Full CI
+#   Fork PR -> Webhook -> Gatekeeper -> Block Step (if fork) -> Approval -> Full CI
+#   Internal PR -> Webhook -> Gatekeeper -> Direct Upload -> Full CI
 #
-# Configure this as the default pipeline in Buildkite UI.
-# It will dynamically upload the actual CI pipeline after security checks.
+# IMPORTANT SECURITY NOTE: This gatekeeper pipeline should be defined in the
+# Buildkite UI (trusted source), NOT loaded from the PR checkout via
+# 'buildkite-agent pipeline upload', because fork contributors could modify
+# this file to bypass the approval gate.
+#
+# See: ci/GATEKEEPER.md for detailed setup instructions.
 
 # No additional env vars needed - using Buildkite's built-in vars:
 # BUILDKITE_REPO - The main repository
@@ -25,8 +29,19 @@ steps:
       IS_FORK="false"
       if [[ -n "$$BUILDKITE_PULL_REQUEST_REPO" ]]; then
         # Normalize URLs for comparison
-        PR_REPO_NORMALIZED=$$(echo "$$BUILDKITE_PULL_REQUEST_REPO" | sed 's|https://||' | sed 's|git://||' | sed 's|github.com/||' | tr '[:upper:]' '[:lower:]')
-        MAIN_REPO_NORMALIZED=$$(echo "$$BUILDKITE_REPO" | sed 's|https://||' | sed 's|git://||' | sed 's|github.com/||' | tr '[:upper:]' '[:lower:]')
+        # Handles: https://github.com/org/repo.git, git://github.com/org/repo, git@github.com:org/repo.git
+        normalize_url() {
+          echo "$1" | \
+            sed 's|^https://||' | \
+            sed 's|^git://||' | \
+            sed 's|^git@github.com:||' | \
+            sed 's|github.com/||' | \
+            sed 's|\.git$||' | \
+            tr '[:upper:]' '[:lower:]'
+        }
+
+        PR_REPO_NORMALIZED=$$(normalize_url "$$BUILDKITE_PULL_REQUEST_REPO")
+        MAIN_REPO_NORMALIZED=$$(normalize_url "$$BUILDKITE_REPO")
 
         if [[ "$$PR_REPO_NORMALIZED" != "$$MAIN_REPO_NORMALIZED" && "$$PR_REPO_NORMALIZED" != "risingwavelabs/risingwave" ]]; then
           IS_FORK="true"
@@ -82,7 +97,7 @@ steps:
 
       - [ ] **Code Review**: Check for malicious code, backdoors, or suspicious logic
       - [ ] **Dependency Changes**: Verify no malicious dependencies added
-      - [ ] **CI Script Changes**: Check if `.buildkite/`, `ci/`, or `.github/` files are modified
+      - [ ] **CI Script Changes**: Check if `ci/workflows/`, `ci/scripts/`, or `.github/workflows/` files are modified
       - [ ] **Secret Exfiltration**: Look for code that might leak secrets or tokens
       - [ ] **Resource Abuse**: Check for crypto mining, network scanning, etc.
       - [ ] **Author Reputation**: Verify the contributor's GitHub profile and history
@@ -178,70 +193,33 @@ steps:
       echo "Is Fork: $$IS_FORK"
       echo "CI Approved: $$CI_APPROVED"
 
-      # Determine which pipeline to upload
-      PIPELINE_FILE=""
-
-      if [[ "$$IS_FORK" == "true" ]]; then
-        if [[ "$$CI_APPROVED" != "true" ]]; then
-          echo "❌ Fork PR not approved. Cannot proceed."
-          exit 1
-        fi
-        echo "✅ Fork PR approved. Uploading pull-request pipeline..."
-        PIPELINE_FILE="ci/workflows/pull-request.yml"
-      else
-        echo "✅ Internal PR. Uploading pull-request pipeline..."
-        PIPELINE_FILE="ci/workflows/pull-request.yml"
-      fi
-
-      # Verify pipeline file exists
-      if [[ ! -f "$$PIPELINE_FILE" ]]; then
-        echo "❌ Pipeline file not found: $$PIPELINE_FILE"
+      # Check approval for fork PRs
+      if [[ "$$IS_FORK" == "true" && "$$CI_APPROVED" != "true" ]]; then
+        echo "❌ Fork PR not approved. Cannot proceed."
         exit 1
       fi
 
-      echo "Uploading: $$PIPELINE_FILE"
-      buildkite-agent pipeline upload "$$PIPELINE_FILE"
+      echo "✅ Uploading pull-request pipeline..."
+
+      # IMPORTANT: pull-request.yml contains a monorepo-diff step at the beginning.
+      # When this pipeline is uploaded, monorepo-diff will run and may generate
+      # additional steps based on file changes (ci/.env or ci/build-ci-image.sh).
+      #
+      # If the monorepo-diff generates a step to re-upload this pipeline,
+      # it could cause infinite recursion. This is a known issue with monorepo-diff.
+      #
+      # Workaround: The monorepo-diff step only watches ci/.env and ci/build-ci-image.sh.
+      # If those files haven't changed, it should not generate the upload step.
+      # If they have changed, the CI image rebuild is necessary.
+      #
+      # TODO: Consider creating pull-request-without-monorepo.yml for gatekeeper use.
+
+      if [[ ! -f "ci/workflows/pull-request.yml" ]]; then
+        echo "❌ Pipeline file not found: ci/workflows/pull-request.yml"
+        exit 1
+      fi
+
+      buildkite-agent pipeline upload "ci/workflows/pull-request.yml"
 
       echo ""
       echo "=== Pipeline uploaded successfully ==="
-    plugins:
-      - seek-oss/aws-sm#v2.3.2:
-          env:
-            GITHUB_TOKEN: github-token
-
-  # Post status to GitHub PR
-  - label: ":github: Update PR Status"
-    key: "update-status"
-    depends_on: "upload-pipeline"
-    command: |
-      IS_FORK="$$(buildkite-agent meta-data get is_fork 2>/dev/null || echo 'false')"
-
-      if [[ "$$IS_FORK" == "true" && -n "$$BUILDKITE_PULL_REQUEST" ]]; then
-        APPROVER="$$(buildkite-agent meta-data get approved_by 2>/dev/null || echo 'unknown')"
-
-        # Post approval confirmation comment
-        curl -s -X POST \
-          -H "Authorization: token $$GITHUB_TOKEN" \
-          -H "Content-Type: application/json" \
-          -d "{\"body\":\"✅ **CI Approved** by @$$APPROVER\\n\\nThe full CI pipeline has been triggered. Results will be posted as separate status checks.\"}" \
-          "https://api.github.com/repos/risingwavelabs/risingwave/issues/$$BUILDKITE_PULL_REQUEST/comments" \
-          > /dev/null
-
-        # Remove pending label, add approved label
-        curl -s -X DELETE \
-          -H "Authorization: token $$GITHUB_TOKEN" \
-          "https://api.github.com/repos/risingwavelabs/risingwave/issues/$$BUILDKITE_PULL_REQUEST/labels/ci/pending-approval" \
-          > /dev/null 2>&1 || true
-
-        curl -s -X POST \
-          -H "Authorization: token $$GITHUB_TOKEN" \
-          -H "Content-Type: application/json" \
-          -d '{"labels":["ci/approved"]}' \
-          "https://api.github.com/repos/risingwavelabs/risingwave/issues/$$BUILDKITE_PULL_REQUEST/labels" \
-          > /dev/null || true
-      fi
-    plugins:
-      - seek-oss/aws-sm#v2.3.2:
-          env:
-            GITHUB_TOKEN: github-token
-    soft_fail: true

@@ -123,7 +123,11 @@ steps:
   - label: ":white_check_mark: Verify Main-Cron Approval"
     key: "verify-main-cron-approval"
     depends_on: "security-block-main-cron"
-    if: build.meta_data("is_fork") == "true"
+    # Only run verification if the block step was triggered (fork + main-cron labels)
+    if: |
+      build.meta_data("is_fork") == "true" &&
+      (build.pull_request.labels includes "ci/main-cron/run-all" ||
+       build.pull_request.labels includes "ci/main-cron/run-selected")
     command: |
       DECISION="$${BUILDKITE_UNBLOCKER_MAIN_CRON_APPROVAL:-}"
       NOTES="$${BUILDKITE_UNBLOCKER_REVIEW_NOTES:-}"
@@ -179,7 +183,8 @@ steps:
       - "verify-main-cron-approval"
     command: |
       IS_FORK="$$(buildkite-agent meta-data get is_fork 2>/dev/null || echo 'false')"
-      APPROVED="$$(buildkite-agent meta-data get main_cron_approved 2>/dev/null || echo 'true')"
+      # Default to false for safety - must be explicitly approved
+      APPROVED="$$(buildkite-agent meta-data get main_cron_approved 2>/dev/null || echo 'false')"
       SCOPE="$$(buildkite-agent meta-data get main_cron_scope 2>/dev/null || echo 'full')"
 
       echo "=== Uploading Main-Cron Pipeline ==="
@@ -192,15 +197,10 @@ steps:
         exit 1
       fi
 
-      # Select pipeline file based on scope
-      if [[ "$$SCOPE" == "limited" ]]; then
-        echo "Uploading limited main-cron pipeline (no cloud tests)..."
-        # Could create a limited version without cloud tests
-        PIPELINE_FILE="ci/workflows/main-cron.yml"
-      else
-        echo "Uploading full main-cron pipeline..."
-        PIPELINE_FILE="ci/workflows/main-cron.yml"
-      fi
+      # For now, both "full" and "limited" use the same pipeline.
+      # TODO: Create a limited pipeline variant without cloud tests if needed.
+      echo "Uploading main-cron pipeline (scope: $$SCOPE)..."
+      PIPELINE_FILE="ci/workflows/main-cron.yml"
 
       if [[ ! -f "$$PIPELINE_FILE" ]]; then
         echo "❌ Pipeline file not found: $$PIPELINE_FILE"

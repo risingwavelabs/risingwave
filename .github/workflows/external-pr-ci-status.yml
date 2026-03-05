@@ -5,8 +5,14 @@ name: External PR CI Status
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened]
+    # Note: For fork PRs, this workflow runs with a read-only GITHUB_TOKEN by default
+    # unless the repository setting "Workflow permissions" -> "Read and write permissions"
+    # is enabled for fork pull requests. Alternatively, use pull_request_target (with caution)
+    # if you need write access for fork PRs.
+    types: [opened, synchronize, reopened, labeled, closed]
 
+# For fork PRs, these permissions may be restricted to read-only depending on
+# repository settings. See: https://docs.github.com/en/actions/security-guides/automatic-token-authentication#permissions-for-the-github_token
 permissions:
   pull-requests: write
   issues: write

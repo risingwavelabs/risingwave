@@ -53,17 +53,40 @@ Webhook URL: https://buildkite.com/webhook?token=xxx
              (pointing to gatekeeper)
 ```
 
-### Step 3: Configure Steps
+### Step 3: Configure Steps (⚠️ SECURITY CRITICAL)
 
-In the Buildkite UI, set the **Steps** to:
+**⚠️ IMPORTANT SECURITY WARNING:**
 
+The gatekeeper pipeline **MUST NOT** be loaded from the PR's repository checkout via `buildkite-agent pipeline upload`, because fork contributors could modify `ci/workflows/gatekeeper-pull-request.yml` to bypass the approval block or exfiltrate secrets.
+
+**Correct Approach:**
+
+In the Buildkite UI, define the **Steps** directly by **copying and pasting** the content of `ci/workflows/gatekeeper-pull-request.yml` from the trusted `main` branch:
+
+1. Go to Pipeline Settings → Steps
+2. Select "Edit Steps"
+3. Copy the entire content of `ci/workflows/gatekeeper-pull-request.yml` from the `main` branch
+4. Paste it into the Buildkite Steps editor
+5. Save
+
+**❌ DO NOT use:**
 ```yaml
+# WRONG - This loads from PR checkout and is insecure!
 steps:
   - label: ":pipeline: Upload Gatekeeper"
     command: buildkite-agent pipeline upload ci/workflows/gatekeeper-pull-request.yml
 ```
 
-Or directly paste the content of `gatekeeper-pull-request.yml` into the Steps editor.
+**✅ CORRECT - Paste content directly in Buildkite UI:**
+- The gatekeeper pipeline definition is controlled by maintainers
+- Cannot be modified by external contributors
+- Updates must be done manually by maintainers in the Buildkite UI
+
+**Maintenance:**
+When updating the gatekeeper pipeline:
+1. Update `ci/workflows/gatekeeper-pull-request.yml` in the repo (for version control)
+2. Manually copy the updated content to Buildkite UI
+3. Keep the repo version and UI version in sync
 
 ## Security Workflow
 
