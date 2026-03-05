@@ -2,7 +2,7 @@
 # Test script for gatekeeper fork detection logic
 # Usage: ./ci/scripts/test-gatekeeper.sh [PR_REPO] [MAIN_REPO]
 
-set -e
+set -euo pipefail
 
 # Test cases
 run_test() {
