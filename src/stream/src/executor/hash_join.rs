@@ -494,7 +494,6 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding>
 
         let inequality_watermarks = vec![None; inequality_pairs.len()];
         let watermark_buffers = BTreeMap::new();
-
         Self {
             ctx: ctx.clone(),
             info,
@@ -1200,7 +1199,8 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding>
 
         // watermark state cleaning
         for matched_row in matched_rows_to_clean {
-            side_match.ht.delete_handle_degree(key, matched_row)?;
+            // The committed table watermark is responsible for reclaiming rows in the state table.
+            side_match.ht.delete_row_in_mem(key, &matched_row.row)?;
         }
 
         // apply append_only optimization to clean matched_rows which have been persisted
@@ -1253,7 +1253,6 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding>
     ) -> Option<StreamChunk> {
         let mut need_state_clean = false;
         let mut chunk_opt = None;
-
         // TODO(kwannoel): Instead of evaluating this every loop,
         // we can call this only if there's a non-equi expression.
         // check join cond
@@ -1328,9 +1327,10 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding>
             assert!(append_only_matched_row.is_none());
             *append_only_matched_row = Some(matched_row.map(map_output));
         } else if need_state_clean {
-            // `append_only_optimize` and `need_state_clean` won't both be true.
-            // 'else' here is only to suppress compiler error, otherwise
-            // `matched_row` will be moved twice.
+            debug_assert!(
+                !append_only_optimize,
+                "`append_only_optimize` and `need_state_clean` must not both be true"
+            );
             matched_rows_to_clean.push(matched_row.map(map_output));
         }
 
@@ -1411,23 +1411,48 @@ mod tests {
         table_id: u32,
         degree_inequality_type: Option<DataType>,
     ) -> (StateTable<MemoryStateStore>, StateTable<MemoryStateStore>) {
+        create_in_memory_state_table_with_watermark(
+            mem_state,
+            data_types,
+            order_types,
+            pk_indices,
+            table_id,
+            degree_inequality_type,
+            vec![],
+            vec![],
+        )
+        .await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn create_in_memory_state_table_with_watermark(
+        mem_state: MemoryStateStore,
+        data_types: &[DataType],
+        order_types: &[OrderType],
+        pk_indices: &[usize],
+        table_id: u32,
+        degree_inequality_type: Option<DataType>,
+        state_clean_watermark_indices: Vec<usize>,
+        degree_clean_watermark_indices: Vec<usize>,
+    ) -> (StateTable<MemoryStateStore>, StateTable<MemoryStateStore>) {
         let column_descs = data_types
             .iter()
             .enumerate()
             .map(|(id, data_type)| ColumnDesc::unnamed(ColumnId::new(id as i32), data_type.clone()))
             .collect_vec();
-        let state_table = StateTable::from_table_catalog(
-            &gen_pbtable(
-                TableId::new(table_id),
-                column_descs,
-                order_types.to_vec(),
-                pk_indices.to_vec(),
-                0,
-            ),
-            mem_state.clone(),
-            None,
-        )
-        .await;
+        let mut state_table_catalog = gen_pbtable(
+            TableId::new(table_id),
+            column_descs,
+            order_types.to_vec(),
+            pk_indices.to_vec(),
+            0,
+        );
+        state_table_catalog.clean_watermark_indices = state_clean_watermark_indices
+            .into_iter()
+            .map(|idx| idx as u32)
+            .collect();
+        let state_table =
+            StateTable::from_table_catalog(&state_table_catalog, mem_state.clone(), None).await;
 
         // Create degree table with schema: [pk..., _degree, inequality?]
         let mut degree_table_column_descs = vec![];
@@ -1449,18 +1474,19 @@ mod tests {
                 ineq_type,
             ));
         }
-        let degree_state_table = StateTable::from_table_catalog(
-            &gen_pbtable(
-                TableId::new(table_id + 1),
-                degree_table_column_descs,
-                order_types.to_vec(),
-                pk_indices.to_vec(),
-                0,
-            ),
-            mem_state,
-            None,
-        )
-        .await;
+        let mut degree_table_catalog = gen_pbtable(
+            TableId::new(table_id + 1),
+            degree_table_column_descs,
+            order_types.to_vec(),
+            pk_indices.to_vec(),
+            0,
+        );
+        degree_table_catalog.clean_watermark_indices = degree_clean_watermark_indices
+            .into_iter()
+            .map(|idx| idx as u32)
+            .collect();
+        let degree_state_table =
+            StateTable::from_table_catalog(&degree_table_catalog, mem_state, None).await;
         (state_table, degree_state_table)
     }
 
@@ -1503,24 +1529,47 @@ mod tests {
             .iter()
             .find(|pair| pair.clean_right_state)
             .map(|_| DataType::Int64); // Column 1 is Int64
+        let l_clean_watermark_indices = inequality_pairs
+            .iter()
+            .find(|pair| pair.clean_left_state)
+            .map(|pair| vec![pair.left_idx])
+            .unwrap_or_default();
+        let r_clean_watermark_indices = inequality_pairs
+            .iter()
+            .find(|pair| pair.clean_right_state)
+            .map(|pair| vec![pair.right_idx])
+            .unwrap_or_default();
+        let degree_inequality_column_idx = 3;
+        let l_degree_clean_watermark_indices = l_degree_ineq_type
+            .as_ref()
+            .map(|_| vec![degree_inequality_column_idx])
+            .unwrap_or_default();
+        let r_degree_clean_watermark_indices = r_degree_ineq_type
+            .as_ref()
+            .map(|_| vec![degree_inequality_column_idx])
+            .unwrap_or_default();
 
-        let (state_l, degree_state_l) = create_in_memory_state_table_with_inequality(
+        let (state_l, degree_state_l) = create_in_memory_state_table_with_watermark(
             mem_state.clone(),
             &[DataType::Int64, DataType::Int64],
             &[OrderType::ascending(), OrderType::ascending()],
             &[0, 1],
             0,
             l_degree_ineq_type,
+            l_clean_watermark_indices,
+            l_degree_clean_watermark_indices,
         )
         .await;
 
-        let (state_r, degree_state_r) = create_in_memory_state_table_with_inequality(
+        let (state_r, degree_state_r) = create_in_memory_state_table_with_watermark(
             mem_state,
             &[DataType::Int64, DataType::Int64],
             &[OrderType::ascending(), OrderType::ascending()],
             &[0, 1],
             2,
             r_degree_ineq_type,
+            r_clean_watermark_indices,
+            r_degree_clean_watermark_indices,
         )
         .await;
 
