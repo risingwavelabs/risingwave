@@ -1762,4 +1762,38 @@ mod tests {
 
         hash_dispatcher.dispatch_data(projected).await.unwrap();
     }
+
+    #[tokio::test]
+    async fn test_hash_dispatcher_internal_projection_normalize_single_u_plus() {
+        let (output_tx, mut output_rx) = channel_for_test();
+        let outputs = vec![Output::new(ActorId::new(1), output_tx)];
+        let hash_mapping = vec![ActorId::new(1); VirtualNode::COUNT_FOR_TEST];
+        let mut hash_dispatcher = HashDataDispatcher::new(
+            outputs,
+            vec![0],
+            DispatchOutputMapping::Simple(vec![0]),
+            hash_mapping,
+            0.into(),
+        );
+
+        let input = StreamChunk::from_pretty(
+            "  I I
+            + 1 10
+            U- 1 10
+            U+ 1 30",
+        );
+
+        hash_dispatcher.dispatch_data(input).await.unwrap();
+
+        let output = output_rx.recv().await.unwrap();
+        assert_eq!(
+            *output.as_chunk().unwrap(),
+            StreamChunk::from_pretty(
+                "  I
+                + 1 D
+                U- 1 D
+                + 1",
+            )
+        );
+    }
 }
