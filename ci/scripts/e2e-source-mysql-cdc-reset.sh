@@ -189,6 +189,16 @@ risedev psql -c "ALTER SOURCE s RESET;"
 
 sleep 2
 
+echo "--- Verify RESET cleared CDC offset in state table (start_offset should be NULL)"
+RESET_NULL_COUNT=$(risedev psql -t -A -c "SELECT COUNT(*) FROM ${STATE_TABLE} WHERE offset_info->'split_info'->'inner'->>'start_offset' IS NULL;")
+if [ "$RESET_NULL_COUNT" -ge 1 ]; then
+    echo "✓ PASS: ALTER SOURCE RESET cleared CDC start_offset to NULL"
+else
+    echo "✗ FAIL: ALTER SOURCE RESET did not clear CDC start_offset"
+    risedev psql -c "SELECT partition_id, offset_info FROM ${STATE_TABLE};"
+    exit 1
+fi
+
 echo "\n\n\n-------------Phase 7: Insert data after RESET------------\n\n\n"
 echo "Inserting third batch (id=16-20) after RESET..."
 for i in {16..20}; do
