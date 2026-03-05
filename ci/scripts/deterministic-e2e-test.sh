@@ -5,19 +5,6 @@ set -euo pipefail
 
 source ci/scripts/common.sh
 
-TARGET_RELEASE_BRANCH="release-2.6"
-IS_TARGET_RELEASE_BRANCH=0
-if [[ "${BUILDKITE_BRANCH:-}" == "${TARGET_RELEASE_BRANCH}" || "${BUILDKITE_PULL_REQUEST_BASE_BRANCH:-}" == "${TARGET_RELEASE_BRANCH}" ]]; then
-  IS_TARGET_RELEASE_BRANCH=1
-fi
-
-if [[ "${IS_TARGET_RELEASE_BRANCH}" == "1" && "${RW_CI_ENABLE_RELEASE_2_6_DETERMINISTIC_E2E:-0}" != "1" ]]; then
-  echo "--- skip deterministic simulation e2e, ci-3cn-2fe on ${TARGET_RELEASE_BRANCH}"
-  echo "Reason: temporarily disabled on ${TARGET_RELEASE_BRANCH} due to test stability concerns."
-  echo "Set RW_CI_ENABLE_RELEASE_2_6_DETERMINISTIC_E2E=1 to re-enable."
-  exit 0
-fi
-
 echo "--- Download artifacts"
 download-and-decompress-artifact risingwave_simulation .
 chmod +x ./risingwave_simulation
@@ -59,8 +46,8 @@ seq "$TEST_NUM" | parallel 'MADSIM_TEST_SEED={} ./risingwave_simulation -j 16 ./
 echo "--- deterministic simulation e2e, ci-3cn-2fe, parallel, batch"
 seq "$TEST_NUM" | parallel 'MADSIM_TEST_SEED={} ./risingwave_simulation -j 16 ./e2e_test/batch/\*\*/\*.slt 2> $LOGDIR/parallel-batch-{}.log && rm $LOGDIR/parallel-batch-{}.log'
 
-# TODO: Re-enable pre-generated query fuzzing when release-2.6 no longer needs
-# temporary CI stabilization.
+# TODO: Re-enable pre-generated query fuzzing once flaky failures are
+# root-caused and fixed.
 echo "--- skip deterministic simulation e2e, ci-3cn-2fe, fuzzing (pre-generated-queries)"
 
 echo "--- deterministic simulation e2e, ci-3cn-2fe, e2e extended mode test"
