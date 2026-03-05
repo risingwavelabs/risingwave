@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,7 +19,7 @@ use super::{
     BatchLimit, ColPrunable, ExprRewritable, Logical, LogicalPlanRef as PlanRef, PlanBase,
     PlanTreeNodeUnary, PredicatePushdown, ToBatch, ToStream, gen_filter_and_pushdown, generic,
 };
-use crate::error::Result;
+use crate::error::{ErrorCode, Result, RwError};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::generic::Limit;
 use crate::optimizer::plan_node::{
@@ -111,11 +111,29 @@ impl ToBatch for LogicalLimit {
 impl ToStream for LogicalLimit {
     fn to_stream(
         &self,
-        ctx: &mut ToStreamContext,
+        _ctx: &mut ToStreamContext,
     ) -> Result<crate::optimizer::plan_node::StreamPlanRef> {
-        // use the first column as an order to provide determinism for streaming queries.
-        let order = Order::new(vec![ColumnOrder::new(0, OrderType::ascending())]);
-        let topn = LogicalTopN::new(
+        Err(RwError::from(ErrorCode::InternalError(
+            "LogicalLimit should already be rewritten to LogicalTopN".to_owned(),
+        )))
+    }
+
+    fn logical_rewrite_for_stream(
+        &self,
+        ctx: &mut RewriteStreamContext,
+    ) -> Result<(PlanRef, ColIndexMapping)> {
+        // First, rewrite self into a `LogicalTopN`.
+        //
+        // For streaming queries without an explicit `ORDER BY`, SQL does not guarantee which rows
+        // are returned by `LIMIT/OFFSET`. We prefer to use the first visible column as a stable
+        // ordering if it exists; otherwise, fall back to an empty order and rely on the input
+        // stream key (e.g. `_row_id`/PK) as the tie-breaker.
+        let order = if !self.input().schema().is_empty() {
+            Order::new(vec![ColumnOrder::new(0, OrderType::ascending())])
+        } else {
+            Order::any()
+        };
+        let top_n = LogicalTopN::new(
             self.input(),
             self.limit(),
             self.offset(),
@@ -123,15 +141,6 @@ impl ToStream for LogicalLimit {
             order,
             vec![],
         );
-        topn.to_stream(ctx)
-    }
-
-    fn logical_rewrite_for_stream(
-        &self,
-        ctx: &mut RewriteStreamContext,
-    ) -> Result<(PlanRef, ColIndexMapping)> {
-        let (input, input_col_change) = self.input().logical_rewrite_for_stream(ctx)?;
-        let (filter, out_col_change) = self.rewrite_with_input(input, input_col_change);
-        Ok((filter.into(), out_col_change))
+        top_n.logical_rewrite_for_stream(ctx)
     }
 }
