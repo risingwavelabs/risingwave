@@ -19,13 +19,8 @@ use std::vec;
 use itertools::Itertools;
 use risingwave_common::catalog::{DatabaseId, FragmentTypeFlag, SchemaId, TableId};
 use risingwave_common::hash::VirtualNode;
-use risingwave_common::id::WorkerId;
-use risingwave_common::util::worker_util::DEFAULT_RESOURCE_GROUP;
 use risingwave_pb::catalog::PbTable;
-use risingwave_pb::common::worker_node::Property;
-use risingwave_pb::common::{
-    PbColumnOrder, PbDirection, PbNullsAre, PbOrderType, WorkerNode, WorkerType,
-};
+use risingwave_pb::common::{PbColumnOrder, PbDirection, PbNullsAre, PbOrderType};
 use risingwave_pb::data::DataType;
 use risingwave_pb::data::data_type::TypeName;
 use risingwave_pb::ddl_service::TableJobType;
@@ -43,7 +38,6 @@ use risingwave_pb::stream_plan::{
 };
 
 use crate::MetaResult;
-use crate::controller::cluster::StreamingClusterInfo;
 use crate::manager::{MetaSrvEnv, StreamingJob};
 use crate::model::StreamJobFragments;
 use crate::stream::{

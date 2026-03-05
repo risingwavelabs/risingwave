@@ -45,6 +45,7 @@ use risingwave_meta_model::object::ObjectType;
 use risingwave_meta_model::{
     ConnectionId, DatabaseId, DispatcherType, FragmentId, FunctionId, IndexId, JobStatus, ObjectId,
     SchemaId, SecretId, SinkId, SourceId, StreamingParallelism, SubscriptionId, UserId, ViewId,
+    streaming_job,
 };
 use risingwave_pb::catalog::{
     Comment, Connection, CreateType, Database, Function, PbTable, Schema, Secret, Source,
@@ -1029,7 +1030,7 @@ impl DdlController {
             self.validate_table_for_sink(target_table).await?;
         }
         let ctx = StreamContext::from_protobuf(fragment_graph.get_ctx().unwrap());
-        let check_ret = self
+        let streaming_job_model = match self
             .metadata_manager
             .catalog_controller
             .create_job_catalog(
@@ -1041,24 +1042,27 @@ impl DdlController {
                 resource_type.clone(),
                 &fragment_graph.backfill_parallelism,
             )
-            .await;
-        if let Err(meta_err) = check_ret {
-            if !if_not_exists {
-                return Err(meta_err);
-            }
-            return if let MetaErrorInner::Duplicated(_, _, Some(job_id)) = meta_err.inner() {
-                if streaming_job.create_type() == CreateType::Foreground {
-                    let database_id = streaming_job.database_id();
-                    self.metadata_manager
-                        .wait_streaming_job_finished(database_id, *job_id)
-                        .await
-                } else {
-                    Ok(IGNORED_NOTIFICATION_VERSION)
+            .await
+        {
+            Ok(model) => model,
+            Err(meta_err) => {
+                if !if_not_exists {
+                    return Err(meta_err);
                 }
-            } else {
-                Err(meta_err)
-            };
-        }
+                return if let MetaErrorInner::Duplicated(_, _, Some(job_id)) = meta_err.inner() {
+                    if streaming_job.create_type() == CreateType::Foreground {
+                        let database_id = streaming_job.database_id();
+                        self.metadata_manager
+                            .wait_streaming_job_finished(database_id, *job_id)
+                            .await
+                    } else {
+                        Ok(IGNORED_NOTIFICATION_VERSION)
+                    }
+                } else {
+                    Err(meta_err)
+                };
+            }
+        };
         let job_id = streaming_job.id();
         tracing::debug!(
             id = %job_id,
@@ -1087,7 +1091,14 @@ impl DdlController {
 
         // create streaming job.
         match self
-            .create_streaming_job_inner(ctx, streaming_job, fragment_graph, resource_type, permit)
+            .create_streaming_job_inner(
+                ctx,
+                streaming_job,
+                fragment_graph,
+                resource_type,
+                permit,
+                streaming_job_model,
+            )
             .await
         {
             Ok(version) => Ok(version),
@@ -1131,6 +1142,7 @@ impl DdlController {
         fragment_graph: StreamFragmentGraphProto,
         resource_type: streaming_job_resource_type::ResourceType,
         permit: OwnedSemaphorePermit,
+        streaming_job_model: streaming_job::Model,
     ) -> MetaResult<NotificationVersion> {
         let mut fragment_graph =
             StreamFragmentGraph::new(&self.env, fragment_graph, &streaming_job)?;
@@ -1151,7 +1163,13 @@ impl DdlController {
         // create fragment and actor catalogs.
         tracing::debug!(id = %streaming_job.id(), "building streaming job");
         let (ctx, stream_job_fragments) = self
-            .build_stream_job(ctx, streaming_job, fragment_graph, resource_type)
+            .build_stream_job(
+                ctx,
+                streaming_job,
+                fragment_graph,
+                resource_type,
+                streaming_job_model,
+            )
             .await?;
 
         let streaming_job = &ctx.streaming_job;
@@ -1447,6 +1465,7 @@ impl DdlController {
                         )
                         .into());
                     }
+                    let sink_ctx = sink_job_fragments.ctx;
                     let original_sink_fragment =
                         sink_job_fragments.fragments.into_values().next().unwrap();
                     let (new_sink_fragment, new_schema, new_log_store_table) =
@@ -1461,12 +1480,12 @@ impl DdlController {
 
                     let streaming_job = StreamingJob::Sink(sink);
 
-                    let tmp_sink_id = self
+                    let tmp_sink_model = self
                         .metadata_manager
                         .catalog_controller
                         .create_job_catalog_for_replace(&streaming_job, None, None, None)
-                        .await?
-                        .as_sink_id();
+                        .await?;
+                    let tmp_sink_id = tmp_sink_model.job_id.as_sink_id();
                     let StreamingJob::Sink(sink) = streaming_job else {
                         unreachable!()
                     };
@@ -1482,6 +1501,7 @@ impl DdlController {
                             .collect(),
                         new_fragment: new_sink_fragment,
                         new_log_store_table,
+                        ctx: sink_ctx,
                     });
                 }
                 Some(sinks)
@@ -1492,7 +1512,7 @@ impl DdlController {
             None
         };
 
-        let tmp_id = self
+        let streaming_job_model = self
             .metadata_manager
             .catalog_controller
             .create_job_catalog_for_replace(
@@ -1502,6 +1522,7 @@ impl DdlController {
                 Some(fragment_graph.max_parallelism()),
             )
             .await?;
+        let tmp_id = streaming_job_model.job_id;
 
         let tmp_sink_ids = auto_refresh_schema_sinks.as_ref().map(|sinks| {
             sinks
@@ -1522,6 +1543,7 @@ impl DdlController {
                     fragment_graph,
                     tmp_id,
                     auto_refresh_schema_sinks,
+                    streaming_job_model,
                 )
                 .await?;
             drop_table_connector_ctx = ctx.drop_table_connector_ctx.clone();
@@ -1760,6 +1782,7 @@ impl DdlController {
         mut stream_job: StreamingJob,
         fragment_graph: StreamFragmentGraph,
         resource_type: streaming_job_resource_type::ResourceType,
+        streaming_job_model: streaming_job::Model,
     ) -> MetaResult<(CreateStreamingJobContext, StreamJobFragmentsToCreate)> {
         let id = stream_job.id();
         let specified_parallelism = fragment_graph.specified_parallelism();
@@ -1875,9 +1898,7 @@ impl DdlController {
             graph,
             downstream_fragment_relations,
             upstream_fragment_downstreams,
-            new_no_shuffle,
             replace_upstream,
-            ..
         } = actor_graph_builder.generate_graph()?;
         assert!(replace_upstream.is_empty());
 
@@ -1957,7 +1978,6 @@ impl DdlController {
 
         let ctx = CreateStreamingJobContext {
             upstream_fragment_downstreams,
-            new_no_shuffle,
             definition: stream_job.definition(),
             create_type: stream_job.create_type(),
             job_type: (&stream_job).into(),
@@ -1970,6 +1990,7 @@ impl DdlController {
             locality_fragment_state_table_mapping,
             cdc_table_snapshot_splits,
             is_serverless_backfill,
+            streaming_job_model,
         };
 
         Ok((
@@ -1993,6 +2014,7 @@ impl DdlController {
         mut fragment_graph: StreamFragmentGraph,
         tmp_job_id: JobId,
         auto_refresh_schema_sinks: Option<Vec<AutoRefreshSchemaSinkContext>>,
+        streaming_job_model: streaming_job::Model,
     ) -> MetaResult<(ReplaceStreamJobContext, StreamJobFragmentsToCreate)> {
         match &stream_job {
             StreamingJob::Table(..)
@@ -2121,7 +2143,7 @@ impl DdlController {
             _ => unreachable!(),
         };
 
-        let resource_group = self
+        let _resource_group = self
             .metadata_manager
             .get_existing_job_resource_group(id)
             .await?;
@@ -2141,8 +2163,6 @@ impl DdlController {
             downstream_fragment_relations,
             upstream_fragment_downstreams,
             mut replace_upstream,
-            new_no_shuffle,
-            ..
         } = actor_graph_builder.generate_graph()?;
 
         // general table & source does not have upstream job, so the dispatchers should be empty
@@ -2178,12 +2198,12 @@ impl DdlController {
         let ctx = ReplaceStreamJobContext {
             old_fragments,
             replace_upstream,
-            new_no_shuffle,
             upstream_fragment_downstreams,
             streaming_job: stream_job.clone(),
             tmp_id: tmp_job_id,
             drop_table_connector_ctx,
             auto_refresh_schema_sinks,
+            streaming_job_model,
         };
 
         Ok((

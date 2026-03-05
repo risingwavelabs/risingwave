@@ -16,12 +16,18 @@ use std::assert_matches::assert_matches;
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
 use std::mem::take;
+use std::sync::atomic::AtomicU32;
 
 use risingwave_common::bail;
+use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::TableId;
+use risingwave_common::hash::VnodeCountCompat;
 use risingwave_common::id::JobId;
+use risingwave_common::system_param::AdaptiveParallelismStrategy;
 use risingwave_common::util::epoch::Epoch;
-use risingwave_meta_model::WorkerId;
+use risingwave_meta_model::fragment::DistributionType;
+use risingwave_meta_model::{DispatcherType, WorkerId, streaming_job};
+use risingwave_pb::common::WorkerNode;
 use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
 use risingwave_pb::stream_plan::barrier_mutation::{Mutation, PbMutation};
@@ -48,7 +54,15 @@ use crate::barrier::partial_graph::PartialGraphManager;
 use crate::barrier::rpc::to_partial_graph_id;
 use crate::barrier::{BarrierKind, Command, CreateStreamingJobType, TracedEpoch};
 use crate::controller::fragment::{InflightActorInfo, InflightFragmentInfo};
-use crate::model::{ActorId, ActorNewNoShuffle, FragmentId, StreamActor, StreamJobActorsToCreate};
+use crate::controller::scale::{
+    ComponentFragmentAligner, NoShuffleEnsemble, build_no_shuffle_fragment_graph_edges,
+    find_no_shuffle_graphs,
+};
+use crate::model::{
+    ActorId, ActorNewNoShuffle, Fragment as ModelFragment, FragmentDownstreamRelation, FragmentId,
+    FragmentNewNoShuffle, StreamActor, StreamContext, StreamJobActorsToCreate,
+    StreamJobFragmentsToCreate,
+};
 use crate::stream::cdc::parallel_cdc_table_backfill_fragment;
 use crate::stream::{
     GlobalActorIdGen, ReplaceJobSplitPlan, SourceManager, SplitAssignment,
@@ -164,12 +178,361 @@ pub(super) struct RenderResult {
     pub actor_no_shuffle: ActorNewNoShuffle,
 }
 
-fn render_actors() -> MetaResult<RenderResult> {
-    // assume that we have rendered the actors correctly
+/// Derive `NoShuffle` edges from fragment downstream relations and resolve ensembles.
+///
+/// This scans both the internal downstream relations (`fragments.downstreams`) and
+/// the cross-boundary upstream-to-new-fragment relations (`upstream_fragment_downstreams`)
+/// to find all `NoShuffle` edges. It then runs BFS to find connected components (ensembles)
+/// and categorizes them into:
+/// - Ensembles whose entry fragments include existing (non-new) fragments
+/// - Ensembles whose entry fragments are all newly created
+///
+/// Also returns the derived `FragmentNewNoShuffle` for use in actor-level mapping.
+fn resolve_no_shuffle_ensembles(
+    fragments: &StreamJobFragmentsToCreate,
+    upstream_fragment_downstreams: &FragmentDownstreamRelation,
+) -> MetaResult<(
+    Vec<NoShuffleEnsemble>,
+    Vec<NoShuffleEnsemble>,
+    FragmentNewNoShuffle,
+)> {
+    // Derive FragmentNewNoShuffle from the two downstream relation maps.
+    let mut new_no_shuffle: FragmentNewNoShuffle = HashMap::new();
+
+    // Internal edges (new → new) and edges from new → existing downstream (replace job).
+    for (upstream_fid, relations) in &fragments.downstreams {
+        for rel in relations {
+            if rel.dispatcher_type == DispatcherType::NoShuffle {
+                new_no_shuffle
+                    .entry(*upstream_fid)
+                    .or_default()
+                    .insert(rel.downstream_fragment_id);
+            }
+        }
+    }
+
+    // Cross-boundary edges: existing upstream → new downstream.
+    for (upstream_fid, relations) in upstream_fragment_downstreams {
+        for rel in relations {
+            if rel.dispatcher_type == DispatcherType::NoShuffle {
+                new_no_shuffle
+                    .entry(*upstream_fid)
+                    .or_default()
+                    .insert(rel.downstream_fragment_id);
+            }
+        }
+    }
+
+    if new_no_shuffle.is_empty() {
+        return Ok((Vec::new(), Vec::new(), new_no_shuffle));
+    }
+
+    // Flatten into directed edge pairs for BFS.
+    let no_shuffle_edges: Vec<(FragmentId, FragmentId)> = new_no_shuffle
+        .iter()
+        .flat_map(|(upstream_fid, downstream_fids)| {
+            downstream_fids
+                .iter()
+                .map(move |downstream_fid| (*upstream_fid, *downstream_fid))
+        })
+        .collect();
+
+    let all_fragment_ids: Vec<FragmentId> = no_shuffle_edges
+        .iter()
+        .flat_map(|(u, d)| [*u, *d])
+        .collect::<HashSet<_>>()
+        .into_iter()
+        .collect();
+
+    let (fwd, bwd) = build_no_shuffle_fragment_graph_edges(no_shuffle_edges);
+    let ensembles = find_no_shuffle_graphs(&all_fragment_ids, &fwd, &bwd)?;
+
+    let new_fragment_ids: HashSet<FragmentId> = fragments.inner.fragments.keys().copied().collect();
+
+    let mut existing_entry = Vec::new();
+    let mut new_entry = Vec::new();
+    for ensemble in ensembles {
+        if ensemble
+            .entry_fragments()
+            .any(|fid| !new_fragment_ids.contains(&fid))
+        {
+            existing_entry.push(ensemble);
+        } else {
+            new_entry.push(ensemble);
+        }
+    }
+
+    Ok((existing_entry, new_entry, new_no_shuffle))
+}
+
+/// Render actors for a create or replace streaming job.
+///
+/// This builds `NoShuffle` ensembles from the fragment graph, determines the parallelism
+/// for each ensemble (either from an existing inflight upstream or computed fresh),
+/// and produces `StreamActor` instances with worker placements and actor-level
+/// no-shuffle mappings.
+///
+/// # Arguments
+///
+/// * `fragments` - The new fragments to create, including internal downstream relations.
+/// * `database_info` - Current inflight database info for looking up existing fragments.
+/// * `definition` - The mview definition string for actors.
+/// * `ctx` - Stream context containing config override and adaptive parallelism strategy.
+/// * `streaming_job_model` - The streaming job model from meta store.
+/// * `actor_id_counter` - Atomic counter for generating unique actor IDs.
+/// * `worker_map` - Available connected worker nodes.
+/// * `adaptive_parallelism_strategy` - System-level adaptive parallelism strategy.
+/// * `existing_entry_no_shuffle_ensembles` - Ensembles whose entry fragments are existing upstream.
+/// * `new_entry_no_shuffle_ensembles` - Ensembles whose entry fragments are all newly created.
+#[expect(clippy::too_many_arguments)]
+fn render_actors(
+    fragments: &StreamJobFragmentsToCreate,
+    new_no_shuffle: &FragmentNewNoShuffle,
+    database_info: &InflightDatabaseInfo,
+    definition: &str,
+    ctx: &StreamContext,
+    streaming_job_model: &streaming_job::Model,
+    actor_id_counter: &AtomicU32,
+    worker_map: &HashMap<WorkerId, WorkerNode>,
+    adaptive_parallelism_strategy: AdaptiveParallelismStrategy,
+    existing_entry_no_shuffle_ensembles: &[NoShuffleEnsemble],
+    new_entry_no_shuffle_ensembles: &[NoShuffleEnsemble],
+) -> MetaResult<RenderResult> {
+    use risingwave_common::util::worker_util::DEFAULT_RESOURCE_GROUP;
+
+    // Determine which new fragments are covered by a pre-computed ensemble.
+    let mut covered_fragments: HashSet<FragmentId> = HashSet::new();
+    for ensemble in existing_entry_no_shuffle_ensembles
+        .iter()
+        .chain(new_entry_no_shuffle_ensembles)
+    {
+        for fid in ensemble.component_fragments() {
+            if fragments.inner.fragments.contains_key(&fid) {
+                covered_fragments.insert(fid);
+            }
+        }
+    }
+
+    let mut result_stream_actors: HashMap<FragmentId, Vec<StreamActor>> = HashMap::new();
+    let mut result_actor_location: HashMap<ActorId, WorkerId> = HashMap::new();
+    let mut result_actor_no_shuffle: ActorNewNoShuffle = HashMap::new();
+
+    /// Render actors for a single fragment given an aligner's output, and populate the
+    /// result maps.
+    fn render_fragment_actors(
+        fragment: &ModelFragment,
+        actor_assignments: &HashMap<ActorId, (WorkerId, Option<Bitmap>)>,
+        definition: &str,
+        ctx: &StreamContext,
+        result_stream_actors: &mut HashMap<FragmentId, Vec<StreamActor>>,
+        result_actor_location: &mut HashMap<ActorId, WorkerId>,
+    ) {
+        let mut actors = Vec::with_capacity(actor_assignments.len());
+        for (&actor_id, (worker_id, vnode_bitmap)) in actor_assignments {
+            result_actor_location.insert(actor_id, *worker_id);
+            actors.push(StreamActor {
+                actor_id,
+                fragment_id: fragment.fragment_id,
+                vnode_bitmap: vnode_bitmap.clone(),
+                mview_definition: definition.to_owned(),
+                expr_context: Some(ctx.to_expr_context()),
+                config_override: ctx.config_override.clone(),
+            });
+        }
+        result_stream_actors.insert(fragment.fragment_id, actors);
+    }
+
+    /// Build the actor-level no-shuffle mapping for a pair of upstream/downstream fragments
+    /// that share the same aligner (same ensemble).
+    fn build_actor_no_shuffle_mapping(
+        upstream_aligner: &ComponentFragmentAligner,
+        downstream_aligner: &ComponentFragmentAligner,
+        upstream_fid: FragmentId,
+        downstream_fid: FragmentId,
+        result: &mut ActorNewNoShuffle,
+    ) {
+        let upstream_base = upstream_aligner.actor_id_base();
+        let downstream_base = downstream_aligner.actor_id_base();
+        let count = upstream_aligner.actor_count();
+        let mapping: HashMap<ActorId, ActorId> = (0..count)
+            .map(|idx| {
+                let upstream_actor_id = upstream_base + idx;
+                let downstream_actor_id = downstream_base + idx;
+                (upstream_actor_id, downstream_actor_id)
+            })
+            .collect();
+        result
+            .entry(upstream_fid)
+            .or_default()
+            .insert(downstream_fid, mapping);
+    }
+
+    /// Process a single `NoShuffle` ensemble: render actors for new fragments and build
+    /// actor-level no-shuffle mappings. `fragment_aligners` should be pre-populated with
+    /// any existing entry fragment aligners before calling this.
+    #[allow(clippy::too_many_arguments)]
+    fn process_ensemble(
+        ensemble: &NoShuffleEnsemble,
+        aligner: &ComponentFragmentAligner,
+        fragment_aligners: &mut HashMap<FragmentId, ComponentFragmentAligner>,
+        fragments: &StreamJobFragmentsToCreate,
+        new_no_shuffle: &FragmentNewNoShuffle,
+        definition: &str,
+        ctx: &StreamContext,
+        actor_id_counter: &AtomicU32,
+        result_stream_actors: &mut HashMap<FragmentId, Vec<StreamActor>>,
+        result_actor_location: &mut HashMap<ActorId, WorkerId>,
+        result_actor_no_shuffle: &mut ActorNewNoShuffle,
+    ) {
+        // Allocate aligners for each new fragment in this ensemble and render actors.
+        for fid in ensemble.component_fragments() {
+            // Skip existing fragments (they already exist, no actor rendering needed).
+            if !fragments.inner.fragments.contains_key(&fid) {
+                continue;
+            }
+
+            let fragment = &fragments.inner.fragments[&fid];
+            let distribution_type: DistributionType = fragment.distribution_type.into();
+
+            let frag_aligner = aligner.clone_for_new_fragment(actor_id_counter);
+            let actor_assignments = frag_aligner.align_component_actor(distribution_type);
+            render_fragment_actors(
+                fragment,
+                &actor_assignments,
+                definition,
+                ctx,
+                result_stream_actors,
+                result_actor_location,
+            );
+            fragment_aligners.insert(fid, frag_aligner);
+        }
+
+        // Build actor-level no-shuffle mappings.
+        // new_no_shuffle contains all directed NoShuffle edges (both internal between new
+        // fragments and cross-boundary with existing upstream/downstream fragments).
+        // The fragment_aligners check naturally filters to this ensemble's fragments.
+        for (upstream_fid, downstream_fids) in new_no_shuffle {
+            for downstream_fid in downstream_fids {
+                if let (Some(up_aligner), Some(down_aligner)) = (
+                    fragment_aligners.get(upstream_fid),
+                    fragment_aligners.get(downstream_fid),
+                ) {
+                    build_actor_no_shuffle_mapping(
+                        up_aligner,
+                        down_aligner,
+                        *upstream_fid,
+                        *downstream_fid,
+                        result_actor_no_shuffle,
+                    );
+                }
+            }
+        }
+    }
+
+    // Process ensembles with existing upstream entry fragments.
+    for ensemble in existing_entry_no_shuffle_ensembles {
+        // Build the aligner from the first existing entry fragment's inflight info.
+        let existing_entry_fid = ensemble
+            .entry_fragments()
+            .find(|fid| !fragments.inner.fragments.contains_key(fid))
+            .expect("existing entry ensemble must have at least one existing entry");
+        let upstream_fragment = database_info.fragment(existing_entry_fid);
+        let aligner = ComponentFragmentAligner::from_existing_inflight_fragment(upstream_fragment);
+
+        // Pre-populate aligners for existing entry fragments.
+        let mut fragment_aligners: HashMap<FragmentId, ComponentFragmentAligner> = HashMap::new();
+        for entry_fid in ensemble.entry_fragments() {
+            if !fragments.inner.fragments.contains_key(&entry_fid) {
+                let upstream_fragment = database_info.fragment(entry_fid);
+                let upstream_aligner =
+                    ComponentFragmentAligner::from_existing_inflight_fragment(upstream_fragment);
+                fragment_aligners.insert(entry_fid, upstream_aligner);
+            }
+        }
+
+        process_ensemble(
+            ensemble,
+            &aligner,
+            &mut fragment_aligners,
+            fragments,
+            new_no_shuffle,
+            definition,
+            ctx,
+            actor_id_counter,
+            &mut result_stream_actors,
+            &mut result_actor_location,
+            &mut result_actor_no_shuffle,
+        );
+    }
+
+    // Process ensembles with all-new entry fragments.
+    for ensemble in new_entry_no_shuffle_ensembles {
+        let first_entry_fid = ensemble
+            .entry_fragments()
+            .next()
+            .expect("ensemble must have at least one entry");
+        let fragment = &fragments.inner.fragments[&first_entry_fid];
+        let vnode_count = fragment.vnode_count();
+        let aligner = ComponentFragmentAligner::render_entry_fragment(
+            streaming_job_model,
+            worker_map,
+            adaptive_parallelism_strategy,
+            None,
+            DEFAULT_RESOURCE_GROUP.to_owned(),
+            vnode_count,
+            actor_id_counter,
+        )?;
+
+        let mut fragment_aligners: HashMap<FragmentId, ComponentFragmentAligner> = HashMap::new();
+        process_ensemble(
+            ensemble,
+            &aligner,
+            &mut fragment_aligners,
+            fragments,
+            new_no_shuffle,
+            definition,
+            ctx,
+            actor_id_counter,
+            &mut result_stream_actors,
+            &mut result_actor_location,
+            &mut result_actor_no_shuffle,
+        );
+    }
+
+    // Handle standalone fragments (not in any ensemble).
+    for (fid, fragment) in &fragments.inner.fragments {
+        if covered_fragments.contains(fid) {
+            continue;
+        }
+
+        let vnode_count = fragment.vnode_count();
+        let distribution_type: DistributionType = fragment.distribution_type.into();
+
+        let frag_aligner = ComponentFragmentAligner::render_entry_fragment(
+            streaming_job_model,
+            worker_map,
+            adaptive_parallelism_strategy,
+            None,
+            DEFAULT_RESOURCE_GROUP.to_owned(),
+            vnode_count,
+            actor_id_counter,
+        )?;
+
+        let actor_assignments = frag_aligner.align_component_actor(distribution_type);
+        render_fragment_actors(
+            fragment,
+            &actor_assignments,
+            definition,
+            ctx,
+            &mut result_stream_actors,
+            &mut result_actor_location,
+        );
+    }
+
     Ok(RenderResult {
-        stream_actors: HashMap::new(),
-        actor_location: HashMap::new(),
-        actor_no_shuffle: HashMap::new(),
+        stream_actors: result_stream_actors,
+        actor_location: result_actor_location,
+        actor_no_shuffle: result_actor_no_shuffle,
     })
 }
 
@@ -209,6 +572,8 @@ impl DatabaseCheckpointControl {
         barrier_info: &BarrierInfo,
         partial_graph_manager: &mut PartialGraphManager,
         hummock_version_stats: &HummockVersionStats,
+        adaptive_parallelism_strategy: AdaptiveParallelismStrategy,
+        worker_nodes: &HashMap<WorkerId, WorkerNode>,
     ) -> MetaResult<ApplyCommandInfo> {
         debug_assert!(
             !matches!(
@@ -285,7 +650,27 @@ impl DatabaseCheckpointControl {
                 job_type: CreateStreamingJobType::SnapshotBackfill(mut snapshot_backfill_info),
                 cross_db_snapshot_backfill_info,
             }) => {
-                let actors = render_actors()?;
+                let (existing_entry_ensembles, new_entry_ensembles, new_no_shuffle) =
+                    resolve_no_shuffle_ensembles(
+                        &info.stream_job_fragments,
+                        &info.upstream_fragment_downstreams,
+                    )?;
+                let actors = render_actors(
+                    &info.stream_job_fragments,
+                    &new_no_shuffle,
+                    &self.database_info,
+                    &info.definition,
+                    &info.stream_job_fragments.inner.ctx,
+                    &info.streaming_job_model,
+                    partial_graph_manager
+                        .control_stream_manager()
+                        .env
+                        .actor_id_generator(),
+                    worker_nodes,
+                    adaptive_parallelism_strategy,
+                    &existing_entry_ensembles,
+                    &new_entry_ensembles,
+                )?;
                 {
                     assert!(!self.state.is_paused());
                     let snapshot_epoch = barrier_info.prev_epoch();
@@ -393,7 +778,27 @@ impl DatabaseCheckpointControl {
                 job_type,
                 cross_db_snapshot_backfill_info,
             }) => {
-                let actors = render_actors()?;
+                let (existing_entry_ensembles, new_entry_ensembles, new_no_shuffle) =
+                    resolve_no_shuffle_ensembles(
+                        &info.stream_job_fragments,
+                        &info.upstream_fragment_downstreams,
+                    )?;
+                let actors = render_actors(
+                    &info.stream_job_fragments,
+                    &new_no_shuffle,
+                    &self.database_info,
+                    &info.definition,
+                    &info.stream_job_fragments.inner.ctx,
+                    &info.streaming_job_model,
+                    partial_graph_manager
+                        .control_stream_manager()
+                        .env
+                        .actor_id_generator(),
+                    worker_nodes,
+                    adaptive_parallelism_strategy,
+                    &existing_entry_ensembles,
+                    &new_entry_ensembles,
+                )?;
                 for fragment in info.stream_job_fragments.inner.fragments.values_mut() {
                     fill_snapshot_backfill_epoch(
                         &mut fragment.nodes,
@@ -677,7 +1082,63 @@ impl DatabaseCheckpointControl {
             }
 
             Some(Command::ReplaceStreamJob(plan)) => {
-                let render_result = render_actors()?;
+                let (existing_entry_ensembles, new_entry_ensembles, new_no_shuffle) =
+                    resolve_no_shuffle_ensembles(
+                        &plan.new_fragments,
+                        &plan.upstream_fragment_downstreams,
+                    )?;
+                let mut render_result = render_actors(
+                    &plan.new_fragments,
+                    &new_no_shuffle,
+                    &self.database_info,
+                    "", // replace jobs don't need mview definition
+                    &plan.new_fragments.inner.ctx,
+                    &plan.streaming_job_model,
+                    partial_graph_manager
+                        .control_stream_manager()
+                        .env
+                        .actor_id_generator(),
+                    worker_nodes,
+                    adaptive_parallelism_strategy,
+                    &existing_entry_ensembles,
+                    &new_entry_ensembles,
+                )?;
+
+                // Render actors for auto_refresh_schema_sinks.
+                // Each sink's new_fragment inherits parallelism from its original_fragment.
+                if let Some(sinks) = &plan.auto_refresh_schema_sinks {
+                    let actor_id_counter = partial_graph_manager
+                        .control_stream_manager()
+                        .env
+                        .actor_id_generator();
+                    for sink_ctx in sinks {
+                        let original_fragment_id = sink_ctx.original_fragment.fragment_id;
+                        let original_frag_info = self.database_info.fragment(original_fragment_id);
+                        let aligner = ComponentFragmentAligner::from_existing_inflight_fragment(
+                            original_frag_info,
+                        );
+                        let new_aligner = aligner.clone_for_new_fragment(actor_id_counter);
+                        let distribution_type: DistributionType =
+                            sink_ctx.new_fragment.distribution_type.into();
+                        let actor_assignments =
+                            new_aligner.align_component_actor(distribution_type);
+                        let new_fid = sink_ctx.new_fragment.fragment_id;
+                        let mut actors = Vec::with_capacity(actor_assignments.len());
+                        for (&actor_id, (worker_id, vnode_bitmap)) in &actor_assignments {
+                            render_result.actor_location.insert(actor_id, *worker_id);
+                            actors.push(StreamActor {
+                                actor_id,
+                                fragment_id: new_fid,
+                                vnode_bitmap: vnode_bitmap.clone(),
+                                mview_definition: String::new(),
+                                expr_context: Some(sink_ctx.ctx.to_expr_context()),
+                                config_override: sink_ctx.ctx.config_override.clone(),
+                            });
+                        }
+                        render_result.stream_actors.insert(new_fid, actors);
+                    }
+                }
+
                 // Phase 2: Resolve splits to actor-level assignment.
                 let fragment_actor_ids: HashMap<FragmentId, Vec<ActorId>> = render_result
                     .stream_actors
@@ -694,7 +1155,7 @@ impl DatabaseCheckpointControl {
                             &fragment_actor_ids,
                         )?
                     }
-                    ReplaceJobSplitPlan::AlignFromPrevious(_new_no_shuffle) => {
+                    ReplaceJobSplitPlan::AlignFromPrevious => {
                         SourceManager::resolve_replace_source_splits(
                             &plan.new_fragments,
                             &plan.replace_upstream,
@@ -763,6 +1224,15 @@ impl DatabaseCheckpointControl {
                     &render_result.actor_location,
                 ));
 
+                // Mutation (must be generated before removing old fragments,
+                // because it reads actor info from database_info)
+                let mutation = Command::replace_stream_job_to_mutation(
+                    &plan,
+                    &mut edges,
+                    &mut self.database_info,
+                    &resolved_split_assignment,
+                )?;
+
                 // Post-apply: remove old fragments
                 {
                     let mut fragment_ids_to_remove: Vec<_> = plan
@@ -778,14 +1248,6 @@ impl DatabaseCheckpointControl {
                     self.database_info
                         .post_apply_remove_fragments(fragment_ids_to_remove);
                 }
-
-                // Mutation
-                let mutation = Command::replace_stream_job_to_mutation(
-                    &plan,
-                    &mut edges,
-                    &mut self.database_info,
-                    &resolved_split_assignment,
-                )?;
 
                 (
                     mutation,

@@ -27,7 +27,7 @@ use risingwave_common::util::epoch::Epoch;
 use risingwave_connector::source::{CdcTableSnapshotSplitRaw, SplitImpl};
 use risingwave_hummock_sdk::change_log::build_table_change_log_delta;
 use risingwave_hummock_sdk::vector_index::VectorIndexDelta;
-use risingwave_meta_model::{DispatcherType, WorkerId, fragment_relation};
+use risingwave_meta_model::{DispatcherType, WorkerId, fragment_relation, streaming_job};
 use risingwave_pb::catalog::CreateType;
 use risingwave_pb::common::PbActorInfo;
 use risingwave_pb::hummock::vector_index_delta::PbVectorIndexInit;
@@ -65,9 +65,8 @@ use crate::hummock::{CommitEpochInfo, NewTableFragmentInfo};
 use crate::manager::{StreamingJob, StreamingJobType};
 use crate::model::{
     ActorId, ActorUpstreams, DispatcherId, FragmentActorDispatchers, FragmentDownstreamRelation,
-    FragmentId, FragmentNewNoShuffle, FragmentReplaceUpstream, StreamActor,
-    StreamActorWithDispatchers, StreamJobActorsToCreate, StreamJobFragments,
-    StreamJobFragmentsToCreate, SubscriptionId,
+    FragmentId, FragmentReplaceUpstream, StreamActor, StreamActorWithDispatchers,
+    StreamJobActorsToCreate, StreamJobFragments, StreamJobFragmentsToCreate, SubscriptionId,
 };
 use crate::stream::{
     AutoRefreshSchemaSinkContext, ConnectorPropsChange, ExtendedFragmentBackfillOrder,
@@ -305,6 +304,8 @@ pub struct ReplaceStreamJobPlan {
     pub split_plan: ReplaceJobSplitPlan,
     /// The `StreamingJob` info of the table to be replaced. Must be `StreamingJob::Table`
     pub streaming_job: StreamingJob,
+    /// The `streaming_job::Model` for this job, loaded from meta store.
+    pub streaming_job_model: streaming_job::Model,
     /// The temporary dummy job fragments id of new table fragment
     pub tmp_id: JobId,
     /// The state table ids to be dropped.
@@ -342,8 +343,6 @@ pub struct CreateStreamingJobCommandInfo {
     pub upstream_fragment_downstreams: FragmentDownstreamRelation,
     /// Source-level split assignment (Phase 1). Resolved to actor-level in the barrier worker.
     pub init_split_assignment: SourceSplitAssignment,
-    /// No-shuffle mapping for resolving backfill splits in the barrier worker (Phase 2).
-    pub new_no_shuffle: FragmentNewNoShuffle,
     pub definition: String,
     pub job_type: StreamingJobType,
     pub create_type: CreateType,
@@ -352,6 +351,8 @@ pub struct CreateStreamingJobCommandInfo {
     pub cdc_table_snapshot_splits: Option<Vec<CdcTableSnapshotSplitRaw>>,
     pub locality_fragment_state_table_mapping: HashMap<FragmentId, Vec<TableId>>,
     pub is_serverless: bool,
+    /// The `streaming_job::Model` for this job, loaded from meta store.
+    pub streaming_job_model: streaming_job::Model,
 }
 
 impl StreamJobFragments {

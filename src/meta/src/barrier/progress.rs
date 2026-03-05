@@ -1071,6 +1071,7 @@ mod tests {
     fn test_cdc_source_initialized_as_cdc_source_init() {
         use std::collections::BTreeMap;
 
+        use risingwave_meta_model::streaming_job;
         use risingwave_pb::catalog::{CreateType, PbSource, StreamSourceInfo};
 
         use crate::barrier::command::CreateStreamingJobCommandInfo;
@@ -1101,7 +1102,6 @@ mod tests {
             stream_job_fragments,
             upstream_fragment_downstreams: Default::default(),
             init_split_assignment: Default::default(),
-            new_no_shuffle: Default::default(),
             definition: "CREATE SOURCE ...".to_owned(),
             job_type: StreamingJobType::Source,
             create_type: CreateType::Foreground,
@@ -1110,9 +1110,27 @@ mod tests {
             cdc_table_snapshot_splits: None,
             locality_fragment_state_table_mapping: Default::default(),
             is_serverless: false,
+            streaming_job_model: streaming_job::Model {
+                job_id: JobId::new(100),
+                job_status: risingwave_meta_model::JobStatus::Creating,
+                create_type: risingwave_meta_model::CreateType::Foreground,
+                timezone: None,
+                config_override: None,
+                adaptive_parallelism_strategy: None,
+                parallelism: risingwave_meta_model::StreamingParallelism::Adaptive,
+                backfill_parallelism: None,
+                backfill_orders: None,
+                max_parallelism: 256,
+                specific_resource_group: None,
+                is_serverless_backfill: false,
+            },
         };
 
-        let tracker = CreateMviewProgressTracker::new(&info, &HummockVersionStats::default(), &HashMap::new());
+        let tracker = CreateMviewProgressTracker::new(
+            &info,
+            &HummockVersionStats::default(),
+            &HashMap::new(),
+        );
 
         // CDC source should be in CdcSourceInit state
         assert!(matches!(tracker.status, CreateMviewStatus::CdcSourceInit));

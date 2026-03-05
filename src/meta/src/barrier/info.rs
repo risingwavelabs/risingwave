@@ -611,7 +611,11 @@ impl InflightDatabaseInfo {
                         let CreateStreamingJobStatus::Init = replace(
                             &mut job_info.status,
                             CreateStreamingJobStatus::Creating {
-                                tracker: CreateMviewProgressTracker::new(info, version_stats, &job_info.fragment_infos),
+                                tracker: CreateMviewProgressTracker::new(
+                                    info,
+                                    version_stats,
+                                    &job_info.fragment_infos,
+                                ),
                             },
                         ) else {
                             unreachable!("should be init before collect the first barrier")

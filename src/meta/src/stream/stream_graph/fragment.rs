@@ -1545,10 +1545,8 @@ impl CompleteStreamFragmentGraph {
                             {
                                 // Resolve the required output columns from the upstream materialized view.
                                 let (dist_key_indices, output_mapping) = {
-                                    let mview_node = fragment
-                                        .node
-                                        .as_ref()
-                                        .unwrap()
+                                    let mview_node = upstream_fragment
+                                        .nodes
                                         .get_node_body()
                                         .unwrap()
                                         .as_materialize()
@@ -1585,10 +1583,8 @@ impl CompleteStreamFragmentGraph {
                                 .contains(FragmentTypeFlag::Source)
                             {
                                 let output_mapping = {
-                                    let source_node = fragment
-                                        .node
-                                        .as_ref()
-                                        .unwrap()
+                                    let source_node = upstream_fragment
+                                        .nodes
                                         .get_node_body()
                                         .unwrap()
                                         .as_source()

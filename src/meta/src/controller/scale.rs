@@ -815,12 +815,23 @@ fn render_actors(
             let vnode_count = fragment.vnode_count;
             let source_id = fragment_source_ids.get(&fragment_id).cloned();
 
-            let actors = aligner.align_component_actor(distribution_type);
+            // Entry fragments reuse the original aligner's actor IDs (already
+            // allocated by `render_entry_fragment`). Non-entry component
+            // fragments get fresh actor IDs via `clone_for_new_fragment`.
+            let is_entry = entries.contains(component_fragment_id);
+            let component_aligner;
+            let effective_aligner = if is_entry {
+                &aligner
+            } else {
+                component_aligner = aligner.clone_for_new_fragment(actor_id_counter);
+                &component_aligner
+            };
+            let actors = effective_aligner.align_component_actor(distribution_type);
             let mut splits = source_id
                 .map(|source_id| {
                     let (fragment_splits, shared_source_id) = source_splits.as_ref().unwrap();
                     assert_eq!(*shared_source_id, source_id);
-                    aligner.align_component_splits(fragment_splits)
+                    effective_aligner.align_component_splits(fragment_splits)
                 })
                 .unwrap_or_default();
 
@@ -872,6 +883,32 @@ pub(crate) struct ComponentFragmentAligner {
 }
 
 impl ComponentFragmentAligner {
+    /// Get the actor ID base for this aligner.
+    pub(crate) fn actor_id_base(&self) -> ActorId {
+        self.actor_id_base
+    }
+
+    /// Get the number of actors in this aligner.
+    pub(crate) fn actor_count(&self) -> u32 {
+        self.actor_count
+    }
+
+    /// Create a new aligner with the same assignment structure but fresh actor IDs.
+    ///
+    /// This is used when multiple fragments in the same `NoShuffle` ensemble need
+    /// to share the same worker placement / vnode assignment but with distinct actor IDs.
+    pub(crate) fn clone_for_new_fragment(&self, actor_id_counter: &AtomicU32) -> Self {
+        let new_base: ActorId = actor_id_counter
+            .fetch_add(self.actor_count, Ordering::Relaxed)
+            .into();
+        Self {
+            assignment: self.assignment.clone(),
+            actor_count: self.actor_count,
+            vnode_count: self.vnode_count,
+            actor_id_base: new_base,
+        }
+    }
+
     pub(crate) fn render_entry_fragment(
         job: &streaming_job::Model,
         worker_map: &HashMap<WorkerId, WorkerNode>,
@@ -969,7 +1006,38 @@ impl ComponentFragmentAligner {
     }
 
     pub(crate) fn from_existing_inflight_fragment(fragment: &InflightFragmentInfo) -> Self {
-        todo!()
+        if fragment.actors.is_empty() {
+            return Self {
+                assignment: BTreeMap::new(),
+                actor_count: 0,
+                vnode_count: fragment.vnode_count,
+                actor_id_base: 0.into(),
+            };
+        }
+
+        let actor_id_base: ActorId = *fragment.actors.keys().min().unwrap();
+        let actor_count = fragment.actors.len() as u32;
+
+        let mut assignment: BTreeMap<WorkerId, BTreeMap<u32, Vec<usize>>> = BTreeMap::new();
+        for (&actor_id, actor_info) in &fragment.actors {
+            let actor_idx = actor_id - actor_id_base;
+            let vnodes: Vec<usize> = actor_info
+                .vnode_bitmap
+                .as_ref()
+                .map(|bitmap| bitmap.iter_ones().collect())
+                .unwrap_or_default();
+            assignment
+                .entry(actor_info.worker_id)
+                .or_default()
+                .insert(actor_idx, vnodes);
+        }
+
+        Self {
+            assignment,
+            actor_count,
+            vnode_count: fragment.vnode_count,
+            actor_id_base,
+        }
     }
 
     fn assign_entry_split(

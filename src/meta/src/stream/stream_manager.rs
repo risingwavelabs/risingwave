@@ -24,7 +24,7 @@ use risingwave_common::hash::VnodeCountCompat;
 use risingwave_common::id::{JobId, SinkId};
 use risingwave_connector::source::CdcTableSnapshotSplitRaw;
 use risingwave_meta_model::prelude::Fragment as FragmentModel;
-use risingwave_meta_model::{StreamingParallelism, WorkerId, fragment};
+use risingwave_meta_model::{StreamingParallelism, WorkerId, fragment, streaming_job};
 use risingwave_pb::catalog::{CreateType, PbSink, PbTable, Subscription};
 use risingwave_pb::expr::PbExprNode;
 use risingwave_pb::plan_common::{PbColumnCatalog, PbField};
@@ -48,7 +48,7 @@ use crate::manager::{
 };
 use crate::model::{
     ActorId, DownstreamFragmentRelation, Fragment, FragmentDownstreamRelation, FragmentId,
-    FragmentNewNoShuffle, FragmentReplaceUpstream, StreamActor, StreamJobFragments,
+    FragmentReplaceUpstream, StreamActor, StreamContext, StreamJobFragments,
     StreamJobFragmentsToCreate, SubscriptionId,
 };
 use crate::stream::{ReplaceJobSplitPlan, SourceManagerRef};
@@ -78,7 +78,6 @@ pub struct UpstreamSinkInfo {
 pub struct CreateStreamingJobContext {
     /// New fragment relation to add from upstream fragments to downstream fragments.
     pub upstream_fragment_downstreams: FragmentDownstreamRelation,
-    pub new_no_shuffle: FragmentNewNoShuffle,
 
     /// DDL definition.
     pub definition: String,
@@ -104,6 +103,9 @@ pub struct CreateStreamingJobContext {
     pub locality_fragment_state_table_mapping: HashMap<FragmentId, Vec<TableId>>,
 
     pub is_serverless_backfill: bool,
+
+    /// The `streaming_job::Model` for this job, loaded from meta store.
+    pub streaming_job_model: streaming_job::Model,
 }
 
 struct StreamingJobExecution {
@@ -187,6 +189,8 @@ pub struct AutoRefreshSchemaSinkContext {
     pub newly_add_fields: Vec<Field>,
     pub new_fragment: Fragment,
     pub new_log_store_table: Option<PbTable>,
+    /// The sink's own stream context (timezone, `config_override`).
+    pub ctx: StreamContext,
 }
 
 impl AutoRefreshSchemaSinkContext {
@@ -230,7 +234,6 @@ pub struct ReplaceStreamJobContext {
 
     /// The updates to be applied to the downstream chain actors. Used for schema change.
     pub replace_upstream: FragmentReplaceUpstream,
-    pub new_no_shuffle: FragmentNewNoShuffle,
 
     /// New fragment relation to add from existing upstream fragment to downstream fragment.
     pub upstream_fragment_downstreams: FragmentDownstreamRelation,
@@ -243,6 +246,9 @@ pub struct ReplaceStreamJobContext {
     pub drop_table_connector_ctx: Option<DropTableConnectorContext>,
 
     pub auto_refresh_schema_sinks: Option<Vec<AutoRefreshSchemaSinkContext>>,
+
+    /// The `streaming_job::Model` for this job, loaded from meta store.
+    pub streaming_job_model: streaming_job::Model,
 }
 
 /// `GlobalStreamManager` manages all the streams in the system.
@@ -446,7 +452,6 @@ impl GlobalStreamManager {
         CreateStreamingJobContext {
             streaming_job,
             upstream_fragment_downstreams,
-            new_no_shuffle,
             definition,
             create_type,
             job_type,
@@ -457,6 +462,7 @@ impl GlobalStreamManager {
             locality_fragment_state_table_mapping,
             cdc_table_snapshot_splits,
             is_serverless_backfill,
+            streaming_job_model,
             ..
         }: CreateStreamingJobContext,
     ) -> MetaResult<StreamingJob> {
@@ -468,7 +474,7 @@ impl GlobalStreamManager {
         // Phase 1: Gather fragment-level split information.
         // - For source fragments: discover splits from the external source.
         // - For backfill fragments: splits will be aligned in Phase 2 inside the barrier worker
-        //   using the new_no_shuffle mapping and in-flight actor info.
+        //   using the actor-level no-shuffle mapping produced by render_actors.
         let init_split_assignment = self
             .source_manager
             .discover_splits(&stream_job_fragments)
@@ -492,7 +498,6 @@ impl GlobalStreamManager {
             stream_job_fragments,
             upstream_fragment_downstreams,
             init_split_assignment,
-            new_no_shuffle,
             definition: definition.clone(),
             streaming_job: streaming_job.clone(),
             job_type,
@@ -501,6 +506,7 @@ impl GlobalStreamManager {
             cdc_table_snapshot_splits,
             locality_fragment_state_table_mapping,
             is_serverless: is_serverless_backfill,
+            streaming_job_model,
         };
 
         let job_type = if let Some(snapshot_backfill_info) = snapshot_backfill_info {
@@ -540,18 +546,17 @@ impl GlobalStreamManager {
         ReplaceStreamJobContext {
             old_fragments,
             replace_upstream,
-            new_no_shuffle,
             upstream_fragment_downstreams,
             tmp_id,
             streaming_job,
             drop_table_connector_ctx,
             auto_refresh_schema_sinks,
-            ..
+            streaming_job_model,
         }: ReplaceStreamJobContext,
     ) -> MetaResult<()> {
         // Phase 1: Gather fragment-level split information.
         // For replace source with existing downstream, splits will be aligned
-        // in Phase 2 inside the barrier worker using new_no_shuffle and SharedActorInfos.
+        // in Phase 2 inside the barrier worker using actor-level no-shuffle produced by render_actors.
         // For replace source with no downstream (or non-source), discover splits fresh.
         let split_plan = if streaming_job.is_source() {
             match self
@@ -560,7 +565,7 @@ impl GlobalStreamManager {
                 .await?
             {
                 Some(discovered) => ReplaceJobSplitPlan::Discovered(discovered),
-                None => ReplaceJobSplitPlan::AlignFromPrevious(new_no_shuffle),
+                None => ReplaceJobSplitPlan::AlignFromPrevious,
             }
         } else {
             let discovered = self.source_manager.discover_splits(&new_fragments).await?;
@@ -578,6 +583,7 @@ impl GlobalStreamManager {
                     upstream_fragment_downstreams,
                     split_plan,
                     streaming_job,
+                    streaming_job_model,
                     tmp_id,
                     to_drop_state_table_ids: {
                         if let Some(drop_table_connector_ctx) = &drop_table_connector_ctx {

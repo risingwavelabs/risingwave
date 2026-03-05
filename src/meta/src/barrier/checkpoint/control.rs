@@ -24,8 +24,10 @@ use prometheus::HistogramTimer;
 use risingwave_common::catalog::{DatabaseId, TableId};
 use risingwave_common::id::JobId;
 use risingwave_common::metrics::{LabelGuardedHistogram, LabelGuardedIntGauge};
+use risingwave_common::system_param::AdaptiveParallelismStrategy;
 use risingwave_common::util::stream_graph_visitor::visit_stream_node_cont;
 use risingwave_meta_model::WorkerId;
+use risingwave_pb::common::WorkerNode;
 use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::id::{FragmentId, PartialGraphId};
 use risingwave_pb::stream_plan::DispatcherType as PbDispatcherType;
@@ -196,6 +198,8 @@ impl CheckpointControl {
         &mut self,
         new_barrier: NewBarrier,
         partial_graph_manager: &mut PartialGraphManager,
+        adaptive_parallelism_strategy: AdaptiveParallelismStrategy,
+        worker_nodes: &HashMap<WorkerId, WorkerNode>,
     ) -> MetaResult<()> {
         let NewBarrier {
             database_id,
@@ -320,6 +324,8 @@ impl CheckpointControl {
                 span,
                 partial_graph_manager,
                 &self.hummock_version_stats,
+                adaptive_parallelism_strategy,
+                worker_nodes,
             )
         } else {
             let database = match self.databases.entry(database_id) {
@@ -344,6 +350,8 @@ impl CheckpointControl {
                 span,
                 partial_graph_manager,
                 &self.hummock_version_stats,
+                adaptive_parallelism_strategy,
+                worker_nodes,
             )
         }
     }
@@ -1122,6 +1130,8 @@ impl DatabaseCheckpointControl {
         span: tracing::Span,
         partial_graph_manager: &mut PartialGraphManager,
         hummock_version_stats: &HummockVersionStats,
+        adaptive_parallelism_strategy: AdaptiveParallelismStrategy,
+        worker_nodes: &HashMap<WorkerId, WorkerNode>,
     ) -> MetaResult<()> {
         let curr_epoch = self.state.in_flight_prev_epoch().next();
 
@@ -1271,6 +1281,8 @@ impl DatabaseCheckpointControl {
             &barrier_info,
             partial_graph_manager,
             hummock_version_stats,
+            adaptive_parallelism_strategy,
+            worker_nodes,
         ) {
             Ok(info) => info,
             Err(err) => {

@@ -27,9 +27,7 @@ use risingwave_pb::stream_plan::{
 };
 
 use crate::MetaResult;
-use crate::model::{
-    Fragment, FragmentDownstreamRelation, FragmentId, FragmentNewNoShuffle, FragmentReplaceUpstream,
-};
+use crate::model::{Fragment, FragmentDownstreamRelation, FragmentId, FragmentReplaceUpstream};
 use crate::stream::stream_graph::fragment::{
     CompleteStreamFragmentGraph, DownstreamExternalEdgeId, EdgeId, EitherFragment,
     StreamFragmentEdge,
@@ -225,8 +223,8 @@ struct UpstreamFragmentChange {
 #[derive(Default)]
 struct DownstreamFragmentChange {
     /// The new upstreams to be added (replaced), indexed by the edge id to upstream fragment.
-    /// `edge_id` -> (new upstream fragment id, whether the edge is no shuffle)
-    new_upstreams: HashMap<DownstreamExternalEdgeId, (GlobalFragmentId, bool)>,
+    /// `edge_id` -> new upstream fragment id
+    new_upstreams: HashMap<DownstreamExternalEdgeId, GlobalFragmentId>,
 }
 
 impl UpstreamFragmentChange {
@@ -248,10 +246,9 @@ impl DownstreamFragmentChange {
         &mut self,
         edge_id: DownstreamExternalEdgeId,
         new_upstream_fragment_id: GlobalFragmentId,
-        is_no_shuffle: bool,
     ) {
         self.new_upstreams
-            .try_insert(edge_id, (new_upstream_fragment_id, is_no_shuffle))
+            .try_insert(edge_id, new_upstream_fragment_id)
             .unwrap();
     }
 }
@@ -348,7 +345,7 @@ impl ActorGraphBuildStateInner {
             self.downstream_fragment_changes
                 .entry(fragment_id)
                 .or_default()
-                .add_upstream(edge_id, upstream_fragment_id, is_no_shuffle);
+                .add_upstream(edge_id, upstream_fragment_id);
         }
     }
 
@@ -432,11 +429,6 @@ pub struct ActorGraphBuildResult {
     /// The updates to be applied to the downstream fragment merge node. Used for schema change (replace
     /// table plan).
     pub replace_upstream: FragmentReplaceUpstream,
-
-    /// The new no shuffle added to create the new streaming job, including the no shuffle from existing fragments to
-    /// the newly created fragments, between two newly created fragments, and from newly created fragments to existing
-    /// downstream fragments (for create sink into table and replace table).
-    pub new_no_shuffle: FragmentNewNoShuffle,
 }
 
 /// [`ActorGraphBuilder`] builds the actor graph for the given complete fragment graph, based on the
@@ -526,7 +518,6 @@ impl ActorGraphBuilder {
         } = self.build_actor_graph()?;
 
         let mut downstream_fragment_relations: FragmentDownstreamRelation = HashMap::new();
-        let mut new_no_shuffle: FragmentNewNoShuffle = HashMap::new();
         // Serialize the graph into sealed fragments.
         let graph = {
             // As all fragments are processed, we can now `rewrite` the stream nodes where the
@@ -536,14 +527,6 @@ impl ActorGraphBuilder {
             for (fragment_id, builder) in fragment_actor_builders {
                 let global_fragment_id = fragment_id.as_global_id();
                 let node = builder.rewrite()?;
-                for (upstream_fragment_id, is_no_shuffle) in builder.upstreams.into_values() {
-                    if is_no_shuffle {
-                        new_no_shuffle
-                            .entry(upstream_fragment_id.as_global_id())
-                            .or_default()
-                            .insert(global_fragment_id);
-                    }
-                }
                 downstream_fragment_relations
                     .try_insert(
                         global_fragment_id,
@@ -593,20 +576,13 @@ impl ActorGraphBuilder {
             .into_iter()
             .map(|(fragment_id, changes)| {
                 let fragment_id = fragment_id.as_global_id();
-                let new_no_shuffle = &mut new_no_shuffle;
                 (
                     fragment_id,
                     changes
                         .new_upstreams
                         .into_iter()
-                        .map(move |(edge_id, (upstream_fragment_id, is_no_shuffle))| {
+                        .map(move |(edge_id, upstream_fragment_id)| {
                             let upstream_fragment_id = upstream_fragment_id.as_global_id();
-                            if is_no_shuffle {
-                                new_no_shuffle
-                                    .entry(upstream_fragment_id)
-                                    .or_default()
-                                    .insert(fragment_id);
-                            }
                             let DownstreamExternalEdgeId {
                                 original_upstream_fragment_id,
                                 ..
@@ -627,7 +603,6 @@ impl ActorGraphBuilder {
             downstream_fragment_relations,
             upstream_fragment_downstreams,
             replace_upstream,
-            new_no_shuffle,
         })
     }
 

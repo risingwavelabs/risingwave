@@ -38,8 +38,8 @@ use risingwave_pb::stream_service::BarrierCompleteResponse;
 use status::CreatingStreamingJobStatus;
 use tracing::{debug, info};
 
+use super::state::RenderResult;
 use crate::MetaResult;
-use crate::barrier::Command;
 use crate::barrier::backfill_order_control::get_nodes_with_backfill_dependencies;
 use crate::barrier::checkpoint::creating_job::status::CreateMviewLogStoreProgressTracker;
 use crate::barrier::context::CreateSnapshotBackfillJobCommandInfo;
@@ -50,15 +50,14 @@ use crate::barrier::partial_graph::{CollectedBarrier, PartialGraphManager, Parti
 use crate::barrier::progress::{CreateMviewProgressTracker, TrackingJob, collect_done_fragments};
 use crate::barrier::rpc::{build_locality_fragment_state_table_mapping, to_partial_graph_id};
 use crate::barrier::{
-    BackfillOrderState, BackfillProgress, BarrierKind, FragmentBackfillProgress, TracedEpoch,
+    BackfillOrderState, BackfillProgress, BarrierKind, Command, FragmentBackfillProgress,
+    TracedEpoch,
 };
 use crate::controller::fragment::InflightFragmentInfo;
 use crate::model::{FragmentDownstreamRelation, StreamActor, StreamJobActorsToCreate};
 use crate::rpc::metrics::GLOBAL_META_METRICS;
 use crate::stream::source_manager::SplitAssignment;
 use crate::stream::{ExtendedFragmentBackfillOrder, build_actor_connector_splits};
-
-use super::state::RenderResult;
 
 #[derive(Debug)]
 pub(crate) struct CreatingJobInfo {
@@ -135,7 +134,11 @@ impl CreatingStreamingJobControl {
         );
         let fragment_infos = info
             .stream_job_fragments
-            .new_fragment_info(&actors.stream_actors, &actors.actor_location, split_assignment)
+            .new_fragment_info(
+                &actors.stream_actors,
+                &actors.actor_location,
+                split_assignment,
+            )
             .collect();
         let snapshot_backfill_actors =
             InflightStreamingJobInfo::snapshot_backfill_actor_ids(&fragment_infos).collect();
@@ -173,7 +176,8 @@ impl CreatingStreamingJobControl {
             PbBarrierKind::Checkpoint,
         );
 
-        let added_actors: Vec<ActorId> = actors.stream_actors
+        let added_actors: Vec<ActorId> = actors
+            .stream_actors
             .values()
             .flatten()
             .map(|actor| actor.actor_id)
@@ -246,7 +250,8 @@ impl CreatingStreamingJobControl {
                 upstream_fragment_downstreams: info.upstream_fragment_downstreams.clone(),
                 downstreams: info.stream_job_fragments.downstreams,
                 snapshot_backfill_upstream_tables: job.snapshot_backfill_upstream_tables.clone(),
-                stream_actors: actors.stream_actors
+                stream_actors: actors
+                    .stream_actors
                     .values()
                     .flatten()
                     .map(|actor| (actor.actor_id, actor.clone()))
