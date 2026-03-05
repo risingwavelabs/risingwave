@@ -295,6 +295,8 @@ impl RescheduleContext {
 pub struct ReplaceStreamJobPlan {
     pub old_fragments: StreamJobFragments,
     pub new_fragments: StreamJobFragmentsToCreate,
+    /// The resource group of the database this job belongs to.
+    pub database_resource_group: String,
     /// Downstream jobs of the replaced job need to update their `Merge` node to
     /// connect to the new fragment.
     pub replace_upstream: FragmentReplaceUpstream,
@@ -341,6 +343,8 @@ pub struct CreateStreamingJobCommandInfo {
     #[educe(Debug(ignore))]
     pub stream_job_fragments: StreamJobFragmentsToCreate,
     pub upstream_fragment_downstreams: FragmentDownstreamRelation,
+    /// The resource group of the database this job belongs to.
+    pub database_resource_group: String,
     /// Source-level split assignment (Phase 1). Resolved to actor-level in the barrier worker.
     pub init_split_assignment: SourceSplitAssignment,
     pub definition: String,

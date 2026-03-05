@@ -278,9 +278,8 @@ fn render_actors(
     worker_map: &HashMap<WorkerId, WorkerNode>,
     adaptive_parallelism_strategy: AdaptiveParallelismStrategy,
     ensembles: &[NoShuffleEnsemble],
+    database_resource_group: &str,
 ) -> MetaResult<RenderResult> {
-    use risingwave_common::util::worker_util::DEFAULT_RESOURCE_GROUP;
-
     // Step 2: Render actors for each ensemble.
     // For each new fragment, produce a simple assignment: actor_id -> (worker_id, vnode_bitmap).
     let mut actor_assignments: HashMap<FragmentId, HashMap<ActorId, (WorkerId, Option<Bitmap>)>> =
@@ -324,7 +323,7 @@ fn render_actors(
                         worker_map,
                         adaptive_parallelism_strategy,
                         None,
-                        DEFAULT_RESOURCE_GROUP.to_owned(),
+                        database_resource_group.to_owned(),
                         vnode_count,
                     )?
                 }
@@ -545,6 +544,7 @@ impl DatabaseCheckpointControl {
                     worker_nodes,
                     adaptive_parallelism_strategy,
                     &ensembles,
+                    &info.database_resource_group,
                 )?;
                 {
                     assert!(!self.state.is_paused());
@@ -671,6 +671,7 @@ impl DatabaseCheckpointControl {
                     worker_nodes,
                     adaptive_parallelism_strategy,
                     &ensembles,
+                    &info.database_resource_group,
                 )?;
                 for fragment in info.stream_job_fragments.inner.fragments.values_mut() {
                     fill_snapshot_backfill_epoch(
@@ -973,6 +974,7 @@ impl DatabaseCheckpointControl {
                     worker_nodes,
                     adaptive_parallelism_strategy,
                     &ensembles,
+                    &plan.database_resource_group,
                 )?;
 
                 // Render actors for auto_refresh_schema_sinks.

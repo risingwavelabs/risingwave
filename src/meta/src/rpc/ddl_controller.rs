@@ -1978,6 +1978,7 @@ impl DdlController {
 
         let ctx = CreateStreamingJobContext {
             upstream_fragment_downstreams,
+            database_resource_group: resource_group,
             definition: stream_job.definition(),
             create_type: stream_job.create_type(),
             job_type: (&stream_job).into(),
@@ -2143,7 +2144,7 @@ impl DdlController {
             _ => unreachable!(),
         };
 
-        let _resource_group = self
+        let resource_group = self
             .metadata_manager
             .get_existing_job_resource_group(id)
             .await?;
@@ -2200,6 +2201,7 @@ impl DdlController {
             replace_upstream,
             upstream_fragment_downstreams,
             streaming_job: stream_job.clone(),
+            database_resource_group: resource_group,
             tmp_id: tmp_job_id,
             drop_table_connector_ctx,
             auto_refresh_schema_sinks,

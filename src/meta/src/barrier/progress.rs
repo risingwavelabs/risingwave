@@ -1106,6 +1106,8 @@ mod tests {
             job_type: StreamingJobType::Source,
             create_type: CreateType::Foreground,
             streaming_job: StreamingJob::Source(source),
+            database_resource_group: risingwave_common::util::worker_util::DEFAULT_RESOURCE_GROUP
+                .to_owned(),
             fragment_backfill_ordering: Default::default(),
             cdc_table_snapshot_splits: None,
             locality_fragment_state_table_mapping: Default::default(),

@@ -79,6 +79,9 @@ pub struct CreateStreamingJobContext {
     /// New fragment relation to add from upstream fragments to downstream fragments.
     pub upstream_fragment_downstreams: FragmentDownstreamRelation,
 
+    /// The resource group of the database this job belongs to.
+    pub database_resource_group: String,
+
     /// DDL definition.
     pub definition: String,
 
@@ -239,6 +242,9 @@ pub struct ReplaceStreamJobContext {
     pub upstream_fragment_downstreams: FragmentDownstreamRelation,
 
     pub streaming_job: StreamingJob,
+
+    /// The resource group of the database this job belongs to.
+    pub database_resource_group: String,
 
     pub tmp_id: JobId,
 
@@ -452,6 +458,7 @@ impl GlobalStreamManager {
         CreateStreamingJobContext {
             streaming_job,
             upstream_fragment_downstreams,
+            database_resource_group,
             definition,
             create_type,
             job_type,
@@ -502,6 +509,7 @@ impl GlobalStreamManager {
             streaming_job: streaming_job.clone(),
             job_type,
             create_type,
+            database_resource_group,
             fragment_backfill_ordering,
             cdc_table_snapshot_splits,
             locality_fragment_state_table_mapping,
@@ -552,6 +560,7 @@ impl GlobalStreamManager {
             drop_table_connector_ctx,
             auto_refresh_schema_sinks,
             streaming_job_model,
+            database_resource_group,
         }: ReplaceStreamJobContext,
     ) -> MetaResult<()> {
         // Phase 1: Gather fragment-level split information.
@@ -579,6 +588,7 @@ impl GlobalStreamManager {
                 Command::ReplaceStreamJob(ReplaceStreamJobPlan {
                     old_fragments,
                     new_fragments,
+                    database_resource_group,
                     replace_upstream,
                     upstream_fragment_downstreams,
                     split_plan,
