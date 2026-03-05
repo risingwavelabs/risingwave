@@ -20,10 +20,10 @@ use tokio::time::sleep;
 
 const SET_LOCALITY_BACKFILL: &str = "SET enable_locality_backfill = true;";
 const SET_BACKGROUND_DDL: &str = "SET background_ddl = true;";
-const SET_RATE_LIMIT_1: &str = "SET backfill_rate_limit = 1;";
 const CREATE_TABLE: &str = "CREATE TABLE t(a int);";
 const SEED_TABLE: &str = "INSERT INTO t SELECT * FROM generate_series(1, 10000, 1);";
-const CREATE_MV: &str = "CREATE MATERIALIZED VIEW mv AS SELECT count(*) FROM t GROUP BY a;";
+const CREATE_MV: &str =
+    "CREATE MATERIALIZED VIEW mv WITH (backfill_rate_limit = 1) AS SELECT count(*) FROM t GROUP BY a;";
 const ALTER_RATE_LIMIT_DEFAULT: &str =
     "ALTER MATERIALIZED VIEW mv SET BACKFILL_RATE_LIMIT = DEFAULT;";
 const WAIT: &str = "WAIT;";
@@ -42,7 +42,6 @@ async fn test_locality_backfill_recovery_internal_tables() -> Result<()> {
     // Step 1: Enable locality backfill and configure for slow background DDL
     session.run(SET_LOCALITY_BACKFILL).await?;
     session.run(SET_BACKGROUND_DDL).await?;
-    session.run(SET_RATE_LIMIT_1).await?;
 
     // Step 2: Create table and populate with 10,000 rows
     session.run(CREATE_TABLE).await?;

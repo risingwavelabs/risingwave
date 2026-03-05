@@ -80,14 +80,11 @@ statement ok
 set background_ddl=true;
 
 statement ok
-set backfill_rate_limit=2500;
-
-statement ok
 flush;
 
 statement ok
 create materialized view mv1
-with (backfill_order = FIXED(s1->s2, s2->s3, s3->t1, t1->t3))
+with (backfill_rate_limit = 2500, backfill_order = FIXED(s1->s2, s2->s3, s3->t1, t1->t3))
 as select s1.a, s2.b, s3.b as c, s1.a as d, t5.a as e
   from
     s1
@@ -242,9 +239,6 @@ set streaming_parallelism=default;
 
 statement ok
 set background_ddl=false;
-
-statement ok
-set backfill_rate_limit=default;
 
 statement ok
 create materialized view mv2

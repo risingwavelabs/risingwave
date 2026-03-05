@@ -30,14 +30,13 @@ async fn test_background_ddl_alter_parallelism_without_arrangement_backfill() ->
         .run("set STREAMING_USE_ARRANGEMENT_BACKFILL = false;")
         .await?;
     session.run("set BACKGROUND_DDL = true;").await?;
-    session.run("set BACKFILL_RATE_LIMIT = 1;").await?;
 
     session.run("create table t(v int);").await?;
     session
         .run("insert into t select * from generate_series(1, 30);")
         .await?;
     session
-        .run("create materialized view m as select * from t;")
+        .run("create materialized view m with (backfill_rate_limit = 1) as select * from t;")
         .await?;
 
     // alter should fail when arrangement backfill is disabled
@@ -71,10 +70,9 @@ async fn test_background_arrangement_backfill_offline_scaling() -> Result<()> {
         .await?;
 
     session.run("SET BACKGROUND_DDL=true;").await?;
-    session.run("SET BACKFILL_RATE_LIMIT=1;").await?;
 
     session
-        .run("create materialized view m as select * from t;")
+        .run("create materialized view m with (backfill_rate_limit = 1) as select * from t;")
         .await?;
 
     let mat_fragment = cluster
@@ -123,11 +121,10 @@ async fn test_background_ddl_scale_during_backfill() -> Result<()> {
     session
         .run("insert into t select * from generate_series(1, 30);")
         .await?;
-    session.run("set BACKFILL_RATE_LIMIT = 1;").await?;
     session.run("set BACKGROUND_DDL = true;").await?;
 
     session
-        .run("create materialized view m as select * from t;")
+        .run("create materialized view m with (backfill_rate_limit = 1) as select * from t;")
         .await?;
 
     for parallelism in [1, 2, 3] {
@@ -191,11 +188,10 @@ async fn test_background_ddl_scale_out_after_cn_restart() -> Result<()> {
     session
         .run("insert into t select * from generate_series(1, 30);")
         .await?;
-    session.run("set BACKFILL_RATE_LIMIT = 1;").await?;
     session.run("set BACKGROUND_DDL = true;").await?;
 
     session
-        .run("create materialized view m as select * from t;")
+        .run("create materialized view m with (backfill_rate_limit = 1) as select * from t;")
         .await?;
 
     // Record initial actor count with reduced CNs.

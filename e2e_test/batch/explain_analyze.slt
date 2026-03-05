@@ -32,19 +32,11 @@ set background_ddl=true;
 
 onlyif serial
 statement ok
-set backfill_rate_limit=0;
-
-onlyif serial
-statement ok
-create materialized view explain_analyze_test.background_mv as select * from explain_analyze_test.t1;
+create materialized view explain_analyze_test.background_mv with (backfill_rate_limit = 0) as select * from explain_analyze_test.t1;
 
 onlyif serial
 statement ok
 set background_ddl=default;
-
-onlyif serial
-statement ok
-set backfill_rate_limit=default;
 
 onlyif serial
 statement ok

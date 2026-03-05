@@ -42,13 +42,10 @@ flush;
 statement ok
 set background_ddl=true;
 
-statement ok
-set backfill_rate_limit=1;
-
 # Create materialized view with backfill order control: t1 -> t2
 statement ok
 create materialized view mv1
-with (backfill_order = FIXED(t1 -> t2))
+with (backfill_rate_limit = 1, backfill_order = FIXED(t1 -> t2))
 as select v1 from t1
 union
 select v1 from t2;
@@ -105,9 +102,6 @@ select * from rw_catalog.rw_fragment_backfill_progress;
 # Validate the results by creating a non-background MV with the same query
 statement ok
 set background_ddl=false;
-
-statement ok
-set backfill_rate_limit=default;
 
 statement ok
 create materialized view mv1_validate

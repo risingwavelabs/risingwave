@@ -1,8 +1,5 @@
 statement ok
-set backfill_rate_limit=100;
-
-statement ok
-create materialized view m1 as
+create materialized view m1 with (backfill_rate_limit = 100) as
   select x.v1, x.v2
   from
     t x
@@ -40,8 +37,7 @@ system ok
 risedev psql -c '
 set streaming_use_snapshot_backfill=true;
 set streaming_parallelism=1;
-set backfill_rate_limit=100;
-create materialized view m1 as
+create materialized view m1 with (backfill_rate_limit = 100) as
   select x.v1, x.v2
   from
     t x

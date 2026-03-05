@@ -8,16 +8,13 @@ statement ok
 insert into t select x, x*2 from generate_series(1, 10000) t(x);
 
 statement ok
-set backfill_rate_limit=1000;
-
-statement ok
 set background_ddl=true;
 
 statement ok
 set streaming_parallelism to 2;
 
 statement ok
-CREATE INDEX idx1 ON t(v1);
+CREATE INDEX idx1 ON t(v1) WITH (backfill_rate_limit = 1000);
 
 statement count 1
 show jobs;
@@ -71,9 +68,6 @@ drop table t cascade;
 
 statement ok
 set background_ddl=false;
-
-statement ok
-set backfill_rate_limit=default;
 
 statement ok
 set streaming_parallelism to default;

@@ -7,9 +7,6 @@ statement ok
 SET STREAMING_PARALLELISM=2;
 
 statement ok
-SET BACKFILL_RATE_LIMIT=1;
-
-statement ok
 CREATE TABLE source_table (i1 int)
 WITH (
     connector = 'datagen',
@@ -27,7 +24,7 @@ CREATE SINK sink AS
         JOIN source_table s1 ON x.i1 = s1.i1
             JOIN source_table s2 ON x.i1 = s2.i1
                 JOIN source_table s3 ON x.i1 = s3.i1
-    WITH (connector = 'blackhole');
+    WITH (connector = 'blackhole', backfill_rate_limit = 1);
 
 statement ok
 SET BACKGROUND_DDL=false;

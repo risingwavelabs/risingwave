@@ -45,10 +45,6 @@ sleep 3s
 
 ############## Create MV on source
 
-# This should be ignored.
-statement ok
-SET SOURCE_RATE_LIMIT=1000;
-
 statement ok
 create materialized view rl_mv1 as select count(*) from kafka_source;
 

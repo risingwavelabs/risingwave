@@ -76,10 +76,7 @@ statement ok
 SET BACKGROUND_DDL=true;
 
 statement ok
-SET BACKFILL_RATE_LIMIT=0;
-
-statement ok
-create materialized view rl_mv2 as select count(*) from kafka_source;
+create materialized view rl_mv2 with (backfill_rate_limit = 0) as select count(*) from kafka_source;
 
 sleep 1s
 

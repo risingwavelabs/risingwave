@@ -14,8 +14,7 @@
 
 use crate::handler::HandlerArgs;
 
-/// Some options can be configured both in `WITH` clause and session variables.
-/// The config in `WITH` clause has higher priority.
+/// Options that can be configured in the `WITH` clause of DDL statements.
 #[derive(Debug, Clone, Default)]
 pub struct OverwriteOptions {
     pub source_rate_limit: Option<u32>,
@@ -31,58 +30,22 @@ impl OverwriteOptions {
     pub(crate) const SOURCE_RATE_LIMIT_KEY: &'static str = "source_rate_limit";
 
     pub fn new(args: &mut HandlerArgs) -> Self {
-        let source_rate_limit = {
-            if let Some(x) = args.with_options.remove(Self::SOURCE_RATE_LIMIT_KEY) {
-                // FIXME(tabVersion): validate the value
-                Some(x.parse::<u32>().unwrap())
-            } else {
-                let rate_limit = args.session.config().source_rate_limit();
-                if rate_limit < 0 {
-                    None
-                } else {
-                    Some(rate_limit as u32)
-                }
-            }
-        };
-        let backfill_rate_limit = {
-            if let Some(x) = args.with_options.remove(Self::BACKFILL_RATE_LIMIT_KEY) {
-                // FIXME(tabVersion): validate the value
-                Some(x.parse::<u32>().unwrap())
-            } else {
-                let rate_limit = args.session.config().backfill_rate_limit();
-                if rate_limit < 0 {
-                    None
-                } else {
-                    Some(rate_limit as u32)
-                }
-            }
-        };
-        let dml_rate_limit = {
-            if let Some(x) = args.with_options.remove(Self::DML_RATE_LIMIT_KEY) {
-                // FIXME(tabVersion): validate the value
-                Some(x.parse::<u32>().unwrap())
-            } else {
-                let rate_limit = args.session.config().dml_rate_limit();
-                if rate_limit < 0 {
-                    None
-                } else {
-                    Some(rate_limit as u32)
-                }
-            }
-        };
-        let sink_rate_limit = {
-            if let Some(x) = args.with_options.remove(Self::SINK_RATE_LIMIT_KEY) {
-                // FIXME(tabVersion): validate the value
-                Some(x.parse::<u32>().unwrap())
-            } else {
-                let rate_limit = args.session.config().sink_rate_limit();
-                if rate_limit < 0 {
-                    None
-                } else {
-                    Some(rate_limit as u32)
-                }
-            }
-        };
+        let source_rate_limit = args
+            .with_options
+            .remove(Self::SOURCE_RATE_LIMIT_KEY)
+            .map(|x| x.parse::<u32>().unwrap());
+        let backfill_rate_limit = args
+            .with_options
+            .remove(Self::BACKFILL_RATE_LIMIT_KEY)
+            .map(|x| x.parse::<u32>().unwrap());
+        let dml_rate_limit = args
+            .with_options
+            .remove(Self::DML_RATE_LIMIT_KEY)
+            .map(|x| x.parse::<u32>().unwrap());
+        let sink_rate_limit = args
+            .with_options
+            .remove(Self::SINK_RATE_LIMIT_KEY)
+            .map(|x| x.parse::<u32>().unwrap());
         Self {
             source_rate_limit,
             backfill_rate_limit,

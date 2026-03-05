@@ -54,9 +54,6 @@ set streaming_use_snapshot_backfill=false;
 include ./create_materialized_view.slt
 
 statement ok
-set backfill_rate_limit=default
-
-statement ok
 set background_ddl=false;
 
 statement ok

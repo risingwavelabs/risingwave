@@ -234,20 +234,12 @@ skipif madsim
 statement ok
 set background_ddl=true;
 
-skipif madsim
 statement ok
-set backfill_rate_limit=1;
-
-statement ok
-create materialized view describe_plan_test.backfilling_mv as select * from describe_plan_test.t;
+create materialized view describe_plan_test.backfilling_mv with (backfill_rate_limit = 1) as select * from describe_plan_test.t;
 
 skipif madsim
 statement ok
 set background_ddl=false;
-
-skipif madsim
-statement ok
-set backfill_rate_limit=default;
 
 statement ok
 flush;

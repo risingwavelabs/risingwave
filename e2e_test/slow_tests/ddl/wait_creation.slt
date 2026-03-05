@@ -8,13 +8,10 @@ statement ok
 insert into t select 1 from generate_series(1, 10000);
 
 statement ok
-SET BACKFILL_RATE_LIMIT=1000;
-
-statement ok
 SET BACKGROUND_DDL = true;
 
 statement ok
-CREATE MATERIALIZED VIEW m1 as SELECT * FROM t;
+CREATE MATERIALIZED VIEW m1 WITH (backfill_rate_limit = 1000) as SELECT * FROM t;
 
 query I
 select count(*) from rw_catalog.rw_ddl_progress;

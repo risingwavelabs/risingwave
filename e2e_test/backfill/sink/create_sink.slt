@@ -4,9 +4,6 @@ SET RW_IMPLICIT_FLUSH=true;
 statement ok
 create table t (v1 int);
 
-statement ok
-SET BACKFILL_RATE_LIMIT = 500;
-
 # Should finish in 20s
 statement ok
 insert into t select * from generate_series(1, 10000);
@@ -24,6 +21,7 @@ with (
     topic='s_kafka',
     primary_key='v1',
     allow.auto.create.topics=true,
+    backfill_rate_limit=500,
 )
 FORMAT DEBEZIUM ENCODE JSON;
 

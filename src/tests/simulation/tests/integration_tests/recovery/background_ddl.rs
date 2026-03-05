@@ -30,9 +30,6 @@ const SEED_TABLE_500: &str = "INSERT INTO t SELECT generate_series FROM generate
 const SEED_TABLE_100: &str = "INSERT INTO t SELECT generate_series FROM generate_series(1, 100);";
 const SET_BACKGROUND_DDL: &str = "SET BACKGROUND_DDL=true;";
 const RESET_BACKGROUND_DDL: &str = "SET BACKGROUND_DDL=false;";
-const SET_RATE_LIMIT_2: &str = "SET BACKFILL_RATE_LIMIT=2;";
-const SET_RATE_LIMIT_1: &str = "SET BACKFILL_RATE_LIMIT=1;";
-const RESET_RATE_LIMIT: &str = "SET BACKFILL_RATE_LIMIT=DEFAULT;";
 const CREATE_MV1: &str = "CREATE MATERIALIZED VIEW mv1 as SELECT * FROM t;";
 const DROP_MV1: &str = "DROP MATERIALIZED VIEW mv1;";
 const WAIT: &str = "WAIT;";
@@ -81,9 +78,11 @@ async fn test_background_mv_barrier_recovery() -> Result<()> {
         .run("INSERT INTO t SELECT generate_series FROM generate_series(1, 200);")
         .await?;
     session.flush().await?;
-    session.run(SET_RATE_LIMIT_2).await?;
     session.run(SET_BACKGROUND_DDL).await?;
-    create_mv(&mut session).await?;
+    session
+        .run("CREATE MATERIALIZED VIEW mv1 WITH (backfill_rate_limit = 2) as SELECT * FROM t;")
+        .await?;
+    sleep(Duration::from_secs(2)).await;
 
     // If the CN is killed before first barrier pass for the MV, the MV will be dropped.
     // This is because it's table fragments will NOT be committed until first barrier pass.
@@ -137,10 +136,9 @@ async fn test_background_join_mv_recovery() -> Result<()> {
         .run("INSERT INTO t2 SELECT generate_series FROM generate_series(1, 200);")
         .await?;
     session.flush().await?;
-    session.run(SET_RATE_LIMIT_2).await?;
     session.run(SET_BACKGROUND_DDL).await?;
     session
-        .run("CREATE MATERIALIZED VIEW mv1 as select t1.v1 from t1 join t2 on t1.v1 = t2.v1;")
+        .run("CREATE MATERIALIZED VIEW mv1 WITH (backfill_rate_limit = 2) as select t1.v1 from t1 join t2 on t1.v1 = t2.v1;")
         .await?;
     sleep(Duration::from_secs(2)).await;
 
@@ -171,17 +169,21 @@ async fn test_ddl_cancel() -> Result<()> {
     session.run(CREATE_TABLE).await?;
     session.run(SEED_TABLE_500).await?;
     session.flush().await?;
-    session.run(SET_RATE_LIMIT_1).await?;
     session.run(SET_BACKGROUND_DDL).await?;
 
     for _ in 0..5 {
-        create_mv(&mut session).await?;
+        session
+            .run("CREATE MATERIALIZED VIEW mv1 WITH (backfill_rate_limit = 1) as SELECT * FROM t;")
+            .await?;
+        sleep(Duration::from_secs(2)).await;
         let ids = cancel_stream_jobs(&mut session).await?;
         assert_eq!(ids.len(), 1);
     }
 
-    session.run(SET_RATE_LIMIT_1).await?;
-    create_mv(&mut session).await?;
+    session
+        .run("CREATE MATERIALIZED VIEW mv1 WITH (backfill_rate_limit = 1) as SELECT * FROM t;")
+        .await?;
+    sleep(Duration::from_secs(2)).await;
 
     // Test cancel after kill cn
     kill_cn_and_wait_recover(&cluster).await;
@@ -191,7 +193,10 @@ async fn test_ddl_cancel() -> Result<()> {
 
     sleep(Duration::from_secs(2)).await;
 
-    create_mv(&mut session).await?;
+    session
+        .run("CREATE MATERIALIZED VIEW mv1 WITH (backfill_rate_limit = 1) as SELECT * FROM t;")
+        .await?;
+    sleep(Duration::from_secs(2)).await;
 
     // Test cancel after kill random nodes
     kill_random_and_wait_recover(&cluster).await;
@@ -203,8 +208,11 @@ async fn test_ddl_cancel() -> Result<()> {
     let mut session2 = cluster.start_session();
     tokio::spawn(async move {
         session2.run(RESET_BACKGROUND_DDL).await.unwrap();
-        session2.run(SET_RATE_LIMIT_1).await.unwrap();
-        let _ = create_mv(&mut session2).await;
+        session2
+            .run("CREATE MATERIALIZED VIEW mv1 WITH (backfill_rate_limit = 1) as SELECT * FROM t;")
+            .await
+            .unwrap();
+        sleep(Duration::from_secs(2)).await;
     });
 
     // Keep searching for the process in process list
@@ -225,7 +233,6 @@ async fn test_ddl_cancel() -> Result<()> {
         sleep(Duration::from_secs(2)).await;
     }
 
-    session.run(RESET_RATE_LIMIT).await?;
     session.run(SET_BACKGROUND_DDL).await?;
 
     // Make sure MV can be created after all these cancels
@@ -282,8 +289,7 @@ async fn test_high_barrier_latency_cancel(config: Configuration) -> Result<()> {
     // Keep creating mv1, if it's not created.
     loop {
         session.run(SET_BACKGROUND_DDL).await?;
-        session.run(SET_RATE_LIMIT_2).await?;
-        session.run("CREATE MATERIALIZED VIEW mv1 as select fact1.v1 from fact1 join fact2 on fact1.v1 = fact2.v1").await?;
+        session.run("CREATE MATERIALIZED VIEW mv1 WITH (backfill_rate_limit = 2) as select fact1.v1 from fact1 join fact2 on fact1.v1 = fact2.v1").await?;
         tracing::info!("created mv in background");
         sleep(Duration::from_secs(1)).await;
 
@@ -392,8 +398,9 @@ async fn test_foreground_ddl_no_recovery() -> Result<()> {
 
     let mut session2 = cluster.start_session();
     tokio::spawn(async move {
-        session2.run(SET_RATE_LIMIT_2).await.unwrap();
-        let result = create_mv(&mut session2).await;
+        let result = session2
+            .run("CREATE MATERIALIZED VIEW mv1 WITH (backfill_rate_limit = 2) as SELECT * FROM t;")
+            .await;
         assert!(result.is_err());
     });
 
@@ -404,8 +411,10 @@ async fn test_foreground_ddl_no_recovery() -> Result<()> {
     kill_cn_and_wait_recover(&cluster).await;
 
     // Create MV should succeed, since the previous foreground job should be cancelled.
-    session.run(SET_RATE_LIMIT_2).await?;
-    create_mv(&mut session).await?;
+    session
+        .run("CREATE MATERIALIZED VIEW mv1 WITH (backfill_rate_limit = 2) as SELECT * FROM t;")
+        .await?;
+    sleep(Duration::from_secs(2)).await;
 
     session.run(DROP_MV1).await?;
     session.run(DROP_TABLE).await?;
@@ -424,8 +433,9 @@ async fn test_foreground_index_cancel() -> Result<()> {
 
     let mut session2 = cluster.start_session();
     tokio::spawn(async move {
-        session2.run(SET_RATE_LIMIT_2).await.unwrap();
-        let result = session2.run("CREATE INDEX i ON t (v1);").await;
+        let result = session2
+            .run("CREATE INDEX i ON t (v1) WITH (backfill_rate_limit = 2);")
+            .await;
         assert!(result.is_err());
     });
 
@@ -436,8 +446,9 @@ async fn test_foreground_index_cancel() -> Result<()> {
     cancel_stream_jobs(&mut session).await?;
 
     // Create MV should succeed, since the previous foreground job should be cancelled.
-    session.run(SET_RATE_LIMIT_2).await?;
-    session.run("CREATE INDEX i ON t (v1);").await?;
+    session
+        .run("CREATE INDEX i ON t (v1) WITH (backfill_rate_limit = 2);")
+        .await?;
 
     session.run("DROP INDEX i;").await?;
     session.run(DROP_TABLE).await?;
@@ -457,9 +468,8 @@ async fn test_background_sink_create() -> Result<()> {
     let mut session2 = cluster.start_session();
     tokio::spawn(async move {
         session2.run(SET_BACKGROUND_DDL).await.unwrap();
-        session2.run(SET_RATE_LIMIT_2).await.unwrap();
         session2
-            .run("CREATE SINK s FROM t WITH (connector='blackhole');")
+            .run("CREATE SINK s FROM t WITH (connector='blackhole', backfill_rate_limit = 2);")
             .await
             .expect("create sink should succeed");
     });
@@ -487,10 +497,9 @@ async fn test_background_agg_mv_recovery() -> Result<()> {
         .run("INSERT INTO t1 SELECT generate_series FROM generate_series(1, 200);")
         .await?;
     session.flush().await?;
-    session.run(SET_RATE_LIMIT_1).await?;
     session.run(SET_BACKGROUND_DDL).await?;
     session
-        .run("CREATE MATERIALIZED VIEW mv1 as select v1, count(*) from t1 group by v1;")
+        .run("CREATE MATERIALIZED VIEW mv1 WITH (backfill_rate_limit = 1) as select v1, count(*) from t1 group by v1;")
         .await?;
     sleep(Duration::from_secs(2)).await;
 
@@ -525,9 +534,10 @@ async fn test_background_index_creation() -> Result<()> {
     session.flush().await?;
 
     // Enable background DDL and create index
-    session.run(SET_RATE_LIMIT_2).await?;
     session.run(SET_BACKGROUND_DDL).await?;
-    session.run("CREATE INDEX idx_v1 ON t(v1);").await?;
+    session
+        .run("CREATE INDEX idx_v1 ON t(v1) WITH (backfill_rate_limit = 2);")
+        .await?;
 
     // Kill CN and recover to test background index recovery
     kill_cn_and_wait_recover(&cluster).await;

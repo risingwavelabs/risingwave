@@ -1,8 +1,5 @@
 statement ok
-set dml_rate_limit to 2;
-
-statement ok
-create table t(v1 int);
+create table t(v1 int) with (dml_rate_limit = 2);
 
 statement ok
 alter table t set parallelism to 1;

@@ -60,12 +60,6 @@ pub enum SessionConfigError {
 
 type SessionConfigResult<T> = std::result::Result<T, SessionConfigError>;
 
-// NOTE(kwannoel): We declare it separately as a constant,
-// otherwise seems like it can't infer the type of -1 when written inline.
-const DISABLE_BACKFILL_RATE_LIMIT: i32 = -1;
-const DISABLE_SOURCE_RATE_LIMIT: i32 = -1;
-const DISABLE_DML_RATE_LIMIT: i32 = -1;
-const DISABLE_SINK_RATE_LIMIT: i32 = -1;
 
 /// Default parallelism bound for tables
 const DEFAULT_TABLE_PARALLELISM_BOUND: std::num::NonZeroU64 = std::num::NonZeroU64::new(4).unwrap();
@@ -367,29 +361,6 @@ pub struct SessionConfig {
     #[parameter(default = STANDARD_CONFORMING_STRINGS)]
     standard_conforming_strings: String,
 
-    /// Set streaming rate limit (rows per second) for each parallelism for mv / source / sink backfilling
-    /// If set to -1, disable rate limit.
-    /// If set to 0, this pauses the snapshot read / source read.
-    #[parameter(default = DISABLE_BACKFILL_RATE_LIMIT)]
-    backfill_rate_limit: i32,
-
-    /// Set streaming rate limit (rows per second) for each parallelism for mv / source backfilling, source reads.
-    /// If set to -1, disable rate limit.
-    /// If set to 0, this pauses the snapshot read / source read.
-    #[parameter(default = DISABLE_SOURCE_RATE_LIMIT)]
-    source_rate_limit: i32,
-
-    /// Set streaming rate limit (rows per second) for each parallelism for table DML.
-    /// If set to -1, disable rate limit.
-    /// If set to 0, this pauses the DML.
-    #[parameter(default = DISABLE_DML_RATE_LIMIT)]
-    dml_rate_limit: i32,
-
-    /// Set sink rate limit (rows per second) for each parallelism for external sink.
-    /// If set to -1, disable rate limit.
-    /// If set to 0, this pauses the sink.
-    #[parameter(default = DISABLE_SINK_RATE_LIMIT)]
-    sink_rate_limit: i32,
 
     /// Cache policy for partition cache in streaming over window.
     /// Can be `full`, `recent`, `recent_first_n` or `recent_last_n`.

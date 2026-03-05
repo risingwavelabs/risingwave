@@ -14,17 +14,13 @@ statement ok
 insert into t select * from generate_series(1, 10000);
 
 statement ok
-set backfill_rate_limit=1;
-
-statement ok
-set sink_rate_limit=1;
-
-statement ok
 set background_ddl=true;
 
 statement ok
 CREATE SINK sink1 AS select * from t WITH (
-    connector = 'blackhole'
+    connector = 'blackhole',
+    backfill_rate_limit = 1,
+    sink_rate_limit = 1
 );
 
 statement count 1
@@ -55,7 +51,9 @@ show jobs;
 
 statement ok
 CREATE SINK sink2 AS select * from t WITH (
-    connector = 'blackhole'
+    connector = 'blackhole',
+    backfill_rate_limit = 1,
+    sink_rate_limit = 1
 );
 
 statement count 1
@@ -71,7 +69,7 @@ statement ok
 create table t1(v1 int primary key);
 
 statement ok
-create sink sink2 into t1 from t;
+create sink sink2 into t1 from t with (backfill_rate_limit = 1, sink_rate_limit = 1);
 
 statement count 1
 show jobs;
@@ -99,5 +97,3 @@ drop table t cascade;
 statement ok
 set background_ddl=false;
 
-statement ok
-set backfill_rate_limit=default;

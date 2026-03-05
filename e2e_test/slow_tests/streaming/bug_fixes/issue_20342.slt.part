@@ -19,14 +19,10 @@ flush;
 
 skipif madsim
 statement ok
-set backfill_rate_limit=1;
-
-skipif madsim
-statement ok
 set background_ddl=true;
 
 statement ok
-create materialized view m2 as select count(*) from m1;
+create materialized view m2 with (backfill_rate_limit = 1) as select count(*) from m1;
 
 skipif madsim
 sleep 2s
@@ -78,9 +74,6 @@ update t set v2 = 100007 where v1 = 8;
 
 statement ok
 flush;
-
-statement ok
-set backfill_rate_limit=default;
 
 statement ok
 set background_ddl=false;

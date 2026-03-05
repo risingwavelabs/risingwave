@@ -39,9 +39,6 @@ create source mysql_source with (
 
 # backfill rate limit to zero
 statement ok
-set backfill_rate_limit=0;
-
-statement ok
 create table my_orders (
    order_id int,
    order_date timestamp,
@@ -50,7 +47,7 @@ create table my_orders (
    product_id int,
    order_status smallint,
    PRIMARY KEY (order_id)
-) from mysql_source table 'testdb2.orders';
+) with (backfill_rate_limit = 0) from mysql_source table 'testdb2.orders';
 
 sleep 3s
 

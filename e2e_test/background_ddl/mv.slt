@@ -8,13 +8,10 @@ statement ok
 INSERT INTO t select * from generate_series(1, 1000);
 
 statement ok
-set backfill_rate_limit=100;
-
-statement ok
 set background_ddl=true;
 
 statement ok
-CREATE MATERIALIZED VIEW m1 as SELECT * FROM t;
+CREATE MATERIALIZED VIEW m1 WITH (backfill_rate_limit = 100) as SELECT * FROM t;
 
 query I
 select status from rw_catalog.rw_materialized_views where name='m1';

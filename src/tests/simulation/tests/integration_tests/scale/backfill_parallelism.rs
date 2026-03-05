@@ -106,10 +106,9 @@ async fn test_backfill_parallelism_switches_to_normal_after_completion() -> Resu
     session
         .run("insert into t select * from generate_series(1, 12);")
         .await?;
-    session.run("set backfill_rate_limit = 1;").await?;
     session.run("set background_ddl = true;").await?;
     session
-        .run("create materialized view m as select * from t;")
+        .run("create materialized view m with (backfill_rate_limit = 1) as select * from t;")
         .await?;
 
     wait_parallelism(&mut session, "m", "2").await?;
@@ -139,14 +138,13 @@ async fn test_backfill_parallelism_switches_to_normal_for_multiple_jobs() -> Res
     session
         .run("insert into t select * from generate_series(1, 500);")
         .await?;
-    session.run("set backfill_rate_limit = 1;").await?;
     session.run("set background_ddl = true;").await?;
 
     session
-        .run("create materialized view m1 as select * from t;")
+        .run("create materialized view m1 with (backfill_rate_limit = 1) as select * from t;")
         .await?;
     session
-        .run("create materialized view m2 as select * from t;")
+        .run("create materialized view m2 with (backfill_rate_limit = 1) as select * from t;")
         .await?;
 
     wait_parallelism(&mut session, "m1", "2").await?;
@@ -191,10 +189,9 @@ async fn test_backfill_parallelism_optional_and_adaptive() -> Result<()> {
     session
         .run("insert into t select * from generate_series(1, 12);")
         .await?;
-    session.run("set backfill_rate_limit = 1;").await?;
     session.run("set background_ddl = true;").await?;
     session
-        .run("create materialized view m as select * from t;")
+        .run("create materialized view m with (backfill_rate_limit = 1) as select * from t;")
         .await?;
 
     // backfill uses override
@@ -237,7 +234,6 @@ async fn test_backfill_parallelism_persists_after_recovery() -> Result<()> {
     session
         .run("set streaming_parallelism_for_backfill = 2;")
         .await?;
-    session.run("set backfill_rate_limit = 1;").await?;
     session.run("set background_ddl = true;").await?;
 
     session.run("create table t(v int);").await?;
@@ -245,7 +241,7 @@ async fn test_backfill_parallelism_persists_after_recovery() -> Result<()> {
         .run("insert into t select * from generate_series(1, 500);")
         .await?;
     session
-        .run("create materialized view m as select * from t;")
+        .run("create materialized view m with (backfill_rate_limit = 1) as select * from t;")
         .await?;
 
     // Ensure backfill starts with the configured backfill parallelism.
@@ -277,7 +273,6 @@ async fn test_backfill_parallelism_prefers_backfill_override_over_mview_override
     session
         .run("set streaming_parallelism_for_backfill = 1;")
         .await?;
-    session.run("set backfill_rate_limit = 1;").await?;
     session.run("set background_ddl = true;").await?;
 
     session.run("create table t(v int);").await?;
@@ -288,7 +283,7 @@ async fn test_backfill_parallelism_prefers_backfill_override_over_mview_override
     // With both MV-specific and backfill-specific overrides, backfill uses the backfill value (1),
     // while normal parallelism falls back to the MV-specific value (2) instead of the global (3).
     session
-        .run("create materialized view m1 as select * from t;")
+        .run("create materialized view m1 with (backfill_rate_limit = 1) as select * from t;")
         .await?;
     wait_parallelism(&mut session, "m1", "1").await?;
     wait_jobs_finished(&mut session).await?;
@@ -329,7 +324,6 @@ async fn test_alter_backfill_parallelism_during_backfill() -> Result<()> {
     session
         .run("set streaming_parallelism_for_backfill = 2;")
         .await?;
-    session.run("set backfill_rate_limit = 1;").await?;
     session.run("set background_ddl = true;").await?;
 
     session.run("create table t(v int);").await?;
@@ -337,7 +331,7 @@ async fn test_alter_backfill_parallelism_during_backfill() -> Result<()> {
         .run("insert into t select * from generate_series(1, 800);")
         .await?;
     session
-        .run("create materialized view m as select * from t;")
+        .run("create materialized view m with (backfill_rate_limit = 1) as select * from t;")
         .await?;
 
     wait_parallelism(&mut session, "m", "2").await?;

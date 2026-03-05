@@ -167,9 +167,8 @@ async fn test_arrangement_backfill_replication() -> Result<()> {
     session
         .run("SET STREAMING_USE_ARRANGEMENT_BACKFILL=true")
         .await?;
-    session.run("SET BACKFILL_RATE_LIMIT=30").await?;
     session
-        .run("create materialized view m1 as select * from t")
+        .run("create materialized view m1 with (backfill_rate_limit = 30) as select * from t")
         .await?;
 
     upstream_task.await?;
@@ -251,9 +250,8 @@ async fn test_arrangement_backfill_progress() -> Result<()> {
     // Create arrangement backfill with rate limit
     session.run("SET STREAMING_PARALLELISM=1").await?;
     session.run("SET BACKGROUND_DDL=true").await?;
-    session.run("SET BACKFILL_RATE_LIMIT=1").await?;
     session
-        .run("CREATE MATERIALIZED VIEW m1 AS SELECT * FROM t")
+        .run("CREATE MATERIALIZED VIEW m1 WITH (backfill_rate_limit = 1) AS SELECT * FROM t")
         .await?;
 
     // Verify arrangement backfill progress after 10s, it should be around 1%,
@@ -311,14 +309,13 @@ async fn test_enable_arrangement_backfill() -> Result<()> {
 async fn test_recovery_cancels_foreground_ddl() -> Result<()> {
     let mut cluster = Cluster::start(Configuration::enable_arrangement_backfill()).await?;
     let mut session = cluster.start_session();
-    session.run("SET BACKFILL_RATE_LIMIT=1").await?;
     session.run("CREATE TABLE t(v1 int);").await?;
     session
         .run("INSERT INTO t select * from generate_series(1, 100000);")
         .await?;
     let handle = tokio::spawn(async move {
         session
-            .run("CREATE MATERIALIZED VIEW m1 AS SELECT * FROM t;")
+            .run("CREATE MATERIALIZED VIEW m1 WITH (backfill_rate_limit = 1) AS SELECT * FROM t;")
             .await
     });
     sleep(Duration::from_secs(2)).await;

@@ -10,15 +10,6 @@ CREATE SINK s1 AS select * from t1 WITH (
 );
 
 statement ok
-SET SINK_RATE_LIMIT TO 100;
-
-statement ok
-SET SINK_RATE_LIMIT TO 0;
-
-statement ok
-SET SINK_RATE_LIMIT TO default;
-
-statement ok
 ALTER SINK s1 SET SINK_RATE_LIMIT = 1000;
 
 statement ok

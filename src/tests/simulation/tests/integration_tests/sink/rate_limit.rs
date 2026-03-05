@@ -35,9 +35,10 @@ async fn test_sink_decouple_rate_limit_inner(test_type: TestSinkType) -> Result<
 
     session.run("set streaming_parallelism = 2").await?;
     session.run("set sink_decouple = true").await?;
-    session.run("set sink_rate_limit = 0").await?;
     session.run(CREATE_SOURCE).await?;
-    session.run(CREATE_SINK).await?;
+    session
+        .run("create sink test_sink from test_source with (connector = 'test', type = 'upsert', sink_rate_limit = 0)")
+        .await?;
     test_sink.wait_initial_parallelism(2).await?;
 
     // sink should not write anything due to 0 rate limit

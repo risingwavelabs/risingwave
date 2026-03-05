@@ -34,16 +34,13 @@ select count(*) from d1.public.t1;
 10000
 
 statement ok
-set backfill_rate_limit = 200;
-
-statement ok
 set streaming_parallelism=2;
 
 statement ok
 set background_ddl=true;
 
 statement ok
-create materialized view mv1 as select * from d1.public.t1;
+create materialized view mv1 with (backfill_rate_limit = 200) as select * from d1.public.t1;
 
 query ok
 select count(*) from rw_ddl_progress;

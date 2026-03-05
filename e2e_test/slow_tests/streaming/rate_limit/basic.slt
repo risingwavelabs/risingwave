@@ -5,10 +5,7 @@ statement ok
 CREATE TABLE t1(v1 int, v2 int);
 
 statement ok
-SET BACKFILL_RATE_LIMIT TO 2000;
-
-statement ok
-CREATE MATERIALIZED VIEW m AS SELECT * FROM t1;
+CREATE MATERIALIZED VIEW m WITH (backfill_rate_limit = 2000) AS SELECT * FROM t1;
 
 # Throughput on source is limited to 2000 * 2 (parallelism)
 # Should take around 3s due to rate limit
@@ -35,10 +32,7 @@ FLUSH;
 # Test with small rate_limit. In this case, the stream chunk needs to be split
 
 statement ok
-SET BACKFILL_RATE_LIMIT TO 1;
-
-statement ok
-CREATE MATERIALIZED VIEW m AS SELECT * FROM t1;
+CREATE MATERIALIZED VIEW m WITH (backfill_rate_limit = 1) AS SELECT * FROM t1;
 
 # Throughput on source is limited to 1 * 2 (parallelism)
 # Should take around 3s due to rate limit

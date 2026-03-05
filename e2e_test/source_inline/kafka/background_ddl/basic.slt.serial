@@ -69,13 +69,10 @@ statement ok
 flush;
 
 statement ok
-set backfill_rate_limit = 1;
-
-statement ok
 set background_ddl=true;
 
 statement ok
-create materialized view rl_mv2 as select kafka_source.v1 from kafka_source join t1 on kafka_source.v1 = t1.v1;
+create materialized view rl_mv2 with (backfill_rate_limit = 1) as select kafka_source.v1 from kafka_source join t1 on kafka_source.v1 = t1.v1;
 
 query I
 select count(*) from rw_catalog.rw_ddl_progress;

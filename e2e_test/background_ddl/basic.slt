@@ -14,13 +14,10 @@ statement ok
 FLUSH;
 
 statement ok
-SET BACKFILL_RATE_LIMIT=10000;
+CREATE MATERIALIZED VIEW m1 WITH (backfill_rate_limit = 10000) as SELECT * FROM t;
 
 statement ok
-CREATE MATERIALIZED VIEW m1 as SELECT * FROM t;
-
-statement ok
-CREATE MATERIALIZED VIEW m2 as SELECT * FROM t;
+CREATE MATERIALIZED VIEW m2 WITH (backfill_rate_limit = 10000) as SELECT * FROM t;
 
 query I
 select count(*) from rw_catalog.rw_ddl_progress;
@@ -65,10 +62,7 @@ statement ok
 insert into t select to_timestamp(x) as z, to_timestamp(x) as y from generate_series(1, 1000) t(x);
 
 statement ok
-set backfill_rate_limit=1;
-
-statement ok
-create materialized view m1 as select * from t where v1 >= now() and v2 >= now();
+create materialized view m1 with (backfill_rate_limit = 1) as select * from t where v1 >= now() and v2 >= now();
 
 
 query I retry 4 backoff 1s
@@ -105,14 +99,11 @@ statement ok
 insert into t select * from generate_series(1, 100);
 
 statement ok
-set backfill_rate_limit=0;
-
-statement ok
 set background_ddl=true;
 
 # Initial create MV
 statement ok
-create materialized view if not exists m1 as select * from t;
+create materialized view if not exists m1 with (backfill_rate_limit = 0) as select * from t;
 
 statement ok
 flush;
@@ -133,9 +124,6 @@ statement ok
 drop table t;
 
 ################### Cleanup
-
-statement ok
-set backfill_rate_limit=default;
 
 statement ok
 SET BACKGROUND_DDL=false;
