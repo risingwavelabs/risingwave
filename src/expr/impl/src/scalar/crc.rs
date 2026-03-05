@@ -54,3 +54,26 @@ pub fn crc32(data: &[u8]) -> i64 {
 pub fn crc32c(data: &[u8]) -> i64 {
     crc32c::crc32c(data) as i64
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_crc32() {
+        assert_eq!(crc32(b""), 0);
+        assert_eq!(crc32(b"\x00"), 3523407757);
+        assert_eq!(crc32(b"123456789"), 3421780262); // standard CRC-32 check value
+        assert_eq!(
+            crc32(b"The quick brown fox jumps over the lazy dog"),
+            1095738169
+        );
+    }
+
+    #[test]
+    fn test_crc32c() {
+        assert_eq!(crc32c(b""), 0);
+        assert_eq!(crc32c(b"\x00"), 1383945041);
+        assert_eq!(crc32c(b"123456789"), 3808858755); // standard CRC-32C check value
+    }
+}
