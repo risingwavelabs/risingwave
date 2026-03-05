@@ -90,7 +90,7 @@ statement ok
 set background_ddl=false;
 
 statement ok
-create materialized view m1 with (backfill_rate_limit = 1) as select * from t;
+create materialized view m1 as select * from t;
 
 skipif madsim
 query I

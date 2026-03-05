@@ -60,7 +60,6 @@ pub enum SessionConfigError {
 
 type SessionConfigResult<T> = std::result::Result<T, SessionConfigError>;
 
-
 /// Default parallelism bound for tables
 const DEFAULT_TABLE_PARALLELISM_BOUND: std::num::NonZeroU64 = std::num::NonZeroU64::new(4).unwrap();
 
@@ -360,7 +359,6 @@ pub struct SessionConfig {
     /// see <https://www.postgresql.org/docs/current/runtime-config-client.html#GUC-STANDARD-CONFORMING-STRINGS>
     #[parameter(default = STANDARD_CONFORMING_STRINGS)]
     standard_conforming_strings: String,
-
 
     /// Cache policy for partition cache in streaming over window.
     /// Can be `full`, `recent`, `recent_first_n` or `recent_last_n`.

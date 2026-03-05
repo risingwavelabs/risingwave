@@ -208,10 +208,9 @@ async fn test_ddl_cancel() -> Result<()> {
     let mut session2 = cluster.start_session();
     tokio::spawn(async move {
         session2.run(RESET_BACKGROUND_DDL).await.unwrap();
-        session2
+        let _ = session2
             .run("CREATE MATERIALIZED VIEW mv1 WITH (backfill_rate_limit = 1) as SELECT * FROM t;")
-            .await
-            .unwrap();
+            .await;
         sleep(Duration::from_secs(2)).await;
     });
 

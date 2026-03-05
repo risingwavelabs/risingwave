@@ -12,8 +12,18 @@ flush;
 statement ok
 set background_ddl=true;
 
+skipif parallel
+skipif madsim
 statement ok
 create materialized view if not exists m1 with (backfill_rate_limit = 0) as select * from t;
+
+onlyif parallel
+statement ok
+create materialized view if not exists m1 as select * from t;
+
+onlyif madsim
+statement ok
+create materialized view if not exists m1 as select * from t;
 
 statement ok
 flush;

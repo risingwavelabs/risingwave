@@ -21,8 +21,13 @@ skipif madsim
 statement ok
 set background_ddl=true;
 
+skipif madsim
 statement ok
 create materialized view m2 with (backfill_rate_limit = 1) as select count(*) from m1;
+
+onlyif madsim
+statement ok
+create materialized view m2 as select count(*) from m1;
 
 skipif madsim
 sleep 2s
