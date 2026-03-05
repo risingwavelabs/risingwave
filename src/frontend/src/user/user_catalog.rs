@@ -196,7 +196,7 @@ impl UserCatalog {
     }
 
     pub fn has_schema_usage_privilege(&self, schema_id: SchemaId) -> bool {
-        self.has_privilege(schema_id, AclMode::Usage)
+        self.is_super || self.has_privilege(schema_id, AclMode::Usage)
     }
 
     pub fn check_privilege_with_grant_option(

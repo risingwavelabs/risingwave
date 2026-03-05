@@ -2,9 +2,6 @@
 
 control substitution on
 
-statement ok
-ALTER SYSTEM SET max_concurrent_creating_streaming_jobs TO 1;
-
 system ok
 mysql -e "
     SET GLOBAL time_zone = '+01:00';

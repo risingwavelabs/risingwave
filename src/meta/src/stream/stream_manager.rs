@@ -957,4 +957,24 @@ impl GlobalStreamManager {
                 tracing::error!(error = ?err.as_report(), "failed to run drop command");
             });
     }
+
+    pub async fn alter_subscription_retention(
+        self: &Arc<Self>,
+        database_id: DatabaseId,
+        subscription_id: SubscriptionId,
+        table_id: TableId,
+        retention_second: u64,
+    ) -> MetaResult<()> {
+        let command = Command::AlterSubscriptionRetention {
+            subscription_id,
+            upstream_mv_table_id: table_id,
+            retention_second,
+        };
+
+        tracing::debug!("sending Command::AlterSubscriptionRetention");
+        self.barrier_scheduler
+            .run_command(database_id, command)
+            .await?;
+        Ok(())
+    }
 }

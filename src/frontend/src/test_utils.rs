@@ -141,7 +141,7 @@ impl LocalFrontend {
         sql: impl Into<String>,
     ) -> std::result::Result<RwPgResponse, Box<dyn std::error::Error + Send + Sync>> {
         let sql: Arc<str> = Arc::from(sql.into());
-        self.session_ref().run_statement(sql, vec![]).await
+        Box::pin(self.session_ref().run_statement(sql, vec![])).await
     }
 
     pub async fn run_sql_with_session(
@@ -150,7 +150,7 @@ impl LocalFrontend {
         sql: impl Into<String>,
     ) -> std::result::Result<RwPgResponse, Box<dyn std::error::Error + Send + Sync>> {
         let sql: Arc<str> = Arc::from(sql.into());
-        session_ref.run_statement(sql, vec![]).await
+        Box::pin(session_ref.run_statement(sql, vec![])).await
     }
 
     pub async fn run_user_sql(
@@ -161,9 +161,11 @@ impl LocalFrontend {
         user_id: UserId,
     ) -> std::result::Result<RwPgResponse, Box<dyn std::error::Error + Send + Sync>> {
         let sql: Arc<str> = Arc::from(sql.into());
-        self.session_user_ref(database, user_name, user_id)
-            .run_statement(sql, vec![])
-            .await
+        Box::pin(
+            self.session_user_ref(database, user_name, user_id)
+                .run_statement(sql, vec![]),
+        )
+        .await
     }
 
     pub async fn query_formatted_result(&self, sql: impl Into<String>) -> Vec<String> {
@@ -666,6 +668,30 @@ impl CatalogWriter for MockCatalogWriter {
         }
 
         Err(ErrorCode::ItemNotFound(format!("object not found: {:?}", object)).into())
+    }
+
+    async fn alter_subscription_retention(
+        &self,
+        subscription_id: SubscriptionId,
+        retention_seconds: u64,
+        definition: String,
+    ) -> Result<()> {
+        for database in self.catalog.read().iter_databases() {
+            for schema in database.iter_schemas() {
+                if let Some(subscription) = schema.get_subscription_by_id(subscription_id) {
+                    let mut pb_subscription = subscription.to_proto();
+                    pb_subscription.retention_seconds = retention_seconds;
+                    pb_subscription.definition = definition;
+                    self.catalog.write().update_subscription(&pb_subscription);
+                    return Ok(());
+                }
+            }
+        }
+
+        Err(
+            ErrorCode::ItemNotFound(format!("subscription not found: {:?}", subscription_id))
+                .into(),
+        )
     }
 
     async fn alter_set_schema(

@@ -356,7 +356,7 @@ pub fn start(
             max_timeout_ms / 1000
         } + MIN_TIMEOUT_INTERVAL_SEC;
 
-        rpc_serve(
+        Box::pin(rpc_serve(
             add_info,
             backend,
             max_heartbeat_interval,
@@ -562,7 +562,7 @@ pub fn start(
             config.system.into_init_system_params(),
             Default::default(),
             shutdown,
-        )
+        ))
         .await
         .unwrap();
     })

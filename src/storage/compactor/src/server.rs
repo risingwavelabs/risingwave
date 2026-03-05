@@ -243,7 +243,12 @@ pub async fn compactor_serve(
         await_tree_reg,
         storage_opts,
         compactor_metrics,
-    ) = prepare_start_parameters(&opts, config.clone(), system_params_reader.clone()).await;
+    ) = Box::pin(prepare_start_parameters(
+        &opts,
+        config.clone(),
+        system_params_reader.clone(),
+    ))
+    .await;
 
     let compaction_catalog_manager_ref = Arc::new(CompactionCatalogManager::new(Box::new(
         RemoteTableAccessor::new(meta_client.clone()),
@@ -377,7 +382,12 @@ pub async fn shared_compactor_serve(
         await_tree_reg,
         storage_opts,
         compactor_metrics,
-    ) = prepare_start_parameters(&opts, config.clone(), system_params.into()).await;
+    ) = Box::pin(prepare_start_parameters(
+        &opts,
+        config.clone(),
+        system_params.into(),
+    ))
+    .await;
     let (sender, receiver) = mpsc::unbounded_channel();
     let compactor_srv: CompactorServiceImpl = CompactorServiceImpl::new(sender);
 
