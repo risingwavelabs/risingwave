@@ -597,7 +597,7 @@ impl CatalogController {
             job_info.job_status.into(),
             job_info.stream_context(),
             fragment_actors,
-            job_info.parallelism.clone(),
+            job_info.parallelism,
             job_info.max_parallelism as _,
             job_definition,
         )
@@ -1020,7 +1020,7 @@ impl CatalogController {
                     job.job_status.into(),
                     job.stream_context(),
                     fragment_actors,
-                    job.parallelism.clone(),
+                    job.parallelism,
                     job.max_parallelism as _,
                     job_definition.remove(&job.job_id),
                 )?,

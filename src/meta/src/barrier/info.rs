@@ -52,7 +52,7 @@ use crate::barrier::{
 use crate::controller::fragment::{InflightActorInfo, InflightFragmentInfo};
 use crate::controller::utils::rebuild_fragment_mapping;
 use crate::manager::NotificationManagerRef;
-use crate::model::{ActorId, BackfillUpstreamType, FragmentId, StreamJobFragments};
+use crate::model::{ActorId, BackfillUpstreamType, FragmentId, StreamActor, StreamJobFragments};
 use crate::stream::UpstreamSinkInfo;
 use crate::stream::source_manager::SplitAssignment;
 use crate::{MetaError, MetaResult};
@@ -611,7 +611,7 @@ impl InflightDatabaseInfo {
                         let CreateStreamingJobStatus::Init = replace(
                             &mut job_info.status,
                             CreateStreamingJobStatus::Creating {
-                                tracker: CreateMviewProgressTracker::new(info, version_stats),
+                                tracker: CreateMviewProgressTracker::new(info, version_stats, &job_info.fragment_infos),
                             },
                         ) else {
                             unreachable!("should be init before collect the first barrier")
@@ -1168,6 +1168,8 @@ impl InflightDatabaseInfo {
         new_upstream_sink: Option<&UpstreamSinkInfo>,
         control_stream_manager: &ControlStreamManager,
         split_assignment: &SplitAssignment,
+        stream_actors: &HashMap<FragmentId, Vec<StreamActor>>,
+        actor_location: &HashMap<ActorId, WorkerId>,
     ) -> FragmentEdgeBuildResult {
         // `existing_fragment_ids` consists of
         //  - keys of `info.upstream_fragment_downstreams`, which are the `fragment_id` the upstream fragment of the newly created job
@@ -1208,7 +1210,7 @@ impl InflightDatabaseInfo {
                     is_snapshot_backfill.then_some(info.streaming_job.id()),
                 );
                 info.stream_job_fragments
-                    .new_fragment_info(split_assignment)
+                    .new_fragment_info(stream_actors, actor_location, split_assignment)
                     .map(move |(fragment_id, info)| (fragment_id, info, partial_graph_id))
             })
             .chain(
@@ -1217,7 +1219,7 @@ impl InflightDatabaseInfo {
                     .flat_map(|replace_job| {
                         replace_job
                             .new_fragments
-                            .new_fragment_info(split_assignment)
+                            .new_fragment_info(stream_actors, actor_location, split_assignment)
                             .chain(
                                 replace_job
                                     .auto_refresh_schema_sinks
@@ -1227,8 +1229,10 @@ impl InflightDatabaseInfo {
                                         sinks.iter().map(|sink| {
                                             (
                                                 sink.new_fragment.fragment_id,
-                                                // TODO(render): Fill auto-refresh sink actors.
-                                                sink.new_fragment_info(HashMap::new()),
+                                                sink.new_fragment_info(
+                                                    stream_actors,
+                                                    actor_location,
+                                                ),
                                             )
                                         })
                                     }),

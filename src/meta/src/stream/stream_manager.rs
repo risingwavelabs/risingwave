@@ -24,7 +24,7 @@ use risingwave_common::hash::VnodeCountCompat;
 use risingwave_common::id::{JobId, SinkId};
 use risingwave_connector::source::CdcTableSnapshotSplitRaw;
 use risingwave_meta_model::prelude::Fragment as FragmentModel;
-use risingwave_meta_model::{StreamingParallelism, fragment};
+use risingwave_meta_model::{StreamingParallelism, WorkerId, fragment};
 use risingwave_pb::catalog::{CreateType, PbSink, PbTable, Subscription};
 use risingwave_pb::expr::PbExprNode;
 use risingwave_pb::plan_common::{PbColumnCatalog, PbField};
@@ -48,8 +48,8 @@ use crate::manager::{
 };
 use crate::model::{
     ActorId, DownstreamFragmentRelation, Fragment, FragmentDownstreamRelation, FragmentId,
-    FragmentNewNoShuffle, FragmentReplaceUpstream, StreamJobFragments, StreamJobFragmentsToCreate,
-    SubscriptionId,
+    FragmentNewNoShuffle, FragmentReplaceUpstream, StreamActor, StreamJobFragments,
+    StreamJobFragmentsToCreate, SubscriptionId,
 };
 use crate::stream::{ReplaceJobSplitPlan, SourceManagerRef};
 use crate::{MetaError, MetaResult};
@@ -192,7 +192,8 @@ pub struct AutoRefreshSchemaSinkContext {
 impl AutoRefreshSchemaSinkContext {
     pub fn new_fragment_info(
         &self,
-        actors: HashMap<ActorId, InflightActorInfo>,
+        stream_actors: &HashMap<FragmentId, Vec<StreamActor>>,
+        actor_location: &HashMap<ActorId, WorkerId>,
     ) -> InflightFragmentInfo {
         InflightFragmentInfo {
             fragment_id: self.new_fragment.fragment_id,
@@ -200,7 +201,21 @@ impl AutoRefreshSchemaSinkContext {
             fragment_type_mask: self.new_fragment.fragment_type_mask,
             vnode_count: self.new_fragment.vnode_count(),
             nodes: self.new_fragment.nodes.clone(),
-            actors,
+            actors: stream_actors
+                .get(&self.new_fragment.fragment_id)
+                .into_iter()
+                .flatten()
+                .map(|actor| {
+                    (
+                        actor.actor_id,
+                        InflightActorInfo {
+                            worker_id: actor_location[&actor.actor_id],
+                            vnode_bitmap: actor.vnode_bitmap.clone(),
+                            splits: vec![],
+                        },
+                    )
+                })
+                .collect(),
             state_table_ids: self.new_fragment.state_table_ids.iter().copied().collect(),
         }
     }

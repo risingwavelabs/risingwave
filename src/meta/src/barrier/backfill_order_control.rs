@@ -18,7 +18,7 @@ use risingwave_common::catalog::{FragmentTypeFlag, TableId};
 pub use risingwave_common::id::ActorId;
 
 use crate::controller::fragment::InflightFragmentInfo;
-use crate::model::{FragmentId, StreamJobFragments};
+use crate::model::FragmentId;
 use crate::stream::ExtendedFragmentBackfillOrder;
 
 #[derive(Clone, Debug, Default)]
@@ -60,16 +60,23 @@ pub fn get_nodes_with_backfill_dependencies(
 impl BackfillOrderState {
     pub fn new(
         backfill_orders: &ExtendedFragmentBackfillOrder,
-        stream_job_fragments: &StreamJobFragments,
+        fragment_infos: &HashMap<FragmentId, InflightFragmentInfo>,
         locality_fragment_state_table_mapping: HashMap<FragmentId, Vec<TableId>>,
     ) -> Self {
         tracing::debug!(?backfill_orders, "initialize backfill order state");
-        // TODO(render): Rebuild actor-to-fragment mapping from renderer output.
-        let actor_to_fragment_id = HashMap::new();
+        let actor_to_fragment_id: HashMap<ActorId, FragmentId> = fragment_infos
+            .iter()
+            .flat_map(|(fragment_id, fragment)| {
+                fragment
+                    .actors
+                    .keys()
+                    .map(|actor_id| (*actor_id, *fragment_id))
+            })
+            .collect();
 
         let mut backfill_nodes: HashMap<FragmentId, BackfillNode> = HashMap::new();
 
-        for fragment in stream_job_fragments.fragments() {
+        for fragment in fragment_infos.values() {
             if fragment.fragment_type_mask.contains_any([
                 FragmentTypeFlag::StreamScan,
                 FragmentTypeFlag::SourceScan,
@@ -80,8 +87,7 @@ impl BackfillOrderState {
                     fragment_id,
                     BackfillNode {
                         fragment_id,
-                        // TODO(render): Fill actor ids for each fragment after actor rendering.
-                        remaining_actors: HashSet::new(),
+                        remaining_actors: fragment.actors.keys().copied().collect(),
                         remaining_dependencies: Default::default(),
                         children: backfill_orders
                             .get(&fragment_id)

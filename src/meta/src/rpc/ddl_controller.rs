@@ -2129,7 +2129,7 @@ impl DdlController {
         // XXX: what is this parallelism?
         // Is it "assigned parallelism"?
         let parallelism = NonZeroUsize::new(match old_fragments.assigned_parallelism {
-            TableParallelism::Fixed(n) => n as usize,
+            TableParallelism::Fixed(n) => n,
             TableParallelism::Adaptive | TableParallelism::Custom => 1,
         })
         .expect("The number of actors in the original table fragment should be greater than 0");

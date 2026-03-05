@@ -501,13 +501,14 @@ impl SourceManagerCore {
 /// See also:
 /// - [Kinesis resharding doc](https://docs.aws.amazon.com/streams/latest/dev/kinesis-using-sdk-java-after-resharding.html#kinesis-using-sdk-java-resharding-data-routing)
 /// - An example of how the shards can be like: <https://stackoverflow.com/questions/72272034/list-shard-show-more-shards-than-provisioned>
-pub fn reassign_splits<T>(
+pub fn reassign_splits<I, T>(
     fragment_id: FragmentId,
-    actor_splits: HashMap<ActorId, Vec<T>>,
+    actor_splits: HashMap<I, Vec<T>>,
     discovered_splits: &BTreeMap<SplitId, T>,
     opts: SplitDiffOptions,
-) -> Option<HashMap<ActorId, Vec<T>>>
+) -> Option<HashMap<I, Vec<T>>>
 where
+    I: Ord + std::hash::Hash + Eq,
     T: SplitMetaData + Clone,
 {
     // if no actors, return
@@ -569,11 +570,11 @@ where
             splits.retain(|split| !dropped_splits.contains(&split.id()));
         }
 
-        heap.push(ActorSplitsAssignment { actor_id, splits })
+        heap.push(SplitsAssignment { actor_id, splits })
     }
 
     for split_id in new_discovered_splits {
-        // ActorSplitsAssignment's Ord is reversed, so this is min heap, i.e.,
+        // SplitsAssignment's Ord is reversed, so this is min heap, i.e.,
         // we get the assignment with the least splits here.
 
         // Note: If multiple actors have the same number of splits, it will be randomly picked.
@@ -589,7 +590,7 @@ where
 
     Some(
         heap.into_iter()
-            .map(|ActorSplitsAssignment { actor_id, splits }| (actor_id, splits))
+            .map(|SplitsAssignment { actor_id, splits }| (actor_id, splits))
             .collect(),
     )
 }
@@ -632,26 +633,26 @@ pub fn align_splits(
 
 /// Note: the `PartialEq` and `Ord` impl just compares the number of splits.
 #[derive(Debug)]
-struct ActorSplitsAssignment<T: SplitMetaData> {
-    actor_id: ActorId,
+struct SplitsAssignment<I, T: SplitMetaData> {
+    actor_id: I,
     splits: Vec<T>,
 }
 
-impl<T: SplitMetaData + Clone> Eq for ActorSplitsAssignment<T> {}
+impl<I, T: SplitMetaData + Clone> Eq for SplitsAssignment<I, T> {}
 
-impl<T: SplitMetaData + Clone> PartialEq<Self> for ActorSplitsAssignment<T> {
+impl<I, T: SplitMetaData + Clone> PartialEq<Self> for SplitsAssignment<I, T> {
     fn eq(&self, other: &Self) -> bool {
         self.splits.len() == other.splits.len()
     }
 }
 
-impl<T: SplitMetaData + Clone> PartialOrd<Self> for ActorSplitsAssignment<T> {
+impl<I: Ord, T: SplitMetaData + Clone> PartialOrd<Self> for SplitsAssignment<I, T> {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
     }
 }
 
-impl<T: SplitMetaData + Clone> Ord for ActorSplitsAssignment<T> {
+impl<I: Ord, T: SplitMetaData + Clone> Ord for SplitsAssignment<I, T> {
     fn cmp(&self, other: &Self) -> Ordering {
         // Note: this is reversed order, to make BinaryHeap a min heap.
         other
@@ -815,7 +816,7 @@ mod tests {
 
     #[test]
     fn test_reassign_splits() {
-        let actor_splits = HashMap::new();
+        let actor_splits: HashMap<u32, _> = HashMap::new();
         let discovered_splits: BTreeMap<SplitId, TestSplit> = BTreeMap::new();
         assert!(
             reassign_splits(
@@ -827,7 +828,7 @@ mod tests {
             .is_none()
         );
 
-        let actor_splits = (0..3).map(|i| (i.into(), vec![])).collect();
+        let actor_splits = (0..3).map(|i| (i, vec![])).collect();
         let discovered_splits: BTreeMap<SplitId, TestSplit> = BTreeMap::new();
         let diff = reassign_splits(
             FragmentId::default(),

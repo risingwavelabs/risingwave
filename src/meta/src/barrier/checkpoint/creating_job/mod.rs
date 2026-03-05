@@ -39,6 +39,7 @@ use status::CreatingStreamingJobStatus;
 use tracing::{debug, info};
 
 use crate::MetaResult;
+use crate::barrier::Command;
 use crate::barrier::backfill_order_control::get_nodes_with_backfill_dependencies;
 use crate::barrier::checkpoint::creating_job::status::CreateMviewLogStoreProgressTracker;
 use crate::barrier::context::CreateSnapshotBackfillJobCommandInfo;
@@ -56,6 +57,8 @@ use crate::model::{FragmentDownstreamRelation, StreamActor, StreamJobActorsToCre
 use crate::rpc::metrics::GLOBAL_META_METRICS;
 use crate::stream::source_manager::SplitAssignment;
 use crate::stream::{ExtendedFragmentBackfillOrder, build_actor_connector_splits};
+
+use super::state::RenderResult;
 
 #[derive(Debug)]
 pub(crate) struct CreatingJobInfo {
@@ -120,6 +123,7 @@ impl CreatingStreamingJobControl {
         partial_graph_manager: &mut PartialGraphManager,
         edges: &mut FragmentEdgeBuildResult,
         split_assignment: &SplitAssignment,
+        actors: &RenderResult,
     ) -> MetaResult<&'a mut Self> {
         let info = create_info.info.clone();
         let job_id = info.stream_job_fragments.stream_job_id();
@@ -131,7 +135,7 @@ impl CreatingStreamingJobControl {
         );
         let fragment_infos = info
             .stream_job_fragments
-            .new_fragment_info(split_assignment)
+            .new_fragment_info(&actors.stream_actors, &actors.actor_location, split_assignment)
             .collect();
         let snapshot_backfill_actors =
             InflightStreamingJobInfo::snapshot_backfill_actor_ids(&fragment_infos).collect();
@@ -141,7 +145,7 @@ impl CreatingStreamingJobControl {
                 .collect();
         let backfill_order_state = BackfillOrderState::new(
             &info.fragment_backfill_ordering,
-            &info.stream_job_fragments,
+            &fragment_infos,
             info.locality_fragment_state_table_mapping.clone(),
         );
         let create_mview_tracker = CreateMviewProgressTracker::recover(
@@ -151,9 +155,12 @@ impl CreatingStreamingJobControl {
             version_stat,
         );
 
-        // TODO(render): Collect actors to create from renderer output.
-        let _ = edges;
-        let actors_to_create = StreamJobActorsToCreate::default();
+        let actors_to_create = Command::create_streaming_job_actors_to_create(
+            &info,
+            edges,
+            &actors.stream_actors,
+            &actors.actor_location,
+        );
 
         let barrier_control = CreatingStreamingJobBarrierControl::new(job_id, snapshot_epoch, None);
 
@@ -166,8 +173,11 @@ impl CreatingStreamingJobControl {
             PbBarrierKind::Checkpoint,
         );
 
-        // TODO(render): Fill added actors from rendered actor infos.
-        let added_actors = Vec::new();
+        let added_actors: Vec<ActorId> = actors.stream_actors
+            .values()
+            .flatten()
+            .map(|actor| actor.actor_id)
+            .collect();
         let actor_splits = split_assignment
             .values()
             .flat_map(build_actor_connector_splits)
@@ -234,10 +244,13 @@ impl CreatingStreamingJobControl {
             let job_info = CreatingJobInfo {
                 fragment_infos,
                 upstream_fragment_downstreams: info.upstream_fragment_downstreams.clone(),
-                downstreams: info.stream_job_fragments.downstreams.clone(),
+                downstreams: info.stream_job_fragments.downstreams,
                 snapshot_backfill_upstream_tables: job.snapshot_backfill_upstream_tables.clone(),
-                // TODO(render): Fill stream actors from renderer output.
-                stream_actors: HashMap::new(),
+                stream_actors: actors.stream_actors
+                    .values()
+                    .flatten()
+                    .map(|actor| (actor.actor_id, actor.clone()))
+                    .collect(),
             };
             job.status = CreatingStreamingJobStatus::ConsumingSnapshot {
                 prev_epoch_fake_physical_time,

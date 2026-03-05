@@ -722,7 +722,11 @@ impl CreateMviewProgressTracker {
     ///
     /// If the actors to track are empty, return the given command as it can be finished immediately.
     /// For CDC sources, mark as `CdcSourceInit` instead of Finished.
-    pub fn new(info: &CreateStreamingJobCommandInfo, version_stats: &HummockVersionStats) -> Self {
+    pub fn new(
+        info: &CreateStreamingJobCommandInfo,
+        version_stats: &HummockVersionStats,
+        fragment_infos: &HashMap<FragmentId, InflightFragmentInfo>,
+    ) -> Self {
         tracing::trace!(?info, "add job to track");
         let CreateStreamingJobCommandInfo {
             stream_job_fragments,
@@ -732,8 +736,7 @@ impl CreateMviewProgressTracker {
             ..
         } = info;
         let job_id = stream_job_fragments.stream_job_id();
-        // TODO(render): Derive tracking actors from rendered actor infos.
-        let actors = Vec::new();
+        let actors = InflightStreamingJobInfo::tracking_progress_actor_ids(fragment_infos);
         let tracking_job = TrackingJob::new(&info.stream_job_fragments);
         if actors.is_empty() {
             // NOTE: This CDC source detection uses hardcoded property checks and should be replaced
@@ -769,7 +772,7 @@ impl CreateMviewProgressTracker {
 
         let backfill_order_state = BackfillOrderState::new(
             fragment_backfill_ordering,
-            stream_job_fragments,
+            fragment_infos,
             locality_fragment_state_table_mapping.clone(),
         );
         let progress = Progress::new(
@@ -1109,7 +1112,7 @@ mod tests {
             is_serverless: false,
         };
 
-        let tracker = CreateMviewProgressTracker::new(&info, &HummockVersionStats::default());
+        let tracker = CreateMviewProgressTracker::new(&info, &HummockVersionStats::default(), &HashMap::new());
 
         // CDC source should be in CdcSourceInit state
         assert!(matches!(tracker.status, CreateMviewStatus::CdcSourceInit));

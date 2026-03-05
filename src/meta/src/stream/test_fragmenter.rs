@@ -424,31 +424,6 @@ fn make_stream_graph() -> StreamFragmentGraphProto {
     }
 }
 
-fn make_cluster_info() -> StreamingClusterInfo {
-    let worker_nodes: HashMap<WorkerId, WorkerNode> = std::iter::once((
-        0.into(),
-        WorkerNode {
-            id: 0.into(),
-            property: Some(Property {
-                parallelism: 8,
-                resource_group: Some(DEFAULT_RESOURCE_GROUP.to_owned()),
-                ..Default::default()
-            }),
-            r#type: WorkerType::ComputeNode.into(),
-            ..Default::default()
-        },
-    ))
-    .collect();
-
-    let schedulable_workers = worker_nodes.keys().cloned().collect();
-
-    StreamingClusterInfo {
-        worker_nodes,
-        schedulable_workers,
-        unschedulable_workers: Default::default(),
-    }
-}
-
 #[tokio::test]
 async fn test_graph_builder() -> MetaResult<()> {
     let env = MetaSrvEnv::for_test().await;
