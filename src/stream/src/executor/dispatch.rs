@@ -1004,12 +1004,35 @@ impl Dispatcher for HashDataDispatcher {
         }
         assert!(last_update_delete_row_idx.is_none(), "missing U+ after U-");
 
-        let ops = new_ops;
         // Apply output mapping after calculating the vnode and new visibility maps.
         // The output mapping may project columns and eliminate noop updates.
         let chunk = self.output_mapping.apply(chunk);
         // Get the visibility after noop update elimination to incorporate into the final visibility.
         let chunk_vis = chunk.visibility();
+
+        // The noop elimination in `output_mapping.apply()` may normalize partially-visible
+        // update pairs (e.g., U- → Delete, U+ → Insert). We must adopt these normalized ops,
+        // otherwise the downstream will see an orphan U+ and panic.
+        // Meanwhile, `new_ops` contains dist-key-changed rewrites (U-/U+ → Delete/Insert)
+        // that are not reflected in `chunk.ops()`. Merge both: prefer `new_ops` when it already
+        // did a rewrite, otherwise take the (possibly normalized) op from the chunk.
+        let chunk_ops = chunk.ops();
+        let ops: Vec<Op> = new_ops
+            .iter()
+            .zip_eq_fast(chunk_ops.iter())
+            .map(|(&new_op, &elim_op)| {
+                // If new_ops already rewrote U-/U+ to Delete/Insert (dist_key_changed), keep it.
+                // Otherwise, use the post-elimination op which may have been normalized.
+                match (new_op, elim_op) {
+                    // dist_key_changed rewrite: new_ops turned U- into Delete
+                    (Op::Delete, Op::UpdateDelete) => Op::Delete,
+                    // dist_key_changed rewrite: new_ops turned U+ into Insert
+                    (Op::Insert, Op::UpdateInsert) => Op::Insert,
+                    // For all other cases, use the post-elimination op (which includes normalize).
+                    _ => elim_op,
+                }
+            })
+            .collect();
 
         // individually output StreamChunk integrated with vis_map
         futures::future::try_join_all(
