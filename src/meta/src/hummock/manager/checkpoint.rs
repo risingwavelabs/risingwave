@@ -95,9 +95,7 @@ impl HummockVersionCheckpoint {
 /// `checksum.is_some()` reliably distinguishes envelope from legacy format.
 /// Legacy bytes may happen to decode as an envelope (field 1 wire-type mismatch
 /// is skipped, field 2 LEN matches `payload`), but will never have a checksum.
-fn decode_checkpoint_data(
-    data: bytes::Bytes,
-) -> std::result::Result<PbHummockVersionCheckpoint, anyhow::Error> {
+fn decode_checkpoint_data(data: bytes::Bytes) -> Result<PbHummockVersionCheckpoint> {
     use anyhow::Context;
     use prost::Message;
 
@@ -108,11 +106,12 @@ fn decode_checkpoint_data(
     {
         let actual = xxhash64_checksum(&envelope.payload);
         if actual != expected {
-            anyhow::bail!(
+            return Err(anyhow::anyhow!(
                 "checkpoint checksum mismatch: expected {:#x}, got {:#x}",
                 expected,
                 actual
-            );
+            )
+            .into());
         }
 
         let algo = CheckpointCompressionAlgorithm::try_from(envelope.compression_algorithm)
@@ -126,10 +125,9 @@ fn decode_checkpoint_data(
         let decompressed = decompress_payload(algo, &envelope.payload)?;
         let ckpt = PbHummockVersionCheckpoint::decode(decompressed.as_ref())
             .context("failed to decode checkpoint envelope payload")?;
-        anyhow::ensure!(
-            ckpt.version.is_some(),
-            "checkpoint missing required field `version`"
-        );
+        if ckpt.version.is_none() {
+            return Err(anyhow::anyhow!("checkpoint missing required field `version`").into());
+        }
 
         tracing::info!(
             compression = ?algo,
@@ -150,25 +148,24 @@ fn decode_checkpoint_data(
     );
     let ckpt =
         PbHummockVersionCheckpoint::decode(data).context("failed to decode legacy checkpoint")?;
-    anyhow::ensure!(
-        ckpt.version.is_some(),
-        "legacy checkpoint missing required field `version`"
-    );
+    if ckpt.version.is_none() {
+        return Err(anyhow::anyhow!("legacy checkpoint missing required field `version`").into());
+    }
     Ok(ckpt)
 }
 
 fn decompress_payload(
     algo: CheckpointCompressionAlgorithm,
     payload: &[u8],
-) -> std::result::Result<std::borrow::Cow<'_, [u8]>, anyhow::Error> {
+) -> Result<std::borrow::Cow<'_, [u8]>> {
     use anyhow::Context;
 
     match algo {
         CheckpointCompressionAlgorithm::CheckpointCompressionUnspecified => Ok(payload.into()),
         CheckpointCompressionAlgorithm::CheckpointCompressionZstd => {
-            zstd::stream::decode_all(payload)
+            Ok(zstd::stream::decode_all(payload)
                 .map(std::borrow::Cow::Owned)
-                .context("zstd decompression failed")
+                .context("zstd decompression failed")?)
         }
         CheckpointCompressionAlgorithm::CheckpointCompressionLz4 => {
             let mut decoder = lz4::Decoder::new(payload).context("lz4 decoder init failed")?;
@@ -183,7 +180,7 @@ fn decompress_payload(
 fn compress_payload(
     algo: risingwave_common::config::CheckpointCompression,
     data: &[u8],
-) -> std::result::Result<Vec<u8>, anyhow::Error> {
+) -> Result<Vec<u8>> {
     use anyhow::Context;
     use risingwave_common::config::CheckpointCompression;
 
@@ -191,7 +188,7 @@ fn compress_payload(
         CheckpointCompression::None => Ok(data.to_vec()),
         CheckpointCompression::Zstd => {
             // Level 3: good balance between compression ratio and speed
-            zstd::stream::encode_all(data, 3).context("zstd compression failed")
+            Ok(zstd::stream::encode_all(data, 3).context("zstd compression failed")?)
         }
         CheckpointCompression::Lz4 => {
             let mut compressed = Vec::new();
