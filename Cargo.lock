@@ -12042,6 +12042,7 @@ dependencies = [
  "thiserror-ext",
  "tonic 0.12.3",
  "tracing",
+ "unicode-casefold",
  "workspace-hack",
  "zstd 0.13.3",
 ]
@@ -16178,6 +16179,12 @@ name = "unicode-bidi"
 version = "0.3.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "92888ba5573ff080736b3648696b70cafad7d250551175acbaa4e0385b3e1460"
+
+[[package]]
+name = "unicode-casefold"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b7f66b1c8f8caa2ab31dc6d3f35386f16efdab89668f93411e565ac368908e8f"
 
 [[package]]
 name = "unicode-ident"

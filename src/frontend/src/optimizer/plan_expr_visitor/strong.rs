@@ -152,6 +152,7 @@ impl Strong {
             | ExprType::SimilarToEscape
             | ExprType::Upper
             | ExprType::Lower
+            | ExprType::Casefold
             | ExprType::Replace
             | ExprType::Position
             | ExprType::Case

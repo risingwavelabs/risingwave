@@ -66,6 +66,7 @@ tokio = { version = "0.2", package = "madsim-tokio", features = ["time"] }
 # For arrow-udf-runtime/remote
 tonic = { version = "0.12.3", optional = true }
 tracing = "0.1"
+unicode-casefold = "0.2"
 zstd = { version = "0.13", default-features = false, optional = true }
 
 [target.'cfg(not(madsim))'.dependencies]

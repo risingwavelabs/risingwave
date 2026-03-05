@@ -144,6 +144,7 @@ impl ExprVisitor for ImpureAnalyzer {
             | Type::SimilarToEscape
             | Type::Upper
             | Type::Lower
+            | Type::Casefold
             | Type::Trim
             | Type::Replace
             | Type::Position

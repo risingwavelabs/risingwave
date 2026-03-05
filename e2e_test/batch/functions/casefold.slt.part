@@ -1,0 +1,57 @@
+query T
+SELECT casefold('Hello World');
+----
+hello world
+
+query T
+SELECT casefold('HELLO RUST');
+----
+hello rust
+
+# ß folds to ss (full case folding)
+query T
+SELECT casefold('Straße');
+----
+strasse
+
+# Empty string
+query T
+SELECT casefold('');
+----
+(empty)
+
+# NULL input
+query T
+SELECT casefold(NULL::varchar);
+----
+NULL
+
+# ASCII-only input
+query T
+SELECT casefold('ABC123xyz');
+----
+abc123xyz
+
+# Already lowercase
+query T
+SELECT casefold('already lowercase');
+----
+already lowercase
+
+# Mixed with numbers and symbols
+query T
+SELECT casefold('Test@123#ABC');
+----
+test@123#abc
+
+# Latin ligatures: ﬁ folds to fi
+query T
+SELECT casefold('ﬁnd');
+----
+find
+
+# Capital sharp S also folds to ss
+query T
+SELECT casefold('GROẞE');
+----
+grosse

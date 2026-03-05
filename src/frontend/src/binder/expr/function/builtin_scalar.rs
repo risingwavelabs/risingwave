@@ -232,6 +232,7 @@ impl Binder {
                 ("length", raw_call(ExprType::Length)),
                 ("upper", raw_call(ExprType::Upper)),
                 ("lower", raw_call(ExprType::Lower)),
+                ("casefold", raw_call(ExprType::Casefold)),
                 ("trim", raw_call(ExprType::Trim)),
                 ("replace", raw_call(ExprType::Replace)),
                 ("overlay", raw_call(ExprType::Overlay)),
