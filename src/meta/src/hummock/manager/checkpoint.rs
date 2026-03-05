@@ -88,37 +88,92 @@ impl HummockVersionCheckpoint {
 /// - field 1 has a wire-type mismatch and is skipped as unknown;
 /// - field 2 in legacy is `stale_objects` (LEN), which would be parsed as envelope `payload`.
 ///
-/// Therefore, we only treat it as an envelope when the decoded message carries an unambiguous
-/// envelope signal: either a non-zero `compression_algorithm` (compressed) or a present checksum
-/// (always written by current code paths, even for `compression_algorithm = UNSPECIFIED`).
+/// Therefore, we disambiguate by attempting to decode the envelope payload into
+/// `PbHummockVersionCheckpoint` and requiring the decoded checkpoint to contain `version`.
+/// If `version` is missing, we treat it as legacy bytes that happened to be decodable as an
+/// envelope and fall back to legacy decoding.
 fn decode_checkpoint_data(
-    data: &bytes::Bytes,
+    data: bytes::Bytes,
 ) -> std::result::Result<PbHummockVersionCheckpoint, anyhow::Error> {
     use anyhow::Context;
     use prost::Message;
 
-    // Try envelope format
-    if let Ok(envelope) = PbHummockVersionCheckpointEnvelope::decode(data.clone())
-        && !envelope.payload.is_empty()
-        && (envelope.checksum.is_some() || envelope.compression_algorithm != 0)
-    {
-        // Verify checksum if present.
-        if let Some(expected) = envelope.checksum {
-            let actual = xxhash64_checksum(&envelope.payload);
-            if actual != expected {
-                return Err(anyhow::anyhow!(
-                    "checkpoint checksum mismatch: expected {:#x}, got {:#x}",
-                    expected,
-                    actual
-                ));
-            }
+    let data_size = data.len();
+    let envelope = match PbHummockVersionCheckpointEnvelope::decode(data.clone()) {
+        Ok(envelope) => envelope,
+        Err(_) => {
+            tracing::info!(
+                data_size,
+                "decoding checkpoint in legacy uncompressed format"
+            );
+            return PbHummockVersionCheckpoint::decode(data)
+                .context("failed to decode legacy checkpoint");
         }
+    };
 
-        let algo = CheckpointCompressionAlgorithm::try_from(envelope.compression_algorithm)
-            .unwrap_or(CheckpointCompressionAlgorithm::CheckpointCompressionUnspecified);
-        let decompressed = decompress_payload(algo, &envelope.payload)?;
-        let ckpt = PbHummockVersionCheckpoint::decode(decompressed.as_ref())
-            .context("failed to decode checkpoint payload")?;
+    // If `payload` is empty, it's unlikely to be a valid envelope. Fall back to legacy format.
+    if envelope.payload.is_empty() {
+        tracing::info!(
+            data_size,
+            "decoding checkpoint in legacy uncompressed format"
+        );
+        return PbHummockVersionCheckpoint::decode(data)
+            .context("failed to decode legacy checkpoint");
+    }
+
+    // If checksum is present or a non-default compression algorithm is set, treat it as an envelope
+    // and avoid keeping the original full `data` buffer alive during decompression.
+    let should_fallback_to_legacy =
+        envelope.checksum.is_none() && envelope.compression_algorithm == 0;
+    let mut legacy_data = if should_fallback_to_legacy {
+        Some(data)
+    } else {
+        drop(data);
+        None
+    };
+
+    // Verify checksum if present.
+    if let Some(expected) = envelope.checksum {
+        let actual = xxhash64_checksum(&envelope.payload);
+        if actual != expected {
+            return Err(anyhow::anyhow!(
+                "checkpoint checksum mismatch: expected {:#x}, got {:#x}",
+                expected,
+                actual
+            ));
+        }
+    }
+
+    let algo = CheckpointCompressionAlgorithm::try_from(envelope.compression_algorithm)
+        .with_context(|| {
+            format!(
+                "unknown checkpoint compression algorithm: {}",
+                envelope.compression_algorithm
+            )
+        })?;
+
+    let decompressed = decompress_payload(algo, &envelope.payload)?;
+    let ckpt = match PbHummockVersionCheckpoint::decode(decompressed.as_ref()) {
+        Ok(ckpt) => ckpt,
+        Err(err) => {
+            if should_fallback_to_legacy {
+                tracing::info!(
+                    data_size,
+                    "decoding checkpoint in legacy uncompressed format"
+                );
+                return PbHummockVersionCheckpoint::decode(
+                    legacy_data
+                        .take()
+                        .expect("legacy_data must exist when falling back to legacy format"),
+                )
+                .context("failed to decode legacy checkpoint")
+                .or_else(|_| Err(err).context("failed to decode checkpoint envelope payload"));
+            }
+            return Err(err).context("failed to decode checkpoint envelope payload");
+        }
+    };
+
+    if ckpt.version.is_some() {
         let checksum = envelope
             .checksum
             .map(|c| format!("{c:#x}"))
@@ -135,32 +190,47 @@ fn decode_checkpoint_data(
         return Ok(ckpt);
     }
 
-    // Fallback: legacy raw PbHummockVersionCheckpoint
-    tracing::info!(
-        data_size = data.len(),
-        "decoding checkpoint in legacy uncompressed format"
-    );
-    PbHummockVersionCheckpoint::decode(data.clone()).context("failed to decode legacy checkpoint")
+    // If the decoded checkpoint doesn't contain `version`, treat it as legacy checkpoint bytes
+    // that happened to be decodable as an envelope. Fall back to legacy format only when the
+    // envelope isn't unambiguous.
+    if should_fallback_to_legacy {
+        tracing::info!(
+            data_size,
+            "decoding checkpoint in legacy uncompressed format"
+        );
+        PbHummockVersionCheckpoint::decode(
+            legacy_data
+                .take()
+                .expect("legacy_data must exist when falling back to legacy format"),
+        )
+        .context("failed to decode legacy checkpoint")
+    } else {
+        Err(anyhow::anyhow!(
+            "checkpoint envelope payload missing required field `version`"
+        ))
+    }
 }
 
 /// Decompresses payload bytes according to the specified algorithm.
 fn decompress_payload(
     algo: CheckpointCompressionAlgorithm,
     payload: &[u8],
-) -> std::result::Result<Vec<u8>, anyhow::Error> {
+) -> std::result::Result<std::borrow::Cow<'_, [u8]>, anyhow::Error> {
     use anyhow::Context;
 
     match algo {
-        CheckpointCompressionAlgorithm::CheckpointCompressionUnspecified => Ok(payload.to_vec()),
+        CheckpointCompressionAlgorithm::CheckpointCompressionUnspecified => Ok(payload.into()),
         CheckpointCompressionAlgorithm::CheckpointCompressionZstd => {
-            zstd::stream::decode_all(payload).context("zstd decompression failed")
+            zstd::stream::decode_all(payload)
+                .map(std::borrow::Cow::Owned)
+                .context("zstd decompression failed")
         }
         CheckpointCompressionAlgorithm::CheckpointCompressionLz4 => {
             let mut decoder = lz4::Decoder::new(payload).context("lz4 decoder init failed")?;
             let mut decompressed = Vec::new();
             std::io::Read::read_to_end(&mut decoder, &mut decompressed)
                 .context("lz4 decompression failed")?;
-            Ok(decompressed)
+            Ok(decompressed.into())
         }
     }
 }
@@ -303,7 +373,7 @@ impl HummockManager {
 
         // 3. Decode: try envelope format first, fallback to legacy format.
         let decode_start = std::time::Instant::now();
-        let ckpt = decode_checkpoint_data(&data)?;
+        let ckpt = decode_checkpoint_data(data)?;
         let decode_duration = decode_start.elapsed();
 
         tracing::info!(
@@ -601,7 +671,7 @@ mod tests {
     fn decode_checkpoint_data_falls_back_to_legacy_format() {
         let checkpoint = make_checkpoint(42);
         let raw = Bytes::from(checkpoint.encode_to_vec());
-        let decoded = decode_checkpoint_data(&raw).expect("legacy checkpoint should decode");
+        let decoded = decode_checkpoint_data(raw).expect("legacy checkpoint should decode");
         assert_eq!(decoded, checkpoint);
     }
 
@@ -614,7 +684,7 @@ mod tests {
             CheckpointCompression::Lz4,
         ] {
             let data = make_envelope_bytes(&checkpoint, compression, None);
-            let decoded = decode_checkpoint_data(&data).expect("envelope checkpoint should decode");
+            let decoded = decode_checkpoint_data(data).expect("envelope checkpoint should decode");
             assert_eq!(decoded, checkpoint);
         }
     }
@@ -632,7 +702,7 @@ mod tests {
         };
         let data = Bytes::from(envelope.encode_to_vec());
         let decoded =
-            decode_checkpoint_data(&data).expect("envelope without checksum should decode");
+            decode_checkpoint_data(data).expect("envelope without checksum should decode");
         assert_eq!(decoded, checkpoint);
     }
 
@@ -650,7 +720,7 @@ mod tests {
             checksum: Some(expected),
         };
         let data = Bytes::from(envelope.encode_to_vec());
-        let err = decode_checkpoint_data(&data).expect_err("checksum mismatch should error");
+        let err = decode_checkpoint_data(data).expect_err("checksum mismatch should error");
         assert!(err.to_string().contains("checksum mismatch"), "{err:?}");
     }
 
