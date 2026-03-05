@@ -39,6 +39,12 @@ pub(crate) async fn start_sync_log_store_cluster() -> Result<Cluster> {
         meta_nodes: 1,
         compactor_nodes: 1,
         compute_node_cores: 2,
+        per_session_queries: vec![
+            "set streaming_parallelism_strategy_for_table = 'DEFAULT'".into(),
+            "set streaming_parallelism_strategy_for_source = 'DEFAULT'".into(),
+            "alter system set adaptive_parallelism_strategy to AUTO".into(),
+        ]
+        .into(),
         ..Default::default()
     })
     .await
