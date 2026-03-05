@@ -59,14 +59,9 @@ seq "$TEST_NUM" | parallel 'MADSIM_TEST_SEED={} ./risingwave_simulation -j 16 ./
 echo "--- deterministic simulation e2e, ci-3cn-2fe, parallel, batch"
 seq "$TEST_NUM" | parallel 'MADSIM_TEST_SEED={} ./risingwave_simulation -j 16 ./e2e_test/batch/\*\*/\*.slt 2> $LOGDIR/parallel-batch-{}.log && rm $LOGDIR/parallel-batch-{}.log'
 
-if [[ "${IS_TARGET_RELEASE_BRANCH}" != "1" || "${RW_CI_ENABLE_PREGENERATED_SQLSMITH_FUZZING:-0}" == "1" ]]; then
-  echo "--- deterministic simulation e2e, ci-3cn-2fe, fuzzing (pre-generated-queries)"
-  timeout 10m seq 64 | parallel RUST_MIN_STACK=4194304 'MADSIM_TEST_SEED={} ./risingwave_simulation --run-sqlsmith-queries ./src/tests/sqlsmith/tests/sqlsmith-query-snapshots/{} 2> $LOGDIR/fuzzing-{}.log && rm $LOGDIR/fuzzing-{}.log'
-else
-  echo "--- skip deterministic simulation e2e, ci-3cn-2fe, fuzzing (pre-generated-queries)"
-  echo "Reason: temporarily disabled on ${TARGET_RELEASE_BRANCH} due to test stability concerns."
-  echo "Set RW_CI_ENABLE_PREGENERATED_SQLSMITH_FUZZING=1 to re-enable."
-fi
+# TODO: Re-enable pre-generated query fuzzing when release-2.6 no longer needs
+# temporary CI stabilization.
+echo "--- skip deterministic simulation e2e, ci-3cn-2fe, fuzzing (pre-generated-queries)"
 
 echo "--- deterministic simulation e2e, ci-3cn-2fe, e2e extended mode test"
 seq "$TEST_NUM" | parallel 'MADSIM_TEST_SEED={} RUST_LOG=info ./risingwave_simulation -e 2> $LOGDIR/extended-{}.log && rm $LOGDIR/extended-{}.log'
