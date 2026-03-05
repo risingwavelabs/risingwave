@@ -85,6 +85,7 @@ pub async fn validate_connection(connection: &PbConnection) -> ConnectorResult<(
                 let connection = build_connection(cp.connection_type(), props_secret_resolved)?;
                 connection.validate_connection().await?
             }
+            #[expect(deprecated)]
             risingwave_pb::catalog::connection::Info::PrivateLinkService(_) => unreachable!(),
         }
     }

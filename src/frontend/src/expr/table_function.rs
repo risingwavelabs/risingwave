@@ -411,6 +411,7 @@ impl TableFunction {
                         &evaled_args[4],
                         &ssl_mode,
                         &ssl_root_cert,
+                        None,
                     )
                     .await?;
 

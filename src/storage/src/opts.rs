@@ -315,6 +315,7 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
             iceberg_compaction_max_record_batch_rows: c
                 .storage
                 .iceberg_compaction_max_record_batch_rows,
+            #[allow(deprecated)]
             iceberg_compaction_write_parquet_max_row_group_rows: c
                 .storage
                 .iceberg_compaction_write_parquet_max_row_group_rows,

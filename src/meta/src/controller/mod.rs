@@ -479,6 +479,7 @@ impl From<ObjectModel<connection::Model>> for PbConnection {
         let info: PbConnectionInfo = if value.0.info == PrivateLinkService::default() {
             PbConnectionInfo::ConnectionParams(value.0.params.to_protobuf())
         } else {
+            #[expect(deprecated)]
             PbConnectionInfo::PrivateLinkService(value.0.info.to_protobuf())
         };
         Self {

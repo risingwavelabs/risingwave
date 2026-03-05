@@ -80,6 +80,7 @@ impl SinkType {
             PbSinkType::AppendOnly => SinkType::AppendOnly,
             // Backward compatibility: normalize force-append-only to append-only. The associated
             // behavior is now represented by another field `ignore_delete`.
+            #[expect(deprecated)]
             PbSinkType::ForceAppendOnly => SinkType::AppendOnly,
             PbSinkType::Upsert => SinkType::Upsert,
             PbSinkType::Retract => SinkType::Retract,
