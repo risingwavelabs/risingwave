@@ -122,6 +122,57 @@ else
     exit 1
 fi
 
+echo "\n\n\n-------------Phase 1.6: Inject a controllable forward offset and verify skip------------\n\n\n"
+echo "Pausing source before writing skip-candidate rows..."
+risedev psql -c "ALTER SOURCE s SET source_rate_limit = 0;"
+sleep 2
+
+echo "Inserting skip-candidate rows (id=9001-9003) while source is paused..."
+for i in {9001..9003}; do
+    mysql -e "USE binlog_test; INSERT INTO test_table (id, value) VALUES ($i, 'inject_skip_$i');"
+done
+
+# Move source offset to current binlog tail so 9001-9003 are skipped after resume.
+BINLOG_STATUS=$(mysql -s -N -e "SHOW BINARY LOG STATUS;" 2>/dev/null || mysql -s -N -e "SHOW MASTER STATUS;" 2>/dev/null)
+BINLOG_FILE=$(echo "$BINLOG_STATUS" | awk '{print $1}')
+BINLOG_POS=$(echo "$BINLOG_STATUS" | awk '{print $2}')
+
+if [ -z "$BINLOG_FILE" ] || [ -z "$BINLOG_POS" ]; then
+    echo "✗ FAIL: Failed to obtain MySQL binlog file/position for controllable offset injection"
+    exit 1
+fi
+
+FORWARD_OFFSET=$(python3 -c 'import json,sys; o=json.loads(sys.argv[1]); so=o.setdefault("sourceOffset",{}); so["file"]=sys.argv[2]; so["pos"]=int(sys.argv[3]); so["snapshot"]=False; o["isHeartbeat"]=False; print(json.dumps(o,separators=(",",":")))' "$CURRENT_OFFSET" "$BINLOG_FILE" "$BINLOG_POS")
+FORWARD_OFFSETS_JSON=$(python3 -c 'import json,sys; print(json.dumps({sys.argv[1]: sys.argv[2]}))' "$SPLIT_ID" "$FORWARD_OFFSET")
+
+echo "Injecting forward offset to skip paused rows: file=$BINLOG_FILE pos=$BINLOG_POS"
+./risedev ctl meta inject-source-offsets --source-id "$SOURCE_ID" --offsets "$FORWARD_OFFSETS_JSON"
+
+echo "Resuming source..."
+risedev psql -c "ALTER SOURCE s SET source_rate_limit = default;"
+sleep 5
+
+echo "--- Verify skip behavior after forward offset injection (count should remain 5)"
+OUTPUT=$(risedev psql -t -c "SELECT CASE WHEN COUNT(*) = 5 THEN 'OK' ELSE 'FAIL' END FROM test_table;" 2>&1)
+if echo "$OUTPUT" | grep -q "OK"; then
+    echo "✓ PASS: Forward offset injection skipped paused rows as expected"
+else
+    echo "✗ FAIL: Row count changed unexpectedly after forward offset injection"
+    echo "Debug output: $OUTPUT"
+    risedev psql -c "SELECT COUNT(*) FROM test_table;"
+    exit 1
+fi
+
+OUTPUT=$(risedev psql -t -c "SELECT CASE WHEN COUNT(*) = 0 THEN 'OK' ELSE 'FAIL' END FROM test_table WHERE id BETWEEN 9001 AND 9003;" 2>&1)
+if echo "$OUTPUT" | grep -q "OK"; then
+    echo "✓ PASS: Skip-candidate rows (9001-9003) were not consumed"
+else
+    echo "✗ FAIL: Skip-candidate rows should not be consumed after forward offset injection"
+    echo "Debug output: $OUTPUT"
+    risedev psql -c "SELECT id, value FROM test_table WHERE id BETWEEN 9001 AND 9003;"
+    exit 1
+fi
+
 echo "\n\n\n-------------Phase 2: Pause source------------\n\n\n"
 echo "Pausing source with rate_limit=0..."
 risedev psql -c "ALTER SOURCE s SET source_rate_limit = 0;"
