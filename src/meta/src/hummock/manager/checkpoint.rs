@@ -91,10 +91,15 @@ impl HummockVersionCheckpoint {
 
 /// Decodes checkpoint data, supporting both envelope (compressed) and legacy (raw) formats.
 ///
-/// Format detection: tries `HummockVersionCheckpointEnvelope` first. The two formats are
-/// distinguishable because field 1 of the envelope is a VARINT (enum), while field 1 of
-/// the legacy `HummockVersionCheckpoint` is a LEN (message). If envelope decoding succeeds
-/// and the payload is non-empty, we treat it as the new format.
+/// Format detection: tries `HummockVersionCheckpointEnvelope` first.
+///
+/// Note: decoding legacy `HummockVersionCheckpoint` bytes as envelope can *succeed* because:
+/// - field 1 has a wire-type mismatch and is skipped as unknown;
+/// - field 2 in legacy is `stale_objects` (LEN), which would be parsed as envelope `payload`.
+///
+/// Therefore, we only treat it as an envelope when the decoded message carries an unambiguous
+/// envelope signal: either a non-zero `compression_algorithm` (compressed) or a present checksum
+/// (always written by current code paths, even for `compression_algorithm = UNSPECIFIED`).
 fn decode_checkpoint_data(
     data: &bytes::Bytes,
 ) -> std::result::Result<PbHummockVersionCheckpoint, anyhow::Error> {
@@ -104,6 +109,7 @@ fn decode_checkpoint_data(
     // Try envelope format
     if let Ok(envelope) = PbHummockVersionCheckpointEnvelope::decode(data.clone())
         && !envelope.payload.is_empty()
+        && (envelope.checksum.is_some() || envelope.compression_algorithm != 0)
     {
         // Verify checksum if present.
         if let Some(expected) = envelope.checksum {
@@ -548,6 +554,7 @@ mod tests {
     use bytes::Bytes;
     use prost::Message;
     use risingwave_common::config::CheckpointCompression;
+    use risingwave_pb::hummock::hummock_version_checkpoint::StaleObjects;
     use risingwave_pb::hummock::{
         PbHummockVersion, PbHummockVersionCheckpoint, PbHummockVersionCheckpointEnvelope,
     };
@@ -570,9 +577,15 @@ mod tests {
     }
 
     fn make_checkpoint(version_id: u64) -> PbHummockVersionCheckpoint {
+        let stale = StaleObjects {
+            id: vec![1u64.into(), 2u64.into(), 3u64.into()],
+            total_file_size: 123,
+            vector_files: vec![],
+        };
+
         PbHummockVersionCheckpoint {
             version: Some(make_version(version_id)),
-            stale_objects: Default::default(),
+            stale_objects: [(1u64.into(), stale)].into_iter().collect(),
         }
     }
 
