@@ -17,36 +17,36 @@ steps:
       echo "Main Repository: $$BUILDKITE_REPO"
       echo "PR Number: $$BUILDKITE_PULL_REQUEST"
       echo "Branch: $$BUILDKITE_BRANCH"
-      
+
       # Detect if this is a fork PR
       IS_FORK="false"
       TRIGGER_REASON=""
-      
+
       if [[ -n "$$BUILDKITE_PULL_REQUEST_REPO" ]]; then
         PR_REPO_NORMALIZED=$$(echo "$$BUILDKITE_PULL_REQUEST_REPO" | sed 's|https://||' | sed 's|git://||' | sed 's|github.com/||' | tr '[:upper:]' '[:lower:]')
-        
+
         if [[ "$$PR_REPO_NORMALIZED" != "risingwavelabs/risingwave" ]]; then
           IS_FORK="true"
           echo "⚠️  Fork PR detected"
-          
+
           # Check if triggered by main-cron label
           PR_LABELS=$$(curl -s -H "Authorization: token $$GITHUB_TOKEN" \
             "https://api.github.com/repos/risingwavelabs/risingwave/pulls/$$BUILDKITE_PULL_REQUEST" | \
             jq -r '.labels[].name // empty')
-          
+
           if echo "$$PR_LABELS" | grep -q "ci/main-cron"; then
             TRIGGER_REASON="External contributor requested main-cron via label"
             echo "📝 Trigger reason: $$TRIGGER_REASON"
           fi
         fi
       fi
-      
+
       # Store metadata
       echo "is_fork=$$IS_FORK" | tee -a /tmp/cron_metadata
       echo "trigger_reason=$$TRIGGER_REASON" | tee -a /tmp/cron_metadata
       buildkite-agent meta-data set "is_fork" "$$IS_FORK"
       buildkite-agent meta-data set "trigger_reason" "$$TRIGGER_REASON"
-      
+
       # Get PR details
       if [[ -n "$$BUILDKITE_PULL_REQUEST" && "$$BUILDKITE_PULL_REQUEST" != "false" ]]; then
         PR_INFO=$$(curl -s -H "Authorization: token $$GITHUB_TOKEN" \
@@ -55,7 +55,7 @@ steps:
         buildkite-agent meta-data set "pr_author" "$$PR_AUTHOR"
         echo "PR Author: @$$PR_AUTHOR"
       fi
-      
+
       echo "=== Result: IS_FORK=$$IS_FORK ==="
     plugins:
       - seek-oss/aws-sm#v2.3.2:
@@ -74,7 +74,7 @@ steps:
       ## 🔒 Extended Security Review: Main-Cron Tests
 
       An **external contributor** has requested to run the **main-cron** test suite.
-      
+
       ### ⚠️ Important Considerations
 
       **Main-cron tests are:**
@@ -82,7 +82,7 @@ steps:
       - Include cloud service integrations (AWS S3, Pulsar, etc.)
       - Run with production-like configurations
       - Consume significant compute resources
-      
+
       **For external contributors, this also means:**
       - Potential access to cloud resources and secrets
       - Extended execution time (up to several hours)
@@ -128,11 +128,11 @@ steps:
       DECISION="$${BUILDKITE_UNBLOCKER_MAIN_CRON_APPROVAL:-}"
       NOTES="$${BUILDKITE_UNBLOCKER_REVIEW_NOTES:-}"
       APPROVER="$${BUILDKITE_UNBLOCKER_NAME:-unknown}"
-      
+
       echo "=== Main-Cron Approval Verification ==="
       echo "Decision: $$DECISION"
       echo "Approver: $$APPROVER"
-      
+
       case "$$DECISION" in
         "approve_full")
           echo "✅ Full main-cron approved by $$APPROVER"
@@ -166,7 +166,7 @@ steps:
           exit 1
           ;;
       esac
-      
+
       # Log audit trail
       echo ""
       echo "=== Security Audit Log ==="
@@ -181,17 +181,17 @@ steps:
       IS_FORK="$$(buildkite-agent meta-data get is_fork 2>/dev/null || echo 'false')"
       APPROVED="$$(buildkite-agent meta-data get main_cron_approved 2>/dev/null || echo 'true')"
       SCOPE="$$(buildkite-agent meta-data get main_cron_scope 2>/dev/null || echo 'full')"
-      
+
       echo "=== Uploading Main-Cron Pipeline ==="
       echo "Is Fork: $$IS_FORK"
       echo "Approved: $$APPROVED"
       echo "Scope: $$SCOPE"
-      
+
       if [[ "$$IS_FORK" == "true" && "$$APPROVED" != "true" ]]; then
         echo "❌ Main-cron not approved for fork PR"
         exit 1
       fi
-      
+
       # Select pipeline file based on scope
       if [[ "$$SCOPE" == "limited" ]]; then
         echo "Uploading limited main-cron pipeline (no cloud tests)..."
@@ -201,12 +201,12 @@ steps:
         echo "Uploading full main-cron pipeline..."
         PIPELINE_FILE="ci/workflows/main-cron.yml"
       fi
-      
+
       if [[ ! -f "$$PIPELINE_FILE" ]]; then
         echo "❌ Pipeline file not found: $$PIPELINE_FILE"
         exit 1
       fi
-      
+
       buildkite-agent pipeline upload "$$PIPELINE_FILE"
       echo "✅ Main-cron pipeline uploaded"
     plugins:

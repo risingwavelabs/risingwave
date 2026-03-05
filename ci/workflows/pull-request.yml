@@ -1,5 +1,5 @@
 # CI Pipeline: Pull Request
-# 
+#
 # SECURITY NOTICE: This pipeline accesses sensitive secrets (AWS, Docker, GitHub tokens).
 # For external contributors (fork PRs), this pipeline should only be executed after
 # security approval via the gatekeeper pipeline.

@@ -21,10 +21,10 @@ jobs:
         run: |
           HEAD_REPO="${{ github.event.pull_request.head.repo.full_name }}"
           BASE_REPO="${{ github.repository }}"
-          
+
           echo "Head repo: $HEAD_REPO"
           echo "Base repo: $BASE_REPO"
-          
+
           if [ "$HEAD_REPO" != "$BASE_REPO" ]; then
             echo "is_fork=true" >> $GITHUB_OUTPUT
             echo "⚠️ Fork PR detected"
@@ -39,14 +39,14 @@ jobs:
         with:
           script: |
             const labels = ['ci/external-pr', 'ci/pending-approval'];
-            
+
             await github.rest.issues.addLabels({
               issue_number: context.issue.number,
               owner: context.repo.owner,
               repo: context.repo.repo,
               labels: labels
             });
-            
+
             console.log('Added labels:', labels);
 
       - name: Post initial notification (first-time only)
@@ -56,23 +56,23 @@ jobs:
           script: |
             const prNumber = context.issue.number;
             const author = context.payload.pull_request.user.login;
-            
+
             // Check if we've already commented on this PR
             const { data: comments } = await github.rest.issues.listComments({
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: prNumber
             });
-            
-            const alreadyNotified = comments.some(c => 
+
+            const alreadyNotified = comments.some(c =>
               c.body.includes('🔒 External Contributor CI Workflow')
             );
-            
+
             if (alreadyNotified) {
               console.log('Already notified, skipping');
               return;
             }
-            
+
             // Post notification
             const body = `## 🔒 External Contributor CI Workflow
 
@@ -100,14 +100,14 @@ jobs:
 
             ---
             *This is an automated message. The CI will start automatically once approved by a maintainer.*`;
-            
+
             await github.rest.issues.createComment({
               issue_number: prNumber,
               owner: context.repo.owner,
               repo: context.repo.repo,
               body: body
             });
-            
+
             console.log('Posted external contributor notification');
 
       - name: Post internal PR acknowledgment (optional)
@@ -129,7 +129,7 @@ jobs:
         with:
           script: |
             const prNumber = context.issue.number;
-            
+
             await github.rest.issues.createComment({
               issue_number: prNumber,
               owner: context.repo.owner,
@@ -140,7 +140,7 @@ jobs:
 
             You can monitor progress in the [Buildkite dashboard](https://buildkite.com/risingwavelabs).`
             });
-            
+
             // Update labels
             await github.rest.issues.removeLabel({
               issue_number: prNumber,
@@ -162,7 +162,7 @@ jobs:
           script: |
             const prNumber = context.issue.number;
             const labelsToRemove = ['ci/pending-approval', 'ci/approved'];
-            
+
             for (const label of labelsToRemove) {
               await github.rest.issues.removeLabel({
                 issue_number: prNumber,

@@ -20,14 +20,14 @@ steps:
       echo "PR Repository: $$BUILDKITE_PULL_REQUEST_REPO"
       echo "Main Repository: $$BUILDKITE_REPO"
       echo "PR Number: $$BUILDKITE_PULL_REQUEST"
-      
+
       # Detect if this is a fork PR
       IS_FORK="false"
       if [[ -n "$$BUILDKITE_PULL_REQUEST_REPO" ]]; then
         # Normalize URLs for comparison
         PR_REPO_NORMALIZED=$$(echo "$$BUILDKITE_PULL_REQUEST_REPO" | sed 's|https://||' | sed 's|git://||' | sed 's|github.com/||' | tr '[:upper:]' '[:lower:]')
         MAIN_REPO_NORMALIZED=$$(echo "$$BUILDKITE_REPO" | sed 's|https://||' | sed 's|git://||' | sed 's|github.com/||' | tr '[:upper:]' '[:lower:]')
-        
+
         if [[ "$$PR_REPO_NORMALIZED" != "$$MAIN_REPO_NORMALIZED" && "$$PR_REPO_NORMALIZED" != "risingwavelabs/risingwave" ]]; then
           IS_FORK="true"
           echo "⚠️  Fork PR detected: $$BUILDKITE_PULL_REQUEST_REPO"
@@ -37,27 +37,27 @@ steps:
       else
         echo "✅ Branch push (not PR) - treating as internal"
       fi
-      
+
       # Store detection result
       echo "is_fork=$$IS_FORK" | tee -a /tmp/pr_metadata
       buildkite-agent meta-data set "is_fork" "$$IS_FORK"
-      
+
       # Fetch PR author information for display
       if [[ -n "$$BUILDKITE_PULL_REQUEST" && "$$BUILDKITE_PULL_REQUEST" != "false" ]]; then
         PR_INFO=$$(curl -s -H "Authorization: token $$GITHUB_TOKEN" \
           "https://api.github.com/repos/risingwavelabs/risingwave/pulls/$$BUILDKITE_PULL_REQUEST")
         PR_AUTHOR=$$(echo "$$PR_INFO" | jq -r '.user.login // "unknown"')
         PR_TITLE=$$(echo "$$PR_INFO" | jq -r '.title // "unknown"')
-        
+
         echo "pr_author=$$PR_AUTHOR" | tee -a /tmp/pr_metadata
         echo "pr_title=$$PR_TITLE" | tee -a /tmp/pr_metadata
         buildkite-agent meta-data set "pr_author" "$$PR_AUTHOR"
-        
+
         echo ""
         echo "PR Author: @$$PR_AUTHOR"
         echo "PR Title: $$PR_TITLE"
       fi
-      
+
       echo ""
       echo "=== Detection Result: IS_FORK=$$IS_FORK ==="
     plugins:
@@ -121,12 +121,12 @@ steps:
       DECISION="$${BUILDKITE_UNBLOCKER_APPROVAL_DECISION:-}"
       NOTES="$${BUILDKITE_UNBLOCKER_APPROVAL_NOTES:-}"
       APPROVER="$${BUILDKITE_UNBLOCKER_NAME:-unknown}"
-      
+
       echo "=== Approval Verification ==="
       echo "Decision: $$DECISION"
       echo "Approver: $$APPROVER"
       echo "Notes: $$NOTES"
-      
+
       # Log approval for audit trail
       echo ""
       echo "=== Security Audit Log ==="
@@ -136,7 +136,7 @@ steps:
       echo "Approver: $$APPROVER"
       echo "Decision: $$DECISION"
       echo "Notes: $$NOTES"
-      
+
       case "$$DECISION" in
         "approve")
           echo "✅ CI approved by $$APPROVER"
@@ -167,20 +167,20 @@ steps:
 
   - label: ":pipeline: Upload CI Pipeline"
     key: "upload-pipeline"
-    depends_on: 
+    depends_on:
       - "detect-fork"
       - "verify-approval"
     command: |
       IS_FORK="$$(buildkite-agent meta-data get is_fork 2>/dev/null || echo 'false')"
       CI_APPROVED="$$(buildkite-agent meta-data get ci_approved 2>/dev/null || echo 'true')"
-      
+
       echo "=== Pipeline Upload ==="
       echo "Is Fork: $$IS_FORK"
       echo "CI Approved: $$CI_APPROVED"
-      
+
       # Determine which pipeline to upload
       PIPELINE_FILE=""
-      
+
       if [[ "$$IS_FORK" == "true" ]]; then
         if [[ "$$CI_APPROVED" != "true" ]]; then
           echo "❌ Fork PR not approved. Cannot proceed."
@@ -192,16 +192,16 @@ steps:
         echo "✅ Internal PR. Uploading pull-request pipeline..."
         PIPELINE_FILE="ci/workflows/pull-request.yml"
       fi
-      
+
       # Verify pipeline file exists
       if [[ ! -f "$$PIPELINE_FILE" ]]; then
         echo "❌ Pipeline file not found: $$PIPELINE_FILE"
         exit 1
       fi
-      
+
       echo "Uploading: $$PIPELINE_FILE"
       buildkite-agent pipeline upload "$$PIPELINE_FILE"
-      
+
       echo ""
       echo "=== Pipeline uploaded successfully ==="
     plugins:
@@ -215,10 +215,10 @@ steps:
     depends_on: "upload-pipeline"
     command: |
       IS_FORK="$$(buildkite-agent meta-data get is_fork 2>/dev/null || echo 'false')"
-      
+
       if [[ "$$IS_FORK" == "true" && -n "$$BUILDKITE_PULL_REQUEST" ]]; then
         APPROVER="$$(buildkite-agent meta-data get approved_by 2>/dev/null || echo 'unknown')"
-        
+
         # Post approval confirmation comment
         curl -s -X POST \
           -H "Authorization: token $$GITHUB_TOKEN" \
@@ -226,13 +226,13 @@ steps:
           -d "{\"body\":\"✅ **CI Approved** by @$$APPROVER\\n\\nThe full CI pipeline has been triggered. Results will be posted as separate status checks.\"}" \
           "https://api.github.com/repos/risingwavelabs/risingwave/issues/$$BUILDKITE_PULL_REQUEST/comments" \
           > /dev/null
-        
+
         # Remove pending label, add approved label
         curl -s -X DELETE \
           -H "Authorization: token $$GITHUB_TOKEN" \
           "https://api.github.com/repos/risingwavelabs/risingwave/issues/$$BUILDKITE_PULL_REQUEST/labels/ci/pending-approval" \
           > /dev/null 2>&1 || true
-        
+
         curl -s -X POST \
           -H "Authorization: token $$GITHUB_TOKEN" \
           -H "Content-Type: application/json" \
