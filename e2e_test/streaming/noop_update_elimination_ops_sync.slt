@@ -1,0 +1,145 @@
+# Test that ops are correctly synced with visibility after noop update elimination
+# in HashDataDispatcher.
+#
+# When consecutive updates on the same key produce a pattern like:
+#   U- row_A, U+ row_B, U- row_B, U+ row_C
+# and columns are projected out, eliminate_adjacent_noop_update() will hide the
+# middle pair (row_B) and normalize the outer pair's ops (U- → Delete, U+ → Insert).
+# The HashDataDispatcher must use the normalized ops; otherwise the downstream sees
+# an orphan UpdateInsert and panics: "expect a U- before U+".
+#
+# The key trick is to use a JOIN to amplify a single-row update into multiple
+# consecutive U-/U+ pairs within the same chunk, combined with column pruning
+# that triggers noop elimination.
+
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+SET streaming_parallelism TO 1;
+
+# Table t1 has an extra column (c3) that will be projected out by the downstream MV.
+statement ok
+CREATE TABLE t1 (
+    a INT PRIMARY KEY,
+    b INT,
+    c3 INT
+);
+
+# Table t2 joins with t1; multiple rows per join key ensure that a single update
+# to t1 produces multiple consecutive U-/U+ pairs in the same chunk.
+statement ok
+CREATE TABLE t2 (
+    x INT,
+    y INT,
+    PRIMARY KEY (x, y)
+);
+
+statement ok
+INSERT INTO t1 VALUES (1, 10, 100), (2, 20, 200);
+
+# Multiple t2 rows per key — this is what produces consecutive U-/U+ pairs.
+statement ok
+INSERT INTO t2 VALUES (1, 1), (1, 2), (1, 3), (2, 4), (2, 5);
+
+# The MV projects out c3. The hash dispatcher will call eliminate_adjacent_noop_update()
+# on the projected chunk, which can produce partially-visible update pairs.
+statement ok
+CREATE MATERIALIZED VIEW mv AS
+SELECT t2.x, t2.y, t1.b
+FROM t2
+INNER JOIN t1 ON t2.x = t1.a;
+
+query III rowsort
+SELECT * FROM mv;
+----
+1 1 10
+1 2 10
+1 3 10
+2 4 20
+2 5 20
+
+# Update both b and c3. The join amplifies this into 3 consecutive U-/U+ pairs
+# (one per matching t2 row) in a single chunk. After projection (dropping c3),
+# eliminate_adjacent_noop_update runs on the chunk. Because b actually changed,
+# these are NOT noops — but the pattern of consecutive updates within the chunk
+# exercises the ops/visibility sync code path.
+# Without the fix, this would panic: "expect a U- before U+".
+statement ok
+UPDATE t1 SET b = 11, c3 = 101 WHERE a = 1;
+
+query III rowsort
+SELECT * FROM mv;
+----
+1 1 11
+1 2 11
+1 3 11
+2 4 20
+2 5 20
+
+# Update ONLY c3 (projected out). The join amplifies this into 3 U-/U+ pairs,
+# all of which become noops after projection. eliminate_adjacent_noop_update()
+# hides the middle pair and normalizes the outer pair.
+# Without the fix, this would panic: "expect a U- before U+".
+statement ok
+UPDATE t1 SET c3 = 999 WHERE a = 1;
+
+# MV should be unchanged — the update was a noop after projection.
+query III rowsort
+SELECT * FROM mv;
+----
+1 1 11
+1 2 11
+1 3 11
+2 4 20
+2 5 20
+
+# Update c3 on a different key to exercise multiple hash partitions.
+statement ok
+UPDATE t1 SET c3 = 888 WHERE a = 2;
+
+query III rowsort
+SELECT * FROM mv;
+----
+1 1 11
+1 2 11
+1 3 11
+2 4 20
+2 5 20
+
+# Real update to b on key 2, amplified by 2 matching t2 rows.
+statement ok
+UPDATE t1 SET b = 21, c3 = 201 WHERE a = 2;
+
+query III rowsort
+SELECT * FROM mv;
+----
+1 1 11
+1 2 11
+1 3 11
+2 4 21
+2 5 21
+
+# Batch update all rows — exercises the scenario where multiple keys
+# are updated in the same chunk.
+statement ok
+UPDATE t1 SET b = b + 100, c3 = c3 + 100;
+
+query III rowsort
+SELECT * FROM mv;
+----
+1 1 111
+1 2 111
+1 3 111
+2 4 121
+2 5 121
+
+# Cleanup
+statement ok
+DROP MATERIALIZED VIEW mv;
+
+statement ok
+DROP TABLE t2;
+
+statement ok
+DROP TABLE t1;
