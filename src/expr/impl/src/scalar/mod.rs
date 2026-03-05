@@ -36,6 +36,7 @@ mod bitwise_op;
 mod bytea_bits;
 mod cardinality;
 mod case;
+mod casefold;
 mod cast;
 mod cmp;
 mod coalesce;
