@@ -47,9 +47,8 @@ use crate::common::log_store_impl::kv_log_store::state::{
 };
 use crate::common::log_store_impl::kv_log_store::{FIRST_SEQ_ID, LogStoreVnodeProgress, SeqId};
 use crate::executor::prelude::*;
-use crate::executor::sync_kv_log_store::{
-    ReadFlushedChunkFuture, SyncedLogStoreBuffer, write_barrier,
-};
+use crate::executor::sync_kv_log_store::SyncedLogStoreBuffer;
+use crate::executor::sync_log_store_impl::{ReadFlushedChunkFuture, SyncedKvLogStoreExecutorInner};
 use crate::executor::{FlushedChunkInfo, StreamConsumer, SyncedKvLogStoreMetrics};
 use crate::task::NewOutputRequest;
 
@@ -808,15 +807,16 @@ impl<S: StateStore> StreamConsumer for SyncLogStoreDispatchExecutor<S> {
                                                 _ => {}
                                             }
                                         }
-                                        let write_state_post_write_barrier = write_barrier(
-                                            actor_id,
-                                            &mut write_state,
-                                            barrier.clone(),
-                                            &log_store_config.metrics,
-                                            progress.take(),
-                                            &mut buffer,
-                                        )
-                                        .await?;
+                                        let write_state_post_write_barrier =
+                                            SyncedKvLogStoreExecutorInner::<S>::write_barrier(
+                                                actor_id,
+                                                &mut write_state,
+                                                barrier.clone(),
+                                                &log_store_config.metrics,
+                                                progress.take(),
+                                                &mut buffer,
+                                            )
+                                            .await?;
                                         seq_id = FIRST_SEQ_ID;
                                         let update_vnode_bitmap =
                                             barrier.as_update_vnode_bitmap(actor_id);
@@ -832,11 +832,10 @@ impl<S: StateStore> StreamConsumer for SyncLogStoreDispatchExecutor<S> {
                                         if is_stop_barrier {
                                             write_future_state = WriteFuture::EndOfStream;
                                         } else {
-                                            write_future_state =
-                                                WriteFuture::receive_from_upstream(
-                                                    stream,
-                                                    write_state,
-                                                );
+                                            write_future_state = WriteFuture::receive_from_upstream(
+                                                stream,
+                                                write_state,
+                                            );
                                         }
                                     }
                                 }

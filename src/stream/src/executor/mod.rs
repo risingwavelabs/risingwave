@@ -121,6 +121,7 @@ mod wrapper;
 mod approx_percentile;
 
 mod row_merge;
+mod sync_log_store_impl;
 
 #[cfg(test)]
 mod integration_tests;
@@ -170,9 +171,9 @@ pub use receiver::ReceiverExecutor;
 use risingwave_common::id::SourceId;
 pub use row_merge::RowMergeExecutor;
 pub use sink::SinkExecutor;
-pub(crate) use sync_kv_log_store::FlushedChunkInfo;
 pub use sync_kv_log_store::SyncedKvLogStoreExecutor;
 pub use sync_kv_log_store::metrics::SyncedKvLogStoreMetrics;
+pub(crate) use sync_log_store_impl::FlushedChunkInfo;
 pub use temporal_join::TemporalJoinExecutor;
 pub use top_n::{
     AppendOnlyGroupTopNExecutor, AppendOnlyTopNExecutor, GroupTopNExecutor, TopNExecutor,
