@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use itertools::Itertools;
-use risingwave_common::catalog::Field;
+use risingwave_common::catalog::{Field, Schema};
 
 use crate::binder::statement::RewriteExprsRecursive;
 use crate::binder::{BoundQuery, Relation, ShareId};
@@ -27,11 +27,23 @@ use crate::optimizer::plan_node::generic::{_CHANGELOG_ROW_ID, CHANGELOG_OP};
 pub enum BoundShareInput {
     Query(BoundQuery),
     ChangeLog(Relation),
+    /// A recursive CTE with anchor and recursive parts.
+    RecursiveCte {
+        anchor: BoundQuery,
+        recursive: BoundQuery,
+    },
 }
 impl BoundShareInput {
     pub fn fields(&self) -> Result<Vec<(bool, Field)>> {
         match self {
             BoundShareInput::Query(q) => Ok(q
+                .schema()
+                .fields()
+                .iter()
+                .cloned()
+                .map(|f| (false, f))
+                .collect_vec()),
+            BoundShareInput::RecursiveCte { anchor, .. } => Ok(anchor
                 .schema()
                 .fields()
                 .iter()
@@ -96,6 +108,21 @@ impl RewriteExprsRecursive for BoundShare {
         match &mut self.input {
             BoundShareInput::Query(q) => q.rewrite_exprs_recursive(rewriter),
             BoundShareInput::ChangeLog(r) => r.rewrite_exprs_recursive(rewriter),
+            BoundShareInput::RecursiveCte { anchor, recursive } => {
+                anchor.rewrite_exprs_recursive(rewriter);
+                recursive.rewrite_exprs_recursive(rewriter);
+            }
         };
     }
+}
+
+/// A reference back to a recursive CTE that is currently being defined.
+/// This is used inside the recursive branch of the CTE to refer to the CTE's working table.
+#[derive(Debug, Clone)]
+pub struct BoundBackCteRef {
+    #[allow(dead_code)]
+    pub(crate) share_id: ShareId,
+    /// Schema of the CTE (from the anchor query).
+    #[allow(dead_code)]
+    pub(crate) schema: Schema,
 }

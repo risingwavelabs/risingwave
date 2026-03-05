@@ -1,0 +1,60 @@
+# Recursive CTE tests
+# Phase 1: binder support only — planning returns "not yet implemented"
+
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+# Basic recursive CTE — should bind successfully but fail at planning stage
+statement error not yet implemented
+WITH RECURSIVE t(n) AS (
+    SELECT 1
+    UNION ALL
+    SELECT n + 1 FROM t WHERE n < 10
+)
+SELECT * FROM t;
+
+# Recursive CTE must use UNION ALL, not plain UNION
+statement error must use UNION ALL
+WITH RECURSIVE t(n) AS (
+    SELECT 1
+    UNION
+    SELECT n + 1 FROM t WHERE n < 10
+)
+SELECT * FROM t;
+
+# Recursive CTE with ORDER BY in definition is not allowed
+statement error ORDER BY, LIMIT, OFFSET, and FETCH are not allowed in recursive CTE
+WITH RECURSIVE t(n) AS (
+    SELECT 1
+    UNION ALL
+    SELECT n + 1 FROM t WHERE n < 10
+    ORDER BY 1
+)
+SELECT * FROM t;
+
+# Recursive CTE with LIMIT in definition is not allowed
+statement error ORDER BY, LIMIT, OFFSET, and FETCH are not allowed in recursive CTE
+WITH RECURSIVE t(n) AS (
+    (SELECT 1
+    UNION ALL
+    SELECT n + 1 FROM t WHERE n < 10)
+    LIMIT 5
+)
+SELECT * FROM t;
+
+# Column count mismatch between anchor and recursive
+statement error anchor has 1 columns but recursive term has 2 columns
+WITH RECURSIVE t(n) AS (
+    SELECT 1
+    UNION ALL
+    SELECT n + 1, n + 2 FROM t WHERE n < 10
+)
+SELECT * FROM t;
+
+# Non-recursive CTE in WITH RECURSIVE is fine (binds and plans normally)
+# WITH RECURSIVE allows non-recursive CTEs too — only CTEs that self-reference are actually recursive
+statement ok
+WITH RECURSIVE t AS (
+    SELECT 1 AS n
+)
+SELECT * FROM t;

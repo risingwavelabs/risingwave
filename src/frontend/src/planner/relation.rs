@@ -61,6 +61,9 @@ impl Planner {
             Relation::Watermark(tf) => self.plan_watermark(*tf),
             Relation::Share(share) => self.plan_share(*share),
             Relation::GapFill(bound_gap_fill) => self.plan_gap_fill(*bound_gap_fill),
+            Relation::BackCteRef(_) => {
+                bail_not_implemented!("recursive CTE is not fully supported yet")
+            }
         }
     }
 
@@ -383,6 +386,9 @@ source: {:?}",
                 let logical_share = LogicalShare::create(result);
                 self.share_cache.insert(id, logical_share.clone());
                 Ok(logical_share)
+            }
+            BoundShareInput::RecursiveCte { .. } => {
+                bail_not_implemented!("planning recursive CTE is not supported yet")
             }
         }
     }
