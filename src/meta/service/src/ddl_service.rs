@@ -298,6 +298,7 @@ impl DdlService for DdlServiceImpl {
         Ok(Response::new(DropSecretResponse {
             status: None,
             version,
+            cascade_objects: vec![],
         }))
     }
 
@@ -353,6 +354,7 @@ impl DdlService for DdlServiceImpl {
         Ok(Response::new(DropSchemaResponse {
             status: None,
             version,
+            cascade_objects: vec![],
         }))
     }
 
@@ -410,6 +412,7 @@ impl DdlService for DdlServiceImpl {
         Ok(Response::new(DropSourceResponse {
             status: None,
             version,
+            cascade_objects: vec![],
         }))
     }
 
@@ -489,6 +492,7 @@ impl DdlService for DdlServiceImpl {
         Ok(Response::new(DropSinkResponse {
             status: None,
             version,
+            cascade_objects: vec![],
         }))
     }
 
@@ -526,6 +530,7 @@ impl DdlService for DdlServiceImpl {
         Ok(Response::new(DropSubscriptionResponse {
             status: None,
             version,
+            cascade_objects: vec![],
         }))
     }
 
@@ -580,6 +585,7 @@ impl DdlService for DdlServiceImpl {
         Ok(Response::new(DropMaterializedViewResponse {
             status: None,
             version,
+            cascade_objects: vec![],
         }))
     }
 
@@ -632,6 +638,7 @@ impl DdlService for DdlServiceImpl {
         Ok(Response::new(DropIndexResponse {
             status: None,
             version,
+            cascade_objects: vec![],
         }))
     }
 
@@ -670,6 +677,7 @@ impl DdlService for DdlServiceImpl {
         Ok(Response::new(DropFunctionResponse {
             status: None,
             version,
+            cascade_objects: vec![],
         }))
     }
 
@@ -710,6 +718,15 @@ impl DdlService for DdlServiceImpl {
         let source_id = request.source_id;
         let table_id = request.table_id;
 
+        let cascade_objects = if request.cascade {
+            self.metadata_manager
+                .catalog_controller
+                .get_drop_cascade_objects(request.table_id.as_object_id())
+                .await?
+        } else {
+            vec![]
+        };
+
         let drop_mode = DropMode::from_request_setting(request.cascade);
         let version = self
             .ddl_controller
@@ -722,6 +739,7 @@ impl DdlService for DdlServiceImpl {
         Ok(Response::new(DropTableResponse {
             status: None,
             version,
+            cascade_objects,
         }))
     }
 
@@ -762,6 +780,7 @@ impl DdlService for DdlServiceImpl {
         Ok(Response::new(DropViewResponse {
             status: None,
             version,
+            cascade_objects: vec![],
         }))
     }
 
@@ -1021,6 +1040,7 @@ impl DdlService for DdlServiceImpl {
         Ok(Response::new(DropConnectionResponse {
             status: None,
             version,
+            cascade_objects: vec![],
         }))
     }
 
