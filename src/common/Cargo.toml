@@ -9,6 +9,7 @@ repository = { workspace = true }
 
 [dependencies]
 ahash = "0.8"
+allocator-api2 = "0.2"
 anyhow = "1"
 arc-swap = { workspace = true }
 arrow-54-array = { package = "arrow-array", version = "54" }
@@ -19,6 +20,10 @@ arrow-56-array = { package = "arrow-array", version = "56" }
 arrow-56-buffer = { package = "arrow-buffer", version = "56" }
 arrow-56-cast = { package = "arrow-cast", version = "56" }
 arrow-56-schema = { package = "arrow-schema", version = "56" }
+arrow-57-array = { package = "arrow-array", version = "57" }
+arrow-57-buffer = { package = "arrow-buffer", version = "57" }
+arrow-57-cast = { package = "arrow-cast", version = "57" }
+arrow-57-schema = { package = "arrow-schema", version = "57" }
 async-trait = "0.1"
 auto_enums = { workspace = true }
 auto_impl = "1"
@@ -44,7 +49,6 @@ faiss = { workspace = true }
 fixedbitset = "0.5"
 foyer = { workspace = true }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
-hashbrown = { workspace = true }
 hashbrown0_14 = { workspace = true }
 hashbrown0_15 = { workspace = true }
 hex = "0.4.3"

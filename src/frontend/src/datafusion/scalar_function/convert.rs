@@ -378,7 +378,17 @@ fn convert_list_ops_func(
     }))
 }
 
-fn array_to_string_element_type_may_differ(ty: &RwDataType) -> bool {
+fn pow_type_mismatch(base: &RwDataType, exp: &RwDataType) -> bool {
+    matches!(
+        base,
+        RwDataType::Float32 | RwDataType::Float64 | RwDataType::Decimal
+    ) || matches!(
+        exp,
+        RwDataType::Float32 | RwDataType::Float64 | RwDataType::Decimal
+    )
+}
+
+fn array_to_string_type_mismatch(ty: &RwDataType) -> bool {
     match ty {
         RwDataType::List(list) => matches!(
             list.elem(),
@@ -406,14 +416,6 @@ fn convert_trivial_datafusion_func(
         return None;
     }
 
-    // ArrayToString: do not map when array element is float/decimal — RW uses ToText, DF uses
-    // Arrow formatting; display can differ (precision, exponent).
-    if func_type == ExprType::ArrayToString
-        && array_to_string_element_type_may_differ(&inputs[0].return_type())
-    {
-        return None;
-    }
-
     let udf_impl: Arc<ScalarUDF> = match func_type {
         // Math functions
         //
@@ -425,12 +427,14 @@ fn convert_trivial_datafusion_func(
         // - sqrt: negative input -> RW: error, DF: NaN
         // - ln/log10: input <= 0 -> RW: error, DF: NaN/-inf
         // - exp: extreme values -> RW: error, DF: inf/0
-        // - pow: 0^negative or negative^frac -> RW: error, DF: inf/NaN
         ExprType::Abs => math::abs(),
         ExprType::Ceil => math::ceil(),
         ExprType::Floor => math::floor(),
         ExprType::Trunc => math::trunc(),
-        ExprType::Pow => math::power(),
+        // - pow: DataFusion doesn't support power which exp is not integer. And pow(decimal, integer) is easy to overflow because it will keep the precision, e.x. pow(2::decimal(38, 10), 4) will calculate (2e10 ^ 4) / (1e10 ^ 4) and 2e10 ^ 4 = 1.6e41 has exceed the max precision of decimal(38, 10).
+        ExprType::Pow if !pow_type_mismatch(&inputs[0].return_type(), &inputs[1].return_type()) => {
+            math::power()
+        }
         ExprType::Exp => math::exp(),
         ExprType::Sin => math::sin(),
         ExprType::Cos => math::cos(),
@@ -522,7 +526,11 @@ fn convert_trivial_datafusion_func(
         ExprType::ArrayContained => array_has::array_has_all_udf(),
         ExprType::ArrayFlatten => flatten::flatten_udf(),
         ExprType::ArrayReverse => reverse::array_reverse_udf(),
-        ExprType::ArrayToString => nested_string::array_to_string_udf(),
+        // ArrayToString: do not map when array element is float/decimal — RW uses ToText, DF uses
+        // Arrow formatting; display can differ (precision, exponent).
+        ExprType::ArrayToString if !array_to_string_type_mismatch(&inputs[0].return_type()) => {
+            nested_string::array_to_string_udf()
+        }
         // Misc functions
         ExprType::Coalesce => core::coalesce(),
         _ => return None,
@@ -587,6 +595,7 @@ fn fallback_rw_expr_builder(
         signature: Signature {
             type_signature: TypeSignature::Any(input_columns.len()),
             volatility,
+            parameter_names: None,
         },
     };
     Some(DFExpr::ScalarFunction(ScalarFunction {
