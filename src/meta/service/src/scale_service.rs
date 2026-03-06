@@ -13,9 +13,8 @@
 // limitations under the License.
 
 use risingwave_meta::manager::{MetaSrvEnv, MetadataManager};
-use risingwave_pb::common::{PbActorLocation, WorkerType};
+use risingwave_pb::common::WorkerType;
 use risingwave_pb::meta::scale_service_server::ScaleService;
-use risingwave_pb::meta::table_fragments::PbActorStatus;
 use risingwave_pb::meta::{
     GetClusterInfoRequest, GetClusterInfoResponse, GetServerlessStreamingJobsStatusRequest,
     GetServerlessStreamingJobsStatusResponse, RescheduleRequest, RescheduleResponse,
@@ -63,7 +62,7 @@ impl ScaleService for ScaleServiceImpl {
             .await?;
 
         let mut table_fragments = Vec::with_capacity(stream_job_fragments.len());
-        for (_, (stream_job_fragments, fragment_actors)) in stream_job_fragments {
+        for (_, (stream_job_fragments, fragment_actors, actor_status)) in stream_job_fragments {
             let upstreams = self
                 .metadata_manager
                 .catalog_controller
@@ -83,37 +82,8 @@ impl ScaleService for ScaleServiceImpl {
                 &fragment_actors,
                 &upstreams,
                 &dispatchers,
+                actor_status,
             ))
-        }
-
-        // Populate actor_status on each PbTableFragments from the shared actor infos.
-        // Actor status (worker location) is managed by the barrier worker at runtime,
-        // not stored in StreamJobFragments, so we need to fill it in here for the ctl API.
-        {
-            let guard = self.env.shared_actor_infos().read_guard();
-            let actor_worker: std::collections::HashMap<u32, _> = guard
-                .iter_over_fragments()
-                .flat_map(|(_, fragment)| {
-                    fragment
-                        .actors
-                        .iter()
-                        .map(|(actor_id, info)| (actor_id.as_raw_id(), info.worker_id))
-                })
-                .collect();
-            for tf in &mut table_fragments {
-                for fragment in tf.fragments.values() {
-                    for actor in &fragment.actors {
-                        if let Some(&worker_id) = actor_worker.get(&actor.actor_id.as_raw_id()) {
-                            tf.actor_status.insert(
-                                actor.actor_id,
-                                PbActorStatus {
-                                    location: PbActorLocation::from_worker(worker_id),
-                                },
-                            );
-                        }
-                    }
-                }
-            }
         }
 
         let worker_nodes = self

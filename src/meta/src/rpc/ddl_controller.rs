@@ -2146,7 +2146,7 @@ impl DdlController {
 
         let resource_group = self
             .metadata_manager
-            .get_existing_job_resource_group(id)
+            .get_database_resource_group(stream_job.database_id())
             .await?;
 
         // XXX: what is this parallelism?

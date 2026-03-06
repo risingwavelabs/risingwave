@@ -31,7 +31,7 @@ use risingwave_pb::id::SubscriberId;
 use risingwave_pb::meta::table_fragments::fragment::{
     FragmentDistributionType, PbFragmentDistributionType,
 };
-use risingwave_pb::meta::table_fragments::{PbFragment, State};
+use risingwave_pb::meta::table_fragments::{PbActorStatus, PbFragment, State};
 use risingwave_pb::meta::table_parallelism::{
     FixedParallelism, Parallelism, PbAdaptiveParallelism, PbCustomParallelism, PbFixedParallelism,
     PbParallelism,
@@ -363,6 +363,7 @@ impl StreamJobFragments {
         fragment_actors: &HashMap<FragmentId, Vec<StreamActor>>,
         fragment_upstreams: &HashMap<FragmentId, HashSet<FragmentId>>,
         fragment_dispatchers: &FragmentActorDispatchers,
+        actor_status: HashMap<ActorId, PbActorStatus>,
     ) -> PbTableFragments {
         PbTableFragments {
             table_id: self.stream_job_id,
@@ -382,7 +383,7 @@ impl StreamJobFragments {
                     )
                 })
                 .collect(),
-            actor_status: Default::default(),
+            actor_status,
             ctx: Some(self.ctx.to_protobuf()),
             parallelism: Some(self.assigned_parallelism.into()),
             node_label: "".to_owned(),

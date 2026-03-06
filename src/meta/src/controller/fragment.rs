@@ -273,6 +273,7 @@ impl CatalogController {
         Ok(fragment)
     }
 
+    #[expect(clippy::type_complexity)]
     fn compose_table_fragments(
         job_id: JobId,
         state: PbState,
@@ -281,15 +282,21 @@ impl CatalogController {
         parallelism: StreamingParallelism,
         max_parallelism: usize,
         job_definition: Option<String>,
-    ) -> MetaResult<(StreamJobFragments, HashMap<FragmentId, Vec<StreamActor>>)> {
+    ) -> MetaResult<(
+        StreamJobFragments,
+        HashMap<FragmentId, Vec<StreamActor>>,
+        HashMap<crate::model::ActorId, PbActorStatus>,
+    )> {
         let mut pb_fragments = BTreeMap::new();
         let mut fragment_actors = HashMap::new();
+        let mut all_actor_status = HashMap::new();
 
         for (fragment, actors) in fragments {
-            let (fragment, actors, _fragment_actor_status, _) =
+            let (fragment, actors, actor_status, _) =
                 Self::compose_fragment(fragment, actors, job_definition.clone())?;
             let fragment_id = fragment.fragment_id;
             fragment_actors.insert(fragment_id, actors);
+            all_actor_status.extend(actor_status);
 
             pb_fragments.insert(fragment_id, fragment);
         }
@@ -307,10 +314,10 @@ impl CatalogController {
             max_parallelism,
         };
 
-        Ok((table_fragments, fragment_actors))
+        Ok((table_fragments, fragment_actors, all_actor_status))
     }
 
-    #[allow(clippy::type_complexity)]
+    #[expect(clippy::type_complexity)]
     fn compose_fragment(
         fragment: fragment::Model,
         actors: Vec<ActorInfo>,
@@ -571,7 +578,11 @@ impl CatalogController {
     pub async fn get_job_fragments_by_id(
         &self,
         job_id: JobId,
-    ) -> MetaResult<(StreamJobFragments, HashMap<FragmentId, Vec<StreamActor>>)> {
+    ) -> MetaResult<(
+        StreamJobFragments,
+        HashMap<FragmentId, Vec<StreamActor>>,
+        HashMap<ActorId, PbActorStatus>,
+    )> {
         let inner = self.inner.read().await;
 
         // Load fragments matching the job from the database
@@ -992,8 +1003,16 @@ impl CatalogController {
     // TODO: This function is too heavy, we should avoid using it and implement others on demand.
     pub async fn table_fragments(
         &self,
-    ) -> MetaResult<BTreeMap<JobId, (StreamJobFragments, HashMap<FragmentId, Vec<StreamActor>>)>>
-    {
+    ) -> MetaResult<
+        BTreeMap<
+            JobId,
+            (
+                StreamJobFragments,
+                HashMap<FragmentId, Vec<StreamActor>>,
+                HashMap<crate::model::ActorId, PbActorStatus>,
+            ),
+        >,
+    > {
         let inner = self.inner.read().await;
         let jobs = StreamingJob::find().all(&inner.db).await?;
 

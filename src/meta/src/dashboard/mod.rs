@@ -325,7 +325,7 @@ pub(super) mod handlers {
             .await
             .map_err(err)?;
         let mut fragment_to_relation_map = HashMap::new();
-        for (relation_id, (tf, _)) in table_fragments {
+        for (relation_id, (tf, _, _)) in table_fragments {
             for fragment_id in tf.fragments.keys() {
                 fragment_to_relation_map.insert(*fragment_id, relation_id);
             }
@@ -347,7 +347,7 @@ pub(super) mod handlers {
             .await
             .map_err(err)?;
         let mut map = HashMap::new();
-        for (id, (tf, fragment_actors)) in table_fragments {
+        for (id, (tf, fragment_actors, _actor_status)) in table_fragments {
             let mut fragment_id_to_actor_ids = HashMap::new();
             for fragment_id in tf.fragments.keys() {
                 let actor_ids = fragment_actors
@@ -374,8 +374,9 @@ pub(super) mod handlers {
         Path(job_id): Path<u32>,
     ) -> Result<Json<PbTableFragments>> {
         let job_id = JobId::new(job_id);
-        let table_fragments = srv
+        let (table_fragments, fragment_actors, actor_status) = srv
             .metadata_manager
+            .catalog_controller
             .get_job_fragments_by_id(job_id)
             .await
             .map_err(err)?;
@@ -393,10 +394,12 @@ pub(super) mod handlers {
             )
             .await
             .map_err(err)?;
-        Ok(Json(
-            // TODO: pass rendered fragment actors from barrier worker rendering.
-            table_fragments.to_protobuf(&Default::default(), &upstream_fragments, &dispatchers),
-        ))
+        Ok(Json(table_fragments.to_protobuf(
+            &fragment_actors,
+            &upstream_fragments,
+            &dispatchers,
+            actor_status,
+        )))
     }
 
     pub async fn list_users(Extension(srv): Extension<Service>) -> Result<Json<Vec<PbUserInfo>>> {

@@ -266,7 +266,7 @@ fn resolve_no_shuffle_ensembles(
 /// 1. For each ensemble, resolve `EntryFragmentActors` (from existing or fresh).
 /// 2. For each new component fragment, allocate actor IDs and compute worker/vnode assignments.
 /// 3. Expand the simple assignments into full `StreamActor` structures.
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments)]
 fn render_actors(
     fragments: &StreamJobFragmentsToCreate,
     new_no_shuffle: &FragmentNewNoShuffle,

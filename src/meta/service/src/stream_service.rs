@@ -272,7 +272,7 @@ impl StreamManagerService for StreamServiceImpl {
 
         let mut info = HashMap::new();
         for job_id in table_ids {
-            let (table_fragments, fragment_actors) = self
+            let (table_fragments, fragment_actors, _actor_status) = self
                 .metadata_manager
                 .catalog_controller
                 .get_job_fragments_by_id(job_id)
