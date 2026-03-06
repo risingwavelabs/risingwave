@@ -2044,7 +2044,8 @@ impl HummockMetaClient for MetaClient {
         table_id: JobId,
         level: u32,
         sst_ids: Vec<HummockSstableId>,
-    ) -> Result<()> {
+        exclusive: bool,
+    ) -> Result<bool> {
         // TODO: support key_range parameter
         let req = TriggerManualCompactionRequest {
             compaction_group_id,
@@ -2053,11 +2054,12 @@ impl HummockMetaClient for MetaClient {
             // without check internal_table_id
             level,
             sst_ids,
+            exclusive: Some(exclusive),
             ..Default::default()
         };
 
-        self.inner.trigger_manual_compaction(req).await?;
-        Ok(())
+        let resp = self.inner.trigger_manual_compaction(req).await?;
+        Ok(resp.should_retry.unwrap_or(false))
     }
 
     async fn trigger_full_gc(

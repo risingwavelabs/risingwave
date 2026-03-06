@@ -97,7 +97,7 @@ impl MockHummockMetaClient {
         self.hummock_manager
             .get_compact_task(
                 StaticCompactionGroupId::StateDefault,
-                &mut default_compaction_selector(),
+                &mut *default_compaction_selector(),
             )
             .await
             .unwrap_or(None)
@@ -231,7 +231,8 @@ impl HummockMetaClient for MockHummockMetaClient {
         _table_id: JobId,
         _level: u32,
         _sst_ids: Vec<HummockSstableId>,
-    ) -> Result<()> {
+        _exclusive: bool,
+    ) -> Result<bool> {
         todo!()
     }
 
@@ -314,7 +315,7 @@ impl HummockMetaClient for MockHummockMetaClient {
                     _ => panic!("Error type when mock_hummock_meta_client subscribe_compact_tasks"),
                 };
                 if let Some(task) = hummock_manager_compact
-                    .get_compact_task(group, &mut selector)
+                    .get_compact_task(group, &mut *selector)
                     .await
                     .unwrap()
                 {

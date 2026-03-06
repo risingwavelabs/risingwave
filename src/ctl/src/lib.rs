@@ -139,6 +139,12 @@ enum HummockCommands {
 
         #[clap(short, long = "sst-ids", value_delimiter = ',')]
         sst_ids: Vec<HummockSstableId>,
+
+        #[clap(long = "exclusive", default_value_t = false)]
+        exclusive: bool,
+
+        #[clap(long = "retry-interval-ms", default_value_t = 1000)]
+        retry_interval_ms: u64,
     },
     /// Trigger a full GC for SSTs that is not pinned, with timestamp <= now -
     /// `sst_retention_time_sec`, and with `prefix` in path.
@@ -651,6 +657,8 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
             table_id,
             levels,
             sst_ids,
+            exclusive,
+            retry_interval_ms,
         }) => {
             cmd_impl::hummock::trigger_manual_compaction(
                 context,
@@ -658,6 +666,8 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
                 table_id.into(),
                 levels,
                 sst_ids,
+                exclusive,
+                retry_interval_ms,
             )
             .await?
         }
