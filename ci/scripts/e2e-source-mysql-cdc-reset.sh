@@ -17,13 +17,6 @@ query_scalar() {
     printf "%s\n" "$raw" | strip_logs | tail -n 1
 }
 
-query_row_tsv() {
-    local sql="$1"
-    local raw
-    raw=$(risedev psql -t -A -F $'\t' -c "$sql" 2>&1 || true)
-    printf "%s\n" "$raw" | strip_logs | tail -n 1
-}
-
 mysql_exec() {
     local sql="$1"
     mysql -e "$sql"
@@ -44,6 +37,30 @@ ${expected}
 SLT
     risedev slt "$tmp"
     rm -f "$tmp"
+}
+
+wait_non_empty_scalar() {
+    local sql="$1"
+    local timeout="$2"
+    local interval="1"
+    local start
+    start=$(date +%s)
+    while true; do
+        local current
+        current=$(query_scalar "$sql")
+        if [ -n "$current" ]; then
+            echo "$current"
+            return 0
+        fi
+        if [ $(( $(date +%s) - start )) -ge "$timeout" ]; then
+            echo "✗ FAIL: wait_non_empty_scalar timeout=${timeout}s"
+            echo "SQL: ${sql}"
+            echo "Current value: '${current}'"
+            return 1
+        fi
+        echo "wait_non_empty_scalar retry: SQL='${sql}', current='${current}'"
+        sleep "$interval"
+    done
 }
 
 echo "------------- setup ------------"
@@ -91,7 +108,7 @@ STATE_TABLE=$(query_scalar "SELECT name FROM rw_catalog.rw_internal_table_info W
 [[ "$STATE_TABLE" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || { echo "✗ FAIL: invalid STATE_TABLE=${STATE_TABLE}"; exit 1; }
 
 query_i_retry "SELECT CASE WHEN COUNT(*) >= 1 THEN 1 ELSE 0 END FROM ${STATE_TABLE} WHERE offset_info->'split_info'->'inner'->>'start_offset' IS NOT NULL;" "1" 30 "1s"
-STATE_ROW=$(query_row_tsv "SELECT partition_id, offset_info->'split_info'->'inner'->>'start_offset' FROM ${STATE_TABLE} WHERE offset_info->'split_info'->'inner'->>'start_offset' IS NOT NULL LIMIT 1;")
+STATE_ROW=$(wait_non_empty_scalar "SELECT partition_id || E'\\t' || (offset_info->'split_info'->'inner'->>'start_offset') FROM ${STATE_TABLE} WHERE offset_info->'split_info'->'inner'->>'start_offset' IS NOT NULL LIMIT 1;" 30)
 [ -n "$STATE_ROW" ] || { echo "✗ FAIL: missing non-null start_offset row"; exit 1; }
 
 IFS=$'\t' read -r SPLIT_ID CURRENT_OFFSET <<< "$STATE_ROW"
