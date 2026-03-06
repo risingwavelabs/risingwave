@@ -171,6 +171,9 @@ order by 1, 2;
 2 10
 
 statement error
+select a.id from s1.a, s2.a;
+
+statement error
 select a, b from s1.a AS a1 join s2.a AS a2 on s1.a.id = s2.a.id;
 
 statement ok
@@ -383,5 +386,4 @@ drop schema s2;
 
 statement ok
 drop schema s3;
-
 
