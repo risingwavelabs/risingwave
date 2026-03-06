@@ -14,6 +14,7 @@
 
 use anyhow::anyhow;
 use itertools::Itertools;
+use risingwave_connector::source::fill_adaptive_split;
 
 use super::*;
 use crate::model::{FragmentNewNoShuffle, FragmentReplaceUpstream, StreamJobFragments};
@@ -56,27 +57,27 @@ impl SourceManager {
         );
         Ok(align_splits(
             actors,
-            SplitAlignmentContext::Pending(upstream_assignment),
+            |upstream_actor_id| upstream_assignment.get(&upstream_actor_id).cloned(),
             fragment_id,
             upstream_source_fragment_id,
         )?)
     }
 
-    /// Allocates splits to actors for a newly created source executor.
+    /// Discovers splits for a newly created source executor.
+    /// Returns fragment-level split information. Actor-level assignment
+    /// will happen during Phase 2 inside the barrier worker.
     #[await_tree::instrument]
-    pub async fn allocate_splits(
+    pub async fn discover_splits(
         &self,
         table_fragments: &StreamJobFragments,
-    ) -> MetaResult<SplitAssignment> {
+    ) -> MetaResult<SourceSplitAssignment> {
         let core = self.core.lock().await;
 
-        // stream_job_id is used to fetch pre-calculated splits for CDC table.
-        let stream_job_id = table_fragments.stream_job_id;
         let source_fragments = table_fragments.stream_source_fragments();
 
         let mut assigned = HashMap::new();
 
-        'loop_source: for (source_id, fragments) in source_fragments {
+        for (source_id, _fragments) in source_fragments {
             let handle = core
                 .managed_sources
                 .get(&source_id)
@@ -86,38 +87,105 @@ impl SourceManager {
                 handle.force_tick().await?;
             }
 
-            for fragment_id in fragments {
-                let empty_actor_splits: HashMap<ActorId, Vec<SplitImpl>> = table_fragments
-                    .fragments
-                    .get(&fragment_id)
-                    .unwrap()
-                    .actors
-                    .iter()
-                    .map(|actor| (actor.actor_id, vec![]))
-                    .collect();
-                let actor_count = empty_actor_splits.keys().len();
-                let splits = handle.discovered_splits(source_id, actor_count).await?;
-                if splits.is_empty() {
-                    tracing::warn!(?stream_job_id, %source_id, "no splits detected");
-                    continue 'loop_source;
-                }
-                if let Some(diff) = reassign_splits(
-                    fragment_id,
-                    empty_actor_splits,
-                    &splits,
-                    SplitDiffOptions::default(),
-                ) {
-                    assigned.insert(fragment_id, diff);
-                }
+            let Some(discovered) = handle.discovered_splits(source_id).await? else {
+                tracing::warn!(%source_id, "no splits detected (not ready)");
+                continue;
+            };
+            if let DiscoveredSplits::Fixed(ref splits) = discovered
+                && splits.is_empty()
+            {
+                tracing::warn!(%source_id, "no splits detected");
+                continue;
             }
+            // Store the discovered splits enum at source level.
+            // The enum is preserved until the barrier worker resolves it
+            // to concrete per-fragment, per-actor splits during actor rendering.
+            assigned.insert(source_id, discovered);
         }
 
         Ok(assigned)
     }
 
-    /// Allocates splits to actors for replace source job.
-    pub async fn allocate_splits_for_replace_source(
+    /// Resolve a [`SourceSplitAssignment`] (source-level, containing [`DiscoveredSplits`])
+    /// into an actor-level [`SplitAssignment`] using the source→fragment mapping and
+    /// the actors defined in the given [`StreamJobFragments`].
+    ///
+    /// For `Fixed` splits, splits are distributed across actors via [`reassign_splits`].
+    /// For `Adaptive` splits, `fill_adaptive_split` expands the template per actor count.
+    pub fn resolve_fragment_to_actor_splits(
+        table_fragments: &StreamJobFragments,
+        source_assignment: &SourceSplitAssignment,
+    ) -> MetaResult<SplitAssignment> {
+        let source_fragments = table_fragments.stream_source_fragments();
+        let mut result: SplitAssignment = HashMap::new();
+        for (source_id, discovered) in source_assignment {
+            let fragment_ids = source_fragments.get(source_id).unwrap_or_else(|| {
+                panic!("source {} not found in stream job fragments", source_id)
+            });
+            for fragment_id in fragment_ids {
+                let fragment = table_fragments
+                    .fragments
+                    .get(fragment_id)
+                    .unwrap_or_else(|| {
+                        panic!("fragment {} not found in stream job fragments", fragment_id)
+                    });
+                let actor_count = fragment.actors.len();
+                match discovered {
+                    DiscoveredSplits::Fixed(splits) => {
+                        let empty_actor_splits: HashMap<ActorId, Vec<SplitImpl>> = fragment
+                            .actors
+                            .iter()
+                            .map(|actor| (actor.actor_id, vec![]))
+                            .collect();
+                        if let Some(diff) = reassign_splits(
+                            *fragment_id,
+                            empty_actor_splits,
+                            splits,
+                            SplitDiffOptions::default(),
+                        ) {
+                            result.insert(*fragment_id, diff);
+                        }
+                    }
+                    DiscoveredSplits::Adaptive(template) => {
+                        let expanded = fill_adaptive_split(template, actor_count)?;
+                        let expanded_splits: Vec<SplitImpl> = expanded.into_values().collect();
+                        let mut actor_splits = HashMap::new();
+                        for (i, actor) in fragment.actors.iter().enumerate() {
+                            actor_splits.insert(actor.actor_id, vec![expanded_splits[i].clone()]);
+                        }
+                        result.insert(*fragment_id, actor_splits);
+                    }
+                }
+            }
+        }
+        Ok(result)
+    }
+
+    /// Phase 1 for replace source: gathers fragment-level split information.
+    ///
+    /// When there are no existing downstream (`upstream_updates` is empty), we can
+    /// re-allocate splits fresh by delegating to [`Self::discover_splits`].
+    /// When there are existing downstream, returns `None` — the actual
+    /// split alignment happens in Phase 2 inside the barrier worker via
+    /// [`Self::resolve_replace_source_splits`].
+    pub async fn discover_splits_for_replace_source(
         &self,
+        table_fragments: &StreamJobFragments,
+        upstream_updates: &FragmentReplaceUpstream,
+    ) -> MetaResult<Option<SourceSplitAssignment>> {
+        if upstream_updates.is_empty() {
+            // No existing downstream. We can just re-allocate splits arbitrarily.
+            return Ok(Some(self.discover_splits(table_fragments).await?));
+        }
+        // Splits will be aligned with the previous fragment in Phase 2
+        // using new_no_shuffle and inflight database info inside the barrier worker.
+        Ok(None)
+    }
+
+    /// Phase 2 resolve for replace source: align the new source fragment's actor splits
+    /// with the previous source fragment using the `new_no_shuffle` actor mapping and
+    /// the existing split assignment looked up via the provided closure.
+    pub fn resolve_replace_source_splits(
         table_fragments: &StreamJobFragments,
         upstream_updates: &FragmentReplaceUpstream,
         // new_no_shuffle:
@@ -126,14 +194,10 @@ impl SourceManager {
         //     upstream actor_id ->
         //     downstream actor_id
         new_no_shuffle: &FragmentNewNoShuffle,
+        get_upstream_actor_splits: impl Fn(FragmentId, ActorId) -> Option<Vec<SplitImpl>>,
     ) -> MetaResult<SplitAssignment> {
         tracing::debug!(?upstream_updates, "allocate_splits_for_replace_source");
-        if upstream_updates.is_empty() {
-            // no existing downstream. We can just re-allocate splits arbitrarily.
-            return self.allocate_splits(table_fragments).await;
-        }
-
-        let core = self.core.lock().await;
+        assert!(!upstream_updates.is_empty());
 
         let source_fragments = table_fragments.stream_source_fragments();
         assert_eq!(
@@ -193,41 +257,39 @@ impl SourceManager {
             .collect();
         let assignment = align_splits(
             aligned_actors.into_iter(),
-            SplitAlignmentContext::Stored(core.env.shared_actor_infos()),
+            |actor_id| get_upstream_actor_splits(prev_fragment_id, actor_id),
             fragment_id,
             prev_fragment_id,
         )?;
         Ok(HashMap::from([(fragment_id, assignment)]))
     }
 
-    /// Allocates splits to actors for a newly created `SourceBackfill` executor.
-    ///
-    /// Unlike [`Self::allocate_splits`], which creates a new assignment,
-    /// this method aligns the splits for backfill fragments with its upstream source fragment ([`align_splits`]).
-    #[await_tree::instrument]
-    pub async fn allocate_splits_for_backfill(
-        &self,
+    /// Phase 2 resolve for source backfill: align each backfill fragment's actor splits
+    /// with its upstream source fragment using the `new_no_shuffle` actor mapping and
+    /// the existing split assignment looked up via the provided closure.
+    pub fn resolve_backfill_splits(
         table_fragments: &StreamJobFragments,
         upstream_new_no_shuffle: &FragmentNewNoShuffle,
-        upstream_actors: &HashMap<FragmentId, HashSet<ActorId>>,
+        get_upstream_actor_splits: impl Fn(FragmentId, ActorId) -> Option<Vec<SplitImpl>>,
     ) -> MetaResult<SplitAssignment> {
-        let core = self.core.lock().await;
-
         let source_backfill_fragments = table_fragments.source_backfill_fragments();
 
         let mut assigned = HashMap::new();
 
         for (_source_id, fragments) in source_backfill_fragments {
             for (fragment_id, upstream_source_fragment_id) in fragments {
-                let upstream_actors = upstream_actors
+                // Get upstream actors from new_no_shuffle mapping
+                let upstream_actors: HashSet<ActorId> = upstream_new_no_shuffle
                     .get(&upstream_source_fragment_id)
+                    .and_then(|m| m.get(&fragment_id))
                     .ok_or_else(|| {
                         anyhow!(
                             "no upstream actors found from fragment {} to upstream source fragment {}",
                             fragment_id,
                             upstream_source_fragment_id
                         )
-                    })?;
+                    })?.keys().copied().collect();
+
                 let mut backfill_actors = vec![];
                 let Some(source_new_no_shuffle) = upstream_new_no_shuffle
                     .get(&upstream_source_fragment_id)
@@ -242,7 +304,7 @@ impl SourceManager {
                             upstream_new_no_shuffle = upstream_new_no_shuffle,
                         ).into());
                 };
-                for upstream_actor in upstream_actors {
+                for upstream_actor in &upstream_actors {
                     let Some(no_shuffle_backfill_actor) = source_new_no_shuffle.get(upstream_actor)
                     else {
                         return Err(anyhow::anyhow!(
@@ -259,7 +321,7 @@ impl SourceManager {
                     fragment_id,
                     align_splits(
                         backfill_actors,
-                        SplitAlignmentContext::Stored(core.env.shared_actor_infos()),
+                        |actor_id| get_upstream_actor_splits(upstream_source_fragment_id, actor_id),
                         fragment_id,
                         upstream_source_fragment_id,
                     )?,
@@ -307,11 +369,21 @@ impl SourceManagerCore {
                     }
                 };
 
-                let discovered_splits = handle.discovered_splits(*source_id, actors.len()).await?;
-                if discovered_splits.is_empty() {
+                let Some(discovered) = handle.discovered_splits(*source_id).await? else {
                     // The discover loop for this source is not ready yet; we'll wait for the next run
                     continue 'loop_source;
-                }
+                };
+                let discovered_splits = match discovered {
+                    DiscoveredSplits::Fixed(splits) => {
+                        if splits.is_empty() {
+                            continue 'loop_source;
+                        }
+                        splits
+                    }
+                    DiscoveredSplits::Adaptive(template) => {
+                        fill_adaptive_split(&template, actors.len())?
+                    }
+                };
 
                 let prev_actor_splits = {
                     let guard = self.env.shared_actor_infos().read_guard();
@@ -373,7 +445,9 @@ impl SourceManagerCore {
                         *fragment_id,
                         align_splits(
                             actors,
-                            SplitAlignmentContext::Pending(upstream_assignment),
+                            |upstream_actor_id| {
+                                upstream_assignment.get(&upstream_actor_id).cloned()
+                            },
                             *fragment_id,
                             *upstream_fragment_id,
                         )?,
@@ -522,12 +596,12 @@ where
     )
 }
 
-pub enum SplitAlignmentContext<'a> {
-    Stored(&'a SharedActorInfos),
-    Pending(&'a HashMap<ActorId, Vec<SplitImpl>>),
-}
-
 /// Assign splits to a new set of actors, according to existing assignment.
+///
+/// The `get_upstream_actor_splits` closure looks up the current splits for a given
+/// upstream actor ID. How exactly this lookup works depends on the caller:
+/// - Inside the barrier worker, it reads from `InflightDatabaseInfo`.
+/// - During reassignment, it reads from the pending upstream assignment.
 ///
 /// illustration:
 /// ```text
@@ -536,26 +610,17 @@ pub enum SplitAlignmentContext<'a> {
 /// actor x2 [split 3]              ->     actor y2 [split 3]
 /// ...
 /// ```
-fn align_splits(
+pub fn align_splits(
     // (actor_id, upstream_actor_id)
     aligned_actors: impl IntoIterator<Item = (ActorId, ActorId)>,
-    alignment_context: SplitAlignmentContext<'_>,
+    get_upstream_actor_splits: impl Fn(ActorId) -> Option<Vec<SplitImpl>>,
     fragment_id: FragmentId,
     upstream_source_fragment_id: FragmentId,
 ) -> anyhow::Result<HashMap<ActorId, Vec<SplitImpl>>> {
     aligned_actors
         .into_iter()
         .map(|(actor_id, upstream_actor_id)| {
-            let Some(splits) = (match alignment_context {
-                SplitAlignmentContext::Stored(info) => {
-                    let guard = info.read_guard();
-                    let actor_info = guard.iter_over_fragments().find_map(|(_, fragment_info)| fragment_info.actors.get(&upstream_actor_id));
-                    actor_info.map(|info| info.splits.clone())
-                }
-                SplitAlignmentContext::Pending(existing_assignment) => {
-                    existing_assignment.get(&upstream_actor_id).cloned()
-                }
-            }) else {
+            let Some(splits) = get_upstream_actor_splits(upstream_actor_id) else {
                 return Err(anyhow::anyhow!("upstream assignment not found, fragment_id: {fragment_id}, upstream_fragment_id: {upstream_source_fragment_id}, actor_id: {actor_id}, upstream_actor_id: {upstream_actor_id:?}"));
             };
 
