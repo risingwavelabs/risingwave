@@ -520,7 +520,7 @@ pub(crate) mod tests {
         register_table_ids_to_compaction_group(
             &hummock_manager_ref,
             &[drop_table_id, existing_table_id],
-            StaticCompactionGroupId::StateDefault.into(),
+            StaticCompactionGroupId::StateDefault,
         )
         .await;
 
@@ -1860,6 +1860,7 @@ pub(crate) mod tests {
     }
 
     #[tokio::test]
+    #[allow(clippy::large_stack_frames)]
     async fn test_split_and_merge() {
         let (env, hummock_manager_ref, cluster_ctl_ref, worker_id) = setup_compute_env(8080).await;
         let hummock_meta_client: Arc<dyn HummockMetaClient> = Arc::new(MockHummockMetaClient::new(
@@ -2002,7 +2003,7 @@ pub(crate) mod tests {
         .await;
         epoch += millisec_interval_epoch;
 
-        let parent_group_id = 2;
+        let parent_group_id = 2.into();
         let split_table_ids = vec![table_id_2];
 
         async fn compact_once(

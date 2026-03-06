@@ -1,0 +1,117 @@
+# Regression test for: https://github.com/risingwavelabs/risingwave/issues/24790
+statement ok
+drop materialized view if exists t_stat;
+
+statement ok
+drop materialized view if exists t1_v;
+
+statement ok
+drop materialized view if exists t2_v;
+
+statement ok
+drop table if exists t;
+
+statement ok
+create table t (
+    id int primary key,
+    key string,
+    amount int
+);
+
+statement ok
+insert into t values
+    (1, 'k', 100),
+    (2, 'k', 200);
+
+statement ok
+create materialized view t1_v as
+select sum(amount) as amount, max(key) as key
+from t
+where id = 1;
+
+statement ok
+create materialized view t2_v as
+select sum(amount) as amount, max(key) as key
+from t
+where id = 2;
+
+statement ok
+create materialized view t_stat as
+select
+    coalesce(a.key, b.key) as key,
+    coalesce(a.amount, 0) as amount_1,
+    coalesce(b.amount, 0) as amount_2
+from t1_v a
+full outer join t2_v b
+    on a.key = b.key;
+
+statement ok
+flush;
+
+query TII
+select key, amount_1, amount_2 from t_stat;
+----
+k 100 200
+
+statement ok
+drop materialized view t_stat;
+
+statement ok
+drop materialized view t1_v;
+
+statement ok
+drop materialized view t2_v;
+
+statement ok
+drop table t;
+
+# Regression test for full outer join on nullable global-agg key
+statement ok
+drop materialized view if exists mvj;
+
+statement ok
+drop materialized view if exists mv;
+
+statement ok
+drop table if exists t;
+
+statement ok
+create table t (a int, b int);
+
+statement ok
+create materialized view mv as
+select max(a) ma, max(b) mb from t;
+
+statement ok
+insert into t values (1, NULL);
+
+statement ok
+flush;
+
+query II
+select ma, mb from mv;
+----
+1 NULL
+
+statement ok
+create materialized view mvj as
+select mv1.ma as ma1
+from mv as mv1
+full outer join mv as mv2
+    on mv1.mb = mv2.mb;
+
+statement ok
+flush;
+
+query I rowsort
+select ma1 from mvj;
+----
+
+statement ok
+drop materialized view mvj;
+
+statement ok
+drop materialized view mv;
+
+statement ok
+drop table t;

@@ -1417,11 +1417,7 @@ impl ToStream for LogicalAgg {
         use super::stream::prelude::*;
 
         let eowc = ctx.emit_on_window_close();
-        let input = if self.group_key().is_empty() {
-            self.input()
-        } else {
-            try_enforce_locality_requirement(self.input(), &self.group_key().to_vec())
-        };
+        let input = self.input();
 
         let stream_input = input.to_stream(ctx)?;
 
@@ -1521,11 +1517,34 @@ impl ToStream for LogicalAgg {
         }
     }
 
+    fn try_better_locality(&self, columns: &[usize]) -> Option<PlanRef> {
+        if columns.is_empty() {
+            return None;
+        }
+
+        // Check if the given columns are a prefix of group keys.
+        let group_key = self.group_key().to_vec();
+        if columns.len() > group_key.len() || columns != &group_key[..columns.len()] {
+            return None;
+        }
+
+        // Return the same plan directly without calling `try_better_locality` on input.
+        // Because in `to_stream`, we will enforce the locality requirement on the group keys anyway.
+        // If we call `try_better_locality` on input, it would miss the chance to utilize the locality of the current agg,
+        // since the agg's input doesn't have the locality yet at that moment.
+        Some(self.clone_with_input(self.input()).into())
+    }
+
     fn logical_rewrite_for_stream(
         &self,
         ctx: &mut RewriteStreamContext,
     ) -> Result<(PlanRef, ColIndexMapping)> {
-        let (input, input_col_change) = self.input().logical_rewrite_for_stream(ctx)?;
+        let logical_input = if self.group_key().is_empty() {
+            self.input()
+        } else {
+            try_enforce_locality_requirement(self.input(), &self.group_key().to_vec())
+        };
+        let (input, input_col_change) = logical_input.logical_rewrite_for_stream(ctx)?;
         let (agg, out_col_change) = self.rewrite_with_input(input, input_col_change);
         let (map, _) = out_col_change.into_parts();
         let out_col_change = ColIndexMapping::new(map, agg.schema().len());

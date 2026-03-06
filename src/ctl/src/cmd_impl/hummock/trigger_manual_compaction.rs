@@ -12,22 +12,26 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_pb::id::JobId;
+use risingwave_hummock_sdk::HummockSstableId;
+use risingwave_pb::id::{CompactionGroupId, JobId};
 use risingwave_rpc_client::HummockMetaClient;
 
 use crate::CtlContext;
 
 pub async fn trigger_manual_compaction(
     context: &CtlContext,
-    compaction_group_id: u64,
+    compaction_group_id: CompactionGroupId,
     table_id: JobId,
-    level: u32,
-    sst_ids: Vec<u64>,
+    levels: Vec<u32>,
+    sst_ids: Vec<HummockSstableId>,
 ) -> anyhow::Result<()> {
     let meta_client = context.meta_client().await?;
-    let result = meta_client
-        .trigger_manual_compaction(compaction_group_id, table_id, level, sst_ids)
-        .await;
-    println!("{:#?}", result);
+    for level in levels {
+        tracing::info!("Triggering manual compaction for level {level}...");
+        let result = meta_client
+            .trigger_manual_compaction(compaction_group_id, table_id, level, sst_ids.clone())
+            .await;
+        println!("Level {level}: {:#?}", result);
+    }
     Ok(())
 }

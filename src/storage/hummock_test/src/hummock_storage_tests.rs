@@ -24,6 +24,7 @@ use itertools::Itertools;
 use risingwave_common::bitmap::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_common::hash::VirtualNode;
+use risingwave_common::id::FragmentId;
 use risingwave_common::range::RangeBoundsExt;
 use risingwave_common::util::epoch::{EpochExt, INVALID_EPOCH, test_epoch};
 use risingwave_hummock_sdk::key::{
@@ -871,6 +872,7 @@ async fn test_state_store_multiple_flush_no_upload() {
         .storage
         .new_local(NewLocalOptions {
             table_id: TEST_TABLE_ID,
+            fragment_id: FragmentId::default(),
             op_consistency_level: OpConsistencyLevel::Inconsistent,
             table_option: TableOption {
                 retention_seconds: None,

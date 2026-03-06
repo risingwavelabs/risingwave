@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::id::ObjectId;
+use risingwave_common::id::{ObjectId, SchemaId};
 use user_catalog::UserCatalog;
 
 pub(crate) mod user_authentication;
@@ -21,7 +21,7 @@ pub(crate) mod user_manager;
 pub mod user_privilege;
 pub(crate) mod user_service;
 
-pub type UserId = u32;
+pub use risingwave_common::id::UserId;
 pub type UserInfoVersion = u64;
 
 /// Check if the current user has access to the object.
@@ -32,4 +32,13 @@ pub fn has_access_to_object(
 ) -> bool {
     let obj_id = obj_id.into();
     owner_id == current_user.id || current_user.check_object_visibility(obj_id)
+}
+
+pub fn has_schema_usage_privilege(
+    current_user: &UserCatalog,
+    schema_id: impl Into<SchemaId>,
+    owner_id: UserId,
+) -> bool {
+    let schema_id = schema_id.into();
+    current_user.id == owner_id || current_user.has_schema_usage_privilege(schema_id)
 }

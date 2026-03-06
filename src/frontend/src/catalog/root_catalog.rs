@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use itertools::Itertools;
@@ -25,7 +25,9 @@ use risingwave_pb::catalog::{
     PbConnection, PbDatabase, PbFunction, PbIndex, PbSchema, PbSecret, PbSink, PbSource,
     PbSubscription, PbTable, PbView,
 };
+use risingwave_pb::common::PbObjectType;
 use risingwave_pb::hummock::HummockVersionStats;
+use risingwave_pb::meta::ObjectDependency as PbObjectDependency;
 
 use super::function_catalog::FunctionCatalog;
 use super::source_catalog::SourceCatalog;
@@ -87,6 +89,25 @@ impl<'a> SchemaPath<'a> {
     }
 }
 
+#[derive(Clone, Debug)]
+pub struct ObjectDependency {
+    pub object_id: ObjectId,
+    pub referenced_object_id: ObjectId,
+    pub referenced_object_type: PbObjectType,
+}
+
+impl From<PbObjectDependency> for ObjectDependency {
+    fn from(dependency: PbObjectDependency) -> Self {
+        let referenced_object_type = PbObjectType::try_from(dependency.referenced_object_type)
+            .unwrap_or(PbObjectType::Unspecified);
+        Self {
+            object_id: dependency.object_id,
+            referenced_object_id: dependency.referenced_object_id,
+            referenced_object_type,
+        }
+    }
+}
+
 /// Root catalog of database catalog. It manages all database/schema/table in memory on frontend.
 /// It is protected by a `RwLock`. Only [`crate::observer::FrontendObserverNode`]
 /// will acquire the write lock and sync it with the meta catalog. In other situations, it is
@@ -104,6 +125,7 @@ pub struct Catalog {
     /// all table catalogs in the cluster identified by universal unique table id.
     table_by_id: HashMap<TableId, Arc<TableCatalog>>,
     table_stats: HummockVersionStats,
+    object_dependencies: HashMap<ObjectId, Vec<ObjectDependency>>,
 }
 
 #[expect(clippy::derivable_impls)]
@@ -114,6 +136,7 @@ impl Default for Catalog {
             db_name_by_id: HashMap::new(),
             table_by_id: HashMap::new(),
             table_stats: HummockVersionStats::default(),
+            object_dependencies: HashMap::new(),
         }
     }
 }
@@ -128,6 +151,7 @@ impl Catalog {
         self.database_by_name.clear();
         self.db_name_by_id.clear();
         self.table_by_id.clear();
+        self.object_dependencies.clear();
     }
 
     pub fn create_database(&mut self, db: &PbDatabase) {
@@ -293,16 +317,26 @@ impl Catalog {
     pub fn drop_database(&mut self, db_id: DatabaseId) {
         let name = self.db_name_by_id.remove(&db_id).unwrap();
         let database = self.database_by_name.remove(&name).unwrap();
+        let object_ids: HashSet<ObjectId> = database.iter_object_ids().collect();
+        self.remove_object_dependencies_for_objects(&object_ids);
         database.iter_all_table_ids().for_each(|table| {
             self.table_by_id.remove(&table);
         });
     }
 
     pub fn drop_schema(&mut self, db_id: DatabaseId, schema_id: SchemaId) {
+        let object_ids = self
+            .get_database_by_id(db_id)
+            .ok()
+            .and_then(|db| db.get_schema_by_id(schema_id))
+            .map(|schema| schema.iter_object_ids().collect::<HashSet<_>>())
+            .unwrap_or_default();
+        self.remove_object_dependencies_for_objects(&object_ids);
         self.get_database_mut(db_id).unwrap().drop_schema(schema_id);
     }
 
     pub fn drop_table(&mut self, db_id: DatabaseId, schema_id: SchemaId, tb_id: TableId) {
+        self.remove_object_dependencies_for_object(tb_id.as_object_id());
         self.table_by_id.remove(&tb_id);
         self.get_database_mut(db_id)
             .unwrap()
@@ -378,6 +412,7 @@ impl Catalog {
     }
 
     pub fn drop_source(&mut self, db_id: DatabaseId, schema_id: SchemaId, source_id: SourceId) {
+        self.remove_object_dependencies_for_object(source_id.as_object_id());
         self.get_database_mut(db_id)
             .unwrap()
             .get_schema_mut(schema_id)
@@ -404,6 +439,7 @@ impl Catalog {
     }
 
     pub fn drop_sink(&mut self, db_id: DatabaseId, schema_id: SchemaId, sink_id: SinkId) {
+        self.remove_object_dependencies_for_object(sink_id.as_object_id());
         self.get_database_mut(db_id)
             .unwrap()
             .get_schema_mut(schema_id)
@@ -412,6 +448,7 @@ impl Catalog {
     }
 
     pub fn drop_secret(&mut self, db_id: DatabaseId, schema_id: SchemaId, secret_id: SecretId) {
+        self.remove_object_dependencies_for_object(secret_id.as_object_id());
         self.get_database_mut(db_id)
             .unwrap()
             .get_schema_mut(schema_id)
@@ -443,6 +480,7 @@ impl Catalog {
         schema_id: SchemaId,
         subscription_id: SubscriptionId,
     ) {
+        self.remove_object_dependencies_for_object(subscription_id.as_object_id());
         self.get_database_mut(db_id)
             .unwrap()
             .get_schema_mut(schema_id)
@@ -470,6 +508,7 @@ impl Catalog {
     }
 
     pub fn drop_index(&mut self, db_id: DatabaseId, schema_id: SchemaId, index_id: IndexId) {
+        self.remove_object_dependencies_for_object(index_id.as_object_id());
         self.get_database_mut(db_id)
             .unwrap()
             .get_schema_mut(schema_id)
@@ -478,6 +517,7 @@ impl Catalog {
     }
 
     pub fn drop_view(&mut self, db_id: DatabaseId, schema_id: SchemaId, view_id: ViewId) {
+        self.remove_object_dependencies_for_object(view_id.as_object_id());
         self.get_database_mut(db_id)
             .unwrap()
             .get_schema_mut(schema_id)
@@ -509,6 +549,7 @@ impl Catalog {
         schema_id: SchemaId,
         function_id: FunctionId,
     ) {
+        self.remove_object_dependencies_for_object(function_id.as_object_id());
         self.get_database_mut(db_id)
             .unwrap()
             .get_schema_mut(schema_id)
@@ -1126,6 +1167,50 @@ impl Catalog {
 
     pub fn set_table_stats(&mut self, table_stats: HummockVersionStats) {
         self.table_stats = table_stats;
+    }
+
+    pub fn set_object_dependencies(&mut self, dependencies: Vec<PbObjectDependency>) {
+        self.object_dependencies.clear();
+        self.insert_object_dependencies(dependencies);
+    }
+
+    pub fn insert_object_dependencies(&mut self, dependencies: Vec<PbObjectDependency>) {
+        let mut grouped: HashMap<ObjectId, Vec<ObjectDependency>> = HashMap::new();
+        for dependency in dependencies {
+            let dependency = ObjectDependency::from(dependency);
+            grouped
+                .entry(dependency.object_id)
+                .or_default()
+                .push(dependency);
+        }
+        for (object_id, deps) in grouped {
+            self.object_dependencies.insert(object_id, deps);
+        }
+    }
+
+    pub fn iter_object_dependencies(&self) -> impl Iterator<Item = &ObjectDependency> {
+        self.object_dependencies
+            .values()
+            .flat_map(|deps| deps.iter())
+    }
+
+    fn remove_object_dependencies_for_object(&mut self, object_id: ObjectId) {
+        let mut object_ids = HashSet::new();
+        object_ids.insert(object_id);
+        self.remove_object_dependencies_for_objects(&object_ids);
+    }
+
+    fn remove_object_dependencies_for_objects(&mut self, object_ids: &HashSet<ObjectId>) {
+        if object_ids.is_empty() {
+            return;
+        }
+        self.object_dependencies.retain(|object_id, deps| {
+            if object_ids.contains(object_id) {
+                return false;
+            }
+            deps.retain(|dep| !object_ids.contains(&dep.referenced_object_id));
+            !deps.is_empty()
+        });
     }
 
     pub fn get_all_indexes_related_to_object(

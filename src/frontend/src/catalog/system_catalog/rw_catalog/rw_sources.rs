@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::id::{ConnectionId, SchemaId, SourceId, TableId, UserId};
 use risingwave_common::types::{Fields, JsonbVal, Timestamptz};
 use risingwave_frontend_macro::system_catalog;
 use serde_json::{Map as JsonMap, json};
@@ -25,17 +26,17 @@ use crate::handler::create_source::UPSTREAM_SOURCE_KEY;
 #[derive(Fields)]
 struct RwSource {
     #[primary_key]
-    id: i32,
+    id: SourceId,
     name: String,
-    schema_id: i32,
-    owner: i32,
+    schema_id: SchemaId,
+    owner: UserId,
     connector: String,
     columns: Vec<String>,
     format: Option<String>,
     row_encode: Option<String>,
     append_only: bool,
-    associated_table_id: Option<i32>,
-    connection_id: Option<i32>,
+    associated_table_id: Option<TableId>,
+    connection_id: Option<ConnectionId>,
     definition: String,
     acl: Vec<String>,
     initialized_at: Option<Timestamptz>,
@@ -65,10 +66,10 @@ fn read_rw_sources_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwSource>> 
                     source.info.format_encode_secret_refs.clone(),
                 );
                 RwSource {
-                    id: source.id.as_i32_id(),
+                    id: source.id,
                     name: source.name.clone(),
-                    schema_id: schema.id().as_i32_id(),
-                    owner: source.owner as i32,
+                    schema_id: schema.id(),
+                    owner: source.owner,
                     connector: source
                         .with_properties
                         .get(UPSTREAM_SOURCE_KEY)
@@ -87,8 +88,8 @@ fn read_rw_sources_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwSource>> 
                         .ok()
                         .map(|row_encode| row_encode.as_str_name().into()),
                     append_only: source.append_only,
-                    associated_table_id: source.associated_table_id.map(|id| id.as_i32_id()),
-                    connection_id: source.connection_id.map(|id| id.as_i32_id()),
+                    associated_table_id: source.associated_table_id,
+                    connection_id: source.connection_id,
                     definition: source.create_sql_purified(),
                     acl: get_acl_items(source.id, false, &users, username_map),
                     initialized_at: source.initialized_at_epoch.map(|e| e.as_timestamptz()),

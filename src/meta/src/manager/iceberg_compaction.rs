@@ -840,7 +840,7 @@ impl IcebergCompactionManager {
         }
 
         let catalog = iceberg_config.create_catalog().await?;
-        let table = catalog
+        let mut table = catalog
             .load_table(&iceberg_config.full_table_name()?)
             .await
             .map_err(|e| SinkError::Iceberg(e.into()))?;
@@ -888,12 +888,21 @@ impl IcebergCompactionManager {
             expired_snapshots = expired_snapshots.retain_last(retain_last);
         }
 
+        let before_metadata = table.metadata_ref();
         let tx = expired_snapshots
             .apply(txn)
             .map_err(|e| SinkError::Iceberg(e.into()))?;
-        tx.commit(catalog.as_ref())
+        table = tx
+            .commit(catalog.as_ref())
             .await
             .map_err(|e| SinkError::Iceberg(e.into()))?;
+
+        if iceberg_config.snapshot_expiration_clear_expired_files {
+            table
+                .cleanup_expired_files(&before_metadata)
+                .await
+                .map_err(|e| SinkError::Iceberg(e.into()))?;
+        }
 
         tracing::info!(
             catalog_name = iceberg_config.catalog_name(),

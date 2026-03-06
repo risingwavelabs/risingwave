@@ -14,6 +14,7 @@
 
 #![allow(unfulfilled_lint_expectations)]
 #![allow(clippy::doc_overindented_list_items)]
+#![allow(clippy::doc_lazy_continuation)]
 // for derived code of `Message`
 #![expect(clippy::doc_markdown)]
 #![expect(clippy::upper_case_acronyms)]
@@ -24,6 +25,7 @@
 #![expect(clippy::module_inception)]
 // FIXME: This should be fixed!!! https://github.com/risingwavelabs/risingwave/issues/19906
 #![expect(clippy::large_enum_variant)]
+#![feature(step_trait)]
 
 pub mod id;
 
@@ -507,14 +509,19 @@ impl catalog::StreamSourceInfo {
 }
 
 impl stream_plan::PbStreamScanType {
-    pub fn is_reschedulable(&self) -> bool {
+    pub fn is_reschedulable(&self, is_online: bool) -> bool {
         match self {
+            PbStreamScanType::Unspecified => {
+                unreachable!()
+            }
             // todo: should this be true?
             PbStreamScanType::UpstreamOnly => false,
             PbStreamScanType::ArrangementBackfill => true,
             PbStreamScanType::CrossDbSnapshotBackfill => true,
-            PbStreamScanType::SnapshotBackfill => true,
-            _ => false,
+            PbStreamScanType::SnapshotBackfill => !is_online,
+            PbStreamScanType::Chain | PbStreamScanType::Rearrange | PbStreamScanType::Backfill => {
+                false
+            }
         }
     }
 }

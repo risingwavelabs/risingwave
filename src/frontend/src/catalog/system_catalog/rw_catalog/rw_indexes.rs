@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use risingwave_common::catalog::CreateType;
+use risingwave_common::id::{IndexId, SchemaId, TableId, UserId};
 use risingwave_common::types::{Fields, Timestamptz};
 use risingwave_frontend_macro::system_catalog;
 
@@ -23,13 +24,13 @@ use crate::error::Result;
 #[derive(Fields)]
 struct RwIndex {
     #[primary_key]
-    id: i32,
+    id: IndexId,
     name: String,
-    primary_table_id: i32,
+    primary_table_id: TableId,
     key_columns: Vec<i16>,
     include_columns: Vec<i16>,
-    schema_id: i32,
-    owner: i32,
+    schema_id: SchemaId,
+    owner: UserId,
     definition: String,
     acl: Vec<String>,
     initialized_at: Option<Timestamptz>,
@@ -56,9 +57,9 @@ fn read_rw_indexes(reader: &SysCatalogReaderImpl) -> Result<Vec<RwIndex>> {
                     IndexType::Vector(index) => (&index.index_table, 1),
                 };
                 RwIndex {
-                    id: index.id.as_i32_id(),
+                    id: index.id,
                     name: index.name.clone(),
-                    primary_table_id: index.primary_table.id().as_i32_id(),
+                    primary_table_id: index.primary_table.id(),
                     key_columns: index
                         .index_item
                         .iter()
@@ -85,8 +86,8 @@ fn read_rw_indexes(reader: &SysCatalogReaderImpl) -> Result<Vec<RwIndex>> {
                             ind as i16
                         })
                         .collect(),
-                    schema_id: schema.id().as_i32_id(),
-                    owner: index.index_table().owner as i32,
+                    schema_id: schema.id(),
+                    owner: index.index_table().owner,
                     definition: index_table.create_sql(),
                     acl: vec![],
                     initialized_at: index.initialized_at_epoch.map(|e| e.as_timestamptz()),

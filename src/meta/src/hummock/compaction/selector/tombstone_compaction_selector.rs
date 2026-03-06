@@ -14,7 +14,7 @@
 
 use std::collections::HashMap;
 
-use risingwave_hummock_sdk::HummockCompactionTaskId;
+use risingwave_hummock_sdk::{CompactionGroupId, HummockCompactionTaskId};
 use risingwave_pb::hummock::compact_task;
 
 use super::{CompactionSelector, DynamicLevelSelectorCore};
@@ -26,7 +26,7 @@ use crate::hummock::compaction::{CompactionTask, create_compaction_task, create_
 
 #[derive(Default)]
 pub struct TombstoneCompactionSelector {
-    state: HashMap<u64, TombstoneReclaimPickerState>,
+    state: HashMap<CompactionGroupId, TombstoneReclaimPickerState>,
 }
 
 impl CompactionSelector for TombstoneCompactionSelector {

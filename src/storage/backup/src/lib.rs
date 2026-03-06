@@ -111,7 +111,7 @@ impl From<&MetaSnapshotMetadata> for PbMetaSnapshotMetadata {
     fn from(m: &MetaSnapshotMetadata) -> Self {
         Self {
             id: m.id,
-            hummock_version_id: m.hummock_version_id.to_u64(),
+            hummock_version_id: m.hummock_version_id,
             format_version: Some(m.format_version),
             remarks: m.remarks.clone(),
             state_table_info: m

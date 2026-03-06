@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use itertools::Itertools;
+use risingwave_common::id::{ActorId, FragmentId};
 use risingwave_common::types::{Fields, JsonbVal};
 use risingwave_frontend_macro::system_catalog;
 use serde_json::json;
@@ -23,8 +24,8 @@ use crate::error::Result;
 #[derive(Fields)]
 struct RwActorInfo {
     #[primary_key]
-    actor_id: i32,
-    fragment_id: i32,
+    actor_id: ActorId,
+    fragment_id: FragmentId,
     node: JsonbVal,
     dispatcher: JsonbVal,
 }
@@ -45,8 +46,8 @@ async fn read_rw_actors(reader: &SysCatalogReaderImpl) -> Result<Vec<RwActorInfo
             fragment_info.fragments.into_iter().flat_map(|fragment| {
                 let fragment_id = fragment.id;
                 fragment.actors.into_iter().map(move |actor| RwActorInfo {
-                    actor_id: actor.id.as_i32_id(),
-                    fragment_id: fragment_id.as_i32_id(),
+                    actor_id: actor.id,
+                    fragment_id,
                     node: json!(actor.node).into(),
                     dispatcher: json!(actor.dispatcher).into(),
                 })
