@@ -324,13 +324,6 @@ impl meta::table_fragments::ActorStatus {
     }
 }
 
-impl common::WorkerNode {
-    pub fn is_streaming_schedulable(&self) -> bool {
-        let property = self.property.as_ref();
-        property.is_some_and(|p| p.is_streaming) && !property.is_some_and(|p| p.is_unschedulable)
-    }
-}
-
 impl common::ActorLocation {
     pub fn from_worker(worker_node_id: WorkerId) -> Option<Self> {
         Some(Self { worker_node_id })

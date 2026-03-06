@@ -201,7 +201,6 @@ async fn test_barrier_manager_worker_crash_no_early_commit() {
         property: Some(worker_node::Property {
             is_streaming: true,
             is_serving: true,
-            is_unschedulable: false,
             internal_rpc_host_addr: "".to_owned(),
             parallelism: 1,
             resource_group: Some(resource_group.to_owned()),
