@@ -28,28 +28,31 @@ impl Binder {
             [table, column] => (None, Some(table.real_value()), column.real_value()),
             [schema, table, column] => {
                 let schema_name = schema.real_value();
-                let table_name = table.real_value();
+                let relation_name = table.real_value();
                 if !is_system_schema(&schema_name) {
-                    self.catalog
+                    let schema = self
+                        .catalog
                         .get_schema_by_name(&self.db_name, &schema_name)
                         .map_err(|_| {
                             ErrorCode::InvalidReference(format!(
                                 "missing FROM-clause entry for table \"{}\"\n",
-                                table_name
+                                relation_name
                             ))
                         })?;
-                    let schema_path = self.bind_schema_path(Some(&schema_name));
-                    self.catalog
-                        .get_any_table_by_name(&self.db_name, schema_path, &table_name)
-                        .map_err(|_| {
-                            ErrorCode::InvalidReference(format!(
-                                "FROM-clause entry for table \"{}\"\n\
-                                DETAIL: There is an entry for table \"{}\", but it cannot be referenced from this part of the query.",
-                                table_name, table_name
-                            ))
-                        })?;
+                    let relation_exists = schema.get_any_table_by_name(&relation_name).is_some()
+                        || schema.get_any_index_by_name(&relation_name).is_some()
+                        || schema.get_any_sink_by_name(&relation_name).is_some()
+                        || schema.get_source_by_name(&relation_name).is_some()
+                        || schema.get_view_by_name(&relation_name).is_some();
+                    if !relation_exists {
+                        return Err(ErrorCode::InvalidReference(format!(
+                            "missing FROM-clause entry for table \"{}\"\n",
+                            relation_name
+                        ))
+                        .into());
+                    }
                 }
-                (Some(schema_name), Some(table_name), column.real_value())
+                (Some(schema_name), Some(relation_name), column.real_value())
             }
             _ => {
                 return Err(
