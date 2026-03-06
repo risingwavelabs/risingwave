@@ -121,6 +121,9 @@ def _(outer_panels: Panels):
             ],
         )
     )
+    total_memory_usage_ratio_expr = (
+        f"({total_memory_usage_expr}) / on() group_left clamp_min(sum(({total_memory_usage_expr})), 1)"
+    )
     return [
         outer_panels.row_collapsed(
             "Streaming Relation Metrics",
@@ -249,6 +252,20 @@ def _(outer_panels: Panels):
                     ],
                 ),
                 panels.subheader("Memory Usage By Relation"),
+                panels.timeseries_percentage(
+                    "Total Memory Usage Ratio(%)",
+                    "Relation memory usage / sum of all relation memory usages",
+                    [
+                        panels.target(
+                            _relation_metric_with_metadata(
+                                relabel_materialized_view_id_as_id(
+                                    total_memory_usage_ratio_expr
+                                )
+                            ),
+                            "relation {{name}} (id={{id}} type={{type}})",
+                        ),
+                    ],
+                ),
                 panels.timeseries_bytes(
                     "Total Memory Usage",
                     "Sum of executor cache, shared buffer imm size, and log store buffer memory",
