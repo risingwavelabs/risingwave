@@ -109,9 +109,15 @@ impl DeleteExecutor {
         let data_types = self.child.schema().data_types();
         let mut builder = DataChunkBuilder::new(data_types, self.chunk_size);
 
-        let table_dml_handle = self
+        let (table_dml_handle, mut write_handle) = self
             .dml_manager
-            .table_dml_handle(self.table_id, self.table_version_id)?;
+            .table_write_handle(
+                self.table_id,
+                self.table_version_id,
+                self.session_id,
+                self.txn_id,
+            )
+            .await?;
         assert_eq!(
             table_dml_handle
                 .column_descs()
@@ -121,8 +127,6 @@ impl DeleteExecutor {
             self.child.schema().data_types(),
             "bad delete schema"
         );
-        let mut write_handle = table_dml_handle.write_handle(self.session_id, self.txn_id)?;
-
         write_handle.begin()?;
 
         // Transform the data chunk to a stream chunk, then write to the source.
