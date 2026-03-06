@@ -34,13 +34,13 @@ impl Binder {
                         .get_schema_by_name(&self.db_name, &schema_name)
                         .map_err(|_| {
                             ErrorCode::InvalidReference(format!(
-                                "missing FROM-clause entry for table \"{}\".",
+                                "missing FROM-clause entry for table \"{}\"\n",
                                 table_name
                             ))
                         })?;
                     let schema_path = self.bind_schema_path(Some(&schema_name));
                     self.catalog
-                        .get_id_by_class_name(&self.db_name, schema_path, &table_name)
+                        .get_any_table_by_name(&self.db_name, schema_path, &table_name)
                         .map_err(|_| {
                             ErrorCode::InvalidReference(format!(
                                 "FROM-clause entry for table \"{}\"\n\

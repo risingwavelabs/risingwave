@@ -2,11 +2,12 @@
 - sql: |
     create table t(c STRUCT<x INTEGER, y INTEGER>);
     select t.c.x from t
-  binder_error: |
+  binder_error: |+
     Failed to bind expression: t.c.x
 
     Caused by:
-      Invalid reference: missing FROM-clause entry for table "c".
+      Invalid reference: missing FROM-clause entry for table "c"
+
 - sql: |
     create table t(c STRUCT<x INTEGER, y INTEGER>);
     select (t.c).x from t
