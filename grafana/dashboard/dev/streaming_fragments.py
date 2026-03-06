@@ -342,7 +342,7 @@ def _(outer_panels: Panels):
                 ),
                 panels.subheader("Memory Usage by Fragment"),
                 panels.timeseries_percentage(
-                    "Total Memory Usage(%)",
+                    "Total Memory Usage Ratio(%)",
                     "Fragment memory usage / sum of all fragment memory usages",
                     [
                         panels.target(
