@@ -584,6 +584,13 @@ impl DatabaseCheckpointControl {
                     partial_graph_manager.control_stream_manager(),
                 );
 
+                // For replace sink, the new sink is a completely new job that
+                // doesn't yet exist in database_info.jobs. Register it first.
+                if plan.old_fragments.stream_job_id != plan.streaming_job.id() {
+                    self.database_info
+                        .pre_apply_new_job(plan.streaming_job.id(), None);
+                }
+
                 // Pre-apply: add new fragments and replace upstream
                 self.database_info.pre_apply_new_fragments(
                     plan.new_fragments
