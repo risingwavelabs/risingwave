@@ -58,7 +58,7 @@ impl HummockManager {
         else {
             return Ok(());
         };
-        guard.last_time_travel_snapshot_sst_ids = version.get_sst_ids(true);
+        guard.last_time_travel_snapshot_sst_ids = version.get_sst_ids();
         Ok(())
     }
 
@@ -135,9 +135,9 @@ impl HummockManager {
         ) = {
             (
                 latest_valid_version.id,
-                latest_valid_version.get_sst_ids(true),
+                latest_valid_version.get_sst_ids(),
                 latest_valid_version
-                    .get_object_ids(true)
+                    .get_object_ids()
                     .collect::<HashSet<_>>(),
             )
         };
@@ -230,7 +230,7 @@ impl HummockManager {
                     &prev_version.version.to_protobuf(),
                 )
             };
-            let sst_ids = prev_version.get_sst_ids(true);
+            let sst_ids = prev_version.get_sst_ids();
             // The SST ids deleted by compaction between the 2 versions.
             sst_ids_to_delete.extend(&sst_ids - &next_version_sst_ids);
             if sst_ids_to_delete.len() >= delete_sst_batch_size {
@@ -241,7 +241,7 @@ impl HummockManager {
                 )
                 .await?;
             }
-            let new_object_ids: HashSet<_> = prev_version.get_object_ids(true).collect();
+            let new_object_ids: HashSet<_> = prev_version.get_object_ids().collect();
             object_ids_to_delete.extend(&new_object_ids - &latest_valid_version_object_ids);
             next_version_sst_ids = sst_ids;
         }
@@ -353,7 +353,7 @@ impl HummockManager {
                 while let Some(model) = version_stream.try_next().await? {
                     let version =
                         HummockVersion::from_persisted_protobuf(&model.version.to_protobuf());
-                    for object_id in version.get_object_ids(true) {
+                    for object_id in version.get_object_ids() {
                         result.remove(&object_id);
                     }
                     next_prev_version_id = Some(model.version_id);
@@ -493,7 +493,7 @@ impl HummockManager {
         );
 
         let mut sst_ids = actual_version
-            .get_sst_ids(true)
+            .get_sst_ids()
             .into_iter()
             .collect::<VecDeque<_>>();
         let sst_count = sst_ids.len();
@@ -612,7 +612,7 @@ impl HummockManager {
             // `version_sst_ids` is used to update `last_time_travel_snapshot_sst_ids`.
             version_sst_ids = Some(
                 version
-                    .get_sst_infos(true)
+                    .get_sst_infos()
                     .filter_map(|s| {
                         if s.table_ids
                             .iter()
@@ -625,7 +625,7 @@ impl HummockManager {
                     .collect(),
             );
             write_sstable_infos(
-                version.get_sst_infos(true).filter(|s| {
+                version.get_sst_infos().filter(|s| {
                     !skip_sst_ids.contains(&s.sst_id)
                         && s.table_ids
                             .iter()

@@ -661,6 +661,39 @@ impl HummockManagerService for HummockServiceImpl {
             .await?;
         Ok(Response::new(MergeCompactionGroupResponse {}))
     }
+
+    async fn get_table_change_logs(
+        &self,
+        request: Request<GetTableChangeLogsRequest>,
+    ) -> Result<Response<GetTableChangeLogsResponse>, Status> {
+        let GetTableChangeLogsRequest {
+            epoch_only,
+            start_epoch_inclusive,
+            end_epoch_inclusive,
+            table_ids,
+            exclude_empty,
+            limit,
+        } = request.into_inner();
+        let table_change_logs = self
+            .hummock_manager
+            .get_table_change_logs(
+                epoch_only,
+                start_epoch_inclusive,
+                end_epoch_inclusive,
+                table_ids
+                    .map(|t| t.table_ids.into_iter().collect::<HashSet<_>>())
+                    .clone(),
+                exclude_empty,
+                limit,
+            )
+            .await
+            .into_iter()
+            .map(|(i, l)| (i.as_raw_id(), l.to_protobuf()))
+            .collect();
+        Ok(Response::new(GetTableChangeLogsResponse {
+            table_change_logs,
+        }))
+    }
 }
 
 #[cfg(test)]

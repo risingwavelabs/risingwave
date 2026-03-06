@@ -17,7 +17,7 @@ use std::ops::Bound::{Excluded, Included};
 use std::ops::{Deref, DerefMut};
 use std::sync::atomic::Ordering;
 
-use risingwave_hummock_sdk::compaction_group::hummock_version_ext::object_size_map;
+use risingwave_hummock_sdk::compaction_group::hummock_version_ext::version_object_size_map;
 use risingwave_hummock_sdk::version::HummockVersion;
 use risingwave_hummock_sdk::{HummockObjectId, HummockVersionId, get_stale_object_ids};
 use risingwave_pb::hummock::hummock_version_checkpoint::{PbStaleObjects, StaleObjects};
@@ -140,17 +140,21 @@ impl HummockManager {
             let versioning = self.versioning.read().await;
             let context_info = self.context_info.read().await;
             let min_pinned_version_id = context_info.min_pinned_version_id();
-            trigger_gc_stat(&self.metrics, &versioning.checkpoint, min_pinned_version_id);
+            trigger_gc_stat(
+                &self.metrics,
+                &versioning.checkpoint,
+                min_pinned_version_id,
+                &versioning.table_change_log,
+            );
             return Ok(0);
         }
         assert!(new_checkpoint_id > old_checkpoint_id);
         let mut archive: Option<PbHummockVersionArchive> = None;
         let mut stale_objects = old_checkpoint.stale_objects.clone();
         // `object_sizes` is used to calculate size of stale objects.
-        let mut object_sizes = object_size_map(&old_checkpoint.version);
+        let mut object_sizes = version_object_size_map(&old_checkpoint.version);
         // The set of object ids that once exist in any hummock version
-        let mut versions_object_ids: HashSet<_> =
-            old_checkpoint.version.get_object_ids(false).collect();
+        let mut versions_object_ids: HashSet<_> = old_checkpoint.version.get_object_ids().collect();
         for (_, version_delta) in versioning
             .hummock_version_deltas
             .range((Excluded(old_checkpoint_id), Included(new_checkpoint_id)))
@@ -179,8 +183,16 @@ impl HummockManager {
         }
 
         // Object ids that once exist in any hummock version but not exist in the latest hummock version
-        let removed_object_ids =
-            &versions_object_ids - &current_version.get_object_ids(false).collect();
+        let current_version_object_ids = current_version
+            .get_object_ids()
+            .chain(
+                versioning
+                    .table_change_log
+                    .values()
+                    .flat_map(|l| l.get_object_ids()),
+            )
+            .collect();
+        let removed_object_ids = &versions_object_ids - &current_version_object_ids;
         let total_file_size = removed_object_ids
             .iter()
             .map(|t| {
@@ -260,7 +272,12 @@ impl HummockManager {
         assert!(new_checkpoint.version.id > versioning.checkpoint.version.id);
         versioning.checkpoint = new_checkpoint;
         let min_pinned_version_id = self.context_info.read().await.min_pinned_version_id();
-        trigger_gc_stat(&self.metrics, &versioning.checkpoint, min_pinned_version_id);
+        trigger_gc_stat(
+            &self.metrics,
+            &versioning.checkpoint,
+            min_pinned_version_id,
+            &versioning.table_change_log,
+        );
         trigger_split_stat(&self.metrics, &versioning.current_version);
         drop(versioning_guard);
         timer.observe_duration();
