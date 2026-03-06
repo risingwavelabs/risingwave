@@ -107,15 +107,10 @@ impl InsertExecutor {
         let data_types = self.child.schema().data_types();
         let mut builder = DataChunkBuilder::new(data_types, self.chunk_size);
 
-        let (table_dml_handle, mut write_handle) = self
+        let table_dml_handle = self
             .dml_manager
-            .table_write_handle(
-                self.table_id,
-                self.table_version_id,
-                self.session_id,
-                self.txn_id,
-            )
-            .await?;
+            .table_dml_handle(self.table_id, self.table_version_id)?;
+        let mut write_handle = table_dml_handle.write_handle(self.session_id, self.txn_id)?;
 
         write_handle.begin()?;
 

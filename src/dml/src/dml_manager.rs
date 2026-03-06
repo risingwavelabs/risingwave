@@ -16,16 +16,14 @@ use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
 use std::sync::{Arc, Weak};
-use std::time::Duration;
 
 use parking_lot::RwLock;
 use risingwave_common::catalog::{ColumnDesc, TableId, TableVersionId};
 use risingwave_common::transaction::transaction_id::{TxnId, TxnIdGenerator};
 use risingwave_common::util::worker_util::WorkerNodeId;
-use tokio::time::sleep;
 
 use crate::error::{DmlError, Result};
-use crate::{TableDmlHandle, TableDmlHandleRef, WriteHandle};
+use crate::{TableDmlHandle, TableDmlHandleRef};
 
 pub type DmlManagerRef = Arc<DmlManager>;
 
@@ -48,9 +46,6 @@ pub struct DmlManager {
 }
 
 impl DmlManager {
-    const NO_READER_RETRY_INTERVAL: Duration = Duration::from_millis(50);
-    const NO_READER_RETRY_TIMES: usize = 20;
-
     pub fn new(worker_node_id: WorkerNodeId, dml_channel_initial_permits: usize) -> Self {
         Self {
             table_readers: RwLock::new(HashMap::new()),
@@ -167,30 +162,6 @@ impl DmlManager {
         .ok_or(DmlError::NoReader)?;
 
         Ok(table_dml_handle)
-    }
-
-    pub async fn table_write_handle(
-        &self,
-        table_id: TableId,
-        table_version_id: TableVersionId,
-        session_id: u32,
-        txn_id: TxnId,
-    ) -> Result<(TableDmlHandleRef, WriteHandle)> {
-        for _ in 0..Self::NO_READER_RETRY_TIMES {
-            match self.table_dml_handle(table_id, table_version_id) {
-                Ok(table_dml_handle) => match table_dml_handle.write_handle(session_id, txn_id) {
-                    Ok(write_handle) => return Ok((table_dml_handle, write_handle)),
-                    Err(DmlError::NoReader) => {}
-                    Err(err) => return Err(err),
-                },
-                Err(DmlError::NoReader) => {}
-                Err(err) => return Err(err),
-            }
-
-            sleep(Self::NO_READER_RETRY_INTERVAL).await;
-        }
-
-        Err(DmlError::NoReader)
     }
 
     pub fn clear(&self) {
@@ -342,37 +313,5 @@ mod tests {
         let _h = dml_manager
             .register_reader(table_id, table_version_id, &other_column_descs)
             .unwrap();
-    }
-
-    #[tokio::test]
-    async fn test_wait_table_write_handle_until_reader_ready() {
-        let dml_manager = Arc::new(DmlManager::for_test());
-        let table_id = TableId::new(1);
-        let table_version_id = INITIAL_TABLE_VERSION_ID;
-        let column_descs = vec![ColumnDesc::unnamed(100.into(), DataType::Float64)];
-
-        let reader_manager = dml_manager.clone();
-        let reader_task = tokio::spawn(async move {
-            sleep(Duration::from_millis(100)).await;
-            let table_dml_handle = reader_manager
-                .register_reader(table_id, table_version_id, &column_descs)
-                .unwrap();
-            let _reader = table_dml_handle.stream_reader();
-            sleep(Duration::from_millis(100)).await;
-        });
-
-        let (_table_dml_handle, mut write_handle) = dml_manager
-            .table_write_handle(
-                table_id,
-                table_version_id,
-                TEST_SESSION_ID,
-                TEST_TRANSACTION_ID,
-            )
-            .await
-            .unwrap();
-        write_handle.begin().unwrap();
-        write_handle.rollback().unwrap();
-
-        reader_task.await.unwrap();
     }
 }
