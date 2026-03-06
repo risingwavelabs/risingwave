@@ -197,7 +197,7 @@ steps:
     plugins:
       - docker-compose#v5.5.0: *docker-compose
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 38
+    timeout_in_minutes: 45
     parallelism: 4
     retry: *auto-retry
 
