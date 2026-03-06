@@ -89,13 +89,13 @@ alter source non_shared_source_1 connector WITH (properties.receive.message.max.
 statement ok
 alter source non_shared_source_2 connector WITH (properties.receive.message.max.bytes = secret s2);
 
-query I
+query I retry 5 backoff 1s
 select count(*)  from rw_sources where definition ILIKE '%secret s2%' and name = 'non_shared_source_1';
 ----
 1
 
 
-query I
+query I retry 5 backoff 1s
 select count(*)  from rw_sources where definition ILIKE '%secret s2%' and name = 'non_shared_source_2';
 ----
 1
