@@ -463,13 +463,13 @@ impl DdlController {
                     dependencies,
                     resource_type,
                 } => {
-                    ctrl.replace_sink(
+                    Box::pin(ctrl.replace_sink(
                         old_sink_id,
                         stream_job,
                         fragment_graph,
                         dependencies,
                         resource_type,
-                    )
+                    ))
                     .await
                 }
                 DdlCommand::AlterName(relation, name) => ctrl.alter_name(relation, &name).await,
@@ -1260,9 +1260,13 @@ impl DdlController {
         resource_type: streaming_job_resource_type::ResourceType,
         permit: OwnedSemaphorePermit,
     ) -> MetaResult<NotificationVersion> {
-        let (ctx, stream_job_fragments) = self
-            .build_new_streaming_job(ctx, streaming_job, fragment_graph, resource_type)
-            .await?;
+        let (ctx, stream_job_fragments) = Box::pin(self.build_new_streaming_job(
+            ctx,
+            streaming_job,
+            fragment_graph,
+            resource_type,
+        ))
+        .await?;
 
         let backfill_orders = ctx.fragment_backfill_ordering.to_meta_model();
         self.metadata_manager
@@ -1458,9 +1462,13 @@ impl DdlController {
                 )
                 .await?;
 
-            let (create_ctx, stream_job_fragments) = self
-                .build_new_streaming_job(ctx, streaming_job, fragment_graph, resource_type)
-                .await?;
+            let (create_ctx, stream_job_fragments) = Box::pin(self.build_new_streaming_job(
+                ctx,
+                streaming_job,
+                fragment_graph,
+                resource_type,
+            ))
+            .await?;
 
             self.metadata_manager
                 .catalog_controller
