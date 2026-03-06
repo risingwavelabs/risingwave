@@ -24,7 +24,6 @@ use risingwave_hummock_sdk::{HummockEpoch, HummockVersionId};
 use risingwave_meta::backup_restore::RestoreOpts;
 use risingwave_pb::hummock::rise_ctl_update_compaction_config_request::CompressionAlgorithm;
 use risingwave_pb::id::{CompactionGroupId, FragmentId, HummockSstableId, JobId, TableId};
-use risingwave_pb::meta::update_worker_node_schedulability_request::Schedulability;
 use thiserror_ext::AsReport;
 
 use crate::cmd_impl::hummock::{
@@ -67,9 +66,6 @@ enum Commands {
     /// Commands for Meta
     #[clap(subcommand)]
     Meta(MetaCommands),
-    /// Commands for Scaling
-    #[clap(subcommand)]
-    Scale(ScaleCommands),
     /// Commands for Benchmarks
     #[clap(subcommand)]
     Bench(BenchCommands),
@@ -335,33 +331,6 @@ enum TableCommands {
     },
     /// list all state tables
     List,
-}
-
-#[derive(Subcommand, Debug)]
-enum ScaleCommands {
-    /// Mark a compute node as unschedulable
-    #[clap(verbatim_doc_comment)]
-    Cordon {
-        /// Workers that need to be cordoned, both id and host are supported.
-        #[clap(
-            long,
-            required = true,
-            value_delimiter = ',',
-            value_name = "id or host,..."
-        )]
-        workers: Vec<String>,
-    },
-    /// mark a compute node as schedulable. Nodes are schedulable unless they are cordoned
-    Uncordon {
-        /// Workers that need to be uncordoned, both id and host are supported.
-        #[clap(
-            long,
-            required = true,
-            value_delimiter = ',',
-            value_name = "id or host,..."
-        )]
-        workers: Vec<String>,
-    },
 }
 
 #[derive(Subcommand)]
@@ -980,14 +949,6 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
         }) => cmd_impl::profile::cpu_profile(context, sleep, worker_types).await?,
         Commands::Profile(ProfileCommands::Heap { dir, worker_types }) => {
             cmd_impl::profile::heap_profile(context, dir, worker_types).await?
-        }
-        Commands::Scale(ScaleCommands::Cordon { workers }) => {
-            cmd_impl::scale::update_schedulability(context, workers, Schedulability::Unschedulable)
-                .await?
-        }
-        Commands::Scale(ScaleCommands::Uncordon { workers }) => {
-            cmd_impl::scale::update_schedulability(context, workers, Schedulability::Schedulable)
-                .await?
         }
         Commands::Throttle(ThrottleCommands::Source(args)) => {
             apply_throttle(context, risingwave_pb::meta::PbThrottleTarget::Source, args).await?

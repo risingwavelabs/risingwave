@@ -391,7 +391,6 @@ async fn test_release_context_resource() {
                 parallelism: fake_parallelism,
                 is_streaming: true,
                 is_serving: true,
-                is_unschedulable: false,
                 ..Default::default()
             },
             Default::default(),
@@ -474,7 +473,6 @@ async fn test_hummock_manager_basic() {
                 parallelism: fake_parallelism,
                 is_streaming: true,
                 is_serving: true,
-                is_unschedulable: false,
                 ..Default::default()
             },
             Default::default(),

@@ -636,8 +636,7 @@ impl ActorGraphBuilder {
         let expected_vnode_count = fragment_graph.max_parallelism();
         let existing_distributions = fragment_graph.existing_distribution();
 
-        let schedulable_workers =
-            cluster_info.filter_schedulable_workers_by_resource_group(&resource_group);
+        let schedulable_workers = cluster_info.filter_workers_by_resource_group(&resource_group);
 
         let scheduler = schedule::Scheduler::new(
             streaming_job_id,
@@ -751,21 +750,8 @@ impl ActorGraphBuilder {
             building_locations,
             downstream_fragment_changes,
             upstream_fragment_changes,
-            external_locations,
+            ..
         } = self.build_actor_graph(id_gen)?;
-
-        for alignment_id in external_locations.values() {
-            if self
-                .cluster_info
-                .unschedulable_workers
-                .contains(&alignment_id.worker_id())
-            {
-                bail!(
-                    "The worker {} where the associated upstream is located is unschedulable",
-                    alignment_id.worker_id(),
-                );
-            }
-        }
 
         let mut downstream_fragment_relations: FragmentDownstreamRelation = HashMap::new();
         let mut new_no_shuffle: FragmentNewNoShuffle = HashMap::new();
