@@ -275,9 +275,6 @@ impl HummockManager {
             }
         };
         let total_size = object_metadata.total_size;
-        if total_size == 0 {
-            return Ok(None);
-        }
 
         let download_start = std::time::Instant::now();
         let data = if total_size <= CHUNK_SIZE {
@@ -690,6 +687,16 @@ mod tests {
         assert!(
             err.to_string()
                 .contains("failed to decode checkpoint envelope payload"),
+            "{err:?}"
+        );
+    }
+
+    #[test]
+    fn decode_checkpoint_data_returns_error_on_empty_input() {
+        let err = decode_checkpoint_data(Bytes::new()).expect_err("empty checkpoint should fail");
+        assert!(
+            err.to_string()
+                .contains("legacy checkpoint missing required field `version`"),
             "{err:?}"
         );
     }
