@@ -29,6 +29,12 @@ message DropDatabaseRequest {
   uint32 database_id = 1;
 }
 
+message CascadeObject {
+  string object = 1;
+  optional string schema_name = 2;
+  string object_name = 3;
+}
+
 message DropDatabaseResponse {
   common.Status status = 1;
   WaitVersion version = 2;
@@ -51,6 +57,7 @@ message DropSchemaRequest {
 message DropSchemaResponse {
   common.Status status = 1;
   WaitVersion version = 2;
+  repeated CascadeObject cascade_objects = 3;
 }
 
 message CreateSourceRequest {
@@ -72,6 +79,7 @@ message DropSourceRequest {
 message DropSourceResponse {
   common.Status status = 1;
   WaitVersion version = 2;
+  repeated CascadeObject cascade_objects = 3;
 }
 
 // Only for non-shared source
@@ -120,6 +128,7 @@ message DropSinkRequest {
 message DropSinkResponse {
   common.Status status = 1;
   WaitVersion version = 2;
+  repeated CascadeObject cascade_objects = 3;
 }
 
 message CreateSubscriptionRequest {
@@ -139,6 +148,7 @@ message DropSubscriptionRequest {
 message DropSubscriptionResponse {
   common.Status status = 1;
   WaitVersion version = 2;
+  repeated CascadeObject cascade_objects = 3;
 }
 
 // If SERVERLESS, the materialized view should be created using serverless backfill
@@ -178,6 +188,7 @@ message DropMaterializedViewRequest {
 message DropMaterializedViewResponse {
   common.Status status = 1;
   WaitVersion version = 2;
+  repeated CascadeObject cascade_objects = 3;
 }
 
 message CreateViewRequest {
@@ -200,6 +211,7 @@ message DropViewRequest {
 message DropViewResponse {
   common.Status status = 1;
   WaitVersion version = 2;
+  repeated CascadeObject cascade_objects = 3;
 }
 
 // An enum to distinguish different types of the `Table` streaming job.
@@ -412,6 +424,7 @@ message DropFunctionRequest {
 message DropFunctionResponse {
   common.Status status = 1;
   WaitVersion version = 2;
+  repeated CascadeObject cascade_objects = 3;
 }
 
 message DropTableRequest {
@@ -425,6 +438,7 @@ message DropTableRequest {
 message DropTableResponse {
   common.Status status = 1;
   WaitVersion version = 2;
+  repeated CascadeObject cascade_objects = 3;
 }
 
 // Used by risectl (and in the future, dashboard)
@@ -466,6 +480,7 @@ message DropIndexRequest {
 message DropIndexResponse {
   common.Status status = 1;
   WaitVersion version = 2;
+  repeated CascadeObject cascade_objects = 3;
 }
 
 message ReplaceJobPlan {
@@ -558,6 +573,7 @@ message DropSecretRequest {
 message DropSecretResponse {
   WaitVersion version = 1;
   common.Status status = 2;
+  repeated CascadeObject cascade_objects = 3;
 }
 
 message AlterSecretRequest {
@@ -608,6 +624,7 @@ message DropConnectionRequest {
 message DropConnectionResponse {
   common.Status status = 1;
   WaitVersion version = 2;
+  repeated CascadeObject cascade_objects = 3;
 }
 
 message GetTablesRequest {

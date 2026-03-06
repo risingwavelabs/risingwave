@@ -42,6 +42,7 @@ use tokio::sync::watch::Receiver;
 
 use super::root_catalog::Catalog;
 use super::{DatabaseId, SecretId, SinkId, SubscriptionId, TableId};
+use crate::catalog::notice_drop_cascade_objects;
 use crate::error::Result;
 use crate::scheduler::HummockSnapshotManagerRef;
 use crate::session::current::notice_to_user;
@@ -529,10 +530,17 @@ impl CatalogWriter for CatalogWriterImpl {
         table_id: TableId,
         cascade: bool,
     ) -> Result<()> {
-        let version = self
+        let resp = self
             .meta_client
             .drop_table(source_id, table_id, cascade)
             .await?;
+
+        let version = resp
+            .version
+            .ok_or_else(|| anyhow!("wait version not set"))?;
+
+        notice_drop_cascade_objects(&resp.cascade_objects);
+
         self.wait_version(version).await
     }
 
