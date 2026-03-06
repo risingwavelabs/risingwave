@@ -1,254 +1,230 @@
 #!/bin/bash
 
-# Test: MySQL CDC binlog offset expiration and ALTER SOURCE RESET recovery
-#
-# This test verifies the behavior when MySQL binlog containing the CDC offset expires,
-# and validates the ALTER SOURCE RESET command for recovery.
-#
-# Expected behavior:
-# 1. ALTER SOURCE RESET sets the expired offset in state table to NULL
-# 2. Requires one recovery (restart) to reset Debezium and update offset from NULL to latest available offset
-# 3. After recovery, new data after the latest offset is consumed normally
-# 4. Data between expired offset and latest offset is lost (expected data loss)
-#
-# Test scenario:
-# - Batch 1 (id=1-5): Consumed before binlog expiration -> SHOULD BE PRESENT
-# - Batch 2 (id=6-10): Written while source paused, binlog purged -> LOST (binlog expired)
-# - Batch 3 (id=16-20): Written after RESET but before restart -> LOST (offset not persisted)
-# - Batch 4 (id=101-120): Written after restart cluster -> SHOULD BE PRESENT
-# - Expected final count: 25 rows (5 + 20)
+# Test MySQL CDC inject-source-offsets + ALTER SOURCE RESET + forward-offset skip behavior.
 
 set -euo pipefail
 
 export MYSQL_HOST=mysql MYSQL_TCP_PORT=3306 MYSQL_PWD=123456
 
-echo "\n\n\n-------------Run MySQL CDC binlog expire and RESET test------------\n\n\n"
+strip_logs() {
+    sed 's/\r$//' | awk '!/\[cargo-make\]/ && NF { print }'
+}
 
-# Cleanup
-risedev kill && risedev clean-data
+query_scalar() {
+    local sql="$1"
+    local retry="${2:-1}"
+    local backoff="${3:-1}"
+    local attempt=1
+    local raw=""
+    local value=""
 
-# Setup CDC table with initial schema
+    while [ "$attempt" -le "$retry" ]; do
+        raw=$(risedev psql -t -A -c "$sql" 2>&1 || true)
+        value=$(printf "%s\n" "$raw" | strip_logs | tail -n 1)
+        if [ -n "$value" ]; then
+            echo "$value"
+            return 0
+        fi
+        if [ "$attempt" -lt "$retry" ]; then
+            echo "query_scalar retry ${attempt}/${retry}: sql='${sql}', raw='${raw}'"
+            sleep "$backoff"
+        fi
+        attempt=$((attempt + 1))
+    done
+
+    echo "✗ FAIL: query_scalar exhausted retries"
+    echo "SQL: ${sql}"
+    echo "Attempts: ${retry}"
+    echo "Raw output: ${raw}"
+    return 1
+}
+
+query_scalar_or_fail() {
+    local sql="$1"
+    local retry="${2:-1}"
+    local backoff="${3:-1}"
+    local value
+    if ! value=$(query_scalar "$sql" "$retry" "$backoff"); then
+        exit 1
+    fi
+    echo "$value"
+}
+
+mysql_exec() {
+    local sql="$1"
+    mysql -e "$sql"
+}
+
+query_i_retry() {
+    local sql="$1"
+    local expected="$2"
+    local retry="$3"
+    local backoff="$4"
+    local tmp
+    tmp=$(mktemp)
+    cat > "$tmp" <<SLT
+query I retry ${retry} backoff ${backoff}
+${sql}
+----
+${expected}
+SLT
+    risedev slt "$tmp"
+    rm -f "$tmp"
+}
+
+wait_non_empty_scalar() {
+    local sql="$1"
+    local timeout="$2"
+    local interval="1"
+    local attempt=0
+    local last_raw=""
+    local start
+    start=$(date +%s)
+    while true; do
+        local current
+        attempt=$((attempt + 1))
+        last_raw=$(risedev psql -t -A -c "$sql" 2>&1 || true)
+        current=$(printf "%s\n" "$last_raw" | strip_logs | tail -n 1)
+        if [ -n "$current" ]; then
+            echo "$current"
+            return 0
+        fi
+        if [ $(( $(date +%s) - start )) -ge "$timeout" ]; then
+            echo "✗ FAIL: wait_non_empty_scalar timeout=${timeout}s"
+            echo "SQL: ${sql}"
+            echo "Attempts: ${attempt}"
+            echo "Current value: '${current}'"
+            echo "Raw output: ${last_raw}"
+            return 1
+        fi
+        echo "wait_non_empty_scalar retry#${attempt}: SQL='${sql}', current='${current}', raw='${last_raw}'"
+        sleep "$interval"
+    done
+}
+
+echo "------------- setup ------------"
+risedev kill || true
+risedev clean-data
 risedev ci-resume mysql-offline-schema-change-test
-echo "\n\n\n-------------RW started------------\n\n\n"
 
-# Create database and test table
-echo "Creating test database and table..."
-mysql -e "
-    DROP DATABASE IF EXISTS binlog_test;
-    CREATE DATABASE binlog_test;
-    USE binlog_test;
-    CREATE TABLE test_table (
-        id INT PRIMARY KEY,
-        value VARCHAR(100),
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    );
-"
-
-# Create CDC source
-echo "Creating CDC source..."
-risedev psql -c "CREATE SOURCE s WITH (
-    username = '${MYSQL_USER:-root}',
-    connector = 'mysql-cdc',
-    hostname = '${MYSQL_HOST}',
-    port = '${MYSQL_TCP_PORT}',
-    password = '${MYSQL_PWD}',
-    database.name = 'binlog_test'
+mysql_exec "
+DROP DATABASE IF EXISTS binlog_test;
+CREATE DATABASE binlog_test;
+USE binlog_test;
+CREATE TABLE test_table (
+  id INT PRIMARY KEY,
+  value VARCHAR(100),
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );"
 
-sleep 3
+risedev psql -c "CREATE SOURCE s WITH (
+  username = '${MYSQL_USER:-root}',
+  connector = 'mysql-cdc',
+  hostname = '${MYSQL_HOST}',
+  port = '${MYSQL_TCP_PORT}',
+  password = '${MYSQL_PWD}',
+  database.name = 'binlog_test'
+);"
 
-# Create CDC table
-echo "Creating CDC table..."
 risedev psql -c "CREATE TABLE test_table (
-    id INT PRIMARY KEY,
-    value VARCHAR,
-    created_at TIMESTAMPTZ
+  id INT PRIMARY KEY,
+  value VARCHAR,
+  created_at TIMESTAMPTZ
 ) FROM s TABLE 'binlog_test.test_table';"
 
-sleep 5
-
-echo "\n\n\n-------------Phase 1: Insert first batch and let RW consume------------\n\n\n"
-echo "Inserting first batch (id=1-5)..."
+echo "------------- baseline consume ------------"
 for i in {1..5}; do
-    mysql -e "USE binlog_test; INSERT INTO test_table (id, value) VALUES ($i, 'batch1_$i');"
+    mysql_exec "USE binlog_test; INSERT INTO test_table (id, value) VALUES ($i, 'batch1_$i');"
 done
+query_i_retry "SELECT COUNT(*) FROM test_table;" "5" 30 "1s"
 
-sleep 5
+echo "------------- inject validation ------------"
+query_i_retry "SELECT CASE WHEN EXISTS (SELECT 1 FROM rw_catalog.rw_internal_table_info WHERE job_name = 's' AND job_type = 'source') THEN 1 ELSE 0 END;" "1" 30 "1s"
+SOURCE_ID=$(query_scalar_or_fail "SELECT id FROM rw_sources WHERE name = 's';" 30 1)
+STATE_TABLE=$(query_scalar_or_fail "SELECT name FROM rw_catalog.rw_internal_table_info WHERE job_name = 's' AND job_type = 'source' LIMIT 1;" 30 1)
 
-echo "--- Verify first batch (should be 5 rows)"
-OUTPUT=$(risedev psql -t -c "SELECT CASE WHEN COUNT(*) = 5 THEN 'OK' ELSE 'FAIL' END FROM test_table;" 2>&1)
-if echo "$OUTPUT" | grep -q "OK"; then
-    echo "✓ PASS: First batch has 5 rows"
-else
-    echo "✗ FAIL: First batch does not have 5 rows"
-    echo "Debug output: $OUTPUT"
-    risedev psql -c "SELECT COUNT(*) FROM test_table;"
+[[ "$SOURCE_ID" =~ ^[0-9]+$ ]] || { echo "✗ FAIL: invalid SOURCE_ID=${SOURCE_ID}"; exit 1; }
+[[ "$STATE_TABLE" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || { echo "✗ FAIL: invalid STATE_TABLE=${STATE_TABLE}"; exit 1; }
+
+query_i_retry "SELECT CASE WHEN COUNT(*) >= 1 THEN 1 ELSE 0 END FROM ${STATE_TABLE} WHERE offset_info->'split_info'->'inner'->>'start_offset' IS NOT NULL;" "1" 30 "1s"
+STATE_ROW=$(wait_non_empty_scalar "SELECT partition_id || E'\\t' || (offset_info->'split_info'->'inner'->>'start_offset') FROM ${STATE_TABLE} WHERE offset_info->'split_info'->'inner'->>'start_offset' IS NOT NULL LIMIT 1;" 30)
+[ -n "$STATE_ROW" ] || { echo "✗ FAIL: missing non-null start_offset row"; exit 1; }
+
+IFS=$'\t' read -r SPLIT_ID CURRENT_OFFSET <<< "$STATE_ROW"
+[ -n "$SPLIT_ID" ] && [ -n "$CURRENT_OFFSET" ] || { echo "✗ FAIL: invalid split row: ${STATE_ROW}"; exit 1; }
+OFFSETS_JSON=$(python3 -c 'import json,sys; print(json.dumps({sys.argv[1]: sys.argv[2]}))' "$SPLIT_ID" "$CURRENT_OFFSET")
+./risedev ctl meta inject-source-offsets --source-id "$SOURCE_ID" --offsets "$OFFSETS_JSON"
+
+OFFSET_AFTER_INJECT=$(query_scalar_or_fail "SELECT offset_info->'split_info'->'inner'->>'start_offset' FROM ${STATE_TABLE} WHERE partition_id='${SPLIT_ID}' LIMIT 1;" 30 1)
+if [ "$OFFSET_AFTER_INJECT" != "$CURRENT_OFFSET" ]; then
+    echo "✗ FAIL: inject-source-offsets changed split state unexpectedly"
+    echo "Before: $CURRENT_OFFSET"
+    echo "After:  $OFFSET_AFTER_INJECT"
     exit 1
 fi
+echo "✓ PASS: inject-source-offsets keeps split state consistent"
 
-echo "\n\n\n-------------Phase 2: Pause source------------\n\n\n"
-echo "Pausing source with rate_limit=0..."
+echo "------------- forward offset skip validation ------------"
 risedev psql -c "ALTER SOURCE s SET source_rate_limit = 0;"
 
-sleep 2
-
-echo "\n\n\n-------------Phase 3: Insert second batch (will not be consumed)------------\n\n\n"
-echo "Inserting second batch (id=6-10) while source is paused..."
-for i in {6..10}; do
-    mysql -e "USE binlog_test; INSERT INTO test_table (id, value) VALUES ($i, 'batch2_$i');"
+for i in {9001..9003}; do
+    mysql_exec "USE binlog_test; INSERT INTO test_table (id, value) VALUES ($i, 'inject_skip_$i');"
 done
 
-sleep 3
+BINLOG_STATUS=$(mysql -s -N -e "SHOW BINARY LOG STATUS;" 2>/dev/null || mysql -s -N -e "SHOW MASTER STATUS;" 2>/dev/null)
+BINLOG_FILE=$(echo "$BINLOG_STATUS" | awk '{print $1}')
+BINLOG_POS=$(echo "$BINLOG_STATUS" | awk '{print $2}')
+[ -n "$BINLOG_FILE" ] && [ -n "$BINLOG_POS" ] || { echo "✗ FAIL: failed to get binlog file/pos"; exit 1; }
 
-echo "--- Verify second batch not consumed (should still be 5 rows)"
-OUTPUT=$(risedev psql -t -c "SELECT CASE WHEN COUNT(*) = 5 THEN 'OK' ELSE 'FAIL' END FROM test_table;" 2>&1)
-if echo "$OUTPUT" | grep -q "OK"; then
-    echo "✓ PASS: Second batch not consumed, still 5 rows"
-else
-    echo "✗ FAIL: Count is not 5"
-    echo "Debug output: $OUTPUT"
-    risedev psql -c "SELECT COUNT(*) FROM test_table;"
-    exit 1
-fi
+FORWARD_OFFSET=$(python3 -c 'import json,sys; o=json.loads(sys.argv[1]); so=o.setdefault("sourceOffset",{}); so["file"]=sys.argv[2]; so["pos"]=int(sys.argv[3]); so["snapshot"]=False; o["isHeartbeat"]=False; print(json.dumps(o,separators=(",",":")))' "$CURRENT_OFFSET" "$BINLOG_FILE" "$BINLOG_POS")
+FORWARD_OFFSETS_JSON=$(python3 -c 'import json,sys; print(json.dumps({sys.argv[1]: sys.argv[2]}))' "$SPLIT_ID" "$FORWARD_OFFSET")
+./risedev ctl meta inject-source-offsets --source-id "$SOURCE_ID" --offsets "$FORWARD_OFFSETS_JSON"
 
-echo "\n\n\n-------------Phase 4: Force binlog rotation and PURGE------------\n\n\n"
-echo "Flushing logs to rotate binlog..."
-mysql -e "FLUSH LOGS;"
-
-sleep 2
-
-echo "Inserting dummy data to new binlog..."
-mysql -e "USE binlog_test; INSERT INTO test_table (id, value) VALUES (50, 'dummy_data');"
-
-sleep 1
-
-echo "Purging old binlog files..."
-CURRENT_BINLOG=$(mysql -s -N -e "SHOW BINARY LOG STATUS;" 2>/dev/null | awk '{print $1}' || mysql -s -N -e "SHOW MASTER STATUS;" 2>/dev/null | awk '{print $1}')
-mysql -e "PURGE BINARY LOGS TO '$CURRENT_BINLOG';"
-
-sleep 2
-
-echo "\n\n\n-------------Phase 5: Resume source (should fail to consume expired binlog)------------\n\n\n"
-echo "Resuming source..."
 risedev psql -c "ALTER SOURCE s SET source_rate_limit = default;"
+query_i_retry "SELECT COUNT(*) FROM test_table;" "5" 30 "1s"
+query_i_retry "SELECT COUNT(*) FROM test_table WHERE id BETWEEN 9001 AND 9003;" "0" 10 "1s"
 
-sleep 5
+echo "------------- reset validation ------------"
+risedev psql -c "ALTER SOURCE s SET source_rate_limit = 0;"
+for i in {6..10}; do
+    mysql_exec "USE binlog_test; INSERT INTO test_table (id, value) VALUES ($i, 'batch2_$i');"
+done
+query_i_retry "SELECT COUNT(*) FROM test_table;" "5" 10 "1s"
 
-echo "--- Verify source cannot consume expired binlog (should still be 5 rows)"
-OUTPUT=$(risedev psql -t -c "SELECT CASE WHEN COUNT(*) = 5 THEN 'OK' ELSE 'FAIL' END FROM test_table;" 2>&1)
-if echo "$OUTPUT" | grep -q "OK"; then
-    echo "✓ PASS: Source cannot consume expired binlog, still 5 rows"
-else
-    echo "✗ FAIL: Count is not 5, binlog may not be expired"
-    echo "Debug output: $OUTPUT"
-    risedev psql -c "SELECT COUNT(*) FROM test_table;"
-    exit 1
-fi
+mysql_exec "FLUSH LOGS;"
+mysql_exec "USE binlog_test; INSERT INTO test_table (id, value) VALUES (50, 'dummy_data');"
+CURRENT_BINLOG=$(mysql -s -N -e "SHOW BINARY LOG STATUS;" 2>/dev/null | awk '{print $1}' || mysql -s -N -e "SHOW MASTER STATUS;" 2>/dev/null | awk '{print $1}')
+mysql_exec "PURGE BINARY LOGS TO '$CURRENT_BINLOG';"
 
-sleep 2
+risedev psql -c "ALTER SOURCE s SET source_rate_limit = default;"
+query_i_retry "SELECT COUNT(*) FROM test_table;" "5" 10 "1s"
 
-echo "\n\n\n-------------Phase 6: Execute ALTER SOURCE RESET------------\n\n\n"
-echo "Executing ALTER SOURCE RESET..."
 risedev psql -c "ALTER SOURCE s RESET;"
+query_i_retry "SELECT CASE WHEN COUNT(*) >= 1 THEN 1 ELSE 0 END FROM ${STATE_TABLE} WHERE offset_info->'split_info'->'inner'->>'start_offset' IS NULL;" "1" 10 "1s"
 
-sleep 2
-
-echo "\n\n\n-------------Phase 7: Insert data after RESET------------\n\n\n"
-echo "Inserting third batch (id=16-20) after RESET..."
+echo "------------- resume behavior validation ------------"
 for i in {16..20}; do
-    mysql -e "USE binlog_test; INSERT INTO test_table (id, value) VALUES ($i, 'batch3_after_reset_$i');"
+    mysql_exec "USE binlog_test; INSERT INTO test_table (id, value) VALUES ($i, 'batch3_after_reset_$i');"
 done
 
-sleep 5
-
-echo "Restarting RW to ensure offset persistence..."
 risedev kill
-sleep 2
 risedev ci-resume mysql-offline-schema-change-test
-sleep 5
 
-echo "Inserting fourth batch (id=101-120) after restart..."
 for i in {101..120}; do
-    mysql -e "USE binlog_test; INSERT INTO test_table (id, value) VALUES ($i, 'batch4_after_restart_$i');"
+    mysql_exec "USE binlog_test; INSERT INTO test_table (id, value) VALUES ($i, 'batch4_after_restart_$i');"
 done
 
-sleep 10
+query_i_retry "SELECT COUNT(*) FROM test_table;" "25" 60 "1s"
+query_i_retry "SELECT COUNT(*) FROM test_table WHERE id BETWEEN 1 AND 5;" "5" 10 "1s"
+query_i_retry "SELECT COUNT(*) FROM test_table WHERE id BETWEEN 6 AND 10;" "0" 10 "1s"
+query_i_retry "SELECT COUNT(*) FROM test_table WHERE id BETWEEN 16 AND 20;" "0" 10 "1s"
+query_i_retry "SELECT COUNT(*) FROM test_table WHERE id BETWEEN 101 AND 120;" "20" 10 "1s"
 
-echo "\n\n\n-------------Final Verification------------\n\n\n"
-
-# Verify batch 1 (id=1-5): should have 5 rows
-echo "--- Verify batch 1 (id=1-5, should be 5 rows)"
-OUTPUT=$(risedev psql -t -c "SELECT CASE WHEN COUNT(*) = 5 THEN 'OK' ELSE 'FAIL' END FROM test_table WHERE id BETWEEN 1 AND 5;" 2>&1)
-if echo "$OUTPUT" | grep -q "OK"; then
-    echo "✓ PASS: Batch 1 has 5 rows"
-else
-    echo "✗ FAIL: Batch 1 does not have 5 rows"
-    echo "Debug output: $OUTPUT"
-    risedev psql -c "SELECT COUNT(*) FROM test_table WHERE id BETWEEN 1 AND 5;"
-    exit 1
-fi
-
-# Verify batch 2 (id=6-10): should have 0 rows (binlog expired)
-echo "--- Verify batch 2 (id=6-10, should be 0 rows - binlog expired)"
-OUTPUT=$(risedev psql -t -c "SELECT CASE WHEN COUNT(*) = 0 THEN 'OK' ELSE 'FAIL' END FROM test_table WHERE id BETWEEN 6 AND 10;" 2>&1)
-if echo "$OUTPUT" | grep -q "OK"; then
-    echo "✓ PASS: Batch 2 has 0 rows (binlog expired as expected)"
-else
-    echo "✗ FAIL: Batch 2 should have 0 rows"
-    echo "Debug output: $OUTPUT"
-    risedev psql -c "SELECT COUNT(*) FROM test_table WHERE id BETWEEN 6 AND 10;"
-    exit 1
-fi
-
-# Verify batch 3 (id=16-20): should have 0 rows (not persisted before restart)
-echo "--- Verify batch 3 (id=16-20, should be 0 rows - not persisted before restart)"
-OUTPUT=$(risedev psql -t -c "SELECT CASE WHEN COUNT(*) = 0 THEN 'OK' ELSE 'FAIL' END FROM test_table WHERE id BETWEEN 16 AND 20;" 2>&1)
-if echo "$OUTPUT" | grep -q "OK"; then
-    echo "✓ PASS: Batch 3 has 0 rows (not persisted as expected)"
-else
-    echo "✗ FAIL: Batch 3 should have 0 rows"
-    echo "Debug output: $OUTPUT"
-    risedev psql -c "SELECT COUNT(*) FROM test_table WHERE id BETWEEN 16 AND 20;"
-    exit 1
-fi
-
-# Verify batch 4 (id=101-120): should have 20 rows
-echo "--- Verify batch 4 (id=101-120, should be 20 rows)"
-OUTPUT=$(risedev psql -t -c "SELECT CASE WHEN COUNT(*) = 20 THEN 'OK' ELSE 'FAIL' END FROM test_table WHERE id BETWEEN 101 AND 120;" 2>&1)
-if echo "$OUTPUT" | grep -q "OK"; then
-    echo "✓ PASS: Batch 4 has 20 rows"
-else
-    echo "✗ FAIL: Batch 4 does not have 20 rows"
-    echo "Debug output: $OUTPUT"
-    risedev psql -c "SELECT COUNT(*) FROM test_table WHERE id BETWEEN 101 AND 120;"
-    exit 1
-fi
-
-# Verify total count (should be 25: batch1(5) + batch4(20))
-echo "--- Verify total count (should be 25 rows)"
-OUTPUT=$(risedev psql -t -c "SELECT CASE WHEN COUNT(*) = 25 THEN 'OK' ELSE 'FAIL' END FROM test_table;" 2>&1)
-if echo "$OUTPUT" | grep -q "OK"; then
-    echo "✓ PASS: Total count is 25 rows (batch1 + batch4)"
-    echo "  - Lost data as expected: batch2(5, binlog expired) + batch3(5, not persisted) + dummy(1)"
-else
-    echo "✗ FAIL: Total count is not 25"
-    echo "Debug output: $OUTPUT"
-    risedev psql -c "SELECT COUNT(*) FROM test_table;"
-    exit 1
-fi
-
-echo "\n\n\n-------------All verifications passed------------\n\n\n"
-
-echo "\n\n\n-------------Cleanup test environment------------\n\n\n"
-
-# Drop table and source
+echo "------------- cleanup ------------"
 risedev psql -c "DROP TABLE test_table;"
 risedev psql -c "DROP SOURCE s;"
+mysql_exec "DROP DATABASE IF EXISTS binlog_test;"
+risedev kill || true
+risedev clean-data
 
-# Drop database
-mysql -e "DROP DATABASE IF EXISTS binlog_test;"
-
-echo "\n\n\n-------------Cleanup completed------------\n\n\n"
-
-# Cleanup
-risedev kill && risedev clean-data
+echo "All verifications passed."
