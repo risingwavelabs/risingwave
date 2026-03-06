@@ -2,6 +2,7 @@ from ..common import *
 from . import section
 from .streaming_common import _actor_busy_rate_expr, relabel_materialized_view_id_as_id
 from .streaming_fragments import (
+    _channel_buffer_usage_by_fragment_expr,
     _kv_log_store_buffer_usage_by_fragment_expr,
     _sync_kv_log_store_buffer_usage_by_fragment_expr,
 )
@@ -105,6 +106,9 @@ def _(outer_panels: Panels):
     sync_kv_log_store_buffer_usage_expr = _sum_fragment_metric_by_mv(
         _sync_kv_log_store_buffer_usage_by_fragment_expr()
     )
+    channel_buffer_usage_expr = _sum_fragment_metric_by_mv(
+        _channel_buffer_usage_by_fragment_expr()
+    )
     total_memory_usage_expr = " + ".join(
         map(
             _coalesce_mv,
@@ -113,8 +117,12 @@ def _(outer_panels: Panels):
                 shared_buffer_usage_expr,
                 kv_log_store_buffer_usage_expr,
                 sync_kv_log_store_buffer_usage_expr,
+                channel_buffer_usage_expr,
             ],
         )
+    )
+    total_memory_usage_ratio_expr = (
+        f"({total_memory_usage_expr}) / on() group_left clamp_min(sum(({total_memory_usage_expr})), 1)"
     )
     return [
         outer_panels.row_collapsed(
@@ -244,6 +252,20 @@ def _(outer_panels: Panels):
                     ],
                 ),
                 panels.subheader("Memory Usage By Relation"),
+                panels.timeseries_percentage(
+                    "Total Memory Usage Ratio(%)",
+                    "Relation memory usage / sum of all relation memory usages",
+                    [
+                        panels.target(
+                            _relation_metric_with_metadata(
+                                relabel_materialized_view_id_as_id(
+                                    total_memory_usage_ratio_expr
+                                )
+                            ),
+                            "relation {{name}} (id={{id}} type={{type}})",
+                        ),
+                    ],
+                ),
                 panels.timeseries_bytes(
                     "Total Memory Usage",
                     "Sum of executor cache, shared buffer imm size, and log store buffer memory",
@@ -276,6 +298,20 @@ def _(outer_panels: Panels):
                             _relation_metric_with_metadata(
                                 relabel_materialized_view_id_as_id(
                                     shared_buffer_usage_expr
+                                )
+                            ),
+                            "relation {{name}} (id={{id}} type={{type}})",
+                        ),
+                    ],
+                ),
+                panels.timeseries_bytes(
+                    "Inter-Actor Channel Buffer Memory Usage",
+                    "Buffer size of inter-actor channels aggregated by relation.",
+                    [
+                        panels.target(
+                            _relation_metric_with_metadata(
+                                relabel_materialized_view_id_as_id(
+                                    channel_buffer_usage_expr
                                 )
                             ),
                             "relation {{name}} (id={{id}} type={{type}})",
