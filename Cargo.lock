@@ -10112,7 +10112,7 @@ name = "prost-build"
 version = "0.14.3"
 source = "git+https://github.com/risingwavelabs/prost.git?rev=040a192409e45069158300baec4f402ad1fe101a#040a192409e45069158300baec4f402ad1fe101a"
 dependencies = [
- "heck 0.5.0",
+ "heck 0.4.1",
  "itertools 0.14.0",
  "log",
  "multimap 0.10.0",
@@ -11314,8 +11314,8 @@ dependencies = [
  "risingwave_meta_node",
  "risingwave_rt",
  "shell-words",
- "strum 0.27.2",
- "strum_macros 0.27.2",
+ "strum 0.28.0",
+ "strum_macros 0.28.0",
  "thiserror-ext",
  "tikv-jemallocator",
  "tracing",
@@ -11424,8 +11424,8 @@ dependencies = [
  "speedate",
  "stacker",
  "static_assertions",
- "strum 0.27.2",
- "strum_macros 0.27.2",
+ "strum 0.28.0",
+ "strum_macros 0.28.0",
  "sysinfo",
  "tempfile",
  "thiserror 2.0.17",
@@ -11802,8 +11802,8 @@ dependencies = [
  "simd-json",
  "smallvec",
  "sqlx",
- "strum 0.27.2",
- "strum_macros 0.27.2",
+ "strum 0.28.0",
+ "strum_macros 0.28.0",
  "syn 2.0.111",
  "tempfile",
  "thiserror 2.0.17",
@@ -12295,7 +12295,7 @@ dependencies = [
  "risingwave_pb",
  "risingwave_telemetry_event",
  "serde",
- "strum 0.27.2",
+ "strum 0.28.0",
  "thiserror 2.0.17",
  "thiserror-ext",
  "tracing",
@@ -12373,7 +12373,7 @@ dependencies = [
  "sea-orm",
  "serde",
  "serde_json",
- "strum 0.27.2",
+ "strum 0.28.0",
  "sync-point",
  "tempfile",
  "thiserror 2.0.17",
@@ -12552,7 +12552,7 @@ dependencies = [
  "sea-orm",
  "serde",
  "static_assertions",
- "strum 0.27.2",
+ "strum 0.28.0",
  "thiserror 2.0.17",
  "thiserror-ext",
  "tonic-prost",
@@ -12756,7 +12756,7 @@ dependencies = [
  "serde",
  "serde_yaml",
  "similar",
- "strum 0.27.2",
+ "strum 0.28.0",
  "thiserror-ext",
  "tokio-postgres",
  "tracing",
@@ -12916,7 +12916,7 @@ dependencies = [
  "serde_yaml",
  "smallvec",
  "static_assertions",
- "strum_macros 0.27.2",
+ "strum_macros 0.28.0",
  "thiserror 2.0.17",
  "thiserror-ext",
  "tokio-metrics",
@@ -14853,6 +14853,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "strum"
+version = "0.28.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9628de9b8791db39ceda2b119bbe13134770b56c138ec1d3af810d045c04f9bd"
+dependencies = [
+ "strum_macros 0.28.0",
+]
+
+[[package]]
 name = "strum_macros"
 version = "0.25.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -14883,6 +14892,18 @@ name = "strum_macros"
 version = "0.27.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7695ce3845ea4b33927c055a39dc438a45b059f7c1b3d91d38d10355fb8cbca7"
+dependencies = [
+ "heck 0.5.0",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.111",
+]
+
+[[package]]
+name = "strum_macros"
+version = "0.28.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ab85eea0270ee17587ed4156089e10b9e6880ee688791d45a905f5b1ca36f664"
 dependencies = [
  "heck 0.5.0",
  "proc-macro2",
