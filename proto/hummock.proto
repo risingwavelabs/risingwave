@@ -367,9 +367,9 @@ enum CheckpointCompressionAlgorithm {
 // - Old code (unaware of this message) writes raw PbHummockVersionCheckpoint directly.
 // - New code tries to decode as HummockVersionCheckpointEnvelope first.
 //   If it fails (old format), it falls back to decoding as PbHummockVersionCheckpoint.
-// - The two formats can be distinguished by protobuf wire type of field 1:
-//   HummockVersionCheckpoint field 1 is a message (wire type 2/LEN),
-//   HummockVersionCheckpointEnvelope field 1 is an enum (wire type 0/VARINT).
+// - Legacy bytes may occasionally decode as an envelope due to protobuf's unknown-field
+//   skipping, so readers treat `checksum` as the discriminator: all new envelopes set it,
+//   while old raw checkpoints do not have field 3.
 message HummockVersionCheckpointEnvelope {
   CheckpointCompressionAlgorithm compression_algorithm = 1;
   bytes payload = 2;
