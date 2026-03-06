@@ -7,12 +7,21 @@ set -euo pipefail
 export MYSQL_HOST=mysql MYSQL_TCP_PORT=3306 MYSQL_PWD=123456
 
 strip_logs() {
-    sed 's/\r$//' | grep -v '\[cargo-make\]' | sed '/^[[:space:]]*$/d'
+    sed 's/\r$//' | awk '!/\[cargo-make\]/ && NF { print }'
 }
 
 query_scalar() {
     local sql="$1"
-    risedev psql -t -A -c "$sql" 2>&1 | strip_logs | tail -n 1
+    local raw
+    raw=$(risedev psql -t -A -c "$sql" 2>&1 || true)
+    printf "%s\n" "$raw" | strip_logs | tail -n 1
+}
+
+query_row_tsv() {
+    local sql="$1"
+    local raw
+    raw=$(risedev psql -t -A -F $'\t' -c "$sql" 2>&1 || true)
+    printf "%s\n" "$raw" | strip_logs | tail -n 1
 }
 
 mysql_exec() {
@@ -74,17 +83,19 @@ done
 query_i_retry "SELECT COUNT(*) FROM test_table;" "5" 30 "1s"
 
 echo "------------- inject validation ------------"
+query_i_retry "SELECT CASE WHEN EXISTS (SELECT 1 FROM rw_catalog.rw_internal_table_info WHERE job_name = 's' AND job_type = 'source') THEN 1 ELSE 0 END;" "1" 30 "1s"
 SOURCE_ID=$(query_scalar "SELECT id FROM rw_sources WHERE name = 's';")
 STATE_TABLE=$(query_scalar "SELECT name FROM rw_catalog.rw_internal_table_info WHERE job_name = 's' AND job_type = 'source' LIMIT 1;")
 
 [[ "$SOURCE_ID" =~ ^[0-9]+$ ]] || { echo "✗ FAIL: invalid SOURCE_ID=${SOURCE_ID}"; exit 1; }
 [[ "$STATE_TABLE" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || { echo "✗ FAIL: invalid STATE_TABLE=${STATE_TABLE}"; exit 1; }
 
-STATE_ROW=$(query_scalar "SELECT partition_id || '|' || (offset_info->'split_info'->'inner'->>'start_offset') FROM ${STATE_TABLE} WHERE offset_info->'split_info'->'inner'->>'start_offset' IS NOT NULL LIMIT 1;")
+query_i_retry "SELECT CASE WHEN COUNT(*) >= 1 THEN 1 ELSE 0 END FROM ${STATE_TABLE} WHERE offset_info->'split_info'->'inner'->>'start_offset' IS NOT NULL;" "1" 30 "1s"
+STATE_ROW=$(query_row_tsv "SELECT partition_id, offset_info->'split_info'->'inner'->>'start_offset' FROM ${STATE_TABLE} WHERE offset_info->'split_info'->'inner'->>'start_offset' IS NOT NULL LIMIT 1;")
 [ -n "$STATE_ROW" ] || { echo "✗ FAIL: missing non-null start_offset row"; exit 1; }
 
-SPLIT_ID="${STATE_ROW%%|*}"
-CURRENT_OFFSET="${STATE_ROW#*|}"
+IFS=$'\t' read -r SPLIT_ID CURRENT_OFFSET <<< "$STATE_ROW"
+[ -n "$SPLIT_ID" ] && [ -n "$CURRENT_OFFSET" ] || { echo "✗ FAIL: invalid split row: ${STATE_ROW}"; exit 1; }
 OFFSETS_JSON=$(python3 -c 'import json,sys; print(json.dumps({sys.argv[1]: sys.argv[2]}))' "$SPLIT_ID" "$CURRENT_OFFSET")
 ./risedev ctl meta inject-source-offsets --source-id "$SOURCE_ID" --offsets "$OFFSETS_JSON"
 
