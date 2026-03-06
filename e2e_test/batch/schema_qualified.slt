@@ -1,0 +1,389 @@
+# Test on support schema-qualified name on BindContext
+
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+# Test on gap-fill table function
+statement ok
+CREATE SCHEMA test;
+
+statement ok
+CREATE TABLE test.gap_normal_table (
+    ts TIMESTAMP,
+    value DOUBLE,
+    PRIMARY KEY (ts)
+);
+
+statement ok
+INSERT INTO test.gap_normal_table VALUES
+    ('2024-05-21 10:00:00', 10.0),
+    ('2024-05-21 10:02:00', 12.0),
+    ('2024-05-21 10:05:00', 15.0);
+
+statement ok
+CREATE MATERIALIZED VIEW gap_filled_normal AS
+SELECT ts, value
+FROM GAP_FILL(test.gap_normal_table, ts, INTERVAL '1' MINUTE);
+
+query TR
+SELECT ts, value FROM gap_filled_normal ORDER BY ts;
+----
+2024-05-21 10:00:00 10
+2024-05-21 10:01:00 NULL
+2024-05-21 10:02:00 12
+2024-05-21 10:03:00 NULL
+2024-05-21 10:04:00 NULL
+2024-05-21 10:05:00 15
+
+statement ok
+DROP MATERIALIZED VIEW gap_filled_normal;
+
+statement ok
+DROP TABLE test.gap_normal_table;
+
+# Test on window-table function
+statement ok
+CREATE TABLE test.t1 (id int, created_at date);
+
+statement ok
+INSERT INTO test.t1 VALUES
+    (1, DATE '2024-05-20'),
+    (2, DATE '2024-05-21'),
+    (3, DATE '2024-05-22'),
+    (4, DATE '2024-05-23');
+
+query ID
+SELECT id, created_at
+FROM tumble(test.t1, created_at, interval '3' day)
+ORDER BY id;
+----
+1 2024-05-20
+2 2024-05-21
+3 2024-05-22
+4 2024-05-23
+
+statement ok
+DROP TABLE test.t1;
+
+# Test on watermark function
+statement ok
+CREATE TABLE test.t (
+    ts timestamp,
+    foo int,
+    watermark for ts as ts - interval '5 minutes'
+) APPEND ONLY;
+
+statement ok
+CREATE MATERIALIZED VIEW mv1 as select * from test.t emit on window close;
+
+statement ok
+INSERT INTO test.t VALUES
+    ('2023-05-06 16:51:00', 1),
+    ('2023-05-06 16:51:00', 2),
+    ('2023-05-06 16:51:00', 3);
+
+statement ok
+INSERT INTO test.t VALUES
+    ('2023-05-06 16:56:01', 1);
+
+query TI retry 21 backoff 1s
+SELECT * FROM mv1 ORDER BY 2;
+----
+2023-05-06 16:51:00 1
+2023-05-06 16:51:00 2
+2023-05-06 16:51:00 3
+
+statement ok
+DROP MATERIALIZED VIEW mv1;
+
+statement ok
+DROP TABLE test.t;
+
+# Test on base table
+statement ok
+CREATE TABLE test.t(v int);
+
+statement ok
+INSERT INTO test.t VALUES (1), (2);
+
+query I
+SELECT test.t.v FROM test.t ORDER BY 1;
+----
+1
+2
+
+query I
+SELECT tt.v FROM test.t AS tt ORDER BY 1;
+----
+1
+2
+
+statement error
+SELECT ss.t.v FROM test.t AS tt;
+
+statement error
+SELECT s.tt.v FROM test.t AS tt;
+
+statement error
+SELECT test.t.v FROM test.t AS tt;
+
+statement ok
+DROP TABLE test.t;
+
+statement ok
+DROP SCHEMA test;
+
+# Test on join condition
+statement ok
+create schema s1;
+
+statement ok
+create schema s2;
+
+statement ok
+create table s1.a(id int, a int);
+
+statement ok
+create table s2.a(id int, b int);
+
+statement ok
+insert into s1.a values (1, 2), (2, 3), (3, 4);
+
+statement ok
+insert into s2.a values (1, 10), (4, 40);
+
+query II
+select s1.a.a, s2.a.b
+from s1.a
+join s2.a
+on s1.a.id = s2.a.id
+order by 1, 2;
+----
+2 10
+
+query II
+select a1.a, a2.b
+from s1.a AS a1
+join s2.a AS a2
+on a1.id = a2.id
+order by 1, 2;
+----
+2 10
+
+statement error
+select a.id from s1.a, s2.a;
+
+statement error
+select a, b from s1.a AS a1 join s2.a AS a2 on s1.a.id = s2.a.id;
+
+statement ok
+DROP TABLE s1.a;
+
+statement ok
+DROP TABLE s2.a;
+
+statement ok
+DROP SCHEMA s1;
+
+statement ok
+DROP SCHEMA s2;
+
+# Test on use schema-qualified to refer the column, but the table has alias
+statement ok
+CREATE SCHEMA s;
+
+statement ok
+CREATE TABLE s.t(v int);
+
+statement ok
+INSERT INTO s.t VALUES (7);
+
+query I
+SELECT s.t.v FROM s.t;
+----
+7
+
+statement error
+SELECT s.t.v FROM s.t AS tt;
+
+statement ok
+DROP TABLE s.t;
+
+statement ok
+DROP SCHEMA s;
+
+statement ok
+create schema s1;
+
+statement ok
+create schema s2;
+
+# Create two tables with the same name but different schemas
+statement ok
+create table s1.users (id int, name varchar, age int);
+
+statement ok
+create table s2.users (id int, email varchar);
+
+# Insert test data
+statement ok
+insert into s1.users values (1, 'Alice', 30), (2, 'Bob', 25), (3, 'Charlie', 35);
+
+statement ok
+insert into s2.users values (1, 'alice@example.com'), (3, 'charlie@example.com'), (4, 'dave@example.com');
+
+# Test 1: Simple schema-qualified column reference in SELECT
+query TTI rowsort
+select s1.users.name, s2.users.email, s1.users.age
+from s1.users, s2.users
+where s1.users.id = s2.users.id;
+----
+Alice	alice@example.com	30
+Charlie	charlie@example.com	35
+
+# Test 2: EXISTS subquery with schema-qualified column references (the main bug)
+# This should return 2 (only Alice and Charlie have matching IDs)
+query I
+select count(*) from s1.users
+where exists (
+  select 1 from s2.users
+  where s2.users.id = s1.users.id
+);
+----
+2
+
+# Test 3: EXISTS subquery returning specific columns with schema qualification
+query T rowsort
+select s1.users.name
+from s1.users
+where exists (
+  select 1 from s2.users
+  where s2.users.id = s1.users.id
+);
+----
+Alice
+Charlie
+
+# Test 4: Multiple EXISTS conditions with schema-qualified references
+query T rowsort
+select s1.users.name
+from s1.users
+where exists (
+  select 1 from s2.users
+  where s2.users.id = s1.users.id
+) and s1.users.age > 25;
+----
+Alice
+Charlie
+
+# Test 5: IN subquery with schema-qualified column references
+query T rowsort
+select s1.users.name
+from s1.users
+where s1.users.id in (select s2.users.id from s2.users);
+----
+Alice
+Charlie
+
+# Test 6: JOIN with schema-qualified column references
+query TT rowsort
+select s1.users.name, s2.users.email
+from s1.users
+inner join s2.users on s1.users.id = s2.users.id;
+----
+Alice	alice@example.com
+Charlie	charlie@example.com
+
+# Test 7: Schema-qualified references in WHERE clause without EXISTS
+query TTI rowsort
+select s1.users.name, s1.users.age, s2.users.email
+from s1.users, s2.users
+where s1.users.age > 25 and s1.users.id = s2.users.id;
+----
+Alice	30	alice@example.com
+Charlie	35	charlie@example.com
+
+# Test 8: NOT EXISTS with schema-qualified column references
+# Should return Bob (id=2) who doesn't have a match in s2.users
+query T
+select s1.users.name
+from s1.users
+where not exists (
+  select 1 from s2.users
+  where s2.users.id = s1.users.id
+);
+----
+Bob
+
+# Test 9: Three schemas with same table name
+statement ok
+create schema s3;
+
+statement ok
+create table s3.users (id int, country varchar);
+
+statement ok
+insert into s3.users values (1, 'USA'), (2, 'Canada'), (3, 'UK');
+
+statement ok
+flush
+
+query TT rowsort
+select s1.users.name, s3.users.country
+from s1.users
+inner join s3.users on s1.users.id = s3.users.id;
+----
+Alice	USA
+Bob	Canada
+Charlie	UK
+
+# Test 10: Unqualified column reference still works (backward compatibility)
+# When table names are unique, unqualified references should still work
+query T rowsort
+select name from s1.users;
+----
+Alice
+Bob
+Charlie
+
+# Test 11: EXISTS with correlated subquery and additional JOIN
+query TTI rowsort
+select s1.users.name, s1.users.age, s3.users.country
+from s1.users
+inner join s3.users on s1.users.id = s3.users.id
+where exists (
+  select 1 from s2.users
+  where s2.users.id = s1.users.id
+);
+----
+Alice	30	USA
+Charlie	35	UK
+
+# Test 12: AND condition with both qualified and unqualified references
+query TTI rowsort
+select s1.users.name, s2.users.email, s1.users.age
+from s1.users, s2.users
+where s1.users.id = s2.users.id and age > 25;
+----
+Alice	alice@example.com	30
+Charlie	charlie@example.com	35
+
+# Cleanup
+statement ok
+drop table s1.users;
+
+statement ok
+drop table s2.users;
+
+statement ok
+drop table s3.users;
+
+statement ok
+drop schema s1;
+
+statement ok
+drop schema s2;
+
+statement ok
+drop schema s3;
+
