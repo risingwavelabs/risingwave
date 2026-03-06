@@ -96,15 +96,11 @@ impl FastInsertExecutor {
         data_chunk_to_insert: DataChunk,
         returning_epoch: bool,
     ) -> Result<Epoch> {
-        let (table_dml_handle, mut write_handle) = self
+        let table_dml_handle = self
             .dml_manager
-            .table_write_handle(
-                self.table_id,
-                self.table_version_id,
-                self.request_id,
-                self.txn_id,
-            )
-            .await?;
+            .table_dml_handle(self.table_id, self.table_version_id)?;
+        // instead of session id, we use request id here to select a write handle.
+        let mut write_handle = table_dml_handle.write_handle(self.request_id, self.txn_id)?;
 
         write_handle.begin()?;
 

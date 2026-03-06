@@ -112,15 +112,9 @@ impl Executor for UpdateExecutor {
 impl UpdateExecutor {
     #[try_stream(boxed, ok = DataChunk, error = BatchError)]
     async fn do_execute(self: Box<Self>) {
-        let (table_dml_handle, mut write_handle) = self
+        let table_dml_handle = self
             .dml_manager
-            .table_write_handle(
-                self.table_id,
-                self.table_version_id,
-                self.session_id,
-                self.txn_id,
-            )
-            .await?;
+            .table_dml_handle(self.table_id, self.table_version_id)?;
 
         let data_types = table_dml_handle
             .column_descs()
@@ -141,6 +135,8 @@ impl UpdateExecutor {
 
         let mut builder = StreamChunkBuilder::new(self.chunk_size, data_types);
 
+        let mut write_handle: risingwave_dml::WriteHandle =
+            table_dml_handle.write_handle(self.session_id, self.txn_id)?;
         write_handle.begin()?;
 
         // Write to the source to the handle.
