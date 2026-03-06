@@ -342,10 +342,22 @@ impl Binder {
         table_name: String,
         alias: Option<&TableAlias>,
     ) -> Result<()> {
+        self.bind_table_to_context_with_schema(columns, table_name, None, alias)
+    }
+
+    /// Fill the [`BindContext`](super::BindContext) for table, with optional schema name.
+    pub(super) fn bind_table_to_context_with_schema(
+        &mut self,
+        columns: impl IntoIterator<Item = (bool, Field)>, // bool indicates if the field is hidden
+        table_name: String,
+        schema_name: Option<String>,
+        alias: Option<&TableAlias>,
+    ) -> Result<()> {
         const EMPTY: [Ident; 0] = [];
-        let (table_name, column_aliases) = match alias {
-            None => (table_name, &EMPTY[..]),
-            Some(TableAlias { name, columns }) => (name.real_value(), columns.as_slice()),
+        let (table_name, schema_name, column_aliases) = match alias {
+            None => (table_name, schema_name, &EMPTY[..]),
+            // When an alias is used, schema qualification is no longer relevant
+            Some(TableAlias { name, columns }) => (name.real_value(), None, columns.as_slice()),
         };
 
         let num_col_aliases = column_aliases.len();
@@ -366,6 +378,7 @@ impl Binder {
             field.name.clone_from(&name);
             self.context.columns.push(ColumnBinding::new(
                 table_name.clone(),
+                schema_name.clone(),
                 begin + index,
                 is_hidden,
                 field,

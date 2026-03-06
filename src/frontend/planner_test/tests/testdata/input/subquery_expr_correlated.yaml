@@ -700,3 +700,13 @@
   expected_outputs:
     - batch_plan
     - stream_plan
+- name: schema-qualified column references with same-name tables in different schemas (issue 24667)
+  sql: |
+    create schema s1;
+    create schema s2;
+    create table s1.users(id int, name varchar, is_active boolean);
+    create table s2.users(id int, name varchar, is_active boolean);
+    select * from s1.users where exists (select 1 from s2.users where s2.users.id = s1.users.id and s2.users.is_active = false);
+  expected_outputs:
+    - logical_plan
+    - batch_plan

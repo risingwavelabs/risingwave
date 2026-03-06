@@ -2531,3 +2531,26 @@
     StreamMaterialize { columns: [c, t._row_id(hidden)], stream_key: [t._row_id], pk_columns: [t._row_id], pk_conflict: NoCheck }
     └─StreamProject { exprs: [(t.a + t.b) as $expr1, t._row_id] }
       └─StreamTableScan { table: t, columns: [t.a, t.b, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+- name: schema-qualified column references with same-name tables in different schemas (issue 24667)
+  sql: |
+    create schema s1;
+    create schema s2;
+    create table s1.users(id int, name varchar, is_active boolean);
+    create table s2.users(id int, name varchar, is_active boolean);
+    select * from s1.users where exists (select 1 from s2.users where s2.users.id = s1.users.id and s2.users.is_active = false);
+  logical_plan: |-
+    LogicalProject { exprs: [users.id, users.name, users.is_active] }
+    └─LogicalApply { type: LeftSemi, on: true, correlated_id: 1 }
+      ├─LogicalScan { table: users, columns: [users.id, users.name, users.is_active, users._row_id, users._rw_timestamp] }
+      └─LogicalProject { exprs: [1:Int32] }
+        └─LogicalFilter { predicate: (users.id = CorrelatedInputRef { index: 0, correlated_id: 1 }) AND (users.is_active = false:Boolean) }
+          └─LogicalScan { table: users, columns: [users.id, users.name, users.is_active, users._row_id, users._rw_timestamp] }
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchHashJoin { type: LeftSemi, predicate: users.id = users.id, output: all }
+      ├─BatchExchange { order: [], dist: HashShard(users.id) }
+      │ └─BatchScan { table: users, columns: [users.id, users.name, users.is_active], distribution: SomeShard }
+      └─BatchExchange { order: [], dist: HashShard(users.id) }
+        └─BatchProject { exprs: [users.id] }
+          └─BatchFilter { predicate: (users.is_active = false:Boolean) }
+            └─BatchScan { table: users, columns: [users.id, users.is_active], distribution: SomeShard }
