@@ -107,6 +107,10 @@ def _(outer_panels: Panels):
             ],
         )
     )
+    total_memory_usage_ratio_expr = (
+        f"({total_memory_usage_expr}) "
+        f"/ on() group_left clamp_min(sum(({total_memory_usage_expr})), 1)"
+    )
     return [
         outer_panels.row_collapsed(
             "Streaming Fragments",
@@ -337,6 +341,16 @@ def _(outer_panels: Panels):
                     ],
                 ),
                 panels.subheader("Memory Usage by Fragment"),
+                panels.timeseries_percentage(
+                    "Total Memory Usage(%)",
+                    "Fragment memory usage / sum of all fragment memory usages",
+                    [
+                        panels.target(
+                            total_memory_usage_ratio_expr,
+                            "fragment {{fragment_id}}",
+                        ),
+                    ],
+                ),
                 panels.timeseries_bytes(
                     "Total Memory Usage",
                     "Sum of executor cache memory, shared buffer imm size, and log store buffer memory",
