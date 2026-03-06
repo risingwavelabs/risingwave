@@ -12,9 +12,42 @@ strip_logs() {
 
 query_scalar() {
     local sql="$1"
-    local raw
-    raw=$(risedev psql -t -A -c "$sql" 2>&1 || true)
-    printf "%s\n" "$raw" | strip_logs | tail -n 1
+    local retry="${2:-1}"
+    local backoff="${3:-1}"
+    local attempt=1
+    local raw=""
+    local value=""
+
+    while [ "$attempt" -le "$retry" ]; do
+        raw=$(risedev psql -t -A -c "$sql" 2>&1 || true)
+        value=$(printf "%s\n" "$raw" | strip_logs | tail -n 1)
+        if [ -n "$value" ]; then
+            echo "$value"
+            return 0
+        fi
+        if [ "$attempt" -lt "$retry" ]; then
+            echo "query_scalar retry ${attempt}/${retry}: sql='${sql}', raw='${raw}'"
+            sleep "$backoff"
+        fi
+        attempt=$((attempt + 1))
+    done
+
+    echo "✗ FAIL: query_scalar exhausted retries"
+    echo "SQL: ${sql}"
+    echo "Attempts: ${retry}"
+    echo "Raw output: ${raw}"
+    return 1
+}
+
+query_scalar_or_fail() {
+    local sql="$1"
+    local retry="${2:-1}"
+    local backoff="${3:-1}"
+    local value
+    if ! value=$(query_scalar "$sql" "$retry" "$backoff"); then
+        exit 1
+    fi
+    echo "$value"
 }
 
 mysql_exec() {
@@ -43,11 +76,15 @@ wait_non_empty_scalar() {
     local sql="$1"
     local timeout="$2"
     local interval="1"
+    local attempt=0
+    local last_raw=""
     local start
     start=$(date +%s)
     while true; do
         local current
-        current=$(query_scalar "$sql")
+        attempt=$((attempt + 1))
+        last_raw=$(risedev psql -t -A -c "$sql" 2>&1 || true)
+        current=$(printf "%s\n" "$last_raw" | strip_logs | tail -n 1)
         if [ -n "$current" ]; then
             echo "$current"
             return 0
@@ -55,10 +92,12 @@ wait_non_empty_scalar() {
         if [ $(( $(date +%s) - start )) -ge "$timeout" ]; then
             echo "✗ FAIL: wait_non_empty_scalar timeout=${timeout}s"
             echo "SQL: ${sql}"
+            echo "Attempts: ${attempt}"
             echo "Current value: '${current}'"
+            echo "Raw output: ${last_raw}"
             return 1
         fi
-        echo "wait_non_empty_scalar retry: SQL='${sql}', current='${current}'"
+        echo "wait_non_empty_scalar retry#${attempt}: SQL='${sql}', current='${current}', raw='${last_raw}'"
         sleep "$interval"
     done
 }
@@ -101,8 +140,8 @@ query_i_retry "SELECT COUNT(*) FROM test_table;" "5" 30 "1s"
 
 echo "------------- inject validation ------------"
 query_i_retry "SELECT CASE WHEN EXISTS (SELECT 1 FROM rw_catalog.rw_internal_table_info WHERE job_name = 's' AND job_type = 'source') THEN 1 ELSE 0 END;" "1" 30 "1s"
-SOURCE_ID=$(query_scalar "SELECT id FROM rw_sources WHERE name = 's';")
-STATE_TABLE=$(query_scalar "SELECT name FROM rw_catalog.rw_internal_table_info WHERE job_name = 's' AND job_type = 'source' LIMIT 1;")
+SOURCE_ID=$(query_scalar_or_fail "SELECT id FROM rw_sources WHERE name = 's';" 30 1)
+STATE_TABLE=$(query_scalar_or_fail "SELECT name FROM rw_catalog.rw_internal_table_info WHERE job_name = 's' AND job_type = 'source' LIMIT 1;" 30 1)
 
 [[ "$SOURCE_ID" =~ ^[0-9]+$ ]] || { echo "✗ FAIL: invalid SOURCE_ID=${SOURCE_ID}"; exit 1; }
 [[ "$STATE_TABLE" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || { echo "✗ FAIL: invalid STATE_TABLE=${STATE_TABLE}"; exit 1; }
@@ -116,7 +155,7 @@ IFS=$'\t' read -r SPLIT_ID CURRENT_OFFSET <<< "$STATE_ROW"
 OFFSETS_JSON=$(python3 -c 'import json,sys; print(json.dumps({sys.argv[1]: sys.argv[2]}))' "$SPLIT_ID" "$CURRENT_OFFSET")
 ./risedev ctl meta inject-source-offsets --source-id "$SOURCE_ID" --offsets "$OFFSETS_JSON"
 
-OFFSET_AFTER_INJECT=$(query_scalar "SELECT offset_info->'split_info'->'inner'->>'start_offset' FROM ${STATE_TABLE} WHERE partition_id='${SPLIT_ID}' LIMIT 1;")
+OFFSET_AFTER_INJECT=$(query_scalar_or_fail "SELECT offset_info->'split_info'->'inner'->>'start_offset' FROM ${STATE_TABLE} WHERE partition_id='${SPLIT_ID}' LIMIT 1;" 30 1)
 if [ "$OFFSET_AFTER_INJECT" != "$CURRENT_OFFSET" ]; then
     echo "✗ FAIL: inject-source-offsets changed split state unexpectedly"
     echo "Before: $CURRENT_OFFSET"
