@@ -16,6 +16,7 @@ use std::collections::HashMap;
 use std::marker::PhantomData;
 use std::sync::atomic::AtomicU64;
 
+use futures::future::try_join_all;
 use itertools::Itertools;
 use risingwave_common::array::{ArrayRef, Op};
 use risingwave_common::bitmap::{Bitmap, BitmapBuilder};
@@ -273,17 +274,77 @@ impl<S: StateStore> DistinctDeduplicater<S> {
         dedup_tables: &mut HashMap<usize, StateTable<S>>,
         group_key: Option<&GroupKey>,
     ) -> StreamExecutorResult<Vec<Bitmap>> {
-        for (distinct_col, (call_indices, deduplicater)) in &mut self.deduplicaters {
-            let column = &columns[*distinct_col];
-            let dedup_table = dedup_tables.get_mut(distinct_col).unwrap();
-            // Select visibilities (as mutable references) of distinct agg calls that distinct on
-            // `distinct_col` so that `Deduplicater` doesn't need to care about index mapping.
-            // SAFETY: all items in `agg_call_indices` are unique by nature, see `new`.
-            let visibilities = unsafe { get_many_mut_from_slice(&mut visibilities, call_indices) };
-            deduplicater
-                .dedup(ops, column, visibilities, dedup_table, group_key)
-                .await?;
+        if self.deduplicaters.len() <= 1 {
+            // Fast path: no parallelization benefit for 0 or 1 distinct columns.
+            for (distinct_col, (call_indices, deduplicater)) in &mut self.deduplicaters {
+                let column = &columns[*distinct_col];
+                let dedup_table = dedup_tables.get_mut(distinct_col).unwrap();
+                // SAFETY: all items in `call_indices` are unique by nature, see `new`.
+                let visibilities =
+                    unsafe { get_many_mut_from_slice(&mut visibilities, call_indices) };
+                deduplicater
+                    .dedup(ops, column, visibilities, dedup_table, group_key)
+                    .await?;
+            }
+            return Ok(visibilities);
         }
+
+        // Parallel path: process all distinct columns concurrently.
+        // Each distinct column's dedup operation may involve state table I/O on cache miss
+        // (`dedup_table.get_row()`), so concurrent execution can reduce latency.
+        //
+        // SAFETY: The following unsafe code creates concurrent mutable references to:
+        // - Different `StateTable` entries in `dedup_tables` (each column maps to a unique key)
+        // - Different `Bitmap` entries in `visibilities` (call_indices are disjoint by construction
+        //   in `new()`, same invariant as `get_many_mut_from_slice`)
+        // `ColumnDeduplicater` entries are already disjoint via `iter_mut()`.
+        //
+        // The `dedup_tables` HashMap must not be structurally modified (insert/remove) while
+        // the raw pointers are live. This is guaranteed because `dedup_tables` is exclusively
+        // borrowed (`&mut`) by this function, and no code path adds or removes entries.
+        //
+        // Raw pointers (`*mut`) are collected and consumed within the block below so they are
+        // dropped before the `await`, satisfying `Send` requirements.
+        let futs: Vec<_> = {
+            // Pre-extract raw pointers to dedup tables for each distinct column.
+            let dedup_table_ptrs: HashMap<usize, *mut StateTable<S>> = self
+                .deduplicaters
+                .keys()
+                .map(|col| {
+                    (
+                        *col,
+                        dedup_tables.get_mut(col).unwrap() as *mut StateTable<S>,
+                    )
+                })
+                .collect();
+
+            let vis_ptr = visibilities.as_mut_ptr();
+            let vis_len = visibilities.len();
+
+            self.deduplicaters
+                .iter_mut()
+                .map(|(distinct_col, (call_indices, deduplicater))| {
+                    let column = &columns[*distinct_col];
+                    // SAFETY: each distinct column accesses a unique dedup_table entry.
+                    let dedup_table = unsafe { &mut *dedup_table_ptrs[distinct_col] };
+                    // SAFETY: call_indices are disjoint across distinct columns by construction.
+                    let vis_refs: Vec<&mut Bitmap> = call_indices
+                        .iter()
+                        .map(|&idx| {
+                            assert!(idx < vis_len);
+                            unsafe { &mut *vis_ptr.add(idx) }
+                        })
+                        .collect();
+                    async move {
+                        deduplicater
+                            .dedup(ops, column, vis_refs, dedup_table, group_key)
+                            .await
+                    }
+                })
+                .collect()
+        };
+
+        try_join_all(futs).await?;
         Ok(visibilities)
     }
 

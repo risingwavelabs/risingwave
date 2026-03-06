@@ -43,6 +43,11 @@ use crate::executor::prelude::*;
 type AggGroup<S> = GenericAggGroup<S, OnlyOutputIfHasInput>;
 type BoxedAggGroup<S> = Box<AggGroup<S>>;
 
+/// Concurrency limit for I/O-bound operations across agg groups (e.g., state table lookups
+/// in `touch_agg_groups` and `build_outputs_change`). Each group's create/output computation
+/// may involve state table I/O on cache miss, so concurrent execution reduces barrier latency.
+const HASH_AGG_STATE_IO_CONCURRENCY: usize = 10;
+
 impl<S: StateStore> EstimateSize for BoxedAggGroup<S> {
     fn estimated_heap_size(&self) -> usize {
         self.as_ref().estimated_size()
@@ -318,7 +323,9 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         if !futs.is_empty() {
             // If not all the required states/keys are in the cache, it's a chunk-level cache miss.
             vars.stats.chunk_lookup_miss_count += 1;
-            let mut buffered = stream::iter(futs).buffer_unordered(10).fuse();
+            let mut buffered = stream::iter(futs)
+                .buffer_unordered(HASH_AGG_STATE_IO_CONCURRENCY)
+                .fuse();
             while let Some(result) = buffered.next().await {
                 let (key, agg_group, stats) = result?;
                 vars.stats.merge_state_cache_stats(stats);
@@ -474,12 +481,27 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
             }
         } else {
             // emit on update
-            // TODO(wrj,rc): we may need to parallelize it and set a reasonable concurrency limit.
-            for mut agg_group in vars.dirty_groups.values_mut() {
-                let agg_group = agg_group.as_mut();
-                let (change, stats) = agg_group
-                    .build_outputs_change(&this.storages, &this.agg_funcs)
-                    .await?;
+            // Parallelize build_outputs_change across groups with a concurrency limit.
+            // Each group's output computation may involve state table I/O (for MaterializedInput
+            // states with cache miss), so concurrent execution can significantly reduce barrier
+            // latency when there are many dirty groups.
+            let storages = &this.storages;
+            let agg_funcs = &this.agg_funcs;
+            let futs = vars
+                .dirty_groups
+                .values_mut()
+                .map(|mut agg_group| async move {
+                    agg_group
+                        .as_mut()
+                        .build_outputs_change(storages, agg_funcs)
+                        .await
+                })
+                .collect_vec();
+            let mut buffered = stream::iter(futs)
+                .buffer_unordered(HASH_AGG_STATE_IO_CONCURRENCY)
+                .fuse();
+            while let Some(result) = buffered.next().await {
+                let (change, stats) = result?;
                 vars.stats.merge_state_cache_stats(stats);
 
                 if let Some(change) = change
