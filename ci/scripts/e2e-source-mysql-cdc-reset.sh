@@ -20,38 +20,21 @@ mysql_exec() {
     mysql -e "$sql"
 }
 
-assert_eq() {
-    local actual="$1"
-    local expected="$2"
-    local msg="$3"
-    if [ "$actual" != "$expected" ]; then
-        echo "✗ FAIL: ${msg} (expected=${expected}, actual=${actual})"
-        exit 1
-    fi
-    echo "✓ PASS: ${msg}"
-}
-
-wait_until() {
+query_i_retry() {
     local sql="$1"
     local expected="$2"
-    local timeout="$3"
-    local interval="1"
-    local start
-    start=$(date +%s)
-    while true; do
-        local current
-        current=$(query_scalar "$sql" || true)
-        if [ "$current" = "$expected" ]; then
-            echo "✓ PASS: wait_until matched expected=${expected}"
-            return 0
-        fi
-        if [ $(( $(date +%s) - start )) -ge "$timeout" ]; then
-            echo "✗ FAIL: wait_until timeout=${timeout}s, expected=${expected}, actual=${current}"
-            echo "SQL: ${sql}"
-            return 1
-        fi
-        sleep "$interval"
-    done
+    local retry="$3"
+    local backoff="$4"
+    local tmp
+    tmp=$(mktemp)
+    cat > "$tmp" <<SLT
+query I retry ${retry} backoff ${backoff}
+${sql}
+----
+${expected}
+SLT
+    risedev slt "$tmp"
+    rm -f "$tmp"
 }
 
 echo "------------- setup ------------"
@@ -88,7 +71,7 @@ echo "------------- baseline consume ------------"
 for i in {1..5}; do
     mysql_exec "USE binlog_test; INSERT INTO test_table (id, value) VALUES ($i, 'batch1_$i');"
 done
-wait_until "SELECT COUNT(*) FROM test_table;" "5" 30
+query_i_retry "SELECT COUNT(*) FROM test_table;" "5" 30 "1s"
 
 echo "------------- inject validation ------------"
 SOURCE_ID=$(query_scalar "SELECT id FROM rw_sources WHERE name = 's';")
@@ -106,7 +89,13 @@ OFFSETS_JSON=$(python3 -c 'import json,sys; print(json.dumps({sys.argv[1]: sys.a
 ./risedev ctl meta inject-source-offsets --source-id "$SOURCE_ID" --offsets "$OFFSETS_JSON"
 
 OFFSET_AFTER_INJECT=$(query_scalar "SELECT offset_info->'split_info'->'inner'->>'start_offset' FROM ${STATE_TABLE} WHERE partition_id='${SPLIT_ID}' LIMIT 1;")
-assert_eq "$OFFSET_AFTER_INJECT" "$CURRENT_OFFSET" "inject-source-offsets keeps split state consistent"
+if [ "$OFFSET_AFTER_INJECT" != "$CURRENT_OFFSET" ]; then
+    echo "✗ FAIL: inject-source-offsets changed split state unexpectedly"
+    echo "Before: $CURRENT_OFFSET"
+    echo "After:  $OFFSET_AFTER_INJECT"
+    exit 1
+fi
+echo "✓ PASS: inject-source-offsets keeps split state consistent"
 
 echo "------------- forward offset skip validation ------------"
 risedev psql -c "ALTER SOURCE s SET source_rate_limit = 0;"
@@ -125,15 +114,15 @@ FORWARD_OFFSETS_JSON=$(python3 -c 'import json,sys; print(json.dumps({sys.argv[1
 ./risedev ctl meta inject-source-offsets --source-id "$SOURCE_ID" --offsets "$FORWARD_OFFSETS_JSON"
 
 risedev psql -c "ALTER SOURCE s SET source_rate_limit = default;"
-wait_until "SELECT COUNT(*) FROM test_table;" "5" 30
-assert_eq "$(query_scalar "SELECT COUNT(*) FROM test_table WHERE id BETWEEN 9001 AND 9003;")" "0" "forward offset skips paused rows"
+query_i_retry "SELECT COUNT(*) FROM test_table;" "5" 30 "1s"
+query_i_retry "SELECT COUNT(*) FROM test_table WHERE id BETWEEN 9001 AND 9003;" "0" 10 "1s"
 
 echo "------------- reset validation ------------"
 risedev psql -c "ALTER SOURCE s SET source_rate_limit = 0;"
 for i in {6..10}; do
     mysql_exec "USE binlog_test; INSERT INTO test_table (id, value) VALUES ($i, 'batch2_$i');"
 done
-assert_eq "$(query_scalar "SELECT COUNT(*) FROM test_table;")" "5" "paused source keeps total count at baseline"
+query_i_retry "SELECT COUNT(*) FROM test_table;" "5" 10 "1s"
 
 mysql_exec "FLUSH LOGS;"
 mysql_exec "USE binlog_test; INSERT INTO test_table (id, value) VALUES (50, 'dummy_data');"
@@ -141,12 +130,10 @@ CURRENT_BINLOG=$(mysql -s -N -e "SHOW BINARY LOG STATUS;" 2>/dev/null | awk '{pr
 mysql_exec "PURGE BINARY LOGS TO '$CURRENT_BINLOG';"
 
 risedev psql -c "ALTER SOURCE s SET source_rate_limit = default;"
-assert_eq "$(query_scalar "SELECT COUNT(*) FROM test_table;")" "5" "expired binlog is not consumed"
+query_i_retry "SELECT COUNT(*) FROM test_table;" "5" 10 "1s"
 
 risedev psql -c "ALTER SOURCE s RESET;"
-RESET_NULL_COUNT=$(query_scalar "SELECT COUNT(*) FROM ${STATE_TABLE} WHERE offset_info->'split_info'->'inner'->>'start_offset' IS NULL;")
-[ "$RESET_NULL_COUNT" -ge 1 ] || { echo "✗ FAIL: RESET did not clear start_offset"; exit 1; }
-echo "✓ PASS: RESET clears CDC start_offset"
+query_i_retry "SELECT CASE WHEN COUNT(*) >= 1 THEN 1 ELSE 0 END FROM ${STATE_TABLE} WHERE offset_info->'split_info'->'inner'->>'start_offset' IS NULL;" "1" 10 "1s"
 
 echo "------------- resume behavior validation ------------"
 for i in {16..20}; do
@@ -160,11 +147,11 @@ for i in {101..120}; do
     mysql_exec "USE binlog_test; INSERT INTO test_table (id, value) VALUES ($i, 'batch4_after_restart_$i');"
 done
 
-wait_until "SELECT COUNT(*) FROM test_table;" "25" 60
-assert_eq "$(query_scalar "SELECT COUNT(*) FROM test_table WHERE id BETWEEN 1 AND 5;")" "5" "batch1 preserved"
-assert_eq "$(query_scalar "SELECT COUNT(*) FROM test_table WHERE id BETWEEN 6 AND 10;")" "0" "batch2 expired"
-assert_eq "$(query_scalar "SELECT COUNT(*) FROM test_table WHERE id BETWEEN 16 AND 20;")" "0" "batch3 not persisted before restart"
-assert_eq "$(query_scalar "SELECT COUNT(*) FROM test_table WHERE id BETWEEN 101 AND 120;")" "20" "batch4 consumed after restart"
+query_i_retry "SELECT COUNT(*) FROM test_table;" "25" 60 "1s"
+query_i_retry "SELECT COUNT(*) FROM test_table WHERE id BETWEEN 1 AND 5;" "5" 10 "1s"
+query_i_retry "SELECT COUNT(*) FROM test_table WHERE id BETWEEN 6 AND 10;" "0" 10 "1s"
+query_i_retry "SELECT COUNT(*) FROM test_table WHERE id BETWEEN 16 AND 20;" "0" 10 "1s"
+query_i_retry "SELECT COUNT(*) FROM test_table WHERE id BETWEEN 101 AND 120;" "20" 10 "1s"
 
 echo "------------- cleanup ------------"
 risedev psql -c "DROP TABLE test_table;"
