@@ -9,8 +9,6 @@ on:
     branches:
     - main
     - "v*.*.*-rc"
-  merge_group:
-    types: [checks_requested]
 jobs:
   license-header-check:
     runs-on: ubuntu-latest
