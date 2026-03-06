@@ -385,7 +385,6 @@ struct ShowClusterRow {
     parallelism: Option<i32>,
     is_streaming: Option<bool>,
     is_serving: Option<bool>,
-    is_unschedulable: Option<bool>,
     started_at: Option<Timestamptz>,
 }
 
@@ -726,7 +725,6 @@ pub async fn handle_show_object(
                     parallelism: worker.parallelism().map(|parallelism| parallelism as i32),
                     is_streaming: property.map(|p| p.is_streaming),
                     is_serving: property.map(|p| p.is_serving),
-                    is_unschedulable: property.map(|p| p.is_unschedulable),
                     started_at: worker
                         .started_at
                         .map(|ts| Timestamptz::from_secs(ts as i64).unwrap()),

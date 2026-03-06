@@ -322,7 +322,7 @@ impl CatalogController {
             }
         }
 
-        let (removed_source_fragments, removed_sink_fragments, removed_actors, removed_fragments) =
+        let (removed_source_fragments, removed_sink_fragments, _removed_actors, removed_fragments) =
             get_fragments_for_jobs(
                 &txn,
                 self.env.shared_actor_infos(),
@@ -435,7 +435,6 @@ impl CatalogController {
                 removed_source_ids: removed_source_ids.into_iter().collect(),
                 removed_secret_ids,
                 removed_source_fragments,
-                removed_actors,
                 removed_fragments,
                 removed_sink_fragment_by_targets,
                 removed_iceberg_table_sinks,
