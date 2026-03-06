@@ -1973,6 +1973,7 @@ where
                 .await
                 .map(|s| s.boxed());
         }
+
         let watermark_bytes = self.row_store.state_store.get_table_watermark(vnode);
         let Some(watermark_bytes) = watermark_bytes else {
             return self
@@ -1999,6 +2000,7 @@ where
                 "Watermark serde should have at least one order type"
             ))
         })?;
+
         let direction = if order_type.is_ascending() {
             WatermarkDirection::Ascending
         } else {
@@ -2008,6 +2010,20 @@ where
             .pk_indices
             .iter()
             .position(|&i| i == clean_watermark_index);
+        let clean_watermark_index_in_value = match &self.value_indices {
+            Some(value_indices) => value_indices
+                .iter()
+                .position(|idx| *idx == clean_watermark_index)
+                .ok_or_else(|| {
+                    StreamExecutorError::from(anyhow!(
+                        "clean watermark column index {} is not included in table value indices {:?}",
+                        clean_watermark_index,
+                        value_indices
+                    ))
+                })?,
+            None => clean_watermark_index,
+        };
+
         let stream = self
             .iter_with_prefix_inner::</* REVERSE */ false, Bytes>(pk_prefix, sub_range, prefetch_options)
             .await?
@@ -2030,7 +2046,7 @@ where
                     },
                     WatermarkSerdeType::Value => {
                         direction.datum_filter_by_watermark(
-                            row.datum_at(clean_watermark_index),
+                            row.datum_at(clean_watermark_index_in_value),
                             &watermark_value,
                             *order_type,
                         )
