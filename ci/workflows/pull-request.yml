@@ -212,7 +212,49 @@ steps:
     parallelism: 4
     retry: *auto-retry
 
-  - label: "end-to-end test (parallel, ci-dev, repro)"
+  - label: "end-to-end test (parallel, ci-dev, repro group 1)"
+    command: "ci/scripts/e2e-test-parallel.sh -p ci-dev"
+    if: build.branch == "shanicky/over-window-pr-only"
+    depends_on:
+      - "build"
+      - "build-other"
+      - "docslt"
+    plugins:
+      - docker-compose#v5.5.0: *docker-compose
+      - ./ci/plugins/upload-failure-logs
+    timeout_in_minutes: 45
+    parallelism: 4
+    retry: *auto-retry
+
+  - label: "end-to-end test (parallel, ci-dev, repro group 2)"
+    command: "ci/scripts/e2e-test-parallel.sh -p ci-dev"
+    if: build.branch == "shanicky/over-window-pr-only"
+    depends_on:
+      - "build"
+      - "build-other"
+      - "docslt"
+    plugins:
+      - docker-compose#v5.5.0: *docker-compose
+      - ./ci/plugins/upload-failure-logs
+    timeout_in_minutes: 45
+    parallelism: 4
+    retry: *auto-retry
+
+  - label: "end-to-end test (parallel, ci-dev, repro group 3)"
+    command: "ci/scripts/e2e-test-parallel.sh -p ci-dev"
+    if: build.branch == "shanicky/over-window-pr-only"
+    depends_on:
+      - "build"
+      - "build-other"
+      - "docslt"
+    plugins:
+      - docker-compose#v5.5.0: *docker-compose
+      - ./ci/plugins/upload-failure-logs
+    timeout_in_minutes: 45
+    parallelism: 4
+    retry: *auto-retry
+
+  - label: "end-to-end test (parallel, ci-dev, repro group 4)"
     command: "ci/scripts/e2e-test-parallel.sh -p ci-dev"
     if: build.branch == "shanicky/over-window-pr-only"
     depends_on:
