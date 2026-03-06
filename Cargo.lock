@@ -12343,6 +12343,7 @@ dependencies = [
  "indexmap 2.12.0",
  "itertools 0.14.0",
  "jsonbb",
+ "lz4",
  "madsim-tokio",
  "madsim-tonic",
  "maplit",
@@ -12388,6 +12389,7 @@ dependencies = [
  "twox-hash 2.1.0",
  "uuid",
  "workspace-hack",
+ "zstd 0.13.3",
 ]
 
 [[package]]

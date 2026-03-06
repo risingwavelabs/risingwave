@@ -17,12 +17,14 @@ use std::ops::Bound::{Excluded, Included};
 use std::ops::{Deref, DerefMut};
 use std::sync::atomic::Ordering;
 
+use bytes::BytesMut;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::object_size_map;
 use risingwave_hummock_sdk::version::HummockVersion;
 use risingwave_hummock_sdk::{HummockObjectId, HummockVersionId, get_stale_object_ids};
 use risingwave_pb::hummock::hummock_version_checkpoint::{PbStaleObjects, StaleObjects};
 use risingwave_pb::hummock::{
-    PbHummockVersion, PbHummockVersionArchive, PbHummockVersionCheckpoint, PbVectorIndexObject,
+    CheckpointCompressionAlgorithm, PbHummockVersion, PbHummockVersionArchive,
+    PbHummockVersionCheckpoint, PbHummockVersionCheckpointEnvelope, PbVectorIndexObject,
     PbVectorIndexObjectType,
 };
 use thiserror_ext::AsReport;
@@ -32,6 +34,15 @@ use crate::hummock::HummockManager;
 use crate::hummock::error::Result;
 use crate::hummock::manager::versioning::Versioning;
 use crate::hummock::metrics_utils::{trigger_gc_stat, trigger_split_stat};
+
+/// Computes xxhash64 checksum of the given data, using seed 0.
+/// This matches the xxhash64 used in block checksum (see `sstable/utils.rs`).
+pub(crate) fn xxhash64_checksum(data: &[u8]) -> u64 {
+    use std::hash::Hasher;
+    let mut hasher = twox_hash::XxHash64::with_seed(0);
+    hasher.write(data);
+    hasher.finish()
+}
 
 #[derive(Default)]
 pub struct HummockVersionCheckpoint {
@@ -69,18 +80,184 @@ impl HummockVersionCheckpoint {
     }
 }
 
+/// Decodes checkpoint data, supporting both envelope (compressed) and legacy (raw) formats.
+///
+/// Format detection: our writer always sets `checksum` in the envelope, so
+/// `checksum.is_some()` reliably distinguishes envelope from legacy format.
+/// Legacy bytes may happen to decode as an envelope (field 1 wire-type mismatch
+/// is skipped, field 2 LEN matches `payload`), but will never have a checksum.
+fn decode_checkpoint_data(data: bytes::Bytes) -> Result<PbHummockVersionCheckpoint> {
+    use anyhow::Context;
+    use prost::Message;
+
+    let data_size = data.len();
+
+    if let Ok(envelope) = PbHummockVersionCheckpointEnvelope::decode(data.clone())
+        && let Some(expected) = envelope.checksum
+    {
+        let actual = xxhash64_checksum(&envelope.payload);
+        if actual != expected {
+            return Err(anyhow::anyhow!(
+                "checkpoint checksum mismatch: expected {:#x}, got {:#x}",
+                expected,
+                actual
+            )
+            .into());
+        }
+
+        let algo = CheckpointCompressionAlgorithm::try_from(envelope.compression_algorithm)
+            .with_context(|| {
+                format!(
+                    "unknown checkpoint compression algorithm: {}",
+                    envelope.compression_algorithm
+                )
+            })?;
+
+        let decompressed = decompress_payload(algo, &envelope.payload)?;
+        let ckpt = PbHummockVersionCheckpoint::decode(decompressed.as_ref())
+            .context("failed to decode checkpoint envelope payload")?;
+        if ckpt.version.is_none() {
+            return Err(anyhow::anyhow!("checkpoint missing required field `version`").into());
+        }
+
+        tracing::info!(
+            compression = ?algo,
+            compressed_size = envelope.payload.len(),
+            decompressed_size = decompressed.len(),
+            compression_ratio =
+                format!("{:.2}x", decompressed.len() as f64 / envelope.payload.len().max(1) as f64),
+            checksum = format!("{expected:#x}"),
+            "decoded compressed checkpoint"
+        );
+        return Ok(ckpt);
+    }
+
+    // Legacy uncompressed format
+    tracing::info!(
+        data_size,
+        "decoding checkpoint in legacy uncompressed format"
+    );
+    let ckpt =
+        PbHummockVersionCheckpoint::decode(data).context("failed to decode legacy checkpoint")?;
+    if ckpt.version.is_none() {
+        return Err(anyhow::anyhow!("legacy checkpoint missing required field `version`").into());
+    }
+    Ok(ckpt)
+}
+
+fn decompress_payload(
+    algo: CheckpointCompressionAlgorithm,
+    payload: &[u8],
+) -> Result<std::borrow::Cow<'_, [u8]>> {
+    use anyhow::Context;
+
+    match algo {
+        CheckpointCompressionAlgorithm::CheckpointCompressionUnspecified => Ok(payload.into()),
+        CheckpointCompressionAlgorithm::CheckpointCompressionZstd => {
+            Ok(zstd::stream::decode_all(payload)
+                .map(std::borrow::Cow::Owned)
+                .context("zstd decompression failed")?)
+        }
+        CheckpointCompressionAlgorithm::CheckpointCompressionLz4 => {
+            let mut decoder = lz4::Decoder::new(payload).context("lz4 decoder init failed")?;
+            let mut decompressed = Vec::new();
+            std::io::Read::read_to_end(&mut decoder, &mut decompressed)
+                .context("lz4 decompression failed")?;
+            Ok(decompressed.into())
+        }
+    }
+}
+
+fn compress_payload(
+    algo: risingwave_common::config::CheckpointCompression,
+    data: &[u8],
+) -> Result<Vec<u8>> {
+    use anyhow::Context;
+    use risingwave_common::config::CheckpointCompression;
+
+    match algo {
+        CheckpointCompression::None => Ok(data.to_vec()),
+        CheckpointCompression::Zstd => {
+            // Level 3: good balance between compression ratio and speed
+            Ok(zstd::stream::encode_all(data, 3).context("zstd compression failed")?)
+        }
+        CheckpointCompression::Lz4 => {
+            let mut compressed = Vec::new();
+            let mut encoder = lz4::EncoderBuilder::new()
+                .level(4)
+                .build(&mut compressed)
+                .context("lz4 encoder init failed")?;
+            std::io::Write::write_all(&mut encoder, data)
+                .context("lz4 compression write failed")?;
+            let (_writer, result) = encoder.finish();
+            result.context("lz4 compression finish failed")?;
+            Ok(compressed)
+        }
+    }
+}
+
+async fn read_bytes_in_chunks<F, Fut>(
+    total_size: usize,
+    chunk_size: usize,
+    max_in_flight_chunks: usize,
+    mut read_range: F,
+) -> anyhow::Result<bytes::Bytes>
+where
+    F: FnMut(std::ops::Range<usize>) -> Fut,
+    Fut: std::future::Future<Output = anyhow::Result<bytes::Bytes>>,
+{
+    use anyhow::Context;
+    use futures::StreamExt;
+
+    let num_chunks = total_size.div_ceil(chunk_size);
+    let mut buf = BytesMut::with_capacity(total_size);
+
+    let mut chunk_stream = futures::stream::iter((0..total_size).step_by(chunk_size))
+        .enumerate()
+        .map(|(chunk_idx, offset)| {
+            let end = std::cmp::min(offset + chunk_size, total_size);
+            let range = offset..end;
+            let fut = read_range(range.clone());
+            async move {
+                fut.await.with_context(|| {
+                    format!(
+                        "read checkpoint chunk {}/{} range {}..{}",
+                        chunk_idx + 1,
+                        num_chunks,
+                        range.start,
+                        range.end
+                    )
+                })
+            }
+        })
+        .buffered(max_in_flight_chunks);
+
+    while let Some(chunk) = chunk_stream.next().await {
+        let chunk = chunk?;
+        buf.extend_from_slice(&chunk);
+    }
+
+    Ok(buf.freeze())
+}
+
 /// A hummock version checkpoint compacts previous hummock version delta logs, and stores stale
 /// objects from those delta logs.
 impl HummockManager {
     /// Returns Ok(None) if not found.
+    ///
+    /// Reads large checkpoints using bounded parallel chunked reads (128MB per chunk) to avoid
+    /// single-request timeout issues.
+    /// Supports both compressed (envelope) and uncompressed (legacy) checkpoint formats.
     pub async fn try_read_checkpoint(&self) -> Result<Option<HummockVersionCheckpoint>> {
-        use prost::Message;
-        let data = match self
+        const CHUNK_SIZE: usize = 128 * 1024 * 1024; // 128MB
+        const MAX_IN_FLIGHT_CHUNKS: usize = 4;
+
+        let object_metadata = match self
             .object_store
-            .read(&self.version_checkpoint_path, ..)
+            .metadata(&self.version_checkpoint_path)
             .await
         {
-            Ok(data) => data,
+            Ok(metadata) => metadata,
             Err(e) => {
                 if e.is_object_not_found_error() {
                     return Ok(None);
@@ -88,7 +265,50 @@ impl HummockManager {
                 return Err(e.into());
             }
         };
-        let ckpt = PbHummockVersionCheckpoint::decode(data).map_err(|e| anyhow::anyhow!(e))?;
+        let total_size = object_metadata.total_size;
+
+        let download_start = std::time::Instant::now();
+        let data = if total_size <= CHUNK_SIZE {
+            self.object_store
+                .read(&self.version_checkpoint_path, 0..total_size)
+                .await?
+        } else {
+            let num_chunks = total_size.div_ceil(CHUNK_SIZE);
+            let data = read_bytes_in_chunks(
+                total_size,
+                CHUNK_SIZE,
+                MAX_IN_FLIGHT_CHUNKS,
+                |range| async {
+                    Ok(self
+                        .object_store
+                        .read(&self.version_checkpoint_path, range)
+                        .await?)
+                },
+            )
+            .await?;
+
+            tracing::info!(
+                total_size,
+                num_chunks,
+                chunk_size = CHUNK_SIZE,
+                max_in_flight_chunks = MAX_IN_FLIGHT_CHUNKS,
+                "chunked read complete"
+            );
+            data
+        };
+        let download_duration = download_start.elapsed();
+
+        let decode_start = std::time::Instant::now();
+        let ckpt = decode_checkpoint_data(data)?;
+        let decode_duration = decode_start.elapsed();
+
+        tracing::info!(
+            total_size,
+            download_ms = download_duration.as_millis() as u64,
+            decode_ms = decode_duration.as_millis() as u64,
+            "checkpoint read complete"
+        );
+
         Ok(Some(HummockVersionCheckpoint::from_protobuf(&ckpt)))
     }
 
@@ -97,7 +317,30 @@ impl HummockManager {
         checkpoint: &HummockVersionCheckpoint,
     ) -> Result<()> {
         use prost::Message;
-        let buf = checkpoint.to_protobuf().encode_to_vec();
+        let raw_bytes = checkpoint.to_protobuf().encode_to_vec();
+        let raw_size = raw_bytes.len();
+
+        let compression = self.env.opts.checkpoint_compression_algorithm;
+        let compressed = compress_payload(compression, &raw_bytes)?;
+        let checksum = xxhash64_checksum(&compressed);
+
+        tracing::info!(
+            raw_size,
+            compressed_size = compressed.len(),
+            compression_ratio =
+                format!("{:.2}x", raw_size as f64 / compressed.len().max(1) as f64),
+            compression = ?compression,
+            checksum = format!("{:#x}", checksum),
+            "writing compressed checkpoint"
+        );
+
+        let envelope = PbHummockVersionCheckpointEnvelope {
+            compression_algorithm: compression as i32,
+            payload: compressed,
+            checksum: Some(checksum),
+        };
+
+        let buf = envelope.encode_to_vec();
         self.object_store
             .upload(&self.version_checkpoint_path, buf.into())
             .await?;
@@ -146,7 +389,6 @@ impl HummockManager {
         assert!(new_checkpoint_id > old_checkpoint_id);
         let mut archive: Option<PbHummockVersionArchive> = None;
         let mut stale_objects = old_checkpoint.stale_objects.clone();
-        // `object_sizes` is used to calculate size of stale objects.
         let mut object_sizes = object_size_map(&old_checkpoint.version);
         // The set of object ids that once exist in any hummock version
         let mut versions_object_ids: HashSet<_> =
@@ -243,7 +485,6 @@ impl HummockManager {
             stale_objects,
         };
         drop(versioning_guard);
-        // 2. persist the new checkpoint without holding lock
         self.write_checkpoint(&new_checkpoint).await?;
         if let Some(archive) = archive
             && let Err(e) = self.write_version_archive(&archive).await
@@ -254,7 +495,6 @@ impl HummockManager {
                 archive.version.as_ref().unwrap().id
             );
         }
-        // 3. hold write lock and update in memory state
         let mut versioning_guard = self.versioning.write().await;
         let versioning = versioning_guard.deref_mut();
         assert!(new_checkpoint.version.id > versioning.checkpoint.version.id);
@@ -289,5 +529,264 @@ impl HummockManager {
     pub async fn get_checkpoint_version(&self) -> HummockVersion {
         let versioning_guard = self.versioning.read().await;
         versioning_guard.checkpoint.version.clone()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use bytes::Bytes;
+    use prost::Message;
+    use risingwave_common::config::CheckpointCompression;
+    use risingwave_pb::hummock::hummock_version_checkpoint::StaleObjects;
+    use risingwave_pb::hummock::{
+        PbHummockVersion, PbHummockVersionCheckpoint, PbHummockVersionCheckpointEnvelope,
+    };
+
+    use super::{
+        compress_payload, decode_checkpoint_data, read_bytes_in_chunks, xxhash64_checksum,
+    };
+
+    #[allow(deprecated)]
+    fn make_version(id: u64) -> PbHummockVersion {
+        PbHummockVersion {
+            id: id.into(),
+            levels: Default::default(),
+            max_committed_epoch: 0,
+            table_watermarks: Default::default(),
+            table_change_logs: Default::default(),
+            state_table_info: Default::default(),
+            vector_indexes: Default::default(),
+        }
+    }
+
+    fn make_checkpoint(version_id: u64) -> PbHummockVersionCheckpoint {
+        let stale = StaleObjects {
+            id: vec![1u64.into(), 2u64.into(), 3u64.into()],
+            total_file_size: 123,
+            vector_files: vec![],
+        };
+
+        PbHummockVersionCheckpoint {
+            version: Some(make_version(version_id)),
+            stale_objects: [(1u64.into(), stale)].into_iter().collect(),
+        }
+    }
+
+    fn make_envelope_bytes(
+        checkpoint: &PbHummockVersionCheckpoint,
+        compression: CheckpointCompression,
+        checksum: Option<u64>,
+    ) -> Bytes {
+        let raw = checkpoint.encode_to_vec();
+        let payload = compress_payload(compression, &raw)
+            .expect("compress checkpoint payload should succeed");
+        let checksum = checksum.unwrap_or_else(|| xxhash64_checksum(&payload));
+        let envelope = PbHummockVersionCheckpointEnvelope {
+            compression_algorithm: compression as i32,
+            payload,
+            checksum: Some(checksum),
+        };
+        Bytes::from(envelope.encode_to_vec())
+    }
+
+    #[test]
+    fn decode_checkpoint_data_falls_back_to_legacy_format() {
+        let checkpoint = make_checkpoint(42);
+        let raw = Bytes::from(checkpoint.encode_to_vec());
+        let decoded = decode_checkpoint_data(raw).expect("legacy checkpoint should decode");
+        assert_eq!(decoded, checkpoint);
+    }
+
+    #[test]
+    fn decode_checkpoint_data_roundtrips_envelope_with_checksum() {
+        let checkpoint = make_checkpoint(42);
+        for compression in [
+            CheckpointCompression::None,
+            CheckpointCompression::Zstd,
+            CheckpointCompression::Lz4,
+        ] {
+            let data = make_envelope_bytes(&checkpoint, compression, None);
+            let decoded = decode_checkpoint_data(data).expect("envelope checkpoint should decode");
+            assert_eq!(decoded, checkpoint);
+        }
+    }
+
+    #[test]
+    fn decode_checkpoint_data_returns_error_on_checksum_mismatch() {
+        let checkpoint = make_checkpoint(42);
+        let raw = checkpoint.encode_to_vec();
+        let mut payload = compress_payload(CheckpointCompression::Zstd, &raw)
+            .expect("compress checkpoint payload should succeed");
+        let expected = xxhash64_checksum(&payload);
+        payload[0] ^= 0x01;
+        let envelope = PbHummockVersionCheckpointEnvelope {
+            compression_algorithm: CheckpointCompression::Zstd as i32,
+            payload,
+            checksum: Some(expected),
+        };
+        let data = Bytes::from(envelope.encode_to_vec());
+        let err = decode_checkpoint_data(data).expect_err("checksum mismatch should error");
+        assert!(err.to_string().contains("checksum mismatch"), "{err:?}");
+    }
+
+    #[test]
+    fn decode_checkpoint_data_returns_error_on_unknown_compression_algorithm() {
+        let checkpoint = make_checkpoint(42);
+        let payload = checkpoint.encode_to_vec();
+        let checksum = xxhash64_checksum(&payload);
+        let envelope = PbHummockVersionCheckpointEnvelope {
+            compression_algorithm: 123,
+            payload,
+            checksum: Some(checksum),
+        };
+        let data = Bytes::from(envelope.encode_to_vec());
+        let err =
+            decode_checkpoint_data(data).expect_err("unknown compression algorithm should error");
+        assert!(
+            err.to_string()
+                .contains("unknown checkpoint compression algorithm"),
+            "{err:?}"
+        );
+    }
+
+    #[test]
+    fn decode_checkpoint_data_returns_error_on_legacy_missing_version() {
+        let checkpoint = PbHummockVersionCheckpoint {
+            version: None,
+            stale_objects: Default::default(),
+        };
+        let data = Bytes::from(checkpoint.encode_to_vec());
+        let err = decode_checkpoint_data(data).expect_err("missing version should error");
+        assert!(
+            err.to_string()
+                .contains("legacy checkpoint missing required field `version`"),
+            "{err:?}"
+        );
+    }
+
+    #[test]
+    fn decode_checkpoint_data_returns_error_on_corrupt_envelope_payload() {
+        let garbage = b"not a valid protobuf";
+        let checksum = xxhash64_checksum(garbage);
+        let envelope = PbHummockVersionCheckpointEnvelope {
+            compression_algorithm: CheckpointCompression::None as i32,
+            payload: garbage.to_vec(),
+            checksum: Some(checksum),
+        };
+        let data = Bytes::from(envelope.encode_to_vec());
+        let err = decode_checkpoint_data(data).expect_err("corrupt envelope payload should error");
+        assert!(
+            err.to_string()
+                .contains("failed to decode checkpoint envelope payload"),
+            "{err:?}"
+        );
+    }
+
+    #[test]
+    fn decode_checkpoint_data_returns_error_on_empty_input() {
+        let err = decode_checkpoint_data(Bytes::new()).expect_err("empty checkpoint should fail");
+        assert!(
+            err.to_string()
+                .contains("legacy checkpoint missing required field `version`"),
+            "{err:?}"
+        );
+    }
+
+    #[test]
+    fn decode_checkpoint_data_returns_error_on_envelope_missing_version() {
+        let checkpoint = PbHummockVersionCheckpoint {
+            version: None,
+            stale_objects: Default::default(),
+        };
+        let raw = checkpoint.encode_to_vec();
+        let checksum = xxhash64_checksum(&raw);
+        let envelope = PbHummockVersionCheckpointEnvelope {
+            compression_algorithm: CheckpointCompression::None as i32,
+            payload: raw,
+            checksum: Some(checksum),
+        };
+        let data = Bytes::from(envelope.encode_to_vec());
+        let err =
+            decode_checkpoint_data(data).expect_err("envelope with missing version should error");
+        assert!(
+            err.to_string()
+                .contains("checkpoint missing required field `version`"),
+            "{err:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn read_bytes_in_chunks_respects_concurrency_limit_and_reassembles() {
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        use tokio::time::{Duration, sleep};
+
+        let total_size = 100usize;
+        let chunk_size = 10usize;
+        let max_in_flight = 3usize;
+
+        let data: Arc<Vec<u8>> = Arc::new((0..total_size).map(|i| (i % 256) as u8).collect());
+        let in_flight = Arc::new(AtomicUsize::new(0));
+        let max_seen = Arc::new(AtomicUsize::new(0));
+
+        let out = read_bytes_in_chunks(total_size, chunk_size, max_in_flight, {
+            let data = data.clone();
+            let in_flight = in_flight.clone();
+            let max_seen = max_seen.clone();
+            move |range: std::ops::Range<usize>| {
+                let data = data.clone();
+                let in_flight = in_flight.clone();
+                let max_seen = max_seen.clone();
+                async move {
+                    let cur = in_flight.fetch_add(1, Ordering::SeqCst) + 1;
+                    max_seen.fetch_max(cur, Ordering::SeqCst);
+
+                    // Add a small delay to keep multiple reads in-flight concurrently.
+                    sleep(Duration::from_millis(30)).await;
+
+                    let bytes = Bytes::copy_from_slice(&data[range]);
+                    in_flight.fetch_sub(1, Ordering::SeqCst);
+                    Ok(bytes)
+                }
+            }
+        })
+        .await
+        .expect("chunked read should succeed");
+
+        assert_eq!(out.as_ref(), data.as_slice());
+        let max_seen = max_seen.load(Ordering::SeqCst);
+        assert!(max_seen <= max_in_flight, "max_seen={max_seen}");
+        assert!(
+            max_seen > 1,
+            "expected some concurrency, max_seen={max_seen}"
+        );
+    }
+
+    #[tokio::test]
+    async fn read_bytes_in_chunks_adds_range_context_on_error() {
+        let total_size = 30usize;
+        let chunk_size = 10usize;
+        let max_in_flight = 2usize;
+
+        let err = read_bytes_in_chunks(total_size, chunk_size, max_in_flight, |range| async move {
+            if range.start == 10 {
+                anyhow::bail!("boom");
+            }
+            Ok(Bytes::copy_from_slice(&vec![0u8; range.len()]))
+        })
+        .await
+        .expect_err("should fail");
+
+        let msg = err.to_string();
+        assert!(
+            msg.contains("read checkpoint chunk 2/3 range 10..20"),
+            "unexpected error message: {msg}"
+        );
+        let msg_with_chain = format!("{err:#}");
+        assert!(
+            msg_with_chain.contains("boom"),
+            "unexpected error message: {msg_with_chain}"
+        );
     }
 }
