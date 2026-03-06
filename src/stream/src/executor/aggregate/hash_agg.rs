@@ -43,6 +43,11 @@ use crate::executor::prelude::*;
 type AggGroup<S> = GenericAggGroup<S, OnlyOutputIfHasInput>;
 type BoxedAggGroup<S> = Box<AggGroup<S>>;
 
+/// Concurrency limit for I/O-bound operations across agg groups (e.g., state table lookups
+/// in `touch_agg_groups` and `build_outputs_change`). Each group's create/output computation
+/// may involve state table I/O on cache miss, so concurrent execution reduces barrier latency.
+const HASH_AGG_STATE_IO_CONCURRENCY: usize = 10;
+
 impl<S: StateStore> EstimateSize for BoxedAggGroup<S> {
     fn estimated_heap_size(&self) -> usize {
         self.as_ref().estimated_size()
@@ -318,7 +323,9 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         if !futs.is_empty() {
             // If not all the required states/keys are in the cache, it's a chunk-level cache miss.
             vars.stats.chunk_lookup_miss_count += 1;
-            let mut buffered = stream::iter(futs).buffer_unordered(10).fuse();
+            let mut buffered = stream::iter(futs)
+                .buffer_unordered(HASH_AGG_STATE_IO_CONCURRENCY)
+                .fuse();
             while let Some(result) = buffered.next().await {
                 let (key, agg_group, stats) = result?;
                 vars.stats.merge_state_cache_stats(stats);
@@ -490,7 +497,9 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                         .await
                 })
                 .collect_vec();
-            let mut buffered = stream::iter(futs).buffer_unordered(10).fuse();
+            let mut buffered = stream::iter(futs)
+                .buffer_unordered(HASH_AGG_STATE_IO_CONCURRENCY)
+                .fuse();
             while let Some(result) = buffered.next().await {
                 let (change, stats) = result?;
                 vars.stats.merge_state_cache_stats(stats);
