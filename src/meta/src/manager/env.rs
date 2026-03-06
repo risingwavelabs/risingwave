@@ -330,7 +330,7 @@ impl MetaOpts {
             gc_history_retention_time_sec: 3600 * 24 * 7,
             max_inflight_time_travel_query: 1000,
             enable_committed_sst_sanity_check: false,
-            periodic_compaction_interval_sec: 60,
+            periodic_compaction_interval_sec: 300,
             node_num_monitor_interval_sec: 10,
             protect_drop_table_with_incoming_sink: false,
             prometheus_endpoint: None,
