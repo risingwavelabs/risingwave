@@ -242,3 +242,124 @@
             │   └─StreamTableScan { table: s1, columns: [s1.id, s1.value, s1.ts, s1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [s1._row_id], pk: [_row_id], dist: UpstreamHashShard(s1._row_id) }
             └─StreamExchange { dist: HashShard(s2.id) }
               └─StreamTableScan { table: s2, columns: [s2.id, s2.value, s2.ts, s2._row_id], stream_scan_type: SnapshotBackfill, stream_key: [s2._row_id], pk: [_row_id], dist: UpstreamHashShard(s2._row_id) }
+- id: multiple numbering functions over eowc source each get a state column
+  sql: |
+    create source t (a int, b int, tm timestamp, watermark for tm as tm - interval '5 minutes') with (connector = 'kinesis') FORMAT PLAIN ENCODE JSON;
+    select
+      row_number() over (partition by b order by tm),
+      rank() over (partition by b order by tm),
+      dense_rank() over (partition by b order by tm)
+    from t;
+  eowc_stream_plan: |-
+    StreamMaterialize { columns: [row_number, rank, dense_rank, _row_id(hidden), b(hidden)], stream_key: [_row_id, b], pk_columns: [_row_id, b], pk_conflict: NoCheck }
+    └─StreamProject { exprs: [row_number, rank, dense_rank, _row_id, b] }
+      └─StreamEowcOverWindow { window_functions: [row_number() OVER(PARTITION BY b ORDER BY tm ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW), rank() OVER(PARTITION BY b ORDER BY tm ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW), dense_rank() OVER(PARTITION BY b ORDER BY tm ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
+        └─StreamEowcSort { sort_column: tm }
+          └─StreamExchange { dist: HashShard(b) }
+            └─StreamProject { exprs: [b, tm, _row_id], output_watermarks: [[tm]] }
+              └─StreamRowIdGen { row_id_index: 3 }
+                └─StreamWatermarkFilter { watermark_descs: [Desc { column: tm, expr: (tm - '00:05:00':Interval) }], output_watermarks: [[tm]] }
+                  └─StreamSource { source: t, columns: [a, b, tm, _row_id] }
+  eowc_stream_dist_plan: |+
+    Fragment 0
+    StreamMaterialize { columns: [row_number, rank, dense_rank, _row_id(hidden), b(hidden)], stream_key: [_row_id, b], pk_columns: [_row_id, b], pk_conflict: NoCheck }
+    └── StreamProject { exprs: [row_number, rank, dense_rank, _row_id, b] }
+        └── StreamEowcOverWindow { window_functions: [row_number() OVER(PARTITION BY b ORDER BY tm ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW), rank() OVER(PARTITION BY b ORDER BY tm ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW), dense_rank() OVER(PARTITION BY b ORDER BY tm ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
+            ├── tables: [ EowcOverWindow: 0, EowcOverWindowIntermediateState: 1 ]
+            └── StreamEowcSort { sort_column: tm } { tables: [ Sort: 2 ] }
+                └── StreamExchange Hash([0]) from 1
+
+    Fragment 1
+    StreamProject { exprs: [b, tm, _row_id], output_watermarks: [[tm]] }
+    └── StreamRowIdGen { row_id_index: 3 }
+        └── StreamWatermarkFilter { watermark_descs: [Desc { column: tm, expr: (tm - '00:05:00':Interval) }], output_watermarks: [[tm]] } { tables: [ WatermarkFilter: 3 ] }
+            └── StreamSource { source: t, columns: [a, b, tm, _row_id] } { tables: [ Source: 4 ] }
+
+    Table 0 { columns: [ b, tm, _row_id, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC, $2 ASC ], value indices: [ 0, 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+
+    Table 1 { columns: [ b, state_0, state_1, state_2, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+
+    Table 2 { columns: [ b, tm, _row_id, _rw_timestamp ], primary key: [ $1 ASC, $0 ASC, $2 ASC ], value indices: [ 0, 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 0 }
+
+    Table 3 { columns: [ vnode, offset, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
+
+    Table 4 { columns: [ partition_id, offset_info, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 1 }
+
+    Table 4294967294 { columns: [ row_number, rank, dense_rank, _row_id, b, _rw_timestamp ], primary key: [ $3 ASC, $4 ASC ], value indices: [ 0, 1, 2, 3, 4 ], distribution key: [ 4 ], read pk prefix len hint: 2 }
+
+- id: mixed numbering and non-numbering functions over eowc source still has intermediate state table
+  sql: |
+    create source t (a int, b int, tm timestamp, watermark for tm as tm - interval '5 minutes') with (connector = 'kinesis') FORMAT PLAIN ENCODE JSON;
+    select
+      row_number() over (partition by b order by tm),
+      lag(a) over (partition by b order by tm)
+    from t;
+  eowc_stream_plan: |-
+    StreamMaterialize { columns: [row_number, lag, _row_id(hidden), b(hidden)], stream_key: [_row_id, b], pk_columns: [_row_id, b], pk_conflict: NoCheck }
+    └─StreamProject { exprs: [row_number, first_value, _row_id, b] }
+      └─StreamEowcOverWindow { window_functions: [row_number() OVER(PARTITION BY b ORDER BY tm ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW), first_value(a) OVER(PARTITION BY b ORDER BY tm ASC ROWS BETWEEN 1 PRECEDING AND 1 PRECEDING)] }
+        └─StreamEowcSort { sort_column: tm }
+          └─StreamExchange { dist: HashShard(b) }
+            └─StreamProject { exprs: [a, b, tm, _row_id], output_watermarks: [[tm]] }
+              └─StreamRowIdGen { row_id_index: 3 }
+                └─StreamWatermarkFilter { watermark_descs: [Desc { column: tm, expr: (tm - '00:05:00':Interval) }], output_watermarks: [[tm]] }
+                  └─StreamSource { source: t, columns: [a, b, tm, _row_id] }
+  eowc_stream_dist_plan: |+
+    Fragment 0
+    StreamMaterialize { columns: [row_number, lag, _row_id(hidden), b(hidden)], stream_key: [_row_id, b], pk_columns: [_row_id, b], pk_conflict: NoCheck }
+    └── StreamProject { exprs: [row_number, first_value, _row_id, b] }
+        └── StreamEowcOverWindow { window_functions: [row_number() OVER(PARTITION BY b ORDER BY tm ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW), first_value(a) OVER(PARTITION BY b ORDER BY tm ASC ROWS BETWEEN 1 PRECEDING AND 1 PRECEDING)] }
+            ├── tables: [ EowcOverWindow: 0, EowcOverWindowIntermediateState: 1 ]
+            └── StreamEowcSort { sort_column: tm } { tables: [ Sort: 2 ] }
+                └── StreamExchange Hash([1]) from 1
+
+    Fragment 1
+    StreamProject { exprs: [a, b, tm, _row_id], output_watermarks: [[tm]] }
+    └── StreamRowIdGen { row_id_index: 3 }
+        └── StreamWatermarkFilter { watermark_descs: [Desc { column: tm, expr: (tm - '00:05:00':Interval) }], output_watermarks: [[tm]] } { tables: [ WatermarkFilter: 3 ] }
+            └── StreamSource { source: t, columns: [a, b, tm, _row_id] } { tables: [ Source: 4 ] }
+
+    Table 0 { columns: [ a, b, tm, _row_id, _rw_timestamp ], primary key: [ $1 ASC, $2 ASC, $3 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [ 1 ], read pk prefix len hint: 1 }
+
+    Table 1 { columns: [ b, state_0, state_1, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+
+    Table 2 { columns: [ a, b, tm, _row_id, _rw_timestamp ], primary key: [ $2 ASC, $1 ASC, $3 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [ 1 ], read pk prefix len hint: 0 }
+
+    Table 3 { columns: [ vnode, offset, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
+
+    Table 4 { columns: [ partition_id, offset_info, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 1 }
+
+    Table 4294967294 { columns: [ row_number, lag, _row_id, b, _rw_timestamp ], primary key: [ $2 ASC, $3 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [ 3 ], read pk prefix len hint: 2 }
+
+- id: non-numbering functions only over eowc source has no intermediate state table
+  sql: |
+    create source t (a int, b int, tm timestamp, watermark for tm as tm - interval '5 minutes') with (connector = 'kinesis') FORMAT PLAIN ENCODE JSON;
+    select
+      lag(a) over (partition by b order by tm) as lag1,
+      lag(a, 2) over (partition by b order by tm) as lag2
+    from t;
+  eowc_stream_dist_plan: |+
+    Fragment 0
+    StreamMaterialize { columns: [lag1, lag2, _row_id(hidden), b(hidden)], stream_key: [_row_id, b], pk_columns: [_row_id, b], pk_conflict: NoCheck }
+    └── StreamProject { exprs: [first_value, first_value, _row_id, b] }
+        └── StreamEowcOverWindow { window_functions: [first_value(a) OVER(PARTITION BY b ORDER BY tm ASC ROWS BETWEEN 1 PRECEDING AND 1 PRECEDING), first_value(a) OVER(PARTITION BY b ORDER BY tm ASC ROWS BETWEEN 2 PRECEDING AND 2 PRECEDING)] }
+            ├── tables: [ EowcOverWindow: 0 ]
+            └── StreamEowcSort { sort_column: tm } { tables: [ Sort: 1 ] }
+                └── StreamExchange Hash([1]) from 1
+
+    Fragment 1
+    StreamProject { exprs: [a, b, tm, _row_id], output_watermarks: [[tm]] }
+    └── StreamRowIdGen { row_id_index: 3 }
+        └── StreamWatermarkFilter { watermark_descs: [Desc { column: tm, expr: (tm - '00:05:00':Interval) }], output_watermarks: [[tm]] } { tables: [ WatermarkFilter: 2 ] }
+            └── StreamSource { source: t, columns: [a, b, tm, _row_id] } { tables: [ Source: 3 ] }
+
+    Table 0 { columns: [ a, b, tm, _row_id, _rw_timestamp ], primary key: [ $1 ASC, $2 ASC, $3 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [ 1 ], read pk prefix len hint: 1 }
+
+    Table 1 { columns: [ a, b, tm, _row_id, _rw_timestamp ], primary key: [ $2 ASC, $1 ASC, $3 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [ 1 ], read pk prefix len hint: 0 }
+
+    Table 2 { columns: [ vnode, offset, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
+
+    Table 3 { columns: [ partition_id, offset_info, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 1 }
+
+    Table 4294967294 { columns: [ lag1, lag2, _row_id, b, _rw_timestamp ], primary key: [ $2 ASC, $3 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [ 3 ], read pk prefix len hint: 2 }
+
