@@ -557,6 +557,7 @@ impl HummockManagerService for HummockServiceImpl {
             periodic_ttl_reclaim_compaction_interval_sec,
             periodic_tombstone_reclaim_compaction_interval_sec,
             periodic_scheduling_compaction_group_split_interval_sec,
+            enable_compaction_group_normalize,
             do_not_config_object_storage_lifecycle,
             partition_vnode_count,
             table_high_write_throughput_threshold,
