@@ -22,6 +22,15 @@ set -euo pipefail
 
 export MYSQL_HOST=mysql MYSQL_TCP_PORT=3306 MYSQL_PWD=123456
 
+query_psql_scalar() {
+    local sql="$1"
+    risedev psql -t -A -c "$sql" 2>&1 \
+        | grep -v '\[cargo-make\]' \
+        | sed 's/\r$//' \
+        | sed '/^[[:space:]]*$/d' \
+        | tail -n 1
+}
+
 echo "\n\n\n-------------Run MySQL CDC binlog expire and RESET test------------\n\n\n"
 
 # Cleanup
@@ -87,8 +96,8 @@ else
 fi
 
 echo "\n\n\n-------------Phase 1.5: Verify CDC inject-source-offsets path------------\n\n\n"
-SOURCE_ID=$(risedev psql -t -A -c "SELECT id FROM rw_sources WHERE name = 's';")
-STATE_TABLE=$(risedev psql -t -A -c "SELECT name FROM rw_catalog.rw_internal_table_info WHERE job_name = 's' AND job_type = 'source' LIMIT 1;")
+SOURCE_ID=$(query_psql_scalar "SELECT id FROM rw_sources WHERE name = 's';")
+STATE_TABLE=$(query_psql_scalar "SELECT name FROM rw_catalog.rw_internal_table_info WHERE job_name = 's' AND job_type = 'source' LIMIT 1;")
 
 if [ -z "$SOURCE_ID" ] || [ -z "$STATE_TABLE" ]; then
     echo "✗ FAIL: Failed to locate source id or source state table"
@@ -96,8 +105,18 @@ if [ -z "$SOURCE_ID" ] || [ -z "$STATE_TABLE" ]; then
     exit 1
 fi
 
+if ! [[ "$SOURCE_ID" =~ ^[0-9]+$ ]]; then
+    echo "✗ FAIL: Invalid source id output: $SOURCE_ID"
+    exit 1
+fi
+
+if ! [[ "$STATE_TABLE" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
+    echo "✗ FAIL: Invalid state table output: $STATE_TABLE"
+    exit 1
+fi
+
 echo "Source id: $SOURCE_ID, state table: $STATE_TABLE"
-STATE_ROW=$(risedev psql -t -A -F '|' -c "SELECT partition_id, offset_info->'split_info'->'inner'->>'start_offset' FROM ${STATE_TABLE} WHERE offset_info->'split_info'->'inner'->>'start_offset' IS NOT NULL LIMIT 1;")
+STATE_ROW=$(risedev psql -t -A -F '|' -c "SELECT partition_id, offset_info->'split_info'->'inner'->>'start_offset' FROM ${STATE_TABLE} WHERE offset_info->'split_info'->'inner'->>'start_offset' IS NOT NULL LIMIT 1;" 2>&1 | grep -v '\[cargo-make\]' | sed '/^[[:space:]]*$/d' | tail -n 1)
 
 if [ -z "$STATE_ROW" ]; then
     echo "✗ FAIL: No non-null CDC start_offset found before inject-source-offsets"
@@ -112,7 +131,7 @@ OFFSETS_JSON=$(python3 -c 'import json,sys; print(json.dumps({sys.argv[1]: sys.a
 echo "Injecting current offset back for split ${SPLIT_ID}"
 ./risedev ctl meta inject-source-offsets --source-id "$SOURCE_ID" --offsets "$OFFSETS_JSON"
 
-OFFSET_AFTER_INJECT=$(risedev psql -t -A -c "SELECT offset_info->'split_info'->'inner'->>'start_offset' FROM ${STATE_TABLE} WHERE partition_id = '${SPLIT_ID}' LIMIT 1;")
+OFFSET_AFTER_INJECT=$(query_psql_scalar "SELECT offset_info->'split_info'->'inner'->>'start_offset' FROM ${STATE_TABLE} WHERE partition_id = '${SPLIT_ID}' LIMIT 1;")
 if [ "$OFFSET_AFTER_INJECT" = "$CURRENT_OFFSET" ]; then
     echo "✓ PASS: inject-source-offsets accepted CDC split offset and kept state consistent"
 else
@@ -241,7 +260,7 @@ risedev psql -c "ALTER SOURCE s RESET;"
 sleep 2
 
 echo "--- Verify RESET cleared CDC offset in state table (start_offset should be NULL)"
-RESET_NULL_COUNT=$(risedev psql -t -A -c "SELECT COUNT(*) FROM ${STATE_TABLE} WHERE offset_info->'split_info'->'inner'->>'start_offset' IS NULL;")
+RESET_NULL_COUNT=$(query_psql_scalar "SELECT COUNT(*) FROM ${STATE_TABLE} WHERE offset_info->'split_info'->'inner'->>'start_offset' IS NULL;")
 if [ "$RESET_NULL_COUNT" -ge 1 ]; then
     echo "✓ PASS: ALTER SOURCE RESET cleared CDC start_offset to NULL"
 else
