@@ -348,17 +348,27 @@ impl BindContext {
             .indices_of
             .get(column_name)
             .ok_or_else(|| ErrorCode::ItemNotFound(format!("Invalid column: {}", column_name)))?;
-        match column_indexes.iter().find(|column_index| {
-            let column = &self.columns[**column_index];
 
-            column.table_name == *table_name
-                && schema_name
-                    .as_deref()
-                    .is_none_or(|s| column.schema_name.as_deref() == Some(s))
-        }) {
-            Some(column_index) => Ok(*column_index),
-            None => Err(ErrorCode::ItemNotFound(format!(
+        let column_indexes: Vec<usize> = column_indexes
+            .iter()
+            .copied()
+            .filter(|column_index| {
+                let column = &self.columns[*column_index];
+
+                column.table_name == *table_name
+                    && schema_name
+                        .as_deref()
+                        .is_none_or(|s| column.schema_name.as_deref() == Some(s))
+            })
+            .collect();
+        match column_indexes.as_slice() {
+            [] => Err(ErrorCode::ItemNotFound(format!(
                 "missing FROM-clause entry for table \"{}\"",
+                table_name
+            ))),
+            [column_index] => Ok(*column_index),
+            _ => Err(ErrorCode::InvalidReference(format!(
+                "table reference \"{}\" is ambiguous",
                 table_name
             ))),
         }
