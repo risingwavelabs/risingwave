@@ -1388,17 +1388,16 @@ fn sanity_check_for_table_on_cdc_source(
         .into());
     }
 
-    if !source_watermarks.is_empty() {
-        if source_watermarks
+    if !source_watermarks.is_empty()
+        && source_watermarks
             .iter()
             .any(|watermark| !watermark.with_ttl)
-        {
-            return Err(ErrorCode::NotSupported(
-                "non-TTL watermark defined on the table created from a CDC source".into(),
-                "Use `WATERMARK ... WITH TTL` instead.".into(),
-            )
-            .into());
-        }
+    {
+        return Err(ErrorCode::NotSupported(
+            "non-TTL watermark defined on the table created from a CDC source".into(),
+            "Use `WATERMARK ... WITH TTL` instead.".into(),
+        )
+        .into());
     }
 
     Ok(())
@@ -2496,6 +2495,14 @@ pub async fn generate_stream_graph_for_replace_table(
             ((plan, None, table), TableJobType::General)
         }
         (None, Some(cdc_table)) => {
+            sanity_check_for_table_on_cdc_source(
+                append_only,
+                &columns,
+                &wildcard_idx,
+                &constraints,
+                &source_watermarks,
+            )?;
+
             let session = &handler_args.session;
             let (source, resolved_table_name) =
                 get_source_and_resolved_table_name(session, cdc_table.clone(), table_name.clone())?;

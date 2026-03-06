@@ -29,6 +29,19 @@ create source s_mysql_cdc_watermark_ttl with (
 
 sleep 2s
 
+statement error non-TTL watermark defined on the table created from a CDC source
+create table rw_mysql_cdc_watermark_non_ttl (
+  id INT,
+  ts INT,
+  v VARCHAR,
+  PRIMARY KEY (id),
+  WATERMARK FOR ts AS ts - 10
+) with (
+  snapshot = 'true',
+  snapshot.batch_size = 1,
+  backfill.parallelism = 1
+) from s_mysql_cdc_watermark_ttl table 'risedev.mysql_cdc_watermark_ttl_test';
+
 statement ok
 create table rw_mysql_cdc_watermark_ttl (
   id INT,
