@@ -101,7 +101,10 @@ impl ActiveStreamingWorkerNodes {
         Ok(Self {
             worker_nodes: nodes
                 .into_iter()
-                .filter_map(|node| node.is_streaming_schedulable().then_some((node.id, node)))
+                .filter_map(|node| {
+                    let is_streaming = node.property.as_ref().is_some_and(|p| p.is_streaming);
+                    is_streaming.then_some((node.id, node))
+                })
                 .collect(),
             rx,
             meta_manager: Some(meta_manager),
@@ -122,7 +125,6 @@ impl ActiveStreamingWorkerNodes {
             fn is_target_worker_node(worker: &WorkerNode) -> bool {
                 worker.r#type == WorkerType::ComputeNode as i32
                     && worker.property.as_ref().unwrap().is_streaming
-                    && worker.is_streaming_schedulable()
             }
             match notification {
                 LocalNotification::WorkerNodeDeleted(worker) => {
