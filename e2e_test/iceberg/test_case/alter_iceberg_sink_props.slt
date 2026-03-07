@@ -1,0 +1,38 @@
+statement ok
+set sink_decouple = false;
+
+statement ok
+CREATE TABLE s1 (i1 int, i2 varchar, i3 varchar);
+
+
+statement ok
+CREATE SINK sink1 from s1 WITH (
+    connector = 'iceberg',
+    type = 'upsert',
+    database.name = 'demo_db',
+    table.name = 'test_connection_table',
+    connection = conn,
+    create_table_if_not_exists = 'true',
+    commit_checkpoint_interval = 2,
+    primary_key = 'i1,i2',
+    partition_by = 'i1'
+);
+
+statement ok
+ALTER SINK sink1 CONNECTOR WITH (
+    commit_checkpoint_interval = 1
+);
+
+query I
+select count(*)
+from rw_sinks
+where name = 'sink1'
+  and definition ILIKE '%commit_checkpoint_interval = 1%';
+----
+1
+
+statement ok
+DROP SINK sink1;
+
+statement ok
+DROP TABLE s1;
