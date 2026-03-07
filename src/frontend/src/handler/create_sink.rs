@@ -15,6 +15,7 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::sync::{Arc, LazyLock};
 
+use anyhow::Context;
 use either::Either;
 use iceberg::arrow::type_to_arrow_type;
 use iceberg::spec::Transform;
@@ -24,7 +25,10 @@ use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::array::arrow::IcebergArrowConvert;
 use risingwave_common::array::arrow::arrow_schema_iceberg::DataType as ArrowDataType;
 use risingwave_common::bail;
-use risingwave_common::catalog::{ColumnCatalog, ICEBERG_SINK_PREFIX, ObjectId, Schema};
+use risingwave_common::catalog::{
+    ColumnCatalog, ICEBERG_SINK_PREFIX, ObjectId, RISINGWAVE_ICEBERG_ROW_ID, ROW_ID_COLUMN_NAME,
+    Schema,
+};
 use risingwave_common::license::Feature;
 use risingwave_common::secret::LocalSecretManager;
 use risingwave_common::system_param::reader::SystemParamsRead;
@@ -47,8 +51,9 @@ use risingwave_pb::catalog::connection_params::PbConnectionType;
 use risingwave_pb::telemetry::TelemetryDatabaseObject;
 use risingwave_sqlparser::ast::{
     CreateSink, CreateSinkStatement, EmitMode, Encode, ExplainOptions, Format, FormatEncodeOptions,
-    ObjectName, Query,
+    ObjectName, Query, Statement,
 };
+use risingwave_sqlparser::parser::Parser;
 
 use super::RwPgResponse;
 use super::create_mv::get_column_names;
@@ -64,6 +69,7 @@ use crate::handler::create_mv::parse_column_names;
 use crate::handler::util::{
     LongRunningNotificationAction, check_connector_match_connection_type,
     ensure_connection_type_allowed, execute_with_long_running_notification,
+    get_table_catalog_by_table_name,
 };
 use crate::optimizer::backfill_order_strategy::plan_backfill_order;
 use crate::optimizer::plan_node::{
@@ -196,7 +202,7 @@ pub async fn gen_sink_plan(
     // `true` means that sink statement has the form: `CREATE SINK s1 FROM ...`
     // `false` means that sink statement has the form: `CREATE SINK s1 AS <query>`
     let direct_sink_from_name: Option<(ObjectName, bool)>;
-    let query = match stmt.sink_from {
+    let mut query = match stmt.sink_from {
         CreateSink::From(from_name) => {
             sink_from_table_name = from_name.0.last().unwrap().real_value();
             direct_sink_from_name = Some((from_name.clone(), is_auto_schema_change));
@@ -247,6 +253,24 @@ pub async fn gen_sink_plan(
             query
         }
     };
+
+    if is_iceberg_engine_internal && let Some((from_name, _)) = &direct_sink_from_name {
+        let (table, _) = get_table_catalog_by_table_name(session, from_name)?;
+        let pk_names = table.pk_column_names();
+        if pk_names.len() == 1 && pk_names[0].eq(ROW_ID_COLUMN_NAME) {
+            let [stmt]: [_; 1] = Parser::parse_sql(&format!(
+                "select {} as {}, * from {}",
+                ROW_ID_COLUMN_NAME, RISINGWAVE_ICEBERG_ROW_ID, from_name
+            ))
+            .context("unable to parse query")?
+            .try_into()
+            .unwrap();
+            let Statement::Query(parsed_query) = stmt else {
+                panic!("unexpected statement: {:?}", stmt);
+            };
+            query = parsed_query;
+        }
+    }
 
     let (sink_database_id, sink_schema_id) =
         session.get_database_and_schema_id_for_create(sink_schema_name.clone())?;
