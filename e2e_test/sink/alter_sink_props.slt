@@ -43,20 +43,19 @@ query I
 select count(*)
 from rw_sinks
 where name = 's_alter_sink_cfg_kafka'
-  and definition ILIKE '%properties.allow.auto.create.topics%'
-  and definition ILIKE '%properties.batch.num.messages%'
-  and definition ILIKE '%properties.batch.size%'
-  and definition ILIKE '%properties.enable.idempotence%'
-  and definition ILIKE '%properties.max.in.flight.requests.per.connection%'
-  and definition ILIKE '%properties.message.max.bytes%'
-  and definition ILIKE '%properties.message.send.max.retries%'
-  and definition ILIKE '%properties.message.timeout.ms%'
-  and definition ILIKE '%properties.queue.buffering.max.kbytes%'
-  and definition ILIKE '%properties.queue.buffering.max.messages%'
-  and definition ILIKE '%properties.queue.buffering.max.ms%'
-  and definition ILIKE '%properties.request.required.acks%'
-  and definition ILIKE '%properties.retry.backoff.ms%'
-  and definition ILIKE '%properties.receive.message.max.bytes%';
+  and definition ilike '%properties.allow."auto"."create".topics = ''true''%'
+  and definition ilike '%properties.batch.size = ''1000000''%'
+  and definition ilike '%properties.enable.idempotence = ''true''%'
+  and definition ilike '%properties."max"."in".flight.requests.per."connection" = ''1''%'
+  and definition ilike '%properties."message"."max".bytes = ''10485760''%'
+  and definition ilike '%properties."message".send."max".retries = ''10''%'
+  and definition ilike '%properties."message".timeout.ms = ''60000''%'
+  and definition ilike '%properties.queue.buffering."max".kbytes = ''20480''%'
+  and definition ilike '%properties.queue.buffering."max".messages = ''200000''%'
+  and definition ilike '%properties.queue.buffering."max".ms = ''1000''%'
+  and definition ilike '%properties.receive."message"."max".bytes = ''104857600''%'
+  and definition ilike '%properties.request.required.acks = ''1''%'
+  and definition ilike '%properties.retry.backoff.ms = ''200''%';
 ----
 1
 
@@ -105,7 +104,7 @@ query I
 select count(*)
 from rw_sinks
 where name = 's_alter_sink_cfg_ch'
-  and definition ILIKE '%commit_checkpoint_interval%';
+  and definition ILIKE '%commit_checkpoint_interval = ''1''%';
 ----
 1
 
@@ -205,7 +204,7 @@ query I
 select count(*)
 from rw_sinks
 where name = 's_alter_sink_cfg_dl'
-  and definition ILIKE '%commit_checkpoint_interval%';
+  and definition ILIKE '%commit_checkpoint_interval = ''1''%';
 ----
 1
 
@@ -275,7 +274,7 @@ query I
 select count(*)
 from rw_sinks
 where name = 's_alter_sink_cfg_iceberg'
-  and definition ILIKE '%commit_checkpoint_interval%';
+  and definition ILIKE '%commit_checkpoint_interval = ''1''%';
 ----
 1
 
