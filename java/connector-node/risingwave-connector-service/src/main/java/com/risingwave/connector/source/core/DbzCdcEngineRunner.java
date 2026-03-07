@@ -139,7 +139,8 @@ public class DbzCdcEngineRunner {
         executor.execute(engine);
 
         boolean startOk = true;
-        // For backfill source, we need to wait for the streaming source to start before proceeding
+        // For streaming-only startup (e.g. backfill mode or snapshot already done),
+        // wait for the streaming source to be connected before proceeding.
         if (config.isBackfillSource()) {
             var databaseServerName =
                     config.getResolvedDebeziumProps()

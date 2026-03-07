@@ -157,6 +157,25 @@ public class DbzSourceUtils {
         }
     }
 
+    /**
+     * Check if Debezium streaming is connected (JMX "Connected" attribute).
+     *
+     * <p>This is used as a best-effort health signal for streaming-only CDC mode. It does NOT mean
+     * that records are flowing (upstream may be idle), only that the streaming client is connected.
+     */
+    public static boolean isStreamingConnected(SourceTypeE sourceType, String dbServerName) {
+        if (sourceType == SourceTypeE.MYSQL) {
+            return isStreamingRunning("mysql", dbServerName, "streaming");
+        } else if (sourceType == SourceTypeE.POSTGRES) {
+            return isStreamingRunning("postgres", dbServerName, "streaming");
+        } else if (sourceType == SourceTypeE.SQL_SERVER) {
+            return isStreamingRunning("sql_server", dbServerName, "streaming");
+        } else {
+            // Unsupported backfill source, don't treat it as disconnected.
+            return true;
+        }
+    }
+
     private static boolean waitForStreamingRunningInner(
             String connector, String dbServerName, int waitStreamingStartTimeout) {
         int pollCount = 0;
