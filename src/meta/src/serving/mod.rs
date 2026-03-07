@@ -86,7 +86,7 @@ impl ServingVnodeMapping {
     }
 }
 
-pub(crate) fn to_fragment_worker_slot_mapping(
+pub(crate) fn to_fragment_worker_mapping(
     mappings: &HashMap<FragmentId, WorkerSlotMapping>,
 ) -> Vec<FragmentWorkerSlotMapping> {
     mappings
@@ -98,7 +98,7 @@ pub(crate) fn to_fragment_worker_slot_mapping(
         .collect()
 }
 
-pub(crate) fn to_deleted_fragment_worker_slot_mapping(
+pub(crate) fn to_deleted_fragment_worker_mapping(
     fragment_ids: &[FragmentId],
 ) -> Vec<FragmentWorkerSlotMapping> {
     fragment_ids
@@ -136,7 +136,7 @@ pub async fn on_meta_start(
     notification_manager.notify_frontend_without_version(
         Operation::Snapshot,
         Info::ServingWorkerSlotMappings(FragmentWorkerSlotMappings {
-            mappings: to_fragment_worker_slot_mapping(&mappings),
+            mappings: to_fragment_worker_mapping(&mappings),
         }),
     );
 }
@@ -201,7 +201,7 @@ pub fn start_serving_vnode_mapping_worker(
             notification_manager.notify_frontend_without_version(
                 Operation::Snapshot,
                 Info::ServingWorkerSlotMappings(FragmentWorkerSlotMappings {
-                    mappings: to_fragment_worker_slot_mapping(&mappings),
+                    mappings: to_fragment_worker_mapping(&mappings),
                 }),
             );
         };
@@ -242,11 +242,11 @@ pub fn start_serving_vnode_mapping_worker(
                                     let (upserted, failed) = serving_vnode_mapping.upsert(filtered_streaming_parallelisms, &workers, max_serving_parallelism);
                                     if !upserted.is_empty() {
                                         tracing::debug!("Update serving vnode mapping for fragments {:?}.", upserted.keys());
-                                        notification_manager.notify_frontend_without_version(Operation::Update, Info::ServingWorkerSlotMappings(FragmentWorkerSlotMappings{ mappings: to_fragment_worker_slot_mapping(&upserted) }));
+                                        notification_manager.notify_frontend_without_version(Operation::Update, Info::ServingWorkerSlotMappings(FragmentWorkerSlotMappings{ mappings: to_fragment_worker_mapping(&upserted) }));
                                     }
                                     if !failed.is_empty() {
                                         tracing::warn!("Fail to update serving vnode mapping for fragments {:?}.", failed);
-                                        notification_manager.notify_frontend_without_version(Operation::Delete, Info::ServingWorkerSlotMappings(FragmentWorkerSlotMappings{ mappings: to_deleted_fragment_worker_slot_mapping(&failed)}));
+                                        notification_manager.notify_frontend_without_version(Operation::Delete, Info::ServingWorkerSlotMappings(FragmentWorkerSlotMappings{ mappings: to_deleted_fragment_worker_mapping(&failed)}));
                                     }
                                 }
                                 LocalNotification::FragmentMappingsDelete(fragment_ids) => {
@@ -255,7 +255,7 @@ pub fn start_serving_vnode_mapping_worker(
                                     }
                                     tracing::debug!("Delete serving vnode mapping for fragments {:?}.", fragment_ids);
                                     serving_vnode_mapping.remove(&fragment_ids);
-                                    notification_manager.notify_frontend_without_version(Operation::Delete, Info::ServingWorkerSlotMappings(FragmentWorkerSlotMappings{ mappings: to_deleted_fragment_worker_slot_mapping(&fragment_ids) }));
+                                    notification_manager.notify_frontend_without_version(Operation::Delete, Info::ServingWorkerSlotMappings(FragmentWorkerSlotMappings{ mappings: to_deleted_fragment_worker_mapping(&fragment_ids) }));
                                 }
                                 _ => {}
                             }
