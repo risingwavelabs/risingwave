@@ -63,6 +63,7 @@ impl UserDefinedFunction {
             always_retry_on_network_error: udf.always_retry_on_network_error,
             is_batched: udf.is_batched,
             is_async: udf.is_async,
+            secret_refs: udf.secret_refs.clone().into_iter().collect(),
             created_at_epoch: None,
             created_at_cluster_version: None,
         };
@@ -111,6 +112,7 @@ impl Expr for UserDefinedFunction {
                 always_retry_on_network_error: self.catalog.always_retry_on_network_error,
                 is_async: self.catalog.is_async,
                 is_batched: self.catalog.is_batched,
+                secret_refs: self.catalog.secret_refs.clone().into_iter().collect(),
                 version: PbUdfExprVersion::LATEST as _,
             }))),
         })

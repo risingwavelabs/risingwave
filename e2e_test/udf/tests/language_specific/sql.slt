@@ -324,6 +324,16 @@ Caused by these errors (recent errors listed first):
   2: Bind error: failed to find named parameter _this_is_invalid_please_properly_mark_the_boundary_of_this_invalid_paramerter_
 
 
+# SQL udf currently does not support WITH options.
+statement error
+create function sql_udf_with_options(INT) returns int language sql as 'select $1 + 1' with (always_retry_on_network_error = true);
+----
+db error: ERROR: Failed to run the query
+
+Caused by these errors (recent errors listed first):
+  1: Invalid Parameter Value: SQL UDF does not support WITH options yet
+
+
 # sql udf with non-existent function
 statement error
 create function call_non_existent_function(INT) returns int language sql as 'select 1 + non_existent(1) + 1';

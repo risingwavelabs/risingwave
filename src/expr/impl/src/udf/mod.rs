@@ -22,6 +22,8 @@ use risingwave_expr::sig::{
     CreateFunctionOutput, CreateOptions, UDF_IMPLS, UdfImpl, UdfImplDescriptor,
 };
 
+mod runtime_options;
+
 #[cfg(feature = "udf")]
 #[cfg(not(madsim))]
 mod external;

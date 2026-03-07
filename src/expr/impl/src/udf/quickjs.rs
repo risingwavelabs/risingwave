@@ -17,6 +17,7 @@ use futures_util::{FutureExt, StreamExt};
 use risingwave_common::array::arrow::arrow_schema_udf::{DataType, Field};
 use risingwave_common::array::arrow::{UdfArrowConvert, UdfToArrow};
 
+use super::runtime_options::prepend_javascript_udf_options;
 use super::*;
 
 #[linkme::distributed_slice(UDF_IMPLS)]
@@ -38,6 +39,8 @@ static QUICKJS: UdfImplDescriptor = UdfImplDescriptor {
             let mut runtime = Runtime::new()
                 .await
                 .context("failed to create QuickJS Runtime")?;
+            let body = opts.body.context("body is required")?;
+            let body = prepend_javascript_udf_options(body, opts.options)?;
             if opts.is_async.unwrap_or(false) {
                 runtime
                     .enable_fetch()
@@ -56,7 +59,7 @@ static QUICKJS: UdfImplDescriptor = UdfImplDescriptor {
                             [("ARROW:extension:name".into(), "arrowudf.json".into())].into(),
                         ),
                         UdfArrowConvert::default().to_arrow_field("", opts.return_type)?,
-                        opts.body.context("body is required")?,
+                        body.as_ref(),
                         options,
                     )
                     .await
@@ -71,7 +74,7 @@ static QUICKJS: UdfImplDescriptor = UdfImplDescriptor {
                     .add_function(
                         opts.name_in_runtime,
                         UdfArrowConvert::default().to_arrow_field("", opts.return_type)?,
-                        opts.body.context("body is required")?,
+                        body.as_ref(),
                         options.clone(),
                     )
                     .await;
@@ -84,7 +87,7 @@ static QUICKJS: UdfImplDescriptor = UdfImplDescriptor {
                         if opts.kind.is_table() { "*" } else { "" },
                         opts.name_in_runtime,
                         opts.arg_names.join(","),
-                        opts.body.context("body is required")?,
+                        body.as_ref(),
                     );
                     runtime
                         .add_function(

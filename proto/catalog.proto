@@ -366,6 +366,8 @@ message Function {
   optional uint64 created_at_epoch = 22;
   // Cluster version (tracked by git commit) when created
   optional string created_at_cluster_version = 23;
+  // Secret-backed UDF options, where key is option name.
+  map<string, secret.SecretRef> secret_refs = 24;
 
   oneof kind {
     ScalarFunction scalar = 11;

@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, LazyLock};
 
@@ -24,6 +25,7 @@ use risingwave_common::array::{Array, ArrayRef, DataChunk};
 use risingwave_common::metrics::*;
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 use risingwave_common::row::OwnedRow;
+use risingwave_common::secret::LocalSecretManager;
 use risingwave_common::types::{DataType, Datum};
 use risingwave_expr::expr_context::FRAGMENT_ID;
 use risingwave_pb::expr::ExprNode;
@@ -178,6 +180,12 @@ impl Build for UserDefinedFunction {
         let name_in_runtime = udf
             .name_in_runtime()
             .expect("SQL UDF won't get here, other UDFs must have `name_in_runtime`");
+        let options = LocalSecretManager::global()
+            .fill_secrets(
+                BTreeMap::new(),
+                udf.secret_refs.clone().into_iter().collect(),
+            )
+            .context("failed to resolve UDF secret options")?;
 
         // lookup UDF builder
         let build_fn = crate::sig::find_udf_impl(language, runtime, link)?.build_fn;
@@ -194,6 +202,7 @@ impl Build for UserDefinedFunction {
             language,
             is_async: udf.is_async,
             is_batched: udf.is_batched,
+            options: &options,
         })
         .context("failed to build UDF runtime")?;
 

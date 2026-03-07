@@ -360,6 +360,7 @@ pub async fn handle(
                     args,
                     returns,
                     params,
+                    with_options,
                 )
                 .await
             }

@@ -345,12 +345,20 @@ impl CatalogController {
         mut pb_function: PbFunction,
     ) -> MetaResult<NotificationVersion> {
         let inner = self.inner.write().await;
+        let dep_secrets: HashSet<SecretId> = pb_function
+            .secret_refs
+            .values()
+            .map(|secret_ref| secret_ref.secret_id)
+            .collect();
         let owner_id = pb_function.owner as _;
         let txn = inner.db.begin().await?;
         ensure_user_id(owner_id, &txn).await?;
         ensure_object_id(ObjectType::Database, pb_function.database_id, &txn).await?;
         ensure_object_id(ObjectType::Schema, pb_function.schema_id, &txn).await?;
         check_function_signature_duplicate(&pb_function, &txn).await?;
+        for secret_id in &dep_secrets {
+            ensure_object_id(ObjectType::Secret, *secret_id, &txn).await?;
+        }
 
         let function_obj = Self::create_object(
             &txn,
@@ -367,6 +375,15 @@ impl CatalogController {
         pb_function.created_at_cluster_version = function_obj.created_at_cluster_version;
         let function: function::ActiveModel = pb_function.clone().into();
         Function::insert(function).exec(&txn).await?;
+        for secret_id in &dep_secrets {
+            ObjectDependency::insert(object_dependency::ActiveModel {
+                oid: Set(secret_id.as_object_id()),
+                used_by: Set(function_obj.oid),
+                ..Default::default()
+            })
+            .exec(&txn)
+            .await?;
+        }
 
         let updated_user_info =
             grant_default_privileges_automatically(&txn, function_obj.oid).await?;

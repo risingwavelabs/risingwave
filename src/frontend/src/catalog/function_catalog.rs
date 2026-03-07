@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::BTreeMap;
+
 use enum_as_inner::EnumAsInner;
 use parse_display::Display;
 use risingwave_common::catalog::FunctionId;
@@ -21,6 +23,7 @@ use risingwave_pb::catalog::PbFunction;
 use risingwave_pb::catalog::function::PbKind;
 use risingwave_pb::expr::{PbUdfExprVersion, PbUserDefinedFunctionMetadata};
 use risingwave_pb::id::UserId;
+use risingwave_pb::secret::PbSecretRef;
 
 use crate::catalog::OwnedByUserCatalog;
 
@@ -42,6 +45,7 @@ pub struct FunctionCatalog {
     pub always_retry_on_network_error: bool,
     pub is_async: Option<bool>,
     pub is_batched: Option<bool>,
+    pub secret_refs: BTreeMap<String, PbSecretRef>,
     pub created_at_epoch: Option<Epoch>,
     pub created_at_cluster_version: Option<String>,
 }
@@ -84,6 +88,7 @@ impl From<&PbFunction> for FunctionCatalog {
             always_retry_on_network_error: prost.always_retry_on_network_error,
             is_async: prost.is_async,
             is_batched: prost.is_batched,
+            secret_refs: prost.secret_refs.clone().into_iter().collect(),
             created_at_epoch: prost.created_at_epoch.map(Epoch::from),
             created_at_cluster_version: prost.created_at_cluster_version.clone(),
         }
@@ -105,6 +110,7 @@ impl From<&FunctionCatalog> for PbUserDefinedFunctionMetadata {
             version: PbUdfExprVersion::LATEST as _,
             is_async: c.is_async,
             is_batched: c.is_batched,
+            secret_refs: c.secret_refs.clone().into_iter().collect(),
         }
     }
 }

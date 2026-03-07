@@ -899,6 +899,42 @@ fn parse_create_function() {
             with_options: Default::default(),
         }
     );
+
+    let sql = "CREATE FUNCTION secure_udf(INT) RETURNS INT LANGUAGE python AS 'secure_udf' USING LINK 'http://localhost:8815' WITH ( always_retry_on_network_error = true, api_token = secret my_schema.my_secret )";
+    assert_eq!(
+        verified_stmt(sql),
+        Statement::CreateFunction {
+            or_replace: false,
+            temporary: false,
+            if_not_exists: false,
+            name: ObjectName(vec![Ident::new_unchecked("secure_udf")]),
+            args: Some(vec![OperateFunctionArg::unnamed(DataType::Int)]),
+            returns: Some(CreateFunctionReturns::Value(DataType::Int)),
+            params: CreateFunctionBody {
+                language: Some(Ident::new_unchecked("python")),
+                as_: Some(FunctionDefinition::SingleQuotedDef("secure_udf".into())),
+                using: Some(CreateFunctionUsing::Link("http://localhost:8815".into())),
+                ..Default::default()
+            },
+            with_options: CreateFunctionWithOptions {
+                always_retry_on_network_error: Some(true),
+                r#async: None,
+                batch: None,
+                secret_refs: [(
+                    "api_token".to_owned(),
+                    SecretRefValue {
+                        secret_name: ObjectName(vec![
+                            Ident::new_unchecked("my_schema"),
+                            Ident::new_unchecked("my_secret"),
+                        ]),
+                        ref_as: SecretRefAsType::Text,
+                    },
+                )]
+                .into_iter()
+                .collect(),
+            },
+        }
+    );
 }
 
 #[test]
