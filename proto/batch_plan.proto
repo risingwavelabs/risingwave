@@ -29,6 +29,8 @@ message RowSeqScanNode {
   // The pushed down `batch_limit`. Max rows needed to return.
   optional uint64 limit = 6;
   common.BatchQueryEpoch query_epoch = 7;
+  // Whether to scan in reverse order (for DESC order optimization).
+  bool reverse = 8;
 }
 
 message SysRowSeqScanNode {

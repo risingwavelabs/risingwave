@@ -598,6 +598,7 @@ async fn test_batch_scan_chunk_with_value_indices() {
             false,
             chunk_size,
             Default::default(),
+            false,
         )
         .await
         .unwrap();

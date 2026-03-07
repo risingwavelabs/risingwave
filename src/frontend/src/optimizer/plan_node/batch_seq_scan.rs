@@ -36,6 +36,7 @@ pub struct BatchSeqScan {
     core: generic::TableScan,
     scan_ranges: Vec<ScanRange>,
     limit: Option<u64>,
+    reverse: bool,
     as_of: Option<AsOf>,
 }
 
@@ -45,11 +46,17 @@ impl BatchSeqScan {
         dist: Distribution,
         scan_ranges: Vec<ScanRange>,
         limit: Option<u64>,
+        reverse: bool,
     ) -> Self {
         let orders = if scan_ranges.len() > 1 {
             vec![Order::any()]
         } else {
-            let base_order = core.get_out_column_index_order();
+            let mut base_order = core.get_out_column_index_order();
+            if reverse {
+                for col_order in &mut base_order.column_orders {
+                    col_order.order_type = col_order.order_type.reverse();
+                }
+            }
             if scan_ranges.len() == 1 && !base_order.is_any() {
                 let eq_prefix_len = scan_ranges[0].eq_conds.len();
                 if eq_prefix_len > 0 {
@@ -90,13 +97,23 @@ impl BatchSeqScan {
             core,
             scan_ranges,
             limit,
+            reverse,
             as_of,
         }
     }
 
     pub fn new(core: generic::TableScan, scan_ranges: Vec<ScanRange>, limit: Option<u64>) -> Self {
+        Self::new_with_direction(core, scan_ranges, limit, false)
+    }
+
+    pub fn new_with_direction(
+        core: generic::TableScan,
+        scan_ranges: Vec<ScanRange>,
+        limit: Option<u64>,
+        reverse: bool,
+    ) -> Self {
         // Use `Single` by default, will be updated later with `clone_with_dist`.
-        Self::new_inner(core, Distribution::Single, scan_ranges, limit)
+        Self::new_inner(core, Distribution::Single, scan_ranges, limit, reverse)
     }
 
     pub fn new_with_dist(
@@ -105,7 +122,17 @@ impl BatchSeqScan {
         scan_ranges: Vec<ScanRange>,
         limit: Option<u64>,
     ) -> Self {
-        Self::new_inner(core, dist, scan_ranges, limit)
+        Self::new_with_dist_and_direction(core, dist, scan_ranges, limit, false)
+    }
+
+    pub fn new_with_dist_and_direction(
+        core: generic::TableScan,
+        dist: Distribution,
+        scan_ranges: Vec<ScanRange>,
+        limit: Option<u64>,
+        reverse: bool,
+    ) -> Self {
+        Self::new_inner(core, dist, scan_ranges, limit, reverse)
     }
 
     fn clone_with_dist(&self) -> Self {
@@ -135,6 +162,7 @@ impl BatchSeqScan {
             },
             self.scan_ranges.clone(),
             self.limit,
+            self.reverse,
         )
     }
 
@@ -150,6 +178,10 @@ impl BatchSeqScan {
 
     pub fn limit(&self) -> &Option<u64> {
         &self.limit
+    }
+
+    pub fn reverse(&self) -> bool {
+        self.reverse
     }
 }
 
@@ -176,6 +208,9 @@ impl Distill for BatchSeqScan {
 
         if let Some(limit) = &self.limit {
             vec.push(("limit", Pretty::display(limit)));
+        }
+        if self.reverse {
+            vec.push(("reverse", Pretty::display(&self.reverse)));
         }
 
         if verbose {
@@ -212,6 +247,7 @@ impl TryToBatchPb for BatchSeqScan {
             ordered: !self.order().is_any(),
             limit: *self.limit(),
             query_epoch: to_batch_query_epoch(&self.as_of)?,
+            reverse: self.reverse,
         }))
     }
 }
@@ -232,6 +268,7 @@ impl ToLocalBatch for BatchSeqScan {
             dist,
             self.scan_ranges.clone(),
             self.limit,
+            self.reverse,
         )
         .into())
     }
@@ -245,7 +282,7 @@ impl ExprRewritable<Batch> for BatchSeqScan {
     fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
         let mut core = self.core.clone();
         core.rewrite_exprs(r);
-        Self::new(core, self.scan_ranges.clone(), self.limit).into()
+        Self::new_with_direction(core, self.scan_ranges.clone(), self.limit, self.reverse).into()
     }
 }
 
