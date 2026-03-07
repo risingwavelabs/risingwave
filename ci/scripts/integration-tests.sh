@@ -66,8 +66,28 @@ if [ "${case}" == "client-library" ]; then
   exit 0
 fi
 
-echo "~~~ install postgresql"
-sudo yum install -y postgresql15
+echo "~~~ install postgresql client"
+desired_pg_major="15"
+if [[ -n "${POSTGRES_CDC_IMAGE:-}" ]]; then
+  # Expected format: postgres:<major>-alpine, e.g. postgres:18-alpine
+  if [[ "${POSTGRES_CDC_IMAGE}" =~ ^postgres:([0-9]+)([-:].*)?$ ]]; then
+    desired_pg_major="${BASH_REMATCH[1]}"
+  fi
+  echo "Detected POSTGRES_CDC_IMAGE=${POSTGRES_CDC_IMAGE}, probing postgresql${desired_pg_major}"
+fi
+
+desired_pg_pkg="postgresql${desired_pg_major}"
+fallback_pg_pkg="postgresql15"
+install_pg_pkg="${desired_pg_pkg}"
+
+if ! sudo yum list --showduplicates "${desired_pg_pkg}" >/dev/null 2>&1; then
+  if [[ "${desired_pg_pkg}" != "${fallback_pg_pkg}" ]]; then
+    echo "WARN: ${desired_pg_pkg} is unavailable on this runner; fallback to ${fallback_pg_pkg}"
+  fi
+  install_pg_pkg="${fallback_pg_pkg}"
+fi
+
+sudo yum install -y "${install_pg_pkg}"
 
 echo "~~~ install poetry"
 curl -sSL https://install.python-poetry.org | POETRY_VERSION=1.8.0 python3 -

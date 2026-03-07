@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import subprocess
+from typing import Dict, Optional
 
 CASES_MAP = {
     "ad-click": ["json"],
@@ -47,13 +48,21 @@ CASES_MAP = {
     "dynamodb": ["json"],
 }
 
-def gen_pipeline_steps():
-    pipeline_steps = ""
-    for test_case, test_formats in CASES_MAP.items():
-        for test_format in test_formats:
-            pipeline_steps += f"""
- - label: Run Demos {test_case} {test_format}
-   key: {test_case}-{test_format}
+def gen_step(
+    test_case: str,
+    test_format: str,
+    *,
+    step_key: Optional[str] = None,
+    extra_env: Optional[Dict[str, str]] = None,
+) -> str:
+    key = step_key or f"{test_case}-{test_format}"
+    env_block = ""
+    if extra_env:
+        env_lines = "\n".join([f"     {k}: {v}" for k, v in extra_env.items()])
+        env_block = f"\n   env:\n{env_lines}"
+    return f"""
+ - label: Run Demos {key}
+   key: {key}
    command: ci/scripts/integration-tests.sh -c {test_case} -f {test_format}
    timeout_in_minutes: 30
    retry: *auto-retry
@@ -65,8 +74,22 @@ def gen_pipeline_steps():
            GHCR_USERNAME: ghcr-username
            GHCR_TOKEN: ghcr-token
            RW_LICENSE_KEY: rw-license-key
-     - ./ci/plugins/docker-compose-logs
+     - ./ci/plugins/docker-compose-logs{env_block}
 """
+
+
+def gen_pipeline_steps():
+    pipeline_steps = ""
+    for test_case, test_formats in CASES_MAP.items():
+        for test_format in test_formats:
+            pipeline_steps += gen_step(test_case, test_format)
+            if test_case == "postgres-cdc" and test_format == "json":
+                pipeline_steps += gen_step(
+                    test_case,
+                    test_format,
+                    step_key="postgres-cdc-pg18-json",
+                    extra_env={"POSTGRES_CDC_IMAGE": "postgres:18-alpine"},
+                )
     return pipeline_steps
 
 def format_pipeline_yaml_cmd(pipeline_steps):
