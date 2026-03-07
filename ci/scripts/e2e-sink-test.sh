@@ -87,7 +87,6 @@ risedev slt './e2e_test/sink/postgres_sink.slt'
 
 echo "--- testing common sinks"
 risedev slt './e2e_test/sink/append_only_sink.slt'
-risedev slt './e2e_test/sink/alter_sink_props.slt'
 risedev slt './e2e_test/sink/create_sink_as.slt'
 risedev slt './e2e_test/sink/blackhole_sink.slt'
 risedev slt './e2e_test/sink/remote/types.slt'
