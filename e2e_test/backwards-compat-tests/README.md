@@ -13,6 +13,7 @@ The backwards compatibility tests run in the following manner:
 
 We currently cover the following:
 1. Basic mv
-2. Nexmark (on rw table not nexmark source)
-3. TPC-H
-4. Kafka Source
+2. Hash join with watermark / EOWC
+3. Nexmark (on rw table not nexmark source)
+4. TPC-H
+5. Kafka Source
