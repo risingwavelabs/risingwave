@@ -109,7 +109,8 @@ impl InsertExecutor {
 
         let table_dml_handle = self
             .dml_manager
-            .table_dml_handle(self.table_id, self.table_version_id)?;
+            .table_dml_handle_with_retry(self.table_id, self.table_version_id)
+            .await?;
         let mut write_handle = table_dml_handle.write_handle(self.session_id, self.txn_id)?;
 
         write_handle.begin()?;

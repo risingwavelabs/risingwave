@@ -125,10 +125,21 @@ impl DispatchExecutorInner {
         downstream_actors: &[ActorId],
     ) -> StreamResult<Vec<Output>> {
         fn resolve_output(downstream_actor: ActorId, request: NewOutputRequest) -> Output {
-            let tx = match request {
-                NewOutputRequest::Local(tx) | NewOutputRequest::Remote(tx) => tx,
-            };
-            Output::new(downstream_actor, tx)
+            match request {
+                NewOutputRequest::Local(tx) | NewOutputRequest::Remote(tx) => {
+                    Output::new(downstream_actor, tx)
+                }
+                NewOutputRequest::CoalescedBarrierRemote {
+                    upstream_actor_id,
+                    data_tx,
+                    barrier_tx,
+                } => Output::new_coalesced_barrier(
+                    downstream_actor,
+                    upstream_actor_id,
+                    data_tx,
+                    barrier_tx,
+                ),
+            }
         }
         let mut outputs = Vec::with_capacity(downstream_actors.len());
         for &downstream_actor in downstream_actors {
