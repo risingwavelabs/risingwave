@@ -1365,6 +1365,64 @@ PulsarProperties:
     field_type: bool
     required: false
     default: Default::default
+SqsCommon:
+  fields:
+  - name: queue_url
+    field_type: String
+    comments: The URL of the SQS queue
+    required: true
+    alias:
+    - sqs.queue_url
+  - name: aws.region
+    field_type: String
+    comments: AWS region for the SQS queue
+    required: true
+    alias:
+    - sqs.region
+  - name: endpoint
+    field_type: String
+    comments: Optional endpoint URL (for LocalStack or custom endpoints)
+    required: false
+    alias:
+    - sqs.endpoint
+  - name: aws.credentials.access_key_id
+    field_type: String
+    comments: AWS access key ID
+    required: false
+    alias:
+    - sqs.credentials.access
+  - name: aws.credentials.secret_access_key
+    field_type: String
+    comments: AWS secret access key
+    required: false
+    alias:
+    - sqs.credentials.secret
+  - name: aws.credentials.session_token
+    field_type: String
+    comments: AWS session token (for temporary credentials)
+    required: false
+    alias:
+    - sqs.credentials.session_token
+  - name: aws.credentials.role.arn
+    field_type: String
+    comments: IAM role ARN for assume role
+    required: false
+    alias:
+    - sqs.assumerole.arn
+  - name: aws.credentials.role.external_id
+    field_type: String
+    comments: External ID for assume role
+    required: false
+    alias:
+    - sqs.assumerole.external_id
+  - name: message_group_id
+    field_type: String
+    comments: |-
+      Message group ID for FIFO queues
+      Required for FIFO queues to ensure message ordering within the group
+    required: false
+    alias:
+    - sqs.message_group_id
 TestSourceProperties:
   fields:
   - name: properties

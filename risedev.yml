@@ -1004,6 +1004,18 @@ profile:
       - use: sqlite
       - use: minio
 
+  # Profile for testing the SQS sink against LocalStack
+  sqs-sink:
+    steps:
+      - use: minio
+      - use: sqlite
+      - use: meta-node
+        meta-backend: sqlite
+      - use: compute-node
+      - use: frontend
+      - use: compactor
+      - use: localstack
+
   ci-sink-test:
     config-path: src/config/ci.toml
     steps:
@@ -1503,6 +1515,28 @@ template:
 
     # address of redis
     address: "127.0.0.1"
+
+  # LocalStack - AWS cloud services emulator (SQS, S3, Kinesis, etc.)
+  # Used to run end-to-end sink/source tests without real AWS credentials.
+  localstack:
+    # Id to be picked-up by services
+    id: localstack
+
+    # address of localstack
+    address: "127.0.0.1"
+
+    # LocalStack gateway port (default: 4566)
+    port: 4566
+
+    # The docker image. Can be overridden to use a different version.
+    image: "localstack/localstack:4.14"
+
+    # If set to true, data will be persisted at data/{id}.
+    persist-data: false
+
+    # If `user-managed` is true, user is responsible for starting LocalStack
+    # to serve at the above address and port in any way they see fit.
+    user-managed: false
 
   # MySQL service backed by docker.
   mysql:
