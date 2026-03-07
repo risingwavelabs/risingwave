@@ -92,6 +92,7 @@ use crate::model::{
     FragmentDownstreamRelation, FragmentReplaceUpstream, StreamContext, StreamJobFragments,
     StreamJobFragmentsToCreate,
 };
+use crate::rpc::ddl_controller::DropMode;
 use crate::stream::SplitAssignment;
 use crate::{MetaError, MetaResult};
 
@@ -166,6 +167,7 @@ impl CatalogController {
         mut dependencies: HashSet<ObjectId>,
         resource_type: streaming_job_resource_type::ResourceType,
         backfill_parallelism: &Option<Parallelism>,
+        ignore_duplicate_name: bool,
     ) -> MetaResult<()> {
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
@@ -183,13 +185,15 @@ impl CatalogController {
         ensure_user_id(streaming_job.owner() as _, &txn).await?;
         ensure_object_id(ObjectType::Database, streaming_job.database_id(), &txn).await?;
         ensure_object_id(ObjectType::Schema, streaming_job.schema_id(), &txn).await?;
-        check_relation_name_duplicate(
-            &streaming_job.name(),
-            streaming_job.database_id(),
-            streaming_job.schema_id(),
-            &txn,
-        )
-        .await?;
+        if !ignore_duplicate_name {
+            check_relation_name_duplicate(
+                &streaming_job.name(),
+                streaming_job.database_id(),
+                streaming_job.schema_id(),
+                &txn,
+            )
+            .await?;
+        }
 
         // check if any dependency is in altering status.
         if !dependencies.is_empty() {
@@ -474,6 +478,7 @@ impl CatalogController {
         streaming_job: &StreamingJob,
         for_replace: bool,
         backfill_orders: Option<BackfillOrders>,
+        enable_creating_notification: bool,
     ) -> MetaResult<()> {
         self.prepare_streaming_job(
             stream_job_fragments.stream_job_id(),
@@ -482,6 +487,7 @@ impl CatalogController {
             for_replace,
             Some(streaming_job),
             backfill_orders,
+            enable_creating_notification,
         )
         .await
     }
@@ -489,7 +495,7 @@ impl CatalogController {
     // TODO: In this function, we also update the `Table` model in the meta store.
     // Given that we've ensured the tables inside `TableFragments` are complete, shall we consider
     // making them the source of truth and performing a full replacement for those in the meta store?
-    /// Insert fragments and actors to meta store. Used both for creating new jobs and replacing jobs.
+    /// Insert fragments to meta store. Used both for creating new jobs and replacing jobs.
     #[await_tree::instrument("prepare_streaming_job_for_{}", if for_replace { "replace" } else { "create" }
     )]
     pub async fn prepare_streaming_job<'a, I: Iterator<Item = &'a crate::model::Fragment> + 'a>(
@@ -500,14 +506,16 @@ impl CatalogController {
         for_replace: bool,
         creating_streaming_job: Option<&'a StreamingJob>,
         backfill_orders: Option<BackfillOrders>,
+        enable_creating_notification: bool,
     ) -> MetaResult<()> {
         let fragments = Self::prepare_fragment_models_from_fragments(job_id, get_fragments())?;
 
         let inner = self.inner.write().await;
 
-        let need_notify = creating_streaming_job
-            .map(|job| job.should_notify_creating())
-            .unwrap_or(false);
+        let need_notify = enable_creating_notification
+            && creating_streaming_job
+                .map(|job| job.should_notify_creating())
+                .unwrap_or(false);
         let definition = creating_streaming_job.map(|job| job.definition());
 
         let mut objects_to_notify = vec![];
@@ -525,10 +533,10 @@ impl CatalogController {
             StreamingJobModel::update(job).exec(&txn).await?;
         }
 
-        let state_table_ids = fragments
+        let state_table_ids: Vec<TableId> = fragments
             .iter()
             .flat_map(|fragment| fragment.state_table_ids.inner_ref().clone())
-            .collect_vec();
+            .collect();
 
         if !fragments.is_empty() {
             let fragment_models = fragments
@@ -1053,6 +1061,53 @@ impl CatalogController {
         Ok(new_obj_id)
     }
 
+    pub async fn finish_replace_sink(
+        &self,
+        old_job_id: JobId,
+        new_job_id: JobId,
+    ) -> MetaResult<(NotificationVersion, Vec<PbTable>)> {
+        let inner = self.inner.write().await;
+        let txn = inner.db.begin().await?;
+
+        let (_, removed_partial_objects, dropped_tables, updated_user_info_by_remove) = self
+            .drop_objects_in_txn(&txn, ObjectType::Sink, old_job_id, DropMode::Cascade)
+            .await?;
+        let (_, new_objects, updated_user_info_by_create, new_dependencies) =
+            self.finish_streaming_job_inner(&txn, new_job_id).await?;
+        let updated_user_ids: Vec<UserId> = updated_user_info_by_remove
+            .into_iter()
+            .map(|info| info.id as _)
+            .chain(
+                updated_user_info_by_create
+                    .into_iter()
+                    .map(|info| info.id as _),
+            )
+            .collect_vec();
+        let updated_user_info = list_user_info_by_ids(updated_user_ids, &txn).await?;
+
+        txn.commit().await?;
+
+        // notify users about the default privileges
+        let delete_objects_info =
+            build_object_group_for_delete(removed_partial_objects.into_values().collect());
+        self.notify_frontend(NotificationOperation::Delete, delete_objects_info)
+            .await;
+        let mut version = self
+            .notify_frontend(
+                NotificationOperation::Add,
+                NotificationInfo::ObjectGroup(PbObjectGroup {
+                    objects: new_objects,
+                    dependencies: new_dependencies,
+                }),
+            )
+            .await;
+        if !updated_user_info.is_empty() {
+            version = self.notify_users_update(updated_user_info).await;
+        }
+
+        Ok((version, dropped_tables))
+    }
+
     /// `finish_streaming_job` marks job related objects as `Created` and notify frontend.
     pub async fn finish_streaming_job(&self, job_id: JobId) -> MetaResult<()> {
         let mut inner = self.inner.write().await;
@@ -1526,7 +1581,7 @@ impl CatalogController {
 
         finish_fragments(txn, tmp_id, original_job_id, replace_upstream).await?;
 
-        // 4. update catalogs and notify.
+        // 4. notify frontend about updated catalogs.
         let mut objects = vec![];
         match job_type {
             StreamingJobType::Table(_) | StreamingJobType::MaterializedView => {

@@ -240,6 +240,16 @@ impl StreamingJob {
         }
     }
 
+    pub fn set_create_type(&mut self, create_type: CreateType) {
+        match self {
+            Self::Table(_, table, ..) => table.create_type = create_type as i32,
+            Self::MaterializedView(table) => table.create_type = create_type as i32,
+            Self::Sink(s) => s.create_type = create_type as i32,
+            Self::Index(index, _) => index.create_type = create_type as i32,
+            _ => {}
+        }
+    }
+
     pub fn dependent_connection_ids(&self) -> MetaResult<HashSet<ConnectionId>> {
         match self {
             StreamingJob::Source(source) => Ok(get_referred_connection_ids_from_source(source)),

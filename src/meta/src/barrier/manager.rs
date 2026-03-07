@@ -17,10 +17,13 @@ use std::sync::Arc;
 
 use anyhow::Context;
 use arc_swap::ArcSwap;
+use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::cast::datetime_to_timestamp_millis;
+use risingwave_common::id::TableId;
 use risingwave_hummock_sdk::HummockVersionId;
 use risingwave_meta_model::DatabaseId;
+use risingwave_pb::catalog::PbTable;
 use risingwave_pb::ddl_service::{DdlProgress, PbBackfillType};
 use risingwave_pb::id::JobId;
 use risingwave_pb::meta::PbRecoveryStatus;
@@ -164,6 +167,16 @@ impl GlobalBarrierManager {
 
     pub async fn get_hummock_version_id(&self) -> HummockVersionId {
         self.hummock_manager.get_version_id().await
+    }
+
+    pub async fn drop_tables_in_hummock(&self, tables: Vec<PbTable>) -> MetaResult<()> {
+        let table_ids = tables.iter().map(|t| TableId::from(t.id)).collect_vec();
+        self.hummock_manager.unregister_table_ids(table_ids).await?;
+        self.metadata_manager
+            .catalog_controller
+            .notify_hummock_dropped_tables(tables)
+            .await;
+        Ok(())
     }
 }
 
