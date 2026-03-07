@@ -417,7 +417,7 @@ impl HummockManager {
                 .map(|m| {
                     (
                         m.id,
-                        HummockVersionDelta::from_persisted_protobuf(&m.into()),
+                        HummockVersionDelta::from_persisted_protobuf_owned(m.into()),
                     )
                 })
                 .collect();

@@ -259,6 +259,18 @@ where
     }
 }
 
+impl<T> HummockVersionCommon<T>
+where
+    T: From<PbSstableInfo>,
+    PbSstableInfo: for<'a> From<&'a T>,
+{
+    /// Convert an owned `PbHummockVersion` deserialized from persisted state to `HummockVersion`,
+    /// moving data instead of cloning for better performance on large checkpoints.
+    pub fn from_persisted_protobuf_owned(pb_version: PbHummockVersion) -> Self {
+        pb_version.into()
+    }
+}
+
 impl HummockVersion {
     pub fn estimated_encode_len(&self) -> usize {
         self.levels.len() * size_of::<CompactionGroupId>()
@@ -326,6 +338,49 @@ where
                 .vector_indexes
                 .iter()
                 .map(|(table_id, index)| (*table_id, index.clone().into()))
+                .collect(),
+        }
+    }
+}
+
+impl<T> From<PbHummockVersion> for HummockVersionCommon<T>
+where
+    T: From<PbSstableInfo>,
+{
+    fn from(pb_version: PbHummockVersion) -> Self {
+        #[expect(deprecated)]
+        Self {
+            id: pb_version.id,
+            levels: pb_version
+                .levels
+                .into_iter()
+                .map(|(group_id, levels)| (group_id, LevelsCommon::from(levels)))
+                .collect(),
+            max_committed_epoch: pb_version.max_committed_epoch,
+            table_watermarks: pb_version
+                .table_watermarks
+                .into_iter()
+                .map(|(table_id, table_watermark)| {
+                    (table_id, Arc::new(TableWatermarks::from(table_watermark)))
+                })
+                .collect(),
+            table_change_log: pb_version
+                .table_change_logs
+                .into_iter()
+                .map(|(table_id, change_log)| {
+                    (
+                        table_id,
+                        TableChangeLogCommon::from_protobuf_owned(change_log),
+                    )
+                })
+                .collect(),
+            state_table_info: HummockVersionStateTableInfo::from_protobuf(
+                &pb_version.state_table_info,
+            ),
+            vector_indexes: pb_version
+                .vector_indexes
+                .into_iter()
+                .map(|(table_id, index)| (table_id, index.into()))
                 .collect(),
         }
     }
@@ -558,6 +613,18 @@ where
 
     pub fn to_protobuf(&self) -> PbHummockVersionDelta {
         self.into()
+    }
+}
+
+impl<T> HummockVersionDeltaCommon<T>
+where
+    T: From<PbSstableInfo>,
+    PbSstableInfo: for<'a> From<&'a T>,
+{
+    /// Convert an owned `PbHummockVersionDelta` deserialized from persisted state to
+    /// `HummockVersionDelta`, moving data instead of cloning.
+    pub fn from_persisted_protobuf_owned(delta: PbHummockVersionDelta) -> Self {
+        delta.into()
     }
 }
 
@@ -807,22 +874,18 @@ where
             removed_table_ids: pb_version_delta.removed_table_ids.into_iter().collect(),
             change_log_delta: pb_version_delta
                 .change_log_delta
-                .iter()
+                .into_iter()
                 .map(|(table_id, log_delta)| {
                     (
-                        *table_id,
+                        table_id,
                         ChangeLogDeltaCommon {
-                            new_log: log_delta.new_log.clone().unwrap().into(),
+                            new_log: log_delta.new_log.unwrap().into(),
                             truncate_epoch: log_delta.truncate_epoch,
                         },
                     )
                 })
                 .collect(),
-            state_table_info_delta: pb_version_delta
-                .state_table_info_delta
-                .iter()
-                .map(|(table_id, delta)| (*table_id, *delta))
-                .collect(),
+            state_table_info_delta: pb_version_delta.state_table_info_delta,
             vector_index_delta: pb_version_delta
                 .vector_index_delta
                 .into_iter()
