@@ -18,6 +18,7 @@ use risingwave_connector::WithPropertiesExt;
 use risingwave_connector::error::ConnectorError;
 use risingwave_connector::source::AnySplitEnumerator;
 use risingwave_connector::source::base::ConnectorProperties;
+use tokio::sync::oneshot;
 
 use super::*;
 
@@ -318,6 +319,12 @@ impl ConnectorSourceWorker {
                                 return;
                             }
                         }
+                    } else {
+                        tracing::info!(
+                            source_id = self.source_id.as_raw_id(),
+                            "source worker command channel closed, exiting worker loop"
+                        );
+                        return;
                     }
                 }
                 _ = interval.tick() => {
@@ -438,8 +445,18 @@ impl ConnectorSourceWorkerHandle {
 
     /// Force [`ConnectorSourceWorker::tick()`] to be called.
     pub async fn force_tick(&self) -> MetaResult<()> {
+        let rx = self.force_tick_async()?;
+        Self::wait_force_tick(rx).await
+    }
+
+    /// Send a force tick command and return its response channel.
+    pub fn force_tick_async(&self) -> MetaResult<oneshot::Receiver<MetaResult<()>>> {
         let (tx, rx) = oneshot::channel();
         self.send_command(SourceWorkerCommand::Tick(tx))?;
+        Ok(rx)
+    }
+
+    pub async fn wait_force_tick(rx: oneshot::Receiver<MetaResult<()>>) -> MetaResult<()> {
         rx.await
             .context("failed to receive tick command response from source worker")?
             .context("source worker tick failed")?;
@@ -494,4 +511,27 @@ pub enum SourceWorkerCommand {
     Terminate,
     /// Update the properties of the source worker.
     UpdateProps(ConnectorProperties),
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_wait_force_tick_success() {
+        let (tx, rx) = oneshot::channel();
+        tx.send(Ok(())).expect("send should succeed");
+
+        let result = ConnectorSourceWorkerHandle::wait_force_tick(rx).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_wait_force_tick_channel_closed() {
+        let (tx, rx) = oneshot::channel::<MetaResult<()>>();
+        drop(tx);
+
+        let result = ConnectorSourceWorkerHandle::wait_force_tick(rx).await;
+        assert!(result.is_err());
+    }
 }
