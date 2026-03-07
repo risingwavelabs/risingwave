@@ -528,9 +528,12 @@ impl HummockManager {
         let mut pending_tasks: HashMap<u64, (CompactionGroupId, usize, RunningCompactTask)> =
             HashMap::default();
         {
-            let compaction_guard = self.compaction.read().await;
             for group_id in slowdown_groups.keys() {
-                if let Some(status) = compaction_guard.compaction_statuses.get(group_id) {
+                let Some(group) = self.compaction.get_group(*group_id).await else {
+                    continue;
+                };
+                let group_guard = group.inner.read().await;
+                if let Some(status) = group_guard.compaction_status.as_ref() {
                     for (idx, level_handler) in status.level_handlers.iter().enumerate() {
                         let tasks = level_handler.pending_tasks().to_vec();
                         if tasks.is_empty() {

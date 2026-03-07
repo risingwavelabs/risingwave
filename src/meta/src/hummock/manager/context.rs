@@ -158,16 +158,15 @@ impl ContextInfo {
 impl HummockManager {
     /// Release invalid contexts, aka worker node ids which are no longer valid in `ClusterManager`.
     pub(super) async fn release_invalid_contexts(&self) -> Result<Vec<HummockContextId>> {
+        let assigned_tasks = self.compaction.snapshot_assignments().await;
         let (active_context_ids, mut context_info) = {
-            let compaction_guard = self.compaction.read().await;
             let context_info = self.context_info.write().await;
             let _timer = start_measure_real_process_timer!(self, "release_invalid_contexts");
             let mut active_context_ids = HashSet::new();
             active_context_ids.extend(
-                compaction_guard
-                    .compact_task_assignment
-                    .values()
-                    .map(|c| c.context_id),
+                assigned_tasks
+                    .into_values()
+                    .map(|assignment| assignment.context_id),
             );
             active_context_ids.extend(context_info.pinned_versions.keys());
             (active_context_ids, context_info)
