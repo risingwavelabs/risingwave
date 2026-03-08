@@ -4,6 +4,17 @@ set sink_decouple = false;
 statement ok
 CREATE TABLE s1 (i1 int, i2 varchar, i3 varchar);
 
+statement ok
+CREATE CONNECTION CONN WITH (
+    type = 'iceberg',
+    catalog.name = 'demo',
+    catalog.type = 'storage',
+    warehouse.path = 's3a://hummock001/iceberg-data',
+    s3.endpoint = 'http://127.0.0.1:9301',
+    s3.region = 'us-east-1',
+    s3.access.key = 'hummockadmin',
+    s3.secret.key = 'hummockadmin'
+);
 
 statement ok
 CREATE SINK sink1 from s1 WITH (
@@ -36,3 +47,6 @@ DROP SINK sink1;
 
 statement ok
 DROP TABLE s1;
+
+statement ok
+DROP CONNECTION conn;
