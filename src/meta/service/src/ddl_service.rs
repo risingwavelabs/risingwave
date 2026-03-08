@@ -298,7 +298,6 @@ impl DdlService for DdlServiceImpl {
         Ok(Response::new(DropSecretResponse {
             status: None,
             version,
-            cascade_objects: vec![],
         }))
     }
 
@@ -354,7 +353,6 @@ impl DdlService for DdlServiceImpl {
         Ok(Response::new(DropSchemaResponse {
             status: None,
             version,
-            cascade_objects: vec![],
         }))
     }
 
@@ -412,7 +410,6 @@ impl DdlService for DdlServiceImpl {
         Ok(Response::new(DropSourceResponse {
             status: None,
             version,
-            cascade_objects: vec![],
         }))
     }
 
@@ -492,7 +489,6 @@ impl DdlService for DdlServiceImpl {
         Ok(Response::new(DropSinkResponse {
             status: None,
             version,
-            cascade_objects: vec![],
         }))
     }
 
@@ -530,7 +526,6 @@ impl DdlService for DdlServiceImpl {
         Ok(Response::new(DropSubscriptionResponse {
             status: None,
             version,
-            cascade_objects: vec![],
         }))
     }
 
@@ -585,7 +580,6 @@ impl DdlService for DdlServiceImpl {
         Ok(Response::new(DropMaterializedViewResponse {
             status: None,
             version,
-            cascade_objects: vec![],
         }))
     }
 
@@ -638,7 +632,6 @@ impl DdlService for DdlServiceImpl {
         Ok(Response::new(DropIndexResponse {
             status: None,
             version,
-            cascade_objects: vec![],
         }))
     }
 
@@ -677,7 +670,6 @@ impl DdlService for DdlServiceImpl {
         Ok(Response::new(DropFunctionResponse {
             status: None,
             version,
-            cascade_objects: vec![],
         }))
     }
 
@@ -780,7 +772,6 @@ impl DdlService for DdlServiceImpl {
         Ok(Response::new(DropViewResponse {
             status: None,
             version,
-            cascade_objects: vec![],
         }))
     }
 
@@ -1040,7 +1031,6 @@ impl DdlService for DdlServiceImpl {
         Ok(Response::new(DropConnectionResponse {
             status: None,
             version,
-            cascade_objects: vec![],
         }))
     }
 
