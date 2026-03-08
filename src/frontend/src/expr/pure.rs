@@ -309,6 +309,8 @@ impl ExprVisitor for ImpureAnalyzer {
             | Type::Sha256
             | Type::Sha384
             | Type::Sha512
+            | Type::Crc32
+            | Type::Crc32c
             | Type::Hmac
             | Type::SecureCompare
             | Type::Decrypt

@@ -130,7 +130,6 @@ pub async fn compute_node_serve(
             parallelism: opts.parallelism as u32,
             is_streaming: opts.role.for_streaming(),
             is_serving: opts.role.for_serving(),
-            is_unschedulable: false,
             internal_rpc_host_addr: "".to_owned(),
             resource_group: Some(opts.resource_group.clone()),
             is_iceberg_compactor: false,

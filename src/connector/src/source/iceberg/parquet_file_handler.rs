@@ -44,18 +44,18 @@ use crate::error::ConnectorResult;
 use crate::parser::ParquetParser;
 use crate::source::{Column, SourceColumnDesc};
 
-pub struct ParquetFileReader<R: FileRead> {
+pub struct ParquetFileReader {
     meta: FileMetadata,
-    r: R,
+    r: Box<dyn FileRead>,
 }
 
-impl<R: FileRead> ParquetFileReader<R> {
-    pub fn new(meta: FileMetadata, r: R) -> Self {
+impl ParquetFileReader {
+    pub fn new(meta: FileMetadata, r: Box<dyn FileRead>) -> Self {
         Self { meta, r }
     }
 }
 
-impl<R: FileRead> AsyncFileReader for ParquetFileReader<R> {
+impl AsyncFileReader for ParquetFileReader {
     fn get_bytes(&mut self, range: Range<u64>) -> BoxFuture<'_, parquet::errors::Result<Bytes>> {
         Box::pin(
             self.r
@@ -84,7 +84,7 @@ pub async fn create_parquet_stream_builder(
     s3_access_key: String,
     s3_secret_key: String,
     location: String,
-) -> Result<ParquetRecordBatchStreamBuilder<ParquetFileReader<impl FileRead>>, anyhow::Error> {
+) -> Result<ParquetRecordBatchStreamBuilder<ParquetFileReader>, anyhow::Error> {
     let mut props = HashMap::new();
     props.insert(S3_REGION, s3_region.clone());
     props.insert(S3_ACCESS_KEY_ID, s3_access_key.clone());
@@ -338,7 +338,7 @@ pub async fn read_parquet_file(
         for col in schema_descr.columns() {
             let path = col.path().string();
             let physical = col.physical_type();
-            let logical = col.logical_type();
+            let logical = col.logical_type_ref();
             tracing::debug!(
                 file = %file_name,
                 column_path = path,

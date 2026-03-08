@@ -526,22 +526,6 @@ message DeleteWorkerNodeResponse {
   common.Status status = 1;
 }
 
-// Mark CN as schedulable or as unschedulable
-message UpdateWorkerNodeSchedulabilityRequest {
-  enum Schedulability {
-    UNSPECIFIED = 0;
-    SCHEDULABLE = 1;
-    UNSCHEDULABLE = 2;
-  }
-
-  repeated uint32 worker_ids = 1;
-  Schedulability schedulability = 2;
-}
-
-message UpdateWorkerNodeSchedulabilityResponse {
-  common.Status status = 1;
-}
-
 message ListAllNodesRequest {
   optional common.WorkerType worker_type = 1;
   // Whether to include nodes still starting
@@ -576,7 +560,6 @@ service ClusterService {
   rpc AddWorkerNode(AddWorkerNodeRequest) returns (AddWorkerNodeResponse);
   rpc ActivateWorkerNode(ActivateWorkerNodeRequest) returns (ActivateWorkerNodeResponse);
   rpc DeleteWorkerNode(DeleteWorkerNodeRequest) returns (DeleteWorkerNodeResponse);
-  rpc UpdateWorkerNodeSchedulability(UpdateWorkerNodeSchedulabilityRequest) returns (UpdateWorkerNodeSchedulabilityResponse);
   rpc ListAllNodes(ListAllNodesRequest) returns (ListAllNodesResponse);
   rpc GetClusterRecoveryStatus(GetClusterRecoveryStatusRequest) returns (GetClusterRecoveryStatusResponse);
   rpc GetMetaStoreInfo(GetMetaStoreInfoRequest) returns (GetMetaStoreInfoResponse);

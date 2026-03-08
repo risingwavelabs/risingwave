@@ -29,7 +29,7 @@ use iceberg_compaction_core::config::{
 };
 use iceberg_compaction_core::executor::RewriteFilesStat;
 use mixtrics::registry::prometheus::PrometheusMetricsRegistry;
-use parquet::file::properties::WriterProperties;
+use parquet_57::file::properties::WriterProperties;
 use risingwave_common::config::storage::default::storage::{
     iceberg_compaction_enable_dynamic_size_estimation,
     iceberg_compaction_enable_heuristic_output_parallelism,
