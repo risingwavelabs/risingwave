@@ -718,6 +718,24 @@ impl ToStream for LogicalOverWindow {
         }
     }
 
+    fn try_better_locality(&self, columns: &[usize]) -> Option<PlanRef> {
+        if columns.is_empty() {
+            return None;
+        }
+
+        let partition_key_indices = self.partition_key_indices();
+        if columns.len() > partition_key_indices.len()
+            || columns != &partition_key_indices[..columns.len()]
+        {
+            return None;
+        }
+
+        // Similar to agg/topn, keep the current over-window node so the locality can be provided
+        // by its own state table after `to_stream`, instead of trying to enforce it on input
+        // during logical rewrite.
+        Some(self.clone_with_input(self.input()).into())
+    }
+
     fn logical_rewrite_for_stream(
         &self,
         ctx: &mut RewriteStreamContext,
