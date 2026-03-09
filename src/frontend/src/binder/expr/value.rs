@@ -70,52 +70,92 @@ impl Binder {
     ) -> Result<Literal> {
         // > INTERVAL '1' means 1 second.
         // https://www.postgresql.org/docs/current/datatype-datetime.html#DATATYPE-INTERVAL-INPUT
-        let unit = leading_field.unwrap_or(DateTimeField::Second);
+        let default_unit = leading_field.unwrap_or(DateTimeField::Second);
         use DateTimeField::*;
         let tokens = parse_interval(&s)?;
-        // Todo: support more syntax
-        if tokens.len() > 2 {
+        
+        // Parse tokens into (number, unit) pairs
+        let mut pairs = Vec::new();
+        let mut i = 0;
+        while i < tokens.len() {
+            let num = match tokens.get(i) {
+                Some(TimeStrToken::Num(num)) => *num,
+                _ => {
+                    return Err(
+                        ErrorCode::InvalidInputSyntax(format!("Invalid interval {}.", &s)).into(),
+                    );
+                }
+            };
+            i += 1;
+            
+            let unit = match tokens.get(i) {
+                Some(TimeStrToken::TimeUnit(u)) => {
+                    i += 1;
+                    *u
+                }
+                _ => default_unit,
+            };
+            
+            pairs.push((num, unit));
+        }
+        
+        if pairs.is_empty() {
             return Err(ErrorCode::InvalidInputSyntax(format!("Invalid interval {}.", &s)).into());
         }
-        let num = match tokens.get(0) {
-            Some(TimeStrToken::Num(num)) => *num,
-            _ => {
-                return Err(
-                    ErrorCode::InvalidInputSyntax(format!("Invalid interval {}.", &s)).into(),
-                );
+        
+        // Accumulate all interval components
+        let mut total_months = 0i32;
+        let mut total_days = 0i32;
+        let mut total_ms = 0i64;
+        
+        for (num, unit) in pairs {
+            match unit {
+                Year => {
+                    let months = num.checked_mul(12).ok_or_else(|| {
+                        RwError::from(ErrorCode::InvalidInputSyntax(format!("Interval overflow: {} years", num)))
+                    })?;
+                    total_months = total_months.checked_add(months as i32).ok_or_else(|| {
+                        RwError::from(ErrorCode::InvalidInputSyntax("Interval overflow: too many months"))
+                    })?;
+                }
+                Month => {
+                    total_months = total_months.checked_add(num as i32).ok_or_else(|| {
+                        RwError::from(ErrorCode::InvalidInputSyntax("Interval overflow: too many months"))
+                    })?;
+                }
+                Day => {
+                    total_days = total_days.checked_add(num as i32).ok_or_else(|| {
+                        RwError::from(ErrorCode::InvalidInputSyntax("Interval overflow: too many days"))
+                    })?;
+                }
+                Hour => {
+                    let ms = num.checked_mul(3600 * 1000).ok_or_else(|| {
+                        RwError::from(ErrorCode::InvalidInputSyntax("Interval overflow: too many hours"))
+                    })?;
+                    total_ms = total_ms.checked_add(ms).ok_or_else(|| {
+                        RwError::from(ErrorCode::InvalidInputSyntax("Interval overflow: too many milliseconds"))
+                    })?;
+                }
+                Minute => {
+                    let ms = num.checked_mul(60 * 1000).ok_or_else(|| {
+                        RwError::from(ErrorCode::InvalidInputSyntax("Interval overflow: too many minutes"))
+                    })?;
+                    total_ms = total_ms.checked_add(ms).ok_or_else(|| {
+                        RwError::from(ErrorCode::InvalidInputSyntax("Interval overflow: too many milliseconds"))
+                    })?;
+                }
+                Second => {
+                    let ms = num.checked_mul(1000).ok_or_else(|| {
+                        RwError::from(ErrorCode::InvalidInputSyntax("Interval overflow: too many seconds"))
+                    })?;
+                    total_ms = total_ms.checked_add(ms).ok_or_else(|| {
+                        RwError::from(ErrorCode::InvalidInputSyntax("Interval overflow: too many milliseconds"))
+                    })?;
+                }
             }
-        };
-        let interval_unit = match tokens.get(1) {
-            Some(TimeStrToken::TimeUnit(unit)) => unit,
-            _ => &unit,
-        };
-
-        let interval = (|| match interval_unit {
-            Year => {
-                let months = num.checked_mul(12)?;
-                Some(IntervalUnit::from_month(months as i32))
-            }
-            Month => Some(IntervalUnit::from_month(num as i32)),
-            Day => Some(IntervalUnit::from_days(num as i32)),
-            Hour => {
-                let ms = num.checked_mul(3600 * 1000)?;
-                Some(IntervalUnit::from_millis(ms))
-            }
-            Minute => {
-                let ms = num.checked_mul(60 * 1000)?;
-                Some(IntervalUnit::from_millis(ms))
-            }
-            Second => {
-                let ms = num.checked_mul(1000)?;
-                Some(IntervalUnit::from_millis(ms))
-            }
-        })()
-        .ok_or_else(|| {
-            RwError::from(ErrorCode::InvalidInputSyntax(format!(
-                "Invalid interval {}.",
-                s
-            )))
-        })?;
+        }
+        
+        let interval = IntervalUnit::new(total_months, total_days, total_ms);
 
         let datum = Some(ScalarImpl::Interval(interval));
         let literal = Literal::new(datum, DataType::Interval);
@@ -211,22 +251,42 @@ pub fn parse_interval(s: &str) -> Result<Vec<TimeStrToken>> {
     let mut tokens = Vec::new();
     let mut num_buf = "".to_string();
     let mut char_buf = "".to_string();
+    let mut expect_number = true; // Track whether we expect a number next
+    
     for (i, c) in s.chars().enumerate() {
         match c {
-            '-' => {
+            '-' if expect_number => {
+                // This is a negative sign for a number
                 num_buf.push(c);
+            }
+            '-' => {
+                // This is a subtraction operator, treat it as starting a new negative number
+                convert_unit(&mut char_buf, &mut tokens)?;
+                convert_digit(&mut num_buf, &mut tokens)?;
+                num_buf.push(c);
+                expect_number = true;
+            }
+            '+' => {
+                // This is an addition operator, just skip it
+                convert_unit(&mut char_buf, &mut tokens)?;
+                convert_digit(&mut num_buf, &mut tokens)?;
+                expect_number = true;
             }
             c if c.is_ascii_digit() => {
                 convert_unit(&mut char_buf, &mut tokens)?;
                 num_buf.push(c);
+                expect_number = false;
             }
             c if c.is_ascii_alphabetic() => {
                 convert_digit(&mut num_buf, &mut tokens)?;
                 char_buf.push(c);
+                expect_number = false;
             }
             chr if chr.is_ascii_whitespace() => {
                 convert_unit(&mut char_buf, &mut tokens)?;
                 convert_digit(&mut num_buf, &mut tokens)?;
+                // After whitespace, we might expect either a number or a unit
+                // Don't change expect_number here
             }
             _ => {
                 return Err(ErrorCode::InvalidInputSyntax(format!(
@@ -349,6 +409,9 @@ mod tests {
             "6 second",
             "2 minutes",
             "1 month",
+            "1 month - 1 day",
+            "1 day + 1 hour",
+            "2 months - 5 days",
         ];
         let data = vec![
             Ok(Literal::new(
@@ -373,6 +436,21 @@ mod tests {
             )),
             Ok(Literal::new(
                 Some(ScalarImpl::Interval(IntervalUnit::from_month(1))),
+                DataType::Interval,
+            )),
+            // 1 month - 1 day = 1 month, -1 days, 0 ms
+            Ok(Literal::new(
+                Some(ScalarImpl::Interval(IntervalUnit::new(1, -1, 0))),
+                DataType::Interval,
+            )),
+            // 1 day + 1 hour = 0 months, 1 days, 3600000 ms
+            Ok(Literal::new(
+                Some(ScalarImpl::Interval(IntervalUnit::new(0, 1, 3600000))),
+                DataType::Interval,
+            )),
+            // 2 months - 5 days = 2 months, -5 days, 0 ms
+            Ok(Literal::new(
+                Some(ScalarImpl::Interval(IntervalUnit::new(2, -5, 0))),
                 DataType::Interval,
             )),
         ];
