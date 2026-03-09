@@ -61,10 +61,11 @@ impl ClusterService for ClusterServiceImpl {
             PbWorkerType::Frontend | PbWorkerType::ComputeNode | PbWorkerType::Compactor
         ) && resource.rw_version != RW_VERSION
         {
-            return Err(Status::invalid_argument(format!(
+            return Err(MetaError::invalid_parameter(format!(
                 "worker node version {} does not match meta node version {}",
                 resource.rw_version, RW_VERSION,
-            )));
+            ))
+            .into());
         }
         let worker_id = self
             .metadata_manager
