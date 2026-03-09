@@ -24,6 +24,7 @@ use sea_orm::ActiveValue::{NotSet, Set};
 use sea_orm::prelude::DateTime;
 use sea_orm::sea_query::Expr;
 use sea_orm::{ActiveModelTrait, DatabaseTransaction};
+use thiserror_ext::AsReport;
 
 use super::*;
 use crate::controller::utils::load_streaming_jobs_by_ids;
@@ -1203,7 +1204,7 @@ impl CatalogController {
                 if self.should_skip_refresh_job_db_err(table_id, &e).await? {
                     tracing::warn!(
                         %table_id,
-                        error = %e,
+                        error = %e.as_report(),
                         "skip ensure_refresh_job for stale dropped table"
                     );
                     Ok(())
@@ -1247,7 +1248,7 @@ impl CatalogController {
                 if self.should_skip_refresh_job_db_err(table_id, &e).await? {
                     tracing::warn!(
                         %table_id,
-                        error = %e,
+                        error = %e.as_report(),
                         "skip update_refresh_job_status for stale dropped table"
                     );
                     Ok(())
@@ -1302,7 +1303,7 @@ impl CatalogController {
 }
 
 fn is_foreign_key_constraint_violation(err: &sea_orm::DbErr) -> bool {
-    let err_msg = err.to_string().to_ascii_lowercase();
+    let err_msg = err.to_report_string().to_ascii_lowercase();
     err_msg.contains("foreign key constraint failed")
         || err_msg.contains("foreign key constraint violated")
 }
