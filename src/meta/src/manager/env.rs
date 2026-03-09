@@ -279,6 +279,9 @@ pub struct MetaOpts {
     pub actor_cnt_per_worker_parallelism_hard_limit: usize,
     pub actor_cnt_per_worker_parallelism_soft_limit: usize,
 
+    pub table_change_log_insert_batch_size: u64,
+    pub table_change_log_delete_batch_size: u64,
+
     pub license_key_path: Option<PathBuf>,
 
     pub compute_client_config: RpcClientConfig,
@@ -388,6 +391,8 @@ impl MetaOpts {
             enable_legacy_table_migration: true,
             refresh_scheduler_interval_sec: 60,
             pause_on_next_bootstrap_offline: false,
+            table_change_log_insert_batch_size: 1000,
+            table_change_log_delete_batch_size: 1000,
         }
     }
 }

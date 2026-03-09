@@ -535,6 +535,14 @@ pub fn start(
                     .meta
                     .developer
                     .actor_cnt_per_worker_parallelism_soft_limit,
+                table_change_log_insert_batch_size: config
+                    .meta
+                    .developer
+                    .table_change_log_insert_batch_size,
+                table_change_log_delete_batch_size: config
+                    .meta
+                    .developer
+                    .table_change_log_delete_batch_size,
                 license_key_path: opts.license_key_path,
                 compute_client_config: config.meta.developer.compute_client_config.clone(),
                 stream_client_config: config.meta.developer.stream_client_config.clone(),

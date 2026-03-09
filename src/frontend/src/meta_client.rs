@@ -12,13 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use anyhow::Context;
 use risingwave_common::id::{ConnectionId, JobId, SourceId, TableId, WorkerId};
 use risingwave_common::session_config::SessionConfig;
 use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_common::util::cluster_limit::ClusterLimit;
+use risingwave_hummock_sdk::change_log::TableChangeLogs;
 use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
 use risingwave_hummock_sdk::{CompactionGroupId, HummockVersionId};
 use risingwave_pb::backup_service::MetaSnapshotMetadata;
@@ -110,6 +111,15 @@ pub trait FrontendMetaClient: Send + Sync {
     async fn list_hummock_pinned_versions(&self) -> Result<Vec<(WorkerId, HummockVersionId)>>;
 
     async fn get_hummock_current_version(&self) -> Result<HummockVersion>;
+
+    async fn get_hummock_table_change_log(
+        &self,
+        start_epoch_inclusive: Option<u64>,
+        end_epoch_inclusive: Option<u64>,
+        table_ids: Option<HashSet<TableId>>,
+        exclude_empty: bool,
+        limit: Option<u32>,
+    ) -> Result<TableChangeLogs>;
 
     async fn get_hummock_checkpoint_version(&self) -> Result<HummockVersion>;
 
@@ -331,6 +341,26 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
 
     async fn get_hummock_current_version(&self) -> Result<HummockVersion> {
         self.0.get_current_version().await
+    }
+
+    async fn get_hummock_table_change_log(
+        &self,
+        start_epoch_inclusive: Option<u64>,
+        end_epoch_inclusive: Option<u64>,
+        table_ids: Option<HashSet<TableId>>,
+        exclude_empty: bool,
+        limit: Option<u32>,
+    ) -> Result<TableChangeLogs> {
+        self.0
+            .get_table_change_logs(
+                true,
+                start_epoch_inclusive,
+                end_epoch_inclusive,
+                table_ids,
+                exclude_empty,
+                limit,
+            )
+            .await
     }
 
     async fn get_hummock_checkpoint_version(&self) -> Result<HummockVersion> {
