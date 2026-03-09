@@ -187,6 +187,11 @@ pub enum DdlCommand {
     CommentOn(Comment),
     CreateSubscription(Subscription),
     DropSubscription(SubscriptionId, DropMode),
+    AlterSubscriptionRetention {
+        subscription_id: SubscriptionId,
+        retention_seconds: u64,
+        definition: String,
+    },
     AlterDatabaseParam(DatabaseId, AlterDatabaseParam),
     AlterStreamingJobConfig(JobId, HashMap<String, String>, Vec<String>),
 }
@@ -223,6 +228,9 @@ impl DdlCommand {
             DdlCommand::CommentOn(comment) => Right(comment.table_id.into()),
             DdlCommand::CreateSubscription(subscription) => Left(subscription.name.clone()),
             DdlCommand::DropSubscription(id, _) => Right(id.as_object_id()),
+            DdlCommand::AlterSubscriptionRetention {
+                subscription_id, ..
+            } => Right(subscription_id.as_object_id()),
             DdlCommand::AlterDatabaseParam(id, _) => Right(id.as_object_id()),
             DdlCommand::AlterStreamingJobConfig(job_id, _, _) => Right(job_id.as_object_id()),
         }
@@ -252,7 +260,8 @@ impl DdlCommand {
             | DdlCommand::AlterSecret(_)
             | DdlCommand::AlterSwapRename(_)
             | DdlCommand::AlterDatabaseParam(_, _)
-            | DdlCommand::AlterStreamingJobConfig(_, _, _) => true,
+            | DdlCommand::AlterStreamingJobConfig(_, _, _)
+            | DdlCommand::AlterSubscriptionRetention { .. } => true,
             DdlCommand::CreateStreamingJob { .. }
             | DdlCommand::CreateNonSharedSource(_)
             | DdlCommand::ReplaceStreamJob(_)
@@ -379,6 +388,7 @@ impl DdlController {
     /// would be a huge hassle and pain if we don't spawn here.
     ///
     /// Though returning `Option`, it's always `Some`, to simplify the handling logic
+    #[allow(clippy::large_stack_frames)]
     pub async fn run_command(&self, command: DdlCommand) -> MetaResult<Option<WaitVersion>> {
         if !command.allow_in_recovery() {
             self.barrier_manager.check_status_running()?;
@@ -388,7 +398,7 @@ impl DdlController {
         let await_tree_span = await_tree::span!("{command}({})", command.object());
 
         let ctrl = self.clone();
-        let fut = async move {
+        let fut = Box::pin(async move {
             match command {
                 DdlCommand::CreateDatabase(database) => ctrl.create_database(database).await,
                 DdlCommand::DropDatabase(database_id) => ctrl.drop_database(database_id).await,
@@ -464,6 +474,18 @@ impl DdlController {
                 DdlCommand::DropSubscription(subscription_id, drop_mode) => {
                     ctrl.drop_subscription(subscription_id, drop_mode).await
                 }
+                DdlCommand::AlterSubscriptionRetention {
+                    subscription_id,
+                    retention_seconds,
+                    definition,
+                } => {
+                    ctrl.alter_subscription_retention(
+                        subscription_id,
+                        retention_seconds,
+                        definition,
+                    )
+                    .await
+                }
                 DdlCommand::AlterSwapRename(objects) => ctrl.alter_swap_rename(objects).await,
                 DdlCommand::AlterDatabaseParam(database_id, param) => {
                     ctrl.alter_database_param(database_id, param).await
@@ -473,7 +495,7 @@ impl DdlController {
                         .await
                 }
             }
-        }
+        })
         .in_current_span();
         let fut = (self.env.await_tree_reg())
             .register(await_tree_key, await_tree_span)
@@ -849,6 +871,31 @@ impl DdlController {
         Ok(version)
     }
 
+    async fn alter_subscription_retention(
+        &self,
+        subscription_id: SubscriptionId,
+        retention_seconds: u64,
+        definition: String,
+    ) -> MetaResult<NotificationVersion> {
+        tracing::debug!("alter subscription retention");
+        let _reschedule_job_lock = self.stream_manager.reschedule_lock_read_guard().await;
+        let (version, subscription) = self
+            .metadata_manager
+            .catalog_controller
+            .alter_subscription_retention(subscription_id, retention_seconds, definition)
+            .await?;
+        self.stream_manager
+            .alter_subscription_retention(
+                subscription.database_id,
+                subscription.id,
+                subscription.dependent_table_id,
+                subscription.retention_seconds,
+            )
+            .await?;
+        tracing::debug!("finish alter subscription retention");
+        Ok(version)
+    }
+
     /// Validates the connect properties in the `cdc_table_desc` stored in the `StreamCdcScan` node
     #[await_tree::instrument]
     pub(crate) async fn validate_cdc_table(
@@ -1204,6 +1251,11 @@ impl DdlController {
         drop_mode: DropMode,
     ) -> MetaResult<NotificationVersion> {
         let object_id = object_id.into();
+        // Fence reschedule and source tick before catalog deletion so post-collect split updates
+        // cannot race with dropped fragments.
+        let _reschedule_job_lock = self.stream_manager.reschedule_lock_read_guard().await;
+        let _source_tick_pause_guard = self.source_manager.pause_tick().await;
+
         let (release_ctx, version) = self
             .metadata_manager
             .catalog_controller
@@ -1229,7 +1281,6 @@ impl DdlController {
             removed_iceberg_table_sinks,
         } = release_ctx;
 
-        let _guard = self.source_manager.pause_tick().await;
         self.stream_manager
             .drop_streaming_jobs(
                 database_id,
@@ -1608,8 +1659,6 @@ impl DdlController {
         job_id: StreamingJobId,
         drop_mode: DropMode,
     ) -> MetaResult<NotificationVersion> {
-        let _reschedule_job_lock = self.stream_manager.reschedule_lock_read_guard().await;
-
         let (object_id, object_type) = match job_id {
             StreamingJobId::MaterializedView(id) => (id.as_object_id(), ObjectType::Table),
             StreamingJobId::Sink(id) => (id.as_object_id(), ObjectType::Sink),

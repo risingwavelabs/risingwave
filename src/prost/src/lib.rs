@@ -14,6 +14,7 @@
 
 #![allow(unfulfilled_lint_expectations)]
 #![allow(clippy::doc_overindented_list_items)]
+#![allow(clippy::doc_lazy_continuation)]
 // for derived code of `Message`
 #![expect(clippy::doc_markdown)]
 #![expect(clippy::upper_case_acronyms)]
@@ -320,13 +321,6 @@ impl meta::table_fragments::ActorStatus {
             .as_ref()
             .expect("actor location should be exist")
             .worker_node_id
-    }
-}
-
-impl common::WorkerNode {
-    pub fn is_streaming_schedulable(&self) -> bool {
-        let property = self.property.as_ref();
-        property.is_some_and(|p| p.is_streaming) && !property.is_some_and(|p| p.is_unschedulable)
     }
 }
 

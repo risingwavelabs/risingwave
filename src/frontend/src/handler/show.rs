@@ -48,8 +48,8 @@ use crate::error::{Result, RwError};
 use crate::handler::HandlerArgs;
 use crate::handler::create_connection::print_connection_params;
 use crate::session::{SessionImpl, WorkerProcessId};
-use crate::user::has_access_to_object;
 use crate::user::user_catalog::UserCatalog;
+use crate::user::{has_access_to_object, has_schema_usage_privilege};
 
 pub fn get_columns_from_table(
     session: &SessionImpl,
@@ -152,8 +152,11 @@ where
         .filter_map(|schema| {
             if let Ok(schema_catalog) =
                 reader.get_schema_by_name(&session.database(), schema.as_ref())
-                && (current_user.is_super
-                    || current_user.has_schema_usage_privilege(schema_catalog.id()))
+                && (has_schema_usage_privilege(
+                    current_user,
+                    schema_catalog.id(),
+                    schema_catalog.owner,
+                ))
             {
                 Some(schema_catalog)
             } else {
@@ -382,7 +385,6 @@ struct ShowClusterRow {
     parallelism: Option<i32>,
     is_streaming: Option<bool>,
     is_serving: Option<bool>,
-    is_unschedulable: Option<bool>,
     started_at: Option<Timestamptz>,
 }
 
@@ -643,6 +645,7 @@ pub async fn handle_show_object(
                 .map(|c| {
                     let name = c.name.clone();
                     let r#type = match &c.info {
+                        #[expect(deprecated)]
                         connection::Info::PrivateLinkService(_) => {
                             PRIVATELINK_CONNECTION.to_owned()
                         },
@@ -663,6 +666,7 @@ pub async fn handle_show_object(
                         .filter_map(|sid| schema.get_sink_by_id(sid).map(|catalog| catalog.name.as_str()))
                         .collect_vec();
                     let properties = match &c.info {
+                        #[expect(deprecated)]
                         connection::Info::PrivateLinkService(i) => {
                             format!(
                                 "provider: {}\nservice_name: {}\nendpoint_id: {}\navailability_zones: {}\nsources: {}\nsinks: {}",
@@ -721,7 +725,6 @@ pub async fn handle_show_object(
                     parallelism: worker.parallelism().map(|parallelism| parallelism as i32),
                     is_streaming: property.map(|p| p.is_streaming),
                     is_serving: property.map(|p| p.is_serving),
-                    is_unschedulable: property.map(|p| p.is_unschedulable),
                     started_at: worker
                         .started_at
                         .map(|ts| Timestamptz::from_secs(ts as i64).unwrap()),

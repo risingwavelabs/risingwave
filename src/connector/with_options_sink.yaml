@@ -729,6 +729,23 @@ IcebergConfig:
     required: false
     default: Default::default
     allow_alter_on_fly: true
+  - name: compaction.write_parquet_compression
+    field_type: String
+    comments: |-
+      Parquet compression codec
+      Supported values: uncompressed, snappy, gzip, lzo, brotli, lz4, zstd
+      Default is snappy
+    required: false
+    default: Default::default
+    allow_alter_on_fly: true
+  - name: compaction.write_parquet_max_row_group_rows
+    field_type: usize
+    comments: |-
+      Maximum number of rows in a Parquet row group
+      Default is 122880 (from developer config)
+    required: false
+    default: Default::default
+    allow_alter_on_fly: true
 KafkaConfig:
   fields:
   - name: topic

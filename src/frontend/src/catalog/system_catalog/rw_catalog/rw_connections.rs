@@ -59,6 +59,7 @@ fn read_rw_connections(reader: &SysCatalogReaderImpl) -> Result<Vec<RwConnection
                     connection_params: "".to_owned(),
                 };
                 match &conn.info {
+                    #[expect(deprecated)]
                     risingwave_pb::catalog::connection::Info::PrivateLinkService(_) => {
                         rw_connection.provider = conn.provider().into();
                     }
