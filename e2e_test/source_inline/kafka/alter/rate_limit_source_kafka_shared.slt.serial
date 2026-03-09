@@ -108,14 +108,13 @@ order by name;
 kafka_source	SOURCE	{SOURCE}	1000
 rl_mv2	SOURCE_BACKFILL	{SOURCE_SCAN}	0
 
-sleep 3s
 
-query I
+query I retry 10 backoff 1s
 select * from rl_mv1;
 ----
 2000
 
-query T
+query T retry 3 backoff 1s
 SELECT progress from rw_ddl_progress;
 ----
 0 rows consumed
@@ -152,9 +151,8 @@ order by name;
 kafka_source	SOURCE	{SOURCE}	1000
 rl_mv2	SOURCE_BACKFILL	{SOURCE_SCAN}	2000
 
-sleep 3s
 
-query T
+query T retry 10 backoff 1s
 select * from rl_mv2;
 ----
 2000
