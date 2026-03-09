@@ -63,19 +63,17 @@ psql -h ${RISEDEV_RW_FRONTEND_LISTEN_ADDRESS} \
         ORDER BY id
         LIMIT 1;" > /tmp/direct_cdc_source_id.txt
 
-statement ok
-flush;
+system ok
+bash -ceu 'mysql --batch --raw --skip-column-names -e "SHOW MASTER STATUS" | awk "NR==1 {print \$1 > \"/tmp/direct_cdc_binlog_file_before.txt\"; print \$2 > \"/tmp/direct_cdc_binlog_pos_before.txt\"}"
+BINLOG_FILE=$(cat /tmp/direct_cdc_binlog_file_before.txt)
+printf "%s" "$((10#${BINLOG_FILE##*.}))" > /tmp/direct_cdc_binlog_file_seq_before.txt'
 
 system ok
-bash -ceu 'for attempt in $(seq 1 30); do
-    internal_table.mjs --name direct_cdc_inject_offset --type source > /tmp/direct_cdc_state_before.txt && \
-    python3 e2e_test/source_inline/cdc/mysql/cron_only/extract_cdc_inject_offsets.py \
-        --state-file /tmp/direct_cdc_state_before.txt \
-        --output /tmp/direct_cdc_offsets_before.json && exit 0
-    sleep 1
-done
-echo "timed out waiting for initial direct CDC offset"
-exit 1'
+python3 e2e_test/source_inline/cdc/mysql/cron_only/build_mysql_inject_offsets.py \
+    --split-id "$(cat /tmp/direct_cdc_source_id.txt)" \
+    --binlog-file "$(cat /tmp/direct_cdc_binlog_file_before.txt)" \
+    --binlog-pos "$(cat /tmp/direct_cdc_binlog_pos_before.txt)" \
+    --output /tmp/direct_cdc_offsets_before.json
 
 system ok
 mysql -e "
@@ -89,20 +87,12 @@ select count(*) from direct_cdc_inject_offset;
 ----
 6
 
-statement ok
-flush;
-
 system ok
-bash -ceu 'for attempt in $(seq 1 30); do
-    internal_table.mjs --name direct_cdc_inject_offset --type source > /tmp/direct_cdc_state_after_insert.txt && \
-    python3 e2e_test/source_inline/cdc/mysql/cron_only/extract_cdc_inject_offsets.py \
-        --state-file /tmp/direct_cdc_state_after_insert.txt \
-        --output /tmp/direct_cdc_offsets_after_insert.json && \
-    ! cmp -s /tmp/direct_cdc_offsets_before.json /tmp/direct_cdc_offsets_after_insert.json && exit 0
-    sleep 1
-done
-echo "timed out waiting for direct CDC offset to advance"
-exit 1'
+python3 e2e_test/source_inline/cdc/mysql/cron_only/wait_mysql_cdc_metrics.py \
+    --source-id "$(cat /tmp/direct_cdc_source_id.txt)" \
+    --file-seq "$(cat /tmp/direct_cdc_binlog_file_seq_before.txt)" \
+    --pos "$(cat /tmp/direct_cdc_binlog_pos_before.txt)" \
+    --mode advance
 
 statement ok
 alter table direct_cdc_inject_offset set source_rate_limit to 0;
@@ -114,20 +104,12 @@ OFFSETS=$(cat /tmp/direct_cdc_offsets_before.json) && \
     --source-id "$SOURCE_ID" \
     --offsets "$OFFSETS"
 
-statement ok
-flush;
-
 system ok
-bash -ceu 'for attempt in $(seq 1 30); do
-    internal_table.mjs --name direct_cdc_inject_offset --type source > /tmp/direct_cdc_state_after_inject.txt && \
-    python3 e2e_test/source_inline/cdc/mysql/cron_only/extract_cdc_inject_offsets.py \
-        --state-file /tmp/direct_cdc_state_after_inject.txt \
-        --output /tmp/direct_cdc_offsets_after_inject.json && \
-    cmp -s /tmp/direct_cdc_offsets_before.json /tmp/direct_cdc_offsets_after_inject.json && exit 0
-    sleep 1
-done
-echo "timed out waiting for injected direct CDC offset to apply"
-exit 1'
+python3 e2e_test/source_inline/cdc/mysql/cron_only/wait_mysql_cdc_metrics.py \
+    --source-id "$(cat /tmp/direct_cdc_source_id.txt)" \
+    --file-seq "$(cat /tmp/direct_cdc_binlog_file_seq_before.txt)" \
+    --pos "$(cat /tmp/direct_cdc_binlog_pos_before.txt)" \
+    --mode equal
 
 statement ok
 alter table direct_cdc_inject_offset set source_rate_limit to default;
