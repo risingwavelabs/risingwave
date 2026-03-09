@@ -1931,6 +1931,14 @@ impl MetaClient {
         Ok(resp.states)
     }
 
+    pub async fn list_iceberg_compaction_status(
+        &self,
+    ) -> Result<Vec<list_iceberg_compaction_status_response::IcebergCompactionStatus>> {
+        let request = ListIcebergCompactionStatusRequest {};
+        let resp = self.inner.list_iceberg_compaction_status(request).await?;
+        Ok(resp.statuses)
+    }
+
     pub async fn list_sink_log_store_tables(
         &self,
     ) -> Result<Vec<list_sink_log_store_tables_response::SinkLogStoreTable>> {
@@ -2590,6 +2598,7 @@ macro_rules! for_all_meta_rpc {
             ,{ stream_client, list_rate_limits, ListRateLimitsRequest, ListRateLimitsResponse }
             ,{ stream_client, list_cdc_progress, ListCdcProgressRequest, ListCdcProgressResponse }
             ,{ stream_client, list_refresh_table_states, ListRefreshTableStatesRequest, ListRefreshTableStatesResponse }
+            ,{ stream_client, list_iceberg_compaction_status, ListIcebergCompactionStatusRequest, ListIcebergCompactionStatusResponse }
             ,{ stream_client, alter_connector_props, AlterConnectorPropsRequest, AlterConnectorPropsResponse }
             ,{ stream_client, alter_source_properties_safe, AlterSourcePropertiesSafeRequest, AlterSourcePropertiesSafeResponse }
             ,{ stream_client, reset_source_splits, ResetSourceSplitsRequest, ResetSourceSplitsResponse }
