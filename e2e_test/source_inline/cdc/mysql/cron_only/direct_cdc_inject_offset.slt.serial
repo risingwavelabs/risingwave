@@ -67,17 +67,15 @@ statement ok
 flush;
 
 system ok
-for attempt in $(seq 1 30); do
+bash -ceu 'for attempt in $(seq 1 30); do
     internal_table.mjs --name direct_cdc_inject_offset --type source > /tmp/direct_cdc_state_before.txt && \
     python3 e2e_test/source_inline/cdc/mysql/cron_only/extract_cdc_inject_offsets.py \
         --state-file /tmp/direct_cdc_state_before.txt \
-        --output /tmp/direct_cdc_offsets_before.json && \
-    exit 0
+        --output /tmp/direct_cdc_offsets_before.json && exit 0
     sleep 1
 done
-
 echo "timed out waiting for initial direct CDC offset"
-exit 1
+exit 1'
 
 system ok
 mysql -e "
@@ -95,18 +93,16 @@ statement ok
 flush;
 
 system ok
-for attempt in $(seq 1 30); do
+bash -ceu 'for attempt in $(seq 1 30); do
     internal_table.mjs --name direct_cdc_inject_offset --type source > /tmp/direct_cdc_state_after_insert.txt && \
     python3 e2e_test/source_inline/cdc/mysql/cron_only/extract_cdc_inject_offsets.py \
         --state-file /tmp/direct_cdc_state_after_insert.txt \
         --output /tmp/direct_cdc_offsets_after_insert.json && \
-    ! cmp -s /tmp/direct_cdc_offsets_before.json /tmp/direct_cdc_offsets_after_insert.json && \
-    exit 0
+    ! cmp -s /tmp/direct_cdc_offsets_before.json /tmp/direct_cdc_offsets_after_insert.json && exit 0
     sleep 1
 done
-
 echo "timed out waiting for direct CDC offset to advance"
-exit 1
+exit 1'
 
 statement ok
 alter table direct_cdc_inject_offset set source_rate_limit to 0;
@@ -122,18 +118,16 @@ statement ok
 flush;
 
 system ok
-for attempt in $(seq 1 30); do
+bash -ceu 'for attempt in $(seq 1 30); do
     internal_table.mjs --name direct_cdc_inject_offset --type source > /tmp/direct_cdc_state_after_inject.txt && \
     python3 e2e_test/source_inline/cdc/mysql/cron_only/extract_cdc_inject_offsets.py \
         --state-file /tmp/direct_cdc_state_after_inject.txt \
         --output /tmp/direct_cdc_offsets_after_inject.json && \
-    cmp -s /tmp/direct_cdc_offsets_before.json /tmp/direct_cdc_offsets_after_inject.json && \
-    exit 0
+    cmp -s /tmp/direct_cdc_offsets_before.json /tmp/direct_cdc_offsets_after_inject.json && exit 0
     sleep 1
 done
-
 echo "timed out waiting for injected direct CDC offset to apply"
-exit 1
+exit 1'
 
 statement ok
 alter table direct_cdc_inject_offset set source_rate_limit to default;
