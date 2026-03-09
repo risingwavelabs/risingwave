@@ -11666,7 +11666,7 @@ dependencies = [
  "hashbrown 0.15.5",
  "hex",
  "http 1.4.0",
- "http-body 0.4.6",
+ "http-body 1.0.1",
  "humantime",
  "ipnet",
  "itertools 0.14.0",
