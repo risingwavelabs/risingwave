@@ -8,8 +8,8 @@ version = "0.22.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e8dbe031527c9856a1e2df5e82aa8e568ffaab3be897f70d874477fb42a783bb"
 dependencies = [
- "arrow-array 56.2.0",
- "arrow-schema 56.2.0",
+ "arrow-array 57.3.0",
+ "arrow-schema 57.3.0",
 ]
 
 [[package]]
@@ -20,8 +20,8 @@ checksum = "5beaa87308b040adcf482fb760f64ced1cbcd9469fe86ddd5be221dabbbc544e"
 dependencies = [
  "adbc_core",
  "adbc_ffi",
- "arrow-array 56.2.0",
- "arrow-schema 56.2.0",
+ "arrow-array 57.3.0",
+ "arrow-schema 57.3.0",
  "libloading 0.8.9",
  "toml 0.9.12+spec-1.1.0",
  "windows-registry 0.6.1",
@@ -35,8 +35,8 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3600ae9aec2907516d088189e3b863029280f1953dd0eab903c7f4c862a0ce81"
 dependencies = [
  "adbc_core",
- "arrow-array 56.2.0",
- "arrow-schema 56.2.0",
+ "arrow-array 57.3.0",
+ "arrow-schema 57.3.0",
 ]
 
 [[package]]
@@ -48,8 +48,8 @@ dependencies = [
  "adbc_core",
  "adbc_driver_manager",
  "adbc_ffi",
- "arrow-array 56.2.0",
- "arrow-schema 56.2.0",
+ "arrow-array 57.3.0",
+ "arrow-schema 57.3.0",
  "url",
 ]
 
@@ -758,9 +758,6 @@ name = "arrow-schema"
 version = "56.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b3aa9e59c611ebc291c28582077ef25c97f1975383f1479b12f3b9ffee2ffabe"
-dependencies = [
- "bitflags 2.10.0",
-]
 
 [[package]]
 name = "arrow-schema"
@@ -6046,9 +6043,9 @@ dependencies = [
 
 [[package]]
 name = "gcp-bigquery-client"
-version = "0.27.0"
+version = "0.28.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fb75ad03f4fffd15675c6fed7c37715176d7fc3f681b91c055a9f0a5cd34973d"
+checksum = "b776bd336303c2dcd66a872d3a9f5c2a4678162dc3c90617e89ea665e2ce79cc"
 dependencies = [
  "async-stream",
  "async-trait",
