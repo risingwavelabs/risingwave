@@ -41,6 +41,17 @@ select count(*) from direct_cdc_inject_offset;
 3
 
 system ok
+mysql -e "
+    INSERT INTO testdb_direct_cdc_inject_offset.t_inject_offset VALUES
+        (4, 'row-4');
+"
+
+query I retry 20 backoff 1s
+select count(*) from direct_cdc_inject_offset;
+----
+4
+
+system ok
 psql -h ${RISEDEV_RW_FRONTEND_LISTEN_ADDRESS} \
     -p ${RISEDEV_RW_FRONTEND_PORT} \
     -d $__DATABASE__ \
@@ -64,14 +75,14 @@ python3 e2e_test/source_inline/cdc/mysql/cron_only/extract_cdc_inject_offsets.py
 system ok
 mysql -e "
     INSERT INTO testdb_direct_cdc_inject_offset.t_inject_offset VALUES
-        (4, 'row-4'),
-        (5, 'row-5');
+        (5, 'row-5'),
+        (6, 'row-6');
 "
 
 query I retry 20 backoff 1s
 select count(*) from direct_cdc_inject_offset;
 ----
-5
+6
 
 statement ok
 flush;
@@ -116,13 +127,13 @@ alter table direct_cdc_inject_offset set source_rate_limit to default;
 system ok
 mysql -e "
     INSERT INTO testdb_direct_cdc_inject_offset.t_inject_offset VALUES
-        (6, 'row-6');
+        (7, 'row-7');
 "
 
 query I retry 20 backoff 1s
 select count(*) from direct_cdc_inject_offset;
 ----
-6
+7
 
 statement ok
 drop table direct_cdc_inject_offset;
