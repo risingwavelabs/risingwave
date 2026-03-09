@@ -68,7 +68,8 @@ fn map_from_key_values(
     values: ListRef<'_>,
     writer: &mut impl risingwave_common::array::MapWrite,
 ) -> Result<(), ExprError> {
-    let result = MapValue::try_from_kv(keys.to_owned_scalar(), values.to_owned_scalar()).map_err(ExprError::Custom)?;
+    let result = MapValue::try_from_kv(keys.to_owned_scalar(), values.to_owned_scalar())
+        .map_err(ExprError::Custom)?;
     writer.write_iter(result.into_inner().iter());
     Ok(())
 }
@@ -81,7 +82,8 @@ fn map_from_entries(
     entries: ListRef<'_>,
     writer: &mut impl risingwave_common::array::MapWrite,
 ) -> Result<(), ExprError> {
-    let result =MapValue::try_from_entries(entries.to_owned_scalar()).map_err(ExprError::Custom)?;
+    let result =
+        MapValue::try_from_entries(entries.to_owned_scalar()).map_err(ExprError::Custom)?;
     writer.write_iter(result.into_inner().iter());
     Ok(())
 }
@@ -223,7 +225,7 @@ fn map_cat(
     };
     writer.write_iter(result.into_inner().iter());
     Some(())
- }
+}
 
 /// Inserts a key-value pair into the map. If the key already exists, the value is updated.
 ///
@@ -247,6 +249,7 @@ fn map_insert(
     map: MapRef<'_>,
     key: Option<ScalarRefImpl<'_>>,
     value: Option<ScalarRefImpl<'_>>,
+    writer: &mut impl risingwave_common::array::MapWrite,
 ) {
     let result = match key {
         Some(key) => MapValue::insert(map, key.into_scalar_impl(), value.to_owned_datum()),
@@ -283,7 +286,7 @@ fn map_delete(
         None => map.to_owned_scalar(),
     };
     writer.write_iter(result.into_inner().iter());
- }
+}
 
 /// # Example
 ///
