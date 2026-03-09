@@ -30,7 +30,7 @@ ALTER SINK sink_kafka CONNECTOR WITH (
     properties.queue.buffering.max.kbytes = '20480',
     properties.queue.buffering.max.messages = '200000',
     properties.queue.buffering.max.ms = '1000',
-    properties.request.required.acks = '1',
+    properties.request.required.acks = '-1',
     properties.retry.backoff.ms = '200',
     properties.receive.message.max.bytes = '104857600'
 );
@@ -50,7 +50,7 @@ where name = 'sink_kafka'
   and definition ilike '%properties.queue.buffering."max".messages = ''200000''%'
   and definition ilike '%properties.queue.buffering."max".ms = ''1000''%'
   and definition ilike '%properties.receive."message"."max".bytes = ''104857600''%'
-  and definition ilike '%properties.request.required.acks = ''1''%'
+  and definition ilike '%properties.request.required.acks = ''-1''%'
   and definition ilike '%properties.retry.backoff.ms = ''200''%';
 ----
 1
