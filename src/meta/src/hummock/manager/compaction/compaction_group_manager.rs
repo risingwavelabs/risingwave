@@ -18,6 +18,7 @@ use std::sync::Arc;
 
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
+use risingwave_common::config::meta::default::compaction_config as default_compaction_config;
 use risingwave_common::util::epoch::INVALID_EPOCH;
 use risingwave_hummock_sdk::CompactionGroupId;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
@@ -531,7 +532,7 @@ impl CompactionGroupManager {
     }
 }
 
-fn update_compaction_config(target: &mut CompactionConfig, items: &[MutableConfig]) {
+fn update_compaction_config(target: &mut CompactionConfig, items: &[MutableConfig]) -> Result<()> {
     for item in items {
         match item {
             MutableConfig::MaxBytesForLevelBase(c) => {
@@ -580,8 +581,28 @@ fn update_compaction_config(target: &mut CompactionConfig, items: &[MutableConfi
                 target.tombstone_reclaim_ratio = *c;
             }
             MutableConfig::CompressionAlgorithm(c) => {
-                target.compression_algorithm[c.get_level() as usize]
-                    .clone_from(&c.compression_algorithm);
+                let level = c.get_level();
+                let max_level = try_u32_max_level(target.max_level)?;
+                if level > max_level {
+                    return Err(Error::CompactionGroup(format!(
+                        "invalid compression_algorithm level {}, max_level is {}",
+                        level, target.max_level
+                    )));
+                }
+
+                let Some(algorithm) = target.compression_algorithm.get_mut(level as usize) else {
+                    return Err(Error::CompactionGroup(format!(
+                        "invalid compression_algorithm level {}, compression_algorithm len is {}",
+                        level,
+                        target.compression_algorithm.len()
+                    )));
+                };
+                algorithm.clone_from(&c.compression_algorithm);
+            }
+            MutableConfig::ResetCompressionAlgorithm(_) => {
+                target.compression_algorithm = default_compaction_config::compression_algorithm_vec(
+                    try_u32_max_level(target.max_level)?,
+                );
             }
             MutableConfig::MaxL0CompactLevelCount(c) => {
                 target.max_l0_compact_level_count = Some(*c);
@@ -625,6 +646,18 @@ fn update_compaction_config(target: &mut CompactionConfig, items: &[MutableConfi
             }
         }
     }
+
+    Ok(())
+}
+
+fn try_u32_max_level(max_level: u64) -> Result<u32> {
+    u32::try_from(max_level).map_err(|_| {
+        Error::CompactionGroup(format!(
+            "invalid max_level {}, expect <= {}",
+            max_level,
+            u32::MAX
+        ))
+    })
 }
 
 impl CompactionGroupTransaction<'_> {
@@ -691,7 +724,7 @@ impl CompactionGroupTransaction<'_> {
                 Error::CompactionGroup(format!("invalid group {}", *compaction_group_id))
             })?;
             let mut config = group.compaction_config.as_ref().clone();
-            update_compaction_config(&mut config, config_to_update);
+            update_compaction_config(&mut config, config_to_update)?;
             if let Err(reason) = validate_compaction_config(&config) {
                 return Err(Error::CompactionGroup(reason));
             }
@@ -708,10 +741,12 @@ impl CompactionGroupTransaction<'_> {
 #[cfg(test)]
 mod tests {
     use std::collections::{BTreeMap, HashSet};
+    use std::sync::Arc;
 
     use itertools::Itertools;
     use risingwave_common::id::JobId;
     use risingwave_hummock_sdk::CompactionGroupId;
+    use risingwave_pb::hummock::rise_ctl_update_compaction_config_request::CompressionAlgorithm;
     use risingwave_pb::hummock::rise_ctl_update_compaction_config_request::mutable_config::MutableConfig;
 
     use crate::controller::SqlMetaStore;
@@ -754,6 +789,23 @@ mod tests {
             }
         }
 
+        async fn insert_compaction_group_config_with_max_level(
+            meta: &SqlMetaStore,
+            inner: &mut CompactionGroupManager,
+            cg_id: u64,
+            max_level: u64,
+        ) {
+            let mut config = inner.default_compaction_config().as_ref().clone();
+            config.max_level = max_level;
+            config.compression_algorithm =
+                super::default_compaction_config::compression_algorithm_vec(
+                    super::try_u32_max_level(max_level).expect("max_level should fit u32 in test"),
+                );
+            let mut compaction_groups_txn = inner.start_compaction_groups_txn();
+            compaction_groups_txn.create_compaction_groups(cg_id.into(), Arc::new(config));
+            commit_multi_var!(meta, compaction_groups_txn).unwrap();
+        }
+
         update_compaction_config(env.meta_store_ref(), &mut inner, &[100, 200], &[])
             .await
             .unwrap_err();
@@ -786,6 +838,40 @@ mod tests {
                 .compaction_config
                 .max_sub_compaction,
             123
+        );
+
+        insert_compaction_group_config_with_max_level(env.meta_store_ref(), &mut inner, 300, 4)
+            .await;
+        update_compaction_config(
+            env.meta_store_ref(),
+            &mut inner,
+            &[300],
+            &[MutableConfig::ResetCompressionAlgorithm(true)],
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            inner
+                .try_get_compaction_group_config(300)
+                .unwrap()
+                .compaction_config
+                .compression_algorithm,
+            super::default_compaction_config::compression_algorithm_vec(4)
+        );
+        let err = update_compaction_config(
+            env.meta_store_ref(),
+            &mut inner,
+            &[300],
+            &[MutableConfig::CompressionAlgorithm(CompressionAlgorithm {
+                level: 6,
+                compression_algorithm: "Zstd".to_owned(),
+            })],
+        )
+        .await
+        .unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("invalid compression_algorithm level 6")
         );
     }
 

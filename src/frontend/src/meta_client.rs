@@ -25,6 +25,7 @@ use risingwave_pb::backup_service::MetaSnapshotMetadata;
 use risingwave_pb::catalog::Table;
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::ddl_service::DdlProgress;
+use risingwave_pb::hummock::rise_ctl_update_compaction_config_request::mutable_config::MutableConfig as PbMutableConfig;
 use risingwave_pb::hummock::write_limits::WriteLimit;
 use risingwave_pb::hummock::{
     BranchedObject, CompactTaskAssignment, CompactTaskProgress, CompactionGroupInfo,
@@ -218,6 +219,12 @@ pub trait FrontendMetaClient: Send + Sync {
     fn cluster_id(&self) -> &str;
 
     async fn list_unmigrated_tables(&self) -> Result<HashMap<TableId, String>>;
+
+    async fn update_compaction_config(
+        &self,
+        compaction_group_ids: Vec<CompactionGroupId>,
+        configs: Vec<PbMutableConfig>,
+    ) -> Result<()>;
 }
 
 pub struct FrontendMetaClientImpl(pub MetaClient);
@@ -542,5 +549,15 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
 
     async fn list_refresh_table_states(&self) -> Result<Vec<RefreshTableState>> {
         self.0.list_refresh_table_states().await
+    }
+
+    async fn update_compaction_config(
+        &self,
+        compaction_group_ids: Vec<CompactionGroupId>,
+        configs: Vec<PbMutableConfig>,
+    ) -> Result<()> {
+        self.0
+            .risectl_update_compaction_config(&compaction_group_ids, &configs)
+            .await
     }
 }
