@@ -92,6 +92,15 @@ impl HummockVersionStateTableInfo {
         }
     }
 
+    pub fn from_protobuf_owned(state_table_info: HashMap<TableId, PbStateTableInfo>) -> Self {
+        let compaction_group_member_tables =
+            Self::build_compaction_group_member_tables(&state_table_info);
+        Self {
+            state_table_info,
+            compaction_group_member_tables,
+        }
+    }
+
     pub fn apply_delta(
         &mut self,
         delta: &HashMap<TableId, StateTableInfoDelta>,
@@ -374,8 +383,8 @@ where
                     )
                 })
                 .collect(),
-            state_table_info: HummockVersionStateTableInfo::from_protobuf(
-                &pb_version.state_table_info,
+            state_table_info: HummockVersionStateTableInfo::from_protobuf_owned(
+                pb_version.state_table_info,
             ),
             vector_indexes: pb_version
                 .vector_indexes
@@ -875,15 +884,7 @@ where
             change_log_delta: pb_version_delta
                 .change_log_delta
                 .into_iter()
-                .map(|(table_id, log_delta)| {
-                    (
-                        table_id,
-                        ChangeLogDeltaCommon {
-                            new_log: log_delta.new_log.unwrap().into(),
-                            truncate_epoch: log_delta.truncate_epoch,
-                        },
-                    )
-                })
+                .map(|(table_id, log_delta)| (table_id, log_delta.into()))
                 .collect(),
             state_table_info_delta: pb_version_delta.state_table_info_delta,
             vector_index_delta: pb_version_delta
