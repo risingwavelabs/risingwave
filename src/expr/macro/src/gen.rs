@@ -462,7 +462,8 @@ impl FunctionAttr {
         let append_output = match user_fn.writer_type_kind {
             Some(WriterTypeKind::FmtWrite)
             | Some(WriterTypeKind::IoWrite)
-            | Some(WriterTypeKind::ListWrite) => quote! {{
+            | Some(WriterTypeKind::ListWrite)
+            | Some(WriterTypeKind::MapWrite) => quote! {{
                 let mut writer = builder.writer();
                 if #output.is_some() {
                     writer.finish();
@@ -511,6 +512,26 @@ impl FunctionAttr {
                     list_ty.elem().create_array_builder(1)
                 };
                 #output.map(|_| ListValue::new(writer.finish()).into())
+            }},
+            Some(WriterTypeKind::MapWrite) => quote! {{
+                let mut builder = {
+                    let DataType::Map(map_ty) = &self.context.return_type else {
+                        panic!("data type must be DataType::Map");
+                    };
+                    MapArrayBuilder::with_type(1, DataType::Map(map_ty.clone()))
+                };
+                let committed = {
+                    let mut writer = builder.writer();
+                    let committed = #output.is_some();
+                    if committed { writer.finish(); } else { writer.rollback(); }
+                    committed
+                };
+                if committed {
+                    let array = builder.finish();
+                    array.value_at(0).map(|v| v.to_owned_scalar().into())
+                } else {
+                    None
+                }
             }},
             None if user_fn.core_return_type == "impl AsRef < [u8] >" => quote! {
                 #output.map(|s| s.as_ref().into())

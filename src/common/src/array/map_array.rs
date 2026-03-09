@@ -24,11 +24,11 @@ use serde::Serializer;
 
 use super::{
     Array, ArrayBuilder, ArrayImpl, ArrayResult, DatumRef, DefaultOrdered, ListArray,
-    ListArrayBuilder, ListRef, ListValue, MapType, ScalarImpl, ScalarRef, ScalarRefImpl,
-    StructArray, StructRef,
+    ListArrayBuilder, ListRef, ListValue, ListWrite, ListWriter, MapType, ScalarImpl, ScalarRef,
+    ScalarRefImpl, StructArray, StructRef,
 };
 use crate::bitmap::Bitmap;
-use crate::types::{DataType, Scalar, ToText};
+use crate::types::{DataType, Scalar, ToDatumRef, ToText};
 use crate::util::memcmp_encoding;
 
 #[derive(Debug, Clone, EstimateSize)]
@@ -76,6 +76,12 @@ impl ArrayBuilder for MapArrayBuilder {
     fn finish(self) -> MapArray {
         let inner = self.inner.finish();
         MapArray { inner }
+    }
+}
+
+impl MapArrayBuilder {
+    pub fn writer(&mut self) -> MapWriter<'_> {
+        MapWriter::new(self)
     }
 }
 
@@ -555,5 +561,45 @@ impl MapValue {
             ListValue::new(key_array),
             ListValue::new(value_array),
         )?)
+    }
+}
+
+pub struct MapWriter<'a> {
+    inner: ListWriter<'a>,
+}
+
+impl<'a> MapWriter<'a> {
+    pub fn new(builder: &'a mut MapArrayBuilder) -> Self {
+        Self {
+            inner: builder.inner.writer(),
+        }
+    }
+
+    /// `finish` will be called when the entire record is successfully written.
+    /// The partial data was committed and the `builder` can no longer be used.
+    pub fn finish(self) {
+        self.inner.finish();
+    }
+
+    /// `rollback` will be called while the entire record is abandoned.
+    /// The partial data was cleaned and the `builder` can be safely used.
+    pub fn rollback(self) {
+        self.inner.rollback();
+    }
+}
+
+pub trait MapWrite {
+    fn write(&mut self, entry: impl ToDatumRef);
+
+    fn write_iter(&mut self, entries: impl IntoIterator<Item = impl ToDatumRef>) {
+        for e in entries {
+            self.write(e);
+        }
+    }
+}
+
+impl<'a> MapWrite for MapWriter<'a> {
+    fn write(&mut self, entry: impl ToDatumRef) {
+        self.inner.write(entry);
     }
 }
