@@ -350,7 +350,6 @@ impl SkipWatermarkState for NonPkPrefixSkipWatermarkState {
                     .is_none_or(|last_table_id| last_table_id != key_table_id)
                 {
                     self.last_table_id = Some(key_table_id);
-                    self.last_serde = self.compaction_catalog_agent_ref.watermark_serde(*table_id);
                 }
             }
 
@@ -360,6 +359,10 @@ impl SkipWatermarkState for NonPkPrefixSkipWatermarkState {
                     return false;
                 }
                 Ordering::Equal => {
+                    if self.last_serde.is_none() {
+                        self.last_serde =
+                            self.compaction_catalog_agent_ref.watermark_serde(*table_id);
+                    }
                     let (pk_prefix_serde, watermark_col_serde, watermark_col_idx_in_pk) =
                         self.last_serde.as_ref().unwrap();
                     let row = pk_prefix_serde
@@ -385,6 +388,7 @@ impl SkipWatermarkState for NonPkPrefixSkipWatermarkState {
     }
 
     fn reset_watermark(&mut self) {
+        self.last_serde = None;
         self.remain_watermarks = self
             .watermarks
             .iter()
@@ -421,9 +425,14 @@ impl SkipWatermarkState for NonPkPrefixSkipWatermarkState {
             match (table_id, vnode).cmp(&(&key_table_id, &key_vnode)) {
                 Ordering::Less => {
                     self.remain_watermarks.pop_front();
+                    self.last_serde = None;
                     continue;
                 }
                 Ordering::Equal => {
+                    if self.last_serde.is_none() {
+                        self.last_serde =
+                            self.compaction_catalog_agent_ref.watermark_serde(*table_id);
+                    }
                     let (pk_prefix_serde, watermark_col_serde, watermark_col_idx_in_pk) =
                         self.last_serde.as_ref().unwrap();
 
@@ -507,9 +516,6 @@ impl SkipWatermarkState for ValueSkipWatermarkState {
                 .is_none_or(|last_table_id| last_table_id != key_table_id)
             {
                 self.last_table_id = Some(key_table_id);
-                self.last_serde = self
-                    .compaction_catalog_agent_ref
-                    .value_watermark_serde(*table_id);
             }
             match (&key_table_id, &key_vnode).cmp(&(table_id, vnode)) {
                 Ordering::Less => {
@@ -519,9 +525,12 @@ impl SkipWatermarkState for ValueSkipWatermarkState {
                     let HummockValue::Put(value) = value else {
                         return false;
                     };
-                    let Some(ref last_serde) = self.last_serde else {
-                        return false;
-                    };
+                    if self.last_serde.is_none() {
+                        self.last_serde = self
+                            .compaction_catalog_agent_ref
+                            .value_watermark_serde(*table_id);
+                    }
+                    let last_serde = self.last_serde.as_ref().unwrap();
                     let Ok(watermark_column_value) = last_serde.deserialize(value) else {
                         tracing::error!(
                             ?table_id,
@@ -553,6 +562,7 @@ impl SkipWatermarkState for ValueSkipWatermarkState {
     }
 
     fn reset_watermark(&mut self) {
+        self.last_serde = None;
         self.remain_watermarks = self
             .watermarks
             .iter()
@@ -579,15 +589,19 @@ impl SkipWatermarkState for ValueSkipWatermarkState {
             match (table_id, vnode).cmp(&(&key_table_id, &key_vnode)) {
                 Ordering::Less => {
                     self.remain_watermarks.pop_front();
+                    self.last_serde = None;
                     continue;
                 }
                 Ordering::Equal => {
                     let HummockValue::Put(value) = value else {
                         return false;
                     };
-                    let Some(ref last_serde) = self.last_serde else {
-                        return false;
-                    };
+                    if self.last_serde.is_none() {
+                        self.last_serde = self
+                            .compaction_catalog_agent_ref
+                            .value_watermark_serde(*table_id);
+                    }
+                    let last_serde = self.last_serde.as_ref().unwrap();
                     let Ok(watermark_column_value) = last_serde.deserialize(value) else {
                         tracing::error!(
                             ?table_id,

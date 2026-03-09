@@ -497,7 +497,7 @@ fn on_field<D: MaybeData>(
             _ => return no_match_err(),
         },
         DataType::List(lt) => match inner {
-            AvroSchema::Array(avro_elem) => maybe.on_list(lt, avro_elem, refs)?,
+            AvroSchema::Array(avro_arr) => maybe.on_list(lt, &avro_arr.items, refs)?,
             _ => return no_match_err(),
         },
         DataType::Map(m) => {
@@ -505,9 +505,7 @@ fn on_field<D: MaybeData>(
                 return no_match_err();
             }
             match inner {
-                AvroSchema::Map(avro_value_type) => {
-                    maybe.on_map(m.value(), avro_value_type, refs)?
-                }
+                AvroSchema::Map(avro_map) => maybe.on_map(m.value(), &avro_map.types, refs)?,
                 _ => return no_match_err(),
             }
         }
@@ -604,7 +602,9 @@ fn on_field<D: MaybeData>(
             _ => return no_match_err(),
         },
         DataType::Vector(_) => match inner {
-            AvroSchema::Array(avro_elem) => maybe.on_list(&VECTOR_AS_LIST_TYPE, avro_elem, refs)?,
+            AvroSchema::Array(avro_arr) => {
+                maybe.on_list(&VECTOR_AS_LIST_TYPE, &avro_arr.items, refs)?
+            }
             _ => return no_match_err(),
         },
         // Group D: unsupported
@@ -1273,7 +1273,7 @@ mod tests {
             t,
             datum.to_datum_ref(),
             both,
-            r#"encode '' error: cannot encode timestamp with time zone column as [{"type":"long","logicalType":"timestamp-millis"},{"type":"long","logicalType":"timestamp-micros"}] field"#,
+            r#"encode '' error: cannot encode timestamp with time zone column as [{"type":"long"},{"type":"long"}] field"#,
         );
 
         test_err(
@@ -1337,24 +1337,6 @@ mod tests {
             assert_eq!(
                 value.unwrap_err().to_string(),
                 "Union index 3 out of bounds: 2"
-            );
-        }
-
-        let mut writer = Writer::new(&avro_schema, Vec::new());
-        let mut record = Record::new(writer.schema()).unwrap();
-        // f0 omitted, f1 = Union(1, Int(3))
-        record.put("f1", Value::Union(1, Value::Int(3).into()));
-        writer.append(record).unwrap();
-        let encoded = writer.into_inner().unwrap();
-        // writing produced no error, but read returns wrong value
-        let reader = Reader::new(encoded.as_slice()).unwrap();
-        for value in reader {
-            assert_eq!(
-                value.unwrap(),
-                Value::Record(vec![
-                    ("f0".into(), Value::Union(1, Value::Int(3).into())),
-                    ("f1".into(), Value::Union(0, Value::Null.into())),
-                ])
             );
         }
     }

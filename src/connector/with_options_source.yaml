@@ -94,6 +94,10 @@ AzblobProperties:
     field_type: CompressionFormat
     required: false
     default: Default::default
+  - name: parquet.case_insensitive
+    field_type: bool
+    required: false
+    default: Default::default
   - name: compression_format
     field_type: CompressionFormat
     required: false
@@ -114,6 +118,10 @@ BatchPosixFsProperties:
     required: false
   - name: compression_format
     field_type: CompressionFormat
+    required: false
+    default: Default::default
+  - name: parquet.case_insensitive
+    field_type: bool
     required: false
     default: Default::default
 DatagenProperties:
@@ -165,6 +173,10 @@ GcsProperties:
     required: false
   - name: compression_format
     field_type: CompressionFormat
+    required: false
+    default: Default::default
+  - name: parquet.case_insensitive
+    field_type: bool
     required: false
     default: Default::default
   - name: compression_format
@@ -1155,6 +1167,10 @@ OpendalS3Properties:
     field_type: CompressionFormat
     required: false
     default: Default::default
+  - name: parquet.case_insensitive
+    field_type: bool
+    required: false
+    default: Default::default
 PosixFsProperties:
   fields:
   - name: posix_fs.root
@@ -1171,6 +1187,10 @@ PosixFsProperties:
     required: false
   - name: compression_format
     field_type: CompressionFormat
+    required: false
+    default: Default::default
+  - name: parquet.case_insensitive
+    field_type: bool
     required: false
     default: Default::default
   - name: compression_format

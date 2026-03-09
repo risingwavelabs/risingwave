@@ -22,7 +22,7 @@ use rand::rng as thread_rng;
 use rand::seq::IndexedRandom;
 use replace_job_plan::{ReplaceSource, ReplaceTable};
 use risingwave_common::catalog::{AlterDatabaseParam, ColumnCatalog};
-use risingwave_common::id::{FragmentId, JobId, ObjectId, TableId};
+use risingwave_common::id::{ObjectId, TableId};
 use risingwave_common::types::DataType;
 use risingwave_common::util::stream_graph_visitor;
 use risingwave_connector::sink::catalog::SinkId;
@@ -44,7 +44,6 @@ use risingwave_pb::ddl_service::drop_table_request::PbSourceId;
 use risingwave_pb::ddl_service::replace_job_plan::ReplaceMaterializedView;
 use risingwave_pb::ddl_service::{streaming_job_resource_type, *};
 use risingwave_pb::frontend_service::GetTableReplacePlanRequest;
-use risingwave_pb::id::SourceId;
 use risingwave_pb::meta::event_log;
 use risingwave_pb::meta::table_parallelism::{FixedParallelism, Parallelism};
 use risingwave_pb::stream_plan::stream_node::NodeBody;
@@ -715,10 +714,7 @@ impl DdlService for DdlServiceImpl {
         let version = self
             .ddl_controller
             .run_command(DdlCommand::DropStreamingJob {
-                job_id: StreamingJobId::Table(
-                    source_id.map(|PbSourceId::Id(id)| id.into()),
-                    table_id,
-                ),
+                job_id: StreamingJobId::Table(source_id.map(|PbSourceId::Id(id)| id), table_id),
                 drop_mode,
             })
             .await?;
@@ -792,7 +788,6 @@ impl DdlService for DdlServiceImpl {
 
         match target {
             risectl_resume_backfill_request::Target::JobId(job_id) => {
-                let job_id = JobId::new(job_id);
                 let database_id = self
                     .metadata_manager
                     .catalog_controller
@@ -808,7 +803,6 @@ impl DdlService for DdlServiceImpl {
                     .await?;
             }
             risectl_resume_backfill_request::Target::FragmentId(fragment_id) => {
-                let fragment_id = FragmentId::new(fragment_id);
                 let mut job_ids = self
                     .metadata_manager
                     .catalog_controller
@@ -817,7 +811,6 @@ impl DdlService for DdlServiceImpl {
                 let job_id = job_ids
                     .pop()
                     .ok_or_else(|| Status::invalid_argument("fragment not found"))?;
-                let job_id = JobId::new(job_id.as_raw_id());
                 let database_id = self
                     .metadata_manager
                     .catalog_controller
@@ -916,6 +909,29 @@ impl DdlService for DdlServiceImpl {
         }))
     }
 
+    async fn alter_subscription_retention(
+        &self,
+        request: Request<AlterSubscriptionRetentionRequest>,
+    ) -> Result<Response<AlterSubscriptionRetentionResponse>, Status> {
+        let AlterSubscriptionRetentionRequest {
+            subscription_id,
+            retention_seconds,
+            definition,
+        } = request.into_inner();
+        let version = self
+            .ddl_controller
+            .run_command(DdlCommand::AlterSubscriptionRetention {
+                subscription_id,
+                retention_seconds,
+                definition,
+            })
+            .await?;
+        Ok(Response::new(AlterSubscriptionRetentionResponse {
+            status: None,
+            version,
+        }))
+    }
+
     async fn alter_set_schema(
         &self,
         request: Request<AlterSetSchemaRequest>,
@@ -953,6 +969,7 @@ impl DdlService for DdlServiceImpl {
         }
 
         match req.payload.unwrap() {
+            #[expect(deprecated)]
             create_connection_request::Payload::PrivateLink(_) => {
                 panic!("Private Link Connection has been deprecated")
             }
@@ -1053,8 +1070,10 @@ impl DdlService for DdlServiceImpl {
     }
 
     async fn wait(&self, _request: Request<WaitRequest>) -> Result<Response<WaitResponse>, Status> {
-        self.ddl_controller.wait().await?;
-        Ok(Response::new(WaitResponse {}))
+        let version = self.ddl_controller.wait().await?;
+        Ok(Response::new(WaitResponse {
+            version: Some(version),
+        }))
     }
 
     async fn alter_cdc_table_backfill_parallelism(
@@ -1111,6 +1130,38 @@ impl DdlService for DdlServiceImpl {
             .await?;
 
         Ok(Response::new(AlterParallelismResponse {}))
+    }
+
+    async fn alter_backfill_parallelism(
+        &self,
+        request: Request<AlterBackfillParallelismRequest>,
+    ) -> Result<Response<AlterBackfillParallelismResponse>, Status> {
+        let req = request.into_inner();
+
+        let job_id = req.get_table_id();
+        let deferred = req.get_deferred();
+
+        let parallelism = match req.parallelism {
+            None => None,
+            Some(parallelism) => {
+                let parallelism = match parallelism.get_parallelism()? {
+                    Parallelism::Fixed(FixedParallelism { parallelism }) => {
+                        StreamingParallelism::Fixed(*parallelism as _)
+                    }
+                    Parallelism::Auto(_) | Parallelism::Adaptive(_) => {
+                        StreamingParallelism::Adaptive
+                    }
+                    _ => bail_unavailable!(),
+                };
+                Some(parallelism)
+            }
+        };
+
+        self.ddl_controller
+            .reschedule_streaming_job_backfill_parallelism(job_id, parallelism, deferred)
+            .await?;
+
+        Ok(Response::new(AlterBackfillParallelismResponse {}))
     }
 
     async fn alter_fragment_parallelism(
@@ -1670,7 +1721,7 @@ impl DdlService for DdlServiceImpl {
                 table_catalog.optional_associated_source_id.unwrap();
             let (jobs, fragments) = self
                 .metadata_manager
-                .update_source_rate_limit_by_source_id(SourceId::new(source_id), source_rate_limit)
+                .update_source_rate_limit_by_source_id(source_id, source_rate_limit)
                 .await?;
             let throttle_config = ThrottleConfig {
                 throttle_type: risingwave_pb::common::ThrottleType::Source.into(),

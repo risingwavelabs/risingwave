@@ -54,6 +54,7 @@ impl WindowFuncKind {
                 Ok(PbGeneralType::Lead) => Self::Lead,
                 Err(_) => bail!("no such window function type"),
             },
+            #[expect(deprecated)]
             PbType::Aggregate(kind) => Self::Aggregate(AggType::from_protobuf_flatten(
                 PbAggKind::try_from(*kind).context("no such aggregate function type")?,
                 None,

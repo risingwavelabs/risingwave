@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use itertools::Itertools;
 use risingwave_meta::barrier::BarrierManagerRef;
 use risingwave_meta::manager::MetadataManager;
 use risingwave_pb::common::HostAddress;
@@ -23,7 +22,6 @@ use risingwave_pb::meta::{
     AddWorkerNodeResponse, DeleteWorkerNodeRequest, DeleteWorkerNodeResponse,
     GetClusterRecoveryStatusRequest, GetClusterRecoveryStatusResponse, GetMetaStoreInfoRequest,
     GetMetaStoreInfoResponse, ListAllNodesRequest, ListAllNodesResponse,
-    UpdateWorkerNodeSchedulabilityRequest, UpdateWorkerNodeSchedulabilityResponse,
 };
 use tonic::{Request, Response, Status};
 
@@ -66,26 +64,6 @@ impl ClusterService for ClusterServiceImpl {
         Ok(Response::new(AddWorkerNodeResponse {
             node_id: Some(worker_id),
             cluster_id,
-        }))
-    }
-
-    /// Update schedulability of a compute node. Will not affect actors which are already running on
-    /// that node, if marked as unschedulable
-    async fn update_worker_node_schedulability(
-        &self,
-        req: Request<UpdateWorkerNodeSchedulabilityRequest>,
-    ) -> Result<Response<UpdateWorkerNodeSchedulabilityResponse>, Status> {
-        let req = req.into_inner();
-        let schedulability = req.get_schedulability()?;
-        let worker_ids = req.worker_ids;
-
-        self.metadata_manager
-            .cluster_controller
-            .update_schedulability(worker_ids.into_iter().map_into().collect(), schedulability)
-            .await?;
-
-        Ok(Response::new(UpdateWorkerNodeSchedulabilityResponse {
-            status: None,
         }))
     }
 

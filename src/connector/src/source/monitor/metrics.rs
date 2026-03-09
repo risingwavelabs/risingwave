@@ -31,6 +31,8 @@ pub struct EnumeratorMetrics {
     pub high_watermark: LabelGuardedIntGaugeVec,
     /// PostgreSQL CDC confirmed flush LSN monitoring
     pub pg_cdc_confirmed_flush_lsn: LabelGuardedIntGaugeVec,
+    /// PostgreSQL CDC upstream max LSN monitoring
+    pub pg_cdc_upstream_max_lsn: LabelGuardedIntGaugeVec,
     /// MySQL CDC binlog file sequence number (min)
     pub mysql_cdc_binlog_file_seq_min: LabelGuardedIntGaugeVec,
     /// MySQL CDC binlog file sequence number (max)
@@ -58,6 +60,14 @@ impl EnumeratorMetrics {
         )
         .unwrap();
 
+        let pg_cdc_upstream_max_lsn = register_guarded_int_gauge_vec_with_registry!(
+            "pg_cdc_upstream_max_lsn",
+            "PostgreSQL CDC upstream max LSN (pg_current_wal_lsn)",
+            &["source_id", "slot_name"],
+            registry,
+        )
+        .unwrap();
+
         let mysql_cdc_binlog_file_seq_min = register_guarded_int_gauge_vec_with_registry!(
             "mysql_cdc_binlog_file_seq_min",
             "MySQL CDC upstream binlog file sequence number (minimum/oldest)",
@@ -77,6 +87,7 @@ impl EnumeratorMetrics {
         EnumeratorMetrics {
             high_watermark,
             pg_cdc_confirmed_flush_lsn,
+            pg_cdc_upstream_max_lsn,
             mysql_cdc_binlog_file_seq_min,
             mysql_cdc_binlog_file_seq_max,
         }
@@ -108,6 +119,8 @@ pub struct SourceMetrics {
 
     pub parquet_source_skip_row_count: LabelGuardedIntCounterVec,
     pub file_source_input_row_count: LabelGuardedIntCounterVec,
+    pub file_source_dirty_split_count: LabelGuardedIntGaugeVec,
+    pub file_source_failed_split_count: LabelGuardedIntCounterVec,
 
     // kinesis source
     pub kinesis_throughput_exceeded_count: LabelGuardedIntCounterVec,
@@ -182,6 +195,20 @@ impl SourceMetrics {
             registry
         )
         .unwrap();
+        let file_source_dirty_split_count = register_guarded_int_gauge_vec_with_registry!(
+            "file_source_dirty_split_count",
+            "Current number of dirty file splits in file source",
+            &["source_id", "source_name", "actor_id", "fragment_id"],
+            registry
+        )
+        .unwrap();
+        let file_source_failed_split_count = register_guarded_int_counter_vec_with_registry!(
+            "file_source_failed_split_count",
+            "Total number of file splits marked dirty in file source",
+            &["source_id", "source_name", "actor_id", "fragment_id"],
+            registry
+        )
+        .unwrap();
 
         let kinesis_throughput_exceeded_count = register_guarded_int_counter_vec_with_registry!(
             "kinesis_throughput_exceeded_count",
@@ -231,6 +258,8 @@ impl SourceMetrics {
             direct_cdc_event_lag_latency,
             parquet_source_skip_row_count,
             file_source_input_row_count,
+            file_source_dirty_split_count,
+            file_source_failed_split_count,
 
             kinesis_throughput_exceeded_count,
             kinesis_timeout_count,

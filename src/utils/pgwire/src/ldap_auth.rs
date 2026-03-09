@@ -19,6 +19,8 @@ use std::sync::Arc;
 use anyhow::anyhow;
 use ldap3::{LdapConnAsync, Scope, SearchEntry, dn_escape, ldap_escape};
 use risingwave_common::config::{AuthMethod, HbaEntry};
+use rustls_pki_types::pem::PemObject;
+use rustls_pki_types::{CertificateDer, PrivateKeyDer};
 use thiserror_ext::AsReport;
 use tracing::warn;
 
@@ -95,7 +97,7 @@ impl LdapTlsConfig {
             let ca_cert_bytes = fs::read(tls_config).map_err(|e| {
                 PsqlError::StartupError(anyhow!(e).context("Failed to read CA certificate").into())
             })?;
-            for cert in rustls_pemfile::certs(&mut ca_cert_bytes.as_slice()) {
+            for cert in CertificateDer::pem_slice_iter(&ca_cert_bytes) {
                 let cert = cert.map_err(|e| {
                     PsqlError::StartupError(
                         anyhow!(e).context("Failed to parse CA certificate").into(),
@@ -139,8 +141,8 @@ impl LdapTlsConfig {
             let client_key_bytes = fs::read(key).map_err(|e| {
                 PsqlError::StartupError(anyhow!(e).context("Failed to read client key").into())
             })?;
-            let client_certs = rustls_pemfile::certs(&mut client_cert_bytes.as_slice())
-                .try_collect()
+            let client_certs = CertificateDer::pem_slice_iter(&client_cert_bytes)
+                .collect::<Result<Vec<_>, _>>()
                 .map_err(|e| {
                     PsqlError::StartupError(
                         anyhow!(e)
@@ -149,15 +151,10 @@ impl LdapTlsConfig {
                     )
                 })?;
 
-            let private_key = rustls_pemfile::private_key(&mut client_key_bytes.as_slice())
-                .map_err(|e| {
+            let client_private_key =
+                PrivateKeyDer::from_pem_slice(&client_key_bytes).map_err(|e| {
                     PsqlError::StartupError(anyhow!(e).context("Failed to parse client key").into())
                 })?;
-            let Some(client_private_key) = private_key else {
-                return Err(PsqlError::StartupError(
-                    "No private key found in client key file".into(),
-                ));
-            };
 
             tls_client_config
                 .with_client_auth_cert(client_certs, client_private_key)

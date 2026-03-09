@@ -187,6 +187,11 @@ pub enum DdlCommand {
     CommentOn(Comment),
     CreateSubscription(Subscription),
     DropSubscription(SubscriptionId, DropMode),
+    AlterSubscriptionRetention {
+        subscription_id: SubscriptionId,
+        retention_seconds: u64,
+        definition: String,
+    },
     AlterDatabaseParam(DatabaseId, AlterDatabaseParam),
     AlterStreamingJobConfig(JobId, HashMap<String, String>, Vec<String>),
 }
@@ -223,6 +228,9 @@ impl DdlCommand {
             DdlCommand::CommentOn(comment) => Right(comment.table_id.into()),
             DdlCommand::CreateSubscription(subscription) => Left(subscription.name.clone()),
             DdlCommand::DropSubscription(id, _) => Right(id.as_object_id()),
+            DdlCommand::AlterSubscriptionRetention {
+                subscription_id, ..
+            } => Right(subscription_id.as_object_id()),
             DdlCommand::AlterDatabaseParam(id, _) => Right(id.as_object_id()),
             DdlCommand::AlterStreamingJobConfig(job_id, _, _) => Right(job_id.as_object_id()),
         }
@@ -252,7 +260,8 @@ impl DdlCommand {
             | DdlCommand::AlterSecret(_)
             | DdlCommand::AlterSwapRename(_)
             | DdlCommand::AlterDatabaseParam(_, _)
-            | DdlCommand::AlterStreamingJobConfig(_, _, _) => true,
+            | DdlCommand::AlterStreamingJobConfig(_, _, _)
+            | DdlCommand::AlterSubscriptionRetention { .. } => true,
             DdlCommand::CreateStreamingJob { .. }
             | DdlCommand::CreateNonSharedSource(_)
             | DdlCommand::ReplaceStreamJob(_)
@@ -379,6 +388,7 @@ impl DdlController {
     /// would be a huge hassle and pain if we don't spawn here.
     ///
     /// Though returning `Option`, it's always `Some`, to simplify the handling logic
+    #[allow(clippy::large_stack_frames)]
     pub async fn run_command(&self, command: DdlCommand) -> MetaResult<Option<WaitVersion>> {
         if !command.allow_in_recovery() {
             self.barrier_manager.check_status_running()?;
@@ -388,7 +398,7 @@ impl DdlController {
         let await_tree_span = await_tree::span!("{command}({})", command.object());
 
         let ctrl = self.clone();
-        let fut = async move {
+        let fut = Box::pin(async move {
             match command {
                 DdlCommand::CreateDatabase(database) => ctrl.create_database(database).await,
                 DdlCommand::DropDatabase(database_id) => ctrl.drop_database(database_id).await,
@@ -464,6 +474,18 @@ impl DdlController {
                 DdlCommand::DropSubscription(subscription_id, drop_mode) => {
                     ctrl.drop_subscription(subscription_id, drop_mode).await
                 }
+                DdlCommand::AlterSubscriptionRetention {
+                    subscription_id,
+                    retention_seconds,
+                    definition,
+                } => {
+                    ctrl.alter_subscription_retention(
+                        subscription_id,
+                        retention_seconds,
+                        definition,
+                    )
+                    .await
+                }
                 DdlCommand::AlterSwapRename(objects) => ctrl.alter_swap_rename(objects).await,
                 DdlCommand::AlterDatabaseParam(database_id, param) => {
                     ctrl.alter_database_param(database_id, param).await
@@ -473,7 +495,7 @@ impl DdlController {
                         .await
                 }
             }
-        }
+        })
         .in_current_span();
         let fut = (self.env.await_tree_reg())
             .register(await_tree_key, await_tree_span)
@@ -523,6 +545,25 @@ impl DdlController {
 
         self.stream_manager
             .reschedule_streaming_job(job_id, target, deferred)
+            .await
+    }
+
+    pub async fn reschedule_streaming_job_backfill_parallelism(
+        &self,
+        job_id: JobId,
+        parallelism: Option<StreamingParallelism>,
+        mut deferred: bool,
+    ) -> MetaResult<()> {
+        tracing::info!("altering backfill parallelism for job {}", job_id);
+        if self.barrier_manager.check_status_running().is_err() {
+            tracing::info!(
+                "alter backfill parallelism is set to deferred mode because the system is in recovery state"
+            );
+            deferred = true;
+        }
+
+        self.stream_manager
+            .reschedule_streaming_job_backfill_parallelism(job_id, parallelism, deferred)
             .await
     }
 
@@ -624,7 +665,7 @@ impl DdlController {
         let version = self
             .metadata_manager
             .catalog_controller
-            .current_notification_version()
+            .notify_frontend_trivial()
             .await;
         Ok(version)
     }
@@ -827,6 +868,31 @@ impl DdlController {
             .drop_subscription(database_id, subscription_id, table_id)
             .await;
         tracing::debug!("finish drop subscription");
+        Ok(version)
+    }
+
+    async fn alter_subscription_retention(
+        &self,
+        subscription_id: SubscriptionId,
+        retention_seconds: u64,
+        definition: String,
+    ) -> MetaResult<NotificationVersion> {
+        tracing::debug!("alter subscription retention");
+        let _reschedule_job_lock = self.stream_manager.reschedule_lock_read_guard().await;
+        let (version, subscription) = self
+            .metadata_manager
+            .catalog_controller
+            .alter_subscription_retention(subscription_id, retention_seconds, definition)
+            .await?;
+        self.stream_manager
+            .alter_subscription_retention(
+                subscription.database_id,
+                subscription.id,
+                subscription.dependent_table_id,
+                subscription.retention_seconds,
+            )
+            .await?;
+        tracing::debug!("finish alter subscription retention");
         Ok(version)
     }
 
@@ -1185,6 +1251,11 @@ impl DdlController {
         drop_mode: DropMode,
     ) -> MetaResult<NotificationVersion> {
         let object_id = object_id.into();
+        // Fence reschedule and source tick before catalog deletion so post-collect split updates
+        // cannot race with dropped fragments.
+        let _reschedule_job_lock = self.stream_manager.reschedule_lock_read_guard().await;
+        let _source_tick_pause_guard = self.source_manager.pause_tick().await;
+
         let (release_ctx, version) = self
             .metadata_manager
             .catalog_controller
@@ -1210,7 +1281,6 @@ impl DdlController {
             removed_iceberg_table_sinks,
         } = release_ctx;
 
-        let _guard = self.source_manager.pause_tick().await;
         self.stream_manager
             .drop_streaming_jobs(
                 database_id,
@@ -1589,8 +1659,6 @@ impl DdlController {
         job_id: StreamingJobId,
         drop_mode: DropMode,
     ) -> MetaResult<NotificationVersion> {
-        let _reschedule_job_lock = self.stream_manager.reschedule_lock_read_guard().await;
-
         let (object_id, object_type) = match job_id {
             StreamingJobId::MaterializedView(id) => (id.as_object_id(), ObjectType::Table),
             StreamingJobId::Sink(id) => (id.as_object_id(), ObjectType::Sink),
@@ -2194,15 +2262,15 @@ impl DdlController {
         relation: alter_name_request::Object,
         new_name: &str,
     ) -> MetaResult<NotificationVersion> {
-        let (obj_type, id) = match relation {
-            alter_name_request::Object::TableId(id) => (ObjectType::Table, id),
-            alter_name_request::Object::ViewId(id) => (ObjectType::View, id),
-            alter_name_request::Object::IndexId(id) => (ObjectType::Index, id),
-            alter_name_request::Object::SinkId(id) => (ObjectType::Sink, id),
-            alter_name_request::Object::SourceId(id) => (ObjectType::Source, id),
-            alter_name_request::Object::SchemaId(id) => (ObjectType::Schema, id),
-            alter_name_request::Object::DatabaseId(id) => (ObjectType::Database, id),
-            alter_name_request::Object::SubscriptionId(id) => (ObjectType::Subscription, id),
+        let (obj_type, id): (ObjectType, ObjectId) = match relation {
+            alter_name_request::Object::TableId(id) => (ObjectType::Table, id.into()),
+            alter_name_request::Object::ViewId(id) => (ObjectType::View, id.into()),
+            alter_name_request::Object::IndexId(id) => (ObjectType::Index, id.into()),
+            alter_name_request::Object::SinkId(id) => (ObjectType::Sink, id.into()),
+            alter_name_request::Object::SourceId(id) => (ObjectType::Source, id.into()),
+            alter_name_request::Object::SchemaId(id) => (ObjectType::Schema, id.into()),
+            alter_name_request::Object::DatabaseId(id) => (ObjectType::Database, id.into()),
+            alter_name_request::Object::SubscriptionId(id) => (ObjectType::Subscription, id.into()),
         };
         self.metadata_manager
             .catalog_controller
@@ -2249,21 +2317,21 @@ impl DdlController {
         object: Object,
         owner_id: UserId,
     ) -> MetaResult<NotificationVersion> {
-        let (obj_type, id) = match object {
-            Object::TableId(id) => (ObjectType::Table, id),
-            Object::ViewId(id) => (ObjectType::View, id),
-            Object::SourceId(id) => (ObjectType::Source, id),
-            Object::SinkId(id) => (ObjectType::Sink, id),
-            Object::SchemaId(id) => (ObjectType::Schema, id),
-            Object::DatabaseId(id) => (ObjectType::Database, id),
-            Object::SubscriptionId(id) => (ObjectType::Subscription, id),
-            Object::ConnectionId(id) => (ObjectType::Connection, id),
-            Object::FunctionId(id) => (ObjectType::Function, id),
-            Object::SecretId(id) => (ObjectType::Secret, id),
+        let (obj_type, id): (ObjectType, ObjectId) = match object {
+            Object::TableId(id) => (ObjectType::Table, id.into()),
+            Object::ViewId(id) => (ObjectType::View, id.into()),
+            Object::SourceId(id) => (ObjectType::Source, id.into()),
+            Object::SinkId(id) => (ObjectType::Sink, id.into()),
+            Object::SchemaId(id) => (ObjectType::Schema, id.into()),
+            Object::DatabaseId(id) => (ObjectType::Database, id.into()),
+            Object::SubscriptionId(id) => (ObjectType::Subscription, id.into()),
+            Object::ConnectionId(id) => (ObjectType::Connection, id.into()),
+            Object::FunctionId(id) => (ObjectType::Function, id.into()),
+            Object::SecretId(id) => (ObjectType::Secret, id.into()),
         };
         self.metadata_manager
             .catalog_controller
-            .alter_owner(obj_type, id.into(), owner_id as _)
+            .alter_owner(obj_type, id, owner_id as _)
             .await
     }
 
@@ -2272,22 +2340,26 @@ impl DdlController {
         object: alter_set_schema_request::Object,
         new_schema_id: SchemaId,
     ) -> MetaResult<NotificationVersion> {
-        let (obj_type, id) = match object {
-            alter_set_schema_request::Object::TableId(id) => (ObjectType::Table, id),
-            alter_set_schema_request::Object::ViewId(id) => (ObjectType::View, id),
-            alter_set_schema_request::Object::SourceId(id) => (ObjectType::Source, id),
-            alter_set_schema_request::Object::SinkId(id) => (ObjectType::Sink, id),
-            alter_set_schema_request::Object::FunctionId(id) => (ObjectType::Function, id),
-            alter_set_schema_request::Object::ConnectionId(id) => (ObjectType::Connection, id),
-            alter_set_schema_request::Object::SubscriptionId(id) => (ObjectType::Subscription, id),
+        let (obj_type, id): (ObjectType, ObjectId) = match object {
+            alter_set_schema_request::Object::TableId(id) => (ObjectType::Table, id.into()),
+            alter_set_schema_request::Object::ViewId(id) => (ObjectType::View, id.into()),
+            alter_set_schema_request::Object::SourceId(id) => (ObjectType::Source, id.into()),
+            alter_set_schema_request::Object::SinkId(id) => (ObjectType::Sink, id.into()),
+            alter_set_schema_request::Object::FunctionId(id) => (ObjectType::Function, id.into()),
+            alter_set_schema_request::Object::ConnectionId(id) => {
+                (ObjectType::Connection, id.into())
+            }
+            alter_set_schema_request::Object::SubscriptionId(id) => {
+                (ObjectType::Subscription, id.into())
+            }
         };
         self.metadata_manager
             .catalog_controller
-            .alter_schema(obj_type, id.into(), new_schema_id as _)
+            .alter_schema(obj_type, id, new_schema_id)
             .await
     }
 
-    pub async fn wait(&self) -> MetaResult<()> {
+    pub async fn wait(&self) -> MetaResult<WaitVersion> {
         let timeout_ms = 30 * 60 * 1000;
         for _ in 0..timeout_ms {
             if self
@@ -2297,7 +2369,16 @@ impl DdlController {
                 .await?
                 .is_empty()
             {
-                return Ok(());
+                let catalog_version = self
+                    .metadata_manager
+                    .catalog_controller
+                    .notify_frontend_trivial()
+                    .await;
+                let hummock_version_id = self.barrier_manager.get_hummock_version_id().await;
+                return Ok(WaitVersion {
+                    catalog_version,
+                    hummock_version_id,
+                });
             }
 
             sleep(Duration::from_millis(1)).await;

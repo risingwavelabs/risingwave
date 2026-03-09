@@ -91,7 +91,7 @@ Also remember to create the database and tables in postgresql
 CREATE TABLE test (id serial PRIMARY KEY, name VARCHAR (50) NOT NULL);
 ```
 
-If you want to create a Sink to this pg instance, please check details at [here](https://www.risingwave.dev/docs/current/sink-to-postgres/). About how to launch rw in kubernetes, please check [here](https://github.com/risingwavelabs/risingwave-operator/blob/main/README.md).
+If you want to create a Sink to this pg instance, please check details at [here](https://docs.risingwave.com/integrations/destinations/postgresql). About how to launch rw in kubernetes, please check [here](https://github.com/risingwavelabs/risingwave-operator/blob/main/README.md).
 
 By maintaining consistency between these configurations, you can ensure a smooth execution of the integration tests. Please check more details in `connector-node-integration.yml`.
 

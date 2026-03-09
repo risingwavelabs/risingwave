@@ -420,6 +420,10 @@ pub mod default {
         pub fn sync_log_store_buffer_size() -> usize {
             2048
         }
+
+        pub fn enable_state_table_vnode_stats_pruning() -> bool {
+            false
+        }
     }
 }
 

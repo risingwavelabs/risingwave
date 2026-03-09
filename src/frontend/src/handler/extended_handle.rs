@@ -218,7 +218,7 @@ pub async fn handle_execute(session: Arc<SessionImpl>, portal: Portal) -> Result
         }
         Portal::PureStatement(stmt) => {
             let sql: Arc<str> = Arc::from(stmt.to_string());
-            handle(session, stmt, sql, vec![]).await
+            Box::pin(handle(session, stmt, sql, vec![])).await
         }
     }
 }
