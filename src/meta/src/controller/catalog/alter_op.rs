@@ -1292,7 +1292,7 @@ impl CatalogController {
         table_id: TableId,
         err: &sea_orm::DbErr,
     ) -> MetaResult<bool> {
-        if !is_foreign_key_constraint_violation(err) {
+        if !is_refresh_job_stale_drop_candidate(err) {
             return Ok(false);
         }
 
@@ -1300,6 +1300,10 @@ impl CatalogController {
         let table_exists = Table::find_by_id(table_id).one(&inner.db).await?.is_some();
         Ok(!table_exists)
     }
+}
+
+fn is_refresh_job_stale_drop_candidate(err: &sea_orm::DbErr) -> bool {
+    is_foreign_key_constraint_violation(err) || matches!(err, sea_orm::DbErr::RecordNotUpdated)
 }
 
 fn is_foreign_key_constraint_violation(err: &sea_orm::DbErr) -> bool {
@@ -1312,7 +1316,7 @@ fn is_foreign_key_constraint_violation(err: &sea_orm::DbErr) -> bool {
 mod tests {
     use sea_orm::DbErr;
 
-    use super::is_foreign_key_constraint_violation;
+    use super::{is_foreign_key_constraint_violation, is_refresh_job_stale_drop_candidate};
 
     #[test]
     fn detect_foreign_key_constraint_violation_from_db_err_message() {
@@ -1324,5 +1328,12 @@ mod tests {
     fn do_not_treat_non_fk_db_err_as_foreign_key_violation() {
         let err = DbErr::Custom("record not found".to_owned());
         assert!(!is_foreign_key_constraint_violation(&err));
+    }
+
+    #[test]
+    fn treat_record_not_updated_as_stale_drop_candidate() {
+        assert!(is_refresh_job_stale_drop_candidate(
+            &DbErr::RecordNotUpdated
+        ));
     }
 }
