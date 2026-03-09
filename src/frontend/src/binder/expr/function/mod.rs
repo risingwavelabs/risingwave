@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::str::FromStr;
 use std::sync::Arc;
 
@@ -21,9 +21,11 @@ use itertools::Itertools;
 use risingwave_common::acl::AclMode;
 use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::INFORMATION_SCHEMA_SCHEMA_NAME;
+use risingwave_common::secret::LocalSecretManager;
 use risingwave_common::types::{DataType, MapType};
 use risingwave_expr::aggregate::AggType;
 use risingwave_expr::window_function::WindowFuncKind;
+use risingwave_pb::secret::PbSecretRef;
 use risingwave_sqlparser::ast::{
     self, Expr as AstExpr, Function, FunctionArg, FunctionArgExpr, FunctionArgList, Ident,
     OrderByExpr, Statement, Window,
@@ -35,8 +37,8 @@ use crate::binder::bind_context::Clause;
 use crate::catalog::function_catalog::FunctionCatalog;
 use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{
-    Expr, ExprImpl, ExprType, FunctionCallWithLambda, InputRef, TableFunction, TableFunctionType,
-    UserDefinedFunction,
+    Expr, ExprImpl, ExprType, FunctionCallWithLambda, InputRef, Literal, TableFunction,
+    TableFunctionType, UserDefinedFunction,
 };
 use crate::handler::privilege::ObjectCheckItem;
 
@@ -698,6 +700,7 @@ impl Binder {
         body: &str,
         arg_names: &[String],
         args: Vec<ExprImpl>,
+        secret_refs: &BTreeMap<String, PbSecretRef>,
     ) -> Result<ExprImpl> {
         // This represents the current user defined function is `language sql`
         let ast = Parser::parse_sql(body)?;
@@ -717,6 +720,21 @@ impl Binder {
                 // named argument
                 arguments.insert(arg_names[i].clone(), arg);
             }
+        }
+        for (option_key, secret_value) in
+            LocalSecretManager::global().fill_secrets(BTreeMap::new(), secret_refs.clone())?
+        {
+            if arguments.contains_key(&option_key) {
+                return Err(ErrorCode::InvalidParameterValue(format!(
+                    "SQL UDF secret option `{}` conflicts with a function argument name",
+                    option_key
+                ))
+                .into());
+            }
+            arguments.insert(
+                option_key,
+                Literal::new(Some(secret_value.into()), DataType::Varchar).into(),
+            );
         }
         self.context.sql_udf_arguments = Some(arguments);
 
@@ -747,7 +765,7 @@ impl Binder {
             );
         };
 
-        self.bind_sql_udf_inner(body, &func.arg_names, args)
+        self.bind_sql_udf_inner(body, &func.arg_names, args, &func.secret_refs)
     }
 
     pub(in crate::binder) fn bind_function_expr_arg(

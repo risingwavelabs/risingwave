@@ -130,7 +130,6 @@ pub async fn handle_create_function(
     let db_name = &session.database();
     let (schema_name, function_name) = Binder::resolve_schema_qualified_name(db_name, &name)?;
     let (database_id, schema_id) = session.get_database_and_schema_id_for_create(schema_name)?;
-    let resolved_secret_refs = resolve_secret_refs_inner(secret_refs, session)?;
 
     // check if the function exists in the catalog
     if let Either::Right(resp) = session.check_function_name_duplicated(
@@ -141,6 +140,8 @@ pub async fn handle_create_function(
     )? {
         return Ok(resp);
     }
+
+    let resolved_secret_refs = resolve_secret_refs_inner(secret_refs, session)?;
 
     let link = match &params.using {
         Some(CreateFunctionUsing::Link(l)) => Some(l.as_str()),

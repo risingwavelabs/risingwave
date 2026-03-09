@@ -12,14 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::{BTreeMap, HashSet};
+
 use either::Either;
 use risingwave_common::catalog::FunctionId;
 use risingwave_common::types::StructType;
 use risingwave_pb::catalog::PbFunction;
 use risingwave_pb::catalog::function::{Kind, ScalarFunction, TableFunction};
+use risingwave_pb::secret::PbSecretRef;
 
 use super::*;
 use crate::expr::{Expr, Literal};
+use crate::utils::resolve_secret_refs_inner;
 use crate::{Binder, bind_data_type};
 
 pub async fn handle_create_sql_function(
@@ -41,13 +45,16 @@ pub async fn handle_create_sql_function(
         bail_not_implemented!("CREATE TEMPORARY FUNCTION");
     }
 
-    if with_options.always_retry_on_network_error.is_some()
-        || with_options.r#async.is_some()
-        || with_options.batch.is_some()
-        || !with_options.secret_refs.is_empty()
-    {
+    let CreateFunctionWithOptions {
+        always_retry_on_network_error,
+        r#async,
+        batch,
+        secret_refs,
+    } = with_options;
+
+    if always_retry_on_network_error.is_some() || r#async.is_some() || batch.is_some() {
         return Err(ErrorCode::InvalidParameterValue(
-            "SQL UDF does not support WITH options yet".to_owned(),
+            "SQL UDF does not support non-secret WITH options yet".to_owned(),
         )
         .into());
     }
@@ -144,6 +151,9 @@ pub async fn handle_create_sql_function(
         return Ok(resp);
     }
 
+    let resolved_secret_refs = resolve_secret_refs_inner(secret_refs, session)?;
+    ensure_sql_udf_secret_names_do_not_conflict(&arg_names, &resolved_secret_refs)?;
+
     // Try bind the function call with mock arguments.
     // Note that the parsing here is just basic syntax / semantic check, the result will NOT be stored
     // e.g., The provided function body contains invalid syntax, return type mismatch, ..., etc.
@@ -154,7 +164,7 @@ pub async fn handle_create_sql_function(
             .map(|ty| Literal::new(None, ty.clone()).into() /* NULL */)
             .collect();
 
-        let expr = binder.bind_sql_udf_inner(&body, &arg_names, args)?;
+        let expr = binder.bind_sql_udf_inner(&body, &arg_names, args, &resolved_secret_refs)?;
 
         // Check if the return type mismatches
         if expr.return_type() != return_type {
@@ -189,11 +199,32 @@ pub async fn handle_create_sql_function(
         is_batched: None,
         created_at_epoch: None,
         created_at_cluster_version: None,
-        secret_refs: Default::default(),
+        secret_refs: resolved_secret_refs.into_iter().collect(),
     };
 
     let catalog_writer = session.catalog_writer()?;
     catalog_writer.create_function(function).await?;
 
     Ok(PgResponse::empty_result(StatementType::CREATE_FUNCTION))
+}
+
+fn ensure_sql_udf_secret_names_do_not_conflict(
+    arg_names: &[String],
+    secret_refs: &BTreeMap<String, PbSecretRef>,
+) -> Result<()> {
+    let arg_names = arg_names
+        .iter()
+        .filter(|name| !name.is_empty())
+        .cloned()
+        .collect::<HashSet<_>>();
+
+    if let Some(conflict_name) = secret_refs.keys().find(|name| arg_names.contains(*name)) {
+        return Err(ErrorCode::InvalidParameterValue(format!(
+            "SQL UDF secret option `{}` conflicts with a function argument name",
+            conflict_name
+        ))
+        .into());
+    }
+
+    Ok(())
 }
