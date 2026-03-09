@@ -1,0 +1,131 @@
+control substitution on
+
+system ok
+mysql -e "
+    DROP DATABASE IF EXISTS testdb_direct_cdc_inject_offset;
+    CREATE DATABASE testdb_direct_cdc_inject_offset;
+    USE testdb_direct_cdc_inject_offset;
+    CREATE TABLE t_inject_offset (
+        id INT PRIMARY KEY,
+        payload VARCHAR(64)
+    );
+    INSERT INTO t_inject_offset VALUES
+        (1, 'row-1'),
+        (2, 'row-2'),
+        (3, 'row-3');
+"
+
+system ok
+mysql -e "
+    DROP USER IF EXISTS 'non-shared-cdc'@'%';
+    CREATE USER 'non-shared-cdc'@'%' IDENTIFIED BY '123456';
+    GRANT SELECT, RELOAD, SHOW DATABASES, REPLICATION SLAVE, REPLICATION CLIENT ON *.* TO 'non-shared-cdc'@'%';
+    FLUSH PRIVILEGES;
+"
+
+statement ok
+create table direct_cdc_inject_offset (
+    id INT PRIMARY KEY,
+    payload VARCHAR
+) with (
+    ${RISEDEV_MYSQL_WITH_OPTIONS_COMMON},
+    username = 'non-shared-cdc',
+    password = '123456',
+    database.name = 'testdb_direct_cdc_inject_offset',
+    table.name = 't_inject_offset'
+);
+
+query I retry 20 backoff 1s
+select count(*) from direct_cdc_inject_offset;
+----
+3
+
+system ok
+psql -h ${RISEDEV_RW_FRONTEND_LISTEN_ADDRESS} \
+    -p ${RISEDEV_RW_FRONTEND_PORT} \
+    -d $__DATABASE__ \
+    -U root \
+    -t -A \
+    -c "SELECT id
+        FROM rw_sources
+        WHERE associated_table_id = (SELECT id FROM rw_tables WHERE name = 'direct_cdc_inject_offset')
+        ORDER BY id
+        LIMIT 1;" > /tmp/direct_cdc_source_id.txt
+
+statement ok
+flush;
+
+system ok
+internal_table.mjs --name direct_cdc_inject_offset --type source > /tmp/direct_cdc_state_before.txt && \
+python3 e2e_test/source_inline/cdc/mysql/cron_only/extract_cdc_inject_offsets.py \
+    --state-file /tmp/direct_cdc_state_before.txt \
+    --output /tmp/direct_cdc_offsets_before.json
+
+system ok
+mysql -e "
+    INSERT INTO testdb_direct_cdc_inject_offset.t_inject_offset VALUES
+        (4, 'row-4'),
+        (5, 'row-5');
+"
+
+query I retry 20 backoff 1s
+select count(*) from direct_cdc_inject_offset;
+----
+5
+
+statement ok
+flush;
+
+system ok
+internal_table.mjs --name direct_cdc_inject_offset --type source > /tmp/direct_cdc_state_after_insert.txt && \
+python3 e2e_test/source_inline/cdc/mysql/cron_only/extract_cdc_inject_offsets.py \
+    --state-file /tmp/direct_cdc_state_after_insert.txt \
+    --output /tmp/direct_cdc_offsets_after_insert.json
+
+system ok
+if cmp -s /tmp/direct_cdc_offsets_before.json /tmp/direct_cdc_offsets_after_insert.json; then
+    echo "offset did not advance after new CDC events"
+    exit 1
+fi
+
+statement ok
+alter table direct_cdc_inject_offset set source_rate_limit to 0;
+
+system ok
+SOURCE_ID=$(cat /tmp/direct_cdc_source_id.txt) && \
+OFFSETS=$(cat /tmp/direct_cdc_offsets_before.json) && \
+./risedev ctl meta inject-source-offsets \
+    --source-id "$SOURCE_ID" \
+    --offsets "$OFFSETS"
+
+statement ok
+flush;
+
+system ok
+internal_table.mjs --name direct_cdc_inject_offset --type source > /tmp/direct_cdc_state_after_inject.txt && \
+python3 e2e_test/source_inline/cdc/mysql/cron_only/extract_cdc_inject_offsets.py \
+    --state-file /tmp/direct_cdc_state_after_inject.txt \
+    --output /tmp/direct_cdc_offsets_after_inject.json
+
+system ok
+cmp -s /tmp/direct_cdc_offsets_before.json /tmp/direct_cdc_offsets_after_inject.json
+
+statement ok
+alter table direct_cdc_inject_offset set source_rate_limit to default;
+
+system ok
+mysql -e "
+    INSERT INTO testdb_direct_cdc_inject_offset.t_inject_offset VALUES
+        (6, 'row-6');
+"
+
+query I retry 20 backoff 1s
+select count(*) from direct_cdc_inject_offset;
+----
+6
+
+statement ok
+drop table direct_cdc_inject_offset;
+
+system ok
+mysql -e "DROP DATABASE IF EXISTS testdb_direct_cdc_inject_offset;"
