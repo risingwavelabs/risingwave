@@ -15,8 +15,8 @@
 use risingwave_common::RW_VERSION;
 use risingwave_meta::barrier::BarrierManagerRef;
 use risingwave_meta::manager::MetadataManager;
-use risingwave_pb::common::HostAddress;
 use risingwave_pb::common::worker_node::State;
+use risingwave_pb::common::{HostAddress, WorkerType as PbWorkerType};
 use risingwave_pb::meta::cluster_service_server::ClusterService;
 use risingwave_pb::meta::{
     ActivateWorkerNodeRequest, ActivateWorkerNodeResponse, AddWorkerNodeRequest,
@@ -56,7 +56,11 @@ impl ClusterService for ClusterServiceImpl {
             .property
             .ok_or_else(|| MetaError::invalid_parameter("worker node property is not provided"))?;
         let resource = req.resource.unwrap_or_default();
-        if resource.rw_version != RW_VERSION {
+        if matches!(
+            worker_type,
+            PbWorkerType::Frontend | PbWorkerType::ComputeNode | PbWorkerType::Compactor
+        ) && resource.rw_version != RW_VERSION
+        {
             return Err(Status::invalid_argument(format!(
                 "worker node version {} does not match meta node version {}",
                 resource.rw_version, RW_VERSION,
