@@ -25,7 +25,7 @@ use crate::error::Result;
 #[derive(Fields)]
 struct RwIcebergCompactionSchedules {
     #[primary_key]
-    sink_id: SinkId,
+    sink_id: i32,
     schema_name: Option<String>,
     sink_name: Option<String>,
     task_type: String,
@@ -61,7 +61,7 @@ async fn read(reader: &SysCatalogReaderImpl) -> Result<Vec<RwIcebergCompactionSc
             let sink_id = SinkId::from(status.sink_id);
             let names = sink_name_by_id.get(&sink_id).cloned();
             RwIcebergCompactionSchedules {
-                sink_id,
+                sink_id: status.sink_id as i32,
                 schema_name: names.as_ref().map(|(schema_name, _)| schema_name.clone()),
                 sink_name: names.map(|(_, sink_name)| sink_name),
                 task_type: status.task_type,
