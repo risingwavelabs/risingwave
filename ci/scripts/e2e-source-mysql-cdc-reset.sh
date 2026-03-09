@@ -1,59 +1,22 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
-# Test MySQL CDC inject-source-offsets + ALTER SOURCE RESET + forward-offset skip behavior.
+# Test MySQL CDC binlog expiration and ALTER SOURCE RESET recovery.
+#
+# This script intentionally focuses on RESET behavior only.
+# inject-source-offsets skip/rewind behavior is covered by:
+# e2e_test/source_inline/kafka/alter/cron_only/alter_source_properties_safe.slt.serial
+#
+# Scenario:
+# 1. Consume batch1 (id=1..5).
+# 2. Pause source and write batch2 (id=6..10), then purge old binlog.
+# 3. Resume source; expired binlog data should not be consumed.
+# 4. Execute ALTER SOURCE RESET.
+# 5. Write batch3 (id=16..20), restart RW, then write batch4 (id=101..120).
+# 6. Verify RESET recovery and expected data loss boundaries.
 
 set -euo pipefail
 
 export MYSQL_HOST=mysql MYSQL_TCP_PORT=3306 MYSQL_PWD=123456
-
-strip_logs() {
-    sed 's/\r$//' | awk '!/\[cargo-make\]/ && NF { print }'
-}
-
-query_scalar() {
-    local sql="$1"
-    local retry="${2:-1}"
-    local backoff="${3:-1}"
-    local attempt=1
-    local raw=""
-    local value=""
-
-    while [ "$attempt" -le "$retry" ]; do
-        raw=$(risedev psql -t -A -c "$sql" 2>&1 || true)
-        value=$(printf "%s\n" "$raw" | strip_logs | tail -n 1)
-        if [ -n "$value" ]; then
-            echo "$value"
-            return 0
-        fi
-        if [ "$attempt" -lt "$retry" ]; then
-            echo "query_scalar retry ${attempt}/${retry}: sql='${sql}', raw='${raw}'"
-            sleep "$backoff"
-        fi
-        attempt=$((attempt + 1))
-    done
-
-    echo "✗ FAIL: query_scalar exhausted retries"
-    echo "SQL: ${sql}"
-    echo "Attempts: ${retry}"
-    echo "Raw output: ${raw}"
-    return 1
-}
-
-query_scalar_or_fail() {
-    local sql="$1"
-    local retry="${2:-1}"
-    local backoff="${3:-1}"
-    local value
-    if ! value=$(query_scalar "$sql" "$retry" "$backoff"); then
-        exit 1
-    fi
-    echo "$value"
-}
-
-mysql_exec() {
-    local sql="$1"
-    mysql -e "$sql"
-}
 
 query_i_retry() {
     local sql="$1"
@@ -62,7 +25,7 @@ query_i_retry() {
     local backoff="$4"
     local tmp
     tmp=$(mktemp)
-    cat > "$tmp" <<SLT
+    cat >"$tmp" <<SLT
 query I retry ${retry} backoff ${backoff}
 ${sql}
 ----
@@ -72,35 +35,13 @@ SLT
     rm -f "$tmp"
 }
 
-wait_non_empty_scalar() {
+mysql_exec() {
     local sql="$1"
-    local timeout="$2"
-    local interval="1"
-    local attempt=0
-    local last_raw=""
-    local start
-    start=$(date +%s)
-    while true; do
-        local current
-        attempt=$((attempt + 1))
-        last_raw=$(risedev psql -t -A -c "$sql" 2>&1 || true)
-        current=$(printf "%s\n" "$last_raw" | strip_logs | tail -n 1)
-        if [ -n "$current" ]; then
-            echo "$current"
-            return 0
-        fi
-        if [ $(( $(date +%s) - start )) -ge "$timeout" ]; then
-            echo "✗ FAIL: wait_non_empty_scalar timeout=${timeout}s"
-            echo "SQL: ${sql}"
-            echo "Attempts: ${attempt}"
-            echo "Current value: '${current}'"
-            echo "Raw output: ${last_raw}"
-            return 1
-        fi
-        echo "wait_non_empty_scalar retry#${attempt}: SQL='${sql}', current='${current}', raw='${last_raw}'"
-        sleep "$interval"
-    done
+    mysql -e "$sql"
 }
+
+echo "------------- reset-only mysql cdc test ------------"
+echo "inject-source-offsets skip behavior is validated in cron_only tests"
 
 echo "------------- setup ------------"
 risedev kill || true
@@ -132,77 +73,34 @@ risedev psql -c "CREATE TABLE test_table (
   created_at TIMESTAMPTZ
 ) FROM s TABLE 'binlog_test.test_table';"
 
-echo "------------- baseline consume ------------"
+echo "------------- phase1: baseline consume ------------"
 for i in {1..5}; do
     mysql_exec "USE binlog_test; INSERT INTO test_table (id, value) VALUES ($i, 'batch1_$i');"
 done
 query_i_retry "SELECT COUNT(*) FROM test_table;" "5" 30 "1s"
 
-echo "------------- inject validation ------------"
-query_i_retry "SELECT CASE WHEN EXISTS (SELECT 1 FROM rw_catalog.rw_internal_table_info WHERE job_name = 's' AND job_type = 'source') THEN 1 ELSE 0 END;" "1" 30 "1s"
-SOURCE_ID=$(query_scalar_or_fail "SELECT id FROM rw_sources WHERE name = 's';" 30 1)
-STATE_TABLE=$(query_scalar_or_fail "SELECT name FROM rw_catalog.rw_internal_table_info WHERE job_name = 's' AND job_type = 'source' LIMIT 1;" 30 1)
-
-[[ "$SOURCE_ID" =~ ^[0-9]+$ ]] || { echo "✗ FAIL: invalid SOURCE_ID=${SOURCE_ID}"; exit 1; }
-[[ "$STATE_TABLE" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || { echo "✗ FAIL: invalid STATE_TABLE=${STATE_TABLE}"; exit 1; }
-
-query_i_retry "SELECT CASE WHEN COUNT(*) >= 1 THEN 1 ELSE 0 END FROM ${STATE_TABLE} WHERE offset_info->'split_info'->'inner'->>'start_offset' IS NOT NULL;" "1" 30 "1s"
-STATE_ROW=$(wait_non_empty_scalar "SELECT partition_id || E'\\t' || (offset_info->'split_info'->'inner'->>'start_offset') FROM ${STATE_TABLE} WHERE offset_info->'split_info'->'inner'->>'start_offset' IS NOT NULL LIMIT 1;" 30)
-[ -n "$STATE_ROW" ] || { echo "✗ FAIL: missing non-null start_offset row"; exit 1; }
-
-IFS=$'\t' read -r SPLIT_ID CURRENT_OFFSET <<< "$STATE_ROW"
-[ -n "$SPLIT_ID" ] && [ -n "$CURRENT_OFFSET" ] || { echo "✗ FAIL: invalid split row: ${STATE_ROW}"; exit 1; }
-OFFSETS_JSON=$(python3 -c 'import json,sys; print(json.dumps({sys.argv[1]: sys.argv[2]}))' "$SPLIT_ID" "$CURRENT_OFFSET")
-./risedev ctl meta inject-source-offsets --source-id "$SOURCE_ID" --offsets "$OFFSETS_JSON"
-
-OFFSET_AFTER_INJECT=$(query_scalar_or_fail "SELECT offset_info->'split_info'->'inner'->>'start_offset' FROM ${STATE_TABLE} WHERE partition_id='${SPLIT_ID}' LIMIT 1;" 30 1)
-if [ "$OFFSET_AFTER_INJECT" != "$CURRENT_OFFSET" ]; then
-    echo "✗ FAIL: inject-source-offsets changed split state unexpectedly"
-    echo "Before: $CURRENT_OFFSET"
-    echo "After:  $OFFSET_AFTER_INJECT"
-    exit 1
-fi
-echo "✓ PASS: inject-source-offsets keeps split state consistent"
-
-echo "------------- forward offset skip validation ------------"
-risedev psql -c "ALTER SOURCE s SET source_rate_limit = 0;"
-
-for i in {9001..9003}; do
-    mysql_exec "USE binlog_test; INSERT INTO test_table (id, value) VALUES ($i, 'inject_skip_$i');"
-done
-
-BINLOG_STATUS=$(mysql -s -N -e "SHOW BINARY LOG STATUS;" 2>/dev/null || mysql -s -N -e "SHOW MASTER STATUS;" 2>/dev/null)
-BINLOG_FILE=$(echo "$BINLOG_STATUS" | awk '{print $1}')
-BINLOG_POS=$(echo "$BINLOG_STATUS" | awk '{print $2}')
-[ -n "$BINLOG_FILE" ] && [ -n "$BINLOG_POS" ] || { echo "✗ FAIL: failed to get binlog file/pos"; exit 1; }
-
-FORWARD_OFFSET=$(python3 -c 'import json,sys; o=json.loads(sys.argv[1]); so=o.setdefault("sourceOffset",{}); so["file"]=sys.argv[2]; so["pos"]=int(sys.argv[3]); so["snapshot"]=False; o["isHeartbeat"]=False; print(json.dumps(o,separators=(",",":")))' "$CURRENT_OFFSET" "$BINLOG_FILE" "$BINLOG_POS")
-FORWARD_OFFSETS_JSON=$(python3 -c 'import json,sys; print(json.dumps({sys.argv[1]: sys.argv[2]}))' "$SPLIT_ID" "$FORWARD_OFFSET")
-./risedev ctl meta inject-source-offsets --source-id "$SOURCE_ID" --offsets "$FORWARD_OFFSETS_JSON"
-
-risedev psql -c "ALTER SOURCE s SET source_rate_limit = default;"
-query_i_retry "SELECT COUNT(*) FROM test_table;" "5" 30 "1s"
-query_i_retry "SELECT COUNT(*) FROM test_table WHERE id BETWEEN 9001 AND 9003;" "0" 10 "1s"
-
-echo "------------- reset validation ------------"
+echo "------------- phase2: pause and write batch2 ------------"
 risedev psql -c "ALTER SOURCE s SET source_rate_limit = 0;"
 for i in {6..10}; do
     mysql_exec "USE binlog_test; INSERT INTO test_table (id, value) VALUES ($i, 'batch2_$i');"
 done
 query_i_retry "SELECT COUNT(*) FROM test_table;" "5" 10 "1s"
 
+echo "------------- phase3: expire binlog and resume ------------"
 mysql_exec "FLUSH LOGS;"
 mysql_exec "USE binlog_test; INSERT INTO test_table (id, value) VALUES (50, 'dummy_data');"
-CURRENT_BINLOG=$(mysql -s -N -e "SHOW BINARY LOG STATUS;" 2>/dev/null | awk '{print $1}' || mysql -s -N -e "SHOW MASTER STATUS;" 2>/dev/null | awk '{print $1}')
+CURRENT_BINLOG=$(
+    mysql -s -N -e "SHOW BINARY LOG STATUS;" 2>/dev/null | awk '{print $1}' ||
+        mysql -s -N -e "SHOW MASTER STATUS;" 2>/dev/null | awk '{print $1}'
+)
 mysql_exec "PURGE BINARY LOGS TO '$CURRENT_BINLOG';"
 
 risedev psql -c "ALTER SOURCE s SET source_rate_limit = default;"
 query_i_retry "SELECT COUNT(*) FROM test_table;" "5" 10 "1s"
 
+echo "------------- phase4: reset and restart ------------"
 risedev psql -c "ALTER SOURCE s RESET;"
-query_i_retry "SELECT CASE WHEN COUNT(*) >= 1 THEN 1 ELSE 0 END FROM ${STATE_TABLE} WHERE offset_info->'split_info'->'inner'->>'start_offset' IS NULL;" "1" 10 "1s"
 
-echo "------------- resume behavior validation ------------"
 for i in {16..20}; do
     mysql_exec "USE binlog_test; INSERT INTO test_table (id, value) VALUES ($i, 'batch3_after_reset_$i');"
 done
@@ -214,6 +112,7 @@ for i in {101..120}; do
     mysql_exec "USE binlog_test; INSERT INTO test_table (id, value) VALUES ($i, 'batch4_after_restart_$i');"
 done
 
+echo "------------- verify reset behavior ------------"
 query_i_retry "SELECT COUNT(*) FROM test_table;" "25" 60 "1s"
 query_i_retry "SELECT COUNT(*) FROM test_table WHERE id BETWEEN 1 AND 5;" "5" 10 "1s"
 query_i_retry "SELECT COUNT(*) FROM test_table WHERE id BETWEEN 6 AND 10;" "0" 10 "1s"

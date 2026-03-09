@@ -2,13 +2,14 @@
 # This test covers:
 # 1. Update broker address - most critical ops scenario (broker migration)
 # 2. Split reset (reset-source-splits) - force split re-discovery
-# 3. Offset injection (inject-source-offsets) - UNSAFE offset manipulation
+# 3. Offset injection rewind (inject-source-offsets) - UNSAFE offset manipulation
+# 4. Offset injection forward skip (inject-source-offsets) - UNSAFE offset manipulation
 
 control substitution on
 
 # Setup: Create topic and produce initial data
 system ok
-rpk topic create test_safe_update
+rpk topic create test_safe_update -p 1
 
 system ok
 cat <<EOF | rpk topic produce 'test_safe_update' -f "%v\n"
@@ -167,6 +168,48 @@ query I
 SELECT COUNT(*) FROM mv_test WHERE data = 'after_inject';
 ----
 2
+
+# Test 4: Inject forward offsets (UNSAFE skip behavior)
+# This test verifies offset injection by injecting a forward offset,
+# which should skip the next 2 messages.
+system ok
+python3 e2e_test/source_inline/kafka/alter/get_kafka_offsets.py \
+    --topic test_safe_update \
+    --skip-next 2 \
+    --output /tmp/offsets_skip_forward.json
+
+system ok
+SOURCE_ID=$(psql -h ${RISEDEV_RW_FRONTEND_LISTEN_ADDRESS} \
+    -p ${RISEDEV_RW_FRONTEND_PORT} \
+    -d $__DATABASE__ \
+    -U root \
+    -t -A \
+    -c "SELECT id FROM rw_sources WHERE name = 'kafka_test_source'") && \
+OFFSETS=$(cat /tmp/offsets_skip_forward.json) && \
+echo "Injecting forward offsets for Source ID: $SOURCE_ID" && \
+echo "Offsets: $OFFSETS" && \
+./risedev ctl meta inject-source-offsets \
+    --source-id $SOURCE_ID \
+    --offsets "$OFFSETS"
+
+system ok
+cat <<EOF | rpk topic produce 'test_safe_update' -f "%v\n"
+{"id": 12, "data": "after_forward_skip"}
+{"id": 13, "data": "after_forward_skip"}
+{"id": 14, "data": "after_forward_skip"}
+EOF
+
+# The first 2 newly produced records should be skipped.
+# Previous count: 15. Only one new record should be consumed.
+query I retry 10 backoff 1s
+SELECT COUNT(*) FROM mv_test;
+----
+16
+
+query I retry 10 backoff 1s
+SELECT COUNT(*) FROM mv_test WHERE data = 'after_forward_skip';
+----
+1
 
 # Cleanup
 statement ok
