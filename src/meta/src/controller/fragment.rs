@@ -1177,7 +1177,7 @@ impl CatalogController {
             }
         }
 
-        debug!(?database_fragment_infos, "reload all actors");
+        tracing::trace!(?database_fragment_infos, "reload all actors");
 
         Ok(database_fragment_infos)
     }
