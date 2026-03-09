@@ -6,6 +6,26 @@ import json
 from pathlib import Path
 
 
+def find_start_offset(payload: object) -> str | None:
+    if isinstance(payload, dict):
+        start_offset = payload.get("start_offset")
+        if isinstance(start_offset, str) and start_offset:
+            return start_offset
+
+        for value in payload.values():
+            nested_offset = find_start_offset(value)
+            if nested_offset is not None:
+                return nested_offset
+
+    elif isinstance(payload, list):
+        for value in payload:
+            nested_offset = find_start_offset(value)
+            if nested_offset is not None:
+                return nested_offset
+
+    return None
+
+
 def extract_offsets(state_file: Path) -> dict[str, str]:
     for raw_line in state_file.read_text().splitlines():
         line = raw_line.strip()
@@ -29,9 +49,8 @@ def extract_offsets(state_file: Path) -> dict[str, str]:
         except json.JSONDecodeError:
             continue
 
-        split_info = split_payload.get("split_info", {})
-        start_offset = split_info.get("start_offset")
-        if not isinstance(start_offset, str) or not start_offset:
+        start_offset = find_start_offset(split_payload)
+        if start_offset is None:
             continue
 
         return {split_id: start_offset}
