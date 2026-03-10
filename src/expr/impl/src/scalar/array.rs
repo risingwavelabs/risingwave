@@ -75,7 +75,7 @@ fn map_from_key_values(
         ));
     }
 
-    let mut seen: Vec<ScalarRefImpl> = Vec::with_capacity(keys.len());
+    let mut seen: Vec<ScalarRefImpl<'_>> = Vec::with_capacity(keys.len());
 
     for (k, v) in keys.iter().zip(values.iter()) {
         let key =
@@ -105,7 +105,7 @@ fn map_from_entries(
     entries: ListRef<'_>,
     writer: &mut impl risingwave_common::array::MapWrite,
 ) -> Result<(), ExprError> {
-    let mut seen: Vec<ScalarRefImpl> = Vec::with_capacity(entries.len());
+    let mut seen: Vec<ScalarRefImpl<'_>> = Vec::with_capacity(entries.len());
 
     for entry in entries.iter() {
         let struct_val = match entry {
