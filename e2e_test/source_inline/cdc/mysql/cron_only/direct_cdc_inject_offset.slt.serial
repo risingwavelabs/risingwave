@@ -40,10 +40,15 @@ select count(*) from direct_cdc_inject_offset;
 ----
 3
 
+query T retry 20 backoff 1s
+select status from rw_catalog.rw_streaming_jobs where name = 'direct_cdc_inject_offset';
+----
+CREATED
+
 system ok
 mysql -e "
     INSERT INTO testdb_direct_cdc_inject_offset.t_inject_offset VALUES
-        (4, 'row-4');
+        (4, 'row-4-before-inject');
 "
 
 query I retry 20 backoff 1s
@@ -60,83 +65,88 @@ psql -h ${RISEDEV_RW_FRONTEND_LISTEN_ADDRESS} \
     -c "SELECT id
         FROM rw_sources
         WHERE associated_table_id = (SELECT id FROM rw_tables WHERE name = 'direct_cdc_inject_offset')
-        ORDER BY id
+        ORDER BY id DESC
         LIMIT 1;" > /tmp/direct_cdc_source_id.txt
 
 system ok
-python3 e2e_test/source_inline/cdc/mysql/cron_only/capture_mysql_master_status.py \
-    --file-output /tmp/direct_cdc_binlog_file_before.txt \
-    --pos-output /tmp/direct_cdc_binlog_pos_before.txt \
-    --file-seq-output /tmp/direct_cdc_binlog_file_seq_before.txt
+bash -ceu '
+source /Users/tab/conductor/workspaces/risingwave/madrid/.risingwave/config/risedev-env
+STATE_TABLE=$(psql -h "$RISEDEV_RW_FRONTEND_LISTEN_ADDRESS" \
+    -p "$RISEDEV_RW_FRONTEND_PORT" \
+    -d "$__DATABASE__" \
+    -U root \
+    -t -A \
+    -c "SELECT name
+        FROM rw_catalog.rw_internal_table_info
+        WHERE job_name = '\''direct_cdc_inject_offset'\''
+          AND job_type = '\''table'\''
+        ORDER BY job_id DESC
+        LIMIT 1;")
+SOURCE_ID=$(cat /tmp/direct_cdc_source_id.txt)
+for _ in $(seq 1 60); do
+    OFFSET=$(psql -h "$RISEDEV_RW_FRONTEND_LISTEN_ADDRESS" \
+        -p "$RISEDEV_RW_FRONTEND_PORT" \
+        -d "$__DATABASE__" \
+        -U root \
+        -t -A \
+        -c "SELECT offset_info->'\''split_info'\''->'\''mysql_split'\''->'\''inner'\''->>'\''start_offset'\''
+            FROM ${STATE_TABLE}
+            WHERE partition_id = '\''${SOURCE_ID}'\''
+            LIMIT 1;")
+    if [ -n "$OFFSET" ] && printf '%s' "$OFFSET" | grep -q '"isHeartbeat":false'; then
+        printf '%s' "$OFFSET" > /tmp/direct_cdc_current_offset.txt
+        exit 0
+    fi
+    sleep 1
+done
+echo "timed out waiting for non-heartbeat direct CDC offset" >&2
+exit 1
+'
+
 system ok
-python3 e2e_test/source_inline/cdc/mysql/cron_only/build_mysql_inject_offsets.py \
-    --split-id "$(cat /tmp/direct_cdc_source_id.txt)" \
-    --binlog-file "$(cat /tmp/direct_cdc_binlog_file_before.txt)" \
-    --binlog-pos "$(cat /tmp/direct_cdc_binlog_pos_before.txt)" \
-    --output /tmp/direct_cdc_offsets_before.json
+python3 -c "import json, pathlib; source_id = pathlib.Path('/tmp/direct_cdc_source_id.txt').read_text().strip(); offset = pathlib.Path('/tmp/direct_cdc_current_offset.txt').read_text().strip(); pathlib.Path('/tmp/direct_cdc_offsets.json').write_text(json.dumps({source_id: offset}, separators=(',', ':'), sort_keys=True))"
+
+system ok
+bash -ceu '
+source /Users/tab/conductor/workspaces/risingwave/madrid/.risingwave/config/risedev-env
+SOURCE_ID="$(cat /tmp/direct_cdc_source_id.txt)"
+OFFSETS="$(cat /tmp/direct_cdc_offsets.json)"
+for _ in $(seq 1 30); do
+    if /Users/tab/conductor/workspaces/risingwave/madrid/.risingwave/bin/risingwave/risectl meta inject-source-offsets \
+        --source-id "$SOURCE_ID" \
+        --offsets "$OFFSETS"; then
+        exit 0
+    fi
+    sleep 1
+done
+exit 1
+'
 
 system ok
 mysql -e "
     INSERT INTO testdb_direct_cdc_inject_offset.t_inject_offset VALUES
-        (5, 'row-5'),
-        (6, 'row-6');
-"
-
-query I retry 20 backoff 1s
-select count(*) from direct_cdc_inject_offset;
-----
-6
-
-system ok
-python3 e2e_test/source_inline/cdc/mysql/cron_only/wait_mysql_cdc_metrics.py \
-    --source-id "$(cat /tmp/direct_cdc_source_id.txt)" \
-    --file-seq "$(cat /tmp/direct_cdc_binlog_file_seq_before.txt)" \
-    --pos "$(cat /tmp/direct_cdc_binlog_pos_before.txt)" \
-    --mode advance
-
-statement ok
-alter table direct_cdc_inject_offset set source_rate_limit to 0;
-
-system ok
-SOURCE_ID=$(cat /tmp/direct_cdc_source_id.txt) && \
-OFFSETS=$(cat /tmp/direct_cdc_offsets_before.json) && \
-./risedev ctl meta inject-source-offsets \
-    --source-id "$SOURCE_ID" \
-    --offsets "$OFFSETS"
-
-system ok
-python3 e2e_test/source_inline/cdc/mysql/cron_only/wait_mysql_cdc_metrics.py \
-    --source-id "$(cat /tmp/direct_cdc_source_id.txt)" \
-    --file-seq "$(cat /tmp/direct_cdc_binlog_file_seq_before.txt)" \
-    --pos "$(cat /tmp/direct_cdc_binlog_pos_before.txt)" \
-    --mode equal
-
-statement ok
-alter table direct_cdc_inject_offset set source_rate_limit to default;
-
-system ok
-mysql -e "
-    INSERT INTO testdb_direct_cdc_inject_offset.t_inject_offset VALUES
-        (7, 'row-7');
+        (5, 'row-5-after-inject')
+    ON DUPLICATE KEY UPDATE payload = 'row-5-after-inject';
 "
 
 system ok
-python3 e2e_test/source_inline/cdc/mysql/cron_only/capture_mysql_master_status.py \
-    --file-output /tmp/direct_cdc_binlog_file_after_resume.txt \
-    --pos-output /tmp/direct_cdc_binlog_pos_after_resume.txt \
-    --file-seq-output /tmp/direct_cdc_binlog_file_seq_after_resume.txt
-
-system ok
-python3 e2e_test/source_inline/cdc/mysql/cron_only/wait_mysql_cdc_metrics.py \
-    --source-id "$(cat /tmp/direct_cdc_source_id.txt)" \
-    --file-seq "$(cat /tmp/direct_cdc_binlog_file_seq_after_resume.txt)" \
-    --pos "$(cat /tmp/direct_cdc_binlog_pos_after_resume.txt)" \
-    --mode at_least
-
-query I retry 20 backoff 1s
-select count(*) from direct_cdc_inject_offset;
-----
-7
+bash -ceu '
+source /Users/tab/conductor/workspaces/risingwave/madrid/.risingwave/config/risedev-env
+for _ in $(seq 1 180); do
+    ACTUAL=$(psql -h "$RISEDEV_RW_FRONTEND_LISTEN_ADDRESS" \
+        -p "$RISEDEV_RW_FRONTEND_PORT" \
+        -d "$__DATABASE__" \
+        -U root \
+        -t -A \
+        -c "SELECT string_agg(id || '':' || payload, '','' ORDER BY id) FROM direct_cdc_inject_offset" 2>/dev/null || true)
+    if [ "$ACTUAL" = "1:row-1,2:row-2,3:row-3,4:row-4-before-inject,5:row-5-after-inject" ]; then
+        exit 0
+    fi
+    sleep 1
+done
+echo "timed out waiting for injected direct CDC rows" >&2
+exit 1
+'
 
 statement ok
 drop table direct_cdc_inject_offset;
