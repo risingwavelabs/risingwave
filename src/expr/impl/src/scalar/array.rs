@@ -70,6 +70,8 @@ fn map_from_key_values(
 ) -> Result<(), ExprError> {
     let result = MapValue::try_from_kv(keys.to_owned_scalar(), values.to_owned_scalar())
         .map_err(ExprError::Custom)?;
+    // `into_inner()` gives us the inner `ListRef` of Struct datums.
+    // We iterate over it and write each struct entry directly into the writer.
     writer.write_iter(result.into_inner().iter());
     Ok(())
 }
@@ -218,6 +220,9 @@ fn map_cat(
     m2: Option<MapRef<'_>>,
     writer: &mut impl risingwave_common::array::MapWrite,
 ) -> Option<()> {
+    // MapValue::concat and to_owned_scalar both allocate.
+    // The output-side copy into `writer` is zero-alloc from the builder's
+    // perspective — no second MapValue is allocated for the output column.
     let result = match (m1, m2) {
         (None, None) => return None,
         (Some(m), None) | (None, Some(m)) => m.to_owned_scalar(),
@@ -251,9 +256,12 @@ fn map_insert(
     value: Option<ScalarRefImpl<'_>>,
     writer: &mut impl risingwave_common::array::MapWrite,
 ) {
+    // When key is NULL, SQL semantics require returning the original map
+    // unchanged.  MapValue::insert allocates a new MapValue with the
+    // key-value pair inserted.  Writer avoids the output-side builder alloc.
     let result = match key {
-        Some(key) => MapValue::insert(map, key.into_scalar_impl(), value.to_owned_datum()),
         None => map.to_owned_scalar(),
+        Some(key) => MapValue::insert(map, key.into_scalar_impl(), value.to_owned_datum()),
     };
     writer.write_iter(result.into_inner().iter());
 }
@@ -281,9 +289,10 @@ fn map_delete(
     key: Option<ScalarRefImpl<'_>>,
     writer: &mut impl risingwave_common::array::MapWrite,
 ) {
+    // When key is NULL, return original map unchanged (no-op delete).
     let result = match key {
-        Some(key) => MapValue::delete(map, key),
         None => map.to_owned_scalar(),
+        Some(key) => MapValue::delete(map, key),
     };
     writer.write_iter(result.into_inner().iter());
 }

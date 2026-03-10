@@ -79,12 +79,6 @@ impl ArrayBuilder for MapArrayBuilder {
     }
 }
 
-impl MapArrayBuilder {
-    pub fn writer(&mut self) -> MapWriter<'_> {
-        MapWriter::new(self)
-    }
-}
-
 /// `MapArray` is physically just a `List<Struct<key: K, value: V>>` array, but with some additional restrictions.
 ///
 /// Type:
@@ -564,6 +558,17 @@ impl MapValue {
     }
 }
 
+impl MapArrayBuilder {
+    /// Create a writer for appending a single map value.
+    pub fn writer(&mut self) -> MapWriter<'_> {
+        MapWriter::new(self)
+    }
+}
+
+/// Writer for appending a single map entry to a [`MapArrayBuilder`].
+///
+/// Physically, [`MapArray`] is represented as `List<Struct<key, value>>`,
+/// so this writer delegates to an underlying [`ListWriter`].
 pub struct MapWriter<'a> {
     inner: ListWriter<'a>,
 }
@@ -575,14 +580,10 @@ impl<'a> MapWriter<'a> {
         }
     }
 
-    /// `finish` will be called when the entire record is successfully written.
-    /// The partial data was committed and the `builder` can no longer be used.
     pub fn finish(self) {
         self.inner.finish();
     }
 
-    /// `rollback` will be called while the entire record is abandoned.
-    /// The partial data was cleaned and the `builder` can be safely used.
     pub fn rollback(self) {
         self.inner.rollback();
     }

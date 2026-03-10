@@ -654,8 +654,9 @@ fn bench_map(c: &mut Criterion) {
     )
     .unwrap();
     let map_type = DataType::Map(MapType::from_kv(DataType::Int32, DataType::Int32));
+    let list_type = DataType::List(ListType::new(DataType::Int32));
 
-    // col 0: map<int32,int32>  (first arg)
+    // col 0: map<int32,int32>  (first operand for map_cat / map_insert / map_delete)
     let map_col1 = {
         let mut builder = MapArrayBuilder::with_type(CHUNK_SIZE, map_type.clone());
         for _ in 0..CHUNK_SIZE {
@@ -663,7 +664,7 @@ fn bench_map(c: &mut Criterion) {
         }
         builder.finish().into_ref()
     };
-    // col 1: map<int32,int32>  (second arg for map_cat)
+    // col 1: map<int32,int32>  (second operand for map_cat)
     let map_col2 = {
         let mut builder = MapArrayBuilder::with_type(CHUNK_SIZE, map_type.clone());
         for _ in 0..CHUNK_SIZE {
@@ -671,7 +672,7 @@ fn bench_map(c: &mut Criterion) {
         }
         builder.finish().into_ref()
     };
-    // col 2: int32  key for map_insert / map_delete (key=2, always hits)
+    // col 2: int32  key for map_insert / map_delete (key=2, always exists)
     let key_col = I32Array::from_iter((0..CHUNK_SIZE).map(|_| 2i32)).into_ref();
     // col 3: int32  new value for map_insert
     let val_col = I32Array::from_iter((0..CHUNK_SIZE).map(|_| 99i32)).into_ref();
@@ -683,12 +684,30 @@ fn bench_map(c: &mut Criterion) {
     let vals_col =
         ListArray::from_iter((0..CHUNK_SIZE).map(|_| Some([10i32, 20, 30].iter().copied())))
             .into_ref();
+    // col 6: struct(int32, int32)[]  entries for map_from_entries
+    // Each entry is a Struct{key: i32, value: i32}.
+    // Build the entries array as a list of struct values matching MapType's schema.
+    let entries_col = {
+        // map_from_entries expects: anyarray of Struct<key,value>
+        // We reuse map_val's inner list (which IS the struct list) for each row.
+        let inner_list = map_val.as_scalar_ref().into_inner().to_owned_scalar();
+        ListArray::from_iter((0..CHUNK_SIZE).map(|_| inner_list.clone())).into_ref()
+    };
 
     let input = StreamChunk::from(DataChunk::new(
-        vec![map_col1, map_col2, key_col, val_col, keys_col, vals_col],
+        vec![
+            map_col1,
+            map_col2,
+            key_col,
+            val_col,
+            keys_col,
+            vals_col,
+            entries_col,
+        ],
         CHUNK_SIZE,
     ));
 
+    // ── map_cat ──────────────────────────────────────────────────────────────
     c.bench_function("map_cat(map, map) -> map", |bencher| {
         let expr = build_func(
             PbType::MapCat,
@@ -699,12 +718,11 @@ fn bench_map(c: &mut Criterion) {
             ],
         )
         .unwrap();
-        bencher
-            .to_async(FuturesExecutor)
-            .iter(|| expr.eval(&input))
+        bencher.to_async(FuturesExecutor).iter(|| expr.eval(&input))
     });
 
-    c.bench_function("map_insert existing key", |bencher| {
+    // ── map_insert (existing key — exercises update path) ────────────────────
+    c.bench_function("map_insert(map, key=existing, value) -> map", |bencher| {
         let expr = build_func(
             PbType::MapInsert,
             map_type.clone(),
@@ -715,12 +733,11 @@ fn bench_map(c: &mut Criterion) {
             ],
         )
         .unwrap();
-        bencher
-            .to_async(FuturesExecutor)
-            .iter(|| expr.eval(&input))
+        bencher.to_async(FuturesExecutor).iter(|| expr.eval(&input))
     });
 
-    c.bench_function("map_delete hit", |bencher| {
+    // ── map_delete (hit — key exists) ────────────────────────────────────────
+    c.bench_function("map_delete(map, key=existing) -> map", |bencher| {
         let expr = build_func(
             PbType::MapDelete,
             map_type.clone(),
@@ -730,13 +747,11 @@ fn bench_map(c: &mut Criterion) {
             ],
         )
         .unwrap();
-        bencher
-            .to_async(FuturesExecutor)
-            .iter(|| expr.eval(&input))
+        bencher.to_async(FuturesExecutor).iter(|| expr.eval(&input))
     });
 
+    // ── map_from_key_values ──────────────────────────────────────────────────
     c.bench_function("map_from_key_values(int32[], int32[]) -> map", |bencher| {
-        let list_type = DataType::List(ListType::new(DataType::Int32));
         let expr = build_func(
             PbType::MapFromKeyValues,
             map_type.clone(),
@@ -746,9 +761,23 @@ fn bench_map(c: &mut Criterion) {
             ],
         )
         .unwrap();
-        bencher
-            .to_async(FuturesExecutor)
-            .iter(|| expr.eval(&input))
+        bencher.to_async(FuturesExecutor).iter(|| expr.eval(&input))
+    });
+
+    // ── map_from_entries ─────────────────────────────────────────────────────
+    // entries column is col 6: a list-of-structs matching the map's inner type
+    c.bench_function("map_from_entries(struct[]) -> map", |bencher| {
+        // The inner list of a map<int32,int32> is of type
+        // list<struct(key int32, value int32)>
+        let struct_type = map_type.clone().into_map().into_struct();
+        let entries_list_type = DataType::List(ListType::new(struct_type));
+        let expr = build_func(
+            PbType::MapFromEntries,
+            map_type.clone(),
+            vec![InputRefExpression::new(entries_list_type, 6).boxed()],
+        )
+        .unwrap();
+        bencher.to_async(FuturesExecutor).iter(|| expr.eval(&input))
     });
 }
 
@@ -762,7 +791,7 @@ fn bench_vector(c: &mut Criterion) {
     // col 0: vector(4) — left operand
     // col 1: vector(4) — right operand (same values; avoids zero-division in multiply)
     let make_vec_col = || {
-    let vec_val: VectorVal = [1.0f32, 0.5, 0.25, 0.125]
+        let vec_val: VectorVal = [1.0f32, 0.5, 0.25, 0.125]
             .into_iter()
             .map(|f| Finite32::try_from(f).unwrap())
             .collect();
@@ -771,12 +800,7 @@ fn bench_vector(c: &mut Criterion) {
             builder.append(Some(vec_val.as_scalar_ref()));
         }
         builder.finish().into_ref()
-    };   // ← semicolon here
-
-    let input = StreamChunk::from(DataChunk::new(
-        vec![make_vec_col(), make_vec_col()],
-        CHUNK_SIZE,
-    ));
+    };
 
     let input = StreamChunk::from(DataChunk::new(
         vec![make_vec_col(), make_vec_col()],
@@ -794,9 +818,7 @@ fn bench_vector(c: &mut Criterion) {
             ],
         )
         .unwrap();
-        bencher
-            .to_async(FuturesExecutor)
-            .iter(|| expr.eval(&input))
+        bencher.to_async(FuturesExecutor).iter(|| expr.eval(&input))
     });
 
     // subtract(vector, vector) -> vector
@@ -810,9 +832,7 @@ fn bench_vector(c: &mut Criterion) {
             ],
         )
         .unwrap();
-        bencher
-            .to_async(FuturesExecutor)
-            .iter(|| expr.eval(&input))
+        bencher.to_async(FuturesExecutor).iter(|| expr.eval(&input))
     });
 
     // multiply(vector, vector) -> vector
@@ -826,9 +846,7 @@ fn bench_vector(c: &mut Criterion) {
             ],
         )
         .unwrap();
-        bencher
-            .to_async(FuturesExecutor)
-            .iter(|| expr.eval(&input))
+        bencher.to_async(FuturesExecutor).iter(|| expr.eval(&input))
     });
 
     // vec_concat(vector, vector) -> vector(8)  — result is double-width
@@ -843,9 +861,7 @@ fn bench_vector(c: &mut Criterion) {
             ],
         )
         .unwrap();
-        bencher
-            .to_async(FuturesExecutor)
-            .iter(|| expr.eval(&input))
+        bencher.to_async(FuturesExecutor).iter(|| expr.eval(&input))
     });
 
     // l2_normalize(vector) -> vector
@@ -856,8 +872,6 @@ fn bench_vector(c: &mut Criterion) {
             vec![InputRefExpression::new(vec_type.clone(), 0).boxed()],
         )
         .unwrap();
-        bencher
-            .to_async(FuturesExecutor)
-            .iter(|| expr.eval(&input))
+        bencher.to_async(FuturesExecutor).iter(|| expr.eval(&input))
     });
 }
