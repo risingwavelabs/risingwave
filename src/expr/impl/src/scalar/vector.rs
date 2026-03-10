@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::array::Finite32;
+use risingwave_common::array::{Finite32,VectorWrite,VectorItemType};
 use risingwave_common::types::{DataType, F32, F64, ListRef, ScalarRefImpl, VectorRef, VectorVal};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::vector::MeasureDistanceBuilder;
@@ -218,18 +218,17 @@ fn inner_product(lhs: VectorRef<'_>, rhs: VectorRef<'_>) -> Result<F64> {
 /// SELECT '[1,2]'::vector(2) + '[3]';
 /// ```
 #[function("add(vector, vector) -> vector", type_infer = "unreachable")]
-fn vector_add(lhs: VectorRef<'_>, rhs: VectorRef<'_>) -> Result<VectorVal> {
+fn vector_add(
+    lhs: VectorRef<'_>,
+    rhs: VectorRef<'_>,
+    writer: &mut impl risingwave_common::array::VectorWrite,
+) -> Result<()> {
     check_dims("vector_add", lhs, rhs)?;
-    let lhs = lhs.as_raw_slice();
-    let rhs = rhs.as_raw_slice();
-
-    let result = lhs
-        .iter()
-        .zip_eq_fast(rhs.iter())
-        .map(|(l, r)| Finite32::try_from(l + r))
-        .try_collect()
-        .map_err(|_| ExprError::NumericOverflow)?;
-    Ok(result)
+    for (l, r) in lhs.as_raw_slice().iter().zip_eq_fast(rhs.as_raw_slice()) {
+        let v = Finite32::try_from(l + r).map_err(|_| ExprError::NumericOverflow)?;
+        writer.write(F32::from(v.0));
+    }
+    Ok(())
 }
 
 /// ```slt
@@ -245,19 +244,18 @@ fn vector_add(lhs: VectorRef<'_>, rhs: VectorRef<'_>) -> Result<VectorVal> {
 /// SELECT '[1,2]'::vector(2) - '[3]';
 /// ```
 #[function("subtract(vector, vector) -> vector", type_infer = "unreachable")]
-fn vector_subtract(lhs: VectorRef<'_>, rhs: VectorRef<'_>) -> Result<VectorVal> {
-    check_dims("vector_subtract", lhs, rhs)?;
-    let lhs = lhs.as_raw_slice();
-    let rhs = rhs.as_raw_slice();
-
-    let result = lhs
-        .iter()
-        .zip_eq_fast(rhs.iter())
-        .map(|(l, r)| Finite32::try_from(l - r))
-        .try_collect()
-        .map_err(|_| ExprError::NumericOverflow)?;
-    Ok(result)
-}
+fn vector_subtract(
+    lhs: VectorRef<'_>,
+    rhs: VectorRef<'_>,
+    writer: &mut impl risingwave_common::array::VectorWrite,
+) -> Result<()> {
+     check_dims("vector_subtract", lhs, rhs)?;
+    for (l, r) in lhs.as_raw_slice().iter().zip_eq_fast(rhs.as_raw_slice()) {
+        let v = Finite32::try_from(l - r).map_err(|_| ExprError::NumericOverflow)?;
+        writer.write(F32::from(v.0));
+    }
+    Ok(())
+ }
 
 /// ```slt
 /// query R
@@ -275,24 +273,22 @@ fn vector_subtract(lhs: VectorRef<'_>, rhs: VectorRef<'_>) -> Result<VectorVal> 
 /// SELECT '[1,2]'::vector(2) * '[3]';
 /// ```
 #[function("multiply(vector, vector) -> vector", type_infer = "unreachable")]
-fn vector_multiply(lhs: VectorRef<'_>, rhs: VectorRef<'_>) -> Result<VectorVal> {
-    check_dims("vector_multiply", lhs, rhs)?;
-    let lhs = lhs.as_raw_slice();
-    let rhs = rhs.as_raw_slice();
-
-    let result = lhs
-        .iter()
-        .zip_eq_fast(rhs.iter())
-        .map(|(l, r)| {
-            let v = l * r;
-            match v == 0. && !(*l == 0. || *r == 0.) {
-                true => Err(ExprError::NumericUnderflow),
-                false => Finite32::try_from(v).map_err(|_| ExprError::NumericOverflow),
-            }
-        })
-        .try_collect()?;
-    Ok(result)
-}
+fn vector_multiply(
+    lhs: VectorRef<'_>,
+    rhs: VectorRef<'_>,
+    writer: &mut impl risingwave_common::array::VectorWrite,
+) -> Result<()> {
+     check_dims("vector_multiply", lhs, rhs)?;
+    for (l, r) in lhs.as_raw_slice().iter().zip_eq_fast(rhs.as_raw_slice()) {
+        let v = l * r;
+        let f = match v == 0. && !(*l == 0. || *r == 0.) {
+            true => return Err(ExprError::NumericUnderflow),
+            false => Finite32::try_from(v).map_err(|_| ExprError::NumericOverflow)?,
+        };
+        writer.write(f.into());
+    }
+    Ok(())
+ }
 
 /// ```slt
 /// query R
@@ -312,19 +308,17 @@ fn vector_multiply(lhs: VectorRef<'_>, rhs: VectorRef<'_>) -> Result<VectorVal> 
 /// SELECT null::vector(16000) || '[1]';
 /// ```
 #[function("vec_concat(vector, vector) -> vector", type_infer = "unreachable")]
-fn vector_concat(lhs: VectorRef<'_>, rhs: VectorRef<'_>) -> Result<VectorVal> {
-    let lhs = lhs.as_raw_slice();
-    let rhs = rhs.as_raw_slice();
-
-    let result = lhs
-        .iter()
-        .chain(rhs)
-        .copied()
-        .map(Finite32::try_from)
-        .try_collect()
-        .map_err(|_| ExprError::NumericOverflow)?;
-    Ok(result)
-}
+fn vector_concat(
+    lhs: VectorRef<'_>,
+    rhs: VectorRef<'_>,
+    writer: &mut impl risingwave_common::array::VectorWrite,
+) -> Result<()> {
+    for &f in lhs.as_raw_slice().iter().chain(rhs.as_raw_slice()) {
+        let v = Finite32::try_from(f).map_err(|_| ExprError::NumericOverflow)?;
+        writer.write(F32::from(v.0));
+    }
+    Ok(())
+ }
 
 /// ```slt
 /// query T
@@ -520,8 +514,12 @@ fn l2_norm(vector: VectorRef<'_>) -> F64 {
     "l2_normalize(vector) -> vector",
     type_infer = "|args| Ok(args[0].clone())"
 )]
-fn l2_normalize(vector: VectorRef<'_>) -> VectorVal {
-    vector.normalized()
+fn l2_normalize(
+    vector: VectorRef<'_>,
+    writer: &mut impl risingwave_common::array::VectorWrite,
+) {
+    let normalized = vector.normalized();
+    writer.write_iter(normalized.as_raw_slice().iter().copied().map(VectorItemType::from));
 }
 
 #[derive(Debug)]

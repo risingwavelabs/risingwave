@@ -14,6 +14,7 @@
 
 use std::fmt::Debug;
 use std::hash::Hash;
+use std::mem::ManuallyDrop;
 use std::slice;
 use std::sync::LazyLock;
 
@@ -439,5 +440,65 @@ impl VectorVal {
             value.push(Finite32::try_from(f32::deserialize(&mut *de)?).map_err(Error::Message)?)
         }
         Ok(VectorVal::from(value))
+    }
+}
+
+pub struct VectorWriter<'a> {
+    builder: &'a mut VectorArrayBuilder,
+    /// The `inner` length at the point this writer was created.
+    start: usize,
+}
+
+impl<'a> VectorWriter<'a> {
+    pub fn new(builder: &'a mut VectorArrayBuilder) -> Self {
+        let start = builder.inner.len();
+        Self { builder, start }
+    }
+
+    /// Finish will be called when the entire record is successfully written.
+    /// The partial data is committed and the builder can no longer be used.
+    pub fn finish(self) {
+        let last = self
+            .builder
+            .offsets
+            .last()
+            .cloned()
+            .expect("non-empty with an initial 0");
+        let written = (self.builder.inner.len() - self.start) as u32;
+        self.builder
+            .offsets
+            .push(last.checked_add(written).expect("offset overflow"));
+        self.builder.bitmap.append(true);
+        let _ = ManuallyDrop::new(self); // prevent drop from rolling back
+    }
+
+    /// Rollback will be called when the entire record is abandoned.
+    /// The partial data is cleaned and the builder can be safely used.
+    pub fn rollback(self) {
+        let _ = ManuallyDrop::new(self); // just drop — Drop impl truncates
+    }
+}
+
+impl Drop for VectorWriter<'_> {
+    /// If the writer is dropped without calling `finish` or `rollback`,
+    /// we rollback the partial data by default.
+    fn drop(&mut self) {
+        self.builder.inner.truncate(self.start);
+    }
+}
+
+pub trait VectorWrite {
+    fn write(&mut self, value: VectorItemType);
+
+    fn write_iter(&mut self, values: impl IntoIterator<Item = VectorItemType>) {
+        for v in values {
+            self.write(v);
+        }
+    }
+}
+
+impl<'a> VectorWrite for VectorWriter<'a> {
+    fn write(&mut self, value: VectorItemType) {
+        self.builder.inner.push(value);
     }
 }
