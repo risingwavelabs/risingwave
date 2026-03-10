@@ -101,7 +101,7 @@ query I
 explain select * from iceberg_t1_source where i1 in (1, 2, 3, 4, 5);
 ----
 BatchExchange { order: [], dist: Single }
-└─BatchIcebergScan { source: iceberg_t1_source, columns: [i1, i2, i3], iceberg_scan_type: DataScan, predicate: i1 IN (1, 2, 3, 4, 5) }
+└─BatchIcebergScan { source: iceberg_t1_source, columns: [i1, i2, i3], iceberg_scan_type: DataScan, predicate: i1 IN (5, 4, 1, 3, 2) }
 
 query I
 select i1 from iceberg_t1_source where i1 in (1, 2, 3, 4, 5) order by i1;
