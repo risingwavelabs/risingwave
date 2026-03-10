@@ -271,7 +271,7 @@ dependencies = [
  "strum_macros 0.27.2",
  "thiserror 2.0.17",
  "uuid",
- "zstd 0.13.3",
+ "zstd",
 ]
 
 [[package]]
@@ -668,7 +668,7 @@ dependencies = [
  "arrow-select 57.3.0",
  "flatbuffers 25.2.10",
  "lz4_flex 0.12.0",
- "zstd 0.13.3",
+ "zstd",
 ]
 
 [[package]]
@@ -868,7 +868,7 @@ dependencies = [
  "itertools 0.14.0",
  "pyo3",
  "pyo3-build-config",
- "reqwest 0.12.25",
+ "reqwest",
  "rquickjs",
  "serde_json",
  "tempfile",
@@ -1029,7 +1029,7 @@ dependencies = [
  "futures",
  "getrandom 0.3.1",
  "rand 0.9.2",
- "reqwest 0.12.25",
+ "reqwest",
  "reqwest-eventsource",
  "secrecy",
  "serde",
@@ -2160,7 +2160,7 @@ dependencies = [
  "clang-sys",
  "itertools 0.13.0",
  "log",
- "prettyplease 0.2.15",
+ "prettyplease",
  "proc-macro2",
  "quote",
  "regex",
@@ -2175,14 +2175,8 @@ version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "08807e080ed7f9d5433fa9b275196cfc35414f66a0c79d864dc51a0d825231a3"
 dependencies = [
- "bit-vec 0.8.0",
+ "bit-vec",
 ]
-
-[[package]]
-name = "bit-vec"
-version = "0.6.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "349f9b6a179ed607305526ca489b34ad0a41aed5f7980fa90eb03160b69598fb"
 
 [[package]]
 name = "bit-vec"
@@ -2306,7 +2300,7 @@ checksum = "77e9d642a7e3a318e37c2c9427b5a6a48aa1ad55dcd986f3034ab2239045a645"
 dependencies = [
  "darling 0.21.3",
  "ident_case",
- "prettyplease 0.2.15",
+ "prettyplease",
  "proc-macro2",
  "quote",
  "rustversion",
@@ -2858,8 +2852,8 @@ dependencies = [
  "flate2",
  "liblzma",
  "memchr",
- "zstd 0.13.3",
- "zstd-safe 7.2.1",
+ "zstd",
+ "zstd-safe",
 ]
 
 [[package]]
@@ -3665,9 +3659,9 @@ checksum = "c2e66c9d817f1720209181c316d28635c050fa304f9c79e47a520882661b7308"
 
 [[package]]
 name = "data-url"
-version = "0.3.0"
+version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "41b319d1b62ffbd002e057f36bebd1f42b9f97927c9577461d855f3513c4289f"
+checksum = "be1e0bca6c3637f992fc1cc7cbc52a78c1ef6db076dbf1059c4323d6a2048376"
 
 [[package]]
 name = "datafusion"
@@ -3721,7 +3715,7 @@ dependencies = [
  "tokio",
  "url",
  "uuid",
- "zstd 0.13.3",
+ "zstd",
 ]
 
 [[package]]
@@ -3839,7 +3833,7 @@ dependencies = [
  "tokio",
  "tokio-util",
  "url",
- "zstd 0.13.3",
+ "zstd",
 ]
 
 [[package]]
@@ -4374,7 +4368,7 @@ dependencies = [
  "itertools 0.14.0",
  "object_store",
  "parquet 57.3.0",
- "reqwest 0.12.25",
+ "reqwest",
  "roaring",
  "rustc_version",
  "serde",
@@ -4990,7 +4984,7 @@ dependencies = [
  "flate2",
  "lazy_static",
  "percent-encoding",
- "reqwest 0.12.25",
+ "reqwest",
  "rustc_version",
  "serde",
  "serde_json",
@@ -5704,7 +5698,7 @@ dependencies = [
  "tokio",
  "tracing",
  "twox-hash 2.1.0",
- "zstd 0.13.3",
+ "zstd",
 ]
 
 [[package]]
@@ -5944,7 +5938,7 @@ dependencies = [
  "gcloud-metadata",
  "home",
  "jsonwebtoken 9.3.1",
- "reqwest 0.12.25",
+ "reqwest",
  "serde",
  "serde_json",
  "thiserror 2.0.17",
@@ -5973,7 +5967,7 @@ dependencies = [
  "gcloud-googleapis",
  "num-bigint",
  "prost-types 0.14.3",
- "reqwest 0.12.25",
+ "reqwest",
  "reqwest-middleware",
  "serde",
  "serde_json",
@@ -6018,7 +6012,7 @@ version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "61f706788c1b58712c513e4d403234707fd255f49caa89d1c930197418b5fb2c"
 dependencies = [
- "reqwest 0.12.25",
+ "reqwest",
  "thiserror 2.0.17",
  "tokio",
 ]
@@ -6059,7 +6053,7 @@ dependencies = [
  "prost 0.14.3",
  "prost-build 0.14.3",
  "prost-types 0.14.3",
- "reqwest 0.12.25",
+ "reqwest",
  "serde",
  "serde_json",
  "thiserror 2.0.17",
@@ -6856,7 +6850,7 @@ dependencies = [
  "parquet 57.3.0",
  "rand 0.8.5",
  "reqsign",
- "reqwest 0.12.25",
+ "reqwest",
  "roaring",
  "serde",
  "serde_bytes",
@@ -6871,7 +6865,7 @@ dependencies = [
  "typetag",
  "url",
  "uuid",
- "zstd 0.13.3",
+ "zstd",
 ]
 
 [[package]]
@@ -6901,7 +6895,7 @@ dependencies = [
  "http 1.4.0",
  "iceberg",
  "itertools 0.13.0",
- "reqwest 0.12.25",
+ "reqwest",
  "serde",
  "serde_derive",
  "serde_json",
@@ -8095,7 +8089,7 @@ version = "0.6.0+0.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d2df12aca583def22dfeb88ec9d9c8f82045db3575c4973153f89bf2688f9367"
 dependencies = [
- "prettyplease 0.2.15",
+ "prettyplease",
  "proc-macro2",
  "prost-build 0.14.3",
  "quote",
@@ -8433,12 +8427,6 @@ checksum = "1fafa6961cabd9c63bcd77a45d7e3b7f3b552b70417831fb0f56db717e72407e"
 
 [[package]]
 name = "multimap"
-version = "0.8.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e5ce46fe64a9d73be07dcbe690a38ce1b293be448fd8ce1e6c1b8062c9f72c6a"
-
-[[package]]
-name = "multimap"
 version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "defc4c55412d89136f966bbb339008b474350e5e6e78d2714439c386b3137a03"
@@ -8546,11 +8534,10 @@ dependencies = [
 
 [[package]]
 name = "native-tls"
-version = "0.2.11"
+version = "0.2.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "07226173c32f2926027b63cce4bcd8076c3552846cbe7925f3aaffeac0a3b92e"
+checksum = "87de3442987e9dbec73158d5c715e7ad9072fda936bb03d19d7fa10e00520f0e"
 dependencies = [
- "lazy_static",
  "libc",
  "log",
  "openssl",
@@ -8845,16 +8832,16 @@ dependencies = [
 
 [[package]]
 name = "oauth2"
-version = "4.4.2"
+version = "5.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c38841cdd844847e3e7c8d29cef9dcfed8877f8f56f9071f77843ecf3baf937f"
+checksum = "51e219e79014df21a225b1860a479e2dcd7cbd9130f4defd4bd0e191ea31d67d"
 dependencies = [
- "base64 0.13.1",
+ "base64 0.22.1",
  "chrono",
  "getrandom 0.2.11",
- "http 0.2.12",
+ "http 1.4.0",
  "rand 0.8.5",
- "reqwest 0.11.20",
+ "reqwest",
  "serde",
  "serde_json",
  "serde_path_to_error",
@@ -8926,7 +8913,7 @@ dependencies = [
  "percent-encoding",
  "quick-xml 0.38.4",
  "rand 0.9.2",
- "reqwest 0.12.25",
+ "reqwest",
  "ring",
  "rustls-pemfile 2.2.0",
  "serde",
@@ -8996,7 +8983,7 @@ dependencies = [
  "percent-encoding",
  "quick-xml 0.38.4",
  "reqsign",
- "reqwest 0.12.25",
+ "reqwest",
  "serde",
  "serde_json",
  "sha2",
@@ -9007,16 +8994,16 @@ dependencies = [
 
 [[package]]
 name = "openidconnect"
-version = "3.4.0"
+version = "4.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "62d6050f6a84b81f23c569f5607ad883293e57491036e318fafe6fc4895fadb1"
+checksum = "0d8c6709ba2ea764bbed26bce1adf3c10517113ddea6f2d4196e4851757ef2b2"
 dependencies = [
- "base64 0.13.1",
+ "base64 0.21.7",
  "chrono",
  "dyn-clone",
  "ed25519-dalek",
  "hmac",
- "http 0.2.12",
+ "http 1.4.0",
  "itertools 0.10.5",
  "log",
  "oauth2",
@@ -9026,7 +9013,6 @@ dependencies = [
  "rsa",
  "serde",
  "serde-value",
- "serde_derive",
  "serde_json",
  "serde_path_to_error",
  "serde_plain",
@@ -9048,7 +9034,7 @@ dependencies = [
  "dyn-clone",
  "lazy_static",
  "percent-encoding",
- "reqwest 0.12.25",
+ "reqwest",
  "rustc_version",
  "serde",
  "serde_json",
@@ -9135,7 +9121,7 @@ dependencies = [
  "bytes",
  "http 1.4.0",
  "opentelemetry",
- "reqwest 0.12.25",
+ "reqwest",
 ]
 
 [[package]]
@@ -9150,7 +9136,7 @@ dependencies = [
  "opentelemetry-proto",
  "opentelemetry_sdk",
  "prost 0.14.3",
- "reqwest 0.12.25",
+ "reqwest",
  "thiserror 2.0.17",
  "tokio",
  "tonic 0.14.2",
@@ -9443,7 +9429,7 @@ dependencies = [
  "thrift",
  "tokio",
  "twox-hash 2.1.0",
- "zstd 0.13.3",
+ "zstd",
 ]
 
 [[package]]
@@ -9480,7 +9466,7 @@ dependencies = [
  "thrift",
  "tokio",
  "twox-hash 2.1.0",
- "zstd 0.13.3",
+ "zstd",
 ]
 
 [[package]]
@@ -9593,12 +9579,12 @@ dependencies = [
 
 [[package]]
 name = "pem"
-version = "3.0.2"
+version = "3.0.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3163d2912b7c3b52d651a055f2c7eec9ba5cd22d26ef75b8dd3a59980b185923"
+checksum = "1d30c53c26bc5b31a98cd02d20f25a7c8567146caf63ed593a9d87b2775291be"
 dependencies = [
- "base64 0.21.7",
- "serde",
+ "base64 0.22.1",
+ "serde_core",
 ]
 
 [[package]]
@@ -9688,7 +9674,7 @@ dependencies = [
  "peekable",
  "postgres-types",
  "rand 0.8.5",
- "reqwest 0.12.25",
+ "reqwest",
  "risingwave_common",
  "risingwave_sqlparser",
  "rsa",
@@ -10123,16 +10109,6 @@ dependencies = [
 
 [[package]]
 name = "prettyplease"
-version = "0.1.25"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6c8646e95016a7a6c4adea95bafa8a16baab64b583356217f2c85db4a39d9a86"
-dependencies = [
- "proc-macro2",
- "syn 1.0.109",
-]
-
-[[package]]
-name = "prettyplease"
 version = "0.2.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ae005bd773ab59b4725093fd7df83fd7892f7d8eafb48dbd7de6e024e4215f9d"
@@ -10342,7 +10318,7 @@ checksum = "0fcebfa99f03ae51220778316b37d24981e36322c82c24848f48c5bd0f64cbdb"
 dependencies = [
  "enum-as-inner 0.6.1",
  "mime",
- "reqwest 0.12.25",
+ "reqwest",
  "serde",
  "time",
  "url",
@@ -10379,24 +10355,22 @@ dependencies = [
 
 [[package]]
 name = "prost-build"
-version = "0.11.9"
+version = "0.13.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "119533552c9a7ffacc21e099c24a0ac8bb19c2a2a3f363de84cd9b844feab270"
+checksum = "be769465445e8c1474e9c5dac2018218498557af32d9ed057325ec9a41ae81bf"
 dependencies = [
- "bytes",
- "heck 0.4.1",
- "itertools 0.10.5",
- "lazy_static",
+ "heck 0.5.0",
+ "itertools 0.14.0",
  "log",
- "multimap 0.8.3",
+ "multimap",
+ "once_cell",
  "petgraph 0.6.5",
- "prettyplease 0.1.25",
- "prost 0.11.9",
- "prost-types 0.11.9",
+ "prettyplease",
+ "prost 0.13.5",
+ "prost-types 0.13.5",
  "regex",
- "syn 1.0.109",
+ "syn 2.0.117",
  "tempfile",
- "which",
 ]
 
 [[package]]
@@ -10407,9 +10381,9 @@ dependencies = [
  "heck 0.5.0",
  "itertools 0.14.0",
  "log",
- "multimap 0.10.0",
+ "multimap",
  "petgraph 0.8.3",
- "prettyplease 0.2.15",
+ "prettyplease",
  "prost 0.14.3",
  "prost-types 0.14.3",
  "pulldown-cmark",
@@ -10479,15 +10453,6 @@ dependencies = [
  "prost-types 0.14.3",
  "serde",
  "serde-value",
-]
-
-[[package]]
-name = "prost-types"
-version = "0.11.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "213622a1460818959ac1181aaeb2dc9c7f63df720db7d788b3e24eacd1983e13"
-dependencies = [
- "prost 0.11.9",
 ]
 
 [[package]]
@@ -10616,29 +10581,28 @@ dependencies = [
 
 [[package]]
 name = "pulsar"
-version = "6.3.0"
+version = "6.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d7f3541ff84e39da334979ac4bf171e0f277f4f782603aeae65bf5795dc7275a"
+checksum = "4493cb89dac20434cceeab8c1d21b59f703892a033e64e1de06a1a5d8f88169f"
 dependencies = [
+ "async-channel 2.5.0",
  "async-trait",
- "bit-vec 0.6.3",
  "bytes",
  "chrono",
  "crc",
  "data-url",
  "futures",
- "futures-io",
- "futures-timer",
  "log",
  "lz4",
+ "murmur3",
  "native-tls",
  "nom",
  "oauth2",
  "openidconnect",
  "pem",
- "prost 0.11.9",
- "prost-build 0.11.9",
- "prost-derive 0.11.9",
+ "prost 0.13.5",
+ "prost-build 0.13.5",
+ "prost-derive 0.13.5",
  "rand 0.8.5",
  "regex",
  "serde",
@@ -10649,7 +10613,7 @@ dependencies = [
  "tracing",
  "url",
  "uuid",
- "zstd 0.12.4",
+ "zstd",
 ]
 
 [[package]]
@@ -11189,7 +11153,7 @@ dependencies = [
  "percent-encoding",
  "quick-xml 0.37.1",
  "rand 0.8.5",
- "reqwest 0.12.25",
+ "reqwest",
  "rsa",
  "rust-ini",
  "serde",
@@ -11197,45 +11161,6 @@ dependencies = [
  "sha1",
  "sha2",
  "tokio",
-]
-
-[[package]]
-name = "reqwest"
-version = "0.11.20"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3e9ad3fe7488d7e34558a2033d45a0c90b72d97b4f80705666fea71472e2e6a1"
-dependencies = [
- "base64 0.21.7",
- "bytes",
- "encoding_rs",
- "futures-core",
- "futures-util",
- "h2 0.3.26",
- "http 0.2.12",
- "http-body 0.4.6",
- "hyper 0.14.27",
- "hyper-rustls 0.24.2",
- "ipnet",
- "js-sys",
- "log",
- "mime",
- "once_cell",
- "percent-encoding",
- "pin-project-lite",
- "rustls 0.21.11",
- "rustls-pemfile 1.0.4",
- "serde",
- "serde_json",
- "serde_urlencoded",
- "tokio",
- "tokio-rustls 0.24.1",
- "tower-service",
- "url",
- "wasm-bindgen",
- "wasm-bindgen-futures",
- "web-sys",
- "webpki-roots 0.25.2",
- "winreg",
 ]
 
 [[package]]
@@ -11300,7 +11225,7 @@ dependencies = [
  "mime",
  "nom",
  "pin-project-lite",
- "reqwest 0.12.25",
+ "reqwest",
  "thiserror 1.0.63",
 ]
 
@@ -11313,7 +11238,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "http 1.4.0",
- "reqwest 0.12.25",
+ "reqwest",
  "serde",
  "thiserror 1.0.63",
  "tower-service",
@@ -11390,7 +11315,7 @@ dependencies = [
  "panic-message",
  "redis",
  "regex",
- "reqwest 0.12.25",
+ "reqwest",
  "serde",
  "serde_json",
  "serde_yaml",
@@ -11423,7 +11348,7 @@ version = "2.9.0-alpha"
 dependencies = [
  "expect-test",
  "indoc",
- "prettyplease 0.2.15",
+ "prettyplease",
  "proc-macro2",
  "quote",
  "syn 2.0.117",
@@ -11690,7 +11615,7 @@ dependencies = [
  "prost 0.14.3",
  "rand 0.9.2",
  "regex",
- "reqwest 0.12.25",
+ "reqwest",
  "risingwave-fields-derive",
  "risingwave_common_estimate_size",
  "risingwave_common_log",
@@ -11856,7 +11781,7 @@ dependencies = [
  "moka",
  "parking_lot 0.12.5",
  "prost 0.14.3",
- "reqwest 0.12.25",
+ "reqwest",
  "risingwave_pb",
  "serde",
  "serde_json",
@@ -12071,7 +11996,7 @@ dependencies = [
  "rand 0.9.2",
  "redis",
  "regex",
- "reqwest 0.12.25",
+ "reqwest",
  "risingwave_common",
  "risingwave_common_estimate_size",
  "risingwave_common_rate_limit",
@@ -12141,7 +12066,7 @@ dependencies = [
  "prost-reflect",
  "prost-types 0.14.3",
  "protox",
- "reqwest 0.12.25",
+ "reqwest",
  "risingwave_common",
  "risingwave_pb",
  "rust_decimal",
@@ -12337,7 +12262,7 @@ dependencies = [
  "tonic 0.12.3",
  "tracing",
  "workspace-hack",
- "zstd 0.13.3",
+ "zstd",
 ]
 
 [[package]]
@@ -12696,7 +12621,7 @@ dependencies = [
  "dircpy",
  "mime_guess",
  "npm_rs",
- "reqwest 0.12.25",
+ "reqwest",
  "rust-embed",
  "thiserror-ext",
  "tokio",
@@ -12817,7 +12742,7 @@ dependencies = [
  "madsim-tokio",
  "opendal",
  "prometheus",
- "reqwest 0.12.25",
+ "reqwest",
  "risingwave_common",
  "spin 0.10.0",
  "thiserror 2.0.17",
@@ -13143,7 +13068,7 @@ dependencies = [
  "workspace-hack",
  "xorf",
  "xxhash-rust",
- "zstd 0.13.3",
+ "zstd",
 ]
 
 [[package]]
@@ -13181,7 +13106,7 @@ dependencies = [
  "maplit",
  "memcomparable",
  "moka",
- "multimap 0.10.0",
+ "multimap",
  "parking_lot 0.12.5",
  "paste",
  "pin-project",
@@ -13228,7 +13153,7 @@ dependencies = [
  "jsonbb",
  "madsim-tokio",
  "prost 0.14.3",
- "reqwest 0.12.25",
+ "reqwest",
  "risingwave_common_log",
  "risingwave_pb",
  "thiserror-ext",
@@ -15978,7 +15903,7 @@ dependencies = [
  "tower-service",
  "tracing",
  "webpki-roots 1.0.4",
- "zstd 0.13.3",
+ "zstd",
 ]
 
 [[package]]
@@ -15987,7 +15912,7 @@ version = "0.14.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "27aac809edf60b741e2d7db6367214d078856b8a5bff0087e94ff330fb97b6fc"
 dependencies = [
- "prettyplease 0.2.15",
+ "prettyplease",
  "proc-macro2",
  "quote",
  "syn 2.0.117",
@@ -16010,7 +15935,7 @@ version = "0.14.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a4556786613791cfef4ed134aa670b61a85cfcacf71543ef33e8d801abae988f"
 dependencies = [
- "prettyplease 0.2.15",
+ "prettyplease",
  "proc-macro2",
  "prost-build 0.14.3",
  "prost-types 0.14.3",
@@ -16947,7 +16872,7 @@ dependencies = [
  "sha2",
  "toml 0.8.12",
  "windows-sys 0.59.0",
- "zstd 0.13.3",
+ "zstd",
 ]
 
 [[package]]
@@ -17186,18 +17111,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b2878ef029c47c6e8cf779119f20fcf52bde7ad42a731b2a304bc221df17571e"
 dependencies = [
  "rustls-pki-types",
-]
-
-[[package]]
-name = "which"
-version = "4.4.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "87ba24419a2078cd2b0f2ede2691b6c66d8e47836da3b6db8265ebad47afbfc7"
-dependencies = [
- "either",
- "home",
- "once_cell",
- "rustix 0.38.41",
 ]
 
 [[package]]
@@ -18092,30 +18005,11 @@ checksum = "2f06ae92f42f5e5c42443fd094f245eb656abf56dd7cce9b8b263236565e00f2"
 
 [[package]]
 name = "zstd"
-version = "0.12.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1a27595e173641171fc74a1232b7b1c7a7cb6e18222c11e9dfb9888fa424c53c"
-dependencies = [
- "zstd-safe 6.0.6",
-]
-
-[[package]]
-name = "zstd"
 version = "0.13.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e91ee311a569c327171651566e07972200e76fcfe2242a4fa446149a3881c08a"
 dependencies = [
- "zstd-safe 7.2.1",
-]
-
-[[package]]
-name = "zstd-safe"
-version = "6.0.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ee98ffd0b48ee95e6c5168188e44a54550b1564d9d530ee21d5f0eaed1069581"
-dependencies = [
- "libc",
- "zstd-sys",
+ "zstd-safe",
 ]
 
 [[package]]
