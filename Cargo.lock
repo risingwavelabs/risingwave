@@ -2361,8 +2361,7 @@ dependencies = [
 [[package]]
 name = "bson"
 version = "2.15.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7969a9ba84b0ff843813e7249eed1678d9b6607ce5a3b8f0a47af3fcf7978e6e"
+source = "git+https://github.com/risingwavelabs/bson-rust?tag=v2.15.0-json-no-preserve_order#44a00c6e2230e64bc53bd68249a473f50cbfa48d"
 dependencies = [
  "ahash 0.8.11",
  "base64 0.22.1",
@@ -14291,7 +14290,6 @@ version = "1.0.145"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "402a6f66d8c709116cf22f558eab210f5a50187f702eb4d7e5ef38d9a7f1c79c"
 dependencies = [
- "indexmap 2.13.0",
  "itoa",
  "memchr",
  "ryu",
@@ -18191,8 +18189,3 @@ dependencies = [
  "cc",
  "pkg-config",
 ]
-
-[[patch.unused]]
-name = "bson"
-version = "2.14.0"
-source = "git+https://github.com/risingwavelabs/bson-rust?tag=v2.14.0-json-no-preserve_order#a9ef07735285ca1989409db99678e94983bee5d1"
