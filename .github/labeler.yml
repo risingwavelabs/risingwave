@@ -57,6 +57,26 @@ labels:
 - label: "ci/run-e2e-iceberg-tests"
   title: ".*iceberg.*"
 
+# Auto-label for source/sink connector tests based on changed files
+- label: "ci/run-e2e-source-tests"
+  files:
+  - "src\\/connector\\/src\\/source\\/.*"
+  - "src\\/connector\\/codec\\/.*"
+  - "src\\/connector\\/with_options\\/.*"
+  - "java\\/.*"
+  - "proto\\/source.*"
+  - "proto\\/connector_service.*"
+  - "e2e_test\\/source\\/.*"
+
+- label: "ci/run-e2e-sink-tests"
+  files:
+  - "src\\/connector\\/src\\/sink\\/.*"
+  - "src\\/connector\\/codec\\/.*"
+  - "src\\/connector\\/with_options\\/.*"
+  - "java\\/.*"
+  - "proto\\/connector_service.*"
+  - "e2e_test\\/sink\\/.*"
+
 # S3 source tests
 - label: "ci/run-s3-source-tests"
   files:

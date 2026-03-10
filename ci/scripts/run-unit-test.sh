@@ -7,15 +7,16 @@ REPO_ROOT=${PWD}
 
 source ci/scripts/common.sh
 
-# Enable coverage instrumentation.
-export RW_BUILD_INSTRUMENT_COVERAGE=1
-
-# `cargo-nextest` will spawn a process for each test. Avoid including `%p` in the file name pattern
-# to avoid creating too many profraw files. Instead, use `%m` to reuse the profraw files for the
-# same test binary. Here `%4m` means that there's a pool of 4 profraw files for each test binary.
-# This achieves a good balance between the performance of running tests and generating reports.
-# https://github.com/taiki-e/cargo-llvm-cov/issues/335#issuecomment-1890349373
-export LLVM_PROFILE_FILE="${CARGO_LLVM_COV_TARGET_DIR}/risingwave-unit-test-%4m.profraw"
+# Enable coverage instrumentation only when coverage is enabled (main-cron).
+if [[ "${RW_CI_ENABLE_COVERAGE:-0}" == "1" ]]; then
+  export RW_BUILD_INSTRUMENT_COVERAGE=1
+  # `cargo-nextest` will spawn a process for each test. Avoid including `%p` in the file name pattern
+  # to avoid creating too many profraw files. Instead, use `%m` to reuse the profraw files for the
+  # same test binary. Here `%4m` means that there's a pool of 4 profraw files for each test binary.
+  # This achieves a good balance between the performance of running tests and generating reports.
+  # https://github.com/taiki-e/cargo-llvm-cov/issues/335#issuecomment-1890349373
+  export LLVM_PROFILE_FILE="${CARGO_LLVM_COV_TARGET_DIR}/risingwave-unit-test-%4m.profraw"
+fi
 
 echo "+++ Run unit tests"
 # use tee to disable progress bar
