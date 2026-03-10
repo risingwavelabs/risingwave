@@ -5,6 +5,10 @@ on:
     branches: [main]
     paths: [proto/**]
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   buf-breaking-check:
     runs-on: ubuntu-latest

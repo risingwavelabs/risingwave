@@ -106,3 +106,15 @@ labels:
   - "src\\/frontend\\/src\\/optimizer\\/rule\\/table_function_to_internal_get_channel_delta_stats\\.rs"
   - "e2e_test\\/table_function\\/internal_get_channel_delta_stats\\.slt"
   - "ci\\/scripts\\/e2e-monitoring-tests\\.sh"
+
+# Auto-label connector-related PRs to run source/sink tests
+- label: "ci/run-e2e-source-tests"
+  files:
+  - "src\\/connector\\/src\\/source\\/.*"
+  - "src\\/connector\\/src\\/parser\\/.*"
+  - "src\\/connector\\/with\\/options\\.yaml"
+
+- label: "ci/run-e2e-sink-tests"
+  files:
+  - "src\\/connector\\/src\\/sink\\/.*"
+  - "src\\/connector\\/with\\/options\\.yaml"

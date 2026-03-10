@@ -10,6 +10,10 @@ on:
       - ".github/workflows/slt-coverage-check.yml"
       - "e2e_test/.coverageignore"
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   check-slt-coverage:
     name: Check SLT Coverage Regression

@@ -25,3 +25,6 @@ cargo check -p risingwave_cmd --bin risectl --features "rw-static-link" --profil
 echo "--- Show sccache stats"
 sccache --show-stats
 sccache --zero-stats
+
+echo "--- Check unused dependencies"
+cargo machete
