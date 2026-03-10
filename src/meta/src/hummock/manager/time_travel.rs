@@ -54,7 +54,9 @@ impl HummockManager {
             .order_by_desc(hummock_time_travel_version::Column::VersionId)
             .one(&sql_store.conn)
             .await?
-            .map(|v| IncompleteHummockVersion::from_persisted_protobuf(&v.version.to_protobuf()))
+            .map(|v| {
+                IncompleteHummockVersion::from_persisted_protobuf_owned(v.version.to_protobuf())
+            })
         else {
             return Ok(());
         };
@@ -123,7 +125,9 @@ impl HummockManager {
             .order_by_desc(hummock_time_travel_version::Column::VersionId)
             .one(&txn)
             .await?
-            .map(|m| IncompleteHummockVersion::from_persisted_protobuf(&m.version.to_protobuf()));
+            .map(|m| {
+                IncompleteHummockVersion::from_persisted_protobuf_owned(m.version.to_protobuf())
+            });
         let Some(latest_valid_version) = latest_valid_version else {
             txn.commit().await?;
             return Ok(());
@@ -197,8 +201,8 @@ impl HummockManager {
                         delta_id_to_delete
                     )))
                 })?;
-            let delta_to_delete = IncompleteHummockVersionDelta::from_persisted_protobuf(
-                &delta_to_delete.version_delta.to_protobuf(),
+            let delta_to_delete = IncompleteHummockVersionDelta::from_persisted_protobuf_owned(
+                delta_to_delete.version_delta.to_protobuf(),
             );
             let new_sst_ids = delta_to_delete.newly_added_sst_ids(true);
             // The SST ids added and then deleted by compaction between the 2 versions.
@@ -226,8 +230,8 @@ impl HummockManager {
                             prev_version_id
                         )))
                     })?;
-                IncompleteHummockVersion::from_persisted_protobuf(
-                    &prev_version.version.to_protobuf(),
+                IncompleteHummockVersion::from_persisted_protobuf_owned(
+                    prev_version.version.to_protobuf(),
                 )
             };
             let sst_ids = prev_version.get_sst_ids(true);
@@ -352,7 +356,7 @@ impl HummockManager {
                 let mut next_prev_version_id = None;
                 while let Some(model) = version_stream.try_next().await? {
                     let version =
-                        HummockVersion::from_persisted_protobuf(&model.version.to_protobuf());
+                        HummockVersion::from_persisted_protobuf_owned(model.version.to_protobuf());
                     for object_id in version.get_object_ids(true) {
                         result.remove(&object_id);
                     }
@@ -388,8 +392,8 @@ impl HummockManager {
                     .await?;
                 let mut next_prev_version_id = None;
                 while let Some(model) = version_stream.try_next().await? {
-                    let version_delta = HummockVersionDelta::from_persisted_protobuf(
-                        &model.version_delta.to_protobuf(),
+                    let version_delta = HummockVersionDelta::from_persisted_protobuf_owned(
+                        model.version_delta.to_protobuf(),
                     );
                     // set exclude_table_change_log to true because in time travel delta we ignore the table change log
                     for object_id in version_delta.newly_added_object_ids(true) {
@@ -692,9 +696,9 @@ fn replay_archive(
 ) -> HummockVersion {
     // The pb version ann pb version delta are actually written by InHummockVersion and InHummockVersionDelta, respectively.
     // Using HummockVersion make it easier for `refill_version` later.
-    let mut last_version = HummockVersion::from_persisted_protobuf(&version);
+    let mut last_version = HummockVersion::from_persisted_protobuf_owned(version);
     for d in deltas {
-        let d = HummockVersionDelta::from_persisted_protobuf(&d);
+        let d = HummockVersionDelta::from_persisted_protobuf_owned(d);
         debug_assert!(
             !should_mark_next_time_travel_version_snapshot(&d),
             "unexpected time travel delta {:?}",

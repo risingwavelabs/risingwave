@@ -57,6 +57,15 @@ impl HummockVersionCheckpoint {
         }
     }
 
+    /// Convert an owned `PbHummockVersionCheckpoint` to `HummockVersionCheckpoint`,
+    /// moving data instead of cloning for better performance on large checkpoints.
+    pub fn from_protobuf_owned(checkpoint: PbHummockVersionCheckpoint) -> Self {
+        Self {
+            version: HummockVersion::from_persisted_protobuf_owned(checkpoint.version.unwrap()),
+            stale_objects: checkpoint.stale_objects,
+        }
+    }
+
     pub fn to_protobuf(&self) -> PbHummockVersionCheckpoint {
         PbHummockVersionCheckpoint {
             version: Some(PbHummockVersion::from(&self.version)),
@@ -89,7 +98,7 @@ impl HummockManager {
             }
         };
         let ckpt = PbHummockVersionCheckpoint::decode(data).map_err(|e| anyhow::anyhow!(e))?;
-        Ok(Some(HummockVersionCheckpoint::from_protobuf(&ckpt)))
+        Ok(Some(HummockVersionCheckpoint::from_protobuf_owned(ckpt)))
     }
 
     pub(super) async fn write_checkpoint(

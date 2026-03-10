@@ -43,7 +43,7 @@ datafusion = ["risingwave_frontend/datafusion"]
 [dependencies]
 clap = { workspace = true }
 console = "0.16"
-const-str = "1.0"
+const-str = "1.1"
 home = "0.5"
 risingwave_batch_executors = { workspace = true }
 risingwave_cmd = { workspace = true }
