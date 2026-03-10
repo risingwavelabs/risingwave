@@ -440,13 +440,7 @@ fn make_cluster_info() -> StreamingClusterInfo {
     ))
     .collect();
 
-    let schedulable_workers = worker_nodes.keys().cloned().collect();
-
-    StreamingClusterInfo {
-        worker_nodes,
-        schedulable_workers,
-        unschedulable_workers: Default::default(),
-    }
+    StreamingClusterInfo { worker_nodes }
 }
 
 #[tokio::test]

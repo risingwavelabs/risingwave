@@ -710,9 +710,6 @@ for_all_wrapped_id_fields! (
             state_table_ids: TableId,
             table_id: JobId,
         }
-        UpdateWorkerNodeSchedulabilityRequest {
-            worker_ids: WorkerId,
-        }
         WorkerReschedule {
             worker_actor_diff: WorkerId,
         }

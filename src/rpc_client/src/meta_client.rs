@@ -102,7 +102,6 @@ use risingwave_pb::meta::session_param_service_client::SessionParamServiceClient
 use risingwave_pb::meta::stream_manager_service_client::StreamManagerServiceClient;
 use risingwave_pb::meta::system_params_service_client::SystemParamsServiceClient;
 use risingwave_pb::meta::telemetry_info_service_client::TelemetryInfoServiceClient;
-use risingwave_pb::meta::update_worker_node_schedulability_request::Schedulability;
 use risingwave_pb::meta::{FragmentDistribution, *};
 use risingwave_pb::monitor_service::monitor_service_client::MonitorServiceClient;
 use risingwave_pb::monitor_service::stack_trace_request::ActorTracesFormat;
@@ -292,9 +291,6 @@ impl MetaClient {
             true,
         );
 
-        if property.is_unschedulable {
-            tracing::warn!("worker {:?} registered as unschedulable", addr.clone());
-        }
         let init_result: Result<_> = tokio_retry::RetryIf::spawn(
             retry_strategy,
             || async {
@@ -1074,22 +1070,6 @@ impl MetaClient {
                 );
             }
         }
-    }
-
-    pub async fn update_schedulability(
-        &self,
-        worker_ids: &[WorkerId],
-        schedulability: Schedulability,
-    ) -> Result<UpdateWorkerNodeSchedulabilityResponse> {
-        let request = UpdateWorkerNodeSchedulabilityRequest {
-            worker_ids: worker_ids.to_vec(),
-            schedulability: schedulability.into(),
-        };
-        let resp = self
-            .inner
-            .update_worker_node_schedulability(request)
-            .await?;
-        Ok(resp)
     }
 
     pub async fn list_worker_nodes(
@@ -2590,7 +2570,6 @@ macro_rules! for_all_meta_rpc {
              { cluster_client, add_worker_node, AddWorkerNodeRequest, AddWorkerNodeResponse }
             ,{ cluster_client, activate_worker_node, ActivateWorkerNodeRequest, ActivateWorkerNodeResponse }
             ,{ cluster_client, delete_worker_node, DeleteWorkerNodeRequest, DeleteWorkerNodeResponse }
-            ,{ cluster_client, update_worker_node_schedulability, UpdateWorkerNodeSchedulabilityRequest, UpdateWorkerNodeSchedulabilityResponse }
             ,{ cluster_client, list_all_nodes, ListAllNodesRequest, ListAllNodesResponse }
             ,{ cluster_client, get_cluster_recovery_status, GetClusterRecoveryStatusRequest, GetClusterRecoveryStatusResponse }
             ,{ cluster_client, get_meta_store_info, GetMetaStoreInfoRequest, GetMetaStoreInfoResponse }

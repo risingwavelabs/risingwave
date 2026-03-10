@@ -38,6 +38,43 @@ use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::prelude::*;
 use tracing_subscriber::{EnvFilter, filter, reload};
 
+/// Parse a comma-separated list of `key=value` pairs into `OpenTelemetry` `KeyValue` attributes.
+///
+/// - Splits by comma to get pairs.
+/// - Each pair must contain exactly one `=`.
+/// - Trims whitespace around key and value.
+/// - Ignores invalid pairs but logs a warning.
+/// - Returns an empty vec for empty or unset input.
+fn parse_extra_tracing_attributes(input: &str) -> Vec<opentelemetry::KeyValue> {
+    use opentelemetry::KeyValue;
+
+    if input.trim().is_empty() {
+        return vec![];
+    }
+
+    input
+        .split(',')
+        .filter_map(|pair| {
+            let pair = pair.trim();
+            if pair.is_empty() {
+                return None;
+            }
+            let parts: Vec<&str> = pair.splitn(2, '=').collect();
+            if parts.len() != 2 {
+                eprintln!("warning: ignoring invalid tracing attribute pair (no '='): {pair:?}");
+                return None;
+            }
+            let key = parts[0].trim();
+            let value = parts[1].trim();
+            if key.is_empty() {
+                eprintln!("warning: ignoring tracing attribute with empty key: {pair:?}");
+                return None;
+            }
+            Some(KeyValue::new(key.to_owned(), value.to_owned()))
+        })
+        .collect()
+}
+
 pub struct LoggerSettings {
     /// The name of the service. Used to identify the service in distributed tracing.
     name: String,
@@ -55,6 +92,8 @@ pub struct LoggerSettings {
     default_level: Option<tracing::metadata::LevelFilter>,
     /// The endpoint of the tracing collector in OTLP gRPC protocol.
     tracing_endpoint: Option<String>,
+    /// Extra key/value attributes to attach to `OpenTelemetry` trace resources.
+    extra_tracing_attributes: Vec<opentelemetry::KeyValue>,
 }
 
 impl Default for LoggerSettings {
@@ -94,6 +133,10 @@ impl LoggerSettings {
             targets: vec![],
             default_level: None,
             tracing_endpoint: std::env::var("RW_TRACING_ENDPOINT").ok(),
+            extra_tracing_attributes: std::env::var("RW_TRACING_EXTRA_ATTRIBUTES")
+                .ok()
+                .map(|v| parse_extra_tracing_attributes(&v))
+                .unwrap_or_default(),
         }
     }
 
@@ -434,6 +477,17 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
             std::process::id()
         );
 
+        let extra_attributes = &settings.extra_tracing_attributes;
+        if !extra_attributes.is_empty() {
+            println!(
+                "extra tracing resource attributes: {:?}",
+                extra_attributes
+                    .iter()
+                    .map(|kv| format!("{}={}", kv.key, kv.value))
+                    .collect::<Vec<_>>()
+            );
+        }
+
         let (otel_tracer, exporter) = {
             let runtime = tokio::runtime::Builder::new_multi_thread()
                 .enable_all()
@@ -449,6 +503,15 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
             // TODO(bugen): better service name
             // https://github.com/jaegertracing/jaeger-ui/issues/336
             let service_name = format!("{}-{}", settings.name, id);
+
+            let mut resource_attrs = vec![
+                KeyValue::new(resource::SERVICE_NAME, service_name.clone()),
+                KeyValue::new(resource::SERVICE_INSTANCE_ID, id.clone()),
+                KeyValue::new(resource::SERVICE_VERSION, env!("CARGO_PKG_VERSION")),
+                KeyValue::new(resource::PROCESS_PID, std::process::id().to_string()),
+            ];
+            resource_attrs.extend(extra_attributes.iter().cloned());
+
             let otel_tracer = TracerProviderBuilder::default()
                 .with_batch_exporter(
                     SpanExporter::builder()
@@ -457,16 +520,7 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
                         .build()
                         .unwrap(),
                 )
-                .with_resource(
-                    Resource::builder()
-                        .with_attributes([
-                            KeyValue::new(resource::SERVICE_NAME, service_name.clone()),
-                            KeyValue::new(resource::SERVICE_INSTANCE_ID, id.clone()),
-                            KeyValue::new(resource::SERVICE_VERSION, env!("CARGO_PKG_VERSION")),
-                            KeyValue::new(resource::PROCESS_PID, std::process::id().to_string()),
-                        ])
-                        .build(),
-                )
+                .with_resource(Resource::builder().with_attributes(resource_attrs).build())
                 .build()
                 .tracer(service_name);
 
@@ -524,11 +578,18 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
         // ```bash
         // risectl hummock tiered-cache-tracing -h
         // ```
+        let mut fastrace_resource_attrs: Vec<opentelemetry::KeyValue> =
+            vec![opentelemetry::KeyValue::new(
+                opentelemetry_semantic_conventions::resource::SERVICE_NAME,
+                format!("fastrace-{id}"),
+            )];
+        fastrace_resource_attrs.extend(extra_attributes.iter().cloned());
+
         let reporter = OpenTelemetryReporter::new(
             exporter,
             Cow::Owned(
                 Resource::builder()
-                    .with_service_name(format!("fastrace-{id}"))
+                    .with_attributes(fastrace_resource_attrs)
                     .build(),
             ),
             InstrumentationScope::builder("opentelemetry-instrumentation-foyer").build(),
@@ -545,4 +606,78 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
     }
     tracing_subscriber::registry().with(layers).init();
     // TODO: add file-appender tracing subscriber in the future
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_extra_tracing_attributes_normal() {
+        let attrs =
+            parse_extra_tracing_attributes("cluster=prod,region=us-east-1,namespace=terry-dev");
+        assert_eq!(attrs.len(), 3);
+        assert_eq!(attrs[0].key.as_str(), "cluster");
+        assert_eq!(attrs[0].value.as_str(), "prod");
+        assert_eq!(attrs[1].key.as_str(), "region");
+        assert_eq!(attrs[1].value.as_str(), "us-east-1");
+        assert_eq!(attrs[2].key.as_str(), "namespace");
+        assert_eq!(attrs[2].value.as_str(), "terry-dev");
+    }
+
+    #[test]
+    fn test_parse_extra_tracing_attributes_whitespace() {
+        let attrs = parse_extra_tracing_attributes("  key1 = val1 , key2=val2  ");
+        assert_eq!(attrs.len(), 2);
+        assert_eq!(attrs[0].key.as_str(), "key1");
+        assert_eq!(attrs[0].value.as_str(), "val1");
+        assert_eq!(attrs[1].key.as_str(), "key2");
+        assert_eq!(attrs[1].value.as_str(), "val2");
+    }
+
+    #[test]
+    fn test_parse_extra_tracing_attributes_empty() {
+        assert!(parse_extra_tracing_attributes("").is_empty());
+        assert!(parse_extra_tracing_attributes("  ").is_empty());
+    }
+
+    #[test]
+    fn test_parse_extra_tracing_attributes_invalid_pairs() {
+        // No '=' sign — should be skipped
+        let attrs = parse_extra_tracing_attributes("good=value,badpair,also_good=123");
+        assert_eq!(attrs.len(), 2);
+        assert_eq!(attrs[0].key.as_str(), "good");
+        assert_eq!(attrs[1].key.as_str(), "also_good");
+    }
+
+    #[test]
+    fn test_parse_extra_tracing_attributes_empty_key() {
+        // "=value" has empty key — should be skipped
+        let attrs = parse_extra_tracing_attributes("=value,key=val");
+        assert_eq!(attrs.len(), 1);
+        assert_eq!(attrs[0].key.as_str(), "key");
+    }
+
+    #[test]
+    fn test_parse_extra_tracing_attributes_value_with_equals() {
+        // value itself contains '=' — only first '=' is the delimiter
+        let attrs = parse_extra_tracing_attributes("expr=a=b");
+        assert_eq!(attrs.len(), 1);
+        assert_eq!(attrs[0].key.as_str(), "expr");
+        assert_eq!(attrs[0].value.as_str(), "a=b");
+    }
+
+    #[test]
+    fn test_parse_extra_tracing_attributes_trailing_comma() {
+        let attrs = parse_extra_tracing_attributes("k1=v1,k2=v2,");
+        assert_eq!(attrs.len(), 2);
+    }
+
+    #[test]
+    fn test_parse_extra_tracing_attributes_empty_value() {
+        let attrs = parse_extra_tracing_attributes("key=");
+        assert_eq!(attrs.len(), 1);
+        assert_eq!(attrs[0].key.as_str(), "key");
+        assert_eq!(attrs[0].value.as_str(), "");
+    }
 }
