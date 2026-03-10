@@ -18,7 +18,7 @@ use std::sync::Arc;
 
 use anyhow::{Context, anyhow};
 use futures::TryStreamExt;
-use itertools::Itertools;
+use itertools::{Either, Itertools};
 use risingwave_common::bail;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{FragmentTypeFlag, FragmentTypeMask};
@@ -453,13 +453,24 @@ impl CatalogController {
         fragment_ids: Vec<FragmentId>,
     ) -> MetaResult<Vec<ObjectId>> {
         let inner = self.inner.read().await;
+        self.get_fragment_job_id_in_txn(&inner.db, fragment_ids)
+            .await
+    }
 
+    pub async fn get_fragment_job_id_in_txn<C>(
+        &self,
+        txn: &C,
+        fragment_ids: Vec<FragmentId>,
+    ) -> MetaResult<Vec<ObjectId>>
+    where
+        C: ConnectionTrait + Send,
+    {
         let object_ids: Vec<ObjectId> = FragmentModel::find()
             .select_only()
             .column(fragment::Column::JobId)
             .filter(fragment::Column::FragmentId.is_in(fragment_ids))
             .into_tuple()
-            .all(&inner.db)
+            .all(txn)
             .await?;
 
         Ok(object_ids)
@@ -755,9 +766,21 @@ impl CatalogController {
         job_id: JobId,
     ) -> MetaResult<HashMap<crate::model::FragmentId, PbStreamScanType>> {
         let inner = self.inner.read().await;
+        self.get_job_fragment_backfill_scan_type_in_txn(&inner.db, job_id)
+            .await
+    }
+
+    pub async fn get_job_fragment_backfill_scan_type_in_txn<C>(
+        &self,
+        txn: &C,
+        job_id: JobId,
+    ) -> MetaResult<HashMap<crate::model::FragmentId, PbStreamScanType>>
+    where
+        C: ConnectionTrait + Send,
+    {
         let fragments: Vec<_> = FragmentModel::find()
             .filter(fragment::Column::JobId.eq(job_id))
-            .all(&inner.db)
+            .all(txn)
             .await?;
 
         let mut result = HashMap::new();
@@ -1011,6 +1034,18 @@ impl CatalogController {
         fragment_ids: impl Iterator<Item = crate::model::FragmentId>,
     ) -> MetaResult<HashMap<crate::model::FragmentId, HashSet<crate::model::FragmentId>>> {
         let inner = self.inner.read().await;
+        self.upstream_fragments_in_txn(&inner.db, fragment_ids)
+            .await
+    }
+
+    pub async fn upstream_fragments_in_txn<C>(
+        &self,
+        txn: &C,
+        fragment_ids: impl Iterator<Item = crate::model::FragmentId>,
+    ) -> MetaResult<HashMap<crate::model::FragmentId, HashSet<crate::model::FragmentId>>>
+    where
+        C: ConnectionTrait + StreamTrait + Send,
+    {
         let mut stream = FragmentRelation::find()
             .select_only()
             .columns([
@@ -1022,7 +1057,7 @@ impl CatalogController {
                     .is_in(fragment_ids.map(|id| id as FragmentId)),
             )
             .into_tuple::<(FragmentId, FragmentId)>()
-            .stream(&inner.db)
+            .stream(txn)
             .await?;
         let mut upstream_fragments: HashMap<_, HashSet<_>> = HashMap::new();
         while let Some((upstream_fragment_id, downstream_fragment_id)) = stream.try_next().await? {
@@ -1999,15 +2034,43 @@ impl CatalogController {
             return Ok(());
         }
 
-        let models: Vec<fragment_splits::ActiveModel> = fragment_splits
-            .iter()
-            .map(|(fragment_id, splits)| fragment_splits::ActiveModel {
-                fragment_id: Set(*fragment_id as _),
-                splits: Set(Some(ConnectorSplits::from(&PbConnectorSplits {
-                    splits: splits.iter().map(Into::into).collect_vec(),
-                }))),
-            })
+        let existing_fragment_ids: HashSet<FragmentId> = FragmentModel::find()
+            .select_only()
+            .column(fragment::Column::FragmentId)
+            .filter(fragment::Column::FragmentId.is_in(fragment_splits.keys().copied()))
+            .into_tuple()
+            .all(txn)
+            .await?
+            .into_iter()
             .collect();
+
+        // Filter out stale fragment ids to avoid FK violations when split updates race with drop.
+        let (models, skipped_fragment_ids): (Vec<_>, Vec<_>) = fragment_splits
+            .iter()
+            .partition_map(|(fragment_id, splits)| {
+                if existing_fragment_ids.contains(fragment_id) {
+                    Either::Left(fragment_splits::ActiveModel {
+                        fragment_id: Set(*fragment_id as _),
+                        splits: Set(Some(ConnectorSplits::from(&PbConnectorSplits {
+                            splits: splits.iter().map(Into::into).collect_vec(),
+                        }))),
+                    })
+                } else {
+                    Either::Right(*fragment_id)
+                }
+            });
+
+        if !skipped_fragment_ids.is_empty() {
+            tracing::warn!(
+                skipped_fragment_ids = ?skipped_fragment_ids,
+                total_fragment_ids = fragment_splits.len(),
+                "skipping stale fragment split updates for missing fragments"
+            );
+        }
+
+        if models.is_empty() {
+            return Ok(());
+        }
 
         FragmentSplits::insert_many(models)
             .on_conflict(

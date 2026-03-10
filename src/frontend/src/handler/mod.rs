@@ -58,6 +58,7 @@ mod alter_source_with_sr;
 mod alter_streaming_config;
 mod alter_streaming_enable_unaligned_join;
 mod alter_streaming_rate_limit;
+mod alter_subscription_retention;
 mod alter_swap_rename;
 mod alter_system;
 mod alter_table_column;
@@ -264,6 +265,7 @@ impl HandlerArgs {
     }
 }
 
+#[allow(clippy::large_stack_frames)]
 pub async fn handle(
     session: Arc<SessionImpl>,
     stmt: Statement,
@@ -281,7 +283,15 @@ pub async fn handle(
             statement,
             analyze,
             options,
-        } => explain::handle_explain(handler_args, *statement, options, analyze).await,
+        } => {
+            Box::pin(explain::handle_explain(
+                handler_args,
+                *statement,
+                options,
+                analyze,
+            ))
+            .await
+        }
         Statement::ExplainAnalyzeStreamJob {
             target,
             duration_secs,
@@ -419,7 +429,7 @@ pub async fn handle(
                 .await;
             }
             let format_encode = format_encode.map(|s| s.into_v2_with_warning());
-            create_table::handle_create_table(
+            Box::pin(create_table::handle_create_table(
                 handler_args,
                 name,
                 columns,
@@ -438,7 +448,7 @@ pub async fn handle(
                 include_column_options,
                 webhook_info,
                 engine,
-            )
+            ))
             .await
         }
         Statement::CreateDatabase {
@@ -811,7 +821,12 @@ pub async fn handle(
             AlterTableOperation::AddColumn { .. }
             | AlterTableOperation::DropColumn { .. }
             | AlterTableOperation::AlterColumn { .. } => {
-                alter_table_column::handle_alter_table_column(handler_args, name, operation).await
+                Box::pin(alter_table_column::handle_alter_table_column(
+                    handler_args,
+                    name,
+                    operation,
+                ))
+                .await
             }
             AlterTableOperation::RenameTable { table_name } => {
                 alter_rename::handle_rename_table(handler_args, TableType::Table, name, table_name)
@@ -840,6 +855,19 @@ pub async fn handle(
                 )
                 .await
             }
+            AlterTableOperation::SetBackfillParallelism {
+                parallelism,
+                deferred,
+            } => {
+                alter_parallelism::handle_alter_backfill_parallelism(
+                    handler_args,
+                    name,
+                    parallelism,
+                    StatementType::ALTER_TABLE,
+                    deferred,
+                )
+                .await
+            }
             AlterTableOperation::SetSchema { new_schema_name } => {
                 alter_set_schema::handle_alter_set_schema(
                     handler_args,
@@ -851,7 +879,11 @@ pub async fn handle(
                 .await
             }
             AlterTableOperation::RefreshSchema => {
-                alter_table_with_sr::handle_refresh_schema(handler_args, name).await
+                Box::pin(alter_table_with_sr::handle_refresh_schema(
+                    handler_args,
+                    name,
+                ))
+                .await
             }
             AlterTableOperation::SetSourceRateLimit { rate_limit } => {
                 alter_streaming_rate_limit::handle_alter_streaming_rate_limit(
@@ -864,8 +896,13 @@ pub async fn handle(
                 .await
             }
             AlterTableOperation::DropConnector => {
-                alter_table_drop_connector::handle_alter_table_drop_connector(handler_args, name)
-                    .await
+                Box::pin(
+                    alter_table_drop_connector::handle_alter_table_drop_connector(
+                        handler_args,
+                        name,
+                    ),
+                )
+                .await
             }
             AlterTableOperation::SetDmlRateLimit { rate_limit } => {
                 alter_streaming_rate_limit::handle_alter_streaming_rate_limit(
@@ -945,6 +982,19 @@ pub async fn handle(
                 )
                 .await
             }
+            AlterIndexOperation::SetBackfillParallelism {
+                parallelism,
+                deferred,
+            } => {
+                alter_parallelism::handle_alter_backfill_parallelism(
+                    handler_args,
+                    name,
+                    parallelism,
+                    StatementType::ALTER_INDEX,
+                    deferred,
+                )
+                .await
+            }
             AlterIndexOperation::SetConfig { entries } => {
                 alter_streaming_config::handle_alter_streaming_set_config(
                     handler_args,
@@ -996,6 +1046,22 @@ pub async fn handle(
                         bail_not_implemented!("ALTER VIEW SET PARALLELISM");
                     }
                     alter_parallelism::handle_alter_parallelism(
+                        handler_args,
+                        name,
+                        parallelism,
+                        statement_type,
+                        deferred,
+                    )
+                    .await
+                }
+                AlterViewOperation::SetBackfillParallelism {
+                    parallelism,
+                    deferred,
+                } => {
+                    if !materialized {
+                        bail_not_implemented!("ALTER VIEW SET BACKFILL PARALLELISM");
+                    }
+                    alter_parallelism::handle_alter_backfill_parallelism(
                         handler_args,
                         name,
                         parallelism,
@@ -1147,6 +1213,19 @@ pub async fn handle(
                 )
                 .await
             }
+            AlterSinkOperation::SetBackfillParallelism {
+                parallelism,
+                deferred,
+            } => {
+                alter_parallelism::handle_alter_backfill_parallelism(
+                    handler_args,
+                    name,
+                    parallelism,
+                    StatementType::ALTER_SINK,
+                    deferred,
+                )
+                .await
+            }
             AlterSinkOperation::SetConfig { entries } => {
                 alter_streaming_config::handle_alter_streaming_set_config(
                     handler_args,
@@ -1228,6 +1307,14 @@ pub async fn handle(
                 )
                 .await
             }
+            AlterSubscriptionOperation::SetRetention { retention } => {
+                alter_subscription_retention::handle_alter_subscription_retention(
+                    handler_args,
+                    name,
+                    retention,
+                )
+                .await
+            }
             AlterSubscriptionOperation::SwapRenameSubscription {
                 target_subscription,
             } => {
@@ -1306,6 +1393,19 @@ pub async fn handle(
                 deferred,
             } => {
                 alter_parallelism::handle_alter_parallelism(
+                    handler_args,
+                    name,
+                    parallelism,
+                    StatementType::ALTER_SOURCE,
+                    deferred,
+                )
+                .await
+            }
+            AlterSourceOperation::SetBackfillParallelism {
+                parallelism,
+                deferred,
+            } => {
+                alter_parallelism::handle_alter_backfill_parallelism(
                     handler_args,
                     name,
                     parallelism,
@@ -1534,6 +1634,19 @@ fn check_ban_ddl_for_iceberg_engine_table(
             if table.is_iceberg_engine_table() {
                 bail!(
                     "ALTER TABLE SET PARALLELISM is not supported for iceberg table: {}.{}",
+                    schema_name,
+                    name
+                );
+            }
+        }
+        Statement::AlterTable {
+            name,
+            operation: AlterTableOperation::SetBackfillParallelism { .. },
+        } => {
+            let (table, schema_name) = get_table_catalog_by_table_name(session.as_ref(), name)?;
+            if table.is_iceberg_engine_table() {
+                bail!(
+                    "ALTER TABLE SET BACKFILL PARALLELISM is not supported for iceberg table: {}.{}",
                     schema_name,
                     name
                 );

@@ -21,7 +21,7 @@ use risingwave_common::metrics::{
     LabelGuardedHistogram, LabelGuardedIntCounter, LabelGuardedIntGauge,
     LazyLabelGuardedIntCounter, LazyLabelGuardedIntGauge,
 };
-use risingwave_pb::id::TableId;
+use risingwave_pb::id::{FragmentId, TableId};
 
 use crate::monitor::HummockStateStoreMetrics;
 
@@ -41,6 +41,7 @@ impl TableMemoryMetrics {
     pub(super) fn new(
         metrics: &HummockStateStoreMetrics,
         table_id: TableId,
+        fragment_id: FragmentId,
         is_replicated: bool,
     ) -> Self {
         let table_id_string = if is_replicated {
@@ -48,29 +49,43 @@ impl TableMemoryMetrics {
         } else {
             table_id.to_string()
         };
-        let labels_vec = vec![table_id_string];
-        let labels = labels_vec.as_slice();
+        let fragment_labels_vec = vec![table_id_string.clone(), fragment_id.to_string()];
+        let fragment_labels = fragment_labels_vec.as_slice();
+        let table_labels_vec = vec![table_id_string];
+        let table_labels = table_labels_vec.as_slice();
         Self {
-            imm_total_size: metrics.per_table_imm_size.with_guarded_label_values(labels),
+            imm_total_size: metrics
+                .per_table_imm_size
+                .with_guarded_label_values(fragment_labels),
             imm_count: metrics
                 .per_table_imm_count
-                .with_guarded_label_values(labels),
+                .with_guarded_label_values(table_labels),
             write_batch_tuple_counts: metrics
                 .write_batch_tuple_counts
-                .with_guarded_label_values(labels),
+                .with_guarded_label_values(table_labels),
             write_batch_duration: metrics
                 .write_batch_duration
-                .with_guarded_label_values(labels),
-            write_batch_size: metrics.write_batch_size.with_guarded_label_values(labels),
+                .with_guarded_label_values(table_labels),
+            write_batch_size: metrics
+                .write_batch_size
+                .with_guarded_label_values(table_labels),
             mem_table_spill_counts: metrics
                 .mem_table_spill_counts
-                .lazy_guarded_metrics(labels_vec.clone()),
-            old_value_size: metrics.old_value_size.lazy_guarded_metrics(labels_vec),
+                .lazy_guarded_metrics(table_labels_vec.clone()),
+            old_value_size: metrics
+                .old_value_size
+                .lazy_guarded_metrics(table_labels_vec),
         }
     }
 
     pub(super) fn for_test() -> Arc<Self> {
-        Self::new(&HummockStateStoreMetrics::unused(), TEST_TABLE_ID, false).into()
+        Self::new(
+            &HummockStateStoreMetrics::unused(),
+            TEST_TABLE_ID,
+            FragmentId::default(),
+            false,
+        )
+        .into()
     }
 
     pub(super) fn inc_imm(&self, imm_size: usize) {

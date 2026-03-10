@@ -200,6 +200,7 @@ pub(crate) struct KvLogStoreMetrics {
     pub buffer_unconsumed_row_count: LabelGuardedIntGauge,
     pub buffer_unconsumed_epoch_count: LabelGuardedIntGauge,
     pub buffer_unconsumed_min_epoch: LabelGuardedIntGauge,
+    pub buffer_memory_bytes: LabelGuardedIntGauge,
     pub persistent_log_read_metrics: KvLogStoreReadMetrics,
     pub flushed_buffer_read_metrics: KvLogStoreReadMetrics,
 }
@@ -301,6 +302,9 @@ impl KvLogStoreMetrics {
         let buffer_unconsumed_min_epoch = metrics
             .kv_log_store_buffer_unconsumed_min_epoch
             .with_guarded_label_values(labels);
+        let buffer_memory_bytes = metrics
+            .kv_log_store_buffer_memory_bytes
+            .with_guarded_label_values(labels);
 
         Self {
             storage_write_size,
@@ -310,6 +314,7 @@ impl KvLogStoreMetrics {
             buffer_unconsumed_row_count,
             buffer_unconsumed_epoch_count,
             buffer_unconsumed_min_epoch,
+            buffer_memory_bytes,
             persistent_log_read_metrics: KvLogStoreReadMetrics {
                 storage_read_size: persistent_log_read_size,
                 storage_read_count: persistent_log_read_count,
@@ -331,6 +336,7 @@ impl KvLogStoreMetrics {
             buffer_unconsumed_row_count: LabelGuardedIntGauge::test_int_gauge::<4>(),
             buffer_unconsumed_epoch_count: LabelGuardedIntGauge::test_int_gauge::<4>(),
             buffer_unconsumed_min_epoch: LabelGuardedIntGauge::test_int_gauge::<4>(),
+            buffer_memory_bytes: LabelGuardedIntGauge::test_int_gauge::<4>(),
             rewind_count: LabelGuardedIntCounter::test_int_counter::<4>(),
             rewind_delay: LabelGuardedHistogram::test_histogram::<4>(),
             persistent_log_read_metrics: KvLogStoreReadMetrics::for_test(),
@@ -538,6 +544,7 @@ impl<S: StateStore> LogStoreFactory for KvLogStoreFactory<S> {
             .state_store
             .new_local(NewLocalOptions {
                 table_id,
+                fragment_id: self.table_catalog.fragment_id,
                 op_consistency_level: OpConsistencyLevel::Inconsistent,
                 table_option: TableOption {
                     retention_seconds: None,
@@ -621,12 +628,16 @@ mod tests {
     async fn test_basic() {
         for count in (0..20).step_by(5) {
             #[expect(deprecated)]
-            test_basic_inner(
+            Box::pin(test_basic_inner(
                 count * TEST_DATA_SIZE,
                 &crate::common::log_store_impl::kv_log_store::v1::KV_LOG_STORE_V1_INFO,
-            )
+            ))
             .await;
-            test_basic_inner(count * TEST_DATA_SIZE, &KV_LOG_STORE_V2_INFO).await;
+            Box::pin(test_basic_inner(
+                count * TEST_DATA_SIZE,
+                &KV_LOG_STORE_V2_INFO,
+            ))
+            .await;
         }
     }
 
@@ -738,12 +749,16 @@ mod tests {
     async fn test_recovery() {
         for count in (0..20).step_by(5) {
             #[expect(deprecated)]
-            test_recovery_inner(
+            Box::pin(test_recovery_inner(
                 count * TEST_DATA_SIZE,
                 &crate::common::log_store_impl::kv_log_store::v1::KV_LOG_STORE_V1_INFO,
-            )
+            ))
             .await;
-            test_recovery_inner(count * TEST_DATA_SIZE, &KV_LOG_STORE_V2_INFO).await;
+            Box::pin(test_recovery_inner(
+                count * TEST_DATA_SIZE,
+                &KV_LOG_STORE_V2_INFO,
+            ))
+            .await;
         }
     }
 
@@ -922,12 +937,12 @@ mod tests {
     async fn test_truncate() {
         for count in (2..10).step_by(3) {
             #[expect(deprecated)]
-            test_truncate_inner(
+            Box::pin(test_truncate_inner(
                 count,
                 &crate::common::log_store_impl::kv_log_store::v1::KV_LOG_STORE_V1_INFO,
-            )
+            ))
             .await;
-            test_truncate_inner(count, &KV_LOG_STORE_V2_INFO).await;
+            Box::pin(test_truncate_inner(count, &KV_LOG_STORE_V2_INFO)).await;
         }
     }
 
@@ -1880,12 +1895,12 @@ mod tests {
     #[tokio::test]
     async fn test_truncate_historical() {
         #[expect(deprecated)]
-        test_truncate_historical_inner(
+        Box::pin(test_truncate_historical_inner(
             10,
             &crate::common::log_store_impl::kv_log_store::v1::KV_LOG_STORE_V1_INFO,
-        )
+        ))
         .await;
-        test_truncate_historical_inner(10, &KV_LOG_STORE_V2_INFO).await;
+        Box::pin(test_truncate_historical_inner(10, &KV_LOG_STORE_V2_INFO)).await;
     }
 
     async fn test_truncate_historical_inner(

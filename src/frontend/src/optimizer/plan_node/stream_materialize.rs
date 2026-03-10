@@ -470,17 +470,14 @@ impl StreamMaterialize {
         assert!(retention_seconds.is_none());
         assert!(refreshable);
 
-        // only keep pk columns
-        let mut pk_col_indices = vec![];
-        let mut pk_cols = vec![];
-        for (i, col) in columns.iter().enumerate() {
-            if pk.iter().any(|pk| pk.column_index == i) {
-                pk_col_indices.push(i);
-                pk_cols.push(col.clone());
-            }
-        }
+        // Keep pk columns in pk order, so the staging chunk projected by pk indices can be
+        // written directly without reordering.
+        let pk_col_indices = pk.iter().map(|pk| pk.column_index).collect_vec();
+        let pk_cols = pk_col_indices
+            .iter()
+            .map(|&col_idx| columns[col_idx].clone())
+            .collect_vec();
         let mapping = ColIndexMapping::with_remaining_columns(&pk_col_indices, columns.len());
-
         TableCatalog {
             id,
             schema_id,
@@ -495,7 +492,8 @@ impl StreamMaterialize {
                 .collect(),
             stream_key: mapping.try_map_all(stream_key).unwrap(),
             vnode_col_index: vnode_col_index.map(|i| mapping.map(i)),
-            dist_key_in_pk: mapping.try_map_all(dist_key_in_pk).unwrap(),
+            // `dist_key_in_pk` is already based on pk positions, so it should keep unchanged.
+            dist_key_in_pk,
             distribution_key: mapping.try_map_all(distribution_key).unwrap(),
             table_type: TableType::Internal,
             watermark_columns: FixedBitSet::new(),

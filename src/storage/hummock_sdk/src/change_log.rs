@@ -270,6 +270,15 @@ where
     }
 }
 
+impl<T> TableChangeLogCommon<T>
+where
+    T: From<PbSstableInfo>,
+{
+    pub fn from_protobuf_owned(val: PbTableChangeLog) -> Self {
+        Self(val.change_logs.into_iter().map(|a| a.into()).collect())
+    }
+}
+
 pub fn build_table_change_log_delta<'a>(
     old_value_ssts: impl Iterator<Item = SstableInfo>,
     new_value_ssts: impl Iterator<Item = &'a SstableInfo>,

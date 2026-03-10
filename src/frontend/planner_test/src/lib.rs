@@ -283,8 +283,8 @@ impl TestCase {
         let placeholder_empty_vec = vec![];
 
         // Since temp file will be deleted when it goes out of scope, so create source in advance.
-        self.do_create_source(session.clone()).await?;
-        self.do_create_table_with_connector(session.clone()).await?;
+        Box::pin(self.do_create_source(session.clone())).await?;
+        Box::pin(self.do_create_table_with_connector(session.clone())).await?;
 
         let mut result: Option<TestCaseResult> = None;
         for sql in self
@@ -294,14 +294,13 @@ impl TestCase {
             .iter()
             .chain(std::iter::once(self.sql()))
         {
-            result = self
-                .run_sql(
-                    Arc::from(sql.to_owned()),
-                    session.clone(),
-                    do_check_result,
-                    result,
-                )
-                .await?;
+            result = Box::pin(self.run_sql(
+                Arc::from(sql.to_owned()),
+                session.clone(),
+                do_check_result,
+                result,
+            ))
+            .await?;
         }
 
         let mut result = result.unwrap_or_default();
@@ -345,12 +344,12 @@ impl TestCase {
                         connector.encode,
                     );
                     let temp_file = create_proto_file(content.as_str());
-                    self.run_sql(
+                    Box::pin(self.run_sql(
                         Arc::from(sql + temp_file.path().to_str().unwrap() + "')"),
                         session.clone(),
                         false,
                         None,
-                    )
+                    ))
                     .await
                 } else {
                     panic!(
@@ -376,12 +375,12 @@ impl TestCase {
                         source.encode,
                     );
                     let temp_file = create_proto_file(content.as_str());
-                    self.run_sql(
+                    Box::pin(self.run_sql(
                         Arc::from(sql + temp_file.path().to_str().unwrap() + "')"),
                         session.clone(),
                         false,
                         None,
-                    )
+                    ))
                     .await
                 } else {
                     panic!(
@@ -447,7 +446,7 @@ impl TestCase {
                 } => {
                     let format_encode = format_encode.map(|schema| schema.into_v2_with_warning());
 
-                    create_table::handle_create_table(
+                    Box::pin(create_table::handle_create_table(
                         handler_args,
                         name,
                         columns,
@@ -466,7 +465,7 @@ impl TestCase {
                         include_column_options,
                         webhook_info,
                         engine,
-                    )
+                    ))
                     .await?;
                 }
                 Statement::CreateSource { stmt } => {
@@ -567,8 +566,13 @@ impl TestCase {
                     if result.is_some() {
                         panic!("two queries in one test case");
                     }
-                    let rsp =
-                        explain::handle_explain(handler_args, *statement, options, analyze).await?;
+                    let rsp = Box::pin(explain::handle_explain(
+                        handler_args,
+                        *statement,
+                        options,
+                        analyze,
+                    ))
+                    .await?;
 
                     let explain_output = get_explain_output(rsp).await;
                     let ret = TestCaseResult {
@@ -985,7 +989,7 @@ pub async fn run_test_file(file_path: &Path, file_content: &str) -> Result<()> {
             c.id().clone().unwrap_or_else(|| "<none>".to_owned()),
             c.sql()
         );
-        match c.run(true).await {
+        match Box::pin(c.run(true)).await {
             Ok(case) => {
                 outputs.push(case);
             }

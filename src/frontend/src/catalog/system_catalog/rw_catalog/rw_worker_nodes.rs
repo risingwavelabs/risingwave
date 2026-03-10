@@ -33,7 +33,6 @@ struct RwWorkerNode {
     parallelism: Option<i32>,
     is_streaming: Option<bool>,
     is_serving: Option<bool>,
-    is_unschedulable: Option<bool>,
     internal_rpc_host_addr: Option<String>,
     rw_version: Option<String>,
     system_total_memory_bytes: Option<i64>,
@@ -70,11 +69,6 @@ async fn read_rw_worker_nodes_info(reader: &SysCatalogReaderImpl) -> Result<Vec<
                 },
                 is_serving: if is_compute {
                     property.map(|p| p.is_serving)
-                } else {
-                    None
-                },
-                is_unschedulable: if is_compute {
-                    property.map(|p| p.is_unschedulable)
                 } else {
                     None
                 },

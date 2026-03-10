@@ -61,6 +61,36 @@ pub struct PostgresConfig {
     #[serde_as(as = "DisplayFromStr")]
     pub max_batch_rows: usize,
     pub r#type: String, // accept "append-only" or "upsert"
+    #[serde(default, rename = "tcp.keepalive.enable")]
+    #[serde_as(as = "DisplayFromStr")]
+    pub tcp_keepalive_enable: bool,
+
+    #[serde(flatten)]
+    pub tcp_keepalive: Option<TcpKeepaliveConfig>,
+}
+
+#[serde_as]
+#[derive(Debug, Clone, Deserialize)]
+pub struct TcpKeepaliveConfig {
+    #[serde(rename = "tcp.keepalive.idle")]
+    #[serde_as(as = "DisplayFromStr")]
+    pub tcp_keepalive_idle: u32,
+    #[serde(rename = "tcp.keepalive.interval")]
+    #[serde_as(as = "DisplayFromStr")]
+    pub tcp_keepalive_interval: u32,
+    #[serde(rename = "tcp.keepalive.count")]
+    #[serde_as(as = "DisplayFromStr")]
+    pub tcp_keepalive_count: u32,
+}
+
+impl Default for TcpKeepaliveConfig {
+    fn default() -> Self {
+        Self {
+            tcp_keepalive_idle: 10 * 60, // 10 minutes,
+            tcp_keepalive_interval: 10,
+            tcp_keepalive_count: 3,
+        }
+    }
 }
 
 impl EnforceSecret for PostgresConfig {
@@ -274,6 +304,14 @@ impl PostgresSinkWriter {
         pk_indices: Vec<usize>,
         is_append_only: bool,
     ) -> Result<Self> {
+        let tcp_keepalive = if config.tcp_keepalive_enable {
+            config
+                .tcp_keepalive
+                .or_else(|| Some(TcpKeepaliveConfig::default()))
+        } else {
+            None
+        };
+
         let client = create_pg_client(
             &config.user,
             &config.password,
@@ -282,6 +320,7 @@ impl PostgresSinkWriter {
             &config.database,
             &config.ssl_mode,
             &config.ssl_root_cert,
+            tcp_keepalive,
         )
         .await?;
 

@@ -94,7 +94,7 @@ pub async fn get_replace_table_plan(
     let handler_args = HandlerArgs::new(session.clone(), &new_definition, Arc::from(""))?;
     let col_id_gen = ColumnIdGenerator::new_alter(old_catalog);
 
-    let (graph, table, source, job_type) = generate_stream_graph_for_replace_table(
+    let (graph, table, source, job_type) = Box::pin(generate_stream_graph_for_replace_table(
         session,
         table_name,
         old_catalog,
@@ -102,7 +102,7 @@ pub async fn get_replace_table_plan(
         new_definition,
         col_id_gen,
         sql_column_strategy,
-    )
+    ))
     .await?;
 
     // Set some fields ourselves so that the meta service does not need to maintain them.
@@ -286,13 +286,13 @@ pub async fn handle_alter_table_column(
 
         _ => unreachable!(),
     };
-    let (source, table, graph, job_type) = get_replace_table_plan(
+    let (source, table, graph, job_type) = Box::pin(get_replace_table_plan(
         &session,
         table_name,
         definition,
         &original_catalog,
         sql_column_strategy,
-    )
+    ))
     .await?;
 
     let catalog_writer = session.catalog_writer()?;
