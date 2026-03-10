@@ -132,7 +132,7 @@ url = "2"
 uuid = { version = "1", features = ["v4"] }
 
 [target.'cfg(not(madsim))'.dependencies]
-http-body = "0.4.5"
+http-body = "1.0.1"
 tower-layer = "0.3.3"
 tower-service = "0.3.3"
 workspace-hack = { path = "../workspace-hack" }
