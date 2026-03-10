@@ -15,13 +15,15 @@
 use std::collections::HashMap;
 
 use super::prelude::{PlanRef, *};
+use crate::expr::{Expr, ExprType, FunctionCall};
 use crate::optimizer::optimizer_context::MaterializedViewCandidate;
 use crate::optimizer::plan_node::generic::{Agg, GenericPlanRef, PlanAggCall};
 use crate::optimizer::plan_node::{
-    LogicalAgg, LogicalPlanRef, LogicalProject, LogicalScan, PlanTreeNodeUnary,
+    LogicalAgg, LogicalFilter, LogicalMultiJoinBuilder, LogicalPlanRef, LogicalProject,
+    LogicalScan, PlanTreeNodeUnary,
 };
 use crate::optimizer::rule::{BoxedRule, Rule};
-use crate::utils::{ColIndexMapping, IndexSet};
+use crate::utils::{ColIndexMapping, Condition, IndexSet};
 
 pub struct MvSelectionRule;
 
@@ -51,7 +53,8 @@ impl MvSelectionRule {
         if plan == &candidate.plan {
             return Some(Self::candidate_scan(candidate, plan.ctx())?.into());
         }
-        Self::agg_rollup_rewrite(plan, candidate)
+        Self::inner_join_rewrite(plan, candidate)
+            .or_else(|| Self::agg_rollup_rewrite(plan, candidate))
     }
 
     fn candidate_scan(
@@ -253,5 +256,357 @@ impl MvSelectionRule {
             .into_iter()
             .collect::<Option<Vec<usize>>>()?;
         Some((mv_agg.clone(), mv_agg_to_mv_output))
+    }
+
+    fn inner_join_rewrite(
+        plan: &PlanRef,
+        candidate: &MaterializedViewCandidate,
+    ) -> Option<PlanRef> {
+        let query_join = Self::extract_inner_join_rewrite(plan)?;
+        let mv_join = Self::extract_inner_join_rewrite(&candidate.plan)?;
+        if query_join.inputs.len() != mv_join.inputs.len() {
+            return None;
+        }
+
+        let mv_input_to_query = Self::match_join_inputs(&query_join.inputs, &mv_join.inputs)?;
+        let query_input_to_query = (0..query_join.inputs.len()).collect::<Vec<_>>();
+        let query_base_offsets = Self::input_base_offsets(&query_join.inputs);
+        let total_base_len = query_join.total_base_len();
+
+        let query_conditions = Self::normalize_join_conditions(
+            &query_join,
+            &query_input_to_query,
+            &query_base_offsets,
+            total_base_len,
+        )?;
+        let mv_conditions = Self::normalize_join_conditions(
+            &mv_join,
+            &mv_input_to_query,
+            &query_base_offsets,
+            total_base_len,
+        )?;
+        let rewritten_predicate = Self::subtract_conditions(query_conditions, mv_conditions)?;
+
+        let query_output_to_base =
+            Self::normalize_join_outputs(&query_join, &query_input_to_query, &query_base_offsets)?;
+        let mv_output_to_base =
+            Self::normalize_join_outputs(&mv_join, &mv_input_to_query, &query_base_offsets)?;
+        let Some(base_to_mv_output) =
+            Self::invert_mapping(&mv_output_to_base, query_join.total_base_len())
+        else {
+            return None;
+        };
+        let rewritten_predicate =
+            Self::rewrite_condition_to_mv(rewritten_predicate, &base_to_mv_output)?;
+        let output_col_idx = query_output_to_base
+            .iter()
+            .map(|base_idx| base_to_mv_output.get(*base_idx).copied().flatten())
+            .collect::<Option<Vec<_>>>()?;
+
+        let mv_scan: LogicalPlanRef = Self::candidate_scan(candidate, plan.ctx())?.into();
+        let rewritten = LogicalFilter::create(mv_scan, rewritten_predicate);
+        if output_col_idx.iter().copied().eq(0..output_col_idx.len()) {
+            Some(rewritten)
+        } else {
+            Some(LogicalProject::with_out_col_idx(rewritten, output_col_idx.into_iter()).into())
+        }
+    }
+
+    fn extract_inner_join_rewrite(plan: &PlanRef) -> Option<InnerJoinRewrite> {
+        let multijoin = LogicalMultiJoinBuilder::new(plan.clone());
+        let (output_indices, conjunctions, inputs, _) = multijoin.into_parts();
+        if inputs.len() < 2 {
+            return None;
+        }
+
+        let inputs = inputs
+            .iter()
+            .map(Self::extract_join_leaf)
+            .collect::<Option<Vec<_>>>()?;
+
+        Some(InnerJoinRewrite {
+            inputs,
+            conditions: Condition { conjunctions },
+            output_indices,
+        })
+    }
+
+    fn extract_join_leaf(plan: &PlanRef) -> Option<JoinLeafRewrite> {
+        if let Some(scan) = plan.as_logical_scan() {
+            let output_to_base = scan.output_col_idx().clone();
+            let base_scan =
+                scan.clone_with_output_indices((0..scan.table().columns().len()).collect());
+            let predicate = Self::rewrite_condition(
+                scan.predicate().clone(),
+                output_to_base.clone(),
+                base_scan.schema().len(),
+            )?;
+            return Some(JoinLeafRewrite {
+                base_scan: base_scan.into(),
+                output_to_base,
+                predicate,
+            });
+        }
+        if let Some(filter) = plan.as_logical_filter() {
+            let mut child = Self::extract_join_leaf(&filter.input())?;
+            let predicate = Self::rewrite_condition(
+                filter.predicate().clone(),
+                child.output_to_base.clone(),
+                child.base_len(),
+            )?;
+            child.predicate = child.predicate.and(predicate);
+            return Some(child);
+        }
+        if let Some(project) = plan.as_logical_project() {
+            let child = Self::extract_join_leaf(&project.input())?;
+            let output_to_base = project
+                .try_as_projection()?
+                .into_iter()
+                .map(|idx| child.output_to_base.get(idx).copied())
+                .collect::<Option<Vec<_>>>()?;
+            return Some(JoinLeafRewrite {
+                base_scan: child.base_scan,
+                output_to_base,
+                predicate: child.predicate,
+            });
+        }
+        None
+    }
+
+    fn input_base_offsets(inputs: &[JoinLeafRewrite]) -> Vec<usize> {
+        let mut offsets = Vec::with_capacity(inputs.len());
+        let mut offset = 0;
+        for input in inputs {
+            offsets.push(offset);
+            offset += input.base_len();
+        }
+        offsets
+    }
+
+    fn match_join_inputs(
+        query_inputs: &[JoinLeafRewrite],
+        mv_inputs: &[JoinLeafRewrite],
+    ) -> Option<Vec<usize>> {
+        fn dfs(
+            mv_idx: usize,
+            query_inputs: &[JoinLeafRewrite],
+            mv_inputs: &[JoinLeafRewrite],
+            used_query: &mut [bool],
+            mapping: &mut [usize],
+        ) -> bool {
+            if mv_idx == mv_inputs.len() {
+                return true;
+            }
+            for query_idx in 0..query_inputs.len() {
+                if used_query[query_idx]
+                    || mv_inputs[mv_idx].base_scan != query_inputs[query_idx].base_scan
+                    || mv_inputs[mv_idx].base_len() != query_inputs[query_idx].base_len()
+                {
+                    continue;
+                }
+                used_query[query_idx] = true;
+                mapping[mv_idx] = query_idx;
+                if dfs(mv_idx + 1, query_inputs, mv_inputs, used_query, mapping) {
+                    return true;
+                }
+                used_query[query_idx] = false;
+            }
+            false
+        }
+
+        let mut used_query = vec![false; query_inputs.len()];
+        let mut mapping = vec![usize::MAX; mv_inputs.len()];
+        dfs(0, query_inputs, mv_inputs, &mut used_query, &mut mapping).then_some(mapping)
+    }
+
+    fn normalize_join_conditions(
+        join: &InnerJoinRewrite,
+        input_to_query: &[usize],
+        query_base_offsets: &[usize],
+        total_base_len: usize,
+    ) -> Option<Condition> {
+        let join_output_to_base =
+            Self::join_output_to_base_mapping(join, input_to_query, query_base_offsets);
+        let mut conditions =
+            Self::rewrite_condition(join.conditions.clone(), join_output_to_base, total_base_len)?;
+        for (input_idx, input) in join.inputs.iter().enumerate() {
+            conditions = conditions.and(Self::shift_condition_to_join_base(
+                input.predicate.clone(),
+                *query_base_offsets.get(*input_to_query.get(input_idx)?)?,
+                input.base_len(),
+                total_base_len,
+            )?);
+        }
+        Some(conditions)
+    }
+
+    fn normalize_join_outputs(
+        join: &InnerJoinRewrite,
+        input_to_query: &[usize],
+        query_base_offsets: &[usize],
+    ) -> Option<Vec<usize>> {
+        let join_output_to_base =
+            Self::join_output_to_base_mapping(join, input_to_query, query_base_offsets);
+        join.output_indices
+            .iter()
+            .map(|idx| join_output_to_base.get(*idx).copied())
+            .collect()
+    }
+
+    fn join_output_to_base_mapping(
+        join: &InnerJoinRewrite,
+        input_to_query: &[usize],
+        query_base_offsets: &[usize],
+    ) -> Vec<usize> {
+        join.inputs
+            .iter()
+            .enumerate()
+            .flat_map(|(input_idx, input)| {
+                let offset = query_base_offsets[input_to_query[input_idx]];
+                input
+                    .output_to_base
+                    .iter()
+                    .copied()
+                    .map(move |base_idx| base_idx + offset)
+            })
+            .collect()
+    }
+
+    fn subtract_conditions(query: Condition, mv: Condition) -> Option<Condition> {
+        let mut counts: HashMap<crate::expr::ExprImpl, usize> = HashMap::new();
+        for expr in query.conjunctions {
+            *counts.entry(expr).or_default() += 1;
+        }
+        for expr in mv.conjunctions {
+            let count = counts.get_mut(&expr)?;
+            *count -= 1;
+            if *count == 0 {
+                counts.remove(&expr);
+            }
+        }
+        let residual = counts
+            .into_iter()
+            .flat_map(|(expr, count)| std::iter::repeat_n(expr, count))
+            .collect();
+        Some(Self::canonicalize_condition(Condition {
+            conjunctions: residual,
+        }))
+    }
+
+    fn rewrite_condition(
+        condition: Condition,
+        output_to_base: Vec<usize>,
+        target_size: usize,
+    ) -> Option<Condition> {
+        let mut mapping =
+            ColIndexMapping::new(output_to_base.into_iter().map(Some).collect(), target_size);
+        Some(Self::canonicalize_condition(
+            condition.rewrite_expr(&mut mapping),
+        ))
+    }
+
+    fn shift_condition_to_join_base(
+        condition: Condition,
+        offset: usize,
+        source_size: usize,
+        target_size: usize,
+    ) -> Option<Condition> {
+        let mut mapping = ColIndexMapping::new(
+            (0..source_size).map(|idx| Some(idx + offset)).collect(),
+            target_size,
+        );
+        Some(Self::canonicalize_condition(
+            condition.rewrite_expr(&mut mapping),
+        ))
+    }
+
+    fn invert_mapping(mapping: &[usize], source_size: usize) -> Option<Vec<Option<usize>>> {
+        let mut inverse = vec![None; source_size];
+        for (target_idx, source_idx) in mapping.iter().copied().enumerate() {
+            match inverse.get_mut(source_idx)? {
+                slot @ None => *slot = Some(target_idx),
+                Some(_) => {}
+            }
+        }
+        Some(inverse)
+    }
+
+    fn rewrite_condition_to_mv(
+        condition: Condition,
+        base_to_mv_output: &[Option<usize>],
+    ) -> Option<Condition> {
+        let input_refs = condition.collect_input_refs(base_to_mv_output.len());
+        if input_refs
+            .ones()
+            .any(|idx| base_to_mv_output[idx].is_none())
+        {
+            return None;
+        }
+        let target_size = base_to_mv_output
+            .iter()
+            .flatten()
+            .max()
+            .copied()
+            .map_or(0, |idx| idx + 1);
+        let mut mapping = ColIndexMapping::new(base_to_mv_output.to_vec(), target_size);
+        Some(Self::canonicalize_condition(
+            condition.rewrite_expr(&mut mapping),
+        ))
+    }
+
+    fn canonicalize_condition(condition: Condition) -> Condition {
+        let mut conjunctions = condition
+            .conjunctions
+            .into_iter()
+            .map(Self::canonicalize_expr)
+            .collect::<Vec<_>>();
+        conjunctions.sort_by_cached_key(|expr| format!("{expr:?}"));
+        Condition { conjunctions }
+    }
+
+    fn canonicalize_expr(expr: crate::expr::ExprImpl) -> crate::expr::ExprImpl {
+        if let Some((lhs, rhs)) = expr.as_eq_cond() {
+            return FunctionCall::new_unchecked(
+                ExprType::Equal,
+                vec![lhs.into(), rhs.into()],
+                expr.return_type(),
+            )
+            .into();
+        }
+        if let Some((lhs, rhs)) = expr.as_is_not_distinct_from_cond() {
+            return FunctionCall::new_unchecked(
+                ExprType::IsNotDistinctFrom,
+                vec![lhs.into(), rhs.into()],
+                expr.return_type(),
+            )
+            .into();
+        }
+        expr
+    }
+}
+
+#[derive(Clone)]
+struct JoinLeafRewrite {
+    base_scan: LogicalPlanRef,
+    output_to_base: Vec<usize>,
+    predicate: Condition,
+}
+
+impl JoinLeafRewrite {
+    fn base_len(&self) -> usize {
+        self.base_scan.schema().len()
+    }
+}
+
+#[derive(Clone)]
+struct InnerJoinRewrite {
+    inputs: Vec<JoinLeafRewrite>,
+    conditions: Condition,
+    output_indices: Vec<usize>,
+}
+
+impl InnerJoinRewrite {
+    fn total_base_len(&self) -> usize {
+        self.inputs.iter().map(JoinLeafRewrite::base_len).sum()
     }
 }
