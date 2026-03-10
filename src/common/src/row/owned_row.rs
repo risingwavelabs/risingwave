@@ -180,23 +180,6 @@ impl<D: AsRef<[DataType]>> RowDeserializer<D> {
         Ok(OwnedRow(values.into()))
     }
 
-    /// Deserialize the row from value encoding bytes, padding missing tail columns with NULL.
-    pub fn deserialize_with_padding(
-        &self,
-        mut data: impl bytes::Buf,
-    ) -> value_encoding::Result<OwnedRow> {
-        let total_len = self.data_types().len();
-        let mut values = Vec::with_capacity(total_len);
-        for typ in self.data_types() {
-            if !data.has_remaining() {
-                values.resize(total_len, None);
-                return Ok(OwnedRow(values.into()));
-            }
-            values.push(deserialize_datum(&mut data, typ)?);
-        }
-        Ok(OwnedRow(values.into()))
-    }
-
     pub fn data_types(&self) -> &[DataType] {
         self.data_types.as_ref()
     }
@@ -240,27 +223,6 @@ mod tests {
         ]);
         let row1 = de.deserialize(bytes.as_ref()).unwrap();
         assert_eq!(row, row1);
-    }
-
-    #[test]
-    fn row_value_decode_with_padding() {
-        let row = OwnedRow::new(vec![
-            Some(ScalarImpl::Utf8("string".into())),
-            Some(ScalarImpl::Bool(true)),
-            Some(ScalarImpl::Int16(1)),
-        ]);
-        let bytes = (&row).value_serialize();
-        let de = RowDeserializer::new(vec![Ty::Varchar, Ty::Boolean, Ty::Int16, Ty::Int32]);
-        let row_with_padding = de.deserialize_with_padding(bytes.as_ref()).unwrap();
-        assert_eq!(
-            row_with_padding,
-            OwnedRow::new(vec![
-                Some(ScalarImpl::Utf8("string".into())),
-                Some(ScalarImpl::Bool(true)),
-                Some(ScalarImpl::Int16(1)),
-                None,
-            ])
-        );
     }
 
     #[test]
