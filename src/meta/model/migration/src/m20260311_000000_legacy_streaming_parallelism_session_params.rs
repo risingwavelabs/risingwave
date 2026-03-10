@@ -10,6 +10,8 @@ const STREAMING_PARALLELISM_FOR_SINK: &str = "streaming_parallelism_for_sink";
 const STREAMING_PARALLELISM_FOR_INDEX: &str = "streaming_parallelism_for_index";
 const STREAMING_PARALLELISM_FOR_MATERIALIZED_VIEW: &str =
     "streaming_parallelism_for_materialized_view";
+const DEFAULT_TABLE_PARALLELISM_BOUND: u64 = 4;
+const DEFAULT_SOURCE_PARALLELISM_BOUND: u64 = 4;
 
 const LEGACY_ADAPTIVE_PARALLELISM_STRATEGY: &str = "adaptive_parallelism_strategy";
 const LEGACY_STREAMING_PARALLELISM_STRATEGY: &str = "streaming_parallelism_strategy";
@@ -250,7 +252,7 @@ fn derive_legacy_streaming_parallelism_params(
         );
         let specific_strategy = parse_legacy_strategy(
             param_map.get(strategy_key).copied(),
-            ConfigAdaptiveParallelismStrategy::Default,
+            default_legacy_strategy_for_type(parallelism_key),
         );
         derived.insert(
             parallelism_key.to_owned(),
@@ -266,6 +268,18 @@ fn derive_legacy_streaming_parallelism_params(
     }
 
     derived
+}
+
+fn default_legacy_strategy_for_type(parallelism_key: &str) -> ConfigAdaptiveParallelismStrategy {
+    match parallelism_key {
+        STREAMING_PARALLELISM_FOR_TABLE => {
+            ConfigAdaptiveParallelismStrategy::Bounded(DEFAULT_TABLE_PARALLELISM_BOUND)
+        }
+        STREAMING_PARALLELISM_FOR_SOURCE => {
+            ConfigAdaptiveParallelismStrategy::Bounded(DEFAULT_SOURCE_PARALLELISM_BOUND)
+        }
+        _ => ConfigAdaptiveParallelismStrategy::Default,
+    }
 }
 
 fn parse_parallelism(value: Option<&str>, default: ConfigParallelism) -> ConfigParallelism {
@@ -644,7 +658,14 @@ mod tests {
                 .await
                 .unwrap()
                 .value,
-            "default"
+            "bounded(4)"
+        );
+        assert_eq!(
+            query_session_param(&db, STREAMING_PARALLELISM_FOR_SOURCE)
+                .await
+                .unwrap()
+                .value,
+            "bounded(4)"
         );
         assert!(
             query_session_param(&db, LEGACY_STREAMING_PARALLELISM_STRATEGY)
@@ -664,6 +685,32 @@ mod tests {
         assert_eq!(
             query_streaming_job_strategy(&db, 999001).await,
             Some("AUTO".to_owned())
+        );
+    }
+
+    #[test]
+    fn test_derive_legacy_streaming_parallelism_params_keeps_table_default_when_global_fixed() {
+        let params = vec![SessionParameterRow {
+            name: STREAMING_PARALLELISM.to_owned(),
+            value: "8".to_owned(),
+        }];
+
+        let derived = derive_legacy_streaming_parallelism_params(
+            &params,
+            Some(AdaptiveParallelismStrategy::Auto),
+        );
+
+        assert_eq!(
+            derived
+                .get(STREAMING_PARALLELISM_FOR_TABLE)
+                .map(String::as_str),
+            Some("default")
+        );
+        assert_eq!(
+            derived
+                .get(STREAMING_PARALLELISM_FOR_SOURCE)
+                .map(String::as_str),
+            Some("default")
         );
     }
 }

@@ -31,15 +31,23 @@ The meaning is:
 - `bounded(<n>)` means adaptive scheduling with an upper bound.
 - `ratio(<r>)` means adaptive scheduling with a ratio of the available worker parallelism.
 
-For type-specific parameters, `SET ... = DEFAULT` resets the value to `default`, which falls back
-to `streaming_parallelism`.
+Built-in defaults are:
+
+- `streaming_parallelism = adaptive`
+- `streaming_parallelism_for_table = bounded(4)`
+- `streaming_parallelism_for_source = bounded(4)`
+- all other `streaming_parallelism_for_<type>` values default to `default`
+
+For type-specific parameters, `SET ... = DEFAULT` resets the value to the built-in default for
+that parameter. This means `table` and `source` reset to `bounded(4)`, while other job types fall
+back to `streaming_parallelism`.
 
 ## Resolution Rules
 
 Resolution happens in a single step:
 
-1. Pick `streaming_parallelism_for_<type>` if it is not `default`.
-2. Otherwise, fall back to `streaming_parallelism`.
+1. Read `streaming_parallelism_for_<type>`.
+2. If the value is `default`, fall back to `streaming_parallelism`.
 3. Convert the resolved value into:
    - a fixed parallelism, or
    - an adaptive strategy stored in the streaming job metadata.
@@ -72,4 +80,6 @@ Older releases exposed these deprecated parameters:
 
 On startup, meta derives the final `streaming_parallelism` and
 `streaming_parallelism_for_<type>` values once from the legacy parameters, persists the new values,
-and drops the deprecated entries. New clusters only expose the unified parameters.
+and drops the deprecated entries. The legacy `BOUNDED(4)` defaults for `table` and `source` are
+materialized into the new parameters during this migration. New clusters only expose the unified
+parameters.

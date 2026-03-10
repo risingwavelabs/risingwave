@@ -25,19 +25,14 @@ const KEYWORD_ADAPTIVE: &str = "adaptive";
 const KEYWORD_AUTO: &str = "auto";
 const KEYWORD_DEFAULT_STRATEGY: &str = "default";
 
-#[derive(Copy, Debug, Clone, PartialEq)]
+#[derive(Copy, Debug, Clone, PartialEq, Default)]
 pub enum ConfigParallelism {
     Default,
     Fixed(NonZeroU64),
+    #[default]
     Adaptive,
     Bounded(NonZeroU64),
     Ratio(f32),
-}
-
-impl Default for ConfigParallelism {
-    fn default() -> Self {
-        Self::Adaptive
-    }
 }
 
 #[derive(Error, Debug)]
@@ -265,9 +260,8 @@ pub fn migrate_legacy_type_parallelism(
             if matches!(
                 specific_strategy,
                 ConfigAdaptiveParallelismStrategy::Default
-            ) {
-                ConfigParallelism::Default
-            } else if matches!(global_parallelism, ConfigParallelism::Fixed(_)) {
+            ) || matches!(global_parallelism, ConfigParallelism::Fixed(_))
+            {
                 ConfigParallelism::Default
             } else {
                 legacy_strategy_to_parallelism(resolve_legacy_strategy(

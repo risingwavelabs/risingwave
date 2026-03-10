@@ -216,13 +216,13 @@ pub fn build_graph_with_strategy(
                 ConfigBackfillParallelism::Default => None,
                 override_parallelism => {
                     derive_backfill_parallelism(override_parallelism, streaming_parallelism)
-                        .or_else(|| normal_parallelism.parallelism.clone())
+                        .or(normal_parallelism.parallelism)
                 }
             }
         } else {
             None
         };
-        fragment_graph.parallelism = normal_parallelism.parallelism.clone();
+        fragment_graph.parallelism = normal_parallelism.parallelism;
         fragment_graph.backfill_parallelism = backfill_parallelism;
         fragment_graph.max_parallelism = config.streaming_max_parallelism() as _;
         normal_parallelism.adaptive_strategy
