@@ -69,28 +69,28 @@ fn map_from_key_values(
     values: ListRef<'_>,
     writer: &mut impl risingwave_common::array::MapWrite,
 ) -> Result<(), ExprError> {
-    use std::collections::HashSet;
-
     if keys.len() != values.len() {
         return Err(ExprError::Custom(
             "map_from_key_values: keys and values length mismatch".into(),
         ));
     }
 
-    let mut seen = HashSet::with_capacity(keys.len());
+    let mut seen: Vec<ScalarRefImpl> = Vec::with_capacity(keys.len());
 
     for (k, v) in keys.iter().zip(values.iter()) {
         let key =
             k.ok_or_else(|| ExprError::Custom("map_from_key_values: key must not be NULL".into()))?;
 
-        // duplicate key detection
-        if !seen.insert(key.to_owned()) {
+        if seen.contains(&key) {
             return Err(ExprError::Custom(
                 "map_from_key_values: duplicate key".into(),
             ));
         }
 
+        seen.push(key);
+
         let entry = StructValue::new(vec![Some(key.into()), v.map(|vv| vv.into())]);
+
         writer.write(Some(ScalarImpl::Struct(entry)));
     }
 
@@ -105,9 +105,7 @@ fn map_from_entries(
     entries: ListRef<'_>,
     writer: &mut impl risingwave_common::array::MapWrite,
 ) -> Result<(), ExprError> {
-    use std::collections::HashSet;
-
-    let mut seen = HashSet::with_capacity(entries.len());
+    let mut seen: Vec<ScalarRefImpl> = Vec::with_capacity(entries.len());
 
     for entry in entries.iter() {
         let struct_val = match entry {
@@ -123,11 +121,13 @@ fn map_from_entries(
             .field_at(0)
             .ok_or_else(|| ExprError::Custom("map_from_entries: key must not be NULL".into()))?;
 
-        if !seen.insert(key.to_owned()) {
+        if seen.contains(&key) {
             return Err(ExprError::Custom("map_from_entries: duplicate key".into()));
         }
 
-        writer.write(Some(ScalarRefImpl::Struct(struct_val)));
+        seen.push(key);
+
+        writer.write(entry);
     }
 
     Ok(())
@@ -308,15 +308,21 @@ fn map_insert(
     let mut replaced = false;
 
     for entry in map.into_inner().iter() {
-        let struct_val = entry.unwrap().into_struct();
-        let existing_key = struct_val.field_at(0).unwrap();
+        match entry {
+            Some(ScalarRefImpl::Struct(struct_val)) => {
+                let existing_key = struct_val.field_at(0).unwrap();
 
-        if existing_key == key {
-            let new_entry = StructValue::new(vec![Some(key.into()), value.map(|v| v.into())]);
-            writer.write(Some(ScalarImpl::Struct(new_entry)));
-            replaced = true;
-        } else {
-            writer.write(entry);
+                if existing_key == key {
+                    let new_entry =
+                        StructValue::new(vec![Some(key.into()), value.map(|v| v.into())]);
+
+                    writer.write(Some(ScalarImpl::Struct(new_entry)));
+                    replaced = true;
+                } else {
+                    writer.write(entry);
+                }
+            }
+            _ => unreachable!("map entry must be struct"),
         }
     }
 
@@ -357,11 +363,15 @@ fn map_delete(
     let key = key.unwrap();
 
     for entry in map.into_inner().iter() {
-        let struct_val = entry.unwrap().into_struct();
-        let existing_key = struct_val.field_at(0).unwrap();
+        match entry {
+            Some(ScalarRefImpl::Struct(struct_val)) => {
+                let existing_key = struct_val.field_at(0).unwrap();
 
-        if existing_key != key {
-            writer.write(entry);
+                if existing_key != key {
+                    writer.write(entry);
+                }
+            }
+            _ => unreachable!("map entry must be struct"),
         }
     }
 }
