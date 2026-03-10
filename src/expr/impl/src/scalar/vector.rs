@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::array::{Finite32, VectorItemType, VectorWrite};
-use risingwave_common::types::{DataType, F32, F64, ListRef, ScalarRefImpl, VectorRef, VectorVal};
+use risingwave_common::array::{Finite32, VectorWrite};
+use risingwave_common::types::{DataType, F32, F64, ListRef, ScalarRefImpl, VectorRef, };
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::vector::MeasureDistanceBuilder;
 use risingwave_common::vector::distance::{L1Distance, L2SqrDistance, inner_product_faiss};
@@ -406,11 +406,6 @@ fn vector_to_float4(v: VectorRef<'_>, writer: &mut impl risingwave_common::array
 #[function("cast(decimal[]) -> vector", type_infer = "unreachable")]
 #[function("cast(float4[]) -> vector", type_infer = "unreachable")]
 #[function("cast(float8[]) -> vector", type_infer = "unreachable")]
-// ✅ array_to_vector — writer style
-#[function("cast(int4[]) -> vector", type_infer = "unreachable")]
-#[function("cast(decimal[]) -> vector", type_infer = "unreachable")]
-#[function("cast(float4[]) -> vector", type_infer = "unreachable")]
-#[function("cast(float8[]) -> vector", type_infer = "unreachable")]
 fn array_to_vector(
     array: ListRef<'_>,
     ctx: &Context,
@@ -593,6 +588,6 @@ fn subvector(
     writer: &mut impl risingwave_common::array::VectorWrite,
 ) -> Result<()> {
     let sub = v.subvector(ctx.start, ctx.end);
-    writer.write_iter(sub.as_raw_slice().iter().copied().map(VectorItemType::from));
+    writer.write_iter(sub.as_raw_slice().iter().copied());
     Ok(())
 }
