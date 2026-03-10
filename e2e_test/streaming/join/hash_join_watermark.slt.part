@@ -78,10 +78,10 @@ SELECT count(*) FROM hash_join_wm_eowc_mv;
 
 # Before watermark advances, manual compaction should not reclaim the only old row.
 system ok
-./risedev ctl hummock trigger-manual-compaction -c "$right_state_compaction_group_id" -t "$right_state_tid" -l 0,6
+./risedev ctl hummock trigger-manual-compaction --exclusive -c "$right_state_compaction_group_id" -t "$right_state_tid" -l 0,6
 
 system ok
-./risedev ctl hummock trigger-manual-compaction -c "$left_degree_compaction_group_id" -t "$left_degree_tid" -l 0,6
+./risedev ctl hummock trigger-manual-compaction --exclusive -c "$left_degree_compaction_group_id" -t "$left_degree_tid" -l 0,6
 
 # Check exact state rows instead of only row counts.
 query IT rowsort retry 21 backoff 1s
@@ -135,10 +135,10 @@ SELECT * FROM hash_join_wm_eowc_mv;
 1 100 2024-01-01 00:00:00+00:00
 
 system ok
-./risedev ctl hummock trigger-manual-compaction -c "$right_state_compaction_group_id" -t "$right_state_tid" -l 0,6
+./risedev ctl hummock trigger-manual-compaction --exclusive -c "$right_state_compaction_group_id" -t "$right_state_tid" -l 0,6
 
 system ok
-./risedev ctl hummock trigger-manual-compaction -c "$left_degree_compaction_group_id" -t "$left_degree_tid" -l 0,6
+./risedev ctl hummock trigger-manual-compaction --exclusive -c "$left_degree_compaction_group_id" -t "$left_degree_tid" -l 0,6
 
 # After compaction, only the newer (00:00:10) state should remain.
 query IT rowsort retry 21 backoff 1s
@@ -205,10 +205,10 @@ SELECT * FROM hash_join_wm_eowc_mv;
 3 200 2024-01-01 00:00:10+00:00
 
 system ok
-./risedev ctl hummock trigger-manual-compaction -c "$right_state_compaction_group_id" -t "$right_state_tid" -l 0,6
+./risedev ctl hummock trigger-manual-compaction --exclusive -c "$right_state_compaction_group_id" -t "$right_state_tid" -l 0,6
 
 system ok
-./risedev ctl hummock trigger-manual-compaction -c "$left_degree_compaction_group_id" -t "$left_degree_tid" -l 0,6
+./risedev ctl hummock trigger-manual-compaction --exclusive -c "$left_degree_compaction_group_id" -t "$left_degree_tid" -l 0,6
 
 # Compact again after next watermark advance and keep only the latest state.
 query IT rowsort retry 21 backoff 1s

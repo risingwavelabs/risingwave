@@ -176,7 +176,7 @@ WHERE member_tables @> ('[' || $table_id || ']')::jsonb
 
 # Trigger compaction to reclaim rows older than watermark in left join state table
 system ok
-./risedev ctl hummock trigger-manual-compaction -c "$compaction_group_id" -t "$table_id" -l 0,6
+./risedev ctl hummock trigger-manual-compaction --exclusive -c "$compaction_group_id" -t "$table_id" -l 0,6
 
 # After compaction, the old left row (ts=10s) should be reclaimed by watermark
 query IT retry 21 backoff 1s
@@ -231,7 +231,7 @@ SELECT * FROM eowc_mv;
 2 2 2024-01-01 00:00:30+00:00 2024-01-01 00:00:25+00:00
 
 system ok
-./risedev ctl hummock trigger-manual-compaction -c "$compaction_group_id" -t "$table_id" -l 0,6
+./risedev ctl hummock trigger-manual-compaction --exclusive -c "$compaction_group_id" -t "$table_id" -l 0,6
 
 query I retry 21 backoff 1s
 SELECT CASE
@@ -445,7 +445,7 @@ WHERE member_tables @> ('[' || $between_left_state_tid || ']')::jsonb
 
 # Trigger manual compaction for Test 2 left state table and verify cleanup.
 system ok
-./risedev ctl hummock trigger-manual-compaction -c "$between_compaction_group_id" -t "$between_left_state_tid" -l 0,6
+./risedev ctl hummock trigger-manual-compaction --exclusive -c "$between_compaction_group_id" -t "$between_left_state_tid" -l 0,6
 
 query IT rowsort retry 21 backoff 1s
 SELECT stream_a_id, stream_a_ts FROM ${between_left_state_tname} ORDER BY stream_a_id;
@@ -506,8 +506,13 @@ SELECT * FROM between_eowc_mv;
 statement ok
 INSERT INTO stream_a VALUES (3, '2024-01-01 00:01:25+00', 75);
 
+let between_compaction_group_id
+SELECT id
+FROM rw_catalog.rw_hummock_compaction_group_configs
+WHERE member_tables @> ('[' || $between_left_state_tid || ']')::jsonb
+
 system ok
-./risedev ctl hummock trigger-manual-compaction -c "$between_compaction_group_id" -t "$between_left_state_tid" -l 0,6
+./risedev ctl hummock trigger-manual-compaction --exclusive -c "$between_compaction_group_id" -t "$between_left_state_tid" -l 0,6
 
 query IT rowsort retry 21 backoff 1s
 SELECT stream_a_id, stream_a_ts FROM ${between_left_state_tname} ORDER BY stream_a_id;
