@@ -106,6 +106,7 @@ def _(outer_panels: Panels):
     sync_kv_log_store_buffer_usage_expr = _sum_fragment_metric_by_mv(
         _sync_kv_log_store_buffer_usage_by_fragment_expr()
     )
+    # stream_fragment_channel_buffered_bytes is aggregated by fragment_id.
     channel_buffer_usage_expr = _sum_fragment_metric_by_mv(
         _channel_buffer_usage_by_fragment_expr()
     )

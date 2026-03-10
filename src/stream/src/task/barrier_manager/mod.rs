@@ -160,18 +160,19 @@ impl LocalBarrierManager {
         &self,
         actor_id: ActorId,
         upstream_actor_id: ActorId,
+        upstream_fragment_id: FragmentId,
         upstream_partial_graph_id: PartialGraphId,
         metrics: Arc<StreamingMetrics>,
     ) -> permit::Receiver {
-        let upstream_actor_id_str = upstream_actor_id.to_string();
-        let actor_channel_buffered_bytes = metrics
-            .actor_channel_buffered_bytes
-            .with_guarded_label_values(&[&upstream_actor_id_str]);
+        let upstream_fragment_id_str = upstream_fragment_id.to_string();
+        let fragment_channel_buffered_bytes = metrics
+            .fragment_channel_buffered_bytes
+            .with_guarded_label_values(&[&upstream_fragment_id_str]);
         let (tx, rx) = permit::channel_from_config_with_metrics(
             self.env.global_config(),
             permit::ChannelMetrics {
-                sender_actor_channel_buffered_bytes: actor_channel_buffered_bytes.clone(),
-                receiver_actor_channel_buffered_bytes: actor_channel_buffered_bytes,
+                sender_actor_channel_buffered_bytes: fragment_channel_buffered_bytes.clone(),
+                receiver_actor_channel_buffered_bytes: fragment_channel_buffered_bytes,
             },
         );
         self.send_event(LocalBarrierEvent::RegisterLocalUpstreamOutput {
