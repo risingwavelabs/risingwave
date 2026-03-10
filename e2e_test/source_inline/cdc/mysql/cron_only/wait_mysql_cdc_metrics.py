@@ -20,7 +20,7 @@ def main() -> None:
     parser.add_argument("--source-id", required=True)
     parser.add_argument("--file-seq", required=True, type=int)
     parser.add_argument("--pos", required=True, type=int)
-    parser.add_argument("--mode", choices=["advance", "equal"], required=True)
+    parser.add_argument("--mode", choices=["advance", "equal", "at_least"], required=True)
     parser.add_argument("--metrics-url", default="http://127.0.0.1:1222/metrics")
     parser.add_argument("--timeout-secs", type=int, default=30)
     parser.add_argument("--interval-secs", type=float, default=1.0)
@@ -43,8 +43,13 @@ def main() -> None:
                     last_file_seq == args.file_seq and last_pos > args.pos
                 ):
                     return
-            else:
+            elif args.mode == "equal":
                 if last_file_seq == args.file_seq and last_pos == args.pos:
+                    return
+            else:
+                if last_file_seq > args.file_seq or (
+                    last_file_seq == args.file_seq and last_pos >= args.pos
+                ):
                     return
 
         time.sleep(args.interval_secs)

@@ -64,10 +64,10 @@ psql -h ${RISEDEV_RW_FRONTEND_LISTEN_ADDRESS} \
         LIMIT 1;" > /tmp/direct_cdc_source_id.txt
 
 system ok
-bash -ceu 'mysql --batch --raw --skip-column-names -e "SHOW MASTER STATUS" | awk "NR==1 {print \$1 > \"/tmp/direct_cdc_binlog_file_before.txt\"; print \$2 > \"/tmp/direct_cdc_binlog_pos_before.txt\"}"
-BINLOG_FILE=$(cat /tmp/direct_cdc_binlog_file_before.txt)
-printf "%s" "$((10#${BINLOG_FILE##*.}))" > /tmp/direct_cdc_binlog_file_seq_before.txt'
-
+python3 e2e_test/source_inline/cdc/mysql/cron_only/capture_mysql_master_status.py \
+    --file-output /tmp/direct_cdc_binlog_file_before.txt \
+    --pos-output /tmp/direct_cdc_binlog_pos_before.txt \
+    --file-seq-output /tmp/direct_cdc_binlog_file_seq_before.txt
 system ok
 python3 e2e_test/source_inline/cdc/mysql/cron_only/build_mysql_inject_offsets.py \
     --split-id "$(cat /tmp/direct_cdc_source_id.txt)" \
@@ -120,6 +120,18 @@ mysql -e "
         (7, 'row-7');
 "
 
+system ok
+python3 e2e_test/source_inline/cdc/mysql/cron_only/capture_mysql_master_status.py \
+    --file-output /tmp/direct_cdc_binlog_file_after_resume.txt \
+    --pos-output /tmp/direct_cdc_binlog_pos_after_resume.txt \
+    --file-seq-output /tmp/direct_cdc_binlog_file_seq_after_resume.txt
+
+system ok
+python3 e2e_test/source_inline/cdc/mysql/cron_only/wait_mysql_cdc_metrics.py \
+    --source-id "$(cat /tmp/direct_cdc_source_id.txt)" \
+    --file-seq "$(cat /tmp/direct_cdc_binlog_file_seq_after_resume.txt)" \
+    --pos "$(cat /tmp/direct_cdc_binlog_pos_after_resume.txt)" \
+    --mode at_least
 query I retry 20 backoff 1s
 select count(*) from direct_cdc_inject_offset;
 ----
