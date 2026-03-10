@@ -28,7 +28,6 @@ use rand::rng as thread_rng;
 use rand::seq::SliceRandom;
 use risingwave_common::catalog::TableId;
 use risingwave_common::config::meta::default::compaction_config;
-use risingwave_common::hash::VnodeCountCompat;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_hummock_sdk::compact_task::{CompactTask, ReportTask};
 use risingwave_hummock_sdk::compaction_group::StateTableId;
@@ -512,11 +511,7 @@ impl HummockManager {
                     self.calculate_vnode_partition(
                         &mut compact_task,
                         group_config.compaction_config.as_ref(),
-                        version
-                            .latest_version()
-                            .get_compaction_group_levels(compaction_group_id),
-                    )
-                    .await?;
+                    );
 
                     let table_ids_to_be_compacted = compact_task.build_compact_table_ids();
 
@@ -1113,67 +1108,6 @@ impl HummockManager {
         )
     }
 
-    /// Apply vnode-aligned compaction for large single-table levels.
-    /// This enables one-vnode-per-SST alignment for precise query pruning.
-    async fn try_apply_vnode_aligned_partition(
-        &self,
-        compact_task: &mut CompactTask,
-        compaction_config: &CompactionConfig,
-        levels: &Levels,
-    ) -> Result<bool> {
-        // Check if vnode-aligned compaction is enabled for this level
-        // Only enable for single-table scenarios to avoid cross-table complexity
-        let Some(threshold) = compaction_config.vnode_aligned_level_size_threshold else {
-            return Ok(false);
-        };
-
-        if compact_task.target_level < compact_task.base_level
-            || compact_task.existing_table_ids.len() != 1
-        {
-            return Ok(false);
-        }
-
-        // Calculate total size of the entire target level
-        let target_level_size = levels
-            .get_level(compact_task.target_level as usize)
-            .total_file_size;
-
-        if target_level_size < threshold {
-            return Ok(false);
-        }
-
-        // Enable strict one-vnode-per-SST alignment for single table
-        let table_id = compact_task.existing_table_ids[0];
-
-        // Get the actual vnode count from table catalog
-        let table = self
-            .metadata_manager
-            .get_table_catalog_by_ids(&[table_id])
-            .await
-            .with_context(|| {
-                format!(
-                    "Failed to get table catalog for table_id {} in compaction_group {}",
-                    table_id, compact_task.compaction_group_id
-                )
-            })
-            .map_err(Error::Internal)?
-            .into_iter()
-            .next()
-            .ok_or_else(|| {
-                Error::Internal(anyhow::anyhow!(
-                    "Table catalog not found for table_id {} in compaction_group {}",
-                    table_id,
-                    compact_task.compaction_group_id
-                ))
-            })?;
-
-        compact_task
-            .table_vnode_partition
-            .insert(table_id, table.vnode_count() as u32);
-
-        Ok(true)
-    }
-
     /// Apply `split_weight_by_vnode` based partition strategy.
     /// This handles dynamic partitioning based on table size and write throughput.
     fn apply_split_weight_by_vnode_partition(
@@ -1255,32 +1189,21 @@ impl HummockManager {
             .retain(|table_id, _| compact_task.existing_table_ids.contains(table_id));
     }
 
-    pub(crate) async fn calculate_vnode_partition(
+    pub(crate) fn calculate_vnode_partition(
         &self,
         compact_task: &mut CompactTask,
         compaction_config: &CompactionConfig,
-        levels: &Levels,
-    ) -> Result<()> {
-        // Try vnode-aligned partition first (for large single-table levels)
-        if self
-            .try_apply_vnode_aligned_partition(compact_task, compaction_config, levels)
-            .await?
-        {
-            return Ok(());
-        }
-
+    ) {
         // Do not split sst by vnode partition when target_level > base_level
         // The purpose of data alignment is mainly to improve the parallelism of base level compaction
         // and reduce write amplification. However, at high level, the size of the sst file is often
         // larger and only contains the data of a single table_id, so there is no need to cut it.
         if compact_task.target_level > compact_task.base_level {
-            return Ok(());
+            return;
         }
 
         // Apply split_weight_by_vnode based partition strategy
         self.apply_split_weight_by_vnode_partition(compact_task, compaction_config);
-
-        Ok(())
     }
 
     pub fn compactor_manager_ref(&self) -> crate::hummock::CompactorManagerRef {

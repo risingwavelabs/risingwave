@@ -796,7 +796,8 @@ message RiseCtlUpdateCompactionConfigRequest {
       uint32 sst_allowed_trivial_move_max_count = 29;
       // Enable the optimization of the interval selection for the level0 compaction
       bool enable_optimize_l0_interval_selection = 30;
-      uint64 vnode_aligned_level_size_threshold = 31;
+      // Deprecated. Kept for backward compatibility and ignored by meta.
+      uint64 vnode_aligned_level_size_threshold = 31 [deprecated = true];
       // The maximum key-value count threshold for using Xor16 filter
       uint64 max_kv_count_for_xor16 = 32;
     }
@@ -1023,16 +1024,8 @@ message CompactionConfig {
   // Enable the optimization of the interval selection for the level0 compaction
   optional bool enable_optimize_l0_interval_selection = 30;
 
-  // Enable strict one-vnode-per-SST for levels that meet the size threshold.
-  // Only effective when both conditions are met:
-  //   1. target_level > base_level (deeper levels only)
-  //   2. level.total_file_size >= this threshold
-  //
-  // This prevents generating too many small SSTs when level size is small.
-  // Each SST will contain exactly one vnode, enabling precise query pruning.
-  //
-  // Typical value: 50GB.
-  optional uint64 vnode_aligned_level_size_threshold = 31;
+  // Deprecated. Kept for backward compatibility and ignored by meta.
+  optional uint64 vnode_aligned_level_size_threshold = 31 [deprecated = true];
 
   // The maximum key-value count threshold for using Xor16 filter instead of BlockedXor16 filter.
   // When the number of keys in a compaction task or SST exceeds this threshold,
