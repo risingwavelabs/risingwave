@@ -15,7 +15,8 @@
 use risingwave_common::array::StructValue;
 use risingwave_common::row::Row;
 use risingwave_common::types::{
-    DataType, ListRef, MapRef, MapType, MapValue, ScalarRef, ScalarRefImpl, ToOwnedDatum,
+    DataType, ListRef, MapRef, MapType, MapValue, Scalar, ScalarImpl, ScalarRef, ScalarRefImpl,
+    ToOwnedDatum,
 };
 use risingwave_expr::{ExprError, function};
 
@@ -68,11 +69,31 @@ fn map_from_key_values(
     values: ListRef<'_>,
     writer: &mut impl risingwave_common::array::MapWrite,
 ) -> Result<(), ExprError> {
-    let result = MapValue::try_from_kv(keys.to_owned_scalar(), values.to_owned_scalar())
-        .map_err(ExprError::Custom)?;
-    // `into_inner()` gives us the inner `ListRef` of Struct datums.
-    // We iterate over it and write each struct entry directly into the writer.
-    writer.write_iter(result.into_inner().iter());
+    use std::collections::HashSet;
+
+    if keys.len() != values.len() {
+        return Err(ExprError::Custom(
+            "map_from_key_values: keys and values length mismatch".into(),
+        ));
+    }
+
+    let mut seen = HashSet::with_capacity(keys.len());
+
+    for (k, v) in keys.iter().zip(values.iter()) {
+        let key =
+            k.ok_or_else(|| ExprError::Custom("map_from_key_values: key must not be NULL".into()))?;
+
+        // duplicate key detection
+        if !seen.insert(key.to_owned()) {
+            return Err(ExprError::Custom(
+                "map_from_key_values: duplicate key".into(),
+            ));
+        }
+
+        let entry = StructValue::new(vec![Some(key.into()), v.map(|vv| vv.into())]);
+        writer.write(Some(ScalarImpl::Struct(entry)));
+    }
+
     Ok(())
 }
 
@@ -84,9 +105,31 @@ fn map_from_entries(
     entries: ListRef<'_>,
     writer: &mut impl risingwave_common::array::MapWrite,
 ) -> Result<(), ExprError> {
-    let result =
-        MapValue::try_from_entries(entries.to_owned_scalar()).map_err(ExprError::Custom)?;
-    writer.write_iter(result.into_inner().iter());
+    use std::collections::HashSet;
+
+    let mut seen = HashSet::with_capacity(entries.len());
+
+    for entry in entries.iter() {
+        let struct_val = match entry {
+            Some(ScalarRefImpl::Struct(s)) => s,
+            _ => {
+                return Err(ExprError::Custom(
+                    "map_from_entries: entry must be struct".into(),
+                ));
+            }
+        };
+
+        let key = struct_val
+            .field_at(0)
+            .ok_or_else(|| ExprError::Custom("map_from_entries: key must not be NULL".into()))?;
+
+        if !seen.insert(key.to_owned()) {
+            return Err(ExprError::Custom("map_from_entries: duplicate key".into()));
+        }
+
+        writer.write(Some(ScalarRefImpl::Struct(struct_val)));
+    }
+
     Ok(())
 }
 
@@ -256,14 +299,31 @@ fn map_insert(
     value: Option<ScalarRefImpl<'_>>,
     writer: &mut impl risingwave_common::array::MapWrite,
 ) {
-    // When key is NULL, SQL semantics require returning the original map
-    // unchanged.  MapValue::insert allocates a new MapValue with the
-    // key-value pair inserted.  Writer avoids the output-side builder alloc.
-    let result = match key {
-        None => map.to_owned_scalar(),
-        Some(key) => MapValue::insert(map, key.into_scalar_impl(), value.to_owned_datum()),
-    };
-    writer.write_iter(result.into_inner().iter());
+    if key.is_none() {
+        writer.write_iter(map.into_inner().iter());
+        return;
+    }
+
+    let key = key.unwrap();
+    let mut replaced = false;
+
+    for entry in map.into_inner().iter() {
+        let struct_val = entry.unwrap().into_struct();
+        let existing_key = struct_val.field_at(0).unwrap();
+
+        if existing_key == key {
+            let new_entry = StructValue::new(vec![Some(key.into()), value.map(|v| v.into())]);
+            writer.write(Some(ScalarImpl::Struct(new_entry)));
+            replaced = true;
+        } else {
+            writer.write(entry);
+        }
+    }
+
+    if !replaced {
+        let new_entry = StructValue::new(vec![Some(key.into()), value.map(|v| v.into())]);
+        writer.write(Some(ScalarImpl::Struct(new_entry)));
+    }
 }
 
 /// Deletes a key-value pair from the map.
@@ -289,12 +349,21 @@ fn map_delete(
     key: Option<ScalarRefImpl<'_>>,
     writer: &mut impl risingwave_common::array::MapWrite,
 ) {
-    // When key is NULL, return original map unchanged (no-op delete).
-    let result = match key {
-        None => map.to_owned_scalar(),
-        Some(key) => MapValue::delete(map, key),
-    };
-    writer.write_iter(result.into_inner().iter());
+    if key.is_none() {
+        writer.write_iter(map.into_inner().iter());
+        return;
+    }
+
+    let key = key.unwrap();
+
+    for entry in map.into_inner().iter() {
+        let struct_val = entry.unwrap().into_struct();
+        let existing_key = struct_val.field_at(0).unwrap();
+
+        if existing_key != key {
+            writer.write(entry);
+        }
+    }
 }
 
 /// # Example
