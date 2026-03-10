@@ -257,6 +257,13 @@ impl<S: StateStore> SnapshotBackfillExecutor<S> {
                     let initial_pending_lag = Duration::from_millis(
                         Epoch(upstream_buffer.pending_epoch_lag()).physical_time(),
                     );
+                    info!(
+                        actor_id = %self.actor_ctx.id,
+                        table_id = %self.upstream_table.table_id(),
+                        ?barrier_epoch,
+                        ?initial_pending_lag,
+                        "snapshot backfill starts consuming log store"
+                    );
                     trace!(
                         ?barrier_epoch,
                         table_id = %self.upstream_table.table_id(),
@@ -300,6 +307,16 @@ impl<S: StateStore> SnapshotBackfillExecutor<S> {
                                 .first()
                                 .map(|epoch| epoch.prev)
                                 .unwrap_or(end_epoch);
+                            info!(
+                                actor_id = %self.actor_ctx.id,
+                                table_id = %self.upstream_table.table_id(),
+                                checkpoint_prev_epoch = barrier_epoch.prev,
+                                checkpoint_curr_epoch = barrier_epoch.curr,
+                                start_epoch,
+                                end_epoch,
+                                pending_non_checkpoint_barrier_count = pending_non_checkpoint_barrier.len(),
+                                "snapshot backfill starts consuming change log for checkpoint"
+                            );
                             trace!(?barrier_epoch, kind = ?barrier.kind, ?pending_non_checkpoint_barrier, "start consume epoch change log");
                             // use `upstream_buffer.run_future` to poll upstream concurrently so that we won't have back-pressure
                             // on the upstream. Otherwise, in `batch_iter_log_with_pk_bounds`, we may wait upstream epoch to be committed,
@@ -325,6 +342,15 @@ impl<S: StateStore> SnapshotBackfillExecutor<S> {
                                 yield Message::Chunk(chunk);
                             }
 
+                            info!(
+                                actor_id = %self.actor_ctx.id,
+                                table_id = %self.upstream_table.table_id(),
+                                checkpoint_prev_epoch = barrier_epoch.prev,
+                                checkpoint_curr_epoch = barrier_epoch.curr,
+                                start_epoch,
+                                end_epoch,
+                                "snapshot backfill finished consuming change log for checkpoint"
+                            );
                             trace!(?barrier_epoch, "after consume change log");
 
                             stream
@@ -374,6 +400,12 @@ impl<S: StateStore> SnapshotBackfillExecutor<S> {
                         ?barrier_epoch,
                         table_id = %self.upstream_table.table_id(),
                         "finish consuming log store"
+                    );
+                    info!(
+                        actor_id = %self.actor_ctx.id,
+                        table_id = %self.upstream_table.table_id(),
+                        ?barrier_epoch,
+                        "snapshot backfill finished consuming log store"
                     );
 
                     (barrier_epoch, false)

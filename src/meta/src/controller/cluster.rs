@@ -267,26 +267,6 @@ impl ClusterController {
         Ok(worker)
     }
 
-    pub async fn update_schedulability(
-        &self,
-        worker_ids: Vec<WorkerId>,
-        schedulability: Schedulability,
-    ) -> MetaResult<()> {
-        let inner = self.inner.write().await;
-        let hold_start = Instant::now();
-        let result = inner
-            .update_schedulability(worker_ids, schedulability)
-            .await;
-        let held = hold_start.elapsed();
-        if held > Self::write_lock_warn_threshold() {
-            tracing::warn!(
-                op = "update_schedulability",
-                ?held,
-                "cluster write lock held too long"
-            );
-        }
-        result
-    }
     /// Invoked when it receives a heartbeat from a worker node.
     pub async fn heartbeat(
         &self,
