@@ -344,6 +344,7 @@ pub(crate) async fn new_input(
         let rx = local_barrier_manager.register_local_upstream_output(
             actor_id,
             upstream_actor_id,
+            upstream_fragment_id,
             upstream_actor_info.partial_graph_id,
             metrics,
         );

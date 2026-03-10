@@ -412,8 +412,8 @@ impl PartialGraphStatus {
         match self {
             PartialGraphStatus::ReceivedExchangeRequest(pending_requests) => {
                 for (_, request) in pending_requests.drain(..) {
-                    if let TakeReceiverRequest::Remote(sender) = request {
-                        let _ = sender.send(Err(anyhow!("partial graph aborted").into()));
+                    if let TakeReceiverRequest::Remote { result_sender, .. } = request {
+                        let _ = result_sender.send(Err(anyhow!("partial graph aborted").into()));
                     }
                 }
             }
@@ -483,8 +483,8 @@ impl PartialGraphStatus {
         match replace(self, PartialGraphStatus::Resetting) {
             PartialGraphStatus::ReceivedExchangeRequest(pending_requests) => {
                 for (_, request) in pending_requests {
-                    if let TakeReceiverRequest::Remote(sender) = request {
-                        let _ = sender.send(Err(anyhow!("partial graph reset").into()));
+                    if let TakeReceiverRequest::Remote { result_sender, .. } = request {
+                        let _ = result_sender.send(Err(anyhow!("partial graph reset").into()));
                     }
                 }
                 async move { ResetPartialGraphOutput { root_err: None } }.boxed()
@@ -805,18 +805,22 @@ impl PartialGraphState {
         request: TakeReceiverRequest,
     ) {
         let request = match request {
-            TakeReceiverRequest::Remote(result_sender) => {
-                let upstream_actor_id_str = upstream_actor_id.to_string();
-                let actor_channel_buffered_bytes = self
+            TakeReceiverRequest::Remote {
+                result_sender,
+                upstream_fragment_id,
+            } => {
+                let upstream_fragment_id_str = upstream_fragment_id.to_string();
+                let fragment_channel_buffered_bytes = self
                     .actor_manager
                     .streaming_metrics
-                    .actor_channel_buffered_bytes
-                    .with_guarded_label_values(&[&upstream_actor_id_str]);
+                    .fragment_channel_buffered_bytes
+                    .with_guarded_label_values(&[&upstream_fragment_id_str]);
                 let (tx, rx) = permit::channel_from_config_with_metrics(
                     self.local_barrier_manager.env.global_config(),
                     permit::ChannelMetrics {
-                        sender_actor_channel_buffered_bytes: actor_channel_buffered_bytes.clone(),
-                        receiver_actor_channel_buffered_bytes: actor_channel_buffered_bytes,
+                        sender_actor_channel_buffered_bytes: fragment_channel_buffered_bytes
+                            .clone(),
+                        receiver_actor_channel_buffered_bytes: fragment_channel_buffered_bytes,
                     },
                 );
                 let _ = result_sender.send(Ok(rx));

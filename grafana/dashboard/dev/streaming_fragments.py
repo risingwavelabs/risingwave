@@ -36,16 +36,7 @@ def _sync_kv_log_store_buffer_usage_by_fragment_expr() -> str:
     return f"sum({metric('sync_kv_log_store_buffer_memory_bytes')}) by (fragment_id)"
 
 def _channel_buffer_usage_by_fragment_expr() -> str:
-    channel_buffer_usage_by_actor_expr = (
-        f"sum({metric('stream_actor_channel_buffered_bytes')}) by (actor_id)"
-    )
-    return (
-        f"sum("
-        f"  ({channel_buffer_usage_by_actor_expr})"
-        f"  * on(actor_id) group_left(fragment_id)"
-        f"    group({metric('actor_info')}) by (actor_id, fragment_id)"
-        f") by (fragment_id)"
-    )
+    return f"sum({metric('stream_fragment_channel_buffered_bytes')}) by (fragment_id)"
 
 @section
 def _(outer_panels: Panels):
