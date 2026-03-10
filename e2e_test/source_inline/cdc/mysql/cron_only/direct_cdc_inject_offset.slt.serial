@@ -132,6 +132,7 @@ python3 e2e_test/source_inline/cdc/mysql/cron_only/wait_mysql_cdc_metrics.py \
     --file-seq "$(cat /tmp/direct_cdc_binlog_file_seq_after_resume.txt)" \
     --pos "$(cat /tmp/direct_cdc_binlog_pos_after_resume.txt)" \
     --mode at_least
+
 query I retry 20 backoff 1s
 select count(*) from direct_cdc_inject_offset;
 ----
