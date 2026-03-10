@@ -606,6 +606,7 @@ pub async fn start_service_as_election_leader(
         stream_manager.clone(),
         metadata_manager.clone(),
         refresh_manager.clone(),
+        iceberg_compaction_mgr.clone(),
     );
     let sink_coordination_srv = SinkCoordinationServiceImpl::new(sink_manager);
     let hummock_srv = HummockServiceImpl::new(

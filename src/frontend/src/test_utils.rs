@@ -59,6 +59,7 @@ use risingwave_pb::meta::cancel_creating_jobs_request::PbJobs;
 use risingwave_pb::meta::list_actor_splits_response::ActorSplit;
 use risingwave_pb::meta::list_actor_states_response::ActorState;
 use risingwave_pb::meta::list_cdc_progress_response::PbCdcProgress;
+use risingwave_pb::meta::list_iceberg_compaction_status_response::IcebergCompactionStatus;
 use risingwave_pb::meta::list_iceberg_tables_response::IcebergTable;
 use risingwave_pb::meta::list_object_dependencies_response::PbObjectDependencies;
 use risingwave_pb::meta::list_rate_limits_response::RateLimitInfo;
@@ -1285,6 +1286,10 @@ impl FrontendMetaClient for MockFrontendMetaClient {
 
     async fn list_hosted_iceberg_tables(&self) -> RpcResult<Vec<IcebergTable>> {
         unimplemented!()
+    }
+
+    async fn list_iceberg_compaction_status(&self) -> RpcResult<Vec<IcebergCompactionStatus>> {
+        Ok(vec![])
     }
 
     async fn get_fragment_by_id(
