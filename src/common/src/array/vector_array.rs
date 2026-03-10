@@ -152,6 +152,13 @@ impl ArrayBuilder for VectorArrayBuilder {
     }
 }
 
+impl VectorArrayBuilder {
+    pub fn writer(&mut self) -> VectorWriter<'_> {
+        VectorWriter::new(self)
+    }
+}
+
+
 #[derive(Debug, Clone)]
 pub struct VectorArray {
     bitmap: Bitmap,
@@ -464,7 +471,10 @@ impl<'a> VectorWriter<'a> {
             .last()
             .cloned()
             .expect("non-empty with an initial 0");
-        let written = (self.builder.inner.len() - self.start) as u32;
+        let written: u32 = (self.builder.inner.len() - self.start)
+            .try_into()
+            .expect("vector length overflow u32");
+
         self.builder
             .offsets
             .push(last.checked_add(written).expect("offset overflow"));
