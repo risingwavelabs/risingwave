@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::array::{Finite32,VectorWrite,VectorItemType};
+use risingwave_common::array::{Finite32, VectorItemType, VectorWrite};
 use risingwave_common::types::{DataType, F32, F64, ListRef, ScalarRefImpl, VectorRef, VectorVal};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::vector::MeasureDistanceBuilder;
@@ -249,13 +249,13 @@ fn vector_subtract(
     rhs: VectorRef<'_>,
     writer: &mut impl risingwave_common::array::VectorWrite,
 ) -> Result<()> {
-     check_dims("vector_subtract", lhs, rhs)?;
+    check_dims("vector_subtract", lhs, rhs)?;
     for (l, r) in lhs.as_raw_slice().iter().zip_eq_fast(rhs.as_raw_slice()) {
         let v = Finite32::try_from(l - r).map_err(|_| ExprError::NumericOverflow)?;
         writer.write(F32::from(v.0));
     }
     Ok(())
- }
+}
 
 /// ```slt
 /// query R
@@ -278,7 +278,7 @@ fn vector_multiply(
     rhs: VectorRef<'_>,
     writer: &mut impl risingwave_common::array::VectorWrite,
 ) -> Result<()> {
-     check_dims("vector_multiply", lhs, rhs)?;
+    check_dims("vector_multiply", lhs, rhs)?;
     for (l, r) in lhs.as_raw_slice().iter().zip_eq_fast(rhs.as_raw_slice()) {
         let v = l * r;
         let f = match v == 0. && !(*l == 0. || *r == 0.) {
@@ -288,7 +288,7 @@ fn vector_multiply(
         writer.write(f.into());
     }
     Ok(())
- }
+}
 
 /// ```slt
 /// query R
@@ -318,7 +318,7 @@ fn vector_concat(
         writer.write(F32::from(v.0));
     }
     Ok(())
- }
+}
 
 /// ```slt
 /// query T
@@ -406,7 +406,16 @@ fn vector_to_float4(v: VectorRef<'_>, writer: &mut impl risingwave_common::array
 #[function("cast(decimal[]) -> vector", type_infer = "unreachable")]
 #[function("cast(float4[]) -> vector", type_infer = "unreachable")]
 #[function("cast(float8[]) -> vector", type_infer = "unreachable")]
-fn array_to_vector(array: ListRef<'_>, ctx: &Context) -> Result<VectorVal> {
+// ✅ array_to_vector — writer style
+#[function("cast(int4[]) -> vector", type_infer = "unreachable")]
+#[function("cast(decimal[]) -> vector", type_infer = "unreachable")]
+#[function("cast(float4[]) -> vector", type_infer = "unreachable")]
+#[function("cast(float8[]) -> vector", type_infer = "unreachable")]
+fn array_to_vector(
+    array: ListRef<'_>,
+    ctx: &Context,
+    writer: &mut impl risingwave_common::array::VectorWrite,
+) -> Result<()> {
     macro_rules! bail_invalid_param {
         ($($arg:tt)*) => {
             return Err(ExprError::InvalidParam {
@@ -422,30 +431,28 @@ fn array_to_vector(array: ListRef<'_>, ctx: &Context) -> Result<VectorVal> {
     if array.len() != size {
         bail_invalid_param!("expected {} dimensions, not {}", size, array.len());
     }
-    let result = array
-        .iter()
-        .map(|scalar| {
-            let Some(scalar) = scalar else {
-                bail_invalid_param!("array must not contain nulls");
-            };
-            let val = match scalar {
-                ScalarRefImpl::Int32(val) => val.into(),
-                ScalarRefImpl::Decimal(val) => {
-                    val.try_into().map_err(|_| ExprError::NumericOverflow)?
-                }
-                ScalarRefImpl::Float32(val) => val,
-                ScalarRefImpl::Float64(val) => {
-                    val.try_into().map_err(|_| ExprError::NumericOverflow)?
-                }
-                _ => unreachable!(),
-            };
-            Finite32::try_from(val.0).map_err(|err| ExprError::InvalidParam {
-                name: "array_to_vector",
-                reason: err.into(),
-            })
-        })
-        .try_collect()?;
-    Ok(result)
+    for scalar in array.iter() {
+        let Some(scalar) = scalar else {
+            bail_invalid_param!("array must not contain nulls");
+        };
+        let val = match scalar {
+            ScalarRefImpl::Int32(val) => val.into(),
+            ScalarRefImpl::Decimal(val) => {
+                val.try_into().map_err(|_| ExprError::NumericOverflow)?
+            }
+            ScalarRefImpl::Float32(val) => val,
+            ScalarRefImpl::Float64(val) => {
+                val.try_into().map_err(|_| ExprError::NumericOverflow)?
+            }
+            _ => unreachable!(),
+        };
+        let finite = Finite32::try_from(val.0).map_err(|err| ExprError::InvalidParam {
+            name: "array_to_vector",
+            reason: err.into(),
+        })?;
+        writer.write(F32::from(finite.0));
+    }
+    Ok(())
 }
 
 /// ```slt
@@ -514,12 +521,9 @@ fn l2_norm(vector: VectorRef<'_>) -> F64 {
     "l2_normalize(vector) -> vector",
     type_infer = "|args| Ok(args[0].clone())"
 )]
-fn l2_normalize(
-    vector: VectorRef<'_>,
-    writer: &mut impl risingwave_common::array::VectorWrite,
-) {
+fn l2_normalize(vector: VectorRef<'_>, writer: &mut impl risingwave_common::array::VectorWrite) {
     let normalized = vector.normalized();
-    writer.write_iter(normalized.as_raw_slice().iter().copied().map(VectorItemType::from));
+    writer.write_iter(normalized.as_raw_slice().iter().copied());
 }
 
 #[derive(Debug)]
@@ -583,6 +587,12 @@ impl SubvectorContext {
     prebuild = "SubvectorContext::from_start_count($1, $2)?",
     type_infer = "unreachable"
 )]
-fn subvector(v: VectorRef<'_>, ctx: &SubvectorContext) -> Result<VectorVal> {
-    Ok(v.subvector(ctx.start, ctx.end))
+fn subvector(
+    v: VectorRef<'_>,
+    ctx: &SubvectorContext,
+    writer: &mut impl risingwave_common::array::VectorWrite,
+) -> Result<()> {
+    let sub = v.subvector(ctx.start, ctx.end);
+    writer.write_iter(sub.as_raw_slice().iter().copied().map(VectorItemType::from));
+    Ok(())
 }

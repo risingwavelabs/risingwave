@@ -208,7 +208,7 @@ fn arg_writer_type(arg: &syn::FnArg) -> Option<WriterTypeKind> {
         Some(WriterTypeKind::MapWrite)
     } else if elem == &parse_quote!(impl risingwave_common::array::VectorWrite) {
         Some(WriterTypeKind::VectorWrite)
-    }else {
+    } else {
         None
     }
 }

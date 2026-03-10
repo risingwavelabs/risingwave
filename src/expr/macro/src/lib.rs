@@ -624,7 +624,7 @@ enum WriterTypeKind {
     JsonbbBuilder, // jsonbb::Builder
     ListWrite,     // risingwave_common::array::ListWrite
     MapWrite,      // risingwave_common::array::MapWrite
-    VectorWrite,  // risingwave_common::array::VectorWrite
+    VectorWrite,   // risingwave_common::array::VectorWrite
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]

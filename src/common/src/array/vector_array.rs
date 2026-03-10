@@ -158,7 +158,6 @@ impl VectorArrayBuilder {
     }
 }
 
-
 #[derive(Debug, Clone)]
 pub struct VectorArray {
     bitmap: Bitmap,
