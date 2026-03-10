@@ -291,11 +291,8 @@ impl MvSelectionRule {
             Self::normalize_join_outputs(&query_join, &query_input_to_query, &query_base_offsets)?;
         let mv_output_to_base =
             Self::normalize_join_outputs(&mv_join, &mv_input_to_query, &query_base_offsets)?;
-        let Some(base_to_mv_output) =
-            Self::invert_mapping(&mv_output_to_base, query_join.total_base_len())
-        else {
-            return None;
-        };
+        let base_to_mv_output =
+            Self::invert_mapping(&mv_output_to_base, query_join.total_base_len())?;
         let rewritten_predicate =
             Self::rewrite_condition_to_mv(rewritten_predicate, &base_to_mv_output)?;
         let output_col_idx = query_output_to_base
@@ -523,9 +520,8 @@ impl MvSelectionRule {
     fn invert_mapping(mapping: &[usize], source_size: usize) -> Option<Vec<Option<usize>>> {
         let mut inverse = vec![None; source_size];
         for (target_idx, source_idx) in mapping.iter().copied().enumerate() {
-            match inverse.get_mut(source_idx)? {
-                slot @ None => *slot = Some(target_idx),
-                Some(_) => {}
+            if let slot @ None = inverse.get_mut(source_idx)? {
+                *slot = Some(target_idx);
             }
         }
         Some(inverse)
