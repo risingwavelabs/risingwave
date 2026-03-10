@@ -30,7 +30,7 @@ use educe::Educe;
 use risingwave_common::catalog::{FragmentTypeFlag, TableId};
 use risingwave_common::session_config::SessionConfig;
 use risingwave_common::session_config::parallelism::{
-    ConfigAdaptiveParallelismStrategy, ConfigParallelism,
+    ConfigBackfillParallelism, ConfigParallelism,
 };
 use risingwave_common::system_param::AdaptiveParallelismStrategy;
 use risingwave_connector::source::cdc::CdcScanOptions;
@@ -48,7 +48,7 @@ use crate::error::ErrorCode::NotSupported;
 use crate::error::{Result, RwError};
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{StreamPlanRef as PlanRef, reorganize_elements_id};
-use crate::stream_fragmenter::parallelism::{derive_parallelism, derive_parallelism_strategy};
+use crate::stream_fragmenter::parallelism::{derive_backfill_parallelism, derive_parallelism};
 
 /// The mutable state when building fragment graph.
 #[derive(Educe)]
@@ -161,21 +161,6 @@ impl GraphJobType {
             GraphJobType::Index => config.streaming_parallelism_for_index(),
         }
     }
-
-    pub fn to_parallelism_strategy(
-        &self,
-        config: &SessionConfig,
-    ) -> ConfigAdaptiveParallelismStrategy {
-        match self {
-            GraphJobType::Table => config.streaming_parallelism_strategy_for_table(),
-            GraphJobType::MaterializedView => {
-                config.streaming_parallelism_strategy_for_materialized_view()
-            }
-            GraphJobType::Source => config.streaming_parallelism_strategy_for_source(),
-            GraphJobType::Sink => config.streaming_parallelism_strategy_for_sink(),
-            GraphJobType::Index => config.streaming_parallelism_strategy_for_index(),
-        }
-    }
 }
 
 pub fn build_graph(
@@ -228,23 +213,19 @@ pub fn build_graph_with_strategy(
         let normal_parallelism = derive_parallelism(job_parallelism, streaming_parallelism);
         let backfill_parallelism = if state.has_any_backfill {
             match config.streaming_parallelism_for_backfill() {
-                ConfigParallelism::Default => None,
+                ConfigBackfillParallelism::Default => None,
                 override_parallelism => {
-                    derive_parallelism(Some(override_parallelism), streaming_parallelism)
-                        .or(normal_parallelism)
+                    derive_backfill_parallelism(override_parallelism, streaming_parallelism)
+                        .or_else(|| normal_parallelism.parallelism.clone())
                 }
             }
         } else {
             None
         };
-        fragment_graph.parallelism = normal_parallelism;
+        fragment_graph.parallelism = normal_parallelism.parallelism.clone();
         fragment_graph.backfill_parallelism = backfill_parallelism;
         fragment_graph.max_parallelism = config.streaming_max_parallelism() as _;
-
-        let job_strategy = job_type
-            .as_ref()
-            .map(|t| t.to_parallelism_strategy(config.deref()));
-        derive_parallelism_strategy(job_strategy, config.streaming_parallelism_strategy())
+        normal_parallelism.adaptive_strategy
     };
 
     // Set context for this streaming job.

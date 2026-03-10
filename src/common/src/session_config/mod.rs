@@ -37,7 +37,7 @@ use crate::config::mutate::TomlTableMutateExt;
 use crate::config::streaming::{JoinEncodingType, OverWindowCachePolicy};
 use crate::config::{ConfigMergeError, StreamingConfig, merge_streaming_config_section};
 use crate::hash::VirtualNode;
-use crate::session_config::parallelism::{ConfigAdaptiveParallelismStrategy, ConfigParallelism};
+use crate::session_config::parallelism::{ConfigBackfillParallelism, ConfigParallelism};
 use crate::session_config::sink_decouple::SinkDecouple;
 use crate::session_config::transaction_isolation_level::IsolationLevel;
 pub use crate::session_config::visibility_mode::VisibilityMode;
@@ -66,13 +66,6 @@ const DISABLE_BACKFILL_RATE_LIMIT: i32 = -1;
 const DISABLE_SOURCE_RATE_LIMIT: i32 = -1;
 const DISABLE_DML_RATE_LIMIT: i32 = -1;
 const DISABLE_SINK_RATE_LIMIT: i32 = -1;
-
-/// Default parallelism bound for tables
-const DEFAULT_TABLE_PARALLELISM_BOUND: std::num::NonZeroU64 = std::num::NonZeroU64::new(4).unwrap();
-
-/// Default parallelism bound for sources
-const DEFAULT_SOURCE_PARALLELISM_BOUND: std::num::NonZeroU64 =
-    std::num::NonZeroU64::new(4).unwrap();
 
 /// Default to bypass cluster limits iff in debug mode.
 const BYPASS_CLUSTER_LIMITS: bool = cfg!(debug_assertions);
@@ -176,55 +169,31 @@ pub struct SessionConfig {
     ///
     /// If a non-zero value is set, streaming queries will be scheduled to use a fixed number of parallelism.
     /// Note that the value will be bounded at `STREAMING_MAX_PARALLELISM`.
-    #[parameter(default = ConfigParallelism::default())]
+    #[parameter(default = ConfigParallelism::Adaptive)]
     streaming_parallelism: ConfigParallelism,
 
     /// Specific parallelism for backfill. By default, it will fall back to `STREAMING_PARALLELISM`.
-    #[parameter(default = ConfigParallelism::default())]
-    streaming_parallelism_for_backfill: ConfigParallelism,
-
-    /// The adaptive parallelism strategy for streaming jobs. Defaults to `default`, which follows the system setting.
-    #[parameter(default = ConfigAdaptiveParallelismStrategy::default())]
-    streaming_parallelism_strategy: ConfigAdaptiveParallelismStrategy,
-
-    /// Specific adaptive parallelism strategy for table. Defaults to `BOUNDED(4)`.
-    #[parameter(default = ConfigAdaptiveParallelismStrategy::Bounded(DEFAULT_TABLE_PARALLELISM_BOUND))]
-    streaming_parallelism_strategy_for_table: ConfigAdaptiveParallelismStrategy,
+    #[parameter(default = ConfigBackfillParallelism::Default)]
+    streaming_parallelism_for_backfill: ConfigBackfillParallelism,
 
     /// Specific parallelism for table. By default, it will fall back to `STREAMING_PARALLELISM`.
-    #[parameter(default = ConfigParallelism::default())]
+    #[parameter(default = ConfigParallelism::Default)]
     streaming_parallelism_for_table: ConfigParallelism,
 
-    /// Specific adaptive parallelism strategy for sink. Falls back to `STREAMING_PARALLELISM_STRATEGY`.
-    #[parameter(default = ConfigAdaptiveParallelismStrategy::default())]
-    streaming_parallelism_strategy_for_sink: ConfigAdaptiveParallelismStrategy,
-
     /// Specific parallelism for sink. By default, it will fall back to `STREAMING_PARALLELISM`.
-    #[parameter(default = ConfigParallelism::default())]
+    #[parameter(default = ConfigParallelism::Default)]
     streaming_parallelism_for_sink: ConfigParallelism,
 
-    /// Specific adaptive parallelism strategy for index. Falls back to `STREAMING_PARALLELISM_STRATEGY`.
-    #[parameter(default = ConfigAdaptiveParallelismStrategy::default())]
-    streaming_parallelism_strategy_for_index: ConfigAdaptiveParallelismStrategy,
-
     /// Specific parallelism for index. By default, it will fall back to `STREAMING_PARALLELISM`.
-    #[parameter(default = ConfigParallelism::default())]
+    #[parameter(default = ConfigParallelism::Default)]
     streaming_parallelism_for_index: ConfigParallelism,
 
-    /// Specific adaptive parallelism strategy for source. Defaults to `BOUNDED(4)`.
-    #[parameter(default = ConfigAdaptiveParallelismStrategy::Bounded(DEFAULT_SOURCE_PARALLELISM_BOUND))]
-    streaming_parallelism_strategy_for_source: ConfigAdaptiveParallelismStrategy,
-
     /// Specific parallelism for source. By default, it will fall back to `STREAMING_PARALLELISM`.
-    #[parameter(default = ConfigParallelism::default())]
+    #[parameter(default = ConfigParallelism::Default)]
     streaming_parallelism_for_source: ConfigParallelism,
 
-    /// Specific adaptive parallelism strategy for materialized view. Falls back to `STREAMING_PARALLELISM_STRATEGY`.
-    #[parameter(default = ConfigAdaptiveParallelismStrategy::default())]
-    streaming_parallelism_strategy_for_materialized_view: ConfigAdaptiveParallelismStrategy,
-
     /// Specific parallelism for materialized view. By default, it will fall back to `STREAMING_PARALLELISM`.
-    #[parameter(default = ConfigParallelism::default())]
+    #[parameter(default = ConfigParallelism::Default)]
     streaming_parallelism_for_materialized_view: ConfigParallelism,
 
     /// Enable delta join for streaming queries. Defaults to false.

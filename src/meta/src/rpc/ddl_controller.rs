@@ -1878,15 +1878,7 @@ impl DdlController {
         let parallelism = if initial_parallelism.is_some() {
             parallelism.get()
         } else {
-            // Prefer job-level override for initial scheduling, fallback to system strategy.
-            let adaptive_strategy = match stream_ctx.adaptive_parallelism_strategy {
-                Some(strategy) => strategy,
-                None => self
-                    .env
-                    .system_params_reader()
-                    .await
-                    .adaptive_parallelism_strategy(),
-            };
+            let adaptive_strategy = stream_ctx.adaptive_parallelism_strategy.unwrap_or_default();
             adaptive_strategy.compute_target_parallelism(parallelism.get())
         };
 

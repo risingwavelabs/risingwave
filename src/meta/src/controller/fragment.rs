@@ -24,7 +24,7 @@ use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{FragmentTypeFlag, FragmentTypeMask};
 use risingwave_common::hash::{VnodeCount, VnodeCountCompat};
 use risingwave_common::id::JobId;
-use risingwave_common::system_param::reader::SystemParamsRead;
+use risingwave_common::system_param::AdaptiveParallelismStrategy;
 use risingwave_common::util::stream_graph_visitor::visit_stream_node_body;
 use risingwave_connector::source::SplitImpl;
 use risingwave_connector::source::cdc::CdcScanOptions;
@@ -1518,15 +1518,10 @@ impl CatalogController {
             return Ok(HashMap::new());
         }
 
-        let adaptive_parallelism_strategy = {
-            let system_params_reader = self.env.system_params_reader().await;
-            system_params_reader.adaptive_parallelism_strategy()
-        };
-
         let RenderedGraph { fragments, .. } = render_actor_assignments(
             self.env.actor_id_generator(),
             worker_nodes.current(),
-            adaptive_parallelism_strategy,
+            AdaptiveParallelismStrategy::default(),
             &loaded,
         )?;
 

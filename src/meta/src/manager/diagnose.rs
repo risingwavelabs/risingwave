@@ -1182,11 +1182,6 @@ impl DiagnoseCommand {
         table.add_row(row);
 
         let mut row = Row::new();
-        row.add_cell("adaptive_parallelism_strategy".into());
-        row.add_cell(params.adaptive_parallelism_strategy().to_string().into());
-        table.add_row(row);
-
-        let mut row = Row::new();
         row.add_cell("per_database_isolation".into());
         row.add_cell(params.per_database_isolation().to_string().into());
         table.add_row(row);

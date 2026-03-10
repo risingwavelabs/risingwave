@@ -22,7 +22,6 @@ use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::catalog::DatabaseId;
 use risingwave_common::hash::ActorMapping;
-use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_meta_model::{
     StreamingParallelism, WorkerId, fragment, fragment_relation, object, streaming_job,
 };
@@ -52,7 +51,6 @@ pub struct WorkerReschedule {
 }
 
 use risingwave_common::id::JobId;
-use risingwave_common::system_param::AdaptiveParallelismStrategy;
 use risingwave_meta_model::DispatcherType;
 use risingwave_meta_model::fragment::DistributionType;
 use risingwave_meta_model::prelude::{Fragment, FragmentRelation, StreamingJob};
@@ -1038,8 +1036,6 @@ impl GlobalStreamManager {
             .map(|worker| (worker.id, worker))
             .collect();
 
-        let mut previous_adaptive_parallelism_strategy = AdaptiveParallelismStrategy::default();
-
         let mut should_trigger = false;
 
         loop {
@@ -1081,14 +1077,7 @@ impl GlobalStreamManager {
                     };
 
                     match notification {
-                        LocalNotification::SystemParamsChange(reader) => {
-                            let new_strategy = reader.adaptive_parallelism_strategy();
-                            if new_strategy != previous_adaptive_parallelism_strategy {
-                                tracing::info!("adaptive parallelism strategy changed from {:?} to {:?}", previous_adaptive_parallelism_strategy, new_strategy);
-                                should_trigger = true;
-                                previous_adaptive_parallelism_strategy = new_strategy;
-                            }
-                        }
+                        LocalNotification::SystemParamsChange(_) => {}
                         LocalNotification::WorkerNodeActivated(worker) => {
                             if !worker_is_streaming_compute(&worker) {
                                 continue;
