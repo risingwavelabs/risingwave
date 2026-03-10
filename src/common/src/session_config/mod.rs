@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+mod iceberg_engine_storage_mode;
 mod non_zero64;
 mod opt;
 pub mod parallelism;
@@ -23,6 +24,7 @@ mod transaction_isolation_level;
 mod visibility_mode;
 
 use chrono_tz::Tz;
+pub use iceberg_engine_storage_mode::IcebergEngineStorageMode;
 use itertools::Itertools;
 pub use opt::OptionConfig;
 pub use query_mode::QueryMode;
@@ -108,6 +110,16 @@ pub struct SessionConfig {
     /// or distributed mode automatically.
     #[parameter(default = QueryMode::default())]
     query_mode: QueryMode,
+
+    /// For Iceberg engine tables, which storage to use for batch SELECT: Iceberg (columnar) or
+    /// Hummock (row). Only affects batch SELECT on tables with ENGINE = ICEBERG.
+    #[parameter(default = IcebergEngineStorageMode::default())]
+    iceberg_engine_storage_mode: IcebergEngineStorageMode,
+
+    /// When `iceberg_engine_storage_mode` is auto and table cardinality is unknown: prefer Hummock
+    /// (row store) if required columns >= this percent of table columns. Only used as fallback.
+    #[parameter(default = 80)]
+    iceberg_engine_row_ratio_percent: i32,
 
     /// Sets the number of digits displayed for floating-point values.
     /// See <https://www.postgresql.org/docs/current/runtime-config-client.html#:~:text=for%20more%20information.-,extra_float_digits,-(integer)>

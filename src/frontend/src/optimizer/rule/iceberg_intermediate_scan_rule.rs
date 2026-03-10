@@ -89,13 +89,12 @@ impl FallibleRule<Logical> for IcebergIntermediateScanRule {
         {
             use risingwave_connector::source::iceberg::IcebergListResult;
 
-            let list_result =
-                tokio::task::block_in_place(|| {
-                    FRONTEND_RUNTIME.block_on(enumerator.list_scan_tasks(
-                        Some(scan.time_travel_info.clone()),
-                        scan.predicate.clone(),
-                    ))
-                })?;
+            let list_result = tokio::task::block_in_place(|| {
+                FRONTEND_RUNTIME.block_on(enumerator.list_scan_tasks(
+                    Some(scan.time_travel_info.clone()),
+                    scan.iceberg_predicate.clone(),
+                ))
+            })?;
             let Some(IcebergListResult {
                 mut data_files,
                 mut equality_delete_files,
@@ -119,10 +118,8 @@ impl FallibleRule<Logical> for IcebergIntermediateScanRule {
             // Build the data file scan with pre-computed splits
             let schema = data_files[0].schema.clone();
             let mut projection_columns: Vec<&str> = scan
-                .output_columns
-                .iter()
-                .chain(&equality_delete_columns)
-                .map(|col| col.as_str())
+                .output_columns()
+                .chain(equality_delete_columns.iter().map(|s| s.as_str()))
                 .collect();
             projection_columns.sort_unstable_by_key(|&s| schema.field_id_by_name(s));
             projection_columns.dedup();
@@ -196,9 +193,8 @@ impl FallibleRule<Logical> for IcebergIntermediateScanRule {
             // Add projection if output columns differ from scan columns
             let schema_len = plan.schema().len();
             let schema_names = plan.schema().fields.iter().map(|f| f.name.as_str());
-            let output_names = scan.output_columns.iter().map(|s| s.as_str());
-            if schema_len != scan.output_columns.len()
-                || !itertools::equal(schema_names, output_names)
+            let output_columns = scan.output_columns();
+            if schema_len != output_columns.len() || !itertools::equal(schema_names, output_columns)
             {
                 let col_map: HashMap<&str, usize> = plan
                     .schema()
@@ -208,16 +204,44 @@ impl FallibleRule<Logical> for IcebergIntermediateScanRule {
                     .map(|(idx, field)| (field.name.as_str(), idx))
                     .collect();
                 let output_col_idx: Vec<_> = scan
-                    .output_columns
-                    .iter()
+                    .output_columns()
                     .map(|col| {
-                        col_map.get(col.as_str()).copied().with_context(|| {
+                        col_map.get(col).copied().with_context(|| {
                             format!("Output column {} not found in scan schema", col)
                         })
                     })
                     .try_collect()?;
                 let mapping = ColIndexMapping::with_remaining_columns(&output_col_idx, schema_len);
                 plan = LogicalProject::with_mapping(plan, mapping).into();
+            }
+
+            // For Iceberg engine tables, the intermediate scan's output schema has
+            // Hummock types (via table_column_type_mapping), but the LogicalIcebergScan
+            // reads from Iceberg with Iceberg types. Add casts to match the expected
+            // Hummock output types.
+            if scan.has_type_mapping() {
+                let cast_exprs: Vec<ExprImpl> = plan
+                    .schema()
+                    .fields
+                    .iter()
+                    .enumerate()
+                    .map(|(i, field)| {
+                        let input_ref: ExprImpl = InputRef::new(i, field.data_type.clone()).into();
+                        if let Some(target_type) = scan.table_column_type_mapping.get(&field.name) {
+                            if &field.data_type != target_type {
+                                match input_ref.cast_explicit(target_type) {
+                                    Ok(casted) => casted,
+                                    Err(_) => InputRef::new(i, field.data_type.clone()).into(),
+                                }
+                            } else {
+                                input_ref
+                            }
+                        } else {
+                            input_ref
+                        }
+                    })
+                    .collect();
+                plan = LogicalProject::create(plan, cast_exprs);
             }
 
             ApplyResult::Ok(plan)
