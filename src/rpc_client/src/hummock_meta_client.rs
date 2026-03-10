@@ -57,7 +57,8 @@ pub trait HummockMetaClient: Send + Sync + 'static {
         table_id: JobId,
         level: u32,
         sst_ids: Vec<HummockSstableId>,
-    ) -> Result<()>;
+        exclusive: bool,
+    ) -> Result<bool>;
     async fn trigger_full_gc(
         &self,
         sst_retention_time_sec: u64,

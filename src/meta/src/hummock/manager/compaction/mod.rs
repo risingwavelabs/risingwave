@@ -53,7 +53,7 @@ use risingwave_pb::hummock::{
 use thiserror_ext::AsReport;
 use tokio::sync::RwLockWriteGuard;
 use tokio::sync::mpsc::UnboundedReceiver;
-use tokio::sync::oneshot::Sender;
+use tokio::sync::oneshot::{Receiver, Sender};
 use tokio::task::JoinHandle;
 use tonic::Streaming;
 use tracing::warn;
@@ -66,6 +66,7 @@ use crate::hummock::compaction::selector::{
 };
 use crate::hummock::compaction::{CompactStatus, CompactionDeveloperConfig, CompactionSelector};
 use crate::hummock::error::{Error, Result};
+use crate::hummock::manager::CompactionTaskReportResult;
 use crate::hummock::manager::transaction::{
     HummockVersionStatsTransaction, HummockVersionTransaction,
 };
@@ -79,6 +80,12 @@ use crate::hummock::sequence::next_compaction_task_id;
 use crate::hummock::{HummockManager, commit_multi_var, start_measure_real_process_timer};
 use crate::manager::META_NODE_ID;
 use crate::model::BTreeMapTransaction;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ManualCompactionTriggerResult {
+    Submitted,
+    Retry,
+}
 
 pub mod compaction_event_loop;
 pub mod compaction_group_manager;
@@ -287,7 +294,7 @@ impl HummockManager {
         &self,
         compaction_groups: Vec<CompactionGroupId>,
         max_select_count: usize,
-        selector: &mut Box<dyn CompactionSelector>,
+        selector: &mut dyn CompactionSelector,
     ) -> Result<(Vec<CompactTask>, Vec<CompactionGroupId>)> {
         let deterministic_mode = self.env.opts.compaction_deterministic_test;
 
@@ -734,7 +741,7 @@ impl HummockManager {
         &self,
         mut compaction_groups: Vec<CompactionGroupId>,
         max_select_count: usize,
-        selector: &mut Box<dyn CompactionSelector>,
+        selector: &mut dyn CompactionSelector,
     ) -> Result<(Vec<CompactTask>, Vec<CompactionGroupId>)> {
         fail_point!("fp_get_compact_task", |_| Err(Error::MetaStore(
             anyhow::anyhow!("failpoint metastore error")
@@ -757,7 +764,7 @@ impl HummockManager {
     pub async fn get_compact_task(
         &self,
         compaction_group_id: CompactionGroupId,
-        selector: &mut Box<dyn CompactionSelector>,
+        selector: &mut dyn CompactionSelector,
     ) -> Result<Option<CompactTask>> {
         fail_point!("fp_get_compact_task", |_| Err(Error::MetaStore(
             anyhow::anyhow!("failpoint metastore error")
@@ -780,10 +787,22 @@ impl HummockManager {
         compaction_group_id: CompactionGroupId,
         manual_compaction_option: ManualCompactionOption,
     ) -> Result<Option<CompactTask>> {
-        let mut selector: Box<dyn CompactionSelector> =
-            Box::new(ManualCompactionSelector::new(manual_compaction_option));
-        self.get_compact_task(compaction_group_id, &mut selector)
-            .await
+        let (task, _) = self
+            .manual_get_compact_task_with_info(compaction_group_id, manual_compaction_option)
+            .await?;
+        Ok(task)
+    }
+
+    pub async fn manual_get_compact_task_with_info(
+        &self,
+        compaction_group_id: CompactionGroupId,
+        manual_compaction_option: ManualCompactionOption,
+    ) -> Result<(Option<CompactTask>, bool)> {
+        let mut selector = ManualCompactionSelector::new(manual_compaction_option);
+        let task = self
+            .get_compact_task(compaction_group_id, &mut selector)
+            .await?;
+        Ok((task, selector.blocked_by_pending()))
     }
 
     pub async fn report_compact_task(
@@ -864,13 +883,21 @@ impl HummockManager {
             self.env.notification_manager(),
         );
         let mut success_count = 0;
+        let mut report_results = Vec::with_capacity(rets.len());
         for (idx, task) in report_tasks.into_iter().enumerate() {
             rets[idx] = true;
+            let task_id = task.task_id;
+            let mut task_status = task.task_status;
             let mut compact_task = match compact_task_assignment.remove(task.task_id) {
                 Some(compact_task) => CompactTask::from(compact_task.compact_task.unwrap()),
                 None => {
                     tracing::warn!("{}", format!("compact task {} not found", task.task_id));
                     rets[idx] = false;
+                    report_results.push(CompactionTaskReportResult {
+                        task_id,
+                        task_status,
+                        reported: false,
+                    });
                     continue;
                 }
             };
@@ -948,6 +975,12 @@ impl HummockManager {
                     &task.table_stats_change,
                 );
             }
+            task_status = compact_task.task_status;
+            report_results.push(CompactionTaskReportResult {
+                task_id,
+                task_status,
+                reported: rets[idx],
+            });
             tasks.push(compact_task);
         }
         if success_count > 0 {
@@ -971,6 +1004,8 @@ impl HummockManager {
                 compact_task_assignment
             )?;
         }
+
+        self.notify_compaction_task_report_waiters(report_results);
 
         let mut success_groups = vec![];
         for compact_task in &tasks {
@@ -1040,8 +1075,9 @@ impl HummockManager {
         &self,
         compaction_group: CompactionGroupId,
         manual_compaction_option: ManualCompactionOption,
-    ) -> Result<()> {
+    ) -> Result<ManualCompactionTriggerResult> {
         let start_time = Instant::now();
+        let exclusive = manual_compaction_option.exclusive;
 
         // 1. Get idle compactor.
         let compactor = match self.compactor_manager.next_compactor() {
@@ -1058,18 +1094,10 @@ impl HummockManager {
 
         // 2. Get manual compaction task.
         let compact_task = self
-            .manual_get_compact_task(compaction_group, manual_compaction_option)
+            .manual_get_compact_task_with_info(compaction_group, manual_compaction_option)
             .await;
-        let compact_task = match compact_task {
-            Ok(Some(compact_task)) => compact_task,
-            Ok(None) => {
-                // No compaction task available.
-                return Err(anyhow::anyhow!(
-                    "trigger_manual_compaction No compaction_task is available. compaction_group {}",
-                    compaction_group
-                )
-                    .into());
-            }
+        let (compact_task, blocked_by_pending) = match compact_task {
+            Ok((compact_task, blocked_by_pending)) => (compact_task, blocked_by_pending),
             Err(err) => {
                 tracing::warn!(error = %err.as_report(), "Failed to get compaction task");
 
@@ -1081,26 +1109,76 @@ impl HummockManager {
                     .into());
             }
         };
+        let compact_task = match compact_task {
+            Some(compact_task) => compact_task,
+            None => {
+                if exclusive && blocked_by_pending {
+                    return Ok(ManualCompactionTriggerResult::Retry);
+                }
+                // No compaction task available.
+                return Err(anyhow::anyhow!(
+                    "trigger_manual_compaction No compaction_task is available. compaction_group {}",
+                    compaction_group
+                )
+                .into());
+            }
+        };
 
         // 3. send task to compactor
+        let task_id = compact_task.task_id;
         let compact_task_string = compact_task_to_string(&compact_task);
-        // TODO: shall we need to cancel on meta ?
-        compactor
+        tracing::info!(
+            compact_task_string,
+            duration = ?start_time.elapsed(),
+            "Triggered manual compaction task."
+        );
+
+        let report_rx = self.register_compaction_task_report_waiter(task_id);
+        if let Err(err) = compactor
             .send_event(ResponseEvent::CompactTask(compact_task.into()))
             .with_context(|| {
                 format!(
                     "Failed to trigger compaction task for compaction_group {}",
                     compaction_group,
                 )
-            })?;
+            })
+        {
+            self.remove_compaction_task_report_waiter(task_id);
+            return Err(err.into());
+        }
+
+        let report_result = match report_rx.await {
+            Ok(result) => result,
+            Err(_) => {
+                self.remove_compaction_task_report_waiter(task_id);
+                return Err(anyhow::anyhow!(
+                    "trigger_manual_compaction wait report failed. compaction_group {}",
+                    compaction_group
+                )
+                .into());
+            }
+        };
+        if !report_result.reported {
+            return Err(anyhow::anyhow!(
+                "trigger_manual_compaction report not accepted. task_id {}",
+                report_result.task_id
+            )
+            .into());
+        }
+
+        if report_result.task_status == TaskStatus::NoAvailCpuResourceCanceled
+            || report_result.task_status == TaskStatus::NoAvailMemoryResourceCanceled
+        {
+            return Ok(ManualCompactionTriggerResult::Retry);
+        }
 
         tracing::info!(
-            "Trigger manual compaction task. {}. cost time: {:?}",
-            &compact_task_string,
-            start_time.elapsed(),
+            ?report_result,
+            duration = ?start_time.elapsed(),
+            "Completed manual compaction task."
         );
 
-        Ok(())
+        Ok(ManualCompactionTriggerResult::Submitted)
     }
 
     /// Sends a compaction request for new data (clears cooldown).
@@ -1288,6 +1366,28 @@ impl HummockManager {
 
     pub fn compactor_manager_ref(&self) -> crate::hummock::CompactorManagerRef {
         self.compactor_manager.clone()
+    }
+
+    fn register_compaction_task_report_waiter(
+        &self,
+        task_id: HummockCompactionTaskId,
+    ) -> Receiver<CompactionTaskReportResult> {
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        self.compaction_task_report_notifiers
+            .lock()
+            .register(task_id, tx);
+        rx
+    }
+
+    fn remove_compaction_task_report_waiter(&self, task_id: HummockCompactionTaskId) {
+        self.compaction_task_report_notifiers.lock().remove(task_id);
+    }
+
+    fn notify_compaction_task_report_waiters(&self, results: Vec<CompactionTaskReportResult>) {
+        let mut guard = self.compaction_task_report_notifiers.lock();
+        for result in results {
+            guard.notify(result);
+        }
     }
 }
 

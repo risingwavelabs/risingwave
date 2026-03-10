@@ -702,10 +702,12 @@ message TriggerManualCompactionRequest {
   uint32 table_id = 3;
   uint32 level = 4;
   repeated uint64 sst_ids = 5;
+  optional bool exclusive = 6;
 }
 
 message TriggerManualCompactionResponse {
   common.Status status = 1;
+  optional bool should_retry = 2;
 }
 
 message TriggerFullGCRequest {

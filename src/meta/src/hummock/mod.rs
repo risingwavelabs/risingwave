@@ -16,8 +16,7 @@ pub mod compaction;
 pub mod compactor_manager;
 pub mod error;
 mod manager;
-
-pub use manager::*;
+pub use manager::{ManualCompactionTriggerResult, *};
 use thiserror_ext::AsReport;
 
 mod level_handler;
