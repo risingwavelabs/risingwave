@@ -2611,9 +2611,7 @@ mod tests {
         let new_log_store_table = new_log_store_table.expect("log store table should be updated");
         assert_eq!(
             new_log_store_table.value_indices,
-            (0..columns.len())
-                .map(|i| i as i32)
-                .collect::<Vec<_>>()
+            (0..columns.len()).map(|i| i as i32).collect::<Vec<_>>()
         );
     }
 }
