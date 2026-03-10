@@ -178,6 +178,19 @@ pub struct MetaConfig {
     #[serde(default)]
     pub checkpoint_compression_algorithm: CheckpointCompression,
 
+    /// Chunk size in bytes for reading large checkpoints.
+    /// Large checkpoints are read in parallel chunks to avoid single-request timeout issues.
+    /// Default: 128MB
+    #[serde(default = "default::meta::checkpoint_read_chunk_size")]
+    pub checkpoint_read_chunk_size: usize,
+
+    /// Maximum number of concurrent chunk reads when reading large checkpoints.
+    /// Higher values may improve read throughput but increase memory usage.
+    /// Memory usage = checkpoint_read_chunk_size * checkpoint_read_max_in_flight_chunks
+    /// Default: 4
+    #[serde(default = "default::meta::checkpoint_read_max_in_flight_chunks")]
+    pub checkpoint_read_max_in_flight_chunks: usize,
+
     /// If enabled, `SSTable` object file and version delta will be retained.
     ///
     /// `SSTable` object file need to be deleted via full GC.
@@ -635,6 +648,14 @@ pub mod default {
 
         pub fn hummock_version_checkpoint_interval_sec() -> u64 {
             30
+        }
+
+        pub fn checkpoint_read_chunk_size() -> usize {
+            128 * 1024 * 1024 // 128MB
+        }
+
+        pub fn checkpoint_read_max_in_flight_chunks() -> usize {
+            4
         }
 
         pub fn enable_hummock_data_archive() -> bool {

@@ -95,6 +95,15 @@ impl HummockVersionCheckpoint {
 /// `checksum.is_some()` reliably distinguishes envelope from legacy format.
 /// Legacy bytes may happen to decode as an envelope (field 1 wire-type mismatch
 /// is skipped, field 2 LEN matches `payload`), but will never have a checksum.
+///
+/// Decoding logic:
+/// 1. Try to decode as `HummockVersionCheckpointEnvelope`
+/// 2. If `checksum.is_some()`:
+///    - Verify xxhash64 checksum
+///    - Decompress payload according to `compression_algorithm`
+///    - Decode decompressed bytes as `PbHummockVersionCheckpoint`
+/// 3. If decode fails or `checksum.is_none()`:
+///    - Decode bytes directly as legacy `PbHummockVersionCheckpoint`
 fn decode_checkpoint_data(data: bytes::Bytes) -> Result<PbHummockVersionCheckpoint> {
     use anyhow::Context;
     use prost::Message;
@@ -177,7 +186,8 @@ fn decompress_payload(
     }
 }
 
-fn compress_payload(
+/// Compresses checkpoint data using the specified algorithm.
+pub(crate) fn compress_payload(
     algo: risingwave_common::config::CheckpointCompression,
     data: &[u8],
 ) -> Result<Vec<u8>> {
@@ -254,13 +264,11 @@ where
 impl HummockManager {
     /// Returns Ok(None) if not found.
     ///
-    /// Reads large checkpoints using bounded parallel chunked reads (128MB per chunk) to avoid
-    /// single-request timeout issues.
+    /// Reads large checkpoints using bounded parallel chunked reads to avoid
+    /// single-request timeout issues. Chunk size and concurrency are configurable
+    /// via `checkpoint_read_chunk_size` and `checkpoint_read_max_in_flight_chunks`.
     /// Supports both compressed (envelope) and uncompressed (legacy) checkpoint formats.
     pub async fn try_read_checkpoint(&self) -> Result<Option<HummockVersionCheckpoint>> {
-        const CHUNK_SIZE: usize = 128 * 1024 * 1024; // 128MB
-        const MAX_IN_FLIGHT_CHUNKS: usize = 4;
-
         let object_metadata = match self
             .object_store
             .metadata(&self.version_checkpoint_path)
@@ -276,17 +284,20 @@ impl HummockManager {
         };
         let total_size = object_metadata.total_size;
 
+        let chunk_size = self.env.opts.checkpoint_read_chunk_size;
+        let max_in_flight_chunks = self.env.opts.checkpoint_read_max_in_flight_chunks;
+
         let download_start = std::time::Instant::now();
-        let data = if total_size <= CHUNK_SIZE {
+        let data = if total_size <= chunk_size {
             self.object_store
                 .read(&self.version_checkpoint_path, 0..total_size)
                 .await?
         } else {
-            let num_chunks = total_size.div_ceil(CHUNK_SIZE);
+            let num_chunks = total_size.div_ceil(chunk_size);
             let data = read_bytes_in_chunks(
                 total_size,
-                CHUNK_SIZE,
-                MAX_IN_FLIGHT_CHUNKS,
+                chunk_size,
+                max_in_flight_chunks,
                 |range| async {
                     Ok(self
                         .object_store
@@ -299,8 +310,8 @@ impl HummockManager {
             tracing::info!(
                 total_size,
                 num_chunks,
-                chunk_size = CHUNK_SIZE,
-                max_in_flight_chunks = MAX_IN_FLIGHT_CHUNKS,
+                chunk_size,
+                max_in_flight_chunks,
                 "chunked read complete"
             );
             data
@@ -751,7 +762,9 @@ mod tests {
                     let cur = in_flight.fetch_add(1, Ordering::SeqCst) + 1;
                     max_seen.fetch_max(cur, Ordering::SeqCst);
 
-                    // Add a small delay to keep multiple reads in-flight concurrently.
+                    // Add a small delay to simulate real I/O and allow multiple reads
+                    // to be in-flight concurrently. This tests that max_in_flight limit
+                    // is respected (should not exceed 3 concurrent reads).
                     sleep(Duration::from_millis(30)).await;
 
                     let bytes = Bytes::copy_from_slice(&data[range]);

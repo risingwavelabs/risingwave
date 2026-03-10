@@ -28,9 +28,7 @@ use risingwave_hummock_sdk::{
 };
 use risingwave_object_store::object::build_remote_object_store;
 use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
-use risingwave_pb::hummock::{
-    CheckpointCompressionAlgorithm, PbHummockVersionCheckpoint, PbHummockVersionCheckpointEnvelope,
-};
+use risingwave_pb::hummock::{PbHummockVersionCheckpoint, PbHummockVersionCheckpointEnvelope};
 use thiserror_ext::AsReport;
 
 use crate::backup_restore::restore_impl::v2::{LoaderV2, WriterModelV2ToMetaStoreV2};
@@ -120,14 +118,16 @@ async fn restore_hummock_version(
     };
     use anyhow::Context;
     use prost::Message;
+
+    // Use zstd compression by default. The next checkpoint written by the cluster
+    // will use the configured compression algorithm from the config file.
     let raw_bytes = checkpoint.encode_to_vec();
     let compressed = zstd::stream::encode_all(raw_bytes.as_slice(), 3)
         .context("zstd compression failed")
         .map_err(BackupError::Other)?;
     let checksum = crate::hummock::xxhash64_checksum(&compressed);
-    // Restore always uses zstd — this is a one-shot operation not driven by runtime config.
     let envelope = PbHummockVersionCheckpointEnvelope {
-        compression_algorithm: CheckpointCompressionAlgorithm::CheckpointCompressionZstd as i32,
+        compression_algorithm: compression as i32,
         payload: compressed,
         checksum: Some(checksum),
     };
