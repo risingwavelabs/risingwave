@@ -462,7 +462,7 @@ impl<'a> VectorWriter<'a> {
         Self { builder, start }
     }
 
-    /// Finish will be called when the entire record is successfully written.
+    /// `finish` will be called when the entire record is successfully written.
     /// The partial data is committed and the builder can no longer be used.
     pub fn finish(self) {
         let last = self
@@ -473,19 +473,18 @@ impl<'a> VectorWriter<'a> {
             .expect("non-empty with an initial 0");
         let written: u32 = (self.builder.inner.len() - self.start)
             .try_into()
-            .expect("vector length overflow u32");
-
+            .expect("offset overflow");
         self.builder
             .offsets
             .push(last.checked_add(written).expect("offset overflow"));
         self.builder.bitmap.append(true);
-        let _ = ManuallyDrop::new(self); // prevent drop from rolling back
+        let _ = ManuallyDrop::new(self); // prevent Drop from rolling back
     }
 
-    /// Rollback will be called when the entire record is abandoned.
+    /// `rollback` will be called when the entire record is abandoned.
     /// The partial data is cleaned and the builder can be safely used.
     pub fn rollback(self) {
-        let _ = ManuallyDrop::new(self); // just drop — Drop impl truncates
+        // just drop self — Drop impl calls truncate(self.start)
     }
 }
 

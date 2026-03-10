@@ -277,6 +277,7 @@ mod utils;
 /// - For `jsonb`: `&mut jsonbb::Builder`
 /// - For `anyarray`: `&mut impl risingwave_common::array::ListWrite`
 /// - For `anymap`: `&mut impl risingwave_common::array::MapWrite`
+/// - For `vector`:   `&mut impl risingwave_common::array::VectorWrite`
 ///
 /// Note: Use fully-qualified trait paths (for example, `impl std::fmt::Write`).
 /// Partial or relative paths (such as `impl Write` or `impl ::std::fmt::Write`) are not recognized.

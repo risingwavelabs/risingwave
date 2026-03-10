@@ -66,7 +66,7 @@ pub use struct_array::{StructArray, StructArrayBuilder, StructRef, StructValue};
 pub use utf8_array::*;
 pub use vector_array::{
     Finite32, VECTOR_AS_LIST_TYPE, VECTOR_DISTANCE_TYPE, VECTOR_ITEM_TYPE, VectorArray,
-    VectorArrayBuilder, VectorDistanceType, VectorItemType, VectorRef, VectorVal,VectorWrite, VectorWriter,
+    VectorArrayBuilder, VectorDistanceType, VectorItemType, VectorRef, VectorVal, VectorWrite, VectorWriter,
 };
 
 pub use self::error::ArrayError;
