@@ -186,7 +186,7 @@ pub struct MetaConfig {
 
     /// Maximum number of concurrent chunk reads when reading large checkpoints.
     /// Higher values may improve read throughput but increase memory usage.
-    /// Memory usage = checkpoint_read_chunk_size * checkpoint_read_max_in_flight_chunks
+    /// Memory usage = `checkpoint_read_chunk_size` * `checkpoint_read_max_in_flight_chunks`
     /// Default: 4
     #[serde(default = "default::meta::checkpoint_read_max_in_flight_chunks")]
     pub checkpoint_read_max_in_flight_chunks: usize,
