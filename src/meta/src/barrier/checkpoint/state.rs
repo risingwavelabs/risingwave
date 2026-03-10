@@ -38,7 +38,7 @@ use crate::barrier::cdc_progress::CdcTableBackfillTracker;
 use crate::barrier::checkpoint::{CreatingStreamingJobControl, DatabaseCheckpointControl};
 use crate::barrier::command::{CreateStreamingJobCommandInfo, PostCollectCommand, ReschedulePlan};
 use crate::barrier::context::CreateSnapshotBackfillJobCommandInfo;
-use crate::barrier::edge_builder::FragmentEdgeBuilder;
+use crate::barrier::edge_builder::{EdgeBuilderFragmentInfo, FragmentEdgeBuilder};
 use crate::barrier::info::{
     BarrierInfo, CreateStreamingJobStatus, InflightDatabaseInfo, InflightStreamingJobInfo,
     SubscriberType,
@@ -295,7 +295,6 @@ impl DatabaseCheckpointControl {
                         None,
                         None,
                         partial_graph_manager.control_stream_manager(),
-                        &resolved_split_assignment,
                     );
 
                     let Entry::Vacant(entry) = self.creating_streaming_job_controls.entry(job_id)
@@ -383,7 +382,6 @@ impl DatabaseCheckpointControl {
                     None,
                     new_upstream_sink,
                     partial_graph_manager.control_stream_manager(),
-                    &resolved_split_assignment,
                 );
 
                 // Pre-apply: add new job and fragments
@@ -652,7 +650,6 @@ impl DatabaseCheckpointControl {
                     Some(&plan),
                     None,
                     partial_graph_manager.control_stream_manager(),
-                    &resolved_split_assignment,
                 );
 
                 // Pre-apply: add new fragments and replace upstream
@@ -1001,8 +998,16 @@ impl DatabaseCheckpointControl {
                                     self.database_info.fragment(*upstream_fragment_id)
                                 })
                                 .chain(new_fragment_info.values())
-                                .map(|info| (info, partial_graph_id)),
-                            partial_graph_manager.control_stream_manager(),
+                                .map(|fragment| {
+                                    (
+                                        fragment.fragment_id,
+                                        EdgeBuilderFragmentInfo::from_inflight(
+                                            fragment,
+                                            partial_graph_id,
+                                            partial_graph_manager.control_stream_manager(),
+                                        ),
+                                    )
+                                }),
                         );
                         edge_builder.add_relations(&info.upstream_fragment_downstreams);
                         edge_builder.add_relations(&info.downstreams);

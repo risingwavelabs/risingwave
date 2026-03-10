@@ -12,13 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use risingwave_common::bitmap::Bitmap;
 use risingwave_meta_model::WorkerId;
 use risingwave_meta_model::fragment::DistributionType;
 use risingwave_pb::common::{ActorInfo, HostAddress};
 use risingwave_pb::id::{PartialGraphId, SubscriberId};
+use risingwave_pb::meta::table_fragments::ActorStatus;
 use risingwave_pb::stream_plan::StreamNode;
 use risingwave_pb::stream_plan::update_mutation::MergeUpdate;
 use tracing::warn;
@@ -27,16 +28,73 @@ use crate::barrier::rpc::ControlStreamManager;
 use crate::controller::fragment::InflightFragmentInfo;
 use crate::controller::utils::compose_dispatchers;
 use crate::model::{
-    ActorId, ActorUpstreams, DownstreamFragmentRelation, FragmentActorDispatchers,
+    ActorId, ActorUpstreams, DownstreamFragmentRelation, Fragment, FragmentActorDispatchers,
     FragmentDownstreamRelation, FragmentId, StreamActor, StreamJobActorsToCreate,
 };
 
+/// Fragment information needed by [`FragmentEdgeBuilder`] to compute dispatchers and merge nodes.
+///
+/// Contains actor bitmaps and resolved host addresses.
 #[derive(Debug)]
-struct FragmentInfo {
-    distribution_type: DistributionType,
-    actors: HashMap<ActorId, Option<Bitmap>>,
-    actor_location: HashMap<ActorId, HostAddress>,
-    partial_graph_id: PartialGraphId,
+pub(super) struct EdgeBuilderFragmentInfo {
+    pub distribution_type: DistributionType,
+    pub actors: HashMap<ActorId, Option<Bitmap>>,
+    pub actor_location: HashMap<ActorId, HostAddress>,
+    pub partial_graph_id: PartialGraphId,
+}
+
+impl EdgeBuilderFragmentInfo {
+    /// Build from an already-inflight fragment (actors already materialized).
+    pub fn from_inflight(
+        info: &InflightFragmentInfo,
+        partial_graph_id: PartialGraphId,
+        control_stream_manager: &ControlStreamManager,
+    ) -> Self {
+        let (actors, actor_location) = info
+            .actors
+            .iter()
+            .map(|(&actor_id, actor)| {
+                (
+                    (actor_id, actor.vnode_bitmap.clone()),
+                    (actor_id, control_stream_manager.host_addr(actor.worker_id)),
+                )
+            })
+            .unzip();
+        Self {
+            distribution_type: info.distribution_type,
+            actors,
+            actor_location,
+            partial_graph_id,
+        }
+    }
+
+    /// Build from a model `Fragment` with separately provided actors and locations.
+    pub fn from_fragment(
+        fragment: &Fragment,
+        actor_status: &BTreeMap<ActorId, ActorStatus>,
+        partial_graph_id: PartialGraphId,
+        control_stream_manager: &ControlStreamManager,
+    ) -> Self {
+        let (actors, actor_location) = fragment
+            .actors
+            .iter()
+            .map(|actor| {
+                (
+                    (actor.actor_id, actor.vnode_bitmap.clone()),
+                    (
+                        actor.actor_id,
+                        control_stream_manager.host_addr(actor_status[&actor.actor_id].worker_id()),
+                    ),
+                )
+            })
+            .unzip();
+        Self {
+            distribution_type: fragment.distribution_type.into(),
+            actors,
+            actor_location,
+            partial_graph_id,
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -101,36 +159,19 @@ impl FragmentEdgeBuildResult {
 }
 
 pub(super) struct FragmentEdgeBuilder {
-    fragments: HashMap<FragmentId, FragmentInfo>,
+    fragments: HashMap<FragmentId, EdgeBuilderFragmentInfo>,
     result: FragmentEdgeBuildResult,
 }
 
 impl FragmentEdgeBuilder {
+    /// Create a new edge builder from fragment edge information.
     pub(super) fn new(
-        fragment_infos: impl Iterator<Item = (&InflightFragmentInfo, PartialGraphId)>,
-        control_stream_manager: &ControlStreamManager,
+        fragment_infos: impl IntoIterator<Item = (FragmentId, EdgeBuilderFragmentInfo)>,
     ) -> Self {
         let mut fragments = HashMap::new();
-        for (info, partial_graph_id) in fragment_infos {
+        for (fragment_id, info) in fragment_infos {
             fragments
-                .try_insert(info.fragment_id, {
-                    let (actors, actor_location) = info
-                        .actors
-                        .iter()
-                        .map(|(actor_id, actor)| {
-                            (
-                                (*actor_id, actor.vnode_bitmap.clone()),
-                                (*actor_id, control_stream_manager.host_addr(actor.worker_id)),
-                            )
-                        })
-                        .unzip();
-                    FragmentInfo {
-                        distribution_type: info.distribution_type,
-                        actors,
-                        actor_location,
-                        partial_graph_id,
-                    }
-                })
+                .try_insert(fragment_id, info)
                 .expect("non-duplicate");
         }
         Self {
@@ -250,6 +291,7 @@ impl FragmentEdgeBuilder {
         }
     }
 
+    /// Finalize the builder, returning the edge build result.
     pub(super) fn build(self) -> FragmentEdgeBuildResult {
         self.result
     }
