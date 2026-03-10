@@ -498,6 +498,7 @@ impl PostCollectCommand {
                         &replace_plan,
                     )
                     .await;
+
                 barrier_manager_context
                     .hummock_manager
                     .unregister_table_ids(to_drop_state_table_ids.iter().cloned())

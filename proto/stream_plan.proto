@@ -99,6 +99,7 @@ message UpdateMutation {
   source.CdcTableSnapshotSplitsWithGeneration actor_cdc_table_snapshot_splits = 7;
   map<uint32, SinkSchemaChange> sink_schema_change = 8;
   repeated SubscriptionUpstreamInfo subscriptions_to_drop = 9;
+  optional uint32 replace_sink_id = 10;
 }
 
 message SourceChangeSplitMutation {

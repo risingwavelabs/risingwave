@@ -1067,10 +1067,10 @@ mod tests {
     fn test_cdc_source_initialized_as_cdc_source_init() {
         use std::collections::BTreeMap;
 
-        use risingwave_pb::catalog::{CreateType, PbSource, StreamSourceInfo};
+        use risingwave_pb::catalog::{PbSource, StreamSourceInfo};
 
         use crate::barrier::command::CreateStreamingJobCommandInfo;
-        use crate::manager::{StreamingJob, StreamingJobType};
+        use crate::manager::StreamingJob;
         use crate::model::StreamJobFragmentsToCreate;
 
         // Create a CDC source with cdc_source_job = true
@@ -1098,8 +1098,6 @@ mod tests {
             upstream_fragment_downstreams: Default::default(),
             init_split_assignment: Default::default(),
             definition: "CREATE SOURCE ...".to_owned(),
-            job_type: StreamingJobType::Source,
-            create_type: CreateType::Foreground,
             streaming_job: StreamingJob::Source(source),
             fragment_backfill_ordering: Default::default(),
             cdc_table_snapshot_splits: None,
