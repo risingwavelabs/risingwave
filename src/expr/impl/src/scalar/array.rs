@@ -15,7 +15,7 @@
 use risingwave_common::array::StructValue;
 use risingwave_common::row::Row;
 use risingwave_common::types::{
-    DataType, ListRef, MapRef, MapType, MapValue, Scalar, ScalarImpl, ScalarRef, ScalarRefImpl,
+    DataType, ListRef, MapRef, MapType, MapValue, ScalarImpl, ScalarRef, ScalarRefImpl,
     ToOwnedDatum,
 };
 use risingwave_expr::{ExprError, function};
