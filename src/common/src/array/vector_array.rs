@@ -29,7 +29,7 @@ use serde::{Deserialize, Serialize};
 
 use super::{Array, ArrayBuilder};
 use crate::bitmap::{Bitmap, BitmapBuilder};
-use crate::types::{DataType, ListType, Scalar, ScalarRef, ToText, F32};
+use crate::types::{DataType, F32, ListType, Scalar, ScalarRef, ToText};
 use crate::vector::{VectorInner, decode_vector_payload, encode_vector_payload};
 
 pub type VectorItemType = F32;
@@ -373,7 +373,7 @@ impl FromIterator<Finite32> for VectorVal {
 
 impl From<Finite32> for VectorItemType {
     fn from(v: Finite32) -> VectorItemType {
-        VectorItemType::from(v.0)   
+        VectorItemType::from(v.0)
     }
 }
 

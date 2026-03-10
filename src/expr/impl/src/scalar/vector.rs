@@ -226,7 +226,7 @@ fn vector_add(
     check_dims("vector_add", lhs, rhs)?;
     for (l, r) in lhs.as_raw_slice().iter().zip_eq_fast(rhs.as_raw_slice()) {
         let v = Finite32::try_from(l + r).map_err(|_| ExprError::NumericOverflow)?;
-        writer.write(v.into()); 
+        writer.write(v.into());
     }
     Ok(())
 }
@@ -252,7 +252,7 @@ fn vector_subtract(
     check_dims("vector_subtract", lhs, rhs)?;
     for (l, r) in lhs.as_raw_slice().iter().zip_eq_fast(rhs.as_raw_slice()) {
         let v = Finite32::try_from(l - r).map_err(|_| ExprError::NumericOverflow)?;
-        writer.write(v.into()); 
+        writer.write(v.into());
     }
     Ok(())
 }
@@ -315,7 +315,7 @@ fn vector_concat(
 ) -> Result<()> {
     for &f in lhs.as_raw_slice().iter().chain(rhs.as_raw_slice()) {
         let v = Finite32::try_from(f).map_err(|_| ExprError::NumericOverflow)?;
-        writer.write(v.into()); 
+        writer.write(v.into());
     }
     Ok(())
 }
@@ -445,7 +445,7 @@ fn array_to_vector(
             name: "array_to_vector",
             reason: err.into(),
         })?;
-        writer.write(finite.into()); 
+        writer.write(finite.into());
     }
     Ok(())
 }
