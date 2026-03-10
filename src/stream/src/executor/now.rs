@@ -170,7 +170,6 @@ impl<S: StateStore> NowExecutor<S> {
                 // Extract timestamp from the current epoch.
                 if let Some(datum) = &last_timestamp_datum
                     && let Some(progress_ratio) = progress_ratio
-                    && progress_ratio > 1.0
                 {
                     let last_timestamp = datum.as_timestamptz();
                     // curr_timestamp = min(last_timestamp + barrier_interval * progress_ratio, timestamp from epoch)
@@ -178,7 +177,10 @@ impl<S: StateStore> NowExecutor<S> {
                     // which may cause excessive changes in downstream dynamic filter
                     let progress_timestamp = last_timestamp
                         .timestamp_millis()
-                        .checked_add((barrier_interval_ms as f32 * progress_ratio).ceil() as i64)
+                        .checked_add(std::cmp::max(
+                            (barrier_interval_ms as f32 * progress_ratio).ceil() as i64,
+                            1,
+                        ))
                         .expect("progress_timestamp is out of i64 range");
                     let adjusted_timestamp = if progress_timestamp
                         < new_timestamp.timestamp_millis()
