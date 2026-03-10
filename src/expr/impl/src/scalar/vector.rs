@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::array::{Finite32, VectorWrite};
-use risingwave_common::types::{DataType, F32, F64, ListRef, ScalarRefImpl, VectorRef, };
+use risingwave_common::array::Finite32;
+use risingwave_common::types::{DataType, F32, F64, ListRef, ScalarRefImpl, VectorRef};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::vector::MeasureDistanceBuilder;
 use risingwave_common::vector::distance::{L1Distance, L2SqrDistance, inner_product_faiss};
@@ -226,7 +226,7 @@ fn vector_add(
     check_dims("vector_add", lhs, rhs)?;
     for (l, r) in lhs.as_raw_slice().iter().zip_eq_fast(rhs.as_raw_slice()) {
         let v = Finite32::try_from(l + r).map_err(|_| ExprError::NumericOverflow)?;
-        writer.write(F32::from(v.0));
+        writer.write(v.into()); 
     }
     Ok(())
 }
@@ -252,7 +252,7 @@ fn vector_subtract(
     check_dims("vector_subtract", lhs, rhs)?;
     for (l, r) in lhs.as_raw_slice().iter().zip_eq_fast(rhs.as_raw_slice()) {
         let v = Finite32::try_from(l - r).map_err(|_| ExprError::NumericOverflow)?;
-        writer.write(F32::from(v.0));
+        writer.write(v.into()); 
     }
     Ok(())
 }
@@ -315,7 +315,7 @@ fn vector_concat(
 ) -> Result<()> {
     for &f in lhs.as_raw_slice().iter().chain(rhs.as_raw_slice()) {
         let v = Finite32::try_from(f).map_err(|_| ExprError::NumericOverflow)?;
-        writer.write(F32::from(v.0));
+        writer.write(v.into()); 
     }
     Ok(())
 }
@@ -445,7 +445,7 @@ fn array_to_vector(
             name: "array_to_vector",
             reason: err.into(),
         })?;
-        writer.write(F32::from(finite.0));
+        writer.write(finite.into()); 
     }
     Ok(())
 }
@@ -518,7 +518,7 @@ fn l2_norm(vector: VectorRef<'_>) -> F64 {
 )]
 fn l2_normalize(vector: VectorRef<'_>, writer: &mut impl risingwave_common::array::VectorWrite) {
     let normalized = vector.normalized();
-    writer.write_iter(normalized.as_raw_slice().iter().copied());
+    writer.write_iter(normalized.as_raw_slice().iter().copied().map(F32::from));
 }
 
 #[derive(Debug)]
@@ -588,6 +588,6 @@ fn subvector(
     writer: &mut impl risingwave_common::array::VectorWrite,
 ) -> Result<()> {
     let sub = v.subvector(ctx.start, ctx.end);
-    writer.write_iter(sub.as_raw_slice().iter().copied());
+    writer.write_iter(sub.as_raw_slice().iter().copied().map(F32::from));
     Ok(())
 }

@@ -21,7 +21,6 @@ use std::sync::LazyLock;
 use bytes::{Buf, BufMut};
 use itertools::{Itertools, repeat_n};
 use memcomparable::Error;
-use risingwave_common::types::F32;
 use risingwave_common_estimate_size::EstimateSize;
 use risingwave_pb::common::PbBuffer;
 use risingwave_pb::common::buffer::PbCompressionType;
@@ -30,7 +29,7 @@ use serde::{Deserialize, Serialize};
 
 use super::{Array, ArrayBuilder};
 use crate::bitmap::{Bitmap, BitmapBuilder};
-use crate::types::{DataType, ListType, Scalar, ScalarRef, ToText};
+use crate::types::{DataType, ListType, Scalar, ScalarRef, ToText, F32};
 use crate::vector::{VectorInner, decode_vector_payload, encode_vector_payload};
 
 pub type VectorItemType = F32;
@@ -369,6 +368,12 @@ impl FromIterator<Finite32> for VectorVal {
     fn from_iter<I: IntoIterator<Item = Finite32>>(iter: I) -> Self {
         let inner = iter.into_iter().collect_vec();
         Self::from(inner)
+    }
+}
+
+impl From<Finite32> for VectorItemType {
+    fn from(v: Finite32) -> VectorItemType {
+        VectorItemType::from(v.0)   
     }
 }
 
