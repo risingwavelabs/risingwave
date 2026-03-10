@@ -496,7 +496,7 @@ fn build_new_sink_columns(
     columns
 }
 
-/// Rewrite log store table columns and value indices for schema change.
+/// Rewrite log store table columns for schema change.
 fn rewrite_log_store_table(
     log_store_table: &mut PbTable,
     removed_log_store_column_names: &HashSet<String>,
@@ -509,9 +509,6 @@ fn rewrite_log_store_table(
     extend_sink_columns(&mut log_store_table.columns, newly_added_columns, |name| {
         format!("{}_{}", upstream_table_name, name)
     });
-    log_store_table.value_indices = (0..log_store_table.columns.len())
-        .map(|i| i as i32)
-        .collect();
 }
 
 /// Rewrite `StreamScan` + Merge to match the new upstream schema.
@@ -614,7 +611,6 @@ fn rewrite_stream_scan_and_merge(
                 .clone()
         })
         .collect();
-    table_desc.value_indices = (0..table_desc.columns.len()).map(|i| i as u32).collect();
 
     stream_scan_node.fields = new_output_column_ids
         .iter()
@@ -2615,7 +2611,7 @@ mod tests {
         let new_log_store_table = new_log_store_table.expect("log store table should be updated");
         assert_eq!(
             new_log_store_table.value_indices,
-            (0..new_log_store_table.columns.len())
+            (0..columns.len())
                 .map(|i| i as i32)
                 .collect::<Vec<_>>()
         );
