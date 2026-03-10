@@ -93,7 +93,7 @@ async fn test_alter_fragment() -> Result<()> {
         .await?
         .assert_result_eq(format!("{initial_table_parallelism}"));
 
-    let new_parallelism = default_parallelism + 1;
+    let new_parallelism = 5;
 
     cluster
         .run(&format!(

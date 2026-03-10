@@ -2511,6 +2511,7 @@ pub struct StreamingJobExtraInfo {
     pub timezone: Option<String>,
     pub config_override: Arc<str>,
     pub adaptive_parallelism_strategy: Option<AdaptiveParallelismStrategy>,
+    pub backfill_adaptive_parallelism_strategy: Option<AdaptiveParallelismStrategy>,
     pub job_definition: String,
     pub backfill_orders: Option<BackfillOrders>,
 }
@@ -2521,13 +2522,16 @@ impl StreamingJobExtraInfo {
             timezone: self.timezone.clone(),
             config_override: self.config_override.clone(),
             adaptive_parallelism_strategy: self.adaptive_parallelism_strategy,
+            backfill_adaptive_parallelism_strategy: self.backfill_adaptive_parallelism_strategy,
         }
     }
 }
 
-/// Tuple of (`job_id`, `timezone`, `config_override`, `adaptive_parallelism_strategy`, `backfill_orders`)
+/// Tuple of (`job_id`, `timezone`, `config_override`, `adaptive_parallelism_strategy`,
+/// `backfill_adaptive_parallelism_strategy`, `backfill_orders`)
 type StreamingJobExtraInfoRow = (
     JobId,
+    Option<String>,
     Option<String>,
     Option<String>,
     Option<String>,
@@ -2548,6 +2552,7 @@ where
             streaming_job::Column::Timezone,
             streaming_job::Column::ConfigOverride,
             streaming_job::Column::AdaptiveParallelismStrategy,
+            streaming_job::Column::BackfillAdaptiveParallelismStrategy,
             streaming_job::Column::BackfillOrders,
         ])
         .filter(streaming_job::Column::JobId.is_in(job_ids.clone()))
@@ -2562,17 +2567,22 @@ where
     let result = pairs
         .into_iter()
         .map(
-            |(job_id, timezone, config_override, strategy, backfill_orders)| {
+            |(job_id, timezone, config_override, strategy, backfill_strategy, backfill_orders)| {
                 let job_definition = definitions.remove(&job_id).unwrap_or_default();
                 let adaptive_parallelism_strategy = strategy.as_deref().map(|s| {
                     parse_strategy(s).expect("strategy should be validated before storing")
                 });
+                let backfill_adaptive_parallelism_strategy =
+                    backfill_strategy.as_deref().map(|s| {
+                        parse_strategy(s).expect("strategy should be validated before storing")
+                    });
                 (
                     job_id,
                     StreamingJobExtraInfo {
                         timezone,
                         config_override: config_override.unwrap_or_default().into(),
                         adaptive_parallelism_strategy,
+                        backfill_adaptive_parallelism_strategy,
                         job_definition,
                         backfill_orders,
                     },
