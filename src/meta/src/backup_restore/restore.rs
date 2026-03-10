@@ -35,6 +35,7 @@ use crate::backup_restore::restore_impl::v2::{LoaderV2, WriterModelV2ToMetaStore
 use crate::backup_restore::restore_impl::{Loader, Writer};
 use crate::backup_restore::utils::{get_backup_store, get_meta_store};
 use crate::controller::SqlMetaStore;
+use crate::hummock::compress_payload;
 
 /// Command-line arguments for restore.
 #[derive(clap::Args, Debug, Clone)]
@@ -118,11 +119,13 @@ async fn restore_hummock_version(
     };
     use anyhow::Context;
     use prost::Message;
+    use risingwave_common::config::CheckpointCompression;
 
     // Use zstd compression by default. The next checkpoint written by the cluster
     // will use the configured compression algorithm from the config file.
+    let compression = CheckpointCompression::Zstd;
     let raw_bytes = checkpoint.encode_to_vec();
-    let compressed = zstd::stream::encode_all(raw_bytes.as_slice(), 3)
+    let compressed = compress_payload(compression, &raw_bytes)
         .context("zstd compression failed")
         .map_err(BackupError::Other)?;
     let checksum = crate::hummock::xxhash64_checksum(&compressed);
