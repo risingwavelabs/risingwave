@@ -167,8 +167,8 @@ impl Planner {
 
         // Build type mapping: source column name → Hummock table type.
         // This lets the intermediate scan output Hummock types directly,
-        // avoiding double casts when the storage selection rule rewrites
-        // to a Hummock LogicalScan.
+        // while the Iceberg scan path still adds explicit casts after
+        // materialization to match the expected output types.
         let mut table_column_type_mapping = HashMap::new();
         let table_column_map: HashMap<&str, &DataType> = base_table
             .table_catalog
@@ -197,8 +197,9 @@ impl Planner {
             .enumerate()
             .map(|(i, column)| (column.name().to_owned(), (i, column)))
             .collect();
-        // For intermediate scan, it will outputs Hummock types directly. But for source, it still outputs original types.
-        // So only when the plan target is source and the column type is different, we need to add cast.
+        // For intermediate scan, it will output Hummock types directly. But for source, it still
+        // outputs original types. So only when the plan target is source and the column type is
+        // different, we need to add cast.
         let exprs = scan
             .table()
             .column_schema()
@@ -608,7 +609,13 @@ source: {:?}",
                 .map(IcebergTimeTravelInfo::Version);
         }
         let Some(time_travel_info) = time_travel_info else {
-            return Ok(LogicalValues::new(vec![], source.schema().clone(), self.ctx()).into());
+            let mut schema = source.schema().clone();
+            for field in &mut schema.fields {
+                if let Some(target_type) = table_column_type_mapping.get(&field.name) {
+                    field.data_type = target_type.clone();
+                }
+            }
+            return Ok(LogicalValues::new(vec![], schema, self.ctx()).into());
         };
         let intermediate_scan = LogicalIcebergIntermediateScan::new(
             source,
@@ -630,24 +637,33 @@ source: {:?}",
             return Ok(snapshot_id);
         }
 
-        let ConnectorProperties::Iceberg(prop) =
-            ConnectorProperties::extract(catalog.with_properties.clone(), false)?
-        else {
-            return Err(crate::error::ErrorCode::InternalError(
-                "Iceberg source must have Iceberg connector properties".to_owned(),
-            )
-            .into());
-        };
+        #[cfg(madsim)]
+        return Err(crate::error::ErrorCode::BindError(
+            "iceberg source time travel can't be used in the madsim mode".to_string(),
+        )
+        .into());
 
-        let snapshot_id = tokio::task::block_in_place(|| {
-            crate::utils::FRONTEND_RUNTIME.block_on(async {
-                prop.load_table()
-                    .await
-                    .map(|table| table.metadata().current_snapshot_id())
-            })
-        })?;
-        map.insert(name.to_owned(), snapshot_id);
-        Ok(snapshot_id)
+        #[cfg(not(madsim))]
+        {
+            let ConnectorProperties::Iceberg(prop) =
+                ConnectorProperties::extract(catalog.with_properties.clone(), false)?
+            else {
+                return Err(crate::error::ErrorCode::InternalError(
+                    "Iceberg source must have Iceberg connector properties".to_owned(),
+                )
+                .into());
+            };
+
+            let snapshot_id = tokio::task::block_in_place(|| {
+                crate::utils::FRONTEND_RUNTIME.block_on(async {
+                    prop.load_table()
+                        .await
+                        .map(|table| table.metadata().current_snapshot_id())
+                })
+            })?;
+            map.insert(name.to_owned(), snapshot_id);
+            Ok(snapshot_id)
+        }
     }
 
     fn get_iceberg_source_by_table_catalog(

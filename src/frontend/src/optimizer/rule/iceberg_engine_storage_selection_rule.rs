@@ -19,7 +19,6 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 
-use risingwave_common::catalog::{RISINGWAVE_ICEBERG_ROW_ID, ROW_ID_COLUMN_NAME};
 use risingwave_common::session_config::IcebergEngineStorageMode;
 
 use super::prelude::{PlanRef, *};
@@ -72,10 +71,6 @@ impl IcebergEngineStorageSelectionRule {
 }
 
 /// Rewrite the intermediate Iceberg scan to a Hummock `LogicalScan`.
-///
-/// The intermediate scan's output schema already uses Hummock types (via
-/// `table_column_type_mapping`), so the `LogicalScan`'s schema matches
-/// directly—no extra cast project is needed.
 fn rewrite_to_table_scan(
     plan: &PlanRef,
     scan: &LogicalIcebergIntermediateScan,
@@ -132,14 +127,7 @@ fn check_point_lookup(
         .iter()
         .filter_map(|input_ref| table.columns().get(input_ref.index()))
         .filter(|c| !c.is_hidden())
-        .map(|c| {
-            let s = c.name.as_str();
-            if s == RISINGWAVE_ICEBERG_ROW_ID {
-                ROW_ID_COLUMN_NAME
-            } else {
-                s
-            }
-        })
+        .map(|c| c.name.as_str())
         .collect();
 
     // All PK columns must be covered by equality predicates.
