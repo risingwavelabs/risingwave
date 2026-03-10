@@ -1459,6 +1459,19 @@ impl DdlController {
                     .filter(|col| !new_table_column_ids.contains(&col.column_id()))
                     .cloned()
                     .collect_vec();
+                // TODO: Remove this guard when auto schema refresh sink fully supports drop column.
+                if !removed_columns.is_empty() {
+                    return Err(anyhow!(
+                        "new table columns does not contains all original columns. new: {:?}, original: {:?}, not included: {:?}",
+                        table.columns,
+                        original_table_columns,
+                        removed_columns
+                            .iter()
+                            .map(|col| col.column_id())
+                            .collect_vec()
+                    )
+                    .into());
+                }
                 let mut sinks = Vec::with_capacity(auto_refresh_schema_sinks.len());
                 for sink in auto_refresh_schema_sinks {
                     let sink_job_fragments = self
