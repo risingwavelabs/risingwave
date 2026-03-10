@@ -256,4 +256,56 @@ mod tests {
 
         Ok(())
     }
+
+    #[tokio::test]
+    async fn test_abort_creating_subscription_commits_delete() -> MetaResult<()> {
+        use risingwave_pb::catalog::subscription::SubscriptionState;
+
+        let mgr = CatalogController::new(MetaSrvEnv::for_test().await).await?;
+        let pb_view = PbView {
+            schema_id: TEST_SCHEMA_ID,
+            database_id: TEST_DATABASE_ID,
+            name: "subscription_dep_view".to_owned(),
+            owner: TEST_OWNER_ID as _,
+            sql: "CREATE VIEW subscription_dep_view AS SELECT 1".to_owned(),
+            ..Default::default()
+        };
+        mgr.create_view(pb_view, HashSet::new()).await?;
+
+        let view_id: ViewId = View::find()
+            .select_only()
+            .column(view::Column::ViewId)
+            .filter(view::Column::Name.eq("subscription_dep_view"))
+            .into_tuple()
+            .one(&mgr.inner.read().await.db)
+            .await?
+            .unwrap();
+
+        let mut pb_subscription = PbSubscription {
+            name: "subscription_to_abort".to_owned(),
+            definition: "CREATE SUBSCRIPTION subscription_to_abort FROM subscription_dep_view"
+                .to_owned(),
+            retention_seconds: 86400,
+            database_id: TEST_DATABASE_ID,
+            schema_id: TEST_SCHEMA_ID,
+            dependent_table_id: view_id.as_object_id().as_table_id(),
+            owner: TEST_OWNER_ID as _,
+            subscription_state: SubscriptionState::Init as _,
+            ..Default::default()
+        };
+        mgr.create_subscription_catalog(&mut pb_subscription)
+            .await?;
+
+        mgr.try_abort_creating_subscription(pb_subscription.id)
+            .await?;
+
+        assert!(
+            Subscription::find_by_id(pb_subscription.id)
+                .one(&mgr.inner.read().await.db)
+                .await?
+                .is_none()
+        );
+
+        Ok(())
+    }
 }
