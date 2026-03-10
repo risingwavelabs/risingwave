@@ -16,7 +16,7 @@
 //! `LogicalIcebergIntermediateScan` (columnar Iceberg) to `LogicalScan` (row Hummock)
 //! for Iceberg engine tables.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use risingwave_common::catalog::{RISINGWAVE_ICEBERG_ROW_ID, ROW_ID_COLUMN_NAME};
@@ -57,7 +57,6 @@ impl InfallibleRule<Logical> for IcebergEngineStorageSelectionRule {
             };
         }
         let prefer_rowstore = try_strategy!(check_point_lookup, check_column_ratio);
-
         if !prefer_rowstore {
             return None;
         }
@@ -82,40 +81,20 @@ fn rewrite_to_table_scan(
     scan: &LogicalIcebergIntermediateScan,
     table: &Arc<TableCatalog>,
 ) -> Option<PlanRef> {
-    // Map source output column names to table column indices.
-    let table_columns = table.columns();
-    let name_to_idx: HashMap<&str, usize> = table_columns
+    let output_col_idx = scan
+        .output_column_mapping
+        .to_parts()
+        .0
         .iter()
-        .enumerate()
-        .map(|(i, c)| (c.name.as_str(), i))
-        .collect();
-
-    let output_columns = scan.output_columns();
-    let mut output_col_idx = Vec::with_capacity(output_columns.len());
-    for name in output_columns {
-        let table_col_name = if name == RISINGWAVE_ICEBERG_ROW_ID {
-            ROW_ID_COLUMN_NAME
-        } else {
-            name
-        };
-        let Some(&idx) = name_to_idx.get(table_col_name) else {
-            tracing::warn!(
-                "IcebergEngineStorageSelectionRule: column {} not found in table {}, ignore storage selection",
-                table_col_name,
-                table.name()
-            );
-            return None;
-        };
-        output_col_idx.push(idx);
-    }
-
+        .copied()
+        .try_collect()?;
     let table_scan = generic::TableScan::new(
         output_col_idx,
         table.clone(),
         vec![],
         vec![],
         plan.ctx(),
-        scan.risingwave_condition.clone(),
+        scan.origin_condition.clone(),
         scan.core.as_of.clone(),
     );
     Some(LogicalScan::from(table_scan).into())
@@ -148,7 +127,7 @@ fn check_point_lookup(
     }
 
     // Collect output column names that have equality-to-constant predicates.
-    let eq_input_refs = scan.risingwave_condition.get_eq_const_input_refs();
+    let eq_input_refs = scan.origin_condition.get_eq_const_input_refs();
     let eq_col_names: HashSet<&str> = eq_input_refs
         .iter()
         .filter_map(|input_ref| table.columns().get(input_ref.index()))

@@ -34,7 +34,7 @@ use crate::binder::{
 };
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::error::{ErrorCode, Result};
-use crate::expr::{Expr, ExprImpl, ExprType, FunctionCall, InputRef, Literal};
+use crate::expr::{CastContext, Expr, ExprImpl, ExprType, FunctionCall, InputRef, Literal};
 use crate::optimizer::plan_node::generic::{GenericPlanRef, SourceNodeKind};
 use crate::optimizer::plan_node::utils::to_iceberg_time_travel_as_of;
 use crate::optimizer::plan_node::{
@@ -97,112 +97,153 @@ impl Planner {
                 };
                 Ok(scan.into())
             }
-            Engine::Iceberg => {
-                let is_append_only = base_table.table_catalog.append_only;
-                let iceberg_engine_storage_mode = self
-                    .ctx()
-                    .session_ctx()
-                    .config()
-                    .iceberg_engine_storage_mode();
-                let use_table_scan = match self.plan_for() {
-                    PlanFor::StreamIcebergEngineInternal => true,
-                    PlanFor::BatchDql => {
-                        iceberg_engine_storage_mode == IcebergEngineStorageMode::Hummock
-                    }
-                    PlanFor::Stream | PlanFor::Batch => !is_append_only,
-                };
-                match as_of {
-                    None
-                    | Some(AsOf::VersionNum(_))
-                    | Some(AsOf::TimestampString(_))
-                    | Some(AsOf::TimestampNum(_)) => {}
-                    Some(AsOf::ProcessTime) | Some(AsOf::ProcessTimeWithInterval(_)) => {
-                        bail_not_implemented!("As Of ProcessTime() is not supported yet.")
-                    }
-                    Some(AsOf::VersionString(_)) => {
-                        bail_not_implemented!("As Of Version is not supported yet.")
-                    }
+            Engine::Iceberg => self.plan_iceberg_table(base_table, scan, as_of),
+        }
+    }
+
+    fn plan_iceberg_table(
+        &mut self,
+        base_table: &BoundBaseTable,
+        scan: LogicalScan,
+        as_of: Option<AsOf>,
+    ) -> Result<PlanRef> {
+        let is_append_only = base_table.table_catalog.append_only;
+        let iceberg_engine_storage_mode = self
+            .ctx()
+            .session_ctx()
+            .config()
+            .iceberg_engine_storage_mode();
+
+        enum PlanTarget {
+            TableScan,
+            Source,
+            IntermediateScan,
+        }
+        let plan_target = match self.plan_for() {
+            PlanFor::StreamIcebergEngineInternal => PlanTarget::TableScan,
+            PlanFor::BatchDql => match iceberg_engine_storage_mode {
+                IcebergEngineStorageMode::Hummock => PlanTarget::TableScan,
+                _ => PlanTarget::IntermediateScan,
+            },
+            PlanFor::Stream => {
+                if is_append_only {
+                    PlanTarget::Source
+                } else {
+                    PlanTarget::TableScan
                 }
-
-                if use_table_scan {
-                    return Ok(scan.into());
+            }
+            PlanFor::Batch => {
+                if is_append_only {
+                    PlanTarget::IntermediateScan
+                } else {
+                    PlanTarget::TableScan
                 }
-
-                let source_catalog = self.get_iceberg_source_by_table_catalog(&base_table.table_catalog)
-                .ok_or_else(|| {
-                    ErrorCode::BindError(format!(
-                        "failed to plan an iceberg engine table: {}. Can't find the corresponding iceberg source. Maybe you need to recreate the table",
-                        base_table.table_catalog.name()
-                    ))
-                })?;
-
-                // Build type mapping: source column name → Hummock table type.
-                // This lets the intermediate scan output Hummock types directly,
-                // avoiding double casts when the storage selection rule rewrites
-                // to a Hummock LogicalScan.
-                let mut table_column_type_mapping = HashMap::new();
-                let table_column_map: HashMap<&str, &DataType> = base_table
-                    .table_catalog
-                    .columns
-                    .iter()
-                    .map(|c| (c.name.as_str(), &c.column_desc.data_type))
-                    .collect();
-                for source_col in &source_catalog.columns {
-                    let source_name = source_col.name();
-                    let table_name = if source_name == RISINGWAVE_ICEBERG_ROW_ID {
-                        ROW_ID_COLUMN_NAME
-                    } else {
-                        source_name
-                    };
-                    if let Some(&table_type) = table_column_map.get(table_name)
-                        && source_col.column_desc.data_type != *table_type
-                    {
-                        table_column_type_mapping
-                            .insert(source_name.to_owned(), table_type.clone());
-                    }
-                }
-
-                let column_map: HashMap<String, (usize, ColumnCatalog)> = source_catalog
-                    .columns
-                    .clone()
-                    .into_iter()
-                    .enumerate()
-                    .map(|(i, column)| (column.name().to_owned(), (i, column)))
-                    .collect();
-                // The intermediate scan now outputs Hummock types (via table_column_type_mapping),
-                // so the outer project only needs column remapping and NULL fillers, no type casts.
-                let exprs = scan
-                    .table()
-                    .column_schema()
-                    .fields()
-                    .iter()
-                    .map(|field| {
-                        let source_filed_name = if field.name == ROW_ID_COLUMN_NAME {
-                            RISINGWAVE_ICEBERG_ROW_ID
-                        } else {
-                            &field.name
-                        };
-                        if let Some((i, _source_column)) = column_map.get(source_filed_name) {
-                            ExprImpl::InputRef(InputRef::new(*i, field.data_type.clone()).into())
-                        } else {
-                            // fields like `_rw_timestamp`, would not be found in source.
-                            ExprImpl::Literal(Literal::new(None, field.data_type.clone()).into())
-                        }
-                    })
-                    .collect_vec();
-
-                let logical_source = LogicalSource::with_catalog(
-                    Rc::new(source_catalog),
-                    SourceNodeKind::CreateMViewOrBatch,
-                    self.ctx(),
-                    as_of,
-                )?;
-                let logical_iceberg_intermediate_scan = self
-                    .plan_iceberg_intermediate_scan(&logical_source, table_column_type_mapping)?;
-
-                Ok(LogicalProject::new(logical_iceberg_intermediate_scan, exprs).into())
+            }
+        };
+        match as_of {
+            None
+            | Some(AsOf::VersionNum(_))
+            | Some(AsOf::TimestampString(_))
+            | Some(AsOf::TimestampNum(_)) => {}
+            Some(AsOf::ProcessTime) | Some(AsOf::ProcessTimeWithInterval(_)) => {
+                bail_not_implemented!("As Of ProcessTime() is not supported yet.")
+            }
+            Some(AsOf::VersionString(_)) => {
+                bail_not_implemented!("As Of Version is not supported yet.")
             }
         }
+
+        if matches!(plan_target, PlanTarget::TableScan) {
+            return Ok(scan.into());
+        }
+
+        let source_catalog = self.get_iceberg_source_by_table_catalog(&base_table.table_catalog)
+            .ok_or_else(|| {
+                ErrorCode::BindError(format!(
+                    "failed to plan an iceberg engine table: {}. Can't find the corresponding iceberg source. Maybe you need to recreate the table",
+                    base_table.table_catalog.name()
+                    ))
+            })?;
+
+        // Build type mapping: source column name → Hummock table type.
+        // This lets the intermediate scan output Hummock types directly,
+        // avoiding double casts when the storage selection rule rewrites
+        // to a Hummock LogicalScan.
+        let mut table_column_type_mapping = HashMap::new();
+        let table_column_map: HashMap<&str, &DataType> = base_table
+            .table_catalog
+            .columns
+            .iter()
+            .map(|c| (c.name.as_str(), &c.column_desc.data_type))
+            .collect();
+        for source_col in &source_catalog.columns {
+            let source_name = source_col.name();
+            let table_name = if source_name == RISINGWAVE_ICEBERG_ROW_ID {
+                ROW_ID_COLUMN_NAME
+            } else {
+                source_name
+            };
+            if let Some(&table_type) = table_column_map.get(table_name)
+                && source_col.column_desc.data_type != *table_type
+            {
+                table_column_type_mapping.insert(source_name.to_owned(), table_type.clone());
+            }
+        }
+
+        let column_map: HashMap<String, (usize, ColumnCatalog)> = source_catalog
+            .columns
+            .clone()
+            .into_iter()
+            .enumerate()
+            .map(|(i, column)| (column.name().to_owned(), (i, column)))
+            .collect();
+        // For intermediate scan, it will outputs Hummock types directly. But for source, it still outputs original types.
+        // So only when the plan target is source and the column type is different, we need to add cast.
+        let exprs = scan
+            .table()
+            .column_schema()
+            .fields()
+            .iter()
+            .map(|field| {
+                let source_filed_name = if field.name == ROW_ID_COLUMN_NAME {
+                    RISINGWAVE_ICEBERG_ROW_ID
+                } else {
+                    &field.name
+                };
+                if let Some((i, source_column)) = column_map.get(source_filed_name) {
+                    let mut input_ref =
+                        ExprImpl::InputRef(InputRef::new(*i, field.data_type.clone()).into());
+                    if matches!(plan_target, PlanTarget::Source)
+                        && source_column.column_desc.data_type != field.data_type
+                    {
+                        FunctionCall::cast_mut(
+                            &mut input_ref,
+                            &field.data_type(),
+                            CastContext::Explicit,
+                        )
+                        .unwrap();
+                    }
+                    input_ref
+                } else {
+                    // fields like `_rw_timestamp`, would not be found in source.
+                    ExprImpl::Literal(Literal::new(None, field.data_type.clone()).into())
+                }
+            })
+            .collect_vec();
+
+        let logical_source = LogicalSource::with_catalog(
+            Rc::new(source_catalog),
+            SourceNodeKind::CreateMViewOrBatch,
+            self.ctx(),
+            as_of,
+        )?;
+        if matches!(plan_target, PlanTarget::Source) {
+            return Ok(LogicalProject::new(logical_source.into(), exprs).into());
+        }
+
+        let logical_iceberg_intermediate_scan =
+            self.plan_iceberg_intermediate_scan(&logical_source, table_column_type_mapping)?;
+        Ok(LogicalProject::new(logical_iceberg_intermediate_scan, exprs).into())
     }
 
     pub(super) fn plan_source(&mut self, source: BoundSource) -> Result<PlanRef> {

@@ -56,11 +56,13 @@ use crate::utils::{
 pub struct LogicalIcebergIntermediateScan {
     pub base: PlanBase<Logical>,
     pub core: generic::Source,
-    // iceberg_predicate and risingwave_condition are same expression but in different forms. They will be added together during predicate pushdown.
+    // iceberg_predicate and origin_condition are same expression but in different forms.
+    // They will be added together during predicate pushdown. The input index in origin_condition
+    // is based on table columns rather than output columns, and the column mapping is stored in output_column_mapping.
     #[educe(Hash(ignore))]
     pub iceberg_predicate: Predicate,
     #[educe(Hash(ignore))]
-    pub risingwave_condition: Condition,
+    pub origin_condition: Condition,
     #[educe(Hash(ignore))]
     pub output_column_mapping: ColIndexMapping,
     pub time_travel_info: IcebergTimeTravelInfo,
@@ -98,7 +100,7 @@ impl LogicalIcebergIntermediateScan {
             base,
             core,
             iceberg_predicate: Predicate::AlwaysTrue,
-            risingwave_condition: Condition::true_cond(),
+            origin_condition: Condition::true_cond(),
             output_column_mapping,
             time_travel_info,
             table_column_type_mapping,
@@ -121,10 +123,10 @@ impl LogicalIcebergIntermediateScan {
         let new_predicate = self.iceberg_predicate.clone().and(iceberg_predicate);
         let extracted_condition =
             extracted_condition.rewrite_expr(&mut self.output_column_mapping.clone());
-        let new_condition = self.risingwave_condition.clone().and(extracted_condition);
+        let new_condition = self.origin_condition.clone().and(extracted_condition);
         LogicalIcebergIntermediateScan {
             iceberg_predicate: new_predicate,
-            risingwave_condition: new_condition,
+            origin_condition: new_condition,
             ..self.clone()
         }
     }
@@ -159,7 +161,7 @@ impl LogicalIcebergIntermediateScan {
             base,
             core,
             iceberg_predicate: self.iceberg_predicate.clone(),
-            risingwave_condition: self.risingwave_condition.clone(),
+            origin_condition: self.origin_condition.clone(),
             output_column_mapping: new_output_column_mapping,
             time_travel_info: self.time_travel_info.clone(),
             table_column_type_mapping: self.table_column_type_mapping.clone(),
