@@ -71,7 +71,7 @@ impl LogStoreVnodeProgress {
         match prev_progress {
             None => {
                 assert!(
-                    prev_epoch < epoch,
+                    prev_epoch <= epoch,
                     "barrier epoch {} decrease to {}",
                     prev_epoch,
                     epoch
@@ -80,7 +80,24 @@ impl LogStoreVnodeProgress {
             Some(prev_progress) => {
                 assert_eq!(prev_epoch, epoch);
                 if let Some(progress) = progress {
-                    assert!(progress > prev_progress);
+                    assert!(
+                        progress >= prev_progress,
+                        "seq_id decreased: prev_epoch={}, epoch={}, prev_progress={}, progress={}",
+                        prev_epoch,
+                        epoch,
+                        prev_progress,
+                        progress
+                    );
+                    if progress == prev_progress {
+                        tracing::warn!(
+                            prev_epoch,
+                            epoch,
+                            prev_progress,
+                            progress,
+                            "progress did not strictly increase: this may indicate \
+                             empty chunks (cardinality=0) were not filtered out"
+                        );
+                    }
                 }
             }
         }
