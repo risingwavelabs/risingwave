@@ -270,6 +270,7 @@ message ListStreamingJobStatesResponse {
     string config_override = 9;
     uint32 database_id = 7;
     uint32 schema_id = 8;
+    optional string adaptive_parallelism_strategy = 10;
   }
   repeated StreamingJobState states = 1;
 }

@@ -321,6 +321,7 @@ message AlterParallelismRequest {
   uint32 table_id = 1;
   meta.TableParallelism parallelism = 2;
   bool deferred = 3;
+  optional string adaptive_parallelism_strategy = 4;
 }
 
 message AlterParallelismResponse {}
@@ -331,6 +332,7 @@ message AlterBackfillParallelismRequest {
   // When `parallelism` is `None`, it indicates resetting to no backfill override.
   optional meta.TableParallelism parallelism = 2;
   bool deferred = 3;
+  optional string adaptive_parallelism_strategy = 4;
 }
 
 message AlterBackfillParallelismResponse {}

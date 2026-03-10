@@ -1286,6 +1286,8 @@ message StreamContext {
   string config_override = 2;
   // The adaptive parallelism strategy for this streaming job, if explicitly set.
   string adaptive_parallelism_strategy = 3;
+  // The adaptive parallelism strategy for the backfill override, if explicitly set.
+  string backfill_adaptive_parallelism_strategy = 4;
 }
 
 message BackfillOrder {

@@ -298,6 +298,9 @@ pub struct StreamContext {
 
     /// The adaptive parallelism strategy for this job if it overrides the system default.
     pub adaptive_parallelism_strategy: Option<AdaptiveParallelismStrategy>,
+
+    /// The adaptive parallelism strategy for this job's temporary backfill override.
+    pub backfill_adaptive_parallelism_strategy: Option<AdaptiveParallelismStrategy>,
 }
 
 impl StreamContext {
@@ -307,6 +310,11 @@ impl StreamContext {
             config_override: self.config_override.to_string(),
             adaptive_parallelism_strategy: self
                 .adaptive_parallelism_strategy
+                .as_ref()
+                .map(ToString::to_string)
+                .unwrap_or_default(),
+            backfill_adaptive_parallelism_strategy: self
+                .backfill_adaptive_parallelism_strategy
                 .as_ref()
                 .map(ToString::to_string)
                 .unwrap_or_default(),
@@ -337,6 +345,18 @@ impl StreamContext {
                         .expect("adaptive parallelism strategy should be validated in frontend"),
                 )
             },
+            backfill_adaptive_parallelism_strategy: if prost
+                .get_backfill_adaptive_parallelism_strategy()
+                .is_empty()
+            {
+                None
+            } else {
+                Some(
+                    parse_strategy(prost.get_backfill_adaptive_parallelism_strategy()).expect(
+                        "backfill adaptive parallelism strategy should be validated in frontend",
+                    ),
+                )
+            },
         }
     }
 }
@@ -350,6 +370,12 @@ impl risingwave_meta_model::streaming_job::Model {
             adaptive_parallelism_strategy: self.adaptive_parallelism_strategy.as_deref().map(|s| {
                 parse_strategy(s).expect("strategy should be validated before persisting")
             }),
+            backfill_adaptive_parallelism_strategy: self
+                .backfill_adaptive_parallelism_strategy
+                .as_deref()
+                .map(|s| {
+                    parse_strategy(s).expect("strategy should be validated before persisting")
+                }),
         }
     }
 }
