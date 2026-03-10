@@ -623,6 +623,9 @@ fn update_compaction_config(target: &mut CompactionConfig, items: &[MutableConfi
             MutableConfig::MaxKvCountForXor16(c) => {
                 target.max_kv_count_for_xor16 = (*c != u64::MIN && *c != u64::MAX).then_some(*c);
             }
+            MutableConfig::MaxVnodeKeyRangeBytes(c) => {
+                target.max_vnode_key_range_bytes = (*c > 0).then_some(*c);
+            }
         }
     }
 }

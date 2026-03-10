@@ -15,6 +15,7 @@
 use risingwave_hummock_sdk::HummockSstableId;
 use risingwave_pb::id::{CompactionGroupId, JobId};
 use risingwave_rpc_client::HummockMetaClient;
+use tokio::time::{Duration, sleep};
 
 use crate::CtlContext;
 
@@ -24,14 +25,45 @@ pub async fn trigger_manual_compaction(
     table_id: JobId,
     levels: Vec<u32>,
     sst_ids: Vec<HummockSstableId>,
+    exclusive: bool,
+    retry_interval_ms: u64,
 ) -> anyhow::Result<()> {
     let meta_client = context.meta_client().await?;
     for level in levels {
         tracing::info!("Triggering manual compaction for level {level}...");
-        let result = meta_client
-            .trigger_manual_compaction(compaction_group_id, table_id, level, sst_ids.clone())
-            .await;
-        println!("Level {level}: {:#?}", result);
+        loop {
+            let result = meta_client
+                .trigger_manual_compaction(
+                    compaction_group_id,
+                    table_id,
+                    level,
+                    sst_ids.clone(),
+                    exclusive,
+                )
+                .await;
+            match &result {
+                Ok(should_retry) if *should_retry => {
+                    if exclusive {
+                        tracing::info!(
+                            "Manual compaction is blocked by ongoing tasks. Sleeping {} ms before retrying.",
+                            retry_interval_ms
+                        );
+                        sleep(Duration::from_millis(retry_interval_ms)).await;
+                        continue;
+                    }
+                    tracing::info!("Level {level}: {:#?}", result);
+                    break;
+                }
+                Ok(_) => {
+                    tracing::info!("Level {level}: {:#?}", result);
+                    break;
+                }
+                Err(_) => {
+                    tracing::info!("Level {level}: {:#?}", result);
+                    break;
+                }
+            }
+        }
     }
     Ok(())
 }
