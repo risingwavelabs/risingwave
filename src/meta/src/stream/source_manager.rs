@@ -47,7 +47,7 @@ use worker::{ConnectorSourceWorkerHandle, create_source_worker_async};
 
 use crate::barrier::{BarrierScheduler, Command, ReplaceStreamJobPlan};
 use crate::manager::{MetaSrvEnv, MetadataManager};
-use crate::model::{ActorId, FragmentId, FragmentNewNoShuffle, StreamJobFragments};
+use crate::model::{ActorId, FragmentId, StreamJobFragments};
 use crate::rpc::metrics::MetaMetrics;
 use crate::{MetaError, MetaResult};
 
@@ -91,7 +91,7 @@ pub enum ReplaceJobSplitPlan {
     /// Resolved via [`SourceManager::resolve_replace_source_splits`] in Phase 2.
     ///
     /// Contains the no-shuffle mapping needed for split alignment.
-    AlignFromPrevious(FragmentNewNoShuffle),
+    AlignFromPrevious,
 }
 
 // ALTER CONNECTOR parameters, specifying the new parameters to be set for each job_id (source_id/sink_id)

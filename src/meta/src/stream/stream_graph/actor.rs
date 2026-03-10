@@ -20,7 +20,7 @@ use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::hash::{ActorAlignmentId, IsSingleton, VnodeCount, VnodeCountCompat};
-use risingwave_common::id::{ActorId, JobId};
+use risingwave_common::id::JobId;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::stream_graph_visitor::visit_tables;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
@@ -33,8 +33,8 @@ use crate::MetaResult;
 use crate::controller::cluster::StreamingClusterInfo;
 use crate::manager::{MetaSrvEnv, StreamingJob};
 use crate::model::{
-    Fragment, FragmentDownstreamRelation, FragmentId, FragmentNewNoShuffle,
-    FragmentReplaceUpstream, StreamActor, StreamContext,
+    Fragment, FragmentDownstreamRelation, FragmentId, FragmentReplaceUpstream, StreamActor,
+    StreamContext,
 };
 use crate::stream::stream_graph::fragment::{
     CompleteStreamFragmentGraph, DownstreamExternalEdgeId, EdgeId, EitherFragment,
@@ -143,7 +143,7 @@ impl FragmentActorBuilder {
                     == StreamScanType::ArrangementBackfill as i32
                     || stream_scan.stream_scan_type == StreamScanType::SnapshotBackfill as i32;
                 if !is_shuffled_backfill {
-                    assert!(upstream_no_shuffle_actor.is_some());
+                    assert!(*upstream_no_shuffle_actor);
                 }
 
                 let upstream_dispatcher_type = if is_shuffled_backfill {
@@ -194,14 +194,14 @@ impl FragmentActorBuilder {
                 };
 
                 // Index the upstreams by the an external edge ID.
-                let (upstream_fragment_id, upstream_actors) = &self.upstreams
+                let (upstream_fragment_id, upstream_is_no_shuffle) = &self.upstreams
                     [&EdgeId::UpstreamExternal {
                         upstream_job_id: upstream_source_id.as_share_source_job_id(),
                         downstream_fragment_id: self.fragment_id,
                     }];
 
                 assert!(
-                    upstream_actors.is_some(),
+                    *upstream_is_no_shuffle,
                     "Upstream Cdc Source should be singleton. \
                     SourceBackfill is NoShuffle 1-1 correspondence. \
                     So they both should have only one upstream actor."
@@ -279,8 +279,7 @@ struct UpstreamFragmentChange {
 struct DownstreamFragmentChange {
     /// The new upstreams to be added (replaced), indexed by the edge id to upstream fragment.
     /// `edge_id` -> new upstream fragment id
-    new_upstreams:
-        HashMap<DownstreamExternalEdgeId, (GlobalFragmentId, Option<NewExternalNoShuffle>)>,
+    new_upstreams: HashMap<DownstreamExternalEdgeId, GlobalFragmentId>,
 }
 
 impl UpstreamFragmentChange {
@@ -302,21 +301,15 @@ impl DownstreamFragmentChange {
         &mut self,
         edge_id: DownstreamExternalEdgeId,
         new_upstream_fragment_id: GlobalFragmentId,
-        no_shuffle_actor_mapping: Option<HashMap<GlobalActorId, GlobalActorId>>,
     ) {
         self.new_upstreams
-            .try_insert(
-                edge_id,
-                (new_upstream_fragment_id, no_shuffle_actor_mapping),
-            )
+            .try_insert(edge_id, new_upstream_fragment_id)
             .unwrap();
     }
 }
 
 /// The location of actors.
 type ActorLocations = BTreeMap<GlobalActorId, ActorAlignmentId>;
-// no_shuffle upstream actor_id -> actor_id
-type NewExternalNoShuffle = HashMap<GlobalActorId, GlobalActorId>;
 
 #[derive(Debug)]
 struct FragmentActorBuilder {
@@ -324,8 +317,8 @@ struct FragmentActorBuilder {
     node: StreamNode,
     actor_builders: BTreeMap<GlobalActorId, ActorBuilder>,
     downstreams: HashMap<GlobalFragmentId, DispatchStrategy>,
-    // edge_id -> (upstream fragment_id, no shuffle actor pairs if it's no shuffle dispatched)
-    upstreams: HashMap<EdgeId, (GlobalFragmentId, Option<NewExternalNoShuffle>)>,
+    // edge_id -> (upstream fragment_id, whether the edge is no shuffle)
+    upstreams: HashMap<EdgeId, (GlobalFragmentId, bool)>,
 }
 
 impl FragmentActorBuilder {
@@ -440,12 +433,12 @@ impl ActorGraphBuildStateInner {
         fragment_id: GlobalFragmentId,
         edge_id: EdgeId,
         upstream_fragment_id: GlobalFragmentId,
-        no_shuffle_actor_mapping: Option<HashMap<GlobalActorId, GlobalActorId>>,
+        is_no_shuffle: bool,
     ) {
         if let Some(builder) = self.fragment_actor_builders.get_mut(&fragment_id) {
             builder
                 .upstreams
-                .try_insert(edge_id, (upstream_fragment_id, no_shuffle_actor_mapping))
+                .try_insert(edge_id, (upstream_fragment_id, is_no_shuffle))
                 .unwrap();
         } else {
             let EdgeId::DownstreamExternal(edge_id) = edge_id else {
@@ -454,18 +447,8 @@ impl ActorGraphBuildStateInner {
             self.downstream_fragment_changes
                 .entry(fragment_id)
                 .or_default()
-                .add_upstream(edge_id, upstream_fragment_id, no_shuffle_actor_mapping);
+                .add_upstream(edge_id, upstream_fragment_id);
         }
-    }
-
-    /// Get the location of an actor. Will look up the location map of both the actors to be built
-    /// and the external actors.
-    fn get_location(&self, actor_id: GlobalActorId) -> ActorAlignmentId {
-        self.building_locations
-            .get(&actor_id)
-            .copied()
-            .or_else(|| self.external_locations.get(&actor_id).copied())
-            .unwrap()
     }
 
     /// Add a "link" between two fragments in the graph.
@@ -488,16 +471,6 @@ impl ActorGraphBuildStateInner {
             // For `NoShuffle`, make n "1-1" links between the actors.
             DispatcherType::NoShuffle => {
                 assert_eq!(upstream.actor_ids.len(), downstream.actor_ids.len());
-                let upstream_locations: HashMap<_, _> = upstream
-                    .actor_ids
-                    .iter()
-                    .map(|id| (self.get_location(*id), *id))
-                    .collect();
-                let downstream_locations: HashMap<_, _> = downstream
-                    .actor_ids
-                    .iter()
-                    .map(|id| (self.get_location(*id), *id))
-                    .collect();
 
                 // Create a new dispatcher just between these two actors.
                 self.add_dispatcher(
@@ -507,20 +480,7 @@ impl ActorGraphBuildStateInner {
                 );
 
                 // Also record the upstream for the downstream actor.
-                self.add_upstream(
-                    downstream.fragment_id,
-                    edge.id,
-                    upstream.fragment_id,
-                    Some(
-                        downstream_locations
-                            .iter()
-                            .map(|(location, downstream_actor_id)| {
-                                let upstream_actor_id = upstream_locations.get(location).unwrap();
-                                (*upstream_actor_id, *downstream_actor_id)
-                            })
-                            .collect(),
-                    ),
-                );
+                self.add_upstream(downstream.fragment_id, edge.id, upstream.fragment_id, true);
             }
 
             // Otherwise, make m * n links between the actors.
@@ -530,7 +490,7 @@ impl ActorGraphBuildStateInner {
                     downstream.fragment_id,
                     edge.dispatch_strategy.clone(),
                 );
-                self.add_upstream(downstream.fragment_id, edge.id, upstream.fragment_id, None);
+                self.add_upstream(downstream.fragment_id, edge.id, upstream.fragment_id, false);
             }
 
             DispatcherType::Unspecified => unreachable!(),
@@ -599,11 +559,6 @@ pub struct ActorGraphBuildResult {
     /// The updates to be applied to the downstream fragment merge node. Used for schema change (replace
     /// table plan).
     pub replace_upstream: FragmentReplaceUpstream,
-
-    /// The new no shuffle added to create the new streaming job, including the no shuffle from existing fragments to
-    /// the newly created fragments, between two newly created fragments, and from newly created fragments to existing
-    /// downstream fragments (for create sink into table and replace table).
-    pub new_no_shuffle: FragmentNewNoShuffle,
 }
 
 /// [`ActorGraphBuilder`] builds the actor graph for the given complete fragment graph, based on the
@@ -754,7 +709,6 @@ impl ActorGraphBuilder {
         } = self.build_actor_graph(id_gen)?;
 
         let mut downstream_fragment_relations: FragmentDownstreamRelation = HashMap::new();
-        let mut new_no_shuffle: FragmentNewNoShuffle = HashMap::new();
         // Serialize the graph into a map of sealed fragments.
         let graph = {
             let mut fragment_actors: HashMap<GlobalFragmentId, (StreamNode, Vec<StreamActor>)> =
@@ -765,23 +719,6 @@ impl ActorGraphBuilder {
             for (fragment_id, builder) in fragment_actor_builders {
                 let global_fragment_id = fragment_id.as_global_id();
                 let node = builder.rewrite()?;
-                for (upstream_fragment_id, no_shuffle_upstream) in builder.upstreams.into_values() {
-                    if let Some(no_shuffle_upstream) = no_shuffle_upstream {
-                        new_no_shuffle
-                            .entry(upstream_fragment_id.as_global_id())
-                            .or_default()
-                            .try_insert(
-                                global_fragment_id,
-                                no_shuffle_upstream
-                                    .iter()
-                                    .map(|(upstream_actor_id, actor_id)| {
-                                        (upstream_actor_id.as_global_id(), actor_id.as_global_id())
-                                    })
-                                    .collect(),
-                            )
-                            .expect("non-duplicate");
-                    }
-                }
                 downstream_fragment_relations
                     .try_insert(
                         global_fragment_id,
@@ -850,44 +787,22 @@ impl ActorGraphBuilder {
             .into_iter()
             .map(|(fragment_id, changes)| {
                 let fragment_id = fragment_id.as_global_id();
-                let new_no_shuffle = &mut new_no_shuffle;
                 (
                     fragment_id,
                     changes
                         .new_upstreams
                         .into_iter()
-                        .map(
-                            move |(edge_id, (upstream_fragment_id, upstream_new_no_shuffle))| {
-                                let upstream_fragment_id = upstream_fragment_id.as_global_id();
-                                if let Some(upstream_new_no_shuffle) = upstream_new_no_shuffle
-                                    && !upstream_new_no_shuffle.is_empty()
-                                {
-                                    let no_shuffle_actors = new_no_shuffle
-                                        .entry(upstream_fragment_id)
-                                        .or_default()
-                                        .entry(fragment_id)
-                                        .or_default();
-                                    no_shuffle_actors.extend(
-                                        upstream_new_no_shuffle.into_iter().map(
-                                            |(upstream_actor_id, actor_id)| -> (ActorId, ActorId) {
-                                                (
-                                                    upstream_actor_id.as_global_id(),
-                                                    actor_id.as_global_id(),
-                                                )
-                                            },
-                                        ),
-                                    );
-                                }
-                                let DownstreamExternalEdgeId {
-                                    original_upstream_fragment_id,
-                                    ..
-                                } = edge_id;
-                                (
-                                    original_upstream_fragment_id.as_global_id(),
-                                    upstream_fragment_id,
-                                )
-                            },
-                        )
+                        .map(move |(edge_id, upstream_fragment_id)| {
+                            let upstream_fragment_id = upstream_fragment_id.as_global_id();
+                            let DownstreamExternalEdgeId {
+                                original_upstream_fragment_id,
+                                ..
+                            } = edge_id;
+                            (
+                                original_upstream_fragment_id.as_global_id(),
+                                upstream_fragment_id,
+                            )
+                        })
                         .collect(),
                 )
             })
@@ -900,7 +815,6 @@ impl ActorGraphBuilder {
             building_locations,
             upstream_fragment_downstreams,
             replace_upstream,
-            new_no_shuffle,
         })
     }
 

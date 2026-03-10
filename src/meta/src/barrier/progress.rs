@@ -1097,7 +1097,6 @@ mod tests {
             stream_job_fragments,
             upstream_fragment_downstreams: Default::default(),
             init_split_assignment: Default::default(),
-            new_no_shuffle: Default::default(),
             definition: "CREATE SOURCE ...".to_owned(),
             job_type: StreamingJobType::Source,
             create_type: CreateType::Foreground,

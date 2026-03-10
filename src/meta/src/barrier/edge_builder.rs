@@ -20,16 +20,17 @@ use risingwave_meta_model::fragment::DistributionType;
 use risingwave_pb::common::{ActorInfo, HostAddress};
 use risingwave_pb::id::{PartialGraphId, SubscriberId};
 use risingwave_pb::meta::table_fragments::ActorStatus;
-use risingwave_pb::stream_plan::StreamNode;
 use risingwave_pb::stream_plan::update_mutation::MergeUpdate;
+use risingwave_pb::stream_plan::{PbDispatcherType, StreamNode};
 use tracing::warn;
 
 use crate::barrier::rpc::ControlStreamManager;
 use crate::controller::fragment::InflightFragmentInfo;
 use crate::controller::utils::compose_dispatchers;
 use crate::model::{
-    ActorId, ActorUpstreams, DownstreamFragmentRelation, Fragment, FragmentActorDispatchers,
-    FragmentDownstreamRelation, FragmentId, StreamActor, StreamJobActorsToCreate,
+    ActorId, ActorNewNoShuffle, ActorUpstreams, DownstreamFragmentRelation, Fragment,
+    FragmentActorDispatchers, FragmentDownstreamRelation, FragmentId, StreamActor,
+    StreamJobActorsToCreate,
 };
 
 /// Fragment information needed by [`FragmentEdgeBuilder`] to compute dispatchers and merge nodes.
@@ -155,6 +156,35 @@ impl FragmentEdgeBuildResult {
                 .merge_updates
                 .values()
                 .all(|updates| updates.is_empty())
+    }
+
+    /// Extract the actor-level no-shuffle mapping from the dispatchers.
+    ///
+    /// Returns: `upstream_fragment_id -> downstream_fragment_id -> upstream_actor_id -> downstream_actor_id`
+    pub(super) fn extract_no_shuffle(&self) -> ActorNewNoShuffle {
+        let mut no_shuffle: ActorNewNoShuffle = HashMap::new();
+        for (&upstream_fragment_id, actor_dispatchers) in &self.dispatchers {
+            for (&actor_id, dispatchers) in actor_dispatchers {
+                for dispatcher in dispatchers {
+                    if dispatcher.r#type == PbDispatcherType::NoShuffle as i32 {
+                        let downstream_fragment_id = dispatcher.dispatcher_id;
+                        assert_eq!(
+                            dispatcher.downstream_actor_id.len(),
+                            1,
+                            "NoShuffle dispatcher should have exactly one downstream actor"
+                        );
+                        let downstream_actor_id = dispatcher.downstream_actor_id[0];
+                        no_shuffle
+                            .entry(upstream_fragment_id)
+                            .or_default()
+                            .entry(downstream_fragment_id)
+                            .or_default()
+                            .insert(actor_id, downstream_actor_id);
+                    }
+                }
+            }
+        }
+        no_shuffle
     }
 }
 

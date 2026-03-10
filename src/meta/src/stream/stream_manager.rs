@@ -50,8 +50,7 @@ use crate::manager::{
 };
 use crate::model::{
     ActorId, DownstreamFragmentRelation, Fragment, FragmentDownstreamRelation, FragmentId,
-    FragmentNewNoShuffle, FragmentReplaceUpstream, StreamJobFragments, StreamJobFragmentsToCreate,
-    SubscriptionId,
+    FragmentReplaceUpstream, StreamJobFragments, StreamJobFragmentsToCreate, SubscriptionId,
 };
 use crate::stream::SourceManagerRef;
 use crate::{MetaError, MetaResult};
@@ -80,7 +79,6 @@ pub struct UpstreamSinkInfo {
 pub struct CreateStreamingJobContext {
     /// New fragment relation to add from upstream fragments to downstream fragments.
     pub upstream_fragment_downstreams: FragmentDownstreamRelation,
-    pub new_no_shuffle: FragmentNewNoShuffle,
 
     /// The locations of the actors to build in the streaming job.
     pub building_locations: Locations,
@@ -236,7 +234,6 @@ pub struct ReplaceStreamJobContext {
 
     /// The updates to be applied to the downstream chain actors. Used for schema change.
     pub replace_upstream: FragmentReplaceUpstream,
-    pub new_no_shuffle: FragmentNewNoShuffle,
 
     /// New fragment relation to add from existing upstream fragment to downstream fragment.
     pub upstream_fragment_downstreams: FragmentDownstreamRelation,
@@ -455,7 +452,6 @@ impl GlobalStreamManager {
         CreateStreamingJobContext {
             streaming_job,
             upstream_fragment_downstreams,
-            new_no_shuffle,
             definition,
             create_type,
             job_type,
@@ -501,7 +497,6 @@ impl GlobalStreamManager {
             stream_job_fragments,
             upstream_fragment_downstreams,
             init_split_assignment,
-            new_no_shuffle,
             definition: definition.clone(),
             streaming_job: streaming_job.clone(),
             job_type,
@@ -549,7 +544,6 @@ impl GlobalStreamManager {
         ReplaceStreamJobContext {
             old_fragments,
             replace_upstream,
-            new_no_shuffle,
             upstream_fragment_downstreams,
             tmp_id,
             streaming_job,
@@ -569,7 +563,7 @@ impl GlobalStreamManager {
                 .await?
             {
                 Some(discovered) => ReplaceJobSplitPlan::Discovered(discovered),
-                None => ReplaceJobSplitPlan::AlignFromPrevious(new_no_shuffle),
+                None => ReplaceJobSplitPlan::AlignFromPrevious,
             }
         } else {
             let discovered = self.source_manager.discover_splits(&new_fragments).await?;

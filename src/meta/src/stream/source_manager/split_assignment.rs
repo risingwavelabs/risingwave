@@ -17,7 +17,7 @@ use itertools::Itertools;
 use risingwave_connector::source::fill_adaptive_split;
 
 use super::*;
-use crate::model::{FragmentNewNoShuffle, FragmentReplaceUpstream, StreamJobFragments};
+use crate::model::{ActorNewNoShuffle, FragmentReplaceUpstream, StreamJobFragments};
 
 #[derive(Debug, Clone)]
 pub struct SplitState {
@@ -193,7 +193,7 @@ impl SourceManager {
         //     downstream fragment_id ->
         //     upstream actor_id ->
         //     downstream actor_id
-        new_no_shuffle: &FragmentNewNoShuffle,
+        new_no_shuffle: &ActorNewNoShuffle,
         get_upstream_actor_splits: impl Fn(FragmentId, ActorId) -> Option<Vec<SplitImpl>>,
     ) -> MetaResult<SplitAssignment> {
         tracing::debug!(?upstream_updates, "allocate_splits_for_replace_source");
@@ -269,7 +269,7 @@ impl SourceManager {
     /// the existing split assignment looked up via the provided closure.
     pub fn resolve_backfill_splits(
         table_fragments: &StreamJobFragments,
-        upstream_new_no_shuffle: &FragmentNewNoShuffle,
+        upstream_new_no_shuffle: &ActorNewNoShuffle,
         get_upstream_actor_splits: impl Fn(FragmentId, ActorId) -> Option<Vec<SplitImpl>>,
     ) -> MetaResult<SplitAssignment> {
         let source_backfill_fragments = table_fragments.source_backfill_fragments();
