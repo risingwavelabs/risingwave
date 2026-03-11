@@ -65,8 +65,8 @@ use crate::hummock::{CommitEpochInfo, NewTableFragmentInfo};
 use crate::manager::{StreamingJob, StreamingJobType};
 use crate::model::{
     ActorId, ActorUpstreams, DispatcherId, FragmentActorDispatchers, FragmentDownstreamRelation,
-    FragmentId, FragmentNewNoShuffle, FragmentReplaceUpstream, StreamActorWithDispatchers,
-    StreamJobActorsToCreate, StreamJobFragments, StreamJobFragmentsToCreate, SubscriptionId,
+    FragmentId, FragmentReplaceUpstream, StreamActorWithDispatchers, StreamJobActorsToCreate,
+    StreamJobFragments, StreamJobFragmentsToCreate, SubscriptionId,
 };
 use crate::stream::{
     AutoRefreshSchemaSinkContext, ConnectorPropsChange, ExtendedFragmentBackfillOrder,
@@ -341,8 +341,6 @@ pub struct CreateStreamingJobCommandInfo {
     pub upstream_fragment_downstreams: FragmentDownstreamRelation,
     /// Source-level split assignment (Phase 1). Resolved to actor-level in the barrier worker.
     pub init_split_assignment: SourceSplitAssignment,
-    /// No-shuffle mapping for resolving backfill splits in the barrier worker (Phase 2).
-    pub new_no_shuffle: FragmentNewNoShuffle,
     pub definition: String,
     pub job_type: StreamingJobType,
     pub create_type: CreateType,
