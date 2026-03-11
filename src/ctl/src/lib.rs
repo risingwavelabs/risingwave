@@ -217,8 +217,6 @@ enum HummockCommands {
         #[clap(long)]
         enable_optimize_l0_interval_selection: Option<bool>,
         #[clap(long)]
-        vnode_aligned_level_size_threshold: Option<u64>,
-        #[clap(long)]
         max_kv_count_for_xor16: Option<u64>,
         #[clap(long)]
         max_vnode_key_range_bytes: Option<u64>,
@@ -712,7 +710,6 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
             level0_stop_write_threshold_max_sst_count,
             level0_stop_write_threshold_max_size,
             enable_optimize_l0_interval_selection,
-            vnode_aligned_level_size_threshold,
             max_kv_count_for_xor16,
             max_vnode_key_range_bytes,
         }) => {
@@ -754,7 +751,6 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
                     level0_stop_write_threshold_max_sst_count,
                     level0_stop_write_threshold_max_size,
                     enable_optimize_l0_interval_selection,
-                    vnode_aligned_level_size_threshold,
                     max_kv_count_for_xor16,
                     max_vnode_key_range_bytes,
                 ),
