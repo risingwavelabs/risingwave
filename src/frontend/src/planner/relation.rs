@@ -304,7 +304,7 @@ source: {:?}",
                 self.ctx(),
                 as_of,
             )?;
-            if is_iceberg {
+            if is_iceberg && !matches!(self.plan_for(), PlanFor::Stream) {
                 let intermediate_scan =
                     self.plan_iceberg_intermediate_scan(&source, HashMap::new())?;
                 Ok(intermediate_scan)
