@@ -113,7 +113,7 @@
   sql: |
     create table t1(v1 int, v2 int);
     create table t2(v1 int, v2 int);
-    select * from t1 asof join t2 on t1.v1 = t2.v1 and t1.v2 < t2.v2;
+    select t1.v1, t1.v2, t2.v1 as t2_v1, t2.v2 as t2_v2 from t1 asof join t2 on t1.v1 = t2.v1 and t1.v2 < t2.v2;
   expected_outputs:
     - backfill_order_plan
 - name: backfill order, auto, temporal join

@@ -810,7 +810,9 @@ impl TestCase {
                     &mut ret.eowc_stream_error,
                 ),
             ] {
-                if !plan && !dist_plan && !error {
+                let backfill_order = emit_mode == EmitMode::Immediately
+                    && self.expected_outputs.contains(&TestType::BackfillOrderPlan);
+                if !plan && !dist_plan && !error && !backfill_order {
                     continue;
                 }
 
@@ -847,7 +849,7 @@ impl TestCase {
                         Some(explain_stream_graph(&graph, Some(table.to_prost()), false));
                 }
 
-                if self.expected_outputs.contains(&TestType::BackfillOrderPlan) {
+                if backfill_order {
                     match explain_backfill_order_in_dot_format(
                         &session,
                         BackfillOrderStrategy::Auto,
