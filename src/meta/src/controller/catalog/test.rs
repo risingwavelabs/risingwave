@@ -15,6 +15,7 @@
 #[cfg(test)]
 mod tests {
     use risingwave_pb::catalog::StreamSourceInfo;
+    use risingwave_pb::catalog::subscription::SubscriptionState;
 
     use crate::controller::catalog::*;
 
@@ -259,8 +260,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_abort_creating_subscription_commits_delete() -> MetaResult<()> {
-        use risingwave_pb::catalog::subscription::SubscriptionState;
-
         let mgr = CatalogController::new(MetaSrvEnv::for_test().await).await?;
         let pb_view = PbView {
             schema_id: TEST_SCHEMA_ID,

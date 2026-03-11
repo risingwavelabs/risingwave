@@ -369,6 +369,45 @@ message HummockVersionCheckpoint {
   map<uint64, StaleObjects> stale_objects = 2;
 }
 
+// Compression algorithm used for checkpoint data serialization.
+enum CheckpointCompressionAlgorithm {
+  // No compression (uncompressed).
+  CHECKPOINT_COMPRESSION_UNSPECIFIED = 0;
+  // Zstd compression (default, good balance between ratio and speed).
+  CHECKPOINT_COMPRESSION_ZSTD = 1;
+  // Lz4 compression (faster but lower compression ratio).
+  CHECKPOINT_COMPRESSION_LZ4 = 2;
+}
+
+// Envelope message wrapping a compressed or uncompressed HummockVersionCheckpoint.
+// When compression_algorithm is NONE (or UNSPECIFIED), payload contains raw PbHummockVersionCheckpoint bytes.
+// Otherwise, payload contains the compressed PbHummockVersionCheckpoint bytes.
+//
+// Backward compatibility:
+// - Old code (unaware of this message) writes raw PbHummockVersionCheckpoint directly.
+// - New code tries to decode as HummockVersionCheckpointEnvelope first.
+//   If it fails (old format), it falls back to decoding as PbHummockVersionCheckpoint.
+// - Legacy bytes may occasionally decode as an envelope due to protobuf's unknown-field
+//   skipping, so readers treat `checksum` as the discriminator: all new envelopes set it,
+//   while old raw checkpoints do not have field 3.
+//
+// Format detection logic:
+// 1. Try to decode bytes as HummockVersionCheckpointEnvelope
+// 2. If checksum.is_some(), treat as new envelope format:
+//    a. Verify checksum against payload
+//    b. Decompress payload according to compression_algorithm
+//    c. Decode decompressed bytes as PbHummockVersionCheckpoint
+// 3. If checksum.is_none() or decode fails, treat as legacy format:
+//    - Decode bytes directly as PbHummockVersionCheckpoint
+message HummockVersionCheckpointEnvelope {
+  CheckpointCompressionAlgorithm compression_algorithm = 1;
+  // Compressed (or uncompressed if algorithm is NONE) PbHummockVersionCheckpoint bytes.
+  bytes payload = 2;
+  // xxhash64 checksum of the payload bytes (compressed data) for integrity verification.
+  // Presence of this field distinguishes new envelope format from legacy raw checkpoints.
+  optional uint64 checksum = 3;
+}
+
 message HummockVersionArchive {
   HummockVersion version = 1;
   // some version_deltas since version
