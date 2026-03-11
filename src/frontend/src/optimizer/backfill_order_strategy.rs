@@ -97,7 +97,10 @@ pub mod auto {
                 })
             }
             StreamPlanNodeType::StreamAsOfJoin => {
-                let join_type = plan.as_stream_asof_join().expect("asof join").join_type();
+                let join_type = plan
+                    .as_stream_as_of_join()
+                    .expect("asof join")
+                    .join_type();
                 let (l, r) = join_inputs(plan, join_type);
                 Some(BackfillTreeNode::Join {
                     lhs: Box::new(plan_graph_to_backfill_tree(session, l)?),
