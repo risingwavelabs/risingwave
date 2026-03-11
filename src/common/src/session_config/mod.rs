@@ -74,6 +74,10 @@ const DEFAULT_TABLE_PARALLELISM_BOUND: std::num::NonZeroU64 = std::num::NonZeroU
 const DEFAULT_SOURCE_PARALLELISM_BOUND: std::num::NonZeroU64 =
     std::num::NonZeroU64::new(4).unwrap();
 
+/// Default global parallelism bound matching the legacy adaptive strategy default.
+const DEFAULT_GLOBAL_PARALLELISM_BOUND: std::num::NonZeroU64 =
+    std::num::NonZeroU64::new(64).unwrap();
+
 /// Default to bypass cluster limits iff in debug mode.
 const BYPASS_CLUSTER_LIMITS: bool = cfg!(debug_assertions);
 
@@ -171,12 +175,14 @@ pub struct SessionConfig {
     #[parameter(default = "UTC", check_hook = check_timezone)]
     timezone: String,
 
-    /// The execution parallelism for streaming queries, including tables, materialized views, indexes,
-    /// and sinks. Defaults to 0, which means they will be scheduled adaptively based on the cluster size.
+    /// The execution parallelism for streaming queries, including tables, materialized views,
+    /// indexes, and sinks. Defaults to `bounded(64)`, which preserves the legacy adaptive
+    /// strategy bound.
     ///
-    /// If a non-zero value is set, streaming queries will be scheduled to use a fixed number of parallelism.
-    /// Note that the value will be bounded at `STREAMING_MAX_PARALLELISM`.
-    #[parameter(default = ConfigParallelism::Adaptive)]
+    /// If a fixed value is set, streaming queries will use that parallelism directly. Adaptive
+    /// values such as `adaptive`, `bounded(n)`, and `ratio(r)` are still bounded by
+    /// `STREAMING_MAX_PARALLELISM`.
+    #[parameter(default = ConfigParallelism::Bounded(DEFAULT_GLOBAL_PARALLELISM_BOUND))]
     streaming_parallelism: ConfigParallelism,
 
     /// Specific parallelism for backfill. By default, it will fall back to `STREAMING_PARALLELISM`.
@@ -699,7 +705,10 @@ mod test {
     fn test_streaming_parallelism_defaults() {
         let config = SessionConfig::default();
 
-        assert_eq!(config.streaming_parallelism(), ConfigParallelism::Adaptive);
+        assert_eq!(
+            config.streaming_parallelism(),
+            ConfigParallelism::Bounded(DEFAULT_GLOBAL_PARALLELISM_BOUND)
+        );
         assert_eq!(
             config.streaming_parallelism_for_table(),
             ConfigParallelism::Bounded(DEFAULT_TABLE_PARALLELISM_BOUND)

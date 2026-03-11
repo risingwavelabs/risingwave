@@ -713,4 +713,52 @@ mod tests {
             Some("default")
         );
     }
+
+    #[test]
+    fn test_derive_legacy_streaming_parallelism_params_uses_legacy_global_default_bound() {
+        let params = vec![SessionParameterRow {
+            name: LEGACY_STREAMING_PARALLELISM_STRATEGY.to_owned(),
+            value: "default".to_owned(),
+        }];
+
+        let derived = derive_legacy_streaming_parallelism_params(
+            &params,
+            Some(AdaptiveParallelismStrategy::Bounded(64)),
+        );
+
+        assert_eq!(
+            derived.get(STREAMING_PARALLELISM).map(String::as_str),
+            Some("bounded(64)")
+        );
+        assert_eq!(
+            derived
+                .get(STREAMING_PARALLELISM_FOR_MATERIALIZED_VIEW)
+                .map(String::as_str),
+            Some("default")
+        );
+        assert_eq!(
+            derived
+                .get(STREAMING_PARALLELISM_FOR_SINK)
+                .map(String::as_str),
+            Some("default")
+        );
+        assert_eq!(
+            derived
+                .get(STREAMING_PARALLELISM_FOR_INDEX)
+                .map(String::as_str),
+            Some("default")
+        );
+        assert_eq!(
+            derived
+                .get(STREAMING_PARALLELISM_FOR_TABLE)
+                .map(String::as_str),
+            Some("bounded(4)")
+        );
+        assert_eq!(
+            derived
+                .get(STREAMING_PARALLELISM_FOR_SOURCE)
+                .map(String::as_str),
+            Some("bounded(4)")
+        );
+    }
 }

@@ -26,14 +26,14 @@ The unified parallelism value accepts the following forms:
 
 The meaning is:
 
-- `0`, `adaptive`, and the global default all mean adaptive scheduling with the full worker set.
+- `0` and `adaptive` mean adaptive scheduling with the full worker set.
 - `<n>` means fixed parallelism.
 - `bounded(<n>)` means adaptive scheduling with an upper bound.
 - `ratio(<r>)` means adaptive scheduling with a ratio of the available worker parallelism.
 
 Built-in defaults are:
 
-- `streaming_parallelism = adaptive`
+- `streaming_parallelism = bounded(64)`
 - `streaming_parallelism_for_table = bounded(4)`
 - `streaming_parallelism_for_source = bounded(4)`
 - all other `streaming_parallelism_for_<type>` values default to `default`
@@ -80,6 +80,7 @@ Older releases exposed these deprecated parameters:
 
 On startup, meta derives the final `streaming_parallelism` and
 `streaming_parallelism_for_<type>` values once from the legacy parameters, persists the new values,
-and drops the deprecated entries. The legacy `BOUNDED(4)` defaults for `table` and `source` are
-materialized into the new parameters during this migration. New clusters only expose the unified
+and drops the deprecated entries. The legacy default adaptive bounds are materialized into the new
+parameters as `streaming_parallelism = bounded(64)`, `streaming_parallelism_for_table = bounded(4)`,
+and `streaming_parallelism_for_source = bounded(4)`. New clusters only expose the unified
 parameters.
