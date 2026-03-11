@@ -36,7 +36,7 @@ pub use split::*;
 use with_options::WithOptions;
 
 use crate::connector_common::{KafkaCommon, RdKafkaPropertiesCommon};
-use crate::source::{CreateSplitReaderOpt, SourceProperties};
+use crate::source::SourceProperties;
 
 pub const KAFKA_CONNECTOR: &str = "kafka";
 pub const KAFKA_PROPS_BROKER_KEY: &str = "properties.bootstrap.server";
@@ -180,9 +180,6 @@ pub struct KafkaProperties {
 
     #[serde(flatten)]
     pub unknown_fields: HashMap<String, String>,
-
-    #[serde(skip)]
-    pub enable_partition_eof: bool,
 }
 
 impl EnforceSecret for KafkaProperties {
@@ -201,10 +198,6 @@ impl SourceProperties for KafkaProperties {
     type SplitReader = KafkaSplitReader;
 
     const SOURCE_NAME: &'static str = KAFKA_CONNECTOR;
-
-    fn init_from_create_split_reader_opt(&mut self, opt: &CreateSplitReaderOpt) {
-        self.enable_partition_eof = opt.for_backfill;
-    }
 }
 
 impl crate::source::UnknownFields for KafkaProperties {

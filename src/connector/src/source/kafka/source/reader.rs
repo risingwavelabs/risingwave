@@ -68,10 +68,11 @@ impl SplitReader for KafkaSplitReader {
 
         let bootstrap_servers = &properties.connection.brokers;
         let broker_rewrite_map = properties.privatelink_common.broker_rewrite_map.clone();
+        let enable_partition_eof = source_ctx.source_ctrl_opts.for_backfill;
 
         config.set(
             "enable.partition.eof",
-            if properties.enable_partition_eof {
+            if enable_partition_eof {
                 "true"
             } else {
                 "false"
@@ -139,7 +140,7 @@ impl SplitReader for KafkaSplitReader {
             let search_start = split.start_offset.map_or(low, |offset| offset + 1).max(low);
             if search_start >= high {
                 backfill_info.insert(split.id(), BackfillInfo::NoDataToBackfill);
-            } else if !properties.enable_partition_eof {
+            } else if !enable_partition_eof {
                 backfill_info.insert(
                     split.id(),
                     BackfillInfo::HasDataToBackfill {
@@ -256,8 +257,8 @@ async fn find_latest_readable_offset(
     search_end_exclusive: i64,
     sync_call_timeout: Duration,
 ) -> Result<Option<i64>> {
-    find_latest_offset_with_data(search_start, search_end_exclusive, |offset| {
-        has_readable_data_from(
+    find_latest_offset_with_data(search_start, search_end_exclusive, |offset| async move {
+        Ok(first_readable_offset(
             consumer,
             topic,
             partition,
@@ -265,6 +266,8 @@ async fn find_latest_readable_offset(
             sync_call_timeout,
             search_end_exclusive,
         )
+        .await?
+        .is_some())
     })
     .await
 }
@@ -295,26 +298,6 @@ where
     }
 
     Ok(Some(left))
-}
-
-async fn has_readable_data_from(
-    consumer: &StreamConsumer<RwConsumerContext>,
-    topic: &str,
-    partition: i32,
-    start_offset: i64,
-    sync_call_timeout: Duration,
-    search_end_exclusive: i64,
-) -> Result<bool> {
-    Ok(first_readable_offset(
-        consumer,
-        topic,
-        partition,
-        start_offset,
-        sync_call_timeout,
-        search_end_exclusive,
-    )
-    .await?
-    .is_some())
 }
 
 async fn first_readable_offset(
@@ -408,8 +391,8 @@ impl KafkaSplitReader {
                 match msg {
                     Ok(msg) => msgs.push(msg),
                     Err(KafkaError::PartitionEOF(_)) => {
-                        // `PartitionEOF` is used as a backfill-only control signal to detect that
-                        // there is currently no readable data in this partition.
+                        // `PartitionEOF` is a reader-local backfill control signal. The executor
+                        // still relies on `backfill_info` to know the last readable offset.
                     }
                     Err(err) => return Err(err.into()),
                 }

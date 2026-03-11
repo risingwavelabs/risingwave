@@ -301,7 +301,6 @@ impl From<KafkaConfig> for KafkaProperties {
             aws_auth_props: val.aws_auth_props,
             group_id_prefix: None,
             unknown_fields: Default::default(),
-            enable_partition_eof: false,
         }
     }
 }
