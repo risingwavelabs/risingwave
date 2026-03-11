@@ -78,8 +78,7 @@ fn map_from_key_values(
     let mut seen: Vec<ScalarRefImpl<'_>> = Vec::with_capacity(keys.len());
 
     for (k, v) in keys.iter().zip(values.iter()) {
-        let key =
-            k.ok_or_else(|| ExprError::Custom("map keys must not be NULL".into()))?;
+        let key = k.ok_or_else(|| ExprError::Custom("map keys must not be NULL".into()))?;
 
         if seen.contains(&key) {
             return Err(ExprError::Custom("map keys must be unique".into()));
@@ -109,9 +108,7 @@ fn map_from_entries(
         let struct_val = match entry {
             Some(ScalarRefImpl::Struct(s)) => s,
             _ => {
-                return Err(ExprError::Custom(
-                    "map entry must be struct".into(),
-                ));
+                return Err(ExprError::Custom("map entry must be struct".into()));
             }
         };
 
