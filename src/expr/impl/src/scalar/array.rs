@@ -82,9 +82,7 @@ fn map_from_key_values(
             k.ok_or_else(|| ExprError::Custom("map_from_key_values: key must not be NULL".into()))?;
 
         if seen.contains(&key) {
-            return Err(ExprError::Custom(
-                "map_from_key_values: duplicate key".into(),
-            ));
+            return Err(ExprError::Custom("map keys must be unique".into()));
         }
 
         seen.push(key);
@@ -122,7 +120,7 @@ fn map_from_entries(
             .ok_or_else(|| ExprError::Custom("map_from_entries: key must not be NULL".into()))?;
 
         if seen.contains(&key) {
-            return Err(ExprError::Custom("map_from_entries: duplicate key".into()));
+            return Err(ExprError::Custom("map keys must be unique".into()));
         }
 
         seen.push(key);
