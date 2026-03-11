@@ -2,6 +2,7 @@ control substitution on
 
 system ok
 mysql -e "
+    FLUSH BINARY LOGS;
     DROP DATABASE IF EXISTS testdb_direct_cdc_inject_offset;
     CREATE DATABASE testdb_direct_cdc_inject_offset;
     USE testdb_direct_cdc_inject_offset;
@@ -69,58 +70,20 @@ psql -h ${RISEDEV_RW_FRONTEND_LISTEN_ADDRESS} \
         LIMIT 1;" > /tmp/direct_cdc_source_id.txt
 
 system ok
-bash -ceu '
-source /Users/tab/conductor/workspaces/risingwave/madrid/.risingwave/config/risedev-env
-STATE_TABLE=$(psql -h "$RISEDEV_RW_FRONTEND_LISTEN_ADDRESS" \
-    -p "$RISEDEV_RW_FRONTEND_PORT" \
-    -d "$__DATABASE__" \
-    -U root \
-    -t -A \
-    -c "SELECT name
-        FROM rw_catalog.rw_internal_table_info
-        WHERE job_name = '\''direct_cdc_inject_offset'\''
-          AND job_type = '\''table'\''
-        ORDER BY job_id DESC
-        LIMIT 1;")
-SOURCE_ID=$(cat /tmp/direct_cdc_source_id.txt)
-for _ in $(seq 1 60); do
-    OFFSET=$(psql -h "$RISEDEV_RW_FRONTEND_LISTEN_ADDRESS" \
-        -p "$RISEDEV_RW_FRONTEND_PORT" \
-        -d "$__DATABASE__" \
-        -U root \
-        -t -A \
-        -c "SELECT offset_info->'\''split_info'\''->'\''mysql_split'\''->'\''inner'\''->>'\''start_offset'\''
-            FROM ${STATE_TABLE}
-            WHERE partition_id = '\''${SOURCE_ID}'\''
-            LIMIT 1;")
-    if [ -n "$OFFSET" ] && printf '%s' "$OFFSET" | grep -q '"isHeartbeat":false'; then
-        printf '%s' "$OFFSET" > /tmp/direct_cdc_current_offset.txt
-        exit 0
-    fi
-    sleep 1
-done
-echo "timed out waiting for non-heartbeat direct CDC offset" >&2
-exit 1
-'
+python3 e2e_test/source_inline/cdc/mysql/cron_only/extract_direct_cdc_current_offset.py \
+    --host ${RISEDEV_RW_FRONTEND_LISTEN_ADDRESS} \
+    --port ${RISEDEV_RW_FRONTEND_PORT} \
+    --database $__DATABASE__ \
+    --source-id-file /tmp/direct_cdc_source_id.txt \
+    --output /tmp/direct_cdc_current_offset.txt
 
 system ok
 python3 -c "import json, pathlib; source_id = pathlib.Path('/tmp/direct_cdc_source_id.txt').read_text().strip(); offset = pathlib.Path('/tmp/direct_cdc_current_offset.txt').read_text().strip(); pathlib.Path('/tmp/direct_cdc_offsets.json').write_text(json.dumps({source_id: offset}, separators=(',', ':'), sort_keys=True))"
 
 system ok
-bash -ceu '
-source /Users/tab/conductor/workspaces/risingwave/madrid/.risingwave/config/risedev-env
-SOURCE_ID="$(cat /tmp/direct_cdc_source_id.txt)"
-OFFSETS="$(cat /tmp/direct_cdc_offsets.json)"
-for _ in $(seq 1 30); do
-    if /Users/tab/conductor/workspaces/risingwave/madrid/.risingwave/bin/risingwave/risectl meta inject-source-offsets \
-        --source-id "$SOURCE_ID" \
-        --offsets "$OFFSETS"; then
-        exit 0
-    fi
-    sleep 1
-done
-exit 1
-'
+python3 e2e_test/source_inline/cdc/mysql/cron_only/inject_source_offsets_with_retry.py \
+    --source-id-file /tmp/direct_cdc_source_id.txt \
+    --offsets-file /tmp/direct_cdc_offsets.json
 
 system ok
 mysql -e "
@@ -130,23 +93,12 @@ mysql -e "
 "
 
 system ok
-bash -ceu '
-source /Users/tab/conductor/workspaces/risingwave/madrid/.risingwave/config/risedev-env
-for _ in $(seq 1 180); do
-    ACTUAL=$(psql -h "$RISEDEV_RW_FRONTEND_LISTEN_ADDRESS" \
-        -p "$RISEDEV_RW_FRONTEND_PORT" \
-        -d "$__DATABASE__" \
-        -U root \
-        -t -A \
-        -c "SELECT string_agg(id || '':' || payload, '','' ORDER BY id) FROM direct_cdc_inject_offset" 2>/dev/null || true)
-    if [ "$ACTUAL" = "1:row-1,2:row-2,3:row-3,4:row-4-before-inject,5:row-5-after-inject" ]; then
-        exit 0
-    fi
-    sleep 1
-done
-echo "timed out waiting for injected direct CDC rows" >&2
-exit 1
-'
+python3 e2e_test/source_inline/cdc/mysql/cron_only/wait_direct_cdc_rows.py \
+    --host ${RISEDEV_RW_FRONTEND_LISTEN_ADDRESS} \
+    --port ${RISEDEV_RW_FRONTEND_PORT} \
+    --database $__DATABASE__ \
+    --table direct_cdc_inject_offset \
+    --expected '1:row-1,2:row-2,3:row-3,4:row-4-before-inject,5:row-5-after-inject'
 
 statement ok
 drop table direct_cdc_inject_offset;
