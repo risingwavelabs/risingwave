@@ -24,6 +24,7 @@ use sea_orm::ActiveValue::{NotSet, Set};
 use sea_orm::prelude::DateTime;
 use sea_orm::sea_query::Expr;
 use sea_orm::{ActiveModelTrait, DatabaseTransaction};
+use thiserror_ext::AsReport;
 
 use super::*;
 use crate::controller::utils::load_streaming_jobs_by_ids;
@@ -1199,7 +1200,18 @@ impl CatalogController {
                 tracing::debug!("refresh job already exists for table_id={}", table_id);
                 Ok(())
             }
-            Err(e) => Err(e.into()),
+            Err(e) => {
+                if self.should_skip_refresh_job_db_err(table_id, &e).await? {
+                    tracing::warn!(
+                        %table_id,
+                        error = %e.as_report(),
+                        "skip ensure_refresh_job for stale dropped table"
+                    );
+                    Ok(())
+                } else {
+                    Err(e.into())
+                }
+            }
         }
     }
 
@@ -1230,8 +1242,21 @@ impl CatalogController {
             },
             ..Default::default()
         };
-        RefreshJob::update(active).exec(&inner.db).await?;
-        Ok(())
+        match RefreshJob::update(active).exec(&inner.db).await {
+            Ok(_) => Ok(()),
+            Err(e) => {
+                if self.should_skip_refresh_job_db_err(table_id, &e).await? {
+                    tracing::warn!(
+                        %table_id,
+                        error = %e.as_report(),
+                        "skip update_refresh_job_status for stale dropped table"
+                    );
+                    Ok(())
+                } else {
+                    Err(e.into())
+                }
+            }
+        }
     }
 
     pub async fn reset_all_refresh_jobs_to_idle(&self) -> MetaResult<()> {
@@ -1260,5 +1285,55 @@ impl CatalogController {
         };
         RefreshJob::update(active).exec(&inner.db).await?;
         Ok(())
+    }
+
+    async fn should_skip_refresh_job_db_err(
+        &self,
+        table_id: TableId,
+        err: &sea_orm::DbErr,
+    ) -> MetaResult<bool> {
+        if !is_refresh_job_stale_drop_candidate(err) {
+            return Ok(false);
+        }
+
+        let inner = self.inner.read().await;
+        let table_exists = Table::find_by_id(table_id).one(&inner.db).await?.is_some();
+        Ok(!table_exists)
+    }
+}
+
+fn is_refresh_job_stale_drop_candidate(err: &sea_orm::DbErr) -> bool {
+    is_foreign_key_constraint_violation(err) || matches!(err, sea_orm::DbErr::RecordNotUpdated)
+}
+
+fn is_foreign_key_constraint_violation(err: &sea_orm::DbErr) -> bool {
+    let err_msg = err.to_report_string().to_ascii_lowercase();
+    err_msg.contains("foreign key constraint failed")
+        || err_msg.contains("foreign key constraint violated")
+}
+
+#[cfg(test)]
+mod tests {
+    use sea_orm::DbErr;
+
+    use super::{is_foreign_key_constraint_violation, is_refresh_job_stale_drop_candidate};
+
+    #[test]
+    fn detect_foreign_key_constraint_violation_from_db_err_message() {
+        let err = DbErr::Custom("FOREIGN KEY constraint failed".to_owned());
+        assert!(is_foreign_key_constraint_violation(&err));
+    }
+
+    #[test]
+    fn do_not_treat_non_fk_db_err_as_foreign_key_violation() {
+        let err = DbErr::Custom("record not found".to_owned());
+        assert!(!is_foreign_key_constraint_violation(&err));
+    }
+
+    #[test]
+    fn treat_record_not_updated_as_stale_drop_candidate() {
+        assert!(is_refresh_job_stale_drop_candidate(
+            &DbErr::RecordNotUpdated
+        ));
     }
 }
