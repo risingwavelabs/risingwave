@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::fmt::Debug;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -23,20 +22,23 @@ use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::catalog::DatabaseId;
 use risingwave_common::hash::ActorMapping;
-use risingwave_meta_model::{StreamingParallelism, WorkerId, fragment, fragment_relation};
-use risingwave_pb::common::{PbWorkerNode, WorkerNode, WorkerType};
+use risingwave_common::system_param::reader::SystemParamsRead;
+use risingwave_meta_model::{
+    StreamingParallelism, WorkerId, fragment, fragment_relation, object, streaming_job,
+};
+use risingwave_pb::common::{WorkerNode, WorkerType};
 use risingwave_pb::stream_plan::{PbDispatchOutputMapping, PbDispatcher};
-use sea_orm::{ConnectionTrait, QuerySelect};
+use sea_orm::{ConnectionTrait, JoinType, QuerySelect, RelationTrait};
 use thiserror_ext::AsReport;
 use tokio::sync::oneshot::Receiver;
 use tokio::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard, oneshot};
 use tokio::task::JoinHandle;
 use tokio::time::{Instant, MissedTickBehavior};
 
-use crate::barrier::{Command, Reschedule, SharedFragmentInfo};
+use crate::barrier::{Command, Reschedule, RescheduleContext, ReschedulePlan};
 use crate::controller::scale::{
-    FragmentRenderMap, NoShuffleEnsemble, RenderedGraph, find_fragment_no_shuffle_dags_detailed,
-    render_fragments, render_jobs,
+    FragmentRenderMap, LoadedFragmentContext, NoShuffleEnsemble,
+    find_fragment_no_shuffle_dags_detailed, load_fragment_context, load_fragment_context_for_jobs,
 };
 use crate::error::bail_invalid_parameter;
 use crate::manager::{ActiveStreamingWorkerNodes, LocalNotification, MetaSrvEnv, MetadataManager};
@@ -51,12 +53,13 @@ pub struct WorkerReschedule {
 
 use risingwave_common::id::JobId;
 use risingwave_common::system_param::AdaptiveParallelismStrategy;
-use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_meta_model::DispatcherType;
 use risingwave_meta_model::fragment::DistributionType;
 use risingwave_meta_model::prelude::{Fragment, FragmentRelation, StreamingJob};
 use sea_orm::ActiveValue::Set;
-use sea_orm::{ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter, TransactionTrait};
+use sea_orm::{
+    ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter, TransactionTrait,
+};
 
 use crate::controller::fragment::{InflightActorInfo, InflightFragmentInfo};
 use crate::controller::utils::{
@@ -124,147 +127,11 @@ impl ScaleController {
         Ok(job_ids)
     }
 
-    pub fn diff_fragment(
-        &self,
-        prev_fragment_info: &SharedFragmentInfo,
-        curr_actors: &HashMap<ActorId, InflightActorInfo>,
-        upstream_fragments: HashMap<FragmentId, DispatcherType>,
-        downstream_fragments: HashMap<FragmentId, DispatcherType>,
-        all_actor_dispatchers: HashMap<ActorId, Vec<PbDispatcher>>,
-        job_extra_info: Option<&StreamingJobExtraInfo>,
-    ) -> MetaResult<Reschedule> {
-        let prev_actors: HashMap<_, _> = prev_fragment_info
-            .actors
-            .iter()
-            .map(|(actor_id, actor)| (*actor_id, actor))
-            .collect();
-
-        let prev_ids: HashSet<_> = prev_actors.keys().cloned().collect();
-        let curr_ids: HashSet<_> = curr_actors.keys().cloned().collect();
-
-        let removed_actors: HashSet<_> = &prev_ids - &curr_ids;
-        let added_actor_ids: HashSet<_> = &curr_ids - &prev_ids;
-        let kept_ids: HashSet<_> = prev_ids.intersection(&curr_ids).cloned().collect();
-        debug_assert!(
-            kept_ids.is_empty(),
-            "kept actors found in scale; expected full rebuild, prev={prev_ids:?}, curr={curr_ids:?}, kept={kept_ids:?}"
-        );
-
-        let mut added_actors = HashMap::new();
-        for &actor_id in &added_actor_ids {
-            let InflightActorInfo { worker_id, .. } = curr_actors
-                .get(&actor_id)
-                .ok_or_else(|| anyhow!("BUG: Worker not found for new actor {}", actor_id))?;
-
-            added_actors
-                .entry(*worker_id)
-                .or_insert_with(Vec::new)
-                .push(actor_id);
-        }
-
-        let mut vnode_bitmap_updates = HashMap::new();
-        for actor_id in kept_ids {
-            let prev_actor = prev_actors[&actor_id];
-            let curr_actor = &curr_actors[&actor_id];
-
-            // Check if the vnode distribution has changed.
-            if prev_actor.vnode_bitmap != curr_actor.vnode_bitmap
-                && let Some(bitmap) = curr_actor.vnode_bitmap.clone()
-            {
-                vnode_bitmap_updates.insert(actor_id, bitmap);
-            }
-        }
-
-        let upstream_dispatcher_mapping =
-            if let DistributionType::Hash = prev_fragment_info.distribution_type {
-                let actor_mapping = curr_actors
-                    .iter()
-                    .map(
-                        |(
-                            actor_id,
-                            InflightActorInfo {
-                                worker_id: _,
-                                vnode_bitmap,
-                                ..
-                            },
-                        )| { (*actor_id, vnode_bitmap.clone().unwrap()) },
-                    )
-                    .collect();
-                Some(ActorMapping::from_bitmaps(&actor_mapping))
-            } else {
-                None
-            };
-
-        let upstream_fragment_dispatcher_ids = upstream_fragments
-            .iter()
-            .filter(|&(_, dispatcher_type)| *dispatcher_type != DispatcherType::NoShuffle)
-            .map(|(upstream_fragment, _)| (*upstream_fragment, prev_fragment_info.fragment_id))
-            .collect();
-
-        let downstream_fragment_ids = downstream_fragments
-            .iter()
-            .filter(|&(_, dispatcher_type)| *dispatcher_type != DispatcherType::NoShuffle)
-            .map(|(fragment_id, _)| *fragment_id)
-            .collect();
-
-        let extra_info = job_extra_info.cloned().unwrap_or_default();
-        let expr_context = extra_info.stream_context().to_expr_context();
-        let job_definition = extra_info.job_definition;
-        let config_override = extra_info.config_override;
-
-        let newly_created_actors: HashMap<ActorId, (StreamActorWithDispatchers, WorkerId)> =
-            added_actor_ids
-                .iter()
-                .map(|actor_id| {
-                    let actor = StreamActor {
-                        actor_id: *actor_id,
-                        fragment_id: prev_fragment_info.fragment_id,
-                        vnode_bitmap: curr_actors[actor_id].vnode_bitmap.clone(),
-                        mview_definition: job_definition.clone(),
-                        expr_context: Some(expr_context.clone()),
-                        config_override: config_override.clone(),
-                    };
-                    (
-                        *actor_id,
-                        (
-                            (
-                                actor,
-                                all_actor_dispatchers
-                                    .get(actor_id)
-                                    .cloned()
-                                    .unwrap_or_default(),
-                            ),
-                            curr_actors[actor_id].worker_id,
-                        ),
-                    )
-                })
-                .collect();
-
-        let actor_splits = curr_actors
-            .iter()
-            .map(|(&actor_id, info)| (actor_id, info.splits.clone()))
-            .collect();
-
-        let reschedule = Reschedule {
-            added_actors,
-            removed_actors,
-            vnode_bitmap_updates,
-            upstream_fragment_dispatcher_ids,
-            upstream_dispatcher_mapping,
-            downstream_fragment_ids,
-            actor_splits,
-            newly_created_actors,
-        };
-
-        Ok(reschedule)
-    }
-
     pub async fn reschedule_inplace(
         &self,
         policy: HashMap<JobId, ReschedulePolicy>,
-        workers: &HashMap<WorkerId, WorkerNode>,
     ) -> MetaResult<HashMap<DatabaseId, Command>> {
-        let inner = self.metadata_manager.catalog_controller.inner.read().await;
+        let inner = self.metadata_manager.catalog_controller.inner.write().await;
         let txn = inner.db.begin().await?;
 
         for (table_id, target) in &policy {
@@ -302,9 +169,50 @@ impl ScaleController {
             StreamingJob::update(streaming_job).exec(&txn).await?;
         }
 
+        let job_ids: HashSet<JobId> = policy.keys().copied().collect();
+        let commands = build_reschedule_intent_for_jobs(&txn, job_ids).await?;
+
+        txn.commit().await?;
+
+        Ok(commands)
+    }
+
+    pub async fn reschedule_backfill_parallelism_inplace(
+        &self,
+        policy: HashMap<JobId, Option<StreamingParallelism>>,
+    ) -> MetaResult<HashMap<DatabaseId, Command>> {
+        if policy.is_empty() {
+            return Ok(HashMap::new());
+        }
+
+        let inner = self.metadata_manager.catalog_controller.inner.write().await;
+        let txn = inner.db.begin().await?;
+
+        for (table_id, parallelism) in &policy {
+            let streaming_job = StreamingJob::find_by_id(*table_id)
+                .one(&txn)
+                .await?
+                .ok_or_else(|| MetaError::catalog_id_not_found("table", table_id))?;
+
+            let max_parallelism = streaming_job.max_parallelism;
+
+            let mut streaming_job = streaming_job.into_active_model();
+
+            if let Some(StreamingParallelism::Fixed(n)) = parallelism
+                && *n > max_parallelism as usize
+            {
+                bail!(format!(
+                    "specified backfill parallelism {n} should not exceed max parallelism {max_parallelism}"
+                ));
+            }
+
+            streaming_job.backfill_parallelism = Set(parallelism.clone());
+            streaming_job.update(&txn).await?;
+        }
+
         let jobs = policy.keys().copied().collect();
 
-        let command = self.rerender_inner(&txn, jobs, workers).await?;
+        let command = build_reschedule_intent_for_jobs(&txn, jobs).await?;
 
         txn.commit().await?;
 
@@ -314,13 +222,12 @@ impl ScaleController {
     pub async fn reschedule_fragment_inplace(
         &self,
         policy: HashMap<risingwave_meta_model::FragmentId, Option<StreamingParallelism>>,
-        workers: &HashMap<WorkerId, PbWorkerNode>,
     ) -> MetaResult<HashMap<DatabaseId, Command>> {
         if policy.is_empty() {
             return Ok(HashMap::new());
         }
 
-        let inner = self.metadata_manager.catalog_controller.inner.read().await;
+        let inner = self.metadata_manager.catalog_controller.inner.write().await;
         let txn = inner.db.begin().await?;
 
         let fragment_id_list = policy.keys().copied().collect_vec();
@@ -337,7 +244,7 @@ impl ScaleController {
 
         if let Some(missing_fragment_id) = fragment_id_list
             .iter()
-            .find(|fragment_id| !existing_fragment_ids.contains(fragment_id))
+            .find(|fragment_id| !existing_fragment_ids.contains(*fragment_id))
         {
             return Err(MetaError::catalog_id_not_found(
                 "fragment",
@@ -403,349 +310,572 @@ impl ScaleController {
             target_ensembles.push(ensemble);
         }
 
-        let command = self
-            .rerender_fragment_inner(&txn, target_ensembles, workers)
-            .await?;
+        if target_ensembles.is_empty() {
+            txn.commit().await?;
+            return Ok(HashMap::new());
+        }
+
+        let target_fragment_ids: HashSet<FragmentId> = target_ensembles
+            .iter()
+            .flat_map(|ensemble| ensemble.component_fragments())
+            .collect();
+        let commands = build_reschedule_intent_for_fragments(&txn, target_fragment_ids).await?;
 
         txn.commit().await?;
 
-        Ok(command)
+        Ok(commands)
     }
 
-    async fn rerender(
-        &self,
-        jobs: HashSet<JobId>,
-        workers: &HashMap<WorkerId, WorkerNode>,
-    ) -> MetaResult<HashMap<DatabaseId, Command>> {
+    async fn rerender(&self, jobs: HashSet<JobId>) -> MetaResult<HashMap<DatabaseId, Command>> {
+        if jobs.is_empty() {
+            return Ok(HashMap::new());
+        }
+
         let inner = self.metadata_manager.catalog_controller.inner.read().await;
-        self.rerender_inner(&inner.db, jobs, workers).await
+        let txn = inner.db.begin().await?;
+        let commands = build_reschedule_intent_for_jobs(&txn, jobs).await?;
+        txn.commit().await?;
+        Ok(commands)
+    }
+}
+
+async fn build_reschedule_intent_for_jobs(
+    txn: &impl ConnectionTrait,
+    job_ids: HashSet<JobId>,
+) -> MetaResult<HashMap<DatabaseId, Command>> {
+    if job_ids.is_empty() {
+        return Ok(HashMap::new());
     }
 
-    async fn rerender_fragment_inner(
-        &self,
-        txn: &impl ConnectionTrait,
-        ensembles: Vec<NoShuffleEnsemble>,
-        workers: &HashMap<WorkerId, WorkerNode>,
-    ) -> MetaResult<HashMap<DatabaseId, Command>> {
-        if ensembles.is_empty() {
-            return Ok(HashMap::new());
-        }
-
-        let adaptive_parallelism_strategy = {
-            let system_params_reader = self.env.system_params_reader().await;
-            system_params_reader.adaptive_parallelism_strategy()
-        };
-
-        let RenderedGraph { fragments, .. } = render_fragments(
-            txn,
-            self.env.actor_id_generator(),
-            ensembles,
-            workers,
-            adaptive_parallelism_strategy,
-        )
+    let job_id_list = job_ids.iter().copied().collect_vec();
+    let database_jobs: Vec<(DatabaseId, JobId)> = StreamingJob::find()
+        .select_only()
+        .column(object::Column::DatabaseId)
+        .column(streaming_job::Column::JobId)
+        .join(JoinType::LeftJoin, streaming_job::Relation::Object.def())
+        .filter(streaming_job::Column::JobId.is_in(job_id_list.clone()))
+        .into_tuple()
+        .all(txn)
         .await?;
 
-        self.build_reschedule_commands(txn, fragments).await
+    if database_jobs.len() != job_ids.len() {
+        let returned_jobs: HashSet<JobId> =
+            database_jobs.iter().map(|(_, job_id)| *job_id).collect();
+        let missing = job_ids.difference(&returned_jobs).copied().collect_vec();
+        return Err(MetaError::catalog_id_not_found(
+            "streaming job",
+            format!("{missing:?}"),
+        ));
     }
 
-    async fn rerender_inner(
-        &self,
-        txn: &impl ConnectionTrait,
-        jobs: HashSet<JobId>,
-        workers: &HashMap<WorkerId, WorkerNode>,
-    ) -> MetaResult<HashMap<DatabaseId, Command>> {
-        let adaptive_parallelism_strategy = {
-            let system_params_reader = self.env.system_params_reader().await;
-            system_params_reader.adaptive_parallelism_strategy()
-        };
-
-        let RenderedGraph { fragments, .. } = render_jobs(
-            txn,
-            self.env.actor_id_generator(),
-            jobs,
-            workers,
-            adaptive_parallelism_strategy,
-        )
-        .await?;
-
-        self.build_reschedule_commands(txn, fragments).await
+    let reschedule_context = load_reschedule_context_for_jobs(txn, job_ids).await?;
+    if reschedule_context.is_empty() {
+        return Ok(HashMap::new());
     }
 
-    async fn build_reschedule_commands(
-        &self,
-        txn: &impl ConnectionTrait,
-        render_result: FragmentRenderMap,
-    ) -> MetaResult<HashMap<DatabaseId, Command>> {
-        if render_result.is_empty() {
-            return Ok(HashMap::new());
-        }
-
-        let job_ids = render_result
-            .values()
-            .flat_map(|jobs| jobs.keys().copied())
-            .collect_vec();
-
-        let job_extra_info = get_streaming_job_extra_info(txn, job_ids).await?;
-
-        let fragment_ids = render_result
-            .values()
-            .flat_map(|jobs| jobs.values())
-            .flatten()
-            .map(|(fragment_id, _)| *fragment_id)
-            .collect_vec();
-
-        let upstreams: Vec<(
-            risingwave_meta_model::FragmentId,
-            risingwave_meta_model::FragmentId,
-            DispatcherType,
-        )> = FragmentRelation::find()
-            .select_only()
-            .columns([
-                fragment_relation::Column::TargetFragmentId,
-                fragment_relation::Column::SourceFragmentId,
-                fragment_relation::Column::DispatcherType,
-            ])
-            .filter(fragment_relation::Column::TargetFragmentId.is_in(fragment_ids.clone()))
-            .into_tuple()
-            .all(txn)
-            .await?;
-
-        let downstreams = FragmentRelation::find()
-            .filter(fragment_relation::Column::SourceFragmentId.is_in(fragment_ids.clone()))
-            .all(txn)
-            .await?;
-
-        let mut all_upstream_fragments = HashMap::new();
-
-        for (fragment, upstream, dispatcher) in upstreams {
-            let fragment_id = fragment as FragmentId;
-            let upstream_id = upstream as FragmentId;
-            all_upstream_fragments
-                .entry(fragment_id)
-                .or_insert(HashMap::new())
-                .insert(upstream_id, dispatcher);
-        }
-
-        let mut all_downstream_fragments = HashMap::new();
-
-        let mut downstream_relations = HashMap::new();
-        for relation in downstreams {
-            let source_fragment_id = relation.source_fragment_id as FragmentId;
-            let target_fragment_id = relation.target_fragment_id as FragmentId;
-            all_downstream_fragments
-                .entry(source_fragment_id)
-                .or_insert(HashMap::new())
-                .insert(target_fragment_id, relation.dispatcher_type);
-
-            downstream_relations.insert((source_fragment_id, target_fragment_id), relation);
-        }
-
-        let all_related_fragment_ids: HashSet<_> = fragment_ids
-            .iter()
-            .copied()
-            .chain(all_upstream_fragments.values().flatten().map(|(id, _)| *id))
-            .chain(
-                all_downstream_fragments
-                    .values()
-                    .flatten()
-                    .map(|(id, _)| *id),
+    let commands = reschedule_context
+        .into_database_contexts()
+        .into_iter()
+        .map(|(database_id, context)| {
+            (
+                database_id,
+                Command::RescheduleIntent {
+                    context,
+                    reschedule_plan: None,
+                },
             )
+        })
+        .collect();
+
+    Ok(commands)
+}
+
+async fn build_reschedule_intent_for_fragments(
+    txn: &impl ConnectionTrait,
+    fragment_ids: HashSet<FragmentId>,
+) -> MetaResult<HashMap<DatabaseId, Command>> {
+    if fragment_ids.is_empty() {
+        return Ok(HashMap::new());
+    }
+
+    let fragment_id_list = fragment_ids.iter().copied().collect_vec();
+    let fragment_databases: Vec<(FragmentId, DatabaseId)> = Fragment::find()
+        .select_only()
+        .column(fragment::Column::FragmentId)
+        .column(object::Column::DatabaseId)
+        .join(JoinType::LeftJoin, fragment::Relation::Object.def())
+        .filter(fragment::Column::FragmentId.is_in(fragment_id_list.clone()))
+        .into_tuple()
+        .all(txn)
+        .await?;
+
+    if fragment_databases.len() != fragment_ids.len() {
+        let returned: HashSet<FragmentId> = fragment_databases
+            .iter()
+            .map(|(fragment_id, _)| *fragment_id)
+            .collect();
+        let missing = fragment_ids.difference(&returned).copied().collect_vec();
+        return Err(MetaError::catalog_id_not_found(
+            "fragment",
+            format!("{missing:?}"),
+        ));
+    }
+
+    let ensembles = find_fragment_no_shuffle_dags_detailed(txn, &fragment_id_list).await?;
+    let reschedule_context = load_reschedule_context_for_ensembles(txn, ensembles).await?;
+    if reschedule_context.is_empty() {
+        return Ok(HashMap::new());
+    }
+
+    let commands = reschedule_context
+        .into_database_contexts()
+        .into_iter()
+        .map(|(database_id, context)| {
+            (
+                database_id,
+                Command::RescheduleIntent {
+                    context,
+                    reschedule_plan: None,
+                },
+            )
+        })
+        .collect();
+
+    Ok(commands)
+}
+
+async fn load_reschedule_context_for_jobs(
+    txn: &impl ConnectionTrait,
+    job_ids: HashSet<JobId>,
+) -> MetaResult<RescheduleContext> {
+    let loaded = load_fragment_context_for_jobs(txn, job_ids).await?;
+    build_reschedule_context_from_loaded(txn, loaded).await
+}
+
+async fn load_reschedule_context_for_ensembles(
+    txn: &impl ConnectionTrait,
+    ensembles: Vec<NoShuffleEnsemble>,
+) -> MetaResult<RescheduleContext> {
+    let loaded = load_fragment_context(txn, ensembles).await?;
+    build_reschedule_context_from_loaded(txn, loaded).await
+}
+
+async fn build_reschedule_context_from_loaded(
+    txn: &impl ConnectionTrait,
+    loaded: LoadedFragmentContext,
+) -> MetaResult<RescheduleContext> {
+    if loaded.is_empty() {
+        return Ok(RescheduleContext::empty());
+    }
+
+    let job_ids = loaded.job_map.keys().copied().collect_vec();
+    let job_extra_info = get_streaming_job_extra_info(txn, job_ids).await?;
+
+    let fragment_ids = loaded
+        .job_fragments
+        .values()
+        .flat_map(|fragments| fragments.keys().copied())
+        .collect_vec();
+
+    let upstreams: Vec<(FragmentId, FragmentId, DispatcherType)> = FragmentRelation::find()
+        .select_only()
+        .columns([
+            fragment_relation::Column::TargetFragmentId,
+            fragment_relation::Column::SourceFragmentId,
+            fragment_relation::Column::DispatcherType,
+        ])
+        .filter(fragment_relation::Column::TargetFragmentId.is_in(fragment_ids.clone()))
+        .into_tuple()
+        .all(txn)
+        .await?;
+
+    let mut upstream_fragments = HashMap::new();
+    for (fragment, upstream, dispatcher) in upstreams {
+        upstream_fragments
+            .entry(fragment as FragmentId)
+            .or_insert(HashMap::new())
+            .insert(upstream as FragmentId, dispatcher);
+    }
+
+    let downstreams = FragmentRelation::find()
+        .filter(fragment_relation::Column::SourceFragmentId.is_in(fragment_ids.clone()))
+        .all(txn)
+        .await?;
+
+    let mut downstream_fragments = HashMap::new();
+    let mut downstream_relations = HashMap::new();
+    for relation in downstreams {
+        let source_fragment_id = relation.source_fragment_id as FragmentId;
+        let target_fragment_id = relation.target_fragment_id as FragmentId;
+        downstream_fragments
+            .entry(source_fragment_id)
+            .or_insert(HashMap::new())
+            .insert(target_fragment_id, relation.dispatcher_type);
+        downstream_relations.insert((source_fragment_id, target_fragment_id), relation);
+    }
+
+    Ok(RescheduleContext {
+        loaded,
+        job_extra_info,
+        upstream_fragments,
+        downstream_fragments,
+        downstream_relations,
+    })
+}
+
+/// Build a `Reschedule` by diffing the previously materialized fragment state against
+/// the newly rendered actor layout.
+///
+/// This function assumes a full rebuild (no kept actors) and produces:
+/// - actor additions/removals and vnode bitmap updates
+/// - dispatcher updates for upstream/downstream fragments
+/// - updated split assignments for source actors
+///
+/// `upstream_fragments`/`downstream_fragments` describe neighbor fragments and dispatcher types,
+/// while `all_actor_dispatchers` contains the new dispatcher list for each actor. `job_extra_info`
+/// supplies job-level context for building new actors.
+fn diff_fragment(
+    prev_fragment_info: &InflightFragmentInfo,
+    curr_actors: &HashMap<ActorId, InflightActorInfo>,
+    upstream_fragments: HashMap<FragmentId, DispatcherType>,
+    downstream_fragments: HashMap<FragmentId, DispatcherType>,
+    all_actor_dispatchers: HashMap<ActorId, Vec<PbDispatcher>>,
+    job_extra_info: Option<&StreamingJobExtraInfo>,
+) -> MetaResult<Reschedule> {
+    let prev_ids: HashSet<_> = prev_fragment_info.actors.keys().cloned().collect();
+    let curr_ids: HashSet<_> = curr_actors.keys().cloned().collect();
+
+    let removed_actors: HashSet<_> = &prev_ids - &curr_ids;
+    let added_actor_ids: HashSet<_> = &curr_ids - &prev_ids;
+    let kept_ids: HashSet<_> = prev_ids.intersection(&curr_ids).cloned().collect();
+    debug_assert!(
+        kept_ids.is_empty(),
+        "kept actors found in scale; expected full rebuild, prev={prev_ids:?}, curr={curr_ids:?}, kept={kept_ids:?}"
+    );
+
+    let mut added_actors = HashMap::new();
+    for &actor_id in &added_actor_ids {
+        let InflightActorInfo { worker_id, .. } = curr_actors
+            .get(&actor_id)
+            .ok_or_else(|| anyhow!("BUG: Worker not found for new actor {}", actor_id))?;
+
+        added_actors
+            .entry(*worker_id)
+            .or_insert_with(Vec::new)
+            .push(actor_id);
+    }
+
+    let mut vnode_bitmap_updates = HashMap::new();
+    for actor_id in kept_ids {
+        let prev_actor = &prev_fragment_info.actors[&actor_id];
+        let curr_actor = &curr_actors[&actor_id];
+
+        // Check if the vnode distribution has changed.
+        if prev_actor.vnode_bitmap != curr_actor.vnode_bitmap
+            && let Some(bitmap) = curr_actor.vnode_bitmap.clone()
+        {
+            vnode_bitmap_updates.insert(actor_id, bitmap);
+        }
+    }
+
+    let upstream_dispatcher_mapping =
+        if let DistributionType::Hash = prev_fragment_info.distribution_type {
+            let actor_mapping = curr_actors
+                .iter()
+                .map(
+                    |(
+                        actor_id,
+                        InflightActorInfo {
+                            worker_id: _,
+                            vnode_bitmap,
+                            ..
+                        },
+                    )| { (*actor_id, vnode_bitmap.clone().unwrap()) },
+                )
+                .collect();
+            Some(ActorMapping::from_bitmaps(&actor_mapping))
+        } else {
+            None
+        };
+
+    let upstream_fragment_dispatcher_ids = upstream_fragments
+        .iter()
+        .filter(|&(_, dispatcher_type)| *dispatcher_type != DispatcherType::NoShuffle)
+        .map(|(upstream_fragment, _)| (*upstream_fragment, prev_fragment_info.fragment_id))
+        .collect();
+
+    let downstream_fragment_ids = downstream_fragments
+        .iter()
+        .filter(|&(_, dispatcher_type)| *dispatcher_type != DispatcherType::NoShuffle)
+        .map(|(fragment_id, _)| *fragment_id)
+        .collect();
+
+    let extra_info = job_extra_info.cloned().unwrap_or_default();
+    let expr_context = extra_info.stream_context().to_expr_context();
+    let job_definition = extra_info.job_definition;
+    let config_override = extra_info.config_override;
+
+    let newly_created_actors: HashMap<ActorId, (StreamActorWithDispatchers, WorkerId)> =
+        added_actor_ids
+            .iter()
+            .map(|actor_id| {
+                let actor = StreamActor {
+                    actor_id: *actor_id,
+                    fragment_id: prev_fragment_info.fragment_id,
+                    vnode_bitmap: curr_actors[actor_id].vnode_bitmap.clone(),
+                    mview_definition: job_definition.clone(),
+                    expr_context: Some(expr_context.clone()),
+                    config_override: config_override.clone(),
+                };
+                (
+                    *actor_id,
+                    (
+                        (
+                            actor,
+                            all_actor_dispatchers
+                                .get(actor_id)
+                                .cloned()
+                                .unwrap_or_default(),
+                        ),
+                        curr_actors[actor_id].worker_id,
+                    ),
+                )
+            })
             .collect();
 
-        let all_related_fragment_ids = all_related_fragment_ids.into_iter().collect_vec();
+    let actor_splits = curr_actors
+        .iter()
+        .map(|(&actor_id, info)| (actor_id, info.splits.clone()))
+        .collect();
 
-        let all_prev_fragments: HashMap<_, _> = {
-            let read_guard = self.env.shared_actor_infos().read_guard();
-            all_related_fragment_ids
+    let reschedule = Reschedule {
+        added_actors,
+        removed_actors,
+        vnode_bitmap_updates,
+        upstream_fragment_dispatcher_ids,
+        upstream_dispatcher_mapping,
+        downstream_fragment_ids,
+        actor_splits,
+        newly_created_actors,
+    };
+
+    Ok(reschedule)
+}
+
+pub(crate) fn build_reschedule_commands(
+    render_result: FragmentRenderMap,
+    context: RescheduleContext,
+    all_prev_fragments: HashMap<FragmentId, &InflightFragmentInfo>,
+) -> MetaResult<HashMap<DatabaseId, ReschedulePlan>> {
+    if render_result.is_empty() {
+        return Ok(HashMap::new());
+    }
+
+    let RescheduleContext {
+        job_extra_info,
+        upstream_fragments: mut all_upstream_fragments,
+        downstream_fragments: mut all_downstream_fragments,
+        mut downstream_relations,
+        ..
+    } = context;
+
+    let fragment_ids = render_result
+        .values()
+        .flat_map(|jobs| jobs.values())
+        .flatten()
+        .map(|(fragment_id, _)| *fragment_id)
+        .collect_vec();
+
+    let all_related_fragment_ids: HashSet<_> = fragment_ids
+        .iter()
+        .copied()
+        .chain(all_upstream_fragments.values().flatten().map(|(id, _)| *id))
+        .chain(
+            all_downstream_fragments
+                .values()
+                .flatten()
+                .map(|(id, _)| *id),
+        )
+        .collect();
+
+    for fragment_id in all_related_fragment_ids {
+        if !all_prev_fragments.contains_key(&fragment_id) {
+            return Err(MetaError::from(anyhow!(
+                "previous fragment info for {fragment_id} not found"
+            )));
+        }
+    }
+
+    let all_rendered_fragments: HashMap<_, _> = render_result
+        .values()
+        .flat_map(|jobs| jobs.values())
+        .flatten()
+        .map(|(fragment_id, info)| (*fragment_id, info))
+        .collect();
+
+    let mut commands = HashMap::new();
+
+    for (database_id, jobs) in &render_result {
+        let mut all_fragment_actors = HashMap::new();
+        let mut reschedules = HashMap::new();
+
+        for (job_id, fragment_id, fragment_info) in jobs.iter().flat_map(|(job_id, fragments)| {
+            fragments
                 .iter()
-                .map(|&fragment_id| {
-                    read_guard
-                        .get_fragment(fragment_id as FragmentId)
-                        .cloned()
-                        .map(|fragment| (fragment_id, fragment))
+                .map(move |(fragment_id, info)| (job_id, fragment_id, info))
+        }) {
+            let InflightFragmentInfo {
+                distribution_type,
+                actors,
+                ..
+            } = fragment_info;
+
+            let upstream_fragments = all_upstream_fragments
+                .remove(&(*fragment_id as FragmentId))
+                .unwrap_or_default();
+            let downstream_fragments = all_downstream_fragments
+                .remove(&(*fragment_id as FragmentId))
+                .unwrap_or_default();
+
+            let fragment_actors: HashMap<_, _> = upstream_fragments
+                .keys()
+                .copied()
+                .chain(downstream_fragments.keys().copied())
+                .map(|fragment_id| {
+                    all_prev_fragments
+                        .get(&fragment_id)
+                        .map(|fragment| {
+                            (
+                                fragment_id,
+                                fragment.actors.keys().copied().collect::<HashSet<_>>(),
+                            )
+                        })
                         .ok_or_else(|| {
                             MetaError::from(anyhow!(
-                                "previous fragment info for {fragment_id} not found"
+                                "fragment {} not found in previous state",
+                                fragment_id
                             ))
                         })
                 })
-                .collect::<MetaResult<_>>()?
-        };
+                .collect::<MetaResult<_>>()?;
 
-        let all_rendered_fragments: HashMap<_, _> = render_result
-            .values()
-            .flat_map(|jobs| jobs.values())
-            .flatten()
-            .map(|(fragment_id, info)| (*fragment_id, info))
-            .collect();
+            all_fragment_actors.extend(fragment_actors);
 
-        let mut commands = HashMap::new();
+            let source_fragment_actors = actors
+                .iter()
+                .map(|(actor_id, info)| (*actor_id, info.vnode_bitmap.clone()))
+                .collect();
 
-        for (database_id, jobs) in &render_result {
-            let mut all_fragment_actors = HashMap::new();
-            let mut reschedules = HashMap::new();
+            let mut all_actor_dispatchers: HashMap<_, Vec<_>> = HashMap::new();
 
-            for (job_id, fragment_id, fragment_info) in
-                jobs.iter().flat_map(|(job_id, fragments)| {
-                    fragments
-                        .iter()
-                        .map(move |(fragment_id, info)| (job_id, fragment_id, info))
-                })
-            {
-                let InflightFragmentInfo {
-                    distribution_type,
-                    actors,
-                    ..
-                } = fragment_info;
+            for downstream_fragment_id in downstream_fragments.keys() {
+                let target_fragment_actors =
+                    match all_rendered_fragments.get(downstream_fragment_id) {
+                        None => {
+                            let external_fragment = all_prev_fragments
+                                .get(downstream_fragment_id)
+                                .ok_or_else(|| {
+                                    MetaError::from(anyhow!(
+                                        "fragment {} not found in previous state",
+                                        downstream_fragment_id
+                                    ))
+                                })?;
 
-                let upstream_fragments = all_upstream_fragments
-                    .remove(&(*fragment_id as FragmentId))
-                    .unwrap_or_default();
-                let downstream_fragments = all_downstream_fragments
-                    .remove(&(*fragment_id as FragmentId))
-                    .unwrap_or_default();
-
-                let fragment_actors: HashMap<_, _> = upstream_fragments
-                    .keys()
-                    .copied()
-                    .chain(downstream_fragments.keys().copied())
-                    .map(|fragment_id| {
-                        all_prev_fragments
-                            .get(&fragment_id)
-                            .map(|fragment| {
-                                (
-                                    fragment_id,
-                                    fragment.actors.keys().copied().collect::<HashSet<_>>(),
-                                )
-                            })
-                            .ok_or_else(|| {
-                                MetaError::from(anyhow!(
-                                    "fragment {} not found in previous state",
-                                    fragment_id
-                                ))
-                            })
-                    })
-                    .collect::<MetaResult<_>>()?;
-
-                all_fragment_actors.extend(fragment_actors);
-
-                let source_fragment_actors = actors
-                    .iter()
-                    .map(|(actor_id, info)| (*actor_id, info.vnode_bitmap.clone()))
-                    .collect();
-
-                let mut all_actor_dispatchers: HashMap<_, Vec<_>> = HashMap::new();
-
-                for downstream_fragment_id in downstream_fragments.keys() {
-                    let target_fragment_actors =
-                        match all_rendered_fragments.get(downstream_fragment_id) {
-                            None => {
-                                let external_fragment = all_prev_fragments
-                                    .get(downstream_fragment_id)
-                                    .ok_or_else(|| {
-                                        MetaError::from(anyhow!(
-                                            "fragment {} not found in previous state",
-                                            downstream_fragment_id
-                                        ))
-                                    })?;
-
-                                external_fragment
-                                    .actors
-                                    .iter()
-                                    .map(|(actor_id, info)| (*actor_id, info.vnode_bitmap.clone()))
-                                    .collect()
-                            }
-                            Some(downstream_rendered) => downstream_rendered
+                            external_fragment
                                 .actors
                                 .iter()
                                 .map(|(actor_id, info)| (*actor_id, info.vnode_bitmap.clone()))
-                                .collect(),
-                        };
-
-                    let target_fragment_distribution = *distribution_type;
-
-                    let fragment_relation::Model {
-                        source_fragment_id: _,
-                        target_fragment_id: _,
-                        dispatcher_type,
-                        dist_key_indices,
-                        output_indices,
-                        output_type_mapping,
-                    } = downstream_relations
-                        .remove(&(
-                            *fragment_id as FragmentId,
-                            *downstream_fragment_id as FragmentId,
-                        ))
-                        .ok_or_else(|| {
-                            MetaError::from(anyhow!(
-                                "downstream relation missing for {} -> {}",
-                                fragment_id,
-                                downstream_fragment_id
-                            ))
-                        })?;
-
-                    let pb_mapping = PbDispatchOutputMapping {
-                        indices: output_indices.into_u32_array(),
-                        types: output_type_mapping.unwrap_or_default().to_protobuf(),
+                                .collect()
+                        }
+                        Some(downstream_rendered) => downstream_rendered
+                            .actors
+                            .iter()
+                            .map(|(actor_id, info)| (*actor_id, info.vnode_bitmap.clone()))
+                            .collect(),
                     };
 
-                    let dispatchers = compose_dispatchers(
-                        *distribution_type,
-                        &source_fragment_actors,
-                        *downstream_fragment_id,
-                        target_fragment_distribution,
-                        &target_fragment_actors,
-                        dispatcher_type,
-                        dist_key_indices.into_u32_array(),
-                        pb_mapping,
-                    );
+                let target_fragment_distribution = *distribution_type;
 
-                    for (actor_id, dispatcher) in dispatchers {
-                        all_actor_dispatchers
-                            .entry(actor_id)
-                            .or_default()
-                            .push(dispatcher);
-                    }
-                }
-
-                let prev_fragment = all_prev_fragments.get(&{ *fragment_id }).ok_or_else(|| {
-                    MetaError::from(anyhow!(
-                        "fragment {} not found in previous state",
-                        fragment_id
+                let fragment_relation::Model {
+                    source_fragment_id: _,
+                    target_fragment_id: _,
+                    dispatcher_type,
+                    dist_key_indices,
+                    output_indices,
+                    output_type_mapping,
+                } = downstream_relations
+                    .remove(&(
+                        *fragment_id as FragmentId,
+                        *downstream_fragment_id as FragmentId,
                     ))
-                })?;
+                    .ok_or_else(|| {
+                        MetaError::from(anyhow!(
+                            "downstream relation missing for {} -> {}",
+                            fragment_id,
+                            downstream_fragment_id
+                        ))
+                    })?;
 
-                let reschedule = self.diff_fragment(
-                    prev_fragment,
-                    actors,
-                    upstream_fragments,
-                    downstream_fragments,
-                    all_actor_dispatchers,
-                    job_extra_info.get(job_id),
-                )?;
+                let pb_mapping = PbDispatchOutputMapping {
+                    indices: output_indices.into_u32_array(),
+                    types: output_type_mapping.unwrap_or_default().to_protobuf(),
+                };
 
-                reschedules.insert(*fragment_id as FragmentId, reschedule);
-            }
-
-            let command = Command::RescheduleFragment {
-                reschedules,
-                fragment_actors: all_fragment_actors,
-            };
-
-            if let Command::RescheduleFragment { reschedules, .. } = &command {
-                debug_assert!(
-                    reschedules
-                        .values()
-                        .all(|reschedule| reschedule.vnode_bitmap_updates.is_empty()),
-                    "RescheduleFragment command carries vnode_bitmap_updates, expected full rebuild"
+                let dispatchers = compose_dispatchers(
+                    *distribution_type,
+                    &source_fragment_actors,
+                    *downstream_fragment_id,
+                    target_fragment_distribution,
+                    &target_fragment_actors,
+                    dispatcher_type,
+                    dist_key_indices.into_u32_array(),
+                    pb_mapping,
                 );
+
+                for (actor_id, dispatcher) in dispatchers {
+                    all_actor_dispatchers
+                        .entry(actor_id)
+                        .or_default()
+                        .push(dispatcher);
+                }
             }
 
-            commands.insert(*database_id, command);
+            let prev_fragment = all_prev_fragments.get(&{ *fragment_id }).ok_or_else(|| {
+                MetaError::from(anyhow!(
+                    "fragment {} not found in previous state",
+                    fragment_id
+                ))
+            })?;
+
+            let reschedule = diff_fragment(
+                prev_fragment,
+                actors,
+                upstream_fragments,
+                downstream_fragments,
+                all_actor_dispatchers,
+                job_extra_info.get(job_id),
+            )?;
+
+            reschedules.insert(*fragment_id as FragmentId, reschedule);
         }
 
-        Ok(commands)
+        let command = ReschedulePlan {
+            reschedules,
+            fragment_actors: all_fragment_actors,
+        };
+
+        debug_assert!(
+            command
+                .reschedules
+                .values()
+                .all(|reschedule| reschedule.vnode_bitmap_updates.is_empty()),
+            "reschedule plan carries vnode_bitmap_updates, expected full rebuild"
+        );
+
+        commands.insert(*database_id, command);
     }
+
+    Ok(commands)
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -794,10 +924,11 @@ impl GlobalStreamManager {
             .list_background_creating_jobs()
             .await?;
 
-        let unreschedulable_jobs = self
+        let blocked_jobs = self
             .metadata_manager
-            .collect_unreschedulable_backfill_jobs(&background_streaming_jobs)
+            .collect_reschedule_blocked_jobs_for_creating_jobs(&background_streaming_jobs, true)
             .await?;
+        let has_blocked_jobs = !blocked_jobs.is_empty();
 
         let database_objects: HashMap<risingwave_meta_model::DatabaseId, Vec<JobId>> = self
             .metadata_manager
@@ -817,21 +948,19 @@ impl GlobalStreamManager {
                 idx_a.cmp(idx_b).then(database_a.cmp(database_b))
             })
             .map(|(_, database_id, job_id)| (*database_id, *job_id))
-            .filter(|(_, job_id)| !unreschedulable_jobs.contains(job_id))
+            .filter(|(_, job_id)| !blocked_jobs.contains(job_id))
             .collect_vec();
 
         if job_ids.is_empty() {
             tracing::info!("no streaming jobs for scaling, maybe an empty cluster");
-            return Ok(false);
+            // Retry periodically while some jobs are temporarily blocked by creating
+            // unreschedulable backfill jobs. This allows us to scale them
+            // automatically once the creating jobs finish.
+            return Ok(has_blocked_jobs);
         }
 
         let active_workers =
             ActiveStreamingWorkerNodes::new_snapshot(self.metadata_manager.clone()).await?;
-
-        if job_ids.is_empty() {
-            tracing::info!("no streaming jobs for scaling, maybe an empty cluster");
-            return Ok(false);
-        }
 
         tracing::info!(
             "trigger parallelism control for jobs: {:#?}, workers {:#?}",
@@ -861,10 +990,7 @@ impl GlobalStreamManager {
         for batch in batches {
             let jobs = batch.iter().map(|(_, job_id)| *job_id).collect();
 
-            let commands = self
-                .scale_controller
-                .rerender(jobs, active_workers.current())
-                .await?;
+            let commands = self.scale_controller.rerender(jobs).await?;
 
             let futures = commands.into_iter().map(|(database_id, command)| {
                 let barrier_scheduler = self.barrier_scheduler.clone();
@@ -874,7 +1000,7 @@ impl GlobalStreamManager {
             let _results = future::try_join_all(futures).await?;
         }
 
-        Ok(false)
+        Ok(has_blocked_jobs)
     }
 
     /// Handles notification of worker node activation and deletion, and triggers parallelism control.
@@ -1010,6 +1136,9 @@ impl GlobalStreamManager {
                             tracing::debug!(job_id = %job_id, "received backfill finished notification");
                             if let Err(e) = self.apply_post_backfill_parallelism(job_id).await {
                                 tracing::warn!(job_id = %job_id, error = %e.as_report(), "failed to restore parallelism after backfill");
+                                // Retry in the next periodic tick. This avoids triggering
+                                // unnecessary full control passes when restore succeeds.
+                                should_trigger = true;
                             }
                         }
 
@@ -1024,11 +1153,20 @@ impl GlobalStreamManager {
     async fn apply_post_backfill_parallelism(&self, job_id: JobId) -> MetaResult<()> {
         // Fetch both the target parallelism (final desired state) and the backfill parallelism
         // (temporary parallelism used during backfill phase) from the catalog.
-        let (target, backfill_parallelism) = self
+        let Some((target, backfill_parallelism)) = self
             .metadata_manager
             .catalog_controller
             .get_job_parallelisms(job_id)
-            .await?;
+            .await?
+        else {
+            // The job may have been dropped before this notification is processed.
+            // Treat it as a benign no-op so we don't trigger unnecessary retries.
+            tracing::debug!(
+                job_id = %job_id,
+                "streaming job not found when applying post-backfill parallelism, skip"
+            );
+            return Ok(());
+        };
 
         // Determine if we need to reschedule based on the backfill configuration.
         match backfill_parallelism {

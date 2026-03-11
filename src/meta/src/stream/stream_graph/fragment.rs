@@ -1125,9 +1125,7 @@ impl StreamFragmentGraph {
                 let downstream_fragment_ids = downstream_rel_ids
                     .data
                     .iter()
-                    .flat_map(|&downstream_rel_id| {
-                        mapping.get(&downstream_rel_id.into()).unwrap().iter()
-                    })
+                    .flat_map(|&downstream_rel_id| mapping.get(&downstream_rel_id).unwrap().iter())
                     .copied()
                     .collect();
                 fragment_ordering.insert(*fragment_id, downstream_fragment_ids);

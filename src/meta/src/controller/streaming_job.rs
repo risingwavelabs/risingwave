@@ -34,7 +34,9 @@ use risingwave_connector::connector_common::validate_connection;
 use risingwave_connector::error::ConnectorError;
 use risingwave_connector::sink::file_sink::fs::FsSink;
 use risingwave_connector::sink::{CONNECTOR_TYPE_KEY, SinkError};
-use risingwave_connector::source::{ConnectorProperties, pb_connection_type_to_connection_type};
+use risingwave_connector::source::{
+    ConnectorProperties, UPSTREAM_SOURCE_KEY, pb_connection_type_to_connection_type,
+};
 use risingwave_connector::{WithOptionsSecResolved, WithPropertiesExt, match_sink_name_str};
 use risingwave_meta_model::object::ObjectType;
 use risingwave_meta_model::prelude::{StreamingJob as StreamingJobModel, *};
@@ -51,7 +53,7 @@ use risingwave_pb::meta::object::PbObjectInfo;
 use risingwave_pb::meta::subscribe_response::{
     Info as NotificationInfo, Info, Operation as NotificationOperation, Operation,
 };
-use risingwave_pb::meta::{PbObject, PbObjectGroup};
+use risingwave_pb::meta::{ObjectDependency as PbObjectDependency, PbObject, PbObjectGroup};
 use risingwave_pb::plan_common::PbColumnCatalog;
 use risingwave_pb::plan_common::source_refresh_mode::{
     RefreshMode, SourceRefreshModeFullReload, SourceRefreshModeStreaming,
@@ -81,7 +83,8 @@ use crate::controller::utils::{
     check_relation_name_duplicate, check_sink_into_table_cycle, ensure_job_not_canceled,
     ensure_object_id, ensure_user_id, fetch_target_fragments, get_internal_tables_by_id,
     get_table_columns, grant_default_privileges_automatically, insert_fragment_relations,
-    list_user_info_by_ids, try_get_iceberg_table_by_downstream_sink,
+    list_object_dependencies_by_object_id, list_user_info_by_ids,
+    try_get_iceberg_table_by_downstream_sink,
 };
 use crate::error::MetaErrorInner;
 use crate::manager::{NotificationVersion, StreamingJob, StreamingJobType};
@@ -618,6 +621,7 @@ impl CatalogController {
                 Operation::Add,
                 Info::ObjectGroup(PbObjectGroup {
                     objects: objects_to_notify,
+                    dependencies: vec![],
                 }),
             )
             .await;
@@ -1063,15 +1067,18 @@ impl CatalogController {
             return Ok(());
         }
 
-        let (notification_op, objects, updated_user_info) =
-            Self::finish_streaming_job_inner(&txn, job_id).await?;
+        let (notification_op, objects, updated_user_info, dependencies) =
+            self.finish_streaming_job_inner(&txn, job_id).await?;
 
         txn.commit().await?;
 
         let mut version = self
             .notify_frontend(
                 notification_op,
-                NotificationInfo::ObjectGroup(PbObjectGroup { objects }),
+                NotificationInfo::ObjectGroup(PbObjectGroup {
+                    objects,
+                    dependencies,
+                }),
             )
             .await;
 
@@ -1096,9 +1103,15 @@ impl CatalogController {
 
     /// `finish_streaming_job` marks job related objects as `Created` and notify frontend.
     pub async fn finish_streaming_job_inner(
+        &self,
         txn: &DatabaseTransaction,
         job_id: JobId,
-    ) -> MetaResult<(Operation, Vec<risingwave_pb::meta::Object>, Vec<PbUserInfo>)> {
+    ) -> MetaResult<(
+        Operation,
+        Vec<risingwave_pb::meta::Object>,
+        Vec<PbUserInfo>,
+        Vec<PbObjectDependency>,
+    )> {
         let job_type = Object::find_by_id(job_id)
             .select_only()
             .column(object::Column::ObjType)
@@ -1298,7 +1311,10 @@ impl CatalogController {
             updated_user_info = grant_default_privileges_automatically(txn, job_id).await?;
         }
 
-        Ok((notification_op, objects, updated_user_info))
+        let dependencies =
+            list_object_dependencies_by_object_id(txn, job_id.as_object_id()).await?;
+
+        Ok((notification_op, objects, updated_user_info, dependencies))
     }
 
     pub async fn finish_replace_streaming_job(
@@ -1329,7 +1345,10 @@ impl CatalogController {
         let mut version = self
             .notify_frontend(
                 NotificationOperation::Update,
-                NotificationInfo::ObjectGroup(PbObjectGroup { objects }),
+                NotificationInfo::ObjectGroup(PbObjectGroup {
+                    objects,
+                    dependencies: vec![],
+                }),
             )
             .await;
 
@@ -1800,6 +1819,7 @@ impl CatalogController {
                     objects: vec![PbObject {
                         object_info: Some(relation_info),
                     }],
+                    dependencies: vec![],
                 }),
             )
             .await;
@@ -2041,6 +2061,7 @@ impl CatalogController {
         source_id: SourceId,
         alter_props: BTreeMap<String, String>,
         alter_secret_refs: BTreeMap<String, PbSecretRef>,
+        skip_alter_on_fly_check: bool,
     ) -> MetaResult<WithOptionsSecResolved> {
         let inner = self.inner.read().await;
         let txn = inner.db.begin().await?;
@@ -2067,15 +2088,27 @@ impl CatalogController {
                 .await?;
         }
 
-        // Use check_source_allow_alter_on_fly_fields to validate allowed properties
-        let prop_keys: Vec<String> = alter_props
-            .keys()
-            .chain(alter_secret_refs.keys())
-            .cloned()
-            .collect();
-        risingwave_connector::allow_alter_on_fly_fields::check_source_allow_alter_on_fly_fields(
-            &connector, &prop_keys,
-        )?;
+        // Validate that connector type is not being changed
+        if let Some(new_connector) = alter_props.get(UPSTREAM_SOURCE_KEY)
+            && new_connector != &connector
+        {
+            return Err(MetaError::invalid_parameter(format!(
+                "Cannot change connector type from '{}' to '{}'. Drop and recreate the source instead.",
+                connector, new_connector
+            )));
+        }
+
+        // Only check alter-on-fly restrictions for SQL ALTER SOURCE, not for admin risectl operations
+        if !skip_alter_on_fly_check {
+            let prop_keys: Vec<String> = alter_props
+                .keys()
+                .chain(alter_secret_refs.keys())
+                .cloned()
+                .collect();
+            risingwave_connector::allow_alter_on_fly_fields::check_source_allow_alter_on_fly_fields(
+                &connector, &prop_keys,
+            )?;
+        }
 
         let mut options_with_secret = WithOptionsSecResolved::new(
             source.with_properties.0.clone(),
@@ -2168,7 +2201,8 @@ impl CatalogController {
         };
 
         {
-            // update secret dependencies
+            // Update secret dependencies atomically within the transaction.
+            // Add new dependencies for secrets that are newly referenced.
             if !to_add_secret_dep.is_empty() {
                 ObjectDependency::insert_many(to_add_secret_dep.into_iter().map(|secret_id| {
                     object_dependency::ActiveModel {
@@ -2180,8 +2214,9 @@ impl CatalogController {
                 .exec(&txn)
                 .await?;
             }
+            // Remove dependencies for secrets that are no longer referenced.
+            // This allows the secrets to be deleted after this source no longer uses them.
             if !to_remove_secret_dep.is_empty() {
-                // todo: fix the filter logic
                 let _ = ObjectDependency::delete_many()
                     .filter(
                         object_dependency::Column::Oid
@@ -2277,6 +2312,7 @@ impl CatalogController {
             NotificationOperation::Update,
             NotificationInfo::ObjectGroup(PbObjectGroup {
                 objects: to_update_objs,
+                dependencies: vec![],
             }),
         )
         .await;
@@ -2341,6 +2377,7 @@ impl CatalogController {
                 NotificationOperation::Update,
                 NotificationInfo::ObjectGroup(PbObjectGroup {
                     objects: relation_infos,
+                    dependencies: vec![],
                 }),
             )
             .await;
@@ -2461,6 +2498,7 @@ impl CatalogController {
                 NotificationOperation::Update,
                 NotificationInfo::ObjectGroup(PbObjectGroup {
                     objects: relation_infos,
+                    dependencies: vec![],
                 }),
             )
             .await;
@@ -2892,6 +2930,7 @@ impl CatalogController {
                 NotificationOperation::Update,
                 NotificationInfo::ObjectGroup(PbObjectGroup {
                     objects: updated_objects,
+                    dependencies: vec![],
                 }),
             )
             .await;

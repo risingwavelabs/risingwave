@@ -55,7 +55,6 @@ use risingwave_pb::catalog::{
     PbSubscription, PbTable, PbView,
 };
 use risingwave_pb::meta::cancel_creating_jobs_request::PbCreatingJobInfo;
-use risingwave_pb::meta::list_object_dependencies_response::PbObjectDependencies;
 use risingwave_pb::meta::object::PbObjectInfo;
 use risingwave_pb::meta::subscribe_response::{
     Info as NotificationInfo, Info, Operation as NotificationOperation, Operation,
@@ -209,8 +208,23 @@ impl CatalogController {
             .await
     }
 
-    pub(crate) async fn current_notification_version(&self) -> NotificationVersion {
-        self.env.notification_manager().current_version().await
+    /// Trivially advance the notification version and notify to frontend,
+    /// return the notification version for frontend to wait for.
+    ///
+    /// Cannot simply return the current version, because the current version may not be sent
+    /// to frontend, and the frontend may endlessly wait for this version, until a frontend
+    /// related notification is sent.
+    pub(crate) async fn notify_frontend_trivial(&self) -> NotificationVersion {
+        self.env
+            .notification_manager()
+            .notify_frontend(
+                NotificationOperation::Update,
+                NotificationInfo::ObjectGroup(PbObjectGroup {
+                    objects: vec![],
+                    dependencies: vec![],
+                }),
+            )
+            .await
     }
 }
 
@@ -259,12 +273,17 @@ impl CatalogController {
         subscription_id: SubscriptionId,
     ) -> MetaResult<NotificationVersion> {
         let inner = self.inner.read().await;
+        let txn = inner.db.begin().await?;
         let (subscription, obj) = Subscription::find_by_id(subscription_id)
             .find_also_related(Object)
             .filter(subscription::Column::SubscriptionState.eq(SubscriptionState::Created as i32))
-            .one(&inner.db)
+            .one(&txn)
             .await?
             .ok_or_else(|| MetaError::catalog_id_not_found("subscription", subscription_id))?;
+
+        let dependencies =
+            list_object_dependencies_by_object_id(&txn, subscription_id.into()).await?;
+        txn.commit().await?;
 
         let mut version = self
             .notify_frontend(
@@ -276,6 +295,7 @@ impl CatalogController {
                         )
                         .into(),
                     }],
+                    dependencies,
                 }),
             )
             .await;
@@ -664,7 +684,10 @@ impl CatalogController {
                 object_info: Some(PbObjectInfo::Table(t)),
             })
             .collect();
-        let group = NotificationInfo::ObjectGroup(PbObjectGroup { objects });
+        let group = NotificationInfo::ObjectGroup(PbObjectGroup {
+            objects,
+            dependencies: vec![],
+        });
         self.env
             .notification_manager()
             .notify_hummock(NotificationOperation::Delete, group.clone())

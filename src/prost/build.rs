@@ -30,7 +30,7 @@ macro_rules! for_all_wrapped_id_fields {
             $(
                 $($type_part:ident).* {
                     $(
-                        $field_name:ident: $type_name:ty,
+                        $field_name:ident: $type_name:ident $(-> $value_type_name:ident)?,
                     )+
                 }
             )+
@@ -43,7 +43,7 @@ macro_rules! for_all_wrapped_id_fields {
                         &concat!(stringify!($outer_part), $(stringify!(.$type_part)),*),
                         vec![
                             $(
-                                (stringify!($field_name), stringify!($type_name))
+                                (stringify!($field_name), stringify!($type_name $(-> $value_type_name)?))
                             ),*
                         ]
                     ),
@@ -56,6 +56,7 @@ macro_rules! for_all_wrapped_id_fields {
 for_all_wrapped_id_fields! (
     backup_service {
         MetaSnapshotMetadata {
+            hummock_version_id: HummockVersionId,
             state_table_info: TableId,
         }
     }
@@ -134,6 +135,7 @@ for_all_wrapped_id_fields! (
             schema_id: SchemaId,
             database_id: DatabaseId,
             connection_id: ConnectionId,
+            associated_table_id: TableId,
             owner: UserId,
         }
         StreamSourceInfo {
@@ -150,6 +152,7 @@ for_all_wrapped_id_fields! (
             id: TableId,
             primary_table_id: TableId,
             job_id: JobId,
+            associated_source_id: SourceId,
             schema_id: SchemaId,
             database_id: DatabaseId,
             fragment_id: FragmentId,
@@ -171,6 +174,9 @@ for_all_wrapped_id_fields! (
         ActorLocation {
             worker_node_id: WorkerId,
         }
+        BatchQueryCommittedEpoch {
+            hummock_version_id: HummockVersionId,
+        }
         WorkerNode {
             id: WorkerId,
         }
@@ -181,6 +187,9 @@ for_all_wrapped_id_fields! (
         }
     }
     ddl_service {
+        AlterBackfillParallelismRequest {
+            table_id: JobId,
+        }
         AlterCdcTableBackfillParallelismRequest {
             table_id: JobId,
         }
@@ -190,7 +199,27 @@ for_all_wrapped_id_fields! (
         AlterFragmentParallelismRequest {
             fragment_ids: FragmentId,
         }
+        AlterNameRequest {
+            table_id: TableId,
+            view_id: ViewId,
+            index_id: IndexId,
+            sink_id: SinkId,
+            source_id: SourceId,
+            schema_id: SchemaId,
+            database_id: DatabaseId,
+            subscription_id: SubscriptionId,
+        }
         AlterOwnerRequest {
+            table_id: TableId,
+            view_id: ViewId,
+            source_id: SourceId,
+            sink_id: SinkId,
+            schema_id: SchemaId,
+            database_id: DatabaseId,
+            subscription_id: SubscriptionId,
+            connection_id: ConnectionId,
+            secret_id: SecretId,
+            function_id: FunctionId,
             owner_id: UserId,
         }
         AlterParallelismRequest {
@@ -206,10 +235,20 @@ for_all_wrapped_id_fields! (
             owner_id: UserId,
         }
         AlterSetSchemaRequest {
+            table_id: TableId,
+            view_id: ViewId,
+            source_id: SourceId,
+            sink_id: SinkId,
+            function_id: FunctionId,
+            connection_id: ConnectionId,
+            subscription_id: SubscriptionId,
             new_schema_id: SchemaId,
         }
         AlterStreamingJobConfigRequest {
             job_id: JobId,
+        }
+        AlterSubscriptionRetentionRequest {
+            subscription_id: SubscriptionId,
         }
         AlterSwapRenameRequest.ObjectNameSwapPair {
             src_object_id: ObjectId,
@@ -273,6 +312,7 @@ for_all_wrapped_id_fields! (
             subscription_id: SubscriptionId,
         }
         DropTableRequest {
+            id: SourceId,
             table_id: TableId,
         }
         DropViewRequest {
@@ -290,6 +330,13 @@ for_all_wrapped_id_fields! (
         ResetSourceRequest {
             source_id: SourceId,
         }
+        RisectlResumeBackfillRequest {
+            job_id: JobId,
+            fragment_id: FragmentId,
+        }
+        WaitVersion {
+            hummock_version_id: HummockVersionId,
+        }
     }
     frontend_service {
         GetTableReplacePlanRequest {
@@ -298,10 +345,19 @@ for_all_wrapped_id_fields! (
         }
     }
     hummock {
+        BranchedObject {
+            object_id: HummockSstableObjectId,
+            sst_id: HummockSstableId,
+            compaction_group_id: CompactionGroupId,
+        }
         CancelCompactTask {
             context_id: WorkerId,
         }
+        CompactStatus {
+            compaction_group_id: CompactionGroupId,
+        }
         CompactTask {
+            compaction_group_id: CompactionGroupId,
             existing_table_ids: TableId,
             table_options: TableId,
             table_vnode_partition: TableId,
@@ -311,33 +367,97 @@ for_all_wrapped_id_fields! (
         CompactTaskAssignment {
             context_id: WorkerId,
         }
+        CompactTaskProgress {
+            compaction_group_id: CompactionGroupId,
+        }
+        CompactionGroup {
+            id: CompactionGroupId,
+        }
         CompactionGroupInfo {
+            id: CompactionGroupId,
+            parent_id: CompactionGroupId,
             member_table_ids: TableId,
+        }
+        GetCompactionScoreRequest {
+            compaction_group_id: CompactionGroupId,
+        }
+        GetCompactionScoreResponse {
+            compaction_group_id: CompactionGroupId,
+        }
+        GetNewObjectIdsResponse {
+            start_id: HummockRawObjectId,
+            end_id: HummockRawObjectId,
         }
         GetVersionByEpochRequest {
             table_id: TableId,
+        }
+
+        GroupConstruct {
+            new_sst_start_id: HummockSstableId,
+            parent_group_id: CompactionGroupId,
+            group_id: CompactionGroupId,
+        }
+        GroupMerge {
+            left_group_id: CompactionGroupId,
+            right_group_id: CompactionGroupId,
+        }
+        HnswGraphFileInfo {
+            object_id: HummockHnswGraphFileId,
         }
         HummockPinnedSnapshot {
             context_id: WorkerId,
         }
         HummockPinnedVersion {
             context_id: WorkerId,
+            min_pinned_id: HummockVersionId,
         }
         HummockVersion {
+            id: HummockVersionId,
             table_watermarks: TableId,
             table_change_logs: TableId,
             state_table_info: TableId,
             vector_indexes: TableId,
+            levels: CompactionGroupId,
+        }
+        HummockVersion.Levels {
+            group_id: CompactionGroupId,
+            parent_group_id: CompactionGroupId,
+        }
+        HummockVersionCheckpoint {
+            stale_objects: HummockVersionId,
+        }
+        HummockVersionCheckpoint.StaleObjects {
+            id: HummockSstableObjectId,
         }
         HummockVersionDelta {
+            id: HummockVersionId,
+            prev_id: HummockVersionId,
             new_table_watermarks: TableId,
             removed_table_ids: TableId,
             change_log_delta: TableId,
             state_table_info_delta: TableId,
             vector_index_delta: TableId,
+            group_deltas: CompactionGroupId,
         }
         HummockVersionStats {
+            hummock_version_id: HummockVersionId,
             table_stats: TableId,
+        }
+        IntraLevelDelta {
+            removed_table_ids: HummockSstableId,
+        }
+        LevelHandler.RunningCompactTask {
+            ssts: HummockSstableId,
+        }
+        ListActiveWriteLimitResponse {
+            write_limits: CompactionGroupId,
+        }
+        ListVersionDeltasRequest {
+            start_id: HummockVersionId,
+        }
+        MergeCompactionGroupRequest {
+            left_group_id: CompactionGroupId,
+            right_group_id: CompactionGroupId,
         }
         PinVersionRequest {
             context_id: WorkerId,
@@ -345,32 +465,74 @@ for_all_wrapped_id_fields! (
         PinnedVersionsSummary {
             workers: WorkerId,
         }
+        ReplayVersionDeltaResponse {
+            modified_compaction_groups: CompactionGroupId,
+        }
         ReportCompactionTaskRequest.ReportTask {
             table_stats_change: TableId,
+            object_timestamps: HummockSstableObjectId,
+        }
+        RiseCtlUpdateCompactionConfigRequest {
+            compaction_group_ids: CompactionGroupId,
         }
         SplitCompactionGroupRequest {
+            group_id: CompactionGroupId,
             table_ids: TableId,
         }
+        SplitCompactionGroupResponse {
+            new_group_id: CompactionGroupId,
+        }
         SstableInfo {
+            object_id: HummockSstableObjectId,
+            sst_id: HummockSstableId,
             table_ids: TableId,
+        }
+        StateTableInfo {
+            compaction_group_id: CompactionGroupId,
+        }
+        StateTableInfoDelta {
+            compaction_group_id: CompactionGroupId,
         }
         SubscribeCompactionEventRequest.Register {
             context_id: WorkerId,
         }
         SubscribeCompactionEventRequest.ReportTask {
             table_stats_change: TableId,
+            object_timestamps: HummockSstableObjectId,
+        }
+        TriggerCompactionDeterministicRequest {
+            version_id: HummockVersionId,
+            compaction_groups: CompactionGroupId,
         }
         TriggerManualCompactionRequest {
+            compaction_group_id: CompactionGroupId,
             table_id: JobId,
+            sst_ids: HummockSstableId,
         }
         TruncateTables {
             table_ids: TableId,
         }
         UnpinVersionBeforeRequest {
             context_id: WorkerId,
+            unpin_version_before: HummockVersionId,
         }
         UnpinVersionRequest {
             context_id: WorkerId,
+        }
+        VacuumTask {
+            sstable_object_ids: HummockSstableObjectId,
+        }
+        ValidationTask {
+            sst_id_to_worker_id: HummockSstableObjectId->WorkerId,
+        }
+        VectorFileInfo {
+            object_id: HummockVectorFileId,
+        }
+        VectorIndexObject {
+            id: HummockRawObjectId,
+        }
+        WriteLimits {
+            write_limits: CompactionGroupId,
         }
         WriteLimits.WriteLimit {
             table_ids: TableId,
@@ -439,6 +601,9 @@ for_all_wrapped_id_fields! (
         FlushRequest {
             database_id: DatabaseId,
         }
+        FlushResponse {
+            hummock_version_id: HummockVersionId,
+        }
         FragmentDistribution {
             fragment_id: FragmentId,
             upstream_fragment_ids: FragmentId,
@@ -449,7 +614,7 @@ for_all_wrapped_id_fields! (
             map: FragmentId,
         }
         FragmentToRelationMap {
-            fragment_to_relation_map: FragmentId,
+            fragment_to_relation_map: FragmentId->JobId,
         }
         FragmentWorkerSlotMapping {
             fragment_id: FragmentId,
@@ -474,7 +639,7 @@ for_all_wrapped_id_fields! (
             table_id: TableId,
         }
         GetServingVnodeMappingsResponse {
-            fragment_to_table: FragmentId,
+            fragment_to_table: FragmentId->JobId,
         }
         HeartbeatRequest {
             node_id: WorkerId,
@@ -491,10 +656,6 @@ for_all_wrapped_id_fields! (
         }
         ListCdcProgressResponse {
             cdc_progress: JobId,
-        }
-        ListObjectDependenciesResponse.ObjectDependencies {
-            object_id: ObjectId,
-            referenced_object_id: ObjectId,
         }
         ListRateLimitsResponse.RateLimitInfo {
             job_id: JobId,
@@ -524,6 +685,10 @@ for_all_wrapped_id_fields! (
         ListUnmigratedTablesResponse.UnmigratedTable {
             table_id: TableId,
         }
+        ObjectDependency {
+            object_id: ObjectId,
+            referenced_object_id: ObjectId,
+        }
         RefreshRequest {
             table_id: TableId,
             associated_source_id: SourceId,
@@ -544,9 +709,6 @@ for_all_wrapped_id_fields! (
             upstream_fragment_ids: FragmentId,
             state_table_ids: TableId,
             table_id: JobId,
-        }
-        UpdateWorkerNodeSchedulabilityRequest {
-            worker_ids: WorkerId,
         }
         WorkerReschedule {
             worker_actor_diff: WorkerId,
@@ -632,6 +794,10 @@ for_all_wrapped_id_fields! (
         }
         LoadFinishMutation {
             associated_source_id: SourceId,
+        }
+        LookupNode {
+            table_id: TableId,
+            index_id: TableId,
         }
         MaterializeNode {
             table_id: TableId,
@@ -760,6 +926,9 @@ for_all_wrapped_id_fields! (
         BarrierCompleteResponse.LocalSstableInfo {
             table_stats_map: TableId,
         }
+        GetMinUncommittedObjectIdResponse {
+            min_uncommitted_object_id: HummockRawObjectId,
+        }
         InjectBarrierRequest {
             table_ids_to_sync: TableId,
             actor_ids_to_collect: ActorId,
@@ -816,6 +985,18 @@ for_all_wrapped_id_fields! (
         }
         DropUserRequest {
             user_id: UserId,
+        }
+        GrantPrivilege {
+            database_id: DatabaseId,
+            schema_id: SchemaId,
+            table_id: TableId,
+            source_id: SourceId,
+            sink_id: SinkId,
+            view_id: ViewId,
+            function_id: FunctionId,
+            subscription_id: SubscriptionId,
+            connection_id: ConnectionId,
+            secret_id: SecretId,
         }
         GrantPrivilege.ActionWithGrantOption {
             granted_by: UserId,
@@ -996,114 +1177,32 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .boxed(".stream_plan.StreamNode.node_body.vector_index_lookup_join")
         // `Udf` is 248 bytes, while 2nd largest field is 32 bytes.
         .boxed(".expr.ExprNode.rex_node.udf")
-        // Eq + Hash are for plan nodes to do common sub-plan detection.
-        // The requirement is from Source node -> SourceCatalog -> WatermarkDesc -> expr
-        .type_attribute("catalog.WatermarkDesc", "#[derive(Eq, Hash)]")
+        // prost-build 0.14+ only derives `Eq`/`Hash` for a subset of messages/oneofs.
+        // For some nested/repeated-message cases we still need Eq/Hash in RisingWave types.
         .type_attribute("catalog.StreamSourceInfo", "#[derive(Eq, Hash)]")
+        .type_attribute("catalog.WatermarkDesc", "#[derive(Eq, Hash)]")
         .type_attribute("catalog.WebhookSourceInfo", "#[derive(Eq, Hash)]")
-        .type_attribute("secret.SecretRef", "#[derive(Eq, Hash)]")
-        .type_attribute("catalog.IndexColumnProperties", "#[derive(Eq, Hash)]")
-        .type_attribute("expr.ExprNode", "#[derive(Eq, Hash)]")
         .type_attribute("data.DataType", "#[derive(Eq, Hash)]")
+        .type_attribute("expr.ExprNode", "#[derive(Eq, Hash)]")
         .type_attribute("expr.ExprNode.rex_node", "#[derive(Eq, Hash)]")
-        .type_attribute("expr.ExprNode.NowRexNode", "#[derive(Eq, Hash)]")
         .type_attribute("expr.InputRef", "#[derive(Eq, Hash)]")
         .type_attribute("expr.UserDefinedFunctionMetadata", "#[derive(Eq, Hash)]")
-        .type_attribute("data.Datum", "#[derive(Eq, Hash)]")
         .type_attribute("expr.FunctionCall", "#[derive(Eq, Hash)]")
         .type_attribute("expr.UserDefinedFunction", "#[derive(Eq, Hash)]")
+        .type_attribute("plan_common.ColumnDesc", "#[derive(Eq, Hash)]")
+        .type_attribute("plan_common.ExternalTableDesc", "#[derive(Eq, Hash)]")
         .type_attribute(
             "plan_common.ColumnDesc.generated_or_default_column",
             "#[derive(Eq, Hash)]",
         )
         .type_attribute("plan_common.GeneratedColumnDesc", "#[derive(Eq, Hash)]")
         .type_attribute("plan_common.DefaultColumnDesc", "#[derive(Eq, Hash)]")
-        .type_attribute("plan_common.Cardinality", "#[derive(Eq, Hash)]")
-        .type_attribute("plan_common.ExternalTableDesc", "#[derive(Eq, Hash)]")
-        .type_attribute("plan_common.ColumnDesc", "#[derive(Eq, Hash)]")
-        .type_attribute("plan_common.AdditionalColumn", "#[derive(Eq, Hash)]")
-        .type_attribute("plan_common.AdditionalColumnPulsarMessageIdData", "#[derive(Eq, Hash)]")
+        .type_attribute("plan_common.AdditionalColumnHeader", "#[derive(Eq, Hash)]")
         .type_attribute(
             "plan_common.AdditionalColumn.column_type",
             "#[derive(Eq, Hash)]",
         )
-        .type_attribute("plan_common.AdditionalColumnNormal", "#[derive(Eq, Hash)]")
-        .type_attribute("plan_common.AdditionalColumnKey", "#[derive(Eq, Hash)]")
-        .type_attribute(
-            "plan_common.AdditionalColumnPartition",
-            "#[derive(Eq, Hash)]",
-        )
-        .type_attribute("plan_common.AdditionalColumnPayload", "#[derive(Eq, Hash)]")
-        .type_attribute(
-            "plan_common.AdditionalColumnTimestamp",
-            "#[derive(Eq, Hash)]",
-        )
-        .type_attribute(
-            "plan_common.AdditionalColumnFilename",
-            "#[derive(Eq, Hash)]",
-        )
-        .type_attribute("plan_common.AdditionalColumnHeader", "#[derive(Eq, Hash)]")
-        .type_attribute("plan_common.AdditionalColumnHeaders", "#[derive(Eq, Hash)]")
-        .type_attribute("plan_common.AdditionalColumnOffset", "#[derive(Eq, Hash)]")
-        .type_attribute("plan_common.AdditionalDatabaseName", "#[derive(Eq, Hash)]")
-        .type_attribute("plan_common.AdditionalSchemaName", "#[derive(Eq, Hash)]")
-        .type_attribute("plan_common.AdditionalTableName", "#[derive(Eq, Hash)]")
-        .type_attribute("plan_common.AdditionalSubject", "#[derive(Eq, Hash)]")
-        .type_attribute("plan_common.SourceRefreshMode", "#[derive(Eq, Hash)]")
-        .type_attribute("plan_common.SourceRefreshMode.refresh_mode", "#[derive(Eq, Hash)]")
-        .type_attribute("plan_common.SourceRefreshMode.SourceRefreshModeStreaming", "#[derive(Eq, Hash)]")
-        .type_attribute("plan_common.SourceRefreshMode.SourceRefreshModeFullReload", "#[derive(Eq, Hash)]")
-        .type_attribute(
-            "plan_common.AdditionalCollectionName",
-            "#[derive(Eq, Hash)]",
-        )
-        .type_attribute("plan_common.AsOfJoinDesc", "#[derive(Eq, Hash)]")
-        .type_attribute("common.ColumnOrder", "#[derive(Eq, Hash)]")
-        .type_attribute("common.OrderType", "#[derive(Eq, Hash)]")
-        .type_attribute("common.Buffer", "#[derive(Eq)]")
-        // Eq is required to derive `FromJsonQueryResult` for models in risingwave_meta_model.
-        .type_attribute("hummock.TableStats", "#[derive(Eq)]")
-        .type_attribute("hummock.SstableInfo", "#[derive(Eq)]")
-        .type_attribute("hummock.KeyRange", "#[derive(Eq)]")
-        .type_attribute("hummock.CompactionConfig", "#[derive(Eq)]")
-        .type_attribute("hummock.GroupDelta.delta_type", "#[derive(Eq)]")
-        .type_attribute("hummock.IntraLevelDelta", "#[derive(Eq)]")
-        .type_attribute("hummock.GroupConstruct", "#[derive(Eq)]")
-        .type_attribute("hummock.GroupDestroy", "#[derive(Eq)]")
-        .type_attribute("hummock.GroupMetaChange", "#[derive(Eq)]")
-        .type_attribute("hummock.GroupTableChange", "#[derive(Eq)]")
-        .type_attribute("hummock.GroupMerge", "#[derive(Eq)]")
-        .type_attribute("hummock.GroupDelta", "#[derive(Eq)]")
-        .type_attribute("hummock.NewL0SubLevel", "#[derive(Eq)]")
-        .type_attribute("hummock.TruncateTables", "#[derive(Eq)]")
-        .type_attribute("hummock.LevelHandler.RunningCompactTask", "#[derive(Eq)]")
-        .type_attribute("hummock.LevelHandler", "#[derive(Eq)]")
-        .type_attribute("hummock.TableOption", "#[derive(Eq)]")
-        .type_attribute("hummock.InputLevel", "#[derive(Eq)]")
-        .type_attribute("hummock.TableSchema", "#[derive(Eq)]")
-        .type_attribute("hummock.CompactTask", "#[derive(Eq)]")
-        .type_attribute("hummock.TableWatermarks", "#[derive(Eq)]")
-        .type_attribute("hummock.VnodeWatermark", "#[derive(Eq)]")
-        .type_attribute(
-            "hummock.TableWatermarks.EpochNewWatermarks",
-            "#[derive(Eq)]",
-        )
-        .type_attribute(
-            "catalog.VectorIndexInfo",
-            "#[derive(Eq, Hash)]",
-        )
-        .type_attribute(
-            "catalog.VectorIndexInfo.config",
-            "#[derive(Eq, Hash)]",
-        )
-        .type_attribute(
-            "catalog.FlatIndexConfig",
-            "#[derive(Eq, Hash)]",
-        )
-        .type_attribute(
-            "catalog.HnswFlatIndexConfig",
-            "#[derive(Eq, Hash)]",
-        )
+        .type_attribute("plan_common.AdditionalColumn", "#[derive(Eq, Hash)]")
         // proto version enums
         .type_attribute("stream_plan.AggNodeVersion", "#[derive(prost_helpers::Version)]")
         .type_attribute(
@@ -1134,16 +1233,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     for (wrapped_type, wrapped_fields) in &wrapped_fields() {
         for (field_name, field_type) in wrapped_fields {
-            prost_config.field_wrapper(
-                format!("{wrapped_type}.{field_name}"),
-                format!("crate::id::{field_type}"),
-            );
+            let field_wrapper = if let Some((key_type, value_type)) = field_type.split_once("->") {
+                format!("crate::id::{key_type}->crate::id::{value_type}")
+            } else {
+                format!("crate::id::{field_type}")
+            };
+            prost_config.field_wrapper(format!("{wrapped_type}.{field_name}"), field_wrapper);
         }
     }
     // Compile the proto files.
     tonic_config
         .out_dir(out_dir.as_path())
-        .compile_with_config(prost_config, &protos, &[proto_dir.to_owned()])
+        .compile_protos_with_config(prost_config, &protos, &[proto_dir.to_owned()])
         .expect("Failed to compile grpc!");
 
     // Implement `serde::Serialize` on those structs.
@@ -1167,7 +1268,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         );
         let file_content = file_content.replace(
             ".map(|(k,v)| (k.0, v.0)).collect()",
-            ".map(|(k,v)| (k.0.into(), v.0)).collect()",
+            ".map(|(k,v)| (k.0.into(), v.0.into())).collect()",
         );
         let module_path_id = serde_proto_file.replace('.', "::");
         fs_err::write(

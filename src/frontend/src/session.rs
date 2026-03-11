@@ -191,6 +191,13 @@ pub(crate) struct FrontendEnv {
     /// Memory context used for batch executors in frontend.
     mem_context: MemoryContext,
 
+    #[cfg(feature = "datafusion")]
+    /// Shared budget context for **DataFusion** spillable operators.
+    /// Created by [`crate::datafusion::execute::memory_ctx::create_df_spillable_budget_ctx`];
+    /// caps total spillable usage so unspillable operators always have headroom.
+    /// Not used by the RisingWave batch engine.
+    df_spillable_budget_ctx: MemoryContext,
+
     /// address of the serverless backfill controller.
     serverless_backfill_controller_addr: String,
 
@@ -283,6 +290,8 @@ impl FrontendEnv {
             creating_streaming_job_tracker: Arc::new(creating_streaming_tracker),
             compute_runtime,
             mem_context: MemoryContext::none(),
+            #[cfg(feature = "datafusion")]
+            df_spillable_budget_ctx: MemoryContext::none(),
             serverless_backfill_controller_addr: Default::default(),
             prometheus_client: None,
             prometheus_selector: String::new(),
@@ -506,6 +515,9 @@ impl FrontendEnv {
             frontend_metrics.batch_total_mem.clone(),
             batch_memory_limit as u64,
         );
+        #[cfg(feature = "datafusion")]
+        let df_spillable_budget_ctx =
+            crate::datafusion::create_df_spillable_budget_ctx(&mem_context);
 
         // Initialize Prometheus client if endpoint is provided
         let prometheus_client = if let Some(ref endpoint) = opts.prometheus_endpoint {
@@ -565,6 +577,8 @@ impl FrontendEnv {
                 creating_streaming_job_tracker,
                 compute_runtime,
                 mem_context,
+                #[cfg(feature = "datafusion")]
+                df_spillable_budget_ctx,
                 prometheus_client,
                 prometheus_selector,
             },
@@ -707,6 +721,11 @@ impl FrontendEnv {
 
     pub fn mem_context(&self) -> MemoryContext {
         self.mem_context.clone()
+    }
+
+    #[cfg(feature = "datafusion")]
+    pub fn df_spillable_budget_ctx(&self) -> MemoryContext {
+        self.df_spillable_budget_ctx.clone()
     }
 }
 
@@ -1376,7 +1395,7 @@ impl SessionImpl {
             );
         }
         let stmt = stmts.swap_remove(0);
-        let rsp = handle(self, stmt, sql.clone(), formats).await?;
+        let rsp = Box::pin(handle(self, stmt, sql.clone(), formats)).await?;
         Ok(rsp)
     }
 
@@ -1640,7 +1659,6 @@ impl SessionManagerImpl {
                 client_addr,
             );
 
-            // TODO: adding `FATAL` message support for no matching HBA entry.
             let Some(hba_entry_opt) = hba_entry_opt else {
                 bail_permission_denied!(
                     "no pg_hba.conf entry for host \"{peer_addr}\", user \"{user_name}\", database \"{database_name}\""
@@ -1749,7 +1767,7 @@ impl Session for SessionImpl {
         let sql: Arc<str> = Arc::from(sql_str);
         // The handle can be slow. Release potential large String early.
         drop(string);
-        let rsp = handle(self, stmt, sql, vec![format]).await?;
+        let rsp = Box::pin(handle(self, stmt, sql, vec![format])).await?;
         Ok(rsp)
     }
 
@@ -1784,7 +1802,7 @@ impl Session for SessionImpl {
     }
 
     async fn execute(self: Arc<Self>, portal: Portal) -> Result<PgResponse<PgResponseStream>> {
-        let rsp = handle_execute(self, portal).await?;
+        let rsp = Box::pin(handle_execute(self, portal)).await?;
         Ok(rsp)
     }
 

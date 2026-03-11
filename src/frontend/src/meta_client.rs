@@ -19,8 +19,8 @@ use risingwave_common::id::{ConnectionId, JobId, SourceId, TableId, WorkerId};
 use risingwave_common::session_config::SessionConfig;
 use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_common::util::cluster_limit::ClusterLimit;
-use risingwave_hummock_sdk::HummockVersionId;
 use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
+use risingwave_hummock_sdk::{CompactionGroupId, HummockVersionId};
 use risingwave_pb::backup_service::MetaSnapshotMetadata;
 use risingwave_pb::catalog::Table;
 use risingwave_pb::common::WorkerNode;
@@ -35,7 +35,6 @@ use risingwave_pb::meta::list_actor_splits_response::ActorSplit;
 use risingwave_pb::meta::list_actor_states_response::ActorState;
 use risingwave_pb::meta::list_cdc_progress_response::PbCdcProgress;
 use risingwave_pb::meta::list_iceberg_tables_response::IcebergTable;
-use risingwave_pb::meta::list_object_dependencies_response::PbObjectDependencies;
 use risingwave_pb::meta::list_rate_limits_response::RateLimitInfo;
 use risingwave_pb::meta::list_refresh_table_states_response::RefreshTableState;
 use risingwave_pb::meta::list_streaming_job_states_response::StreamingJobState;
@@ -61,8 +60,6 @@ pub trait FrontendMetaClient: Send + Sync {
 
     async fn flush(&self, database_id: DatabaseId) -> Result<HummockVersionId>;
 
-    async fn wait(&self) -> Result<()>;
-
     async fn recover(&self) -> Result<()>;
 
     async fn cancel_creating_jobs(&self, jobs: PbJobs) -> Result<Vec<u32>>;
@@ -84,8 +81,6 @@ pub trait FrontendMetaClient: Send + Sync {
     async fn list_actor_states(&self) -> Result<Vec<ActorState>>;
 
     async fn list_actor_splits(&self) -> Result<Vec<ActorSplit>>;
-
-    async fn list_object_dependencies(&self) -> Result<Vec<PbObjectDependencies>>;
 
     async fn list_meta_snapshots(&self) -> Result<Vec<MetaSnapshotMetadata>>;
 
@@ -112,7 +107,7 @@ pub trait FrontendMetaClient: Send + Sync {
     ) -> Result<HashMap<TableId, Table>>;
 
     /// Returns vector of (`worker_id`, `min_pinned_version_id`)
-    async fn list_hummock_pinned_versions(&self) -> Result<Vec<(WorkerId, u64)>>;
+    async fn list_hummock_pinned_versions(&self) -> Result<Vec<(WorkerId, HummockVersionId)>>;
 
     async fn get_hummock_current_version(&self) -> Result<HummockVersion>;
 
@@ -124,7 +119,9 @@ pub trait FrontendMetaClient: Send + Sync {
 
     async fn list_hummock_compaction_group_configs(&self) -> Result<Vec<CompactionGroupInfo>>;
 
-    async fn list_hummock_active_write_limits(&self) -> Result<HashMap<u64, WriteLimit>>;
+    async fn list_hummock_active_write_limits(
+        &self,
+    ) -> Result<HashMap<CompactionGroupId, WriteLimit>>;
 
     async fn list_hummock_meta_configs(&self) -> Result<HashMap<String, String>>;
 
@@ -235,10 +232,6 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
         self.0.flush(database_id).await
     }
 
-    async fn wait(&self) -> Result<()> {
-        self.0.wait().await
-    }
-
     async fn recover(&self) -> Result<()> {
         self.0.recover().await
     }
@@ -275,10 +268,6 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
 
     async fn list_actor_splits(&self) -> Result<Vec<ActorSplit>> {
         self.0.list_actor_splits().await
-    }
-
-    async fn list_object_dependencies(&self) -> Result<Vec<PbObjectDependencies>> {
-        self.0.list_object_dependencies().await
     }
 
     async fn list_meta_snapshots(&self) -> Result<Vec<MetaSnapshotMetadata>> {
@@ -325,7 +314,7 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
         Ok(tables)
     }
 
-    async fn list_hummock_pinned_versions(&self) -> Result<Vec<(WorkerId, u64)>> {
+    async fn list_hummock_pinned_versions(&self) -> Result<Vec<(WorkerId, HummockVersionId)>> {
         let pinned_versions = self
             .0
             .risectl_get_pinned_versions_summary()
@@ -366,7 +355,9 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
         self.0.risectl_list_compaction_group().await
     }
 
-    async fn list_hummock_active_write_limits(&self) -> Result<HashMap<u64, WriteLimit>> {
+    async fn list_hummock_active_write_limits(
+        &self,
+    ) -> Result<HashMap<CompactionGroupId, WriteLimit>> {
         self.0.list_active_write_limit().await
     }
 

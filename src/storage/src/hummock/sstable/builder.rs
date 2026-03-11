@@ -555,7 +555,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
         let sst_info: SstableInfo = SstableInfoInner {
             object_id: self.sst_object_id,
             // use the same sst_id as object_id for initial sst
-            sst_id: self.sst_object_id.inner().into(),
+            sst_id: self.sst_object_id.as_raw_id().into(),
             bloom_filter_kind,
             key_range: KeyRange {
                 left: Bytes::from(meta.smallest_key.clone()),

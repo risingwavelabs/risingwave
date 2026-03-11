@@ -4,15 +4,36 @@ from .streaming_common import (
     _actor_busy_rate_expr,
     _actor_busy_rate_target,
     _actor_busy_time_relative_target,
-    relabel_fragment_id_as_id,
-    topk_percent_expr,
 )
+
+def _fragment_topk_percent_expr(expr: str) -> str:
+    """Wrap an expression as top-k percent for fragment tables."""
+    return f"topk(10, ({expr}) * 100)"
 
 def _fragment_peak_rate_with_id_at_step(expr: str) -> str:
     """Compute the peak rate over the dashboard range and attach `id` from fragment_id."""
-    return relabel_fragment_id_as_id(
-        f"max_over_time(({expr})[$__range:$__interval])"
+    return (
+        f"label_replace("
+        f"(max_over_time(({expr})[$__range:$__interval])), 'id', '$1', 'fragment_id', '(.+)')"
     )
+
+def _fragment_peak_rate_per_actor_with_id_at_step(per_actor_expr: str) -> str:
+    """Compute the peak per-actor rate (normalized to seconds) and attach `id`."""
+    return (
+        f"label_replace("
+        f"(max_over_time((({per_actor_expr}) / 1000000000)[$__range:$__interval])), "
+        f"'id', '$1', 'fragment_id', '(.+)')"
+    )
+
+def _kv_log_store_buffer_usage_by_fragment_expr() -> str:
+    return (
+        f"sum({metric('kv_log_store_buffer_memory_bytes')}"
+        f"  * on(actor_id) group_left(fragment_id) {metric('actor_info')})"
+        f" by (fragment_id)"
+    )
+
+def _sync_kv_log_store_buffer_usage_by_fragment_expr() -> str:
+    return f"sum({metric('sync_kv_log_store_buffer_memory_bytes')}) by (fragment_id)"
 
 @section
 def _(outer_panels: Panels):
@@ -27,19 +48,50 @@ def _(outer_panels: Panels):
         f"sum(rate({metric('stream_actor_poll_duration')}[$__rate_interval])) by (fragment_id)"
     )
     poll_duration_expr = (
-        f"{poll_duration_rate_expr} / on(fragment_id) {actor_count_expr} / 1000000000"
+        f"{poll_duration_rate_expr} / on(fragment_id) {actor_count_expr}"
     )
     idle_duration_rate_expr = (
         f"sum(rate({metric('stream_actor_idle_duration')}[$__rate_interval])) by (fragment_id)"
     )
     idle_duration_expr = (
-        f"{idle_duration_rate_expr} / on(fragment_id) {actor_count_expr} / 1000000000"
+        f"{idle_duration_rate_expr} / on(fragment_id) {actor_count_expr}"
     )
     scheduled_duration_rate_expr = (
         f"sum(rate({metric('stream_actor_scheduled_duration')}[$__rate_interval])) by (fragment_id)"
     )
     scheduled_duration_expr = (
-        f"{scheduled_duration_rate_expr} / on(fragment_id) {actor_count_expr} / 1000000000"
+        f"{scheduled_duration_rate_expr} / on(fragment_id) {actor_count_expr}"
+    )
+    zero_for_all_fragments_expr = f"0 * sum({metric('stream_actor_count')}) by (fragment_id)"
+    def _coalesce_fragment(expr: str) -> str:
+        return f"(({expr}) or on(fragment_id) {zero_for_all_fragments_expr})"
+
+    executor_cache_usage_expr = (
+        f"sum("
+        f"  ({metric('stream_memory_usage')})"
+        f"  * on (table_id) group_left(fragment_id)"
+        f"    {metric('table_info')}"
+        f") by (fragment_id)"
+    )
+    shared_buffer_usage_expr = (
+        f"sum({metric('state_store_per_table_imm_size')}) by (fragment_id)"
+    )
+    kv_log_store_buffer_by_fragment_usage_expr = (
+        _kv_log_store_buffer_usage_by_fragment_expr()
+    )
+    sync_kv_log_store_buffer_by_fragment_usage_expr = (
+        _sync_kv_log_store_buffer_usage_by_fragment_expr()
+    )
+    total_memory_usage_expr = " + ".join(
+        map(
+            _coalesce_fragment,
+            [
+                executor_cache_usage_expr,
+                shared_buffer_usage_expr,
+                kv_log_store_buffer_by_fragment_usage_expr,
+                sync_kv_log_store_buffer_by_fragment_usage_expr,
+            ],
+        )
     )
     return [
         outer_panels.row_collapsed(
@@ -51,7 +103,7 @@ def _(outer_panels: Panels):
                     "Top 10 fragments with the highest peak busy rate (%).",
                     [
                         panels.table_target(
-                            topk_percent_expr(
+                            _fragment_topk_percent_expr(
                                 _fragment_peak_rate_with_id_at_step(
                                     _actor_busy_rate_expr("$__rate_interval")
                                 )
@@ -68,8 +120,8 @@ def _(outer_panels: Panels):
                     "Top 10 fragments with the highest peak CPU rate (%).",
                     [
                         panels.table_target(
-                            topk_percent_expr(
-                                _fragment_peak_rate_with_id_at_step(
+                            _fragment_topk_percent_expr(
+                                _fragment_peak_rate_per_actor_with_id_at_step(
                                     poll_duration_expr
                                 )
                             )
@@ -85,8 +137,8 @@ def _(outer_panels: Panels):
                     "Top 10 fragments with the highest peak idle rate (%).",
                     [
                         panels.table_target(
-                            topk_percent_expr(
-                                _fragment_peak_rate_with_id_at_step(
+                            _fragment_topk_percent_expr(
+                                _fragment_peak_rate_per_actor_with_id_at_step(
                                     idle_duration_expr
                                 )
                             )
@@ -102,8 +154,8 @@ def _(outer_panels: Panels):
                     "Top 10 fragments with the highest peak scheduling delay rate (%).",
                     [
                         panels.table_target(
-                            topk_percent_expr(
-                                _fragment_peak_rate_with_id_at_step(
+                            _fragment_topk_percent_expr(
+                                _fragment_peak_rate_per_actor_with_id_at_step(
                                     scheduled_duration_expr
                                 )
                             )
@@ -156,7 +208,7 @@ def _(outer_panels: Panels):
                     "This can be used to estimate the CPU usage of an actor",
                     [
                         panels.target(
-                            f"{poll_duration_expr}",
+                            f"{poll_duration_expr} / 1000000000",
                             "fragment {{fragment_id}}",
                         ),
                     ],
@@ -186,7 +238,7 @@ def _(outer_panels: Panels):
                     "Idle time could be due to no data to process, or waiting for async operations like IO",
                     [
                         panels.target(
-                            f"{idle_duration_expr}",
+                            f"{idle_duration_expr} / 1000000000",
                             "fragment {{fragment_id}}",
                         ),
                     ],
@@ -216,7 +268,7 @@ def _(outer_panels: Panels):
                     "Scheduling delay could be due to poor scheduling priority, or a lack of CPU resources - for instance if there are long polling durations, can be mitigated by scaling up the number of worker threads, or improving the concurrency of the operator",
                     [
                         panels.target(
-                            f"{scheduled_duration_expr}",
+                            f"{scheduled_duration_expr} / 1000000000",
                             "fragment {{fragment_id}}",
                         ),
                     ],
@@ -267,6 +319,37 @@ def _(outer_panels: Panels):
                         panels.target_hidden(
                             f"rate({metric('stream_actor_out_record_cnt', actor_level_filter)}[$__rate_interval])",
                             "actor {{actor_id}}",
+                        ),
+                    ],
+                ),
+                panels.subheader("Memory Usage by Fragment"),
+                panels.timeseries_bytes(
+                    "Total Memory Usage",
+                    "Sum of executor cache memory, shared buffer imm size, and log store buffer memory",
+                    [
+                        panels.target(
+                            total_memory_usage_expr,
+                            "fragment {{fragment_id}}",
+                        ),
+                    ],
+                ),
+                panels.timeseries_bytes(
+                    "Executor Cache Memory Usage",
+                    "",
+                    [
+                        panels.target(
+                            executor_cache_usage_expr,
+                            "fragment {{fragment_id}}",
+                        ),
+                    ],
+                ),
+                panels.timeseries_bytes(
+                    "Shared Buffer Memory Usage",
+                    "",
+                    [
+                        panels.target(
+                            shared_buffer_usage_expr,
+                            "fragment {{fragment_id}}",
                         ),
                     ],
                 ),

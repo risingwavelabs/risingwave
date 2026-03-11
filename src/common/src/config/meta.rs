@@ -112,7 +112,8 @@ pub struct MetaConfig {
     #[serde(default = "default::meta::max_inflight_time_travel_query")]
     pub max_inflight_time_travel_query: u64,
 
-    /// Schedule compaction for all compaction groups with this interval.
+    /// Schedule `Dynamic` compaction for all compaction groups with this interval.
+    /// Groups in cooldown (recently found to have no compaction work) are skipped.
     #[serde(default = "default::meta::periodic_compaction_interval_sec")]
     pub periodic_compaction_interval_sec: u64,
 
@@ -574,7 +575,7 @@ pub mod default {
         }
 
         pub fn periodic_compaction_interval_sec() -> u64 {
-            60
+            300
         }
 
         pub fn vacuum_interval_sec() -> u64 {

@@ -19,7 +19,7 @@
 
 use std::collections::HashMap;
 
-use risingwave_hummock_sdk::HummockCompactionTaskId;
+use risingwave_hummock_sdk::{CompactionGroupId, HummockCompactionTaskId};
 use risingwave_pb::hummock::compact_task;
 
 use super::{CompactionSelector, DynamicLevelSelectorCore};
@@ -29,7 +29,7 @@ use crate::hummock::compaction::{CompactionTask, create_compaction_task};
 
 #[derive(Default)]
 pub struct TtlCompactionSelector {
-    state: HashMap<u64, TtlPickerState>,
+    state: HashMap<CompactionGroupId, TtlPickerState>,
 }
 
 impl CompactionSelector for TtlCompactionSelector {

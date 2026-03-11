@@ -281,7 +281,7 @@ impl CatalogController {
             .iter()
             .filter(|obj| obj.obj_type == ObjectType::Secret)
             .map(|obj| obj.oid.as_secret_id())
-            .collect_vec();
+            .collect();
 
         if !removed_streaming_job_ids.is_empty() {
             let removed_internal_table_objs: Vec<PartialObject> = Object::find()
