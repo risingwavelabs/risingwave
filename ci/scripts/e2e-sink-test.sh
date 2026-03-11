@@ -103,6 +103,9 @@ prepare_pg
 
 echo "--- testing remote sinks"
 
+echo "--- testing jdbc alter connector props"
+risedev slt './e2e_test/sink/remote/jdbc.alter_connector_props.slt'
+
 # check sink destination postgres
 risedev slt './e2e_test/sink/remote/jdbc.load.slt'
 sleep 1
