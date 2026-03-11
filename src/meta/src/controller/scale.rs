@@ -955,7 +955,18 @@ fn render_actors(
 
             let actor_count =
                 u32::try_from(actors.len()).expect("actor parallelism exceeds u32::MAX");
-            let actor_id_base = actor_id_counter.fetch_add(actor_count, Ordering::Relaxed);
+            let actor_id_base = actor_id_counter
+                .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
+                    current.checked_add(actor_count)
+                })
+                .map_err(|current| {
+                    anyhow!(
+                        "actor id exhausted while rendering reschedule: current {}, requested {}, max {}",
+                        current,
+                        actor_count,
+                        u32::MAX
+                    )
+                })?;
 
             let actors: HashMap<ActorId, InflightActorInfo> = assignment
                 .iter()
