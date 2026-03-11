@@ -71,7 +71,7 @@ fn map_from_key_values(
 ) -> Result<(), ExprError> {
     if keys.len() != values.len() {
         return Err(ExprError::Custom(
-            "map_from_key_values: keys and values length mismatch".into(),
+            "map key and value arrays must have the same length".into(),
         ));
     }
 
@@ -79,7 +79,7 @@ fn map_from_key_values(
 
     for (k, v) in keys.iter().zip(values.iter()) {
         let key =
-            k.ok_or_else(|| ExprError::Custom("map_from_key_values: key must not be NULL".into()))?;
+            k.ok_or_else(|| ExprError::Custom("map keys must not be NULL".into()))?;
 
         if seen.contains(&key) {
             return Err(ExprError::Custom("map keys must be unique".into()));
@@ -110,14 +110,14 @@ fn map_from_entries(
             Some(ScalarRefImpl::Struct(s)) => s,
             _ => {
                 return Err(ExprError::Custom(
-                    "map_from_entries: entry must be struct".into(),
+                    "map entry must be struct".into(),
                 ));
             }
         };
 
         let key = struct_val
             .field_at(0)
-            .ok_or_else(|| ExprError::Custom("map_from_entries: key must not be NULL".into()))?;
+            .ok_or_else(|| ExprError::Custom("map keys must not be NULL".into()))?;
 
         if seen.contains(&key) {
             return Err(ExprError::Custom("map keys must be unique".into()));
