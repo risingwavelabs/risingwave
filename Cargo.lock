@@ -12668,7 +12668,7 @@ dependencies = [
  "twox-hash 2.1.0",
  "uuid",
  "workspace-hack",
- "zstd",
+ "zstd 0.13.3",
 ]
 
 [[package]]
