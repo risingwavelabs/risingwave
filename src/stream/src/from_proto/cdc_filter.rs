@@ -52,6 +52,7 @@ impl ExecutorBuilder for CdcFilterExecutorBuilder {
 fn build_search_condition_with_compat(node: &CdcFilterNode) -> StreamResult<ExprNode> {
     Ok(with_legacy_sqlserver_table_name_compat(
         node.get_search_condition()?,
+        node.upstream_source_id.as_raw_id(),
     ))
 }
 
@@ -63,7 +64,10 @@ fn build_search_condition_with_compat(node: &CdcFilterNode) -> StreamResult<Expr
 /// NOTE: This only rewrites a top-level equality predicate.
 /// `CdcFilter` search condition is expected to be a single equality on `_rw_table_name`.
 /// If that assumption changes in planner/proto, this function should be updated accordingly.
-fn with_legacy_sqlserver_table_name_compat(search_condition: &ExprNode) -> ExprNode {
+fn with_legacy_sqlserver_table_name_compat(
+    search_condition: &ExprNode,
+    upstream_source_id: u32,
+) -> ExprNode {
     let Some((table_name_ref_expr, table_name_literal_expr, table_name_literal)) =
         extract_cdc_filter_eq_condition(search_condition)
     else {
@@ -79,6 +83,13 @@ fn with_legacy_sqlserver_table_name_compat(search_condition: &ExprNode) -> ExprN
     if normalized_table_name == table_name_literal {
         return search_condition.clone();
     }
+
+    tracing::info!(
+        source_id = upstream_source_id,
+        original = table_name_literal,
+        normalized = %normalized_table_name,
+        "rewriting legacy SQL Server CdcFilter expression for compatibility"
+    );
 
     let mut normalized_literal_expr = table_name_literal_expr.clone();
     if let Some(RexNode::Constant(constant)) = normalized_literal_expr.rex_node.as_mut() {
@@ -219,7 +230,7 @@ mod tests {
     fn test_legacy_sqlserver_filter_rewrite() {
         let search_condition =
             equal_expr(rw_table_name_ref_expr(), literal_expr("prod.dbo.Answer"));
-        let rewritten = with_legacy_sqlserver_table_name_compat(&search_condition);
+        let rewritten = with_legacy_sqlserver_table_name_compat(&search_condition, 1);
 
         assert_eq!(rewritten.function_type(), ExprType::Or);
         let RexNode::FuncCall(or_func) = rewritten.rex_node.unwrap() else {
@@ -231,7 +242,7 @@ mod tests {
     #[test]
     fn test_normalized_filter_no_rewrite() {
         let search_condition = equal_expr(rw_table_name_ref_expr(), literal_expr("dbo.Answer"));
-        let rewritten = with_legacy_sqlserver_table_name_compat(&search_condition);
+        let rewritten = with_legacy_sqlserver_table_name_compat(&search_condition, 1);
         assert_eq!(rewritten, search_condition);
     }
 
