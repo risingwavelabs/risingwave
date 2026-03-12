@@ -28,24 +28,26 @@ async fn test_streaming_parallelism_adaptive_variants() -> Result<()> {
     let mut cluster = Cluster::start(config).await?;
     let mut session = cluster.start_session();
 
-    session.run("set streaming_parallelism = adaptive").await?;
+    session
+        .run("set streaming_parallelism_for_table = adaptive")
+        .await?;
     session.run("create table t_auto(v int)").await?;
     session.run("select distinct parallelism from rw_fragment_parallelism where name = 't_auto' and distribution_type = 'HASH';").await?.assert_result_eq("6");
 
     session
-        .run("set streaming_parallelism = 'bounded(2)'")
+        .run("set streaming_parallelism_for_table = 'bounded(2)'")
         .await?;
     session.run("create table t_bounded(v int)").await?;
     session.run("select distinct parallelism from rw_fragment_parallelism where name = 't_bounded' and distribution_type = 'HASH';").await?.assert_result_eq("2");
 
     session
-        .run("set streaming_parallelism = 'ratio(0.5)'")
+        .run("set streaming_parallelism_for_table = 'ratio(0.5)'")
         .await?;
     session.run("create table t_ratio(v int)").await?;
     session.run("select distinct parallelism from rw_fragment_parallelism where name = 't_ratio' and distribution_type = 'HASH';").await?.assert_result_eq("3");
 
     session
-        .run("set streaming_parallelism = 'ratio(0.00001)'")
+        .run("set streaming_parallelism_for_table = 'ratio(0.00001)'")
         .await?;
     session.run("create table t_ratio_min(v int)").await?;
     session.run("select distinct parallelism from rw_fragment_parallelism where name = 't_ratio_min' and distribution_type = 'HASH';").await?.assert_result_eq("1");
@@ -61,7 +63,7 @@ async fn test_streaming_parallelism_type_override() -> Result<()> {
     let mut session = cluster.start_session();
 
     session
-        .run("set streaming_parallelism = 'ratio(0.5)'")
+        .run("set streaming_parallelism_for_table = 'ratio(0.5)'")
         .await?;
     session.run("create table t_base(v int)").await?;
     session.run("select distinct parallelism from rw_fragment_parallelism where name = 't_base' and distribution_type = 'HASH';").await?.assert_result_eq("3");
@@ -182,13 +184,13 @@ async fn test_streaming_parallelism_persistence() -> Result<()> {
     let mut session = cluster.start_session();
 
     session
-        .run("set streaming_parallelism = 'ratio(0.5)'")
+        .run("set streaming_parallelism_for_table = 'ratio(0.5)'")
         .await?;
     session.run("create table t_persist(v int)").await?;
     session.run("select distinct parallelism from rw_fragment_parallelism where name = 't_persist' and distribution_type = 'HASH';").await?.assert_result_eq("3");
 
     session
-        .run("set streaming_parallelism = 'bounded(2)'")
+        .run("set streaming_parallelism_for_table = 'bounded(2)'")
         .await?;
     session.run("select distinct parallelism from rw_fragment_parallelism where name = 't_persist' and distribution_type = 'HASH';").await?.assert_result_eq("3");
 
