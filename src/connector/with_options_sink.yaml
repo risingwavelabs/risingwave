@@ -630,7 +630,9 @@ IcebergConfig:
     allow_alter_on_fly: true
   - name: commit_checkpoint_size_threshold_mb
     field_type: u64
-    comments: Commit on the next checkpoint barrier after buffered write size exceeds this threshold, default is 128 MB.
+    comments: |-
+      Commit on the next checkpoint barrier after buffered write size exceeds this threshold.
+      Default is 128 MB.
     required: false
     default: Some (ICEBERG_DEFAULT_COMMIT_CHECKPOINT_SIZE_THRESHOLD_MB)
     allow_alter_on_fly: true
