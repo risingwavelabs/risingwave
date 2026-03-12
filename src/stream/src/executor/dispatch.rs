@@ -1001,12 +1001,35 @@ impl Dispatcher for HashDataDispatcher {
         }
         assert!(last_update_delete_row_idx.is_none(), "missing U+ after U-");
 
-        let ops = new_ops;
         // Apply output mapping after calculating the vnode and new visibility maps.
         // The output mapping may project columns and eliminate noop updates.
         let chunk = self.output_mapping.apply(chunk);
         // Get the visibility after noop update elimination to incorporate into the final visibility.
         let chunk_vis = chunk.visibility();
+
+        // The noop elimination in `output_mapping.apply()` may normalize partially-visible
+        // update pairs (e.g., U- → Delete, U+ → Insert). We must adopt these normalized ops,
+        // otherwise the downstream will see an orphan U+ and panic.
+        // Meanwhile, `new_ops` contains dist-key-changed rewrites (U-/U+ → Delete/Insert)
+        // that are not reflected in `chunk.ops()`. Merge both: prefer `new_ops` when it already
+        // did a rewrite, otherwise take the (possibly normalized) op from the chunk.
+        let chunk_ops = chunk.ops();
+        let ops: Vec<Op> = new_ops
+            .iter()
+            .zip_eq_fast(chunk_ops.iter())
+            .map(|(&new_op, &elim_op)| {
+                // If new_ops already rewrote U-/U+ to Delete/Insert (dist_key_changed), keep it.
+                // Otherwise, use the post-elimination op which may have been normalized.
+                match (new_op, elim_op) {
+                    // dist_key_changed rewrite: new_ops turned U- into Delete
+                    (Op::Delete, Op::UpdateDelete) => Op::Delete,
+                    // dist_key_changed rewrite: new_ops turned U+ into Insert
+                    (Op::Insert, Op::UpdateInsert) => Op::Insert,
+                    // For all other cases, use the post-elimination op (which includes normalize).
+                    _ => elim_op,
+                }
+            })
+            .collect();
 
         // individually output StreamChunk integrated with vis_map
         futures::future::try_join_all(
@@ -1627,5 +1650,162 @@ mod tests {
                     });
             }
         }
+    }
+
+    #[tokio::test]
+    async fn test_hash_dispatcher_non_adjacent_update_after_project() {
+        // This test only works when vnode count is 256.
+        assert_eq!(VirtualNode::COUNT_FOR_TEST, 256);
+
+        let schema = Schema {
+            fields: vec![
+                Field::unnamed(DataType::Int64),
+                Field::unnamed(DataType::Int64),
+            ],
+        };
+        let (mut tx, source) = MockSource::channel();
+        let source = source.into_executor(schema, vec![0]);
+
+        let proj = ProjectExecutor::new(
+            ActorContext::for_test(123),
+            source,
+            vec![
+                NonStrictExpression::for_test(InputRefExpression::new(DataType::Int64, 0)),
+                NonStrictExpression::for_test(InputRefExpression::new(DataType::Int64, 1)),
+            ],
+            MultiMap::new(),
+            vec![],
+            true,
+        );
+        let mut proj = proj.boxed().execute();
+
+        tx.push_barrier(test_epoch(1), false);
+        proj.expect_barrier().await;
+
+        tx.push_chunk(StreamChunk::from_pretty(
+            "  I I
+            U- 1 1
+            U+ 1 2
+            U- 1 2
+            U+ 1 3",
+        ));
+
+        let projected = proj.expect_chunk().await;
+        assert_eq!(
+            projected,
+            StreamChunk::from_pretty(
+                "  I I
+                - 1 1
+                U+ 1 2 D
+                U- 1 2 D
+                + 1 3",
+            )
+        );
+
+        let (output_tx, _output_rx) = channel_for_test();
+        let outputs = vec![Output::new(ActorId::new(1), output_tx)];
+        let hash_mapping = vec![ActorId::new(1); VirtualNode::COUNT_FOR_TEST];
+        let mut hash_dispatcher = HashDataDispatcher::new(
+            outputs,
+            vec![0],
+            DispatchOutputMapping::Simple(vec![0]),
+            hash_mapping,
+            0.into(),
+        );
+
+        hash_dispatcher.dispatch_data(projected).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_hash_dispatcher_missing_update_delete_after_project() {
+        let schema = Schema {
+            fields: vec![
+                Field::unnamed(DataType::Int64),
+                Field::unnamed(DataType::Int64),
+            ],
+        };
+        let (mut tx, source) = MockSource::channel();
+        let source = source.into_executor(schema, vec![0]);
+
+        let proj = ProjectExecutor::new(
+            ActorContext::for_test(123),
+            source,
+            vec![NonStrictExpression::for_test(InputRefExpression::new(
+                DataType::Int64,
+                0,
+            ))],
+            MultiMap::new(),
+            vec![],
+            true,
+        );
+        let mut proj = proj.boxed().execute();
+
+        tx.push_barrier(test_epoch(1), false);
+        proj.expect_barrier().await;
+
+        tx.push_chunk(StreamChunk::from_pretty(
+            "  I I
+            + 1 10
+            U- 1 10
+            U+ 1 30",
+        ));
+
+        let projected = proj.expect_chunk().await;
+        assert_eq!(
+            projected,
+            StreamChunk::from_pretty(
+                "  I
+                + 1 D
+                U- 1 D
+                + 1",
+            )
+        );
+
+        let (output_tx, _output_rx) = channel_for_test();
+        let outputs = vec![Output::new(ActorId::new(1), output_tx)];
+        let hash_mapping = vec![ActorId::new(1); VirtualNode::COUNT_FOR_TEST];
+        let mut hash_dispatcher = HashDataDispatcher::new(
+            outputs,
+            vec![0],
+            DispatchOutputMapping::Simple(vec![0]),
+            hash_mapping,
+            0.into(),
+        );
+
+        hash_dispatcher.dispatch_data(projected).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_hash_dispatcher_internal_projection_normalize_single_u_plus() {
+        let (output_tx, mut output_rx) = channel_for_test();
+        let outputs = vec![Output::new(ActorId::new(1), output_tx)];
+        let hash_mapping = vec![ActorId::new(1); VirtualNode::COUNT_FOR_TEST];
+        let mut hash_dispatcher = HashDataDispatcher::new(
+            outputs,
+            vec![0],
+            DispatchOutputMapping::Simple(vec![0]),
+            hash_mapping,
+            0.into(),
+        );
+
+        let input = StreamChunk::from_pretty(
+            "  I I
+            + 1 10
+            U- 1 10
+            U+ 1 30",
+        );
+
+        hash_dispatcher.dispatch_data(input).await.unwrap();
+
+        let output = output_rx.recv().await.unwrap();
+        assert_eq!(
+            *output.as_chunk().unwrap(),
+            StreamChunk::from_pretty(
+                "  I
+                + 1 D
+                U- 1 D
+                + 1",
+            )
+        );
     }
 }
