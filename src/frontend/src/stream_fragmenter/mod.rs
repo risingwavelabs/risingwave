@@ -153,7 +153,7 @@ pub enum GraphJobType {
 }
 
 impl GraphJobType {
-    pub fn to_parallelism(&self, config: &SessionConfig) -> ConfigParallelism {
+    pub fn to_parallelism(self, config: &SessionConfig) -> ConfigParallelism {
         match self {
             GraphJobType::Table => config.streaming_parallelism_for_table(),
             GraphJobType::MaterializedView => config.streaming_parallelism_for_materialized_view(),
@@ -210,7 +210,7 @@ pub fn build_graph_with_strategy(
     let parallelism_strategy = {
         let config = ctx.session_ctx().config();
         let streaming_parallelism = config.streaming_parallelism();
-        let job_parallelism = job_type.as_ref().map(|t| t.to_parallelism(config.deref()));
+        let job_parallelism = job_type.map(|t| t.to_parallelism(config.deref()));
         let normal_parallelism =
             derive_parallelism(job_type, job_parallelism, streaming_parallelism);
         let backfill_parallelism = if state.has_any_backfill {
