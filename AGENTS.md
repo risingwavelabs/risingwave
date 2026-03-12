@@ -28,6 +28,19 @@ RisingWave components are developed in Rust and split into several crates:
 
 You may need to learn how to build and test RisingWave when implementing features or fixing bugs.
 
+### Pre-Commit Gate (Mandatory)
+
+Before **any** commit for RisingWave, run all commands below and ensure they pass:
+
+1. `cargo fmt`
+2. `./scripts/check/check-trailing-spaces.sh --fix`
+
+Hard requirements:
+
+- Do not commit if any command fails.
+- After all three commands pass, ask the user for explicit approval before `git commit`.
+- Only push to remote after the commit is created with user approval.
+
 ### Build & Check
 
 - Use `./risedev b` to build the project.

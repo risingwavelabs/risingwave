@@ -84,8 +84,9 @@ fn with_legacy_sqlserver_table_name_compat(search_condition: &ExprNode) -> ExprN
     if let Some(RexNode::Constant(constant)) = normalized_literal_expr.rex_node.as_mut() {
         // Must use serialize_datum to produce the correct value_encoding format
         // (null tag byte + data), not raw UTF-8 bytes.
-        constant.body =
-            serialize_datum(Some(ScalarImpl::Utf8(normalized_table_name.into()).as_scalar_ref_impl()));
+        constant.body = serialize_datum(Some(
+            ScalarImpl::Utf8(normalized_table_name.into()).as_scalar_ref_impl(),
+        ));
     } else {
         return search_condition.clone();
     }
@@ -180,7 +181,7 @@ mod tests {
         ExprNode {
             function_type: ExprType::Unspecified as i32,
             return_type: Some(varchar_type()),
-            rex_node: Some(RexNode::InputRef(2)),
+            rex_node: Some(RexNode::InputRef(RW_TABLE_NAME_COLUMN_IDX)),
         }
     }
 
