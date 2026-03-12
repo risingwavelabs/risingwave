@@ -102,7 +102,9 @@ fn with_legacy_sqlserver_table_name_compat(search_condition: &ExprNode) -> ExprN
     }
 }
 
-fn extract_cdc_filter_eq_condition(search_condition: &ExprNode) -> Option<(&ExprNode, &ExprNode, &str)> {
+fn extract_cdc_filter_eq_condition(
+    search_condition: &ExprNode,
+) -> Option<(&ExprNode, &ExprNode, &str)> {
     if search_condition.function_type() != ExprType::Equal {
         return None;
     }
@@ -209,7 +211,8 @@ mod tests {
 
     #[test]
     fn test_legacy_sqlserver_filter_rewrite() {
-        let search_condition = equal_expr(rw_table_name_ref_expr(), literal_expr("prod.dbo.Answer"));
+        let search_condition =
+            equal_expr(rw_table_name_ref_expr(), literal_expr("prod.dbo.Answer"));
         let rewritten = with_legacy_sqlserver_table_name_compat(&search_condition);
 
         assert_eq!(rewritten.function_type(), ExprType::Or);
@@ -228,7 +231,8 @@ mod tests {
 
     #[test]
     fn test_legacy_sqlserver_rewrite_via_cdc_filter_node_entry() {
-        let search_condition = equal_expr(rw_table_name_ref_expr(), literal_expr("prod.dbo.Answer"));
+        let search_condition =
+            equal_expr(rw_table_name_ref_expr(), literal_expr("prod.dbo.Answer"));
         let node = CdcFilterNode {
             search_condition: Some(search_condition),
             ..Default::default()
