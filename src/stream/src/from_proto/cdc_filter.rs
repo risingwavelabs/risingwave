@@ -22,6 +22,12 @@ use crate::executor::FilterExecutor;
 
 pub struct CdcFilterExecutorBuilder;
 
+/// Column index of `_rw_table_name` in CDC source chunks.
+///
+/// Current CDC source schema is `(payload, _rw_offset, _rw_table_name)`.
+/// Keep this value in sync with CDC source schema definition.
+const RW_TABLE_NAME_COLUMN_IDX: u32 = 2;
+
 /// `CdcFilter` is an extension to the Filter executor
 impl ExecutorBuilder for CdcFilterExecutorBuilder {
     type Node = CdcFilterNode;
@@ -32,7 +38,7 @@ impl ExecutorBuilder for CdcFilterExecutorBuilder {
         _store: impl StateStore,
     ) -> StreamResult<Executor> {
         let [input]: [_; 1] = params.input.try_into().unwrap();
-        let search_condition_proto = with_legacy_sqlserver_table_name_compat(node.get_search_condition()?);
+        let search_condition_proto = build_search_condition_with_compat(node)?;
         let search_condition =
             build_non_strict_from_prost(&search_condition_proto, params.eval_error_report)?;
 
@@ -41,10 +47,20 @@ impl ExecutorBuilder for CdcFilterExecutorBuilder {
     }
 }
 
+fn build_search_condition_with_compat(node: &CdcFilterNode) -> StreamResult<ExprNode> {
+    Ok(with_legacy_sqlserver_table_name_compat(
+        node.get_search_condition()?,
+    ))
+}
+
 /// For legacy SQL Server CDC tables created before table-name normalization, preserve
 /// compatibility between:
 /// - historical filter literal: `db.schema.table`
 /// - runtime `_rw_table_name`: `schema.table`
+///
+/// NOTE: This only rewrites a top-level equality predicate.
+/// `CdcFilter` search condition is expected to be a single equality on `_rw_table_name`.
+/// If that assumption changes in planner/proto, this function should be updated accordingly.
 fn with_legacy_sqlserver_table_name_compat(search_condition: &ExprNode) -> ExprNode {
     let Some((table_name_ref_expr, table_name_literal_expr, table_name_literal)) =
         extract_cdc_filter_eq_condition(search_condition)
@@ -109,7 +125,10 @@ fn extract_cdc_filter_eq_condition(search_condition: &ExprNode) -> Option<(&Expr
 }
 
 fn is_rw_table_name_ref(expr: &ExprNode) -> bool {
-    matches!(expr.rex_node, Some(RexNode::InputRef(2)))
+    matches!(
+        expr.rex_node,
+        Some(RexNode::InputRef(RW_TABLE_NAME_COLUMN_IDX))
+    )
 }
 
 fn extract_varchar_literal(expr: &ExprNode) -> Option<&str> {
@@ -205,5 +224,22 @@ mod tests {
         let search_condition = equal_expr(rw_table_name_ref_expr(), literal_expr("dbo.Answer"));
         let rewritten = with_legacy_sqlserver_table_name_compat(&search_condition);
         assert_eq!(rewritten, search_condition);
+    }
+
+    #[test]
+    fn test_legacy_sqlserver_rewrite_via_cdc_filter_node_entry() {
+        let search_condition = equal_expr(rw_table_name_ref_expr(), literal_expr("prod.dbo.Answer"));
+        let node = CdcFilterNode {
+            search_condition: Some(search_condition),
+            ..Default::default()
+        };
+
+        let rewritten = build_search_condition_with_compat(&node).expect("build condition");
+        assert_eq!(rewritten.function_type(), ExprType::Or);
+
+        let RexNode::FuncCall(or_func) = rewritten.rex_node.expect("or node") else {
+            panic!("expect OR function call");
+        };
+        assert_eq!(or_func.children.len(), 2);
     }
 }
