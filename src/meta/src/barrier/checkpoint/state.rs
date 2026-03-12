@@ -310,6 +310,7 @@ fn render_actors(
                 .next()
                 .expect("ensemble must have at least one component");
             let fragment = &fragments.inner.fragments[&first_component];
+            let distribution_type: DistributionType = fragment.distribution_type.into();
             let vnode_count = fragment.vnode_count();
 
             // Assert all component fragments in this ensemble share the same vnode count.
@@ -333,6 +334,7 @@ fn render_actors(
                 adaptive_parallelism_strategy,
                 None,
                 database_resource_group.to_owned(),
+                distribution_type,
                 vnode_count,
             )?
         };
@@ -551,13 +553,11 @@ impl DatabaseCheckpointControl {
                         &actors.stream_actors,
                         &actors.actor_location,
                     );
-                    let actor_no_shuffle = edges.extract_no_shuffle();
-
                     // Phase 2: Resolve source-level DiscoveredSplits to actor-level SplitAssignment
                     let resolved_split_assignment = resolve_source_splits(
                         &info,
                         &actors,
-                        &actor_no_shuffle,
+                        edges.actor_new_no_shuffle(),
                         &self.database_info,
                     )?;
 
@@ -669,11 +669,13 @@ impl DatabaseCheckpointControl {
                     &actors.stream_actors,
                     &actors.actor_location,
                 );
-                let actor_no_shuffle = edges.extract_no_shuffle();
-
                 // Phase 2: Resolve source-level DiscoveredSplits to actor-level SplitAssignment
-                let resolved_split_assignment =
-                    resolve_source_splits(&info, &actors, &actor_no_shuffle, &self.database_info)?;
+                let resolved_split_assignment = resolve_source_splits(
+                    &info,
+                    &actors,
+                    edges.actor_new_no_shuffle(),
+                    &self.database_info,
+                )?;
 
                 // Pre-apply: add new job and fragments
                 let cdc_tracker = if let Some(splits) = &info.cdc_table_snapshot_splits {
@@ -994,7 +996,6 @@ impl DatabaseCheckpointControl {
                     &render_result.stream_actors,
                     &render_result.actor_location,
                 );
-                let actor_no_shuffle = edges.extract_no_shuffle();
 
                 // Phase 2: Resolve splits to actor-level assignment.
                 let fragment_actor_ids: HashMap<FragmentId, Vec<ActorId>> = render_result
@@ -1019,7 +1020,7 @@ impl DatabaseCheckpointControl {
                         SourceManager::resolve_replace_source_splits(
                             &plan.new_fragments,
                             &plan.replace_upstream,
-                            &actor_no_shuffle,
+                            edges.actor_new_no_shuffle(),
                             |_fragment_id, actor_id| {
                                 self.database_info.fragment_infos().find_map(|fragment| {
                                     fragment

@@ -1519,7 +1519,10 @@ pub fn compose_dispatchers(
     dispatcher_type: DispatcherType,
     dist_key_indices: Vec<u32>,
     output_mapping: PbDispatchOutputMapping,
-) -> HashMap<crate::model::ActorId, PbDispatcher> {
+) -> (
+    HashMap<crate::model::ActorId, PbDispatcher>,
+    Option<HashMap<crate::model::ActorId, crate::model::ActorId>>,
+) {
     match dispatcher_type {
         DispatcherType::Hash => {
             let dispatcher = PbDispatcher {
@@ -1545,10 +1548,13 @@ pub fn compose_dispatchers(
                 dispatcher_id: target_fragment_id,
                 downstream_actor_id: target_fragment_actors.keys().copied().collect(),
             };
-            source_fragment_actors
-                .keys()
-                .map(|source_actor_id| (*source_actor_id, dispatcher.clone()))
-                .collect()
+            (
+                source_fragment_actors
+                    .keys()
+                    .map(|source_actor_id| (*source_actor_id, dispatcher.clone()))
+                    .collect(),
+                None,
+            )
         }
         DispatcherType::Broadcast | DispatcherType::Simple => {
             let dispatcher = PbDispatcher {
@@ -1559,50 +1565,66 @@ pub fn compose_dispatchers(
                 dispatcher_id: target_fragment_id,
                 downstream_actor_id: target_fragment_actors.keys().copied().collect(),
             };
-            source_fragment_actors
-                .keys()
-                .map(|source_actor_id| (*source_actor_id, dispatcher.clone()))
-                .collect()
-        }
-        DispatcherType::NoShuffle => resolve_no_shuffle_actor_dispatcher(
-            source_fragment_distribution,
-            source_fragment_actors,
-            target_fragment_distribution,
-            target_fragment_actors,
-        )
-        .into_iter()
-        .map(|(upstream_actor_id, downstream_actor_id)| {
             (
-                upstream_actor_id,
-                PbDispatcher {
-                    r#type: PbDispatcherType::NoShuffle as _,
-                    dist_key_indices: dist_key_indices.clone(),
-                    output_mapping: output_mapping.clone().into(),
-                    hash_mapping: None,
-                    dispatcher_id: target_fragment_id,
-                    downstream_actor_id: vec![downstream_actor_id],
-                },
+                source_fragment_actors
+                    .keys()
+                    .map(|source_actor_id| (*source_actor_id, dispatcher.clone()))
+                    .collect(),
+                None,
             )
-        })
-        .collect(),
+        }
+        DispatcherType::NoShuffle => {
+            let no_shuffle_map = resolve_no_shuffle_actor_mapping(
+                source_fragment_distribution,
+                source_fragment_actors
+                    .iter()
+                    .map(|(&id, bitmap)| (id, bitmap)),
+                target_fragment_distribution,
+                target_fragment_actors
+                    .iter()
+                    .map(|(&id, bitmap)| (id, bitmap)),
+            );
+            let dispatchers = no_shuffle_map
+                .iter()
+                .map(|(&upstream_actor_id, &downstream_actor_id)| {
+                    (
+                        upstream_actor_id,
+                        PbDispatcher {
+                            r#type: PbDispatcherType::NoShuffle as _,
+                            dist_key_indices: dist_key_indices.clone(),
+                            output_mapping: output_mapping.clone().into(),
+                            hash_mapping: None,
+                            dispatcher_id: target_fragment_id,
+                            downstream_actor_id: vec![downstream_actor_id],
+                        },
+                    )
+                })
+                .collect();
+            (dispatchers, Some(no_shuffle_map))
+        }
     }
 }
 
-/// return (`upstream_actor_id` -> `downstream_actor_id`)
-pub fn resolve_no_shuffle_actor_dispatcher(
+/// Resolve 1:1 actor mapping between two no-shuffle-connected fragments.
+///
+/// Returns `Vec<(upstream_actor_id, downstream_actor_id)>` pairs. The actor id
+/// type is generic so the same logic can be reused both for real `ActorId` mapping
+/// and for alignment checks with synthetic ids (e.g. `(WorkerId, actor_idx)`).
+///
+/// For `Single` distribution the single actors are paired directly.
+/// For `Hash` distribution actors are matched by their bitmap's first vnode and
+/// full bitmap equality is asserted.
+pub fn resolve_no_shuffle_actor_mapping<
+    'a,
+    ActorId: Copy + Eq + std::hash::Hash + std::fmt::Debug,
+>(
     source_fragment_distribution: DistributionType,
-    source_fragment_actors: &HashMap<crate::model::ActorId, Option<Bitmap>>,
+    source_fragment_actors: impl IntoIterator<Item = (ActorId, &'a Option<Bitmap>)>,
     target_fragment_distribution: DistributionType,
-    target_fragment_actors: &HashMap<crate::model::ActorId, Option<Bitmap>>,
-) -> Vec<(crate::model::ActorId, crate::model::ActorId)> {
+    target_fragment_actors: impl IntoIterator<Item = (ActorId, &'a Option<Bitmap>)>,
+) -> HashMap<ActorId, ActorId> {
     assert_eq!(source_fragment_distribution, target_fragment_distribution);
-    assert_eq!(
-        source_fragment_actors.len(),
-        target_fragment_actors.len(),
-        "no-shuffle should have equal upstream downstream actor count: {:?} {:?}",
-        source_fragment_actors,
-        target_fragment_actors
-    );
+
     match source_fragment_distribution {
         DistributionType::Single => {
             let assert_singleton = |bitmap: &Option<Bitmap>| {
@@ -1612,63 +1634,71 @@ pub fn resolve_no_shuffle_actor_dispatcher(
                     bitmap
                 );
             };
-            assert_eq!(
-                source_fragment_actors.len(),
-                1,
-                "singleton distribution actor count not 1: {:?}",
-                source_fragment_distribution
-            );
-            assert_eq!(
-                target_fragment_actors.len(),
-                1,
-                "singleton distribution actor count not 1: {:?}",
-                target_fragment_distribution
-            );
-            let (source_actor_id, bitmap) = source_fragment_actors.iter().next().unwrap();
+            let (source_actor_id, bitmap) = source_fragment_actors
+                .into_iter()
+                .exactly_one()
+                .ok()
+                .expect("Single distribution should have exactly one source actor");
             assert_singleton(bitmap);
-            let (target_actor_id, bitmap) = target_fragment_actors.iter().next().unwrap();
+            let (target_actor_id, bitmap) = target_fragment_actors
+                .into_iter()
+                .exactly_one()
+                .ok()
+                .expect("Single distribution should have exactly one target actor");
             assert_singleton(bitmap);
-            vec![(*source_actor_id, *target_actor_id)]
+            HashMap::from([(source_actor_id, target_actor_id)])
         }
         DistributionType::Hash => {
-            let mut target_fragment_actor_index: HashMap<_, _> = target_fragment_actors
-                .iter()
+            // Build target index keyed by first vnode (one pass over target).
+            let mut target_by_vnode: HashMap<_, _> = target_fragment_actors
+                .into_iter()
                 .map(|(actor_id, bitmap)| {
                     let bitmap = bitmap
                         .as_ref()
                         .expect("hash distribution should have bitmap");
                     let first_vnode = bitmap.iter_vnodes().next().expect("non-empty bitmap");
-                    (first_vnode, (*actor_id, bitmap))
+                    (first_vnode, (actor_id, bitmap))
                 })
                 .collect();
-            source_fragment_actors
-                .iter()
-                .map(|(source_actor_id, bitmap)| {
-                    let bitmap = bitmap
+
+            let target_count = target_by_vnode.len();
+
+            // One pass over source, matching against the target index.
+            let mapping: HashMap<_, _> = source_fragment_actors
+                .into_iter()
+                .map(|(source_actor_id, source_bitmap)| {
+                    let source_bitmap = source_bitmap
                         .as_ref()
                         .expect("hash distribution should have bitmap");
-                    let first_vnode = bitmap.iter_vnodes().next().expect("non-empty bitmap");
+                    let first_vnode = source_bitmap
+                        .iter_vnodes()
+                        .next()
+                        .expect("non-empty bitmap");
                     let (target_actor_id, target_bitmap) =
-                        target_fragment_actor_index.remove(&first_vnode).unwrap_or_else(|| {
+                        target_by_vnode.remove(&first_vnode).unwrap_or_else(|| {
                             panic!(
-                                "cannot find matched target actor: {} {:?} {:?} {:?}",
-                                source_actor_id,
-                                first_vnode,
-                                source_fragment_actors,
-                                target_fragment_actors
-                            );
+                                "cannot find matched target actor: {:?} first_vnode {:?}",
+                                source_actor_id, first_vnode,
+                            )
                         });
                     assert_eq!(
-                        bitmap,
-                        target_bitmap,
-                        "cannot find matched target actor due to bitmap mismatch: {} {:?} {:?} {:?}",
-                        source_actor_id,
-                        first_vnode,
-                        source_fragment_actors,
-                        target_fragment_actors
+                        source_bitmap, target_bitmap,
+                        "bitmap mismatch for source {:?} target {:?} at first_vnode {:?}",
+                        source_actor_id, target_actor_id, first_vnode,
                     );
-                    (*source_actor_id, target_actor_id)
-                }).collect()
+                    (source_actor_id, target_actor_id)
+                })
+                .collect();
+
+            assert_eq!(
+                mapping.len(),
+                target_count,
+                "no-shuffle should have equal upstream downstream actor count: {} vs {}",
+                mapping.len(),
+                target_count,
+            );
+
+            mapping
         }
     }
 }

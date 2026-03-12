@@ -19,8 +19,8 @@ use risingwave_meta_model::WorkerId;
 use risingwave_meta_model::fragment::DistributionType;
 use risingwave_pb::common::{ActorInfo, HostAddress};
 use risingwave_pb::id::{PartialGraphId, SubscriberId};
+use risingwave_pb::stream_plan::StreamNode;
 use risingwave_pb::stream_plan::update_mutation::MergeUpdate;
-use risingwave_pb::stream_plan::{PbDispatcherType, StreamNode};
 use tracing::warn;
 
 use crate::barrier::rpc::ControlStreamManager;
@@ -37,10 +37,10 @@ use crate::model::{
 /// Contains actor bitmaps and resolved host addresses.
 #[derive(Debug)]
 pub(super) struct EdgeBuilderFragmentInfo {
-    pub distribution_type: DistributionType,
-    pub actors: HashMap<ActorId, Option<Bitmap>>,
-    pub actor_location: HashMap<ActorId, HostAddress>,
-    pub partial_graph_id: PartialGraphId,
+    distribution_type: DistributionType,
+    actors: HashMap<ActorId, Option<Bitmap>>,
+    actor_location: HashMap<ActorId, HostAddress>,
+    partial_graph_id: PartialGraphId,
 }
 
 impl EdgeBuilderFragmentInfo {
@@ -101,12 +101,17 @@ impl EdgeBuilderFragmentInfo {
 
 #[derive(Debug)]
 pub(super) struct FragmentEdgeBuildResult {
-    pub(super) upstreams: HashMap<FragmentId, HashMap<ActorId, ActorUpstreams>>,
+    upstreams: HashMap<FragmentId, HashMap<ActorId, ActorUpstreams>>,
     pub(super) dispatchers: FragmentActorDispatchers,
     pub(super) merge_updates: HashMap<FragmentId, Vec<MergeUpdate>>,
+    actor_new_no_shuffle: ActorNewNoShuffle,
 }
 
 impl FragmentEdgeBuildResult {
+    pub(super) fn actor_new_no_shuffle(&self) -> &ActorNewNoShuffle {
+        &self.actor_new_no_shuffle
+    }
+
     pub(super) fn collect_actors_to_create(
         &mut self,
         actors: impl Iterator<
@@ -158,35 +163,6 @@ impl FragmentEdgeBuildResult {
                 .values()
                 .all(|updates| updates.is_empty())
     }
-
-    /// Extract the actor-level no-shuffle mapping from the dispatchers.
-    ///
-    /// Returns: `upstream_fragment_id -> downstream_fragment_id -> upstream_actor_id -> downstream_actor_id`
-    pub(super) fn extract_no_shuffle(&self) -> ActorNewNoShuffle {
-        let mut no_shuffle: ActorNewNoShuffle = HashMap::new();
-        for (&upstream_fragment_id, actor_dispatchers) in &self.dispatchers {
-            for (&actor_id, dispatchers) in actor_dispatchers {
-                for dispatcher in dispatchers {
-                    if dispatcher.r#type == PbDispatcherType::NoShuffle as i32 {
-                        let downstream_fragment_id = dispatcher.dispatcher_id;
-                        assert_eq!(
-                            dispatcher.downstream_actor_id.len(),
-                            1,
-                            "NoShuffle dispatcher should have exactly one downstream actor"
-                        );
-                        let downstream_actor_id = dispatcher.downstream_actor_id[0];
-                        no_shuffle
-                            .entry(upstream_fragment_id)
-                            .or_default()
-                            .entry(downstream_fragment_id)
-                            .or_default()
-                            .insert(actor_id, downstream_actor_id);
-                    }
-                }
-            }
-        }
-        no_shuffle
-    }
 }
 
 pub(super) struct FragmentEdgeBuilder {
@@ -211,6 +187,7 @@ impl FragmentEdgeBuilder {
                 upstreams: Default::default(),
                 dispatchers: Default::default(),
                 merge_updates: Default::default(),
+                actor_new_no_shuffle: Default::default(),
             },
         }
     }
@@ -243,7 +220,7 @@ impl FragmentEdgeBuilder {
             }
         };
         let downstream_fragment = &self.fragments[&downstream.downstream_fragment_id];
-        let dispatchers = compose_dispatchers(
+        let (dispatchers, no_shuffle_map) = compose_dispatchers(
             fragment.distribution_type,
             &fragment.actors,
             downstream.downstream_fragment_id,
@@ -253,6 +230,13 @@ impl FragmentEdgeBuilder {
             downstream.dist_key_indices.clone(),
             downstream.output_mapping.clone(),
         );
+        if let Some(no_shuffle_map) = no_shuffle_map {
+            self.result
+                .actor_new_no_shuffle
+                .entry(fragment_id)
+                .or_default()
+                .insert(downstream.downstream_fragment_id, no_shuffle_map);
+        }
         let downstream_fragment_upstreams = self
             .result
             .upstreams

@@ -88,8 +88,9 @@ pub enum ReplaceJobSplitPlan {
     Discovered(SourceSplitAssignment),
     /// Splits need to be aligned with the previous source fragment in Phase 2.
     /// This happens when replacing a source that has existing downstream consumers.
-    /// Resolved via [`SourceManager::resolve_replace_source_splits`] in Phase 2,
-    /// using the actor-level no-shuffle mapping produced by `render_actors`.
+    /// Resolved via [`SourceManager::resolve_replace_source_splits`] in Phase 2.
+    ///
+    /// Contains the no-shuffle mapping needed for split alignment.
     AlignFromPrevious,
 }
 

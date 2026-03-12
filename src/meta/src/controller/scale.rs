@@ -43,6 +43,7 @@ use sea_orm::{
 
 use crate::MetaResult;
 use crate::controller::fragment::{InflightActorInfo, InflightFragmentInfo};
+use crate::controller::utils::resolve_no_shuffle_actor_mapping;
 use crate::manager::ActiveStreamingWorkerNodes;
 use crate::model::{ActorId, StreamActor, StreamingJobModelContextExt};
 use crate::stream::{AssignerBuilder, SplitDiffOptions};
@@ -742,9 +743,9 @@ fn render_actors(
                 )
             })?;
 
-        let (job_id, vnode_count) = entry_fragments
+        let (job_id, distribution_type, vnode_count) = entry_fragments
             .iter()
-            .map(|f| (f.job_id, f.vnode_count))
+            .map(|f| (f.job_id, f.distribution_type, f.vnode_count))
             .dedup()
             .exactly_one()
             .map_err(|_| anyhow!("Multiple jobs found in no-shuffle ensemble"))?;
@@ -774,6 +775,7 @@ fn render_actors(
             adaptive_parallelism_strategy,
             entry_fragment_parallelism,
             database_resource_group,
+            distribution_type,
             vnode_count,
         )?;
 
@@ -865,9 +867,9 @@ fn render_actors(
 }
 
 pub(crate) struct EnsembleActorTemplate {
-    assignment: BTreeMap<WorkerId, BTreeMap<u32, Vec<usize>>>,
+    assignment: BTreeMap<WorkerId, BTreeMap<u32, Option<Bitmap>>>,
+    distribution_type: DistributionType,
     actor_count: u32,
-    vnode_count: usize,
 }
 
 impl EnsembleActorTemplate {
@@ -877,6 +879,7 @@ impl EnsembleActorTemplate {
         adaptive_parallelism_strategy: AdaptiveParallelismStrategy,
         entry_fragment_parallelism: Option<StreamingParallelism>,
         database_resource_group: String,
+        distribution_type: DistributionType,
         vnode_count: usize,
     ) -> MetaResult<Self> {
         let job_id = job.job_id;
@@ -951,14 +954,33 @@ impl EnsembleActorTemplate {
         let actors = (0..(actual_parallelism as u32)).collect_vec();
         let vnodes = (0..vnode_count).collect_vec();
 
-        let assignment = assigner.assign_hierarchical(&available_workers, &actors, &vnodes)?;
+        let raw_assignment = assigner.assign_hierarchical(&available_workers, &actors, &vnodes)?;
+
+        let assignment = raw_assignment
+            .into_iter()
+            .map(|(worker_id, actors)| {
+                let actors = actors
+                    .into_iter()
+                    .map(|(actor_idx, vnodes)| {
+                        let bitmap = match distribution_type {
+                            DistributionType::Single => None,
+                            DistributionType::Hash => {
+                                Some(Bitmap::from_indices(vnode_count, &vnodes))
+                            }
+                        };
+                        (actor_idx, bitmap)
+                    })
+                    .collect();
+                (worker_id, actors)
+            })
+            .collect();
 
         let actor_count = u32::try_from(actors.len()).expect("actor parallelism exceeds u32::MAX");
 
         Ok(Self {
             assignment,
+            distribution_type,
             actor_count,
-            vnode_count,
         })
     }
 
@@ -966,64 +988,59 @@ impl EnsembleActorTemplate {
         if fragment.actors.is_empty() {
             return Self {
                 assignment: BTreeMap::new(),
+                distribution_type: fragment.distribution_type,
                 actor_count: 0,
-                vnode_count: fragment.vnode_count,
             };
         }
 
-        let actor_id_base: ActorId = *fragment.actors.keys().min().unwrap();
         let actor_count = fragment.actors.len() as u32;
 
-        let mut assignment: BTreeMap<WorkerId, BTreeMap<u32, Vec<usize>>> = BTreeMap::new();
-        for (&actor_id, actor_info) in &fragment.actors {
-            let actor_idx = actor_id - actor_id_base;
-            let vnodes: Vec<usize> = actor_info
-                .vnode_bitmap
-                .as_ref()
-                .map(|bitmap| bitmap.iter_ones().collect())
-                .unwrap_or_default();
+        let mut assignment: BTreeMap<WorkerId, BTreeMap<u32, Option<Bitmap>>> = BTreeMap::new();
+        // Enumerate actors starting from 0 index, instead of deriving from actor_id.
+        for (actor_idx, (&_actor_id, actor_info)) in fragment.actors.iter().enumerate() {
+            let actor_idx = actor_idx as u32;
             assignment
                 .entry(actor_info.worker_id)
                 .or_default()
-                .insert(actor_idx, vnodes);
+                .insert(actor_idx, actor_info.vnode_bitmap.clone());
         }
 
         Self {
             assignment,
+            distribution_type: fragment.distribution_type,
             actor_count,
-            vnode_count: fragment.vnode_count,
         }
     }
 
-    /// Assert that two `EnsembleActorTemplate` are aligned: same actor count and same
-    /// worker-to-actor-index mapping. Used to verify that multiple existing fragments
-    /// within the same no-shuffle ensemble are consistent.
+    /// Assert that two `EnsembleActorTemplate` are aligned: same distribution type,
+    /// same actor count, and same vnode bitmap / worker placement. Used to verify that
+    /// multiple existing fragments within the same no-shuffle ensemble are consistent.
+    ///
+    /// Internally calls [`resolve_no_shuffle_actor_mapping`] which asserts distribution
+    /// type, count, and bitmap equality. Then additionally verifies worker placement.
     pub(crate) fn assert_aligned_with(
         &self,
         other: &Self,
         self_fragment_id: FragmentId,
         other_fragment_id: FragmentId,
     ) {
-        assert_eq!(
-            self.actor_count, other.actor_count,
-            "existing fragments {} and {} in the same no-shuffle ensemble have \
-             different actor counts: {} vs {}",
-            self_fragment_id, other_fragment_id, self.actor_count, other.actor_count,
+        let mapping = resolve_no_shuffle_actor_mapping(
+            self.distribution_type,
+            self.assignment
+                .iter()
+                .flat_map(|(&wid, actors)| actors.iter().map(move |(&idx, bmp)| ((wid, idx), bmp))),
+            other.distribution_type,
+            other
+                .assignment
+                .iter()
+                .flat_map(|(&wid, actors)| actors.iter().map(move |(&idx, bmp)| ((wid, idx), bmp))),
         );
-        for (worker_id, actors) in &self.assignment {
-            let other_actors = other.assignment.get(worker_id).unwrap_or_else(|| {
-                panic!(
-                    "existing fragment {} has actors on worker {} but fragment {} does not",
-                    self_fragment_id, worker_id, other_fragment_id,
-                )
-            });
+
+        for ((self_worker, _self_idx), (other_worker, _other_idx)) in &mapping {
             assert_eq!(
-                actors.keys().collect::<BTreeSet<_>>(),
-                other_actors.keys().collect::<BTreeSet<_>>(),
-                "existing fragments {} and {} have different actor indices on worker {}",
-                self_fragment_id,
-                other_fragment_id,
-                worker_id,
+                self_worker, other_worker,
+                "fragments {} and {} disagree on worker placement: {:?}",
+                self_fragment_id, other_fragment_id, mapping,
             );
         }
     }
@@ -1079,31 +1096,26 @@ impl<'a> ComponentFragmentAligner<'a> {
     ) -> HashMap<ActorId, (WorkerId, Option<Bitmap>)> {
         let EnsembleActorTemplate {
             assignment,
-            vnode_count,
             actor_count,
+            distribution_type: _,
         } = &self.actor_template;
         let actor_id_base = self.actor_id_base;
-        let vnode_count = *vnode_count;
         {
             assignment
                 .iter()
                 .flat_map(|(worker_id, actors)| {
                     actors
                         .iter()
-                        .map(move |(actor_id, vnodes)| (worker_id, actor_id, vnodes))
+                        .map(move |(actor_idx, bitmap)| (worker_id, actor_idx, bitmap))
                 })
-                .map(|(&worker_id, &actor_idx, vnodes)| {
-                    let vnode_bitmap = match distribution_type {
-                        DistributionType::Single => {
-                            assert_eq!(*actor_count, 1);
-                            None
-                        }
-                        DistributionType::Hash => Some(Bitmap::from_indices(vnode_count, vnodes)),
-                    };
+                .map(|(&worker_id, &actor_idx, bitmap)| {
+                    if distribution_type == DistributionType::Single {
+                        assert_eq!(*actor_count, 1);
+                    }
 
                     let actor_id = actor_id_base + actor_idx;
 
-                    (actor_id, (worker_id, vnode_bitmap))
+                    (actor_id, (worker_id, bitmap.clone()))
                 })
                 .collect()
         }

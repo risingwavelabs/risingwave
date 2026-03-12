@@ -75,7 +75,7 @@ use crate::controller::scale::{
 use crate::controller::utils::{
     FragmentDesc, PartialActorLocation, PartialFragmentStateTables, compose_dispatchers,
     get_sink_fragment_by_ids, has_table_been_migrated, rebuild_fragment_mapping,
-    resolve_no_shuffle_actor_dispatcher,
+    resolve_no_shuffle_actor_mapping,
 };
 use crate::error::MetaError;
 use crate::manager::{ActiveStreamingWorkerNodes, LocalNotification, NotificationManager};
@@ -705,7 +705,7 @@ impl CatalogController {
                 indices: output_indices.into_u32_array(),
                 types: output_type_mapping.unwrap_or_default().to_protobuf(),
             };
-            let dispatchers = compose_dispatchers(
+            let (dispatchers, _) = compose_dispatchers(
                 source_fragment_distribution,
                 &source_fragment_actors,
                 target_fragment_id as _,
@@ -1729,11 +1729,13 @@ impl CatalogController {
         let source_actors =
             load_fragment_actor_distribution(self.env.shared_actor_infos(), source_fragment_id);
 
-        Ok(resolve_no_shuffle_actor_dispatcher(
+        Ok(resolve_no_shuffle_actor_mapping(
             source_distribution_type,
-            &source_actors,
+            source_actors.iter().map(|(&id, bitmap)| (id, bitmap)),
             source_backfill_distribution_type,
-            &source_backfill_actors,
+            source_backfill_actors
+                .iter()
+                .map(|(&id, bitmap)| (id, bitmap)),
         )
         .into_iter()
         .map(|(source_actor, source_backfill_actor)| {
