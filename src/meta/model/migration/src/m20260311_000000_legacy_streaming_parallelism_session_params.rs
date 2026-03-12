@@ -76,7 +76,7 @@ async fn migrate_legacy_streaming_parallelism_session_params(
 
     if !params
         .iter()
-        .any(|param| is_legacy_streaming_parallelism_strategy_param(&param.name))
+        .any(|param| is_migratable_streaming_parallelism_session_param(&param.name))
     {
         if legacy_system_strategy == default_legacy_system_strategy() {
             return Ok(());
@@ -222,6 +222,22 @@ fn is_legacy_streaming_parallelism_strategy_param(name: &str) -> bool {
             | LEGACY_STREAMING_PARALLELISM_STRATEGY_FOR_INDEX
             | LEGACY_STREAMING_PARALLELISM_STRATEGY_FOR_MATERIALIZED_VIEW
     )
+}
+
+fn is_streaming_parallelism_param(name: &str) -> bool {
+    matches!(
+        name,
+        STREAMING_PARALLELISM
+            | STREAMING_PARALLELISM_FOR_TABLE
+            | STREAMING_PARALLELISM_FOR_SOURCE
+            | STREAMING_PARALLELISM_FOR_SINK
+            | STREAMING_PARALLELISM_FOR_INDEX
+            | STREAMING_PARALLELISM_FOR_MATERIALIZED_VIEW
+    )
+}
+
+fn is_migratable_streaming_parallelism_session_param(name: &str) -> bool {
+    is_streaming_parallelism_param(name) || is_legacy_streaming_parallelism_strategy_param(name)
 }
 
 fn derive_legacy_streaming_parallelism_params(
@@ -932,6 +948,46 @@ mod tests {
         assert_eq!(
             query_streaming_job_strategy(&db, 999003).await,
             Some("RATIO(0.5)".to_owned())
+        );
+    }
+
+    #[tokio::test]
+    async fn test_migrate_legacy_streaming_parallelism_with_parallelism_only_session_params() {
+        let db = setup_db_before_target_migration().await;
+
+        db.execute(Statement::from_string(
+            db.get_database_backend(),
+            format!(
+                "INSERT INTO session_parameter (name, value) VALUES \
+                 ('{STREAMING_PARALLELISM}', 'adaptive'), \
+                 ('{STREAMING_PARALLELISM_FOR_TABLE}', 'adaptive')"
+            ),
+        ))
+        .await
+        .unwrap();
+
+        Migrator::up(&db, Some(1)).await.unwrap();
+
+        assert_eq!(
+            query_session_param(&db, STREAMING_PARALLELISM)
+                .await
+                .unwrap()
+                .value,
+            "bounded(64)"
+        );
+        assert_eq!(
+            query_session_param(&db, STREAMING_PARALLELISM_FOR_TABLE)
+                .await
+                .unwrap()
+                .value,
+            "bounded(4)"
+        );
+        assert_eq!(
+            query_session_param(&db, STREAMING_PARALLELISM_FOR_SOURCE)
+                .await
+                .unwrap()
+                .value,
+            "bounded(4)"
         );
     }
 

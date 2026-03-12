@@ -44,7 +44,7 @@ alter table t set parallelism = adaptive;
 query T
 select parallelism from table_parallelism where name = 't';
 ----
-bounded(4)
+adaptive
 
 statement ok
 create materialized view m_simple as select * from t;

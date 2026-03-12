@@ -36,8 +36,7 @@ use tracing::Instrument;
 
 use super::{
     Locations, ParallelismPolicy, ReplaceJobSplitPlan, ReschedulePolicy, ScaleControllerRef,
-    StreamFragmentGraph,
-    UserDefinedFragmentBackfillOrder,
+    StreamFragmentGraph, UserDefinedFragmentBackfillOrder,
 };
 use crate::barrier::{
     BarrierScheduler, Command, CreateStreamingJobCommandInfo, CreateStreamingJobType,

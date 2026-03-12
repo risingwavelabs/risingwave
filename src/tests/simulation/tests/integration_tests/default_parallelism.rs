@@ -50,7 +50,7 @@ async fn test_default_parallelism() -> Result<()> {
     session
         .run("select parallelism from rw_streaming_parallelism where name = 't';")
         .await?
-        .assert_result_eq("bounded(4)");
+        .assert_result_eq("adaptive");
 
     Ok(())
 }

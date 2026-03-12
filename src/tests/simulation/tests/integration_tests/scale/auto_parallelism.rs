@@ -399,7 +399,7 @@ async fn test_auto_parallelism_control_with_fixed_and_auto_helper(
     session
         .run("select parallelism from rw_table_fragments")
         .await?
-        .assert_result_eq("bounded(4)");
+        .assert_result_eq("adaptive");
 
     let table_mat_fragment = locate_table_fragment(&mut cluster).await?;
 
