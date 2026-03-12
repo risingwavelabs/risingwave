@@ -44,7 +44,7 @@ async fn read_rw_streaming_jobs(reader: &SysCatalogReaderImpl) -> Result<Vec<RwS
                 status: state.state().as_str_name().into(),
                 name: state.name,
                 database_id: state.database_id,
-                parallelism: parallelism.to_uppercase(),
+                parallelism,
                 max_parallelism: state.max_parallelism as i32,
                 resource_group: state.resource_group,
             }

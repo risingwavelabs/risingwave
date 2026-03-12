@@ -26,7 +26,7 @@ async fn test_no_default_parallelism() -> Result<()> {
     session
         .run("select parallelism from rw_streaming_parallelism where name = 't';")
         .await?
-        .assert_result_eq("ADAPTIVE");
+        .assert_result_eq("bounded(4)");
 
     Ok(())
 }
@@ -41,7 +41,7 @@ async fn test_default_parallelism() -> Result<()> {
     session
         .run("select parallelism from rw_streaming_parallelism where name = 't';")
         .await?
-        .assert_result_eq("FIXED(2)");
+        .assert_result_eq("2");
 
     session
         .run("alter table t set parallelism = adaptive;")
@@ -50,7 +50,7 @@ async fn test_default_parallelism() -> Result<()> {
     session
         .run("select parallelism from rw_streaming_parallelism where name = 't';")
         .await?
-        .assert_result_eq("ADAPTIVE");
+        .assert_result_eq("bounded(4)");
 
     Ok(())
 }

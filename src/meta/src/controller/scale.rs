@@ -22,6 +22,7 @@ use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{FragmentTypeFlag, FragmentTypeMask, TableId};
 use risingwave_common::id::JobId;
 use risingwave_common::system_param::AdaptiveParallelismStrategy;
+use risingwave_common::system_param::adaptive_parallelism_strategy::parse_strategy;
 use risingwave_common::util::worker_util::DEFAULT_RESOURCE_GROUP;
 use risingwave_connector::source::{SplitId, SplitImpl, SplitMetaData};
 use risingwave_meta_model::fragment::DistributionType;
@@ -884,6 +885,10 @@ impl EnsembleActorTemplate {
             .stream_context()
             .adaptive_parallelism_strategy
             .unwrap_or(adaptive_parallelism_strategy);
+        let backfill_job_strategy = job
+            .backfill_adaptive_parallelism_strategy
+            .as_deref()
+            .map(|s| parse_strategy(s).expect("strategy should be validated before persisting"));
 
         let resource_group = match &job.specific_resource_group {
             None => database_resource_group,
@@ -922,13 +927,18 @@ impl EnsembleActorTemplate {
         } else {
             &job.parallelism
         };
+        let effective_job_strategy = if backfill_jobs.contains(&job_id) {
+            backfill_job_strategy.unwrap_or(job_strategy)
+        } else {
+            job_strategy
+        };
 
         let actual_parallelism = match entry_fragment_parallelism
             .as_ref()
             .unwrap_or(effective_job_parallelism)
         {
             StreamingParallelism::Adaptive | StreamingParallelism::Custom => {
-                job_strategy.compute_target_parallelism(total_parallelism)
+                effective_job_strategy.compute_target_parallelism(total_parallelism)
             }
             StreamingParallelism::Fixed(n) => *n,
         }
@@ -1650,6 +1660,7 @@ mod tests {
             adaptive_parallelism_strategy: None,
             parallelism: StreamingParallelism::Fixed(1),
             backfill_parallelism: None,
+            backfill_adaptive_parallelism_strategy: None,
             backfill_orders: None,
             max_parallelism: 1,
             specific_resource_group: None,
@@ -1743,6 +1754,7 @@ mod tests {
             adaptive_parallelism_strategy: None,
             parallelism: StreamingParallelism::Fixed(2),
             backfill_parallelism: None,
+            backfill_adaptive_parallelism_strategy: None,
             backfill_orders: None,
             max_parallelism: 2,
             specific_resource_group: None,
@@ -1857,6 +1869,7 @@ mod tests {
             adaptive_parallelism_strategy: None,
             parallelism: StreamingParallelism::Fixed(2),
             backfill_parallelism: None,
+            backfill_adaptive_parallelism_strategy: None,
             backfill_orders: None,
             max_parallelism: 2,
             specific_resource_group: None,
@@ -1971,6 +1984,7 @@ mod tests {
             adaptive_parallelism_strategy: Some("BOUNDED(2)".to_owned()),
             parallelism: StreamingParallelism::Adaptive,
             backfill_parallelism: None,
+            backfill_adaptive_parallelism_strategy: None,
             backfill_orders: None,
             max_parallelism: 8,
             specific_resource_group: None,
@@ -2062,6 +2076,7 @@ mod tests {
             adaptive_parallelism_strategy: None, // No custom strategy
             parallelism: StreamingParallelism::Adaptive,
             backfill_parallelism: None,
+            backfill_adaptive_parallelism_strategy: None,
             backfill_orders: None,
             max_parallelism: 8,
             specific_resource_group: None,
@@ -2154,6 +2169,7 @@ mod tests {
             adaptive_parallelism_strategy: Some("BOUNDED(2)".to_owned()),
             parallelism: StreamingParallelism::Fixed(5),
             backfill_parallelism: None,
+            backfill_adaptive_parallelism_strategy: None,
             backfill_orders: None,
             max_parallelism: 8,
             specific_resource_group: None,
@@ -2246,6 +2262,7 @@ mod tests {
             adaptive_parallelism_strategy: Some("RATIO(0.5)".to_owned()),
             parallelism: StreamingParallelism::Adaptive,
             backfill_parallelism: None,
+            backfill_adaptive_parallelism_strategy: None,
             backfill_orders: None,
             max_parallelism: 16,
             specific_resource_group: None,
@@ -2310,6 +2327,95 @@ mod tests {
             state.len(),
             4,
             "RATIO(0.5) of 8 workers should give 4 actors"
+        );
+    }
+
+    #[test]
+    fn render_actors_backfill_strategy_overrides_job_strategy() {
+        let actor_id_counter = AtomicU32::new(0);
+        let fragment_id: FragmentId = 1.into();
+        let job_id: JobId = 104.into();
+        let database_id: DatabaseId = DatabaseId::new(14);
+
+        let fragment_model = build_fragment(
+            fragment_id,
+            job_id,
+            0,
+            DistributionType::Hash,
+            16,
+            StreamingParallelism::Adaptive,
+        );
+
+        let job_model = streaming_job::Model {
+            job_id,
+            job_status: JobStatus::Creating,
+            create_type: CreateType::Background,
+            timezone: None,
+            config_override: None,
+            adaptive_parallelism_strategy: Some("BOUNDED(4)".to_owned()),
+            parallelism: StreamingParallelism::Adaptive,
+            backfill_parallelism: Some(StreamingParallelism::Adaptive),
+            backfill_adaptive_parallelism_strategy: Some("BOUNDED(2)".to_owned()),
+            backfill_orders: None,
+            max_parallelism: 16,
+            specific_resource_group: None,
+            is_serverless_backfill: false,
+        };
+
+        let database_model = database::Model {
+            database_id,
+            name: "test_db".into(),
+            resource_group: "default".into(),
+            barrier_interval_ms: None,
+            checkpoint_frequency: None,
+        };
+
+        let ensembles = vec![NoShuffleEnsemble {
+            entries: HashSet::from([fragment_id]),
+            components: HashSet::from([fragment_id]),
+        }];
+
+        let fragment_map =
+            HashMap::from([(job_id, HashMap::from([(fragment_id, fragment_model)]))]);
+        let job_map = HashMap::from([(job_id, job_model)]);
+
+        let worker_map = HashMap::from([
+            (1.into(), build_worker_node(1, 1, "default")),
+            (2.into(), build_worker_node(2, 1, "default")),
+            (3.into(), build_worker_node(3, 1, "default")),
+            (4.into(), build_worker_node(4, 1, "default")),
+        ]);
+
+        let fragment_source_ids: HashMap<FragmentId, SourceId> = HashMap::new();
+        let fragment_splits: HashMap<FragmentId, Vec<SplitImpl>> = HashMap::new();
+        let streaming_job_databases = HashMap::from([(job_id, database_id)]);
+        let database_map = HashMap::from([(database_id, database_model)]);
+        let backfill_jobs = HashSet::from([job_id]);
+
+        let context = RenderActorsContext {
+            fragment_source_ids: &fragment_source_ids,
+            fragment_splits: &fragment_splits,
+            streaming_job_databases: &streaming_job_databases,
+            database_map: &database_map,
+            backfill_jobs: &backfill_jobs,
+        };
+
+        let result = render_actors(
+            &actor_id_counter,
+            &ensembles,
+            &fragment_map,
+            &job_map,
+            &worker_map,
+            AdaptiveParallelismStrategy::Full,
+            context,
+        )
+        .expect("actor rendering succeeds");
+
+        let state = collect_actor_state(&result[&database_id][&job_id][&fragment_id]);
+        assert_eq!(
+            state.len(),
+            2,
+            "Backfill strategy BOUNDED(2) should override the job strategy during backfill"
         );
     }
 }

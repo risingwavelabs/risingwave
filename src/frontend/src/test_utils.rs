@@ -722,6 +722,7 @@ impl CatalogWriter for MockCatalogWriter {
         &self,
         _job_id: JobId,
         _parallelism: PbTableParallelism,
+        _adaptive_parallelism_strategy: Option<String>,
         _deferred: bool,
     ) -> Result<()> {
         todo!()
@@ -731,6 +732,7 @@ impl CatalogWriter for MockCatalogWriter {
         &self,
         _job_id: JobId,
         _parallelism: Option<PbTableParallelism>,
+        _adaptive_parallelism_strategy: Option<String>,
         _deferred: bool,
     ) -> Result<()> {
         todo!()

@@ -31,23 +31,27 @@ The meaning is:
 - `bounded(<n>)` means adaptive scheduling with an upper bound.
 - `ratio(<r>)` means adaptive scheduling with a ratio of the available worker parallelism.
 
-Built-in defaults are:
+The stored default value for all unified parameters is `default`.
 
-- `streaming_parallelism = bounded(64)`
-- `streaming_parallelism_for_table = bounded(4)`
-- `streaming_parallelism_for_source = bounded(4)`
-- all other `streaming_parallelism_for_<type>` values default to `default`
+The effective defaults preserve the legacy behavior:
 
-For type-specific parameters, `SET ... = DEFAULT` resets the value to the built-in default for
-that parameter. This means `table` and `source` reset to `bounded(4)`, while other job types fall
-back to `streaming_parallelism`.
+- `streaming_parallelism = default`, which resolves to `bounded(64)`
+- `streaming_parallelism_for_table = default`, which resolves to `bounded(4)` unless the global parallelism is fixed
+- `streaming_parallelism_for_source = default`, which resolves to `bounded(4)` unless the global parallelism is fixed
+- all other `streaming_parallelism_for_<type>` values default to `default` and follow `streaming_parallelism`
+
+For these parameters, `SET ... = DEFAULT` and `SET ... = 'default'` both restore the stored
+`default` value, so `SHOW` output remains round-trippable.
 
 ## Resolution Rules
 
 Resolution happens in a single step:
 
-1. Read `streaming_parallelism_for_<type>`.
-2. If the value is `default`, fall back to `streaming_parallelism`.
+1. Resolve `streaming_parallelism`.
+   - `default` resolves to the legacy global default `bounded(64)`.
+2. Resolve `streaming_parallelism_for_<type>`.
+   - For `table` and `source`, `default` resolves to the legacy type-specific default `bounded(4)` unless the resolved global parallelism is fixed.
+   - For other job types, `default` falls back to the resolved global value.
 3. Convert the resolved value into:
    - a fixed parallelism, or
    - an adaptive strategy stored in the streaming job metadata.
@@ -80,7 +84,6 @@ Older releases exposed these deprecated parameters:
 
 On startup, meta derives the final `streaming_parallelism` and
 `streaming_parallelism_for_<type>` values once from the legacy parameters, persists the new values,
-and drops the deprecated entries. The legacy default adaptive bounds are materialized into the new
-parameters as `streaming_parallelism = bounded(64)`, `streaming_parallelism_for_table = bounded(4)`,
-and `streaming_parallelism_for_source = bounded(4)`. New clusters only expose the unified
-parameters.
+and drops the deprecated entries. If the legacy system parameter
+`adaptive_parallelism_strategy` is missing, the migration falls back to the historical init default
+`BOUNDED(64)`. New clusters only expose the unified parameters.

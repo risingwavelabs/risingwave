@@ -10,6 +10,7 @@ const STREAMING_PARALLELISM_FOR_SINK: &str = "streaming_parallelism_for_sink";
 const STREAMING_PARALLELISM_FOR_INDEX: &str = "streaming_parallelism_for_index";
 const STREAMING_PARALLELISM_FOR_MATERIALIZED_VIEW: &str =
     "streaming_parallelism_for_materialized_view";
+const DEFAULT_GLOBAL_PARALLELISM_BOUND: usize = 64;
 const DEFAULT_TABLE_PARALLELISM_BOUND: u64 = 4;
 const DEFAULT_SOURCE_PARALLELISM_BOUND: u64 = 4;
 
@@ -32,7 +33,9 @@ pub struct Migration;
 #[async_trait::async_trait]
 impl MigrationTrait for Migration {
     async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
-        let legacy_system_strategy = load_legacy_system_strategy(manager).await?;
+        let legacy_system_strategy = load_legacy_system_strategy(manager)
+            .await?
+            .unwrap_or_else(default_legacy_system_strategy);
         migrate_legacy_streaming_parallelism_session_params(manager, legacy_system_strategy)
             .await?;
         migrate_legacy_streaming_job_strategy(manager, legacy_system_strategy).await?;
@@ -49,7 +52,7 @@ impl MigrationTrait for Migration {
 
 async fn migrate_legacy_streaming_parallelism_session_params(
     manager: &SchemaManager<'_>,
-    legacy_system_strategy: Option<AdaptiveParallelismStrategy>,
+    legacy_system_strategy: AdaptiveParallelismStrategy,
 ) -> Result<(), DbErr> {
     let conn = manager.get_connection();
     let database_backend = conn.get_database_backend();
@@ -75,6 +78,33 @@ async fn migrate_legacy_streaming_parallelism_session_params(
         .iter()
         .any(|param| is_legacy_streaming_parallelism_strategy_param(&param.name))
     {
+        if legacy_system_strategy == default_legacy_system_strategy() {
+            return Ok(());
+        }
+
+        manager
+            .exec_stmt(
+                Query::insert()
+                    .into_table(SessionParameter::Table)
+                    .columns([SessionParameter::Name, SessionParameter::Value])
+                    .values_panic([
+                        STREAMING_PARALLELISM.into(),
+                        migrate_legacy_global_parallelism(
+                            ConfigParallelism::Default,
+                            ConfigAdaptiveParallelismStrategy::Default,
+                            legacy_system_strategy,
+                        )
+                        .to_string()
+                        .into(),
+                    ])
+                    .on_conflict(
+                        sea_query::OnConflict::column(SessionParameter::Name)
+                            .update_column(SessionParameter::Value)
+                            .to_owned(),
+                    )
+                    .to_owned(),
+            )
+            .await?;
         return Ok(());
     }
 
@@ -119,19 +149,15 @@ async fn migrate_legacy_streaming_parallelism_session_params(
 
 async fn migrate_legacy_streaming_job_strategy(
     manager: &SchemaManager<'_>,
-    legacy_system_strategy: Option<AdaptiveParallelismStrategy>,
+    legacy_system_strategy: AdaptiveParallelismStrategy,
 ) -> Result<(), DbErr> {
-    let Some(strategy) = legacy_system_strategy else {
-        return Ok(());
-    };
-
     manager
         .exec_stmt(
             Query::update()
                 .table(StreamingJob::Table)
                 .value(
                     StreamingJob::AdaptiveParallelismStrategy,
-                    strategy.to_string(),
+                    legacy_system_strategy.to_string(),
                 )
                 .and_where(Expr::col(StreamingJob::AdaptiveParallelismStrategy).is_null())
                 .to_owned(),
@@ -182,6 +208,10 @@ async fn load_legacy_system_strategy(
     Ok(parse_adaptive_parallelism_strategy(&row.value))
 }
 
+fn default_legacy_system_strategy() -> AdaptiveParallelismStrategy {
+    AdaptiveParallelismStrategy::Bounded(DEFAULT_GLOBAL_PARALLELISM_BOUND)
+}
+
 fn is_legacy_streaming_parallelism_strategy_param(name: &str) -> bool {
     matches!(
         name,
@@ -196,12 +226,8 @@ fn is_legacy_streaming_parallelism_strategy_param(name: &str) -> bool {
 
 fn derive_legacy_streaming_parallelism_params(
     params: &[SessionParameterRow],
-    legacy_system_strategy: Option<AdaptiveParallelismStrategy>,
+    legacy_system_strategy: AdaptiveParallelismStrategy,
 ) -> HashMap<String, String> {
-    let Some(system_strategy) = legacy_system_strategy else {
-        return HashMap::new();
-    };
-
     let param_map = params
         .iter()
         .map(|param| (param.name.as_str(), param.value.as_str()))
@@ -220,8 +246,12 @@ fn derive_legacy_streaming_parallelism_params(
 
     let mut derived = HashMap::from([(
         STREAMING_PARALLELISM.to_owned(),
-        migrate_legacy_global_parallelism(global_parallelism, global_strategy, system_strategy)
-            .to_string(),
+        migrate_legacy_global_parallelism(
+            global_parallelism,
+            global_strategy,
+            legacy_system_strategy,
+        )
+        .to_string(),
     )]);
 
     for (parallelism_key, strategy_key) in [
@@ -246,22 +276,30 @@ fn derive_legacy_streaming_parallelism_params(
             LEGACY_STREAMING_PARALLELISM_STRATEGY_FOR_MATERIALIZED_VIEW,
         ),
     ] {
+        let implicit_legacy_strategy = default_legacy_strategy_for_type(parallelism_key);
+        let specific_strategy_value = param_map.get(strategy_key).copied();
         let specific_parallelism = parse_parallelism(
             param_map.get(parallelism_key).copied(),
             ConfigParallelism::Default,
         );
-        let specific_strategy = parse_legacy_strategy(
-            param_map.get(strategy_key).copied(),
-            default_legacy_strategy_for_type(parallelism_key),
+        let specific_strategy =
+            parse_legacy_strategy(specific_strategy_value, implicit_legacy_strategy);
+        let explicit_default_inherits_global = matches!(
+            specific_strategy_value,
+            Some(value) if value.eq_ignore_ascii_case("default")
+        ) && !matches!(
+            implicit_legacy_strategy,
+            ConfigAdaptiveParallelismStrategy::Default
         );
         derived.insert(
             parallelism_key.to_owned(),
             migrate_legacy_type_parallelism(
                 specific_parallelism,
                 specific_strategy,
+                explicit_default_inherits_global,
                 global_parallelism,
                 global_strategy,
-                system_strategy,
+                legacy_system_strategy,
             )
             .to_string(),
         );
@@ -381,6 +419,7 @@ fn migrate_legacy_global_parallelism(
 fn migrate_legacy_type_parallelism(
     specific_parallelism: ConfigParallelism,
     specific_strategy: ConfigAdaptiveParallelismStrategy,
+    explicit_default_inherits_global: bool,
     global_parallelism: ConfigParallelism,
     global_strategy: ConfigAdaptiveParallelismStrategy,
     system_strategy: AdaptiveParallelismStrategy,
@@ -394,11 +433,17 @@ fn migrate_legacy_type_parallelism(
             resolve_legacy_strategy(global_strategy, system_strategy),
         )),
         ConfigParallelism::Default => {
-            if matches!(
+            if matches!(global_parallelism, ConfigParallelism::Fixed(_)) {
+                ConfigParallelism::Default
+            } else if explicit_default_inherits_global {
+                legacy_strategy_to_parallelism(resolve_legacy_strategy(
+                    global_strategy,
+                    system_strategy,
+                ))
+            } else if matches!(
                 specific_strategy,
                 ConfigAdaptiveParallelismStrategy::Default
-            ) || matches!(global_parallelism, ConfigParallelism::Fixed(_))
-            {
+            ) {
                 ConfigParallelism::Default
             } else {
                 legacy_strategy_to_parallelism(resolve_legacy_strategy(
@@ -695,10 +740,8 @@ mod tests {
             value: "8".to_owned(),
         }];
 
-        let derived = derive_legacy_streaming_parallelism_params(
-            &params,
-            Some(AdaptiveParallelismStrategy::Auto),
-        );
+        let derived =
+            derive_legacy_streaming_parallelism_params(&params, AdaptiveParallelismStrategy::Auto);
 
         assert_eq!(
             derived
@@ -723,7 +766,7 @@ mod tests {
 
         let derived = derive_legacy_streaming_parallelism_params(
             &params,
-            Some(AdaptiveParallelismStrategy::Bounded(64)),
+            AdaptiveParallelismStrategy::Bounded(DEFAULT_GLOBAL_PARALLELISM_BOUND),
         );
 
         assert_eq!(
@@ -759,6 +802,189 @@ mod tests {
                 .get(STREAMING_PARALLELISM_FOR_SOURCE)
                 .map(String::as_str),
             Some("bounded(4)")
+        );
+    }
+
+    #[test]
+    fn test_derive_legacy_streaming_parallelism_params_table_explicit_default_inherits_global() {
+        let params = vec![
+            SessionParameterRow {
+                name: LEGACY_STREAMING_PARALLELISM_STRATEGY.to_owned(),
+                value: "RATIO(0.5)".to_owned(),
+            },
+            SessionParameterRow {
+                name: LEGACY_STREAMING_PARALLELISM_STRATEGY_FOR_TABLE.to_owned(),
+                value: "default".to_owned(),
+            },
+            SessionParameterRow {
+                name: LEGACY_STREAMING_PARALLELISM_STRATEGY_FOR_SOURCE.to_owned(),
+                value: "default".to_owned(),
+            },
+        ];
+
+        let derived = derive_legacy_streaming_parallelism_params(
+            &params,
+            AdaptiveParallelismStrategy::Bounded(DEFAULT_GLOBAL_PARALLELISM_BOUND),
+        );
+
+        assert_eq!(
+            derived.get(STREAMING_PARALLELISM).map(String::as_str),
+            Some("ratio(0.5)")
+        );
+        assert_eq!(
+            derived
+                .get(STREAMING_PARALLELISM_FOR_TABLE)
+                .map(String::as_str),
+            Some("ratio(0.5)")
+        );
+        assert_eq!(
+            derived
+                .get(STREAMING_PARALLELISM_FOR_SOURCE)
+                .map(String::as_str),
+            Some("ratio(0.5)")
+        );
+    }
+
+    #[test]
+    fn test_derive_legacy_streaming_parallelism_params_table_explicit_default_inherits_system_strategy()
+     {
+        let params = vec![
+            SessionParameterRow {
+                name: LEGACY_STREAMING_PARALLELISM_STRATEGY_FOR_TABLE.to_owned(),
+                value: "default".to_owned(),
+            },
+            SessionParameterRow {
+                name: LEGACY_STREAMING_PARALLELISM_STRATEGY_FOR_SOURCE.to_owned(),
+                value: "default".to_owned(),
+            },
+        ];
+
+        let derived = derive_legacy_streaming_parallelism_params(
+            &params,
+            AdaptiveParallelismStrategy::Ratio(0.5),
+        );
+
+        assert_eq!(
+            derived.get(STREAMING_PARALLELISM).map(String::as_str),
+            Some("ratio(0.5)")
+        );
+        assert_eq!(
+            derived
+                .get(STREAMING_PARALLELISM_FOR_TABLE)
+                .map(String::as_str),
+            Some("ratio(0.5)")
+        );
+        assert_eq!(
+            derived
+                .get(STREAMING_PARALLELISM_FOR_SOURCE)
+                .map(String::as_str),
+            Some("ratio(0.5)")
+        );
+    }
+
+    #[tokio::test]
+    async fn test_migrate_legacy_streaming_parallelism_with_custom_system_strategy_only() {
+        let db = setup_db_before_target_migration().await;
+
+        db.execute(Statement::from_string(
+            db.get_database_backend(),
+            format!(
+                "INSERT INTO system_parameter (name, value, is_mutable) VALUES \
+                 ('{LEGACY_ADAPTIVE_PARALLELISM_STRATEGY}', 'RATIO(0.5)', TRUE)"
+            ),
+        ))
+        .await
+        .unwrap();
+        db.execute(Statement::from_string(
+            db.get_database_backend(),
+            "INSERT INTO user (user_id, name, is_super, can_create_db, can_create_user, can_login) VALUES \
+             (999003, 'migration_test_user_custom_system_strategy_only', TRUE, TRUE, TRUE, TRUE)"
+                .to_owned(),
+        ))
+        .await
+        .unwrap();
+        db.execute(Statement::from_string(
+            db.get_database_backend(),
+            "INSERT INTO object (oid, obj_type, owner_id) VALUES \
+             (999003, 'TABLE', 999003)"
+                .to_owned(),
+        ))
+        .await
+        .unwrap();
+        db.execute(Statement::from_string(
+            db.get_database_backend(),
+            "INSERT INTO streaming_job (job_id, job_status, create_type, parallelism, max_parallelism, adaptive_parallelism_strategy, is_serverless_backfill) VALUES \
+             (999003, 'CREATED', 'FOREGROUND', '\"Adaptive\"', 256, NULL, FALSE)"
+                .to_owned(),
+        ))
+        .await
+        .unwrap();
+
+        Migrator::up(&db, Some(1)).await.unwrap();
+
+        assert_eq!(
+            query_session_param(&db, STREAMING_PARALLELISM)
+                .await
+                .unwrap()
+                .value,
+            "ratio(0.5)"
+        );
+        assert_eq!(
+            query_streaming_job_strategy(&db, 999003).await,
+            Some("RATIO(0.5)".to_owned())
+        );
+    }
+
+    #[tokio::test]
+    async fn test_migrate_legacy_streaming_parallelism_without_system_param() {
+        let db = setup_db_before_target_migration().await;
+
+        db.execute(Statement::from_string(
+            db.get_database_backend(),
+            format!(
+                "INSERT INTO session_parameter (name, value) VALUES \
+                 ('{LEGACY_STREAMING_PARALLELISM_STRATEGY}', 'default')"
+            ),
+        ))
+        .await
+        .unwrap();
+        db.execute(Statement::from_string(
+            db.get_database_backend(),
+            "INSERT INTO user (user_id, name, is_super, can_create_db, can_create_user, can_login) VALUES \
+             (999002, 'migration_test_user_without_system_param', TRUE, TRUE, TRUE, TRUE)"
+                .to_owned(),
+        ))
+        .await
+        .unwrap();
+        db.execute(Statement::from_string(
+            db.get_database_backend(),
+            "INSERT INTO object (oid, obj_type, owner_id) VALUES \
+             (999002, 'TABLE', 999002)"
+                .to_owned(),
+        ))
+        .await
+        .unwrap();
+        db.execute(Statement::from_string(
+            db.get_database_backend(),
+            "INSERT INTO streaming_job (job_id, job_status, create_type, parallelism, max_parallelism, adaptive_parallelism_strategy, is_serverless_backfill) VALUES \
+             (999002, 'CREATED', 'FOREGROUND', '\"Adaptive\"', 256, NULL, FALSE)"
+                .to_owned(),
+        ))
+        .await
+        .unwrap();
+
+        Migrator::up(&db, Some(1)).await.unwrap();
+
+        assert_eq!(
+            query_session_param(&db, STREAMING_PARALLELISM)
+                .await
+                .unwrap()
+                .value,
+            "bounded(64)"
+        );
+        assert_eq!(
+            query_streaming_job_strategy(&db, 999002).await,
+            Some("BOUNDED(64)".to_owned())
         );
     }
 }

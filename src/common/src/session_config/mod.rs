@@ -67,17 +67,6 @@ const DISABLE_SOURCE_RATE_LIMIT: i32 = -1;
 const DISABLE_DML_RATE_LIMIT: i32 = -1;
 const DISABLE_SINK_RATE_LIMIT: i32 = -1;
 
-/// Default parallelism bound for tables.
-const DEFAULT_TABLE_PARALLELISM_BOUND: std::num::NonZeroU64 = std::num::NonZeroU64::new(4).unwrap();
-
-/// Default parallelism bound for sources.
-const DEFAULT_SOURCE_PARALLELISM_BOUND: std::num::NonZeroU64 =
-    std::num::NonZeroU64::new(4).unwrap();
-
-/// Default global parallelism bound matching the legacy adaptive strategy default.
-const DEFAULT_GLOBAL_PARALLELISM_BOUND: std::num::NonZeroU64 =
-    std::num::NonZeroU64::new(64).unwrap();
-
 /// Default to bypass cluster limits iff in debug mode.
 const BYPASS_CLUSTER_LIMITS: bool = cfg!(debug_assertions);
 
@@ -176,21 +165,19 @@ pub struct SessionConfig {
     timezone: String,
 
     /// The execution parallelism for streaming queries, including tables, materialized views,
-    /// indexes, and sinks. Defaults to `bounded(64)`, which preserves the legacy adaptive
-    /// strategy bound.
-    ///
-    /// If a fixed value is set, streaming queries will use that parallelism directly. Adaptive
-    /// values such as `adaptive`, `bounded(n)`, and `ratio(r)` are still bounded by
-    /// `STREAMING_MAX_PARALLELISM`.
-    #[parameter(default = ConfigParallelism::Bounded(DEFAULT_GLOBAL_PARALLELISM_BOUND))]
+    /// indexes, and sinks. Defaults to `default`, which preserves the legacy adaptive
+    /// scheduling behavior during effective resolution.
+    #[parameter(default = ConfigParallelism::Default)]
     streaming_parallelism: ConfigParallelism,
 
-    /// Specific parallelism for backfill. By default, it will fall back to `STREAMING_PARALLELISM`.
+    /// Specific parallelism for backfill. Defaults to `default`, which keeps backfill aligned
+    /// with the job's normal parallelism instead of applying a dedicated override.
     #[parameter(default = ConfigBackfillParallelism::Default)]
     streaming_parallelism_for_backfill: ConfigBackfillParallelism,
 
-    /// Specific parallelism for table. Defaults to `bounded(4)`.
-    #[parameter(default = ConfigParallelism::Bounded(DEFAULT_TABLE_PARALLELISM_BOUND))]
+    /// Specific parallelism for table. Defaults to `default`, which resolves to the legacy
+    /// bounded adaptive behavior unless the global parallelism is fixed.
+    #[parameter(default = ConfigParallelism::Default)]
     streaming_parallelism_for_table: ConfigParallelism,
 
     /// Specific parallelism for sink. By default, it will fall back to `STREAMING_PARALLELISM`.
@@ -201,8 +188,9 @@ pub struct SessionConfig {
     #[parameter(default = ConfigParallelism::Default)]
     streaming_parallelism_for_index: ConfigParallelism,
 
-    /// Specific parallelism for source. Defaults to `bounded(4)`.
-    #[parameter(default = ConfigParallelism::Bounded(DEFAULT_SOURCE_PARALLELISM_BOUND))]
+    /// Specific parallelism for source. Defaults to `default`, which resolves to the legacy
+    /// bounded adaptive behavior unless the global parallelism is fixed.
+    #[parameter(default = ConfigParallelism::Default)]
     streaming_parallelism_for_source: ConfigParallelism,
 
     /// Specific parallelism for materialized view. By default, it will fall back to `STREAMING_PARALLELISM`.
@@ -705,17 +693,14 @@ mod test {
     fn test_streaming_parallelism_defaults() {
         let config = SessionConfig::default();
 
-        assert_eq!(
-            config.streaming_parallelism(),
-            ConfigParallelism::Bounded(DEFAULT_GLOBAL_PARALLELISM_BOUND)
-        );
+        assert_eq!(config.streaming_parallelism(), ConfigParallelism::Default);
         assert_eq!(
             config.streaming_parallelism_for_table(),
-            ConfigParallelism::Bounded(DEFAULT_TABLE_PARALLELISM_BOUND)
+            ConfigParallelism::Default
         );
         assert_eq!(
             config.streaming_parallelism_for_source(),
-            ConfigParallelism::Bounded(DEFAULT_SOURCE_PARALLELISM_BOUND)
+            ConfigParallelism::Default
         );
         assert_eq!(
             config.streaming_parallelism_for_sink(),
@@ -728,6 +713,61 @@ mod test {
         assert_eq!(
             config.streaming_parallelism_for_materialized_view(),
             ConfigParallelism::Default
+        );
+    }
+
+    #[test]
+    fn test_streaming_parallelism_default_round_trip() {
+        let mut config = SessionConfig::default();
+
+        assert_eq!(config.get("streaming_parallelism").unwrap(), "default");
+        assert_eq!(
+            config.get("streaming_parallelism_for_table").unwrap(),
+            "default"
+        );
+        assert_eq!(
+            config.get("streaming_parallelism_for_source").unwrap(),
+            "default"
+        );
+
+        config
+            .set("streaming_parallelism", "default".to_owned(), &mut ())
+            .unwrap();
+        assert_eq!(config.get("streaming_parallelism").unwrap(), "default");
+
+        config
+            .set("streaming_parallelism", "bounded(16)".to_owned(), &mut ())
+            .unwrap();
+        config
+            .set(
+                "streaming_parallelism_for_table",
+                "bounded(8)".to_owned(),
+                &mut (),
+            )
+            .unwrap();
+        config
+            .set(
+                "streaming_parallelism_for_source",
+                "bounded(8)".to_owned(),
+                &mut (),
+            )
+            .unwrap();
+
+        assert_eq!(
+            config.reset("streaming_parallelism", &mut ()).unwrap(),
+            "default"
+        );
+        assert_eq!(
+            config
+                .reset("streaming_parallelism_for_table", &mut ())
+                .unwrap(),
+            "default"
+        );
+        assert_eq!(
+            config
+                .reset("streaming_parallelism_for_source", &mut ())
+                .unwrap(),
+            "default"
         );
     }
 }

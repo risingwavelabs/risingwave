@@ -113,12 +113,14 @@ impl ConfigParallelism {
     }
 }
 
-#[derive(Copy, Default, Debug, Clone, PartialEq, Eq)]
+#[derive(Copy, Default, Debug, Clone, PartialEq)]
 pub enum ConfigBackfillParallelism {
     #[default]
     Default,
     Fixed(NonZeroU64),
     Adaptive,
+    Bounded(NonZeroU64),
+    Ratio(f32),
 }
 
 impl FromStr for ConfigBackfillParallelism {
@@ -126,9 +128,20 @@ impl FromStr for ConfigBackfillParallelism {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.to_ascii_lowercase().as_str() {
-            KEYWORD_DEFAULT => Ok(Self::Default),
-            KEYWORD_ADAPTIVE | KEYWORD_AUTO => Ok(Self::Adaptive),
-            _ => {
+            KEYWORD_DEFAULT => return Ok(Self::Default),
+            KEYWORD_ADAPTIVE | KEYWORD_AUTO => return Ok(Self::Adaptive),
+            _ => {}
+        }
+
+        match parse_strategy(s) {
+            Ok(AdaptiveParallelismStrategy::Auto | AdaptiveParallelismStrategy::Full) => {
+                Ok(Self::Adaptive)
+            }
+            Ok(AdaptiveParallelismStrategy::Bounded(n)) => {
+                Ok(Self::Bounded(NonZeroU64::new(n.get() as u64).unwrap()))
+            }
+            Ok(AdaptiveParallelismStrategy::Ratio(r)) => Ok(Self::Ratio(r)),
+            Err(ParallelismStrategyParseError::UnsupportedStrategy(_)) => {
                 let parsed = s.parse::<u64>()?;
                 if parsed == 0 {
                     Ok(Self::Adaptive)
@@ -136,6 +149,7 @@ impl FromStr for ConfigBackfillParallelism {
                     Ok(Self::Fixed(NonZeroU64::new(parsed).unwrap()))
                 }
             }
+            Err(err) => Err(err.into()),
         }
     }
 }
@@ -146,6 +160,21 @@ impl std::fmt::Display for ConfigBackfillParallelism {
             Self::Adaptive => write!(f, "{}", KEYWORD_ADAPTIVE),
             Self::Default => write!(f, "{}", KEYWORD_DEFAULT),
             Self::Fixed(n) => write!(f, "{}", n),
+            Self::Bounded(n) => write!(f, "bounded({})", n),
+            Self::Ratio(r) => write!(f, "ratio({})", r),
+        }
+    }
+}
+
+impl ConfigBackfillParallelism {
+    pub fn adaptive_strategy(self) -> Option<AdaptiveParallelismStrategy> {
+        match self {
+            Self::Default | Self::Fixed(_) => None,
+            Self::Adaptive => Some(AdaptiveParallelismStrategy::Auto),
+            Self::Bounded(n) => Some(AdaptiveParallelismStrategy::Bounded(
+                NonZeroUsize::new(n.get() as usize).unwrap(),
+            )),
+            Self::Ratio(r) => Some(AdaptiveParallelismStrategy::Ratio(r)),
         }
     }
 }

@@ -78,6 +78,81 @@ async fn test_streaming_parallelism_type_override() -> Result<()> {
 }
 
 #[tokio::test]
+async fn test_rw_streaming_parallelism_display_uses_unified_dsl() -> Result<()> {
+    let config = Configuration::for_auto_parallelism(10, true);
+
+    let mut cluster = Cluster::start(config).await?;
+    let mut session = cluster.start_session();
+
+    session
+        .run("set streaming_parallelism = 'ratio(0.5)'")
+        .await?;
+    session.run("create table t_display(v int)").await?;
+    session
+        .run("create materialized view m_display as select * from t_display")
+        .await?;
+
+    session
+        .run("select parallelism from rw_streaming_parallelism where name = 't_display'")
+        .await?
+        .assert_result_eq("bounded(4)");
+    session
+        .run("select parallelism from rw_streaming_parallelism where name = 'm_display'")
+        .await?
+        .assert_result_eq("ratio(0.5)");
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_alter_parallelism_accepts_unified_dsl() -> Result<()> {
+    let config = Configuration::for_auto_parallelism(10, true);
+
+    let mut cluster = Cluster::start(config).await?;
+    let mut session = cluster.start_session();
+
+    session.run("create table t_alter(v int)").await?;
+
+    session
+        .run("alter table t_alter set parallelism = bounded(2)")
+        .await?;
+    session
+        .run("select parallelism from rw_streaming_parallelism where name = 't_alter'")
+        .await?
+        .assert_result_eq("bounded(2)");
+    session
+        .run(
+            "select distinct parallelism from rw_fragment_parallelism where name = 't_alter' and distribution_type = 'HASH'",
+        )
+        .await?
+        .assert_result_eq("2");
+
+    session
+        .run("alter table t_alter set parallelism = ratio(0.5)")
+        .await?;
+    session
+        .run("select parallelism from rw_streaming_parallelism where name = 't_alter'")
+        .await?
+        .assert_result_eq("ratio(0.5)");
+    session
+        .run(
+            "select distinct parallelism from rw_fragment_parallelism where name = 't_alter' and distribution_type = 'HASH'",
+        )
+        .await?
+        .assert_result_eq("3");
+
+    session
+        .run("alter table t_alter set parallelism = adaptive")
+        .await?;
+    session
+        .run("select parallelism from rw_streaming_parallelism where name = 't_alter'")
+        .await?
+        .assert_result_eq("adaptive");
+
+    Ok(())
+}
+
+#[tokio::test]
 async fn test_streaming_parallelism_default_fallback() -> Result<()> {
     let config = Configuration::for_auto_parallelism(10, true);
 

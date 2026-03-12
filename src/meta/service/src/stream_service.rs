@@ -366,6 +366,7 @@ impl StreamManagerService for StreamServiceImpl {
                      job_status,
                      name,
                      parallelism,
+                     adaptive_parallelism_strategy,
                      max_parallelism,
                      resource_group,
                      database_id,
@@ -389,6 +390,7 @@ impl StreamManagerService for StreamServiceImpl {
                         database_id,
                         schema_id,
                         config_override,
+                        adaptive_parallelism_strategy,
                     }
                 },
             )

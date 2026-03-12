@@ -141,6 +141,10 @@ impl CatalogController {
                 .map(ToString::to_string)),
             parallelism: Set(streaming_parallelism),
             backfill_parallelism: Set(backfill_parallelism),
+            backfill_adaptive_parallelism_strategy: Set(ctx
+                .backfill_adaptive_parallelism_strategy
+                .as_ref()
+                .map(ToString::to_string)),
             backfill_orders: Set(None),
             max_parallelism: Set(max_parallelism as _),
             specific_resource_group: Set(specific_resource_group),
@@ -178,7 +182,12 @@ impl CatalogController {
         };
         let backfill_parallelism = backfill_parallelism
             .as_ref()
-            .map(|p| StreamingParallelism::Fixed(p.parallelism as _));
+            .map(|p| StreamingParallelism::Fixed(p.parallelism as _))
+            .or_else(|| {
+                ctx.backfill_adaptive_parallelism_strategy
+                    .as_ref()
+                    .map(|_| StreamingParallelism::Adaptive)
+            });
 
         ensure_user_id(streaming_job.owner() as _, &txn).await?;
         ensure_object_id(ObjectType::Database, streaming_job.database_id(), &txn).await?;
@@ -1021,6 +1030,7 @@ impl CatalogController {
             adaptive_parallelism_strategy: original_adaptive_strategy.as_deref().map(|s| {
                 parse_strategy(s).expect("strategy should be validated before persisting")
             }),
+            backfill_adaptive_parallelism_strategy: None,
         };
 
         // 4. create streaming object for new replace table.

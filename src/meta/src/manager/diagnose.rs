@@ -20,6 +20,8 @@ use std::sync::Arc;
 use itertools::Itertools;
 use prometheus_http_query::response::Data::Vector;
 use risingwave_common::id::ObjectId;
+use risingwave_common::system_param::AdaptiveParallelismStrategy;
+use risingwave_common::system_param::adaptive_parallelism_strategy::parse_strategy;
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::types::Timestamptz;
 use risingwave_common::util::StackTraceResponseExt;
@@ -938,7 +940,13 @@ impl DiagnoseCommand {
                 row.add_cell(job.name.into());
                 row.add_cell(job.obj_type.as_str().into());
                 row.add_cell(format_job_status(job.job_status).into());
-                row.add_cell(format_streaming_parallelism(&job.parallelism).into());
+                row.add_cell(
+                    format_streaming_parallelism(
+                        &job.parallelism,
+                        job.adaptive_parallelism_strategy.as_deref(),
+                    )
+                    .into(),
+                );
                 row.add_cell(job.max_parallelism.into());
                 row.add_cell(job.resource_group.into());
                 row.add_cell(job.database_id.into());
@@ -1238,10 +1246,29 @@ fn format_job_status(status: JobStatus) -> &'static str {
     }
 }
 
-fn format_streaming_parallelism(parallelism: &StreamingParallelism) -> String {
+fn format_streaming_parallelism(
+    parallelism: &StreamingParallelism,
+    adaptive_parallelism_strategy: Option<&str>,
+) -> String {
     match parallelism {
-        StreamingParallelism::Adaptive => "adaptive".into(),
-        StreamingParallelism::Fixed(n) => format!("fixed({n})"),
-        StreamingParallelism::Custom => "custom".into(),
+        StreamingParallelism::Adaptive => adaptive_parallelism_strategy
+            .and_then(format_adaptive_parallelism_strategy)
+            .unwrap_or_else(|| "adaptive".into()),
+        StreamingParallelism::Fixed(n) => n.to_string(),
+        StreamingParallelism::Custom => adaptive_parallelism_strategy
+            .and_then(format_adaptive_parallelism_strategy)
+            .unwrap_or_else(|| "custom".into()),
     }
+}
+
+fn format_adaptive_parallelism_strategy(strategy: &str) -> Option<String> {
+    parse_strategy(strategy)
+        .ok()
+        .map(|strategy| match strategy {
+            AdaptiveParallelismStrategy::Auto | AdaptiveParallelismStrategy::Full => {
+                "adaptive".to_owned()
+            }
+            AdaptiveParallelismStrategy::Bounded(n) => format!("bounded({n})"),
+            AdaptiveParallelismStrategy::Ratio(r) => format!("ratio({r})"),
+        })
 }
