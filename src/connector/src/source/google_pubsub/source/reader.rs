@@ -15,6 +15,7 @@
 use async_trait::async_trait;
 use futures_async_stream::try_stream;
 use google_cloud_gax::grpc::Code;
+use google_cloud_pubsub::apiv1::default_retry_setting;
 use google_cloud_pubsub::subscription::Subscription;
 use risingwave_common::{bail, ensure};
 
@@ -43,7 +44,10 @@ impl PubsubSplitReader {
         loop {
             let pull_result = self
                 .subscription
-                .pull(PUBSUB_MAX_FETCH_MESSAGES as i32, None)
+                .pull(
+                    PUBSUB_MAX_FETCH_MESSAGES as i32,
+                    Some(default_retry_setting()),
+                )
                 .await;
 
             let raw_chunk = match pull_result {
@@ -51,14 +55,17 @@ impl PubsubSplitReader {
                 Err(e) => match e.code() {
                     Code::NotFound => bail!("subscription not found"),
                     Code::PermissionDenied => bail!("not authorized to access subscription"),
-                    _ => continue,
+                    _ => {
+                        tracing::warn!(
+                            error = %e,
+                            code = ?e.code(),
+                            "failed to pull from pubsub, retrying"
+                        );
+                        continue;
+                    }
                 },
             };
 
-            // Sleep if we get an empty batch -- this should generally not happen
-            // since subscription.pull claims to block until at least a single message is available.
-            // But pull seems to time out at some point a return with no messages, so we need to see
-            // ? if that's somehow adjustable or we can skip sleeping and hand it off to pull again
             if raw_chunk.is_empty() {
                 continue;
             }
