@@ -829,6 +829,7 @@ pub(crate) fn gen_create_table_plan_for_cdc_table(
     source: Arc<SourceCatalog>,
     external_table_name: String,
     column_defs: Vec<ColumnDef>,
+    source_watermarks: Vec<SourceWatermark>,
     mut columns: Vec<ColumnCatalog>,
     pk_names: Vec<String>,
     cdc_with_options: WithOptionsSecResolved,
@@ -860,6 +861,13 @@ pub(crate) fn gen_create_table_plan_for_cdc_table(
 
     let (mut columns, pk_column_ids, _row_id_index) =
         bind_pk_and_row_id_on_relation(columns, pk_names, true)?;
+
+    let watermark_descs = bind_source_watermark(
+        context.session_ctx(),
+        table_name.real_value(),
+        source_watermarks,
+        &columns,
+    )?;
 
     // NOTES: In auto schema change, default value is not provided in column definition.
     bind_sql_column_constraints(
@@ -938,7 +946,7 @@ pub(crate) fn gen_create_table_plan_for_cdc_table(
             columns,
             pk_column_ids,
             row_id_index: None,
-            watermark_descs: vec![],
+            watermark_descs,
             source_catalog: Some((*source).clone()),
             version: col_id_gen.into_version(),
         },
@@ -1250,6 +1258,7 @@ pub(super) async fn handle_create_table_plan(
                 source,
                 normalized_external_table_name,
                 column_defs,
+                source_watermarks,
                 columns,
                 pk_names,
                 cdc_with_options,
@@ -1380,10 +1389,14 @@ fn sanity_check_for_table_on_cdc_source(
         .into());
     }
 
-    if !source_watermarks.is_empty() {
+    if !source_watermarks.is_empty()
+        && source_watermarks
+            .iter()
+            .any(|watermark| !watermark.with_ttl)
+    {
         return Err(ErrorCode::NotSupported(
-            "watermark defined on the table created from a CDC source".into(),
-            "Remove the Watermark definitions".into(),
+            "non-TTL watermark defined on the table created from a CDC source".into(),
+            "Use `WATERMARK ... WITH TTL` instead.".into(),
         )
         .into());
     }
@@ -2527,6 +2540,14 @@ pub async fn generate_stream_graph_for_replace_table(
             ((plan, None, table), TableJobType::General)
         }
         (None, Some(cdc_table)) => {
+            sanity_check_for_table_on_cdc_source(
+                append_only,
+                &columns,
+                &wildcard_idx,
+                &constraints,
+                &source_watermarks,
+            )?;
+
             let session = &handler_args.session;
             let (source, resolved_table_name) =
                 get_source_and_resolved_table_name(session, cdc_table.clone(), table_name.clone())?;
@@ -2546,6 +2567,7 @@ pub async fn generate_stream_graph_for_replace_table(
                 source,
                 normalized_external_table_name,
                 columns,
+                source_watermarks,
                 column_catalogs,
                 pk_names,
                 cdc_with_options,

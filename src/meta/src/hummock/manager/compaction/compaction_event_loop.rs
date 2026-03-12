@@ -346,7 +346,7 @@ impl HummockCompactionEventHandler {
                 .get_compact_tasks(
                     existed_groups.clone(),
                     pull_task_count - generated_task_count,
-                    selector,
+                    &mut **selector,
                 )
                 .await;
 

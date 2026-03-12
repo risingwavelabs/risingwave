@@ -44,6 +44,7 @@ pub struct HummockStateStoreMetrics {
     pub bloom_filter_true_negative_counts: RelabeledGuardedIntCounterVec,
     pub bloom_filter_check_counts: RelabeledGuardedIntCounterVec,
     pub iter_merge_sstable_counts: RelabeledHistogramVec,
+    pub vnode_pruning_counts: RelabeledGuardedIntCounterVec,
     pub sst_store_block_request_counts: RelabeledGuardedIntCounterVec,
     pub iter_scan_key_counts: RelabeledGuardedIntCounterVec,
     pub get_shared_buffer_hit_counts: RelabeledCounterVec,
@@ -150,6 +151,20 @@ impl HummockStateStoreMetrics {
         let iter_merge_sstable_counts = RelabeledHistogramVec::with_metric_level(
             MetricLevel::Debug,
             iter_merge_sstable_counts,
+            metric_level,
+        );
+
+        let vnode_pruning_counts = register_guarded_int_counter_vec_with_registry!(
+            "state_store_vnode_pruning_counts",
+            "Total number of SST pruning operations by vnode key range hints",
+            &["table_id", "operation", "result"],
+            registry
+        )
+        .unwrap();
+
+        let vnode_pruning_counts = RelabeledGuardedIntCounterVec::with_metric_level(
+            MetricLevel::Debug,
+            vnode_pruning_counts,
             metric_level,
         );
 
@@ -583,6 +598,7 @@ impl HummockStateStoreMetrics {
             bloom_filter_true_negative_counts,
             bloom_filter_check_counts,
             iter_merge_sstable_counts,
+            vnode_pruning_counts,
             sst_store_block_request_counts,
             iter_scan_key_counts,
             get_shared_buffer_hit_counts,
