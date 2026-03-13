@@ -38,6 +38,7 @@ use risingwave_pb::stream_service::BarrierCompleteResponse;
 use status::CreatingStreamingJobStatus;
 use tracing::{debug, info};
 
+use super::state::RenderResult;
 use crate::MetaResult;
 use crate::barrier::backfill_order_control::get_nodes_with_backfill_dependencies;
 use crate::barrier::checkpoint::creating_job::status::CreateMviewLogStoreProgressTracker;
@@ -49,7 +50,8 @@ use crate::barrier::partial_graph::{CollectedBarrier, PartialGraphManager, Parti
 use crate::barrier::progress::{CreateMviewProgressTracker, TrackingJob, collect_done_fragments};
 use crate::barrier::rpc::{build_locality_fragment_state_table_mapping, to_partial_graph_id};
 use crate::barrier::{
-    BackfillOrderState, BackfillProgress, BarrierKind, FragmentBackfillProgress, TracedEpoch,
+    BackfillOrderState, BackfillProgress, BarrierKind, Command, FragmentBackfillProgress,
+    TracedEpoch,
 };
 use crate::controller::fragment::InflightFragmentInfo;
 use crate::model::{FragmentDownstreamRelation, StreamActor, StreamJobActorsToCreate};
@@ -120,6 +122,7 @@ impl CreatingStreamingJobControl {
         partial_graph_manager: &mut PartialGraphManager,
         edges: &mut FragmentEdgeBuildResult,
         split_assignment: &SplitAssignment,
+        actors: &RenderResult,
     ) -> MetaResult<&'a mut Self> {
         let info = create_info.info.clone();
         let job_id = info.stream_job_fragments.stream_job_id();
@@ -131,7 +134,11 @@ impl CreatingStreamingJobControl {
         );
         let fragment_infos = info
             .stream_job_fragments
-            .new_fragment_info(split_assignment)
+            .new_fragment_info(
+                &actors.stream_actors,
+                &actors.actor_location,
+                split_assignment,
+            )
             .collect();
         let snapshot_backfill_actors =
             InflightStreamingJobInfo::snapshot_backfill_actor_ids(&fragment_infos).collect();
@@ -141,7 +148,7 @@ impl CreatingStreamingJobControl {
                 .collect();
         let backfill_order_state = BackfillOrderState::new(
             &info.fragment_backfill_ordering,
-            &info.stream_job_fragments,
+            &fragment_infos,
             info.locality_fragment_state_table_mapping.clone(),
         );
         let create_mview_tracker = CreateMviewProgressTracker::recover(
@@ -151,17 +158,12 @@ impl CreatingStreamingJobControl {
             version_stat,
         );
 
-        let actors_to_create =
-            edges.collect_actors_to_create(info.stream_job_fragments.actors_to_create().map(
-                |(fragment_id, node, actors)| {
-                    (
-                        fragment_id,
-                        node,
-                        actors,
-                        [], // no subscribers for newly creating job
-                    )
-                },
-            ));
+        let actors_to_create = Command::create_streaming_job_actors_to_create(
+            &info,
+            edges,
+            &actors.stream_actors,
+            &actors.actor_location,
+        );
 
         let barrier_control = CreatingStreamingJobBarrierControl::new(job_id, snapshot_epoch, None);
 
@@ -174,7 +176,12 @@ impl CreatingStreamingJobControl {
             PbBarrierKind::Checkpoint,
         );
 
-        let added_actors = info.stream_job_fragments.actor_ids().collect();
+        let added_actors: Vec<ActorId> = actors
+            .stream_actors
+            .values()
+            .flatten()
+            .map(|actor| actor.actor_id)
+            .collect();
         let actor_splits = split_assignment
             .values()
             .flat_map(build_actor_connector_splits)
@@ -241,18 +248,13 @@ impl CreatingStreamingJobControl {
             let job_info = CreatingJobInfo {
                 fragment_infos,
                 upstream_fragment_downstreams: info.upstream_fragment_downstreams.clone(),
-                downstreams: info.stream_job_fragments.downstreams.clone(),
+                downstreams: info.stream_job_fragments.downstreams,
                 snapshot_backfill_upstream_tables: job.snapshot_backfill_upstream_tables.clone(),
-                stream_actors: info
-                    .stream_job_fragments
-                    .fragments
+                stream_actors: actors
+                    .stream_actors
                     .values()
-                    .flat_map(|fragment| {
-                        fragment
-                            .actors
-                            .iter()
-                            .map(|actor| (actor.actor_id, actor.clone()))
-                    })
+                    .flatten()
+                    .map(|actor| (actor.actor_id, actor.clone()))
                     .collect(),
             };
             job.status = CreatingStreamingJobStatus::ConsumingSnapshot {

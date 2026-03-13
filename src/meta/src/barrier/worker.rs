@@ -738,7 +738,12 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                     } else {
                         new_barrier
                     };
-                    if let Err(e) = self.checkpoint_control.handle_new_barrier(new_barrier, &mut self.partial_graph_manager) {
+                    if let Err(e) = self.checkpoint_control.handle_new_barrier(
+                        new_barrier,
+                        &mut self.partial_graph_manager,
+                        self.adaptive_parallelism_strategy,
+                        self.active_streaming_nodes.current()
+                    ) {
                         if !self.enable_recovery {
                             panic!(
                                 "failed to inject barrier to some databases but recovery not enabled: {:?}", (
