@@ -710,6 +710,15 @@ impl DdlService for DdlServiceImpl {
         let source_id = request.source_id;
         let table_id = request.table_id;
 
+        let cascade_objects = if request.cascade {
+            self.metadata_manager
+                .catalog_controller
+                .get_drop_cascade_objects(request.table_id.as_object_id())
+                .await?
+        } else {
+            vec![]
+        };
+
         let drop_mode = DropMode::from_request_setting(request.cascade);
         let version = self
             .ddl_controller
@@ -722,6 +731,7 @@ impl DdlService for DdlServiceImpl {
         Ok(Response::new(DropTableResponse {
             status: None,
             version,
+            cascade_objects,
         }))
     }
 
