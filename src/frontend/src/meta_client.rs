@@ -21,7 +21,7 @@ use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_common::util::cluster_limit::ClusterLimit;
 use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
 use risingwave_hummock_sdk::{CompactionGroupId, HummockVersionId};
-use risingwave_pb::backup_service::MetaSnapshotMetadata;
+use risingwave_pb::backup_service::{BackupJobStatus, MetaSnapshotMetadata};
 use risingwave_pb::catalog::Table;
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::ddl_service::DdlProgress;
@@ -60,6 +60,10 @@ pub trait FrontendMetaClient: Send + Sync {
     async fn try_unregister(&self);
 
     async fn flush(&self, database_id: DatabaseId) -> Result<HummockVersionId>;
+
+    async fn backup_meta(&self, remarks: Option<String>) -> Result<u64>;
+    async fn get_backup_job_status(&self, job_id: u64) -> Result<(BackupJobStatus, String)>;
+    async fn delete_meta_snapshot(&self, snapshot_ids: &[u64]) -> Result<()>;
 
     async fn recover(&self) -> Result<()>;
 
@@ -233,6 +237,18 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
 
     async fn flush(&self, database_id: DatabaseId) -> Result<HummockVersionId> {
         self.0.flush(database_id).await
+    }
+
+    async fn backup_meta(&self, remarks: Option<String>) -> Result<u64> {
+        self.0.backup_meta(remarks).await
+    }
+
+    async fn get_backup_job_status(&self, job_id: u64) -> Result<(BackupJobStatus, String)> {
+        self.0.get_backup_job_status(job_id).await
+    }
+
+    async fn delete_meta_snapshot(&self, snapshot_ids: &[u64]) -> Result<()> {
+        self.0.delete_meta_snapshot(snapshot_ids).await
     }
 
     async fn recover(&self) -> Result<()> {

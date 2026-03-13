@@ -1299,6 +1299,10 @@ pub enum Statement {
         /// RETURNING
         returning: Vec<SelectItem>,
     },
+    /// DELETE META SNAPSHOT(S)
+    DeleteMetaSnapshots {
+        snapshot_ids: Vec<u64>,
+    },
     /// DISCARD
     Discard(DiscardType),
     /// CREATE VIEW
@@ -1684,6 +1688,8 @@ pub enum Statement {
     /// WAIT for ALL running stream jobs to finish.
     /// It will block the current session the condition is met.
     Wait,
+    /// Trigger meta backup.
+    Backup,
     /// Trigger stream job recover
     Recover,
     /// `USE <db_name>`
@@ -1920,6 +1926,14 @@ impl Statement {
                 if !returning.is_empty() {
                     write!(f, " RETURNING {}", display_comma_separated(returning))?;
                 }
+                Ok(())
+            }
+            Statement::DeleteMetaSnapshots { snapshot_ids } => {
+                write!(
+                    f,
+                    "DELETE META SNAPSHOTS {}",
+                    display_comma_separated(snapshot_ids)
+                )?;
                 Ok(())
             }
             Statement::CreateDatabase {
@@ -2442,6 +2456,10 @@ impl Statement {
             }
             Statement::Wait => {
                 write!(f, "WAIT")
+            }
+            Statement::Backup => {
+                write!(f, "BACKUP")?;
+                Ok(())
             }
             Statement::Begin { modes } => {
                 write!(f, "BEGIN")?;
