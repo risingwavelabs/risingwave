@@ -152,13 +152,20 @@ impl SourceExecutor {
             SourceCtrlOpts {
                 chunk_size: self.chunk_size,
                 split_txn: false,
+                for_backfill: false,
             },
             ConnectorProperties::default(),
             None,
         ));
         let (stream, _) = self
             .source
-            .build_stream(Some(self.split_list), self.column_ids, source_ctx, false)
+            .build_stream(
+                Some(self.split_list),
+                self.column_ids,
+                source_ctx,
+                false,
+                false,
+            )
             .await?;
 
         #[for_await]

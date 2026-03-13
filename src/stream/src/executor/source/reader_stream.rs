@@ -149,6 +149,7 @@ impl StreamReaderBuilder {
             SourceCtrlOpts {
                 chunk_size: limited_chunk_size(self.rate_limit),
                 split_txn: self.rate_limit.is_some(), // when rate limiting, we may split txn
+                for_backfill: false,
             },
             self.source_desc.source.config.clone(),
             schema_change_tx,
@@ -173,6 +174,7 @@ impl StreamReaderBuilder {
                 column_ids.clone(),
                 source_ctx_ref.clone(),
                 seek_to_latest,
+                false,
             )
             .await
             .map_err(StreamExecutorError::connector_error)?;
@@ -223,6 +225,7 @@ impl StreamReaderBuilder {
                         source_ctx_ref.clone(),
                         // just `seek_to_latest` for initial build
                         is_initial_build,
+                        false,
                     )
                     .await
             };

@@ -253,7 +253,7 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
     ) -> StreamExecutorResult<BoxStreamingFileSourceChunkStream> {
         let (stream, _) = source_desc
             .source
-            .build_stream(batch, column_ids, Arc::new(source_ctx), false)
+            .build_stream(batch, column_ids, Arc::new(source_ctx), false, false)
             .await
             .map_err(StreamExecutorError::connector_error)?;
         let optional_stream: BoxStreamingFileSourceChunkStream = stream
@@ -281,6 +281,7 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
             SourceCtrlOpts {
                 chunk_size: limited_chunk_size(self.rate_limit_rps),
                 split_txn: self.rate_limit_rps.is_some(), // when rate limiting, we may split txn
+                for_backfill: false,
             },
             source_desc.source.config.clone(),
             None,

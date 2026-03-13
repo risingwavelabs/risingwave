@@ -153,6 +153,7 @@ impl<P: DeserializeOwned + UnknownFields> TryFromBTreeMap for P {
 pub struct CreateSplitReaderOpt {
     pub support_multiple_splits: bool,
     pub seek_to_latest: bool,
+    pub for_backfill: bool,
 }
 
 #[derive(Default)]
@@ -170,6 +171,9 @@ pub async fn create_split_readers<P: SourceProperties>(
     opt: CreateSplitReaderOpt,
 ) -> Result<(BoxSourceChunkStream, CreateSplitReaderResult)> {
     let splits = splits.into_iter().map(P::Split::try_from).try_collect()?;
+    let mut source_ctx = source_ctx.as_ref().clone();
+    source_ctx.source_ctrl_opts.for_backfill = opt.for_backfill;
+    let source_ctx = std::sync::Arc::new(source_ctx);
     let mut res = CreateSplitReaderResult {
         backfill_info: HashMap::new(),
         latest_splits: None,
@@ -284,6 +288,8 @@ pub struct SourceCtrlOpts {
     pub chunk_size: usize,
     /// Whether to allow splitting a transaction into multiple chunks to meet the `max_chunk_size`.
     pub split_txn: bool,
+    /// Whether the source reader is built for backfill.
+    pub for_backfill: bool,
 }
 
 // The options in `SourceCtrlOpts` are so important that we don't want to impl `Default` for it,
@@ -296,6 +302,7 @@ impl SourceCtrlOpts {
         SourceCtrlOpts {
             chunk_size: 256,
             split_txn: false,
+            for_backfill: false,
         }
     }
 }
@@ -404,6 +411,7 @@ impl SourceContext {
             SourceCtrlOpts {
                 chunk_size: MAX_CHUNK_SIZE,
                 split_txn: false,
+                for_backfill: false,
             },
             ConnectorProperties::default(),
             None,
@@ -728,15 +736,9 @@ impl ConnectorProperties {
             "spawning connector split reader",
         );
 
-        dispatch_source_prop!(self, |prop| create_split_readers(
-            *prop,
-            splits,
-            parser_config,
-            source_ctx,
-            columns,
-            opt
-        )
-        .await)
+        dispatch_source_prop!(self, |prop| {
+            create_split_readers(*prop, splits, parser_config, source_ctx, columns, opt).await
+        })
     }
 }
 
