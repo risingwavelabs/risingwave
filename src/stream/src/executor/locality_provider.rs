@@ -31,6 +31,7 @@ use risingwave_common_rate_limit::RateLimit;
 use risingwave_storage::StateStore;
 use risingwave_storage::store::PrefetchOptions;
 
+use crate::common::change_buffer::BTreeChangeBuffer;
 use crate::common::table::state_table::StateTable;
 use crate::executor::backfill::utils::create_builder;
 use crate::executor::prelude::*;
@@ -189,6 +190,10 @@ pub struct LocalityProviderExecutor<S: StateStore> {
 
     /// Chunk size for output
     chunk_size: usize,
+
+    stream_key: StreamKey,
+
+    enable_locality_sort_buffer: bool,
 }
 
 impl<S: StateStore> LocalityProviderExecutor<S> {
@@ -203,6 +208,8 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
         metrics: Arc<StreamingMetrics>,
         chunk_size: usize,
         fragment_id: FragmentId,
+        stream_key: StreamKey,
+        enable_locality_sort_buffer: bool,
     ) -> Self {
         Self {
             upstream,
@@ -215,6 +222,8 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
             metrics,
             chunk_size,
             fragment_id,
+            stream_key,
+            enable_locality_sort_buffer,
         }
     }
 
@@ -796,35 +805,98 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
                 }
             }
         }
+        if self.enable_locality_sort_buffer {
+            debug_assert_eq!(
+                self.stream_key,
+                state_table.pk_indices(),
+                "locality sort buffer expects executor pk to align with state table pk"
+            );
 
-        // After backfill completion, forward messages directly
-        #[for_await]
-        for msg in upstream {
-            let msg = msg?;
+            let pk_indices = self.stream_key.clone();
+            let pk_serde = state_table.pk_serde().clone();
+            let data_types = self.input_schema.data_types();
+            let chunk_size = self.chunk_size;
 
-            match msg {
-                Message::Barrier(barrier) => {
-                    // Commit state tables but don't modify them
-                    state_table
-                        .commit_assert_no_update_vnode_bitmap(barrier.epoch)
-                        .await?;
-                    progress_table
-                        .commit_assert_no_update_vnode_bitmap(barrier.epoch)
-                        .await?;
-                    if report_finished_on_first_barrier {
-                        // At completion, we report `total_snapshot_rows` as buffered rows to make progress accurate.
-                        self.progress.finish_with_buffered_rows(
-                            barrier.epoch,
-                            backfill_state.total_snapshot_rows,
-                            backfill_state.total_snapshot_rows,
-                        );
-                        report_finished_on_first_barrier = false;
+            let mut buffer: BTreeChangeBuffer<Vec<u8>, OwnedRow> = BTreeChangeBuffer::new();
+
+            #[for_await]
+            for msg in upstream {
+                let msg = msg?;
+
+                match msg {
+                    Message::Chunk(chunk) => {
+                        let chunk = chunk.compact_vis();
+                        for record in chunk.records() {
+                            let owned_record = record.map(|row| row.into_owned_row());
+                            buffer.apply_record(owned_record, |row| {
+                                let pk = row.project(&pk_indices);
+                                let mut key = Vec::new();
+                                pk_serde.serialize(pk, &mut key);
+                                key
+                            });
+                        }
                     }
-                    yield Message::Barrier(barrier);
+                    Message::Watermark(watermark) => {
+                        yield Message::Watermark(watermark);
+                    }
+                    Message::Barrier(barrier) => {
+                        if !buffer.is_empty() {
+                            let to_flush = std::mem::take(&mut buffer);
+                            for sorted_chunk in to_flush.into_chunks(data_types.clone(), chunk_size)
+                            {
+                                yield Message::Chunk(sorted_chunk);
+                            }
+                        }
+
+                        state_table
+                            .commit_assert_no_update_vnode_bitmap(barrier.epoch)
+                            .await?;
+                        progress_table
+                            .commit_assert_no_update_vnode_bitmap(barrier.epoch)
+                            .await?;
+                        if report_finished_on_first_barrier {
+                            // At completion, report buffered rows on the first downstream barrier.
+                            self.progress.finish_with_buffered_rows(
+                                barrier.epoch,
+                                backfill_state.total_snapshot_rows,
+                                backfill_state.total_snapshot_rows,
+                            );
+                            report_finished_on_first_barrier = false;
+                        }
+                        yield Message::Barrier(barrier);
+                    }
                 }
-                _ => {
-                    // Forward all other messages directly
-                    yield msg;
+            }
+        } else {
+            // Forward messages directly without sorting
+            #[for_await]
+            for msg in upstream {
+                let msg = msg?;
+
+                match msg {
+                    Message::Barrier(barrier) => {
+                        // Commit state tables but don't modify them
+                        state_table
+                            .commit_assert_no_update_vnode_bitmap(barrier.epoch)
+                            .await?;
+                        progress_table
+                            .commit_assert_no_update_vnode_bitmap(barrier.epoch)
+                            .await?;
+                        if report_finished_on_first_barrier {
+                            // At completion, report buffered rows on the first downstream barrier.
+                            self.progress.finish_with_buffered_rows(
+                                barrier.epoch,
+                                backfill_state.total_snapshot_rows,
+                                backfill_state.total_snapshot_rows,
+                            );
+                            report_finished_on_first_barrier = false;
+                        }
+                        yield Message::Barrier(barrier);
+                    }
+                    _ => {
+                        // Forward all other messages directly
+                        yield msg;
+                    }
                 }
             }
         }
