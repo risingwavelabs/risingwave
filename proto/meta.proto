@@ -934,6 +934,9 @@ message EventLog {
     common.WorkerType worker_type = 2;
     common.HostAddress host_addr = 3;
     string panic_info = 4;
+    optional uint32 actor_id = 5;
+    optional uint32 fragment_id = 6;
+    optional string job_name = 7;
   }
   message EventAutoSchemaChangeFail {
     uint32 table_id = 1;

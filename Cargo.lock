@@ -12882,6 +12882,7 @@ version = "2.9.0-alpha"
 dependencies = [
  "anyhow",
  "async-trait",
+ "await-tree",
  "easy-ext",
  "either",
  "futures",
@@ -12894,6 +12895,7 @@ dependencies = [
  "rand 0.9.2",
  "risingwave_common",
  "risingwave_error",
+ "risingwave_expr",
  "risingwave_hummock_sdk",
  "risingwave_pb",
  "rw_futures_util",
