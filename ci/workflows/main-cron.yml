@@ -1,3 +1,11 @@
+# CI Pipeline: Main-Cron
+#
+# SECURITY NOTICE: This is the extended test suite with cloud service integrations.
+# It consumes significant resources and accesses sensitive cloud credentials.
+#
+# For external contributors, this requires explicit approval before execution.
+# See: ci/workflows/gatekeeper-main-cron.yml
+
 anchors:
   - auto-retry: &auto-retry
       automatic:
