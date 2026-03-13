@@ -43,7 +43,7 @@ mod window_table_function;
 
 pub use gap_fill::BoundGapFill;
 pub use join::BoundJoin;
-pub use share::{BoundShare, BoundShareInput};
+pub use share::{BoundBackCteRef, BoundShare, BoundShareInput};
 pub use subquery::BoundSubquery;
 pub use table_or_source::{BoundBaseTable, BoundSource, BoundSystemTable};
 pub use watermark::BoundWatermark;
@@ -70,6 +70,9 @@ pub enum Relation {
     Watermark(Box<BoundWatermark>),
     Share(Box<BoundShare>),
     GapFill(Box<BoundGapFill>),
+    /// A back-reference to a recursive CTE currently being defined.
+    /// Used inside the recursive branch of a `WITH RECURSIVE` CTE.
+    BackCteRef(Box<BoundBackCteRef>),
 }
 
 impl RewriteExprsRecursive for Relation {
@@ -153,6 +156,17 @@ impl Relation {
                 }
                 BoundShareInput::ChangeLog(change_log) => change_log
                     .collect_correlated_indices_by_depth_and_assign_id(depth, correlated_id),
+                BoundShareInput::RecursiveCte { anchor, recursive } => {
+                    let mut indices = anchor
+                        .collect_correlated_indices_by_depth_and_assign_id(depth, correlated_id);
+                    indices.extend(
+                        recursive.collect_correlated_indices_by_depth_and_assign_id(
+                            depth,
+                            correlated_id,
+                        ),
+                    );
+                    indices
+                }
             },
             _ => vec![],
         }
@@ -462,6 +476,27 @@ impl Binder {
                 }
                 BindingCteState::ChangeLog { table } => {
                     let input = BoundShareInput::ChangeLog(table);
+                    self.bind_table_to_context(input.fields()?, table_name, Some(&original_alias))?;
+                    Ok(Relation::Share(Box::new(BoundShare { share_id, input })))
+                }
+                BindingCteState::Init { schema } => {
+                    // This is a self-reference inside the recursive branch of a CTE.
+                    // Return a BackCteRef that the planner will convert to a CteRef node.
+                    let fields: Vec<(bool, Field)> = schema
+                        .fields()
+                        .iter()
+                        .cloned()
+                        .map(|f| (false, f))
+                        .collect();
+                    self.bind_table_to_context(fields, table_name, Some(&original_alias))?;
+                    Ok(Relation::BackCteRef(Box::new(BoundBackCteRef {
+                        share_id,
+                        schema,
+                    })))
+                }
+                BindingCteState::RecursiveUnion { anchor, recursive } => {
+                    // External reference to a fully-bound recursive CTE.
+                    let input = BoundShareInput::RecursiveCte { anchor, recursive };
                     self.bind_table_to_context(input.fields()?, table_name, Some(&original_alias))?;
                     Ok(Relation::Share(Box::new(BoundShare { share_id, input })))
                 }

@@ -19,7 +19,9 @@ use std::rc::Rc;
 use risingwave_common::catalog::Schema;
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
-use risingwave_sqlparser::ast::{Cte, CteInner, Expr, Fetch, OrderByExpr, Query, Value, With};
+use risingwave_sqlparser::ast::{
+    Cte, CteInner, Expr, Fetch, OrderByExpr, Query, SetExpr, SetOperator, TableAlias, Value, With,
+};
 use thiserror_ext::AsReport;
 
 use super::BoundValues;
@@ -364,10 +366,6 @@ impl Binder {
     }
 
     fn bind_with(&mut self, with: &With) -> Result<()> {
-        if with.recursive {
-            return Err(ErrorCode::BindError("RECURSIVE CTE is not supported".to_owned()).into());
-        }
-
         let mut cte_names: HashSet<String> = HashSet::new();
 
         for cte_table in &with.cte_tables {
@@ -388,17 +386,50 @@ impl Binder {
 
             match cte_inner {
                 CteInner::Query(query) => {
-                    let bound_query = self.bind_query(query)?;
-                    self.context.cte_to_relation.insert(
-                        table_name,
-                        Rc::new(RefCell::new(BindingCte {
-                            share_id,
-                            state: BindingCteState::Bound { query: bound_query },
-                            alias: alias.clone(),
-                        })),
-                    );
+                    if with.recursive
+                        && matches!(
+                            &query.body,
+                            SetExpr::SetOperation {
+                                op: SetOperator::Union,
+                                all: true,
+                                ..
+                            }
+                        )
+                    {
+                        self.bind_recursive_cte(share_id, alias, &table_name, query)?;
+                    } else if with.recursive
+                        && matches!(
+                            &query.body,
+                            SetExpr::SetOperation {
+                                op: SetOperator::Union,
+                                all: false,
+                                ..
+                            }
+                        )
+                    {
+                        return Err(ErrorCode::BindError(
+                            "recursive CTE must use UNION ALL, not UNION".to_owned(),
+                        )
+                        .into());
+                    } else {
+                        let bound_query = self.bind_query(query)?;
+                        self.context.cte_to_relation.insert(
+                            table_name,
+                            Rc::new(RefCell::new(BindingCte {
+                                share_id,
+                                state: BindingCteState::Bound { query: bound_query },
+                                alias: alias.clone(),
+                            })),
+                        );
+                    }
                 }
                 CteInner::ChangeLog(from_table_name) => {
+                    if with.recursive {
+                        return Err(ErrorCode::BindError(
+                            "RECURSIVE CTE with changelog is not supported".to_owned(),
+                        )
+                        .into());
+                    }
                     self.push_context();
                     let from_table_relation =
                         self.bind_relation_by_name(from_table_name, None, None, true)?;
@@ -416,6 +447,113 @@ impl Binder {
                 }
             }
         }
+        Ok(())
+    }
+
+    /// Bind a recursive CTE.
+    ///
+    /// The body of a recursive CTE must be a `UNION ALL` of an anchor query (non-recursive)
+    /// and a recursive query that references the CTE itself.
+    ///
+    /// We use a two-pass approach:
+    /// 1. Bind the anchor (left side of UNION ALL) to determine the output schema.
+    /// 2. Register the CTE with `Init` state so the recursive branch can resolve self-references.
+    /// 3. Bind the recursive query (right side of UNION ALL).
+    /// 4. Update the CTE state to `RecursiveUnion`.
+    fn bind_recursive_cte(
+        &mut self,
+        share_id: super::ShareId,
+        alias: &TableAlias,
+        table_name: &str,
+        query: &Query,
+    ) -> Result<()> {
+        // Validate: no ORDER BY, LIMIT, OFFSET, FETCH in the recursive CTE definition.
+        if !query.order_by.is_empty()
+            || query.limit.is_some()
+            || query.offset.is_some()
+            || query.fetch.is_some()
+        {
+            return Err(ErrorCode::BindError(
+                "ORDER BY, LIMIT, OFFSET, and FETCH are not allowed in recursive CTE".to_owned(),
+            )
+            .into());
+        }
+
+        // The body must be a UNION ALL of anchor and recursive parts.
+        let (anchor_set_expr, recursive_set_expr) = match &query.body {
+            SetExpr::SetOperation {
+                op: SetOperator::Union,
+                all: true,
+                left,
+                right,
+                ..
+            } => (left.as_ref(), right.as_ref()),
+            _ => {
+                return Err(ErrorCode::BindError(
+                    "the body of a recursive CTE must be a UNION ALL of anchor and recursive terms"
+                        .to_owned(),
+                )
+                .into());
+            }
+        };
+
+        // Step 1: Bind the anchor query in a fresh context.
+        self.push_context();
+        let bound_anchor = self.bind_set_expr(anchor_set_expr)?;
+        let anchor_schema = bound_anchor.schema().into_owned();
+        self.pop_context()?;
+
+        // Step 2: Register the CTE with Init state so the recursive branch can reference it.
+        let cte_ref = Rc::new(RefCell::new(BindingCte {
+            share_id,
+            state: BindingCteState::Init {
+                schema: anchor_schema.clone(),
+            },
+            alias: alias.clone(),
+        }));
+        self.context
+            .cte_to_relation
+            .insert(table_name.to_owned(), cte_ref.clone());
+
+        // Step 3: Bind the recursive query in a fresh context.
+        // push_context clones cte_to_relation, so the CTE registration is visible.
+        self.push_context();
+        let bound_recursive = self.bind_set_expr(recursive_set_expr)?;
+        self.pop_context()?;
+
+        // Validate that anchor and recursive schemas have the same number of columns.
+        let recursive_schema = bound_recursive.schema();
+        if anchor_schema.len() != recursive_schema.len() {
+            return Err(ErrorCode::BindError(format!(
+                "recursive CTE anchor has {} columns but recursive term has {} columns",
+                anchor_schema.len(),
+                recursive_schema.len()
+            ))
+            .into());
+        }
+
+        // Step 4: Update the CTE state to RecursiveUnion.
+        let anchor_query = BoundQuery {
+            body: bound_anchor,
+            order: vec![],
+            limit: None,
+            offset: None,
+            with_ties: false,
+            extra_order_exprs: vec![],
+        };
+        let recursive_query = BoundQuery {
+            body: bound_recursive,
+            order: vec![],
+            limit: None,
+            offset: None,
+            with_ties: false,
+            extra_order_exprs: vec![],
+        };
+        cte_ref.borrow_mut().state = BindingCteState::RecursiveUnion {
+            anchor: anchor_query,
+            recursive: recursive_query,
+        };
+
         Ok(())
     }
 }

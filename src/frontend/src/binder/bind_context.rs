@@ -18,7 +18,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::rc::Rc;
 
 use parse_display::Display;
-use risingwave_common::catalog::Field;
+use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{TableAlias, WindowSpec};
 
@@ -79,6 +79,18 @@ pub enum BindingCteState {
 
     ChangeLog {
         table: Relation,
+    },
+
+    /// Placeholder state for a recursive CTE whose anchor has been bound but whose recursive
+    /// branch is still being bound. The schema comes from the anchor query.
+    Init {
+        schema: Schema,
+    },
+
+    /// A fully-bound recursive CTE with both anchor and recursive parts.
+    RecursiveUnion {
+        anchor: BoundQuery,
+        recursive: BoundQuery,
     },
 }
 
