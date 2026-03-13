@@ -261,6 +261,7 @@ async fn test_table_materialize() -> StreamResult<()> {
         "RowSeqExecutor2".to_owned(),
         None,
         None,
+        false,
     ));
     let mut stream = scan.execute();
     let result = stream.next().await;
@@ -331,6 +332,7 @@ async fn test_table_materialize() -> StreamResult<()> {
         "RowSeqScanExecutor2".to_owned(),
         None,
         None,
+        false,
     ));
 
     let mut stream = scan.execute();
@@ -412,6 +414,7 @@ async fn test_table_materialize() -> StreamResult<()> {
         "RowSeqScanExecutor2".to_owned(),
         None,
         None,
+        false,
     ));
 
     let mut stream = scan.execute();
@@ -490,6 +493,7 @@ async fn test_row_seq_scan() -> StreamResult<()> {
         "RowSeqScanExecutor2".to_owned(),
         None,
         None,
+        false,
     ));
 
     assert_eq!(executor.schema().fields().len(), 3);
