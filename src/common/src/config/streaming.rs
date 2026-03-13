@@ -19,10 +19,12 @@ use risingwave_common_proc_macro::serde_prefix_all;
 use super::*;
 
 mod async_stack_trace;
+mod cache_refill;
 mod join_encoding_type;
 mod over_window;
 
 pub use async_stack_trace::*;
+pub use cache_refill::*;
 pub use join_encoding_type::*;
 pub use over_window::*;
 
@@ -285,6 +287,11 @@ pub struct StreamingDeveloperConfig {
     /// validating the correctness of vnode stats pruning before enabling it in production.
     #[serde(default = "default::developer::enable_state_table_vnode_stats_pruning")]
     pub enable_state_table_vnode_stats_pruning: bool,
+
+    /// Cache refill policy for streaming cache refill feature.
+    /// Can be `unspecified`, `disabled`, `streaming`, `serving` or `both`.
+    #[serde(default = "default::developer::cache_refill_policy")]
+    pub cache_refill_policy: CacheRefillPolicy,
 
     #[serde(default, flatten)]
     #[serde_prefix_all(skip)]

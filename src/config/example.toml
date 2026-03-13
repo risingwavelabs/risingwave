@@ -242,6 +242,7 @@ sync_log_store_pause_duration_ms = 64
 sync_log_store_buffer_size = 2048
 over_window_cache_policy = "full"
 enable_state_table_vnode_stats_pruning = false
+cache_refill_policy = "enabled"
 
 [streaming.developer.compute_client_config]
 connect_timeout_secs = 5
@@ -393,6 +394,7 @@ recent_filter_shards = 16
 recent_filter_layers = 6
 recent_filter_rotate_interval_ms = 10000
 skip_recent_filter = false
+skip_inheritance_filter = false
 
 [storage.object_store]
 set_atomic_write_dir = false

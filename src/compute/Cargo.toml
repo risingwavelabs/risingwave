@@ -22,6 +22,7 @@ futures-async-stream = { workspace = true }
 http = "1"
 itertools = { workspace = true }
 maplit = "1.0.2"
+parking_lot = { workspace = true }
 prometheus = { version = "0.14" }
 prost = { workspace = true }
 risingwave_batch = { workspace = true }

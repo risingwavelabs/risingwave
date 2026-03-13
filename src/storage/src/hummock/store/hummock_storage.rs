@@ -20,8 +20,10 @@ use std::sync::Arc;
 use arc_swap::ArcSwap;
 use bytes::Bytes;
 use itertools::Itertools;
+use parking_lot::RwLock;
 use risingwave_common::array::VectorRef;
 use risingwave_common::catalog::{TableId, TableOption};
+use risingwave_common::config::Role;
 use risingwave_common::dispatch_distance_measurement;
 use risingwave_common::util::epoch::is_max_epoch;
 use risingwave_common_service::{NotificationClient, ObserverManager};
@@ -48,6 +50,7 @@ use crate::hummock::compactor::{
     CompactionAwaitTreeRegRef, CompactorContext, new_compaction_await_tree_reg_ref,
 };
 use crate::hummock::event_handler::hummock_event_handler::{BufferTracker, HummockEventSender};
+use crate::hummock::event_handler::refiller::TableCacheRefillContext;
 use crate::hummock::event_handler::{
     HummockEvent, HummockEventHandler, HummockVersionUpdate, ReadOnlyReadVersionMapping,
 };
@@ -119,6 +122,8 @@ pub struct HummockStorage {
     hummock_meta_client: Arc<dyn HummockMetaClient>,
 
     simple_time_travel_version_cache: Arc<SimpleTimeTravelVersionCache>,
+
+    table_cache_refill_context: Arc<RwLock<TableCacheRefillContext>>,
 }
 
 pub type ReadVersionTuple = (Vec<ImmutableMemtable>, Vec<SstableInfo>, CommittedVersion);
@@ -149,6 +154,7 @@ impl HummockStorage {
     /// Creates a [`HummockStorage`].
     #[allow(clippy::too_many_arguments)]
     pub async fn new(
+        role: Role,
         options: Arc<StorageOpts>,
         sstable_store: SstableStoreRef,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
@@ -171,6 +177,8 @@ impl HummockStorage {
         .map_err(HummockError::read_backup_error)?;
         let write_limiter = Arc::new(WriteLimiter::default());
         let (version_update_tx, mut version_update_rx) = unbounded_channel();
+        let (cache_refill_policy_tx, cache_refill_policy_rx) = unbounded_channel();
+        let (serving_table_vnode_mapping_tx, serving_table_vnode_mapping_rx) = unbounded_channel();
 
         let observer_manager = ObserverManager::new(
             notification_client,
@@ -178,6 +186,8 @@ impl HummockStorage {
                 compaction_catalog_manager_ref.clone(),
                 backup_reader.clone(),
                 version_update_tx.clone(),
+                cache_refill_policy_tx,
+                serving_table_vnode_mapping_tx,
                 write_limiter.clone(),
             ),
         )
@@ -209,7 +219,10 @@ impl HummockStorage {
         );
 
         let hummock_event_handler = HummockEventHandler::new(
+            role,
             version_update_rx,
+            cache_refill_policy_rx,
+            serving_table_vnode_mapping_rx,
             pinned_version,
             compactor_context.clone(),
             compaction_catalog_manager_ref.clone(),
@@ -244,6 +257,7 @@ impl HummockStorage {
             simple_time_travel_version_cache: Arc::new(SimpleTimeTravelVersionCache::new(
                 options.time_travel_version_cache_capacity,
             )),
+            table_cache_refill_context: hummock_event_handler.table_cache_refill_context().clone(),
         };
 
         tokio::spawn(hummock_event_handler.start_hummock_event_handler_worker());
@@ -600,6 +614,10 @@ impl HummockStorage {
 
     pub fn sstable_store(&self) -> SstableStoreRef {
         self.context.sstable_store.clone()
+    }
+
+    pub fn table_cache_refill_context(&self) -> &Arc<RwLock<TableCacheRefillContext>> {
+        &self.table_cache_refill_context
     }
 
     pub fn object_id_manager(&self) -> &ObjectIdManagerRef {
@@ -981,6 +999,7 @@ impl HummockStorage {
         )));
 
         Self::new(
+            Role::Both,
             options,
             sstable_store,
             hummock_meta_client,
