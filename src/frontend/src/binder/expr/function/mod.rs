@@ -150,12 +150,21 @@ impl Binder {
             );
         }
 
-        let mut args: Vec<_> = arg_list
-            .args
-            .iter()
-            .map(|arg| self.bind_function_arg(arg))
-            .flatten_ok()
-            .try_collect()?;
+        let mut args: Vec<_> = if func_name == "make_interval"
+            && arg_list
+                .args
+                .iter()
+                .any(|arg| matches!(arg, FunctionArg::Named { .. }))
+        {
+            self.bind_make_interval_named_args(arg_list)?
+        } else {
+            arg_list
+                .args
+                .iter()
+                .map(|arg| self.bind_function_arg(arg))
+                .flatten_ok()
+                .try_collect()?
+        };
 
         let mut referred_udfs = HashSet::new();
 
@@ -764,6 +773,63 @@ impl Binder {
             FunctionArgExpr::Wildcard(None) => Ok(vec![]),
             FunctionArgExpr::Wildcard(Some(_)) => unreachable!(),
         }
+    }
+
+    fn bind_make_interval_named_args(&mut self, arg_list: &FunctionArgList) -> Result<Vec<ExprImpl>> {
+        let mut years = ExprImpl::literal_int(0);
+        let mut months = ExprImpl::literal_int(0);
+        let mut weeks = ExprImpl::literal_int(0);
+        let mut days = ExprImpl::literal_int(0);
+        let mut hours = ExprImpl::literal_int(0);
+        let mut mins = ExprImpl::literal_int(0);
+        let mut secs = ExprImpl::literal_f64(0.0);
+
+        let mut seen = HashSet::new();
+        for arg in &arg_list.args {
+            let FunctionArg::Named { name, arg } = arg else {
+                return Err(ErrorCode::InvalidInputSyntax(
+                    "cannot mix positional and named arguments for make_interval".to_owned(),
+                )
+                .into());
+            };
+
+            let key = name.real_value().to_ascii_lowercase();
+            if !seen.insert(key.clone()) {
+                return Err(ErrorCode::InvalidInputSyntax(format!(
+                    "duplicate named argument: {key}"
+                ))
+                .into());
+            }
+
+            let mut bound = self.bind_function_expr_arg(arg)?;
+            let value = match bound.len() {
+                1 => bound.pop().unwrap(),
+                _ => {
+                    return Err(ErrorCode::InvalidInputSyntax(
+                        "named argument must be a single expression".to_owned(),
+                    )
+                    .into())
+                }
+            };
+
+            match key.as_str() {
+                "years" => years = value,
+                "months" => months = value,
+                "weeks" => weeks = value,
+                "days" => days = value,
+                "hours" => hours = value,
+                "mins" => mins = value,
+                "secs" => secs = value,
+                _ => {
+                    return Err(ErrorCode::InvalidInputSyntax(format!(
+                        "unsupported named argument for make_interval: {key}"
+                    ))
+                    .into())
+                }
+            }
+        }
+
+        Ok(vec![years, months, weeks, days, hours, mins, secs])
     }
 
     pub(in crate::binder) fn bind_function_arg(
