@@ -9,7 +9,7 @@ repository = { workspace = true }
 
 [dependencies]
 ahash = "0.8"
-allocator-api2 = "0.2"
+allocator-api2 = "0.4"
 anyhow = "1"
 arc-swap = { workspace = true }
 arrow-54-array = { package = "arrow-array", version = "54" }
