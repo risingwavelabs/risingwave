@@ -56,3 +56,34 @@
   expected_outputs:
     - eowc_stream_plan
     - stream_plan
+# Numbering functions (row_number/rank/dense_rank) require intermediate state persistence on EOWC
+- id: multiple numbering functions over eowc source each get a state column
+  sql: |
+    create source t (a int, b int, tm timestamp, watermark for tm as tm - interval '5 minutes') with (connector = 'kinesis') FORMAT PLAIN ENCODE JSON;
+    select
+      row_number() over (partition by b order by tm),
+      rank() over (partition by b order by tm),
+      dense_rank() over (partition by b order by tm)
+    from t;
+  expected_outputs:
+    - eowc_stream_dist_plan
+    - eowc_stream_plan
+- id: mixed numbering and non-numbering functions over eowc source still has intermediate state table
+  sql: |
+    create source t (a int, b int, tm timestamp, watermark for tm as tm - interval '5 minutes') with (connector = 'kinesis') FORMAT PLAIN ENCODE JSON;
+    select
+      row_number() over (partition by b order by tm),
+      lag(a) over (partition by b order by tm)
+    from t;
+  expected_outputs:
+    - eowc_stream_dist_plan
+    - eowc_stream_plan
+- id: non-numbering functions only over eowc source has no intermediate state table
+  sql: |
+    create source t (a int, b int, tm timestamp, watermark for tm as tm - interval '5 minutes') with (connector = 'kinesis') FORMAT PLAIN ENCODE JSON;
+    select
+      lag(a) over (partition by b order by tm) as lag1,
+      lag(a, 2) over (partition by b order by tm) as lag2
+    from t;
+  expected_outputs:
+    - eowc_stream_dist_plan
