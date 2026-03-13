@@ -1,0 +1,47 @@
+statement ok
+set sink_decouple = false;
+
+# Kafka: verify supported alter-on-fly props.
+statement ok
+CREATE TABLE table_kafka (
+    id INT PRIMARY KEY,
+    v1 VARCHAR
+);
+
+statement ok
+CREATE SINK sink_kafka FROM table_kafka WITH (
+    connector = 'kafka',
+    properties.bootstrap.server = 'message_queue:29092',
+    topic = 'test-rw-sink-alter-connector-props',
+    type = 'upsert',
+    primary_key = 'id'
+);
+
+
+# FIXME: `properties.allow.auto.create.topics` is the only kafka sink connector
+# property that can be stably altered in CI. Other allow-listed properties currently
+# fail at runtime with `failed to collect barrier` during ALTER SINK.
+
+statement ok
+ALTER SINK sink_kafka CONNECTOR WITH (
+    properties.allow.auto.create.topics = 'true',
+);
+
+query I
+select count(*)
+from rw_sinks
+where name = 'sink_kafka'
+  and definition ilike '%properties.allow."auto"."create".topics = ''true''%'
+----
+1
+
+statement error Field 'topic' is not allowed to be altered on the fly for sink: kafka
+ALTER SINK sink_kafka CONNECTOR WITH (
+    topic = 'test-rw-sink-alter-connector-props-2'
+);
+
+statement ok
+DROP SINK sink_kafka;
+
+statement ok
+DROP TABLE table_kafka;
