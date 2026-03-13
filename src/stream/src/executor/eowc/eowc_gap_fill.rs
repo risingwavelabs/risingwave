@@ -23,7 +23,6 @@ use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{CheckedAdd, ToOwnedDatum};
 use risingwave_expr::ExprError;
 use risingwave_expr::expr::NonStrictExpression;
-use tracing::warn;
 
 use super::sort_buffer::SortBuffer;
 use crate::executor::prelude::*;
@@ -71,39 +70,47 @@ struct ExecutionVars<S: StateStore> {
 }
 
 impl<S: StateStore> ExecutorInner<S> {
-    fn generate_filled_rows(
-        prev_row: &OwnedRow,
-        curr_row: &OwnedRow,
+    #[try_stream(ok = StreamChunk, error = ExprError)]
+    async fn generate_filled_rows<'a>(
+        prev_row: &'a OwnedRow,
+        curr_row: &'a OwnedRow,
         time_column_index: usize,
-        fill_columns: &HashMap<usize, FillStrategy>,
+        fill_columns: &'a HashMap<usize, FillStrategy>,
         interval: risingwave_common::types::Interval,
-        metrics: &GapFillMetrics,
-    ) -> Result<Vec<OwnedRow>, ExprError> {
-        let mut filled_rows = Vec::new();
-        let (Some(prev_time_scalar), Some(curr_time_scalar)) = (
-            prev_row.datum_at(time_column_index),
-            curr_row.datum_at(time_column_index),
-        ) else {
-            return Ok(filled_rows);
-        };
+        metrics: &'a GapFillMetrics,
+        chunk_builder: &'a mut StreamChunkBuilder,
+    ) {
+        // Time column should never be NULL due to validation in execute_inner
+        let prev_time_scalar = prev_row
+            .datum_at(time_column_index)
+            .expect("Gap fill time column must be non-NULL");
+        let curr_time_scalar = curr_row
+            .datum_at(time_column_index)
+            .expect("Gap fill time column must be non-NULL");
 
         let prev_time = match prev_time_scalar {
             ScalarRefImpl::Timestamp(ts) => ts,
             ScalarRefImpl::Timestamptz(ts) => {
                 match risingwave_common::types::Timestamp::with_micros(ts.timestamp_micros()) {
-                    Ok(timestamp) => timestamp,
+                    Ok(t) => t,
                     Err(_) => {
-                        warn!("Failed to convert timestamptz to timestamp: {:?}", ts);
-                        return Ok(filled_rows);
+                        tracing::error!(
+                            "Gap fill skipped: failed to convert prev timestamptz to timestamp: {:?}",
+                            ts
+                        );
+                        return Ok(());
                     }
                 }
             }
             _ => {
-                warn!(
-                    "Failed to convert time column to timestamp, got {:?}. Skipping gap fill.",
-                    prev_time_scalar
-                );
-                return Ok(filled_rows);
+                return Err(ExprError::InvalidParam {
+                    name: "time_column",
+                    reason: format!(
+                        "Time column must be Timestamp or Timestamptz, got {:?}",
+                        prev_time_scalar
+                    )
+                    .into(),
+                });
             }
         };
 
@@ -111,36 +118,44 @@ impl<S: StateStore> ExecutorInner<S> {
             ScalarRefImpl::Timestamp(ts) => ts,
             ScalarRefImpl::Timestamptz(ts) => {
                 match risingwave_common::types::Timestamp::with_micros(ts.timestamp_micros()) {
-                    Ok(timestamp) => timestamp,
+                    Ok(t) => t,
                     Err(_) => {
-                        warn!("Failed to convert timestamptz to timestamp: {:?}", ts);
-                        return Ok(filled_rows);
+                        tracing::error!(
+                            "Gap fill skipped: failed to convert timestamptz to timestamp: {:?}",
+                            ts
+                        );
+                        return Ok(());
                     }
                 }
             }
             _ => {
-                warn!(
-                    "Failed to convert time column to timestamp, got {:?}. Skipping gap fill.",
-                    curr_time_scalar
-                );
-                return Ok(filled_rows);
+                return Err(ExprError::InvalidParam {
+                    name: "time_column",
+                    reason: format!(
+                        "Time column must be Timestamp or Timestamptz, got {:?}",
+                        curr_time_scalar
+                    )
+                    .into(),
+                });
             }
         };
-        if prev_time >= curr_time {
-            return Ok(filled_rows);
-        }
 
         let mut fill_time = match prev_time.checked_add(interval) {
             Some(t) => t,
             None => {
-                return Ok(filled_rows);
+                warn!(
+                    "Gap fill interval is too large, causing timestamp overflow. \
+                     No gap filling will be performed between {:?} and {:?}.",
+                    prev_time, curr_time
+                );
+                return Ok(());
             }
         };
         if fill_time >= curr_time {
-            return Ok(filled_rows);
+            return Ok(());
         }
 
-        // Calculate the number of rows to fill
+        // Calculate the number of rows to fill for interpolation step calculation
         let mut row_count = 0;
         let mut temp_time = fill_time;
         while temp_time < curr_time {
@@ -175,7 +190,11 @@ impl<S: StateStore> ExecutorInner<S> {
             }
         }
 
+        // Track total generated rows for metrics
+        let mut total_generated_rows = 0u64;
+
         // Generate filled rows, applying the appropriate strategy for each column
+        // Output chunks as we go to avoid keeping all rows in memory
         while fill_time < curr_time {
             let mut new_row_data = Vec::with_capacity(prev_row.len());
 
@@ -216,7 +235,13 @@ impl<S: StateStore> ExecutorInner<S> {
                 new_row_data.push(datum);
             }
 
-            filled_rows.push(OwnedRow::new(new_row_data));
+            let filled_row = OwnedRow::new(new_row_data);
+            total_generated_rows += 1;
+
+            // Append row to chunk builder and yield chunk if full
+            if let Some(chunk) = chunk_builder.append_row(Op::Insert, &filled_row) {
+                yield chunk;
+            }
 
             fill_time = match fill_time.checked_add(interval) {
                 Some(t) => t,
@@ -224,7 +249,7 @@ impl<S: StateStore> ExecutorInner<S> {
                     // Time overflow during iteration, stop filling
                     warn!(
                         "Gap fill stopped due to timestamp overflow after generating {} rows.",
-                        filled_rows.len()
+                        total_generated_rows
                     );
                     break;
                 }
@@ -234,9 +259,7 @@ impl<S: StateStore> ExecutorInner<S> {
         // Update metrics with the number of generated rows
         metrics
             .gap_fill_generated_rows_count
-            .inc_by(filled_rows.len() as u64);
-
-        Ok(filled_rows)
+            .inc_by(total_generated_rows);
     }
 }
 
@@ -325,21 +348,24 @@ impl<S: StateStore> EowcGapFillExecutor<S> {
                         .consume(watermark.val.clone(), &mut this.buffer_table)
                     {
                         let current_row = row?;
+
+                        // Validate that time column is not NULL
+                        let _ = current_row
+                            .datum_at(this.time_column_index)
+                            .expect("Gap fill time column must be non-NULL");
+
                         if let Some(p_row) = &staging_prev_row {
-                            let filled_rows = ExecutorInner::<S>::generate_filled_rows(
+                            #[for_await]
+                            for chunk in ExecutorInner::<S>::generate_filled_rows(
                                 p_row,
                                 &current_row,
                                 this.time_column_index,
                                 &this.fill_columns,
                                 interval,
                                 &this.metrics,
-                            )?;
-                            for filled_row in filled_rows {
-                                if let Some(chunk) =
-                                    chunk_builder.append_row(Op::Insert, &filled_row)
-                                {
-                                    yield Message::Chunk(chunk);
-                                }
+                                &mut chunk_builder,
+                            ) {
+                                yield Message::Chunk(chunk?);
                             }
                         }
                         if let Some(chunk) = chunk_builder.append_row(Op::Insert, &current_row) {
