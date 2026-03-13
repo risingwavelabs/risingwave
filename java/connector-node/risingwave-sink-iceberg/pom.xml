@@ -18,8 +18,8 @@
     <properties>
         <iceberg.version>1.10.1</iceberg.version>
         <!-- Keep in sync with the versions bundled in org.apache.iceberg:iceberg-gcp-bundle -->
-        <google.cloud.storage.version>2.55.0</google.cloud.storage.version>
-        <google.cloud.kms.version>2.75.0</google.cloud.kms.version>
+        <google.cloud.storage.version>2.64.0</google.cloud.storage.version>
+        <google.cloud.kms.version>2.89.0</google.cloud.kms.version>
         <maven.compiler.source>11</maven.compiler.source>
         <maven.compiler.target>11</maven.compiler.target>
         <maven.javadoc.skip>true</maven.javadoc.skip>
