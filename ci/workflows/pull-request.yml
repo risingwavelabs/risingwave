@@ -141,10 +141,7 @@ steps:
     retry: *auto-retry
   - label: "e2e preload-memory test"
     command: "DEFAULT_ENABLE_MEM_PRELOAD_STATE_TABLE=true ci/scripts/e2e-test-serial.sh -p ci-dev -m ci-3streaming-2serving-3fe"
-    if: |
-      !(build.pull_request.labels includes "ci/pr/run-selected") && build.env("CI_STEPS") == null
-      || build.pull_request.labels includes "ci/run-preload-memory-tests"
-      || build.env("CI_STEPS") =~ /(^|,)e2e-tests?(,|$$)/
+    if: build.pull_request.labels includes "ci/run-preload-memory-tests"
     depends_on:
       - "build"
     plugins:
@@ -215,10 +212,7 @@ steps:
 
   - label: "end-to-end source test"
     command: "ci/scripts/e2e-source-test.sh -p ci-dev"
-    if: |
-      !(build.pull_request.labels includes "ci/pr/run-selected") && build.env("CI_STEPS") == null
-      || build.pull_request.labels includes "ci/run-e2e-source-tests"
-      || build.env("CI_STEPS") =~ /(^|,)e2e-source-tests?(,|$$)/
+    if: build.pull_request.labels includes "ci/run-e2e-source-tests" || build.env("CI_STEPS") =~ /(^|,)e2e-source-tests?(,|$$)/
     depends_on:
       - "build"
       - "build-other"
@@ -233,10 +227,7 @@ steps:
 
   - label: "end-to-end sink test"
     command: "ci/scripts/e2e-sink-test.sh -p ci-dev"
-    if: |
-      !(build.pull_request.labels includes "ci/pr/run-selected") && build.env("CI_STEPS") == null
-      || build.pull_request.labels includes "ci/run-e2e-sink-tests"
-      || build.env("CI_STEPS") =~ /(^|,)e2e-sink-tests?(,|$$)/
+    if: build.pull_request.labels includes "ci/run-e2e-sink-tests" || build.env("CI_STEPS") =~ /(^|,)e2e-sink-tests?(,|$$)/
     depends_on:
       - "build"
       - "build-other"
@@ -583,9 +574,7 @@ steps:
     retry: *auto-retry
   - label: "preload memory recovery test (deterministic simulation)"
     command: "DEFAULT_ENABLE_MEM_PRELOAD_STATE_TABLE=true TEST_NUM=4 KILL_RATE=1.0 BACKGROUND_DDL_RATE=0.0 ci/scripts/deterministic-recovery-test.sh"
-    if: |
-      !(build.pull_request.labels includes "ci/pr/run-selected") && build.env("CI_STEPS") == null
-      || build.pull_request.labels includes "ci/run-preload-memory-tests"
+    if: build.pull_request.labels includes "ci/run-preload-memory-tests"
     depends_on: "build-simulation"
     plugins:
       - docker-compose#v5.5.0: *docker-compose
