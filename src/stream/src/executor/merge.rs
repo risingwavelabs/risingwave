@@ -885,6 +885,7 @@ mod tests {
                         risingwave_pb::stream_plan::stream_message_batch::StreamMessageBatch::BarrierBatch(
                             BarrierBatch {
                                 barriers: vec![barrier.to_protobuf()],
+                                ..Default::default()
                             },
                         ),
                     ),
