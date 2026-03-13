@@ -55,7 +55,7 @@ pub use interval_array::{IntervalArray, IntervalArrayBuilder};
 pub use iterator::ArrayIterator;
 pub use jsonb_array::{JsonbArray, JsonbArrayBuilder};
 pub use list_array::{ListArray, ListArrayBuilder, ListRef, ListValue, ListWrite, ListWriter};
-pub use map_array::{MapArray, MapArrayBuilder, MapRef, MapValue};
+pub use map_array::{MapArray, MapArrayBuilder, MapRef, MapValue, MapWrite, MapWriter};
 use paste::paste;
 pub use primitive_array::{PrimitiveArray, PrimitiveArrayBuilder, PrimitiveArrayItemType};
 use risingwave_common_estimate_size::EstimateSize;
@@ -66,7 +66,8 @@ pub use struct_array::{StructArray, StructArrayBuilder, StructRef, StructValue};
 pub use utf8_array::*;
 pub use vector_array::{
     Finite32, VECTOR_AS_LIST_TYPE, VECTOR_DISTANCE_TYPE, VECTOR_ITEM_TYPE, VectorArray,
-    VectorArrayBuilder, VectorDistanceType, VectorItemType, VectorRef, VectorVal,
+    VectorArrayBuilder, VectorDistanceType, VectorItemType, VectorRef, VectorVal, VectorWrite,
+    VectorWriter,
 };
 
 pub use self::error::ArrayError;
