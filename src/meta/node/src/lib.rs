@@ -393,6 +393,11 @@ pub fn start(
                     .meta
                     .hummock_version_checkpoint_interval_sec,
                 enable_hummock_data_archive: config.meta.enable_hummock_data_archive,
+                checkpoint_compression_algorithm: config.meta.checkpoint_compression_algorithm,
+                checkpoint_read_chunk_size: config.meta.checkpoint_read_chunk_size,
+                checkpoint_read_max_in_flight_chunks: config
+                    .meta
+                    .checkpoint_read_max_in_flight_chunks,
                 hummock_time_travel_snapshot_interval: config
                     .meta
                     .hummock_time_travel_snapshot_interval,
@@ -577,6 +582,18 @@ fn validate_config(config: &RwConfig) {
 
     if config.meta.parallelism_control_batch_size == 0 {
         let error_msg = "parallelism control batch size should be larger than 0";
+        tracing::error!(error_msg);
+        panic!("{}", error_msg);
+    }
+
+    if config.meta.checkpoint_read_chunk_size == 0 {
+        let error_msg = "checkpoint read chunk size should be larger than 0";
+        tracing::error!(error_msg);
+        panic!("{}", error_msg);
+    }
+
+    if config.meta.checkpoint_read_max_in_flight_chunks == 0 {
+        let error_msg = "checkpoint read max in flight chunks should be larger than 0";
         tracing::error!(error_msg);
         panic!("{}", error_msg);
     }

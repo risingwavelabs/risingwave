@@ -533,7 +533,6 @@ pub async fn scan_task_to_chunk_with_deletes(
         .reader_builder()
         .with_batch_size(chunk_size)
         .with_row_group_filtering_enabled(true)
-        .with_row_selection_enabled(true)
         .build();
     let file_scan_stream = tokio_stream::once(Ok(data_file_scan_task));
 
@@ -627,6 +626,7 @@ mod tests {
             partition: None,
             partition_spec: None,
             name_mapping: None,
+            case_sensitive: true,
         }
     }
 

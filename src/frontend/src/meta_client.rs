@@ -34,6 +34,7 @@ use risingwave_pb::meta::cancel_creating_jobs_request::PbJobs;
 use risingwave_pb::meta::list_actor_splits_response::ActorSplit;
 use risingwave_pb::meta::list_actor_states_response::ActorState;
 use risingwave_pb::meta::list_cdc_progress_response::PbCdcProgress;
+use risingwave_pb::meta::list_iceberg_compaction_status_response::IcebergCompactionStatus;
 use risingwave_pb::meta::list_iceberg_tables_response::IcebergTable;
 use risingwave_pb::meta::list_rate_limits_response::RateLimitInfo;
 use risingwave_pb::meta::list_refresh_table_states_response::RefreshTableState;
@@ -155,6 +156,8 @@ pub trait FrontendMetaClient: Send + Sync {
     async fn list_cdc_progress(&self) -> Result<HashMap<JobId, PbCdcProgress>>;
 
     async fn list_refresh_table_states(&self) -> Result<Vec<RefreshTableState>>;
+
+    async fn list_iceberg_compaction_status(&self) -> Result<Vec<IcebergCompactionStatus>>;
 
     async fn get_meta_store_endpoint(&self) -> Result<String>;
 
@@ -542,5 +545,9 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
 
     async fn list_refresh_table_states(&self) -> Result<Vec<RefreshTableState>> {
         self.0.list_refresh_table_states().await
+    }
+
+    async fn list_iceberg_compaction_status(&self) -> Result<Vec<IcebergCompactionStatus>> {
+        self.0.list_iceberg_compaction_status().await
     }
 }

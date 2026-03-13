@@ -33,13 +33,14 @@ use risingwave_meta_model::{
     compaction_status, compaction_task, hummock_pinned_version, hummock_version_delta,
     hummock_version_stats,
 };
+use risingwave_pb::hummock::compact_task::TaskStatus;
 use risingwave_pb::hummock::{
     HummockVersionStats, PbCompactTaskAssignment, PbCompactionGroupInfo,
     SubscribeCompactionEventRequest,
 };
 use table_write_throughput_statistic::TableWriteThroughputStatisticManager;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
-use tokio::sync::{Mutex, Semaphore};
+use tokio::sync::{Mutex, Semaphore, oneshot};
 use tonic::Streaming;
 
 use crate::MetaResult;
@@ -73,7 +74,7 @@ mod worker;
 pub use commit_epoch::{CommitEpochInfo, NewTableFragmentInfo};
 pub use compaction::compaction_event_loop::*;
 use compaction::*;
-pub use compaction::{GroupState, GroupStateValidator};
+pub use compaction::{GroupState, GroupStateValidator, ManualCompactionTriggerResult};
 pub(crate) use utils::*;
 
 struct TableCommittedEpochNotifiers {
@@ -103,6 +104,40 @@ impl TableCommittedEpochNotifiers {
                 true
             }
         })
+    }
+}
+
+#[derive(Clone, Debug)]
+struct CompactionTaskReportResult {
+    task_id: HummockCompactionTaskId,
+    #[allow(dead_code)]
+    task_status: TaskStatus,
+    reported: bool,
+}
+
+struct CompactionTaskReportNotifiers {
+    txs: HashMap<HummockCompactionTaskId, Vec<oneshot::Sender<CompactionTaskReportResult>>>,
+}
+
+impl CompactionTaskReportNotifiers {
+    fn register(
+        &mut self,
+        task_id: HummockCompactionTaskId,
+        tx: oneshot::Sender<CompactionTaskReportResult>,
+    ) {
+        self.txs.entry(task_id).or_default().push(tx);
+    }
+
+    fn remove(&mut self, task_id: HummockCompactionTaskId) {
+        self.txs.remove(&task_id);
+    }
+
+    fn notify(&mut self, result: CompactionTaskReportResult) {
+        if let Some(txs) = self.txs.remove(&result.task_id) {
+            for tx in txs {
+                let _ = tx.send(result.clone());
+            }
+        }
     }
 }
 // Update to states are performed as follow:
@@ -135,6 +170,7 @@ pub struct HummockManager {
     table_write_throughput_statistic_manager:
         parking_lot::RwLock<TableWriteThroughputStatisticManager>,
     table_committed_epoch_notifiers: parking_lot::Mutex<TableCommittedEpochNotifiers>,
+    compaction_task_report_notifiers: parking_lot::Mutex<CompactionTaskReportNotifiers>,
 
     // for compactor
     // `compactor_streams_change_tx` is used to pass the mapping from `context_id` to event_stream
@@ -336,6 +372,11 @@ impl HummockManager {
                     txs: Default::default(),
                 },
             ),
+            compaction_task_report_notifiers: parking_lot::Mutex::new(
+                CompactionTaskReportNotifiers {
+                    txs: Default::default(),
+                },
+            ),
             compactor_streams_change_tx,
             compaction_state: CompactionState::new(),
             full_gc_state: FullGcState::new().into(),
@@ -417,7 +458,7 @@ impl HummockManager {
                 .map(|m| {
                     (
                         m.id,
-                        HummockVersionDelta::from_persisted_protobuf(&m.into()),
+                        HummockVersionDelta::from_persisted_protobuf_owned(m.into()),
                     )
                 })
                 .collect();

@@ -20,7 +20,7 @@ use futures::stream;
 use itertools::Itertools;
 use parking_lot::RwLock;
 use risingwave_common::array::Op;
-use risingwave_common::array::arrow::arrow_array_56 as arrow;
+use risingwave_common::array::arrow::arrow_array_57 as arrow;
 use risingwave_common::id::TableId;
 use risingwave_common::types::{JsonbVal, Scalar, ScalarRef};
 use risingwave_connector::source::ConnectorProperties;

@@ -71,7 +71,8 @@ use crate::model::{
 };
 use crate::stream::{
     AutoRefreshSchemaSinkContext, ConnectorPropsChange, ExtendedFragmentBackfillOrder,
-    SplitAssignment, SplitState, UpstreamSinkInfo, build_actor_connector_splits,
+    ReplaceJobSplitPlan, SourceSplitAssignment, SplitAssignment, SplitState, UpstreamSinkInfo,
+    build_actor_connector_splits,
 };
 use crate::{MetaError, MetaResult};
 
@@ -299,12 +300,9 @@ pub struct ReplaceStreamJobPlan {
     /// connect to the new fragment.
     pub replace_upstream: FragmentReplaceUpstream,
     pub upstream_fragment_downstreams: FragmentDownstreamRelation,
-    /// For a table with connector, the `SourceExecutor` actor will also be rebuilt with new actor ids.
-    /// We need to reassign splits for it.
-    ///
-    /// Note that there's no `SourceBackfillExecutor` involved for table with connector, so we don't need to worry about
-    /// `backfill_splits`.
-    pub init_split_assignment: SplitAssignment,
+    /// Split plan for the replace job. Determines how splits are resolved in Phase 2
+    /// inside the barrier worker.
+    pub split_plan: ReplaceJobSplitPlan,
     /// The `StreamingJob` info of the table to be replaced. Must be `StreamingJob::Table`
     pub streaming_job: StreamingJob,
     /// The temporary dummy job fragments id of new table fragment
@@ -342,7 +340,8 @@ pub struct CreateStreamingJobCommandInfo {
     #[educe(Debug(ignore))]
     pub stream_job_fragments: StreamJobFragmentsToCreate,
     pub upstream_fragment_downstreams: FragmentDownstreamRelation,
-    pub init_split_assignment: SplitAssignment,
+    /// Source-level split assignment (Phase 1). Resolved to actor-level in the barrier worker.
+    pub init_split_assignment: SourceSplitAssignment,
     pub definition: String,
     pub job_type: StreamingJobType,
     pub create_type: CreateType,
@@ -354,6 +353,7 @@ pub struct CreateStreamingJobCommandInfo {
 }
 
 impl StreamJobFragments {
+    /// Build fragment-level info for new fragments, populating actor splits from the given assignment.
     pub(super) fn new_fragment_info<'a>(
         &'a self,
         assignment: &'a SplitAssignment,
@@ -681,11 +681,15 @@ pub enum PostCollectCommand {
         info: CreateStreamingJobCommandInfo,
         job_type: CreateStreamingJobType,
         cross_db_snapshot_backfill_info: SnapshotBackfillInfo,
+        resolved_split_assignment: SplitAssignment,
     },
     Reschedule {
         reschedules: HashMap<FragmentId, Reschedule>,
     },
-    ReplaceStreamJob(ReplaceStreamJobPlan),
+    ReplaceStreamJob {
+        plan: ReplaceStreamJobPlan,
+        resolved_split_assignment: SplitAssignment,
+    },
     SourceChangeSplit {
         split_assignment: SplitAssignment,
     },
@@ -709,7 +713,7 @@ impl PostCollectCommand {
             PostCollectCommand::DropStreamingJobs { .. } => "DropStreamingJobs",
             PostCollectCommand::CreateStreamingJob { .. } => "CreateStreamingJob",
             PostCollectCommand::Reschedule { .. } => "Reschedule",
-            PostCollectCommand::ReplaceStreamJob(_) => "ReplaceStreamJob",
+            PostCollectCommand::ReplaceStreamJob { .. } => "ReplaceStreamJob",
             PostCollectCommand::SourceChangeSplit { .. } => "SourceChangeSplit",
             PostCollectCommand::CreateSubscription { .. } => "CreateSubscription",
             PostCollectCommand::ConnectorPropsChange(_) => "ConnectorPropsChange",
@@ -1000,12 +1004,12 @@ impl Command {
         edges: &mut FragmentEdgeBuildResult,
         control_stream_manager: &ControlStreamManager,
         actor_cdc_table_snapshot_splits: Option<HashMap<ActorId, PbCdcTableSnapshotSplits>>,
+        split_assignment: &SplitAssignment,
     ) -> MetaResult<Mutation> {
         {
             {
                 let CreateStreamingJobCommandInfo {
                     stream_job_fragments,
-                    init_split_assignment: split_assignment,
                     upstream_fragment_downstreams,
                     fragment_backfill_ordering,
                     streaming_job,
@@ -1109,12 +1113,12 @@ impl Command {
             old_fragments,
             replace_upstream,
             upstream_fragment_downstreams,
-            init_split_assignment,
             auto_refresh_schema_sinks,
             ..
         }: &ReplaceStreamJobPlan,
         edges: &mut FragmentEdgeBuildResult,
         database_info: &mut InflightDatabaseInfo,
+        split_assignment: &SplitAssignment,
     ) -> MetaResult<Option<Mutation>> {
         {
             {
@@ -1147,7 +1151,7 @@ impl Command {
                     ),
                     merge_updates,
                     dispatchers,
-                    init_split_assignment,
+                    split_assignment,
                     actor_cdc_table_snapshot_splits,
                     auto_refresh_schema_sinks.as_ref(),
                 ))
@@ -1600,7 +1604,7 @@ impl Command {
         dropped_actors: impl IntoIterator<Item = ActorId>,
         merge_updates: HashMap<FragmentId, Vec<MergeUpdate>>,
         dispatchers: FragmentActorDispatchers,
-        init_split_assignment: &SplitAssignment,
+        split_assignment: &SplitAssignment,
         cdc_table_snapshot_split_assignment: Option<PbCdcTableSnapshotSplitsWithGeneration>,
         auto_refresh_schema_sinks: Option<&Vec<AutoRefreshSchemaSinkContext>>,
     ) -> Option<Mutation> {
@@ -1612,7 +1616,7 @@ impl Command {
             .map(|(actor_id, dispatchers)| (actor_id, Dispatchers { dispatchers }))
             .collect();
 
-        let actor_splits = init_split_assignment
+        let actor_splits = split_assignment
             .values()
             .flat_map(build_actor_connector_splits)
             .collect();

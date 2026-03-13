@@ -1529,7 +1529,7 @@ impl ToStream for LogicalAgg {
         }
 
         // Return the same plan directly without calling `try_better_locality` on input.
-        // Because in `to_stream`, we will enforce the locality requirement on the group keys anyway.
+        // Because in `logical_rewrite_for_stream`, we will enforce the locality requirement on the group keys anyway.
         // If we call `try_better_locality` on input, it would miss the chance to utilize the locality of the current agg,
         // since the agg's input doesn't have the locality yet at that moment.
         Some(self.clone_with_input(self.input()).into())
