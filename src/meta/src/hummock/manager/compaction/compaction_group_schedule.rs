@@ -740,6 +740,268 @@ impl HummockManager {
 }
 
 impl HummockManager {
+    /// Normalize overlapping adjacent compaction groups by split only.
+    ///
+    /// The algorithm repeatedly scans adjacent groups by `min(table_id)` and if
+    /// `max(left) >= min(right)`, it splits `left` at the first table id `>= min(right)`.
+    /// Each split is appended as an ordered version delta, and all deltas are committed in one
+    /// meta-store transaction for better scheduling efficiency.
+    pub async fn normalize_overlapping_compaction_groups(&self) -> Result<usize> {
+        #[derive(Clone)]
+        struct NormalizeGroupInfo {
+            group_id: CompactionGroupId,
+            table_ids: Vec<StateTableId>,
+            disable_auto_group_scheduling: bool,
+        }
+
+        let mut split_count = 0usize;
+        let mut touched_parent_groups = HashSet::new();
+        let mut split_parent_groups = Vec::new();
+
+        {
+            let mut versioning_guard = self.versioning.write().await;
+            let versioning = versioning_guard.deref_mut();
+            let mut compaction_group_manager = self.compaction_group_manager.write().await;
+            let mut compaction_groups_txn = compaction_group_manager.start_compaction_groups_txn();
+
+            let mut version = HummockVersionTransaction::new(
+                &mut versioning.current_version,
+                &mut versioning.hummock_version_deltas,
+                self.env.notification_manager(),
+                None,
+                &self.metrics,
+            );
+
+            loop {
+                let mut groups = vec![];
+                let latest_version = version.latest_version();
+                for group_id in latest_version.levels.keys() {
+                    let table_ids = latest_version
+                        .state_table_info
+                        .compaction_group_member_table_ids(*group_id)
+                        .iter()
+                        .copied()
+                        .collect_vec();
+                    if table_ids.is_empty() {
+                        continue;
+                    }
+
+                    let group_config = compaction_groups_txn
+                        .try_get_compaction_group_config(*group_id)
+                        .ok_or_else(|| {
+                            Error::CompactionGroup(format!(
+                                "group {} config not found during normalize",
+                                group_id
+                            ))
+                        })?;
+                    groups.push(NormalizeGroupInfo {
+                        group_id: *group_id,
+                        table_ids,
+                        disable_auto_group_scheduling: group_config
+                            .compaction_config
+                            .disable_auto_group_scheduling
+                            .unwrap_or(false),
+                    });
+                }
+
+                groups.sort_by_key(|group| group.table_ids[0]);
+
+                let mut split_candidate = None;
+                for pair in groups.windows(2) {
+                    let left = &pair[0];
+                    let right = &pair[1];
+
+                    if left.table_ids.len() <= 1 || right.table_ids.is_empty() {
+                        continue;
+                    }
+                    if left.disable_auto_group_scheduling {
+                        continue;
+                    }
+
+                    let left_max = *left.table_ids.last().unwrap();
+                    let right_min = right.table_ids[0];
+                    if left_max < right_min {
+                        continue;
+                    }
+
+                    let Some(&boundary_table_id) = left
+                        .table_ids
+                        .iter()
+                        .find(|&&table_id| table_id >= right_min)
+                    else {
+                        continue;
+                    };
+
+                    split_candidate = Some((
+                        left.group_id,
+                        right.group_id,
+                        left.table_ids.clone(),
+                        boundary_table_id,
+                        right_min,
+                    ));
+                    break;
+                }
+
+                let Some((
+                    parent_group_id,
+                    right_group_id,
+                    parent_table_ids,
+                    boundary_table_id,
+                    right_min_table_id,
+                )) = split_candidate
+                else {
+                    break;
+                };
+
+                let split_full_key =
+                    group_split::build_split_full_key(boundary_table_id, VirtualNode::ZERO);
+                let (table_ids_left, table_ids_right) =
+                    group_split::split_table_ids_with_table_id_and_vnode(
+                        &parent_table_ids,
+                        split_full_key.user_key.table_id,
+                        split_full_key.user_key.get_vnode_id(),
+                    );
+                if table_ids_left.is_empty() || table_ids_right.is_empty() {
+                    tracing::debug!(
+                        "normalize split skipped because one side is empty. parent_group_id={} boundary={}",
+                        parent_group_id,
+                        boundary_table_id
+                    );
+                    break;
+                }
+
+                let mut new_version_delta = version.new_delta();
+                let split_key: Bytes = split_full_key.encode().into();
+                let split_sst_count = new_version_delta
+                    .latest_version()
+                    .count_new_ssts_in_group_split(parent_group_id, split_key.clone());
+                let new_sst_start_id = next_sstable_id(&self.env, split_sst_count).await?;
+                let new_compaction_group_id = next_compaction_group_id(&self.env).await?;
+                let config = compaction_groups_txn
+                    .try_get_compaction_group_config(parent_group_id)
+                    .ok_or_else(|| {
+                        Error::CompactionGroup(format!(
+                            "parent group {} config not found",
+                            parent_group_id
+                        ))
+                    })?
+                    .compaction_config()
+                    .as_ref()
+                    .clone();
+
+                #[expect(deprecated)]
+                new_version_delta.group_deltas.insert(
+                    new_compaction_group_id,
+                    GroupDeltas {
+                        group_deltas: vec![GroupDelta::GroupConstruct(Box::new(
+                            PbGroupConstruct {
+                                group_config: Some(config.clone()),
+                                group_id: new_compaction_group_id,
+                                parent_group_id,
+                                new_sst_start_id,
+                                table_ids: vec![],
+                                version: CompatibilityVersion::LATEST as _,
+                                split_key: Some(split_key.into()),
+                            },
+                        ))],
+                    },
+                );
+
+                new_version_delta.with_latest_version(|version, new_version_delta| {
+                    for &table_id in &table_ids_right {
+                        let info = version
+                            .state_table_info
+                            .info()
+                            .get(&table_id)
+                            .expect("table should exist before normalize split");
+                        assert!(
+                            new_version_delta
+                                .state_table_info_delta
+                                .insert(
+                                    table_id,
+                                    PbStateTableInfoDelta {
+                                        committed_epoch: info.committed_epoch,
+                                        compaction_group_id: new_compaction_group_id,
+                                    }
+                                )
+                                .is_none()
+                        );
+                    }
+                });
+                new_version_delta.pre_apply();
+                compaction_groups_txn
+                    .create_compaction_groups(new_compaction_group_id, Arc::new(config));
+
+                split_count += 1;
+                touched_parent_groups.insert(parent_group_id);
+                split_parent_groups.push(parent_group_id);
+                tracing::info!(
+                    "normalize split success: parent_group={} right_group={} boundary_table_id={} right_min_table_id={} new_group_id={}",
+                    parent_group_id,
+                    right_group_id,
+                    boundary_table_id,
+                    right_min_table_id,
+                    new_compaction_group_id
+                );
+            }
+
+            if split_count == 0 {
+                return Ok(0);
+            }
+
+            commit_multi_var!(self.meta_store_ref(), version, compaction_groups_txn)?;
+            versioning.mark_next_time_travel_version_snapshot();
+        }
+
+        let mut canceled_tasks = vec![];
+        {
+            let compaction_guard = self.compaction.write().await;
+            let mut versioning_guard = self.versioning.write().await;
+            let versioning = versioning_guard.deref_mut();
+            for parent_group_id in touched_parent_groups {
+                let compact_task_assignments =
+                    compaction_guard.get_compact_task_assignments_by_group_id(parent_group_id);
+                let levels = versioning
+                    .current_version
+                    .get_compaction_group_levels(parent_group_id);
+                compact_task_assignments
+                    .into_iter()
+                    .for_each(|task_assignment| {
+                        if let Some(task) = task_assignment.compact_task.as_ref()
+                            && is_compaction_task_expired(
+                                task.compaction_group_version_id,
+                                levels.compaction_group_version_id,
+                            )
+                        {
+                            canceled_tasks.push(ReportTask {
+                                task_id: task.task_id,
+                                task_status: TaskStatus::ManualCanceled,
+                                table_stats_change: HashMap::default(),
+                                sorted_output_ssts: vec![],
+                                object_timestamps: HashMap::default(),
+                            });
+                        }
+                    });
+            }
+            canceled_tasks.sort_by_key(|task| task.task_id);
+            canceled_tasks.dedup_by_key(|task| task.task_id);
+
+            if !canceled_tasks.is_empty() {
+                self.report_compact_tasks_impl(canceled_tasks, compaction_guard, versioning_guard)
+                    .await?;
+            }
+        }
+
+        for parent_group_id in split_parent_groups {
+            self.metrics
+                .split_compaction_group_count
+                .with_label_values(&[&parent_group_id.to_string()])
+                .inc();
+        }
+
+        Ok(split_count)
+    }
+
     /// Split the compaction group if the group is too large or contains high throughput tables.
     pub async fn try_split_compaction_group(
         &self,
