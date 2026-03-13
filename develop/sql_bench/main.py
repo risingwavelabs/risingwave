@@ -4,6 +4,7 @@ import argparse
 import os
 import subprocess
 import sys
+import urllib.request
 import yaml
 from pathlib import Path
 from textwrap import dedent
@@ -43,10 +44,51 @@ benchmark_sql: |
 runs: 3
 '''
 
+def load_benchmark_config(yaml_path: Path) -> dict:
+    """Load benchmark configuration from YAML."""
+    with open(yaml_path) as f:
+        config = yaml.safe_load(f) or {}
+    if not isinstance(config, dict):
+        raise ValueError(f"Invalid benchmark config in {yaml_path}: expected a YAML object")
+    return config
+
+def fetch_metrics_snapshot(metrics_endpoint: str, metric_names: list[str]) -> dict[str, float]:
+    """Fetch a sum snapshot for the given metrics from a Prometheus text endpoint."""
+    snapshot = {metric_name: 0.0 for metric_name in metric_names}
+    request = urllib.request.Request(metrics_endpoint, headers={"Accept": "text/plain"})
+    with urllib.request.urlopen(request, timeout=10) as response:
+        payload = response.read().decode("utf-8")
+
+    for line in payload.splitlines():
+        if not line or line.startswith("#"):
+            continue
+        try:
+            sample, value = line.rsplit(maxsplit=1)
+        except ValueError:
+            continue
+
+        metric_name = sample.split("{", 1)[0]
+        if metric_name not in snapshot:
+            continue
+
+        try:
+            snapshot[metric_name] += float(value)
+        except ValueError:
+            continue
+
+    return snapshot
+
+def print_metrics_delta(before: dict[str, float], after: dict[str, float]) -> None:
+    """Print metrics deltas in a deterministic order."""
+    print("\nKPI Metrics Delta")
+    print("=" * 50)
+    for metric_name in sorted(before):
+        delta = after[metric_name] - before[metric_name]
+        print(f"{metric_name}: before={before[metric_name]:.2f}, after={after[metric_name]:.2f}, delta={delta:.2f}")
+
 def create_benchmark_script(yaml_path: Path, dump_output: bool = False) -> Path:
     """Create a shell script from the YAML configuration."""
-    with open(yaml_path) as f:
-        config = yaml.safe_load(f)
+    config = load_benchmark_config(yaml_path)
 
     # Get values from YAML, using empty strings as defaults
     setup_sql = config.get('setup_sql', '')
@@ -143,6 +185,19 @@ def run_benchmark(bench_name: str, profile: str = "full", pg_url: str | None = N
         print(f"Error: Benchmark configuration '{bench_name}' not found at {yaml_file}")
         sys.exit(1)
 
+    config = load_benchmark_config(yaml_file)
+    configured_metrics_endpoint = str(config.get("metrics_endpoint", "")).strip()
+    metrics_endpoint = os.getenv("RW_SQL_BENCH_METRICS_ENDPOINT", configured_metrics_endpoint).strip()
+    configured_kpi_metrics = config.get("kpi_metrics", [])
+    if configured_kpi_metrics and not isinstance(configured_kpi_metrics, list):
+        print("Error: `kpi_metrics` must be a list of metric names in benchmark YAML")
+        sys.exit(1)
+    kpi_metrics = [
+        metric_name.strip()
+        for metric_name in configured_kpi_metrics
+        if isinstance(metric_name, str) and metric_name.strip()
+    ]
+
     # Prepare environment
     env = os.environ.copy()
     if pg_url:
@@ -162,6 +217,18 @@ def run_benchmark(bench_name: str, profile: str = "full", pg_url: str | None = N
         script_file = create_benchmark_script(yaml_file, dump_output)
 
         try:
+            metrics_before = None
+            if metrics_endpoint and kpi_metrics:
+                try:
+                    metrics_before = fetch_metrics_snapshot(metrics_endpoint, kpi_metrics)
+                    print(f"Collected KPI baseline from {metrics_endpoint}")
+                except Exception as e:
+                    print(
+                        f"Warning: failed to collect KPI baseline from {metrics_endpoint}: {e}. "
+                        "Continuing without KPI deltas.",
+                        file=sys.stderr,
+                    )
+
             print(f"\nRunning benchmark: {bench_name}")
             print("=" * 50)
 
@@ -176,6 +243,13 @@ def run_benchmark(bench_name: str, profile: str = "full", pg_url: str | None = N
 
             # Always print the benchmark results
             print(result.stdout)
+
+            if metrics_before is not None:
+                try:
+                    metrics_after = fetch_metrics_snapshot(metrics_endpoint, kpi_metrics)
+                    print_metrics_delta(metrics_before, metrics_after)
+                except Exception as e:
+                    print(f"Warning: failed to collect KPI post-run snapshot: {e}", file=sys.stderr)
 
             # Only print errors if dump_output is True
             if dump_output and result.stderr:

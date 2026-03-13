@@ -505,6 +505,9 @@ impl<S: StateStore> OverWindowExecutor<S> {
                 .over_window_range_cache_right_miss_count
                 .inc_by(stats.right_miss_count);
             metrics
+                .over_window_affected_range_count
+                .inc_by(stats.affected_range_count);
+            metrics
                 .over_window_accessed_entry_count
                 .inc_by(stats.accessed_entry_count);
             metrics
