@@ -158,6 +158,9 @@ pub struct AvroParserConfig {
     writer_schema_cache: WriterSchemaCache,
 
     map_handling: Option<MapHandling>,
+
+    pub schema_version: Option<String>,
+    pub schema_content: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -197,12 +200,16 @@ impl AvroParserConfig {
                 )?;
                 tracing::debug!("value subject {subject_value}");
 
+                let (schema, version, content) = resolver.get_by_subject(&subject_value).await?;
+
                 Ok(Self {
                     schema: Arc::new(ResolvedAvroSchema::create(
-                        resolver.get_by_subject(&subject_value).await?,
+                        schema,
                     )?),
                     writer_schema_cache: WriterSchemaCache::Confluent(Arc::new(resolver)),
                     map_handling,
+                    schema_version: Some(version.to_string()),
+                    schema_content: Some(content),
                 })
             }
             SchemaLocation::File {
@@ -214,10 +221,13 @@ impl AvroParserConfig {
                 let schema_content = bytes_from_url(url, aws_auth_props.as_ref()).await?;
                 let schema = Schema::parse_reader(&mut schema_content.as_slice())
                     .context("failed to parse avro schema")?;
+                let content_str = String::from_utf8(schema_content).ok();
                 Ok(Self {
                     schema: Arc::new(ResolvedAvroSchema::create(Arc::new(schema))?),
                     writer_schema_cache: WriterSchemaCache::File,
                     map_handling,
+                    schema_version: Some("file".to_owned()),
+                    schema_content: content_str,
                 })
             }
             SchemaLocation::Glue {
@@ -227,11 +237,13 @@ impl AvroParserConfig {
             } => {
                 let resolver =
                     GlueSchemaCacheImpl::new(&aws_auth_props, mock_config.as_deref()).await?;
-                let schema = resolver.get_by_name(&schema_arn).await?;
+                let (schema, version, content) = resolver.get_by_name(&schema_arn).await?;
                 Ok(Self {
                     schema: Arc::new(ResolvedAvroSchema::create(schema)?),
                     writer_schema_cache: WriterSchemaCache::Glue(Arc::new(resolver)),
                     map_handling,
+                    schema_version: Some(version),
+                    schema_content: Some(content),
                 })
             }
         }

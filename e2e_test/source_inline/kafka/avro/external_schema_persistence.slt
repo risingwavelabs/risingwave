@@ -1,0 +1,65 @@
+control substitution on
+
+system ok
+rpk topic create persistence_test_topic -p 1
+
+# Register initial schema: id and name
+system ok
+sr_register persistence_test_topic-value AVRO <<< '{"type":"record","name":"User","fields":[{"name":"id","type":"int"},{"name":"name","type":"string"}]}'
+
+# Produce some data
+system ok
+cat << EOF | rpk topic produce persistence_test_topic -f "%p %v\n" -p 0
+0 {"id": 1, "name": "Alice"}
+1 {"id": 2, "name": "Bob"}
+EOF
+
+# Create source with schema registry (schema inference)
+# This triggers the code path in create_source/external_schema/avro.rs
+statement ok
+create source persistence_source
+with (
+    ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+    topic = 'persistence_test_topic'
+)
+format plain encode avro (
+    schema.registry = '${RISEDEV_SCHEMA_REGISTRY_URL}'
+);
+
+# Verify data matches
+query IT rowsort
+select id, name from persistence_source;
+----
+1 Alice
+2 Bob
+
+# Update schema in registry: add 'age' field with default value
+system ok
+sr_register persistence_test_topic-value AVRO <<< '{"type":"record","name":"User","fields":[{"name":"id","type":"int"},{"name":"name","type":"string"},{"name":"age","type":"int", "default": 18}]}'
+
+# Produce new data with new schema
+system ok
+cat << EOF | rpk topic produce persistence_test_topic -f "%p %v\n" -p 0
+0 {"id": 3, "name": "Charlie", "age": 20}
+EOF
+
+# Alter source to refresh schema
+# This triggers the code path in alter_source_with_sr.rs
+statement ok
+ALTER SOURCE persistence_source FORMAT PLAIN ENCODE AVRO (
+    schema.registry = '${RISEDEV_SCHEMA_REGISTRY_URL}'
+);
+
+# Verify new column is visible and data is correct (including default value for old rows)
+query ITI rowsort
+select id, name, age from persistence_source;
+----
+1 Alice 18
+2 Bob 18
+3 Charlie 20
+
+statement ok
+drop source persistence_source;
+
+system ok
+rpk topic delete persistence_test_topic

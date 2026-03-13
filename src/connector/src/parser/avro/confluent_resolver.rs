@@ -57,12 +57,15 @@ impl ConfluentSchemaCache {
     }
 
     /// Gets the latest schema by subject name, which is used as *reader schema*.
-    pub async fn get_by_subject(&self, subject_name: &str) -> ConnectorResult<Arc<Schema>> {
+    pub async fn get_by_subject(&self, subject_name: &str) -> ConnectorResult<(Arc<Schema>, i32, String)> {
         let raw_schema = self
             .confluent_client
             .get_schema_by_subject(subject_name)
             .await?;
-        self.parse_and_cache_schema(raw_schema).await
+        let id = raw_schema.id;
+        let content = raw_schema.content.clone();
+        let schema = self.parse_and_cache_schema(raw_schema).await?;
+        Ok((schema, id, content))
     }
 
     /// Gets the a specific schema by id, which is used as *writer schema*.
