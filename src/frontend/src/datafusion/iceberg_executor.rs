@@ -239,7 +239,6 @@ impl IcebergScanInner {
             .reader_builder()
             .with_batch_size(chunk_size)
             .with_row_group_filtering_enabled(true)
-            .with_row_selection_enabled(true)
             .build();
 
         for task in &self.tasks[partition] {
