@@ -651,12 +651,25 @@ impl CreatingStreamingJobControl {
         partial_graph_manager: &mut PartialGraphManager,
         barrier_info: &BarrierInfo,
     ) -> MetaResult<CreatingJobInfo> {
+        let max_committed_epoch = self.barrier_control.max_committed_epoch();
+        let inflight_barrier_count = self.barrier_control.inflight_barrier_count();
         info!(
             job_id = %self.job_id,
+            partial_graph_id = ?self.partial_graph_id,
             prev_epoch = barrier_info.prev_epoch(),
+            curr_epoch = barrier_info.curr_epoch(),
+            snapshot_epoch = self.snapshot_epoch,
+            ?max_committed_epoch,
+            inflight_barrier_count,
             "start consuming upstream"
         );
         let info = self.status.start_consume_upstream(barrier_info);
+        let stop_actors = info
+            .fragment_infos
+            .values()
+            .flat_map(|info| info.actors.keys().copied())
+            .collect::<Vec<_>>();
+        let stop_actor_count = stop_actors.len();
         Self::inject_barrier(
             self.partial_graph_id,
             partial_graph_manager,
@@ -667,16 +680,21 @@ impl CreatingStreamingJobControl {
             None,
             Some(Mutation::Stop(StopMutation {
                 // stop all actors
-                actors: info
-                    .fragment_infos
-                    .values()
-                    .flat_map(|info| info.actors.keys().copied())
-                    .collect(),
+                actors: stop_actors,
                 dropped_sink_fragments: vec![], // not related to sink-into-table
             })),
             vec![], // no notifiers when start consuming upstream
             None,
         )?;
+        info!(
+            job_id = %self.job_id,
+            partial_graph_id = ?self.partial_graph_id,
+            prev_epoch = barrier_info.prev_epoch(),
+            curr_epoch = barrier_info.curr_epoch(),
+            stop_actor_count,
+            inflight_barrier_count = self.barrier_control.inflight_barrier_count(),
+            "injected stop barrier for snapshot backfill recovery"
+        );
         Ok(info)
     }
 
@@ -692,13 +710,13 @@ impl CreatingStreamingJobControl {
             } else {
                 self.snapshot_epoch
             };
-        self.upstream_lag.set(
-            barrier_info
-                .prev_epoch
-                .value()
-                .0
-                .saturating_sub(progress_epoch) as _,
-        );
+        let upstream_lag = barrier_info
+            .prev_epoch
+            .value()
+            .0
+            .saturating_sub(progress_epoch);
+        self.upstream_lag.set(upstream_lag as _);
+        let has_external_mutation = mutation.is_some();
         let (mut mutation, mut notifiers) = match mutation {
             Some((mutation, notifiers)) => (Some(mutation), notifiers),
             None => (None, vec![]),
@@ -723,6 +741,23 @@ impl CreatingStreamingJobControl {
             }
             assert!(mutation.is_none(), "must have consumed mutation");
             assert!(notifiers.is_empty(), "must consumed notifiers");
+        }
+        if barrier_info.kind.is_checkpoint() {
+            let backfill_progress = self.gen_backfill_progress().progress;
+            info!(
+                job_id = %self.job_id,
+                partial_graph_id = ?self.partial_graph_id,
+                prev_epoch = barrier_info.prev_epoch(),
+                curr_epoch = barrier_info.curr_epoch(),
+                progress_epoch,
+                upstream_lag,
+                ?has_external_mutation,
+                ?barrier_info.kind,
+                max_committed_epoch = ?self.barrier_control.max_committed_epoch(),
+                inflight_barrier_count = self.barrier_control.inflight_barrier_count(),
+                backfill_progress,
+                "snapshot backfill observed upstream checkpoint barrier"
+            );
         }
         Ok(())
     }

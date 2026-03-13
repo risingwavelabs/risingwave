@@ -16,7 +16,7 @@ use std::cmp::{self, Ordering, max};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::ops::Add;
 use std::sync::Arc;
-use std::time::{Duration, SystemTime};
+use std::time::{Duration, Instant, SystemTime};
 
 use itertools::Itertools;
 use risingwave_common::RW_VERSION;
@@ -39,9 +39,10 @@ use risingwave_pb::common::{
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, QuerySelect,
-    TransactionTrait,
+    ActiveModelTrait, ColumnTrait, ConnectionTrait, DatabaseConnection, DbBackend, EntityTrait,
+    QueryFilter, QuerySelect, TransactionTrait,
 };
+use sqlx::{QueryBuilder, Sqlite};
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc::{UnboundedReceiver, unbounded_channel};
 use tokio::sync::oneshot::Sender;
@@ -54,6 +55,25 @@ use crate::model::ClusterId;
 use crate::{MetaError, MetaResult};
 
 pub type ClusterControllerRef = Arc<ClusterController>;
+
+#[derive(sqlx::FromRow)]
+struct WorkerRow {
+    worker_id: u32,
+    worker_type: String,
+    host: String,
+    port: i32,
+}
+
+fn parse_worker_type(value: &str) -> Option<WorkerType> {
+    match value {
+        "FRONTEND" => Some(WorkerType::Frontend),
+        "COMPUTE_NODE" => Some(WorkerType::ComputeNode),
+        "RISE_CTL" => Some(WorkerType::RiseCtl),
+        "COMPACTOR" => Some(WorkerType::Compactor),
+        "META" => Some(WorkerType::Meta),
+        _ => None,
+    }
+}
 
 pub struct ClusterController {
     env: MetaSrvEnv,
@@ -95,6 +115,15 @@ impl From<WorkerInfo> for PbWorkerNode {
 }
 
 impl ClusterController {
+    fn write_lock_warn_threshold() -> Duration {
+        const DEFAULT_WARN_MS: u64 = 200;
+        std::env::var("RW_META_CLUSTER_WRITE_LOCK_WARN_MS")
+            .ok()
+            .and_then(|value| value.parse::<u64>().ok())
+            .map(Duration::from_millis)
+            .unwrap_or(Duration::from_millis(DEFAULT_WARN_MS))
+    }
+
     pub async fn new(env: MetaSrvEnv, max_heartbeat_interval: Duration) -> MetaResult<Self> {
         let inner = ClusterControllerInner::new(
             env.meta_store_ref().conn.clone(),
@@ -150,10 +179,9 @@ impl ClusterController {
         property: AddNodeProperty,
         resource: PbResource,
     ) -> MetaResult<WorkerId> {
-        let worker_id = self
-            .inner
-            .write()
-            .await
+        let mut inner = self.inner.write().await;
+        let hold_start = Instant::now();
+        let worker_id = inner
             .add_worker(
                 r#type,
                 host_address,
@@ -162,6 +190,11 @@ impl ClusterController {
                 self.max_heartbeat_interval,
             )
             .await?;
+        let held = hold_start.elapsed();
+        if held > Self::write_lock_warn_threshold() {
+            tracing::warn!(op = "add_worker", ?held, "cluster write lock held too long");
+        }
+        drop(inner);
 
         // Keep license manager in sync with the latest cluster resource.
         self.update_cluster_resource_for_license().await?;
@@ -171,7 +204,17 @@ impl ClusterController {
 
     pub async fn activate_worker(&self, worker_id: WorkerId) -> MetaResult<()> {
         let inner = self.inner.write().await;
+        let hold_start = Instant::now();
         let worker = inner.activate_worker(worker_id).await?;
+        let held = hold_start.elapsed();
+        if held > Self::write_lock_warn_threshold() {
+            tracing::warn!(
+                op = "activate_worker",
+                ?held,
+                "cluster write lock held too long"
+            );
+        }
+        drop(inner);
 
         // Notify frontends of new compute node and frontend node.
         // Always notify because a running worker's property may have been changed.
@@ -190,7 +233,18 @@ impl ClusterController {
     }
 
     pub async fn delete_worker(&self, host_address: HostAddress) -> MetaResult<WorkerNode> {
-        let worker = self.inner.write().await.delete_worker(host_address).await?;
+        let mut inner = self.inner.write().await;
+        let hold_start = Instant::now();
+        let worker = inner.delete_worker(host_address).await?;
+        let held = hold_start.elapsed();
+        if held > Self::write_lock_warn_threshold() {
+            tracing::warn!(
+                op = "delete_worker",
+                ?held,
+                "cluster write lock held too long"
+            );
+        }
+        drop(inner);
 
         if worker.r#type() == PbWorkerType::ComputeNode || worker.r#type() == PbWorkerType::Frontend
         {
@@ -219,11 +273,30 @@ impl ClusterController {
         worker_id: WorkerId,
         resource: Option<PbResource>,
     ) -> MetaResult<()> {
+        const SLOW_HEARTBEAT_LOCK_THRESHOLD: Duration = Duration::from_millis(200);
         tracing::trace!(target: "events::meta::server_heartbeat", %worker_id, "receive heartbeat");
-        self.inner
-            .write()
-            .await
-            .heartbeat(worker_id, self.max_heartbeat_interval, resource)
+        let start = Instant::now();
+        let mut inner = self.inner.write().await;
+        let waited = start.elapsed();
+        if waited > SLOW_HEARTBEAT_LOCK_THRESHOLD {
+            tracing::warn!(
+                %worker_id,
+                ?waited,
+                "heartbeat wait for cluster write lock is slow"
+            );
+        }
+        let hold_start = Instant::now();
+        let result = inner.heartbeat(worker_id, self.max_heartbeat_interval, resource);
+        let held = hold_start.elapsed();
+        if held > Self::write_lock_warn_threshold() {
+            tracing::warn!(
+                op = "heartbeat",
+                %worker_id,
+                ?held,
+                "cluster write lock held too long"
+            );
+        }
+        result
     }
 
     pub fn start_heartbeat_checker(
@@ -246,6 +319,7 @@ impl ClusterController {
                 }
 
                 let mut inner = cluster_controller.inner.write().await;
+                let hold_start = Instant::now();
                 // 1. Initialize new workers' TTL.
                 for worker in inner
                     .worker_extra_info
@@ -264,24 +338,127 @@ impl ClusterController {
                     .map(|(id, _)| *id)
                     .collect_vec();
 
-                // 3. Delete expired workers.
-                let worker_infos = match Worker::find()
-                    .select_only()
-                    .column(worker::Column::WorkerId)
-                    .column(worker::Column::WorkerType)
-                    .column(worker::Column::Host)
-                    .column(worker::Column::Port)
-                    .filter(worker::Column::WorkerId.is_in(worker_to_delete.clone()))
-                    .into_tuple::<(WorkerId, WorkerType, String, i32)>()
-                    .all(&inner.db)
-                    .await
-                {
-                    Ok(keys) => keys,
-                    Err(err) => {
-                        tracing::warn!(error = %err.as_report(), "Failed to load expire worker info from db");
-                        continue;
+                let slow_threshold = ClusterController::write_lock_warn_threshold();
+                let worker_infos = if worker_to_delete.is_empty() {
+                    Vec::new()
+                } else if inner.db.get_database_backend() == DbBackend::Sqlite {
+                    let acquire_start = Instant::now();
+                    let pool = inner.db.get_sqlite_connection_pool();
+                    let mut conn = match pool.acquire().await {
+                        Ok(conn) => conn,
+                        Err(err) => {
+                            tracing::warn!(
+                                error = %err,
+                                worker_to_delete_len = worker_to_delete.len(),
+                                "Failed to acquire sqlite connection in heartbeat_checker"
+                            );
+                            continue;
+                        }
+                    };
+                    let acquire_elapsed = acquire_start.elapsed();
+                    if acquire_elapsed > slow_threshold {
+                        tracing::warn!(
+                            ?acquire_elapsed,
+                            ?slow_threshold,
+                            worker_to_delete_len = worker_to_delete.len(),
+                            "heartbeat_checker db acquire is slow"
+                        );
                     }
+
+                    let mut builder = QueryBuilder::<Sqlite>::new(
+                        "SELECT worker_id, worker_type, host, port FROM worker WHERE worker_id IN (",
+                    );
+                    let mut separated = builder.separated(", ");
+                    for worker_id in &worker_to_delete {
+                        separated.push_bind(worker_id.as_raw_id());
+                    }
+                    separated.push_unseparated(")");
+
+                    let query_start = Instant::now();
+                    let rows: Vec<WorkerRow> = match builder
+                        .build_query_as()
+                        .fetch_all(&mut *conn)
+                        .await
+                    {
+                        Ok(rows) => rows,
+                        Err(err) => {
+                            tracing::warn!(
+                                error = %err,
+                                worker_to_delete_len = worker_to_delete.len(),
+                                "Failed to load expire worker info from sqlite in heartbeat_checker"
+                            );
+                            continue;
+                        }
+                    };
+                    let query_elapsed = query_start.elapsed();
+                    if query_elapsed > slow_threshold {
+                        tracing::warn!(
+                            ?query_elapsed,
+                            ?slow_threshold,
+                            worker_to_delete_len = worker_to_delete.len(),
+                            "heartbeat_checker db query is slow"
+                        );
+                    }
+
+                    rows.into_iter()
+                        .filter_map(|row| {
+                            let worker_type = match parse_worker_type(&row.worker_type) {
+                                Some(worker_type) => worker_type,
+                                None => {
+                                    tracing::warn!(
+                                        worker_id = row.worker_id,
+                                        worker_type = row.worker_type,
+                                        "Unknown worker type from sqlite in heartbeat_checker"
+                                    );
+                                    return None;
+                                }
+                            };
+                            Some((
+                                WorkerId::new(row.worker_id),
+                                worker_type,
+                                row.host,
+                                row.port,
+                            ))
+                        })
+                        .collect_vec()
+                } else {
+                    let query_start = Instant::now();
+                    let worker_infos = match Worker::find()
+                        .select_only()
+                        .column(worker::Column::WorkerId)
+                        .column(worker::Column::WorkerType)
+                        .column(worker::Column::Host)
+                        .column(worker::Column::Port)
+                        .filter(worker::Column::WorkerId.is_in(worker_to_delete.clone()))
+                        .into_tuple::<(WorkerId, WorkerType, String, i32)>()
+                        .all(&inner.db)
+                        .await
+                    {
+                        Ok(keys) => keys,
+                        Err(err) => {
+                            tracing::warn!(error = %err.as_report(), "Failed to load expire worker info from db");
+                            continue;
+                        }
+                    };
+                    let query_elapsed = query_start.elapsed();
+                    if query_elapsed > slow_threshold {
+                        tracing::warn!(
+                            ?query_elapsed,
+                            ?slow_threshold,
+                            worker_to_delete_len = worker_to_delete.len(),
+                            "heartbeat_checker db query is slow"
+                        );
+                    }
+                    worker_infos
                 };
+                let held = hold_start.elapsed();
+                if held > ClusterController::write_lock_warn_threshold() {
+                    tracing::warn!(
+                        op = "heartbeat_checker",
+                        ?held,
+                        "cluster write lock held too long"
+                    );
+                }
                 drop(inner);
 
                 for (worker_id, worker_type, host, port) in worker_infos {
