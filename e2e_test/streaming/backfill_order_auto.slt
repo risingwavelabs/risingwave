@@ -1,0 +1,121 @@
+statement ok
+drop table if exists r1;
+
+statement ok
+drop table if exists r2;
+
+statement ok
+create table r1(v1 int);
+
+statement ok
+create table r2(v2 int);
+
+query T
+explain(backfill, format dot) create materialized view mv_backfill_right with (backfill_order = auto) as
+select * from r1 right join r2 on r1.v1 = r2.v2;
+----
+digraph G {
+  "public.r1" -> "public.r2";
+}
+
+statement ok
+drop table r1;
+
+statement ok
+drop table r2;
+
+statement ok
+drop table if exists t1;
+
+statement ok
+drop table if exists t2;
+
+statement ok
+create table t1(v1 int, v2 int);
+
+statement ok
+create table t2(v1 int, v2 int);
+
+query T
+explain(backfill, format dot) create materialized view mv_backfill_asof with (backfill_order = auto) as
+select * from t1 asof join t2 on t1.v1 = t2.v1 and t1.v2 < t2.v2;
+----
+digraph G {
+  "public.t2" -> "public.t1";
+}
+
+statement ok
+drop table t1;
+
+statement ok
+drop table t2;
+
+statement ok
+drop table if exists stream;
+
+statement ok
+drop table if exists version;
+
+statement ok
+create table stream(id1 int, a1 int);
+
+statement ok
+create table version(id2 int, a2 int, primary key (id2));
+
+query T
+explain(backfill, format dot) create materialized view mv_backfill_temporal with (backfill_order = auto) as
+select id1, a1, id2, a2 from stream left join version FOR SYSTEM_TIME AS OF PROCTIME() on id1 = id2;
+----
+digraph G {
+  "public.version" -> "public.stream";
+}
+
+statement ok
+drop table stream;
+
+statement ok
+drop table version;
+
+statement ok
+set enable_index_selection = true;
+
+statement ok
+set rw_streaming_enable_delta_join = true;
+
+statement ok
+drop table if exists a;
+
+statement ok
+drop table if exists b;
+
+statement ok
+create table a (a1 int, a2 int);
+
+statement ok
+create index i_a1 on a(a1);
+
+statement ok
+create table b (b1 int, b2 int);
+
+statement ok
+create index i_b1 on b(b1);
+
+query T
+explain(backfill, format dot) create materialized view mv_backfill_delta with (backfill_order = auto) as
+select * from a join b on a.a1 = b.b1;
+----
+digraph G {
+  "public.b" -> "public.a";
+}
+
+statement ok
+drop table a;
+
+statement ok
+drop table b;
+
+statement ok
+reset rw_streaming_enable_delta_join;
+
+statement ok
+reset enable_index_selection;
