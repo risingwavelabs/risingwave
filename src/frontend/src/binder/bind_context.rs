@@ -33,15 +33,23 @@ use crate::binder::{BoundQuery, COLUMN_GROUP_PREFIX, ShareId};
 #[derive(Debug, Clone)]
 pub struct ColumnBinding {
     pub table_name: String,
+    pub schema_name: Option<String>,
     pub index: usize,
     pub is_hidden: bool,
     pub field: Field,
 }
 
 impl ColumnBinding {
-    pub fn new(table_name: String, index: usize, is_hidden: bool, field: Field) -> Self {
+    pub fn new(
+        table_name: String,
+        schema_name: Option<String>,
+        index: usize,
+        is_hidden: bool,
+        field: Field,
+    ) -> Self {
         ColumnBinding {
             table_name,
+            schema_name,
             index,
             is_hidden,
             field,
@@ -147,7 +155,17 @@ impl BindContext {
         table_name: &Option<String>,
         column_name: &String,
     ) -> LiteResult<usize> {
-        match &self.get_column_binding_indices(table_name, column_name)?[..] {
+        self.get_column_binding_index_with_schema(&None, table_name, column_name)
+    }
+
+    pub fn get_column_binding_index_with_schema(
+        &self,
+        schema_name: &Option<String>,
+        table_name: &Option<String>,
+        column_name: &String,
+    ) -> LiteResult<usize> {
+        match &self.get_column_binding_indices_with_schema(schema_name, table_name, column_name)?[..]
+        {
             [] => unreachable!(),
             [idx] => Ok(*idx),
             _ => Err(ErrorCode::InternalError(format!(
@@ -160,8 +178,9 @@ impl BindContext {
     /// If return Vec has len > 1, it means we have an unqualified reference to a column which has
     /// been naturally joined upon, wherein none of the columns are min-nullable. This will be
     /// handled in downstream as a `COALESCE` expression
-    pub fn get_column_binding_indices(
+    pub fn get_column_binding_indices_with_schema(
         &self,
+        schema_name: &Option<String>,
         table_name: &Option<String>,
         column_name: &String,
     ) -> LiteResult<Vec<usize>> {
@@ -172,9 +191,11 @@ impl BindContext {
                         format!("Could not parse {:?} as virtual table name `{COLUMN_GROUP_PREFIX}[group_id]`", table_name)))?;
                     self.get_indices_with_group_id(group_id, column_name)
                 } else {
-                    Ok(vec![
-                        self.get_index_with_table_name(column_name, table_name)?,
-                    ])
+                    Ok(vec![self.get_index_with_table_name(
+                        column_name,
+                        table_name,
+                        schema_name,
+                    )?])
                 }
             }
             None => self.get_unqualified_indices(column_name),
@@ -304,19 +325,26 @@ impl BindContext {
         &self,
         column_name: &String,
         table_name: &String,
+        schema_name: &Option<String>,
     ) -> LiteResult<usize> {
         let column_indexes = self
             .indices_of
             .get(column_name)
             .ok_or_else(|| ErrorCode::ItemNotFound(format!("Invalid column: {}", column_name)))?;
-        match column_indexes
-            .iter()
-            .find(|column_index| self.columns[**column_index].table_name == *table_name)
-        {
+        match column_indexes.iter().find(|column_index| {
+            let col = &self.columns[**column_index];
+            col.table_name == *table_name
+                && schema_name
+                    .as_ref()
+                    .is_none_or(|s| col.schema_name.as_ref().is_none_or(|cs| cs == s))
+        }) {
             Some(column_index) => Ok(*column_index),
             None => Err(ErrorCode::ItemNotFound(format!(
                 "missing FROM-clause entry for table \"{}\"",
-                table_name
+                match schema_name {
+                    Some(s) => format!("{}.{}", s, table_name),
+                    None => table_name.clone(),
+                }
             ))),
         }
     }
