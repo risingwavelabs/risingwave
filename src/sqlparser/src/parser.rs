@@ -4163,6 +4163,16 @@ impl Parser<'_> {
                     |parser: &mut Self| {
                         let checkpoint = *parser;
                         let ident = parser.parse_identifier()?;
+                        if parser.consume_token(&Token::LParen) {
+                            let args = parser.parse_comma_separated(Parser::ensure_parse_value)?;
+                            parser.expect_token(&Token::RParen)?;
+                            let raw = format!(
+                                "{}({})",
+                                ident,
+                                args.iter().map(ToString::to_string).join(", ")
+                            );
+                            return Ok(SetVariableValueSingle::Raw(raw));
+                        }
                         if ident.value == "default" {
                             *parser = checkpoint;
                             return parser.expected("parameter list value").map_err(|e| e.cut());

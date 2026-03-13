@@ -171,14 +171,13 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
         let system_enable_per_database_isolation = reader.per_database_isolation();
         // Load config will be performed in bootstrap phase.
         let periodic_barriers = PeriodicBarriers::default();
-        let adaptive_parallelism_strategy = reader.adaptive_parallelism_strategy();
 
         let checkpoint_control = CheckpointControl::new(env.clone());
         Self {
             enable_recovery,
             periodic_barriers,
             system_enable_per_database_isolation,
-            adaptive_parallelism_strategy,
+            adaptive_parallelism_strategy: AdaptiveParallelismStrategy::default(),
             context,
             env,
             checkpoint_control,
@@ -533,7 +532,6 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                             self.periodic_barriers
                                 .set_sys_checkpoint_frequency(p.checkpoint_frequency());
                             self.system_enable_per_database_isolation = p.per_database_isolation();
-                            self.adaptive_parallelism_strategy = p.adaptive_parallelism_strategy();
                         }
                     }
                 }

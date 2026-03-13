@@ -22,7 +22,6 @@ use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::catalog::DatabaseId;
 use risingwave_common::hash::ActorMapping;
-use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_meta_model::{
     StreamingParallelism, WorkerId, fragment, fragment_relation, object, streaming_job,
 };
@@ -52,7 +51,6 @@ pub struct WorkerReschedule {
 }
 
 use risingwave_common::id::JobId;
-use risingwave_common::system_param::AdaptiveParallelismStrategy;
 use risingwave_meta_model::DispatcherType;
 use risingwave_meta_model::fragment::DistributionType;
 use risingwave_meta_model::prelude::{Fragment, FragmentRelation, StreamingJob};
@@ -155,6 +153,11 @@ impl ScaleController {
                     }
 
                     streaming_job.parallelism = Set(p.parallelism.clone());
+                    if matches!(p.parallelism, StreamingParallelism::Fixed(_)) {
+                        streaming_job.adaptive_parallelism_strategy = Set(None);
+                    } else if let Some(strategy) = &p.adaptive_parallelism_strategy {
+                        streaming_job.adaptive_parallelism_strategy = Set(Some(strategy.clone()));
+                    }
                 }
                 _ => {}
             }
@@ -179,7 +182,7 @@ impl ScaleController {
 
     pub async fn reschedule_backfill_parallelism_inplace(
         &self,
-        policy: HashMap<JobId, Option<StreamingParallelism>>,
+        policy: HashMap<JobId, Option<ParallelismPolicy>>,
     ) -> MetaResult<HashMap<DatabaseId, Command>> {
         if policy.is_empty() {
             return Ok(HashMap::new());
@@ -188,7 +191,7 @@ impl ScaleController {
         let inner = self.metadata_manager.catalog_controller.inner.write().await;
         let txn = inner.db.begin().await?;
 
-        for (table_id, parallelism) in &policy {
+        for (table_id, policy) in &policy {
             let streaming_job = StreamingJob::find_by_id(*table_id)
                 .one(&txn)
                 .await?
@@ -198,7 +201,10 @@ impl ScaleController {
 
             let mut streaming_job = streaming_job.into_active_model();
 
-            if let Some(StreamingParallelism::Fixed(n)) = parallelism
+            if let Some(ParallelismPolicy {
+                parallelism: StreamingParallelism::Fixed(n),
+                ..
+            }) = policy
                 && *n > max_parallelism as usize
             {
                 bail!(format!(
@@ -206,7 +212,18 @@ impl ScaleController {
                 ));
             }
 
-            streaming_job.backfill_parallelism = Set(parallelism.clone());
+            if let Some(policy) = policy {
+                streaming_job.backfill_parallelism = Set(Some(policy.parallelism.clone()));
+                if matches!(policy.parallelism, StreamingParallelism::Fixed(_)) {
+                    streaming_job.backfill_adaptive_parallelism_strategy = Set(None);
+                } else {
+                    streaming_job.backfill_adaptive_parallelism_strategy =
+                        Set(policy.adaptive_parallelism_strategy.clone());
+                }
+            } else {
+                streaming_job.backfill_parallelism = Set(None);
+                streaming_job.backfill_adaptive_parallelism_strategy = Set(None);
+            }
             streaming_job.update(&txn).await?;
         }
 
@@ -881,6 +898,7 @@ pub(crate) fn build_reschedule_commands(
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ParallelismPolicy {
     pub parallelism: StreamingParallelism,
+    pub adaptive_parallelism_strategy: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -1038,8 +1056,6 @@ impl GlobalStreamManager {
             .map(|worker| (worker.id, worker))
             .collect();
 
-        let mut previous_adaptive_parallelism_strategy = AdaptiveParallelismStrategy::default();
-
         let mut should_trigger = false;
 
         loop {
@@ -1081,14 +1097,7 @@ impl GlobalStreamManager {
                     };
 
                     match notification {
-                        LocalNotification::SystemParamsChange(reader) => {
-                            let new_strategy = reader.adaptive_parallelism_strategy();
-                            if new_strategy != previous_adaptive_parallelism_strategy {
-                                tracing::info!("adaptive parallelism strategy changed from {:?} to {:?}", previous_adaptive_parallelism_strategy, new_strategy);
-                                should_trigger = true;
-                                previous_adaptive_parallelism_strategy = new_strategy;
-                            }
-                        }
+                        LocalNotification::SystemParamsChange(_) => {}
                         LocalNotification::WorkerNodeActivated(worker) => {
                             if !worker_is_streaming_compute(&worker) {
                                 continue;
@@ -1153,7 +1162,12 @@ impl GlobalStreamManager {
     async fn apply_post_backfill_parallelism(&self, job_id: JobId) -> MetaResult<()> {
         // Fetch both the target parallelism (final desired state) and the backfill parallelism
         // (temporary parallelism used during backfill phase) from the catalog.
-        let Some((target, backfill_parallelism)) = self
+        let Some((
+            target,
+            target_adaptive_parallelism_strategy,
+            backfill_parallelism,
+            backfill_adaptive_parallelism_strategy,
+        )) = self
             .metadata_manager
             .catalog_controller
             .get_job_parallelisms(job_id)
@@ -1170,7 +1184,11 @@ impl GlobalStreamManager {
 
         // Determine if we need to reschedule based on the backfill configuration.
         match backfill_parallelism {
-            Some(backfill_parallelism) if backfill_parallelism == target => {
+            Some(backfill_parallelism)
+                if backfill_parallelism == target
+                    && backfill_adaptive_parallelism_strategy
+                        == target_adaptive_parallelism_strategy =>
+            {
                 // Backfill parallelism matches target - no reschedule needed since the job
                 // is already running at the desired parallelism.
                 tracing::debug!(
@@ -1205,6 +1223,7 @@ impl GlobalStreamManager {
         );
         let policy = ReschedulePolicy::Parallelism(ParallelismPolicy {
             parallelism: target,
+            adaptive_parallelism_strategy: target_adaptive_parallelism_strategy,
         });
         if let Err(e) = self.reschedule_streaming_job(job_id, policy, false).await {
             tracing::warn!(job_id = %job_id, error = %e.as_report(), "reschedule after backfill failed");

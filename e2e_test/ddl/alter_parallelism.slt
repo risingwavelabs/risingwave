@@ -22,7 +22,7 @@ create table t (v int);
 query T
 select parallelism from table_parallelism where name = 't';
 ----
-ADAPTIVE
+bounded(4)
 
 statement ok
 alter table t set parallelism = 2;
@@ -30,7 +30,7 @@ alter table t set parallelism = 2;
 query T
 select parallelism from table_parallelism where name = 't';
 ----
-FIXED(2)
+2
 
 query I
 select parallelism from fragment_parallelism where table_name = 't';
@@ -44,7 +44,7 @@ alter table t set parallelism = adaptive;
 query T
 select parallelism from table_parallelism where name = 't';
 ----
-ADAPTIVE
+adaptive
 
 statement ok
 create materialized view m_simple as select * from t;
@@ -52,7 +52,7 @@ create materialized view m_simple as select * from t;
 query T
 select parallelism from mview_parallelism where name = 'm_simple';
 ----
-ADAPTIVE
+bounded(64)
 
 statement ok
 alter materialized view m_simple set parallelism = 3;
@@ -60,7 +60,7 @@ alter materialized view m_simple set parallelism = 3;
 query T
 select parallelism from mview_parallelism where name = 'm_simple';
 ----
-FIXED(3)
+3
 
 statement ok
 create materialized view m_join as select t1.v as t1v, t2.v as t2v from t t1, t t2 where t1.v = t2.v;
@@ -68,7 +68,7 @@ create materialized view m_join as select t1.v as t1v, t2.v as t2v from t t1, t 
 query T
 select parallelism from mview_parallelism where name = 'm_join';
 ----
-ADAPTIVE
+bounded(64)
 
 statement ok
 alter materialized view m_join set parallelism = 3;
@@ -76,7 +76,7 @@ alter materialized view m_join set parallelism = 3;
 query T
 select parallelism from mview_parallelism where name = 'm_join';
 ----
-FIXED(3)
+3
 
 statement ok
 create sink s as select t1.v as t1v, t2.v as t2v from t t1, t t2 where t1.v = t2.v with ( connector = 'blackhole', type = 'append-only', force_append_only = 'true');
@@ -84,7 +84,7 @@ create sink s as select t1.v as t1v, t2.v as t2v from t t1, t t2 where t1.v = t2
 query T
 select parallelism from sink_parallelism where name = 's';
 ----
-ADAPTIVE
+bounded(64)
 
 statement ok
 alter sink s set parallelism = 4;
@@ -92,7 +92,7 @@ alter sink s set parallelism = 4;
 query T
 select parallelism from sink_parallelism where name = 's';
 ----
-FIXED(4)
+4
 
 statement ok
 drop sink s;
@@ -115,7 +115,7 @@ create table t (v1 int);
 query T
 select parallelism from table_parallelism where name = 't';
 ----
-FIXED(2)
+2
 
 statement ok
 drop table t;
@@ -129,7 +129,7 @@ create table t (v1 int);
 query T
 select parallelism from table_parallelism where name = 't';
 ----
-ADAPTIVE
+bounded(4)
 
 statement ok
 drop table t;
@@ -143,7 +143,7 @@ create table t (v1 int);
 query T
 select parallelism from table_parallelism where name = 't';
 ----
-ADAPTIVE
+bounded(4)
 
 statement ok
 drop table t;
