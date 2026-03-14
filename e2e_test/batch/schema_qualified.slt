@@ -141,10 +141,13 @@ statement ok
 create schema s2;
 
 statement ok
-create table s1.a(id int, a int);
+create table s1.a(id int, x int);
 
 statement ok
-create table s2.a(id int, b int);
+create table s2.a(id int, y int);
+
+statement error
+select a.x from s1.a, s2.a;
 
 statement ok
 insert into s1.a values (1, 2), (2, 3), (3, 4);
@@ -153,7 +156,7 @@ statement ok
 insert into s2.a values (1, 10), (4, 40);
 
 query II
-select s1.a.a, s2.a.b
+select s1.a.x, s2.a.y
 from s1.a
 join s2.a
 on s1.a.id = s2.a.id
@@ -162,7 +165,7 @@ order by 1, 2;
 2 10
 
 query II
-select a1.a, a2.b
+select a1.x, a2.y
 from s1.a AS a1
 join s2.a AS a2
 on a1.id = a2.id

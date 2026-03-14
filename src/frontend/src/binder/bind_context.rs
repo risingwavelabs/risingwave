@@ -338,30 +338,83 @@ impl BindContext {
         }
     }
 
+    /// Resolve a qualified column reference (`table.column` or `schema.table.column`)
+    /// to one concrete column index in the current bind scope.
+    ///
+    /// This function intentionally uses a two-step strategy:
+    /// 1. Resolve relation first (`resolve_relation_range`), including ambiguity checks.
+    /// 2. Resolve column inside that unique relation range (`resolve_column_in_range`).
     fn get_index_with_table_name(
         &self,
         column_name: &String,
         table_name: &String,
         schema_name: &Option<String>,
     ) -> LiteResult<usize> {
-        let column_indexes = self
+        let chosen_range = self.resolve_relation_range(table_name, schema_name)?;
+        self.resolve_column_in_range(column_name, table_name, chosen_range)
+    }
+
+    /// Resolve the relation range for a `table_name` in the current bind scope.
+    ///
+    /// Alias matches are prioritized over base relation name matches.
+    fn resolve_relation_range(
+        &self,
+        table_name: &String,
+        schema_name: &Option<String>,
+    ) -> LiteResult<(usize, usize)> {
+        let mut alias_ranges = Vec::new();
+        let mut base_ranges = Vec::new();
+
+        for ((_, _), range) in self.range_of.iter().filter(|((rel_schema, rel_name), _)| {
+            rel_name == table_name
+                && schema_name
+                    .as_deref()
+                    .is_none_or(|s| rel_schema.as_deref() == Some(s))
+        }) {
+            match self.columns[range.0].table_alias {
+                Some(_) => alias_ranges.push(*range),
+                None => base_ranges.push(*range),
+            }
+        }
+
+        let chosen_ranges = if alias_ranges.is_empty() {
+            base_ranges
+        } else {
+            alias_ranges
+        };
+
+        match chosen_ranges.as_slice() {
+            [] => Err(ErrorCode::ItemNotFound(format!(
+                "missing FROM-clause entry for table \"{}\"",
+                table_name
+            ))),
+            [range] => Ok(*range),
+            _ => Err(ErrorCode::InvalidReference(format!(
+                "table reference \"{}\" is ambiguous",
+                table_name
+            ))),
+        }
+    }
+
+    /// Resolve `column_name` inside a pre-resolved relation range.
+    fn resolve_column_in_range(
+        &self,
+        column_name: &String,
+        table_name: &String,
+        range: (usize, usize),
+    ) -> LiteResult<usize> {
+        let idxs = self
             .indices_of
             .get(column_name)
             .ok_or_else(|| ErrorCode::ItemNotFound(format!("Invalid column: {}", column_name)))?;
 
-        let column_indexes: Vec<usize> = column_indexes
+        let matched: Vec<_> = idxs
             .iter()
             .copied()
-            .filter(|column_index| {
-                let column = &self.columns[*column_index];
-
-                column.table_name == *table_name
-                    && schema_name
-                        .as_deref()
-                        .is_none_or(|s| column.schema_name.as_deref() == Some(s))
-            })
+            .filter(|index| (range.0..range.1).contains(index))
             .collect();
-        match column_indexes.as_slice() {
+
+        match matched.as_slice() {
             [] => Err(ErrorCode::ItemNotFound(format!(
                 "missing FROM-clause entry for table \"{}\"",
                 table_name
