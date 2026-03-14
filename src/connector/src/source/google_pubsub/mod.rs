@@ -84,8 +84,9 @@ pub struct PubsubProperties {
     #[serde(rename = "pubsub.start_snapshot")]
     pub start_snapshot: Option<String>,
 
-    /// `parallelism` is the number of parallel consumers to run for the subscription.
-    /// TODO: use system parallelism if not set
+    /// Deprecated: ignored since adaptive split mode was introduced.
+    /// Split count now adapts automatically to the number of actors.
+    /// Kept for backward compatibility with existing DDL.
     #[serde_as(as = "Option<DisplayFromStr>")]
     #[serde(rename = "pubsub.parallelism")]
     pub parallelism: Option<u32>,
