@@ -1136,8 +1136,9 @@ PubsubProperties:
   - name: pubsub.parallelism
     field_type: u32
     comments: |-
-      `parallelism` is the number of parallel consumers to run for the subscription.
-      TODO: use system parallelism if not set
+      Deprecated: ignored since adaptive split mode was introduced.
+      Split count now adapts automatically to the number of actors.
+      Kept for backward compatibility with existing DDL.
     required: false
 PulsarProperties:
   fields:
