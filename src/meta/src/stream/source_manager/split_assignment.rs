@@ -665,7 +665,7 @@ impl<I: Ord, T: SplitMetaData + Clone> Ord for SplitsAssignment<I, T> {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct SplitDiffOptions {
     pub enable_scale_in: bool,
 
