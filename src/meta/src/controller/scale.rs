@@ -218,6 +218,9 @@ pub struct LoadedFragmentContext {
     pub database_map: HashMap<DatabaseId, database::Model>,
     pub fragment_source_ids: HashMap<FragmentId, SourceId>,
     pub fragment_splits: HashMap<FragmentId, Vec<SplitImpl>>,
+    /// Per-fragment split diff options derived from the source connector properties.
+    /// Used during reschedule to correctly handle adaptive splits (e.g., NATS, `PubSub`).
+    pub fragment_split_diff_options: HashMap<FragmentId, SplitDiffOptions>,
 }
 
 impl LoadedFragmentContext {
@@ -320,6 +323,13 @@ impl LoadedFragmentContext {
             .map(|(fragment_id, splits)| (*fragment_id, splits.clone()))
             .collect();
 
+        let fragment_split_diff_options = self
+            .fragment_split_diff_options
+            .iter()
+            .filter(|(fragment_id, _)| fragment_ids.contains(*fragment_id))
+            .map(|(fragment_id, opts)| (*fragment_id, opts.clone()))
+            .collect();
+
         Some(Self {
             ensembles,
             job_fragments,
@@ -328,6 +338,7 @@ impl LoadedFragmentContext {
             database_map,
             fragment_source_ids,
             fragment_splits,
+            fragment_split_diff_options,
         })
     }
 
@@ -342,6 +353,7 @@ impl LoadedFragmentContext {
             mut database_map,
             mut fragment_source_ids,
             mut fragment_splits,
+            mut fragment_split_diff_options,
         } = self;
 
         let mut contexts = HashMap::<DatabaseId, Self>::new();
@@ -362,6 +374,7 @@ impl LoadedFragmentContext {
                     database_map: HashMap::from([(database_id, database_model)]),
                     fragment_source_ids: HashMap::new(),
                     fragment_splits: HashMap::new(),
+                    fragment_split_diff_options: HashMap::new(),
                 }
             });
 
@@ -375,6 +388,11 @@ impl LoadedFragmentContext {
                 }
                 if let Some(splits) = fragment_splits.remove(&fragment_id) {
                     context.fragment_splits.insert(fragment_id, splits);
+                }
+                if let Some(opts) = fragment_split_diff_options.remove(&fragment_id) {
+                    context
+                        .fragment_split_diff_options
+                        .insert(fragment_id, opts);
                 }
             }
 
@@ -600,6 +618,7 @@ pub(crate) fn render_actor_assignments(
     let render_context = RenderActorsContext {
         fragment_source_ids: &loaded.fragment_source_ids,
         fragment_splits: &loaded.fragment_splits,
+        fragment_split_diff_options: &loaded.fragment_split_diff_options,
         streaming_job_databases: &loaded.streaming_job_databases,
         database_map: &loaded.database_map,
     };
@@ -647,7 +666,7 @@ where
         debug_sanity_check(&ensembles, &job_fragments, &job_map);
     }
 
-    let (fragment_source_ids, fragment_splits) =
+    let (fragment_source_ids, fragment_splits, fragment_split_diff_options) =
         resolve_source_fragments(txn, &job_fragments).await?;
 
     let job_ids = job_map.keys().copied().collect_vec();
@@ -683,6 +702,7 @@ where
         database_map,
         fragment_source_ids,
         fragment_splits,
+        fragment_split_diff_options,
     })
 }
 
@@ -691,6 +711,7 @@ where
 struct RenderActorsContext<'a> {
     fragment_source_ids: &'a HashMap<FragmentId, SourceId>,
     fragment_splits: &'a HashMap<FragmentId, Vec<SplitImpl>>,
+    fragment_split_diff_options: &'a HashMap<FragmentId, SplitDiffOptions>,
     streaming_job_databases: &'a HashMap<JobId, DatabaseId>,
     database_map: &'a HashMap<DatabaseId, database::Model>,
 }
@@ -707,6 +728,7 @@ fn render_actors(
     let RenderActorsContext {
         fragment_source_ids,
         fragment_splits: fragment_splits_map,
+        fragment_split_diff_options,
         streaming_job_databases,
         database_map,
     } = context;
@@ -797,7 +819,11 @@ fn render_actors(
 
                 let splits: std::collections::BTreeMap<_, _> =
                     splits.into_iter().map(|s| (s.id(), s)).collect();
-                let splits = actor_template.assign_splits(entry_fragment_id, splits);
+                let opts = fragment_split_diff_options
+                    .get(&entry_fragment_id)
+                    .cloned()
+                    .unwrap_or_default();
+                let splits = actor_template.assign_splits(entry_fragment_id, splits, opts);
                 Some((splits, *source_id))
             }
             None => None,
@@ -966,25 +992,54 @@ impl EnsembleActorTemplate {
         &self,
         entry_fragment_id: FragmentId,
         splits: BTreeMap<SplitId, SplitImpl>,
+        opts: SplitDiffOptions,
     ) -> HashMap<u32, Vec<SplitImpl>> {
-        {
-            {
-                let empty_actor_splits: HashMap<_, _> = self
-                    .assignment
-                    .values()
-                    .flat_map(|actors| actors.keys())
-                    .map(|actor_id| (*actor_id, vec![]))
-                    .collect();
+        let actor_ids: Vec<u32> = self
+            .assignment
+            .values()
+            .flat_map(|actors| actors.keys().copied())
+            .collect();
+        let actor_count = actor_ids.len();
 
-                crate::stream::source_manager::reassign_splits(
-                    entry_fragment_id,
-                    empty_actor_splits,
-                    &splits,
-                    SplitDiffOptions::default(),
-                )
-                .unwrap_or_default()
+        // For adaptive sources (e.g., NATS, PubSub), re-expand a template split to match
+        // the new actor count instead of redistributing old persisted splits.
+        if opts.enable_adaptive && !splits.is_empty() {
+            // Any persisted split can serve as the template because `fill_adaptive_split`
+            // only uses connector-level fields (e.g., subscription name for PubSub, subject
+            // for NATS) and regenerates the per-actor index. The BTreeMap is sorted by
+            // split ID, so we deterministically pick the first one.
+            let template = splits.values().next().unwrap();
+            match risingwave_connector::source::fill_adaptive_split(template, actor_count) {
+                Ok(expanded) => {
+                    let expanded_splits: Vec<SplitImpl> = expanded.into_values().collect();
+                    return actor_ids
+                        .into_iter()
+                        .enumerate()
+                        .map(|(i, actor_id)| (actor_id, vec![expanded_splits[i].clone()]))
+                        .collect();
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        %entry_fragment_id,
+                        error = %e,
+                        "failed to fill adaptive split during reschedule, falling back to reassign"
+                    );
+                }
             }
         }
+
+        let empty_actor_splits: HashMap<_, _> = actor_ids
+            .into_iter()
+            .map(|actor_id| (actor_id, vec![]))
+            .collect();
+
+        crate::stream::source_manager::reassign_splits(
+            entry_fragment_id,
+            empty_actor_splits,
+            &splits,
+            opts,
+        )
+        .unwrap_or_default()
     }
 }
 
@@ -1138,6 +1193,7 @@ async fn resolve_source_fragments<C>(
 ) -> MetaResult<(
     HashMap<FragmentId, SourceId>,
     HashMap<FragmentId, Vec<SplitImpl>>,
+    HashMap<FragmentId, SplitDiffOptions>,
 )>
 where
     C: ConnectionTrait,
@@ -1197,7 +1253,73 @@ where
         })
         .collect();
 
-    Ok((fragment_source_ids, fragment_splits))
+    // Build SplitDiffOptions per source fragment from the connector type name.
+    //
+    // We only need the connector type string (e.g., "nats", "google_pubsub") to determine
+    // `enable_adaptive` and `enable_scale_in` flags, since these are purely connector-type-based
+    // (see `ConnectorProperties::enable_adaptive_splits()` / `enable_drop_split()`).
+    // We intentionally avoid `ConnectorProperties::extract()` here because it does full
+    // deserialization of all WITH properties and resolves secrets via `LocalSecretManager`,
+    // which is unnecessary overhead for just determining two boolean flags.
+    let unique_source_ids: Vec<SourceId> = source_fragment_ids.keys().copied().collect();
+    let source_models: HashMap<SourceId, source::Model> = if !unique_source_ids.is_empty() {
+        Source::find()
+            .filter(source::Column::SourceId.is_in(unique_source_ids))
+            .all(txn)
+            .await?
+            .into_iter()
+            .map(|s| (s.source_id, s))
+            .collect()
+    } else {
+        HashMap::new()
+    };
+
+    let mut fragment_split_diff_options: HashMap<FragmentId, SplitDiffOptions> = HashMap::new();
+    for (source_id, fragment_ids) in &source_fragment_ids {
+        if let Some(source_model) = source_models.get(source_id) {
+            let connector = source_model
+                .with_properties
+                .0
+                .get(risingwave_connector::source::UPSTREAM_SOURCE_KEY)
+                .map(|s| s.to_lowercase());
+            let opts = split_diff_options_from_connector_name(connector.as_deref());
+            for fragment_id in fragment_ids {
+                fragment_split_diff_options.insert(*fragment_id, opts.clone());
+            }
+        }
+    }
+
+    Ok((
+        fragment_source_ids,
+        fragment_splits,
+        fragment_split_diff_options,
+    ))
+}
+
+/// Derive `SplitDiffOptions` from the connector type name without full property deserialization.
+///
+/// The flags `enable_adaptive` and `enable_scale_in` are purely determined by connector type
+/// (see `ConnectorProperties::enable_adaptive_splits()` and `enable_drop_split()`).
+fn split_diff_options_from_connector_name(connector: Option<&str>) -> SplitDiffOptions {
+    use risingwave_connector::source::google_pubsub::GOOGLE_PUBSUB_CONNECTOR;
+    use risingwave_connector::source::kinesis::KINESIS_CONNECTOR;
+    use risingwave_connector::source::nats::NATS_CONNECTOR;
+
+    match connector {
+        Some(c) if c.eq_ignore_ascii_case(NATS_CONNECTOR) => SplitDiffOptions {
+            enable_scale_in: true,
+            enable_adaptive: true,
+        },
+        Some(c) if c.eq_ignore_ascii_case(GOOGLE_PUBSUB_CONNECTOR) => SplitDiffOptions {
+            enable_scale_in: true,
+            enable_adaptive: true,
+        },
+        Some(c) if c.eq_ignore_ascii_case(KINESIS_CONNECTOR) => SplitDiffOptions {
+            enable_scale_in: true,
+            enable_adaptive: false,
+        },
+        _ => SplitDiffOptions::default(),
+    }
 }
 
 // Helper struct to make the function signature cleaner and to properly bundle the required data.
@@ -1681,9 +1803,11 @@ mod tests {
         let streaming_job_databases = HashMap::from([(job_id, database_id)]);
         let database_map = HashMap::from([(database_id, database_model)]);
 
+        let fragment_split_diff_options: HashMap<FragmentId, SplitDiffOptions> = HashMap::new();
         let context = RenderActorsContext {
             fragment_source_ids: &fragment_source_ids,
             fragment_splits: &fragment_splits,
+            fragment_split_diff_options: &fragment_split_diff_options,
             streaming_job_databases: &streaming_job_databases,
             database_map: &database_map,
         };
@@ -1779,9 +1903,11 @@ mod tests {
         let streaming_job_databases = HashMap::from([(job_id, database_id)]);
         let database_map = HashMap::from([(database_id, database_model)]);
 
+        let fragment_split_diff_options: HashMap<FragmentId, SplitDiffOptions> = HashMap::new();
         let context = RenderActorsContext {
             fragment_source_ids: &fragment_source_ids,
             fragment_splits: &fragment_splits,
+            fragment_split_diff_options: &fragment_split_diff_options,
             streaming_job_databases: &streaming_job_databases,
             database_map: &database_map,
         };
@@ -1908,9 +2034,11 @@ mod tests {
         let streaming_job_databases = HashMap::from([(job_id, database_id)]);
         let database_map = HashMap::from([(database_id, database_model)]);
 
+        let fragment_split_diff_options: HashMap<FragmentId, SplitDiffOptions> = HashMap::new();
         let context = RenderActorsContext {
             fragment_source_ids: &fragment_source_ids,
             fragment_splits: &fragment_splits,
+            fragment_split_diff_options: &fragment_split_diff_options,
             streaming_job_databases: &streaming_job_databases,
             database_map: &database_map,
         };
@@ -2007,9 +2135,11 @@ mod tests {
         let streaming_job_databases = HashMap::from([(job_id, database_id)]);
         let database_map = HashMap::from([(database_id, database_model)]);
 
+        let fragment_split_diff_options: HashMap<FragmentId, SplitDiffOptions> = HashMap::new();
         let context = RenderActorsContext {
             fragment_source_ids: &fragment_source_ids,
             fragment_splits: &fragment_splits,
+            fragment_split_diff_options: &fragment_split_diff_options,
             streaming_job_databases: &streaming_job_databases,
             database_map: &database_map,
         };
@@ -2098,9 +2228,11 @@ mod tests {
         let streaming_job_databases = HashMap::from([(job_id, database_id)]);
         let database_map = HashMap::from([(database_id, database_model)]);
 
+        let fragment_split_diff_options: HashMap<FragmentId, SplitDiffOptions> = HashMap::new();
         let context = RenderActorsContext {
             fragment_source_ids: &fragment_source_ids,
             fragment_splits: &fragment_splits,
+            fragment_split_diff_options: &fragment_split_diff_options,
             streaming_job_databases: &streaming_job_databases,
             database_map: &database_map,
         };
@@ -2192,9 +2324,11 @@ mod tests {
         let streaming_job_databases = HashMap::from([(job_id, database_id)]);
         let database_map = HashMap::from([(database_id, database_model)]);
 
+        let fragment_split_diff_options: HashMap<FragmentId, SplitDiffOptions> = HashMap::new();
         let context = RenderActorsContext {
             fragment_source_ids: &fragment_source_ids,
             fragment_splits: &fragment_splits,
+            fragment_split_diff_options: &fragment_split_diff_options,
             streaming_job_databases: &streaming_job_databases,
             database_map: &database_map,
         };
@@ -2286,9 +2420,11 @@ mod tests {
         let streaming_job_databases = HashMap::from([(job_id, database_id)]);
         let database_map = HashMap::from([(database_id, database_model)]);
 
+        let fragment_split_diff_options: HashMap<FragmentId, SplitDiffOptions> = HashMap::new();
         let context = RenderActorsContext {
             fragment_source_ids: &fragment_source_ids,
             fragment_splits: &fragment_splits,
+            fragment_split_diff_options: &fragment_split_diff_options,
             streaming_job_databases: &streaming_job_databases,
             database_map: &database_map,
         };

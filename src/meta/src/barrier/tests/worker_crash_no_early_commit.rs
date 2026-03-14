@@ -276,6 +276,7 @@ async fn test_barrier_manager_worker_crash_no_early_commit() {
         database_map: HashMap::from([(database_id, database_model)]),
         fragment_source_ids: HashMap::new(),
         fragment_splits: HashMap::new(),
+        fragment_split_diff_options: HashMap::new(),
     };
 
     let recovery_context = LoadedRecoveryContext {
