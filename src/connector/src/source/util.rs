@@ -81,7 +81,7 @@ mod tests {
     fn test_fill_adaptive_split_pubsub() {
         let template = SplitImpl::GooglePubsub(PubsubSplit {
             index: 0,
-            subscription: "projects/p/subscriptions/s".to_string(),
+            subscription: "projects/p/subscriptions/s".to_owned(),
             __deprecated_start_offset: None,
             __deprecated_stop_offset: None,
         });
@@ -107,7 +107,7 @@ mod tests {
     fn test_fill_adaptive_split_pubsub_single_actor() {
         let template = SplitImpl::GooglePubsub(PubsubSplit {
             index: 0,
-            subscription: "sub".to_string(),
+            subscription: "sub".to_owned(),
             __deprecated_start_offset: None,
             __deprecated_stop_offset: None,
         });
@@ -120,7 +120,7 @@ mod tests {
     #[test]
     fn test_fill_adaptive_split_nats() {
         let template = SplitImpl::Nats(NatsSplit::new(
-            "test-subject".to_string(),
+            "test-subject".to_owned(),
             "0".into(),
             NatsOffset::None,
         ));
