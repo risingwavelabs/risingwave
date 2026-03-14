@@ -1001,10 +1001,13 @@ impl EnsembleActorTemplate {
             .collect();
         let actor_count = actor_ids.len();
 
-        // For adaptive sources (e.g., NATS), re-expand a template split to match
+        // For adaptive sources (e.g., NATS, PubSub), re-expand a template split to match
         // the new actor count instead of redistributing old persisted splits.
         if opts.enable_adaptive && !splits.is_empty() {
-            // Pick the first split as template for adaptive expansion.
+            // Any persisted split can serve as the template because `fill_adaptive_split`
+            // only uses connector-level fields (e.g., subscription name for PubSub, subject
+            // for NATS) and regenerates the per-actor index. The BTreeMap is sorted by
+            // split ID, so we deterministically pick the first one.
             let template = splits.values().next().unwrap();
             match risingwave_connector::source::fill_adaptive_split(template, actor_count) {
                 Ok(expanded) => {
@@ -1250,9 +1253,14 @@ where
         })
         .collect();
 
-    // Load source properties to build SplitDiffOptions per source fragment.
-    // This ensures the scale controller uses the correct options (e.g., enable_adaptive)
-    // during reschedule instead of always using the default (which has adaptive disabled).
+    // Build SplitDiffOptions per source fragment from the connector type name.
+    //
+    // We only need the connector type string (e.g., "nats", "google_pubsub") to determine
+    // `enable_adaptive` and `enable_scale_in` flags, since these are purely connector-type-based
+    // (see `ConnectorProperties::enable_adaptive_splits()` / `enable_drop_split()`).
+    // We intentionally avoid `ConnectorProperties::extract()` here because it does full
+    // deserialization of all WITH properties and resolves secrets via `LocalSecretManager`,
+    // which is unnecessary overhead for just determining two boolean flags.
     let unique_source_ids: Vec<SourceId> = source_fragment_ids.keys().copied().collect();
     let source_models: HashMap<SourceId, source::Model> = if !unique_source_ids.is_empty() {
         Source::find()
@@ -1269,36 +1277,14 @@ where
     let mut fragment_split_diff_options: HashMap<FragmentId, SplitDiffOptions> = HashMap::new();
     for (source_id, fragment_ids) in &source_fragment_ids {
         if let Some(source_model) = source_models.get(source_id) {
-            let secret_refs = source_model
-                .secret_ref
-                .as_ref()
-                .map(|s| s.to_protobuf())
-                .unwrap_or_default();
-            let options_with_secret = risingwave_connector::WithOptionsSecResolved::new(
-                source_model.with_properties.0.clone(),
-                secret_refs,
-            );
-            // Use deny_unknown_fields=false since we are restoring from persisted data.
-            match risingwave_connector::source::ConnectorProperties::extract(
-                options_with_secret,
-                false,
-            ) {
-                Ok(props) => {
-                    let opts = SplitDiffOptions {
-                        enable_scale_in: props.enable_drop_split(),
-                        enable_adaptive: props.enable_adaptive_splits(),
-                    };
-                    for fragment_id in fragment_ids {
-                        fragment_split_diff_options.insert(*fragment_id, opts.clone());
-                    }
-                }
-                Err(e) => {
-                    tracing::warn!(
-                        %source_id,
-                        error = %e,
-                        "failed to extract connector properties for source, using default SplitDiffOptions"
-                    );
-                }
+            let connector = source_model
+                .with_properties
+                .0
+                .get(risingwave_connector::source::UPSTREAM_SOURCE_KEY)
+                .map(|s| s.to_lowercase());
+            let opts = split_diff_options_from_connector_name(connector.as_deref());
+            for fragment_id in fragment_ids {
+                fragment_split_diff_options.insert(*fragment_id, opts.clone());
             }
         }
     }
@@ -1308,6 +1294,32 @@ where
         fragment_splits,
         fragment_split_diff_options,
     ))
+}
+
+/// Derive `SplitDiffOptions` from the connector type name without full property deserialization.
+///
+/// The flags `enable_adaptive` and `enable_scale_in` are purely determined by connector type
+/// (see `ConnectorProperties::enable_adaptive_splits()` and `enable_drop_split()`).
+fn split_diff_options_from_connector_name(connector: Option<&str>) -> SplitDiffOptions {
+    use risingwave_connector::source::google_pubsub::GOOGLE_PUBSUB_CONNECTOR;
+    use risingwave_connector::source::kinesis::KINESIS_CONNECTOR;
+    use risingwave_connector::source::nats::NATS_CONNECTOR;
+
+    match connector {
+        Some(c) if c.eq_ignore_ascii_case(NATS_CONNECTOR) => SplitDiffOptions {
+            enable_scale_in: true,
+            enable_adaptive: true,
+        },
+        Some(c) if c.eq_ignore_ascii_case(GOOGLE_PUBSUB_CONNECTOR) => SplitDiffOptions {
+            enable_scale_in: true,
+            enable_adaptive: true,
+        },
+        Some(c) if c.eq_ignore_ascii_case(KINESIS_CONNECTOR) => SplitDiffOptions {
+            enable_scale_in: true,
+            enable_adaptive: false,
+        },
+        _ => SplitDiffOptions::default(),
+    }
 }
 
 // Helper struct to make the function signature cleaner and to properly bundle the required data.
