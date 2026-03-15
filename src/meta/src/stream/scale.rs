@@ -52,7 +52,6 @@ pub struct WorkerReschedule {
 }
 
 use risingwave_common::id::JobId;
-use risingwave_common::system_param::AdaptiveParallelismStrategy;
 use risingwave_meta_model::DispatcherType;
 use risingwave_meta_model::fragment::DistributionType;
 use risingwave_meta_model::prelude::{Fragment, FragmentRelation, StreamingJob};
@@ -1038,7 +1037,11 @@ impl GlobalStreamManager {
             .map(|worker| (worker.id, worker))
             .collect();
 
-        let mut previous_adaptive_parallelism_strategy = AdaptiveParallelismStrategy::default();
+        let mut previous_adaptive_parallelism_strategy = self
+            .env
+            .system_params_reader()
+            .await
+            .adaptive_parallelism_strategy();
 
         let mut should_trigger = false;
 
