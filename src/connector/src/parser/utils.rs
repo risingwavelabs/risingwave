@@ -18,7 +18,7 @@ use anyhow::Context;
 use bytes::Bytes;
 use reqwest::Url;
 use risingwave_common::bail;
-use risingwave_common::types::{Datum, DatumCow, DatumRef, ScalarRefImpl};
+use risingwave_common::types::{Datum, DatumCow, DatumRef, ScalarImpl, ScalarRefImpl};
 use risingwave_pb::data::DataType as PbDataType;
 
 use crate::aws_utils::load_file_descriptor_from_s3;
@@ -122,6 +122,29 @@ pub fn extract_timestamp_from_meta(meta: &SourceMeta) -> DatumRef<'_> {
         SourceMeta::Kafka(kafka_meta) => kafka_meta.extract_timestamp(),
         SourceMeta::DebeziumCdc(cdc_meta) => cdc_meta.extract_timestamp(),
         SourceMeta::Kinesis(kinesis_meta) => kinesis_meta.extract_timestamp(),
+        _ => None,
+    }
+}
+
+/// Extract the partition identifier from source metadata.
+/// For Kafka, returns the actual partition number (not the `split_id` which may include topic name).
+/// For other connectors, falls back to `split_id`.
+pub fn extract_partition_from_meta<'a>(meta: &SourceMeta, split_id: &'a str) -> DatumCow<'a> {
+    match meta {
+        SourceMeta::Kafka(kafka_meta) => {
+            // Always return the pure partition number, regardless of multi-topic mode.
+            // The split_id may be "topic:partition" in multi-topic mode, but the
+            // INCLUDE partition column should show just the partition number.
+            Some(ScalarImpl::Utf8(kafka_meta.partition.to_string().into())).into()
+        }
+        _ => Some(ScalarRefImpl::Utf8(split_id)).into(),
+    }
+}
+
+/// Extract the topic name from Kafka source metadata.
+pub fn extract_topic_from_meta(meta: &SourceMeta) -> DatumRef<'_> {
+    match meta {
+        SourceMeta::Kafka(kafka_meta) => Some(ScalarRefImpl::Utf8(&kafka_meta.topic)),
         _ => None,
     }
 }

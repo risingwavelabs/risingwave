@@ -105,6 +105,7 @@ statement ok
 CREATE TABLE regex_multi (id int, data varchar)
 INCLUDE partition AS kafka_partition
 INCLUDE offset AS kafka_offset
+INCLUDE topic AS kafka_topic
 WITH (
     ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
     "topic.regex" = '^tr_events_.*',
@@ -120,16 +121,23 @@ SELECT id, data FROM regex_multi ORDER BY id;
 3 user_a
 4 user_b
 
-# Verify split IDs include topic name (multi-topic format "topic:partition")
+# Verify partition column shows pure partition number (not topic:partition)
 query T
 SELECT DISTINCT kafka_partition FROM regex_multi ORDER BY kafka_partition;
 ----
-tr_events_orders:0
-tr_events_users:1
+0
+1
 
-# Exactly-once: no duplicate (topic:partition, offset) pairs
+# Verify topic column shows topic name
+query T
+SELECT DISTINCT kafka_topic FROM regex_multi ORDER BY kafka_topic;
+----
+tr_events_orders
+tr_events_users
+
+# Exactly-once: no duplicate (topic, partition, offset) tuples
 query I
-SELECT count(*) FROM (SELECT DISTINCT kafka_partition, kafka_offset FROM regex_multi);
+SELECT count(*) FROM (SELECT DISTINCT kafka_topic, kafka_partition, kafka_offset FROM regex_multi);
 ----
 4
 
@@ -159,13 +167,13 @@ SELECT id, data FROM regex_multi ORDER BY id;
 50 payment_a
 51 payment_b
 
-# Verify new topic split ID is also in topic:partition format
+# Verify new topic appears in topic column
 query T
-SELECT DISTINCT kafka_partition FROM regex_multi ORDER BY kafka_partition;
+SELECT DISTINCT kafka_topic FROM regex_multi ORDER BY kafka_topic;
 ----
-tr_events_orders:0
-tr_events_payments:0
-tr_events_users:1
+tr_events_orders
+tr_events_payments
+tr_events_users
 
 # ============================================================
 # Test 7: Single-topic source still works after regex source is running

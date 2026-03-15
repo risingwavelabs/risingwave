@@ -31,6 +31,10 @@ use crate::source::base::SourceMessage;
 pub struct KafkaMeta {
     pub timestamp: Timestamp,
     pub headers: Option<OwnedHeaders>,
+    /// The Kafka topic this message was consumed from.
+    pub topic: String,
+    /// The partition number within the topic.
+    pub partition: i32,
 }
 
 impl KafkaMeta {
@@ -113,6 +117,8 @@ impl SourceMessage {
                 } else {
                     None
                 },
+                topic: message.topic().to_owned(),
+                partition: message.partition(),
             }),
         }
     }

@@ -250,6 +250,35 @@ pub fn validate_compatibility(
         props.insert("schema.name".into(), "dbo".into());
     }
 
+    if connector == KAFKA_CONNECTOR {
+        let has_topic = props.get("topic").is_some_and(|t| !t.is_empty());
+        let has_regex = props.contains_key("topic.regex");
+
+        match (has_topic, has_regex) {
+            (false, false) => {
+                return Err(RwError::from(ProtocolError(
+                    "either `topic` or `topic.regex` must be specified for Kafka source".to_owned(),
+                )));
+            }
+            (true, true) => {
+                return Err(RwError::from(ProtocolError(
+                    "`topic` and `topic.regex` cannot be specified at the same time".to_owned(),
+                )));
+            }
+            (false, true) => {
+                // Validate regex pattern syntax
+                let pattern = &props["topic.regex"];
+                if let Err(e) = regex::Regex::new(pattern) {
+                    return Err(RwError::from(ProtocolError(format!(
+                        "invalid topic.regex pattern '{}': {}",
+                        pattern, e
+                    ))));
+                }
+            }
+            _ => {}
+        }
+    }
+
     // Validate cdc.source.wait.streaming.start.timeout for all CDC connectors
     if (connector == MYSQL_CDC_CONNECTOR
         || connector == POSTGRES_CDC_CONNECTOR

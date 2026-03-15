@@ -23,8 +23,8 @@ use risingwave_pb::plan_common::{
     AdditionalCollectionName, AdditionalColumn, AdditionalColumnFilename, AdditionalColumnHeader,
     AdditionalColumnHeaders, AdditionalColumnKey, AdditionalColumnOffset,
     AdditionalColumnPartition, AdditionalColumnPayload, AdditionalColumnPulsarMessageIdData,
-    AdditionalColumnTimestamp, AdditionalDatabaseName, AdditionalSchemaName, AdditionalSubject,
-    AdditionalTableName,
+    AdditionalColumnTimestamp, AdditionalColumnTopicName, AdditionalDatabaseName,
+    AdditionalSchemaName, AdditionalSubject, AdditionalTableName,
 };
 
 use crate::error::ConnectorResult;
@@ -50,6 +50,7 @@ pub static COMPATIBLE_ADDITIONAL_COLUMNS: LazyLock<HashMap<&'static str, HashSet
                     "offset",
                     "header",
                     "payload",
+                    "topic",
                 ]),
             ),
             (
@@ -285,6 +286,16 @@ pub fn build_additional_column_desc(
             AdditionalColumn {
                 column_type: Some(AdditionalColumnType::PulsarMessageIdData(
                     AdditionalColumnPulsarMessageIdData {},
+                )),
+            },
+        ),
+        "topic" => ColumnDesc::named_with_additional_column(
+            column_name,
+            column_id,
+            DataType::Varchar,
+            AdditionalColumn {
+                column_type: Some(AdditionalColumnType::TopicName(
+                    AdditionalColumnTopicName {},
                 )),
             },
         ),

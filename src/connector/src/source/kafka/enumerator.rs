@@ -76,7 +76,7 @@ pub struct KafkaSplitEnumerator {
     stop_offset: KafkaEnumeratorOffset,
 
     sync_call_timeout: Duration,
-    high_watermark_metrics: HashMap<i32, LabelGuardedIntGauge>,
+    high_watermark_metrics: HashMap<String, LabelGuardedIntGauge>,
 
     properties: KafkaProperties,
     config: rdkafka::ClientConfig,
@@ -128,14 +128,14 @@ impl SplitEnumerator for KafkaSplitEnumerator {
 
         let broker_address = properties.connection.brokers.clone();
         let topic = common_props.topic.clone();
-        let topic_regex = match &common_props.topic_regex {
-            Some(pattern) => {
-                let re = Regex::new(pattern)
-                    .map_err(|e| anyhow!("invalid topic.regex pattern '{}': {}", pattern, e))?;
-                Some(re)
-            }
-            None => None,
-        };
+        let topic_regex = common_props
+            .topic_regex
+            .as_deref()
+            .map(|pattern| {
+                Regex::new(pattern)
+                    .with_context(|| format!("invalid topic.regex pattern '{}'", pattern))
+            })
+            .transpose()?;
         config.set("bootstrap.servers", &broker_address);
         config.set("isolation.level", KAFKA_ISOLATION_LEVEL);
         if let Some(log_level) = read_kafka_log_level() {
@@ -525,15 +525,6 @@ impl KafkaSplitEnumerator {
 
     #[inline]
     fn report_high_watermark(&mut self, topic: &str, partition: i32, offset: i64) {
-        // Use a combined key for multi-topic to avoid metric collisions.
-        // For single-topic mode, `topic_regex` is None, so we just use partition.
-        let metric_key = if self.topic_regex.is_some() {
-            // Hash topic:partition into a single i32 to use as key.
-            // This is only for deduplication of metric creation.
-            (topic.len() as i32 * 31) ^ partition
-        } else {
-            partition
-        };
         let partition_label = if self.topic_regex.is_some() {
             format!("{}:{}", topic, partition)
         } else {
@@ -541,7 +532,7 @@ impl KafkaSplitEnumerator {
         };
         let high_watermark_metrics = self
             .high_watermark_metrics
-            .entry(metric_key)
+            .entry(partition_label.clone())
             .or_insert_with(|| {
                 self.context
                     .metrics
