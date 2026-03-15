@@ -17,6 +17,7 @@ use std::num::NonZeroUsize;
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use anyhow::anyhow;
+use thiserror_ext::AsReport;
 use itertools::Itertools;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{FragmentTypeFlag, FragmentTypeMask, TableId};
@@ -1021,7 +1022,7 @@ impl EnsembleActorTemplate {
                 Err(e) => {
                     tracing::warn!(
                         %entry_fragment_id,
-                        error = %e,
+                        error = %e.as_report(),
                         "failed to fill adaptive split during reschedule, falling back to reassign"
                     );
                 }
