@@ -276,6 +276,12 @@ impl KafkaConfig {
         let config = serde_json::from_value::<KafkaConfig>(serde_json::to_value(values).unwrap())
             .map_err(|e| SinkError::Config(anyhow!(e)))?;
 
+        if config.common.topic.is_empty() {
+            return Err(SinkError::Config(anyhow!(
+                "`topic` must be specified for Kafka sink"
+            )));
+        }
+
         Ok(config)
     }
 

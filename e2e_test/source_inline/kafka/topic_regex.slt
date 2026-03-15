@@ -1,0 +1,202 @@
+control substitution on
+
+# ============================================================
+# Test 1: Validation - topic and topic.regex cannot both be set
+# ============================================================
+
+statement error topic.*regex.*cannot be specified at the same time
+CREATE TABLE bad1 (id int) WITH (
+    ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+    topic = 'some_topic',
+    "topic.regex" = '^events\..*',
+    scan.startup.mode = 'earliest'
+) FORMAT PLAIN ENCODE JSON;
+
+# ============================================================
+# Test 2: Validation - at least one of topic or topic.regex must be set
+# ============================================================
+
+statement error either.*topic.*or.*topic\.regex.*must be specified
+CREATE TABLE bad2 (id int) WITH (
+    ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+    scan.startup.mode = 'earliest'
+) FORMAT PLAIN ENCODE JSON;
+
+# ============================================================
+# Test 3: Validation - invalid regex pattern
+# ============================================================
+
+statement error invalid topic\.regex pattern
+CREATE TABLE bad3 (id int) WITH (
+    ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+    "topic.regex" = '[invalid(regex',
+    scan.startup.mode = 'earliest'
+) FORMAT PLAIN ENCODE JSON;
+
+# ============================================================
+# Setup: create test topics for regex matching
+# ============================================================
+
+system ok
+rpk topic delete tr_events_orders || true; \
+rpk topic delete tr_events_users || true; \
+rpk topic delete tr_logs_system || true; \
+rpk topic delete tr_single || true; \
+rpk topic delete tr_events_payments || true; \
+(exit 0)
+
+system ok
+rpk topic create tr_events_orders -p 2
+
+system ok
+rpk topic create tr_events_users -p 2
+
+system ok
+rpk topic create tr_logs_system -p 1
+
+system ok
+rpk topic create tr_single -p 2
+
+system ok
+cat <<EOF | rpk topic produce tr_events_orders -f "%p %v\n"
+0 {"id":1,"data":"order_a"}
+0 {"id":2,"data":"order_b"}
+EOF
+
+system ok
+cat <<EOF | rpk topic produce tr_events_users -f "%p %v\n"
+1 {"id":3,"data":"user_a"}
+1 {"id":4,"data":"user_b"}
+EOF
+
+system ok
+cat <<EOF | rpk topic produce tr_logs_system -f "%v\n"
+{"id":99,"data":"should_not_appear"}
+EOF
+
+system ok
+cat <<EOF | rpk topic produce tr_single -f "%p %v\n"
+0 {"id":10,"data":"single_a"}
+1 {"id":11,"data":"single_b"}
+EOF
+
+# ============================================================
+# Test 4: Backward compatibility - single topic source
+# ============================================================
+
+statement ok
+CREATE TABLE compat_single (id int, data varchar) WITH (
+    ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+    topic = 'tr_single',
+    scan.startup.mode = 'earliest'
+) FORMAT PLAIN ENCODE JSON;
+
+query IT retry 5 backoff 2s
+SELECT id, data FROM compat_single ORDER BY id;
+----
+10 single_a
+11 single_b
+
+# ============================================================
+# Test 5: Multi-topic regex source
+# ============================================================
+
+statement ok
+CREATE TABLE regex_multi (id int, data varchar)
+INCLUDE partition AS kafka_partition
+INCLUDE offset AS kafka_offset
+WITH (
+    ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+    "topic.regex" = '^tr_events_.*',
+    scan.startup.mode = 'earliest'
+) FORMAT PLAIN ENCODE JSON;
+
+# Should consume from tr_events_orders and tr_events_users, but NOT tr_logs_system
+query IT retry 10 backoff 2s
+SELECT id, data FROM regex_multi ORDER BY id;
+----
+1 order_a
+2 order_b
+3 user_a
+4 user_b
+
+# Verify split IDs include topic name (multi-topic format "topic:partition")
+query T
+SELECT DISTINCT kafka_partition FROM regex_multi ORDER BY kafka_partition;
+----
+tr_events_orders:0
+tr_events_users:1
+
+# Exactly-once: no duplicate (topic:partition, offset) pairs
+query I
+SELECT count(*) FROM (SELECT DISTINCT kafka_partition, kafka_offset FROM regex_multi);
+----
+4
+
+# ============================================================
+# Test 6: Dynamic topic addition
+# ============================================================
+
+system ok
+rpk topic create tr_events_payments -p 1
+
+system ok
+cat <<EOF | rpk topic produce tr_events_payments -f "%v\n"
+{"id":50,"data":"payment_a"}
+{"id":51,"data":"payment_b"}
+EOF
+
+# Wait for source manager to discover the new topic (~30s tick interval)
+sleep 40s
+
+query IT retry 5 backoff 5s
+SELECT id, data FROM regex_multi ORDER BY id;
+----
+1 order_a
+2 order_b
+3 user_a
+4 user_b
+50 payment_a
+51 payment_b
+
+# Verify new topic split ID is also in topic:partition format
+query T
+SELECT DISTINCT kafka_partition FROM regex_multi ORDER BY kafka_partition;
+----
+tr_events_orders:0
+tr_events_payments:0
+tr_events_users:1
+
+# ============================================================
+# Test 7: Single-topic source still works after regex source is running
+# ============================================================
+
+system ok
+cat <<EOF | rpk topic produce tr_single -f "%p %v\n"
+0 {"id":12,"data":"single_c"}
+EOF
+
+query IT retry 5 backoff 2s
+SELECT id, data FROM compat_single ORDER BY id;
+----
+10 single_a
+11 single_b
+12 single_c
+
+# ============================================================
+# Cleanup
+# ============================================================
+
+statement ok
+DROP TABLE regex_multi;
+
+statement ok
+DROP TABLE compat_single;
+
+system ok
+rpk topic delete tr_events_orders; \
+rpk topic delete tr_events_users; \
+rpk topic delete tr_logs_system; \
+rpk topic delete tr_single; \
+rpk topic delete tr_events_payments; \
+(exit 0)

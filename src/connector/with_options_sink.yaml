@@ -750,9 +750,18 @@ KafkaConfig:
   fields:
   - name: topic
     field_type: String
-    required: true
+    required: false
+    default: Default::default
     alias:
     - kafka.topic
+  - name: topic.regex
+    field_type: String
+    comments: |-
+      A regex pattern for matching multiple Kafka topics.
+      When set, the source will consume from all topics matching this pattern.
+      New topics matching the pattern will be discovered dynamically.
+      Cannot be used together with `topic`.
+    required: false
   - name: properties.sync.call.timeout
     field_type: Duration
     required: false

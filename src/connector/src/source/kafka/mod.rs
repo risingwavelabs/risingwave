@@ -219,6 +219,29 @@ impl KafkaProperties {
             fragment_id
         )
     }
+
+    /// Returns true if this source uses `topic.regex` for multi-topic consumption.
+    pub fn is_multi_topic(&self) -> bool {
+        self.common.topic_regex.is_some()
+    }
+
+    /// Validate topic configuration: exactly one of `topic` or `topic.regex` must be set.
+    pub fn validate_topic_config(&self) -> ConnectorResult<()> {
+        let has_topic = !self.common.topic.is_empty();
+        let has_regex = self.common.topic_regex.is_some();
+
+        match (has_topic, has_regex) {
+            (false, false) => Err(anyhow::anyhow!(
+                "either `topic` or `topic.regex` must be specified for Kafka source"
+            )
+            .into()),
+            (true, true) => Err(anyhow::anyhow!(
+                "`topic` and `topic.regex` cannot be specified at the same time"
+            )
+            .into()),
+            _ => Ok(()),
+        }
+    }
 }
 
 const KAFKA_ISOLATION_LEVEL: &str = "read_committed";
@@ -322,5 +345,89 @@ mod test {
             "broker1".to_owned() => "10.0.0.1:8001".to_owned()
         };
         assert_eq!(props.privatelink_common.broker_rewrite_map, Some(hashmap));
+    }
+
+    #[test]
+    fn test_topic_regex_config() {
+        // topic.regex without topic
+        let config: BTreeMap<String, String> = btreemap! {
+            "properties.bootstrap.server".to_owned() => "127.0.0.1:9092".to_owned(),
+            "topic.regex".to_owned() => "events\\..*".to_owned(),
+        };
+        let props: KafkaProperties =
+            serde_json::from_value(serde_json::to_value(config).unwrap()).unwrap();
+        assert!(props.is_multi_topic());
+        assert_eq!(props.common.topic_regex.as_deref(), Some("events\\..*"));
+        assert!(props.common.topic.is_empty());
+        assert!(props.validate_topic_config().is_ok());
+    }
+
+    #[test]
+    fn test_topic_and_regex_conflict() {
+        // Both topic and topic.regex set - should fail validation
+        let config: BTreeMap<String, String> = btreemap! {
+            "properties.bootstrap.server".to_owned() => "127.0.0.1:9092".to_owned(),
+            "topic".to_owned() => "test".to_owned(),
+            "topic.regex".to_owned() => "events\\..*".to_owned(),
+        };
+        let props: KafkaProperties =
+            serde_json::from_value(serde_json::to_value(config).unwrap()).unwrap();
+        assert!(props.validate_topic_config().is_err());
+    }
+
+    #[test]
+    fn test_neither_topic_nor_regex() {
+        // Neither topic nor topic.regex - should fail validation
+        let config: BTreeMap<String, String> = btreemap! {
+            "properties.bootstrap.server".to_owned() => "127.0.0.1:9092".to_owned(),
+        };
+        let props: KafkaProperties =
+            serde_json::from_value(serde_json::to_value(config).unwrap()).unwrap();
+        assert!(props.validate_topic_config().is_err());
+    }
+
+    #[test]
+    fn test_kafka_split_id_single_topic() {
+        use crate::source::SplitMetaData;
+        let split = KafkaSplit::new(0, None, None, "test_topic".to_string());
+        assert_eq!(split.id().as_ref(), "0");
+    }
+
+    #[test]
+    fn test_kafka_split_id_multi_topic() {
+        use crate::source::SplitMetaData;
+        let split = KafkaSplit {
+            topic: "events.orders".to_string(),
+            partition: 3,
+            start_offset: None,
+            stop_offset: None,
+            multi_topic: true,
+        };
+        assert_eq!(split.id().as_ref(), "events.orders:3");
+
+        // Different topic same partition should have different split ID
+        let split2 = KafkaSplit {
+            topic: "events.users".to_string(),
+            partition: 3,
+            start_offset: None,
+            stop_offset: None,
+            multi_topic: true,
+        };
+        assert_ne!(split.id(), split2.id());
+        assert_eq!(split2.id().as_ref(), "events.users:3");
+    }
+
+    #[test]
+    fn test_kafka_split_backward_compat_deserialization() {
+        // Old split without multi_topic field should deserialize with multi_topic=false
+        let json = serde_json::json!({
+            "topic": "test",
+            "partition": 0,
+            "start_offset": 100,
+            "stop_offset": null
+        });
+        let split: KafkaSplit = serde_json::from_value(json).unwrap();
+        assert!(!split.multi_topic);
+        assert_eq!(crate::source::SplitMetaData::id(&split).as_ref(), "0");
     }
 }

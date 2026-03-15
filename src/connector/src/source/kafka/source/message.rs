@@ -90,13 +90,22 @@ impl KafkaMeta {
 }
 
 impl SourceMessage {
-    pub fn from_kafka_message(message: &BorrowedMessage<'_>, require_header: bool) -> Self {
+    pub fn from_kafka_message(
+        message: &BorrowedMessage<'_>,
+        require_header: bool,
+        multi_topic: bool,
+    ) -> Self {
+        let split_id = if multi_topic {
+            format!("{}:{}", message.topic(), message.partition()).into()
+        } else {
+            message.partition().to_string().into()
+        };
         SourceMessage {
             // TODO(TaoWu): Possible performance improvement: avoid memory copying here.
             key: message.key().map(|p| p.to_vec()),
             payload: message.payload().map(|p| p.to_vec()),
             offset: message.offset().to_string(),
-            split_id: message.partition().to_string().into(),
+            split_id,
             meta: SourceMeta::Kafka(KafkaMeta {
                 timestamp: message.timestamp(),
                 headers: if require_header {

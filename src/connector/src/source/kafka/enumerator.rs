@@ -25,9 +25,11 @@ use rdkafka::consumer::{BaseConsumer, Consumer};
 use rdkafka::error::{KafkaError, KafkaResult};
 use rdkafka::types::RDKafkaErrorCode;
 use rdkafka::{ClientConfig, Offset, TopicPartitionList};
+use regex::Regex;
 use risingwave_common::bail;
 use risingwave_common::id::FragmentId;
 use risingwave_common::metrics::LabelGuardedIntGauge;
+use thiserror_ext::AsReport;
 
 use crate::connector_common::read_kafka_log_level;
 use crate::error::{ConnectorError, ConnectorResult};
@@ -65,6 +67,8 @@ pub struct KafkaSplitEnumerator {
     context: SourceEnumeratorContextRef,
     broker_address: String,
     topic: String,
+    /// Compiled regex for multi-topic discovery. When set, `topic` is empty.
+    topic_regex: Option<Regex>,
     client: Arc<KafkaConsumer>,
     start_offset: KafkaEnumeratorOffset,
 
@@ -117,11 +121,21 @@ impl SplitEnumerator for KafkaSplitEnumerator {
         properties: KafkaProperties,
         context: SourceEnumeratorContextRef,
     ) -> ConnectorResult<KafkaSplitEnumerator> {
+        properties.validate_topic_config()?;
+
         let mut config = rdkafka::ClientConfig::new();
         let common_props = &properties.common;
 
         let broker_address = properties.connection.brokers.clone();
         let topic = common_props.topic.clone();
+        let topic_regex = match &common_props.topic_regex {
+            Some(pattern) => {
+                let re = Regex::new(pattern)
+                    .map_err(|e| anyhow!("invalid topic.regex pattern '{}': {}", pattern, e))?;
+                Some(re)
+            }
+            None => None,
+        };
         config.set("bootstrap.servers", &broker_address);
         config.set("isolation.level", KAFKA_ISOLATION_LEVEL);
         if let Some(log_level) = read_kafka_log_level() {
@@ -171,6 +185,7 @@ impl SplitEnumerator for KafkaSplitEnumerator {
             context,
             broker_address,
             topic,
+            topic_regex,
             client: client.unwrap(),
             start_offset: scan_start_offset,
             stop_offset: KafkaEnumeratorOffset::None,
@@ -182,29 +197,37 @@ impl SplitEnumerator for KafkaSplitEnumerator {
     }
 
     async fn list_splits(&mut self) -> ConnectorResult<Vec<KafkaSplit>> {
-        let topic_partitions = self.fetch_topic_partition().await.with_context(|| {
+        if self.topic_regex.is_some() {
+            return self.list_splits_multi_topic().await;
+        }
+
+        let topic = self.topic.clone();
+        let topic_partitions = self.fetch_topic_partition(&topic).await.with_context(|| {
             format!(
                 "failed to fetch metadata from kafka ({})",
                 self.broker_address
             )
         })?;
 
-        let watermarks = self.get_watermarks(topic_partitions.as_ref()).await?;
+        let watermarks = self
+            .get_watermarks(&topic, topic_partitions.as_ref())
+            .await?;
         let mut start_offsets = self
-            .fetch_start_offset(topic_partitions.as_ref(), &watermarks)
+            .fetch_start_offset(&topic, topic_partitions.as_ref(), &watermarks)
             .await?;
 
         let mut stop_offsets = self
-            .fetch_stop_offset(topic_partitions.as_ref(), &watermarks)
+            .fetch_stop_offset(&topic, topic_partitions.as_ref(), &watermarks)
             .await?;
 
         let ret: Vec<_> = topic_partitions
             .into_iter()
             .map(|partition| KafkaSplit {
-                topic: self.topic.clone(),
+                topic: topic.clone(),
                 partition,
                 start_offset: start_offsets.remove(&partition).unwrap(),
                 stop_offset: stop_offsets.remove(&partition).unwrap(),
+                multi_topic: false,
             })
             .collect();
 
@@ -269,18 +292,19 @@ async fn build_kafka_admin(
 impl KafkaSplitEnumerator {
     async fn get_watermarks(
         &mut self,
+        topic: &str,
         partitions: &[i32],
     ) -> KafkaResult<HashMap<i32, (i64, i64)>> {
         let mut map = HashMap::new();
         for partition in partitions {
             let (low, high) = self
                 .client
-                .fetch_watermarks(self.topic.as_str(), *partition, self.sync_call_timeout)
+                .fetch_watermarks(topic, *partition, self.sync_call_timeout)
                 .await?;
-            self.report_high_watermark(*partition, high);
+            self.report_high_watermark(topic, *partition, high);
             map.insert(*partition, (low, high));
         }
-        tracing::debug!("fetch kafka watermarks: {map:?}");
+        tracing::debug!(topic, "fetch kafka watermarks: {map:?}");
         Ok(map)
     }
 
@@ -289,7 +313,8 @@ impl KafkaSplitEnumerator {
         expect_start_timestamp_millis: Option<i64>,
         expect_stop_timestamp_millis: Option<i64>,
     ) -> ConnectorResult<Vec<KafkaSplit>> {
-        let topic_partitions = self.fetch_topic_partition().await.with_context(|| {
+        let topic = self.topic.clone();
+        let topic_partitions = self.fetch_topic_partition(&topic).await.with_context(|| {
             format!(
                 "failed to fetch metadata from kafka ({})",
                 self.broker_address
@@ -298,7 +323,9 @@ impl KafkaSplitEnumerator {
 
         // Watermark here has nothing to do with watermark in streaming processing. Watermark
         // here means smallest/largest offset available for reading.
-        let mut watermarks = self.get_watermarks(topic_partitions.as_ref()).await?;
+        let mut watermarks = self
+            .get_watermarks(&topic, topic_partitions.as_ref())
+            .await?;
 
         // here we are getting the start offset and end offset for each partition with the given
         // timestamp if the timestamp is None, we will use the low watermark and high
@@ -306,7 +333,7 @@ impl KafkaSplitEnumerator {
         // the watermark to narrow down the range
         let mut expect_start_offset = if let Some(ts) = expect_start_timestamp_millis {
             Some(
-                self.fetch_offset_for_time(topic_partitions.as_ref(), ts, &watermarks)
+                self.fetch_offset_for_time(&topic, topic_partitions.as_ref(), ts, &watermarks)
                     .await?,
             )
         } else {
@@ -315,7 +342,7 @@ impl KafkaSplitEnumerator {
 
         let mut expect_stop_offset = if let Some(ts) = expect_stop_timestamp_millis {
             Some(
-                self.fetch_offset_for_time(topic_partitions.as_ref(), ts, &watermarks)
+                self.fetch_offset_for_time(&topic, topic_partitions.as_ref(), ts, &watermarks)
                     .await?,
             )
         } else {
@@ -346,17 +373,18 @@ impl KafkaSplitEnumerator {
                 if start_offset > stop_offset {
                     tracing::warn!(
                         "Skipping topic {} partition {}: requested start offset {} is greater than stop offset {}",
-                        self.topic,
+                        topic,
                         partition,
                         start_offset,
                         stop_offset
                     );
                 }
                 KafkaSplit {
-                    topic: self.topic.clone(),
+                    topic: topic.clone(),
                     partition: *partition,
                     start_offset: Some(start_offset),
                     stop_offset: Some(stop_offset),
+                    multi_topic: false,
                 }
             })
             .collect::<Vec<KafkaSplit>>())
@@ -364,6 +392,7 @@ impl KafkaSplitEnumerator {
 
     async fn fetch_stop_offset(
         &self,
+        topic: &str,
         partitions: &[i32],
         watermarks: &HashMap<i32, (i64, i64)>,
     ) -> KafkaResult<HashMap<i32, Option<i64>>> {
@@ -378,7 +407,7 @@ impl KafkaSplitEnumerator {
                 Ok(map)
             }
             KafkaEnumeratorOffset::Timestamp(time) => {
-                self.fetch_offset_for_time(partitions, time, watermarks)
+                self.fetch_offset_for_time(topic, partitions, time, watermarks)
                     .await
             }
             KafkaEnumeratorOffset::None => partitions
@@ -390,6 +419,7 @@ impl KafkaSplitEnumerator {
 
     async fn fetch_start_offset(
         &self,
+        topic: &str,
         partitions: &[i32],
         watermarks: &HashMap<i32, (i64, i64)>,
     ) -> KafkaResult<HashMap<i32, Option<i64>>> {
@@ -408,7 +438,7 @@ impl KafkaSplitEnumerator {
                 Ok(map)
             }
             KafkaEnumeratorOffset::Timestamp(time) => {
-                self.fetch_offset_for_time(partitions, time, watermarks)
+                self.fetch_offset_for_time(topic, partitions, time, watermarks)
                     .await
             }
             KafkaEnumeratorOffset::None => partitions
@@ -420,6 +450,7 @@ impl KafkaSplitEnumerator {
 
     async fn fetch_offset_for_time(
         &self,
+        topic: &str,
         partitions: &[i32],
         time: i64,
         watermarks: &HashMap<i32, (i64, i64)>,
@@ -427,7 +458,7 @@ impl KafkaSplitEnumerator {
         let mut tpl = TopicPartitionList::new();
 
         for partition in partitions {
-            tpl.add_partition_offset(self.topic.as_str(), *partition, Offset::Offset(time))?;
+            tpl.add_partition_offset(topic, *partition, Offset::Offset(time))?;
         }
 
         let offsets = self
@@ -437,7 +468,7 @@ impl KafkaSplitEnumerator {
 
         let mut result = HashMap::with_capacity(partitions.len());
 
-        for elem in offsets.elements_for_topic(self.topic.as_str()) {
+        for elem in offsets.elements_for_topic(topic) {
             match elem.offset() {
                 Offset::Offset(offset) => {
                     // XXX(rc): currently in RW source, `offset` means the last consumed offset, so we need to subtract 1
@@ -493,44 +524,65 @@ impl KafkaSplitEnumerator {
     }
 
     #[inline]
-    fn report_high_watermark(&mut self, partition: i32, offset: i64) {
-        let high_watermark_metrics =
-            self.high_watermark_metrics
-                .entry(partition)
-                .or_insert_with(|| {
-                    self.context
-                        .metrics
-                        .high_watermark
-                        .with_guarded_label_values(&[
-                            &self.context.info.source_id.to_string(),
-                            &partition.to_string(),
-                        ])
-                });
+    fn report_high_watermark(&mut self, topic: &str, partition: i32, offset: i64) {
+        // Use a combined key for multi-topic to avoid metric collisions.
+        // For single-topic mode, `topic_regex` is None, so we just use partition.
+        let metric_key = if self.topic_regex.is_some() {
+            // Hash topic:partition into a single i32 to use as key.
+            // This is only for deduplication of metric creation.
+            (topic.len() as i32 * 31) ^ partition
+        } else {
+            partition
+        };
+        let partition_label = if self.topic_regex.is_some() {
+            format!("{}:{}", topic, partition)
+        } else {
+            partition.to_string()
+        };
+        let high_watermark_metrics = self
+            .high_watermark_metrics
+            .entry(metric_key)
+            .or_insert_with(|| {
+                self.context
+                    .metrics
+                    .high_watermark
+                    .with_guarded_label_values(&[
+                        &self.context.info.source_id.to_string(),
+                        &partition_label,
+                    ])
+            });
         high_watermark_metrics.set(offset);
     }
 
     pub async fn check_reachability(&self) -> ConnectorResult<()> {
-        let _ = self
-            .client
-            .fetch_metadata(Some(self.topic.as_str()), self.sync_call_timeout)
-            .await?;
+        if self.topic_regex.is_some() {
+            // For regex mode, just check that we can reach the broker
+            let _ = self
+                .client
+                .fetch_metadata(None, self.sync_call_timeout)
+                .await?;
+        } else {
+            let _ = self
+                .client
+                .fetch_metadata(Some(self.topic.as_str()), self.sync_call_timeout)
+                .await?;
+        }
         Ok(())
     }
 
-    async fn fetch_topic_partition(&self) -> ConnectorResult<Vec<i32>> {
-        // for now, we only support one topic
+    async fn fetch_topic_partition(&self, topic: &str) -> ConnectorResult<Vec<i32>> {
         let metadata = self
             .client
-            .fetch_metadata(Some(self.topic.as_str()), self.sync_call_timeout)
+            .fetch_metadata(Some(topic), self.sync_call_timeout)
             .await?;
 
         let topic_meta = match metadata.topics() {
             [meta] => meta,
-            _ => bail!("topic {} not found", self.topic),
+            _ => bail!("topic {} not found", topic),
         };
 
         if topic_meta.partitions().is_empty() {
-            bail!("topic {} not found", self.topic);
+            bail!("topic {} not found", topic);
         }
 
         Ok(topic_meta
@@ -538,5 +590,90 @@ impl KafkaSplitEnumerator {
             .iter()
             .map(|partition| partition.id())
             .collect())
+    }
+
+    /// Discover all topics matching the configured regex pattern.
+    async fn fetch_topics_by_regex(&self) -> ConnectorResult<Vec<String>> {
+        let re = self
+            .topic_regex
+            .as_ref()
+            .expect("topic_regex must be set for multi-topic mode");
+
+        let metadata = self
+            .client
+            .fetch_metadata(None, self.sync_call_timeout)
+            .await?;
+
+        let mut topics: Vec<String> = metadata
+            .topics()
+            .iter()
+            .filter(|t| {
+                let name = t.name();
+                // Skip internal topics (starting with '__')
+                !name.starts_with("__") && re.is_match(name)
+            })
+            .map(|t| t.name().to_owned())
+            .collect();
+
+        topics.sort();
+
+        if topics.is_empty() {
+            tracing::warn!(
+                source_id = %self.context.info.source_id,
+                pattern = %re,
+                "no topics found matching topic.regex"
+            );
+        } else {
+            tracing::info!(
+                source_id = %self.context.info.source_id,
+                pattern = %re,
+                topics = ?topics,
+                "discovered {} topics matching topic.regex",
+                topics.len()
+            );
+        }
+
+        Ok(topics)
+    }
+
+    /// List splits for all topics matching the regex pattern.
+    async fn list_splits_multi_topic(&mut self) -> ConnectorResult<Vec<KafkaSplit>> {
+        let topics = self.fetch_topics_by_regex().await?;
+        let mut all_splits = Vec::new();
+
+        for topic in &topics {
+            let partitions = match self.fetch_topic_partition(topic).await {
+                Ok(p) => p,
+                Err(e) => {
+                    tracing::warn!(
+                        source_id = %self.context.info.source_id,
+                        topic = topic,
+                        error = %e.as_report(),
+                        "failed to fetch partitions for topic, skipping"
+                    );
+                    continue;
+                }
+            };
+
+            let watermarks = self.get_watermarks(topic, &partitions).await?;
+            let mut start_offsets = self
+                .fetch_start_offset(topic, &partitions, &watermarks)
+                .await?;
+            let mut stop_offsets = self
+                .fetch_stop_offset(topic, &partitions, &watermarks)
+                .await?;
+
+            for partition in partitions {
+                all_splits.push(KafkaSplit {
+                    topic: topic.clone(),
+                    partition,
+                    start_offset: start_offsets.remove(&partition).unwrap(),
+                    stop_offset: stop_offsets.remove(&partition).unwrap(),
+                    multi_topic: true,
+                });
+            }
+        }
+
+        Ok(all_splits)
     }
 }

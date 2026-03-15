@@ -49,6 +49,9 @@ pub struct KafkaSplitReader {
     max_num_messages: usize,
     parser_config: ParserConfig,
     source_ctx: SourceContextRef,
+    /// Whether consuming from multiple topics (topic.regex mode).
+    /// When true, split IDs include topic name as `{topic}:{partition}`.
+    multi_topic: bool,
 }
 
 #[async_trait]
@@ -141,8 +144,11 @@ impl SplitReader for KafkaSplitReader {
                 );
             }
         }
+        let multi_topic = splits.first().is_some_and(|s| s.multi_topic);
         tracing::info!(
             topic = properties.common.topic,
+            topic_regex = ?properties.common.topic_regex,
+            multi_topic = multi_topic,
             source_name = source_ctx.source_name,
             fragment_id = %source_ctx.fragment_id,
             source_id = %source_ctx.source_id,
@@ -178,6 +184,7 @@ impl SplitReader for KafkaSplitReader {
             max_num_messages,
             parser_config,
             source_ctx,
+            multi_topic,
         })
     }
 
@@ -250,6 +257,7 @@ impl KafkaSplitReader {
             )
         });
 
+        let multi_topic = self.multi_topic;
         let mut latest_message_id_metrics: HashMap<String, LabelGuardedIntGauge> = HashMap::new();
 
         #[for_await]
@@ -258,14 +266,18 @@ impl KafkaSplitReader {
                 .into_iter()
                 .collect::<std::result::Result<_, KafkaError>>()?;
 
-            let mut split_msg_offsets = HashMap::new();
+            let mut split_msg_offsets: HashMap<String, i64> = HashMap::new();
 
             for msg in &msgs {
-                split_msg_offsets.insert(msg.partition(), msg.offset());
+                let split_id = if multi_topic {
+                    format!("{}:{}", msg.topic(), msg.partition())
+                } else {
+                    msg.partition().to_string()
+                };
+                split_msg_offsets.insert(split_id, msg.offset());
             }
 
-            for (partition, offset) in split_msg_offsets {
-                let split_id = partition.to_string();
+            for (split_id, offset) in &split_msg_offsets {
                 latest_message_id_metrics
                     .entry(split_id.clone())
                     .or_insert_with(|| {
@@ -276,10 +288,10 @@ impl KafkaSplitReader {
                                 // source name is not available here
                                 &self.source_ctx.source_id.to_string(),
                                 &self.source_ctx.actor_id.to_string(),
-                                &split_id,
+                                split_id,
                             ])
                     })
-                    .set(offset);
+                    .set(*offset);
             }
 
             for msg in msgs {
@@ -290,7 +302,7 @@ impl KafkaSplitReader {
                 };
                 num_messages += 1;
                 let source_message =
-                    SourceMessage::from_kafka_message(&msg, require_message_header);
+                    SourceMessage::from_kafka_message(&msg, require_message_header, multi_topic);
                 let split_id = source_message.split_id.clone();
                 res.push(source_message);
 
