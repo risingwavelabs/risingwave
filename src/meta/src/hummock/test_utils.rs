@@ -96,7 +96,7 @@ pub async fn add_test_tables(
     )
     .await;
     let mut compact_task = hummock_manager
-        .get_compact_task(compaction_group_id, &mut default_compaction_selector())
+        .get_compact_task(compaction_group_id, &mut *default_compaction_selector())
         .await
         .unwrap()
         .unwrap();

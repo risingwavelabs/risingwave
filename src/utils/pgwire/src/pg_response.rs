@@ -115,6 +115,8 @@ pub enum StatementType {
     FETCH_CURSOR,
     WAIT,
     KILL,
+    BACKUP,
+    DELETE_META_SNAPSHOTS,
     RECOVER,
     USE,
     PREPARE,
@@ -333,6 +335,9 @@ impl StatementType {
             Statement::CloseCursor { .. } => Ok(StatementType::CLOSE_CURSOR),
             Statement::Flush => Ok(StatementType::FLUSH),
             Statement::Wait => Ok(StatementType::WAIT),
+            Statement::Backup => Ok(StatementType::BACKUP),
+            Statement::DeleteMetaSnapshots { .. } => Ok(StatementType::DELETE_META_SNAPSHOTS),
+            Statement::Recover => Ok(StatementType::RECOVER),
             Statement::Use { .. } => Ok(StatementType::USE),
             Statement::Vacuum { .. } => Ok(StatementType::VACUUM),
             _ => Err("unsupported statement type".to_owned()),
@@ -379,6 +384,7 @@ impl StatementType {
                 | StatementType::DELETE_RETURNING
                 | StatementType::UPDATE_RETURNING
                 | StatementType::CANCEL_COMMAND
+                | StatementType::BACKUP
                 | StatementType::FETCH_CURSOR
         )
     }

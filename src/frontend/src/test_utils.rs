@@ -59,6 +59,7 @@ use risingwave_pb::meta::cancel_creating_jobs_request::PbJobs;
 use risingwave_pb::meta::list_actor_splits_response::ActorSplit;
 use risingwave_pb::meta::list_actor_states_response::ActorState;
 use risingwave_pb::meta::list_cdc_progress_response::PbCdcProgress;
+use risingwave_pb::meta::list_iceberg_compaction_status_response::IcebergCompactionStatus;
 use risingwave_pb::meta::list_iceberg_tables_response::IcebergTable;
 use risingwave_pb::meta::list_rate_limits_response::RateLimitInfo;
 use risingwave_pb::meta::list_refresh_table_states_response::RefreshTableState;
@@ -1283,6 +1284,21 @@ impl FrontendMetaClient for MockFrontendMetaClient {
         unimplemented!()
     }
 
+    async fn backup_meta(&self, _remarks: Option<String>) -> RpcResult<u64> {
+        unimplemented!()
+    }
+
+    async fn get_backup_job_status(
+        &self,
+        _job_id: u64,
+    ) -> RpcResult<(risingwave_pb::backup_service::BackupJobStatus, String)> {
+        unimplemented!()
+    }
+
+    async fn delete_meta_snapshot(&self, _snapshot_ids: &[u64]) -> RpcResult<()> {
+        unimplemented!()
+    }
+
     async fn apply_throttle(
         &self,
         _throttle_target: PbThrottleTarget,
@@ -1364,6 +1380,10 @@ impl FrontendMetaClient for MockFrontendMetaClient {
 
     async fn list_hosted_iceberg_tables(&self) -> RpcResult<Vec<IcebergTable>> {
         unimplemented!()
+    }
+
+    async fn list_iceberg_compaction_status(&self) -> RpcResult<Vec<IcebergCompactionStatus>> {
+        Ok(vec![])
     }
 
     async fn get_fragment_by_id(

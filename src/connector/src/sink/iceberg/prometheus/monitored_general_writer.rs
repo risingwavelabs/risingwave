@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::Arc;
+
 use iceberg::Result;
 use iceberg::spec::{DataFile, PartitionKey};
 use iceberg::writer::{IcebergWriter, IcebergWriterBuilder};
@@ -20,7 +22,7 @@ use risingwave_common::metrics::{LabelGuardedHistogram, LabelGuardedIntCounter};
 
 #[derive(Clone)]
 pub struct MonitoredGeneralWriterBuilder<B: IcebergWriterBuilder> {
-    inner: B,
+    inner: Arc<B>,
     write_qps: LabelGuardedIntCounter,
     write_latency: LabelGuardedHistogram,
 }
@@ -32,7 +34,7 @@ impl<B: IcebergWriterBuilder> MonitoredGeneralWriterBuilder<B> {
         write_latency: LabelGuardedHistogram,
     ) -> Self {
         Self {
-            inner,
+            inner: Arc::new(inner),
             write_qps,
             write_latency,
         }
@@ -44,14 +46,14 @@ impl<B: IcebergWriterBuilder> IcebergWriterBuilder for MonitoredGeneralWriterBui
     type R = MonitoredGeneralWriter<B::R>;
 
     async fn build(
-        self,
+        &self,
         partition_key: Option<PartitionKey>,
     ) -> Result<MonitoredGeneralWriter<B::R>> {
         let inner = self.inner.build(partition_key).await?;
         Ok(MonitoredGeneralWriter {
             inner,
-            write_qps: self.write_qps,
-            write_latency: self.write_latency,
+            write_qps: self.write_qps.clone(),
+            write_latency: self.write_latency.clone(),
         })
     }
 }

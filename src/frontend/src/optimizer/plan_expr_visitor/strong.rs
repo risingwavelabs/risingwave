@@ -237,6 +237,8 @@ impl Strong {
             | ExprType::Sha256
             | ExprType::Sha384
             | ExprType::Sha512
+            | ExprType::Crc32
+            | ExprType::Crc32c
             | ExprType::GetBit
             | ExprType::GetByte
             | ExprType::SetBit

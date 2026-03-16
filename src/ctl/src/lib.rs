@@ -139,6 +139,12 @@ enum HummockCommands {
 
         #[clap(short, long = "sst-ids", value_delimiter = ',')]
         sst_ids: Vec<HummockSstableId>,
+
+        #[clap(long = "exclusive", default_value_t = false)]
+        exclusive: bool,
+
+        #[clap(long = "retry-interval-ms", default_value_t = 1000)]
+        retry_interval_ms: u64,
     },
     /// Trigger a full GC for SSTs that is not pinned, with timestamp <= now -
     /// `sst_retention_time_sec`, and with `prefix` in path.
@@ -211,9 +217,9 @@ enum HummockCommands {
         #[clap(long)]
         enable_optimize_l0_interval_selection: Option<bool>,
         #[clap(long)]
-        vnode_aligned_level_size_threshold: Option<u64>,
-        #[clap(long)]
         max_kv_count_for_xor16: Option<u64>,
+        #[clap(long)]
+        max_vnode_key_range_bytes: Option<u64>,
     },
     /// Split given compaction group into two. Moves the given tables to the new group.
     SplitCompactionGroup {
@@ -651,6 +657,8 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
             table_id,
             levels,
             sst_ids,
+            exclusive,
+            retry_interval_ms,
         }) => {
             cmd_impl::hummock::trigger_manual_compaction(
                 context,
@@ -658,6 +666,8 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
                 table_id.into(),
                 levels,
                 sst_ids,
+                exclusive,
+                retry_interval_ms,
             )
             .await?
         }
@@ -700,8 +710,8 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
             level0_stop_write_threshold_max_sst_count,
             level0_stop_write_threshold_max_size,
             enable_optimize_l0_interval_selection,
-            vnode_aligned_level_size_threshold,
             max_kv_count_for_xor16,
+            max_vnode_key_range_bytes,
         }) => {
             cmd_impl::hummock::update_compaction_config(
                 context,
@@ -741,8 +751,8 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
                     level0_stop_write_threshold_max_sst_count,
                     level0_stop_write_threshold_max_size,
                     enable_optimize_l0_interval_selection,
-                    vnode_aligned_level_size_threshold,
                     max_kv_count_for_xor16,
+                    max_vnode_key_range_bytes,
                 ),
             )
             .await?

@@ -42,6 +42,12 @@ pub trait SinkWriter: Send + 'static {
     /// writer should commit the current epoch.
     async fn barrier(&mut self, is_checkpoint: bool) -> Result<Self::CommitMetadata>;
 
+    /// Return true when the writer wants to commit on the next checkpoint barrier earlier than
+    /// the configured checkpoint interval.
+    fn should_commit_on_checkpoint(&self) -> bool {
+        false
+    }
+
     /// Clean up
     async fn abort(&mut self) -> Result<()> {
         Ok(())

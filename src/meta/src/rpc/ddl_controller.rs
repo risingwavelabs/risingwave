@@ -1844,16 +1844,6 @@ impl DdlController {
             }
         }
 
-        let upstream_actors = upstream_root_fragments
-            .values()
-            .map(|(fragment, _)| {
-                (
-                    fragment.fragment_id,
-                    fragment.actors.keys().copied().collect(),
-                )
-            })
-            .collect();
-
         let complete_graph = CompleteStreamFragmentGraph::with_upstreams(
             fragment_graph,
             FragmentGraphUpstreamContext {
@@ -1914,7 +1904,6 @@ impl DdlController {
             downstream_fragment_relations,
             building_locations,
             upstream_fragment_downstreams,
-            new_no_shuffle,
             replace_upstream,
             ..
         } = actor_graph_builder.generate_graph(&self.env, &stream_job, stream_ctx.clone())?;
@@ -1997,8 +1986,6 @@ impl DdlController {
 
         let ctx = CreateStreamingJobContext {
             upstream_fragment_downstreams,
-            new_no_shuffle,
-            upstream_actors,
             building_locations,
             definition: stream_job.definition(),
             create_type: stream_job.create_type(),
@@ -2201,7 +2188,6 @@ impl DdlController {
             building_locations,
             upstream_fragment_downstreams,
             mut replace_upstream,
-            new_no_shuffle,
             ..
         } = actor_graph_builder.generate_graph(&self.env, stream_job, stream_ctx.clone())?;
 
@@ -2239,7 +2225,6 @@ impl DdlController {
         let ctx = ReplaceStreamJobContext {
             old_fragments,
             replace_upstream,
-            new_no_shuffle,
             upstream_fragment_downstreams,
             building_locations,
             streaming_job: stream_job.clone(),

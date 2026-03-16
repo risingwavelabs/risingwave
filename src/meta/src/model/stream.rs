@@ -126,7 +126,7 @@ pub type FragmentDownstreamRelation = HashMap<FragmentId, Vec<DownstreamFragment
 pub type FragmentReplaceUpstream = HashMap<FragmentId, HashMap<FragmentId, FragmentId>>;
 /// The newly added no-shuffle actor dispatcher from upstream fragment to downstream fragment
 /// upstream `fragment_id` -> downstream `fragment_id` -> upstream `actor_id` -> downstream `actor_id`
-pub type FragmentNewNoShuffle = HashMap<FragmentId, HashMap<FragmentId, HashMap<ActorId, ActorId>>>;
+pub type ActorNewNoShuffle = HashMap<FragmentId, HashMap<FragmentId, HashMap<ActorId, ActorId>>>;
 
 #[derive(Debug, Clone)]
 pub struct DownstreamFragmentRelation {
