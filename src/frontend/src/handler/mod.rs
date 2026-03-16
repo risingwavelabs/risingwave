@@ -1330,8 +1330,8 @@ pub async fn handle(
                 )
                 .await
             }
-            AlterSourceOperation::ResetSource => {
-                reset_source::handle_reset_source(handler_args, name).await
+            AlterSourceOperation::ResetSource { start_offset } => {
+                reset_source::handle_reset_source(handler_args, name, start_offset).await
             }
         },
         Statement::AlterFunction {
