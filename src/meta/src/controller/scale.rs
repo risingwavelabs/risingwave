@@ -641,8 +641,15 @@ pub(crate) fn materialize_actor_assignments(
         })
         .collect_vec();
     // Preserve preview order when remapping ids so fragments from the same
-    // no-shuffle ensemble keep their relative slot alignment. Empty fragments
-    // should not appear, but fragment_id keeps the ordering deterministic if they do.
+    // no-shuffle ensemble keep their relative slot alignment.
+    //
+    // This works because the preview allocator assigns actor ids with a single
+    // monotonically-increasing counter, so `min(actor_id)` per fragment faithfully
+    // reproduces the original allocation order. If the preview allocator ever
+    // changes to a non-monotonic scheme this sort key must be revisited.
+    //
+    // Empty fragments should not appear, but fragment_id keeps the ordering
+    // deterministic if they do.
     ordered_fragments.sort_by_key(|(_, _, fragment_id, fragment)| {
         (
             fragment

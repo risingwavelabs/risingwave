@@ -298,11 +298,7 @@ fn build_reschedule_from_context(
         &context.loaded,
     )?;
 
-    if rendered_layout_matches_current(
-        &previewed.fragments,
-        &context.downstream_relations,
-        &all_prev_fragments,
-    )? {
+    if rendered_layout_matches_current(&previewed.fragments, &all_prev_fragments)? {
         return Ok(None);
     }
 

@@ -19,7 +19,6 @@ use std::time::Duration;
 use anyhow::anyhow;
 use futures::future;
 use itertools::Itertools;
-use prost::Message;
 use risingwave_common::bail;
 use risingwave_common::catalog::DatabaseId;
 use risingwave_common::hash::{ActorMapping, VnodeBitmapExt};
@@ -77,27 +76,10 @@ struct NormalizedActor {
     splits: Vec<SplitId>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
-struct NormalizedDispatcher {
-    dispatcher_type: i32,
-    dispatcher_id: FragmentId,
-    dist_key_indices: Vec<u32>,
-    output_mapping: Vec<u8>,
-    target_actors: Vec<NormalizedActor>,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
-struct NormalizedDispatcherEntry {
-    actor: NormalizedActor,
-    dispatchers: Vec<NormalizedDispatcher>,
-}
-
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct NormalizedFragmentLayout {
-    fragment_id: FragmentId,
     distribution_type: DistributionType,
     actors: Vec<NormalizedActor>,
-    dispatcher_entries: Vec<NormalizedDispatcherEntry>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -122,139 +104,40 @@ fn normalize_actor_info(info: &InflightActorInfo) -> NormalizedActor {
     }
 }
 
-fn normalize_dispatcher(
-    dispatcher: PbDispatcher,
-    target_actors: &HashMap<ActorId, NormalizedActor>,
-) -> MetaResult<NormalizedDispatcher> {
-    let mut normalized_targets = dispatcher
-        .downstream_actor_id
-        .iter()
-        .map(|actor_id| {
-            target_actors.get(actor_id).cloned().ok_or_else(|| {
-                MetaError::from(anyhow!(
-                    "target actor {} not found while normalizing dispatcher",
-                    actor_id
-                ))
-            })
-        })
-        .collect::<MetaResult<Vec<_>>>()?;
-    normalized_targets.sort_unstable();
-
-    Ok(NormalizedDispatcher {
-        dispatcher_type: dispatcher.r#type,
-        dispatcher_id: dispatcher.dispatcher_id,
-        dist_key_indices: dispatcher.dist_key_indices,
-        output_mapping: dispatcher
-            .output_mapping
-            .map(|mapping| mapping.encode_to_vec())
-            .unwrap_or_default(),
-        target_actors: normalized_targets,
-    })
-}
-
 fn build_normalized_fragment_layout(
-    fragment_id: FragmentId,
     fragment_info: &InflightFragmentInfo,
-    downstream_relations: &HashMap<(FragmentId, FragmentId), fragment_relation::Model>,
-    render_lookup: &HashMap<FragmentId, &InflightFragmentInfo>,
-    prev_lookup: &HashMap<FragmentId, &InflightFragmentInfo>,
-) -> MetaResult<NormalizedFragmentLayout> {
-    let source_fragment_actors: HashMap<_, _> = fragment_info
+) -> NormalizedFragmentLayout {
+    // Actor ids are intentionally erased here. For no-op detection we only care
+    // about the semantic layout carried by worker placement, vnode ownership,
+    // and split assignment.
+    let mut actors = fragment_info
         .actors
-        .iter()
-        .map(|(actor_id, info)| (*actor_id, info.vnode_bitmap.clone()))
-        .collect();
-    let normalized_actors: HashMap<_, _> = fragment_info
-        .actors
-        .iter()
-        .map(|(actor_id, info)| (*actor_id, normalize_actor_info(info)))
-        .collect();
-
-    let mut actors = normalized_actors.values().cloned().collect_vec();
+        .values()
+        .map(normalize_actor_info)
+        .collect_vec();
     actors.sort_unstable();
 
-    let mut dispatchers_by_actor: HashMap<ActorId, Vec<NormalizedDispatcher>> = HashMap::new();
-    for ((source_fragment_id, downstream_fragment_id), relation) in downstream_relations
-        .iter()
-        .filter(|((source_fragment_id, _), _)| *source_fragment_id == fragment_id)
-    {
-        let target_fragment = render_lookup
-            .get(downstream_fragment_id)
-            .copied()
-            .or_else(|| prev_lookup.get(downstream_fragment_id).copied())
-            .ok_or_else(|| {
-                MetaError::from(anyhow!(
-                    "fragment {} not found while normalizing dispatchers for {}",
-                    downstream_fragment_id,
-                    source_fragment_id
-                ))
-            })?;
-
-        let target_fragment_actors: HashMap<_, _> = target_fragment
-            .actors
-            .iter()
-            .map(|(actor_id, info)| (*actor_id, info.vnode_bitmap.clone()))
-            .collect();
-        let normalized_target_actors: HashMap<_, _> = target_fragment
-            .actors
-            .iter()
-            .map(|(actor_id, info)| (*actor_id, normalize_actor_info(info)))
-            .collect();
-        let pb_mapping = PbDispatchOutputMapping {
-            indices: relation.output_indices.clone().into_u32_array(),
-            types: relation
-                .output_type_mapping
-                .clone()
-                .unwrap_or_default()
-                .to_protobuf(),
-        };
-        let dispatchers = compose_dispatchers(
-            fragment_info.distribution_type,
-            &source_fragment_actors,
-            *downstream_fragment_id,
-            target_fragment.distribution_type,
-            &target_fragment_actors,
-            relation.dispatcher_type,
-            relation.dist_key_indices.clone().into_u32_array(),
-            pb_mapping,
-        );
-
-        for (actor_id, dispatcher) in dispatchers {
-            dispatchers_by_actor
-                .entry(actor_id)
-                .or_default()
-                .push(normalize_dispatcher(dispatcher, &normalized_target_actors)?);
-        }
-    }
-
-    let mut dispatcher_entries = fragment_info
-        .actors
-        .keys()
-        .map(|actor_id| {
-            let mut dispatchers = dispatchers_by_actor.remove(actor_id).unwrap_or_default();
-            dispatchers.sort_unstable();
-            NormalizedDispatcherEntry {
-                actor: normalized_actors
-                    .get(actor_id)
-                    .cloned()
-                    .expect("normalized actor must exist"),
-                dispatchers,
-            }
-        })
-        .collect_vec();
-    dispatcher_entries.sort_unstable();
-
-    Ok(NormalizedFragmentLayout {
-        fragment_id,
+    NormalizedFragmentLayout {
         distribution_type: fragment_info.distribution_type,
         actors,
-        dispatcher_entries,
-    })
+    }
 }
 
+/// Compare the rendered (preview) layout against the current in-flight layout
+/// to decide whether a reschedule is a no-op.
+///
+/// Dispatcher layout is intentionally not compared here. On the reschedule path
+/// it is a deterministic function of the fragment actor layout together with the
+/// stable fragment-relation metadata held in `RescheduleContext`, so fragment-level
+/// equality already implies dispatcher equality.
+///
+/// Only fragments present in `render_result` are compared. This is intentional:
+/// this function sits on the reschedule path, which only re-renders fragments
+/// that were loaded into the `RescheduleContext`. Fragment creation or deletion
+/// is handled by separate DDL / recovery paths, not by reschedule, so fragments
+/// outside the render set are irrelevant here.
 pub(crate) fn rendered_layout_matches_current(
     render_result: &FragmentRenderMap,
-    downstream_relations: &HashMap<(FragmentId, FragmentId), fragment_relation::Model>,
     all_prev_fragments: &HashMap<FragmentId, &InflightFragmentInfo>,
 ) -> MetaResult<bool> {
     let all_rendered_fragments: HashMap<_, _> = render_result
@@ -272,20 +155,8 @@ pub(crate) fn rendered_layout_matches_current(
             )));
         };
 
-        let rendered_layout = build_normalized_fragment_layout(
-            *fragment_id,
-            rendered_fragment,
-            downstream_relations,
-            &all_rendered_fragments,
-            all_prev_fragments,
-        )?;
-        let current_layout = build_normalized_fragment_layout(
-            *fragment_id,
-            prev_fragment,
-            downstream_relations,
-            all_prev_fragments,
-            all_prev_fragments,
-        )?;
+        let rendered_layout = build_normalized_fragment_layout(rendered_fragment);
+        let current_layout = build_normalized_fragment_layout(prev_fragment);
 
         if rendered_layout != current_layout {
             return Ok(false);
@@ -902,11 +773,7 @@ pub(crate) fn build_reschedule_commands(
     if layout_match_check == LayoutMatchCheck::Required {
         // Keep the post-materialization layout check as a safety net for callers
         // that may bypass the preview phase.
-        if rendered_layout_matches_current(
-            &render_result,
-            &context.downstream_relations,
-            &all_prev_fragments,
-        )? {
+        if rendered_layout_matches_current(&render_result, &all_prev_fragments)? {
             return Ok(HashMap::new());
         }
     }
@@ -1172,20 +1039,6 @@ mod tests {
         }
     }
 
-    fn relation(
-        source_fragment_id: FragmentId,
-        target_fragment_id: FragmentId,
-    ) -> fragment_relation::Model {
-        fragment_relation::Model {
-            source_fragment_id,
-            target_fragment_id,
-            dispatcher_type: DispatcherType::Hash,
-            dist_key_indices: vec![0].into(),
-            output_indices: Vec::<i32>::new().into(),
-            output_type_mapping: None,
-        }
-    }
-
     fn render_result(fragments: Vec<(FragmentId, InflightFragmentInfo)>) -> FragmentRenderMap {
         HashMap::from([(
             DatabaseId::new(1),
@@ -1264,16 +1117,12 @@ mod tests {
             (FragmentId::new(1), &current_source),
             (FragmentId::new(2), &current_target),
         ]);
-        let downstream_relations = HashMap::from([(
-            (FragmentId::new(1), FragmentId::new(2)),
-            relation(FragmentId::new(1), FragmentId::new(2)),
-        )]);
 
-        assert!(rendered_layout_matches_current(&rendered, &downstream_relations, &prev,).unwrap());
+        assert!(rendered_layout_matches_current(&rendered, &prev,).unwrap());
     }
 
     #[test]
-    fn rendered_layout_matches_current_detects_downstream_layout_changes() {
+    fn rendered_layout_matches_current_detects_target_fragment_layout_changes() {
         let current_source = fragment(
             FragmentId::new(1),
             [
@@ -1340,14 +1189,8 @@ mod tests {
             (FragmentId::new(1), &current_source),
             (FragmentId::new(2), &current_target),
         ]);
-        let downstream_relations = HashMap::from([(
-            (FragmentId::new(1), FragmentId::new(2)),
-            relation(FragmentId::new(1), FragmentId::new(2)),
-        )]);
 
-        assert!(
-            !rendered_layout_matches_current(&rendered, &downstream_relations, &prev,).unwrap()
-        );
+        assert!(!rendered_layout_matches_current(&rendered, &prev,).unwrap());
     }
 
     #[test]
@@ -1379,9 +1222,8 @@ mod tests {
             ),
         )]);
         let prev = HashMap::from([(fragment_id, &prev_fragment)]);
-        let downstream_relations = HashMap::new();
 
-        assert!(rendered_layout_matches_current(&rendered, &downstream_relations, &prev,).unwrap());
+        assert!(rendered_layout_matches_current(&rendered, &prev,).unwrap());
     }
 }
 
