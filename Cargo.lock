@@ -868,7 +868,7 @@ dependencies = [
  "itertools 0.14.0",
  "pyo3",
  "pyo3-build-config",
- "reqwest 0.12.25",
+ "reqwest",
  "rquickjs",
  "serde_json",
  "tempfile",
@@ -1029,7 +1029,7 @@ dependencies = [
  "futures",
  "getrandom 0.3.1",
  "rand 0.9.2",
- "reqwest 0.12.25",
+ "reqwest",
  "reqwest-eventsource",
  "secrecy",
  "serde",
@@ -4368,7 +4368,7 @@ dependencies = [
  "itertools 0.14.0",
  "object_store",
  "parquet 57.3.0",
- "reqwest 0.12.25",
+ "reqwest",
  "roaring",
  "rustc_version",
  "serde",
@@ -4972,7 +4972,7 @@ dependencies = [
  "flate2",
  "lazy_static",
  "percent-encoding",
- "reqwest 0.12.25",
+ "reqwest",
  "rustc_version",
  "serde",
  "serde_json",
@@ -5926,7 +5926,7 @@ dependencies = [
  "gcloud-metadata",
  "home",
  "jsonwebtoken 9.3.1",
- "reqwest 0.12.25",
+ "reqwest",
  "serde",
  "serde_json",
  "thiserror 2.0.17",
@@ -5955,7 +5955,7 @@ dependencies = [
  "gcloud-googleapis",
  "num-bigint",
  "prost-types 0.14.3",
- "reqwest 0.12.25",
+ "reqwest",
  "reqwest-middleware",
  "serde",
  "serde_json",
@@ -6000,7 +6000,7 @@ version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "61f706788c1b58712c513e4d403234707fd255f49caa89d1c930197418b5fb2c"
 dependencies = [
- "reqwest 0.12.25",
+ "reqwest",
  "thiserror 2.0.17",
  "tokio",
 ]
@@ -6041,7 +6041,7 @@ dependencies = [
  "prost 0.14.3",
  "prost-build 0.14.3",
  "prost-types 0.14.3",
- "reqwest 0.12.25",
+ "reqwest",
  "serde",
  "serde_json",
  "thiserror 2.0.17",
@@ -6884,7 +6884,7 @@ dependencies = [
  "parquet 57.3.0",
  "rand 0.8.5",
  "reqsign",
- "reqwest 0.12.25",
+ "reqwest",
  "roaring",
  "serde",
  "serde_bytes",
@@ -6929,7 +6929,7 @@ dependencies = [
  "http 1.4.0",
  "iceberg",
  "itertools 0.13.0",
- "reqwest 0.12.25",
+ "reqwest",
  "serde",
  "serde_derive",
  "serde_json",
@@ -8881,16 +8881,16 @@ dependencies = [
 
 [[package]]
 name = "oauth2"
-version = "4.4.2"
+version = "5.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c38841cdd844847e3e7c8d29cef9dcfed8877f8f56f9071f77843ecf3baf937f"
+checksum = "51e219e79014df21a225b1860a479e2dcd7cbd9130f4defd4bd0e191ea31d67d"
 dependencies = [
- "base64 0.13.1",
+ "base64 0.22.1",
  "chrono",
  "getrandom 0.2.11",
- "http 0.2.12",
+ "http 1.4.0",
  "rand 0.8.5",
- "reqwest 0.11.20",
+ "reqwest",
  "serde",
  "serde_json",
  "serde_path_to_error",
@@ -8962,7 +8962,7 @@ dependencies = [
  "percent-encoding",
  "quick-xml 0.38.4",
  "rand 0.9.2",
- "reqwest 0.12.25",
+ "reqwest",
  "ring",
  "rustls-pemfile 2.2.0",
  "serde",
@@ -9036,7 +9036,7 @@ dependencies = [
  "percent-encoding",
  "quick-xml 0.38.4",
  "reqsign",
- "reqwest 0.12.25",
+ "reqwest",
  "serde",
  "serde_json",
  "sha2",
@@ -9047,16 +9047,16 @@ dependencies = [
 
 [[package]]
 name = "openidconnect"
-version = "3.5.0"
+version = "4.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f47e80a9cfae4462dd29c41e987edd228971d6565553fbc14b8a11e666d91590"
+checksum = "0d8c6709ba2ea764bbed26bce1adf3c10517113ddea6f2d4196e4851757ef2b2"
 dependencies = [
- "base64 0.13.1",
+ "base64 0.21.7",
  "chrono",
  "dyn-clone",
  "ed25519-dalek",
  "hmac",
- "http 0.2.12",
+ "http 1.4.0",
  "itertools 0.10.5",
  "log",
  "oauth2",
@@ -9066,7 +9066,6 @@ dependencies = [
  "rsa",
  "serde",
  "serde-value",
- "serde_derive",
  "serde_json",
  "serde_path_to_error",
  "serde_plain",
@@ -9088,7 +9087,7 @@ dependencies = [
  "dyn-clone",
  "lazy_static",
  "percent-encoding",
- "reqwest 0.12.25",
+ "reqwest",
  "rustc_version",
  "serde",
  "serde_json",
@@ -9175,7 +9174,7 @@ dependencies = [
  "bytes",
  "http 1.4.0",
  "opentelemetry",
- "reqwest 0.12.25",
+ "reqwest",
 ]
 
 [[package]]
@@ -9190,7 +9189,7 @@ dependencies = [
  "opentelemetry-proto",
  "opentelemetry_sdk",
  "prost 0.14.3",
- "reqwest 0.12.25",
+ "reqwest",
  "thiserror 2.0.17",
  "tokio",
  "tonic 0.14.2",
@@ -9719,7 +9718,7 @@ dependencies = [
  "peekable",
  "postgres-types",
  "rand 0.8.5",
- "reqwest 0.12.25",
+ "reqwest",
  "risingwave_common",
  "risingwave_sqlparser",
  "rsa",
@@ -10363,7 +10362,7 @@ checksum = "0fcebfa99f03ae51220778316b37d24981e36322c82c24848f48c5bd0f64cbdb"
 dependencies = [
  "enum-as-inner 0.6.1",
  "mime",
- "reqwest 0.12.25",
+ "reqwest",
  "serde",
  "time",
  "url",
@@ -10395,7 +10394,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "be769465445e8c1474e9c5dac2018218498557af32d9ed057325ec9a41ae81bf"
 dependencies = [
  "heck 0.5.0",
- "itertools 0.11.0",
+ "itertools 0.14.0",
  "log",
  "multimap",
  "once_cell",
@@ -10603,9 +10602,9 @@ dependencies = [
 
 [[package]]
 name = "pulsar"
-version = "6.3.1"
+version = "6.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6cee616af00383c461f9ceb0067d15dee68e7d313ae47dbd7f8543236aed7ee9"
+checksum = "24c00856d6c64af2078a74c2de029842cdaece2f35b1223f5166809ea49cf5cd"
 dependencies = [
  "async-channel 2.5.0",
  "async-trait",
@@ -10616,6 +10615,7 @@ dependencies = [
  "futures",
  "log",
  "lz4",
+ "murmur3",
  "native-tls",
  "nom",
  "oauth2",
@@ -10631,7 +10631,6 @@ dependencies = [
  "tokio",
  "tokio-native-tls",
  "tokio-util",
- "tracing",
  "url",
  "uuid",
  "zstd",
@@ -11174,7 +11173,7 @@ dependencies = [
  "percent-encoding",
  "quick-xml 0.37.1",
  "rand 0.8.5",
- "reqwest 0.12.25",
+ "reqwest",
  "rsa",
  "rust-ini",
  "serde",
@@ -11182,45 +11181,6 @@ dependencies = [
  "sha1",
  "sha2",
  "tokio",
-]
-
-[[package]]
-name = "reqwest"
-version = "0.11.20"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3e9ad3fe7488d7e34558a2033d45a0c90b72d97b4f80705666fea71472e2e6a1"
-dependencies = [
- "base64 0.21.7",
- "bytes",
- "encoding_rs",
- "futures-core",
- "futures-util",
- "h2 0.3.26",
- "http 0.2.12",
- "http-body 0.4.6",
- "hyper 0.14.27",
- "hyper-rustls 0.24.2",
- "ipnet",
- "js-sys",
- "log",
- "mime",
- "once_cell",
- "percent-encoding",
- "pin-project-lite",
- "rustls 0.21.11",
- "rustls-pemfile 1.0.4",
- "serde",
- "serde_json",
- "serde_urlencoded",
- "tokio",
- "tokio-rustls 0.24.1",
- "tower-service",
- "url",
- "wasm-bindgen",
- "wasm-bindgen-futures",
- "web-sys",
- "webpki-roots 0.25.2",
- "winreg",
 ]
 
 [[package]]
@@ -11285,7 +11245,7 @@ dependencies = [
  "mime",
  "nom",
  "pin-project-lite",
- "reqwest 0.12.25",
+ "reqwest",
  "thiserror 1.0.63",
 ]
 
@@ -11298,7 +11258,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "http 1.4.0",
- "reqwest 0.12.25",
+ "reqwest",
  "serde",
  "thiserror 1.0.63",
  "tower-service",
@@ -11375,7 +11335,7 @@ dependencies = [
  "panic-message",
  "redis",
  "regex",
- "reqwest 0.12.25",
+ "reqwest",
  "serde",
  "serde_json",
  "serde_yaml",
@@ -11675,7 +11635,7 @@ dependencies = [
  "prost 0.14.3",
  "rand 0.9.2",
  "regex",
- "reqwest 0.12.25",
+ "reqwest",
  "risingwave-fields-derive",
  "risingwave_common_estimate_size",
  "risingwave_common_log",
@@ -11841,7 +11801,7 @@ dependencies = [
  "moka",
  "parking_lot 0.12.5",
  "prost 0.14.3",
- "reqwest 0.12.25",
+ "reqwest",
  "risingwave_pb",
  "serde",
  "serde_json",
@@ -12056,7 +12016,7 @@ dependencies = [
  "rand 0.9.2",
  "redis",
  "regex",
- "reqwest 0.12.25",
+ "reqwest",
  "risingwave_common",
  "risingwave_common_estimate_size",
  "risingwave_common_rate_limit",
@@ -12126,7 +12086,7 @@ dependencies = [
  "prost-reflect",
  "prost-types 0.14.3",
  "protox",
- "reqwest 0.12.25",
+ "reqwest",
  "risingwave_common",
  "risingwave_pb",
  "rust_decimal",
@@ -12683,7 +12643,7 @@ dependencies = [
  "dircpy",
  "mime_guess",
  "npm_rs",
- "reqwest 0.12.25",
+ "reqwest",
  "rust-embed",
  "thiserror-ext",
  "tokio",
@@ -12804,7 +12764,7 @@ dependencies = [
  "madsim-tokio",
  "opendal",
  "prometheus",
- "reqwest 0.12.25",
+ "reqwest",
  "risingwave_common",
  "spin 0.10.0",
  "thiserror 2.0.17",
@@ -13215,7 +13175,7 @@ dependencies = [
  "jsonbb",
  "madsim-tokio",
  "prost 0.14.3",
- "reqwest 0.12.25",
+ "reqwest",
  "risingwave_common_log",
  "risingwave_pb",
  "thiserror-ext",
@@ -17159,12 +17119,6 @@ dependencies = [
  "js-sys",
  "wasm-bindgen",
 ]
-
-[[package]]
-name = "webpki-roots"
-version = "0.25.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "14247bb57be4f377dfb94c72830b8ce8fc6beac03cf4bf7b9732eadd414123fc"
 
 [[package]]
 name = "webpki-roots"
