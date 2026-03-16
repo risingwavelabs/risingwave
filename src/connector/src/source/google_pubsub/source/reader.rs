@@ -12,12 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::pin::Pin;
+use std::task::{Context as TaskContext, Poll};
+
 use anyhow::Context;
 use async_trait::async_trait;
-use futures::{FutureExt, StreamExt};
+use futures::{FutureExt, Stream, StreamExt};
 use futures_async_stream::try_stream;
 use google_cloud_pubsub::subscriber::SubscriberConfig;
-use google_cloud_pubsub::subscription::{SubscribeConfig, Subscription};
+use google_cloud_pubsub::subscription::{MessageStream, SubscribeConfig, Subscription};
 use risingwave_common::{bail, ensure};
 
 use super::TaggedReceivedMessage;
@@ -31,6 +34,40 @@ use crate::source::{
 
 const DEFAULT_ACK_DEADLINE_SECONDS: i32 = 60;
 const MAX_BATCH_SIZE: usize = 1024;
+
+/// Wrapper around [`MessageStream`] that calls [`MessageStream::dispose()`] on drop
+/// instead of the default `Drop` impl which has a race condition: `MessageStream::drop()`
+/// spawns a task to drain buffered messages, but `Subscriber::drop()` immediately aborts
+/// the receive task, causing in-flight messages to be lost without being nacked back to
+/// the subscription.
+struct DisposableMessageStream(Option<MessageStream>);
+
+impl Drop for DisposableMessageStream {
+    fn drop(&mut self) {
+        if let Some(stream) = self.0.take() {
+            tokio::spawn(async move {
+                let count = stream.dispose().await;
+                if count > 0 {
+                    tracing::info!(
+                        "disposed pubsub streaming pull, nacked {} in-flight messages",
+                        count
+                    );
+                }
+            });
+        }
+    }
+}
+
+impl Stream for DisposableMessageStream {
+    type Item = <MessageStream as Stream>::Item;
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut TaskContext<'_>) -> Poll<Option<Self::Item>> {
+        match self.0.as_mut() {
+            Some(inner) => Pin::new(inner).poll_next(cx),
+            None => Poll::Ready(None),
+        }
+    }
+}
 
 pub struct PubsubSplitReader {
     subscription: Subscription,
@@ -54,11 +91,12 @@ impl PubsubSplitReader {
     async fn into_data_stream(self) {
         loop {
             let subscribe_config = self.build_subscribe_config();
-            let mut stream = self
+            let raw_stream = self
                 .subscription
                 .subscribe(Some(subscribe_config))
                 .await
                 .context("failed to subscribe")?;
+            let mut stream = DisposableMessageStream(Some(raw_stream));
 
             while let Some(first) = stream.next().await {
                 let mut batch = Vec::with_capacity(MAX_BATCH_SIZE);
