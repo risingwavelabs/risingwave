@@ -19,10 +19,12 @@ use std::time::Duration;
 use anyhow::anyhow;
 use futures::future;
 use itertools::Itertools;
+use prost::Message;
 use risingwave_common::bail;
 use risingwave_common::catalog::DatabaseId;
-use risingwave_common::hash::ActorMapping;
+use risingwave_common::hash::{ActorMapping, VnodeBitmapExt};
 use risingwave_common::system_param::reader::SystemParamsRead;
+use risingwave_connector::source::SplitMetaData;
 use risingwave_meta_model::{
     StreamingParallelism, WorkerId, fragment, fragment_relation, object, streaming_job,
 };
@@ -67,6 +69,226 @@ use crate::controller::utils::{
 };
 
 pub type ScaleControllerRef = Arc<ScaleController>;
+
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+struct NormalizedActor {
+    worker_id: WorkerId,
+    vnode_bitmap: Option<Vec<usize>>,
+    splits: Vec<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+struct NormalizedDispatcher {
+    dispatcher_type: i32,
+    dispatcher_id: FragmentId,
+    dist_key_indices: Vec<u32>,
+    output_mapping: Vec<u8>,
+    target_actors: Vec<NormalizedActor>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+struct NormalizedDispatcherEntry {
+    actor: NormalizedActor,
+    dispatchers: Vec<NormalizedDispatcher>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct NormalizedFragmentLayout {
+    fragment_id: FragmentId,
+    distribution_type: DistributionType,
+    actors: Vec<NormalizedActor>,
+    dispatcher_entries: Vec<NormalizedDispatcherEntry>,
+}
+
+fn normalize_actor_info(info: &InflightActorInfo) -> NormalizedActor {
+    let vnode_bitmap = info.vnode_bitmap.as_ref().map(|bitmap| {
+        bitmap
+            .iter_vnodes()
+            .map(|vnode| vnode.to_index())
+            .collect_vec()
+    });
+    let mut splits = info
+        .splits
+        .iter()
+        .map(|split| split.encode_to_json().take().to_string())
+        .collect_vec();
+    splits.sort();
+    NormalizedActor {
+        worker_id: info.worker_id,
+        vnode_bitmap,
+        splits,
+    }
+}
+
+fn normalize_dispatcher(
+    dispatcher: PbDispatcher,
+    target_actors: &HashMap<ActorId, NormalizedActor>,
+) -> MetaResult<NormalizedDispatcher> {
+    let mut normalized_targets = dispatcher
+        .downstream_actor_id
+        .iter()
+        .map(|actor_id| {
+            target_actors.get(actor_id).cloned().ok_or_else(|| {
+                MetaError::from(anyhow!(
+                    "target actor {} not found while normalizing dispatcher",
+                    actor_id
+                ))
+            })
+        })
+        .collect::<MetaResult<Vec<_>>>()?;
+    normalized_targets.sort();
+
+    Ok(NormalizedDispatcher {
+        dispatcher_type: dispatcher.r#type,
+        dispatcher_id: dispatcher.dispatcher_id,
+        dist_key_indices: dispatcher.dist_key_indices,
+        output_mapping: dispatcher
+            .output_mapping
+            .map(|mapping| mapping.encode_to_vec())
+            .unwrap_or_default(),
+        target_actors: normalized_targets,
+    })
+}
+
+fn build_normalized_fragment_layout(
+    fragment_id: FragmentId,
+    fragment_info: &InflightFragmentInfo,
+    downstream_relations: &HashMap<(FragmentId, FragmentId), fragment_relation::Model>,
+    render_lookup: &HashMap<FragmentId, &InflightFragmentInfo>,
+    prev_lookup: &HashMap<FragmentId, &InflightFragmentInfo>,
+) -> MetaResult<NormalizedFragmentLayout> {
+    let source_fragment_actors: HashMap<_, _> = fragment_info
+        .actors
+        .iter()
+        .map(|(actor_id, info)| (*actor_id, info.vnode_bitmap.clone()))
+        .collect();
+    let normalized_actors: HashMap<_, _> = fragment_info
+        .actors
+        .iter()
+        .map(|(actor_id, info)| (*actor_id, normalize_actor_info(info)))
+        .collect();
+
+    let mut actors = normalized_actors.values().cloned().collect_vec();
+    actors.sort();
+
+    let mut dispatchers_by_actor: HashMap<ActorId, Vec<NormalizedDispatcher>> = HashMap::new();
+    for ((source_fragment_id, downstream_fragment_id), relation) in downstream_relations
+        .iter()
+        .filter(|((source_fragment_id, _), _)| *source_fragment_id == fragment_id)
+    {
+        let target_fragment = render_lookup
+            .get(downstream_fragment_id)
+            .copied()
+            .or_else(|| prev_lookup.get(downstream_fragment_id).copied())
+            .ok_or_else(|| {
+                MetaError::from(anyhow!(
+                    "fragment {} not found while normalizing dispatchers for {}",
+                    downstream_fragment_id,
+                    source_fragment_id
+                ))
+            })?;
+
+        let target_fragment_actors: HashMap<_, _> = target_fragment
+            .actors
+            .iter()
+            .map(|(actor_id, info)| (*actor_id, info.vnode_bitmap.clone()))
+            .collect();
+        let normalized_target_actors: HashMap<_, _> = target_fragment
+            .actors
+            .iter()
+            .map(|(actor_id, info)| (*actor_id, normalize_actor_info(info)))
+            .collect();
+        let pb_mapping = PbDispatchOutputMapping {
+            indices: relation.output_indices.clone().into_u32_array(),
+            types: relation
+                .output_type_mapping
+                .clone()
+                .unwrap_or_default()
+                .to_protobuf(),
+        };
+        let dispatchers = compose_dispatchers(
+            fragment_info.distribution_type,
+            &source_fragment_actors,
+            *downstream_fragment_id,
+            target_fragment.distribution_type,
+            &target_fragment_actors,
+            relation.dispatcher_type,
+            relation.dist_key_indices.clone().into_u32_array(),
+            pb_mapping,
+        );
+
+        for (actor_id, dispatcher) in dispatchers {
+            dispatchers_by_actor
+                .entry(actor_id)
+                .or_default()
+                .push(normalize_dispatcher(dispatcher, &normalized_target_actors)?);
+        }
+    }
+
+    let mut dispatcher_entries = fragment_info
+        .actors
+        .iter()
+        .map(|(actor_id, info)| {
+            let mut dispatchers = dispatchers_by_actor.remove(actor_id).unwrap_or_default();
+            dispatchers.sort();
+            NormalizedDispatcherEntry {
+                actor: normalize_actor_info(info),
+                dispatchers,
+            }
+        })
+        .collect_vec();
+    dispatcher_entries.sort();
+
+    Ok(NormalizedFragmentLayout {
+        fragment_id,
+        distribution_type: fragment_info.distribution_type,
+        actors,
+        dispatcher_entries,
+    })
+}
+
+fn rendered_layout_matches_current(
+    render_result: &FragmentRenderMap,
+    downstream_relations: &HashMap<(FragmentId, FragmentId), fragment_relation::Model>,
+    all_prev_fragments: &HashMap<FragmentId, &InflightFragmentInfo>,
+) -> MetaResult<bool> {
+    let all_rendered_fragments: HashMap<_, _> = render_result
+        .values()
+        .flat_map(|jobs| jobs.values())
+        .flatten()
+        .map(|(fragment_id, info)| (*fragment_id, info))
+        .collect();
+
+    for (fragment_id, rendered_fragment) in &all_rendered_fragments {
+        let Some(prev_fragment) = all_prev_fragments.get(fragment_id).copied() else {
+            return Err(MetaError::from(anyhow!(
+                "previous fragment info for {} not found",
+                fragment_id
+            )));
+        };
+
+        let rendered_layout = build_normalized_fragment_layout(
+            *fragment_id,
+            rendered_fragment,
+            downstream_relations,
+            &all_rendered_fragments,
+            all_prev_fragments,
+        )?;
+        let current_layout = build_normalized_fragment_layout(
+            *fragment_id,
+            prev_fragment,
+            downstream_relations,
+            all_prev_fragments,
+            all_prev_fragments,
+        )?;
+
+        if rendered_layout != current_layout {
+            return Ok(false);
+        }
+    }
+
+    Ok(true)
+}
 
 pub struct ScaleController {
     pub metadata_manager: MetadataManager,
@@ -671,6 +893,14 @@ pub(crate) fn build_reschedule_commands(
         return Ok(HashMap::new());
     }
 
+    if rendered_layout_matches_current(
+        &render_result,
+        &context.downstream_relations,
+        &all_prev_fragments,
+    )? {
+        return Ok(HashMap::new());
+    }
+
     let RescheduleContext {
         job_extra_info,
         upstream_fragments: mut all_upstream_fragments,
@@ -876,6 +1106,217 @@ pub(crate) fn build_reschedule_commands(
     }
 
     Ok(commands)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::{HashMap, HashSet};
+
+    use risingwave_common::bitmap::Bitmap;
+    use risingwave_common::catalog::FragmentTypeMask;
+
+    use super::*;
+
+    fn actor(worker_id: impl Into<WorkerId>, vnode_bitmap: Option<Bitmap>) -> InflightActorInfo {
+        InflightActorInfo {
+            worker_id: worker_id.into(),
+            vnode_bitmap,
+            splits: vec![],
+        }
+    }
+
+    fn fragment(
+        fragment_id: FragmentId,
+        actors: impl IntoIterator<Item = (ActorId, InflightActorInfo)>,
+    ) -> InflightFragmentInfo {
+        InflightFragmentInfo {
+            fragment_id,
+            distribution_type: DistributionType::Hash,
+            fragment_type_mask: FragmentTypeMask::empty(),
+            vnode_count: 8,
+            nodes: Default::default(),
+            actors: actors.into_iter().collect(),
+            state_table_ids: HashSet::new(),
+        }
+    }
+
+    fn relation(
+        source_fragment_id: FragmentId,
+        target_fragment_id: FragmentId,
+    ) -> fragment_relation::Model {
+        fragment_relation::Model {
+            source_fragment_id,
+            target_fragment_id,
+            dispatcher_type: DispatcherType::Hash,
+            dist_key_indices: vec![0].into(),
+            output_indices: Vec::<i32>::new().into(),
+            output_type_mapping: None,
+        }
+    }
+
+    fn render_result(fragments: Vec<(FragmentId, InflightFragmentInfo)>) -> FragmentRenderMap {
+        HashMap::from([(
+            DatabaseId::new(1),
+            HashMap::from([(
+                JobId::new(1),
+                fragments.into_iter().collect::<HashMap<_, _>>(),
+            )]),
+        )])
+    }
+
+    #[test]
+    fn rendered_layout_matches_current_ignores_actor_ids_across_fragments() {
+        let current_source = fragment(
+            FragmentId::new(1),
+            [
+                (
+                    ActorId::new(101),
+                    actor(1, Some(Bitmap::from_indices(8, &[0, 1, 2, 3]))),
+                ),
+                (
+                    ActorId::new(102),
+                    actor(2, Some(Bitmap::from_indices(8, &[4, 5, 6, 7]))),
+                ),
+            ],
+        );
+        let current_target = fragment(
+            FragmentId::new(2),
+            [
+                (
+                    ActorId::new(201),
+                    actor(3, Some(Bitmap::from_indices(8, &[0, 1, 2, 3]))),
+                ),
+                (
+                    ActorId::new(202),
+                    actor(4, Some(Bitmap::from_indices(8, &[4, 5, 6, 7]))),
+                ),
+            ],
+        );
+
+        let rendered = render_result(vec![
+            (
+                FragmentId::new(1),
+                fragment(
+                    FragmentId::new(1),
+                    [
+                        (
+                            ActorId::new(1001),
+                            actor(1, Some(Bitmap::from_indices(8, &[0, 1, 2, 3]))),
+                        ),
+                        (
+                            ActorId::new(1002),
+                            actor(2, Some(Bitmap::from_indices(8, &[4, 5, 6, 7]))),
+                        ),
+                    ],
+                ),
+            ),
+            (
+                FragmentId::new(2),
+                fragment(
+                    FragmentId::new(2),
+                    [
+                        (
+                            ActorId::new(2001),
+                            actor(3, Some(Bitmap::from_indices(8, &[0, 1, 2, 3]))),
+                        ),
+                        (
+                            ActorId::new(2002),
+                            actor(4, Some(Bitmap::from_indices(8, &[4, 5, 6, 7]))),
+                        ),
+                    ],
+                ),
+            ),
+        ]);
+
+        let prev = HashMap::from([
+            (FragmentId::new(1), &current_source),
+            (FragmentId::new(2), &current_target),
+        ]);
+        let downstream_relations = HashMap::from([(
+            (FragmentId::new(1), FragmentId::new(2)),
+            relation(FragmentId::new(1), FragmentId::new(2)),
+        )]);
+
+        assert!(rendered_layout_matches_current(&rendered, &downstream_relations, &prev,).unwrap());
+    }
+
+    #[test]
+    fn rendered_layout_matches_current_detects_downstream_layout_changes() {
+        let current_source = fragment(
+            FragmentId::new(1),
+            [
+                (
+                    ActorId::new(101),
+                    actor(1, Some(Bitmap::from_indices(8, &[0, 1, 2, 3]))),
+                ),
+                (
+                    ActorId::new(102),
+                    actor(2, Some(Bitmap::from_indices(8, &[4, 5, 6, 7]))),
+                ),
+            ],
+        );
+        let current_target = fragment(
+            FragmentId::new(2),
+            [
+                (
+                    ActorId::new(201),
+                    actor(3, Some(Bitmap::from_indices(8, &[0, 1, 2, 3]))),
+                ),
+                (
+                    ActorId::new(202),
+                    actor(4, Some(Bitmap::from_indices(8, &[4, 5, 6, 7]))),
+                ),
+            ],
+        );
+
+        let rendered = render_result(vec![
+            (
+                FragmentId::new(1),
+                fragment(
+                    FragmentId::new(1),
+                    [
+                        (
+                            ActorId::new(1001),
+                            actor(1, Some(Bitmap::from_indices(8, &[0, 1, 2, 3]))),
+                        ),
+                        (
+                            ActorId::new(1002),
+                            actor(2, Some(Bitmap::from_indices(8, &[4, 5, 6, 7]))),
+                        ),
+                    ],
+                ),
+            ),
+            (
+                FragmentId::new(2),
+                fragment(
+                    FragmentId::new(2),
+                    [
+                        (
+                            ActorId::new(2001),
+                            actor(3, Some(Bitmap::from_indices(8, &[0, 1, 2, 3, 4, 5]))),
+                        ),
+                        (
+                            ActorId::new(2002),
+                            actor(4, Some(Bitmap::from_indices(8, &[6, 7]))),
+                        ),
+                    ],
+                ),
+            ),
+        ]);
+
+        let prev = HashMap::from([
+            (FragmentId::new(1), &current_source),
+            (FragmentId::new(2), &current_target),
+        ]);
+        let downstream_relations = HashMap::from([(
+            (FragmentId::new(1), FragmentId::new(2)),
+            relation(FragmentId::new(1), FragmentId::new(2)),
+        )]);
+
+        assert!(
+            !rendered_layout_matches_current(&rendered, &downstream_relations, &prev,).unwrap()
+        );
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
