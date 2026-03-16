@@ -2743,7 +2743,7 @@ dependencies = [
  "hyper 1.6.0",
  "hyper-rustls 0.27.5",
  "hyper-util",
- "lz4_flex 0.11.1",
+ "lz4_flex 0.11.6",
  "replace_with",
  "rustls 0.23.35",
  "sealed",
@@ -5615,7 +5615,7 @@ dependencies = [
  "pin-project",
  "serde",
  "tokio",
- "twox-hash 2.1.0",
+ "twox-hash",
 ]
 
 [[package]]
@@ -5685,7 +5685,7 @@ dependencies = [
  "serde",
  "tokio",
  "tracing",
- "twox-hash 2.1.0",
+ "twox-hash",
  "zstd",
 ]
 
@@ -7925,11 +7925,11 @@ dependencies = [
 
 [[package]]
 name = "lz4_flex"
-version = "0.11.1"
+version = "0.11.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3ea9b256699eda7b0387ffbc776dd625e28bde3918446381781245b7a50349d8"
+checksum = "373f5eceeeab7925e0c1098212f2fbc4d416adec9d35051a6ab251e824c1854a"
 dependencies = [
- "twox-hash 1.6.3",
+ "twox-hash",
 ]
 
 [[package]]
@@ -7938,7 +7938,7 @@ version = "0.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ab6473172471198271ff72e9379150e9dfd70d8e533e0752a27e515b48dd375e"
 dependencies = [
- "twox-hash 2.1.0",
+ "twox-hash",
 ]
 
 [[package]]
@@ -8533,7 +8533,7 @@ dependencies = [
  "tokio",
  "tokio-native-tls",
  "tokio-util",
- "twox-hash 2.1.0",
+ "twox-hash",
  "url",
 ]
 
@@ -9472,7 +9472,7 @@ dependencies = [
  "futures",
  "half 2.7.1",
  "hashbrown 0.16.1",
- "lz4_flex 0.11.1",
+ "lz4_flex 0.11.6",
  "num",
  "num-bigint",
  "paste",
@@ -9481,7 +9481,7 @@ dependencies = [
  "snap",
  "thrift",
  "tokio",
- "twox-hash 2.1.0",
+ "twox-hash",
  "zstd",
 ]
 
@@ -9518,7 +9518,7 @@ dependencies = [
  "snap",
  "thrift",
  "tokio",
- "twox-hash 2.1.0",
+ "twox-hash",
  "zstd",
 ]
 
@@ -11392,7 +11392,7 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 2.0.17",
- "twox-hash 2.1.0",
+ "twox-hash",
 ]
 
 [[package]]
@@ -11436,7 +11436,7 @@ dependencies = [
  "tokio-postgres",
  "tokio-stream 0.1.15",
  "tracing",
- "twox-hash 2.1.0",
+ "twox-hash",
  "workspace-hack",
 ]
 
@@ -11678,7 +11678,7 @@ dependencies = [
  "tracing",
  "tracing-futures",
  "tracing-opentelemetry",
- "twox-hash 2.1.0",
+ "twox-hash",
  "unit-prefix",
  "url",
  "uuid",
@@ -12625,7 +12625,7 @@ dependencies = [
  "tower-http",
  "tracing",
  "tracing-subscriber",
- "twox-hash 2.1.0",
+ "twox-hash",
  "uuid",
  "workspace-hack",
  "zstd",
@@ -16205,16 +16205,6 @@ dependencies = [
  "futures",
  "pin-project-lite",
  "tokio",
-]
-
-[[package]]
-name = "twox-hash"
-version = "1.6.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "97fee6b57c6a41524a810daee9286c02d7752c4253064d0b05472833a438f675"
-dependencies = [
- "cfg-if",
- "static_assertions",
 ]
 
 [[package]]
