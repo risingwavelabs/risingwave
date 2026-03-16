@@ -53,7 +53,8 @@ ALTER SYSTEM SET checkpoint_frequency TO 114514;
 system ok
 e2e_test/source_inline/pubsub/prepare-data.rs publish
 
-# default ack timeout is 10s. Let it redeliver once.
+# Streaming pull auto-extends ack deadlines, so no redelivery while stream is active.
+# Wait for messages to be consumed.
 sleep 15s
 
 # visibility mode is checkpoint
@@ -68,16 +69,16 @@ set visibility_mode = 'all';
 query IT rowsort
 select v1, v2, count(*) FROM s1 group by v1, v2;
 ----
-0 name0 2
-1 name1 2
-2 name2 2
-3 name3 2
-4 name4 2
-5 name5 2
-6 name6 2
-7 name7 2
-8 name8 2
-9 name9 2
+0 name0 1
+1 name1 1
+2 name2 1
+3 name3 1
+4 name4 1
+5 name5 1
+6 name6 1
+7 name7 1
+8 name8 1
+9 name9 1
 
 
 statement ok
@@ -94,8 +95,8 @@ select count(*) from s1;
 ----
 0
 
-# Wait for another redelivery
-sleep 10s
+# Wait for redelivery after recovery (stream disconnected, ack deadline expires)
+sleep 15s
 
 query IT rowsort
 select v1, v2, count(*) FROM s1 group by v1, v2;
