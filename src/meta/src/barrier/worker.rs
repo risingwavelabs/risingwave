@@ -347,9 +347,7 @@ fn is_reschedule_noop(
                     return false;
                 }
 
-                if worker_distribution(&new_info.actors)
-                    != worker_distribution(&prev_info.actors)
-                {
+                if worker_distribution(&new_info.actors) != worker_distribution(&prev_info.actors) {
                     return false;
                 }
             }
