@@ -18,10 +18,10 @@ CREATE SINK sink_kafka FROM table_kafka WITH (
 );
 
 
-# FIXME: `properties.allow.auto.create.topics` is the only kafka sink connector
-# property that can be stably altered in CI. Other allow-listed properties currently
-# fail at runtime with `failed to collect barrier` during ALTER SINK.
-
+# TODO: Support altering other Kafka sink connector properties.
+# Currently, `properties.allow.auto.create.topics` is the only property that
+# can be stably altered in CI. Other allow-listed properties fail at runtime
+# with `failed to collect barrier` during ALTER SINK.
 statement ok
 ALTER SINK sink_kafka CONNECTOR WITH (
     properties.allow.auto.create.topics = 'true',
