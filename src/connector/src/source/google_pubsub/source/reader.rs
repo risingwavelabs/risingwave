@@ -13,12 +13,12 @@
 // limitations under the License.
 
 use async_trait::async_trait;
-use futures::FutureExt;
-use futures::StreamExt;
+use futures::{FutureExt, StreamExt};
 use futures_async_stream::try_stream;
 use google_cloud_pubsub::subscriber::SubscriberConfig;
 use google_cloud_pubsub::subscription::{SubscribeConfig, Subscription};
 use risingwave_common::{bail, ensure};
+use thiserror_ext::AsReport;
 
 use super::TaggedReceivedMessage;
 use crate::error::{ConnectorError, ConnectorResult as Result};
@@ -59,7 +59,7 @@ impl PubsubSplitReader {
                 .subscribe(Some(subscribe_config))
                 .await
                 .map_err(|e| {
-                    ConnectorError::from(anyhow::anyhow!("failed to subscribe: {}", e))
+                    anyhow::anyhow!("failed to subscribe: {}", e.as_report())
                 })?;
 
             while let Some(first) = stream.next().await {
