@@ -35,7 +35,7 @@ use tokio::sync::{Mutex, OwnedSemaphorePermit, oneshot};
 use tracing::Instrument;
 
 use super::{
-    Locations, ReschedulePolicy, ScaleControllerRef, StreamFragmentGraph,
+    Locations, ReplaceJobSplitPlan, ReschedulePolicy, ScaleControllerRef, StreamFragmentGraph,
     UserDefinedFragmentBackfillOrder,
 };
 use crate::barrier::{
@@ -50,8 +50,7 @@ use crate::manager::{
 };
 use crate::model::{
     ActorId, DownstreamFragmentRelation, Fragment, FragmentDownstreamRelation, FragmentId,
-    FragmentNewNoShuffle, FragmentReplaceUpstream, StreamJobFragments, StreamJobFragmentsToCreate,
-    SubscriptionId,
+    FragmentReplaceUpstream, StreamJobFragments, StreamJobFragmentsToCreate, SubscriptionId,
 };
 use crate::stream::SourceManagerRef;
 use crate::{MetaError, MetaResult};
@@ -80,8 +79,6 @@ pub struct UpstreamSinkInfo {
 pub struct CreateStreamingJobContext {
     /// New fragment relation to add from upstream fragments to downstream fragments.
     pub upstream_fragment_downstreams: FragmentDownstreamRelation,
-    pub new_no_shuffle: FragmentNewNoShuffle,
-    pub upstream_actors: HashMap<FragmentId, HashSet<ActorId>>,
 
     /// The locations of the actors to build in the streaming job.
     pub building_locations: Locations,
@@ -237,7 +234,6 @@ pub struct ReplaceStreamJobContext {
 
     /// The updates to be applied to the downstream chain actors. Used for schema change.
     pub replace_upstream: FragmentReplaceUpstream,
-    pub new_no_shuffle: FragmentNewNoShuffle,
 
     /// New fragment relation to add from existing upstream fragment to downstream fragment.
     pub upstream_fragment_downstreams: FragmentDownstreamRelation,
@@ -456,8 +452,6 @@ impl GlobalStreamManager {
         CreateStreamingJobContext {
             streaming_job,
             upstream_fragment_downstreams,
-            new_no_shuffle,
-            upstream_actors,
             definition,
             create_type,
             job_type,
@@ -476,24 +470,14 @@ impl GlobalStreamManager {
             "built actors finished"
         );
 
-        // Here we need to consider:
-        // - Shared source
-        // - Table with connector
-        // - MV on shared source
-        let mut init_split_assignment = self
+        // Phase 1: Gather fragment-level split information.
+        // - For source fragments: discover splits from the external source.
+        // - For backfill fragments: splits will be aligned in Phase 2 inside the barrier worker
+        //   using the new_no_shuffle mapping and in-flight actor info.
+        let init_split_assignment = self
             .source_manager
-            .allocate_splits(&stream_job_fragments)
+            .discover_splits(&stream_job_fragments)
             .await?;
-
-        init_split_assignment.extend(
-            self.source_manager
-                .allocate_splits_for_backfill(
-                    &stream_job_fragments,
-                    &new_no_shuffle,
-                    &upstream_actors,
-                )
-                .await?,
-        );
 
         let fragment_backfill_ordering =
             StreamFragmentGraph::extend_fragment_backfill_ordering_with_locality_backfill(
@@ -560,7 +544,6 @@ impl GlobalStreamManager {
         ReplaceStreamJobContext {
             old_fragments,
             replace_upstream,
-            new_no_shuffle,
             upstream_fragment_downstreams,
             tmp_id,
             streaming_job,
@@ -569,21 +552,24 @@ impl GlobalStreamManager {
             ..
         }: ReplaceStreamJobContext,
     ) -> MetaResult<()> {
-        let init_split_assignment = if streaming_job.is_source() {
-            self.source_manager
-                .allocate_splits_for_replace_source(
-                    &new_fragments,
-                    &replace_upstream,
-                    &new_no_shuffle,
-                )
+        // Phase 1: Gather fragment-level split information.
+        // For replace source with existing downstream, splits will be aligned
+        // in Phase 2 inside the barrier worker using new_no_shuffle and SharedActorInfos.
+        // For replace source with no downstream (or non-source), discover splits fresh.
+        let split_plan = if streaming_job.is_source() {
+            match self
+                .source_manager
+                .discover_splits_for_replace_source(&new_fragments, &replace_upstream)
                 .await?
+            {
+                Some(discovered) => ReplaceJobSplitPlan::Discovered(discovered),
+                None => ReplaceJobSplitPlan::AlignFromPrevious,
+            }
         } else {
-            self.source_manager.allocate_splits(&new_fragments).await?
+            let discovered = self.source_manager.discover_splits(&new_fragments).await?;
+            ReplaceJobSplitPlan::Discovered(discovered)
         };
-        tracing::info!(
-            "replace_stream_job - allocate split: {:?}",
-            init_split_assignment
-        );
+        tracing::info!("replace_stream_job - split plan: {:?}", split_plan);
 
         self.barrier_scheduler
             .run_command(
@@ -593,7 +579,7 @@ impl GlobalStreamManager {
                     new_fragments,
                     replace_upstream,
                     upstream_fragment_downstreams,
-                    init_split_assignment,
+                    split_plan,
                     streaming_job,
                     tmp_id,
                     to_drop_state_table_ids: {
