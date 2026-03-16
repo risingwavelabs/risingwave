@@ -107,6 +107,63 @@ struct DependentSourceFragmentUpdate {
     is_shared_source: bool,
 }
 
+#[derive(Debug)]
+struct ReplaceOriginalJobInfo {
+    max_parallelism: i32,
+    timezone: Option<String>,
+    config_override: Option<String>,
+    adaptive_parallelism_strategy: Option<String>,
+    parallelism: StreamingParallelism,
+    specific_resource_group: Option<String>,
+}
+
+impl ReplaceOriginalJobInfo {
+    fn resolved_parallelism(
+        &self,
+        specified_parallelism: Option<&NonZeroUsize>,
+    ) -> StreamingParallelism {
+        specified_parallelism
+            .map(|n| StreamingParallelism::Fixed(n.get() as _))
+            .unwrap_or_else(|| self.parallelism.clone())
+    }
+
+    fn stream_context(&self, ctx_override: Option<&StreamContext>) -> StreamContext {
+        StreamContext {
+            timezone: ctx_override
+                .and_then(|ctx| ctx.timezone.clone())
+                .or_else(|| self.timezone.clone()),
+            // We don't expect replacing a job with a different config override.
+            // Thus always use the original config override.
+            config_override: self.config_override.clone().unwrap_or_default().into(),
+            adaptive_parallelism_strategy: self.adaptive_parallelism_strategy.as_deref().map(|s| {
+                parse_strategy(s).expect("strategy should be validated before persisting")
+            }),
+        }
+    }
+
+    fn resource_type(&self) -> streaming_job_resource_type::ResourceType {
+        match &self.specific_resource_group {
+            Some(group) => {
+                streaming_job_resource_type::ResourceType::SpecificResourceGroup(group.clone())
+            }
+            None => streaming_job_resource_type::ResourceType::Regular(true),
+        }
+    }
+}
+
+impl From<streaming_job::Model> for ReplaceOriginalJobInfo {
+    fn from(model: streaming_job::Model) -> Self {
+        Self {
+            max_parallelism: model.max_parallelism,
+            timezone: model.timezone,
+            config_override: model.config_override,
+            adaptive_parallelism_strategy: model.adaptive_parallelism_strategy,
+            parallelism: model.parallelism,
+            specific_resource_group: model.specific_resource_group,
+        }
+    }
+}
+
 impl CatalogController {
     #[allow(clippy::too_many_arguments)]
     pub async fn create_streaming_job_obj(
@@ -982,25 +1039,14 @@ impl CatalogController {
         }
 
         // 3. check parallelism.
-        let (
-            original_max_parallelism,
-            original_timezone,
-            original_config_override,
-            original_adaptive_strategy,
-        ): (i32, Option<String>, Option<String>, Option<String>) =
-            StreamingJobModel::find_by_id(id)
-                .select_only()
-                .column(streaming_job::Column::MaxParallelism)
-                .column(streaming_job::Column::Timezone)
-                .column(streaming_job::Column::ConfigOverride)
-                .column(streaming_job::Column::AdaptiveParallelismStrategy)
-                .into_tuple()
-                .one(&txn)
-                .await?
-                .ok_or_else(|| MetaError::catalog_id_not_found(streaming_job.job_type_str(), id))?;
+        let original_job = StreamingJobModel::find_by_id(id)
+            .one(&txn)
+            .await?
+            .map(ReplaceOriginalJobInfo::from)
+            .ok_or_else(|| MetaError::catalog_id_not_found(streaming_job.job_type_str(), id))?;
 
         if let Some(max_parallelism) = expected_original_max_parallelism
-            && original_max_parallelism != max_parallelism as i32
+            && original_job.max_parallelism != max_parallelism as i32
         {
             // We already override the max parallelism in `StreamFragmentGraph` before entering this function.
             // This should not happen in normal cases.
@@ -1008,27 +1054,14 @@ impl CatalogController {
                 "cannot use a different max parallelism \
                  when replacing streaming job, \
                  original: {}, new: {}",
-                original_max_parallelism,
+                original_job.max_parallelism,
                 max_parallelism
             );
         }
 
-        let parallelism = match specified_parallelism {
-            None => StreamingParallelism::Adaptive,
-            Some(n) => StreamingParallelism::Fixed(n.get() as _),
-        };
-
-        let ctx = StreamContext {
-            timezone: ctx
-                .map(|ctx| ctx.timezone.clone())
-                .unwrap_or(original_timezone),
-            // We don't expect replacing a job with a different config override.
-            // Thus always use the original config override.
-            config_override: original_config_override.unwrap_or_default().into(),
-            adaptive_parallelism_strategy: original_adaptive_strategy.as_deref().map(|s| {
-                parse_strategy(s).expect("strategy should be validated before persisting")
-            }),
-        };
+        let parallelism = original_job.resolved_parallelism(specified_parallelism);
+        let ctx = original_job.stream_context(ctx);
+        let resource_type = original_job.resource_type();
 
         // 4. create streaming object for new replace table.
         let tmp_model = Self::create_streaming_job_obj(
@@ -1040,8 +1073,11 @@ impl CatalogController {
             streaming_job.create_type(),
             ctx,
             parallelism,
-            original_max_parallelism as _,
-            streaming_job_resource_type::ResourceType::Regular(true),
+            original_job.max_parallelism as _,
+            resource_type,
+            // `backfill_parallelism` is intentionally NOT inherited from the original job.
+            // Replace has no "backfill finish -> restore parallelism" phase, so inheriting it
+            // would render actors at the backfill parallelism and never recover to steady-state.
             None,
         )
         .await?;
