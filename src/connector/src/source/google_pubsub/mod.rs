@@ -91,6 +91,14 @@ pub struct PubsubProperties {
     #[serde(rename = "pubsub.parallelism")]
     pub parallelism: Option<u32>,
 
+    /// The ack deadline in seconds for the streaming pull subscriber.
+    /// This is the maximum time the server will wait for an ack before redelivering the message.
+    /// Must be between 10 and 600 seconds. Defaults to 60.
+    #[serde_as(as = "Option<DisplayFromStr>")]
+    #[serde(rename = "pubsub.ack_deadline_seconds")]
+    #[with_option(allow_alter_on_fly)]
+    pub ack_deadline_seconds: Option<i32>,
+
     #[serde(flatten)]
     pub unknown_fields: HashMap<String, String>,
 }

@@ -13,8 +13,10 @@
 // limitations under the License.
 
 use async_trait::async_trait;
+use futures::{FutureExt, StreamExt};
 use futures_async_stream::try_stream;
-use google_cloud_pubsub::subscription::Subscription;
+use google_cloud_pubsub::subscriber::SubscriberConfig;
+use google_cloud_pubsub::subscription::{SubscribeConfig, Subscription};
 use risingwave_common::{bail, ensure};
 use tonic::Code;
 
@@ -27,10 +29,12 @@ use crate::source::{
     SplitReader, into_chunk_stream,
 };
 
-const PUBSUB_MAX_FETCH_MESSAGES: usize = 1024;
+const DEFAULT_ACK_DEADLINE_SECONDS: i32 = 60;
+const MAX_BATCH_SIZE: usize = 1024;
 
 pub struct PubsubSplitReader {
     subscription: Subscription,
+    ack_deadline_seconds: i32,
 
     split_id: SplitId,
     parser_config: ParserConfig,
@@ -38,41 +42,49 @@ pub struct PubsubSplitReader {
 }
 
 impl PubsubSplitReader {
+    fn build_subscribe_config(&self) -> SubscribeConfig {
+        let subscriber_config = SubscriberConfig {
+            stream_ack_deadline_seconds: self.ack_deadline_seconds,
+            ..Default::default()
+        };
+        SubscribeConfig::default().with_subscriber_config(subscriber_config)
+    }
+
     #[try_stream(ok = Vec<SourceMessage>, error = ConnectorError)]
     async fn into_data_stream(self) {
         loop {
-            let pull_result = self
+            let subscribe_config = self.build_subscribe_config();
+            let mut stream = self
                 .subscription
-                .pull(PUBSUB_MAX_FETCH_MESSAGES as i32, None)
-                .await;
+                .subscribe(Some(subscribe_config))
+                .await
+                .map_err(|e| ConnectorError::from(anyhow::anyhow!("failed to subscribe: {}", e)))?;
 
-            let raw_chunk = match pull_result {
-                Ok(chunk) => chunk,
-                Err(e) => match e.code() {
-                    Code::NotFound => bail!("subscription not found"),
-                    Code::PermissionDenied => bail!("not authorized to access subscription"),
-                    _ => continue,
-                },
-            };
-
-            // Sleep if we get an empty batch -- this should generally not happen
-            // since subscription.pull claims to block until at least a single message is available.
-            // But pull seems to time out at some point a return with no messages, so we need to see
-            // ? if that's somehow adjustable or we can skip sleeping and hand it off to pull again
-            if raw_chunk.is_empty() {
-                continue;
-            }
-
-            let mut chunk: Vec<SourceMessage> = Vec::with_capacity(raw_chunk.len());
-
-            for message in raw_chunk {
-                chunk.push(SourceMessage::from(TaggedReceivedMessage(
+            while let Some(first) = stream.next().await {
+                let mut batch = Vec::with_capacity(MAX_BATCH_SIZE);
+                batch.push(SourceMessage::from(TaggedReceivedMessage(
                     self.split_id.clone(),
-                    message,
+                    first,
                 )));
+
+                // Drain remaining ready messages without blocking
+                while batch.len() < MAX_BATCH_SIZE {
+                    match stream.next().now_or_never() {
+                        Some(Some(msg)) => {
+                            batch.push(SourceMessage::from(TaggedReceivedMessage(
+                                self.split_id.clone(),
+                                msg,
+                            )));
+                        }
+                        _ => break,
+                    }
+                }
+
+                yield batch;
             }
 
-            yield chunk;
+            // Stream ended (all subscribers stopped). Reconnect.
+            tracing::warn!("pubsub streaming pull ended, reconnecting...");
         }
     }
 }
@@ -95,10 +107,19 @@ impl SplitReader for PubsubSplitReader {
         );
         let split = splits.into_iter().next().unwrap();
 
+        let ack_deadline_seconds = properties
+            .ack_deadline_seconds
+            .unwrap_or(DEFAULT_ACK_DEADLINE_SECONDS);
+
+        if !(10..=600).contains(&ack_deadline_seconds) {
+            bail!("pubsub.ack_deadline_seconds must be between 10 and 600");
+        }
+
         let subscription = properties.subscription_client().await?;
 
         Ok(Self {
             subscription,
+            ack_deadline_seconds,
             split_id: split.id(),
             parser_config,
             source_ctx,
