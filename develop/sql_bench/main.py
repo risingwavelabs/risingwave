@@ -7,7 +7,6 @@ import sys
 import urllib.request
 import yaml
 from pathlib import Path
-from textwrap import dedent
 
 BENCHMARK_TEMPLATE = '''
 # Benchmark configuration
@@ -86,6 +85,10 @@ def print_metrics_delta(before: dict[str, float], after: dict[str, float]) -> No
         delta = after[metric_name] - before[metric_name]
         print(f"{metric_name}: before={before[metric_name]:.2f}, after={after[metric_name]:.2f}, delta={delta:.2f}")
 
+def _escape_for_bash_double_quotes(text: str) -> str:
+    """Escape text so it can be safely embedded in a bash double-quoted string."""
+    return text.replace("\\", "\\\\").replace('"', '\\"').replace("$", "\\$")
+
 def create_benchmark_script(yaml_path: Path, dump_output: bool = False) -> Path:
     """Create a shell script from the YAML configuration."""
     config = load_benchmark_config(yaml_path)
@@ -97,66 +100,191 @@ def create_benchmark_script(yaml_path: Path, dump_output: bool = False) -> Path:
     conclude_sql = config.get('conclude_sql', '')
     cleanup_sql = config.get('cleanup_sql', '')
     runs = config.get('runs', 1)
+    configured_metrics_endpoint = str(config.get("metrics_endpoint", "")).strip()
+    completion = config.get("completion")
 
-    # Base script content with hyperfine command
-    script_content = dedent('''
-        #!/usr/bin/env bash
+    escaped_setup_sql = _escape_for_bash_double_quotes(setup_sql)
+    escaped_prepare_sql = _escape_for_bash_double_quotes(prepare_sql)
+    escaped_benchmark_sql = _escape_for_bash_double_quotes(benchmark_sql)
+    escaped_conclude_sql = _escape_for_bash_double_quotes(conclude_sql)
+    escaped_cleanup_sql = _escape_for_bash_double_quotes(cleanup_sql)
+    escaped_metrics_endpoint = _escape_for_bash_double_quotes(configured_metrics_endpoint)
+    extra_exports: list[str] = []
 
-        run_psql() {{
-          if [ -n "$PSQL_URL" ]; then
-            psql "$PSQL_URL" "$@"
-          else
-            risedev psql "$@"
-          fi
-        }}
-        export -f run_psql
+    script_lines: list[str] = [
+        "#!/usr/bin/env bash",
+        "set -euo pipefail",
+        "",
+        "run_psql() {",
+        "  if [ -n \"${PSQL_URL:-}\" ]; then",
+        "    psql \"$PSQL_URL\" \"$@\"",
+        "  else",
+        "    ./risedev psql \"$@\"",
+        "  fi",
+        "}",
+        "",
+        "run_sql() {",
+        "  run_psql -v ON_ERROR_STOP=1 -c \"$1\"",
+        "}",
+        "",
+        "run_psql_data() {",
+        "  # risedev prints cargo-make logs to stdout; filter them out for scalar parsing.",
+        "  run_psql \"$@\" | awk '!/^\\[cargo-make\\]/ && NF { print }'",
+        "}",
+        "",
+        f"METRICS_ENDPOINT=\"${{RW_SQL_BENCH_METRICS_ENDPOINT:-{escaped_metrics_endpoint}}}\"",
+        "",
+        "setup() {",
+        f"  run_sql \"{escaped_setup_sql}\"",
+        "}",
+        "",
+        "prepare() {",
+        f"  run_sql \"{escaped_prepare_sql}\"",
+        "}",
+        "",
+        "conclude() {",
+        f"  run_sql \"{escaped_conclude_sql}\"",
+        "}",
+        "",
+        "cleanup() {",
+        f"  run_sql \"{escaped_cleanup_sql}\"",
+        "}",
+        "",
+    ]
 
-        setup() {{
-          run_psql -c "{setup_sql}"
-        }}
+    if completion is not None:
+        if not isinstance(completion, dict):
+            raise ValueError("Invalid benchmark config: `completion` must be a YAML object")
+        metric_name = str(completion.get("metric_name", "")).strip()
+        table_id_sql = str(completion.get("table_id_sql", "")).strip()
+        if not metric_name:
+            raise ValueError("Invalid benchmark config: `completion.metric_name` is required")
+        if not table_id_sql:
+            raise ValueError("Invalid benchmark config: `completion.table_id_sql` is required")
+        try:
+            target_delta = int(completion.get("target_delta", 0))
+            timeout_sec = int(completion.get("timeout_sec", 900))
+            poll_interval_sec = float(completion.get("poll_interval_sec", 1))
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"Invalid benchmark config: completion fields contain invalid numbers: {exc}")
+        if target_delta <= 0:
+            raise ValueError("Invalid benchmark config: `completion.target_delta` must be > 0")
+        if timeout_sec <= 0:
+            raise ValueError("Invalid benchmark config: `completion.timeout_sec` must be > 0")
+        if poll_interval_sec <= 0:
+            raise ValueError("Invalid benchmark config: `completion.poll_interval_sec` must be > 0")
 
-        prepare() {{
-          run_psql -c "{prepare_sql}"
-        }}
+        escaped_metric_name = _escape_for_bash_double_quotes(metric_name)
+        script_lines.extend([
+            "get_counter_sum_by_table_id() {",
+            "  local metric_name=\"$1\"",
+            "  local table_id=\"$2\"",
+            "  local endpoint=\"$3\"",
+            "  local payload",
+            "  if ! payload=\"$(curl -fsS \"$endpoint\")\"; then",
+            "    echo 0",
+            "    return 0",
+            "  fi",
+            "  printf '%s\\n' \"$payload\" | awk -v metric=\"$metric_name\" -v table_id=\"$table_id\" '",
+            "    $1 ~ (\"^\" metric \"\\\\{\") && index($1, \"table_id=\\\"\" table_id \"\\\"\") > 0 { sum += $2 }",
+            "    END { printf \"%.0f\\n\", sum + 0 }",
+            "  '",
+            "}",
+            "",
+            "wait_for_counter_delta() {",
+            "  local metric_name=\"$1\"",
+            "  local table_id=\"$2\"",
+            "  local baseline=\"$3\"",
+            "  local target_delta=\"$4\"",
+            "  local timeout_sec=\"$5\"",
+            "  local poll_interval_sec=\"$6\"",
+            "  local endpoint=\"$7\"",
+            "",
+            "  local start_ts",
+            "  start_ts=\"$(date +%s)\"",
+            "  while true; do",
+            "    local current",
+            "    current=\"$(get_counter_sum_by_table_id \"$metric_name\" \"$table_id\" \"$endpoint\")\"",
+            "    if [ \"$current\" -lt \"$baseline\" ]; then",
+            "      baseline=\"$current\"",
+            "    fi",
+            "    local delta=$((current - baseline))",
+            "    if [ \"$delta\" -ge \"$target_delta\" ]; then",
+            "      echo \"Completion reached: metric=$metric_name table_id=$table_id delta=$delta target=$target_delta\"",
+            "      break",
+            "    fi",
+            "",
+            "    local now",
+            "    now=\"$(date +%s)\"",
+            "    local elapsed=$((now - start_ts))",
+            "    if [ \"$elapsed\" -ge \"$timeout_sec\" ]; then",
+            "      echo \"Error: timeout waiting for completion metric. metric=$metric_name table_id=$table_id delta=$delta target=$target_delta timeout_sec=$timeout_sec\" >&2",
+            "      return 1",
+            "    fi",
+            "    sleep \"$poll_interval_sec\"",
+            "  done",
+            "}",
+            "",
+            "benchmark() {",
+            "  if [ -z \"$METRICS_ENDPOINT\" ]; then",
+            "    echo \"Error: completion metric is configured but metrics endpoint is empty. Set metrics_endpoint in YAML or RW_SQL_BENCH_METRICS_ENDPOINT.\" >&2",
+            "    return 1",
+            "  fi",
+            "  local table_id",
+            "  local table_id_sql",
+            "  table_id_sql=$(cat <<'RW_SQL'",
+            table_id_sql,
+            "RW_SQL",
+            ")",
+            "  table_id=\"$(run_psql_data -tA -c \"$table_id_sql\" | tail -n 1 | tr -d '[:space:]')\"",
+            "  if [ -z \"$table_id\" ]; then",
+            "    echo \"Error: failed to resolve table_id for completion metric\" >&2",
+            "    return 1",
+            "  fi",
+            f"  run_sql \"{escaped_benchmark_sql}\"",
+            "  local baseline",
+            f"  baseline=\"$(get_counter_sum_by_table_id \"{escaped_metric_name}\" \"$table_id\" \"$METRICS_ENDPOINT\")\"",
+            f"  wait_for_counter_delta \"{escaped_metric_name}\" \"$table_id\" \"$baseline\" \"{target_delta}\" \"{timeout_sec}\" \"{poll_interval_sec}\" \"$METRICS_ENDPOINT\"",
+            "}",
+            "",
+        ])
+        extra_exports.extend([
+            "export -f get_counter_sum_by_table_id",
+            "export -f wait_for_counter_delta",
+            "export METRICS_ENDPOINT",
+        ])
+    else:
+        script_lines.extend([
+            "benchmark() {",
+            f"  run_sql \"{escaped_benchmark_sql}\"",
+            "}",
+            "",
+        ])
 
-        conclude() {{
-          run_psql -c "{conclude_sql}"
-        }}
+    script_lines.extend([
+        "export -f run_psql",
+        "export -f run_psql_data",
+        "export -f run_sql",
+        "export -f setup",
+        "export -f prepare",
+        "export -f conclude",
+        "export -f cleanup",
+        "export -f benchmark",
+        *extra_exports,
+        "",
+        "# Run setup once",
+        "setup",
+        "",
+        "# Trap to ensure cleanup runs on script exit",
+        "trap cleanup EXIT",
+        "",
+        "# Run benchmark with hyperfine",
+        f"hyperfine --shell=bash --runs {runs}{' --show-output' if dump_output else ''} \\",
+        "  --prepare 'prepare' --cleanup 'conclude' benchmark",
+        "",
+    ])
 
-        cleanup() {{
-          run_psql -c "{cleanup_sql}"
-        }}
-
-        benchmark() {{
-          run_psql -c "{benchmark_sql}"
-        }}
-
-        export -f setup
-        export -f prepare
-        export -f conclude
-        export -f cleanup
-        export -f benchmark
-
-        # Run setup once
-        setup
-
-        # Trap to ensure cleanup runs on script exit
-        trap cleanup EXIT
-
-        # Run benchmark with hyperfine
-        hyperfine --shell=bash --runs {runs}{show_output} \\
-          --prepare 'prepare' --conclude 'conclude' benchmark
-    ''')
-
-    script_content = script_content.format(
-        setup_sql=setup_sql,
-        prepare_sql=prepare_sql,
-        benchmark_sql=benchmark_sql,
-        conclude_sql=conclude_sql,
-        cleanup_sql=cleanup_sql,
-        runs=runs,
-        show_output=' --show-output' if dump_output else ''
-    )
+    script_content = "\n".join(script_lines)
 
     script_path = yaml_path.with_suffix('.sh')
     script_path.write_text(script_content)
@@ -270,7 +398,7 @@ def run_benchmark(bench_name: str, profile: str = "full", pg_url: str | None = N
     finally:
         if not pg_url:
             # Clean up RisingWave cluster and data
-            subprocess.run("risedev k && risedev clean-data", shell=True, check=False)
+            subprocess.run("./risedev k && ./risedev clean-data", shell=True, check=False)
 
 def main():
     parser = argparse.ArgumentParser(description="SQL Benchmark Runner")
