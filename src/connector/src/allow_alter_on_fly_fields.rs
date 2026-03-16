@@ -164,6 +164,13 @@ pub static SOURCE_ALLOW_ALTER_ON_FLY_FIELDS: LazyLock<HashMap<String, HashSet<St
             "properties.enable.auto.commit".to_owned(),
         ].into_iter().collect(),
     ).unwrap();
+    // PubsubProperties
+    map.try_insert(
+        std::any::type_name::<PubsubProperties>().to_owned(),
+        [
+            "pubsub.ack_deadline_seconds".to_owned(),
+        ].into_iter().collect(),
+    ).unwrap();
     map
 });
 
