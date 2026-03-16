@@ -12,13 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use anyhow::Context;
 use async_trait::async_trait;
 use futures::{FutureExt, StreamExt};
 use futures_async_stream::try_stream;
 use google_cloud_pubsub::subscriber::SubscriberConfig;
 use google_cloud_pubsub::subscription::{SubscribeConfig, Subscription};
 use risingwave_common::{bail, ensure};
-use thiserror_ext::AsReport;
 
 use super::TaggedReceivedMessage;
 use crate::error::{ConnectorError, ConnectorResult as Result};
@@ -58,7 +58,7 @@ impl PubsubSplitReader {
                 .subscription
                 .subscribe(Some(subscribe_config))
                 .await
-                .map_err(|e| anyhow::anyhow!("failed to subscribe: {}", e.as_report()))?;
+                .context("failed to subscribe")?;
 
             while let Some(first) = stream.next().await {
                 let mut batch = Vec::with_capacity(MAX_BATCH_SIZE);
