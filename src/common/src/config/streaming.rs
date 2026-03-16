@@ -278,6 +278,11 @@ pub struct StreamingDeveloperConfig {
     #[serde(default)]
     pub over_window_cache_policy: OverWindowCachePolicy,
 
+    /// Enable multi-range optimization for bounded `ROWS` over window frames.
+    /// When disabled, executor falls back to the legacy single-range behavior.
+    #[serde(default = "default::developer::stream_enable_over_window_multi_range")]
+    pub enable_over_window_multi_range: bool,
+
     /// When enabled, vnode stats pruning is applied in production.
     /// When disabled, vnode stats pruning is in dry-run mode: we still maintain vnode stats
     /// and verify that pruning would be correct, but we don't actually use the pruning

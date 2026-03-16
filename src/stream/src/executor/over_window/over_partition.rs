@@ -508,7 +508,8 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
         // When all frames are bounded ROWS (no RANGE/SESSION/UNBOUNDED) and there are
         // multiple delta keys, we can compute per-key affected ranges and merge them.
         // This avoids loading and computing the entire span between distant delta keys.
-        let use_multi_range = !self.calls.start_is_unbounded
+        let use_multi_range = self.calls.enable_multi_range_optimization
+            && !self.calls.start_is_unbounded
             && !self.calls.end_is_unbounded
             && self.calls.range_frames.is_empty()
             && part_with_delta.delta().len() > 1;
@@ -703,7 +704,7 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
         // Compute per-delta-key affected ranges.
         let mut raw_ranges: Vec<AffectedRange<'delta>> = Vec::new();
 
-        for (dk, _) in part_with_delta.delta() {
+        for dk in part_with_delta.delta().keys() {
             // Find the first and last curr keys affected by this delta key.
             let first_curr = if dk == first_key {
                 first_key
