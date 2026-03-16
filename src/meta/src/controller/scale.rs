@@ -594,6 +594,93 @@ pub(crate) fn render_actor_assignments(
     adaptive_parallelism_strategy: AdaptiveParallelismStrategy,
     loaded: &LoadedFragmentContext,
 ) -> MetaResult<RenderedGraph> {
+    let mut actor_id_allocator = RenderActorIdAllocator::Persistent(actor_id_counter);
+    render_actor_assignments_with_allocator(
+        &mut actor_id_allocator,
+        worker_map,
+        adaptive_parallelism_strategy,
+        loaded,
+    )
+}
+
+/// Render a graph with preview-only actor ids so callers can compare layouts
+/// without consuming the global actor id generator.
+pub(crate) fn preview_actor_assignments(
+    worker_map: &HashMap<WorkerId, WorkerNode>,
+    adaptive_parallelism_strategy: AdaptiveParallelismStrategy,
+    loaded: &LoadedFragmentContext,
+) -> MetaResult<RenderedGraph> {
+    let mut actor_id_allocator = RenderActorIdAllocator::Preview { next_actor_id: 0 };
+    render_actor_assignments_with_allocator(
+        &mut actor_id_allocator,
+        worker_map,
+        adaptive_parallelism_strategy,
+        loaded,
+    )
+}
+
+/// Replace preview actor ids with real actor ids after the caller has decided
+/// the rendered layout is not a no-op.
+pub(crate) fn materialize_actor_assignments(
+    actor_id_counter: &AtomicU32,
+    rendered: RenderedGraph,
+) -> RenderedGraph {
+    let RenderedGraph {
+        fragments,
+        ensembles,
+    } = rendered;
+
+    let mut ordered_fragments = fragments
+        .into_iter()
+        .flat_map(|(database_id, jobs)| {
+            jobs.into_iter().flat_map(move |(job_id, fragments)| {
+                fragments.into_iter().map(move |(fragment_id, fragment)| {
+                    (database_id, job_id, fragment_id, fragment)
+                })
+            })
+        })
+        .collect_vec();
+    // Preserve preview order when remapping ids so fragments from the same
+    // no-shuffle ensemble keep their relative slot alignment. Empty fragments
+    // should not appear, but fragment_id keeps the ordering deterministic if they do.
+    ordered_fragments.sort_by_key(|(_, _, fragment_id, fragment)| {
+        (
+            fragment
+                .actors
+                .keys()
+                .copied()
+                .min()
+                .map(|actor_id| actor_id.as_raw_id())
+                .unwrap_or(u32::MAX),
+            *fragment_id,
+        )
+    });
+
+    let mut materialized = FragmentRenderMap::new();
+    for (database_id, job_id, fragment_id, fragment) in ordered_fragments {
+        materialized
+            .entry(database_id)
+            .or_default()
+            .entry(job_id)
+            .or_default()
+            .insert(
+                fragment_id,
+                materialize_fragment(fragment, actor_id_counter),
+            );
+    }
+
+    RenderedGraph {
+        fragments: materialized,
+        ensembles,
+    }
+}
+
+fn render_actor_assignments_with_allocator(
+    actor_id_allocator: &mut RenderActorIdAllocator<'_>,
+    worker_map: &HashMap<WorkerId, WorkerNode>,
+    adaptive_parallelism_strategy: AdaptiveParallelismStrategy,
+    loaded: &LoadedFragmentContext,
+) -> MetaResult<RenderedGraph> {
     if loaded.is_empty() {
         return Ok(RenderedGraph::empty());
     }
@@ -605,8 +692,8 @@ pub(crate) fn render_actor_assignments(
         database_map: &loaded.database_map,
     };
 
-    let fragments = render_actors(
-        actor_id_counter,
+    let fragments = render_actors_with_allocator(
+        actor_id_allocator,
         &loaded.ensembles,
         &loaded.job_fragments,
         &loaded.job_map,
@@ -619,6 +706,30 @@ pub(crate) fn render_actor_assignments(
         fragments,
         ensembles: loaded.ensembles.clone(),
     })
+}
+
+fn materialize_fragment(
+    mut fragment: InflightFragmentInfo,
+    actor_id_counter: &AtomicU32,
+) -> InflightFragmentInfo {
+    let actor_count = u32::try_from(fragment.actors.len()).expect("actor count exceeds u32::MAX");
+    let actor_id_base: ActorId = actor_id_counter
+        .fetch_add(actor_count, Ordering::Relaxed)
+        .into();
+
+    let mut actors = fragment.actors.into_iter().collect_vec();
+    actors.sort_by_key(|(actor_id, _)| *actor_id);
+
+    fragment.actors = actors
+        .into_iter()
+        .enumerate()
+        .map(|(idx, (_, info))| {
+            let actor_offset = u32::try_from(idx).expect("actor index exceeds u32::MAX");
+            (actor_id_base + actor_offset, info)
+        })
+        .collect();
+
+    fragment
 }
 
 async fn build_loaded_context<C>(
@@ -696,8 +807,55 @@ struct RenderActorsContext<'a> {
     database_map: &'a HashMap<DatabaseId, database::Model>,
 }
 
+enum RenderActorIdAllocator<'a> {
+    Persistent(&'a AtomicU32),
+    Preview { next_actor_id: u32 },
+}
+
+impl RenderActorIdAllocator<'_> {
+    fn allocate_block(&mut self, actor_count: u32) -> ActorId {
+        match self {
+            Self::Persistent(actor_id_counter) => {
+                let actor_id_base: ActorId = actor_id_counter
+                    .fetch_add(actor_count, Ordering::Relaxed)
+                    .into();
+                actor_id_base
+            }
+            Self::Preview { next_actor_id } => {
+                let actor_id_base = *next_actor_id;
+                *next_actor_id = next_actor_id
+                    .checked_add(actor_count)
+                    .expect("preview actor id overflow");
+                let actor_id_base: ActorId = actor_id_base.into();
+                actor_id_base
+            }
+        }
+    }
+}
+
 fn render_actors(
     actor_id_counter: &AtomicU32,
+    ensembles: &[NoShuffleEnsemble],
+    job_fragments: &HashMap<JobId, HashMap<FragmentId, LoadedFragment>>,
+    job_map: &HashMap<JobId, streaming_job::Model>,
+    worker_map: &HashMap<WorkerId, WorkerNode>,
+    adaptive_parallelism_strategy: AdaptiveParallelismStrategy,
+    context: RenderActorsContext<'_>,
+) -> MetaResult<FragmentRenderMap> {
+    let mut actor_id_allocator = RenderActorIdAllocator::Persistent(actor_id_counter);
+    render_actors_with_allocator(
+        &mut actor_id_allocator,
+        ensembles,
+        job_fragments,
+        job_map,
+        worker_map,
+        adaptive_parallelism_strategy,
+        context,
+    )
+}
+
+fn render_actors_with_allocator(
+    actor_id_allocator: &mut RenderActorIdAllocator<'_>,
     ensembles: &[NoShuffleEnsemble],
     job_fragments: &HashMap<JobId, HashMap<FragmentId, LoadedFragment>>,
     job_map: &HashMap<JobId, streaming_job::Model>,
@@ -816,7 +974,7 @@ fn render_actors(
             let vnode_count = fragment.vnode_count;
             let source_id = fragment_source_ids.get(&fragment_id).cloned();
 
-            let aligner = ComponentFragmentAligner::new(&actor_template, actor_id_counter);
+            let aligner = ComponentFragmentAligner::new(&actor_template, actor_id_allocator);
             let actors = aligner.align_component_actor(distribution_type);
             let mut splits = source_id
                 .map(|source_id| {
@@ -1077,13 +1235,11 @@ pub(crate) struct ComponentFragmentAligner<'a> {
 }
 
 impl<'a> ComponentFragmentAligner<'a> {
-    pub(crate) fn new(
+    fn new(
         actor_template: &'a EnsembleActorTemplate,
-        actor_id_counter: &AtomicU32,
+        actor_id_allocator: &mut RenderActorIdAllocator<'_>,
     ) -> Self {
-        let actor_id_base = actor_id_counter
-            .fetch_add(actor_template.actor_count, Ordering::Relaxed)
-            .into();
+        let actor_id_base = actor_id_allocator.allocate_block(actor_template.actor_count);
         Self {
             actor_template,
             actor_id_base,
@@ -2027,6 +2183,125 @@ mod tests {
             BTreeSet::from([split_a.id().to_string(), split_b.id().to_string()])
         );
         assert_eq!(actor_id_counter.load(Ordering::Relaxed), 4);
+    }
+
+    #[test]
+    fn preview_actor_assignments_defers_actor_id_allocation() {
+        let actor_id_counter = AtomicU32::new(100);
+        let entry_fragment_id: FragmentId = 11.into();
+        let downstream_fragment_id: FragmentId = 12.into();
+        let job_id: JobId = 30.into();
+        let database_id: DatabaseId = DatabaseId::new(7);
+        let source_id: SourceId = 99.into();
+
+        let source_mask = FragmentTypeFlag::raw_flag([FragmentTypeFlag::Source]) as i32;
+        let source_scan_mask = FragmentTypeFlag::raw_flag([FragmentTypeFlag::SourceScan]) as i32;
+
+        let entry_fragment = build_fragment(
+            entry_fragment_id,
+            job_id,
+            source_mask,
+            DistributionType::Hash,
+            4,
+            StreamingParallelism::Fixed(2),
+        );
+
+        let downstream_fragment = build_fragment(
+            downstream_fragment_id,
+            job_id,
+            source_scan_mask,
+            DistributionType::Hash,
+            4,
+            StreamingParallelism::Fixed(2),
+        );
+
+        let job_model = streaming_job::Model {
+            job_id,
+            job_status: JobStatus::Created,
+            create_type: CreateType::Background,
+            timezone: None,
+            config_override: None,
+            adaptive_parallelism_strategy: None,
+            parallelism: StreamingParallelism::Fixed(2),
+            backfill_parallelism: None,
+            backfill_orders: None,
+            max_parallelism: 2,
+            specific_resource_group: None,
+            is_serverless_backfill: false,
+        };
+
+        let database_model = database::Model {
+            database_id,
+            name: "preview_db".into(),
+            resource_group: "rg-source".into(),
+            barrier_interval_ms: None,
+            checkpoint_frequency: None,
+        };
+
+        let ensembles = vec![NoShuffleEnsemble {
+            entries: HashSet::from([entry_fragment_id]),
+            components: HashSet::from([entry_fragment_id, downstream_fragment_id]),
+        }];
+
+        let fragment_map = HashMap::from([
+            (entry_fragment_id, entry_fragment),
+            (downstream_fragment_id, downstream_fragment),
+        ]);
+        let job_fragments = HashMap::from([(job_id, fragment_map)]);
+        let job_map = HashMap::from([(job_id, job_model)]);
+
+        let worker_map: HashMap<WorkerId, WorkerNode> = HashMap::from([
+            (1.into(), build_worker_node(1, 1, "rg-source")),
+            (2.into(), build_worker_node(2, 1, "rg-source")),
+        ]);
+
+        let split_a = SplitImpl::Test(TestSourceSplit {
+            id: Arc::<str>::from("split-a"),
+            properties: HashMap::new(),
+            offset: "0".into(),
+        });
+        let split_b = SplitImpl::Test(TestSourceSplit {
+            id: Arc::<str>::from("split-b"),
+            properties: HashMap::new(),
+            offset: "0".into(),
+        });
+
+        let loaded = LoadedFragmentContext {
+            ensembles,
+            job_fragments,
+            job_map,
+            streaming_job_databases: HashMap::from([(job_id, database_id)]),
+            database_map: HashMap::from([(database_id, database_model)]),
+            fragment_source_ids: HashMap::from([
+                (entry_fragment_id, source_id),
+                (downstream_fragment_id, source_id),
+            ]),
+            fragment_splits: HashMap::from([(entry_fragment_id, vec![split_a, split_b])]),
+        };
+
+        let preview =
+            preview_actor_assignments(&worker_map, AdaptiveParallelismStrategy::Auto, &loaded)
+                .expect("preview rendering succeeds");
+        assert_eq!(actor_id_counter.load(Ordering::Relaxed), 100);
+
+        let preview_entry_state =
+            collect_actor_state(&preview.fragments[&database_id][&job_id][&entry_fragment_id]);
+        let preview_downstream_state =
+            collect_actor_state(&preview.fragments[&database_id][&job_id][&downstream_fragment_id]);
+        assert_eq!(preview_entry_state, preview_downstream_state);
+
+        let materialized = materialize_actor_assignments(&actor_id_counter, preview);
+
+        let materialized_entry_state =
+            collect_actor_state(&materialized.fragments[&database_id][&job_id][&entry_fragment_id]);
+        let materialized_downstream_state = collect_actor_state(
+            &materialized.fragments[&database_id][&job_id][&downstream_fragment_id],
+        );
+
+        assert_eq!(materialized_entry_state, materialized_downstream_state);
+        assert_eq!(materialized_entry_state, preview_entry_state);
+        assert_eq!(materialized_downstream_state, preview_downstream_state);
+        assert_eq!(actor_id_counter.load(Ordering::Relaxed), 104);
     }
 
     /// Test that job-level strategy overrides global strategy for Adaptive parallelism.

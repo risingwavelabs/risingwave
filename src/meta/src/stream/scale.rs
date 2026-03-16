@@ -247,7 +247,7 @@ fn build_normalized_fragment_layout(
     })
 }
 
-fn rendered_layout_matches_current(
+pub(crate) fn rendered_layout_matches_current(
     render_result: &FragmentRenderMap,
     downstream_relations: &HashMap<(FragmentId, FragmentId), fragment_relation::Model>,
     all_prev_fragments: &HashMap<FragmentId, &InflightFragmentInfo>,
@@ -893,6 +893,8 @@ pub(crate) fn build_reschedule_commands(
         return Ok(HashMap::new());
     }
 
+    // Keep the post-materialization layout check as a safety net for callers
+    // that may bypass the preview phase.
     if rendered_layout_matches_current(
         &render_result,
         &context.downstream_relations,
