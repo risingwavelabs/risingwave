@@ -389,7 +389,7 @@ mod test {
     #[test]
     fn test_kafka_split_id_single_topic() {
         use crate::source::SplitMetaData;
-        let split = KafkaSplit::new(0, None, None, "test_topic".to_string());
+        let split = KafkaSplit::new(0, None, None, "test_topic".to_owned());
         assert_eq!(split.id().as_ref(), "0");
     }
 
@@ -397,7 +397,7 @@ mod test {
     fn test_kafka_split_id_multi_topic() {
         use crate::source::SplitMetaData;
         let split = KafkaSplit {
-            topic: "events.orders".to_string(),
+            topic: "events.orders".to_owned(),
             partition: 3,
             start_offset: None,
             stop_offset: None,
@@ -407,7 +407,7 @@ mod test {
 
         // Different topic same partition should have different split ID
         let split2 = KafkaSplit {
-            topic: "events.users".to_string(),
+            topic: "events.users".to_owned(),
             partition: 3,
             start_offset: None,
             stop_offset: None,
