@@ -158,6 +158,8 @@ message LoadFinishMutation {
 message ResetSourceMutation {
   // Source ID to reset
   uint32 source_id = 1;
+  // Optional start offset to set. When unset, clear offsets to None (latest).
+  optional string start_offset = 2;
 }
 
 // Inject specific offsets into source splits (UNSAFE - admin only).

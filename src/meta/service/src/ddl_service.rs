@@ -419,16 +419,21 @@ impl DdlService for DdlServiceImpl {
     ) -> Result<Response<ResetSourceResponse>, Status> {
         let request = request.into_inner();
         let source_id = request.source_id;
+        let start_offset = request.start_offset;
 
         tracing::info!(
             source_id = %source_id,
+            start_offset = ?start_offset,
             "Received RESET SOURCE request, routing to DDL controller"
         );
 
         // Route to DDL controller
         let version = self
             .ddl_controller
-            .run_command(DdlCommand::ResetSource(source_id))
+            .run_command(DdlCommand::ResetSource {
+                source_id,
+                start_offset,
+            })
             .await?;
 
         Ok(Response::new(ResetSourceResponse {

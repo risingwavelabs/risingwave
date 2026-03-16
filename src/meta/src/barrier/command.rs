@@ -536,10 +536,11 @@ pub enum Command {
         associated_source_id: SourceId,
     },
 
-    /// `ResetSource` command generates a barrier to reset CDC source offset to latest.
-    /// Used when upstream binlog/oplog has expired.
+    /// `ResetSource` command generates a barrier to reset CDC source offset.
+    /// When `start_offset` is `None`, it resets to latest (used when upstream binlog/oplog expired).
     ResetSource {
         source_id: SourceId,
+        start_offset: Option<String>,
     },
 
     /// `ResumeBackfill` command generates a `StartFragmentBackfill` barrier to force backfill
@@ -636,7 +637,13 @@ impl std::fmt::Display for Command {
                 "LoadFinish: {} (source: {})",
                 table_id, associated_source_id
             ),
-            Command::ResetSource { source_id } => write!(f, "ResetSource: {source_id}"),
+            Command::ResetSource {
+                source_id,
+                start_offset,
+            } => match start_offset {
+                Some(offset) => write!(f, "ResetSource: {source_id} (start_offset={offset})"),
+                None => write!(f, "ResetSource: {source_id} (start_offset=None)"),
+            },
             Command::ResumeBackfill { target } => match target {
                 ResumeBackfillTarget::Job(job_id) => {
                     write!(f, "ResumeBackfill: job={job_id}")
@@ -1433,9 +1440,13 @@ impl Command {
     }
 
     /// Build the `ResetSource` mutation.
-    pub(super) fn reset_source_to_mutation(source_id: SourceId) -> Mutation {
+    pub(super) fn reset_source_to_mutation(
+        source_id: SourceId,
+        start_offset: Option<String>,
+    ) -> Mutation {
         Mutation::ResetSource(risingwave_pb::stream_plan::ResetSourceMutation {
             source_id: source_id.as_raw_id(),
+            start_offset,
         })
     }
 

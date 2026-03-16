@@ -887,8 +887,15 @@ impl MetaClient {
             .ok_or_else(|| anyhow!("wait version not set"))?)
     }
 
-    pub async fn reset_source(&self, source_id: SourceId) -> Result<WaitVersion> {
-        let request = ResetSourceRequest { source_id };
+    pub async fn reset_source(
+        &self,
+        source_id: SourceId,
+        start_offset: Option<String>,
+    ) -> Result<WaitVersion> {
+        let request = ResetSourceRequest {
+            source_id,
+            start_offset,
+        };
         let resp = self.inner.reset_source(request).await?;
         Ok(resp
             .version

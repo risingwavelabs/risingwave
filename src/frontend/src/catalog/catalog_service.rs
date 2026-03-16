@@ -183,7 +183,7 @@ pub trait CatalogWriter: Send + Sync {
 
     async fn drop_source(&self, source_id: SourceId, cascade: bool) -> Result<()>;
 
-    async fn reset_source(&self, source_id: SourceId) -> Result<()>;
+    async fn reset_source(&self, source_id: SourceId, start_offset: Option<String>) -> Result<()>;
 
     async fn drop_sink(&self, sink_id: SinkId, cascade: bool) -> Result<()>;
 
@@ -554,8 +554,11 @@ impl CatalogWriter for CatalogWriterImpl {
         self.wait_version(version).await
     }
 
-    async fn reset_source(&self, source_id: SourceId) -> Result<()> {
-        let version = self.meta_client.reset_source(source_id).await?;
+    async fn reset_source(&self, source_id: SourceId, start_offset: Option<String>) -> Result<()> {
+        let version = self
+            .meta_client
+            .reset_source(source_id, start_offset)
+            .await?;
         self.wait_version(version).await
     }
 

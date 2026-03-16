@@ -3849,9 +3849,14 @@ impl Parser<'_> {
             if self.parse_keyword(Keyword::CONFIG) {
                 let keys = self.parse_parenthesized_object_name_list()?;
                 AlterSourceOperation::ResetConfig { keys }
+            } else if self.parse_keyword(Keyword::TO) {
+                let start_offset = self.parse_literal_string()?;
+                AlterSourceOperation::ResetSource {
+                    start_offset: Some(start_offset),
+                }
             } else {
                 // RESET without CONFIG means reset CDC source offset to latest
-                AlterSourceOperation::ResetSource
+                AlterSourceOperation::ResetSource { start_offset: None }
             }
         } else if self.peek_nth_any_of_keywords(0, &[Keyword::FORMAT]) {
             let format_encode = self.parse_schema()?.unwrap();

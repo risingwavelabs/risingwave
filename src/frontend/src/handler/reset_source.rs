@@ -25,6 +25,7 @@ use crate::error::{ErrorCode, Result};
 pub async fn handle_reset_source(
     handler_args: HandlerArgs,
     name: ObjectName,
+    start_offset: Option<String>,
 ) -> Result<RwPgResponse> {
     let session = handler_args.session.clone();
 
@@ -51,7 +52,7 @@ pub async fn handle_reset_source(
 
     // Call meta service to reset the source
     let catalog_writer = session.catalog_writer()?;
-    catalog_writer.reset_source(source.id).await?;
+    catalog_writer.reset_source(source.id, start_offset).await?;
 
     Ok(pgwire::pg_response::PgResponse::empty_result(
         pgwire::pg_response::StatementType::ALTER_SOURCE,
