@@ -67,6 +67,7 @@ pub mod alter_table_props;
 mod alter_table_with_sr;
 pub mod alter_user;
 mod alter_utils;
+mod backup;
 pub mod cancel_job;
 pub mod close_cursor;
 mod comment;
@@ -87,6 +88,7 @@ pub mod create_table_as;
 pub mod create_user;
 pub mod create_view;
 pub mod declare_cursor;
+mod delete_meta_snapshot;
 pub mod describe;
 pub mod discard;
 mod drop_connection;
@@ -656,6 +658,10 @@ pub async fn handle(
         }
         Statement::Flush => flush::handle_flush(handler_args).await,
         Statement::Wait => wait::handle_wait(handler_args).await,
+        Statement::Backup => backup::handle_backup(handler_args).await,
+        Statement::DeleteMetaSnapshots { snapshot_ids } => {
+            delete_meta_snapshot::handle_delete_meta_snapshots(handler_args, snapshot_ids).await
+        }
         Statement::Recover => recover::handle_recover(handler_args).await,
         Statement::SetVariable {
             local: _,

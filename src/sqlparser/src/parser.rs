@@ -345,6 +345,7 @@ impl Parser<'_> {
                 Keyword::COMMENT => Ok(self.parse_comment()?),
                 Keyword::FLUSH => Ok(Statement::Flush),
                 Keyword::WAIT => Ok(Statement::Wait),
+                Keyword::BACKUP => Ok(Statement::Backup),
                 Keyword::RECOVER => Ok(Statement::Recover),
                 Keyword::USE => Ok(self.parse_use()?),
                 Keyword::VACUUM => Ok(self.parse_vacuum()?),
@@ -4534,6 +4535,15 @@ impl Parser<'_> {
     }
 
     pub fn parse_delete(&mut self) -> ModalResult<Statement> {
+        if self.parse_keyword(Keyword::META) {
+            let Some(_) = self.parse_one_of_keywords(&[Keyword::SNAPSHOT, Keyword::SNAPSHOTS])
+            else {
+                return self.expected("SNAPSHOT or SNAPSHOTS");
+            };
+            let snapshot_ids = self.parse_comma_separated(Parser::parse_literal_u64)?;
+            return Ok(Statement::DeleteMetaSnapshots { snapshot_ids });
+        }
+
         self.expect_keyword(Keyword::FROM)?;
         let table_name = self.parse_object_name()?;
         let selection = if self.parse_keyword(Keyword::WHERE) {
