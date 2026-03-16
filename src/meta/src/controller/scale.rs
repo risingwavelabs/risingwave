@@ -833,6 +833,7 @@ impl RenderActorIdAllocator<'_> {
     }
 }
 
+#[cfg(test)]
 fn render_actors(
     actor_id_counter: &AtomicU32,
     ensembles: &[NoShuffleEnsemble],
