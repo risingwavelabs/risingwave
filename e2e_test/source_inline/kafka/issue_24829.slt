@@ -1,5 +1,15 @@
 control substitution on
 
+# Regression test for issue #24829.
+#
+# When a Kafka topic ends with transaction control records (e.g. commit markers),
+# the high watermark includes those invisible control records. Under
+# read_committed isolation the consumer never sees them, so both streaming
+# backfill and batch scan hang waiting for a message at an unreachable offset.
+#
+# The fix enables partition EOF, uses find_latest_readable_offset to compute the
+# real stop offset, and handles PartitionEOF in the data stream loop.
+
 system ok
 rpk topic create test_topic_issue_24829;
 
@@ -19,6 +29,10 @@ with (
     scan.startup.mode = 'earliest'
 ) format plain encode bytes;
 
+# --- streaming backfill path ---
+# MV creation triggers source backfill. Without the fix, backfill hangs because
+# stop_offset = high_watermark - 1 points at a control record.
+
 statement ok
 create materialized view txn_mv_24829 as
 select * from txn_src_24829;
@@ -30,6 +44,17 @@ select count(*) from txn_mv_24829;
 
 statement ok
 drop materialized view txn_mv_24829;
+
+# --- batch scan path ---
+# Direct SELECT from source uses batch kafka scan. The batch executor sets
+# for_backfill=true in SourceCtrlOpts, which enables partition EOF on the Kafka
+# consumer. Without the fix, the batch scan also hangs indefinitely because the
+# consumer waits for a message at stop_offset - 1 (a control record).
+
+query I
+select count(*) from txn_src_24829;
+----
+1
 
 statement ok
 drop source txn_src_24829;
