@@ -168,6 +168,13 @@ pub struct StreamingJobInfo {
     pub job_status: JobStatus,
     pub parallelism: StreamingParallelism,
     pub adaptive_parallelism_strategy: Option<String>,
+    // These backfill fields are only used to derive the effective parallelism shown for
+    // in-progress jobs. They are skipped in JSON responses so existing dashboard payloads keep
+    // the same schema.
+    #[serde(skip)]
+    pub backfill_parallelism: Option<StreamingParallelism>,
+    #[serde(skip)]
+    pub backfill_adaptive_parallelism_strategy: Option<String>,
     pub max_parallelism: i32,
     pub resource_group: String,
     pub config_override: String,
@@ -858,6 +865,8 @@ impl CatalogController {
                 streaming_job::Column::JobStatus,
                 streaming_job::Column::Parallelism,
                 streaming_job::Column::AdaptiveParallelismStrategy,
+                streaming_job::Column::BackfillParallelism,
+                streaming_job::Column::BackfillAdaptiveParallelismStrategy,
                 streaming_job::Column::MaxParallelism,
             ])
             .column_as(

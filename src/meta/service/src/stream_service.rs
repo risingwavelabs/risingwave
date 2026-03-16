@@ -27,7 +27,7 @@ use risingwave_meta::manager::MetadataManager;
 use risingwave_meta::manager::iceberg_compaction::IcebergCompactionManagerRef;
 use risingwave_meta::stream::{GlobalRefreshManagerRef, SourceManagerRunningInfo};
 use risingwave_meta::{MetaError, model};
-use risingwave_meta_model::{ConnectionId, FragmentId, SourceId, StreamingParallelism};
+use risingwave_meta_model::{ConnectionId, FragmentId, JobStatus, SourceId, StreamingParallelism};
 use risingwave_pb::common::ThrottleType;
 use risingwave_pb::meta::alter_connector_props_request::AlterConnectorPropsObject;
 use risingwave_pb::meta::cancel_creating_jobs_request::Jobs;
@@ -81,6 +81,23 @@ impl StreamServiceImpl {
             refresh_manager,
             iceberg_compaction_manager,
         }
+    }
+}
+
+fn effective_streaming_job_parallelism(
+    job_status: JobStatus,
+    parallelism: StreamingParallelism,
+    adaptive_parallelism_strategy: Option<String>,
+    backfill_parallelism: Option<StreamingParallelism>,
+    backfill_adaptive_parallelism_strategy: Option<String>,
+) -> (StreamingParallelism, Option<String>) {
+    if job_status != JobStatus::Created {
+        (
+            backfill_parallelism.unwrap_or(parallelism),
+            backfill_adaptive_parallelism_strategy.or(adaptive_parallelism_strategy),
+        )
+    } else {
+        (parallelism, adaptive_parallelism_strategy)
     }
 }
 
@@ -368,6 +385,8 @@ impl StreamManagerService for StreamServiceImpl {
                      name,
                      parallelism,
                      adaptive_parallelism_strategy,
+                     backfill_parallelism,
+                     backfill_adaptive_parallelism_strategy,
                      max_parallelism,
                      resource_group,
                      database_id,
@@ -375,6 +394,16 @@ impl StreamManagerService for StreamServiceImpl {
                      config_override,
                      ..
                  }| {
+                    // While a job is still being created, system tables should surface the
+                    // temporary backfill override instead of the post-backfill target value.
+                    let (parallelism, adaptive_parallelism_strategy) =
+                        effective_streaming_job_parallelism(
+                            job_status,
+                            parallelism,
+                            adaptive_parallelism_strategy,
+                            backfill_parallelism,
+                            backfill_adaptive_parallelism_strategy,
+                        );
                     let parallelism = match parallelism {
                         StreamingParallelism::Adaptive => model::TableParallelism::Adaptive,
                         StreamingParallelism::Custom => model::TableParallelism::Custom,
@@ -1106,5 +1135,54 @@ fn fragment_desc_to_distribution(
         vnode_count: fragment_desc.vnode_count as _,
         node,
         parallelism_policy: fragment_desc.parallelism_policy,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use risingwave_meta_model::{JobStatus, StreamingParallelism};
+
+    use super::effective_streaming_job_parallelism;
+
+    #[test]
+    fn test_effective_streaming_job_parallelism_prefers_backfill_override() {
+        let (parallelism, strategy) = effective_streaming_job_parallelism(
+            JobStatus::Creating,
+            StreamingParallelism::Adaptive,
+            Some("BOUNDED(4)".to_owned()),
+            Some(StreamingParallelism::Adaptive),
+            Some("BOUNDED(2)".to_owned()),
+        );
+
+        assert_eq!(parallelism, StreamingParallelism::Adaptive);
+        assert_eq!(strategy.as_deref(), Some("BOUNDED(2)"));
+    }
+
+    #[test]
+    fn test_effective_streaming_job_parallelism_falls_back_to_job_strategy() {
+        let (parallelism, strategy) = effective_streaming_job_parallelism(
+            JobStatus::Initial,
+            StreamingParallelism::Adaptive,
+            Some("RATIO(0.5)".to_owned()),
+            Some(StreamingParallelism::Adaptive),
+            None,
+        );
+
+        assert_eq!(parallelism, StreamingParallelism::Adaptive);
+        assert_eq!(strategy.as_deref(), Some("RATIO(0.5)"));
+    }
+
+    #[test]
+    fn test_effective_streaming_job_parallelism_ignores_backfill_after_creation() {
+        let (parallelism, strategy) = effective_streaming_job_parallelism(
+            JobStatus::Created,
+            StreamingParallelism::Fixed(4),
+            None,
+            Some(StreamingParallelism::Fixed(2)),
+            Some("BOUNDED(2)".to_owned()),
+        );
+
+        assert_eq!(parallelism, StreamingParallelism::Fixed(4));
+        assert_eq!(strategy, None);
     }
 }

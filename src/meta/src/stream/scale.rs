@@ -252,8 +252,9 @@ impl ScaleController {
                     streaming_job.parallelism = Set(p.parallelism.clone());
                     if matches!(p.parallelism, StreamingParallelism::Fixed(_)) {
                         streaming_job.adaptive_parallelism_strategy = Set(None);
-                    } else if let Some(strategy) = &p.adaptive_parallelism_strategy {
-                        streaming_job.adaptive_parallelism_strategy = Set(Some(strategy.clone()));
+                    } else {
+                        streaming_job.adaptive_parallelism_strategy =
+                            Set(p.adaptive_parallelism_strategy.clone());
                     }
                 }
                 _ => {}

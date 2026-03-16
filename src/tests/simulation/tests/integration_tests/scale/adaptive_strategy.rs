@@ -97,7 +97,7 @@ async fn test_rw_streaming_parallelism_display_uses_unified_dsl() -> Result<()> 
     session
         .run("select parallelism from rw_streaming_parallelism where name = 't_display'")
         .await?
-        .assert_result_eq("bounded(4)");
+        .assert_result_eq("ratio(0.5)");
     session
         .run("select parallelism from rw_streaming_parallelism where name = 'm_display'")
         .await?

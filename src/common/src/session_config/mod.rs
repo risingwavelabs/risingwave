@@ -175,8 +175,9 @@ pub struct SessionConfig {
     #[parameter(default = ConfigBackfillParallelism::Default)]
     streaming_parallelism_for_backfill: ConfigBackfillParallelism,
 
-    /// Specific parallelism for table. Defaults to `default`, which resolves to the legacy
-    /// bounded adaptive behavior unless the global parallelism is fixed.
+    /// Specific parallelism for table. Defaults to `default`, which preserves the legacy
+    /// bounded adaptive behavior only when the global parallelism itself remains `default`.
+    /// Otherwise it follows the explicit global parallelism.
     #[parameter(default = ConfigParallelism::Default)]
     streaming_parallelism_for_table: ConfigParallelism,
 
@@ -188,8 +189,9 @@ pub struct SessionConfig {
     #[parameter(default = ConfigParallelism::Default)]
     streaming_parallelism_for_index: ConfigParallelism,
 
-    /// Specific parallelism for source. Defaults to `default`, which resolves to the legacy
-    /// bounded adaptive behavior unless the global parallelism is fixed.
+    /// Specific parallelism for source. Defaults to `default`, which preserves the legacy
+    /// bounded adaptive behavior only when the global parallelism itself remains `default`.
+    /// Otherwise it follows the explicit global parallelism.
     #[parameter(default = ConfigParallelism::Default)]
     streaming_parallelism_for_source: ConfigParallelism,
 

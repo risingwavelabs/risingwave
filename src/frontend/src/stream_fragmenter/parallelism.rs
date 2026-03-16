@@ -41,18 +41,15 @@ fn resolve_default_parallelism(
     job_type: Option<GraphJobType>,
     global_streaming_parallelism: ConfigParallelism,
 ) -> ConfigParallelism {
-    let resolved_global_parallelism = resolve_global_parallelism(global_streaming_parallelism);
-
     match job_type {
-        Some(GraphJobType::Table | GraphJobType::Source) => {
-            if matches!(resolved_global_parallelism, ConfigParallelism::Fixed(_)) {
-                resolved_global_parallelism
-            } else {
-                ConfigParallelism::Bounded(NonZeroU64::new(4).unwrap())
-            }
-        }
+        // Table/source only keep their legacy typed default on the untouched default path.
+        // Once the global parallelism is explicitly set, they inherit that global value.
+        Some(GraphJobType::Table | GraphJobType::Source) => match global_streaming_parallelism {
+            ConfigParallelism::Default => ConfigParallelism::Bounded(NonZeroU64::new(4).unwrap()),
+            other => resolve_global_parallelism(other),
+        },
         Some(GraphJobType::MaterializedView | GraphJobType::Sink | GraphJobType::Index) | None => {
-            resolved_global_parallelism
+            resolve_global_parallelism(global_streaming_parallelism)
         }
     }
 }
@@ -243,7 +240,7 @@ mod tests {
     }
 
     #[test]
-    fn test_table_default_resolves_to_legacy_bound() {
+    fn test_table_default_uses_legacy_bound_only_with_default_global() {
         assert_eq!(
             derive_parallelism(
                 Some(GraphJobType::Table),
@@ -255,11 +252,37 @@ mod tests {
                 NonZeroUsize::new(4).unwrap()
             ))
         );
+    }
+
+    #[test]
+    fn test_table_default_follows_explicit_global_strategy() {
         assert_eq!(
             derive_parallelism(
                 Some(GraphJobType::Table),
                 Some(ConfigParallelism::Default),
                 ConfigParallelism::Ratio(0.5)
+            )
+            .adaptive_strategy,
+            Some(AdaptiveParallelismStrategy::Ratio(0.5))
+        );
+        assert_eq!(
+            derive_parallelism(
+                Some(GraphJobType::Table),
+                Some(ConfigParallelism::Default),
+                ConfigParallelism::Adaptive
+            )
+            .adaptive_strategy,
+            Some(AdaptiveParallelismStrategy::Auto)
+        );
+    }
+
+    #[test]
+    fn test_source_default_uses_legacy_bound_only_with_default_global() {
+        assert_eq!(
+            derive_parallelism(
+                Some(GraphJobType::Source),
+                Some(ConfigParallelism::Default),
+                ConfigParallelism::Default
             )
             .adaptive_strategy,
             Some(AdaptiveParallelismStrategy::Bounded(
@@ -269,7 +292,7 @@ mod tests {
     }
 
     #[test]
-    fn test_source_default_follows_fixed_global() {
+    fn test_source_default_follows_explicit_global_parallelism() {
         assert_eq!(
             derive_parallelism(
                 Some(GraphJobType::Source),
@@ -279,6 +302,41 @@ mod tests {
             .parallelism
             .map(|p| p.parallelism),
             Some(7)
+        );
+        assert_eq!(
+            derive_parallelism(
+                Some(GraphJobType::Source),
+                Some(ConfigParallelism::Default),
+                ConfigParallelism::Bounded(NonZeroU64::new(5).unwrap())
+            )
+            .adaptive_strategy,
+            Some(AdaptiveParallelismStrategy::Bounded(
+                NonZeroUsize::new(5).unwrap()
+            ))
+        );
+    }
+
+    #[test]
+    fn test_materialized_view_default_follows_global_parallelism() {
+        assert_eq!(
+            derive_parallelism(
+                Some(GraphJobType::MaterializedView),
+                Some(ConfigParallelism::Default),
+                ConfigParallelism::Default
+            )
+            .adaptive_strategy,
+            Some(AdaptiveParallelismStrategy::Bounded(
+                NonZeroUsize::new(64).unwrap()
+            ))
+        );
+        assert_eq!(
+            derive_parallelism(
+                Some(GraphJobType::MaterializedView),
+                Some(ConfigParallelism::Default),
+                ConfigParallelism::Ratio(0.5)
+            )
+            .adaptive_strategy,
+            Some(AdaptiveParallelismStrategy::Ratio(0.5))
         );
     }
 
