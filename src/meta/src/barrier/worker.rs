@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::collections::hash_map::Entry;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::mem::replace;
 use std::pin::pin;
 use std::sync::Arc;
@@ -24,6 +24,7 @@ use arc_swap::ArcSwap;
 use futures::{TryFutureExt, pin_mut};
 use itertools::Itertools;
 use risingwave_common::catalog::DatabaseId;
+use risingwave_common::id::{ActorId, FragmentId};
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::system_param::{AdaptiveParallelismStrategy, PAUSE_ON_NEXT_BOOTSTRAP_KEY};
 use risingwave_meta_model::WorkerId;
@@ -52,7 +53,8 @@ use crate::barrier::{
     BarrierManagerRequest, BarrierManagerStatus, BarrierWorkerRuntimeInfoSnapshot, Command,
     RecoveryReason, RescheduleContext, UpdateDatabaseBarrierRequest, schedule,
 };
-use crate::controller::scale::render_actor_assignments;
+use crate::controller::fragment::{InflightActorInfo, InflightFragmentInfo};
+use crate::controller::scale::{FragmentRenderMap, render_actor_assignments};
 use crate::error::MetaErrorInner;
 use crate::hummock::HummockManagerRef;
 use crate::manager::sink_coordination::SinkCoordinatorManager;
@@ -294,12 +296,66 @@ fn build_reschedule_from_context(
         &context.loaded,
     )?;
 
-    let all_prev_fragments = database_info
+    let all_prev_fragments: HashMap<_, _> = database_info
         .fragment_infos()
         .map(|fragment| (fragment.fragment_id, fragment))
         .collect();
+
+    // Short-circuit: if the rendered actor count and per-worker distribution are identical
+    // to the current inflight state for every fragment, the reschedule would only destroy
+    // and recreate actors at the same parallelism on the same workers — a disruptive no-op.
+    // Skip it to avoid unnecessary actor rebuilds (which are full rebuilds due to fresh
+    // actor ID allocation).
+    if is_reschedule_noop(&rendered.fragments, &all_prev_fragments) {
+        tracing::info!(
+            "reschedule resolved to no-op: parallelism and worker distribution unchanged, skipping"
+        );
+        return Ok(None);
+    }
+
     let mut commands = build_reschedule_commands(rendered.fragments, context, all_prev_fragments)?;
     Ok(commands.remove(&database_id))
+}
+
+/// Returns `true` when every rendered fragment has the same actor count and
+/// per-worker actor distribution as the current inflight state. In this case
+/// the reschedule would be a pure rebuild with no semantic change, since
+/// `diff_fragment` always allocates fresh actor IDs (full rebuild by design).
+fn is_reschedule_noop(
+    rendered: &FragmentRenderMap,
+    prev_fragments: &HashMap<FragmentId, &InflightFragmentInfo>,
+) -> bool {
+    fn worker_distribution(
+        actors: &HashMap<ActorId, InflightActorInfo>,
+    ) -> BTreeMap<WorkerId, usize> {
+        let mut dist = BTreeMap::new();
+        for info in actors.values() {
+            *dist.entry(info.worker_id).or_default() += 1;
+        }
+        dist
+    }
+
+    for jobs in rendered.values() {
+        for fragments in jobs.values() {
+            for (fragment_id, new_info) in fragments {
+                let Some(prev_info) = prev_fragments.get(fragment_id) else {
+                    // Fragment not in inflight state (new fragment), not a no-op.
+                    return false;
+                };
+
+                if new_info.actors.len() != prev_info.actors.len() {
+                    return false;
+                }
+
+                if worker_distribution(&new_info.actors)
+                    != worker_distribution(&prev_info.actors)
+                {
+                    return false;
+                }
+            }
+        }
+    }
+    true
 }
 
 impl GlobalBarrierWorker<GlobalBarrierWorkerContextImpl> {
