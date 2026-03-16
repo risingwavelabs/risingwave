@@ -152,7 +152,7 @@ impl SourceExecutor {
             SourceCtrlOpts {
                 chunk_size: self.chunk_size,
                 split_txn: false,
-                for_backfill: false,
+                for_backfill: true,
             },
             ConnectorProperties::default(),
             None,

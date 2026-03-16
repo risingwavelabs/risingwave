@@ -390,9 +390,11 @@ impl KafkaSplitReader {
             for msg in polled {
                 match msg {
                     Ok(msg) => msgs.push(msg),
-                    Err(KafkaError::PartitionEOF(_)) => {
-                        // `PartitionEOF` is a reader-local backfill control signal. The executor
-                        // still relies on `backfill_info` to know the last readable offset.
+                    Err(KafkaError::PartitionEOF(partition)) => {
+                        let split_id: SplitId = partition.to_string().into();
+                        if stop_offsets.remove(&split_id).is_some() && stop_offsets.is_empty() {
+                            break 'for_outer_loop;
+                        }
                     }
                     Err(err) => return Err(err.into()),
                 }
