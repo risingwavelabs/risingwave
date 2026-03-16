@@ -58,9 +58,7 @@ impl PubsubSplitReader {
                 .subscription
                 .subscribe(Some(subscribe_config))
                 .await
-                .map_err(|e| {
-                    anyhow::anyhow!("failed to subscribe: {}", e.as_report())
-                })?;
+                .map_err(|e| anyhow::anyhow!("failed to subscribe: {}", e.as_report()))?;
 
             while let Some(first) = stream.next().await {
                 let mut batch = Vec::with_capacity(MAX_BATCH_SIZE);
