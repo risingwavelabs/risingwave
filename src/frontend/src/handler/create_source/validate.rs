@@ -251,31 +251,29 @@ pub fn validate_compatibility(
     }
 
     if connector == KAFKA_CONNECTOR {
-        let has_topic = props.get("topic").is_some_and(|t| !t.is_empty());
+        // Check both "topic" and "kafka.topic" (legacy alias used by some tests/users).
+        let has_topic = props.get("topic").is_some_and(|t| !t.is_empty())
+            || props.get("kafka.topic").is_some_and(|t| !t.is_empty());
         let has_regex = props.contains_key("topic.regex");
 
-        match (has_topic, has_regex) {
-            (false, false) => {
-                return Err(RwError::from(ProtocolError(
-                    "either `topic` or `topic.regex` must be specified for Kafka source".to_owned(),
-                )));
+        // Only validate conflict and regex syntax here. We intentionally skip
+        // the "neither set" check because topic may come from a secret reference
+        // which is not visible in the raw props map at DDL time.
+        // The runtime validation in KafkaSplitEnumerator::new() will catch
+        // truly missing topics after secrets are resolved.
+        if has_topic && has_regex {
+            return Err(RwError::from(ProtocolError(
+                "`topic` and `topic.regex` cannot be specified at the same time".to_owned(),
+            )));
+        }
+        if has_regex {
+            let pattern = &props["topic.regex"];
+            if let Err(e) = regex::Regex::new(pattern) {
+                return Err(RwError::from(ProtocolError(format!(
+                    "invalid topic.regex pattern '{}': {}",
+                    pattern, e
+                ))));
             }
-            (true, true) => {
-                return Err(RwError::from(ProtocolError(
-                    "`topic` and `topic.regex` cannot be specified at the same time".to_owned(),
-                )));
-            }
-            (false, true) => {
-                // Validate regex pattern syntax
-                let pattern = &props["topic.regex"];
-                if let Err(e) = regex::Regex::new(pattern) {
-                    return Err(RwError::from(ProtocolError(format!(
-                        "invalid topic.regex pattern '{}': {}",
-                        pattern, e
-                    ))));
-                }
-            }
-            _ => {}
         }
     }
 
