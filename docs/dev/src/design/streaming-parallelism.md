@@ -36,8 +36,8 @@ The stored default value for all unified parameters is `default`.
 The effective defaults preserve the legacy behavior:
 
 - `streaming_parallelism = default`, which resolves to `bounded(64)`
-- `streaming_parallelism_for_table = default`, which resolves to `bounded(4)` unless the global parallelism is fixed
-- `streaming_parallelism_for_source = default`, which resolves to `bounded(4)` unless the global parallelism is fixed
+- `streaming_parallelism_for_table = default`, which resolves to `bounded(4)` only when `streaming_parallelism` is also `default`
+- `streaming_parallelism_for_source = default`, which resolves to `bounded(4)` only when `streaming_parallelism` is also `default`
 - all other `streaming_parallelism_for_<type>` values default to `default` and follow `streaming_parallelism`
 
 For these parameters, `SET ... = DEFAULT` and `SET ... = 'default'` both restore the stored
@@ -50,7 +50,7 @@ Resolution happens in a single step:
 1. Resolve `streaming_parallelism`.
    - `default` resolves to the legacy global default `bounded(64)`.
 2. Resolve `streaming_parallelism_for_<type>`.
-   - For `table` and `source`, `default` resolves to the legacy type-specific default `bounded(4)` unless the resolved global parallelism is fixed.
+   - For `table` and `source`, `default` resolves to the legacy type-specific default `bounded(4)` only when `streaming_parallelism` is still `default`; otherwise it follows the resolved global value.
    - For other job types, `default` falls back to the resolved global value.
 3. Convert the resolved value into:
    - a fixed parallelism, or
@@ -85,5 +85,8 @@ Older releases exposed these deprecated parameters:
 On startup, meta derives the final `streaming_parallelism` and
 `streaming_parallelism_for_<type>` values once from the legacy parameters, persists the new values,
 and drops the deprecated entries. If the legacy system parameter
-`adaptive_parallelism_strategy` is missing, the migration falls back to the historical init default
-`BOUNDED(64)`. New clusters only expose the unified parameters.
+`adaptive_parallelism_strategy` is missing, the migration interprets it using the released legacy
+default `AUTO`. Existing jobs without a stored job-level strategy are materialized as `AUTO` to
+preserve their released behavior, while untouched sessions on the new runtime still resolve the
+unified defaults (`streaming_parallelism = default` to `bounded(64)`, table/source `default` to
+`bounded(4)`). New clusters only expose the unified parameters.
