@@ -121,7 +121,7 @@ macro_rules! define_decode_metadata {
                 if _idx == 1 {
                     metadata.hummock_version = HummockVersion::from_persisted_protobuf(&get_1(&mut buf)?);
                 }
-                metadata.$name = get_n(&mut buf)?;
+                metadata.$name = Vec::new();
                 _idx += 1;
             )*
             Ok(())
