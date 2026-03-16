@@ -24,7 +24,7 @@ use risingwave_common::bail;
 use risingwave_common::catalog::DatabaseId;
 use risingwave_common::hash::{ActorMapping, VnodeBitmapExt};
 use risingwave_common::system_param::reader::SystemParamsRead;
-use risingwave_connector::source::SplitMetaData;
+use risingwave_connector::source::{SplitId, SplitMetaData};
 use risingwave_meta_model::{
     StreamingParallelism, WorkerId, fragment, fragment_relation, object, streaming_job,
 };
@@ -74,7 +74,7 @@ pub type ScaleControllerRef = Arc<ScaleController>;
 struct NormalizedActor {
     worker_id: WorkerId,
     vnode_bitmap: Option<Vec<usize>>,
-    splits: Vec<String>,
+    splits: Vec<SplitId>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -100,6 +100,12 @@ struct NormalizedFragmentLayout {
     dispatcher_entries: Vec<NormalizedDispatcherEntry>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum LayoutMatchCheck {
+    Required,
+    AlreadyChecked,
+}
+
 fn normalize_actor_info(info: &InflightActorInfo) -> NormalizedActor {
     let vnode_bitmap = info.vnode_bitmap.as_ref().map(|bitmap| {
         bitmap
@@ -107,12 +113,8 @@ fn normalize_actor_info(info: &InflightActorInfo) -> NormalizedActor {
             .map(|vnode| vnode.to_index())
             .collect_vec()
     });
-    let mut splits = info
-        .splits
-        .iter()
-        .map(|split| split.encode_to_json().take().to_string())
-        .collect_vec();
-    splits.sort();
+    let mut splits = info.splits.iter().map(SplitMetaData::id).collect_vec();
+    splits.sort_unstable();
     NormalizedActor {
         worker_id: info.worker_id,
         vnode_bitmap,
@@ -136,7 +138,7 @@ fn normalize_dispatcher(
             })
         })
         .collect::<MetaResult<Vec<_>>>()?;
-    normalized_targets.sort();
+    normalized_targets.sort_unstable();
 
     Ok(NormalizedDispatcher {
         dispatcher_type: dispatcher.r#type,
@@ -169,7 +171,7 @@ fn build_normalized_fragment_layout(
         .collect();
 
     let mut actors = normalized_actors.values().cloned().collect_vec();
-    actors.sort();
+    actors.sort_unstable();
 
     let mut dispatchers_by_actor: HashMap<ActorId, Vec<NormalizedDispatcher>> = HashMap::new();
     for ((source_fragment_id, downstream_fragment_id), relation) in downstream_relations
@@ -227,17 +229,20 @@ fn build_normalized_fragment_layout(
 
     let mut dispatcher_entries = fragment_info
         .actors
-        .iter()
-        .map(|(actor_id, info)| {
+        .keys()
+        .map(|actor_id| {
             let mut dispatchers = dispatchers_by_actor.remove(actor_id).unwrap_or_default();
-            dispatchers.sort();
+            dispatchers.sort_unstable();
             NormalizedDispatcherEntry {
-                actor: normalize_actor_info(info),
+                actor: normalized_actors
+                    .get(actor_id)
+                    .cloned()
+                    .expect("normalized actor must exist"),
                 dispatchers,
             }
         })
         .collect_vec();
-    dispatcher_entries.sort();
+    dispatcher_entries.sort_unstable();
 
     Ok(NormalizedFragmentLayout {
         fragment_id,
@@ -888,19 +893,22 @@ pub(crate) fn build_reschedule_commands(
     render_result: FragmentRenderMap,
     context: RescheduleContext,
     all_prev_fragments: HashMap<FragmentId, &InflightFragmentInfo>,
+    layout_match_check: LayoutMatchCheck,
 ) -> MetaResult<HashMap<DatabaseId, ReschedulePlan>> {
     if render_result.is_empty() {
         return Ok(HashMap::new());
     }
 
-    // Keep the post-materialization layout check as a safety net for callers
-    // that may bypass the preview phase.
-    if rendered_layout_matches_current(
-        &render_result,
-        &context.downstream_relations,
-        &all_prev_fragments,
-    )? {
-        return Ok(HashMap::new());
+    if layout_match_check == LayoutMatchCheck::Required {
+        // Keep the post-materialization layout check as a safety net for callers
+        // that may bypass the preview phase.
+        if rendered_layout_matches_current(
+            &render_result,
+            &context.downstream_relations,
+            &all_prev_fragments,
+        )? {
+            return Ok(HashMap::new());
+        }
     }
 
     let RescheduleContext {
@@ -1116,6 +1124,8 @@ mod tests {
 
     use risingwave_common::bitmap::Bitmap;
     use risingwave_common::catalog::FragmentTypeMask;
+    use risingwave_connector::source::SplitImpl;
+    use risingwave_connector::source::test_source::TestSourceSplit;
 
     use super::*;
 
@@ -1125,6 +1135,26 @@ mod tests {
             vnode_bitmap,
             splits: vec![],
         }
+    }
+
+    fn actor_with_splits(
+        worker_id: impl Into<WorkerId>,
+        vnode_bitmap: Option<Bitmap>,
+        splits: Vec<SplitImpl>,
+    ) -> InflightActorInfo {
+        InflightActorInfo {
+            worker_id: worker_id.into(),
+            vnode_bitmap,
+            splits,
+        }
+    }
+
+    fn test_split(id: &str, offset: &str) -> SplitImpl {
+        SplitImpl::Test(TestSourceSplit {
+            id: id.into(),
+            properties: HashMap::new(),
+            offset: offset.to_owned(),
+        })
     }
 
     fn fragment(
@@ -1318,6 +1348,40 @@ mod tests {
         assert!(
             !rendered_layout_matches_current(&rendered, &downstream_relations, &prev,).unwrap()
         );
+    }
+
+    #[test]
+    fn rendered_layout_matches_current_ignores_split_offsets() {
+        let fragment_id = FragmentId::new(1);
+        let prev_fragment = fragment(
+            fragment_id,
+            [(
+                ActorId::new(101),
+                actor_with_splits(
+                    1,
+                    Some(Bitmap::from_indices(8, &[0, 1, 2, 3])),
+                    vec![test_split("split-0", "100")],
+                ),
+            )],
+        );
+        let rendered = render_result(vec![(
+            fragment_id,
+            fragment(
+                fragment_id,
+                [(
+                    ActorId::new(1001),
+                    actor_with_splits(
+                        1,
+                        Some(Bitmap::from_indices(8, &[0, 1, 2, 3])),
+                        vec![test_split("split-0", "200")],
+                    ),
+                )],
+            ),
+        )]);
+        let prev = HashMap::from([(fragment_id, &prev_fragment)]);
+        let downstream_relations = HashMap::new();
+
+        assert!(rendered_layout_matches_current(&rendered, &downstream_relations, &prev,).unwrap());
     }
 }
 
