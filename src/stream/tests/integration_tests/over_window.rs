@@ -95,6 +95,7 @@ async fn create_executor<S: StateStore>(
         metrics: Arc::new(StreamingMetrics::unused()),
         chunk_size: 1024,
         cache_policy: OverWindowCachePolicy::Recent,
+        enable_multi_range_optimization: true,
     });
     (tx, executor.boxed().execute())
 }
