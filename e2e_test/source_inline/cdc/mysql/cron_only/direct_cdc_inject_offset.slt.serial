@@ -1,0 +1,107 @@
+control substitution on
+
+system ok
+mysql -e "
+    FLUSH BINARY LOGS;
+    DROP DATABASE IF EXISTS testdb_direct_cdc_inject_offset;
+    CREATE DATABASE testdb_direct_cdc_inject_offset;
+    USE testdb_direct_cdc_inject_offset;
+    CREATE TABLE t_inject_offset (
+        id INT PRIMARY KEY,
+        payload VARCHAR(64)
+    );
+    INSERT INTO t_inject_offset VALUES
+        (1, 'row-1'),
+        (2, 'row-2'),
+        (3, 'row-3');
+"
+
+system ok
+mysql -e "
+    DROP USER IF EXISTS 'non-shared-cdc'@'%';
+    CREATE USER 'non-shared-cdc'@'%' IDENTIFIED BY '123456';
+    GRANT SELECT, RELOAD, SHOW DATABASES, REPLICATION SLAVE, REPLICATION CLIENT ON *.* TO 'non-shared-cdc'@'%';
+    FLUSH PRIVILEGES;
+"
+
+statement ok
+create table direct_cdc_inject_offset (
+    id INT PRIMARY KEY,
+    payload VARCHAR
+) with (
+    ${RISEDEV_MYSQL_WITH_OPTIONS_COMMON},
+    username = 'non-shared-cdc',
+    password = '123456',
+    database.name = 'testdb_direct_cdc_inject_offset',
+    table.name = 't_inject_offset'
+);
+
+query I retry 20 backoff 1s
+select count(*) from direct_cdc_inject_offset;
+----
+3
+
+query T retry 20 backoff 1s
+select status from rw_catalog.rw_streaming_jobs where name = 'direct_cdc_inject_offset';
+----
+CREATED
+
+system ok
+mysql -e "
+    INSERT INTO testdb_direct_cdc_inject_offset.t_inject_offset VALUES
+        (4, 'row-4-before-inject');
+"
+
+query I retry 20 backoff 1s
+select count(*) from direct_cdc_inject_offset;
+----
+4
+
+system ok
+psql -h ${RISEDEV_RW_FRONTEND_LISTEN_ADDRESS} \
+    -p ${RISEDEV_RW_FRONTEND_PORT} \
+    -d $__DATABASE__ \
+    -U root \
+    -t -A \
+    -c "SELECT id
+        FROM rw_sources
+        WHERE associated_table_id = (SELECT id FROM rw_tables WHERE name = 'direct_cdc_inject_offset')
+        ORDER BY id DESC
+        LIMIT 1;" > /tmp/direct_cdc_source_id.txt
+
+system ok
+python3 e2e_test/source_inline/cdc/mysql/cron_only/extract_direct_cdc_current_offset.py \
+    --host ${RISEDEV_RW_FRONTEND_LISTEN_ADDRESS} \
+    --port ${RISEDEV_RW_FRONTEND_PORT} \
+    --database $__DATABASE__ \
+    --source-id-file /tmp/direct_cdc_source_id.txt \
+    --output /tmp/direct_cdc_current_offset.txt
+
+system ok
+python3 -c "import json, pathlib; source_id = pathlib.Path('/tmp/direct_cdc_source_id.txt').read_text().strip(); offset = pathlib.Path('/tmp/direct_cdc_current_offset.txt').read_text().strip(); pathlib.Path('/tmp/direct_cdc_offsets.json').write_text(json.dumps({source_id: offset}, separators=(',', ':'), sort_keys=True))"
+
+system ok
+python3 e2e_test/source_inline/cdc/mysql/cron_only/inject_source_offsets_with_retry.py \
+    --source-id-file /tmp/direct_cdc_source_id.txt \
+    --offsets-file /tmp/direct_cdc_offsets.json
+
+system ok
+mysql -e "
+    INSERT INTO testdb_direct_cdc_inject_offset.t_inject_offset VALUES
+        (5, 'row-5-after-inject')
+    ON DUPLICATE KEY UPDATE payload = 'row-5-after-inject';
+"
+
+system ok
+python3 e2e_test/source_inline/cdc/mysql/cron_only/wait_direct_cdc_rows.py \
+    --host ${RISEDEV_RW_FRONTEND_LISTEN_ADDRESS} \
+    --port ${RISEDEV_RW_FRONTEND_PORT} \
+    --database $__DATABASE__ \
+    --table direct_cdc_inject_offset \
+    --expected '1:row-1,2:row-2,3:row-3,4:row-4-before-inject,5:row-5-after-inject'
+
+statement ok
+drop table direct_cdc_inject_offset;
+
+system ok
+mysql -e "DROP DATABASE IF EXISTS testdb_direct_cdc_inject_offset;"
