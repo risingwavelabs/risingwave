@@ -10630,7 +10630,6 @@ dependencies = [
  "tokio",
  "tokio-native-tls",
  "tokio-util",
- "tracing",
  "url",
  "uuid",
  "zstd",
