@@ -30,7 +30,7 @@ use risingwave_meta_model::WorkerId;
 use risingwave_meta_model::fragment::DistributionType;
 use risingwave_pb::ddl_service::PbBackfillType;
 use risingwave_pb::hummock::HummockVersionStats;
-use risingwave_pb::id::SubscriberId;
+use risingwave_pb::id::{PartialGraphId, SubscriberId};
 use risingwave_pb::meta::PbFragmentWorkerSlotMapping;
 use risingwave_pb::meta::subscribe_response::Operation;
 use risingwave_pb::source::PbCdcTableSnapshotSplits;
@@ -54,7 +54,10 @@ use crate::barrier::{
 use crate::controller::fragment::{InflightActorInfo, InflightFragmentInfo};
 use crate::controller::utils::rebuild_fragment_mapping;
 use crate::manager::NotificationManagerRef;
-use crate::model::{ActorId, BackfillUpstreamType, FragmentId, StreamActor, StreamJobFragments};
+use crate::model::{
+    ActorId, BackfillUpstreamType, Fragment, FragmentDownstreamRelation, FragmentId, StreamActor,
+    StreamJobFragments,
+};
 use crate::stream::UpstreamSinkInfo;
 use crate::{MetaError, MetaResult};
 
@@ -332,6 +335,16 @@ impl SharedActorInfoWriter<'_> {
                     entry.insert(info);
                 }
             }
+        }
+    }
+
+    pub(super) fn remove_fragment_id(&mut self, fragment_id: FragmentId) {
+        if let Some(database) = self.write_guard.info.get_mut(&self.database_id)
+            && let Some(fragment) = database.remove(&fragment_id)
+        {
+            self.deleted_fragment_mapping
+                .get_or_insert_default()
+                .push(rebuild_fragment_mapping(&fragment));
         }
     }
 
@@ -625,8 +638,9 @@ impl InflightDatabaseInfo {
                         info!(%job_id, "newly create job get cancelled before first barrier is collected")
                     }
                 }
-                CreateStreamingJobType::SnapshotBackfill(_) => {
-                    // The progress of SnapshotBackfill won't be tracked here
+                CreateStreamingJobType::SnapshotBackfill(_)
+                | CreateStreamingJobType::BatchRefresh(_) => {
+                    // The progress of SnapshotBackfill/BatchRefresh won't be tracked here
                 }
             }
         }
@@ -1161,6 +1175,37 @@ impl InflightDatabaseInfo {
             }
             shared_actor_writer.finish();
         }
+    }
+
+    /// Build edges for a batch refresh re-run.
+    ///
+    /// Batch refresh jobs don't connect to upstream during logstore runs,
+    /// so only internal (intra-job) edges are needed.
+    pub(super) fn build_edge_for_batch_refresh_rerun(
+        &self,
+        internal_downstreams: &FragmentDownstreamRelation,
+        partial_graph_id: PartialGraphId,
+        fragments: impl IntoIterator<Item = &Fragment>,
+        control_stream_manager: &ControlStreamManager,
+        stream_actors: &HashMap<FragmentId, Vec<StreamActor>>,
+        actor_location: &HashMap<ActorId, WorkerId>,
+    ) -> FragmentEdgeBuildResult {
+        // Only the job's own fragments (newly rendered), no upstream.
+        let new = fragments.into_iter().map(|fragment| {
+            (
+                fragment.fragment_id,
+                EdgeBuilderFragmentInfo::from_fragment(
+                    fragment,
+                    stream_actors,
+                    actor_location,
+                    partial_graph_id,
+                    control_stream_manager,
+                ),
+            )
+        });
+        let mut builder = FragmentEdgeBuilder::new(new);
+        builder.add_relations(internal_downstreams);
+        builder.build()
     }
 
     pub(super) fn build_edge(

@@ -397,6 +397,28 @@ impl PostCollectCommand {
                             )
                             .await?
                     }
+                    CreateStreamingJobType::BatchRefresh(batch_refresh_info) => {
+                        barrier_manager_context
+                            .metadata_manager
+                            .catalog_controller
+                            .fill_snapshot_backfill_epoch(
+                                info.stream_job_fragments.fragments.iter().filter_map(
+                                    |(fragment_id, fragment)| {
+                                        if fragment.fragment_type_mask.contains_any([
+                                            FragmentTypeFlag::SnapshotBackfillStreamScan,
+                                            FragmentTypeFlag::CrossDbSnapshotBackfillStreamScan,
+                                        ]) {
+                                            Some(*fragment_id as _)
+                                        } else {
+                                            None
+                                        }
+                                    },
+                                ),
+                                Some(&batch_refresh_info.snapshot_backfill_info),
+                                &cross_db_snapshot_backfill_info,
+                            )
+                            .await?
+                    }
                 }
 
                 // Do `post_collect_job_fragments` of the original streaming job in the end, so that in any previous failure,

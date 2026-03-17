@@ -2513,6 +2513,7 @@ pub struct StreamingJobExtraInfo {
     pub adaptive_parallelism_strategy: Option<AdaptiveParallelismStrategy>,
     pub job_definition: String,
     pub backfill_orders: Option<BackfillOrders>,
+    pub refresh_interval_sec: Option<u64>,
 }
 
 impl StreamingJobExtraInfo {
@@ -2525,13 +2526,14 @@ impl StreamingJobExtraInfo {
     }
 }
 
-/// Tuple of (`job_id`, `timezone`, `config_override`, `adaptive_parallelism_strategy`, `backfill_orders`)
+/// Tuple of (`job_id`, `timezone`, `config_override`, `adaptive_parallelism_strategy`, `backfill_orders`, `refresh_interval_sec`)
 type StreamingJobExtraInfoRow = (
     JobId,
     Option<String>,
     Option<String>,
     Option<String>,
     Option<BackfillOrders>,
+    Option<i64>,
 );
 
 pub async fn get_streaming_job_extra_info<C>(
@@ -2549,6 +2551,7 @@ where
             streaming_job::Column::ConfigOverride,
             streaming_job::Column::AdaptiveParallelismStrategy,
             streaming_job::Column::BackfillOrders,
+            streaming_job::Column::RefreshIntervalSec,
         ])
         .filter(streaming_job::Column::JobId.is_in(job_ids.clone()))
         .into_tuple()
@@ -2562,7 +2565,14 @@ where
     let result = pairs
         .into_iter()
         .map(
-            |(job_id, timezone, config_override, strategy, backfill_orders)| {
+            |(
+                job_id,
+                timezone,
+                config_override,
+                strategy,
+                backfill_orders,
+                refresh_interval_sec,
+            )| {
                 let job_definition = definitions.remove(&job_id).unwrap_or_default();
                 let adaptive_parallelism_strategy = strategy.as_deref().map(|s| {
                     parse_strategy(s).expect("strategy should be validated before storing")
@@ -2575,6 +2585,7 @@ where
                         adaptive_parallelism_strategy,
                         job_definition,
                         backfill_orders,
+                        refresh_interval_sec: refresh_interval_sec.map(|s| s as u64),
                     },
                 )
             },

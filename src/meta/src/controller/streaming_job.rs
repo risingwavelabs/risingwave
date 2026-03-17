@@ -182,6 +182,7 @@ impl CatalogController {
         max_parallelism: usize,
         resource_type: streaming_job_resource_type::ResourceType,
         backfill_parallelism: Option<StreamingParallelism>,
+        refresh_interval_sec: Option<u64>,
     ) -> MetaResult<streaming_job::Model> {
         let obj = Self::create_object(txn, obj_type, owner_id, database_id, schema_id).await?;
         let job_id = obj.oid.as_job_id();
@@ -206,6 +207,7 @@ impl CatalogController {
             max_parallelism: max_parallelism as _,
             specific_resource_group,
             is_serverless_backfill,
+            refresh_interval_sec: refresh_interval_sec.map(|s| s as i64),
         };
         let job = model.clone().into_active_model();
         StreamingJobModel::insert(job).exec(txn).await?;
@@ -228,6 +230,7 @@ impl CatalogController {
         mut dependencies: HashSet<ObjectId>,
         resource_type: streaming_job_resource_type::ResourceType,
         backfill_parallelism: &Option<Parallelism>,
+        refresh_interval_sec: Option<u64>,
     ) -> MetaResult<streaming_job::Model> {
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
@@ -299,6 +302,7 @@ impl CatalogController {
                     max_parallelism,
                     resource_type,
                     backfill_parallelism.clone(),
+                    refresh_interval_sec,
                 )
                 .await?;
                 table.id = streaming_job_model.job_id.as_mv_table_id();
@@ -330,6 +334,7 @@ impl CatalogController {
                     max_parallelism,
                     resource_type,
                     backfill_parallelism.clone(),
+                    None, // refresh_interval_sec: only for MV
                 )
                 .await?;
                 sink.id = streaming_job_model.job_id.as_sink_id();
@@ -350,6 +355,7 @@ impl CatalogController {
                     max_parallelism,
                     resource_type,
                     backfill_parallelism.clone(),
+                    None, // refresh_interval_sec: only for MV
                 )
                 .await?;
                 let job_id = streaming_job_model.job_id;
@@ -412,6 +418,7 @@ impl CatalogController {
                     max_parallelism,
                     resource_type,
                     backfill_parallelism.clone(),
+                    None, // refresh_interval_sec: only for MV
                 )
                 .await?;
                 // to be compatible with old implementation.
@@ -447,6 +454,7 @@ impl CatalogController {
                     max_parallelism,
                     resource_type,
                     backfill_parallelism.clone(),
+                    None, // refresh_interval_sec: only for MV
                 )
                 .await?;
                 src.id = streaming_job_model.job_id.as_shared_source_id();
@@ -1083,6 +1091,7 @@ impl CatalogController {
             // Replace has no "backfill finish -> restore parallelism" phase, so inheriting it
             // would render actors at the backfill parallelism and never recover to steady-state.
             None,
+            None, // refresh_interval_sec: not applicable for replace jobs
         )
         .await?;
 

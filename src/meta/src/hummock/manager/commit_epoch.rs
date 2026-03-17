@@ -90,6 +90,18 @@ impl HummockManager {
             return Ok(());
         }
 
+        if tables_to_commit.is_empty()
+            && sstables.is_empty()
+            && new_table_watermarks.is_empty()
+            && sst_to_context.is_empty()
+            && new_table_fragment_infos.is_empty()
+            && change_log_delta.is_empty()
+            && vector_index_delta.is_empty()
+            && truncate_tables.is_empty()
+        {
+            return Ok(());
+        }
+
         assert!(!tables_to_commit.is_empty());
 
         let versioning: &mut Versioning = &mut versioning_guard;

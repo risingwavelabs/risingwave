@@ -37,8 +37,8 @@ use super::{
     ReschedulePolicy, ScaleControllerRef, StreamFragmentGraph, UserDefinedFragmentBackfillOrder,
 };
 use crate::barrier::{
-    BarrierScheduler, Command, CreateStreamingJobCommandInfo, CreateStreamingJobType,
-    ReplaceStreamJobPlan, SnapshotBackfillInfo,
+    BarrierScheduler, BatchRefreshInfo, Command, CreateStreamingJobCommandInfo,
+    CreateStreamingJobType, ReplaceStreamJobPlan, SnapshotBackfillInfo,
 };
 use crate::controller::catalog::DropTableConnectorContext;
 use crate::controller::fragment::{InflightActorInfo, InflightFragmentInfo};
@@ -109,6 +109,9 @@ pub struct CreateStreamingJobContext {
 
     /// The `streaming_job::Model` for this job, loaded from meta store.
     pub streaming_job_model: streaming_job::Model,
+
+    /// Batch refresh interval in seconds. If set, the MV uses batch refresh semantics.
+    pub refresh_interval_sec: Option<u64>,
 }
 
 struct StreamingJobExecution {
@@ -471,6 +474,7 @@ impl GlobalStreamManager {
             cdc_table_snapshot_splits,
             is_serverless_backfill,
             streaming_job_model,
+            refresh_interval_sec,
             ..
         }: CreateStreamingJobContext,
     ) -> MetaResult<StreamingJob> {
@@ -516,14 +520,27 @@ impl GlobalStreamManager {
             locality_fragment_state_table_mapping,
             is_serverless: is_serverless_backfill,
             streaming_job_model,
+            refresh_interval_sec,
         };
 
         let job_type = if let Some(snapshot_backfill_info) = snapshot_backfill_info {
-            tracing::debug!(
-                ?snapshot_backfill_info,
-                "sending Command::CreateSnapshotBackfillStreamingJob"
-            );
-            CreateStreamingJobType::SnapshotBackfill(snapshot_backfill_info)
+            if let Some(refresh_interval_sec) = refresh_interval_sec {
+                tracing::debug!(
+                    ?snapshot_backfill_info,
+                    refresh_interval_sec,
+                    "sending Command::CreateBatchRefreshStreamingJob"
+                );
+                CreateStreamingJobType::BatchRefresh(BatchRefreshInfo {
+                    snapshot_backfill_info,
+                    refresh_interval_sec,
+                })
+            } else {
+                tracing::debug!(
+                    ?snapshot_backfill_info,
+                    "sending Command::CreateSnapshotBackfillStreamingJob"
+                );
+                CreateStreamingJobType::SnapshotBackfill(snapshot_backfill_info)
+            }
         } else {
             tracing::debug!("sending Command::CreateStreamingJob");
             if let Some(new_upstream_sink) = new_upstream_sink {
