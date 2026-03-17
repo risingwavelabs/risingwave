@@ -821,7 +821,7 @@ pub(crate) fn build_reschedule_commands(
                     types: output_type_mapping.unwrap_or_default().to_protobuf(),
                 };
 
-                let dispatchers = compose_dispatchers(
+                let (dispatchers, _) = compose_dispatchers(
                     *distribution_type,
                     &source_fragment_actors,
                     *downstream_fragment_id,

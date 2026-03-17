@@ -107,6 +107,63 @@ struct DependentSourceFragmentUpdate {
     is_shared_source: bool,
 }
 
+#[derive(Debug)]
+struct ReplaceOriginalJobInfo {
+    max_parallelism: i32,
+    timezone: Option<String>,
+    config_override: Option<String>,
+    adaptive_parallelism_strategy: Option<String>,
+    parallelism: StreamingParallelism,
+    specific_resource_group: Option<String>,
+}
+
+impl ReplaceOriginalJobInfo {
+    fn resolved_parallelism(
+        &self,
+        specified_parallelism: Option<&NonZeroUsize>,
+    ) -> StreamingParallelism {
+        specified_parallelism
+            .map(|n| StreamingParallelism::Fixed(n.get() as _))
+            .unwrap_or_else(|| self.parallelism.clone())
+    }
+
+    fn stream_context(&self, ctx_override: Option<&StreamContext>) -> StreamContext {
+        StreamContext {
+            timezone: ctx_override
+                .and_then(|ctx| ctx.timezone.clone())
+                .or_else(|| self.timezone.clone()),
+            // We don't expect replacing a job with a different config override.
+            // Thus always use the original config override.
+            config_override: self.config_override.clone().unwrap_or_default().into(),
+            adaptive_parallelism_strategy: self.adaptive_parallelism_strategy.as_deref().map(|s| {
+                parse_strategy(s).expect("strategy should be validated before persisting")
+            }),
+        }
+    }
+
+    fn resource_type(&self) -> streaming_job_resource_type::ResourceType {
+        match &self.specific_resource_group {
+            Some(group) => {
+                streaming_job_resource_type::ResourceType::SpecificResourceGroup(group.clone())
+            }
+            None => streaming_job_resource_type::ResourceType::Regular(true),
+        }
+    }
+}
+
+impl From<streaming_job::Model> for ReplaceOriginalJobInfo {
+    fn from(model: streaming_job::Model) -> Self {
+        Self {
+            max_parallelism: model.max_parallelism,
+            timezone: model.timezone,
+            config_override: model.config_override,
+            adaptive_parallelism_strategy: model.adaptive_parallelism_strategy,
+            parallelism: model.parallelism,
+            specific_resource_group: model.specific_resource_group,
+        }
+    }
+}
+
 impl CatalogController {
     #[allow(clippy::too_many_arguments)]
     pub async fn create_streaming_job_obj(
@@ -121,7 +178,7 @@ impl CatalogController {
         max_parallelism: usize,
         resource_type: streaming_job_resource_type::ResourceType,
         backfill_parallelism: Option<StreamingParallelism>,
-    ) -> MetaResult<JobId> {
+    ) -> MetaResult<streaming_job::Model> {
         let obj = Self::create_object(txn, obj_type, owner_id, database_id, schema_id).await?;
         let job_id = obj.oid.as_job_id();
         let specific_resource_group = resource_type.resource_group();
@@ -129,26 +186,27 @@ impl CatalogController {
             &resource_type,
             streaming_job_resource_type::ResourceType::ServerlessBackfillResourceGroup(_)
         );
-        let job = streaming_job::ActiveModel {
-            job_id: Set(job_id),
-            job_status: Set(JobStatus::Initial),
-            create_type: Set(create_type.into()),
-            timezone: Set(ctx.timezone),
-            config_override: Set(Some(ctx.config_override.to_string())),
-            adaptive_parallelism_strategy: Set(ctx
+        let model = streaming_job::Model {
+            job_id,
+            job_status: JobStatus::Initial,
+            create_type: create_type.into(),
+            timezone: ctx.timezone,
+            config_override: Some(ctx.config_override.to_string()),
+            adaptive_parallelism_strategy: ctx
                 .adaptive_parallelism_strategy
                 .as_ref()
-                .map(ToString::to_string)),
-            parallelism: Set(streaming_parallelism),
-            backfill_parallelism: Set(backfill_parallelism),
-            backfill_orders: Set(None),
-            max_parallelism: Set(max_parallelism as _),
-            specific_resource_group: Set(specific_resource_group),
-            is_serverless_backfill: Set(is_serverless_backfill),
+                .map(ToString::to_string),
+            parallelism: streaming_parallelism,
+            backfill_parallelism,
+            backfill_orders: None,
+            max_parallelism: max_parallelism as _,
+            specific_resource_group,
+            is_serverless_backfill,
         };
+        let job = model.clone().into_active_model();
         StreamingJobModel::insert(job).exec(txn).await?;
 
-        Ok(job_id)
+        Ok(model)
     }
 
     /// Create catalogs for the streaming job, then notify frontend about them if the job is a
@@ -166,7 +224,7 @@ impl CatalogController {
         mut dependencies: HashSet<ObjectId>,
         resource_type: streaming_job_resource_type::ResourceType,
         backfill_parallelism: &Option<Parallelism>,
-    ) -> MetaResult<()> {
+    ) -> MetaResult<streaming_job::Model> {
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
         let create_type = streaming_job.create_type();
@@ -223,9 +281,9 @@ impl CatalogController {
             }
         }
 
-        match streaming_job {
+        let streaming_job_model = match streaming_job {
             StreamingJob::MaterializedView(table) => {
-                let job_id = Self::create_streaming_job_obj(
+                let streaming_job_model = Self::create_streaming_job_obj(
                     &txn,
                     ObjectType::Table,
                     table.owner as _,
@@ -239,9 +297,10 @@ impl CatalogController {
                     backfill_parallelism.clone(),
                 )
                 .await?;
-                table.id = job_id.as_mv_table_id();
+                table.id = streaming_job_model.job_id.as_mv_table_id();
                 let table_model: table::ActiveModel = table.clone().into();
                 Table::insert(table_model).exec(&txn).await?;
+                streaming_job_model
             }
             StreamingJob::Sink(sink) => {
                 if let Some(target_table_id) = sink.target_table
@@ -255,7 +314,7 @@ impl CatalogController {
                     bail!("Creating such a sink will result in circular dependency.");
                 }
 
-                let job_id = Self::create_streaming_job_obj(
+                let streaming_job_model = Self::create_streaming_job_obj(
                     &txn,
                     ObjectType::Sink,
                     sink.owner as _,
@@ -269,12 +328,13 @@ impl CatalogController {
                     backfill_parallelism.clone(),
                 )
                 .await?;
-                sink.id = job_id.as_sink_id();
+                sink.id = streaming_job_model.job_id.as_sink_id();
                 let sink_model: sink::ActiveModel = sink.clone().into();
                 Sink::insert(sink_model).exec(&txn).await?;
+                streaming_job_model
             }
             StreamingJob::Table(src, table, _) => {
-                let job_id = Self::create_streaming_job_obj(
+                let streaming_job_model = Self::create_streaming_job_obj(
                     &txn,
                     ObjectType::Table,
                     table.owner as _,
@@ -288,6 +348,7 @@ impl CatalogController {
                     backfill_parallelism.clone(),
                 )
                 .await?;
+                let job_id = streaming_job_model.job_id;
                 table.id = job_id.as_mv_table_id();
                 if let Some(src) = src {
                     let src_obj = Self::create_object(
@@ -331,10 +392,11 @@ impl CatalogController {
                     .exec(&txn)
                     .await?;
                 }
+                streaming_job_model
             }
             StreamingJob::Index(index, table) => {
                 ensure_object_id(ObjectType::Table, index.primary_table_id, &txn).await?;
-                let job_id = Self::create_streaming_job_obj(
+                let streaming_job_model = Self::create_streaming_job_obj(
                     &txn,
                     ObjectType::Index,
                     index.owner as _,
@@ -349,6 +411,7 @@ impl CatalogController {
                 )
                 .await?;
                 // to be compatible with old implementation.
+                let job_id = streaming_job_model.job_id;
                 index.id = job_id.as_index_id();
                 index.index_table_id = job_id.as_mv_table_id();
                 table.id = job_id.as_mv_table_id();
@@ -365,9 +428,10 @@ impl CatalogController {
                 Table::insert(table_model).exec(&txn).await?;
                 let index_model: index::ActiveModel = index.clone().into();
                 Index::insert(index_model).exec(&txn).await?;
+                streaming_job_model
             }
             StreamingJob::Source(src) => {
-                let job_id = Self::create_streaming_job_obj(
+                let streaming_job_model = Self::create_streaming_job_obj(
                     &txn,
                     ObjectType::Source,
                     src.owner as _,
@@ -381,11 +445,12 @@ impl CatalogController {
                     backfill_parallelism.clone(),
                 )
                 .await?;
-                src.id = job_id.as_shared_source_id();
+                src.id = streaming_job_model.job_id.as_shared_source_id();
                 let source_model: source::ActiveModel = src.clone().into();
                 Source::insert(source_model).exec(&txn).await?;
+                streaming_job_model
             }
-        }
+        };
 
         // collect dependent secrets.
         dependencies.extend(
@@ -417,7 +482,7 @@ impl CatalogController {
 
         txn.commit().await?;
 
-        Ok(())
+        Ok(streaming_job_model)
     }
 
     /// Create catalogs for internal tables, then notify frontend about them if the job is a
@@ -657,7 +722,6 @@ impl CatalogController {
 
         Ok(Command::DropStreamingJobs {
             streaming_job_ids: HashSet::from_iter([table_fragments.stream_job_id()]),
-            actors: table_fragments.actor_ids().collect(),
             unregistered_state_table_ids: table_fragments.all_table_ids().collect(),
             unregistered_fragment_ids: table_fragments.fragment_ids().collect(),
             dropped_sink_fragment_by_targets: dropped_sink_fragment_with_target
@@ -946,7 +1010,7 @@ impl CatalogController {
         ctx: Option<&StreamContext>,
         specified_parallelism: Option<&NonZeroUsize>,
         expected_original_max_parallelism: Option<usize>,
-    ) -> MetaResult<JobId> {
+    ) -> MetaResult<streaming_job::Model> {
         let id = streaming_job.id();
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
@@ -975,25 +1039,14 @@ impl CatalogController {
         }
 
         // 3. check parallelism.
-        let (
-            original_max_parallelism,
-            original_timezone,
-            original_config_override,
-            original_adaptive_strategy,
-        ): (i32, Option<String>, Option<String>, Option<String>) =
-            StreamingJobModel::find_by_id(id)
-                .select_only()
-                .column(streaming_job::Column::MaxParallelism)
-                .column(streaming_job::Column::Timezone)
-                .column(streaming_job::Column::ConfigOverride)
-                .column(streaming_job::Column::AdaptiveParallelismStrategy)
-                .into_tuple()
-                .one(&txn)
-                .await?
-                .ok_or_else(|| MetaError::catalog_id_not_found(streaming_job.job_type_str(), id))?;
+        let original_job = StreamingJobModel::find_by_id(id)
+            .one(&txn)
+            .await?
+            .map(ReplaceOriginalJobInfo::from)
+            .ok_or_else(|| MetaError::catalog_id_not_found(streaming_job.job_type_str(), id))?;
 
         if let Some(max_parallelism) = expected_original_max_parallelism
-            && original_max_parallelism != max_parallelism as i32
+            && original_job.max_parallelism != max_parallelism as i32
         {
             // We already override the max parallelism in `StreamFragmentGraph` before entering this function.
             // This should not happen in normal cases.
@@ -1001,30 +1054,17 @@ impl CatalogController {
                 "cannot use a different max parallelism \
                  when replacing streaming job, \
                  original: {}, new: {}",
-                original_max_parallelism,
+                original_job.max_parallelism,
                 max_parallelism
             );
         }
 
-        let parallelism = match specified_parallelism {
-            None => StreamingParallelism::Adaptive,
-            Some(n) => StreamingParallelism::Fixed(n.get() as _),
-        };
-
-        let ctx = StreamContext {
-            timezone: ctx
-                .map(|ctx| ctx.timezone.clone())
-                .unwrap_or(original_timezone),
-            // We don't expect replacing a job with a different config override.
-            // Thus always use the original config override.
-            config_override: original_config_override.unwrap_or_default().into(),
-            adaptive_parallelism_strategy: original_adaptive_strategy.as_deref().map(|s| {
-                parse_strategy(s).expect("strategy should be validated before persisting")
-            }),
-        };
+        let parallelism = original_job.resolved_parallelism(specified_parallelism);
+        let ctx = original_job.stream_context(ctx);
+        let resource_type = original_job.resource_type();
 
         // 4. create streaming object for new replace table.
-        let new_obj_id = Self::create_streaming_job_obj(
+        let tmp_model = Self::create_streaming_job_obj(
             &txn,
             streaming_job.object_type(),
             streaming_job.owner() as _,
@@ -1033,8 +1073,11 @@ impl CatalogController {
             streaming_job.create_type(),
             ctx,
             parallelism,
-            original_max_parallelism as _,
-            streaming_job_resource_type::ResourceType::Regular(true),
+            original_job.max_parallelism as _,
+            resource_type,
+            // `backfill_parallelism` is intentionally NOT inherited from the original job.
+            // Replace has no "backfill finish -> restore parallelism" phase, so inheriting it
+            // would render actors at the backfill parallelism and never recover to steady-state.
             None,
         )
         .await?;
@@ -1042,7 +1085,7 @@ impl CatalogController {
         // 5. record dependency for new replace table.
         ObjectDependency::insert(object_dependency::ActiveModel {
             oid: Set(id.as_object_id()),
-            used_by: Set(new_obj_id.as_object_id()),
+            used_by: Set(tmp_model.job_id.as_object_id()),
             ..Default::default()
         })
         .exec(&txn)
@@ -1050,7 +1093,7 @@ impl CatalogController {
 
         txn.commit().await?;
 
-        Ok(new_obj_id)
+        Ok(tmp_model)
     }
 
     /// `finish_streaming_job` marks job related objects as `Created` and notify frontend.
