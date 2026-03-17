@@ -143,6 +143,10 @@ impl Executor for SourceExecutor {
 impl SourceExecutor {
     #[try_stream(ok = DataChunk, error = BatchError)]
     async fn do_execute(self: Box<Self>) {
+        // Batch scan reads a bounded range and then stops, similar to backfill.
+        // This flag enables partition-EOF signals so the consumer can detect
+        // when a partition has no more readable data (e.g. control-record tails).
+        let for_backfill_and_batch = true;
         let source_ctx = Arc::new(SourceContext::new(
             u32::MAX.into(),
             self.source_id,
@@ -152,7 +156,7 @@ impl SourceExecutor {
             SourceCtrlOpts {
                 chunk_size: self.chunk_size,
                 split_txn: false,
-                for_backfill: true,
+                for_backfill_and_batch,
             },
             ConnectorProperties::default(),
             None,
@@ -164,7 +168,7 @@ impl SourceExecutor {
                 self.column_ids,
                 source_ctx,
                 false,
-                false,
+                for_backfill_and_batch,
             )
             .await?;
 

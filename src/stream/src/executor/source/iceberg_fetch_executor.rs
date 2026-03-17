@@ -424,7 +424,7 @@ impl<S: StateStore> IcebergFetchExecutor<S> {
             SourceCtrlOpts {
                 chunk_size: limited_chunk_size(self.rate_limit_rps),
                 split_txn: self.rate_limit_rps.is_some(), // when rate limiting, we may split txn
-                for_backfill: false,
+                for_backfill_and_batch: false,
             },
             source_desc.source.config.clone(),
             None,

@@ -149,7 +149,7 @@ impl StreamReaderBuilder {
             SourceCtrlOpts {
                 chunk_size: limited_chunk_size(self.rate_limit),
                 split_txn: self.rate_limit.is_some(), // when rate limiting, we may split txn
-                for_backfill: false,
+                for_backfill_and_batch: false,
             },
             self.source_desc.source.config.clone(),
             schema_change_tx,

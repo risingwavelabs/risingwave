@@ -68,7 +68,7 @@ impl SplitReader for KafkaSplitReader {
 
         let bootstrap_servers = &properties.connection.brokers;
         let broker_rewrite_map = properties.privatelink_common.broker_rewrite_map.clone();
-        let enable_partition_eof = source_ctx.source_ctrl_opts.for_backfill;
+        let enable_partition_eof = source_ctx.source_ctrl_opts.for_backfill_and_batch;
 
         config.set(
             "enable.partition.eof",

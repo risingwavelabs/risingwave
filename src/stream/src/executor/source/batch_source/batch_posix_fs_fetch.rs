@@ -267,7 +267,7 @@ impl<S: StateStore> BatchPosixFsFetchExecutor<S> {
             SourceCtrlOpts {
                 chunk_size: limited_chunk_size(*rate_limit_rps),
                 split_txn: rate_limit_rps.is_some(),
-                for_backfill: false,
+                for_backfill_and_batch: false,
             },
             source_desc.source.config.clone(),
             None,

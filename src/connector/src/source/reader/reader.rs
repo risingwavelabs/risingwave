@@ -154,7 +154,7 @@ impl SourceReader {
         column_ids: Vec<ColumnId>,
         source_ctx: Arc<SourceContext>,
         seek_to_latest: bool,
-        for_backfill: bool,
+        for_backfill_and_batch: bool,
     ) -> ConnectorResult<(BoxSourceChunkStream, CreateSplitReaderResult)> {
         let Some(splits) = state else {
             return Ok((pending().boxed(), Default::default()));
@@ -188,7 +188,7 @@ impl SourceReader {
                 data_gen_columns,
                 CreateSplitReaderOpt {
                     seek_to_latest,
-                    for_backfill,
+                    for_backfill_and_batch,
                     ..Default::default()
                 },
             )
