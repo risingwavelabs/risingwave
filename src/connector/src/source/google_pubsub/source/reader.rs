@@ -44,15 +44,10 @@ struct DisposableMessageStream(Option<MessageStream>);
 
 impl Drop for DisposableMessageStream {
     fn drop(&mut self) {
-        if let Some(stream) = self.0.take() {
+        if let Some(mut stream) = self.0.take() {
             tokio::spawn(async move {
-                let count = stream.dispose().await;
-                if count > 0 {
-                    tracing::info!(
-                        "disposed pubsub streaming pull, nacked {} in-flight messages",
-                        count
-                    );
-                }
+                stream.dispose().await;
+                tracing::info!("disposed pubsub streaming pull, nacked in-flight messages");
             });
         }
     }
