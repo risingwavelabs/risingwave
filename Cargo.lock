@@ -667,7 +667,7 @@ dependencies = [
  "arrow-schema 57.3.0",
  "arrow-select 57.3.0",
  "flatbuffers 25.2.10",
- "lz4_flex 0.12.0",
+ "lz4_flex 0.12.1",
  "zstd",
 ]
 
@@ -2158,7 +2158,7 @@ dependencies = [
  "bitflags 2.10.0",
  "cexpr",
  "clang-sys",
- "itertools 0.13.0",
+ "itertools 0.10.5",
  "log",
  "prettyplease",
  "proc-macro2",
@@ -2743,7 +2743,7 @@ dependencies = [
  "hyper 1.6.0",
  "hyper-rustls 0.27.5",
  "hyper-util",
- "lz4_flex 0.11.1",
+ "lz4_flex 0.11.6",
  "replace_with",
  "rustls 0.23.35",
  "sealed",
@@ -5615,7 +5615,7 @@ dependencies = [
  "pin-project",
  "serde",
  "tokio",
- "twox-hash 2.1.0",
+ "twox-hash",
 ]
 
 [[package]]
@@ -5685,7 +5685,7 @@ dependencies = [
  "serde",
  "tokio",
  "tracing",
- "twox-hash 2.1.0",
+ "twox-hash",
  "zstd",
 ]
 
@@ -7905,6 +7905,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "lru-slab"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "112b39cec0b298b6c1999fee3e31427f74f676e4cb9879ed1a121b43661a4154"
+
+[[package]]
 name = "lz4"
 version = "1.28.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7925,20 +7931,20 @@ dependencies = [
 
 [[package]]
 name = "lz4_flex"
-version = "0.11.1"
+version = "0.11.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3ea9b256699eda7b0387ffbc776dd625e28bde3918446381781245b7a50349d8"
+checksum = "373f5eceeeab7925e0c1098212f2fbc4d416adec9d35051a6ab251e824c1854a"
 dependencies = [
- "twox-hash 1.6.3",
+ "twox-hash",
 ]
 
 [[package]]
 name = "lz4_flex"
-version = "0.12.0"
+version = "0.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ab6473172471198271ff72e9379150e9dfd70d8e533e0752a27e515b48dd375e"
+checksum = "98c23545df7ecf1b16c303910a69b079e8e251d60f7dd2cc9b4177f2afaf1746"
 dependencies = [
- "twox-hash 2.1.0",
+ "twox-hash",
 ]
 
 [[package]]
@@ -8533,7 +8539,7 @@ dependencies = [
  "tokio",
  "tokio-native-tls",
  "tokio-util",
- "twox-hash 2.1.0",
+ "twox-hash",
  "url",
 ]
 
@@ -9472,7 +9478,7 @@ dependencies = [
  "futures",
  "half 2.7.1",
  "hashbrown 0.16.1",
- "lz4_flex 0.11.1",
+ "lz4_flex 0.11.6",
  "num",
  "num-bigint",
  "paste",
@@ -9481,7 +9487,7 @@ dependencies = [
  "snap",
  "thrift",
  "tokio",
- "twox-hash 2.1.0",
+ "twox-hash",
  "zstd",
 ]
 
@@ -9507,7 +9513,7 @@ dependencies = [
  "futures",
  "half 2.7.1",
  "hashbrown 0.16.1",
- "lz4_flex 0.12.0",
+ "lz4_flex 0.12.1",
  "num-bigint",
  "num-integer",
  "num-traits",
@@ -9518,7 +9524,7 @@ dependencies = [
  "snap",
  "thrift",
  "tokio",
- "twox-hash 2.1.0",
+ "twox-hash",
  "zstd",
 ]
 
@@ -10772,12 +10778,13 @@ dependencies = [
 
 [[package]]
 name = "quinn-proto"
-version = "0.11.11"
+version = "0.11.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bcbafbbdbb0f638fe3f35f3c56739f77a8a1d070cb25603226c83339b391472b"
+checksum = "434b42fec591c96ef50e21e886936e66d3cc3f737104fdb9b737c40ffb94c098"
 dependencies = [
  "bytes",
  "getrandom 0.3.1",
+ "lru-slab",
  "rand 0.9.2",
  "ring",
  "rustc-hash 2.1.0",
@@ -11392,7 +11399,7 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 2.0.17",
- "twox-hash 2.1.0",
+ "twox-hash",
 ]
 
 [[package]]
@@ -11436,7 +11443,7 @@ dependencies = [
  "tokio-postgres",
  "tokio-stream 0.1.15",
  "tracing",
- "twox-hash 2.1.0",
+ "twox-hash",
  "workspace-hack",
 ]
 
@@ -11678,7 +11685,7 @@ dependencies = [
  "tracing",
  "tracing-futures",
  "tracing-opentelemetry",
- "twox-hash 2.1.0",
+ "twox-hash",
  "unit-prefix",
  "url",
  "uuid",
@@ -12625,7 +12632,7 @@ dependencies = [
  "tower-http",
  "tracing",
  "tracing-subscriber",
- "twox-hash 2.1.0",
+ "twox-hash",
  "uuid",
  "workspace-hack",
  "zstd",
@@ -16205,16 +16212,6 @@ dependencies = [
  "futures",
  "pin-project-lite",
  "tokio",
-]
-
-[[package]]
-name = "twox-hash"
-version = "1.6.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "97fee6b57c6a41524a810daee9286c02d7752c4253064d0b05472833a438f675"
-dependencies = [
- "cfg-if",
- "static_assertions",
 ]
 
 [[package]]
