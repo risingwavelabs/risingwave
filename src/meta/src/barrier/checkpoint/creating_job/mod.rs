@@ -54,6 +54,7 @@ use crate::barrier::{
 use crate::controller::fragment::InflightFragmentInfo;
 use crate::model::{FragmentDownstreamRelation, StreamActor, StreamJobActorsToCreate};
 use crate::rpc::metrics::GLOBAL_META_METRICS;
+use crate::stream::source_manager::SplitAssignment;
 use crate::stream::{ExtendedFragmentBackfillOrder, build_actor_connector_splits};
 
 #[derive(Debug)]
@@ -118,6 +119,7 @@ impl CreatingStreamingJobControl {
         version_stat: &HummockVersionStats,
         partial_graph_manager: &mut PartialGraphManager,
         edges: &mut FragmentEdgeBuildResult,
+        split_assignment: &SplitAssignment,
     ) -> MetaResult<&'a mut Self> {
         let info = create_info.info.clone();
         let job_id = info.stream_job_fragments.stream_job_id();
@@ -129,7 +131,7 @@ impl CreatingStreamingJobControl {
         );
         let fragment_infos = info
             .stream_job_fragments
-            .new_fragment_info(&info.init_split_assignment)
+            .new_fragment_info(split_assignment)
             .collect();
         let snapshot_backfill_actors =
             InflightStreamingJobInfo::snapshot_backfill_actor_ids(&fragment_infos).collect();
@@ -173,8 +175,7 @@ impl CreatingStreamingJobControl {
         );
 
         let added_actors = info.stream_job_fragments.actor_ids().collect();
-        let actor_splits = info
-            .init_split_assignment
+        let actor_splits = split_assignment
             .values()
             .flat_map(build_actor_connector_splits)
             .collect();

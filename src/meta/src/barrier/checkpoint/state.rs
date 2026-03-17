@@ -36,20 +36,24 @@ use tracing::warn;
 use crate::MetaResult;
 use crate::barrier::cdc_progress::CdcTableBackfillTracker;
 use crate::barrier::checkpoint::{CreatingStreamingJobControl, DatabaseCheckpointControl};
-use crate::barrier::command::{PostCollectCommand, ReschedulePlan};
+use crate::barrier::command::{CreateStreamingJobCommandInfo, PostCollectCommand, ReschedulePlan};
 use crate::barrier::context::CreateSnapshotBackfillJobCommandInfo;
-use crate::barrier::edge_builder::FragmentEdgeBuilder;
+use crate::barrier::edge_builder::{EdgeBuilderFragmentInfo, FragmentEdgeBuilder};
 use crate::barrier::info::{
-    BarrierInfo, CreateStreamingJobStatus, InflightStreamingJobInfo, SubscriberType,
+    BarrierInfo, CreateStreamingJobStatus, InflightDatabaseInfo, InflightStreamingJobInfo,
+    SubscriberType,
 };
 use crate::barrier::notifier::Notifier;
 use crate::barrier::partial_graph::PartialGraphManager;
 use crate::barrier::rpc::to_partial_graph_id;
 use crate::barrier::{BarrierKind, Command, CreateStreamingJobType, TracedEpoch};
 use crate::controller::fragment::{InflightActorInfo, InflightFragmentInfo};
-use crate::model::{ActorId, FragmentId, StreamJobActorsToCreate};
+use crate::model::{ActorId, ActorNewNoShuffle, FragmentId, StreamJobActorsToCreate};
 use crate::stream::cdc::parallel_cdc_table_backfill_fragment;
-use crate::stream::{GlobalActorIdGen, fill_snapshot_backfill_epoch};
+use crate::stream::{
+    GlobalActorIdGen, ReplaceJobSplitPlan, SourceManager, SplitAssignment,
+    fill_snapshot_backfill_epoch,
+};
 
 /// The latest state of `GlobalBarrierWorker` after injecting the latest barrier.
 pub(in crate::barrier) struct BarrierWorkerState {
@@ -205,6 +209,34 @@ impl DatabaseCheckpointControl {
         ) {
             bail!("reschedule intent must be resolved before apply");
         }
+
+        /// Resolve source splits for a create streaming job command.
+        ///
+        /// Combines source fragment split resolution and backfill split alignment
+        /// into one step, looking up existing upstream actor splits from the inflight database info.
+        fn resolve_source_splits(
+            info: &CreateStreamingJobCommandInfo,
+            actor_no_shuffle: &ActorNewNoShuffle,
+            database_info: &InflightDatabaseInfo,
+        ) -> MetaResult<SplitAssignment> {
+            let mut resolved = SourceManager::resolve_fragment_to_actor_splits(
+                &info.stream_job_fragments,
+                &info.init_split_assignment,
+            )?;
+            resolved.extend(SourceManager::resolve_backfill_splits(
+                &info.stream_job_fragments,
+                actor_no_shuffle,
+                |fragment_id, actor_id| {
+                    database_info
+                        .fragment(fragment_id)
+                        .actors
+                        .get(&actor_id)
+                        .map(|info| info.splits.clone())
+                },
+            )?);
+            Ok(resolved)
+        }
+
         // Throttle data for creating jobs (set only in the Throttle arm)
         let mut throttle_for_creating_jobs: Option<(
             HashSet<JobId>,
@@ -255,12 +287,18 @@ impl DatabaseCheckpointControl {
                         .cloned()
                         .collect();
 
+                    // Build edges first (needed for no-shuffle mapping used in split resolution)
                     let mut edges = self.database_info.build_edge(
                         Some((&info, true)),
                         None,
                         None,
                         partial_graph_manager.control_stream_manager(),
                     );
+                    let actor_no_shuffle = edges.extract_no_shuffle();
+
+                    // Phase 2: Resolve source-level DiscoveredSplits to actor-level SplitAssignment
+                    let resolved_split_assignment =
+                        resolve_source_splits(&info, &actor_no_shuffle, &self.database_info)?;
 
                     let Entry::Vacant(entry) = self.creating_streaming_job_controls.entry(job_id)
                     else {
@@ -273,6 +311,7 @@ impl DatabaseCheckpointControl {
                             info: info.clone(),
                             snapshot_backfill_info: snapshot_backfill_info.clone(),
                             cross_db_snapshot_backfill_info,
+                            resolved_split_assignment: resolved_split_assignment.clone(),
                         },
                         take(notifiers),
                         snapshot_backfill_upstream_tables,
@@ -280,6 +319,7 @@ impl DatabaseCheckpointControl {
                         hummock_version_stats,
                         partial_graph_manager,
                         &mut edges,
+                        &resolved_split_assignment,
                     )?;
 
                     self.database_info
@@ -304,6 +344,7 @@ impl DatabaseCheckpointControl {
                         &mut edges,
                         partial_graph_manager.control_stream_manager(),
                         None,
+                        &resolved_split_assignment,
                     )?;
 
                     let (table_ids, node_actors) = self.collect_base_info();
@@ -336,12 +377,18 @@ impl DatabaseCheckpointControl {
                     } else {
                         None
                     };
+
                 let mut edges = self.database_info.build_edge(
                     Some((&info, false)),
                     None,
                     new_upstream_sink,
                     partial_graph_manager.control_stream_manager(),
                 );
+                let actor_no_shuffle = edges.extract_no_shuffle();
+
+                // Phase 2: Resolve source-level DiscoveredSplits to actor-level SplitAssignment
+                let resolved_split_assignment =
+                    resolve_source_splits(&info, &actor_no_shuffle, &self.database_info)?;
 
                 // Pre-apply: add new job and fragments
                 let cdc_tracker = if let Some(splits) = &info.cdc_table_snapshot_splits {
@@ -359,7 +406,7 @@ impl DatabaseCheckpointControl {
                     .pre_apply_new_job(info.streaming_job.id(), cdc_tracker);
                 self.database_info.pre_apply_new_fragments(
                     info.stream_job_fragments
-                        .new_fragment_info(&info.init_split_assignment)
+                        .new_fragment_info(&resolved_split_assignment)
                         .map(|(fragment_id, fragment_infos)| {
                             (fragment_id, info.streaming_job.id(), fragment_infos)
                         }),
@@ -397,6 +444,7 @@ impl DatabaseCheckpointControl {
                     &mut edges,
                     partial_graph_manager.control_stream_manager(),
                     actor_cdc_table_snapshot_splits,
+                    &resolved_split_assignment,
                 )?;
 
                 (
@@ -408,6 +456,7 @@ impl DatabaseCheckpointControl {
                         info,
                         job_type,
                         cross_db_snapshot_backfill_info,
+                        resolved_split_assignment,
                     },
                 )
             }
@@ -576,18 +625,44 @@ impl DatabaseCheckpointControl {
             }
 
             Some(Command::ReplaceStreamJob(plan)) => {
-                // Build edges
+                // Build edges first (needed for no-shuffle mapping used in split resolution)
                 let mut edges = self.database_info.build_edge(
                     None,
                     Some(&plan),
                     None,
                     partial_graph_manager.control_stream_manager(),
                 );
+                let actor_no_shuffle = edges.extract_no_shuffle();
+
+                // Phase 2: Resolve splits to actor-level assignment.
+                let resolved_split_assignment = match &plan.split_plan {
+                    ReplaceJobSplitPlan::Discovered(discovered) => {
+                        SourceManager::resolve_fragment_to_actor_splits(
+                            &plan.new_fragments,
+                            discovered,
+                        )?
+                    }
+                    ReplaceJobSplitPlan::AlignFromPrevious => {
+                        SourceManager::resolve_replace_source_splits(
+                            &plan.new_fragments,
+                            &plan.replace_upstream,
+                            &actor_no_shuffle,
+                            |_fragment_id, actor_id| {
+                                self.database_info.fragment_infos().find_map(|fragment| {
+                                    fragment
+                                        .actors
+                                        .get(&actor_id)
+                                        .map(|info| info.splits.clone())
+                                })
+                            },
+                        )?
+                    }
+                };
 
                 // Pre-apply: add new fragments and replace upstream
                 self.database_info.pre_apply_new_fragments(
                     plan.new_fragments
-                        .new_fragment_info(&plan.init_split_assignment)
+                        .new_fragment_info(&resolved_split_assignment)
                         .map(|(fragment_id, new_fragment)| {
                             (fragment_id, plan.streaming_job.id(), new_fragment)
                         }),
@@ -637,6 +712,7 @@ impl DatabaseCheckpointControl {
                     &plan,
                     &mut edges,
                     &mut self.database_info,
+                    &resolved_split_assignment,
                 )?;
 
                 (
@@ -644,7 +720,10 @@ impl DatabaseCheckpointControl {
                     table_ids,
                     actors_to_create,
                     node_actors,
-                    PostCollectCommand::ReplaceStreamJob(plan),
+                    PostCollectCommand::ReplaceStreamJob {
+                        plan,
+                        resolved_split_assignment,
+                    },
                 )
             }
 
@@ -926,8 +1005,16 @@ impl DatabaseCheckpointControl {
                                     self.database_info.fragment(*upstream_fragment_id)
                                 })
                                 .chain(new_fragment_info.values())
-                                .map(|info| (info, partial_graph_id)),
-                            partial_graph_manager.control_stream_manager(),
+                                .map(|fragment| {
+                                    (
+                                        fragment.fragment_id,
+                                        EdgeBuilderFragmentInfo::from_inflight(
+                                            fragment,
+                                            partial_graph_id,
+                                            partial_graph_manager.control_stream_manager(),
+                                        ),
+                                    )
+                                }),
                         );
                         edge_builder.add_relations(&info.upstream_fragment_downstreams);
                         edge_builder.add_relations(&info.downstreams);

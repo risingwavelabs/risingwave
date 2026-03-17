@@ -43,7 +43,9 @@ use crate::barrier::cdc_progress::{CdcProgress, CdcTableBackfillTracker};
 use crate::barrier::command::{
     CreateStreamingJobCommandInfo, PostCollectCommand, ReplaceStreamJobPlan,
 };
-use crate::barrier::edge_builder::{FragmentEdgeBuildResult, FragmentEdgeBuilder};
+use crate::barrier::edge_builder::{
+    EdgeBuilderFragmentInfo, FragmentEdgeBuildResult, FragmentEdgeBuilder,
+};
 use crate::barrier::progress::{CreateMviewProgressTracker, StagingCommitInfo};
 use crate::barrier::rpc::{ControlStreamManager, to_partial_graph_id};
 use crate::barrier::{
@@ -1201,7 +1203,8 @@ impl InflightDatabaseInfo {
                     .map(|ctx| &ctx.new_sink_downstream.downstream_fragment_id),
             )
             .cloned();
-        let new_fragment_infos = info
+        // Collect new fragments with their partial graph IDs
+        let new_fragments = info
             .into_iter()
             .flat_map(|(info, is_snapshot_backfill)| {
                 let partial_graph_id = to_partial_graph_id(
@@ -1209,55 +1212,70 @@ impl InflightDatabaseInfo {
                     is_snapshot_backfill.then_some(info.streaming_job.id()),
                 );
                 info.stream_job_fragments
-                    .new_fragment_info(&info.init_split_assignment)
-                    .map(move |(fragment_id, info)| (fragment_id, info, partial_graph_id))
-            })
-            .chain(
-                replace_job
-                    .into_iter()
-                    .flat_map(|replace_job| {
-                        replace_job
-                            .new_fragments
-                            .new_fragment_info(&replace_job.init_split_assignment)
-                            .chain(
-                                replace_job
-                                    .auto_refresh_schema_sinks
-                                    .as_ref()
-                                    .into_iter()
-                                    .flat_map(|sinks| {
-                                        sinks.iter().map(|sink| {
-                                            (
-                                                sink.new_fragment.fragment_id,
-                                                sink.new_fragment_info(),
-                                            )
-                                        })
-                                    }),
-                            )
-                    })
-                    .map(|(fragment_id, fragment)| {
+                    .fragments
+                    .values()
+                    .map(move |fragment| {
                         (
-                            fragment_id,
+                            partial_graph_id,
                             fragment,
+                            &info.stream_job_fragments.actor_status,
+                        )
+                    })
+            })
+            .chain(replace_job.into_iter().flat_map(|replace_job| {
+                replace_job
+                    .new_fragments
+                    .fragments
+                    .values()
+                    .map(|fragment| (fragment, &replace_job.new_fragments.actor_status))
+                    .chain(
+                        replace_job
+                            .auto_refresh_schema_sinks
+                            .as_ref()
+                            .into_iter()
+                            .flat_map(move |sinks| {
+                                sinks
+                                    .iter()
+                                    .map(|sink| (&sink.new_fragment, &sink.actor_status))
+                            }),
+                    )
+                    .map(|(fragment, actor_status)| {
+                        (
                             // we assume that replace job only happens in database partial graph
                             to_partial_graph_id(self.database_id, None),
+                            fragment,
+                            actor_status,
                         )
-                    }),
-            )
-            .collect_vec();
+                    })
+            }));
+
         let mut builder = FragmentEdgeBuilder::new(
+            // Existing fragments
             existing_fragment_ids
                 .map(|fragment_id| {
                     (
-                        self.fragment(fragment_id),
-                        to_partial_graph_id(self.database_id, None),
+                        fragment_id,
+                        EdgeBuilderFragmentInfo::from_inflight(
+                            self.fragment(fragment_id),
+                            to_partial_graph_id(self.database_id, None),
+                            control_stream_manager,
+                        ),
                     )
                 })
+                // New fragments from create/replace jobs
                 .chain(
-                    new_fragment_infos
-                        .iter()
-                        .map(|(_, info, partial_graph_id)| (info, *partial_graph_id)),
+                    new_fragments.map(|(partial_graph_id, fragment, actor_status)| {
+                        (
+                            fragment.fragment_id,
+                            EdgeBuilderFragmentInfo::from_fragment(
+                                fragment,
+                                actor_status,
+                                partial_graph_id,
+                                control_stream_manager,
+                            ),
+                        )
+                    }),
                 ),
-            control_stream_manager,
         );
         if let Some((info, _)) = info {
             builder.add_relations(&info.upstream_fragment_downstreams);
