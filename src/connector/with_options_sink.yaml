@@ -1582,6 +1582,13 @@ SnowflakeV2Config:
   - name: warehouse
     field_type: String
     required: false
+  - name: task.serverless
+    field_type: bool
+    required: false
+    default: Default::default
+  - name: task.target_completion_interval
+    field_type: String
+    required: false
   - name: jdbc.url
     field_type: String
     required: false
