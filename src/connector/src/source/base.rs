@@ -153,7 +153,6 @@ impl<P: DeserializeOwned + UnknownFields> TryFromBTreeMap for P {
 pub struct CreateSplitReaderOpt {
     pub support_multiple_splits: bool,
     pub seek_to_latest: bool,
-    pub for_backfill_and_batch: bool,
 }
 
 #[derive(Default)]
@@ -171,9 +170,7 @@ pub async fn create_split_readers<P: SourceProperties>(
     opt: CreateSplitReaderOpt,
 ) -> Result<(BoxSourceChunkStream, CreateSplitReaderResult)> {
     let splits = splits.into_iter().map(P::Split::try_from).try_collect()?;
-    let mut source_ctx = source_ctx.as_ref().clone();
-    source_ctx.source_ctrl_opts.for_backfill_and_batch = opt.for_backfill_and_batch;
-    let source_ctx = std::sync::Arc::new(source_ctx);
+    let source_ctx = source_ctx.clone();
     let mut res = CreateSplitReaderResult {
         backfill_info: HashMap::new(),
         latest_splits: None,

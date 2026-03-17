@@ -327,7 +327,7 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
 
         let (stream, res) = source_desc
             .source
-            .build_stream(Some(splits), column_ids, Arc::new(source_ctx), false, true)
+            .build_stream(Some(splits), column_ids, Arc::new(source_ctx), false)
             .await
             .map_err(StreamExecutorError::connector_error)?;
         Ok((

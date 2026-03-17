@@ -163,13 +163,7 @@ impl SourceExecutor {
         ));
         let (stream, _) = self
             .source
-            .build_stream(
-                Some(self.split_list),
-                self.column_ids,
-                source_ctx,
-                false,
-                for_backfill_and_batch,
-            )
+            .build_stream(Some(self.split_list), self.column_ids, source_ctx, false)
             .await?;
 
         #[for_await]
