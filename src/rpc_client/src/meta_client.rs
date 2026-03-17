@@ -427,6 +427,7 @@ impl MetaClient {
         dependencies: HashSet<ObjectId>,
         resource_type: streaming_job_resource_type::ResourceType,
         if_not_exists: bool,
+        refresh_interval_sec: Option<u64>,
     ) -> Result<WaitVersion> {
         let request = CreateMaterializedViewRequest {
             materialized_view: Some(table),
@@ -436,6 +437,7 @@ impl MetaClient {
             }),
             dependencies: dependencies.into_iter().collect(),
             if_not_exists,
+            refresh_interval_sec,
         };
         let resp = self.inner.create_materialized_view(request).await?;
         // TODO: handle error in `resp.status` here

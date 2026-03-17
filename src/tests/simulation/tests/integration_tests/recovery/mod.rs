@@ -14,6 +14,7 @@
 
 mod backfill;
 mod background_ddl;
+mod batch_refresh;
 mod event_log;
 mod locality_backfill;
 mod nexmark_recovery;

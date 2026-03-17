@@ -38,13 +38,13 @@ use crate::handler::util::{
 };
 use crate::optimizer::backfill_order_strategy::plan_backfill_order;
 use crate::optimizer::plan_node::generic::GenericPlanRef;
-use crate::optimizer::plan_node::{Explain, StreamPlanRef as PlanRef};
+use crate::optimizer::plan_node::{BackfillType, Explain, StreamPlanRef as PlanRef};
 use crate::optimizer::{OptimizerContext, OptimizerContextRef, RelationCollectorVisitor};
 use crate::planner::Planner;
 use crate::scheduler::streaming_manager::CreatingStreamingJobInfo;
 use crate::session::{SESSION_MANAGER, SessionImpl};
 use crate::stream_fragmenter::{GraphJobType, build_graph_with_strategy};
-use crate::utils::ordinal;
+use crate::utils::{MV_REFRESH_INTERVAL_SEC_KEY, ordinal};
 use crate::{TableCatalog, WithOptions};
 
 pub const RESOURCE_GROUP_KEY: &str = "resource_group";
@@ -88,7 +88,7 @@ pub(super) fn get_column_names(
 }
 
 /// Bind and generate create MV plan, return plan and mv table info.
-pub fn gen_create_mv_plan(
+pub fn explain_create_mv_plan(
     session: &SessionImpl,
     context: OptimizerContextRef,
     query: Query,
@@ -98,7 +98,7 @@ pub fn gen_create_mv_plan(
 ) -> Result<(PlanRef, TableCatalog)> {
     let mut binder = Binder::new_for_stream(session);
     let bound = binder.bind_query(&query)?;
-    gen_create_mv_plan_bound(session, context, bound, name, columns, emit_mode)
+    gen_create_mv_plan_bound(session, context, bound, name, columns, emit_mode, None)
 }
 
 /// Generate create MV plan from a bound query
@@ -109,6 +109,7 @@ pub fn gen_create_mv_plan_bound(
     name: ObjectName,
     columns: Vec<Ident>,
     emit_mode: Option<EmitMode>,
+    refresh_interval_sec: Option<u64>,
 ) -> Result<(PlanRef, TableCatalog)> {
     if session.config().create_compaction_group_for_mv() {
         context.warn_to_user("The session variable CREATE_COMPACTION_GROUP_FOR_MV has been deprecated. It will not take effect.");
@@ -135,12 +136,21 @@ pub fn gen_create_mv_plan_bound(
         }
         plan_root.set_out_names(col_names)?;
     }
+
+    let backfill_type = if refresh_interval_sec.is_some() {
+        plan_root.require_snapshot_backfill_for_batch_refresh()?;
+        BackfillType::SnapshotBackfill
+    } else {
+        plan_root.derive_backfill_type(true)
+    };
+
     let materialize = plan_root.gen_materialize_plan(
         database_id,
         schema_id,
         table_name,
         definition,
         emit_on_window_close,
+        backfill_type,
     )?;
 
     let mut table = materialize.table().clone();
@@ -250,7 +260,7 @@ pub async fn handle_create_mv_bound(
         "CREATE MATERIALIZED VIEW",
     )?;
 
-    let (table, graph, dependencies, resource_type) = {
+    let (table, graph, dependencies, resource_type, refresh_interval_sec) = {
         gen_create_mv_graph(
             handler_args,
             name,
@@ -284,6 +294,7 @@ pub async fn handle_create_mv_bound(
             dependencies,
             resource_type,
             if_not_exists,
+            refresh_interval_sec,
         ),
         &session,
         "CREATE MATERIALIZED VIEW",
@@ -310,8 +321,11 @@ pub(crate) async fn gen_create_mv_graph(
     PbStreamFragmentGraph,
     HashSet<ObjectId>,
     streaming_job_resource_type::ResourceType,
+    Option<u64>,
 )> {
     let mut with_options = get_with_options(handler_args.clone());
+    let refresh_interval_sec = with_options.refresh_interval_sec()?;
+    with_options.remove(MV_REFRESH_INTERVAL_SEC_KEY);
     let resource_group = with_options.remove(&RESOURCE_GROUP_KEY.to_owned());
 
     if resource_group.is_some() {
@@ -400,8 +414,15 @@ It only indicates the physical clustering of the data, which may improve the per
     let context: OptimizerContextRef = context.into();
     let session = context.session_ctx().as_ref();
 
-    let (plan, table) =
-        gen_create_mv_plan_bound(session, context.clone(), query, name, columns, emit_mode)?;
+    let (plan, table) = gen_create_mv_plan_bound(
+        session,
+        context.clone(),
+        query,
+        name,
+        columns,
+        emit_mode,
+        refresh_interval_sec,
+    )?;
 
     let backfill_order = plan_backfill_order(
         session,
@@ -428,7 +449,13 @@ It only indicates the physical clustering of the data, which may improve the per
         Some(backfill_order),
     )?;
 
-    Ok((table, graph, dependencies, resource_type))
+    Ok((
+        table,
+        graph,
+        dependencies,
+        resource_type,
+        refresh_interval_sec,
+    ))
 }
 
 #[cfg(test)]
