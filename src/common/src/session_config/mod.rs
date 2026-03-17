@@ -116,11 +116,6 @@ pub struct SessionConfig {
     #[parameter(default = IcebergEngineStorageMode::default())]
     iceberg_engine_storage_mode: IcebergEngineStorageMode,
 
-    /// When `iceberg_engine_storage_mode` is auto and table cardinality is unknown: prefer Hummock
-    /// (row store) if required columns >= this percent of table columns. Only used as fallback.
-    #[parameter(default = 80)]
-    iceberg_engine_row_ratio_percent: i32,
-
     /// Sets the number of digits displayed for floating-point values.
     /// See <https://www.postgresql.org/docs/current/runtime-config-client.html#:~:text=for%20more%20information.-,extra_float_digits,-(integer)>
     #[parameter(default = 1)]

@@ -55,7 +55,7 @@ impl InfallibleRule<Logical> for IcebergEngineStorageSelectionRule {
                 }
             };
         }
-        let prefer_rowstore = try_strategy!(check_point_lookup, check_column_ratio);
+        let prefer_rowstore = try_strategy!(check_point_lookup);
         if !prefer_rowstore {
             return None;
         }
@@ -132,26 +132,4 @@ fn check_point_lookup(
 
     // All PK columns must be covered by equality predicates.
     pk_column_names.is_subset(&eq_col_names)
-}
-
-/// Prefer row store when the fraction of required columns meets or exceeds
-/// `iceberg_engine_row_ratio_percent` of total table columns.
-fn check_column_ratio(
-    session: &SessionImpl,
-    scan: &LogicalIcebergIntermediateScan,
-    table: &TableCatalog,
-) -> bool {
-    let total_cols = table.columns().iter().filter(|c| !c.is_hidden()).count();
-    let required_count = scan
-        .core
-        .column_catalog
-        .iter()
-        .filter(|c| !c.is_hidden())
-        .count();
-    if total_cols == 0 {
-        return false;
-    }
-    let ratio_percent = (required_count * 100) / total_cols;
-    let threshold = session.config().iceberg_engine_row_ratio_percent();
-    ratio_percent >= threshold as usize
 }
