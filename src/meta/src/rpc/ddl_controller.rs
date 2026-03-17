@@ -1916,11 +1916,6 @@ impl DdlController {
             Ok(NonZeroUsize::new(resolved_parallelism).expect("parallelism must be positive"))
         };
 
-        let default_adaptive_parallelism_strategy = self
-            .env
-            .system_params_reader()
-            .await
-            .adaptive_parallelism_strategy();
         let has_backfill_override = specified_backfill_parallelism.is_some()
             || stream_ctx.backfill_adaptive_parallelism_strategy.is_some();
         let parallelism = if has_backfill_override {
@@ -1931,9 +1926,7 @@ impl DdlController {
         } else {
             resolve_effective_parallelism(
                 specified_parallelism,
-                stream_ctx
-                    .adaptive_parallelism_strategy
-                    .or(Some(default_adaptive_parallelism_strategy)),
+                stream_ctx.adaptive_parallelism_strategy,
             )?
         };
         let actor_graph_builder = ActorGraphBuilder::new(id, complete_graph, parallelism)?;
