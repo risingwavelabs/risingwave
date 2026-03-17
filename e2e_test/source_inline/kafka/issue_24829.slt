@@ -47,7 +47,7 @@ drop materialized view txn_mv_24829;
 
 # --- batch scan path ---
 # Direct SELECT from source uses batch kafka scan. The batch executor sets
-# for_backfill=true in SourceCtrlOpts, which enables partition EOF on the Kafka
+# for_backfill_and_batch=true in SourceCtrlOpts, which enables partition EOF on the Kafka
 # consumer. Without the fix, the batch scan also hangs indefinitely because the
 # consumer waits for a message at stop_offset - 1 (a control record).
 

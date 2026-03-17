@@ -170,7 +170,6 @@ pub async fn create_split_readers<P: SourceProperties>(
     opt: CreateSplitReaderOpt,
 ) -> Result<(BoxSourceChunkStream, CreateSplitReaderResult)> {
     let splits = splits.into_iter().map(P::Split::try_from).try_collect()?;
-    let source_ctx = source_ctx.clone();
     let mut res = CreateSplitReaderResult {
         backfill_info: HashMap::new(),
         latest_splits: None,
