@@ -433,6 +433,22 @@ message ListRefreshTableStatesResponse {
   repeated RefreshTableState states = 1;
 }
 
+message ListIcebergCompactionStatusRequest {}
+
+message ListIcebergCompactionStatusResponse {
+  message IcebergCompactionStatus {
+    uint32 sink_id = 1;
+    string task_type = 2;
+    uint64 trigger_interval_sec = 3;
+    uint64 trigger_snapshot_count = 4;
+    string schedule_state = 5;
+    optional uint64 next_compaction_after_sec = 6;
+    optional uint64 pending_snapshot_count = 7;
+    bool is_triggerable = 8;
+  }
+  repeated IcebergCompactionStatus statuses = 1;
+}
+
 service StreamManagerService {
   rpc Flush(FlushRequest) returns (FlushResponse);
   rpc Pause(PauseRequest) returns (PauseResponse);
@@ -458,6 +474,7 @@ service StreamManagerService {
   rpc ListCdcProgress(ListCdcProgressRequest) returns (ListCdcProgressResponse);
   rpc ListUnmigratedTables(ListUnmigratedTablesRequest) returns (ListUnmigratedTablesResponse);
   rpc ListRefreshTableStates(ListRefreshTableStatesRequest) returns (ListRefreshTableStatesResponse);
+  rpc ListIcebergCompactionStatus(ListIcebergCompactionStatusRequest) returns (ListIcebergCompactionStatusResponse);
 }
 
 // Below for cluster service.
