@@ -34,8 +34,8 @@ use tokio::sync::{Mutex, OwnedSemaphorePermit, oneshot};
 use tracing::Instrument;
 
 use super::{
-    Locations, ParallelismPolicy, ReplaceJobSplitPlan, ReschedulePolicy, ScaleControllerRef,
-    StreamFragmentGraph, UserDefinedFragmentBackfillOrder,
+    ParallelismPolicy, ReschedulePolicy, ScaleControllerRef, StreamFragmentGraph,
+    UserDefinedFragmentBackfillOrder,
 };
 use crate::barrier::{
     BarrierScheduler, Command, CreateStreamingJobCommandInfo, CreateStreamingJobType,
