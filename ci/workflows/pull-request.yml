@@ -249,6 +249,20 @@ steps:
     parallelism: 2
     retry: *auto-retry
 
+  - label: "end-to-end refill test"
+    command: "ci/scripts/e2e-refill-test.sh -p ci-dev -m ci-3streaming-2serving-3fe"
+    if: |
+      !(build.pull_request.labels includes "ci/pr/run-selected") && build.env("CI_STEPS") == null
+      || build.pull_request.labels includes "ci/run-e2e-refill-tests"
+      || build.env("CI_STEPS") =~ /(^|,)e2e-refill-tests?(,|$$)/
+    depends_on:
+      - "build"
+    plugins:
+      - docker-compose#v5.5.0: *docker-compose
+      - ./ci/plugins/upload-failure-logs
+    timeout_in_minutes: 20
+    retry: *auto-retry
+
   - label: "connector node integration test Java {{matrix.java_version}}"
     if: build.pull_request.labels includes "ci/run-connector-node-integration-tests" || build.env("CI_STEPS") =~ /(^|,)java-connector-node-integration-tests?(,|$$)/
     command: "ci/scripts/connector-node-integration-test.sh -p ci-dev -v {{matrix.java_version}}"
