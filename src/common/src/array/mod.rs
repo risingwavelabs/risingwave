@@ -350,6 +350,12 @@ impl<T: PrimitiveArrayItemType> From<PrimitiveArray<T>> for ArrayImpl {
     }
 }
 
+impl From<DecimalArray> for ArrayImpl {
+    fn from(arr: DecimalArray) -> Self {
+        Self::Decimal(arr)
+    }
+}
+
 impl From<Int256Array> for ArrayImpl {
     fn from(arr: Int256Array) -> Self {
         Self::Int256(arr)
