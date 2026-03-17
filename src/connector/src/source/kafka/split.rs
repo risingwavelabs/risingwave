@@ -35,7 +35,7 @@ pub struct KafkaSplit {
 
     /// When true, the split ID includes the topic name to distinguish partitions
     /// across multiple topics (used with `topic.regex`).
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub(crate) multi_topic: bool,
 }
 

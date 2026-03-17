@@ -430,4 +430,23 @@ mod test {
         assert!(!split.multi_topic);
         assert_eq!(crate::source::SplitMetaData::id(&split).as_ref(), "0");
     }
+
+    #[test]
+    fn test_kafka_split_serialization_skip_multi_topic_false() {
+        // Single-topic split should NOT serialize multi_topic field
+        let split = KafkaSplit::new(0, Some(100), None, "test".to_owned());
+        let json = serde_json::to_value(&split).unwrap();
+        assert!(!json.as_object().unwrap().contains_key("multi_topic"));
+
+        // Multi-topic split SHOULD serialize multi_topic field
+        let split_multi = KafkaSplit {
+            topic: "events.orders".to_owned(),
+            partition: 0,
+            start_offset: Some(100),
+            stop_offset: None,
+            multi_topic: true,
+        };
+        let json_multi = serde_json::to_value(&split_multi).unwrap();
+        assert_eq!(json_multi["multi_topic"], true);
+    }
 }
