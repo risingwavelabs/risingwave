@@ -82,6 +82,7 @@ where
 
     session_mgr: Arc<SM>,
     session: Option<Arc<SM::Session>>,
+    user_name: Option<String>,
 
     result_cache: HashMap<String, ResultCache<<SM::Session as Session>::ValuesStream>>,
     unnamed_prepare_statement: Option<<SM::Session as Session>::PreparedStatement>,
@@ -236,6 +237,7 @@ where
             state: PgProtocolState::Startup,
             session_mgr,
             session: None,
+            user_name: None,
             tls_context: tls_config
                 .as_ref()
                 .and_then(|e| build_ssl_ctx_from_config(e).ok()),
@@ -344,6 +346,7 @@ where
     /// - `None` means to terminate the current connection
     /// - `Some(())` means to continue processing the next message
     async fn do_process(&mut self, msg: FeMessage) -> Option<()> {
+        let user_name = self.user_name_for_msg(&msg);
         let span = self.root_span_for_msg(&msg);
         let weak_session = self
             .session
@@ -377,6 +380,7 @@ where
                 })
         };
 
+        let user_name_clone = user_name.clone();
         // Slow query log.
         let fut = async move {
             let period = *SLOW_QUERY_LOG_PERIOD;
@@ -391,6 +395,7 @@ where
                         elapsed += period;
                         tracing::info!(
                             target: PGWIRE_SLOW_QUERY_LOG,
+                            user_name = user_name_clone,
                             elapsed = %format_args!("{}ms", elapsed.as_millis()),
                             "slow query"
                         );
@@ -404,6 +409,7 @@ where
             if !tracing::Span::current().is_none() {
                 tracing::info!(
                     target: PGWIRE_QUERY_LOG,
+                    user_name,
                     status = "started",
                 );
             }
@@ -433,6 +439,7 @@ where
             if !tracing::Span::current().is_none() {
                 tracing::info!(
                     target: PGWIRE_QUERY_LOG,
+                    user_name,
                     status = if result.is_ok() { "ok" } else { "err" },
                     time = %format_args!("{}ms", elapsed.as_millis()),
                 );
@@ -678,11 +685,8 @@ where
             .get("database")
             .cloned()
             .unwrap_or_else(|| "dev".to_owned());
-        let user_name = msg
-            .config
-            .get("user")
-            .cloned()
-            .unwrap_or_else(|| "root".to_owned());
+        let user_name = Self::user_name_for_startup_msg(&msg);
+        self.user_name = Some(user_name.clone());
 
         let session = self
             .session_mgr
@@ -741,6 +745,24 @@ where
         self.session = Some(session);
         self.state = PgProtocolState::Regular;
         Ok(())
+    }
+
+    fn user_name_for_msg<'a>(&'a self, msg: &'a FeMessage) -> String {
+        match msg {
+            FeMessage::Startup(startup) => Self::user_name_for_startup_msg(startup),
+            _ => self
+                .user_name
+                .as_deref()
+                .map(|s| s.to_owned())
+                .unwrap_or_else(|| "".to_owned()),
+        }
+    }
+
+    fn user_name_for_startup_msg(msg: &FeStartupMessage) -> String {
+        msg.config
+            .get("user")
+            .cloned()
+            .unwrap_or_else(|| "root".to_owned())
     }
 
     async fn process_password_msg(&mut self, msg: FePasswordMessage) -> PsqlResult<()> {
