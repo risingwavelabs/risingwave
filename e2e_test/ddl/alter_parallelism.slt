@@ -129,7 +129,7 @@ create table t (v1 int);
 query T
 select parallelism from table_parallelism where name = 't';
 ----
-bounded(4)
+adaptive
 
 statement ok
 drop table t;
@@ -143,7 +143,7 @@ create table t (v1 int);
 query T
 select parallelism from table_parallelism where name = 't';
 ----
-bounded(4)
+adaptive
 
 statement ok
 drop table t;
