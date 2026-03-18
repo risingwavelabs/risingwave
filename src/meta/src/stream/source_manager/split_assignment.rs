@@ -547,10 +547,9 @@ where
             if disc_ids.len() == 1
                 && prev_split_ids_set.contains(legacy_id)
                 && !prev_split_ids_set.contains(&disc_ids[0])
+                && let Some(disc_split) = discovered_splits.get(&disc_ids[0])
             {
-                if let Some(disc_split) = discovered_splits.get(&disc_ids[0]) {
-                    migration_map.insert(legacy_id.clone(), disc_split.clone());
-                }
+                migration_map.insert(legacy_id.clone(), disc_split.clone());
             }
         }
 

@@ -200,20 +200,20 @@ impl<S: StateStore> SourceStateTableCommittedReader<'_, S> {
 
         // Fallback: try the legacy split ID format for upgrade migration.
         // e.g., Kafka split ID changed from "0" to "orders:0".
-        if let Some(legacy_id) = stream_source_split.legacy_split_id() {
-            if let Some(row) = self.handle.get(&legacy_id).await? {
-                tracing::info!(
-                    new_id = %stream_source_split.id(),
-                    legacy_id = %legacy_id,
-                    "recovered split state using legacy split ID"
-                );
-                return Ok(match row.datum_at(1) {
-                    Some(ScalarRefImpl::Jsonb(jsonb_ref)) => {
-                        Some(SplitImpl::restore_from_json(jsonb_ref.to_owned_scalar())?)
-                    }
-                    _ => unreachable!(),
-                });
-            }
+        if let Some(legacy_id) = stream_source_split.legacy_split_id()
+            && let Some(row) = self.handle.get(&legacy_id).await?
+        {
+            tracing::info!(
+                new_id = %stream_source_split.id(),
+                legacy_id = %legacy_id,
+                "recovered split state using legacy split ID"
+            );
+            return Ok(match row.datum_at(1) {
+                Some(ScalarRefImpl::Jsonb(jsonb_ref)) => {
+                    Some(SplitImpl::restore_from_json(jsonb_ref.to_owned_scalar())?)
+                }
+                _ => unreachable!(),
+            });
         }
 
         Ok(None)

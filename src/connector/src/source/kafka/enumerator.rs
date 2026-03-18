@@ -709,11 +709,12 @@ impl KafkaSplitEnumerator {
                 Ok(splits) => all_splits.extend(splits),
                 Err(e) if is_previously_known => {
                     // D6: Previously assigned topic became unreadable — retriable error.
-                    bail!(
+                    tracing::warn!(
                         "previously discovered topic '{}' became unavailable: {}",
                         topic,
                         e.as_report()
                     );
+                    continue;
                 }
                 Err(e) => {
                     // D7: New topic is unreadable — skip with warning.
