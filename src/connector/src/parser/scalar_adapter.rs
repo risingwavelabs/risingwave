@@ -185,7 +185,7 @@ impl ScalarAdapter {
                 for datum in list.iter() {
                     vec.push(match datum {
                         Some(ScalarRefImpl::Int256(s)) => Some(string_to_pg_numeric(&s.to_string())),
-                        Some(ScalarRefImpl::Decimal(s)) => Some(rw_numeric_to_pg_numeric(s)),
+                        Some(ScalarRefImpl::Decimal(s)) => Some(rw_numeric_to_pg_numeric(*s)),
                         Some(ScalarRefImpl::Utf8(s)) => Some(string_to_pg_numeric(s)),
                         None => None,
                         _ => {

@@ -44,11 +44,11 @@ pub enum Decimal {
     NaN,
 }
 
-pub type DeciRef = Decimal;
+pub type DeciRef<'a> = &'a Decimal;
 
 impl ZeroHeapSize for Decimal {}
 
-impl ToText for DeciRef {
+impl ToText for DeciRef<'_> {
     fn write<W: std::fmt::Write>(&self, f: &mut W) -> std::fmt::Result {
         write!(f, "{self}")
     }

@@ -35,7 +35,7 @@ impl FromIterator<Option<Decimal>> for DecimalArray {
         let iter = iter.into_iter();
         let mut builder = <Self as Array>::Builder::new(iter.size_hint().0);
         for i in iter {
-            builder.append(i);
+            builder.append(i.as_ref());
         }
         builder.finish()
     }
@@ -60,14 +60,14 @@ impl FromIterator<Decimal> for DecimalArray {
 impl Array for DecimalArray {
     type Builder = DecimalArrayBuilder;
     type OwnedItem = Decimal;
-    type RefItem<'a> = DeciRef;
+    type RefItem<'a> = DeciRef<'a>;
 
     unsafe fn raw_value_at_unchecked(&self, idx: usize) -> Self::RefItem<'_> {
-        unsafe { *self.data.get_unchecked(idx) }
+        unsafe { self.data.get_unchecked(idx) }
     }
 
     fn raw_iter(&self) -> impl ExactSizeIterator<Item = Self::RefItem<'_>> {
-        self.data.iter().cloned()
+        self.data.iter()
     }
 
     fn len(&self) -> usize {
@@ -134,7 +134,7 @@ impl ArrayBuilder for DecimalArrayBuilder {
         Self::new(capacity)
     }
 
-    fn append_n(&mut self, n: usize, value: Option<DeciRef>) {
+    fn append_n(&mut self, n: usize, value: Option<DeciRef<'_>>) {
         match value {
             Some(x) => {
                 self.bitmap.append_n(n, true);
@@ -186,10 +186,10 @@ mod tests {
         let v = (0..1000).map(Decimal::from).collect_vec();
         let mut builder = DecimalArrayBuilder::new(0);
         for i in &v {
-            builder.append(Some(*i));
+            builder.append(Some(i));
         }
         let a = builder.finish();
-        let res = v.iter().zip_eq_fast(a.iter()).all(|(a, b)| Some(*a) == b);
+        let res = v.iter().zip_eq_fast(a.iter()).all(|(a, b)| Some(a) == b);
         assert!(res);
     }
 
@@ -262,7 +262,7 @@ mod tests {
             .map(|v| {
                 let mut builder = DecimalArrayBuilder::new(0);
                 for i in v {
-                    builder.append(*i);
+                    builder.append(i.as_ref());
                 }
                 builder.finish()
             })

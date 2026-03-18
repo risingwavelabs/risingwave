@@ -576,7 +576,7 @@ fn on_field<D: MaybeData>(
                             // If the new_scale is lower than the current value (indicating a larger
                             // power of 10), digits will be dropped (as precision is lower)
                             let signed_bigint_bytes =
-                                rust_decimal_to_scaled_bigint(decimal, decimal_schema.scale)
+                                rust_decimal_to_scaled_bigint(*decimal, decimal_schema.scale)
                                     .map_err(FieldEncodeError::new)?;
                             Ok(Value::Decimal(apache_avro::Decimal::from(
                                 &signed_bigint_bytes,

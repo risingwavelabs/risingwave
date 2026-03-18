@@ -471,10 +471,10 @@ mod test {
         assert_eq!(original_array.len(), roundtrip_array.len());
 
         // PositiveInf -> max value -> PositiveInf
-        assert_eq!(roundtrip_array.value_at(0), Some(Decimal::PositiveInf));
+        assert_eq!(roundtrip_array.value_at(0), Some(&Decimal::PositiveInf));
 
         // NegativeInf -> min value -> NegativeInf
-        assert_eq!(roundtrip_array.value_at(1), Some(Decimal::NegativeInf));
+        assert_eq!(roundtrip_array.value_at(1), Some(&Decimal::NegativeInf));
 
         // NaN -> NULL -> None (NaN cannot roundtrip, becomes NULL in Arrow)
         assert_eq!(roundtrip_array.value_at(2), None);

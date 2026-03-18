@@ -233,11 +233,12 @@ fn datum_to_json_object(
             json!(v)
         }
         // Doris/Starrocks will convert out-of-bounds decimal and -INF, INF, NAN to NULL
-        (DataType::Decimal, ScalarRefImpl::Decimal(mut v)) => match &config.custom_json_type {
+        (DataType::Decimal, ScalarRefImpl::Decimal(v)) => match &config.custom_json_type {
             CustomJsonType::Doris(map) => {
                 let s = map.get(&field.name).unwrap();
+                let mut v = *v;
                 v.rescale(*s as u32);
-                json!(v.to_text())
+                json!((&v).to_text())
             }
             CustomJsonType::Es | CustomJsonType::None | CustomJsonType::StarRocks => {
                 json!(v.to_text())
