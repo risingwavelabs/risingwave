@@ -77,6 +77,7 @@ fn rewrite_to_table_scan(
     table: &Arc<TableCatalog>,
 ) -> Option<PlanRef> {
     let output_col_idx = scan
+        .hummock_rewrite
         .output_column_mapping
         .to_parts()
         .0
@@ -89,7 +90,7 @@ fn rewrite_to_table_scan(
         vec![],
         vec![],
         plan.ctx(),
-        scan.origin_condition.clone(),
+        scan.hummock_rewrite.origin_condition.clone(),
         scan.core.as_of.clone(),
     );
     Some(LogicalScan::from(table_scan).into())
@@ -122,7 +123,10 @@ fn check_point_lookup(
     }
 
     // Collect output column names that have equality-to-constant predicates.
-    let eq_input_refs = scan.origin_condition.get_eq_const_input_refs();
+    let eq_input_refs = scan
+        .hummock_rewrite
+        .origin_condition
+        .get_eq_const_input_refs();
     let eq_col_names: HashSet<&str> = eq_input_refs
         .iter()
         .filter_map(|input_ref| table.columns().get(input_ref.index()))

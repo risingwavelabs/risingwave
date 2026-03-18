@@ -39,6 +39,53 @@ use crate::utils::{
     ColIndexMapping, Condition, ExtractIcebergPredicateResult, extract_iceberg_predicate,
 };
 
+/// Predicate and column mapping needed when rewriting an Iceberg scan to a
+/// Hummock `LogicalScan`. Only consumed by `IcebergEngineStorageSelectionRule`;
+/// the normal Iceberg path ignores these fields.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HummockRewriteInfo {
+    /// The accumulated predicate over *table* column indices (not output columns),
+    /// built from the extracted portion of pushed-down predicates.
+    pub origin_condition: Condition,
+    /// Maps current output column indices → original table column indices.
+    pub output_column_mapping: ColIndexMapping,
+}
+
+impl HummockRewriteInfo {
+    pub fn identity(num_columns: usize) -> Self {
+        Self {
+            origin_condition: Condition::true_cond(),
+            output_column_mapping: ColIndexMapping::identity(num_columns),
+        }
+    }
+
+    /// Accumulate a new predicate, remapping it through the current column mapping.
+    pub fn add_predicate(&self, extracted_condition: Condition) -> Self {
+        let mut mapping = self.output_column_mapping.clone();
+        let remapped = extracted_condition.rewrite_expr(&mut mapping);
+        Self {
+            origin_condition: self.origin_condition.clone().and(remapped),
+            output_column_mapping: mapping,
+        }
+    }
+
+    /// Prune columns: compose the column mapping so that the new output indices
+    /// still map back to the original table column indices.
+    pub fn prune_columns(&self, required_cols: &[usize]) -> Self {
+        let map = required_cols
+            .iter()
+            .map(|&idx| Some(self.output_column_mapping.map(idx)))
+            .collect();
+        Self {
+            origin_condition: self.origin_condition.clone(),
+            output_column_mapping: ColIndexMapping::new(
+                map,
+                self.output_column_mapping.target_size(),
+            ),
+        }
+    }
+}
+
 /// `LogicalIcebergIntermediateScan` is an intermediate plan node used during optimization
 /// of Iceberg scans. It accumulates predicates and column pruning information before
 /// being converted to the final `LogicalIcebergScan` with delete file anti-joins.
@@ -56,15 +103,8 @@ use crate::utils::{
 pub struct LogicalIcebergIntermediateScan {
     pub base: PlanBase<Logical>,
     pub core: generic::Source,
-    // iceberg_predicate and origin_condition are same expression but in different forms.
-    // They will be added together during predicate pushdown. The input index in origin_condition
-    // is based on table columns rather than output columns, and the column mapping is stored in output_column_mapping.
     #[educe(Hash(ignore))]
     pub iceberg_predicate: Predicate,
-    #[educe(Hash(ignore))]
-    pub origin_condition: Condition,
-    #[educe(Hash(ignore))]
-    pub output_column_mapping: ColIndexMapping,
     pub time_travel_info: IcebergTimeTravelInfo,
     /// For Iceberg engine tables: maps source column name → target Hummock `DataType`.
     /// This remapping is applied to the output schema so that the intermediate scan's
@@ -73,6 +113,9 @@ pub struct LogicalIcebergIntermediateScan {
     /// Empty for non-engine-table Iceberg sources.
     #[educe(Hash(ignore))]
     pub table_column_type_mapping: HashMap<String, DataType>,
+    /// Info needed only when rewriting to a Hummock row-store scan.
+    #[educe(Hash(ignore))]
+    pub hummock_rewrite: HummockRewriteInfo,
 }
 
 impl Eq for LogicalIcebergIntermediateScan {}
@@ -93,17 +136,16 @@ impl LogicalIcebergIntermediateScan {
                 col.column_desc.data_type = target_type.clone();
             }
         }
-        let output_column_mapping = ColIndexMapping::identity(core.column_catalog.len());
+        let hummock_rewrite = HummockRewriteInfo::identity(core.column_catalog.len());
         let base = PlanBase::new_logical_with_core(&core);
         assert!(logical_source.output_exprs.is_none());
         LogicalIcebergIntermediateScan {
             base,
             core,
             iceberg_predicate: Predicate::AlwaysTrue,
-            origin_condition: Condition::true_cond(),
-            output_column_mapping,
             time_travel_info,
             table_column_type_mapping,
+            hummock_rewrite,
         }
     }
 
@@ -120,13 +162,9 @@ impl LogicalIcebergIntermediateScan {
         iceberg_predicate: Predicate,
         extracted_condition: Condition,
     ) -> Self {
-        let new_predicate = self.iceberg_predicate.clone().and(iceberg_predicate);
-        let extracted_condition =
-            extracted_condition.rewrite_expr(&mut self.output_column_mapping.clone());
-        let new_condition = self.origin_condition.clone().and(extracted_condition);
         LogicalIcebergIntermediateScan {
-            iceberg_predicate: new_predicate,
-            origin_condition: new_condition,
+            iceberg_predicate: self.iceberg_predicate.clone().and(iceberg_predicate),
+            hummock_rewrite: self.hummock_rewrite.add_predicate(extracted_condition),
             ..self.clone()
         }
     }
@@ -150,21 +188,13 @@ impl LogicalIcebergIntermediateScan {
 
         let base = PlanBase::new_logical_with_core(&core);
 
-        let map = required_cols
-            .iter()
-            .map(|&idx| Some(self.output_column_mapping.map(idx)))
-            .collect();
-        let new_output_column_mapping =
-            ColIndexMapping::new(map, self.output_column_mapping.target_size());
-
         LogicalIcebergIntermediateScan {
             base,
             core,
             iceberg_predicate: self.iceberg_predicate.clone(),
-            origin_condition: self.origin_condition.clone(),
-            output_column_mapping: new_output_column_mapping,
             time_travel_info: self.time_travel_info.clone(),
             table_column_type_mapping: self.table_column_type_mapping.clone(),
+            hummock_rewrite: self.hummock_rewrite.prune_columns(required_cols),
         }
     }
 }
