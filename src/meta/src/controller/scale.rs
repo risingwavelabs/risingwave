@@ -20,6 +20,7 @@ use anyhow::anyhow;
 use itertools::Itertools;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{FragmentTypeFlag, FragmentTypeMask, TableId};
+#[cfg(debug_assertions)]
 use risingwave_common::hash::VnodeBitmapExt;
 use risingwave_common::id::JobId;
 use risingwave_common::system_param::AdaptiveParallelismStrategy;
