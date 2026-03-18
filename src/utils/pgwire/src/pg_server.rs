@@ -550,6 +550,10 @@ mod tests {
         fn check_idle_in_transaction_timeout(&self) -> PsqlResult<()> {
             Ok(())
         }
+
+        fn user(&self) -> String {
+            "mock".to_owned()
+        }
     }
 
     async fn do_test_query(bind_addr: impl Into<String>, pg_config: impl Into<String>) {
