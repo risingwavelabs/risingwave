@@ -41,6 +41,18 @@ use crate::sink::{Result, Sink, SinkParam, SinkWriterParam};
 
 pub const POSTGRES_SINK: &str = "postgres";
 
+const CHECK_FOREIGN_KEY_SQL: &str = r#"
+    SELECT EXISTS (
+        SELECT 1
+        FROM pg_constraint c
+        JOIN pg_class t ON t.oid = c.conrelid
+        JOIN pg_namespace n ON n.oid = t.relnamespace
+        WHERE n.nspname = $1
+          AND t.relname = $2
+          AND c.contype = 'f'
+    )
+"#;
+
 #[serde_as]
 #[derive(Clone, Debug, Deserialize)]
 pub struct PostgresConfig {
@@ -105,6 +117,45 @@ fn default_max_batch_rows() -> usize {
 
 fn default_schema() -> String {
     "public".to_owned()
+}
+
+fn tcp_keepalive_from_config(config: &PostgresConfig) -> Option<TcpKeepaliveConfig> {
+    if config.tcp_keepalive_enable {
+        config
+            .tcp_keepalive
+            .clone()
+            .or_else(|| Some(TcpKeepaliveConfig::default()))
+    } else {
+        None
+    }
+}
+
+async fn ensure_no_foreign_key(config: &PostgresConfig) -> Result<()> {
+    let client = create_pg_client(
+        &config.user,
+        &config.password,
+        &config.host,
+        &config.port.to_string(),
+        &config.database,
+        &config.ssl_mode,
+        &config.ssl_root_cert,
+        tcp_keepalive_from_config(config),
+    )
+    .await?;
+
+    let has_foreign_key = client
+        .query_one(CHECK_FOREIGN_KEY_SQL, &[&config.schema, &config.table])
+        .await
+        .context("failed to check foreign key constraints")?
+        .get::<_, bool>(0);
+
+    if has_foreign_key {
+        return Err(SinkError::Config(anyhow!(
+            "Postgres sink does not support target tables with foreign key constraints"
+        )));
+    }
+
+    Ok(())
 }
 
 impl PostgresConfig {
@@ -181,6 +232,8 @@ impl Sink for PostgresSink {
                 "Primary key not defined for upsert Postgres sink (please define in `primary_key` field)"
             )));
         }
+
+        ensure_no_foreign_key(&self.config).await?;
 
         // Verify our sink schema is compatible with Postgres
         {
@@ -304,13 +357,9 @@ impl PostgresSinkWriter {
         pk_indices: Vec<usize>,
         is_append_only: bool,
     ) -> Result<Self> {
-        let tcp_keepalive = if config.tcp_keepalive_enable {
-            config
-                .tcp_keepalive
-                .or_else(|| Some(TcpKeepaliveConfig::default()))
-        } else {
-            None
-        };
+        ensure_no_foreign_key(&config).await?;
+
+        let tcp_keepalive = tcp_keepalive_from_config(&config);
 
         let client = create_pg_client(
             &config.user,
