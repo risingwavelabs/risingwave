@@ -116,6 +116,10 @@ pub struct RwConfig {
 pub struct RpcClientConfig {
     #[serde(default = "default::developer::rpc_client_connect_timeout_secs")]
     pub connect_timeout_secs: u64,
+    /// Maximum concurrency when setting up an RPC client pool.
+    /// Set to 0 to keep the previous unlimited behavior.
+    #[serde(default = "default::developer::rpc_client_pool_setup_concurrency")]
+    pub pool_setup_concurrency: usize,
 }
 
 pub use risingwave_common_metrics::MetricLevel;
@@ -368,6 +372,10 @@ pub mod default {
 
         pub fn rpc_client_connect_timeout_secs() -> u64 {
             5
+        }
+
+        pub fn rpc_client_pool_setup_concurrency() -> usize {
+            0
         }
 
         pub fn iceberg_list_interval_sec() -> u64 {
