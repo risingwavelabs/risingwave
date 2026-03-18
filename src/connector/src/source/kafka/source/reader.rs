@@ -43,15 +43,16 @@ pub struct KafkaSplitReader {
     consumer: StreamConsumer<RwConsumerContext>,
     offsets: HashMap<SplitId, (Option<i64>, Option<i64>)>,
     backfill_info: HashMap<SplitId, BackfillInfo>,
+    /// Maps `(topic, partition)` → `SplitId` for resolving the canonical split ID
+    /// from a consumed Kafka message. Also serves as the dedup set to prevent
+    /// duplicate `(topic, partition)` entries in the TPL (e.g., after risectl changes).
+    split_id_map: HashMap<(String, i32), SplitId>,
     splits: Vec<KafkaSplit>,
     sync_call_timeout: Duration,
     bytes_per_second: usize,
     max_num_messages: usize,
     parser_config: ParserConfig,
     source_ctx: SourceContextRef,
-    /// Whether consuming from multiple topics (topic.regex mode).
-    /// When true, split IDs include topic name as `{topic}:{partition}`.
-    multi_topic: bool,
 }
 
 #[async_trait]
@@ -110,7 +111,21 @@ impl SplitReader for KafkaSplitReader {
 
         let mut offsets = HashMap::new();
         let mut backfill_info = HashMap::new();
+        let mut split_id_map: HashMap<(String, i32), SplitId> = HashMap::new();
+
         for split in splits.clone() {
+            let key = (split.topic.clone(), split.partition);
+            // Dedup by (topic, partition) — keeps the first split if duplicates exist
+            // (defensive against risectl producing old+new split pairs).
+            if split_id_map.contains_key(&key) {
+                tracing::warn!(
+                    topic = %split.topic,
+                    partition = split.partition,
+                    "duplicate (topic, partition) in splits, skipping"
+                );
+                continue;
+            }
+            split_id_map.insert(key, split.id());
             offsets.insert(split.id(), (split.start_offset, split.stop_offset));
 
             if let Some(offset) = split.start_offset {
@@ -144,11 +159,8 @@ impl SplitReader for KafkaSplitReader {
                 );
             }
         }
-        let multi_topic = splits.first().is_some_and(|s| s.multi_topic);
         tracing::info!(
             topic = properties.common.topic,
-            topic_regex = ?properties.common.topic_regex,
-            multi_topic = multi_topic,
             source_name = source_ctx.source_name,
             fragment_id = %source_ctx.fragment_id,
             source_id = %source_ctx.source_id,
@@ -177,6 +189,7 @@ impl SplitReader for KafkaSplitReader {
         Ok(Self {
             consumer,
             offsets,
+            split_id_map,
             splits,
             backfill_info,
             bytes_per_second,
@@ -184,7 +197,6 @@ impl SplitReader for KafkaSplitReader {
             max_num_messages,
             parser_config,
             source_ctx,
-            multi_topic,
         })
     }
 
@@ -222,6 +234,18 @@ impl SplitReader for KafkaSplitReader {
 }
 
 impl KafkaSplitReader {
+    /// Resolve the canonical `SplitId` for a consumed message's `(topic, partition)`.
+    fn resolve_split_id(&self, topic: &str, partition: i32) -> &SplitId {
+        self.split_id_map
+            .get(&(topic.to_owned(), partition))
+            .unwrap_or_else(|| {
+                panic!(
+                    "BUG: received message from unassigned (topic={}, partition={})",
+                    topic, partition
+                )
+            })
+    }
+
     #[try_stream(ok = Vec<SourceMessage>, error = crate::error::ConnectorError)]
     async fn into_data_stream(self) {
         if self.offsets.values().all(|(start_offset, stop_offset)| {
@@ -257,7 +281,6 @@ impl KafkaSplitReader {
             )
         });
 
-        let multi_topic = self.multi_topic;
         let mut latest_message_id_metrics: HashMap<String, LabelGuardedIntGauge> = HashMap::new();
 
         #[for_await]
@@ -266,20 +289,17 @@ impl KafkaSplitReader {
                 .into_iter()
                 .collect::<std::result::Result<_, KafkaError>>()?;
 
-            let mut split_msg_offsets: HashMap<String, i64> = HashMap::new();
+            let mut split_msg_offsets: HashMap<SplitId, i64> = HashMap::new();
 
             for msg in &msgs {
-                let split_id = if multi_topic {
-                    format!("{}:{}", msg.topic(), msg.partition())
-                } else {
-                    msg.partition().to_string()
-                };
+                let split_id = self.resolve_split_id(msg.topic(), msg.partition()).clone();
                 split_msg_offsets.insert(split_id, msg.offset());
             }
 
             for (split_id, offset) in &split_msg_offsets {
+                let split_id_str: String = split_id.as_ref().into();
                 latest_message_id_metrics
-                    .entry(split_id.clone())
+                    .entry(split_id_str.clone())
                     .or_insert_with(|| {
                         self.source_ctx
                             .metrics
@@ -288,7 +308,7 @@ impl KafkaSplitReader {
                                 // source name is not available here
                                 &self.source_ctx.source_id.to_string(),
                                 &self.source_ctx.actor_id.to_string(),
-                                split_id,
+                                &split_id_str,
                             ])
                     })
                     .set(*offset);
@@ -301,8 +321,9 @@ impl KafkaSplitReader {
                     Some(payload) => payload.len(),
                 };
                 num_messages += 1;
+                let split_id = self.resolve_split_id(msg.topic(), msg.partition()).clone();
                 let source_message =
-                    SourceMessage::from_kafka_message(&msg, require_message_header, multi_topic);
+                    SourceMessage::from_kafka_message(&msg, split_id, require_message_header);
                 let split_id = source_message.split_id.clone();
                 res.push(source_message);
 

@@ -948,6 +948,16 @@ impl StreamManagerService for StreamServiceImpl {
             .run_command(database_id, Command::Pause)
             .await?;
 
+        // Normalize topic/topic.regex: setting one should clear the other.
+        let mut changed_props = request.changed_props.clone();
+        if changed_props.contains_key("topic.regex") {
+            // Setting topic.regex → clear topic (they are mutually exclusive).
+            changed_props.entry("topic".to_owned()).or_default();
+        } else if changed_props.get("topic").is_some_and(|v| !v.is_empty()) {
+            // Setting a non-empty topic → clear topic.regex.
+            changed_props.entry("topic.regex".to_owned()).or_default();
+        }
+
         // Step 2: Update catalog and get the new properties
         let result = async {
             let secret_manager = LocalSecretManager::global();
@@ -957,7 +967,7 @@ impl StreamManagerService for StreamServiceImpl {
                 .catalog_controller
                 .update_source_props_by_source_id(
                     source_id.into(),
-                    request.changed_props.clone().into_iter().collect(),
+                    changed_props.clone().into_iter().collect(),
                     request.changed_secret_refs.clone().into_iter().collect(),
                     true, // risectl admin operation skips alter-on-fly check
                 )

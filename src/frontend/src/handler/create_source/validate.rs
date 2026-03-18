@@ -254,7 +254,7 @@ pub fn validate_compatibility(
         // Check both "topic" and "kafka.topic" (legacy alias used by some tests/users).
         let has_topic = props.get("topic").is_some_and(|t| !t.is_empty())
             || props.get("kafka.topic").is_some_and(|t| !t.is_empty());
-        let has_regex = props.contains_key("topic.regex");
+        let has_regex = props.get("topic.regex").is_some_and(|p| !p.is_empty());
 
         // Only validate conflict and regex syntax here. We intentionally skip
         // the "neither set" check because topic may come from a secret reference

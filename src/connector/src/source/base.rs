@@ -818,6 +818,10 @@ impl SplitMetaData for SplitImpl {
         dispatch_split_impl!(self, |inner| inner.id())
     }
 
+    fn legacy_split_id(&self) -> Option<SplitId> {
+        dispatch_split_impl!(self, |inner| inner.legacy_split_id())
+    }
+
     fn encode_to_json(&self) -> JsonbVal {
         use serde_json::json;
         let inner = self.encode_to_json_inner().take();
@@ -926,6 +930,14 @@ impl Eq for SourceMessage {}
 /// The metadata of a split.
 pub trait SplitMetaData: Sized {
     fn id(&self) -> SplitId;
+
+    /// Returns the legacy split ID format for upgrade migration fallback.
+    /// Only connectors that changed their split ID format need to override this.
+    /// Returns `None` by default, meaning no legacy format exists.
+    fn legacy_split_id(&self) -> Option<SplitId> {
+        None
+    }
+
     fn encode_to_bytes(&self) -> Bytes {
         self.encode_to_json()
             .as_scalar_ref()

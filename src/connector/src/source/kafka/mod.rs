@@ -160,6 +160,13 @@ pub struct KafkaProperties {
     #[serde(rename = "upsert")]
     pub upsert: Option<String>,
 
+    /// A regex pattern for matching multiple Kafka topics.
+    /// When set, the source will consume from all topics matching this pattern.
+    /// New topics matching the pattern will be discovered dynamically.
+    /// Mutually exclusive with `topic` — exactly one must be specified.
+    #[serde(rename = "topic.regex")]
+    pub topic_regex: Option<String>,
+
     #[serde(flatten)]
     pub common: KafkaCommon,
 
@@ -222,13 +229,13 @@ impl KafkaProperties {
 
     /// Returns true if this source uses `topic.regex` for multi-topic consumption.
     pub fn is_multi_topic(&self) -> bool {
-        self.common.topic_regex.is_some()
+        self.topic_regex.as_deref().is_some_and(|p| !p.is_empty())
     }
 
     /// Validate topic configuration: exactly one of `topic` or `topic.regex` must be set.
     pub fn validate_topic_config(&self) -> ConnectorResult<()> {
         let has_topic = !self.common.topic.is_empty();
-        let has_regex = self.common.topic_regex.is_some();
+        let has_regex = self.topic_regex.as_deref().is_some_and(|p| !p.is_empty());
 
         match (has_topic, has_regex) {
             (false, false) => Err(anyhow::anyhow!(
@@ -357,7 +364,7 @@ mod test {
         let props: KafkaProperties =
             serde_json::from_value(serde_json::to_value(config).unwrap()).unwrap();
         assert!(props.is_multi_topic());
-        assert_eq!(props.common.topic_regex.as_deref(), Some("events\\..*"));
+        assert_eq!(props.topic_regex.as_deref(), Some("events\\..*"));
         assert!(props.common.topic.is_empty());
         assert!(props.validate_topic_config().is_ok());
     }
@@ -387,39 +394,27 @@ mod test {
     }
 
     #[test]
-    fn test_kafka_split_id_single_topic() {
+    fn test_kafka_split_id_format() {
         use crate::source::SplitMetaData;
+
+        // Split ID always uses "topic:partition" format (Decision D1).
         let split = KafkaSplit::new(0, None, None, "test_topic".to_owned());
-        assert_eq!(split.id().as_ref(), "0");
-    }
+        assert_eq!(split.id().as_ref(), "test_topic:0");
 
-    #[test]
-    fn test_kafka_split_id_multi_topic() {
-        use crate::source::SplitMetaData;
-        let split = KafkaSplit {
-            topic: "events.orders".to_owned(),
-            partition: 3,
-            start_offset: None,
-            stop_offset: None,
-            multi_topic: true,
-        };
-        assert_eq!(split.id().as_ref(), "events.orders:3");
+        // legacy_split_id returns the old format for migration.
+        assert_eq!(split.legacy_split_id().unwrap().as_ref(), "0");
 
-        // Different topic same partition should have different split ID
-        let split2 = KafkaSplit {
-            topic: "events.users".to_owned(),
-            partition: 3,
-            start_offset: None,
-            stop_offset: None,
-            multi_topic: true,
-        };
-        assert_ne!(split.id(), split2.id());
-        assert_eq!(split2.id().as_ref(), "events.users:3");
+        // Different topic same partition should have different split ID.
+        let split2 = KafkaSplit::new(3, None, None, "events.orders".to_owned());
+        let split3 = KafkaSplit::new(3, None, None, "events.users".to_owned());
+        assert_ne!(split2.id(), split3.id());
+        assert_eq!(split2.id().as_ref(), "events.orders:3");
+        assert_eq!(split3.id().as_ref(), "events.users:3");
     }
 
     #[test]
     fn test_kafka_split_backward_compat_deserialization() {
-        // Old split without multi_topic field should deserialize with multi_topic=false
+        // Old checkpoint JSON (without multi_topic field) should deserialize fine.
         let json = serde_json::json!({
             "topic": "test",
             "partition": 0,
@@ -427,26 +422,9 @@ mod test {
             "stop_offset": null
         });
         let split: KafkaSplit = serde_json::from_value(json).unwrap();
-        assert!(!split.multi_topic);
-        assert_eq!(crate::source::SplitMetaData::id(&split).as_ref(), "0");
-    }
-
-    #[test]
-    fn test_kafka_split_serialization_skip_multi_topic_false() {
-        // Single-topic split should NOT serialize multi_topic field
-        let split = KafkaSplit::new(0, Some(100), None, "test".to_owned());
-        let json = serde_json::to_value(&split).unwrap();
-        assert!(!json.as_object().unwrap().contains_key("multi_topic"));
-
-        // Multi-topic split SHOULD serialize multi_topic field
-        let split_multi = KafkaSplit {
-            topic: "events.orders".to_owned(),
-            partition: 0,
-            start_offset: Some(100),
-            stop_offset: None,
-            multi_topic: true,
-        };
-        let json_multi = serde_json::to_value(&split_multi).unwrap();
-        assert_eq!(json_multi["multi_topic"], true);
+        assert_eq!(split.topic, "test");
+        assert_eq!(split.partition, 0);
+        // New id() always returns "topic:partition".
+        assert_eq!(crate::source::SplitMetaData::id(&split).as_ref(), "test:0");
     }
 }

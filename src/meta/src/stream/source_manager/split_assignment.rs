@@ -505,7 +505,7 @@ impl SourceManagerCore {
 /// - An example of how the shards can be like: <https://stackoverflow.com/questions/72272034/list-shard-show-more-shards-than-provisioned>
 pub fn reassign_splits<I, T>(
     fragment_id: FragmentId,
-    actor_splits: HashMap<I, Vec<T>>,
+    mut actor_splits: HashMap<I, Vec<T>>,
     discovered_splits: &BTreeMap<SplitId, T>,
     opts: SplitDiffOptions,
 ) -> Option<HashMap<I, Vec<T>>>
@@ -516,6 +516,60 @@ where
     // if no actors, return
     if actor_splits.is_empty() {
         return None;
+    }
+
+    // --- Upgrade migration: legacy_split_id fallback (Decision D10) ---
+    // For connectors that changed their split ID format (e.g., Kafka: "0" → "orders:0"),
+    // try to match prev splits to discovered splits via legacy_split_id().
+    // Only apply when the mapping is strictly 1-to-1 to avoid ambiguity.
+    let mut migrated = false;
+    {
+        // Build reverse map: legacy_id → list of discovered splits that claim it.
+        let mut legacy_to_discovered: HashMap<SplitId, Vec<SplitId>> = HashMap::new();
+        for (disc_id, disc_split) in discovered_splits {
+            if let Some(legacy_id) = disc_split.legacy_split_id() {
+                legacy_to_discovered
+                    .entry(legacy_id)
+                    .or_default()
+                    .push(disc_id.clone());
+            }
+        }
+
+        // Collect all prev split IDs for quick lookup.
+        let prev_split_ids_set: HashSet<SplitId> = actor_splits
+            .values()
+            .flat_map(|splits| splits.iter().map(SplitMetaData::id))
+            .collect();
+
+        // Build migration map: prev_id → discovered_split, only for 1-to-1 mappings.
+        let mut migration_map: HashMap<SplitId, T> = HashMap::new();
+        for (legacy_id, disc_ids) in &legacy_to_discovered {
+            if disc_ids.len() == 1
+                && prev_split_ids_set.contains(legacy_id)
+                && !prev_split_ids_set.contains(&disc_ids[0])
+            {
+                if let Some(disc_split) = discovered_splits.get(&disc_ids[0]) {
+                    migration_map.insert(legacy_id.clone(), disc_split.clone());
+                }
+            }
+        }
+
+        // Apply migration: replace matching splits in-place within actors.
+        if !migration_map.is_empty() {
+            tracing::info!(
+                %fragment_id,
+                migrations = ?migration_map.keys().collect::<Vec<_>>(),
+                "migrating splits from legacy to new ID format"
+            );
+            for splits in actor_splits.values_mut() {
+                for split in splits.iter_mut() {
+                    if let Some(new_split) = migration_map.get(&split.id()) {
+                        *split = new_split.clone();
+                        migrated = true;
+                    }
+                }
+            }
+        }
     }
 
     let prev_split_ids: HashSet<_> = actor_splits
@@ -553,12 +607,13 @@ where
         if dropped_splits.is_empty()
             && new_discovered_splits.is_empty()
             && !discovered_splits.is_empty()
+            && !migrated
         {
             return None;
         }
     } else {
         // if we do not support scale in, and no more splits are discovered, return
-        if new_discovered_splits.is_empty() && !discovered_splits.is_empty() {
+        if new_discovered_splits.is_empty() && !discovered_splits.is_empty() && !migrated {
             return None;
         }
     }

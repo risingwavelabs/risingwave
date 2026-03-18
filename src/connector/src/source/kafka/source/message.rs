@@ -24,8 +24,8 @@ use risingwave_pb::data::DataType as PbDataType;
 use risingwave_pb::data::data_type::TypeName as PbTypeName;
 
 use crate::parser::additional_columns::get_kafka_header_item_datatype;
-use crate::source::SourceMeta;
 use crate::source::base::SourceMessage;
+use crate::source::{SourceMeta, SplitId};
 
 #[derive(Debug, Clone)]
 pub struct KafkaMeta {
@@ -94,16 +94,15 @@ impl KafkaMeta {
 }
 
 impl SourceMessage {
+    /// Build a `SourceMessage` from a borrowed Kafka message.
+    ///
+    /// `split_id` is the pre-resolved canonical split ID (from `split_id_map`),
+    /// so the caller owns the mapping — we don't re-derive it here.
     pub fn from_kafka_message(
         message: &BorrowedMessage<'_>,
+        split_id: SplitId,
         require_header: bool,
-        multi_topic: bool,
     ) -> Self {
-        let split_id = if multi_topic {
-            format!("{}:{}", message.topic(), message.partition()).into()
-        } else {
-            message.partition().to_string().into()
-        };
         SourceMessage {
             // TODO(TaoWu): Possible performance improvement: avoid memory copying here.
             key: message.key().map(|p| p.to_vec()),

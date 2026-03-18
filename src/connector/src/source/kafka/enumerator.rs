@@ -63,12 +63,18 @@ pub enum KafkaEnumeratorOffset {
     None,
 }
 
+/// Selects which Kafka topics this source consumes from.
+pub enum KafkaTopicSelector {
+    /// A single fixed topic name.
+    Fixed(String),
+    /// A regex pattern matching multiple topics.
+    Regex { pattern: String, compiled: Regex },
+}
+
 pub struct KafkaSplitEnumerator {
     context: SourceEnumeratorContextRef,
     broker_address: String,
-    topic: String,
-    /// Compiled regex for multi-topic discovery. When set, `topic` is empty.
-    topic_regex: Option<Regex>,
+    selector: KafkaTopicSelector,
     client: Arc<KafkaConsumer>,
     start_offset: KafkaEnumeratorOffset,
 
@@ -77,6 +83,11 @@ pub struct KafkaSplitEnumerator {
 
     sync_call_timeout: Duration,
     high_watermark_metrics: HashMap<String, LabelGuardedIntGauge>,
+
+    /// Cached splits from the last successful discovery (regex mode only).
+    /// Used for disappearance protection: if a previously assigned topic becomes
+    /// unavailable, we return a retriable error instead of dropping the splits.
+    last_discovered_splits: Option<Vec<KafkaSplit>>,
 
     properties: KafkaProperties,
     config: rdkafka::ClientConfig,
@@ -103,11 +114,7 @@ impl KafkaSplitEnumerator {
         let res = admin
             .delete_groups(&group_ids, &AdminOptions::default())
             .await?;
-        tracing::debug!(
-            topic = self.topic,
-            ?fragment_ids,
-            "delete groups result: {res:?}"
-        );
+        tracing::debug!(?fragment_ids, "delete groups result: {res:?}");
         Ok(())
     }
 }
@@ -127,15 +134,17 @@ impl SplitEnumerator for KafkaSplitEnumerator {
         let common_props = &properties.common;
 
         let broker_address = properties.connection.brokers.clone();
-        let topic = common_props.topic.clone();
-        let topic_regex = common_props
-            .topic_regex
-            .as_deref()
-            .map(|pattern| {
-                Regex::new(pattern)
-                    .with_context(|| format!("invalid topic.regex pattern '{}'", pattern))
-            })
-            .transpose()?;
+        let selector = match properties.topic_regex.as_deref().filter(|p| !p.is_empty()) {
+            Some(pattern) => {
+                let compiled = Regex::new(pattern)
+                    .with_context(|| format!("invalid topic.regex pattern '{}'", pattern))?;
+                KafkaTopicSelector::Regex {
+                    pattern: pattern.to_owned(),
+                    compiled,
+                }
+            }
+            None => KafkaTopicSelector::Fixed(common_props.topic.clone()),
+        };
         config.set("bootstrap.servers", &broker_address);
         config.set("isolation.level", KAFKA_ISOLATION_LEVEL);
         if let Some(log_level) = read_kafka_log_level() {
@@ -184,24 +193,30 @@ impl SplitEnumerator for KafkaSplitEnumerator {
         Ok(Self {
             context,
             broker_address,
-            topic,
-            topic_regex,
+            selector,
             client: client.unwrap(),
             start_offset: scan_start_offset,
             stop_offset: KafkaEnumeratorOffset::None,
             sync_call_timeout: properties.common.sync_call_timeout,
             high_watermark_metrics: HashMap::new(),
+            last_discovered_splits: None,
             properties,
             config,
         })
     }
 
     async fn list_splits(&mut self) -> ConnectorResult<Vec<KafkaSplit>> {
-        if self.topic_regex.is_some() {
-            return self.list_splits_multi_topic().await;
+        match &self.selector {
+            KafkaTopicSelector::Regex { .. } => {
+                return self.list_splits_regex().await;
+            }
+            KafkaTopicSelector::Fixed(_) => {}
         }
 
-        let topic = self.topic.clone();
+        let topic = match &self.selector {
+            KafkaTopicSelector::Fixed(t) => t.clone(),
+            KafkaTopicSelector::Regex { .. } => unreachable!(),
+        };
         let topic_partitions = self.fetch_topic_partition(&topic).await.with_context(|| {
             format!(
                 "failed to fetch metadata from kafka ({})",
@@ -227,7 +242,6 @@ impl SplitEnumerator for KafkaSplitEnumerator {
                 partition,
                 start_offset: start_offsets.remove(&partition).unwrap(),
                 stop_offset: stop_offsets.remove(&partition).unwrap(),
-                multi_topic: false,
             })
             .collect();
 
@@ -313,7 +327,12 @@ impl KafkaSplitEnumerator {
         expect_start_timestamp_millis: Option<i64>,
         expect_stop_timestamp_millis: Option<i64>,
     ) -> ConnectorResult<Vec<KafkaSplit>> {
-        let topic = self.topic.clone();
+        let topic = match &self.selector {
+            KafkaTopicSelector::Fixed(t) => t.clone(),
+            KafkaTopicSelector::Regex { .. } => {
+                bail!("list_splits_batch is not supported for regex topic sources")
+            }
+        };
         let topic_partitions = self.fetch_topic_partition(&topic).await.with_context(|| {
             format!(
                 "failed to fetch metadata from kafka ({})",
@@ -384,8 +403,7 @@ impl KafkaSplitEnumerator {
                     partition: *partition,
                     start_offset: Some(start_offset),
                     stop_offset: Some(stop_offset),
-                    multi_topic: false,
-                }
+                    }
             })
             .collect::<Vec<KafkaSplit>>())
     }
@@ -525,38 +543,35 @@ impl KafkaSplitEnumerator {
 
     #[inline]
     fn report_high_watermark(&mut self, topic: &str, partition: i32, offset: i64) {
-        let partition_label = if self.topic_regex.is_some() {
-            format!("{}:{}", topic, partition)
-        } else {
-            partition.to_string()
-        };
+        // Always use "topic:partition" format, consistent with the new split ID format.
+        let label = format!("{}:{}", topic, partition);
         let high_watermark_metrics = self
             .high_watermark_metrics
-            .entry(partition_label.clone())
+            .entry(label.clone())
             .or_insert_with(|| {
                 self.context
                     .metrics
                     .high_watermark
-                    .with_guarded_label_values(&[
-                        &self.context.info.source_id.to_string(),
-                        &partition_label,
-                    ])
+                    .with_guarded_label_values(&[&self.context.info.source_id.to_string(), &label])
             });
         high_watermark_metrics.set(offset);
     }
 
     pub async fn check_reachability(&self) -> ConnectorResult<()> {
-        if self.topic_regex.is_some() {
-            // For regex mode, just check that we can reach the broker
-            let _ = self
-                .client
-                .fetch_metadata(None, self.sync_call_timeout)
-                .await?;
-        } else {
-            let _ = self
-                .client
-                .fetch_metadata(Some(self.topic.as_str()), self.sync_call_timeout)
-                .await?;
+        match &self.selector {
+            KafkaTopicSelector::Fixed(topic) => {
+                let _ = self
+                    .client
+                    .fetch_metadata(Some(topic.as_str()), self.sync_call_timeout)
+                    .await?;
+            }
+            KafkaTopicSelector::Regex { .. } => {
+                // For regex mode, just check that we can reach the broker.
+                let _ = self
+                    .client
+                    .fetch_metadata(None, self.sync_call_timeout)
+                    .await?;
+            }
         }
         Ok(())
     }
@@ -585,10 +600,12 @@ impl KafkaSplitEnumerator {
 
     /// Discover all topics matching the configured regex pattern.
     async fn fetch_topics_by_regex(&self) -> ConnectorResult<Vec<String>> {
-        let re = self
-            .topic_regex
-            .as_ref()
-            .expect("topic_regex must be set for multi-topic mode");
+        let re = match &self.selector {
+            KafkaTopicSelector::Regex { compiled, .. } => compiled,
+            KafkaTopicSelector::Fixed(_) => {
+                unreachable!("fetch_topics_by_regex called in Fixed mode")
+            }
+        };
 
         let metadata = self
             .client
@@ -628,42 +645,91 @@ impl KafkaSplitEnumerator {
     }
 
     /// List splits for all topics matching the regex pattern.
-    async fn list_splits_multi_topic(&mut self) -> ConnectorResult<Vec<KafkaSplit>> {
+    ///
+    /// Implements two key behaviors from the design:
+    /// - **D6 (disappearance protection)**: If a previously discovered topic becomes
+    ///   unavailable, returns a retriable error instead of dropping the splits.
+    /// - **D7 (new topic unreadable)**: Skips newly discovered topics that can't be
+    ///   read, logs a warning.
+    async fn list_splits_regex(&mut self) -> ConnectorResult<Vec<KafkaSplit>> {
         let topics = self.fetch_topics_by_regex().await?;
         let mut all_splits = Vec::new();
 
+        // Build the set of previously discovered topics for D6/D7 distinction.
+        // Collected as owned Strings to avoid borrowing self.last_discovered_splits.
+        let prev_topics: std::collections::HashSet<String> = self
+            .last_discovered_splits
+            .as_ref()
+            .into_iter()
+            .flat_map(|splits| splits.iter().map(|s| s.topic.clone()))
+            .collect();
+
+        // D6: Check if any previously discovered topic has disappeared from metadata.
+        if !prev_topics.is_empty() {
+            let new_topic_set: std::collections::HashSet<&str> =
+                topics.iter().map(|t| t.as_str()).collect();
+            for prev_topic in &prev_topics {
+                if !new_topic_set.contains(prev_topic.as_str()) {
+                    bail!(
+                        "previously discovered topic '{}' is no longer available; \
+                         will retry on next tick",
+                        prev_topic
+                    );
+                }
+            }
+        }
+
         for topic in &topics {
-            let partitions = match self.fetch_topic_partition(topic).await {
-                Ok(p) => p,
+            let is_previously_known = prev_topics.contains(topic);
+
+            // Wrap per-topic discovery so we can distinguish D6 vs D7 on failure.
+            let topic_splits: ConnectorResult<Vec<KafkaSplit>> = async {
+                let partitions = self.fetch_topic_partition(topic).await?;
+                let watermarks = self.get_watermarks(topic, &partitions).await?;
+                let mut start_offsets = self
+                    .fetch_start_offset(topic, &partitions, &watermarks)
+                    .await?;
+                let mut stop_offsets = self
+                    .fetch_stop_offset(topic, &partitions, &watermarks)
+                    .await?;
+
+                Ok(partitions
+                    .into_iter()
+                    .map(|partition| KafkaSplit {
+                        topic: topic.clone(),
+                        partition,
+                        start_offset: start_offsets.remove(&partition).unwrap(),
+                        stop_offset: stop_offsets.remove(&partition).unwrap(),
+                    })
+                    .collect())
+            }
+            .await;
+
+            match topic_splits {
+                Ok(splits) => all_splits.extend(splits),
+                Err(e) if is_previously_known => {
+                    // D6: Previously assigned topic became unreadable — retriable error.
+                    bail!(
+                        "previously discovered topic '{}' became unavailable: {}",
+                        topic,
+                        e.as_report()
+                    );
+                }
                 Err(e) => {
+                    // D7: New topic is unreadable — skip with warning.
                     tracing::warn!(
                         source_id = %self.context.info.source_id,
                         topic = topic,
                         error = %e.as_report(),
-                        "failed to fetch partitions for topic, skipping"
+                        "failed to enumerate new topic, skipping"
                     );
                     continue;
                 }
-            };
-
-            let watermarks = self.get_watermarks(topic, &partitions).await?;
-            let mut start_offsets = self
-                .fetch_start_offset(topic, &partitions, &watermarks)
-                .await?;
-            let mut stop_offsets = self
-                .fetch_stop_offset(topic, &partitions, &watermarks)
-                .await?;
-
-            for partition in partitions {
-                all_splits.push(KafkaSplit {
-                    topic: topic.clone(),
-                    partition,
-                    start_offset: start_offsets.remove(&partition).unwrap(),
-                    stop_offset: stop_offsets.remove(&partition).unwrap(),
-                    multi_topic: true,
-                });
             }
         }
+
+        // Update the cache for next tick's disappearance check.
+        self.last_discovered_splits = Some(all_splits.clone());
 
         Ok(all_splits)
     }

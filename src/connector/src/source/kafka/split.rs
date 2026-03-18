@@ -32,21 +32,18 @@ pub struct KafkaSplit {
     /// A better approach would be to make it **inclusive**. <https://github.com/risingwavelabs/risingwave/pull/16257>
     pub(crate) start_offset: Option<i64>,
     pub(crate) stop_offset: Option<i64>,
-
-    /// When true, the split ID includes the topic name to distinguish partitions
-    /// across multiple topics (used with `topic.regex`).
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub(crate) multi_topic: bool,
 }
 
 impl SplitMetaData for KafkaSplit {
     fn id(&self) -> SplitId {
-        if self.multi_topic {
-            format!("{}:{}", self.topic, self.partition).into()
-        } else {
-            // TODO: should avoid constructing a string every time
-            format!("{}", self.partition).into()
-        }
+        // Format: "topic:partition" — `:` is not a valid Kafka topic name character,
+        // so this is unambiguous. See Decision D1 & D2 in the design doc.
+        format!("{}:{}", self.topic, self.partition).into()
+    }
+
+    fn legacy_split_id(&self) -> Option<SplitId> {
+        // Return the old format "{partition}" for upgrade migration fallback.
+        Some(format!("{}", self.partition).into())
     }
 
     fn restore_from_json(value: JsonbVal) -> ConnectorResult<Self> {
@@ -75,7 +72,6 @@ impl KafkaSplit {
             partition,
             start_offset,
             stop_offset,
-            multi_topic: false,
         }
     }
 

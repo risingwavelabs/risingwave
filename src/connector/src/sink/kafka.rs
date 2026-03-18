@@ -273,9 +273,18 @@ impl EnforceSecret for KafkaConfig {
 
 impl KafkaConfig {
     pub fn from_btreemap(values: BTreeMap<String, String>) -> Result<Self> {
+        // Reject `topic.regex` before deserialization — sink does not support it.
+        if values.get("topic.regex").is_some_and(|p| !p.is_empty()) {
+            return Err(SinkError::Config(anyhow!(
+                "`topic.regex` is not supported for Kafka sink"
+            )));
+        }
+
         let config = serde_json::from_value::<KafkaConfig>(serde_json::to_value(values).unwrap())
             .map_err(|e| SinkError::Config(anyhow!(e)))?;
 
+        // KafkaCommon.topic has `#[serde(default)]` to support regex sources
+        // that omit `topic`. Kafka sink must always have a non-empty topic.
         if config.common.topic.is_empty() {
             return Err(SinkError::Config(anyhow!(
                 "`topic` must be specified for Kafka sink"
@@ -299,6 +308,7 @@ impl From<KafkaConfig> for KafkaProperties {
             scan_startup_mode: None,
             time_offset: None,
             upsert: None,
+            topic_regex: None,
             common: val.common,
             connection: val.connection,
             rdkafka_properties_common: val.rdkafka_properties_common,
@@ -781,6 +791,17 @@ mod test {
             "type".to_owned() => "upsert".to_owned(),
             "properties.retry.interval".to_owned() => "500miiinutes".to_owned(),  // invalid duration
         };
+        assert!(KafkaConfig::from_btreemap(properties).is_err());
+    }
+
+    #[test]
+    fn reject_topic_regex_for_kafka_sink() {
+        let properties: BTreeMap<String, String> = btreemap! {
+            "properties.bootstrap.server".to_owned() => "localhost:9092".to_owned(),
+            "topic".to_owned() => "test".to_owned(),
+            "topic.regex".to_owned() => "events\\..*".to_owned(),
+        };
+
         assert!(KafkaConfig::from_btreemap(properties).is_err());
     }
 

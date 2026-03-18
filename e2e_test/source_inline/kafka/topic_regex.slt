@@ -24,6 +24,16 @@ CREATE TABLE bad2 (id int) WITH (
 ) FORMAT PLAIN ENCODE JSON;
 
 # ============================================================
+# Test 3: Validation - topic or topic.regex must be set
+# ============================================================
+
+statement error either `topic` or `topic.regex` must be specified
+CREATE TABLE bad3 (id int) WITH (
+    ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+    scan.startup.mode = 'earliest'
+) FORMAT PLAIN ENCODE JSON;
+
+# ============================================================
 # Setup: create test topics for regex matching
 # ============================================================
 
