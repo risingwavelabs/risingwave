@@ -1330,6 +1330,14 @@ impl<'a> ComponentFragmentAligner<'a> {
         }
     }
 
+    pub(crate) fn new_persistent(
+        actor_template: &'a EnsembleActorTemplate,
+        actor_id_counter: &AtomicU32,
+    ) -> Self {
+        let mut actor_id_allocator = RenderActorIdAllocator::Persistent(actor_id_counter);
+        Self::new(actor_template, &mut actor_id_allocator)
+    }
+
     pub(crate) fn align_component_actor(
         &self,
         distribution_type: DistributionType,
