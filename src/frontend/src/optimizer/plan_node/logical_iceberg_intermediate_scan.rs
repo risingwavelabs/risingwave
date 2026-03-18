@@ -52,10 +52,12 @@ pub struct HummockRewriteInfo {
 }
 
 impl HummockRewriteInfo {
-    pub fn identity(num_columns: usize) -> Self {
+    /// Create with an initial source→table column mapping.
+    /// For non-engine iceberg sources (no associated table), pass an identity mapping.
+    pub fn new(source_to_table_mapping: ColIndexMapping) -> Self {
         Self {
             origin_condition: Condition::true_cond(),
-            output_column_mapping: ColIndexMapping::identity(num_columns),
+            output_column_mapping: source_to_table_mapping,
         }
     }
 
@@ -125,6 +127,11 @@ impl LogicalIcebergIntermediateScan {
         logical_source: &LogicalSource,
         time_travel_info: IcebergTimeTravelInfo,
         table_column_type_mapping: HashMap<String, DataType>,
+        // Maps source-column indices to Hummock table-column indices so that
+        // `HummockRewriteInfo` tracks predicates and projections in table
+        // index space. Pass `ColIndexMapping::identity(n)` when there is no
+        // associated Hummock table (e.g. standalone iceberg sources).
+        source_to_table_mapping: ColIndexMapping,
     ) -> Self {
         assert!(logical_source.core.is_iceberg_connector());
 
@@ -136,7 +143,7 @@ impl LogicalIcebergIntermediateScan {
                 col.column_desc.data_type = target_type.clone();
             }
         }
-        let hummock_rewrite = HummockRewriteInfo::identity(core.column_catalog.len());
+        let hummock_rewrite = HummockRewriteInfo::new(source_to_table_mapping);
         let base = PlanBase::new_logical_with_core(&core);
         assert!(logical_source.output_exprs.is_none());
         LogicalIcebergIntermediateScan {

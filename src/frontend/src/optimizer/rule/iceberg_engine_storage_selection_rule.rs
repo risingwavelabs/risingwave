@@ -12,14 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! When `iceberg_engine_storage_mode` is `auto`, this rule may rewrite
+//! When `iceberg_query_storage_mode` is `auto`, this rule may rewrite
 //! `LogicalIcebergIntermediateScan` (columnar Iceberg) to `LogicalScan` (row Hummock)
 //! for Iceberg engine tables.
 
 use std::collections::HashSet;
 use std::sync::Arc;
 
-use risingwave_common::session_config::IcebergEngineStorageMode;
+use risingwave_common::session_config::IcebergQueryStorageMode;
 
 use super::prelude::{PlanRef, *};
 use crate::TableCatalog;
@@ -37,7 +37,7 @@ impl InfallibleRule<Logical> for IcebergEngineStorageSelectionRule {
         let session = ctx.session_ctx();
 
         // Only apply when storage mode is auto.
-        if session.config().iceberg_engine_storage_mode() != IcebergEngineStorageMode::Auto {
+        if session.config().iceberg_query_storage_mode() != IcebergQueryStorageMode::Auto {
             return None;
         }
         let source_catalog = scan.source_catalog()?;
@@ -76,6 +76,8 @@ fn rewrite_to_table_scan(
     scan: &LogicalIcebergIntermediateScan,
     table: &Arc<TableCatalog>,
 ) -> Option<PlanRef> {
+    // output_column_mapping already maps to table-column indices (built at
+    // construction time), so we can use it and origin_condition directly.
     let output_col_idx = scan
         .hummock_rewrite
         .output_column_mapping
@@ -122,7 +124,7 @@ fn check_point_lookup(
         return false;
     }
 
-    // Collect output column names that have equality-to-constant predicates.
+    // origin_condition is already in table-column index space.
     let eq_input_refs = scan
         .hummock_rewrite
         .origin_condition

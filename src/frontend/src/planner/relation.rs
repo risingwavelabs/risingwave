@@ -21,7 +21,7 @@ use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::{
     ColumnCatalog, Engine, Field, RISINGWAVE_ICEBERG_ROW_ID, ROW_ID_COLUMN_NAME, Schema,
 };
-use risingwave_common::session_config::IcebergEngineStorageMode;
+use risingwave_common::session_config::IcebergQueryStorageMode;
 use risingwave_common::types::{DataType, Interval, ScalarImpl};
 use risingwave_connector::source::ConnectorProperties;
 use risingwave_connector::source::iceberg::IcebergTimeTravelInfo;
@@ -44,7 +44,7 @@ use crate::optimizer::plan_node::{
 };
 use crate::optimizer::property::Cardinality;
 use crate::planner::{PlanFor, Planner};
-use crate::utils::Condition;
+use crate::utils::{ColIndexMapping, Condition};
 
 const ERROR_WINDOW_SIZE_ARG: &str =
     "The size arg of window table function should be an interval literal.";
@@ -108,11 +108,11 @@ impl Planner {
         as_of: Option<AsOf>,
     ) -> Result<PlanRef> {
         let is_append_only = base_table.table_catalog.append_only;
-        let iceberg_engine_storage_mode = self
+        let iceberg_query_storage_mode = self
             .ctx()
             .session_ctx()
             .config()
-            .iceberg_engine_storage_mode();
+            .iceberg_query_storage_mode();
 
         enum PlanTarget {
             TableScan,
@@ -121,8 +121,8 @@ impl Planner {
         }
         let plan_target = match self.plan_for() {
             PlanFor::StreamIcebergEngineInternal => PlanTarget::TableScan,
-            PlanFor::BatchDql => match iceberg_engine_storage_mode {
-                IcebergEngineStorageMode::Hummock => PlanTarget::TableScan,
+            PlanFor::BatchDql => match iceberg_query_storage_mode {
+                IcebergQueryStorageMode::Hummock => PlanTarget::TableScan,
                 _ => PlanTarget::IntermediateScan,
             },
             PlanFor::Stream => {
@@ -232,6 +232,31 @@ impl Planner {
             })
             .collect_vec();
 
+        // Build source→table column index mapping for Hummock rewrite.
+        // Must be built before source_catalog is moved into Rc.
+        let table_col_index: HashMap<&str, usize> = base_table
+            .table_catalog
+            .columns
+            .iter()
+            .enumerate()
+            .map(|(i, c)| (c.name.as_str(), i))
+            .collect();
+        let source_to_table_mapping = ColIndexMapping::new(
+            source_catalog
+                .columns
+                .iter()
+                .map(|c| {
+                    let table_name = if c.name() == RISINGWAVE_ICEBERG_ROW_ID {
+                        ROW_ID_COLUMN_NAME
+                    } else {
+                        c.name()
+                    };
+                    table_col_index.get(table_name).copied()
+                })
+                .collect(),
+            base_table.table_catalog.columns.len(),
+        );
+
         let logical_source = LogicalSource::with_catalog(
             Rc::new(source_catalog),
             SourceNodeKind::CreateMViewOrBatch,
@@ -242,8 +267,11 @@ impl Planner {
             return Ok(LogicalProject::new(logical_source.into(), exprs).into());
         }
 
-        let logical_iceberg_intermediate_scan =
-            self.plan_iceberg_intermediate_scan(&logical_source, table_column_type_mapping)?;
+        let logical_iceberg_intermediate_scan = self.plan_iceberg_intermediate_scan(
+            &logical_source,
+            table_column_type_mapping,
+            source_to_table_mapping,
+        )?;
         Ok(LogicalProject::new(logical_iceberg_intermediate_scan, exprs).into())
     }
 
@@ -305,8 +333,12 @@ source: {:?}",
                 as_of,
             )?;
             if is_iceberg && !matches!(self.plan_for(), PlanFor::Stream) {
-                let intermediate_scan =
-                    self.plan_iceberg_intermediate_scan(&source, HashMap::new())?;
+                let num_cols = source.core.column_catalog.len();
+                let intermediate_scan = self.plan_iceberg_intermediate_scan(
+                    &source,
+                    HashMap::new(),
+                    ColIndexMapping::identity(num_cols),
+                )?;
                 Ok(intermediate_scan)
             } else {
                 Ok(source.into())
@@ -599,6 +631,7 @@ source: {:?}",
         &self,
         source: &LogicalSource,
         table_column_type_mapping: HashMap<String, DataType>,
+        source_to_table_mapping: ColIndexMapping,
     ) -> Result<PlanRef> {
         // If time travel is not specified, we use current timestamp to get the latest snapshot
         let timezone = self.ctx().get_session_timezone();
@@ -621,6 +654,7 @@ source: {:?}",
             source,
             time_travel_info,
             table_column_type_mapping,
+            source_to_table_mapping,
         );
         Ok(intermediate_scan.into())
     }

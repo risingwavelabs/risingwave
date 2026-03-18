@@ -20,7 +20,7 @@ use std::fmt::Formatter;
 use std::str::FromStr;
 
 #[derive(Copy, Default, Debug, Clone, PartialEq, Eq)]
-pub enum IcebergEngineStorageMode {
+pub enum IcebergQueryStorageMode {
     /// Decided by the optimizer.
     Auto,
 
@@ -32,7 +32,7 @@ pub enum IcebergEngineStorageMode {
     Hummock,
 }
 
-impl FromStr for IcebergEngineStorageMode {
+impl FromStr for IcebergQueryStorageMode {
     type Err = &'static str;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
@@ -48,7 +48,7 @@ impl FromStr for IcebergEngineStorageMode {
     }
 }
 
-impl std::fmt::Display for IcebergEngineStorageMode {
+impl std::fmt::Display for IcebergQueryStorageMode {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Auto => write!(f, "auto"),
