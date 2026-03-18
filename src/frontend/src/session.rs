@@ -1903,6 +1903,10 @@ impl Session for SessionImpl {
         }
         Ok(())
     }
+
+    fn user(&self) -> String {
+        self.user_name()
+    }
 }
 
 /// Returns row description of the statement
