@@ -1,4 +1,17 @@
 # Verify migrated parallelism after upgrading to the new cluster.
+#
+# Naming convention: t_{parallelism}{parallelism_for_table}{strategy}{strategy_for_table}
+#   parallelism (streaming_parallelism):                          d=default,      f=fixed(8)
+#   parallelism_for_table (streaming_parallelism_for_table):      d=default,      f=fixed(6)
+#   strategy (streaming_parallelism_strategy):                    d=default,      b=bounded(32),  r=ratio(0.5),  a=auto
+#   strategy_for_table (streaming_parallelism_strategy_for_table): d=default,     b=bounded(16),  r=ratio(0.5),  a=auto
+#
+# System strategy: ALTER SYSTEM SET adaptive_parallelism_strategy = 'BOUNDED(64)'
+#
+# After migration the new version shows the resolved strategy:
+#   - Fixed jobs display as bare numbers (e.g. "6" instead of "fixed(6)")
+#   - Adaptive jobs display the materialized strategy (e.g. "bounded(64)", "ratio(0.5)")
+#   - Auto/Full strategy resolves to "adaptive"
 
 query TT
 SELECT name, lower(parallelism)

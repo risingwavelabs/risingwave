@@ -1,3 +1,11 @@
+# Seed 64 tables covering the 2x2x4x4 matrix of legacy streaming parallelism parameters.
+#
+# Naming convention: t_{parallelism}{parallelism_for_table}{strategy}{strategy_for_table}
+#   parallelism (streaming_parallelism):                          d=default,      f=fixed(8)
+#   parallelism_for_table (streaming_parallelism_for_table):      d=default,      f=fixed(6)
+#   strategy (streaming_parallelism_strategy):                    d=default,      b=bounded(32),  r=ratio(0.5),  a=auto
+#   strategy_for_table (streaming_parallelism_strategy_for_table): d=default,     b=bounded(16),  r=ratio(0.5),  a=auto
+
 statement ok
 SET RW_IMPLICIT_FLUSH TO true;
 
