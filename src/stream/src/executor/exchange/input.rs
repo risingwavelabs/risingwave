@@ -13,12 +13,14 @@
 // limitations under the License.
 
 use std::pin::Pin;
+use std::sync::LazyLock;
 use std::task::{Context, Poll};
 
 use either::Either;
 use local_input::LocalInputStreamInner;
 use pin_project::pin_project;
 use risingwave_common::config::StreamingConfig;
+use risingwave_common::log::LogSuppressor;
 use risingwave_common::util::addr::{HostAddr, is_local_address};
 
 use super::permit::Receiver;
@@ -507,7 +509,15 @@ pub(crate) async fn new_inputs(
                 )
                 .await
                 {
-                    tracing::warn!(error = %e.as_report(), "barrier receiver task failed");
+                    static LOG_SUPPRESSOR: LazyLock<LogSuppressor> =
+                        LazyLock::new(|| LogSuppressor::per_minute(1));
+                    if let Ok(suppressed_count) = LOG_SUPPRESSOR.check() {
+                        tracing::warn!(
+                            error = %e.as_report(),
+                            suppressed_count,
+                            "barrier receiver task failed"
+                        );
+                    }
                 }
             });
         }
