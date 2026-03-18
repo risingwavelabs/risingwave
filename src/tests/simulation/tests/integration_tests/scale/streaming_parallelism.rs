@@ -57,6 +57,7 @@ async fn test_streaming_parallelism_set_some() -> Result<()> {
 #[tokio::test]
 async fn test_streaming_parallelism_set_zero() -> Result<()> {
     let mut cluster = Cluster::start(Configuration::for_scale()).await?;
+    let expected_parallelism = cluster.config().compute_nodes * cluster.config().compute_node_cores;
 
     let mut session = cluster.start_session();
     session.run("set streaming_parallelism=0;").await?;
@@ -65,7 +66,10 @@ async fn test_streaming_parallelism_set_zero() -> Result<()> {
     let materialize_fragment = cluster
         .locate_one_fragment([identity_contains("materialize")])
         .await?;
-    assert_eq!(materialize_fragment.inner.actors.len(), 4);
+    assert_eq!(
+        materialize_fragment.inner.actors.len(),
+        expected_parallelism
+    );
     Ok(())
 }
 
