@@ -23,6 +23,7 @@ use risingwave_connector::connector_common::{
 use risingwave_connector::source::kafka::private_link::{
     PRIVATELINK_ENDPOINT_KEY, insert_privatelink_broker_rewrite_map,
 };
+use risingwave_connector::source::kafka::{KAFKA_PROPS_BROKER_KEY, KAFKA_PROPS_BROKER_KEY_ALIAS};
 use risingwave_connector::{Get, GetKeyIter, WithPropertiesExt};
 use risingwave_pb::catalog::connection::Info as ConnectionInfo;
 use risingwave_pb::catalog::connection_params::PbConnectionType;
@@ -499,6 +500,113 @@ pub(crate) fn resolve_privatelink_in_with_option(
             .map_err(RwError::from)?;
     }
     Ok(None)
+}
+
+/// Resolves PrivateLink-related properties for ALTER operations on Kafka
+/// connection/source/sink.
+///
+/// Enforces that `broker.rewrite.endpoints` is never set directly by users.
+/// When `privatelink.endpoint` / `privatelink.targets` are provided, re-derives
+/// the rewrite map via `insert_privatelink_broker_rewrite_map` (same as CREATE).
+/// When only `bootstrap.server` is changed on a PrivateLink-enabled object,
+/// rejects the ALTER (the user must also supply privatelink inputs).
+///
+/// For non-Kafka objects (no privatelink keys touched and no existing rewrite map),
+/// this function is a no-op that simply computes the property delta.
+///
+/// Returns only the upserted properties (keys whose values differ from `old_props`).
+/// Key deletion is not expressed here; current ALTER syntax only supports SET.
+pub(crate) fn resolve_privatelink_for_alter(
+    old_props: &BTreeMap<String, String>,
+    merged_props: &BTreeMap<String, String>,
+    touched_set_keys: &std::collections::HashSet<String>,
+    touched_drop_keys: &std::collections::HashSet<String>,
+) -> RwResult<BTreeMap<String, String>> {
+    // Rule 1: Forbid direct set/drop of the internal derived field.
+    if touched_set_keys.contains(PRIVATE_LINK_BROKER_REWRITE_MAP_KEY)
+        || touched_drop_keys.contains(PRIVATE_LINK_BROKER_REWRITE_MAP_KEY)
+    {
+        return Err(RwError::from(ErrorCode::InvalidParameterValue(format!(
+            "'{}' is an internal field; use privatelink.endpoint / privatelink.targets instead",
+            PRIVATE_LINK_BROKER_REWRITE_MAP_KEY,
+        ))));
+    }
+
+    // Whether the user explicitly touched privatelink.endpoint or privatelink.targets.
+    let privatelink_input_changed = touched_set_keys.contains(PRIVATELINK_ENDPOINT_KEY)
+        || touched_set_keys.contains(PRIVATE_LINK_TARGETS_KEY)
+        || touched_drop_keys.contains(PRIVATELINK_ENDPOINT_KEY)
+        || touched_drop_keys.contains(PRIVATE_LINK_TARGETS_KEY);
+    // Whether the user explicitly touched properties.bootstrap.server (or its alias).
+    let bootstrap_server_changed = touched_set_keys.contains(KAFKA_PROPS_BROKER_KEY)
+        || touched_set_keys.contains(KAFKA_PROPS_BROKER_KEY_ALIAS)
+        || touched_drop_keys.contains(KAFKA_PROPS_BROKER_KEY)
+        || touched_drop_keys.contains(KAFKA_PROPS_BROKER_KEY_ALIAS);
+    // Whether the object currently has a PrivateLink broker rewrite map.
+    let object_has_privatelink = old_props.contains_key(PRIVATE_LINK_BROKER_REWRITE_MAP_KEY);
+
+    // Early return: nothing PrivateLink-related is involved. This makes the function
+    // a safe no-op for non-Kafka connectors and for Kafka ALTERs that only touch
+    // unrelated properties (e.g. sasl.password, client.id).
+    if !privatelink_input_changed && !bootstrap_server_changed && !object_has_privatelink {
+        let mut delta = BTreeMap::new();
+        for (k, v) in merged_props {
+            if old_props.get(k) != Some(v) {
+                delta.insert(k.clone(), v.clone());
+            }
+        }
+        return Ok(delta);
+    }
+
+    // Rule 2: Changing bootstrap.server on a PrivateLink-enabled object requires
+    // the user to also provide privatelink inputs so the rewrite map can be
+    // regenerated. Old raw fields (privatelink.endpoint / privatelink.targets)
+    // are not stored after CREATE, so we cannot reuse them.
+    if bootstrap_server_changed && object_has_privatelink && !privatelink_input_changed {
+        return Err(RwError::from(ErrorCode::InvalidParameterValue(
+            "changing properties.bootstrap.server on a PrivateLink-enabled object requires \
+             privatelink.endpoint and privatelink.targets to regenerate the broker rewrite map"
+                .to_owned(),
+        )));
+    }
+
+    let mut effective = merged_props.clone();
+
+    // Rule 3: If privatelink inputs are provided, re-derive broker.rewrite.endpoints.
+    // The user must provide *both* privatelink.endpoint and privatelink.targets in the
+    // same ALTER statement because old raw values are not stored after CREATE.
+    if privatelink_input_changed {
+        let endpoint = effective.remove(PRIVATELINK_ENDPOINT_KEY);
+        let has_targets = effective.contains_key(PRIVATE_LINK_TARGETS_KEY);
+
+        if !has_targets || endpoint.is_none() {
+            return Err(RwError::from(ErrorCode::InvalidParameterValue(
+                "both privatelink.endpoint and privatelink.targets must be provided together; \
+                 old values are not stored and cannot be reused"
+                    .to_owned(),
+            )));
+        }
+
+        // Remove old derived field before regenerating.
+        effective.remove(PRIVATE_LINK_BROKER_REWRITE_MAP_KEY);
+        // insert_privatelink_broker_rewrite_map will:
+        // - remove privatelink.targets from effective
+        // - validate broker count == target count
+        // - write broker.rewrite.endpoints JSON into effective
+        insert_privatelink_broker_rewrite_map(&mut effective, None, endpoint)
+            .map_err(RwError::from)?;
+    }
+
+    // Compute upsert delta: only keys whose values differ from old_props.
+    // Keys that exist in old_props but not in effective are NOT reported as removals;
+    // current ALTER syntax only supports SET, not DROP.
+    let mut delta = BTreeMap::new();
+    for (k, v) in &effective {
+        if old_props.get(k) != Some(v) {
+            delta.insert(k.clone(), v.clone());
+        }
+    }
+    Ok(delta)
 }
 
 impl TryFrom<&[SqlOption]> for WithOptions {

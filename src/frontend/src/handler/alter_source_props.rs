@@ -12,7 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::{BTreeMap, HashSet};
+
 use risingwave_common::id::{ConnectionId, SourceId};
+use risingwave_connector::connector_common::PRIVATE_LINK_TARGETS_KEY;
+use risingwave_connector::source::kafka::private_link::PRIVATELINK_ENDPOINT_KEY;
 use risingwave_pb::catalog::connection::Info::ConnectionParams;
 
 use super::RwPgResponse;
@@ -21,8 +25,12 @@ use crate::catalog::root_catalog::SchemaPath;
 use crate::error::{ErrorCode, Result};
 use crate::handler::{HandlerArgs, ObjectName, SqlOption, StatementType};
 use crate::session::SessionImpl;
-use crate::utils::resolve_connection_ref_and_secret_ref;
+use crate::utils::{resolve_connection_ref_and_secret_ref, resolve_privatelink_for_alter};
 use crate::{Binder, WithOptions};
+
+/// Keys that, when touched in an ALTER on a connection-backed source/sink,
+/// should be redirected to ALTER CONNECTION instead.
+const PRIVATELINK_KEYS: &[&str] = &[PRIVATE_LINK_TARGETS_KEY, PRIVATELINK_ENDPOINT_KEY];
 
 pub async fn handle_alter_table_connector_props(
     handler_args: HandlerArgs,
@@ -37,7 +45,7 @@ pub async fn handle_alter_table_connector_props(
     let user_name = &session.user_name();
     let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
 
-    let source_id = {
+    let (source_id, old_props, has_connection) = {
         let reader = session.env().catalog_reader().read_guard();
         let (table, schema_name) =
             reader.get_any_table_by_name(db_name, schema_path, &real_table_name)?;
@@ -66,10 +74,16 @@ pub async fn handle_alter_table_connector_props(
             associate_source_id
         );
 
-        associate_source_id
+        let (props, _secret_refs) = source_catalog.with_properties.clone().into_parts();
+        (
+            associate_source_id,
+            props,
+            source_catalog.connection_id.is_some(),
+        )
     };
 
-    handle_alter_source_props_inner(&session, alter_props, source_id).await?;
+    handle_alter_source_props_inner(&session, alter_props, source_id, &old_props, has_connection)
+        .await?;
 
     Ok(RwPgResponse::empty_result(StatementType::ALTER_TABLE))
 }
@@ -78,6 +92,8 @@ async fn handle_alter_source_props_inner(
     session: &SessionImpl,
     alter_props: Vec<SqlOption>,
     source_id: SourceId,
+    old_props: &BTreeMap<String, String>,
+    has_connection: bool,
 ) -> Result<()> {
     let meta_client = session.env().meta_client();
     let (resolved_with_options, _, connector_conn_ref) = resolve_connection_ref_and_secret_ref(
@@ -85,7 +101,7 @@ async fn handle_alter_source_props_inner(
         session,
         None,
     )?;
-    let (changed_props, changed_secret_refs) = resolved_with_options.into_parts();
+    let (user_set_props, changed_secret_refs) = resolved_with_options.into_parts();
     if connector_conn_ref.is_some() {
         return Err(ErrorCode::InvalidInputSyntax(
             "ALTER SOURCE CONNECTOR does not support CONNECTION".to_owned(),
@@ -93,8 +109,21 @@ async fn handle_alter_source_props_inner(
         .into());
     }
 
+    // If the source is backed by a CONNECTION, reject privatelink-related changes
+    // since those must be done via ALTER CONNECTION.
+    if has_connection {
+        for key in user_set_props.keys() {
+            if PRIVATELINK_KEYS.iter().any(|pk| pk == key) {
+                return Err(ErrorCode::InvalidInputSyntax(
+                    "PrivateLink properties are managed by the CONNECTION; use ALTER CONNECTION instead".to_owned(),
+                )
+                .into());
+            }
+        }
+    }
+
     // Validate cdc.source.wait.streaming.start.timeout if present
-    if let Some(timeout_value) = changed_props.get("cdc.source.wait.streaming.start.timeout")
+    if let Some(timeout_value) = user_set_props.get("cdc.source.wait.streaming.start.timeout")
         && timeout_value.parse::<u32>().is_err()
     {
         return Err(ErrorCode::InvalidConfigValue {
@@ -105,7 +134,7 @@ async fn handle_alter_source_props_inner(
     }
 
     // Validate debezium.max.queue.size if present
-    if let Some(queue_size_value) = changed_props.get("debezium.max.queue.size")
+    if let Some(queue_size_value) = user_set_props.get("debezium.max.queue.size")
         && queue_size_value.parse::<u32>().is_err()
     {
         return Err(ErrorCode::InvalidConfigValue {
@@ -114,6 +143,22 @@ async fn handle_alter_source_props_inner(
         }
         .into());
     }
+
+    // For inline sources (no connection), resolve privatelink and compute effective delta.
+    let touched_set_keys: HashSet<String> = user_set_props.keys().cloned().collect();
+    let touched_drop_keys: HashSet<String> = HashSet::new();
+
+    let mut merged_props = old_props.clone();
+    for (k, v) in &user_set_props {
+        merged_props.insert(k.clone(), v.clone());
+    }
+
+    let changed_props = resolve_privatelink_for_alter(
+        old_props,
+        &merged_props,
+        &touched_set_keys,
+        &touched_drop_keys,
+    )?;
 
     meta_client
         .alter_source_connector_props(
@@ -139,7 +184,7 @@ pub async fn handle_alter_source_connector_props(
     let user_name = &session.user_name();
     let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
 
-    let source_id = {
+    let (source_id, old_props, has_connection) = {
         let reader = session.env().catalog_reader().read_guard();
         let (source, schema_name) =
             reader.get_source_by_name(db_name, schema_path, &real_source_name)?;
@@ -161,10 +206,12 @@ pub async fn handle_alter_source_connector_props(
             &alter_props,
         )?;
 
-        source.id
+        let (props, _secret_refs) = source.with_properties.clone().into_parts();
+        (source.id, props, source.connection_id.is_some())
     };
 
-    handle_alter_source_props_inner(&session, alter_props, source_id).await?;
+    handle_alter_source_props_inner(&session, alter_props, source_id, &old_props, has_connection)
+        .await?;
 
     Ok(RwPgResponse::empty_result(StatementType::ALTER_SOURCE))
 }

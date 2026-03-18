@@ -188,6 +188,7 @@ KafkaConnection:
     required: true
     alias:
     - kafka.brokers
+    allow_alter_on_fly: true
   - name: properties.security.protocol
     field_type: String
     comments: |-
@@ -270,6 +271,7 @@ KafkaConnection:
     field_type: BTreeMap<String,String>
     comments: This is generated from `private_link_targets` and `private_link_endpoint` in frontend, instead of given by users.
     required: false
+    allow_alter_on_fly: true
   - name: aws.region
     field_type: String
     required: false

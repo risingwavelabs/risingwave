@@ -198,6 +198,7 @@ impl AwsAuthProps {
 #[derive(Debug, Clone, Deserialize, WithOptions, PartialEq, Hash, Eq)]
 pub struct KafkaConnectionProps {
     #[serde(rename = "properties.bootstrap.server", alias = "kafka.brokers")]
+    #[with_option(allow_alter_on_fly)]
     pub brokers: String,
 
     /// Security protocol used for RisingWave to communicate with Kafka brokers. Could be
@@ -309,6 +310,7 @@ pub struct KafkaPrivateLinkCommon {
     /// This is generated from `private_link_targets` and `private_link_endpoint` in frontend, instead of given by users.
     #[serde(rename = "broker.rewrite.endpoints")]
     #[serde_as(as = "Option<JsonString>")]
+    #[with_option(allow_alter_on_fly)]
     pub broker_rewrite_map: Option<BTreeMap<String, String>>,
 }
 
