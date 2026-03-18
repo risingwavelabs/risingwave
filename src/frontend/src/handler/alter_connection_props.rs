@@ -14,6 +14,7 @@
 
 use std::collections::{BTreeMap, HashSet};
 
+use risingwave_connector::source::kafka::{KAFKA_PROPS_BROKER_KEY, KAFKA_PROPS_BROKER_KEY_ALIAS};
 use risingwave_pb::catalog::connection::Info as ConnectionInfo;
 
 use super::RwPgResponse;
@@ -106,5 +107,13 @@ pub async fn handle_alter_connection_connector_props(
         )
         .await?;
 
-    Ok(RwPgResponse::empty_result(StatementType::ALTER_CONNECTION))
+    if user_set_props.contains_key(KAFKA_PROPS_BROKER_KEY)
+        || user_set_props.contains_key(KAFKA_PROPS_BROKER_KEY_ALIAS)
+    {
+        Ok(RwPgResponse::builder(StatementType::ALTER_CONNECTION)
+            .notice("changing properties.bootstrap.server may point to a different Kafka cluster and cause data inconsistency".to_owned())
+            .into())
+    } else {
+        Ok(RwPgResponse::empty_result(StatementType::ALTER_CONNECTION))
+    }
 }

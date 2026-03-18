@@ -17,6 +17,7 @@ use std::collections::HashSet;
 use pgwire::pg_response::StatementType;
 use risingwave_connector::connector_common::PRIVATE_LINK_TARGETS_KEY;
 use risingwave_connector::source::kafka::private_link::PRIVATELINK_ENDPOINT_KEY;
+use risingwave_connector::source::kafka::{KAFKA_PROPS_BROKER_KEY, KAFKA_PROPS_BROKER_KEY_ALIAS};
 use risingwave_sqlparser::ast::{ObjectName, SqlOption};
 
 use super::{HandlerArgs, RwPgResponse};
@@ -122,5 +123,13 @@ pub async fn handle_alter_sink_props(
         )
         .await?;
 
-    Ok(RwPgResponse::empty_result(StatementType::ALTER_SINK))
+    if user_set_props.contains_key(KAFKA_PROPS_BROKER_KEY)
+        || user_set_props.contains_key(KAFKA_PROPS_BROKER_KEY_ALIAS)
+    {
+        Ok(RwPgResponse::builder(StatementType::ALTER_SINK)
+            .notice("changing properties.bootstrap.server may point to a different Kafka cluster and cause data inconsistency".to_owned())
+            .into())
+    } else {
+        Ok(RwPgResponse::empty_result(StatementType::ALTER_SINK))
+    }
 }

@@ -17,6 +17,7 @@ use std::collections::{BTreeMap, HashSet};
 use risingwave_common::id::{ConnectionId, SourceId};
 use risingwave_connector::connector_common::PRIVATE_LINK_TARGETS_KEY;
 use risingwave_connector::source::kafka::private_link::PRIVATELINK_ENDPOINT_KEY;
+use risingwave_connector::source::kafka::{KAFKA_PROPS_BROKER_KEY, KAFKA_PROPS_BROKER_KEY_ALIAS};
 use risingwave_pb::catalog::connection::Info::ConnectionParams;
 
 use super::RwPgResponse;
@@ -82,10 +83,22 @@ pub async fn handle_alter_table_connector_props(
         )
     };
 
-    handle_alter_source_props_inner(&session, alter_props, source_id, &old_props, has_connection)
-        .await?;
+    let bootstrap_changed = handle_alter_source_props_inner(
+        &session,
+        alter_props,
+        source_id,
+        &old_props,
+        has_connection,
+    )
+    .await?;
 
-    Ok(RwPgResponse::empty_result(StatementType::ALTER_TABLE))
+    if bootstrap_changed {
+        Ok(RwPgResponse::builder(StatementType::ALTER_TABLE)
+            .notice("changing properties.bootstrap.server may point to a different Kafka cluster and cause data inconsistency".to_owned())
+            .into())
+    } else {
+        Ok(RwPgResponse::empty_result(StatementType::ALTER_TABLE))
+    }
 }
 
 async fn handle_alter_source_props_inner(
@@ -94,7 +107,7 @@ async fn handle_alter_source_props_inner(
     source_id: SourceId,
     old_props: &BTreeMap<String, String>,
     has_connection: bool,
-) -> Result<()> {
+) -> Result<bool> {
     let meta_client = session.env().meta_client();
     let (resolved_with_options, _, connector_conn_ref) = resolve_connection_ref_and_secret_ref(
         WithOptions::try_from(alter_props.as_ref() as &[SqlOption])?,
@@ -160,6 +173,9 @@ async fn handle_alter_source_props_inner(
         &touched_drop_keys,
     )?;
 
+    let bootstrap_changed = user_set_props.contains_key(KAFKA_PROPS_BROKER_KEY)
+        || user_set_props.contains_key(KAFKA_PROPS_BROKER_KEY_ALIAS);
+
     meta_client
         .alter_source_connector_props(
             source_id,
@@ -168,7 +184,8 @@ async fn handle_alter_source_props_inner(
             connector_conn_ref, // always None, keep the interface for future extension
         )
         .await?;
-    Ok(())
+
+    Ok(bootstrap_changed)
 }
 
 pub async fn handle_alter_source_connector_props(
@@ -210,10 +227,22 @@ pub async fn handle_alter_source_connector_props(
         (source.id, props, source.connection_id.is_some())
     };
 
-    handle_alter_source_props_inner(&session, alter_props, source_id, &old_props, has_connection)
-        .await?;
+    let bootstrap_changed = handle_alter_source_props_inner(
+        &session,
+        alter_props,
+        source_id,
+        &old_props,
+        has_connection,
+    )
+    .await?;
 
-    Ok(RwPgResponse::empty_result(StatementType::ALTER_SOURCE))
+    if bootstrap_changed {
+        Ok(RwPgResponse::builder(StatementType::ALTER_SOURCE)
+            .notice("changing properties.bootstrap.server may point to a different Kafka cluster and cause data inconsistency".to_owned())
+            .into())
+    } else {
+        Ok(RwPgResponse::empty_result(StatementType::ALTER_SOURCE))
+    }
 }
 
 /// Validates that the properties being altered don't conflict with properties set by a CONNECTION.
