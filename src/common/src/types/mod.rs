@@ -89,7 +89,7 @@ pub use self::list_type::ListType;
 pub use self::map_type::MapType;
 pub use self::native_type::*;
 pub use self::num256::{Int256, Int256Ref};
-pub use self::ops::{CheckedAdd, IsNegative};
+pub use self::ops::{CheckedAdd, CheckedNeg, IsNegative};
 pub use self::ordered::*;
 pub use self::ordered_float::{FloatExt, IntoOrdered};
 pub use self::scalar_impl::*;

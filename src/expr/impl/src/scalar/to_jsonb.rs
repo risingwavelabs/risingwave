@@ -139,7 +139,7 @@ impl ToJsonb for F64 {
     }
 }
 
-impl ToJsonb for DeciRef {
+impl ToJsonb for DeciRef<'_> {
     fn add_to(self, t: &DataType, builder: &mut Builder) -> Result<()> {
         let res: F64 = self
             .try_into()

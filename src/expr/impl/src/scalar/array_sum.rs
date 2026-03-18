@@ -35,17 +35,25 @@ fn array_sum_int8(list: ListRef<'_>) -> Result<Option<Decimal>> {
 #[function("array_sum(float8[]) -> float8")]
 #[function("array_sum(decimal[]) -> decimal")]
 #[function("array_sum(interval[]) -> interval")]
-fn array_sum<T>(list: ListRef<'_>) -> Result<Option<T>>
+fn array_sum<'a, T>(list: ListRef<'a>) -> Result<Option<T>>
 where
-    T: for<'a> TryFrom<ScalarRefImpl<'a>, Error = ArrayError>,
-    T: Default + From<T> + CheckedAdd<Output = T>,
+    // T: for<'a> TryFrom<ScalarRefImpl<'a>, Error = ArrayError>,
+    T: Default
+        + From<<T as risingwave_common::types::Scalar>::ScalarRefType<'a>>
+        + CheckedAdd<Output = T>
+        + risingwave_common::types::Scalar,
 {
-    array_sum_general::<T, T>(list)
+    array_sum_general::<T::ScalarRefType<'a>, T>(list)
 }
 
-fn array_sum_general<S, T>(list: ListRef<'_>) -> Result<Option<T>>
+// #[function("array_sum(decimal[]) -> decimal")]
+// fn array_sum_decimal(list: ListRef<'_>) -> Result<Option<Decimal>> {
+//     array_sum_general::<risingwave_common::types::DeciRef<'_>, Decimal>(list)
+// }
+
+fn array_sum_general<'a, S, T>(list: ListRef<'a>) -> Result<Option<T>>
 where
-    S: for<'a> TryFrom<ScalarRefImpl<'a>, Error = ArrayError>,
+    S: TryFrom<ScalarRefImpl<'a>, Error = ArrayError>,
     T: Default + From<S> + CheckedAdd<Output = T>,
 {
     if list.iter().flatten().next().is_none() {

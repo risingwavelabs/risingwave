@@ -36,6 +36,27 @@ impl<T: num_traits::CheckedAdd> CheckedAdd for T {
     }
 }
 
+/// A more general version of [`num_traits::CheckedNeg`] that allows `Output` to be different.
+///
+/// Its signature follows [`std::ops::Neg`] to take `self` rather than references used in
+/// [`num_traits::CheckedNeg`]. If we need to implement ops on references, it can be `impl
+/// CheckedNeg for &Foo`.
+pub trait CheckedNeg {
+    type Output;
+    fn checked_neg(self) -> Option<Self::Output>;
+}
+
+/// Types already impl [`num_traits::CheckedNeg`] automatically impl this extended trait. Note that
+/// this only covers `- T` but not `- &T`, which is used less frequently
+/// for `Copy` types.
+impl<T: num_traits::CheckedNeg> CheckedNeg for T {
+    type Output = T;
+
+    fn checked_neg(self) -> Option<Self> {
+        num_traits::CheckedNeg::checked_neg(&self)
+    }
+}
+
 /// A simplified version of [`num_traits::Signed`].
 /// Unlike `Signed::is_negative` or `f64::is_sign_negative`, this returns `false` for `-0.0` to keep
 /// consistency among integers, decimals and floats.

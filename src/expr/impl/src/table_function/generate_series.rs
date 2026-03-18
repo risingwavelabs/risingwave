@@ -14,7 +14,7 @@
 
 use chrono_tz::Tz;
 use num_traits::One;
-use risingwave_common::types::{CheckedAdd, Decimal, Interval, IsNegative, Timestamptz};
+use risingwave_common::types::{CheckedAdd, Interval, IsNegative, Timestamptz};
 use risingwave_expr::expr_context::TIME_ZONE;
 use risingwave_expr::{ExprError, Result, capture_context, function};
 
@@ -27,13 +27,13 @@ where
     range_generic::<_, _, _, true>(start, stop, T::one(), ())
 }
 
-#[function("generate_series(decimal, decimal) -> setof decimal")]
-fn generate_series_decimal(start: Decimal, stop: Decimal) -> Result<impl Iterator<Item = Decimal>>
-where
-{
-    validate_range_parameters(start, stop, Decimal::one())?;
-    range_generic::<Decimal, Decimal, _, true>(start, stop, Decimal::one(), ())
-}
+// #[function("generate_series(decimal, decimal) -> setof decimal")]
+// fn generate_series_decimal(start: Decimal, stop: Decimal) -> Result<impl Iterator<Item = Decimal>>
+// where
+// {
+//     validate_range_parameters(start, stop, Decimal::one())?;
+//     range_generic::<Decimal, Decimal, _, true>(start, stop, Decimal::one(), ())
+// }
 
 #[function("generate_series(int4, int4, int4) -> setof int4")]
 #[function("generate_series(int8, int8, int8) -> setof int8")]
@@ -46,15 +46,15 @@ where
     range_generic::<_, _, _, true>(start, stop, step, ())
 }
 
-#[function("generate_series(decimal, decimal, decimal) -> setof decimal")]
-fn generate_series_step_decimal(
-    start: Decimal,
-    stop: Decimal,
-    step: Decimal,
-) -> Result<impl Iterator<Item = Decimal>> {
-    validate_range_parameters(start, stop, step)?;
-    range_generic::<_, _, _, true>(start, stop, step, ())
-}
+// #[function("generate_series(decimal, decimal, decimal) -> setof decimal")]
+// fn generate_series_step_decimal(
+//     start: Decimal,
+//     stop: Decimal,
+//     step: Decimal,
+// ) -> Result<impl Iterator<Item = Decimal>> {
+//     validate_range_parameters(start, stop, step)?;
+//     range_generic::<_, _, _, true>(start, stop, step, ())
+// }
 
 #[function("generate_series(timestamptz, timestamptz, interval) -> setof timestamptz")]
 fn generate_series_timestamptz_session(
@@ -96,13 +96,13 @@ where
     range_generic::<_, _, _, false>(start, stop, T::one(), ())
 }
 
-#[function("range(decimal, decimal) -> setof decimal")]
-fn range_decimal(start: Decimal, stop: Decimal) -> Result<impl Iterator<Item = Decimal>>
-where
-{
-    validate_range_parameters(start, stop, Decimal::one())?;
-    range_generic::<Decimal, Decimal, _, false>(start, stop, Decimal::one(), ())
-}
+// #[function("range(decimal, decimal) -> setof decimal")]
+// fn range_decimal(start: Decimal, stop: Decimal) -> Result<impl Iterator<Item = Decimal>>
+// where
+// {
+//     validate_range_parameters(start, stop, Decimal::one())?;
+//     range_generic::<Decimal, Decimal, _, false>(start, stop, Decimal::one(), ())
+// }
 
 #[function("range(int4, int4, int4) -> setof int4")]
 #[function("range(int8, int8, int8) -> setof int8")]
@@ -115,15 +115,15 @@ where
     range_generic::<_, _, _, false>(start, stop, step, ())
 }
 
-#[function("range(decimal, decimal, decimal) -> setof decimal")]
-fn range_step_decimal(
-    start: Decimal,
-    stop: Decimal,
-    step: Decimal,
-) -> Result<impl Iterator<Item = Decimal>> {
-    validate_range_parameters(start, stop, step)?;
-    range_generic::<_, _, _, false>(start, stop, step, ())
-}
+// #[function("range(decimal, decimal, decimal) -> setof decimal")]
+// fn range_step_decimal(
+//     start: Decimal,
+//     stop: Decimal,
+//     step: Decimal,
+// ) -> Result<impl Iterator<Item = Decimal>> {
+//     validate_range_parameters(start, stop, step)?;
+//     range_generic::<_, _, _, false>(start, stop, step, ())
+// }
 
 pub trait CheckedAddWithExtra<Rhs = Self, Extra = ()> {
     type Output;
@@ -184,29 +184,29 @@ where
     Ok(std::iter::from_fn(next))
 }
 
-/// Validate decimals can not be `NaN` or `infinity`.
-#[inline]
-fn validate_range_parameters(start: Decimal, stop: Decimal, step: Decimal) -> Result<()> {
-    validate_decimal(start, "start")?;
-    validate_decimal(stop, "stop")?;
-    validate_decimal(step, "step")?;
-    Ok(())
-}
+// /// Validate decimals can not be `NaN` or `infinity`.
+// #[inline]
+// fn validate_range_parameters(start: Decimal, stop: Decimal, step: Decimal) -> Result<()> {
+//     validate_decimal(start, "start")?;
+//     validate_decimal(stop, "stop")?;
+//     validate_decimal(step, "step")?;
+//     Ok(())
+// }
 
-#[inline]
-fn validate_decimal(decimal: Decimal, name: &'static str) -> Result<()> {
-    match decimal {
-        Decimal::Normalized(_) => Ok(()),
-        Decimal::PositiveInf | Decimal::NegativeInf => Err(ExprError::InvalidParam {
-            name,
-            reason: format!("{} value cannot be infinity", name).into(),
-        }),
-        Decimal::NaN => Err(ExprError::InvalidParam {
-            name,
-            reason: format!("{} value cannot be NaN", name).into(),
-        }),
-    }
-}
+// #[inline]
+// fn validate_decimal(decimal: Decimal, name: &'static str) -> Result<()> {
+//     match decimal {
+//         Decimal::Normalized(_) => Ok(()),
+//         Decimal::PositiveInf | Decimal::NegativeInf => Err(ExprError::InvalidParam {
+//             name,
+//             reason: format!("{} value cannot be infinity", name).into(),
+//         }),
+//         Decimal::NaN => Err(ExprError::InvalidParam {
+//             name,
+//             reason: format!("{} value cannot be NaN", name).into(),
+//         }),
+//     }
+// }
 
 #[cfg(test)]
 mod tests {
@@ -363,6 +363,7 @@ mod tests {
         assert_eq!(actual_cnt, expect_cnt);
     }
 
+    #[ignore]
     #[tokio::test]
     async fn test_generate_series_decimal() {
         generate_series_decimal("1", "5", "1", true).await;

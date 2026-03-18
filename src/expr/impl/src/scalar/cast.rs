@@ -329,9 +329,9 @@ mod tests {
         test!(general_to_text(F32::from(32.12_f32)), "32.12");
         test!(general_to_text(F32::from(-32.14_f32)), "-32.14");
 
-        test!(general_to_text(Decimal::try_from(1.222).unwrap()), "1.222");
+        test!(general_to_text(&Decimal::try_from(1.222).unwrap()), "1.222");
 
-        test!(general_to_text(Decimal::NaN), "NaN");
+        test!(general_to_text(&Decimal::NaN), "NaN");
     }
 
     #[test]

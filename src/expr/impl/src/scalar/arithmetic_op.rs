@@ -15,9 +15,10 @@
 use std::fmt::Debug;
 
 use chrono::{Duration, NaiveDateTime};
-use num_traits::{CheckedDiv, CheckedMul, CheckedNeg, CheckedRem, CheckedSub, Zero};
+use num_traits::{CheckedDiv, CheckedMul, CheckedRem, CheckedSub, Zero};
 use risingwave_common::types::{
-    CheckedAdd, Date, Decimal, F64, FloatExt, Interval, IsNegative, Time, Timestamp,
+    CheckedAdd, CheckedNeg, Date, DeciRef, Decimal, F64, FloatExt, Interval, IsNegative, Time,
+    Timestamp,
 };
 use risingwave_expr::{ExprError, Result, function};
 use rust_decimal::MathematicalOps;
@@ -109,7 +110,7 @@ where
 #[function("neg(*int) -> auto")]
 #[function("neg(*float) -> auto")]
 #[function("neg(decimal) -> decimal")]
-pub fn general_neg<T1: CheckedNeg>(expr: T1) -> Result<T1> {
+pub fn general_neg<Owned, Ref: CheckedNeg<Output = Owned>>(expr: Ref) -> Result<Owned> {
     expr.checked_neg().ok_or(ExprError::NumericOutOfRange)
 }
 
@@ -117,7 +118,7 @@ pub fn general_neg<T1: CheckedNeg>(expr: T1) -> Result<T1> {
 pub fn int256_neg<TRef, T>(expr: TRef) -> Result<T>
 where
     TRef: Into<T> + Debug,
-    T: CheckedNeg + Debug,
+    T: CheckedNeg<Output = T> + Debug,
 {
     expr.into()
         .checked_neg()
@@ -125,7 +126,7 @@ where
 }
 
 #[function("abs(*int) -> auto")]
-pub fn general_abs<T1: IsNegative + CheckedNeg>(expr: T1) -> Result<T1> {
+pub fn general_abs<T1: IsNegative + CheckedNeg<Output = T1>>(expr: T1) -> Result<T1> {
     if expr.is_negative() {
         general_neg(expr)
     } else {
@@ -142,7 +143,7 @@ pub fn float_abs<F: num_traits::Float, T1: FloatExt<F>>(expr: T1) -> T1 {
 pub fn int256_abs<TRef, T>(expr: TRef) -> Result<T>
 where
     TRef: Into<T> + Debug,
-    T: IsNegative + CheckedNeg + Debug,
+    T: IsNegative + CheckedNeg<Output = T> + Debug,
 {
     let expr = expr.into();
     if expr.is_negative() {
@@ -153,8 +154,8 @@ where
 }
 
 #[function("abs(decimal) -> decimal")]
-pub fn decimal_abs(decimal: Decimal) -> Decimal {
-    Decimal::abs(&decimal)
+pub fn decimal_abs(decimal: DeciRef<'_>) -> Decimal {
+    Decimal::abs(decimal)
 }
 
 fn err_pow_zero_negative() -> ExprError {
@@ -190,10 +191,10 @@ pub fn pow_f64(l: F64, r: F64) -> Result<F64> {
 }
 
 #[function("pow(decimal, decimal) -> decimal")]
-pub fn pow_decimal(l: Decimal, r: Decimal) -> Result<Decimal> {
+pub fn pow_decimal(l: DeciRef<'_>, r: DeciRef<'_>) -> Result<Decimal> {
     use risingwave_common::types::DecimalPowError as PowError;
 
-    l.checked_powd(&r).map_err(|e| match e {
+    l.checked_powd(r).map_err(|e| match e {
         PowError::ZeroNegative => err_pow_zero_negative(),
         PowError::NegativeFract => err_pow_negative_fract(),
         PowError::Overflow => ExprError::NumericOverflow,
@@ -384,9 +385,9 @@ pub fn sqrt_f64(expr: F64) -> Result<F64> {
 }
 
 #[function("sqrt(decimal) -> decimal")]
-pub fn sqrt_decimal(expr: Decimal) -> Result<Decimal> {
+pub fn sqrt_decimal(expr: DeciRef<'_>) -> Result<Decimal> {
     match expr {
-        Decimal::NaN | Decimal::PositiveInf => Ok(expr),
+        Decimal::NaN | Decimal::PositiveInf => Ok(*expr),
         Decimal::Normalized(value) => match value.sqrt() {
             Some(res) => Ok(Decimal::from(res)),
             None => Err(ExprError::InvalidParam {
@@ -417,22 +418,22 @@ pub fn sign_f64(input: F64) -> F64 {
 }
 
 #[function("sign(decimal) -> decimal")]
-pub fn sign_dec(input: Decimal) -> Decimal {
+pub fn sign_dec(input: DeciRef<'_>) -> Decimal {
     input.sign()
 }
 
 #[function("scale(decimal) -> int4")]
-pub fn decimal_scale(d: Decimal) -> Option<i32> {
+pub fn decimal_scale(d: DeciRef<'_>) -> Option<i32> {
     d.scale()
 }
 
 #[function("min_scale(decimal) -> int4")]
-pub fn decimal_min_scale(d: Decimal) -> Option<i32> {
+pub fn decimal_min_scale(d: DeciRef<'_>) -> Option<i32> {
     d.normalize().scale()
 }
 
 #[function("trim_scale(decimal) -> decimal")]
-pub fn decimal_trim_scale(d: Decimal) -> Decimal {
+pub fn decimal_trim_scale(d: DeciRef<'_>) -> Decimal {
     d.normalize()
 }
 
@@ -505,13 +506,13 @@ mod tests {
             general_mod::<Decimal, i32, Decimal>(dec("2.0"), 2).unwrap(),
             dec("0")
         );
-        assert_eq!(general_neg::<Decimal>(dec("1.0")).unwrap(), dec("-1.0"));
+        assert_eq!(general_neg::<Decimal, _>(&dec("1.0")).unwrap(), dec("-1.0"));
         assert_eq!(general_add::<i16, i32, i32>(1i16, 1i32).unwrap(), 2i32);
         assert_eq!(general_sub::<i16, i32, i32>(1i16, 1i32).unwrap(), 0i32);
         assert_eq!(general_mul::<i16, i32, i32>(1i16, 1i32).unwrap(), 1i32);
         assert_eq!(general_div::<i16, i32, i32>(1i16, 1i32).unwrap(), 1i32);
         assert_eq!(general_mod::<i16, i32, i32>(1i16, 1i32).unwrap(), 0i32);
-        assert_eq!(general_neg::<i16>(1i16).unwrap(), -1i16);
+        assert_eq!(general_neg::<i16, _>(1i16).unwrap(), -1i16);
 
         assert!(
             general_add::<i32, F32, F64>(-1i32, 1f32.into())
@@ -533,7 +534,10 @@ mod tests {
                 .unwrap()
                 .is_zero()
         );
-        assert_eq!(general_neg::<F32>(1f32.into()).unwrap(), F32::from(-1f32));
+        assert_eq!(
+            general_neg::<F32, F32>(1f32.into()).unwrap(),
+            F32::from(-1f32)
+        );
         assert_eq!(
             date_interval_add(Date::from_ymd_uncheck(1994, 1, 1), Interval::from_month(12))
                 .unwrap(),
@@ -576,20 +580,20 @@ mod tests {
             F64::from(f64::INFINITY)
         );
         assert!(sqrt_f64(F64::from(f64::NEG_INFINITY)).is_err());
-        assert_eq!(sqrt_decimal(dec("25.0")).unwrap(), dec("5.0"));
+        assert_eq!(sqrt_decimal(&dec("25.0")).unwrap(), dec("5.0"));
         assert_eq!(
-            sqrt_decimal(dec("107")).unwrap(),
+            sqrt_decimal(&dec("107")).unwrap(),
             dec("10.344080432788600469738599442")
         );
         assert_eq!(
-            sqrt_decimal(dec("12.234567")).unwrap(),
+            sqrt_decimal(&dec("12.234567")).unwrap(),
             dec("3.4977945908815171589625746860")
         );
-        assert!(sqrt_decimal(dec("-25.0")).is_err());
-        assert_eq!(sqrt_decimal(dec("nan")).unwrap(), dec("nan"));
-        assert_eq!(sqrt_decimal(dec("inf")).unwrap(), dec("inf"));
-        assert_eq!(sqrt_decimal(dec("-0")).unwrap(), dec("-0"));
-        assert!(sqrt_decimal(dec("-inf")).is_err());
+        assert!(sqrt_decimal(&dec("-25.0")).is_err());
+        assert_eq!(sqrt_decimal(&dec("nan")).unwrap(), dec("nan"));
+        assert_eq!(sqrt_decimal(&dec("inf")).unwrap(), dec("inf"));
+        assert_eq!(sqrt_decimal(&dec("-0")).unwrap(), dec("-0"));
+        assert!(sqrt_decimal(&dec("-inf")).is_err());
     }
 
     #[test]

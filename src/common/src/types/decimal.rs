@@ -18,16 +18,14 @@ use std::ops::{Add, Div, Mul, Neg, Rem, Sub};
 
 use byteorder::{BigEndian, ReadBytesExt};
 use bytes::{BufMut, BytesMut};
-use num_traits::{
-    CheckedAdd, CheckedDiv, CheckedMul, CheckedNeg, CheckedRem, CheckedSub, Num, One, Zero,
-};
+use num_traits::{CheckedAdd, CheckedDiv, CheckedMul, CheckedRem, CheckedSub, Num, One, Zero};
 use postgres_types::{FromSql, IsNull, ToSql, Type, accepts, to_sql_checked};
 use risingwave_common_estimate_size::ZeroHeapSize;
 use rust_decimal::prelude::FromStr;
 use rust_decimal::{Decimal as RustDecimal, Error, MathematicalOps as _, RoundingStrategy};
 
-use super::DataType;
 use super::to_text::ToText;
+use super::{CheckedNeg, DataType};
 use crate::array::ArrayResult;
 use crate::types::Decimal::Normalized;
 use crate::types::ordered_float::OrderedFloat;
@@ -45,6 +43,12 @@ pub enum Decimal {
 }
 
 pub type DeciRef<'a> = &'a Decimal;
+
+impl From<DeciRef<'_>> for Decimal {
+    fn from(d: DeciRef<'_>) -> Self {
+        *d
+    }
+}
 
 impl ZeroHeapSize for Decimal {}
 
@@ -176,6 +180,17 @@ macro_rules! impl_convert_int {
                 }
             }
         }
+        impl core::convert::TryFrom<DeciRef<'_>> for $T {
+            type Error = Error;
+
+            #[inline]
+            fn try_from(d: DeciRef<'_>) -> Result<Self, Self::Error> {
+                match d.round_dp_ties_away(0) {
+                    Decimal::Normalized(d) => d.try_into(),
+                    _ => Err(Error::ConversionTo(std::any::type_name::<$T>().into())),
+                }
+            }
+        }
     };
 }
 
@@ -218,6 +233,13 @@ macro_rules! impl_convert_float {
 
             fn try_from(d: Decimal) -> Result<Self, Self::Error> {
                 d.try_into().map(Self)
+            }
+        }
+        impl core::convert::TryFrom<DeciRef<'_>> for OrderedFloat<$T> {
+            type Error = Error;
+
+            fn try_from(d: DeciRef<'_>) -> Result<Self, Self::Error> {
+                (*d).try_into().map(Self)
             }
         }
     };
@@ -289,13 +311,15 @@ impl Neg for Decimal {
     }
 }
 
-impl CheckedNeg for Decimal {
-    fn checked_neg(&self) -> Option<Self> {
+impl CheckedNeg for DeciRef<'_> {
+    type Output = Decimal;
+
+    fn checked_neg(self) -> Option<Self::Output> {
         match self {
-            Self::Normalized(d) => Some(Self::Normalized(-d)),
-            Self::NaN => Some(Self::NaN),
-            Self::PositiveInf => Some(Self::NegativeInf),
-            Self::NegativeInf => Some(Self::PositiveInf),
+            Decimal::Normalized(d) => Some(Decimal::Normalized(-d)),
+            Decimal::NaN => Some(Decimal::NaN),
+            Decimal::PositiveInf => Some(Decimal::NegativeInf),
+            Decimal::NegativeInf => Some(Decimal::PositiveInf),
         }
     }
 }
