@@ -20,6 +20,7 @@ use anyhow::anyhow;
 use itertools::Itertools;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{FragmentTypeFlag, FragmentTypeMask, TableId};
+use risingwave_common::hash::VnodeBitmapExt;
 use risingwave_common::id::JobId;
 use risingwave_common::system_param::AdaptiveParallelismStrategy;
 use risingwave_common::util::worker_util::DEFAULT_RESOURCE_GROUP;
@@ -629,6 +630,8 @@ pub(crate) fn materialize_actor_assignments(
         fragments,
         ensembles,
     } = rendered;
+    #[cfg(debug_assertions)]
+    let preview_slots = collect_relative_actor_slots_by_fragment(&fragments);
 
     let mut ordered_fragments = fragments
         .into_iter()
@@ -676,9 +679,81 @@ pub(crate) fn materialize_actor_assignments(
             );
     }
 
+    #[cfg(debug_assertions)]
+    assert_materialization_preserves_preview_slots(&preview_slots, &materialized);
+
     RenderedGraph {
         fragments: materialized,
         ensembles,
+    }
+}
+
+#[cfg(debug_assertions)]
+type RelativeActorSlot = (u32, WorkerId, Option<Vec<usize>>, Vec<SplitId>);
+
+#[cfg(debug_assertions)]
+fn collect_relative_actor_slots(fragment: &InflightFragmentInfo) -> Vec<RelativeActorSlot> {
+    let base = fragment
+        .actors
+        .keys()
+        .copied()
+        .min()
+        .map(|actor_id| actor_id.as_raw_id())
+        .unwrap_or_default();
+
+    let mut entries = fragment
+        .actors
+        .iter()
+        .map(|(&actor_id, info)| {
+            let idx = actor_id.as_raw_id() - base;
+            let vnode_bitmap = info.vnode_bitmap.as_ref().map(|bitmap| {
+                bitmap
+                    .iter_vnodes()
+                    .map(|vnode| vnode.to_index())
+                    .collect_vec()
+            });
+            let mut splits = info.splits.iter().map(SplitMetaData::id).collect_vec();
+            splits.sort_unstable();
+            (idx, info.worker_id, vnode_bitmap, splits)
+        })
+        .collect_vec();
+    entries.sort_unstable_by_key(|(idx, ..)| *idx);
+    entries
+}
+
+#[cfg(debug_assertions)]
+fn collect_relative_actor_slots_by_fragment(
+    fragments: &FragmentRenderMap,
+) -> HashMap<FragmentId, Vec<RelativeActorSlot>> {
+    fragments
+        .values()
+        .flat_map(|jobs| jobs.values())
+        .flatten()
+        .map(|(fragment_id, fragment)| (*fragment_id, collect_relative_actor_slots(fragment)))
+        .collect()
+}
+
+#[cfg(debug_assertions)]
+fn assert_materialization_preserves_preview_slots(
+    preview_slots: &HashMap<FragmentId, Vec<RelativeActorSlot>>,
+    materialized_fragments: &FragmentRenderMap,
+) {
+    for (database_id, jobs) in materialized_fragments {
+        for (job_id, fragments) in jobs {
+            for (fragment_id, fragment) in fragments {
+                let expected_slots = preview_slots.get(fragment_id).unwrap_or_else(|| {
+                    panic!(
+                        "preview fragment {fragment_id} for database {database_id}, job {job_id} not found"
+                    )
+                });
+
+                assert_eq!(
+                    collect_relative_actor_slots(fragment),
+                    *expected_slots,
+                    "materialization changed preview slot ordering for database {database_id}, job {job_id}, fragment {fragment_id}"
+                );
+            }
+        }
     }
 }
 

@@ -69,6 +69,9 @@ use crate::controller::utils::{
 
 pub type ScaleControllerRef = Arc<ScaleController>;
 
+// Field order is intentional: derived `Ord` is used to canonicalize actor
+// layout for no-op detection, so new fields must preserve meaningful
+// comparison order.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 struct NormalizedActor {
     worker_id: WorkerId,
@@ -129,7 +132,8 @@ fn build_normalized_fragment_layout(
 /// this function sits on the reschedule path, which only re-renders fragments
 /// that were loaded into the `RescheduleContext`. Fragment creation or deletion
 /// is handled by separate DDL / recovery paths, not by reschedule, so fragments
-/// outside the render set are irrelevant here.
+/// outside the render set are irrelevant here. In other words, this is a subset
+/// check over the rendered fragments, not a full bidirectional equality check.
 pub(crate) fn rendered_layout_matches_current(
     render_result: &FragmentRenderMap,
     all_prev_fragments: &HashMap<FragmentId, &InflightFragmentInfo>,

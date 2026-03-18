@@ -287,6 +287,8 @@ fn build_reschedule_from_context(
         return Ok(None);
     }
 
+    // Barrier worker resolves this intent against a stable in-flight snapshot.
+    // Reuse the same fragment view for preview comparison and command building.
     let all_prev_fragments = database_info
         .fragment_infos()
         .map(|fragment| (fragment.fragment_id, fragment))
