@@ -51,6 +51,7 @@ drop materialized view txn_mv_24829;
 # consumer. Without the fix, the batch scan also hangs indefinitely because the
 # consumer waits for a message at stop_offset - 1 (a control record).
 
+skipif madsim
 query I
 select count(*) from txn_src_24829;
 ----
