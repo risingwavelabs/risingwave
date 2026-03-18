@@ -82,12 +82,6 @@ struct NormalizedFragmentLayout {
     actors: Vec<NormalizedActor>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum LayoutMatchCheck {
-    Required,
-    AlreadyChecked,
-}
-
 fn normalize_actor_info(info: &InflightActorInfo) -> NormalizedActor {
     let vnode_bitmap = info.vnode_bitmap.as_ref().map(|bitmap| {
         bitmap
@@ -760,22 +754,17 @@ fn diff_fragment(
     Ok(reschedule)
 }
 
+/// Build executable reschedule plans from the rendered fragment layout.
+///
+/// Callers are expected to run the no-op layout check before invoking this
+/// function so command construction stays focused on plan materialization.
 pub(crate) fn build_reschedule_commands(
     render_result: FragmentRenderMap,
     context: RescheduleContext,
     all_prev_fragments: HashMap<FragmentId, &InflightFragmentInfo>,
-    layout_match_check: LayoutMatchCheck,
 ) -> MetaResult<HashMap<DatabaseId, ReschedulePlan>> {
     if render_result.is_empty() {
         return Ok(HashMap::new());
-    }
-
-    if layout_match_check == LayoutMatchCheck::Required {
-        // Keep the post-materialization layout check as a safety net for callers
-        // that may bypass the preview phase.
-        if rendered_layout_matches_current(&render_result, &all_prev_fragments)? {
-            return Ok(HashMap::new());
-        }
     }
 
     let RescheduleContext {

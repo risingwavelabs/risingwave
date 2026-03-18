@@ -62,8 +62,8 @@ use crate::manager::{
 };
 use crate::rpc::metrics::GLOBAL_META_METRICS;
 use crate::stream::{
-    GlobalRefreshManagerRef, LayoutMatchCheck, ScaleControllerRef, SourceManagerRef,
-    build_reschedule_commands, rendered_layout_matches_current,
+    GlobalRefreshManagerRef, ScaleControllerRef, SourceManagerRef, build_reschedule_commands,
+    rendered_layout_matches_current,
 };
 use crate::{MetaError, MetaResult};
 
@@ -303,13 +303,10 @@ fn build_reschedule_from_context(
     }
 
     let actor_id_counter = env.actor_id_generator();
+    // Materialization only replaces preview actor ids with real ids. Worker
+    // placement, vnode ownership, and split assignment remain unchanged.
     let rendered = materialize_actor_assignments(actor_id_counter, previewed);
-    let mut commands = build_reschedule_commands(
-        rendered.fragments,
-        context,
-        all_prev_fragments,
-        LayoutMatchCheck::AlreadyChecked,
-    )?;
+    let mut commands = build_reschedule_commands(rendered.fragments, context, all_prev_fragments)?;
     Ok(commands.remove(&database_id))
 }
 
