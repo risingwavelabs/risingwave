@@ -725,3 +725,267 @@ impl TryFrom<&Statement> for WithOptions {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::collections::{BTreeMap, HashSet};
+
+    use super::resolve_privatelink_for_alter;
+    use crate::utils::with_options::{
+        KAFKA_PROPS_BROKER_KEY, PRIVATE_LINK_BROKER_REWRITE_MAP_KEY, PRIVATE_LINK_TARGETS_KEY,
+        PRIVATELINK_ENDPOINT_KEY,
+    };
+
+    fn props(entries: &[(&str, &str)]) -> BTreeMap<String, String> {
+        entries
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect()
+    }
+
+    fn keys(entries: &[&str]) -> HashSet<String> {
+        entries.iter().map(|k| k.to_string()).collect()
+    }
+
+    fn parse_rewrite_map(raw: &str) -> BTreeMap<String, String> {
+        serde_json::from_str(raw).expect("broker rewrite map should be valid JSON")
+    }
+
+    /// Non-PL old props for reuse across tests.
+    fn non_pl_old() -> BTreeMap<String, String> {
+        props(&[
+            (KAFKA_PROPS_BROKER_KEY, "broker-1:9092,broker-2:9092"),
+            ("sasl.password", "old-pw"),
+        ])
+    }
+
+    /// PL-enabled old props for reuse across tests.
+    fn pl_old() -> BTreeMap<String, String> {
+        props(&[
+            (KAFKA_PROPS_BROKER_KEY, "broker-1:9092,broker-2:9092"),
+            (
+                PRIVATE_LINK_BROKER_REWRITE_MAP_KEY,
+                r#"{"broker-1:9092":"vpce-old:19092","broker-2:9092":"vpce-old:29092"}"#,
+            ),
+            ("sasl.password", "old-pw"),
+        ])
+    }
+
+    // ---- Test 1: Non-PL, non-bootstrap change returns only changed key ----
+    #[test]
+    fn non_pl_non_bootstrap_returns_delta() {
+        let old = non_pl_old();
+        let merged = props(&[
+            (KAFKA_PROPS_BROKER_KEY, "broker-1:9092,broker-2:9092"),
+            ("sasl.password", "old-pw"),
+            ("scan.startup.mode", "latest"),
+        ]);
+
+        let delta =
+            resolve_privatelink_for_alter(&old, &merged, &keys(&["scan.startup.mode"]), &keys(&[]))
+                .unwrap();
+
+        assert_eq!(delta, props(&[("scan.startup.mode", "latest")]));
+    }
+
+    // ---- Test 2: Non-PL, change sasl.password ----
+    #[test]
+    fn non_pl_sasl_password_returns_changed_key() {
+        let old = non_pl_old();
+        let merged = props(&[
+            (KAFKA_PROPS_BROKER_KEY, "broker-1:9092,broker-2:9092"),
+            ("sasl.password", "new-pw"),
+        ]);
+
+        let delta =
+            resolve_privatelink_for_alter(&old, &merged, &keys(&["sasl.password"]), &keys(&[]))
+                .unwrap();
+
+        assert_eq!(delta, props(&[("sasl.password", "new-pw")]));
+    }
+
+    // ---- Test 3: PL-enabled, change sasl.password → no PL re-derive ----
+    #[test]
+    fn pl_enabled_sasl_password_no_rederive() {
+        let old = pl_old();
+        let mut merged = old.clone();
+        merged.insert("sasl.password".to_string(), "new-pw".to_string());
+
+        let delta =
+            resolve_privatelink_for_alter(&old, &merged, &keys(&["sasl.password"]), &keys(&[]))
+                .unwrap();
+
+        assert_eq!(delta, props(&[("sasl.password", "new-pw")]));
+        assert!(!delta.contains_key(PRIVATE_LINK_BROKER_REWRITE_MAP_KEY));
+    }
+
+    // ---- Test 4: Rule 1 — direct SET of broker.rewrite.endpoints → error ----
+    #[test]
+    fn rule1_direct_set_rewrite_map_errors() {
+        let old = pl_old();
+        let mut merged = old.clone();
+        merged.insert(
+            PRIVATE_LINK_BROKER_REWRITE_MAP_KEY.to_string(),
+            r#"{"hijacked":"value"}"#.to_string(),
+        );
+
+        let result = resolve_privatelink_for_alter(
+            &old,
+            &merged,
+            &keys(&[PRIVATE_LINK_BROKER_REWRITE_MAP_KEY]),
+            &keys(&[]),
+        );
+
+        assert!(result.is_err());
+        let msg = result.unwrap_err().to_string();
+        assert!(msg.contains("internal field"), "error: {msg}");
+    }
+
+    // ---- Test 5: Rule 2 — change bootstrap on PL-enabled without PL inputs → error ----
+    #[test]
+    fn rule2_bootstrap_on_pl_without_pl_inputs_errors() {
+        let old = pl_old();
+        let mut merged = old.clone();
+        merged.insert(
+            KAFKA_PROPS_BROKER_KEY.to_string(),
+            "new-broker:9092,new-broker2:9092".to_string(),
+        );
+
+        let result = resolve_privatelink_for_alter(
+            &old,
+            &merged,
+            &keys(&[KAFKA_PROPS_BROKER_KEY]),
+            &keys(&[]),
+        );
+
+        assert!(result.is_err());
+        let msg = result.unwrap_err().to_string();
+        assert!(
+            msg.contains("privatelink.endpoint and privatelink.targets"),
+            "error: {msg}"
+        );
+    }
+
+    // ---- Test 6: Rule 3 — only endpoint without targets → error ----
+    #[test]
+    fn rule3_only_endpoint_without_targets_errors() {
+        let old = non_pl_old();
+        let merged = props(&[
+            (KAFKA_PROPS_BROKER_KEY, "broker-1:9092,broker-2:9092"),
+            ("sasl.password", "old-pw"),
+            (PRIVATELINK_ENDPOINT_KEY, "vpce-new"),
+        ]);
+
+        let result = resolve_privatelink_for_alter(
+            &old,
+            &merged,
+            &keys(&[PRIVATELINK_ENDPOINT_KEY]),
+            &keys(&[]),
+        );
+
+        assert!(result.is_err());
+        let msg = result.unwrap_err().to_string();
+        assert!(msg.contains("must be provided together"), "error: {msg}");
+    }
+
+    // ---- Test 7: Both PL inputs → re-derive rewrite map ----
+    #[test]
+    fn both_pl_inputs_rederive_rewrite_map() {
+        let old = non_pl_old();
+        let merged = props(&[
+            (KAFKA_PROPS_BROKER_KEY, "broker-1:9092,broker-2:9092"),
+            ("sasl.password", "old-pw"),
+            (PRIVATELINK_ENDPOINT_KEY, "vpce-new"),
+            (
+                PRIVATE_LINK_TARGETS_KEY,
+                r#"[{"port":19092},{"port":29092}]"#,
+            ),
+        ]);
+
+        let delta = resolve_privatelink_for_alter(
+            &old,
+            &merged,
+            &keys(&[PRIVATELINK_ENDPOINT_KEY, PRIVATE_LINK_TARGETS_KEY]),
+            &keys(&[]),
+        )
+        .unwrap();
+
+        // privatelink.endpoint and privatelink.targets are removed from effective,
+        // so only broker.rewrite.endpoints appears in the delta.
+        assert!(!delta.contains_key(PRIVATELINK_ENDPOINT_KEY));
+        assert!(!delta.contains_key(PRIVATE_LINK_TARGETS_KEY));
+        assert!(delta.contains_key(PRIVATE_LINK_BROKER_REWRITE_MAP_KEY));
+
+        let map = parse_rewrite_map(delta.get(PRIVATE_LINK_BROKER_REWRITE_MAP_KEY).unwrap());
+        assert_eq!(map.get("broker-1:9092").unwrap(), "vpce-new:19092");
+        assert_eq!(map.get("broker-2:9092").unwrap(), "vpce-new:29092");
+    }
+
+    // ---- Test 8: Change bootstrap + both PL inputs → new rewrite map ----
+    #[test]
+    fn bootstrap_plus_pl_inputs_rederive() {
+        let old = pl_old();
+        let merged = props(&[
+            (KAFKA_PROPS_BROKER_KEY, "new-b1:9093,new-b2:9094"),
+            ("sasl.password", "old-pw"),
+            (PRIVATELINK_ENDPOINT_KEY, "vpce-new"),
+            (
+                PRIVATE_LINK_TARGETS_KEY,
+                r#"[{"port":39092},{"port":49092}]"#,
+            ),
+        ]);
+
+        let delta = resolve_privatelink_for_alter(
+            &old,
+            &merged,
+            &keys(&[
+                KAFKA_PROPS_BROKER_KEY,
+                PRIVATELINK_ENDPOINT_KEY,
+                PRIVATE_LINK_TARGETS_KEY,
+            ]),
+            &keys(&[]),
+        )
+        .unwrap();
+
+        assert_eq!(
+            delta.get(KAFKA_PROPS_BROKER_KEY).unwrap(),
+            "new-b1:9093,new-b2:9094"
+        );
+        let map = parse_rewrite_map(delta.get(PRIVATE_LINK_BROKER_REWRITE_MAP_KEY).unwrap());
+        assert_eq!(map.get("new-b1:9093").unwrap(), "vpce-new:39092");
+        assert_eq!(map.get("new-b2:9094").unwrap(), "vpce-new:49092");
+    }
+
+    // ---- Test 9: No-op (same value) → empty delta ----
+    #[test]
+    fn noop_same_value_returns_empty_delta() {
+        let old = non_pl_old();
+        let merged = old.clone();
+
+        let delta =
+            resolve_privatelink_for_alter(&old, &merged, &keys(&["sasl.password"]), &keys(&[]))
+                .unwrap();
+
+        assert!(delta.is_empty());
+    }
+
+    // ---- Test 10: Non-PL, change bootstrap → returns bootstrap delta only ----
+    #[test]
+    fn non_pl_change_bootstrap_returns_bootstrap_delta() {
+        let old = non_pl_old();
+        let merged = props(&[
+            (KAFKA_PROPS_BROKER_KEY, "new-broker:9092"),
+            ("sasl.password", "old-pw"),
+        ]);
+
+        let delta = resolve_privatelink_for_alter(
+            &old,
+            &merged,
+            &keys(&[KAFKA_PROPS_BROKER_KEY]),
+            &keys(&[]),
+        )
+        .unwrap();
+
+        assert_eq!(delta, props(&[(KAFKA_PROPS_BROKER_KEY, "new-broker:9092")]));
+    }
+}
