@@ -1,0 +1,72 @@
+# Verify the legacy display on the old cluster before restart.
+
+query TT
+SELECT name, lower(parallelism)
+FROM rw_streaming_parallelism
+WHERE name ~ '^sk_[df][df][dbra][dbra]$'
+ORDER BY name;
+----
+sk_ddaa adaptive
+sk_ddab adaptive
+sk_ddad adaptive
+sk_ddar adaptive
+sk_ddba adaptive
+sk_ddbb adaptive
+sk_ddbd adaptive
+sk_ddbr adaptive
+sk_ddda adaptive
+sk_dddb adaptive
+sk_dddd adaptive
+sk_dddr adaptive
+sk_ddra adaptive
+sk_ddrb adaptive
+sk_ddrd adaptive
+sk_ddrr adaptive
+sk_dfaa fixed(6)
+sk_dfab fixed(6)
+sk_dfad fixed(6)
+sk_dfar fixed(6)
+sk_dfba fixed(6)
+sk_dfbb fixed(6)
+sk_dfbd fixed(6)
+sk_dfbr fixed(6)
+sk_dfda fixed(6)
+sk_dfdb fixed(6)
+sk_dfdd fixed(6)
+sk_dfdr fixed(6)
+sk_dfra fixed(6)
+sk_dfrb fixed(6)
+sk_dfrd fixed(6)
+sk_dfrr fixed(6)
+sk_fdaa fixed(8)
+sk_fdab fixed(8)
+sk_fdad fixed(8)
+sk_fdar fixed(8)
+sk_fdba fixed(8)
+sk_fdbb fixed(8)
+sk_fdbd fixed(8)
+sk_fdbr fixed(8)
+sk_fdda fixed(8)
+sk_fddb fixed(8)
+sk_fddd fixed(8)
+sk_fddr fixed(8)
+sk_fdra fixed(8)
+sk_fdrb fixed(8)
+sk_fdrd fixed(8)
+sk_fdrr fixed(8)
+sk_ffaa fixed(6)
+sk_ffab fixed(6)
+sk_ffad fixed(6)
+sk_ffar fixed(6)
+sk_ffba fixed(6)
+sk_ffbb fixed(6)
+sk_ffbd fixed(6)
+sk_ffbr fixed(6)
+sk_ffda fixed(6)
+sk_ffdb fixed(6)
+sk_ffdd fixed(6)
+sk_ffdr fixed(6)
+sk_ffra fixed(6)
+sk_ffrb fixed(6)
+sk_ffrd fixed(6)
+sk_ffrr fixed(6)

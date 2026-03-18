@@ -1,0 +1,72 @@
+# Verify migrated parallelism after upgrading to the new cluster.
+
+query TT
+SELECT name, lower(parallelism)
+FROM rw_streaming_parallelism
+WHERE name ~ '^sk_[df][df][dbra][dbra]$'
+ORDER BY name;
+----
+sk_ddaa adaptive
+sk_ddab bounded(16)
+sk_ddad adaptive
+sk_ddar ratio(0.5)
+sk_ddba adaptive
+sk_ddbb bounded(16)
+sk_ddbd bounded(32)
+sk_ddbr ratio(0.5)
+sk_ddda adaptive
+sk_dddb bounded(16)
+sk_dddd bounded(64)
+sk_dddr ratio(0.5)
+sk_ddra adaptive
+sk_ddrb bounded(16)
+sk_ddrd ratio(0.5)
+sk_ddrr ratio(0.5)
+sk_dfaa 6
+sk_dfab 6
+sk_dfad 6
+sk_dfar 6
+sk_dfba 6
+sk_dfbb 6
+sk_dfbd 6
+sk_dfbr 6
+sk_dfda 6
+sk_dfdb 6
+sk_dfdd 6
+sk_dfdr 6
+sk_dfra 6
+sk_dfrb 6
+sk_dfrd 6
+sk_dfrr 6
+sk_fdaa 8
+sk_fdab 8
+sk_fdad 8
+sk_fdar 8
+sk_fdba 8
+sk_fdbb 8
+sk_fdbd 8
+sk_fdbr 8
+sk_fdda 8
+sk_fddb 8
+sk_fddd 8
+sk_fddr 8
+sk_fdra 8
+sk_fdrb 8
+sk_fdrd 8
+sk_fdrr 8
+sk_ffaa 6
+sk_ffab 6
+sk_ffad 6
+sk_ffar 6
+sk_ffba 6
+sk_ffbb 6
+sk_ffbd 6
+sk_ffbr 6
+sk_ffda 6
+sk_ffdb 6
+sk_ffdd 6
+sk_ffdr 6
+sk_ffra 6
+sk_ffrb 6
+sk_ffrd 6
+sk_ffrr 6

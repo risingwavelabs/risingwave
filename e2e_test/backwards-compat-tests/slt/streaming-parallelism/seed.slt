@@ -1,0 +1,850 @@
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+# Keep the base table lightweight for the sink matrix.
+statement ok
+SET streaming_parallelism TO 1;
+
+statement ok
+SET streaming_parallelism_for_table TO 1;
+
+statement ok
+CREATE TABLE sp_base_t (v int);
+
+# Fix the legacy system strategy to a single value so migration can materialize it deterministically.
+statement ok
+ALTER SYSTEM SET adaptive_parallelism_strategy TO 'BOUNDED(64)';
+
+statement ok
+SET streaming_parallelism TO default;
+
+statement ok
+SET streaming_parallelism_for_sink TO default;
+
+statement ok
+SET streaming_parallelism_strategy TO default;
+
+statement ok
+SET streaming_parallelism_strategy_for_sink TO default;
+
+statement ok
+CREATE SINK sk_dddd AS
+SELECT * FROM sp_base_t
+WITH (
+    connector = 'blackhole',
+    type = 'append-only',
+    force_append_only = 'true'
+);
+
+statement ok
+SET streaming_parallelism_strategy_for_sink TO 'bounded(16)';
+
+statement ok
+CREATE SINK sk_dddb AS
+SELECT * FROM sp_base_t
+WITH (
+    connector = 'blackhole',
+    type = 'append-only',
+    force_append_only = 'true'
+);
+
+statement ok
+SET streaming_parallelism_strategy_for_sink TO 'ratio(0.5)';
+
+statement ok
+CREATE SINK sk_dddr AS
+SELECT * FROM sp_base_t
+WITH (
+    connector = 'blackhole',
+    type = 'append-only',
+    force_append_only = 'true'
+);
+
+statement ok
+SET streaming_parallelism_strategy_for_sink TO AUTO;
+
+statement ok
+CREATE SINK sk_ddda AS
+SELECT * FROM sp_base_t
+WITH (
+    connector = 'blackhole',
+    type = 'append-only',
+    force_append_only = 'true'
+);
+
+statement ok
+SET streaming_parallelism_strategy TO 'bounded(32)';
+
+statement ok
+SET streaming_parallelism_strategy_for_sink TO default;
+
+statement ok
+CREATE SINK sk_ddbd AS
+SELECT * FROM sp_base_t
+WITH (
+    connector = 'blackhole',
+    type = 'append-only',
+    force_append_only = 'true'
+);
+
+statement ok
+SET streaming_parallelism_strategy_for_sink TO 'bounded(16)';
+
+statement ok
+CREATE SINK sk_ddbb AS
+SELECT * FROM sp_base_t
+WITH (
+    connector = 'blackhole',
+    type = 'append-only',
+    force_append_only = 'true'
+);
+
+statement ok
+SET streaming_parallelism_strategy_for_sink TO 'ratio(0.5)';
+
+statement ok
+CREATE SINK sk_ddbr AS
+SELECT * FROM sp_base_t
+WITH (
+    connector = 'blackhole',
+    type = 'append-only',
+    force_append_only = 'true'
+);
+
+statement ok
+SET streaming_parallelism_strategy_for_sink TO AUTO;
+
+statement ok
+CREATE SINK sk_ddba AS
+SELECT * FROM sp_base_t
+WITH (
+    connector = 'blackhole',
+    type = 'append-only',
+    force_append_only = 'true'
+);
+
+statement ok
+SET streaming_parallelism_strategy TO 'ratio(0.5)';
+
+statement ok
+SET streaming_parallelism_strategy_for_sink TO default;
+
+statement ok
+CREATE SINK sk_ddrd AS
+SELECT * FROM sp_base_t
+WITH (
+    connector = 'blackhole',
+    type = 'append-only',
+    force_append_only = 'true'
+);
+
+statement ok
+SET streaming_parallelism_strategy_for_sink TO 'bounded(16)';
+
+statement ok
+CREATE SINK sk_ddrb AS
+SELECT * FROM sp_base_t
+WITH (
+    connector = 'blackhole',
+    type = 'append-only',
+    force_append_only = 'true'
+);
+
+statement ok
+SET streaming_parallelism_strategy_for_sink TO 'ratio(0.5)';
+
+statement ok
+CREATE SINK sk_ddrr AS
+SELECT * FROM sp_base_t
+WITH (
+    connector = 'blackhole',
+    type = 'append-only',
+    force_append_only = 'true'
+);
+
+statement ok
+SET streaming_parallelism_strategy_for_sink TO AUTO;
+
+statement ok
+CREATE SINK sk_ddra AS
+SELECT * FROM sp_base_t
+WITH (
+    connector = 'blackhole',
+    type = 'append-only',
+    force_append_only = 'true'
+);
+
+statement ok
+SET streaming_parallelism_strategy TO AUTO;
+
+statement ok
+SET streaming_parallelism_strategy_for_sink TO default;
+
+statement ok
+CREATE SINK sk_ddad AS
+SELECT * FROM sp_base_t
+WITH (
+    connector = 'blackhole',
+    type = 'append-only',
+    force_append_only = 'true'
+);
+
+statement ok
+SET streaming_parallelism_strategy_for_sink TO 'bounded(16)';
+
+statement ok
+CREATE SINK sk_ddab AS
+SELECT * FROM sp_base_t
+WITH (
+    connector = 'blackhole',
+    type = 'append-only',
+    force_append_only = 'true'
+);
+
+statement ok
+SET streaming_parallelism_strategy_for_sink TO 'ratio(0.5)';
+
+statement ok
+CREATE SINK sk_ddar AS
+SELECT * FROM sp_base_t
+WITH (
+    connector = 'blackhole',
+    type = 'append-only',
+    force_append_only = 'true'
+);
+
+statement ok
+SET streaming_parallelism_strategy_for_sink TO AUTO;
+
+statement ok
+CREATE SINK sk_ddaa AS
+SELECT * FROM sp_base_t
+WITH (
+    connector = 'blackhole',
+    type = 'append-only',
+    force_append_only = 'true'
+);
+
+statement ok
+SET streaming_parallelism_for_sink TO 6;
+
+statement ok
+SET streaming_parallelism_strategy TO default;
+
+statement ok
+SET streaming_parallelism_strategy_for_sink TO default;
+
+statement ok
+CREATE SINK sk_dfdd AS
+SELECT * FROM sp_base_t
+WITH (
+    connector = 'blackhole',
+    type = 'append-only',
+    force_append_only = 'true'
+);
+
+statement ok
+SET streaming_parallelism_strategy_for_sink TO 'bounded(16)';
+
+statement ok
+CREATE SINK sk_dfdb AS
+SELECT * FROM sp_base_t
+WITH (
+    connector = 'blackhole',
+    type = 'append-only',
+    force_append_only = 'true'
+);
+
+statement ok
+SET streaming_parallelism_strategy_for_sink TO 'ratio(0.5)';
+
+statement ok
+CREATE SINK sk_dfdr AS
+SELECT * FROM sp_base_t
+WITH (
+    connector = 'blackhole',
+    type = 'append-only',
+    force_append_only = 'true'
+);
+
+statement ok
+SET streaming_parallelism_strategy_for_sink TO AUTO;
+
+statement ok
+CREATE SINK sk_dfda AS
+SELECT * FROM sp_base_t
+WITH (
+    connector = 'blackhole',
+    type = 'append-only',
+    force_append_only = 'true'
+);
+
+statement ok
+SET streaming_parallelism_strategy TO 'bounded(32)';
+
+statement ok
+SET streaming_parallelism_strategy_for_sink TO default;
+
+statement ok
+CREATE SINK sk_dfbd AS
+SELECT * FROM sp_base_t
+WITH (
+    connector = 'blackhole',
+    type = 'append-only',
+    force_append_only = 'true'
+);
+
+statement ok
+SET streaming_parallelism_strategy_for_sink TO 'bounded(16)';
+
+statement ok
+CREATE SINK sk_dfbb AS
+SELECT * FROM sp_base_t
+WITH (
+    connector = 'blackhole',
+    type = 'append-only',
+    force_append_only = 'true'
+);
+
+statement ok
+SET streaming_parallelism_strategy_for_sink TO 'ratio(0.5)';
+
+statement ok
+CREATE SINK sk_dfbr AS
+SELECT * FROM sp_base_t
+WITH (
+    connector = 'blackhole',
+    type = 'append-only',
+    force_append_only = 'true'
+);
+
+statement ok
+SET streaming_parallelism_strategy_for_sink TO AUTO;
+
+statement ok
+CREATE SINK sk_dfba AS
+SELECT * FROM sp_base_t
+WITH (
+    connector = 'blackhole',
+    type = 'append-only',
+    force_append_only = 'true'
+);
+
+statement ok
+SET streaming_parallelism_strategy TO 'ratio(0.5)';
+
+statement ok
+SET streaming_parallelism_strategy_for_sink TO default;
+
+statement ok
+CREATE SINK sk_dfrd AS
+SELECT * FROM sp_base_t
+WITH (
+    connector = 'blackhole',
+    type = 'append-only',
+    force_append_only = 'true'
+);
+
+statement ok
+SET streaming_parallelism_strategy_for_sink TO 'bounded(16)';
+
+statement ok
+CREATE SINK sk_dfrb AS
+SELECT * FROM sp_base_t
+WITH (
+    connector = 'blackhole',
+    type = 'append-only',
+    force_append_only = 'true'
+);
+
+statement ok
+SET streaming_parallelism_strategy_for_sink TO 'ratio(0.5)';
+
+statement ok
+CREATE SINK sk_dfrr AS
+SELECT * FROM sp_base_t
+WITH (
+    connector = 'blackhole',
+    type = 'append-only',
+    force_append_only = 'true'
+);
+
+statement ok
+SET streaming_parallelism_strategy_for_sink TO AUTO;
+
+statement ok
+CREATE SINK sk_dfra AS
+SELECT * FROM sp_base_t
+WITH (
+    connector = 'blackhole',
+    type = 'append-only',
+    force_append_only = 'true'
+);
+
+statement ok
+SET streaming_parallelism_strategy TO AUTO;
+
+statement ok
+SET streaming_parallelism_strategy_for_sink TO default;
+
+statement ok
+CREATE SINK sk_dfad AS
+SELECT * FROM sp_base_t
+WITH (
+    connector = 'blackhole',
+    type = 'append-only',
+    force_append_only = 'true'
+);
+
+statement ok
+SET streaming_parallelism_strategy_for_sink TO 'bounded(16)';
+
+statement ok
+CREATE SINK sk_dfab AS
+SELECT * FROM sp_base_t
+WITH (
+    connector = 'blackhole',
+    type = 'append-only',
+    force_append_only = 'true'
+);
+
+statement ok
+SET streaming_parallelism_strategy_for_sink TO 'ratio(0.5)';
+
+statement ok
+CREATE SINK sk_dfar AS
+SELECT * FROM sp_base_t
+WITH (
+    connector = 'blackhole',
+    type = 'append-only',
+    force_append_only = 'true'
+);
+
+statement ok
+SET streaming_parallelism_strategy_for_sink TO AUTO;
+
+statement ok
+CREATE SINK sk_dfaa AS
+SELECT * FROM sp_base_t
+WITH (
+    connector = 'blackhole',
+    type = 'append-only',
+    force_append_only = 'true'
+);
+
+statement ok
+SET streaming_parallelism TO 8;
+
+statement ok
+SET streaming_parallelism_for_sink TO default;
+
+statement ok
+SET streaming_parallelism_strategy TO default;
+
+statement ok
+SET streaming_parallelism_strategy_for_sink TO default;
+
+statement ok
+CREATE SINK sk_fddd AS
+SELECT * FROM sp_base_t
+WITH (
+    connector = 'blackhole',
+    type = 'append-only',
+    force_append_only = 'true'
+);
+
+statement ok
+SET streaming_parallelism_strategy_for_sink TO 'bounded(16)';
+
+statement ok
+CREATE SINK sk_fddb AS
+SELECT * FROM sp_base_t
+WITH (
+    connector = 'blackhole',
+    type = 'append-only',
+    force_append_only = 'true'
+);
+
+statement ok
+SET streaming_parallelism_strategy_for_sink TO 'ratio(0.5)';
+
+statement ok
+CREATE SINK sk_fddr AS
+SELECT * FROM sp_base_t
+WITH (
+    connector = 'blackhole',
+    type = 'append-only',
+    force_append_only = 'true'
+);
+
+statement ok
+SET streaming_parallelism_strategy_for_sink TO AUTO;
+
+statement ok
+CREATE SINK sk_fdda AS
+SELECT * FROM sp_base_t
+WITH (
+    connector = 'blackhole',
+    type = 'append-only',
+    force_append_only = 'true'
+);
+
+statement ok
+SET streaming_parallelism_strategy TO 'bounded(32)';
+
+statement ok
+SET streaming_parallelism_strategy_for_sink TO default;
+
+statement ok
+CREATE SINK sk_fdbd AS
+SELECT * FROM sp_base_t
+WITH (
+    connector = 'blackhole',
+    type = 'append-only',
+    force_append_only = 'true'
+);
+
+statement ok
+SET streaming_parallelism_strategy_for_sink TO 'bounded(16)';
+
+statement ok
+CREATE SINK sk_fdbb AS
+SELECT * FROM sp_base_t
+WITH (
+    connector = 'blackhole',
+    type = 'append-only',
+    force_append_only = 'true'
+);
+
+statement ok
+SET streaming_parallelism_strategy_for_sink TO 'ratio(0.5)';
+
+statement ok
+CREATE SINK sk_fdbr AS
+SELECT * FROM sp_base_t
+WITH (
+    connector = 'blackhole',
+    type = 'append-only',
+    force_append_only = 'true'
+);
+
+statement ok
+SET streaming_parallelism_strategy_for_sink TO AUTO;
+
+statement ok
+CREATE SINK sk_fdba AS
+SELECT * FROM sp_base_t
+WITH (
+    connector = 'blackhole',
+    type = 'append-only',
+    force_append_only = 'true'
+);
+
+statement ok
+SET streaming_parallelism_strategy TO 'ratio(0.5)';
+
+statement ok
+SET streaming_parallelism_strategy_for_sink TO default;
+
+statement ok
+CREATE SINK sk_fdrd AS
+SELECT * FROM sp_base_t
+WITH (
+    connector = 'blackhole',
+    type = 'append-only',
+    force_append_only = 'true'
+);
+
+statement ok
+SET streaming_parallelism_strategy_for_sink TO 'bounded(16)';
+
+statement ok
+CREATE SINK sk_fdrb AS
+SELECT * FROM sp_base_t
+WITH (
+    connector = 'blackhole',
+    type = 'append-only',
+    force_append_only = 'true'
+);
+
+statement ok
+SET streaming_parallelism_strategy_for_sink TO 'ratio(0.5)';
+
+statement ok
+CREATE SINK sk_fdrr AS
+SELECT * FROM sp_base_t
+WITH (
+    connector = 'blackhole',
+    type = 'append-only',
+    force_append_only = 'true'
+);
+
+statement ok
+SET streaming_parallelism_strategy_for_sink TO AUTO;
+
+statement ok
+CREATE SINK sk_fdra AS
+SELECT * FROM sp_base_t
+WITH (
+    connector = 'blackhole',
+    type = 'append-only',
+    force_append_only = 'true'
+);
+
+statement ok
+SET streaming_parallelism_strategy TO AUTO;
+
+statement ok
+SET streaming_parallelism_strategy_for_sink TO default;
+
+statement ok
+CREATE SINK sk_fdad AS
+SELECT * FROM sp_base_t
+WITH (
+    connector = 'blackhole',
+    type = 'append-only',
+    force_append_only = 'true'
+);
+
+statement ok
+SET streaming_parallelism_strategy_for_sink TO 'bounded(16)';
+
+statement ok
+CREATE SINK sk_fdab AS
+SELECT * FROM sp_base_t
+WITH (
+    connector = 'blackhole',
+    type = 'append-only',
+    force_append_only = 'true'
+);
+
+statement ok
+SET streaming_parallelism_strategy_for_sink TO 'ratio(0.5)';
+
+statement ok
+CREATE SINK sk_fdar AS
+SELECT * FROM sp_base_t
+WITH (
+    connector = 'blackhole',
+    type = 'append-only',
+    force_append_only = 'true'
+);
+
+statement ok
+SET streaming_parallelism_strategy_for_sink TO AUTO;
+
+statement ok
+CREATE SINK sk_fdaa AS
+SELECT * FROM sp_base_t
+WITH (
+    connector = 'blackhole',
+    type = 'append-only',
+    force_append_only = 'true'
+);
+
+statement ok
+SET streaming_parallelism_for_sink TO 6;
+
+statement ok
+SET streaming_parallelism_strategy TO default;
+
+statement ok
+SET streaming_parallelism_strategy_for_sink TO default;
+
+statement ok
+CREATE SINK sk_ffdd AS
+SELECT * FROM sp_base_t
+WITH (
+    connector = 'blackhole',
+    type = 'append-only',
+    force_append_only = 'true'
+);
+
+statement ok
+SET streaming_parallelism_strategy_for_sink TO 'bounded(16)';
+
+statement ok
+CREATE SINK sk_ffdb AS
+SELECT * FROM sp_base_t
+WITH (
+    connector = 'blackhole',
+    type = 'append-only',
+    force_append_only = 'true'
+);
+
+statement ok
+SET streaming_parallelism_strategy_for_sink TO 'ratio(0.5)';
+
+statement ok
+CREATE SINK sk_ffdr AS
+SELECT * FROM sp_base_t
+WITH (
+    connector = 'blackhole',
+    type = 'append-only',
+    force_append_only = 'true'
+);
+
+statement ok
+SET streaming_parallelism_strategy_for_sink TO AUTO;
+
+statement ok
+CREATE SINK sk_ffda AS
+SELECT * FROM sp_base_t
+WITH (
+    connector = 'blackhole',
+    type = 'append-only',
+    force_append_only = 'true'
+);
+
+statement ok
+SET streaming_parallelism_strategy TO 'bounded(32)';
+
+statement ok
+SET streaming_parallelism_strategy_for_sink TO default;
+
+statement ok
+CREATE SINK sk_ffbd AS
+SELECT * FROM sp_base_t
+WITH (
+    connector = 'blackhole',
+    type = 'append-only',
+    force_append_only = 'true'
+);
+
+statement ok
+SET streaming_parallelism_strategy_for_sink TO 'bounded(16)';
+
+statement ok
+CREATE SINK sk_ffbb AS
+SELECT * FROM sp_base_t
+WITH (
+    connector = 'blackhole',
+    type = 'append-only',
+    force_append_only = 'true'
+);
+
+statement ok
+SET streaming_parallelism_strategy_for_sink TO 'ratio(0.5)';
+
+statement ok
+CREATE SINK sk_ffbr AS
+SELECT * FROM sp_base_t
+WITH (
+    connector = 'blackhole',
+    type = 'append-only',
+    force_append_only = 'true'
+);
+
+statement ok
+SET streaming_parallelism_strategy_for_sink TO AUTO;
+
+statement ok
+CREATE SINK sk_ffba AS
+SELECT * FROM sp_base_t
+WITH (
+    connector = 'blackhole',
+    type = 'append-only',
+    force_append_only = 'true'
+);
+
+statement ok
+SET streaming_parallelism_strategy TO 'ratio(0.5)';
+
+statement ok
+SET streaming_parallelism_strategy_for_sink TO default;
+
+statement ok
+CREATE SINK sk_ffrd AS
+SELECT * FROM sp_base_t
+WITH (
+    connector = 'blackhole',
+    type = 'append-only',
+    force_append_only = 'true'
+);
+
+statement ok
+SET streaming_parallelism_strategy_for_sink TO 'bounded(16)';
+
+statement ok
+CREATE SINK sk_ffrb AS
+SELECT * FROM sp_base_t
+WITH (
+    connector = 'blackhole',
+    type = 'append-only',
+    force_append_only = 'true'
+);
+
+statement ok
+SET streaming_parallelism_strategy_for_sink TO 'ratio(0.5)';
+
+statement ok
+CREATE SINK sk_ffrr AS
+SELECT * FROM sp_base_t
+WITH (
+    connector = 'blackhole',
+    type = 'append-only',
+    force_append_only = 'true'
+);
+
+statement ok
+SET streaming_parallelism_strategy_for_sink TO AUTO;
+
+statement ok
+CREATE SINK sk_ffra AS
+SELECT * FROM sp_base_t
+WITH (
+    connector = 'blackhole',
+    type = 'append-only',
+    force_append_only = 'true'
+);
+
+statement ok
+SET streaming_parallelism_strategy TO AUTO;
+
+statement ok
+SET streaming_parallelism_strategy_for_sink TO default;
+
+statement ok
+CREATE SINK sk_ffad AS
+SELECT * FROM sp_base_t
+WITH (
+    connector = 'blackhole',
+    type = 'append-only',
+    force_append_only = 'true'
+);
+
+statement ok
+SET streaming_parallelism_strategy_for_sink TO 'bounded(16)';
+
+statement ok
+CREATE SINK sk_ffab AS
+SELECT * FROM sp_base_t
+WITH (
+    connector = 'blackhole',
+    type = 'append-only',
+    force_append_only = 'true'
+);
+
+statement ok
+SET streaming_parallelism_strategy_for_sink TO 'ratio(0.5)';
+
+statement ok
+CREATE SINK sk_ffar AS
+SELECT * FROM sp_base_t
+WITH (
+    connector = 'blackhole',
+    type = 'append-only',
+    force_append_only = 'true'
+);
+
+statement ok
+SET streaming_parallelism_strategy_for_sink TO AUTO;
+
+statement ok
+CREATE SINK sk_ffaa AS
+SELECT * FROM sp_base_t
+WITH (
+    connector = 'blackhole',
+    type = 'append-only',
+    force_append_only = 'true'
+);
