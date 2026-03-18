@@ -35,7 +35,7 @@ use static_assertions::const_assert_eq;
 
 use crate::array::{ListValue, MapValue, StructValue, VectorVal};
 use crate::types::{
-    DataType, Date, Decimal, F32, F64, Int256, Int256Ref, JsonbVal, Scalar, ScalarRef,
+    DataType, Date, DeciRef, Decimal, F32, F64, Int256, Int256Ref, JsonbVal, Scalar, ScalarRef,
     ScalarRefImpl, Serial, Time, Timestamp, Timestamptz,
 };
 use crate::util::hash_util::{Crc32FastBuilder, XxHash64Builder};
@@ -528,7 +528,7 @@ impl HashKeyDe for F64 {
     }
 }
 
-impl HashKeySer<'_> for Decimal {
+impl HashKeySer<'_> for DeciRef {
     fn serialize_into(self, mut buf: impl BufMut) {
         let b = Decimal::unordered_serialize(&self.normalize());
         buf.put_slice(b.as_ref());

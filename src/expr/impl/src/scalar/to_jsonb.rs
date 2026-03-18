@@ -16,7 +16,7 @@ use std::fmt::Debug;
 
 use jsonbb::Builder;
 use risingwave_common::types::{
-    DataType, Date, Decimal, F32, F64, Int256Ref, Interval, JsonbRef, ListRef, MapRef,
+    DataType, Date, DeciRef, F32, F64, Int256Ref, Interval, JsonbRef, ListRef, MapRef,
     ScalarRefImpl, Serial, StructRef, Time, Timestamp, Timestamptz, ToText, VectorRef,
 };
 use risingwave_common::util::iter_util::ZipEqDebug;
@@ -139,7 +139,7 @@ impl ToJsonb for F64 {
     }
 }
 
-impl ToJsonb for Decimal {
+impl ToJsonb for DeciRef {
     fn add_to(self, t: &DataType, builder: &mut Builder) -> Result<()> {
         let res: F64 = self
             .try_into()

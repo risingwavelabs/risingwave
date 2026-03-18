@@ -21,7 +21,7 @@ use risingwave_pb::data::{PbArray, PbArrayType};
 
 use super::{Array, ArrayBuilder};
 use crate::bitmap::{Bitmap, BitmapBuilder};
-use crate::types::{DataType, Decimal};
+use crate::types::{DataType, DeciRef, Decimal};
 
 /// `DecimalArray` is a collection of `Decimal`.
 #[derive(Debug, Clone, PartialEq, Eq, EstimateSize)]
@@ -60,7 +60,7 @@ impl FromIterator<Decimal> for DecimalArray {
 impl Array for DecimalArray {
     type Builder = DecimalArrayBuilder;
     type OwnedItem = Decimal;
-    type RefItem<'a> = Decimal;
+    type RefItem<'a> = DeciRef;
 
     unsafe fn raw_value_at_unchecked(&self, idx: usize) -> Self::RefItem<'_> {
         unsafe { *self.data.get_unchecked(idx) }
@@ -134,7 +134,7 @@ impl ArrayBuilder for DecimalArrayBuilder {
         Self::new(capacity)
     }
 
-    fn append_n(&mut self, n: usize, value: Option<Decimal>) {
+    fn append_n(&mut self, n: usize, value: Option<DeciRef>) {
         match value {
             Some(x) => {
                 self.bitmap.append_n(n, true);

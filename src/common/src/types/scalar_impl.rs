@@ -150,15 +150,15 @@ impl ScalarRef<'_> for bool {
 
 /// Implement `Scalar` for `Decimal`.
 impl Scalar for Decimal {
-    type ScalarRefType<'a> = Decimal;
+    type ScalarRefType<'a> = DeciRef;
 
-    fn as_scalar_ref(&self) -> Decimal {
+    fn as_scalar_ref(&self) -> DeciRef {
         *self
     }
 }
 
 /// Implement `ScalarRef` for `Decimal`.
-impl ScalarRef<'_> for Decimal {
+impl ScalarRef<'_> for DeciRef {
     type ScalarType = Decimal;
 
     fn to_owned_scalar(&self) -> Decimal {
