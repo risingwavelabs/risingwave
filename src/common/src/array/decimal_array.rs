@@ -57,17 +57,6 @@ impl FromIterator<Decimal> for DecimalArray {
     }
 }
 
-impl DecimalArray {
-    /// Build a [`DecimalArray`] from iterator and bitmap.
-    ///
-    /// NOTE: The length of `bitmap` must be equal to the length of `iter`.
-    pub fn from_iter_bitmap(iter: impl IntoIterator<Item = Decimal>, bitmap: Bitmap) -> Self {
-        let data: Box<[Decimal]> = iter.into_iter().collect();
-        assert_eq!(data.len(), bitmap.len());
-        DecimalArray { bitmap, data }
-    }
-}
-
 impl Array for DecimalArray {
     type Builder = DecimalArrayBuilder;
     type OwnedItem = Decimal;
