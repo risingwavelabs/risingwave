@@ -125,12 +125,15 @@ hummock_time_travel_filter_out_objects_list_delta_batch_size = 1000
 
 [meta.developer.compute_client_config]
 connect_timeout_secs = 5
+pool_setup_concurrency = 0
 
 [meta.developer.stream_client_config]
 connect_timeout_secs = 5
+pool_setup_concurrency = 0
 
 [meta.developer.frontend_client_config]
 connect_timeout_secs = 5
+pool_setup_concurrency = 0
 
 [meta.meta_store_config]
 max_connections = 10
@@ -161,9 +164,11 @@ local_execute_buffer_size = 64
 
 [batch.developer.compute_client_config]
 connect_timeout_secs = 5
+pool_setup_concurrency = 0
 
 [batch.developer.frontend_client_config]
 connect_timeout_secs = 5
+pool_setup_concurrency = 0
 
 [frontend]
 max_total_query_size_bytes = 1073741824
@@ -242,6 +247,7 @@ enable_state_table_vnode_stats_pruning = false
 
 [streaming.developer.compute_client_config]
 connect_timeout_secs = 5
+pool_setup_concurrency = 0
 
 [storage]
 share_buffers_sync_parallelism = 1
