@@ -31,12 +31,13 @@ use risingwave_hummock_sdk::{
     CompactionGroupId, HummockContextId, HummockObjectId, HummockSstableId, HummockSstableObjectId,
     HummockVersionId, get_stale_object_ids,
 };
+use risingwave_meta_model::hummock_table_change_log;
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::hummock::write_limits::WriteLimit;
 use risingwave_pb::hummock::{HummockPinnedVersion, HummockVersionStats};
 use risingwave_pb::id::TableId;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
-use sea_orm::{EntityTrait, TransactionTrait};
+use sea_orm::{EntityTrait, QuerySelect, TransactionTrait};
 
 use super::GroupStateValidator;
 use crate::MetaResult;
@@ -301,13 +302,17 @@ impl HummockManager {
         let mut versioning = self.versioning.write().await;
         let version = &mut versioning.current_version;
 
-        use sea_orm::PaginatorTrait;
-        let meta_store_table_change_log_count =
-            risingwave_meta_model::hummock_table_change_log::Entity::find()
-                .count(&self.env.meta_store_ref().conn)
-                .await?;
+        let is_nonempty_meta_store = risingwave_meta_model::hummock_table_change_log::Entity::find()
+            .select_only()
+            .columns([
+                hummock_table_change_log::Column::TableId,
+                hummock_table_change_log::Column::CheckpointEpoch,
+            ])
+            .one(&self.env.meta_store_ref().conn)
+            .await?
+            .is_some();
         #[expect(deprecated)]
-        if version.table_change_log.is_empty() || meta_store_table_change_log_count > 0 {
+        if version.table_change_log.is_empty() || is_nonempty_meta_store {
             // Either there are no table change logs to commit to the metastore, or the operation has already been completed.
             return Ok(());
         }
