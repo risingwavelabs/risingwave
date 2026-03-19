@@ -269,9 +269,9 @@ pub fn validate_compatibility(
         if has_regex {
             let pattern = &props["topic.regex"];
             if let Err(e) = regex::Regex::new(pattern) {
+                let err_msg = e.to_string();
                 return Err(RwError::from(ProtocolError(format!(
-                    "invalid topic.regex pattern '{}': {}",
-                    pattern, e
+                    "invalid topic.regex pattern '{pattern}': {err_msg}",
                 ))));
             }
         }

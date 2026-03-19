@@ -1024,9 +1024,9 @@ HINT: use `CREATE TABLE <name> WITH (...)` instead of `CREATE TABLE <name> (<col
             }
             (_, Some(pattern)) => {
                 if let Err(e) = regex::Regex::new(pattern) {
+                    let err_msg = e.to_string();
                     return Err(RwError::from(ProtocolError(format!(
-                        "invalid topic.regex pattern '{}': {}",
-                        pattern, e
+                        "invalid topic.regex pattern '{pattern}': {err_msg}",
                     ))));
                 }
 
