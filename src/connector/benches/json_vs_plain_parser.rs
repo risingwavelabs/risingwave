@@ -135,6 +135,7 @@ fn bench_plain_parser_and_json_parser(c: &mut Criterion) {
                     SourceCtrlOpts {
                         chunk_size: NUM_RECORDS,
                         split_txn: false,
+                        enable_partition_eof: false,
                     },
                 );
                 for record in records {
@@ -166,6 +167,7 @@ fn bench_plain_parser_and_json_parser(c: &mut Criterion) {
                     SourceCtrlOpts {
                         chunk_size: NUM_RECORDS,
                         split_txn: false,
+                        enable_partition_eof: false,
                     },
                 );
                 for record in records {

@@ -15,6 +15,8 @@
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
 use std::mem::swap;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use anyhow::Context;
@@ -49,6 +51,7 @@ pub struct KafkaSplitReader {
     max_num_messages: usize,
     parser_config: ParserConfig,
     source_ctx: SourceContextRef,
+    bounded_eof_flag: Option<Arc<AtomicBool>>,
 }
 
 #[async_trait]
@@ -68,8 +71,15 @@ impl SplitReader for KafkaSplitReader {
         let bootstrap_servers = &properties.connection.brokers;
         let broker_rewrite_map = properties.privatelink_common.broker_rewrite_map.clone();
 
-        // disable partition eof
-        config.set("enable.partition.eof", "false");
+        let enable_partition_eof = source_ctx.source_ctrl_opts.enable_partition_eof;
+        config.set(
+            "enable.partition.eof",
+            if enable_partition_eof {
+                "true"
+            } else {
+                "false"
+            },
+        );
         config.set("auto.offset.reset", "smallest");
         config.set("isolation.level", KAFKA_ISOLATION_LEVEL);
         config.set("bootstrap.servers", bootstrap_servers);
@@ -107,19 +117,7 @@ impl SplitReader for KafkaSplitReader {
 
         let mut offsets = HashMap::new();
         let mut backfill_info = HashMap::new();
-        for split in splits.clone() {
-            offsets.insert(split.id(), (split.start_offset, split.stop_offset));
-
-            if let Some(offset) = split.start_offset {
-                tpl.add_partition_offset(
-                    split.topic.as_str(),
-                    split.partition,
-                    Offset::Offset(offset + 1),
-                )?;
-            } else {
-                tpl.add_partition(split.topic.as_str(), split.partition);
-            }
-
+        for mut split in splits.clone() {
             let (low, high) = consumer
                 .fetch_watermarks(
                     split.topic.as_str(),
@@ -128,6 +126,7 @@ impl SplitReader for KafkaSplitReader {
                 )
                 .await?;
             tracing::info!("fetch kafka watermarks: low: {low}, high: {high}, split: {split:?}");
+
             // note: low is inclusive, high is exclusive, start_offset is exclusive
             if low == high || split.start_offset.is_some_and(|offset| offset + 1 >= high) {
                 backfill_info.insert(split.id(), BackfillInfo::NoDataToBackfill);
@@ -139,6 +138,23 @@ impl SplitReader for KafkaSplitReader {
                         latest_offset: (high - 1).to_string(),
                     },
                 );
+            }
+
+            // Auto-set stop_offset for bounded readers
+            if enable_partition_eof && split.stop_offset.is_none() && low < high {
+                split.stop_offset = Some(high);
+            }
+
+            offsets.insert(split.id(), (split.start_offset, split.stop_offset));
+
+            if let Some(offset) = split.start_offset {
+                tpl.add_partition_offset(
+                    split.topic.as_str(),
+                    split.partition,
+                    Offset::Offset(offset + 1),
+                )?;
+            } else {
+                tpl.add_partition(split.topic.as_str(), split.partition);
             }
         }
         tracing::info!(
@@ -168,6 +184,13 @@ impl SplitReader for KafkaSplitReader {
                 .expect("max.num.messages expect usize"),
         };
 
+        let has_stop_offsets = offsets.values().any(|(_, stop)| stop.is_some());
+        let bounded_eof_flag = if enable_partition_eof && has_stop_offsets {
+            Some(Arc::new(AtomicBool::new(false)))
+        } else {
+            None
+        };
+
         Ok(Self {
             consumer,
             offsets,
@@ -178,6 +201,7 @@ impl SplitReader for KafkaSplitReader {
             max_num_messages,
             parser_config,
             source_ctx,
+            bounded_eof_flag,
         })
     }
 
@@ -189,6 +213,10 @@ impl SplitReader for KafkaSplitReader {
 
     fn backfill_info(&self) -> HashMap<SplitId, BackfillInfo> {
         self.backfill_info.clone()
+    }
+
+    fn bounded_eof_flag(&self) -> Option<Arc<AtomicBool>> {
+        self.bounded_eof_flag.clone()
     }
 
     async fn seek_to_latest(&mut self) -> Result<Vec<SplitImpl>> {
@@ -252,11 +280,35 @@ impl KafkaSplitReader {
 
         let mut latest_message_id_metrics: HashMap<String, LabelGuardedIntGauge> = HashMap::new();
 
+        let enable_eof = self.source_ctx.source_ctrl_opts.enable_partition_eof;
+
         #[for_await]
-        'for_outer_loop: for msgs in self.consumer.stream().ready_chunks(max_chunk_size) {
-            let msgs: Vec<_> = msgs
-                .into_iter()
-                .collect::<std::result::Result<_, KafkaError>>()?;
+        'for_outer_loop: for chunk in self.consumer.stream().ready_chunks(max_chunk_size) {
+            let mut msgs = Vec::with_capacity(chunk.len());
+            for item in chunk {
+                match item {
+                    Ok(msg) => msgs.push(msg),
+                    Err(KafkaError::PartitionEOF(partition)) if enable_eof => {
+                        let split_id: SplitId = partition.to_string().into();
+                        tracing::debug!("partition EOF for split {} in bounded reader", split_id);
+                        stop_offsets.remove(&split_id);
+                    }
+                    Err(e) => return Err(e.into()),
+                }
+            }
+
+            if msgs.is_empty() {
+                if stop_offsets.is_empty() {
+                    if !res.is_empty() {
+                        yield std::mem::take(&mut res);
+                    }
+                    if let Some(ref flag) = self.bounded_eof_flag {
+                        flag.store(true, Ordering::Release);
+                    }
+                    break 'for_outer_loop;
+                }
+                continue;
+            }
 
             let mut split_msg_offsets = HashMap::new();
 
@@ -282,42 +334,64 @@ impl KafkaSplitReader {
                     .set(offset);
             }
 
-            for msg in msgs {
+            for msg in &msgs {
                 let cur_offset = msg.offset();
                 bytes_current_second += match &msg.payload() {
                     None => 0,
                     Some(payload) => payload.len(),
                 };
                 num_messages += 1;
-                let source_message =
-                    SourceMessage::from_kafka_message(&msg, require_message_header);
-                let split_id = source_message.split_id.clone();
+
+                let split_id: SplitId = msg.partition().to_string().into();
+
+                // PRE-PUSH GUARD: stop_offset is exclusive — skip rows at or beyond it
+                if let Entry::Occupied(o) = stop_offsets.entry(split_id.clone())
+                    && cur_offset >= *o.get()
+                {
+                    tracing::debug!(
+                        "bounded stop offset reached split {}, offset {}",
+                        o.key(),
+                        cur_offset
+                    );
+                    o.remove();
+                    if stop_offsets.is_empty() {
+                        if !res.is_empty() {
+                            yield std::mem::take(&mut res);
+                        }
+                        if let Some(ref flag) = self.bounded_eof_flag {
+                            flag.store(true, Ordering::Release);
+                        }
+                        break 'for_outer_loop;
+                    }
+                    continue;
+                }
+
+                let source_message = SourceMessage::from_kafka_message(msg, require_message_header);
+                let split_id_for_stop = source_message.split_id.clone();
                 res.push(source_message);
 
-                if let Entry::Occupied(o) = stop_offsets.entry(split_id) {
-                    let stop_offset = *o.get();
-
-                    if cur_offset == stop_offset - 1 {
-                        tracing::debug!(
-                            "stop offset reached for split {}, stop reading, offset: {}, stop offset: {}",
-                            o.key(),
-                            cur_offset,
-                            stop_offset
-                        );
-
-                        o.remove();
-
-                        if stop_offsets.is_empty() {
-                            yield res;
-                            break 'for_outer_loop;
+                // POST-PUSH FAST-PATH: last valid in-range row
+                if let Entry::Occupied(o) = stop_offsets.entry(split_id_for_stop)
+                    && cur_offset == *o.get() - 1
+                {
+                    tracing::debug!(
+                        "stop offset reached for split {}, stop reading, offset: {}, stop offset: {}",
+                        o.key(),
+                        cur_offset,
+                        o.get()
+                    );
+                    o.remove();
+                    if stop_offsets.is_empty() {
+                        yield std::mem::take(&mut res);
+                        if let Some(ref flag) = self.bounded_eof_flag {
+                            flag.store(true, Ordering::Release);
                         }
-
-                        continue;
+                        break 'for_outer_loop;
                     }
                 }
 
+                // Rate limiting
                 if bytes_current_second > self.bytes_per_second {
-                    // swap to make compiler happy
                     let mut cur = Vec::with_capacity(res.capacity());
                     swap(&mut cur, &mut res);
                     yield cur;
@@ -330,6 +404,18 @@ impl KafkaSplitReader {
                     break 'for_outer_loop;
                 }
             }
+
+            // After processing chunk: check if EOF events emptied stop_offsets
+            if stop_offsets.is_empty() {
+                if !res.is_empty() {
+                    yield std::mem::take(&mut res);
+                }
+                if let Some(ref flag) = self.bounded_eof_flag {
+                    flag.store(true, Ordering::Release);
+                }
+                break 'for_outer_loop;
+            }
+
             let mut cur = Vec::with_capacity(res.capacity());
             swap(&mut cur, &mut res);
             yield cur;

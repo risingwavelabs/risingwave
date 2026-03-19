@@ -14,6 +14,7 @@
 
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 
 use anyhow::anyhow;
 use async_trait::async_trait;
@@ -159,6 +160,9 @@ pub struct CreateSplitReaderOpt {
 pub struct CreateSplitReaderResult {
     pub latest_splits: Option<Vec<SplitImpl>>,
     pub backfill_info: HashMap<SplitId, BackfillInfo>,
+    /// Flag set by bounded readers (e.g., Kafka with `enable.partition.eof`) when
+    /// all partitions have been fully consumed. Executors poll this to detect completion.
+    pub bounded_eof_flag: Option<Arc<AtomicBool>>,
 }
 
 pub async fn create_split_readers<P: SourceProperties>(
@@ -173,6 +177,7 @@ pub async fn create_split_readers<P: SourceProperties>(
     let mut res = CreateSplitReaderResult {
         backfill_info: HashMap::new(),
         latest_splits: None,
+        bounded_eof_flag: None,
     };
     if opt.support_multiple_splits {
         let mut reader = P::SplitReader::new(
@@ -187,6 +192,7 @@ pub async fn create_split_readers<P: SourceProperties>(
             res.latest_splits = Some(reader.seek_to_latest().await?);
         }
         res.backfill_info = reader.backfill_info();
+        res.bounded_eof_flag = reader.bounded_eof_flag();
         Ok((reader.into_stream().boxed(), res))
     } else {
         let mut readers = try_join_all(splits.into_iter().map(|split| {
@@ -209,6 +215,7 @@ pub async fn create_split_readers<P: SourceProperties>(
             res.latest_splits = Some(latest_splits);
         }
         res.backfill_info = readers.iter().flat_map(|r| r.backfill_info()).collect();
+        res.bounded_eof_flag = readers.iter().find_map(|r| r.bounded_eof_flag());
         Ok((
             select_all(readers.into_iter().map(|r| r.into_stream())).boxed(),
             res,
@@ -284,6 +291,10 @@ pub struct SourceCtrlOpts {
     pub chunk_size: usize,
     /// Whether to allow splitting a transaction into multiple chunks to meet the `max_chunk_size`.
     pub split_txn: bool,
+    /// Whether to enable `enable.partition.eof` in the Kafka consumer.
+    /// Used by bounded readers (batch source, source backfill) to detect when
+    /// all partitions have been fully consumed up to the stop offset.
+    pub enable_partition_eof: bool,
 }
 
 // The options in `SourceCtrlOpts` are so important that we don't want to impl `Default` for it,
@@ -296,6 +307,7 @@ impl SourceCtrlOpts {
         SourceCtrlOpts {
             chunk_size: 256,
             split_txn: false,
+            enable_partition_eof: false,
         }
     }
 }
@@ -404,6 +416,7 @@ impl SourceContext {
             SourceCtrlOpts {
                 chunk_size: MAX_CHUNK_SIZE,
                 split_txn: false,
+                enable_partition_eof: false,
             },
             ConnectorProperties::default(),
             None,
@@ -591,6 +604,12 @@ pub trait SplitReader: Sized + Send {
 
     fn backfill_info(&self) -> HashMap<SplitId, BackfillInfo> {
         HashMap::new()
+    }
+
+    /// Returns a shared flag that the reader sets to `true` when all partitions
+    /// have been consumed up to their stop offsets. Only meaningful for bounded reads.
+    fn bounded_eof_flag(&self) -> Option<Arc<AtomicBool>> {
+        None
     }
 
     async fn seek_to_latest(&mut self) -> Result<Vec<SplitImpl>> {
