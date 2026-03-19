@@ -30,7 +30,8 @@ set streaming_parallelism_for_source to default;
 onlyif kafka
 statement ok
 create source s_dd (v int) with (
-    ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+    connector = 'kafka',
+    properties.bootstrap.server = '${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}',
     topic = 'streaming_parallelism_source',
     scan.startup.mode = 'earliest'
 ) format plain encode json;
@@ -63,7 +64,8 @@ set streaming_parallelism_for_source to 6;
 onlyif kafka
 statement ok
 create source s_df (v int) with (
-    ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+    connector = 'kafka',
+    properties.bootstrap.server = '${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}',
     topic = 'streaming_parallelism_source',
     scan.startup.mode = 'earliest'
 ) format plain encode json;
@@ -96,7 +98,8 @@ set streaming_parallelism_for_source to 'ratio(0.5)';
 onlyif kafka
 statement ok
 create source s_dr (v int) with (
-    ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+    connector = 'kafka',
+    properties.bootstrap.server = '${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}',
     topic = 'streaming_parallelism_source',
     scan.startup.mode = 'earliest'
 ) format plain encode json;
@@ -129,7 +132,8 @@ set streaming_parallelism_for_source to 'bounded(16)';
 onlyif kafka
 statement ok
 create source s_db (v int) with (
-    ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+    connector = 'kafka',
+    properties.bootstrap.server = '${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}',
     topic = 'streaming_parallelism_source',
     scan.startup.mode = 'earliest'
 ) format plain encode json;
@@ -162,7 +166,8 @@ set streaming_parallelism_for_source to adaptive;
 onlyif kafka
 statement ok
 create source s_da (v int) with (
-    ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+    connector = 'kafka',
+    properties.bootstrap.server = '${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}',
     topic = 'streaming_parallelism_source',
     scan.startup.mode = 'earliest'
 ) format plain encode json;
@@ -195,7 +200,8 @@ set streaming_parallelism_for_source to default;
 onlyif kafka
 statement ok
 create source s_fd (v int) with (
-    ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+    connector = 'kafka',
+    properties.bootstrap.server = '${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}',
     topic = 'streaming_parallelism_source',
     scan.startup.mode = 'earliest'
 ) format plain encode json;
@@ -228,7 +234,8 @@ set streaming_parallelism_for_source to 6;
 onlyif kafka
 statement ok
 create source s_ff (v int) with (
-    ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+    connector = 'kafka',
+    properties.bootstrap.server = '${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}',
     topic = 'streaming_parallelism_source',
     scan.startup.mode = 'earliest'
 ) format plain encode json;
@@ -261,7 +268,8 @@ set streaming_parallelism_for_source to 'ratio(0.5)';
 onlyif kafka
 statement ok
 create source s_fr (v int) with (
-    ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+    connector = 'kafka',
+    properties.bootstrap.server = '${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}',
     topic = 'streaming_parallelism_source',
     scan.startup.mode = 'earliest'
 ) format plain encode json;
@@ -294,7 +302,8 @@ set streaming_parallelism_for_source to 'bounded(16)';
 onlyif kafka
 statement ok
 create source s_fb (v int) with (
-    ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+    connector = 'kafka',
+    properties.bootstrap.server = '${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}',
     topic = 'streaming_parallelism_source',
     scan.startup.mode = 'earliest'
 ) format plain encode json;
@@ -327,7 +336,8 @@ set streaming_parallelism_for_source to adaptive;
 onlyif kafka
 statement ok
 create source s_fa (v int) with (
-    ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+    connector = 'kafka',
+    properties.bootstrap.server = '${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}',
     topic = 'streaming_parallelism_source',
     scan.startup.mode = 'earliest'
 ) format plain encode json;
@@ -360,7 +370,8 @@ set streaming_parallelism_for_source to default;
 onlyif kafka
 statement ok
 create source s_rd (v int) with (
-    ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+    connector = 'kafka',
+    properties.bootstrap.server = '${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}',
     topic = 'streaming_parallelism_source',
     scan.startup.mode = 'earliest'
 ) format plain encode json;
@@ -393,7 +404,8 @@ set streaming_parallelism_for_source to 6;
 onlyif kafka
 statement ok
 create source s_rf (v int) with (
-    ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+    connector = 'kafka',
+    properties.bootstrap.server = '${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}',
     topic = 'streaming_parallelism_source',
     scan.startup.mode = 'earliest'
 ) format plain encode json;
@@ -426,7 +438,8 @@ set streaming_parallelism_for_source to 'ratio(0.5)';
 onlyif kafka
 statement ok
 create source s_rr (v int) with (
-    ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+    connector = 'kafka',
+    properties.bootstrap.server = '${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}',
     topic = 'streaming_parallelism_source',
     scan.startup.mode = 'earliest'
 ) format plain encode json;
@@ -459,7 +472,8 @@ set streaming_parallelism_for_source to 'bounded(16)';
 onlyif kafka
 statement ok
 create source s_rb (v int) with (
-    ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+    connector = 'kafka',
+    properties.bootstrap.server = '${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}',
     topic = 'streaming_parallelism_source',
     scan.startup.mode = 'earliest'
 ) format plain encode json;
@@ -492,7 +506,8 @@ set streaming_parallelism_for_source to adaptive;
 onlyif kafka
 statement ok
 create source s_ra (v int) with (
-    ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+    connector = 'kafka',
+    properties.bootstrap.server = '${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}',
     topic = 'streaming_parallelism_source',
     scan.startup.mode = 'earliest'
 ) format plain encode json;
@@ -525,7 +540,8 @@ set streaming_parallelism_for_source to default;
 onlyif kafka
 statement ok
 create source s_bd (v int) with (
-    ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+    connector = 'kafka',
+    properties.bootstrap.server = '${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}',
     topic = 'streaming_parallelism_source',
     scan.startup.mode = 'earliest'
 ) format plain encode json;
@@ -558,7 +574,8 @@ set streaming_parallelism_for_source to 6;
 onlyif kafka
 statement ok
 create source s_bf (v int) with (
-    ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+    connector = 'kafka',
+    properties.bootstrap.server = '${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}',
     topic = 'streaming_parallelism_source',
     scan.startup.mode = 'earliest'
 ) format plain encode json;
@@ -591,7 +608,8 @@ set streaming_parallelism_for_source to 'ratio(0.5)';
 onlyif kafka
 statement ok
 create source s_br (v int) with (
-    ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+    connector = 'kafka',
+    properties.bootstrap.server = '${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}',
     topic = 'streaming_parallelism_source',
     scan.startup.mode = 'earliest'
 ) format plain encode json;
@@ -624,7 +642,8 @@ set streaming_parallelism_for_source to 'bounded(16)';
 onlyif kafka
 statement ok
 create source s_bb (v int) with (
-    ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+    connector = 'kafka',
+    properties.bootstrap.server = '${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}',
     topic = 'streaming_parallelism_source',
     scan.startup.mode = 'earliest'
 ) format plain encode json;
@@ -657,7 +676,8 @@ set streaming_parallelism_for_source to adaptive;
 onlyif kafka
 statement ok
 create source s_ba (v int) with (
-    ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+    connector = 'kafka',
+    properties.bootstrap.server = '${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}',
     topic = 'streaming_parallelism_source',
     scan.startup.mode = 'earliest'
 ) format plain encode json;
@@ -690,7 +710,8 @@ set streaming_parallelism_for_source to default;
 onlyif kafka
 statement ok
 create source s_ad (v int) with (
-    ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+    connector = 'kafka',
+    properties.bootstrap.server = '${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}',
     topic = 'streaming_parallelism_source',
     scan.startup.mode = 'earliest'
 ) format plain encode json;
@@ -723,7 +744,8 @@ set streaming_parallelism_for_source to 6;
 onlyif kafka
 statement ok
 create source s_af (v int) with (
-    ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+    connector = 'kafka',
+    properties.bootstrap.server = '${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}',
     topic = 'streaming_parallelism_source',
     scan.startup.mode = 'earliest'
 ) format plain encode json;
@@ -756,7 +778,8 @@ set streaming_parallelism_for_source to 'ratio(0.5)';
 onlyif kafka
 statement ok
 create source s_ar (v int) with (
-    ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+    connector = 'kafka',
+    properties.bootstrap.server = '${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}',
     topic = 'streaming_parallelism_source',
     scan.startup.mode = 'earliest'
 ) format plain encode json;
@@ -789,7 +812,8 @@ set streaming_parallelism_for_source to 'bounded(16)';
 onlyif kafka
 statement ok
 create source s_ab (v int) with (
-    ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+    connector = 'kafka',
+    properties.bootstrap.server = '${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}',
     topic = 'streaming_parallelism_source',
     scan.startup.mode = 'earliest'
 ) format plain encode json;
@@ -822,7 +846,8 @@ set streaming_parallelism_for_source to adaptive;
 onlyif kafka
 statement ok
 create source s_aa (v int) with (
-    ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+    connector = 'kafka',
+    properties.bootstrap.server = '${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}',
     topic = 'streaming_parallelism_source',
     scan.startup.mode = 'earliest'
 ) format plain encode json;
