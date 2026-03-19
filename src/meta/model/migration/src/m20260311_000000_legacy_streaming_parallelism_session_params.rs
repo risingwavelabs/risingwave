@@ -583,3 +583,56 @@ enum StreamingJob {
     Table,
     AdaptiveParallelismStrategy,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn session_param(name: &str, value: &str) -> SessionParameterRow {
+        SessionParameterRow {
+            name: name.to_owned(),
+            value: value.to_owned(),
+        }
+    }
+
+    #[test]
+    fn test_derive_legacy_streaming_parallelism_params_type_only_keeps_global_untouched() {
+        let derived = derive_legacy_streaming_parallelism_params(
+            &[session_param(
+                LEGACY_STREAMING_PARALLELISM_STRATEGY_FOR_SINK,
+                "bounded(8)",
+            )],
+            AdaptiveParallelismStrategy::Auto,
+        );
+
+        assert_eq!(derived.get(STREAMING_PARALLELISM), None);
+        assert_eq!(
+            derived.get(STREAMING_PARALLELISM_FOR_SINK),
+            Some(&"bounded(8)".to_owned())
+        );
+        assert_eq!(
+            derived.get(STREAMING_PARALLELISM_FOR_TABLE),
+            Some(&"default".to_owned())
+        );
+    }
+
+    #[test]
+    fn test_derive_legacy_streaming_parallelism_params_materializes_custom_system_strategy() {
+        let derived = derive_legacy_streaming_parallelism_params(
+            &[session_param(
+                LEGACY_STREAMING_PARALLELISM_STRATEGY_FOR_SINK,
+                "bounded(8)",
+            )],
+            AdaptiveParallelismStrategy::Bounded(16),
+        );
+
+        assert_eq!(
+            derived.get(STREAMING_PARALLELISM),
+            Some(&"bounded(16)".to_owned())
+        );
+        assert_eq!(
+            derived.get(STREAMING_PARALLELISM_FOR_SINK),
+            Some(&"bounded(8)".to_owned())
+        );
+    }
+}
