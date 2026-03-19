@@ -1,873 +1,874 @@
 control substitution on
 
 # `onlyif` is sqllogictest conditional syntax.
-# This file is executed by `ci/scripts/e2e-source-test.sh` with `--label kafka`.
-onlyif kafka
+# This file is executed by `ci/scripts/e2e-source-test.sh` with
+# `--label streaming_parallelism_source_kafka`.
+onlyif streaming_parallelism_source_kafka
 statement ok
 set rw_implicit_flush to true;
 
-onlyif kafka
+onlyif streaming_parallelism_source_kafka
 statement ok
 set streaming_use_shared_source to true;
 
-onlyif kafka
+onlyif streaming_parallelism_source_kafka
 system ok
-rpk topic delete streaming_parallelism_source -X brokers=${RISEDEV_KAFKA_BOOTSTRAP_SERVERS} || true
+rpk topic delete streaming_parallelism_source -X brokers=message_queue:29092 || true
 
-onlyif kafka
+onlyif streaming_parallelism_source_kafka
 system ok
-rpk topic create streaming_parallelism_source -p 32 -X brokers=${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}
+rpk topic create streaming_parallelism_source -p 32 -X brokers=message_queue:29092
 
 # Case: global=default, streaming_parallelism_for_source=default
-onlyif kafka
+onlyif streaming_parallelism_source_kafka
 statement ok
 set streaming_parallelism to default;
 
-onlyif kafka
+onlyif streaming_parallelism_source_kafka
 statement ok
 set streaming_parallelism_for_source to default;
 
-onlyif kafka
+onlyif streaming_parallelism_source_kafka
 statement ok
 create source s_dd (v int) with (
     connector = 'kafka',
-    properties.bootstrap.server = '${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}',
+    properties.bootstrap.server = 'message_queue:29092',
     topic = 'streaming_parallelism_source',
     scan.startup.mode = 'earliest'
 ) format plain encode json;
 
-onlyif kafka
+onlyif streaming_parallelism_source_kafka
 query TT
 select connector, is_shared from rw_sources where name = 's_dd';
 ----
 KAFKA	t
 
-onlyif kafka
+onlyif streaming_parallelism_source_kafka
 query T
 select parallelism from rw_streaming_parallelism where name = 's_dd';
 ----
 bounded(4)
 
-onlyif kafka
+onlyif streaming_parallelism_source_kafka
 statement ok
 drop source s_dd;
 
 # Case: global=default, streaming_parallelism_for_source=6
-onlyif kafka
+onlyif streaming_parallelism_source_kafka
 statement ok
 set streaming_parallelism to default;
 
-onlyif kafka
+onlyif streaming_parallelism_source_kafka
 statement ok
 set streaming_parallelism_for_source to 6;
 
-onlyif kafka
+onlyif streaming_parallelism_source_kafka
 statement ok
 create source s_df (v int) with (
     connector = 'kafka',
-    properties.bootstrap.server = '${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}',
+    properties.bootstrap.server = 'message_queue:29092',
     topic = 'streaming_parallelism_source',
     scan.startup.mode = 'earliest'
 ) format plain encode json;
 
-onlyif kafka
+onlyif streaming_parallelism_source_kafka
 query TT
 select connector, is_shared from rw_sources where name = 's_df';
 ----
 KAFKA	t
 
-onlyif kafka
+onlyif streaming_parallelism_source_kafka
 query T
 select parallelism from rw_streaming_parallelism where name = 's_df';
 ----
 6
 
-onlyif kafka
+onlyif streaming_parallelism_source_kafka
 statement ok
 drop source s_df;
 
 # Case: global=default, streaming_parallelism_for_source='ratio(0.5)'
-onlyif kafka
+onlyif streaming_parallelism_source_kafka
 statement ok
 set streaming_parallelism to default;
 
-onlyif kafka
+onlyif streaming_parallelism_source_kafka
 statement ok
 set streaming_parallelism_for_source to 'ratio(0.5)';
 
-onlyif kafka
+onlyif streaming_parallelism_source_kafka
 statement ok
 create source s_dr (v int) with (
     connector = 'kafka',
-    properties.bootstrap.server = '${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}',
+    properties.bootstrap.server = 'message_queue:29092',
     topic = 'streaming_parallelism_source',
     scan.startup.mode = 'earliest'
 ) format plain encode json;
 
-onlyif kafka
+onlyif streaming_parallelism_source_kafka
 query TT
 select connector, is_shared from rw_sources where name = 's_dr';
 ----
 KAFKA	t
 
-onlyif kafka
+onlyif streaming_parallelism_source_kafka
 query T
 select parallelism from rw_streaming_parallelism where name = 's_dr';
 ----
 ratio(0.5)
 
-onlyif kafka
+onlyif streaming_parallelism_source_kafka
 statement ok
 drop source s_dr;
 
 # Case: global=default, streaming_parallelism_for_source='bounded(16)'
-onlyif kafka
+onlyif streaming_parallelism_source_kafka
 statement ok
 set streaming_parallelism to default;
 
-onlyif kafka
+onlyif streaming_parallelism_source_kafka
 statement ok
 set streaming_parallelism_for_source to 'bounded(16)';
 
-onlyif kafka
+onlyif streaming_parallelism_source_kafka
 statement ok
 create source s_db (v int) with (
     connector = 'kafka',
-    properties.bootstrap.server = '${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}',
+    properties.bootstrap.server = 'message_queue:29092',
     topic = 'streaming_parallelism_source',
     scan.startup.mode = 'earliest'
 ) format plain encode json;
 
-onlyif kafka
+onlyif streaming_parallelism_source_kafka
 query TT
 select connector, is_shared from rw_sources where name = 's_db';
 ----
 KAFKA	t
 
-onlyif kafka
+onlyif streaming_parallelism_source_kafka
 query T
 select parallelism from rw_streaming_parallelism where name = 's_db';
 ----
 bounded(16)
 
-onlyif kafka
+onlyif streaming_parallelism_source_kafka
 statement ok
 drop source s_db;
 
 # Case: global=default, streaming_parallelism_for_source=adaptive
-onlyif kafka
+onlyif streaming_parallelism_source_kafka
 statement ok
 set streaming_parallelism to default;
 
-onlyif kafka
+onlyif streaming_parallelism_source_kafka
 statement ok
 set streaming_parallelism_for_source to adaptive;
 
-onlyif kafka
+onlyif streaming_parallelism_source_kafka
 statement ok
 create source s_da (v int) with (
     connector = 'kafka',
-    properties.bootstrap.server = '${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}',
+    properties.bootstrap.server = 'message_queue:29092',
     topic = 'streaming_parallelism_source',
     scan.startup.mode = 'earliest'
 ) format plain encode json;
 
-onlyif kafka
+onlyif streaming_parallelism_source_kafka
 query TT
 select connector, is_shared from rw_sources where name = 's_da';
 ----
 KAFKA	t
 
-onlyif kafka
+onlyif streaming_parallelism_source_kafka
 query T
 select parallelism from rw_streaming_parallelism where name = 's_da';
 ----
 adaptive
 
-onlyif kafka
+onlyif streaming_parallelism_source_kafka
 statement ok
 drop source s_da;
 
 # Case: global=8, streaming_parallelism_for_source=default
-onlyif kafka
+onlyif streaming_parallelism_source_kafka
 statement ok
 set streaming_parallelism to 8;
 
-onlyif kafka
+onlyif streaming_parallelism_source_kafka
 statement ok
 set streaming_parallelism_for_source to default;
 
-onlyif kafka
+onlyif streaming_parallelism_source_kafka
 statement ok
 create source s_fd (v int) with (
     connector = 'kafka',
-    properties.bootstrap.server = '${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}',
+    properties.bootstrap.server = 'message_queue:29092',
     topic = 'streaming_parallelism_source',
     scan.startup.mode = 'earliest'
 ) format plain encode json;
 
-onlyif kafka
+onlyif streaming_parallelism_source_kafka
 query TT
 select connector, is_shared from rw_sources where name = 's_fd';
 ----
 KAFKA	t
 
-onlyif kafka
+onlyif streaming_parallelism_source_kafka
 query T
 select parallelism from rw_streaming_parallelism where name = 's_fd';
 ----
 8
 
-onlyif kafka
+onlyif streaming_parallelism_source_kafka
 statement ok
 drop source s_fd;
 
 # Case: global=8, streaming_parallelism_for_source=6
-onlyif kafka
+onlyif streaming_parallelism_source_kafka
 statement ok
 set streaming_parallelism to 8;
 
-onlyif kafka
+onlyif streaming_parallelism_source_kafka
 statement ok
 set streaming_parallelism_for_source to 6;
 
-onlyif kafka
+onlyif streaming_parallelism_source_kafka
 statement ok
 create source s_ff (v int) with (
     connector = 'kafka',
-    properties.bootstrap.server = '${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}',
+    properties.bootstrap.server = 'message_queue:29092',
     topic = 'streaming_parallelism_source',
     scan.startup.mode = 'earliest'
 ) format plain encode json;
 
-onlyif kafka
+onlyif streaming_parallelism_source_kafka
 query TT
 select connector, is_shared from rw_sources where name = 's_ff';
 ----
 KAFKA	t
 
-onlyif kafka
+onlyif streaming_parallelism_source_kafka
 query T
 select parallelism from rw_streaming_parallelism where name = 's_ff';
 ----
 6
 
-onlyif kafka
+onlyif streaming_parallelism_source_kafka
 statement ok
 drop source s_ff;
 
 # Case: global=8, streaming_parallelism_for_source='ratio(0.5)'
-onlyif kafka
+onlyif streaming_parallelism_source_kafka
 statement ok
 set streaming_parallelism to 8;
 
-onlyif kafka
+onlyif streaming_parallelism_source_kafka
 statement ok
 set streaming_parallelism_for_source to 'ratio(0.5)';
 
-onlyif kafka
+onlyif streaming_parallelism_source_kafka
 statement ok
 create source s_fr (v int) with (
     connector = 'kafka',
-    properties.bootstrap.server = '${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}',
+    properties.bootstrap.server = 'message_queue:29092',
     topic = 'streaming_parallelism_source',
     scan.startup.mode = 'earliest'
 ) format plain encode json;
 
-onlyif kafka
+onlyif streaming_parallelism_source_kafka
 query TT
 select connector, is_shared from rw_sources where name = 's_fr';
 ----
 KAFKA	t
 
-onlyif kafka
+onlyif streaming_parallelism_source_kafka
 query T
 select parallelism from rw_streaming_parallelism where name = 's_fr';
 ----
 ratio(0.5)
 
-onlyif kafka
+onlyif streaming_parallelism_source_kafka
 statement ok
 drop source s_fr;
 
 # Case: global=8, streaming_parallelism_for_source='bounded(16)'
-onlyif kafka
+onlyif streaming_parallelism_source_kafka
 statement ok
 set streaming_parallelism to 8;
 
-onlyif kafka
+onlyif streaming_parallelism_source_kafka
 statement ok
 set streaming_parallelism_for_source to 'bounded(16)';
 
-onlyif kafka
+onlyif streaming_parallelism_source_kafka
 statement ok
 create source s_fb (v int) with (
     connector = 'kafka',
-    properties.bootstrap.server = '${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}',
+    properties.bootstrap.server = 'message_queue:29092',
     topic = 'streaming_parallelism_source',
     scan.startup.mode = 'earliest'
 ) format plain encode json;
 
-onlyif kafka
+onlyif streaming_parallelism_source_kafka
 query TT
 select connector, is_shared from rw_sources where name = 's_fb';
 ----
 KAFKA	t
 
-onlyif kafka
+onlyif streaming_parallelism_source_kafka
 query T
 select parallelism from rw_streaming_parallelism where name = 's_fb';
 ----
 bounded(16)
 
-onlyif kafka
+onlyif streaming_parallelism_source_kafka
 statement ok
 drop source s_fb;
 
 # Case: global=8, streaming_parallelism_for_source=adaptive
-onlyif kafka
+onlyif streaming_parallelism_source_kafka
 statement ok
 set streaming_parallelism to 8;
 
-onlyif kafka
+onlyif streaming_parallelism_source_kafka
 statement ok
 set streaming_parallelism_for_source to adaptive;
 
-onlyif kafka
+onlyif streaming_parallelism_source_kafka
 statement ok
 create source s_fa (v int) with (
     connector = 'kafka',
-    properties.bootstrap.server = '${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}',
+    properties.bootstrap.server = 'message_queue:29092',
     topic = 'streaming_parallelism_source',
     scan.startup.mode = 'earliest'
 ) format plain encode json;
 
-onlyif kafka
+onlyif streaming_parallelism_source_kafka
 query TT
 select connector, is_shared from rw_sources where name = 's_fa';
 ----
 KAFKA	t
 
-onlyif kafka
+onlyif streaming_parallelism_source_kafka
 query T
 select parallelism from rw_streaming_parallelism where name = 's_fa';
 ----
 adaptive
 
-onlyif kafka
+onlyif streaming_parallelism_source_kafka
 statement ok
 drop source s_fa;
 
 # Case: global='ratio(0.5)', streaming_parallelism_for_source=default
-onlyif kafka
+onlyif streaming_parallelism_source_kafka
 statement ok
 set streaming_parallelism to 'ratio(0.5)';
 
-onlyif kafka
+onlyif streaming_parallelism_source_kafka
 statement ok
 set streaming_parallelism_for_source to default;
 
-onlyif kafka
+onlyif streaming_parallelism_source_kafka
 statement ok
 create source s_rd (v int) with (
     connector = 'kafka',
-    properties.bootstrap.server = '${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}',
+    properties.bootstrap.server = 'message_queue:29092',
     topic = 'streaming_parallelism_source',
     scan.startup.mode = 'earliest'
 ) format plain encode json;
 
-onlyif kafka
+onlyif streaming_parallelism_source_kafka
 query TT
 select connector, is_shared from rw_sources where name = 's_rd';
 ----
 KAFKA	t
 
-onlyif kafka
+onlyif streaming_parallelism_source_kafka
 query T
 select parallelism from rw_streaming_parallelism where name = 's_rd';
 ----
 ratio(0.5)
 
-onlyif kafka
+onlyif streaming_parallelism_source_kafka
 statement ok
 drop source s_rd;
 
 # Case: global='ratio(0.5)', streaming_parallelism_for_source=6
-onlyif kafka
+onlyif streaming_parallelism_source_kafka
 statement ok
 set streaming_parallelism to 'ratio(0.5)';
 
-onlyif kafka
+onlyif streaming_parallelism_source_kafka
 statement ok
 set streaming_parallelism_for_source to 6;
 
-onlyif kafka
+onlyif streaming_parallelism_source_kafka
 statement ok
 create source s_rf (v int) with (
     connector = 'kafka',
-    properties.bootstrap.server = '${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}',
+    properties.bootstrap.server = 'message_queue:29092',
     topic = 'streaming_parallelism_source',
     scan.startup.mode = 'earliest'
 ) format plain encode json;
 
-onlyif kafka
+onlyif streaming_parallelism_source_kafka
 query TT
 select connector, is_shared from rw_sources where name = 's_rf';
 ----
 KAFKA	t
 
-onlyif kafka
+onlyif streaming_parallelism_source_kafka
 query T
 select parallelism from rw_streaming_parallelism where name = 's_rf';
 ----
 6
 
-onlyif kafka
+onlyif streaming_parallelism_source_kafka
 statement ok
 drop source s_rf;
 
 # Case: global='ratio(0.5)', streaming_parallelism_for_source='ratio(0.5)'
-onlyif kafka
+onlyif streaming_parallelism_source_kafka
 statement ok
 set streaming_parallelism to 'ratio(0.5)';
 
-onlyif kafka
+onlyif streaming_parallelism_source_kafka
 statement ok
 set streaming_parallelism_for_source to 'ratio(0.5)';
 
-onlyif kafka
+onlyif streaming_parallelism_source_kafka
 statement ok
 create source s_rr (v int) with (
     connector = 'kafka',
-    properties.bootstrap.server = '${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}',
+    properties.bootstrap.server = 'message_queue:29092',
     topic = 'streaming_parallelism_source',
     scan.startup.mode = 'earliest'
 ) format plain encode json;
 
-onlyif kafka
+onlyif streaming_parallelism_source_kafka
 query TT
 select connector, is_shared from rw_sources where name = 's_rr';
 ----
 KAFKA	t
 
-onlyif kafka
+onlyif streaming_parallelism_source_kafka
 query T
 select parallelism from rw_streaming_parallelism where name = 's_rr';
 ----
 ratio(0.5)
 
-onlyif kafka
+onlyif streaming_parallelism_source_kafka
 statement ok
 drop source s_rr;
 
 # Case: global='ratio(0.5)', streaming_parallelism_for_source='bounded(16)'
-onlyif kafka
+onlyif streaming_parallelism_source_kafka
 statement ok
 set streaming_parallelism to 'ratio(0.5)';
 
-onlyif kafka
+onlyif streaming_parallelism_source_kafka
 statement ok
 set streaming_parallelism_for_source to 'bounded(16)';
 
-onlyif kafka
+onlyif streaming_parallelism_source_kafka
 statement ok
 create source s_rb (v int) with (
     connector = 'kafka',
-    properties.bootstrap.server = '${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}',
+    properties.bootstrap.server = 'message_queue:29092',
     topic = 'streaming_parallelism_source',
     scan.startup.mode = 'earliest'
 ) format plain encode json;
 
-onlyif kafka
+onlyif streaming_parallelism_source_kafka
 query TT
 select connector, is_shared from rw_sources where name = 's_rb';
 ----
 KAFKA	t
 
-onlyif kafka
+onlyif streaming_parallelism_source_kafka
 query T
 select parallelism from rw_streaming_parallelism where name = 's_rb';
 ----
 bounded(16)
 
-onlyif kafka
+onlyif streaming_parallelism_source_kafka
 statement ok
 drop source s_rb;
 
 # Case: global='ratio(0.5)', streaming_parallelism_for_source=adaptive
-onlyif kafka
+onlyif streaming_parallelism_source_kafka
 statement ok
 set streaming_parallelism to 'ratio(0.5)';
 
-onlyif kafka
+onlyif streaming_parallelism_source_kafka
 statement ok
 set streaming_parallelism_for_source to adaptive;
 
-onlyif kafka
+onlyif streaming_parallelism_source_kafka
 statement ok
 create source s_ra (v int) with (
     connector = 'kafka',
-    properties.bootstrap.server = '${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}',
+    properties.bootstrap.server = 'message_queue:29092',
     topic = 'streaming_parallelism_source',
     scan.startup.mode = 'earliest'
 ) format plain encode json;
 
-onlyif kafka
+onlyif streaming_parallelism_source_kafka
 query TT
 select connector, is_shared from rw_sources where name = 's_ra';
 ----
 KAFKA	t
 
-onlyif kafka
+onlyif streaming_parallelism_source_kafka
 query T
 select parallelism from rw_streaming_parallelism where name = 's_ra';
 ----
 adaptive
 
-onlyif kafka
+onlyif streaming_parallelism_source_kafka
 statement ok
 drop source s_ra;
 
 # Case: global='bounded(32)', streaming_parallelism_for_source=default
-onlyif kafka
+onlyif streaming_parallelism_source_kafka
 statement ok
 set streaming_parallelism to 'bounded(32)';
 
-onlyif kafka
+onlyif streaming_parallelism_source_kafka
 statement ok
 set streaming_parallelism_for_source to default;
 
-onlyif kafka
+onlyif streaming_parallelism_source_kafka
 statement ok
 create source s_bd (v int) with (
     connector = 'kafka',
-    properties.bootstrap.server = '${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}',
+    properties.bootstrap.server = 'message_queue:29092',
     topic = 'streaming_parallelism_source',
     scan.startup.mode = 'earliest'
 ) format plain encode json;
 
-onlyif kafka
+onlyif streaming_parallelism_source_kafka
 query TT
 select connector, is_shared from rw_sources where name = 's_bd';
 ----
 KAFKA	t
 
-onlyif kafka
+onlyif streaming_parallelism_source_kafka
 query T
 select parallelism from rw_streaming_parallelism where name = 's_bd';
 ----
 bounded(32)
 
-onlyif kafka
+onlyif streaming_parallelism_source_kafka
 statement ok
 drop source s_bd;
 
 # Case: global='bounded(32)', streaming_parallelism_for_source=6
-onlyif kafka
+onlyif streaming_parallelism_source_kafka
 statement ok
 set streaming_parallelism to 'bounded(32)';
 
-onlyif kafka
+onlyif streaming_parallelism_source_kafka
 statement ok
 set streaming_parallelism_for_source to 6;
 
-onlyif kafka
+onlyif streaming_parallelism_source_kafka
 statement ok
 create source s_bf (v int) with (
     connector = 'kafka',
-    properties.bootstrap.server = '${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}',
+    properties.bootstrap.server = 'message_queue:29092',
     topic = 'streaming_parallelism_source',
     scan.startup.mode = 'earliest'
 ) format plain encode json;
 
-onlyif kafka
+onlyif streaming_parallelism_source_kafka
 query TT
 select connector, is_shared from rw_sources where name = 's_bf';
 ----
 KAFKA	t
 
-onlyif kafka
+onlyif streaming_parallelism_source_kafka
 query T
 select parallelism from rw_streaming_parallelism where name = 's_bf';
 ----
 6
 
-onlyif kafka
+onlyif streaming_parallelism_source_kafka
 statement ok
 drop source s_bf;
 
 # Case: global='bounded(32)', streaming_parallelism_for_source='ratio(0.5)'
-onlyif kafka
+onlyif streaming_parallelism_source_kafka
 statement ok
 set streaming_parallelism to 'bounded(32)';
 
-onlyif kafka
+onlyif streaming_parallelism_source_kafka
 statement ok
 set streaming_parallelism_for_source to 'ratio(0.5)';
 
-onlyif kafka
+onlyif streaming_parallelism_source_kafka
 statement ok
 create source s_br (v int) with (
     connector = 'kafka',
-    properties.bootstrap.server = '${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}',
+    properties.bootstrap.server = 'message_queue:29092',
     topic = 'streaming_parallelism_source',
     scan.startup.mode = 'earliest'
 ) format plain encode json;
 
-onlyif kafka
+onlyif streaming_parallelism_source_kafka
 query TT
 select connector, is_shared from rw_sources where name = 's_br';
 ----
 KAFKA	t
 
-onlyif kafka
+onlyif streaming_parallelism_source_kafka
 query T
 select parallelism from rw_streaming_parallelism where name = 's_br';
 ----
 ratio(0.5)
 
-onlyif kafka
+onlyif streaming_parallelism_source_kafka
 statement ok
 drop source s_br;
 
 # Case: global='bounded(32)', streaming_parallelism_for_source='bounded(16)'
-onlyif kafka
+onlyif streaming_parallelism_source_kafka
 statement ok
 set streaming_parallelism to 'bounded(32)';
 
-onlyif kafka
+onlyif streaming_parallelism_source_kafka
 statement ok
 set streaming_parallelism_for_source to 'bounded(16)';
 
-onlyif kafka
+onlyif streaming_parallelism_source_kafka
 statement ok
 create source s_bb (v int) with (
     connector = 'kafka',
-    properties.bootstrap.server = '${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}',
+    properties.bootstrap.server = 'message_queue:29092',
     topic = 'streaming_parallelism_source',
     scan.startup.mode = 'earliest'
 ) format plain encode json;
 
-onlyif kafka
+onlyif streaming_parallelism_source_kafka
 query TT
 select connector, is_shared from rw_sources where name = 's_bb';
 ----
 KAFKA	t
 
-onlyif kafka
+onlyif streaming_parallelism_source_kafka
 query T
 select parallelism from rw_streaming_parallelism where name = 's_bb';
 ----
 bounded(16)
 
-onlyif kafka
+onlyif streaming_parallelism_source_kafka
 statement ok
 drop source s_bb;
 
 # Case: global='bounded(32)', streaming_parallelism_for_source=adaptive
-onlyif kafka
+onlyif streaming_parallelism_source_kafka
 statement ok
 set streaming_parallelism to 'bounded(32)';
 
-onlyif kafka
+onlyif streaming_parallelism_source_kafka
 statement ok
 set streaming_parallelism_for_source to adaptive;
 
-onlyif kafka
+onlyif streaming_parallelism_source_kafka
 statement ok
 create source s_ba (v int) with (
     connector = 'kafka',
-    properties.bootstrap.server = '${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}',
+    properties.bootstrap.server = 'message_queue:29092',
     topic = 'streaming_parallelism_source',
     scan.startup.mode = 'earliest'
 ) format plain encode json;
 
-onlyif kafka
+onlyif streaming_parallelism_source_kafka
 query TT
 select connector, is_shared from rw_sources where name = 's_ba';
 ----
 KAFKA	t
 
-onlyif kafka
+onlyif streaming_parallelism_source_kafka
 query T
 select parallelism from rw_streaming_parallelism where name = 's_ba';
 ----
 adaptive
 
-onlyif kafka
+onlyif streaming_parallelism_source_kafka
 statement ok
 drop source s_ba;
 
 # Case: global=adaptive, streaming_parallelism_for_source=default
-onlyif kafka
+onlyif streaming_parallelism_source_kafka
 statement ok
 set streaming_parallelism to adaptive;
 
-onlyif kafka
+onlyif streaming_parallelism_source_kafka
 statement ok
 set streaming_parallelism_for_source to default;
 
-onlyif kafka
+onlyif streaming_parallelism_source_kafka
 statement ok
 create source s_ad (v int) with (
     connector = 'kafka',
-    properties.bootstrap.server = '${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}',
+    properties.bootstrap.server = 'message_queue:29092',
     topic = 'streaming_parallelism_source',
     scan.startup.mode = 'earliest'
 ) format plain encode json;
 
-onlyif kafka
+onlyif streaming_parallelism_source_kafka
 query TT
 select connector, is_shared from rw_sources where name = 's_ad';
 ----
 KAFKA	t
 
-onlyif kafka
+onlyif streaming_parallelism_source_kafka
 query T
 select parallelism from rw_streaming_parallelism where name = 's_ad';
 ----
 adaptive
 
-onlyif kafka
+onlyif streaming_parallelism_source_kafka
 statement ok
 drop source s_ad;
 
 # Case: global=adaptive, streaming_parallelism_for_source=6
-onlyif kafka
+onlyif streaming_parallelism_source_kafka
 statement ok
 set streaming_parallelism to adaptive;
 
-onlyif kafka
+onlyif streaming_parallelism_source_kafka
 statement ok
 set streaming_parallelism_for_source to 6;
 
-onlyif kafka
+onlyif streaming_parallelism_source_kafka
 statement ok
 create source s_af (v int) with (
     connector = 'kafka',
-    properties.bootstrap.server = '${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}',
+    properties.bootstrap.server = 'message_queue:29092',
     topic = 'streaming_parallelism_source',
     scan.startup.mode = 'earliest'
 ) format plain encode json;
 
-onlyif kafka
+onlyif streaming_parallelism_source_kafka
 query TT
 select connector, is_shared from rw_sources where name = 's_af';
 ----
 KAFKA	t
 
-onlyif kafka
+onlyif streaming_parallelism_source_kafka
 query T
 select parallelism from rw_streaming_parallelism where name = 's_af';
 ----
 6
 
-onlyif kafka
+onlyif streaming_parallelism_source_kafka
 statement ok
 drop source s_af;
 
 # Case: global=adaptive, streaming_parallelism_for_source='ratio(0.5)'
-onlyif kafka
+onlyif streaming_parallelism_source_kafka
 statement ok
 set streaming_parallelism to adaptive;
 
-onlyif kafka
+onlyif streaming_parallelism_source_kafka
 statement ok
 set streaming_parallelism_for_source to 'ratio(0.5)';
 
-onlyif kafka
+onlyif streaming_parallelism_source_kafka
 statement ok
 create source s_ar (v int) with (
     connector = 'kafka',
-    properties.bootstrap.server = '${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}',
+    properties.bootstrap.server = 'message_queue:29092',
     topic = 'streaming_parallelism_source',
     scan.startup.mode = 'earliest'
 ) format plain encode json;
 
-onlyif kafka
+onlyif streaming_parallelism_source_kafka
 query TT
 select connector, is_shared from rw_sources where name = 's_ar';
 ----
 KAFKA	t
 
-onlyif kafka
+onlyif streaming_parallelism_source_kafka
 query T
 select parallelism from rw_streaming_parallelism where name = 's_ar';
 ----
 ratio(0.5)
 
-onlyif kafka
+onlyif streaming_parallelism_source_kafka
 statement ok
 drop source s_ar;
 
 # Case: global=adaptive, streaming_parallelism_for_source='bounded(16)'
-onlyif kafka
+onlyif streaming_parallelism_source_kafka
 statement ok
 set streaming_parallelism to adaptive;
 
-onlyif kafka
+onlyif streaming_parallelism_source_kafka
 statement ok
 set streaming_parallelism_for_source to 'bounded(16)';
 
-onlyif kafka
+onlyif streaming_parallelism_source_kafka
 statement ok
 create source s_ab (v int) with (
     connector = 'kafka',
-    properties.bootstrap.server = '${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}',
+    properties.bootstrap.server = 'message_queue:29092',
     topic = 'streaming_parallelism_source',
     scan.startup.mode = 'earliest'
 ) format plain encode json;
 
-onlyif kafka
+onlyif streaming_parallelism_source_kafka
 query TT
 select connector, is_shared from rw_sources where name = 's_ab';
 ----
 KAFKA	t
 
-onlyif kafka
+onlyif streaming_parallelism_source_kafka
 query T
 select parallelism from rw_streaming_parallelism where name = 's_ab';
 ----
 bounded(16)
 
-onlyif kafka
+onlyif streaming_parallelism_source_kafka
 statement ok
 drop source s_ab;
 
 # Case: global=adaptive, streaming_parallelism_for_source=adaptive
-onlyif kafka
+onlyif streaming_parallelism_source_kafka
 statement ok
 set streaming_parallelism to adaptive;
 
-onlyif kafka
+onlyif streaming_parallelism_source_kafka
 statement ok
 set streaming_parallelism_for_source to adaptive;
 
-onlyif kafka
+onlyif streaming_parallelism_source_kafka
 statement ok
 create source s_aa (v int) with (
     connector = 'kafka',
-    properties.bootstrap.server = '${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}',
+    properties.bootstrap.server = 'message_queue:29092',
     topic = 'streaming_parallelism_source',
     scan.startup.mode = 'earliest'
 ) format plain encode json;
 
-onlyif kafka
+onlyif streaming_parallelism_source_kafka
 query TT
 select connector, is_shared from rw_sources where name = 's_aa';
 ----
 KAFKA	t
 
-onlyif kafka
+onlyif streaming_parallelism_source_kafka
 query T
 select parallelism from rw_streaming_parallelism where name = 's_aa';
 ----
 adaptive
 
-onlyif kafka
+onlyif streaming_parallelism_source_kafka
 statement ok
 drop source s_aa;
 
-onlyif kafka
+onlyif streaming_parallelism_source_kafka
 system ok
-rpk topic delete streaming_parallelism_source -X brokers=${RISEDEV_KAFKA_BOOTSTRAP_SERVERS};
+rpk topic delete streaming_parallelism_source -X brokers=message_queue:29092;
