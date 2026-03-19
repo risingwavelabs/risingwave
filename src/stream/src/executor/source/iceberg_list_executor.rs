@@ -426,7 +426,7 @@ async fn incremental_scan_stream(
         let snapshot_timestamp_ms = current_snapshot.timestamp_ms();
         let now_ms = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
+            .unwrap_or_default()
             .as_millis() as i64;
         let lag_seconds = ((now_ms - snapshot_timestamp_ms) / 1000).max(0);
         metrics

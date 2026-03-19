@@ -115,7 +115,7 @@ def _(outer_panels: Panels):
                     [
                         panels.target(
                             f"{metric('iceberg_source_snapshot_lag_seconds')}",
-                            "{{source_name}} @ {{table_name}}",
+                            "{{source_name}} ({{source_id}}) @ {{table_name}}",
                         ),
                     ],
                 ),
@@ -124,8 +124,8 @@ def _(outer_panels: Panels):
                     "Rate of new snapshots discovered via incremental scan",
                     [
                         panels.target(
-                            f"sum(rate({metric('iceberg_source_snapshots_discovered_total')}[$__rate_interval])) by (source_name, table_name)",
-                            "{{source_name}} @ {{table_name}}",
+                            f"sum(rate({metric('iceberg_source_snapshots_discovered_total')}[$__rate_interval])) by (source_id, source_name, table_name)",
+                            "{{source_name}} ({{source_id}}) @ {{table_name}}",
                         ),
                     ],
                 ),
@@ -135,8 +135,8 @@ def _(outer_panels: Panels):
                     [
                         *quantile(
                             lambda quantile, legend: panels.target(
-                                f"histogram_quantile({quantile}, sum(rate({metric('iceberg_source_list_duration_seconds_bucket')}[$__rate_interval])) by (le, source_name, table_name))",
-                                f"p{legend}" + " @ {{source_name}} {{table_name}}",
+                                f"histogram_quantile({quantile}, sum(rate({metric('iceberg_source_list_duration_seconds_bucket')}[$__rate_interval])) by (le, source_id, source_name, table_name))",
+                                f"p{legend}" + " @ {{source_name}} ({{source_id}}) {{table_name}}",
                             ),
                             [50, 99, "max"],
                         ),
@@ -147,8 +147,8 @@ def _(outer_panels: Panels):
                     "Rate of files discovered per scan by type",
                     [
                         panels.target(
-                            f"sum(rate({metric('iceberg_source_files_discovered_total')}[$__rate_interval])) by (source_name, table_name, file_type)",
-                            "{{file_type}} @ {{source_name}} {{table_name}}",
+                            f"sum(rate({metric('iceberg_source_files_discovered_total')}[$__rate_interval])) by (source_id, source_name, table_name, file_type)",
+                            "{{file_type}} @ {{source_name}} ({{source_id}}) {{table_name}}",
                         ),
                     ],
                 ),
@@ -203,8 +203,8 @@ def _(outer_panels: Panels):
                     [
                         *quantile(
                             lambda quantile, legend: panels.target(
-                                f"histogram_quantile({quantile}, sum(rate({metric('iceberg_source_delete_files_per_data_file_bucket')}[$__rate_interval])) by (le, source_name, table_name))",
-                                f"p{legend}" + " @ {{source_name}} {{table_name}}",
+                                f"histogram_quantile({quantile}, sum(rate({metric('iceberg_source_delete_files_per_data_file_bucket')}[$__rate_interval])) by (le, source_id, source_name, table_name))",
+                                f"p{legend}" + " @ {{source_name}} ({{source_id}}) {{table_name}}",
                             ),
                             [50, 99, "max"],
                         ),
@@ -217,7 +217,7 @@ def _(outer_panels: Panels):
                     [
                         panels.target(
                             f"{metric('iceberg_source_checkpoint_file_count')}",
-                            "{{source_name}} @ {{table_name}}",
+                            "{{source_name}} ({{source_id}}) @ {{table_name}}",
                         ),
                     ],
                 ),
@@ -226,8 +226,8 @@ def _(outer_panels: Panels):
                     "Rate of scan errors categorized by type",
                     [
                         panels.target(
-                            f"sum(rate({metric('iceberg_source_scan_errors_total')}[$__rate_interval])) by (source_name, table_name, error_type)",
-                            "{{error_type}} @ {{source_name}} {{table_name}}",
+                            f"sum(rate({metric('iceberg_source_scan_errors_total')}[$__rate_interval])) by (source_id, source_name, table_name, error_type)",
+                            "{{error_type}} @ {{source_name}} ({{source_id}}) {{table_name}}",
                         ),
                     ],
                 ),

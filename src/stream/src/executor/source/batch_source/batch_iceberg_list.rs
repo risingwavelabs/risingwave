@@ -284,6 +284,8 @@ impl<S: StateStore> BatchIcebergListExecutor<S> {
 
             let list_start = std::time::Instant::now();
             let mut data_file_count: u64 = 0;
+            let mut eq_delete_count: u64 = 0;
+            let mut pos_delete_count: u64 = 0;
 
             #[for_await]
             for scan_task in snapshot_scan
@@ -293,6 +295,13 @@ impl<S: StateStore> BatchIcebergListExecutor<S> {
             {
                 let scan_task = scan_task.context("failed to get scan task")?;
                 data_file_count += 1;
+                for delete_task in &scan_task.deletes {
+                    match delete_task.data_file_content {
+                        iceberg::spec::DataContentType::EqualityDeletes => eq_delete_count += 1,
+                        iceberg::spec::DataContentType::PositionDeletes => pos_delete_count += 1,
+                        _ => {}
+                    }
+                }
                 tracing::debug!(
                     "list_iceberg_scan_task: data_file_path={}, scan_task={:?}",
                     scan_task.data_file_path,
@@ -317,6 +326,28 @@ impl<S: StateStore> BatchIcebergListExecutor<S> {
                         "data",
                     ])
                     .inc_by(data_file_count);
+            }
+            if eq_delete_count > 0 {
+                metrics
+                    .iceberg_source_files_discovered_total
+                    .with_guarded_label_values(&[
+                        label_values[0],
+                        label_values[1],
+                        label_values[2],
+                        "eq_delete",
+                    ])
+                    .inc_by(eq_delete_count);
+            }
+            if pos_delete_count > 0 {
+                metrics
+                    .iceberg_source_files_discovered_total
+                    .with_guarded_label_values(&[
+                        label_values[0],
+                        label_values[1],
+                        label_values[2],
+                        "pos_delete",
+                    ])
+                    .inc_by(pos_delete_count);
             }
         }
         *is_list_finished.write() = true;
