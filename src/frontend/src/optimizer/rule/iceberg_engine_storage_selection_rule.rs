@@ -24,6 +24,7 @@ use risingwave_common::session_config::IcebergQueryStorageMode;
 use super::prelude::{PlanRef, *};
 use crate::TableCatalog;
 use crate::catalog::source_catalog::SourceCatalog;
+use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{Logical, LogicalIcebergIntermediateScan, LogicalScan, generic};
 use crate::optimizer::rule::InfallibleRule;
 use crate::session::SessionImpl;
@@ -43,24 +44,12 @@ impl InfallibleRule<Logical> for IcebergEngineStorageSelectionRule {
         let source_catalog = scan.source_catalog()?;
         let table = get_table_from_iceberg_source(session, source_catalog)?;
 
-        macro_rules! try_strategy {
-            ($($strategy:ident),*) => {
-                'select_strategy: {
-                    $(
-                        if $strategy(session, scan, &table) {
-                            break 'select_strategy true;
-                        }
-                    )*
-                    false
-                }
-            };
-        }
-        let prefer_rowstore = try_strategy!(check_point_lookup);
+        let prefer_rowstore = check_point_lookup(scan, &table);
         if !prefer_rowstore {
             return None;
         }
 
-        rewrite_to_table_scan(&plan, scan, &table)
+        rewrite_to_table_scan(scan, &table)
     }
 }
 
@@ -72,7 +61,6 @@ impl IcebergEngineStorageSelectionRule {
 
 /// Rewrite the intermediate Iceberg scan to a Hummock `LogicalScan`.
 fn rewrite_to_table_scan(
-    plan: &PlanRef,
     scan: &LogicalIcebergIntermediateScan,
     table: &Arc<TableCatalog>,
 ) -> Option<PlanRef> {
@@ -91,7 +79,7 @@ fn rewrite_to_table_scan(
         table.clone(),
         vec![],
         vec![],
-        plan.ctx(),
+        scan.ctx(),
         scan.hummock_rewrite.origin_condition.clone(),
         scan.core.as_of.clone(),
     );
@@ -114,11 +102,7 @@ fn get_table_from_iceberg_source(
 /// Returns `true` when the predicate has equality-to-constant conditions on
 /// *all* PK columns of the table, making this a point lookup that benefits
 /// from the row store's key-value access pattern.
-fn check_point_lookup(
-    _session: &SessionImpl,
-    scan: &LogicalIcebergIntermediateScan,
-    table: &TableCatalog,
-) -> bool {
+fn check_point_lookup(scan: &LogicalIcebergIntermediateScan, table: &TableCatalog) -> bool {
     let pk_column_names: HashSet<&str> = table.pk_column_names().into_iter().collect();
     if pk_column_names.is_empty() {
         return false;
