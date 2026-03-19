@@ -610,7 +610,8 @@ pub async fn scan_task_to_chunk_with_deletes(
         // and actual rows read may also include predicate pushdown / row-group pruning effects,
         // so this metric can overcount. It is still useful as an approximate signal for
         // detecting whether delete files cause significant row filtering.
-        if handle_delete_files && num_delete_files > 0
+        if handle_delete_files
+            && num_delete_files > 0
             && let Some(expected) = expected_record_count
         {
             let deleted = expected.saturating_sub(total_rows_read);
