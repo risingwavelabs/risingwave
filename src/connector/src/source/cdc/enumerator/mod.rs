@@ -21,6 +21,7 @@ use std::sync::Arc;
 use anyhow::{Context, anyhow};
 use async_trait::async_trait;
 use itertools::Itertools;
+use mysql_async::Row;
 use mysql_async::prelude::*;
 use prost::Message;
 use risingwave_common::global_jvm::Jvm;
@@ -405,15 +406,30 @@ impl DebeziumSplitEnumerator<Mysql> {
             .await
             .context("Failed to connect to MySQL")?;
 
-        // Query binlog files using SHOW BINARY LOGS
-        // Note: MySQL 8.0+ returns 3 columns: Log_name, File_size, Encrypted
-        let query_result: Vec<(String, u64)> = conn
-            .query_map(
-                "SHOW BINARY LOGS",
-                |(log_name, file_size, _encrypted): (String, u64, String)| (log_name, file_size),
-            )
+        // Query binlog files using SHOW BINARY LOGS.
+        // MySQL 8.0+ may return 3 columns (Log_name, File_size, Encrypted), while some variants
+        // only return the first 2. Decode the row manually so we don't panic on column-count
+        // differences.
+        let rows: Vec<Row> = conn
+            .query("SHOW BINARY LOGS")
             .await
             .context("Failed to execute SHOW BINARY LOGS")?;
+        let query_result = rows
+            .into_iter()
+            .map(|mut row| -> ConnectorResult<(String, u64)> {
+                let log_name = row
+                    .take_opt::<String, _>(0)
+                    .transpose()
+                    .context("SHOW BINARY LOGS: failed to decode Log_name")?
+                    .ok_or_else(|| anyhow!("SHOW BINARY LOGS: missing Log_name column"))?;
+                let file_size = row
+                    .take_opt::<u64, _>(1)
+                    .transpose()
+                    .context("SHOW BINARY LOGS: failed to decode File_size")?
+                    .ok_or_else(|| anyhow!("SHOW BINARY LOGS: missing File_size column"))?;
+                Ok((log_name, file_size))
+            })
+            .collect::<ConnectorResult<Vec<_>>>()?;
 
         drop(conn);
         pool.disconnect().await.ok();
