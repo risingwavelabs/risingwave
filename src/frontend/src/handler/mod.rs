@@ -1612,7 +1612,8 @@ fn check_ban_ddl_for_iceberg_engine_table(
                         .get_schema_by_name(&db_name, &schema_name)
                         .ok()
                         .and_then(|schema| schema.get_created_sink_by_name(&sink_name));
-                    sink.and_then(|s| s.auto_refresh_schema_from_table).is_some()
+                    sink.and_then(|s| s.auto_refresh_schema_from_table)
+                        .is_some()
                 } else {
                     false
                 };
@@ -1654,14 +1655,59 @@ fn check_ban_alter_table_operation_for_iceberg_engine_table(
                 table_name
             );
         }
-        _ => {
+        AlterTableOperation::RenameColumn { .. }
+        | AlterTableOperation::ChangeColumn { .. }
+        | AlterTableOperation::AlterColumn { .. } => {
             bail!(
-                "ALTER TABLE {} is not supported for iceberg table: {}.{}. Only ADD COLUMN is supported currently",
+                "ALTER TABLE {} is not supported for iceberg table: {}.{}. Existing column schema mutation is not supported currently",
                 operation,
                 schema_name,
                 table_name
             );
         }
+        AlterTableOperation::RenameTable { .. } => {
+            bail!(
+                "ALTER TABLE RENAME is not supported for iceberg table: {}.{}",
+                schema_name,
+                table_name
+            );
+        }
+        AlterTableOperation::SetParallelism { .. } => {
+            bail!(
+                "ALTER TABLE SET PARALLELISM is not supported for iceberg table: {}.{}",
+                schema_name,
+                table_name
+            );
+        }
+        AlterTableOperation::SetBackfillParallelism { .. } => {
+            bail!(
+                "ALTER TABLE SET BACKFILL PARALLELISM is not supported for iceberg table: {}.{}",
+                schema_name,
+                table_name
+            );
+        }
+        AlterTableOperation::SetSchema { .. } => {
+            bail!(
+                "ALTER TABLE SET SCHEMA is not supported for iceberg table: {}.{}",
+                schema_name,
+                table_name
+            );
+        }
+        AlterTableOperation::RefreshSchema => {
+            bail!(
+                "ALTER TABLE REFRESH SCHEMA is not supported for iceberg table: {}.{}",
+                schema_name,
+                table_name
+            );
+        }
+        AlterTableOperation::SetSourceRateLimit { .. } => {
+            bail!(
+                "ALTER TABLE SET SOURCE RATE LIMIT is not supported for iceberg table: {}.{}",
+                schema_name,
+                table_name
+            );
+        }
+        _ => {}
     }
     Ok(())
 }

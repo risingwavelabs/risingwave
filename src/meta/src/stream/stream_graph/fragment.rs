@@ -2357,7 +2357,6 @@ mod tests {
     async fn test_rewrite_refresh_schema_sink_fragment_with_project() {
         let env = MetaSrvEnv::for_test().await;
         let id_gen_manager = env.id_gen_manager().as_ref();
-        let actor_id_counter = AtomicU32::new(1);
 
         let table_name = "t";
         let columns = vec![
@@ -2409,7 +2408,6 @@ mod tests {
             fragment_id: 1.into(),
             fragment_type_mask: FragmentTypeMask::default(),
             distribution_type: PbFragmentDistributionType::Single,
-            actors: vec![],
             state_table_ids: vec![],
             maybe_vnode_count: None,
             nodes: StreamNode {
@@ -2435,7 +2433,6 @@ mod tests {
             &upstream_table,
             7.into(),
             id_gen_manager,
-            &actor_id_counter,
         )
         .unwrap();
 
@@ -2483,7 +2480,6 @@ mod tests {
     async fn test_rewrite_refresh_schema_sink_fragment_drop_column_with_project() {
         let env = MetaSrvEnv::for_test().await;
         let id_gen_manager = env.id_gen_manager().as_ref();
-        let actor_id_counter = AtomicU32::new(1);
 
         let table_name = "t";
         let columns = vec![
@@ -2535,7 +2531,6 @@ mod tests {
             fragment_id: 1.into(),
             fragment_type_mask: FragmentTypeMask::default(),
             distribution_type: PbFragmentDistributionType::Single,
-            actors: vec![],
             state_table_ids: vec![],
             maybe_vnode_count: None,
             nodes: StreamNode {
@@ -2562,7 +2557,6 @@ mod tests {
             &upstream_table,
             7.into(),
             id_gen_manager,
-            &actor_id_counter,
         )
         .unwrap();
 
