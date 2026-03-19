@@ -13,9 +13,12 @@
 // limitations under the License.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
+use std::sync::Arc;
 use std::time::Duration;
 
 use foyer::{HybridCache, TracingOptions};
+use itertools::Itertools;
+use parking_lot::RwLock;
 use prometheus::core::Collector;
 use prometheus::proto::Metric;
 use risingwave_common::config::{MetricLevel, ServerConfig};
@@ -27,11 +30,13 @@ use risingwave_pb::monitor_service::stack_trace_request::ActorTracesFormat;
 use risingwave_pb::monitor_service::{
     AnalyzeHeapRequest, AnalyzeHeapResponse, ChannelStats, FragmentStats, GetProfileStatsRequest,
     GetProfileStatsResponse, GetStreamingStatsRequest, GetStreamingStatsResponse,
-    HeapProfilingRequest, HeapProfilingResponse, ListHeapProfilingRequest,
-    ListHeapProfilingResponse, ProfilingRequest, ProfilingResponse, RelationStats,
-    StackTraceRequest, StackTraceResponse, TieredCacheTracingRequest, TieredCacheTracingResponse,
+    GetTableCacheRefillStatsRequest, GetTableCacheRefillStatsResponse, HeapProfilingRequest,
+    HeapProfilingResponse, ListHeapProfilingRequest, ListHeapProfilingResponse, ProfilingRequest,
+    ProfilingResponse, RelationStats, StackTraceRequest, StackTraceResponse,
+    TieredCacheTracingRequest, TieredCacheTracingResponse,
 };
 use risingwave_storage::hummock::compactor::await_tree_key::Compaction;
+use risingwave_storage::hummock::event_handler::refiller::TableCacheRefillContext;
 use risingwave_storage::hummock::{Block, Sstable, SstableBlockIndex};
 use risingwave_stream::executor::monitor::global_streaming_metrics;
 use risingwave_stream::task::LocalStreamManager;
@@ -48,6 +53,7 @@ pub struct MonitorServiceImpl {
     profile_service: ProfileServiceImpl,
     meta_cache: Option<MetaCache>,
     block_cache: Option<BlockCache>,
+    table_cache_refill_context: Option<Arc<RwLock<TableCacheRefillContext>>>,
 }
 
 impl MonitorServiceImpl {
@@ -56,12 +62,14 @@ impl MonitorServiceImpl {
         server_config: ServerConfig,
         meta_cache: Option<MetaCache>,
         block_cache: Option<BlockCache>,
+        table_cache_refill_context: Option<Arc<RwLock<TableCacheRefillContext>>>,
     ) -> Self {
         Self {
             stream_mgr,
             profile_service: ProfileServiceImpl::new(server_config),
             meta_cache,
             block_cache,
+            table_cache_refill_context,
         }
     }
 }
@@ -434,6 +442,107 @@ impl MonitorService for MonitorServiceImpl {
         }
 
         Ok(Response::new(TieredCacheTracingResponse::default()))
+    }
+
+    async fn get_table_cache_refill_stats(
+        &self,
+        _request: Request<GetTableCacheRefillStatsRequest>,
+    ) -> Result<Response<GetTableCacheRefillStatsResponse>, Status> {
+        let Some(context) = &self.table_cache_refill_context else {
+            return Ok(Response::new(GetTableCacheRefillStatsResponse {
+                stats: "{}".to_owned(),
+            }));
+        };
+
+        let stats = TableCacheRefillStats::from(&*context.read());
+        let json_value = serde_json::to_value(stats).map_err(|err| {
+            Status::internal(format!(
+                "failed to serialize stats: {e}",
+                e = err.as_report()
+            ))
+        })?;
+        let json_string_pretty = serde_json::to_string_pretty(&json_value).map_err(|err| {
+            Status::internal(format!(
+                "failed to serialize stats: {e}",
+                e = err.as_report()
+            ))
+        })?;
+        Ok(Response::new(GetTableCacheRefillStatsResponse {
+            stats: json_string_pretty,
+        }))
+    }
+}
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+struct TableCacheRefillStats {
+    streaming: HashMap<u32, Vec<u16>>,
+    serving: HashMap<u32, Vec<u16>>,
+    policies: HashMap<u32, String>,
+    default_policy: String,
+    internal: TableCacheRefillInternalStats,
+}
+
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+struct TableCacheRefillInternalStats {
+    streaming: HashMap<u32, Vec<Vec<u16>>>,
+    serving: HashMap<u32, Vec<u16>>,
+}
+
+impl From<&TableCacheRefillContext> for TableCacheRefillStats {
+    fn from(context: &TableCacheRefillContext) -> Self {
+        fn bitmap_to_vnodes(bitmap: &risingwave_common::bitmap::Bitmap) -> Vec<u16> {
+            bitmap.iter_ones().map(|idx| idx as u16).collect()
+        }
+
+        let streaming = context
+            .streaming
+            .iter()
+            .map(|(table_id, bitmap)| (table_id.as_raw_id(), bitmap_to_vnodes(bitmap)))
+            .collect();
+
+        let serving = context
+            .serving
+            .iter()
+            .map(|(table_id, bitmap)| (table_id.as_raw_id(), bitmap_to_vnodes(bitmap)))
+            .collect();
+
+        let policies = context
+            .policies
+            .iter()
+            .map(|(table_id, policy)| (table_id.as_raw_id(), policy.to_string()))
+            .collect();
+
+        let read_version_mapping = context.read_version_mapping.read();
+        let internal_streaming = read_version_mapping
+            .iter()
+            .map(|(table_id, mappings)| {
+                let vnodes = mappings
+                    .iter()
+                    .sorted_by_key(|(version, _)| **version)
+                    .map(|(_, read_version)| {
+                        let vnodes = read_version.read().vnodes();
+                        bitmap_to_vnodes(vnodes.as_ref())
+                    })
+                    .collect();
+                (table_id.as_raw_id(), vnodes)
+            })
+            .collect();
+
+        let serving_table_vnode_mapping = context.serving_table_vnode_mapping.read();
+        let internal_serving = serving_table_vnode_mapping
+            .iter()
+            .map(|(table_id, bitmap)| (table_id.as_raw_id(), bitmap_to_vnodes(bitmap)))
+            .collect();
+
+        Self {
+            streaming,
+            serving,
+            policies,
+            default_policy: context.default_policy.to_string(),
+            internal: TableCacheRefillInternalStats {
+                streaming: internal_streaming,
+                serving: internal_serving,
+            },
+        }
     }
 }
 
