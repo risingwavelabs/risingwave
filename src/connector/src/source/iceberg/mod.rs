@@ -610,15 +610,15 @@ pub async fn scan_task_to_chunk_with_deletes(
         // and actual rows read may also include predicate pushdown / row-group pruning effects,
         // so this metric can overcount. It is still useful as an approximate signal for
         // detecting whether delete files cause significant row filtering.
-        if handle_delete_files && num_delete_files > 0 {
-            if let Some(expected) = expected_record_count {
-                let deleted = expected.saturating_sub(total_rows_read);
-                if deleted > 0 {
-                    metrics
-                        .iceberg_source_delete_rows_applied_total
-                        .with_guarded_label_values(&[table_name.as_str(), "sdk_applied_approx"])
-                        .inc_by(deleted);
-                }
+        if handle_delete_files && num_delete_files > 0
+            && let Some(expected) = expected_record_count
+        {
+            let deleted = expected.saturating_sub(total_rows_read);
+            if deleted > 0 {
+                metrics
+                    .iceberg_source_delete_rows_applied_total
+                    .with_guarded_label_values(&[table_name.as_str(), "sdk_applied_approx"])
+                    .inc_by(deleted);
             }
         }
     }

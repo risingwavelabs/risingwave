@@ -40,7 +40,7 @@ pub struct IcebergScanMetrics {
     /// Time spent planning files from a snapshot (metadata operation).
     pub iceberg_source_list_duration_seconds: LabelGuardedHistogramVec,
 
-    /// Files discovered per scan, labeled by file_type (data, eq_delete, pos_delete).
+    /// Files discovered per scan, labeled by `file_type` (data, `eq_delete`, `pos_delete`).
     pub iceberg_source_files_discovered_total: LabelGuardedIntCounterVec,
 
     // -- Data Reading (used in scan_task_to_chunk_with_deletes, labeled by table_name) --
@@ -50,11 +50,11 @@ pub struct IcebergScanMetrics {
     /// Total rows read from Iceberg source.
     pub iceberg_source_rows_read_total: LabelGuardedIntCounterVec,
 
-    /// Total files read from Iceberg source, labeled by file_type.
+    /// Total files read from Iceberg source, labeled by `file_type`.
     pub iceberg_source_files_read_total: LabelGuardedIntCounterVec,
 
     // -- Delete Handling --
-    /// Rows removed by delete processing, labeled by delete_type.
+    /// Rows removed by delete processing, labeled by `delete_type`.
     pub iceberg_source_delete_rows_applied_total: LabelGuardedIntCounterVec,
 
     /// Histogram of delete files attached per data file scan task.
