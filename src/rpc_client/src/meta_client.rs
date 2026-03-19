@@ -662,6 +662,7 @@ impl MetaClient {
             table_id: job_id,
             parallelism: Some(parallelism),
             deferred,
+            adaptive_parallelism_strategy: None,
         };
 
         self.inner.alter_parallelism(request).await?;
@@ -678,6 +679,7 @@ impl MetaClient {
             table_id: job_id,
             parallelism,
             deferred,
+            adaptive_parallelism_strategy: None,
         };
 
         self.inner.alter_backfill_parallelism(request).await?;

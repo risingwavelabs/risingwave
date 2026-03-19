@@ -12,61 +12,104 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::num::NonZeroU64;
+
 use risingwave_common::session_config::parallelism::{
-    ConfigAdaptiveParallelismStrategy, ConfigParallelism,
+    ConfigBackfillParallelism, ConfigParallelism,
 };
 use risingwave_common::system_param::AdaptiveParallelismStrategy;
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 
-pub(crate) fn derive_parallelism(
-    specific_type_parallelism: Option<ConfigParallelism>,
+use super::GraphJobType;
+
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct ResolvedParallelism {
+    pub parallelism: Option<Parallelism>,
+    pub adaptive_strategy: Option<AdaptiveParallelismStrategy>,
+}
+
+fn resolve_global_parallelism(
     global_streaming_parallelism: ConfigParallelism,
-) -> Option<Parallelism> {
-    match specific_type_parallelism {
-        // fallback to global streaming_parallelism
-        Some(ConfigParallelism::Default) | None => match global_streaming_parallelism {
-            // for streaming_parallelism, `Default` is `Adaptive`
-            ConfigParallelism::Default
-            | ConfigParallelism::Adaptive
-            | ConfigParallelism::Bounded(_)
-            | ConfigParallelism::Ratio(_) => None,
-            ConfigParallelism::Fixed(n) => Some(Parallelism {
-                parallelism: n.get(),
-            }),
-        },
-
-        // specific type parallelism is set to an adaptive mode
-        Some(
-            ConfigParallelism::Adaptive
-            | ConfigParallelism::Bounded(_)
-            | ConfigParallelism::Ratio(_),
-        ) => None,
-
-        // specific type parallelism is set to `Fixed(n)`
-        Some(ConfigParallelism::Fixed(n)) => Some(Parallelism {
-            parallelism: n.get(),
-        }),
+) -> ConfigParallelism {
+    match global_streaming_parallelism {
+        ConfigParallelism::Default => ConfigParallelism::Bounded(NonZeroU64::new(64).unwrap()),
+        other => other,
     }
 }
 
-pub(crate) fn derive_parallelism_strategy(
-    specific_strategy: Option<ConfigAdaptiveParallelismStrategy>,
-    global_strategy: ConfigAdaptiveParallelismStrategy,
-) -> Option<AdaptiveParallelismStrategy> {
-    let to_strategy =
-        |cfg: ConfigAdaptiveParallelismStrategy| -> Option<AdaptiveParallelismStrategy> {
-            cfg.into()
+fn resolve_default_parallelism(
+    job_type: Option<GraphJobType>,
+    global_streaming_parallelism: ConfigParallelism,
+) -> ConfigParallelism {
+    match job_type {
+        // Table/source only keep their legacy typed default on the untouched default path.
+        // Once the global parallelism is explicitly set, they inherit that global value.
+        Some(GraphJobType::Table | GraphJobType::Source) => match global_streaming_parallelism {
+            ConfigParallelism::Default => ConfigParallelism::Bounded(NonZeroU64::new(4).unwrap()),
+            other => resolve_global_parallelism(other),
+        },
+        Some(GraphJobType::MaterializedView | GraphJobType::Sink | GraphJobType::Index) | None => {
+            resolve_global_parallelism(global_streaming_parallelism)
+        }
+    }
+}
+
+pub(crate) fn derive_parallelism(
+    job_type: Option<GraphJobType>,
+    specific_type_parallelism: Option<ConfigParallelism>,
+    global_streaming_parallelism: ConfigParallelism,
+) -> ResolvedParallelism {
+    let effective_parallelism =
+        match specific_type_parallelism.unwrap_or(ConfigParallelism::Default) {
+            ConfigParallelism::Default => {
+                resolve_default_parallelism(job_type, global_streaming_parallelism)
+            }
+            other => other,
         };
 
-    match specific_strategy.unwrap_or(ConfigAdaptiveParallelismStrategy::Default) {
-        ConfigAdaptiveParallelismStrategy::Default => to_strategy(global_strategy),
-        other => to_strategy(other),
+    match effective_parallelism {
+        ConfigParallelism::Default => unreachable!("effective streaming parallelism must be set"),
+        ConfigParallelism::Fixed(n) => ResolvedParallelism {
+            parallelism: Some(Parallelism {
+                parallelism: n.get(),
+            }),
+            adaptive_strategy: None,
+        },
+        ConfigParallelism::Adaptive
+        | ConfigParallelism::Bounded(_)
+        | ConfigParallelism::Ratio(_) => ResolvedParallelism {
+            parallelism: None,
+            adaptive_strategy: effective_parallelism.adaptive_strategy(),
+        },
+    }
+}
+
+pub(crate) fn derive_backfill_parallelism(
+    specific_backfill_parallelism: ConfigBackfillParallelism,
+) -> ResolvedParallelism {
+    match specific_backfill_parallelism {
+        ConfigBackfillParallelism::Default => ResolvedParallelism {
+            parallelism: None,
+            adaptive_strategy: None,
+        },
+        ConfigBackfillParallelism::Fixed(n) => ResolvedParallelism {
+            parallelism: Some(Parallelism {
+                parallelism: n.get(),
+            }),
+            adaptive_strategy: None,
+        },
+        ConfigBackfillParallelism::Adaptive
+        | ConfigBackfillParallelism::Bounded(_)
+        | ConfigBackfillParallelism::Ratio(_) => ResolvedParallelism {
+            parallelism: None,
+            adaptive_strategy: specific_backfill_parallelism.adaptive_strategy(),
+        },
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::num::NonZeroU64;
+    use std::num::{NonZeroU64, NonZeroUsize};
 
     use super::*;
 
@@ -74,7 +117,9 @@ mod tests {
     fn test_none_global_fixed() {
         let global = ConfigParallelism::Fixed(NonZeroU64::new(4).unwrap());
         assert_eq!(
-            derive_parallelism(None, global).map(|p| p.parallelism),
+            derive_parallelism(None, None, global)
+                .parallelism
+                .map(|p| p.parallelism),
             Some(4)
         );
     }
@@ -82,13 +127,23 @@ mod tests {
     #[test]
     fn test_none_global_default() {
         let global = ConfigParallelism::Default;
-        assert_eq!(derive_parallelism(None, global), None);
+        assert_eq!(derive_parallelism(None, None, global).parallelism, None);
+        assert_eq!(
+            derive_parallelism(None, None, global).adaptive_strategy,
+            Some(AdaptiveParallelismStrategy::Bounded(
+                NonZeroUsize::new(64).unwrap()
+            ))
+        );
     }
 
     #[test]
     fn test_none_global_adaptive() {
         let global = ConfigParallelism::Adaptive;
-        assert_eq!(derive_parallelism(None, global), None);
+        assert_eq!(derive_parallelism(None, None, global).parallelism, None);
+        assert_eq!(
+            derive_parallelism(None, None, global).adaptive_strategy,
+            Some(AdaptiveParallelismStrategy::Auto)
+        );
     }
 
     #[test]
@@ -96,7 +151,9 @@ mod tests {
         let specific = Some(ConfigParallelism::Default);
         let global = ConfigParallelism::Fixed(NonZeroU64::new(2).unwrap());
         assert_eq!(
-            derive_parallelism(specific, global).map(|p| p.parallelism),
+            derive_parallelism(None, specific, global)
+                .parallelism
+                .map(|p| p.parallelism),
             Some(2)
         );
     }
@@ -105,14 +162,20 @@ mod tests {
     fn test_default_global_default() {
         let specific = Some(ConfigParallelism::Default);
         let global = ConfigParallelism::Default;
-        assert_eq!(derive_parallelism(specific, global), None);
+        assert_eq!(derive_parallelism(None, specific, global).parallelism, None);
+        assert_eq!(
+            derive_parallelism(None, specific, global).adaptive_strategy,
+            Some(AdaptiveParallelismStrategy::Bounded(
+                NonZeroUsize::new(64).unwrap()
+            ))
+        );
     }
 
     #[test]
     fn test_default_global_adaptive() {
         let specific = Some(ConfigParallelism::Default);
         let global = ConfigParallelism::Adaptive;
-        assert_eq!(derive_parallelism(specific, global), None);
+        assert_eq!(derive_parallelism(None, specific, global).parallelism, None);
     }
 
     #[test]
@@ -125,7 +188,7 @@ mod tests {
         ];
 
         for global in globals {
-            assert_eq!(derive_parallelism(specific, global), None);
+            assert_eq!(derive_parallelism(None, specific, global).parallelism, None);
         }
     }
 
@@ -140,35 +203,177 @@ mod tests {
 
         for global in globals {
             assert_eq!(
-                derive_parallelism(specific, global).map(|p| p.parallelism),
+                derive_parallelism(None, specific, global)
+                    .parallelism
+                    .map(|p| p.parallelism),
                 Some(6)
             );
         }
     }
 
     #[test]
-    fn test_parallelism_strategy_fallback() {
+    fn test_bounded_parallelism_resolves_strategy() {
         assert_eq!(
-            derive_parallelism_strategy(None, ConfigAdaptiveParallelismStrategy::Auto),
-            Some(AdaptiveParallelismStrategy::Auto)
-        );
-        assert_eq!(
-            derive_parallelism_strategy(
-                Some(ConfigAdaptiveParallelismStrategy::Default),
-                ConfigAdaptiveParallelismStrategy::Full
-            ),
-            Some(AdaptiveParallelismStrategy::Full)
+            derive_parallelism(
+                None,
+                Some(ConfigParallelism::Bounded(NonZeroU64::new(4).unwrap())),
+                ConfigParallelism::Adaptive
+            )
+            .adaptive_strategy,
+            Some(AdaptiveParallelismStrategy::Bounded(
+                NonZeroUsize::new(4).unwrap()
+            ))
         );
     }
 
     #[test]
-    fn test_parallelism_strategy_override() {
+    fn test_ratio_parallelism_resolves_strategy() {
         assert_eq!(
-            derive_parallelism_strategy(
-                Some(ConfigAdaptiveParallelismStrategy::Ratio(0.5)),
-                ConfigAdaptiveParallelismStrategy::Full
-            ),
+            derive_parallelism(
+                None,
+                Some(ConfigParallelism::Ratio(0.5)),
+                ConfigParallelism::Adaptive
+            )
+            .adaptive_strategy,
             Some(AdaptiveParallelismStrategy::Ratio(0.5))
+        );
+    }
+
+    #[test]
+    fn test_table_default_uses_legacy_bound_only_with_default_global() {
+        assert_eq!(
+            derive_parallelism(
+                Some(GraphJobType::Table),
+                Some(ConfigParallelism::Default),
+                ConfigParallelism::Default
+            )
+            .adaptive_strategy,
+            Some(AdaptiveParallelismStrategy::Bounded(
+                NonZeroUsize::new(4).unwrap()
+            ))
+        );
+    }
+
+    #[test]
+    fn test_table_default_follows_explicit_global_strategy() {
+        assert_eq!(
+            derive_parallelism(
+                Some(GraphJobType::Table),
+                Some(ConfigParallelism::Default),
+                ConfigParallelism::Ratio(0.5)
+            )
+            .adaptive_strategy,
+            Some(AdaptiveParallelismStrategy::Ratio(0.5))
+        );
+        assert_eq!(
+            derive_parallelism(
+                Some(GraphJobType::Table),
+                Some(ConfigParallelism::Default),
+                ConfigParallelism::Adaptive
+            )
+            .adaptive_strategy,
+            Some(AdaptiveParallelismStrategy::Auto)
+        );
+    }
+
+    #[test]
+    fn test_source_default_uses_legacy_bound_only_with_default_global() {
+        assert_eq!(
+            derive_parallelism(
+                Some(GraphJobType::Source),
+                Some(ConfigParallelism::Default),
+                ConfigParallelism::Default
+            )
+            .adaptive_strategy,
+            Some(AdaptiveParallelismStrategy::Bounded(
+                NonZeroUsize::new(4).unwrap()
+            ))
+        );
+    }
+
+    #[test]
+    fn test_source_default_follows_explicit_global_parallelism() {
+        assert_eq!(
+            derive_parallelism(
+                Some(GraphJobType::Source),
+                Some(ConfigParallelism::Default),
+                ConfigParallelism::Fixed(NonZeroU64::new(7).unwrap())
+            )
+            .parallelism
+            .map(|p| p.parallelism),
+            Some(7)
+        );
+        assert_eq!(
+            derive_parallelism(
+                Some(GraphJobType::Source),
+                Some(ConfigParallelism::Default),
+                ConfigParallelism::Bounded(NonZeroU64::new(5).unwrap())
+            )
+            .adaptive_strategy,
+            Some(AdaptiveParallelismStrategy::Bounded(
+                NonZeroUsize::new(5).unwrap()
+            ))
+        );
+    }
+
+    #[test]
+    fn test_materialized_view_default_follows_global_parallelism() {
+        assert_eq!(
+            derive_parallelism(
+                Some(GraphJobType::MaterializedView),
+                Some(ConfigParallelism::Default),
+                ConfigParallelism::Default
+            )
+            .adaptive_strategy,
+            Some(AdaptiveParallelismStrategy::Bounded(
+                NonZeroUsize::new(64).unwrap()
+            ))
+        );
+        assert_eq!(
+            derive_parallelism(
+                Some(GraphJobType::MaterializedView),
+                Some(ConfigParallelism::Default),
+                ConfigParallelism::Ratio(0.5)
+            )
+            .adaptive_strategy,
+            Some(AdaptiveParallelismStrategy::Ratio(0.5))
+        );
+    }
+
+    #[test]
+    fn test_backfill_parallelism_adaptive_resolves_strategy() {
+        assert_eq!(
+            derive_backfill_parallelism(ConfigBackfillParallelism::Adaptive),
+            ResolvedParallelism {
+                parallelism: None,
+                adaptive_strategy: Some(AdaptiveParallelismStrategy::Auto),
+            }
+        );
+    }
+
+    #[test]
+    fn test_backfill_parallelism_default_does_not_resolve_to_fixed() {
+        assert_eq!(
+            derive_backfill_parallelism(ConfigBackfillParallelism::Default),
+            ResolvedParallelism {
+                parallelism: None,
+                adaptive_strategy: None,
+            }
+        );
+    }
+
+    #[test]
+    fn test_backfill_parallelism_bounded_resolves_strategy() {
+        assert_eq!(
+            derive_backfill_parallelism(ConfigBackfillParallelism::Bounded(
+                NonZeroU64::new(2).unwrap()
+            )),
+            ResolvedParallelism {
+                parallelism: None,
+                adaptive_strategy: Some(AdaptiveParallelismStrategy::Bounded(
+                    NonZeroUsize::new(2).unwrap()
+                )),
+            }
         );
     }
 }
