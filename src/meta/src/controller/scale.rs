@@ -2329,6 +2329,7 @@ mod tests {
             adaptive_parallelism_strategy: None,
             parallelism: StreamingParallelism::Fixed(2),
             backfill_parallelism: None,
+            backfill_adaptive_parallelism_strategy: None,
             backfill_orders: None,
             max_parallelism: 2,
             specific_resource_group: None,

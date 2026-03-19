@@ -22,7 +22,6 @@ use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::catalog::DatabaseId;
 use risingwave_common::hash::{ActorMapping, VnodeBitmapExt};
-use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_connector::source::{SplitId, SplitMetaData};
 use risingwave_meta_model::{
     StreamingParallelism, WorkerId, fragment, fragment_relation, object, streaming_job,
