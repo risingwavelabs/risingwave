@@ -371,6 +371,7 @@ impl<S: StateStore> IcebergFetchExecutor<S> {
             _ => unreachable!(),
         };
         let table = properties.load_table().await?;
+        let metrics = Arc::new(GLOBAL_ICEBERG_SCAN_METRICS.clone());
 
         for task in batch {
             let mut chunks = vec![];
@@ -385,7 +386,7 @@ impl<S: StateStore> IcebergFetchExecutor<S> {
                     handle_delete_files: table.metadata().format_version()
                         >= iceberg::spec::FormatVersion::V3,
                 },
-                Some(Arc::new(GLOBAL_ICEBERG_SCAN_METRICS.clone())),
+                Some(metrics.clone()),
             ) {
                 let chunk = chunk?;
                 chunks.push(StreamChunk::from_parts(
@@ -540,6 +541,12 @@ impl<S: StateStore> IcebergFetchExecutor<S> {
                             .inc();
                     }
                     splits_on_fetch = 0;
+                    if !iceberg_table_name.is_empty() {
+                        iceberg_metrics
+                            .iceberg_source_checkpoint_file_count
+                            .with_guarded_label_values(&metrics_labels)
+                            .set(0);
+                    }
                 }
                 Ok(msg) => {
                     match msg {
@@ -642,7 +649,7 @@ impl<S: StateStore> IcebergFetchExecutor<S> {
                         }) => {
                             // TODO: support persist progress after supporting reading part of a file.
                             if true {
-                                splits_on_fetch -= 1;
+                                splits_on_fetch = splits_on_fetch.saturating_sub(1);
                                 state_store_handler.delete(&data_file_path).await?;
                                 if !iceberg_table_name.is_empty() {
                                     iceberg_metrics
