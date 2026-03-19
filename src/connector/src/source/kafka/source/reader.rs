@@ -405,8 +405,10 @@ impl KafkaSplitReader {
                 }
             }
 
-            // After processing chunk: check if EOF events emptied stop_offsets
-            if stop_offsets.is_empty() {
+            // After processing chunk: check if EOF events emptied stop_offsets.
+            // Only check when in bounded mode (enable_eof), otherwise streaming
+            // sources with no stop_offsets would break after the first chunk.
+            if enable_eof && stop_offsets.is_empty() {
                 if !res.is_empty() {
                     yield std::mem::take(&mut res);
                 }
