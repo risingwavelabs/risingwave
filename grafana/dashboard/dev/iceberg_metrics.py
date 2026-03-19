@@ -108,6 +108,129 @@ def _(outer_panels: Panels):
                         ),
                     ],
                 ),
+                panels.subheader("Source Ingestion"),
+                panels.timeseries_latency(
+                    "Iceberg Source Snapshot Lag",
+                    "Time difference between latest available snapshot and last ingested snapshot",
+                    [
+                        panels.target(
+                            f"{metric('iceberg_source_snapshot_lag_seconds')}",
+                            "{{source_name}} @ {{table_name}}",
+                        ),
+                    ],
+                ),
+                panels.timeseries_ops(
+                    "Iceberg Source Snapshots Discovered",
+                    "Rate of new snapshots discovered via incremental scan",
+                    [
+                        panels.target(
+                            f"sum(rate({metric('iceberg_source_snapshots_discovered_total')}[$__rate_interval])) by (source_name, table_name)",
+                            "{{source_name}} @ {{table_name}}",
+                        ),
+                    ],
+                ),
+                panels.timeseries_latency(
+                    "Iceberg Source List Duration",
+                    "Time spent planning files from a snapshot",
+                    [
+                        *quantile(
+                            lambda quantile, legend: panels.target(
+                                f"histogram_quantile({quantile}, sum(rate({metric('iceberg_source_list_duration_seconds_bucket')}[$__rate_interval])) by (le, source_name, table_name))",
+                                f"p{legend}" + " @ {{source_name}} {{table_name}}",
+                            ),
+                            [50, 99, "max"],
+                        ),
+                    ],
+                ),
+                panels.timeseries_ops(
+                    "Iceberg Source Files Discovered",
+                    "Rate of files discovered per scan by type",
+                    [
+                        panels.target(
+                            f"sum(rate({metric('iceberg_source_files_discovered_total')}[$__rate_interval])) by (source_name, table_name, file_type)",
+                            "{{file_type}} @ {{source_name}} {{table_name}}",
+                        ),
+                    ],
+                ),
+                panels.subheader("Source File Reading"),
+                panels.timeseries_latency(
+                    "Iceberg Source File Read Duration",
+                    "Per-file read duration",
+                    [
+                        *quantile(
+                            lambda quantile, legend: panels.target(
+                                f"histogram_quantile({quantile}, sum(rate({metric('iceberg_source_file_read_duration_seconds_bucket')}[$__rate_interval])) by (le, table_name))",
+                                f"p{legend}" + " @ {{table_name}}",
+                            ),
+                            [50, 99, "max"],
+                        ),
+                    ],
+                ),
+                panels.timeseries_ops(
+                    "Iceberg Source Rows Read",
+                    "Rate of rows read from Iceberg source",
+                    [
+                        panels.target(
+                            f"sum(rate({metric('iceberg_source_rows_read_total')}[$__rate_interval])) by (table_name)",
+                            "{{table_name}}",
+                        ),
+                    ],
+                ),
+                panels.timeseries_ops(
+                    "Iceberg Source Files Read",
+                    "Rate of files read from Iceberg source by type",
+                    [
+                        panels.target(
+                            f"sum(rate({metric('iceberg_source_files_read_total')}[$__rate_interval])) by (table_name, file_type)",
+                            "{{file_type}} @ {{table_name}}",
+                        ),
+                    ],
+                ),
+                panels.subheader("Source Delete Handling"),
+                panels.timeseries_ops(
+                    "Iceberg Source Delete Rows Applied",
+                    "Rate of rows removed by delete processing",
+                    [
+                        panels.target(
+                            f"sum(rate({metric('iceberg_source_delete_rows_applied_total')}[$__rate_interval])) by (table_name, delete_type)",
+                            "{{delete_type}} @ {{table_name}}",
+                        ),
+                    ],
+                ),
+                panels.timeseries_count(
+                    "Iceberg Source Delete Files Per Data File",
+                    "Distribution of delete files attached per data file scan task",
+                    [
+                        *quantile(
+                            lambda quantile, legend: panels.target(
+                                f"histogram_quantile({quantile}, sum(rate({metric('iceberg_source_delete_files_per_data_file_bucket')}[$__rate_interval])) by (le, source_name, table_name))",
+                                f"p{legend}" + " @ {{source_name}} {{table_name}}",
+                            ),
+                            [50, 99, "max"],
+                        ),
+                    ],
+                ),
+                panels.subheader("Source Operational Health"),
+                panels.timeseries_count(
+                    "Iceberg Source Checkpoint File Count",
+                    "Number of files tracked in checkpoint state table",
+                    [
+                        panels.target(
+                            f"{metric('iceberg_source_checkpoint_file_count')}",
+                            "{{source_name}} @ {{table_name}}",
+                        ),
+                    ],
+                ),
+                panels.timeseries_ops(
+                    "Iceberg Source Scan Errors",
+                    "Rate of scan errors categorized by type",
+                    [
+                        panels.target(
+                            f"sum(rate({metric('iceberg_source_scan_errors_total')}[$__rate_interval])) by (source_name, table_name, error_type)",
+                            "{{error_type}} @ {{source_name}} {{table_name}}",
+                        ),
+                    ],
+                ),
             ],
         )
     ]

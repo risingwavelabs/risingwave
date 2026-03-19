@@ -14,7 +14,7 @@
 
 pub mod parquet_file_handler;
 
-mod metrics;
+pub mod metrics;
 use std::collections::{BinaryHeap, HashMap, HashSet};
 use std::sync::Arc;
 
@@ -505,7 +505,11 @@ pub async fn scan_task_to_chunk_with_deletes(
 ) {
     let table_name = table.identifier().name().to_owned();
 
-    let mut read_bytes = scopeguard::guard(0, |read_bytes| {
+    let num_delete_files = data_file_scan_task.deletes.len();
+    let expected_record_count = data_file_scan_task.record_count;
+    let file_start = std::time::Instant::now();
+
+    let mut read_bytes = scopeguard::guard(0u64, |read_bytes| {
         if let Some(metrics) = metrics.clone() {
             metrics
                 .iceberg_read_bytes
@@ -541,6 +545,8 @@ pub async fn scan_task_to_chunk_with_deletes(
         reader.read(Box::pin(file_scan_stream))?;
     let mut record_batch_stream = record_batch_stream.enumerate();
 
+    let mut total_rows_read: u64 = 0;
+
     // Process each record batch. Delete application is handled by the SDK.
     while let Some((batch_index, record_batch)) = record_batch_stream.next().await {
         let record_batch = record_batch?;
@@ -548,6 +554,7 @@ pub async fn scan_task_to_chunk_with_deletes(
 
         let mut chunk = IcebergArrowConvert.chunk_from_record_batch(&record_batch)?;
         let row_count = chunk.capacity();
+        total_rows_read += row_count as u64;
 
         // Add metadata columns if requested
         if need_seq_num {
@@ -574,6 +581,47 @@ pub async fn scan_task_to_chunk_with_deletes(
 
         *read_bytes += chunk.estimated_heap_size() as u64;
         yield chunk;
+    }
+
+    // Record per-file metrics after reading all batches.
+    if let Some(ref metrics) = metrics {
+        let label_values = [table_name.as_str()];
+
+        // File read duration.
+        metrics
+            .iceberg_source_file_read_duration_seconds
+            .with_guarded_label_values(&label_values)
+            .observe(file_start.elapsed().as_secs_f64());
+
+        // Rows read.
+        if total_rows_read > 0 {
+            metrics
+                .iceberg_source_rows_read_total
+                .with_guarded_label_values(&label_values)
+                .inc_by(total_rows_read);
+        }
+
+        // File read count.
+        metrics
+            .iceberg_source_files_read_total
+            .with_guarded_label_values(&[table_name.as_str(), "data"])
+            .inc();
+
+        // APPROXIMATE: Estimate delete rows applied. The delta between expected_record_count
+        // and actual rows read may also include predicate pushdown / row-group pruning effects,
+        // so this metric can overcount. It is still useful as an approximate signal for
+        // detecting whether delete files cause significant row filtering.
+        if handle_delete_files && num_delete_files > 0 {
+            if let Some(expected) = expected_record_count {
+                let deleted = expected.saturating_sub(total_rows_read);
+                if deleted > 0 {
+                    metrics
+                        .iceberg_source_delete_rows_applied_total
+                        .with_guarded_label_values(&[table_name.as_str(), "sdk_applied_approx"])
+                        .inc_by(deleted);
+                }
+            }
+        }
     }
 }
 
