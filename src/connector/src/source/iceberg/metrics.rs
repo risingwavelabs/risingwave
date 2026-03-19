@@ -30,7 +30,6 @@ pub struct IcebergScanMetrics {
     pub iceberg_read_bytes: LabelGuardedIntCounterVec,
 
     // -- Snapshot & Discovery (List Executor) --
-
     /// Time difference (seconds) between the latest available snapshot and
     /// the last ingested snapshot.
     pub iceberg_source_snapshot_lag_seconds: LabelGuardedIntGaugeVec,
@@ -45,7 +44,6 @@ pub struct IcebergScanMetrics {
     pub iceberg_source_files_discovered_total: LabelGuardedIntCounterVec,
 
     // -- Data Reading (used in scan_task_to_chunk_with_deletes, labeled by table_name) --
-
     /// Per-file read duration.
     pub iceberg_source_file_read_duration_seconds: LabelGuardedHistogramVec,
 
@@ -56,7 +54,6 @@ pub struct IcebergScanMetrics {
     pub iceberg_source_files_read_total: LabelGuardedIntCounterVec,
 
     // -- Delete Handling --
-
     /// Rows removed by delete processing, labeled by delete_type.
     pub iceberg_source_delete_rows_applied_total: LabelGuardedIntCounterVec,
 
@@ -64,7 +61,6 @@ pub struct IcebergScanMetrics {
     pub iceberg_source_delete_files_per_data_file: LabelGuardedHistogramVec,
 
     // -- Operational Health --
-
     /// Number of files tracked in checkpoint state table.
     pub iceberg_source_checkpoint_file_count: LabelGuardedIntGaugeVec,
 

@@ -264,7 +264,11 @@ impl<S: StateStore> BatchIcebergListExecutor<S> {
     ) {
         let metrics = &GLOBAL_ICEBERG_SCAN_METRICS;
         let table_name = iceberg_properties.table.table_name().to_owned();
-        let label_values = [source_id.as_str(), source_name.as_str(), table_name.as_str()];
+        let label_values = [
+            source_id.as_str(),
+            source_name.as_str(),
+            table_name.as_str(),
+        ];
 
         let table = iceberg_properties.load_table().await?;
         if let Some(start_snapshot) = table.metadata().current_snapshot() {
