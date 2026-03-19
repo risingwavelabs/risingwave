@@ -28,22 +28,62 @@ async fn wait_parallelism(
     name: &str,
     expected: &str,
 ) -> Result<()> {
+    wait_query_result(
+        session,
+        &format!(
+            "select distinct parallelism from rw_fragment_parallelism where name = '{}' order by parallelism;",
+            name
+        ),
+        expected,
+    )
+    .await
+}
+
+async fn wait_streaming_parallelism(
+    session: &mut risingwave_simulation::cluster::Session,
+    name: &str,
+    expected: &str,
+) -> Result<()> {
+    wait_query_result(
+        session,
+        &format!(
+            "select parallelism from rw_streaming_parallelism where name = '{}';",
+            name
+        ),
+        expected,
+    )
+    .await
+}
+
+async fn wait_streaming_job_parallelism(
+    session: &mut risingwave_simulation::cluster::Session,
+    name: &str,
+    expected: &str,
+) -> Result<()> {
+    wait_query_result(
+        session,
+        &format!(
+            "select parallelism from rw_streaming_jobs where name = '{}';",
+            name
+        ),
+        expected,
+    )
+    .await
+}
+
+async fn wait_query_result(
+    session: &mut risingwave_simulation::cluster::Session,
+    query: &str,
+    expected: &str,
+) -> Result<()> {
     for _ in 0..(MAX_HEARTBEAT_INTERVAL_SECS_CONFIG_FOR_AUTO_SCALE * 10) {
-        let res = match session
-            .run(format!(
-                "select distinct parallelism from rw_fragment_parallelism where name = '{}' order by parallelism;",
-                name
-            ))
-            .await
-        {
+        let res = match session.run(query).await {
             Ok(res) => res,
             Err(err) => {
                 // Background DDL may not have notified the catalog yet; treat as transient.
-                if err.chain().any(|cause| {
-                    cause
-                        .to_report_string()
-                        .contains("table not found")
-                })
+                if err
+                    .chain()
+                    .any(|cause| cause.to_report_string().contains("table not found"))
                 {
                     sleep(Duration::from_millis(200)).await;
                     continue;
@@ -57,9 +97,9 @@ async fn wait_parallelism(
         sleep(Duration::from_millis(200)).await;
     }
     bail!(
-        "parallelism for {} did not reach expected {}",
-        name,
-        expected
+        "query did not reach expected result {}: {}",
+        expected,
+        query
     );
 }
 
@@ -100,7 +140,7 @@ async fn test_backfill_parallelism_switches_to_normal_after_completion() -> Resu
 
     session.run("set streaming_parallelism = 3;").await?;
     session
-        .run("set streaming_parallelism_for_backfill = 2;")
+        .run("set streaming_parallelism_for_backfill = 'bounded(2)';")
         .await?;
     session.run("create table t(v int);").await?;
     session
@@ -235,7 +275,7 @@ async fn test_backfill_parallelism_persists_after_recovery() -> Result<()> {
 
     session.run("set streaming_parallelism = 4;").await?;
     session
-        .run("set streaming_parallelism_for_backfill = 2;")
+        .run("set streaming_parallelism_for_backfill = 'bounded(2)';")
         .await?;
     session.run("set backfill_rate_limit = 1;").await?;
     session.run("set background_ddl = true;").await?;
@@ -342,17 +382,23 @@ async fn test_alter_backfill_parallelism_during_backfill() -> Result<()> {
 
     wait_parallelism(&mut session, "m", "2").await?;
     wait_jobs_running(&mut session).await?;
+    wait_streaming_parallelism(&mut session, "m", "2").await?;
+    wait_streaming_job_parallelism(&mut session, "m", "2").await?;
 
     session
-        .run("alter materialized view m set backfill_parallelism = 3;")
+        .run("alter materialized view m set backfill_parallelism = bounded(3);")
         .await?;
     wait_parallelism(&mut session, "m", "3").await?;
+    wait_streaming_parallelism(&mut session, "m", "bounded(3)").await?;
+    wait_streaming_job_parallelism(&mut session, "m", "bounded(3)").await?;
     session
         .run("alter materialized view m set backfill_rate_limit = default;")
         .await?;
 
     wait_jobs_finished(&mut session).await?;
     wait_parallelism(&mut session, "m", "4").await?;
+    wait_streaming_parallelism(&mut session, "m", "4").await?;
+    wait_streaming_job_parallelism(&mut session, "m", "4").await?;
 
     Ok(())
 }

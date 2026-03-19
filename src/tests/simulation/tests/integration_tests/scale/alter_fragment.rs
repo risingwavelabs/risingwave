@@ -77,7 +77,6 @@ async fn test_alter_fragment_no_shuffle() -> Result<()> {
 #[tokio::test]
 async fn test_alter_fragment() -> Result<()> {
     let mut cluster = Cluster::start(Configuration::for_scale()).await?;
-    let default_parallelism = cluster.config().compute_nodes * cluster.config().compute_node_cores;
     cluster.run("create table t1 (c1 int, c2 int);").await?;
     let materialize_fragment = cluster
         .locate_one_fragment([identity_contains("materialize")])
@@ -89,9 +88,9 @@ async fn test_alter_fragment() -> Result<()> {
             "select parallelism from rw_fragment_parallelism where fragment_id = {fragment_id};"
         ))
         .await?
-        .assert_result_eq(format!("{default_parallelism}"));
+        .assert_result_eq("4");
 
-    let new_parallelism = default_parallelism + 1;
+    let new_parallelism = 5;
 
     cluster
         .run(&format!(

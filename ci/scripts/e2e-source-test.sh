@@ -74,6 +74,7 @@ echo "--- Run kafka sasl test done"
 # cron_only tests are run separately in main-cron via dedicated job
 risedev slt './e2e_test/source_inline/**/*.slt' --skip 'cron_only' -j8
 risedev slt './e2e_test/source_inline/**/*.slt.serial' --skip 'cron_only'
+risedev slt './e2e_test/ddl/streaming_parallelism/source.slt' --label 'streaming_parallelism_source_kafka'
 
 echo "--- Run Vault secret tests"
 risedev slt './e2e_test/ddl/vault_secret.slt'
