@@ -49,6 +49,7 @@ use crate::hummock::error::Result;
 use crate::hummock::manager::checkpoint::HummockVersionCheckpoint;
 use crate::hummock::manager::context::ContextInfo;
 use crate::hummock::manager::gc::{FullGcState, GcManager};
+use crate::hummock::manager::sequence::PrefetchedSequence;
 use crate::manager::{MetaSrvEnv, MetadataManager};
 use crate::model::{ClusterId, MetadataModelError};
 use crate::rpc::metrics::MetaMetrics;
@@ -78,44 +79,6 @@ pub(crate) use utils::*;
 
 struct TableCommittedEpochNotifiers {
     txs: HashMap<TableId, Vec<UnboundedSender<u64>>>,
-}
-
-#[derive(Default, Debug, PartialEq, Eq)]
-struct PrefetchedCompactionTaskIdRange {
-    next: u64,
-    end: u64,
-}
-
-impl PrefetchedCompactionTaskIdRange {
-    fn is_empty(&self) -> bool {
-        self.next >= self.end
-    }
-
-    fn pop(&mut self) -> Option<u64> {
-        if self.is_empty() {
-            return None;
-        }
-
-        let task_id = self.next;
-        self.next += 1;
-        Some(task_id)
-    }
-
-    fn reset(&mut self, start: u64, count: u32) {
-        self.next = start;
-        self.end = start + u64::from(count);
-    }
-
-    #[cfg(test)]
-    fn set_bounds(&mut self, next: u64, end: u64) {
-        self.next = next;
-        self.end = end;
-    }
-
-    #[cfg(test)]
-    fn bounds(&self) -> (u64, u64) {
-        (self.next, self.end)
-    }
 }
 
 impl TableCommittedEpochNotifiers {
@@ -188,8 +151,8 @@ pub struct HummockManager {
     inflight_time_travel_query: Semaphore,
     gc_manager: GcManager,
 
-    // In-memory cache for prefetched compaction task ids: [next, end).
-    prefetched_compaction_task_id_range: parking_lot::Mutex<PrefetchedCompactionTaskIdRange>,
+    /// In-memory cache of prefetched compaction task ids to reduce per-task DB round-trips.
+    prefetched_compaction_task_ids: PrefetchedSequence,
     table_id_to_table_option: parking_lot::RwLock<HashMap<TableId, TableOption>>,
 }
 
@@ -382,7 +345,7 @@ impl HummockManager {
             now: Mutex::new(0),
             inflight_time_travel_query: Semaphore::new(inflight_time_travel_query as usize),
             gc_manager,
-            prefetched_compaction_task_id_range: parking_lot::Mutex::new(Default::default()),
+            prefetched_compaction_task_ids: PrefetchedSequence::new(),
             table_id_to_table_option: RwLock::new(HashMap::new()),
         };
         let instance = Arc::new(instance);

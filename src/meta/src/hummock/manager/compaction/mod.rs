@@ -76,7 +76,6 @@ use crate::hummock::metrics_utils::{
     trigger_local_table_stat,
 };
 use crate::hummock::model::CompactionGroup;
-use crate::hummock::sequence::next_compaction_task_id;
 use crate::hummock::{HummockManager, commit_multi_var, start_measure_real_process_timer};
 use crate::manager::META_NODE_ID;
 use crate::model::BTreeMapTransaction;
@@ -288,67 +287,20 @@ impl HummockManager {
         max_select_count: usize,
         picked_task_count: usize,
     ) -> u32 {
-        max_select_count.saturating_sub(picked_task_count) as u32
+        u32::try_from(max_select_count.saturating_sub(picked_task_count)).unwrap_or(u32::MAX)
     }
 
-    async fn refill_prefetched_compaction_task_id_range_if_needed(
-        &self,
-        task_id_capacity: u32,
-    ) -> Result<()> {
-        if task_id_capacity == 0 {
-            return Ok(());
-        }
-
-        {
-            let prefetched_task_id_range = self.prefetched_compaction_task_id_range.lock();
-            if !prefetched_task_id_range.is_empty() {
-                return Ok(());
-            }
-        }
-
-        let new_range_start = self
-            .env
-            .hummock_seq
-            .next_interval(COMPACTION_TASK_ID, task_id_capacity)
-            .await?;
-        let mut prefetched_task_id_range = self.prefetched_compaction_task_id_range.lock();
-        // Re-check after `await`: another concurrent picker may have already refilled and started
-        // consuming the in-memory range. Do not overwrite that range.
-        if !prefetched_task_id_range.is_empty() {
-            return Ok(());
-        }
-
-        prefetched_task_id_range.reset(new_range_start, task_id_capacity);
-        Ok(())
-    }
-
-    /// Pops one id from the in-memory prefetched range.
-    ///
-    /// The range is `[next, end)` and `next` is advanced by 1 when an id is returned.
-    fn pop_prefetched_compaction_task_id(&self) -> Option<u64> {
-        let mut prefetched_task_id_range = self.prefetched_compaction_task_id_range.lock();
-        prefetched_task_id_range.pop()
-    }
-
-    /// Gets one compaction task id with best-effort batching:
-    /// 1) pop from in-memory prefetched range;
-    /// 2) if empty and `refill_capacity > 0`, refill then pop once more;
-    /// 3) fallback to single-id allocation.
+    /// Gets one compaction task id with best-effort batching while ensuring concurrent callers
+    /// share the same refill instead of wasting an allocated range.
     async fn next_compaction_task_id_with_prefetch(&self, refill_capacity: u32) -> Result<u64> {
-        if let Some(task_id) = self.pop_prefetched_compaction_task_id() {
-            return Ok(task_id);
-        }
-
-        if refill_capacity == 0 {
-            return next_compaction_task_id(&self.env).await;
-        }
-
-        self.refill_prefetched_compaction_task_id_range_if_needed(refill_capacity)
-            .await?;
-        match self.pop_prefetched_compaction_task_id() {
-            Some(task_id) => Ok(task_id),
-            None => next_compaction_task_id(&self.env).await,
-        }
+        self.prefetched_compaction_task_ids
+            .next(refill_capacity, |count| async move {
+                self.env
+                    .hummock_seq
+                    .next_interval(COMPACTION_TASK_ID, count)
+                    .await
+            })
+            .await
     }
 
     pub async fn get_compact_tasks_impl(
@@ -1833,12 +1785,7 @@ impl GroupStateValidator {
 
 #[cfg(test)]
 mod prefetched_task_id_tests {
-    use std::collections::HashSet;
-
-    use itertools::Itertools;
-
     use crate::hummock::HummockManager;
-    use crate::hummock::test_utils::setup_compute_env;
 
     #[test]
     fn test_remaining_compaction_task_id_refill_capacity() {
@@ -1857,190 +1804,6 @@ mod prefetched_task_id_tests {
         assert_eq!(
             HummockManager::remaining_compaction_task_id_refill_capacity(8, 9),
             0
-        );
-    }
-
-    #[tokio::test]
-    async fn test_next_compaction_task_id_with_prefetch_reuses_cached_range() {
-        let (_env, hummock_manager, _cluster_manager, _worker_id) = setup_compute_env(80).await;
-        {
-            let mut range = hummock_manager.prefetched_compaction_task_id_range.lock();
-            range.set_bounds(100, 103);
-        }
-
-        assert_eq!(
-            hummock_manager
-                .next_compaction_task_id_with_prefetch(16)
-                .await
-                .unwrap(),
-            100
-        );
-        assert_eq!(
-            hummock_manager
-                .next_compaction_task_id_with_prefetch(16)
-                .await
-                .unwrap(),
-            101
-        );
-        assert_eq!(
-            hummock_manager
-                .next_compaction_task_id_with_prefetch(16)
-                .await
-                .unwrap(),
-            102
-        );
-
-        let range = hummock_manager.prefetched_compaction_task_id_range.lock();
-        assert_eq!(range.bounds(), (103, 103));
-    }
-
-    #[tokio::test]
-    async fn test_next_compaction_task_id_with_prefetch_refills_in_batch_when_empty() {
-        let (_env, hummock_manager, _cluster_manager, _worker_id) = setup_compute_env(80).await;
-        {
-            let mut range = hummock_manager.prefetched_compaction_task_id_range.lock();
-            range.set_bounds(0, 0);
-        }
-
-        let first_id = hummock_manager
-            .next_compaction_task_id_with_prefetch(4)
-            .await
-            .unwrap();
-        {
-            let range = hummock_manager.prefetched_compaction_task_id_range.lock();
-            assert_eq!(range.bounds(), (first_id + 1, first_id + 4));
-        }
-
-        assert_eq!(
-            hummock_manager
-                .next_compaction_task_id_with_prefetch(4)
-                .await
-                .unwrap(),
-            first_id + 1
-        );
-        assert_eq!(
-            hummock_manager
-                .next_compaction_task_id_with_prefetch(4)
-                .await
-                .unwrap(),
-            first_id + 2
-        );
-        assert_eq!(
-            hummock_manager
-                .next_compaction_task_id_with_prefetch(4)
-                .await
-                .unwrap(),
-            first_id + 3
-        );
-
-        let fifth_id = hummock_manager
-            .next_compaction_task_id_with_prefetch(4)
-            .await
-            .unwrap();
-        assert_eq!(fifth_id, first_id + 4);
-        {
-            let range = hummock_manager.prefetched_compaction_task_id_range.lock();
-            assert_eq!(range.bounds(), (fifth_id + 1, fifth_id + 4));
-        }
-    }
-
-    #[tokio::test]
-    async fn test_next_compaction_task_id_with_prefetch_respects_refill_capacity() {
-        let (_env, hummock_manager, _cluster_manager, _worker_id) = setup_compute_env(80).await;
-        {
-            let mut range = hummock_manager.prefetched_compaction_task_id_range.lock();
-            range.set_bounds(0, 0);
-        }
-
-        let first_id = hummock_manager
-            .next_compaction_task_id_with_prefetch(2)
-            .await
-            .unwrap();
-        assert_eq!(
-            hummock_manager
-                .next_compaction_task_id_with_prefetch(2)
-                .await
-                .unwrap(),
-            first_id + 1
-        );
-        {
-            let range = hummock_manager.prefetched_compaction_task_id_range.lock();
-            assert_eq!(range.bounds(), (first_id + 2, first_id + 2));
-        }
-
-        let third_id = hummock_manager
-            .next_compaction_task_id_with_prefetch(1)
-            .await
-            .unwrap();
-        assert_eq!(third_id, first_id + 2);
-        {
-            let range = hummock_manager.prefetched_compaction_task_id_range.lock();
-            assert_eq!(range.bounds(), (third_id + 1, third_id + 1));
-        }
-    }
-
-    #[tokio::test]
-    async fn test_prefetched_compaction_task_id_range_pop_does_not_overflow_bounds() {
-        let (_env, hummock_manager, _cluster_manager, _worker_id) = setup_compute_env(80).await;
-        {
-            let mut range = hummock_manager.prefetched_compaction_task_id_range.lock();
-            range.set_bounds(10, 13);
-        }
-
-        assert_eq!(
-            hummock_manager.pop_prefetched_compaction_task_id(),
-            Some(10)
-        );
-        assert_eq!(
-            hummock_manager.pop_prefetched_compaction_task_id(),
-            Some(11)
-        );
-        assert_eq!(
-            hummock_manager.pop_prefetched_compaction_task_id(),
-            Some(12)
-        );
-        assert_eq!(hummock_manager.pop_prefetched_compaction_task_id(), None);
-
-        let range = hummock_manager.prefetched_compaction_task_id_range.lock();
-        assert_eq!(range.bounds(), (13, 13));
-    }
-
-    #[tokio::test]
-    async fn test_next_compaction_task_id_with_prefetch_no_duplicate_under_concurrency() {
-        let (_env, hummock_manager, _cluster_manager, _worker_id) = setup_compute_env(80).await;
-        {
-            let mut range = hummock_manager.prefetched_compaction_task_id_range.lock();
-            range.set_bounds(0, 0);
-        }
-
-        // `tokio::task::JoinSet` is not available in `madsim`'s tokio.
-        // Using a vector of `JoinHandle`s works in both environments.
-        let mut handles = Vec::with_capacity(64);
-        for _ in 0..64 {
-            let hummock_manager = hummock_manager.clone();
-            handles.push(tokio::spawn(async move {
-                hummock_manager
-                    .next_compaction_task_id_with_prefetch(4)
-                    .await
-                    .unwrap()
-            }));
-        }
-
-        let mut ids = Vec::with_capacity(64);
-        for handle in handles {
-            ids.push(handle.await.unwrap());
-        }
-
-        assert_eq!(ids.len(), 64);
-        let unique_count = ids.iter().copied().collect::<HashSet<_>>().len();
-        assert_eq!(unique_count, 64, "duplicated task ids found: {:?}", ids);
-
-        let mut sorted_ids = ids.iter().copied().collect_vec();
-        sorted_ids.sort_unstable();
-        assert!(
-            sorted_ids.windows(2).all(|w| w[0] < w[1]),
-            "task ids are not strictly increasing after sort: {:?}",
-            sorted_ids
         );
     }
 }
