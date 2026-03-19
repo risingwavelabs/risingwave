@@ -48,7 +48,7 @@ use crate::executor::monitor::StreamingMetrics;
 use crate::executor::subtask::SubtaskHandle;
 use crate::executor::{
     Actor, ActorContext, ActorContextRef, DispatchExecutor, Execute, Executor, ExecutorInfo,
-    SnapshotBackfillExecutor, SyncLogStoreDispatchExecutor, SyncedKvLogStoreContext,
+    SnapshotBackfillExecutor, SyncLogStoreDispatchExecutor, SyncKvLogStoreContext,
     SyncedKvLogStoreMetrics, TroublemakerExecutor, WrapperExecutor,
 };
 use crate::from_proto::{MergeExecutorBuilder, create_executor};
@@ -549,7 +549,7 @@ impl StreamActorManager {
             )
             .await?;
 
-        let log_store_config = SyncedKvLogStoreContext {
+        let log_store_config = SyncKvLogStoreContext {
             table_id: table.id,
             serde: serde.clone(),
             state_store: state_store.clone(),

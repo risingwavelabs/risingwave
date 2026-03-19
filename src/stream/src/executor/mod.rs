@@ -146,7 +146,7 @@ pub use batch_query::BatchQueryExecutor;
 pub use chain::ChainExecutor;
 pub use changelog::ChangeLogExecutor;
 pub use dedup::AppendOnlyDedupExecutor;
-pub(crate) use dispatch::SyncedKvLogStoreContext;
+pub(crate) use sync_log_store_impl::SyncKvLogStoreContext;
 pub use dispatch::{DispatchExecutor, SyncLogStoreDispatchExecutor};
 pub use dynamic_filter::DynamicFilterExecutor;
 pub use error::{StreamExecutorError, StreamExecutorResult};
@@ -1288,6 +1288,14 @@ impl<M> MessageInner<M> {
             MessageInner::Watermark(watermark) => MessageInner::Watermark(watermark),
         }
     }
+
+    pub fn into_batch(self) -> MessageBatchInner<M> {
+        match self {
+            MessageInner::Chunk(chunk) => MessageBatchInner::Chunk(chunk),
+            MessageInner::Barrier(barrier) => MessageBatchInner::BarrierBatch(vec![barrier]),
+            MessageInner::Watermark(watermark) => MessageBatchInner::Watermark(watermark),
+        }
+    }
 }
 
 pub type Message = MessageInner<BarrierMutationType>;
@@ -1307,11 +1315,7 @@ pub type DispatcherMessageBatch = MessageBatchInner<()>;
 
 impl From<DispatcherMessage> for DispatcherMessageBatch {
     fn from(m: DispatcherMessage) -> Self {
-        match m {
-            DispatcherMessage::Chunk(c) => Self::Chunk(c),
-            DispatcherMessage::Barrier(b) => Self::BarrierBatch(vec![b]),
-            DispatcherMessage::Watermark(w) => Self::Watermark(w),
-        }
+        m.into_batch()
     }
 }
 
