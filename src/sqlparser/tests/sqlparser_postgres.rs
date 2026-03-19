@@ -419,6 +419,16 @@ fn parse_set() {
         }
     );
 
+    let stmt = verified_stmt("SET a = bounded(4)");
+    assert_eq!(
+        stmt,
+        Statement::SetVariable {
+            local: false,
+            variable: "a".into(),
+            value: SetVariableValueSingle::Raw("bounded(4)".into()).into(),
+        }
+    );
+
     let stmt = verified_stmt("SET a = DEFAULT");
     assert_eq!(
         stmt,
