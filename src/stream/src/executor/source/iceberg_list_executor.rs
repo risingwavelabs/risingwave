@@ -298,7 +298,11 @@ async fn incremental_scan_stream(
 ) {
     let metrics = &GLOBAL_ICEBERG_SCAN_METRICS;
     let table_name = iceberg_properties.table.table_name().to_owned();
-    let label_values = [source_id.as_str(), source_name.as_str(), table_name.as_str()];
+    let label_values = [
+        source_id.as_str(),
+        source_name.as_str(),
+        table_name.as_str(),
+    ];
 
     let mut last_snapshot: Option<i64> = *last_snapshot_lock.lock();
     loop {
