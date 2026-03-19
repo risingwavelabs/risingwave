@@ -346,7 +346,8 @@ fn render_actors(
             }
             let fragment = &fragments.inner.fragments[&fragment_id];
             let distribution_type: DistributionType = fragment.distribution_type.into();
-            let aligner = ComponentFragmentAligner::new(&actor_template, actor_id_counter);
+            let aligner =
+                ComponentFragmentAligner::new_persistent(&actor_template, actor_id_counter);
             let assignments = aligner.align_component_actor(distribution_type);
             actor_assignments.insert(fragment_id, assignments);
         }
@@ -964,8 +965,10 @@ impl DatabaseCheckpointControl {
                         let actor_template = EnsembleActorTemplate::from_existing_inflight_fragment(
                             original_frag_info,
                         );
-                        let new_aligner =
-                            ComponentFragmentAligner::new(&actor_template, actor_id_counter);
+                        let new_aligner = ComponentFragmentAligner::new_persistent(
+                            &actor_template,
+                            actor_id_counter,
+                        );
                         let distribution_type: DistributionType =
                             sink_ctx.new_fragment.distribution_type.into();
                         let actor_assignments =
