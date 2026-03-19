@@ -80,6 +80,19 @@ fn try_parse_debezium_geometry_as_bytea(
     Ok(Some(bytes))
 }
 
+fn try_decode_base64_composite_text(value: &str) -> Option<String> {
+    let decoded = base64::engine::general_purpose::STANDARD
+        .decode(value)
+        .ok()?;
+    let decoded = String::from_utf8(decoded).ok()?;
+    // PostgreSQL composite textual representation is usually like "(field1,field2)".
+    if decoded.starts_with('(') && decoded.ends_with(')') {
+        Some(decoded)
+    } else {
+        None
+    }
+}
+
 #[derive(Clone, Debug)]
 pub enum ByteaHandling {
     Standard,
@@ -267,7 +280,9 @@ impl JsonParseOptions {
                 string_parsing: false,
                 string_integer_parsing: false,
             },
-            varchar_handling: VarcharHandling::Strict,
+            // For Debezium CDC payloads, allow non-string values (object/array/etc.)
+            // for VARCHAR columns and preserve them via stringification.
+            varchar_handling: VarcharHandling::AllTypes,
             struct_handling: StructHandling::Strict,
             bigint_unsigned_handling,
             ignoring_keycase: true,
@@ -519,7 +534,13 @@ impl JsonParseOptions {
                 .into(),
             // ---- Varchar -----
             (DataType::Varchar, ValueType::String) => {
-                return Ok(DatumCow::Borrowed(Some(value.as_str().unwrap().into())));
+                let raw = value.as_str().unwrap();
+                if matches!(self.bytea_handling, ByteaHandling::Base64)
+                    && let Some(decoded) = try_decode_base64_composite_text(raw)
+                {
+                    return Ok(DatumCow::Owned(Some(ScalarImpl::Utf8(decoded.into()))));
+                }
+                return Ok(DatumCow::Borrowed(Some(raw.into())));
             }
             (
                 DataType::Varchar,
