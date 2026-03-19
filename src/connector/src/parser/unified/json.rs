@@ -85,7 +85,6 @@ fn try_decode_base64_composite_text(value: &str) -> Option<String> {
         .decode(value)
         .ok()?;
     let decoded = String::from_utf8(decoded).ok()?;
-    // PostgreSQL composite textual representation is usually like "(field1,field2)".
     if decoded.starts_with('(') && decoded.ends_with(')') {
         Some(decoded)
     } else {
@@ -535,6 +534,8 @@ impl JsonParseOptions {
             // ---- Varchar -----
             (DataType::Varchar, ValueType::String) => {
                 let raw = value.as_str().unwrap();
+                // Fallback for Debezium unknown Postgres composite values that may still arrive
+                // as base64-encoded textual records like "(USD,66.66)".
                 if matches!(self.bytea_handling, ByteaHandling::Base64)
                     && let Some(decoded) = try_decode_base64_composite_text(raw)
                 {

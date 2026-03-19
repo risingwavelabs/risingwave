@@ -255,9 +255,12 @@ impl PostgresExternalTableReader {
             .map(|f| {
                 let quoted = Self::quote_column(&f.name);
                 match &f.data_type {
-                    // For columns mapped to VARCHAR, cast to text in snapshot query so
-                    // custom PG types can be read as textual representation.
-                    DataType::Varchar => format!("{quoted}::text AS {quoted}"),
+                    // For columns mapped to VARCHAR:
+                    // 1) keep scalar/string-like types as plain text
+                    // 2) convert composite values to JSON text to align with Debezium converter output
+                    DataType::Varchar => format!(
+                        "CASE WHEN jsonb_typeof(to_jsonb({quoted})) = 'object' THEN to_jsonb({quoted})::text ELSE {quoted}::text END AS {quoted}"
+                    ),
                     _ => quoted,
                 }
             })
