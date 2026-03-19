@@ -33,6 +33,7 @@ use risingwave_pb::stream_service::BarrierCompleteResponse;
 
 use crate::barrier::CreateStreamingJobCommandInfo;
 use crate::barrier::command::PostCollectCommand;
+use crate::barrier::partial_graph::PartialGraphBarrierInfo;
 use crate::hummock::{CommitEpochInfo, NewTableFragmentInfo};
 
 #[expect(clippy::type_complexity)]
@@ -129,8 +130,7 @@ pub(super) fn collect_creating_job_commit_epoch_info(
     commit_info: &mut CommitEpochInfo,
     epoch: u64,
     resps: Vec<BarrierCompleteResponse>,
-    tables_to_commit: impl Iterator<Item = TableId>,
-    post_collect_command: &PostCollectCommand,
+    barrier_info: &PartialGraphBarrierInfo,
 ) {
     let (
         sst_to_context,
@@ -153,18 +153,21 @@ pub(super) fn collect_creating_job_commit_epoch_info(
             .expect("non-duplicate");
     }
     commit_info.truncate_tables.extend(truncate_tables);
-    let tables_to_commit: HashSet<_> = tables_to_commit.collect();
-    tables_to_commit.iter().for_each(|table_id| {
-        commit_info
-            .tables_to_commit
-            .try_insert(*table_id, epoch)
-            .expect("non duplicate");
-    });
-    if let PostCollectCommand::CreateStreamingJob { info, .. } = post_collect_command {
+    barrier_info
+        .table_ids_to_commit
+        .iter()
+        .for_each(|table_id| {
+            commit_info
+                .tables_to_commit
+                .try_insert(*table_id, epoch)
+                .expect("non duplicate");
+        });
+    if let PostCollectCommand::CreateStreamingJob { info, .. } = &barrier_info.post_collect_command
+    {
         commit_info
             .new_table_fragment_infos
             .push(NewTableFragmentInfo {
-                table_ids: tables_to_commit,
+                table_ids: barrier_info.table_ids_to_commit.clone(),
             });
         if let Some(index_table) = collect_new_vector_index_info(info) {
             commit_info

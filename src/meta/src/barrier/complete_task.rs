@@ -19,23 +19,22 @@ use std::sync::Arc;
 
 use anyhow::Context;
 use futures::future::try_join_all;
-use risingwave_common::catalog::DatabaseId;
 use risingwave_common::id::JobId;
 use risingwave_common::must_match;
 use risingwave_common::util::deployment::Deployment;
 use risingwave_pb::hummock::HummockVersionStats;
+use risingwave_pb::id::{DatabaseId, PartialGraphId};
 use risingwave_pb::stream_service::barrier_complete_response::{
     PbListFinishedSource, PbLoadFinishedSource,
 };
 use tokio::task::JoinHandle;
 
 use crate::barrier::checkpoint::CheckpointControl;
-use crate::barrier::command::PostCollectCommand;
 use crate::barrier::context::GlobalBarrierWorkerContext;
 use crate::barrier::info::BarrierInfo;
-use crate::barrier::notifier::Notifier;
 use crate::barrier::partial_graph::{PartialGraphBarrierInfo, PartialGraphManager};
 use crate::barrier::progress::TrackingJob;
+use crate::barrier::rpc::from_partial_graph_id;
 use crate::barrier::schedule::PeriodicBarriers;
 use crate::hummock::CommitEpochInfo;
 use crate::manager::MetaSrvEnv;
@@ -64,16 +63,8 @@ pub(super) struct CompleteBarrierTask {
     pub(super) commit_info: CommitEpochInfo,
     pub(super) finished_jobs: Vec<TrackingJob>,
     pub(super) finished_cdc_table_backfill: Vec<JobId>,
-    pub(super) notifiers: Vec<Notifier>,
-    /// `database_id` -> (Some(`command_ctx`), vec!((`creating_job_id`, `epoch`, `create_snapshot_backfill_info`)))
-    #[expect(clippy::type_complexity)]
-    pub(super) epoch_infos: HashMap<
-        DatabaseId,
-        (
-            Option<PartialGraphBarrierInfo>,
-            Vec<(JobId, u64, PostCollectCommand)>,
-        ),
-    >,
+    /// `partial_graph_id` -> barrier info for post-collect processing
+    pub(super) epoch_infos: HashMap<PartialGraphId, PartialGraphBarrierInfo>,
     /// Source listing completion events that need `ListFinish` commands
     pub(super) list_finished_source_ids: Vec<PbListFinishedSource>,
     /// Source load completion events that need `LoadFinish` commands
@@ -85,23 +76,19 @@ pub(super) struct CompleteBarrierTask {
 impl CompleteBarrierTask {
     #[expect(clippy::type_complexity)]
     pub(super) fn epochs_to_ack(&self) -> HashMap<DatabaseId, (Option<u64>, Vec<(JobId, u64)>)> {
-        self.epoch_infos
-            .iter()
-            .map(|(database_id, (command_context, creating_job_epochs))| {
-                (
-                    *database_id,
-                    (
-                        command_context
-                            .as_ref()
-                            .map(|info| info.barrier_info.prev_epoch()),
-                        creating_job_epochs
-                            .iter()
-                            .map(|(job_id, epoch, _)| (*job_id, *epoch))
-                            .collect(),
-                    ),
-                )
-            })
-            .collect()
+        let mut epochs_to_ack: HashMap<DatabaseId, (Option<u64>, Vec<(JobId, u64)>)> =
+            HashMap::new();
+        for (partial_graph_id, info) in &self.epoch_infos {
+            let (database_id, creating_job_id) = from_partial_graph_id(*partial_graph_id);
+            let epoch = info.barrier_info.prev_epoch();
+            let (database, jobs) = epochs_to_ack.entry(database_id).or_default();
+            if let Some(job_id) = creating_job_id {
+                jobs.push((job_id, epoch));
+            } else {
+                *database = Some(epoch);
+            }
+        }
+        epochs_to_ack
     }
 }
 
@@ -111,6 +98,7 @@ impl CompleteBarrierTask {
         context: &impl GlobalBarrierWorkerContext,
         env: MetaSrvEnv,
     ) -> MetaResult<HummockVersionStats> {
+        let mut notifiers = Vec::new();
         let result: MetaResult<HummockVersionStats> = try {
             let wait_commit_timer = GLOBAL_META_METRICS
                 .barrier_wait_commit_latency
@@ -144,13 +132,15 @@ impl CompleteBarrierTask {
                     .await?;
             }
 
-            for (database_id, (info, creating_jobs)) in self.epoch_infos {
-                if let Some(info) = info {
-                    let command_name = info.post_collect_command.command_name().to_owned();
-                    let elapsed_secs = info.elapsed_secs();
-                    context
-                        .post_collect_command(info.post_collect_command)
-                        .await?;
+            for (partial_graph_id, info) in self.epoch_infos {
+                let (database_id, job_id) = from_partial_graph_id(partial_graph_id);
+                let command_name = info.post_collect_command.command_name().to_owned();
+                let elapsed_secs = info.elapsed_secs();
+                notifiers.extend(info.notifiers);
+                context
+                    .post_collect_command(info.post_collect_command)
+                    .await?;
+                if job_id.is_none() {
                     Self::report_complete_event(
                         &env,
                         elapsed_secs,
@@ -162,9 +152,6 @@ impl CompleteBarrierTask {
                         .with_label_values(&[database_id.to_string().as_str()])
                         .set(info.barrier_info.curr_epoch.value().as_unix_secs() as i64);
                 }
-                for (_, _, post_collect_command) in creating_jobs {
-                    context.post_collect_command(post_collect_command).await?;
-                }
             }
 
             wait_commit_timer.observe_duration();
@@ -175,13 +162,13 @@ impl CompleteBarrierTask {
             let version_stats = match result {
                 Ok(version_stats) => version_stats,
                 Err(e) => {
-                    for notifier in self.notifiers {
+                    for notifier in notifiers {
                         notifier.notify_collection_failed(e.clone());
                     }
                     return Err(e);
                 }
             };
-            self.notifiers.into_iter().for_each(|notifier| {
+            notifiers.into_iter().for_each(|notifier| {
                 notifier.notify_collected();
             });
             try_join_all(

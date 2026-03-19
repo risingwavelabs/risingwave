@@ -152,7 +152,7 @@ impl PartialGraphRunningState {
                 epoch, resps, info, ..
             } = entry.remove();
             if let Some(prev_barrier) = self.collected_barriers.back() {
-                assert_eq!(prev_barrier.epoch.prev, epoch.curr);
+                assert_eq!(prev_barrier.epoch.curr, epoch.prev);
             }
             let barrier_latency_secs = info.elapsed_secs();
             self.collected_barriers

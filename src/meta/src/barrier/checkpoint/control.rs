@@ -44,9 +44,7 @@ use crate::barrier::checkpoint::state::{ApplyCommandInfo, BarrierWorkerState};
 use crate::barrier::complete_task::{BarrierCompleteOutput, CompleteBarrierTask};
 use crate::barrier::info::{InflightDatabaseInfo, SharedActorInfos};
 use crate::barrier::notifier::Notifier;
-use crate::barrier::partial_graph::{
-    CollectedBarrier, PartialGraphBarrierInfo, PartialGraphManager,
-};
+use crate::barrier::partial_graph::{CollectedBarrier, PartialGraphManager};
 use crate::barrier::progress::TrackingJob;
 use crate::barrier::rpc::{from_partial_graph_id, to_partial_graph_id};
 use crate::barrier::schedule::{NewBarrier, PeriodicBarriers};
@@ -872,7 +870,8 @@ impl DatabaseCheckpointControl {
                     committed_epoch,
                 ) {
                     if is_finish_epoch {
-                        finished_jobs.push((*job_id, epoch, resps, info));
+                        assert!(info.notifiers.is_empty());
+                        finished_jobs.push((*job_id, epoch, resps));
                         continue;
                     };
                     creating_jobs_task.push((*job_id, epoch, resps, info));
@@ -887,7 +886,7 @@ impl DatabaseCheckpointControl {
                         .collect(),
                 );
             }
-            for (job_id, epoch, resps, notifiers) in finished_jobs {
+            for (job_id, epoch, resps) in finished_jobs {
                 let epoch_state = &mut self
                     .command_ctx_queue
                     .get_mut(&epoch)
@@ -905,7 +904,7 @@ impl DatabaseCheckpointControl {
                 assert!(
                     epoch_state
                         .finished_jobs
-                        .insert(job_id, (resps, tracking_job, notifiers))
+                        .insert(job_id, (resps, tracking_job))
                         .is_none()
                 );
             }
@@ -915,7 +914,7 @@ impl DatabaseCheckpointControl {
             && !state.is_inflight()
         {
             {
-                let (epoch, mut state) = self.command_ctx_queue.pop_first().expect("non-empty");
+                let (epoch, state) = self.command_ctx_queue.pop_first().expect("non-empty");
                 assert!(state.creating_jobs_to_wait.is_empty());
                 assert!(state.is_collected);
 
@@ -943,16 +942,14 @@ impl DatabaseCheckpointControl {
                     continue;
                 }
                 let mut staging_commit_info = self.database_info.take_staging_commit_info();
-                let task = task.get_or_insert_default();
                 state
                     .finished_jobs
-                    .drain()
-                    .for_each(|(_job_id, (resps, tracking_job, info))| {
+                    .into_iter()
+                    .for_each(|(_, (resps, tracking_job))| {
                         resps_to_commit.extend(resps);
                         staging_commit_info.finished_jobs.push(tracking_job);
-                        task.notifiers.extend(info.notifiers);
                     });
-
+                let task = task.get_or_insert_default();
                 Command::collect_commit_epoch_info(
                     &self.database_info,
                     &info,
@@ -964,9 +961,8 @@ impl DatabaseCheckpointControl {
                 task.finished_jobs.extend(staging_commit_info.finished_jobs);
                 task.finished_cdc_table_backfill
                     .extend(staging_commit_info.finished_cdc_table_backfill);
-                task.notifiers.append(&mut info.notifiers);
                 task.epoch_infos
-                    .try_insert(self.database_id, (Some(info), vec![]))
+                    .try_insert(self.partial_graph_id, info)
                     .expect("non duplicate");
                 task.commit_info
                     .truncate_tables
@@ -977,17 +973,10 @@ impl DatabaseCheckpointControl {
         if !creating_jobs_task.is_empty() {
             let task = task.get_or_insert_default();
             for (job_id, epoch, resps, info) in creating_jobs_task {
-                collect_creating_job_commit_epoch_info(
-                    &mut task.commit_info,
-                    epoch,
-                    resps,
-                    info.table_ids_to_commit.iter().copied(),
-                    &info.post_collect_command,
-                );
-                let (_, creating_job_epochs) =
-                    task.epoch_infos.entry(self.database_id).or_default();
-                creating_job_epochs.push((job_id, epoch, info.post_collect_command));
-                task.notifiers.extend(info.notifiers);
+                collect_creating_job_commit_epoch_info(&mut task.commit_info, epoch, resps, &info);
+                task.epoch_infos
+                    .try_insert(to_partial_graph_id(self.database_id, Some(job_id)), info)
+                    .expect("non duplicate");
             }
         }
     }
@@ -1059,14 +1048,7 @@ struct BarrierEpochState {
 
     creating_jobs_to_wait: HashSet<JobId>,
 
-    finished_jobs: HashMap<
-        JobId,
-        (
-            Vec<BarrierCompleteResponse>,
-            TrackingJob,
-            PartialGraphBarrierInfo,
-        ),
-    >,
+    finished_jobs: HashMap<JobId, (Vec<BarrierCompleteResponse>, TrackingJob)>,
 }
 
 impl BarrierEpochState {
