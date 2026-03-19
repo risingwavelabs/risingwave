@@ -431,7 +431,6 @@ mod tests {
             handles.push(tokio::spawn(async move {
                 seq.next(4, move |count| {
                     refill_calls.fetch_add(1, Ordering::SeqCst);
-                    let next_start = next_start.clone();
                     async move { Ok(next_start.fetch_add(u64::from(count), Ordering::SeqCst)) }
                 })
                 .await
