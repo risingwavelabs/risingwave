@@ -28,6 +28,7 @@ use risingwave_common::config::StreamingConfig;
 use risingwave_common::hash::VnodeBitmapExt;
 use risingwave_common::id::SourceId;
 use risingwave_common::types::{JsonbVal, ScalarRef, Serial, ToOwnedDatum};
+use risingwave_connector::source::iceberg::metrics::GLOBAL_ICEBERG_SCAN_METRICS;
 use risingwave_connector::source::iceberg::{IcebergScanOpts, scan_task_to_chunk_with_deletes};
 use risingwave_connector::source::reader::desc::SourceDesc;
 use risingwave_connector::source::{SourceContext, SourceCtrlOpts};
@@ -384,7 +385,7 @@ impl<S: StateStore> IcebergFetchExecutor<S> {
                     handle_delete_files: table.metadata().format_version()
                         >= iceberg::spec::FormatVersion::V3,
                 },
-                None,
+                Some(Arc::new(GLOBAL_ICEBERG_SCAN_METRICS.clone())),
             ) {
                 let chunk = chunk?;
                 chunks.push(StreamChunk::from_parts(
@@ -474,6 +475,24 @@ impl<S: StateStore> IcebergFetchExecutor<S> {
         // Initialize state table.
         state_store_handler.init_epoch(first_epoch).await?;
 
+        // Extract table name from iceberg properties for metrics labeling.
+        let iceberg_metrics = &GLOBAL_ICEBERG_SCAN_METRICS;
+        let iceberg_table_name = {
+            match &source_desc.source.config {
+                risingwave_connector::source::ConnectorProperties::Iceberg(props) => {
+                    props.table.table_name().to_owned()
+                }
+                _ => String::new(),
+            }
+        };
+        let source_id_str = core.source_id.to_string();
+        let source_name_str = core.source_name.clone();
+        let metrics_labels = [
+            source_id_str.as_str(),
+            source_name_str.as_str(),
+            iceberg_table_name.as_str(),
+        ];
+
         let mut splits_on_fetch: usize = 0;
         let mut stream = StreamReaderWithPause::<true, ChunksWithState>::new(
             upstream,
@@ -498,11 +517,28 @@ impl<S: StateStore> IcebergFetchExecutor<S> {
             self.streaming_config.clone(),
         )
         .await?;
+        if !iceberg_table_name.is_empty() {
+            iceberg_metrics
+                .iceberg_source_checkpoint_file_count
+                .with_guarded_label_values(&metrics_labels)
+                .set(splits_on_fetch as i64);
+        }
 
         while let Some(msg) = stream.next().await {
             match msg {
                 Err(e) => {
                     tracing::error!(error = %e.as_report(), "Fetch Error");
+                    if !iceberg_table_name.is_empty() {
+                        iceberg_metrics
+                            .iceberg_source_scan_errors_total
+                            .with_guarded_label_values(&[
+                                metrics_labels[0],
+                                metrics_labels[1],
+                                metrics_labels[2],
+                                "fetch_error",
+                            ])
+                            .inc();
+                    }
                     splits_on_fetch = 0;
                 }
                 Ok(msg) => {
@@ -572,6 +608,12 @@ impl<S: StateStore> IcebergFetchExecutor<S> {
                                             self.streaming_config.clone(),
                                         )
                                         .await?;
+                                        if !iceberg_table_name.is_empty() {
+                                            iceberg_metrics
+                                                .iceberg_source_checkpoint_file_count
+                                                .with_guarded_label_values(&metrics_labels)
+                                                .set(splits_on_fetch as i64);
+                                        }
                                     }
                                 }
                                 // Receiving file assignments from upstream list executor,
@@ -602,6 +644,12 @@ impl<S: StateStore> IcebergFetchExecutor<S> {
                             if true {
                                 splits_on_fetch -= 1;
                                 state_store_handler.delete(&data_file_path).await?;
+                                if !iceberg_table_name.is_empty() {
+                                    iceberg_metrics
+                                        .iceberg_source_checkpoint_file_count
+                                        .with_guarded_label_values(&metrics_labels)
+                                        .set(splits_on_fetch as i64);
+                                }
                             }
 
                             for chunk in &chunks {

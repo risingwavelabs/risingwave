@@ -12,10 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::Arc;
+
 use anyhow::{Context, anyhow};
 use either::Either;
 use futures_async_stream::try_stream;
 use iceberg::scan::FileScanTask;
+use iceberg::spec::DataContentType;
 use parking_lot::Mutex;
 use risingwave_common::array::Op;
 use risingwave_common::catalog::ColumnCatalog;
@@ -23,6 +26,7 @@ use risingwave_common::config::StreamingConfig;
 use risingwave_common::system_param::local_manager::SystemParamsReaderRef;
 use risingwave_connector::source::ConnectorProperties;
 use risingwave_connector::source::iceberg::IcebergProperties;
+use risingwave_connector::source::iceberg::metrics::GLOBAL_ICEBERG_SCAN_METRICS;
 use risingwave_connector::source::reader::desc::SourceDescBuilder;
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc::UnboundedReceiver;
@@ -183,6 +187,11 @@ impl<S: StateStore> IcebergListExecutor<S> {
             }
         }
 
+        let source_id_str = self.stream_source_core.source_id.to_string();
+        let source_name_str = self.stream_source_core.source_name.clone();
+        let list_table_name = iceberg_properties.table.table_name().to_owned();
+        let list_metrics = &GLOBAL_ICEBERG_SCAN_METRICS;
+
         let last_snapshot = Arc::new(Mutex::new(last_snapshot));
         let build_incremental_stream = || {
             incremental_scan_stream(
@@ -190,6 +199,8 @@ impl<S: StateStore> IcebergListExecutor<S> {
                 last_snapshot.clone(),
                 self.streaming_config.developer.iceberg_list_interval_sec,
                 downstream_columns.clone(),
+                source_id_str.clone(),
+                source_name_str.clone(),
             )
             .map(|res| match res {
                 Ok(scan_task) => {
@@ -221,6 +232,15 @@ impl<S: StateStore> IcebergListExecutor<S> {
                         error = %e.as_report(),
                         "incremental iceberg list stream errored, rebuilding"
                     );
+                    list_metrics
+                        .iceberg_source_scan_errors_total
+                        .with_guarded_label_values(&[
+                            source_id_str.as_str(),
+                            source_name_str.as_str(),
+                            list_table_name.as_str(),
+                            "list_error",
+                        ])
+                        .inc();
                     stream.replace_data_stream(build_incremental_stream());
                 }
                 Ok(msg) => match msg {
@@ -273,7 +293,13 @@ async fn incremental_scan_stream(
     last_snapshot_lock: Arc<Mutex<Option<i64>>>,
     list_interval_sec: u64,
     downstream_columns: Option<Vec<String>>,
+    source_id: String,
+    source_name: String,
 ) {
+    let metrics = &GLOBAL_ICEBERG_SCAN_METRICS;
+    let table_name = iceberg_properties.table.table_name().to_owned();
+    let label_values = [source_id.as_str(), source_name.as_str(), table_name.as_str()];
+
     let mut last_snapshot: Option<i64> = *last_snapshot_lock.lock();
     loop {
         tokio::time::sleep(std::time::Duration::from_secs(list_interval_sec)).await;
@@ -288,12 +314,24 @@ async fn incremental_scan_stream(
         };
 
         if Some(current_snapshot.snapshot_id()) == last_snapshot {
+            // Ingestion is caught up — lag is 0.
+            metrics
+                .iceberg_source_snapshot_lag_seconds
+                .with_guarded_label_values(&label_values)
+                .set(0);
+
             tracing::info!(
                 "Current table snapshot is already enumerated: {}, no new snapshot available",
                 current_snapshot.snapshot_id()
             );
             continue;
         }
+
+        // New snapshot discovered.
+        metrics
+            .iceberg_source_snapshots_discovered_total
+            .with_guarded_label_values(&label_values)
+            .inc();
 
         let mut incremental_scan = table.scan().to_snapshot_id(current_snapshot.snapshot_id());
         if let Some(last_snapshot) = last_snapshot {
@@ -308,14 +346,89 @@ async fn incremental_scan_stream(
         .build()
         .context("failed to build iceberg scan")?;
 
+        let list_start = std::time::Instant::now();
+        let mut data_file_count: u64 = 0;
+        let mut eq_delete_count: u64 = 0;
+        let mut pos_delete_count: u64 = 0;
+
         #[for_await]
         for scan_task in incremental_scan
             .plan_files()
             .await
             .context("failed to plan iceberg files")?
         {
-            yield scan_task.context("failed to get scan task")?;
+            let scan_task = scan_task.context("failed to get scan task")?;
+
+            // Count file types: the main task is a data file, deletes are attached.
+            data_file_count += 1;
+            for delete_task in &scan_task.deletes {
+                match delete_task.data_file_content {
+                    DataContentType::EqualityDeletes => eq_delete_count += 1,
+                    DataContentType::PositionDeletes => pos_delete_count += 1,
+                    _ => {}
+                }
+            }
+
+            // Record delete files per data file.
+            metrics
+                .iceberg_source_delete_files_per_data_file
+                .with_guarded_label_values(&label_values)
+                .observe(scan_task.deletes.len() as f64);
+
+            yield scan_task;
         }
+
+        let list_duration = list_start.elapsed();
+        metrics
+            .iceberg_source_list_duration_seconds
+            .with_guarded_label_values(&label_values)
+            .observe(list_duration.as_secs_f64());
+
+        if data_file_count > 0 {
+            metrics
+                .iceberg_source_files_discovered_total
+                .with_guarded_label_values(&[
+                    label_values[0],
+                    label_values[1],
+                    label_values[2],
+                    "data",
+                ])
+                .inc_by(data_file_count);
+        }
+        if eq_delete_count > 0 {
+            metrics
+                .iceberg_source_files_discovered_total
+                .with_guarded_label_values(&[
+                    label_values[0],
+                    label_values[1],
+                    label_values[2],
+                    "eq_delete",
+                ])
+                .inc_by(eq_delete_count);
+        }
+        if pos_delete_count > 0 {
+            metrics
+                .iceberg_source_files_discovered_total
+                .with_guarded_label_values(&[
+                    label_values[0],
+                    label_values[1],
+                    label_values[2],
+                    "pos_delete",
+                ])
+                .inc_by(pos_delete_count);
+        }
+
+        // Update snapshot lag after processing.
+        let snapshot_timestamp_ms = current_snapshot.timestamp_ms();
+        let now_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as i64;
+        let lag_seconds = ((now_ms - snapshot_timestamp_ms) / 1000).max(0);
+        metrics
+            .iceberg_source_snapshot_lag_seconds
+            .with_guarded_label_values(&label_values)
+            .set(lag_seconds);
 
         last_snapshot = Some(current_snapshot.snapshot_id());
         *last_snapshot_lock.lock() = last_snapshot;
