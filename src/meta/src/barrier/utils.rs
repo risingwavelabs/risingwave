@@ -32,7 +32,7 @@ use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_service::BarrierCompleteResponse;
 
 use crate::barrier::CreateStreamingJobCommandInfo;
-use crate::barrier::context::CreateSnapshotBackfillJobCommandInfo;
+use crate::barrier::command::PostCollectCommand;
 use crate::hummock::{CommitEpochInfo, NewTableFragmentInfo};
 
 #[expect(clippy::type_complexity)]
@@ -130,7 +130,7 @@ pub(super) fn collect_creating_job_commit_epoch_info(
     epoch: u64,
     resps: Vec<BarrierCompleteResponse>,
     tables_to_commit: impl Iterator<Item = TableId>,
-    create_info: Option<&CreateSnapshotBackfillJobCommandInfo>,
+    post_collect_command: &PostCollectCommand,
 ) {
     let (
         sst_to_context,
@@ -160,13 +160,13 @@ pub(super) fn collect_creating_job_commit_epoch_info(
             .try_insert(*table_id, epoch)
             .expect("non duplicate");
     });
-    if let Some(info) = create_info {
+    if let PostCollectCommand::CreateStreamingJob { info, .. } = post_collect_command {
         commit_info
             .new_table_fragment_infos
             .push(NewTableFragmentInfo {
                 table_ids: tables_to_commit,
             });
-        if let Some(index_table) = collect_new_vector_index_info(&info.info) {
+        if let Some(index_table) = collect_new_vector_index_info(info) {
             commit_info
                 .vector_index_delta
                 .try_insert(

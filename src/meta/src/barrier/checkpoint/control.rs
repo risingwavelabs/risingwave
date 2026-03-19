@@ -15,12 +15,10 @@
 use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::future::{Future, poll_fn};
-use std::mem::take;
 use std::task::Poll;
 
 use anyhow::anyhow;
 use fail::fail_point;
-use prometheus::HistogramTimer;
 use risingwave_common::catalog::{DatabaseId, TableId};
 use risingwave_common::id::JobId;
 use risingwave_common::metrics::{LabelGuardedHistogram, LabelGuardedIntGauge};
@@ -37,17 +35,18 @@ use risingwave_pb::stream_service::streaming_control_stream_response::ResetParti
 use tracing::{debug, warn};
 
 use crate::barrier::cdc_progress::CdcProgress;
-use crate::barrier::checkpoint::creating_job::{CompleteJobType, CreatingStreamingJobControl};
+use crate::barrier::checkpoint::creating_job::CreatingStreamingJobControl;
 use crate::barrier::checkpoint::recovery::{
     DatabaseRecoveringState, DatabaseStatusAction, EnterInitializing, EnterRunning,
     RecoveringStateAction,
 };
 use crate::barrier::checkpoint::state::{ApplyCommandInfo, BarrierWorkerState};
-use crate::barrier::command::CommandContext;
 use crate::barrier::complete_task::{BarrierCompleteOutput, CompleteBarrierTask};
 use crate::barrier::info::{InflightDatabaseInfo, SharedActorInfos};
 use crate::barrier::notifier::Notifier;
-use crate::barrier::partial_graph::{CollectedBarrier, PartialGraphManager};
+use crate::barrier::partial_graph::{
+    CollectedBarrier, PartialGraphBarrierInfo, PartialGraphManager,
+};
 use crate::barrier::progress::TrackingJob;
 use crate::barrier::rpc::{from_partial_graph_id, to_partial_graph_id};
 use crate::barrier::schedule::{NewBarrier, PeriodicBarriers};
@@ -129,15 +128,20 @@ impl CheckpointControl {
 
     pub(crate) fn next_complete_barrier_task(
         &mut self,
-        mut context: Option<(&mut PeriodicBarriers, &mut PartialGraphManager)>,
+        periodic_barriers: &mut PeriodicBarriers,
+        partial_graph_manager: &mut PartialGraphManager,
     ) -> Option<CompleteBarrierTask> {
         let mut task = None;
         for database in self.databases.values_mut() {
             let Some(database) = database.running_state_mut() else {
                 continue;
             };
-            let context = context.as_mut().map(|(s, c)| (&mut **s, &mut **c));
-            database.next_complete_barrier_task(&mut task, context, &self.hummock_version_stats);
+            database.next_complete_barrier_task(
+                periodic_barriers,
+                partial_graph_manager,
+                &mut task,
+                &self.hummock_version_stats,
+            );
         }
         task
     }
@@ -443,21 +447,6 @@ impl CheckpointControl {
                 },
             )
     }
-
-    pub(crate) fn clear_on_err(&mut self, err: &MetaError) {
-        for (_, node) in self.databases.values_mut().flat_map(|status| {
-            status
-                .running_state_mut()
-                .map(|database| take(&mut database.command_ctx_queue))
-                .into_iter()
-                .flatten()
-        }) {
-            for notifier in node.notifiers {
-                notifier.notify_collection_failed(err.clone());
-            }
-            node.enqueue_time.observe_duration();
-        }
-    }
 }
 
 pub(crate) enum CheckpointControlEvent<'a> {
@@ -618,11 +607,12 @@ impl DatabaseCheckpointControlMetrics {
 /// Controls the concurrent execution of commands.
 pub(in crate::barrier) struct DatabaseCheckpointControl {
     pub(super) database_id: DatabaseId,
+    partial_graph_id: PartialGraphId,
     pub(super) state: BarrierWorkerState,
 
     /// Save the state and message of barrier in order.
     /// Key is the `prev_epoch`.
-    command_ctx_queue: BTreeMap<u64, EpochNode>,
+    command_ctx_queue: BTreeMap<u64, BarrierEpochState>,
     /// The barrier that are completing.
     /// Some(`prev_epoch`)
     completing_barrier: Option<u64>,
@@ -639,6 +629,7 @@ impl DatabaseCheckpointControl {
     fn new(database_id: DatabaseId, shared_actor_infos: SharedActorInfos) -> Self {
         Self {
             database_id,
+            partial_graph_id: to_partial_graph_id(database_id, None),
             state: BarrierWorkerState::new(),
             command_ctx_queue: Default::default(),
             completing_barrier: None,
@@ -658,6 +649,7 @@ impl DatabaseCheckpointControl {
     ) -> Self {
         Self {
             database_id,
+            partial_graph_id: to_partial_graph_id(database_id, None),
             state,
             command_ctx_queue: Default::default(),
             completing_barrier: None,
@@ -689,7 +681,7 @@ impl DatabaseCheckpointControl {
         self.metrics.in_flight_barrier_nums.set(
             self.command_ctx_queue
                 .values()
-                .filter(|x| x.state.is_inflight())
+                .filter(|state| state.is_inflight())
                 .count() as i64,
         );
         self.metrics
@@ -698,38 +690,14 @@ impl DatabaseCheckpointControl {
     }
 
     /// Enqueue a barrier command
-    fn enqueue_command(
-        &mut self,
-        command_ctx: CommandContext,
-        notifiers: Vec<Notifier>,
-        creating_jobs_to_wait: HashSet<JobId>,
-    ) {
-        let timer = self.metrics.barrier_latency.start_timer();
-
-        if let Some((_, node)) = self.command_ctx_queue.last_key_value() {
-            assert_eq!(
-                command_ctx.barrier_info.prev_epoch.value(),
-                node.command_ctx.barrier_info.curr_epoch.value()
-            );
-        }
-
-        tracing::trace!(
-            prev_epoch = command_ctx.barrier_info.prev_epoch(),
-            ?creating_jobs_to_wait,
-            "enqueue command"
-        );
+    fn enqueue_command(&mut self, prev_epoch: u64, creating_jobs_to_wait: HashSet<JobId>) {
+        tracing::trace!(prev_epoch, ?creating_jobs_to_wait, "enqueue command");
         self.command_ctx_queue.insert(
-            command_ctx.barrier_info.prev_epoch(),
-            EpochNode {
-                enqueue_time: timer,
-                state: BarrierEpochState {
-                    is_collected: false,
-                    resps: vec![],
-                    creating_jobs_to_wait,
-                    finished_jobs: HashMap::new(),
-                },
-                command_ctx,
-                notifiers,
+            prev_epoch,
+            BarrierEpochState {
+                is_collected: false,
+                creating_jobs_to_wait,
+                finished_jobs: HashMap::new(),
             },
         );
     }
@@ -752,12 +720,12 @@ impl DatabaseCheckpointControl {
         assert_eq!(self.database_id, database_id);
         match creating_job_id {
             None => {
-                if let Some(node) = self.command_ctx_queue.get_mut(&prev_epoch) {
-                    assert!(!node.state.is_collected);
-                    node.state.is_collected = true;
-                    node.state
-                        .resps
-                        .extend(collected_barrier.resps.into_values());
+                if let Some(state) = self.command_ctx_queue.get_mut(&prev_epoch) {
+                    assert!(!state.is_collected);
+                    self.metrics
+                        .barrier_latency
+                        .observe(collected_barrier.barrier_latency_secs);
+                    state.is_collected = true;
                 } else {
                     panic!(
                         "collect barrier on non-existing barrier: {}, {:?}",
@@ -783,7 +751,7 @@ impl DatabaseCheckpointControl {
     fn can_inject_barrier(&self, in_flight_barrier_nums: usize) -> bool {
         self.command_ctx_queue
             .values()
-            .filter(|x| x.state.is_inflight())
+            .filter(|state| state.is_inflight())
             .count()
             < in_flight_barrier_nums
     }
@@ -883,8 +851,9 @@ impl DatabaseCheckpointControl {
 
     fn next_complete_barrier_task(
         &mut self,
+        periodic_barriers: &mut PeriodicBarriers,
+        partial_graph_manager: &mut PartialGraphManager,
         task: &mut Option<CompleteBarrierTask>,
-        mut context: Option<(&mut PeriodicBarriers, &mut PartialGraphManager)>,
         hummock_version_stats: &HummockVersionStats,
     ) {
         // `Vec::new` is a const fn, and do not have memory allocation, and therefore is lightweight enough
@@ -897,36 +866,32 @@ impl DatabaseCheckpointControl {
                 .first_key_value()
                 .map(|(epoch, _)| *epoch);
             for (job_id, job) in &mut self.creating_streaming_job_controls {
-                if let Some((epoch, resps, status)) =
-                    job.start_completing(min_upstream_inflight_barrier, committed_epoch)
-                {
-                    let create_info = match status {
-                        CompleteJobType::First(info) => Some(info),
-                        CompleteJobType::Normal => None,
-                        CompleteJobType::Finished => {
-                            finished_jobs.push((*job_id, epoch, resps));
-                            continue;
-                        }
+                if let Some((epoch, resps, info, is_finish_epoch)) = job.start_completing(
+                    partial_graph_manager,
+                    min_upstream_inflight_barrier,
+                    committed_epoch,
+                ) {
+                    if is_finish_epoch {
+                        finished_jobs.push((*job_id, epoch, resps, info));
+                        continue;
                     };
-                    creating_jobs_task.push((*job_id, epoch, resps, create_info));
+                    creating_jobs_task.push((*job_id, epoch, resps, info));
                 }
             }
-            if !finished_jobs.is_empty()
-                && let Some((_, partial_graph_manager)) = &mut context
-            {
+
+            if !finished_jobs.is_empty() {
                 partial_graph_manager.remove_partial_graphs(
                     finished_jobs
                         .iter()
-                        .map(|(job_id, _, _)| to_partial_graph_id(self.database_id, Some(*job_id)))
+                        .map(|(job_id, ..)| to_partial_graph_id(self.database_id, Some(*job_id)))
                         .collect(),
                 );
             }
-            for (job_id, epoch, resps) in finished_jobs {
+            for (job_id, epoch, resps, notifiers) in finished_jobs {
                 let epoch_state = &mut self
                     .command_ctx_queue
                     .get_mut(&epoch)
-                    .expect("should exist")
-                    .state;
+                    .expect("should exist");
                 assert!(epoch_state.creating_jobs_to_wait.remove(&job_id));
                 debug!(epoch, %job_id, "finish creating job");
                 // It's safe to remove the creating job, because on CompleteJobType::Finished,
@@ -940,66 +905,68 @@ impl DatabaseCheckpointControl {
                 assert!(
                     epoch_state
                         .finished_jobs
-                        .insert(job_id, (resps, tracking_job))
+                        .insert(job_id, (resps, tracking_job, notifiers))
                         .is_none()
                 );
             }
         }
         assert!(self.completing_barrier.is_none());
-        while let Some((_, EpochNode { state, .. })) = self.command_ctx_queue.first_key_value()
+        while let Some((_, state)) = self.command_ctx_queue.first_key_value()
             && !state.is_inflight()
         {
             {
-                let (_, mut node) = self.command_ctx_queue.pop_first().expect("non-empty");
-                assert!(node.state.creating_jobs_to_wait.is_empty());
-                assert!(node.state.is_collected);
+                let (epoch, mut state) = self.command_ctx_queue.pop_first().expect("non-empty");
+                assert!(state.creating_jobs_to_wait.is_empty());
+                assert!(state.is_collected);
 
-                self.handle_refresh_table_info(task, &node);
+                let (resps, mut info) =
+                    partial_graph_manager.take_collected_barrier(self.partial_graph_id, epoch);
 
+                self.handle_refresh_table_info(task, &resps);
                 self.database_info.apply_collected_command(
-                    &node.command_ctx.command,
-                    &node.state.resps,
+                    &info.post_collect_command,
+                    &resps,
                     hummock_version_stats,
                 );
-                if !node.command_ctx.barrier_info.kind.is_checkpoint() {
-                    node.notifiers.into_iter().for_each(|notifier| {
+
+                let mut resps_to_commit = resps;
+                if !info.barrier_info.kind.is_checkpoint() {
+                    info.notifiers.drain(..).for_each(|notifier| {
                         notifier.notify_collected();
                     });
-                    if let Some((periodic_barriers, _)) = &mut context
-                        && self.database_info.has_pending_finished_jobs()
-                        && self
-                            .command_ctx_queue
-                            .values()
-                            .all(|node| !node.command_ctx.barrier_info.kind.is_checkpoint())
+                    if self.database_info.has_pending_finished_jobs()
+                        && !partial_graph_manager
+                            .has_pending_checkpoint_barrier(self.partial_graph_id)
                     {
                         periodic_barriers.force_checkpoint_in_next_barrier(self.database_id);
                     }
                     continue;
                 }
                 let mut staging_commit_info = self.database_info.take_staging_commit_info();
-                node.state
+                let task = task.get_or_insert_default();
+                state
                     .finished_jobs
                     .drain()
-                    .for_each(|(_job_id, (resps, tracking_job))| {
-                        node.state.resps.extend(resps);
+                    .for_each(|(_job_id, (resps, tracking_job, info))| {
+                        resps_to_commit.extend(resps);
                         staging_commit_info.finished_jobs.push(tracking_job);
+                        task.notifiers.extend(info.notifiers);
                     });
-                let task = task.get_or_insert_default();
-                node.command_ctx.collect_commit_epoch_info(
+
+                Command::collect_commit_epoch_info(
+                    &self.database_info,
+                    &info,
                     &mut task.commit_info,
-                    take(&mut node.state.resps),
+                    resps_to_commit,
                     self.collect_backfill_pinned_upstream_log_epoch(),
                 );
-                self.completing_barrier = Some(node.command_ctx.barrier_info.prev_epoch());
+                self.completing_barrier = Some(info.barrier_info.prev_epoch());
                 task.finished_jobs.extend(staging_commit_info.finished_jobs);
                 task.finished_cdc_table_backfill
                     .extend(staging_commit_info.finished_cdc_table_backfill);
-                task.notifiers.extend(node.notifiers);
+                task.notifiers.append(&mut info.notifiers);
                 task.epoch_infos
-                    .try_insert(
-                        self.database_id,
-                        (Some((node.command_ctx, node.enqueue_time)), vec![]),
-                    )
+                    .try_insert(self.database_id, (Some(info), vec![]))
                     .expect("non duplicate");
                 task.commit_info
                     .truncate_tables
@@ -1009,20 +976,18 @@ impl DatabaseCheckpointControl {
         }
         if !creating_jobs_task.is_empty() {
             let task = task.get_or_insert_default();
-            for (job_id, epoch, resps, create_info) in creating_jobs_task {
+            for (job_id, epoch, resps, info) in creating_jobs_task {
                 collect_creating_job_commit_epoch_info(
                     &mut task.commit_info,
                     epoch,
                     resps,
-                    self.creating_streaming_job_controls[&job_id]
-                        .state_table_ids()
-                        .iter()
-                        .copied(),
-                    create_info.as_ref(),
+                    info.table_ids_to_commit.iter().copied(),
+                    &info.post_collect_command,
                 );
                 let (_, creating_job_epochs) =
                     task.epoch_infos.entry(self.database_id).or_default();
-                creating_job_epochs.push((job_id, epoch, create_info));
+                creating_job_epochs.push((job_id, epoch, info.post_collect_command));
+                task.notifiers.extend(info.notifiers);
             }
         }
     }
@@ -1048,10 +1013,12 @@ impl DatabaseCheckpointControl {
         }
     }
 
-    fn handle_refresh_table_info(&self, task: &mut Option<CompleteBarrierTask>, node: &EpochNode) {
-        let list_finished_info = node
-            .state
-            .resps
+    fn handle_refresh_table_info(
+        &self,
+        task: &mut Option<CompleteBarrierTask>,
+        resps: &[BarrierCompleteResponse],
+    ) {
+        let list_finished_info = resps
             .iter()
             .flat_map(|resp| resp.list_finished_sources.clone())
             .collect::<Vec<_>>();
@@ -1060,9 +1027,7 @@ impl DatabaseCheckpointControl {
             task.list_finished_source_ids.extend(list_finished_info);
         }
 
-        let load_finished_info = node
-            .state
-            .resps
+        let load_finished_info = resps
             .iter()
             .flat_map(|resp| resp.load_finished_sources.clone())
             .collect::<Vec<_>>();
@@ -1071,9 +1036,7 @@ impl DatabaseCheckpointControl {
             task.load_finished_source_ids.extend(load_finished_info);
         }
 
-        let refresh_finished_table_ids: Vec<JobId> = node
-            .state
-            .resps
+        let refresh_finished_table_ids: Vec<JobId> = resps
             .iter()
             .flat_map(|resp| {
                 resp.refresh_finished_tables
@@ -1089,30 +1052,21 @@ impl DatabaseCheckpointControl {
     }
 }
 
-/// The state and message of this barrier, a node for concurrent checkpoint.
-struct EpochNode {
-    /// Timer for recording barrier latency, taken after `complete_barriers`.
-    enqueue_time: HistogramTimer,
-
-    /// Whether this barrier is in-flight or completed.
-    state: BarrierEpochState,
-
-    /// Context of this command to generate barrier and do some post jobs.
-    command_ctx: CommandContext,
-    /// Notifiers of this barrier.
-    notifiers: Vec<Notifier>,
-}
-
 #[derive(Debug)]
 /// The state of barrier.
 struct BarrierEpochState {
     is_collected: bool,
 
-    resps: Vec<BarrierCompleteResponse>,
-
     creating_jobs_to_wait: HashSet<JobId>,
 
-    finished_jobs: HashMap<JobId, (Vec<BarrierCompleteResponse>, TrackingJob)>,
+    finished_jobs: HashMap<
+        JobId,
+        (
+            Vec<BarrierCompleteResponse>,
+            TrackingJob,
+            PartialGraphBarrierInfo,
+        ),
+    >,
 }
 
 impl BarrierEpochState {
@@ -1270,21 +1224,20 @@ impl DatabaseCheckpointControl {
             });
         span.record("epoch", barrier_info.curr_epoch());
 
-        let ApplyCommandInfo {
-            mv_subscription_max_retention,
-            table_ids_to_commit,
-            jobs_to_wait,
-            command,
-        } = match self.apply_command(
+        let prev_epoch = barrier_info.prev_epoch();
+        let ApplyCommandInfo { jobs_to_wait } = match self.apply_command(
             command,
             &mut notifiers,
-            &barrier_info,
+            barrier_info,
             partial_graph_manager,
             hummock_version_stats,
             adaptive_parallelism_strategy,
             worker_nodes,
         ) {
-            Ok(info) => info,
+            Ok(info) => {
+                assert!(notifiers.is_empty());
+                info
+            }
             Err(err) => {
                 for notifier in notifiers {
                     notifier.notify_start_failed(err.clone());
@@ -1294,19 +1247,8 @@ impl DatabaseCheckpointControl {
             }
         };
 
-        // Notify about the injection.
-        notifiers.iter_mut().for_each(|n| n.notify_started());
-
-        let command_ctx = CommandContext::new(
-            barrier_info,
-            mv_subscription_max_retention,
-            table_ids_to_commit,
-            command,
-            span,
-        );
-
         // Record the in-flight barrier.
-        self.enqueue_command(command_ctx, notifiers, jobs_to_wait);
+        self.enqueue_command(prev_epoch, jobs_to_wait);
 
         Ok(())
     }

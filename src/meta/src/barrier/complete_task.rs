@@ -19,7 +19,6 @@ use std::sync::Arc;
 
 use anyhow::Context;
 use futures::future::try_join_all;
-use prometheus::HistogramTimer;
 use risingwave_common::catalog::DatabaseId;
 use risingwave_common::id::JobId;
 use risingwave_common::must_match;
@@ -31,11 +30,11 @@ use risingwave_pb::stream_service::barrier_complete_response::{
 use tokio::task::JoinHandle;
 
 use crate::barrier::checkpoint::CheckpointControl;
-use crate::barrier::command::CommandContext;
-use crate::barrier::context::{CreateSnapshotBackfillJobCommandInfo, GlobalBarrierWorkerContext};
+use crate::barrier::command::PostCollectCommand;
+use crate::barrier::context::GlobalBarrierWorkerContext;
 use crate::barrier::info::BarrierInfo;
 use crate::barrier::notifier::Notifier;
-use crate::barrier::partial_graph::PartialGraphManager;
+use crate::barrier::partial_graph::{PartialGraphBarrierInfo, PartialGraphManager};
 use crate::barrier::progress::TrackingJob;
 use crate::barrier::schedule::PeriodicBarriers;
 use crate::hummock::CommitEpochInfo;
@@ -66,13 +65,13 @@ pub(super) struct CompleteBarrierTask {
     pub(super) finished_jobs: Vec<TrackingJob>,
     pub(super) finished_cdc_table_backfill: Vec<JobId>,
     pub(super) notifiers: Vec<Notifier>,
-    /// `database_id` -> (Some((`command_ctx`, `enqueue_time`)), vec!((`creating_job_id`, `epoch`, `create_snapshot_backfill_info`)))
+    /// `database_id` -> (Some(`command_ctx`), vec!((`creating_job_id`, `epoch`, `create_snapshot_backfill_info`)))
     #[expect(clippy::type_complexity)]
     pub(super) epoch_infos: HashMap<
         DatabaseId,
         (
-            Option<(CommandContext, HistogramTimer)>,
-            Vec<(JobId, u64, Option<CreateSnapshotBackfillJobCommandInfo>)>,
+            Option<PartialGraphBarrierInfo>,
+            Vec<(JobId, u64, PostCollectCommand)>,
         ),
     >,
     /// Source listing completion events that need `ListFinish` commands
@@ -94,7 +93,7 @@ impl CompleteBarrierTask {
                     (
                         command_context
                             .as_ref()
-                            .map(|(command, _)| command.barrier_info.prev_epoch()),
+                            .map(|info| info.barrier_info.prev_epoch()),
                         creating_job_epochs
                             .iter()
                             .map(|(job_id, epoch, _)| (*job_id, *epoch))
@@ -145,28 +144,26 @@ impl CompleteBarrierTask {
                     .await?;
             }
 
-            for (database_id, (command_ctx, creating_jobs)) in self.epoch_infos {
-                if let Some((command_ctx, enqueue_time)) = command_ctx {
-                    let command_name = command_ctx.command.command_name().to_owned();
-                    context.post_collect_command(command_ctx.command).await?;
-                    let duration_sec = enqueue_time.stop_and_record();
+            for (database_id, (info, creating_jobs)) in self.epoch_infos {
+                if let Some(info) = info {
+                    let command_name = info.post_collect_command.command_name().to_owned();
+                    let elapsed_secs = info.elapsed_secs();
+                    context
+                        .post_collect_command(info.post_collect_command)
+                        .await?;
                     Self::report_complete_event(
                         &env,
-                        duration_sec,
-                        &command_ctx.barrier_info,
+                        elapsed_secs,
+                        &info.barrier_info,
                         command_name,
                     );
                     GLOBAL_META_METRICS
                         .last_committed_barrier_time
                         .with_label_values(&[database_id.to_string().as_str()])
-                        .set(command_ctx.barrier_info.curr_epoch.value().as_unix_secs() as i64);
+                        .set(info.barrier_info.curr_epoch.value().as_unix_secs() as i64);
                 }
-                for (_, _, create_info) in creating_jobs {
-                    if let Some(create_info) = create_info {
-                        context
-                            .post_collect_command(create_info.into_post_collect())
-                            .await?;
-                    }
+                for (_, _, post_collect_command) in creating_jobs {
+                    context.post_collect_command(post_collect_command).await?;
                 }
             }
 
@@ -253,7 +250,7 @@ impl CompletingTask {
         // it has been collected.
         if let CompletingTask::None = self
             && let Some(task) = checkpoint_control
-                .next_complete_barrier_task(Some((periodic_barriers, partial_graph_manager)))
+                .next_complete_barrier_task(periodic_barriers, partial_graph_manager)
         {
             {
                 let epochs_to_ack = task.epochs_to_ack();

@@ -42,11 +42,14 @@ use super::state::RenderResult;
 use crate::MetaResult;
 use crate::barrier::backfill_order_control::get_nodes_with_backfill_dependencies;
 use crate::barrier::checkpoint::creating_job::status::CreateMviewLogStoreProgressTracker;
+use crate::barrier::command::PostCollectCommand;
 use crate::barrier::context::CreateSnapshotBackfillJobCommandInfo;
 use crate::barrier::edge_builder::FragmentEdgeBuildResult;
 use crate::barrier::info::{BarrierInfo, InflightStreamingJobInfo};
 use crate::barrier::notifier::Notifier;
-use crate::barrier::partial_graph::{CollectedBarrier, PartialGraphManager, PartialGraphRecoverer};
+use crate::barrier::partial_graph::{
+    CollectedBarrier, PartialGraphBarrierInfo, PartialGraphManager, PartialGraphRecoverer,
+};
 use crate::barrier::progress::{CreateMviewProgressTracker, TrackingJob, collect_done_fragments};
 use crate::barrier::rpc::{build_locality_fragment_state_table_mapping, to_partial_graph_id};
 use crate::barrier::{
@@ -232,7 +235,8 @@ impl CreatingStreamingJobControl {
             graph_adder.manager(),
             &mut job.barrier_control,
             &job.node_actors,
-            Some(&job.state_table_ids),
+            &job.state_table_ids,
+            false,
             initial_barrier_info,
             Some(actors_to_create),
             Some(initial_mutation),
@@ -611,40 +615,44 @@ impl CreatingStreamingJobControl {
         )
     }
 
+    #[expect(clippy::too_many_arguments)]
     fn inject_barrier(
         partial_graph_id: PartialGraphId,
         partial_graph_manager: &mut PartialGraphManager,
         barrier_control: &mut CreatingStreamingJobBarrierControl,
         node_actors: &HashMap<WorkerId, HashSet<ActorId>>,
-        state_table_ids: Option<&HashSet<TableId>>,
+        state_table_ids: &HashSet<TableId>,
+        is_finishing: bool,
         barrier_info: BarrierInfo,
         new_actors: Option<StreamJobActorsToCreate>,
         mutation: Option<Mutation>,
-        mut notifiers: Vec<Notifier>,
+        notifiers: Vec<Notifier>,
         first_create_info: Option<CreateSnapshotBackfillJobCommandInfo>,
     ) -> MetaResult<()> {
-        let (state_table_ids, nodes_to_sync_table) = if let Some(state_table_ids) = state_table_ids
-        {
+        let (table_ids_to_sync, nodes_to_sync_table) = if !is_finishing {
             (Some(state_table_ids), Some(node_actors.keys().copied()))
         } else {
             (None, None)
         };
+        let prev_epoch = barrier_info.prev_epoch();
         partial_graph_manager.inject_barrier(
             partial_graph_id,
             mutation,
-            &barrier_info,
             node_actors,
-            state_table_ids.into_iter().flatten().copied(),
+            table_ids_to_sync.into_iter().flatten().copied(),
             nodes_to_sync_table.into_iter().flatten(),
             new_actors,
+            PartialGraphBarrierInfo::new(
+                first_create_info.map_or_else(
+                    PostCollectCommand::barrier,
+                    CreateSnapshotBackfillJobCommandInfo::into_post_collect,
+                ),
+                barrier_info,
+                notifiers,
+                state_table_ids.clone(),
+            ),
         )?;
-        notifiers.iter_mut().for_each(|n| n.notify_started());
-        barrier_control.enqueue_epoch(
-            barrier_info.prev_epoch(),
-            barrier_info.kind.clone(),
-            notifiers,
-            first_create_info,
-        );
+        barrier_control.enqueue_epoch(prev_epoch);
         Ok(())
     }
 
@@ -664,7 +672,8 @@ impl CreatingStreamingJobControl {
             partial_graph_manager,
             &mut self.barrier_control,
             &self.node_actors,
-            None,
+            &self.state_table_ids,
+            true,
             barrier_info.clone(),
             None,
             Some(Mutation::Stop(StopMutation {
@@ -715,7 +724,8 @@ impl CreatingStreamingJobControl {
                     partial_graph_manager,
                     &mut self.barrier_control,
                     &self.node_actors,
-                    Some(&self.state_table_ids),
+                    &self.state_table_ids,
+                    false,
                     barrier_to_inject,
                     None,
                     mutation,
@@ -730,12 +740,6 @@ impl CreatingStreamingJobControl {
     }
 
     pub(crate) fn collect(&mut self, collected_barrier: CollectedBarrier) -> bool {
-        self.status.update_progress(
-            collected_barrier
-                .resps
-                .values()
-                .flat_map(|resp| &resp.create_mview_progress),
-        );
         self.barrier_control.collect(collected_barrier);
         self.should_merge_to_upstream()
     }
@@ -756,20 +760,18 @@ impl CreatingStreamingJobControl {
     }
 }
 
-pub(super) enum CompleteJobType {
-    /// The first barrier
-    First(CreateSnapshotBackfillJobCommandInfo),
-    Normal,
-    /// The last barrier to complete
-    Finished,
-}
-
 impl CreatingStreamingJobControl {
     pub(super) fn start_completing(
         &mut self,
+        partial_graph_manager: &mut PartialGraphManager,
         min_upstream_inflight_epoch: Option<u64>,
         upstream_committed_epoch: u64,
-    ) -> Option<(u64, Vec<BarrierCompleteResponse>, CompleteJobType)> {
+    ) -> Option<(
+        u64,
+        Vec<BarrierCompleteResponse>,
+        PartialGraphBarrierInfo,
+        bool,
+    )> {
         // do not commit snapshot backfill job until upstream has committed the snapshot epoch
         if upstream_committed_epoch < self.snapshot_epoch {
             return None;
@@ -801,33 +803,33 @@ impl CreatingStreamingJobControl {
                 unreachable!()
             }
         };
-        self.barrier_control.start_completing(epoch_end_bound).map(
-            |(epoch, resps, create_job_info)| {
-                let status = if let Some(finish_at_epoch) = finished_at_epoch {
-                    assert!(create_job_info.is_none());
+        self.barrier_control
+            .start_completing(epoch_end_bound, |epoch| {
+                let (resps, info) =
+                    partial_graph_manager.take_collected_barrier(self.partial_graph_id, epoch);
+                self.status
+                    .update_progress(resps.iter().flat_map(|resp| &resp.create_mview_progress));
+                (resps, info)
+            })
+            .map(|(epoch, resps, info)| {
+                let is_finish_epoch = if let Some(finish_at_epoch) = finished_at_epoch {
+                    assert!(!info.post_collect_command.should_checkpoint());
                     if epoch == finish_at_epoch {
                         self.barrier_control.ack_completed(epoch);
                         assert!(self.barrier_control.is_empty());
-                        CompleteJobType::Finished
+                        true
                     } else {
-                        CompleteJobType::Normal
+                        false
                     }
-                } else if let Some(info) = create_job_info {
-                    CompleteJobType::First(info)
                 } else {
-                    CompleteJobType::Normal
+                    false
                 };
-                (epoch, resps, status)
-            },
-        )
+                (epoch, resps, info, is_finish_epoch)
+            })
     }
 
     pub(super) fn ack_completed(&mut self, completed_epoch: u64) {
         self.barrier_control.ack_completed(completed_epoch);
-    }
-
-    pub fn state_table_ids(&self) -> &HashSet<TableId> {
-        &self.state_table_ids
     }
 
     pub fn fragment_infos_with_job_id(

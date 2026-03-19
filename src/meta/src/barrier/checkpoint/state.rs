@@ -50,7 +50,7 @@ use crate::barrier::info::{
     SubscriberType,
 };
 use crate::barrier::notifier::Notifier;
-use crate::barrier::partial_graph::PartialGraphManager;
+use crate::barrier::partial_graph::{PartialGraphBarrierInfo, PartialGraphManager};
 use crate::barrier::rpc::to_partial_graph_id;
 use crate::barrier::{BarrierKind, Command, CreateStreamingJobType, TracedEpoch};
 use crate::controller::fragment::{InflightActorInfo, InflightFragmentInfo};
@@ -150,10 +150,7 @@ impl BarrierWorkerState {
 }
 
 pub(super) struct ApplyCommandInfo {
-    pub mv_subscription_max_retention: HashMap<TableId, u64>,
-    pub table_ids_to_commit: HashSet<TableId>,
     pub jobs_to_wait: HashSet<JobId>,
-    pub command: PostCollectCommand,
 }
 
 /// Result tuple of `apply_command`: mutation, table IDs to commit, actors to create,
@@ -411,7 +408,7 @@ impl DatabaseCheckpointControl {
         &mut self,
         command: Option<Command>,
         notifiers: &mut Vec<Notifier>,
-        barrier_info: &BarrierInfo,
+        barrier_info: BarrierInfo,
         partial_graph_manager: &mut PartialGraphManager,
         hummock_version_stats: &HummockVersionStats,
         adaptive_parallelism_strategy: AdaptiveParallelismStrategy,
@@ -1277,7 +1274,7 @@ impl DatabaseCheckpointControl {
                     for (&job_id, creating_job) in &mut self.creating_streaming_job_controls {
                         if creating_job.should_merge_to_upstream() {
                             let info = creating_job
-                                .start_consume_upstream(partial_graph_manager, barrier_info)?;
+                                .start_consume_upstream(partial_graph_manager, &barrier_info)?;
                             finished_snapshot_backfill_job_info
                                 .try_insert(job_id, info)
                                 .expect("non-duplicated");
@@ -1528,7 +1525,7 @@ impl DatabaseCheckpointControl {
                 };
                 creating_job.on_new_upstream_barrier(
                     partial_graph_manager,
-                    barrier_info,
+                    &barrier_info,
                     throttle_mutation,
                 )?;
             }
@@ -1537,18 +1534,20 @@ impl DatabaseCheckpointControl {
         partial_graph_manager.inject_barrier(
             to_partial_graph_id(self.database_id, None),
             mutation,
-            barrier_info,
             &node_actors,
             InflightFragmentInfo::existing_table_ids(self.database_info.fragment_infos()),
             InflightFragmentInfo::workers(self.database_info.fragment_infos()),
             actors_to_create,
+            PartialGraphBarrierInfo::new(
+                post_collect_command,
+                barrier_info,
+                take(notifiers),
+                table_ids_to_commit,
+            ),
         )?;
 
         Ok(ApplyCommandInfo {
-            mv_subscription_max_retention: self.database_info.max_subscription_retention(),
-            table_ids_to_commit,
             jobs_to_wait: finished_snapshot_backfill_jobs,
-            command: post_collect_command,
         })
     }
 }
