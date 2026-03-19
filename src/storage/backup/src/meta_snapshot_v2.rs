@@ -123,7 +123,7 @@ macro_rules! define_decode_metadata {
             let mut _idx = 0;
             $(
                 if _idx == 1 {
-                    metadata.hummock_version = HummockVersion::from_persisted_protobuf(&get_1(&mut buf)?);
+                    metadata.hummock_version = HummockVersion::from_persisted_protobuf_owned(get_1(&mut buf)?);
                 }
                 metadata.$name = get_n(&mut buf)?;
                 _idx += 1;

@@ -1,0 +1,53 @@
+# test commit_checkpoint_size_threshold_mb for iceberg engine
+statement ok
+create secret threshold_secret with (
+  backend = 'meta'
+) as 'hummockadmin';
+
+statement ok
+create connection threshold_conn
+with (
+    type = 'iceberg',
+    warehouse.path = 's3://hummock001/iceberg_connection_commit_threshold',
+    s3.access.key = secret threshold_secret,
+    s3.secret.key = secret threshold_secret,
+    s3.endpoint = 'http://127.0.0.1:9301',
+    s3.region = 'us-west-2',
+    catalog.type = 'storage',
+);
+
+statement ok
+set iceberg_engine_connection = 'public.threshold_conn';
+
+statement ok
+create table t_size_threshold(
+  id int primary key,
+  name varchar
+) with(
+  commit_checkpoint_interval = 3600,
+  commit_checkpoint_size_threshold_mb = 1
+) engine = iceberg;
+
+statement ok
+insert into t_size_threshold
+select
+  i,
+  'fuiqwfnbiewhriwqhreiwhqreiwqhreiwqrnhlewhqrehwrehwdnewkundkjewndj'
+from generate_series(1, 100000, 1) as s(i);
+
+statement ok
+FLUSH;
+
+query ? retry 20 backoff 1s
+select count(*) > 0 from t_size_threshold;
+----
+t
+
+statement ok
+drop table t_size_threshold;
+
+statement ok
+drop connection public.threshold_conn;
+
+statement ok
+drop secret threshold_secret;

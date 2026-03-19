@@ -195,11 +195,17 @@ pub const COMPACTION_TYPE: &str = "compaction.type";
 pub const COMPACTION_WRITE_PARQUET_COMPRESSION: &str = "compaction.write_parquet_compression";
 pub const COMPACTION_WRITE_PARQUET_MAX_ROW_GROUP_ROWS: &str =
     "compaction.write_parquet_max_row_group_rows";
+pub const COMMIT_CHECKPOINT_SIZE_THRESHOLD_MB: &str = "commit_checkpoint_size_threshold_mb";
+pub const ICEBERG_DEFAULT_COMMIT_CHECKPOINT_SIZE_THRESHOLD_MB: u64 = 128;
 
 const PARQUET_CREATED_BY: &str = concat!("risingwave version ", env!("CARGO_PKG_VERSION"));
 
 fn default_commit_retry_num() -> u32 {
     8
+}
+
+fn default_commit_checkpoint_size_threshold_mb() -> Option<u64> {
+    Some(ICEBERG_DEFAULT_COMMIT_CHECKPOINT_SIZE_THRESHOLD_MB)
 }
 
 fn default_iceberg_write_mode() -> IcebergWriteMode {
@@ -379,6 +385,13 @@ pub struct IcebergConfig {
     #[serde_as(as = "DisplayFromStr")]
     #[with_option(allow_alter_on_fly)]
     pub commit_checkpoint_interval: u64,
+
+    /// Commit on the next checkpoint barrier after buffered write size exceeds this threshold.
+    /// Default is 128 MB.
+    #[serde(default = "default_commit_checkpoint_size_threshold_mb")]
+    #[serde_as(as = "Option<DisplayFromStr>")]
+    #[with_option(allow_alter_on_fly)]
+    pub commit_checkpoint_size_threshold_mb: Option<u64>,
 
     #[serde(default, deserialize_with = "deserialize_bool_from_string")]
     pub create_table_if_not_exists: bool,
@@ -590,6 +603,12 @@ impl IcebergConfig {
             )));
         }
 
+        if config.commit_checkpoint_size_threshold_mb == Some(0) {
+            return Err(SinkError::Config(anyhow!(
+                "`commit_checkpoint_size_threshold_mb` must be greater than 0"
+            )));
+        }
+
         Ok(config)
     }
 
@@ -649,6 +668,11 @@ impl IcebergConfig {
 
     pub fn target_file_size_mb(&self) -> u64 {
         self.target_file_size_mb.unwrap_or(1024)
+    }
+
+    pub fn commit_checkpoint_size_threshold_bytes(&self) -> Option<u64> {
+        self.commit_checkpoint_size_threshold_mb
+            .map(|threshold_mb| threshold_mb.saturating_mul(1024 * 1024))
     }
 
     /// Get the compaction type as an enum
@@ -1199,7 +1223,7 @@ impl IcebergWriterBuilder<Vec<PositionDeleteInput>> for PositionDeleteWriterBuil
     type R = PositionDeleteWriterType;
 
     async fn build(
-        self,
+        &self,
         partition_key: Option<iceberg::spec::PartitionKey>,
     ) -> iceberg::Result<Self::R> {
         match self {
@@ -1231,8 +1255,23 @@ impl IcebergWriter<Vec<PositionDeleteInput>> for PositionDeleteWriterType {
 }
 
 #[derive(Clone)]
+struct SharedIcebergWriterBuilder<B>(Arc<B>);
+
+#[async_trait]
+impl<B: IcebergWriterBuilder> IcebergWriterBuilder for SharedIcebergWriterBuilder<B> {
+    type R = B::R;
+
+    async fn build(
+        &self,
+        partition_key: Option<iceberg::spec::PartitionKey>,
+    ) -> iceberg::Result<Self::R> {
+        self.0.build(partition_key).await
+    }
+}
+
+#[derive(Clone)]
 struct TaskWriterBuilderWrapper<B: IcebergWriterBuilder> {
-    inner: B,
+    inner: Arc<B>,
     fanout_enabled: bool,
     schema: IcebergSchemaRef,
     partition_spec: PartitionSpecRef,
@@ -1248,7 +1287,7 @@ impl<B: IcebergWriterBuilder> TaskWriterBuilderWrapper<B> {
         compute_partition: bool,
     ) -> Self {
         Self {
-            inner,
+            inner: Arc::new(inner),
             fanout_enabled,
             schema,
             partition_spec,
@@ -1256,27 +1295,29 @@ impl<B: IcebergWriterBuilder> TaskWriterBuilderWrapper<B> {
         }
     }
 
-    fn build(self) -> iceberg::Result<TaskWriter<B>> {
+    fn build(&self) -> iceberg::Result<TaskWriter<SharedIcebergWriterBuilder<B>>> {
         let partition_splitter = match (
             self.partition_spec.is_unpartitioned(),
             self.compute_partition,
         ) {
             (true, _) => None,
-            (false, true) => Some(RecordBatchPartitionSplitter::new_with_computed_values(
+            (false, true) => Some(RecordBatchPartitionSplitter::try_new_with_computed_values(
                 self.schema.clone(),
                 self.partition_spec.clone(),
             )?),
-            (false, false) => Some(RecordBatchPartitionSplitter::new_with_precomputed_values(
-                self.schema.clone(),
-                self.partition_spec.clone(),
-            )?),
+            (false, false) => Some(
+                RecordBatchPartitionSplitter::try_new_with_precomputed_values(
+                    self.schema.clone(),
+                    self.partition_spec.clone(),
+                )?,
+            ),
         };
 
         Ok(TaskWriter::new_with_partition_splitter(
-            self.inner,
+            SharedIcebergWriterBuilder(self.inner.clone()),
             self.fanout_enabled,
-            self.schema,
-            self.partition_spec,
+            self.schema.clone(),
+            self.partition_spec.clone(),
             partition_splitter,
         ))
     }
@@ -1304,6 +1345,8 @@ pub struct IcebergSinkWriterInner {
     // For chunk with extra partition column, we should remove this column before write.
     // This project index vec is used to avoid create project idx each time.
     project_idx_vec: ProjectIdxVec,
+    commit_checkpoint_size_threshold_bytes: Option<u64>,
+    uncommitted_write_bytes: u64,
 }
 
 #[allow(clippy::type_complexity)]
@@ -1364,6 +1407,13 @@ impl IcebergSinkWriter {
 }
 
 impl IcebergSinkWriterInner {
+    fn should_commit_on_checkpoint(&self) -> bool {
+        self.commit_checkpoint_size_threshold_bytes
+            .is_some_and(|threshold| {
+                self.uncommitted_write_bytes > 0 && self.uncommitted_write_bytes >= threshold
+            })
+    }
+
     fn build_append_only(
         config: &IcebergConfig,
         table: Table,
@@ -1439,7 +1489,6 @@ impl IcebergSinkWriterInner {
         );
         let inner_writer = Some(Box::new(
             writer_builder
-                .clone()
                 .build()
                 .map_err(|err| SinkError::Iceberg(anyhow!(err)))?,
         ) as Box<dyn IcebergWriter>);
@@ -1465,6 +1514,8 @@ impl IcebergSinkWriterInner {
                     ProjectIdxVec::None
                 }
             },
+            commit_checkpoint_size_threshold_bytes: config.commit_checkpoint_size_threshold_bytes(),
+            uncommitted_write_bytes: 0,
         })
     }
 
@@ -1630,7 +1681,6 @@ impl IcebergSinkWriterInner {
         );
         let inner_writer = Some(Box::new(
             writer_builder
-                .clone()
                 .build()
                 .map_err(|err| SinkError::Iceberg(anyhow!(err)))?,
         ) as Box<dyn IcebergWriter>);
@@ -1654,6 +1704,8 @@ impl IcebergSinkWriterInner {
                     ProjectIdxVec::None
                 }
             },
+            commit_checkpoint_size_threshold_bytes: config.commit_checkpoint_size_threshold_bytes(),
+            uncommitted_write_bytes: 0,
         })
     }
 }
@@ -1700,7 +1752,6 @@ impl SinkWriter for IcebergSinkWriter {
                 if writer.is_none() {
                     *writer = Some(Box::new(
                         writer_builder
-                            .clone()
                             .build()
                             .map_err(|err| SinkError::Iceberg(anyhow!(err)))?,
                     ));
@@ -1714,7 +1765,6 @@ impl SinkWriter for IcebergSinkWriter {
                 if writer.is_none() {
                     *writer = Some(Box::new(
                         writer_builder
-                            .clone()
                             .build()
                             .map_err(|err| SinkError::Iceberg(anyhow!(err)))?,
                     ));
@@ -1786,7 +1836,17 @@ impl SinkWriter for IcebergSinkWriter {
             .await
             .map_err(|err| SinkError::Iceberg(anyhow!(err)))?;
         inner.metrics.write_bytes.inc_by(write_batch_size as _);
+        inner.uncommitted_write_bytes = inner
+            .uncommitted_write_bytes
+            .saturating_add(write_batch_size as u64);
         Ok(())
+    }
+
+    fn should_commit_on_checkpoint(&self) -> bool {
+        match self {
+            Self::Initialized(inner) => inner.should_commit_on_checkpoint(),
+            Self::Created(_) => false,
+        }
     }
 
     /// Receive a barrier and mark the end of current epoch. When `is_checkpoint` is true, the sink
@@ -1812,7 +1872,7 @@ impl SinkWriter for IcebergSinkWriter {
                     }
                     _ => None,
                 };
-                match writer_builder.clone().build() {
+                match writer_builder.build() {
                     Ok(new_writer) => {
                         *writer = Some(Box::new(new_writer));
                     }
@@ -1835,7 +1895,7 @@ impl SinkWriter for IcebergSinkWriter {
                     }
                     _ => None,
                 };
-                match writer_builder.clone().build() {
+                match writer_builder.build() {
                     Ok(new_writer) => {
                         *writer = Some(Box::new(new_writer));
                     }
@@ -1851,6 +1911,7 @@ impl SinkWriter for IcebergSinkWriter {
 
         match close_result {
             Some(Ok(result)) => {
+                inner.uncommitted_write_bytes = 0;
                 let format_version = inner.table.metadata().format_version();
                 let partition_type = inner.table.metadata().default_partition_type();
                 let data_files = result
@@ -2980,8 +3041,9 @@ mod test {
     use crate::connector_common::{IcebergCommon, IcebergTableIdentifier};
     use crate::sink::decouple_checkpoint_log_sink::ICEBERG_DEFAULT_COMMIT_CHECKPOINT_INTERVAL;
     use crate::sink::iceberg::{
-        COMPACTION_INTERVAL_SEC, COMPACTION_MAX_SNAPSHOTS_NUM, CompactionType, ENABLE_COMPACTION,
-        ENABLE_SNAPSHOT_EXPIRATION, FormatVersion, IcebergConfig, IcebergWriteMode,
+        COMMIT_CHECKPOINT_SIZE_THRESHOLD_MB, COMPACTION_INTERVAL_SEC, COMPACTION_MAX_SNAPSHOTS_NUM,
+        CompactionType, ENABLE_COMPACTION, ENABLE_SNAPSHOT_EXPIRATION, FormatVersion,
+        ICEBERG_DEFAULT_COMMIT_CHECKPOINT_SIZE_THRESHOLD_MB, IcebergConfig, IcebergWriteMode,
         SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_FILES, SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_META_DATA,
         SNAPSHOT_EXPIRATION_MAX_AGE_MILLIS, SNAPSHOT_EXPIRATION_RETAIN_LAST, WRITE_MODE,
     };
@@ -3237,6 +3299,9 @@ mod test {
                 .map(|(k, v)| (k.to_owned(), v.to_owned()))
                 .collect(),
             commit_checkpoint_interval: ICEBERG_DEFAULT_COMMIT_CHECKPOINT_INTERVAL,
+            commit_checkpoint_size_threshold_mb: Some(
+                ICEBERG_DEFAULT_COMMIT_CHECKPOINT_SIZE_THRESHOLD_MB,
+            ),
             create_table_if_not_exists: false,
             is_exactly_once: Some(true),
             commit_retry_num: 8,
@@ -3264,6 +3329,82 @@ mod test {
         assert_eq!(
             &iceberg_config.full_table_name().unwrap().to_string(),
             "demo_db.demo_table"
+        );
+    }
+
+    #[test]
+    fn test_parse_commit_checkpoint_size_threshold() {
+        let values: BTreeMap<String, String> = [
+            ("connector", "iceberg"),
+            ("type", "append-only"),
+            ("force_append_only", "true"),
+            ("catalog.name", "test-catalog"),
+            ("catalog.type", "storage"),
+            ("warehouse.path", "s3://my-bucket/warehouse"),
+            ("database.name", "test_db"),
+            ("table.name", "test_table"),
+            ("commit_checkpoint_size_threshold_mb", "128"),
+        ]
+        .into_iter()
+        .map(|(k, v)| (k.to_owned(), v.to_owned()))
+        .collect();
+
+        let config = IcebergConfig::from_btreemap(values).unwrap();
+        assert_eq!(config.commit_checkpoint_size_threshold_mb, Some(128));
+        assert_eq!(
+            config.commit_checkpoint_size_threshold_bytes(),
+            Some(128 * 1024 * 1024)
+        );
+    }
+
+    #[test]
+    fn test_default_commit_checkpoint_size_threshold() {
+        let values: BTreeMap<String, String> = [
+            ("connector", "iceberg"),
+            ("type", "append-only"),
+            ("force_append_only", "true"),
+            ("catalog.name", "test-catalog"),
+            ("catalog.type", "storage"),
+            ("warehouse.path", "s3://my-bucket/warehouse"),
+            ("database.name", "test_db"),
+            ("table.name", "test_table"),
+        ]
+        .into_iter()
+        .map(|(k, v)| (k.to_owned(), v.to_owned()))
+        .collect();
+
+        let config = IcebergConfig::from_btreemap(values).unwrap();
+        assert_eq!(
+            config.commit_checkpoint_size_threshold_mb,
+            Some(ICEBERG_DEFAULT_COMMIT_CHECKPOINT_SIZE_THRESHOLD_MB)
+        );
+        assert_eq!(
+            config.commit_checkpoint_size_threshold_bytes(),
+            Some(ICEBERG_DEFAULT_COMMIT_CHECKPOINT_SIZE_THRESHOLD_MB * 1024 * 1024)
+        );
+    }
+
+    #[test]
+    fn test_reject_zero_commit_checkpoint_size_threshold() {
+        let values: BTreeMap<String, String> = [
+            ("connector", "iceberg"),
+            ("type", "append-only"),
+            ("force_append_only", "true"),
+            ("catalog.name", "test-catalog"),
+            ("catalog.type", "storage"),
+            ("warehouse.path", "s3://my-bucket/warehouse"),
+            ("database.name", "test_db"),
+            ("table.name", "test_table"),
+            ("commit_checkpoint_size_threshold_mb", "0"),
+        ]
+        .into_iter()
+        .map(|(k, v)| (k.to_owned(), v.to_owned()))
+        .collect();
+
+        let err = IcebergConfig::from_btreemap(values).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("`commit_checkpoint_size_threshold_mb` must be greater than 0")
         );
     }
 
@@ -3550,6 +3691,10 @@ mod test {
         assert_eq!(COMPACTION_INTERVAL_SEC, "compaction_interval_sec");
         assert_eq!(ENABLE_SNAPSHOT_EXPIRATION, "enable_snapshot_expiration");
         assert_eq!(WRITE_MODE, "write_mode");
+        assert_eq!(
+            COMMIT_CHECKPOINT_SIZE_THRESHOLD_MB,
+            "commit_checkpoint_size_threshold_mb"
+        );
         assert_eq!(
             SNAPSHOT_EXPIRATION_RETAIN_LAST,
             "snapshot_expiration_retain_last"

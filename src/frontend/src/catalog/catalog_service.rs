@@ -755,10 +755,13 @@ impl CatalogWriter for CatalogWriterImpl {
         iceberg_source: PbSource,
         if_not_exists: bool,
     ) -> Result<()> {
-        let version = self
-            .meta_client
-            .create_iceberg_table(table_job_info, sink_job_info, iceberg_source, if_not_exists)
-            .await?;
+        let version = Box::pin(self.meta_client.create_iceberg_table(
+            table_job_info,
+            sink_job_info,
+            iceberg_source,
+            if_not_exists,
+        ))
+        .await?;
         self.wait_version(version).await
     }
 

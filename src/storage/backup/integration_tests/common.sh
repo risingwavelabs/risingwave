@@ -66,16 +66,16 @@ function drop_mvs() {
 }
 
 function backup() {
-  local job_id
-  job_id=$(${BACKUP_TEST_RW_ALL_IN_ONE} risectl meta backup-meta 2>&1 | grep "backup job succeeded" | awk -F ',' '{print $(NF-1)}'| awk '{print $(NF)}')
-  [ -n "${job_id}" ]
-  echo "${job_id}"
+  local snapshot_id
+  snapshot_id=$(execute_sql_t "BACKUP;" | awk '{$1=$1}; NF {print $1}' | tail -n 1)
+  [ -n "${snapshot_id}" ]
+  echo "${snapshot_id}"
 }
 
 function delete_snapshot() {
   local snapshot_id
   snapshot_id=$1
-  ${BACKUP_TEST_RW_ALL_IN_ONE} risectl meta delete-meta-snapshots --snapshot-ids "${snapshot_id}"
+  execute_sql "DELETE META SNAPSHOT ${snapshot_id};" 1>/dev/null
 }
 
 function restore() {

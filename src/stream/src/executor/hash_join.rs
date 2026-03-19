@@ -66,9 +66,7 @@ pub struct InequalityPairInfo {
 }
 
 impl InequalityPairInfo {
-    /// Returns true if the left side has larger values based on the operator.
-    /// For `>` and `>=`, left side is larger.
-    /// State cleanup applies to the side with larger values.
+    /// Returns true if left side has larger values (`>` or `>=`).
     pub fn left_side_is_larger(&self) -> bool {
         matches!(
             self.op,
@@ -183,6 +181,9 @@ pub struct HashJoinExecutor<K: HashKey, S: StateStore, const T: JoinTypePrimitiv
     /// watermarks from both sides. It will be used to generate watermark into downstream
     /// and do state cleaning based on `clean_left_state`/`clean_right_state` fields.
     inequality_watermarks: Vec<Option<Watermark>>,
+    /// Join-key positions and cleaning flags for watermark handling.
+    /// Each entry: (join-key position, `do_state_cleaning`).
+    watermark_indices_in_jk: Vec<(usize, bool)>,
 
     /// Whether the logic can be optimized for append-only stream
     append_only_optimize: bool,
@@ -267,6 +268,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding>
         metrics: Arc<StreamingMetrics>,
         chunk_size: usize,
         high_join_amplification_threshold: usize,
+        watermark_indices_in_jk: Vec<(usize, bool)>,
     ) -> Self {
         Self::new_with_cache_size(
             ctx,
@@ -289,6 +291,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding>
             chunk_size,
             high_join_amplification_threshold,
             None,
+            watermark_indices_in_jk,
         )
     }
 
@@ -314,6 +317,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding>
         chunk_size: usize,
         high_join_amplification_threshold: usize,
         entry_state_max_rows: Option<usize>,
+        watermark_indices_in_jk: Vec<(usize, bool)>,
     ) -> Self {
         let entry_state_max_rows = match entry_state_max_rows {
             None => ctx.config.developer.hash_join_entry_state_max_rows,
@@ -384,21 +388,6 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding>
         let need_degree_table_l = need_left_degree(T) && !pk_contained_in_jk_r;
         let need_degree_table_r = need_right_degree(T) && !pk_contained_in_jk_l;
 
-        let degree_state_l = need_degree_table_l.then(|| {
-            TableInner::new(
-                degree_pk_indices_l,
-                degree_join_key_indices_l,
-                degree_state_table_l,
-            )
-        });
-        let degree_state_r = need_degree_table_r.then(|| {
-            TableInner::new(
-                degree_pk_indices_r,
-                degree_join_key_indices_r,
-                degree_state_table_r,
-            )
-        });
-
         let (left_to_output, right_to_output) = {
             let (left_len, right_len) = if is_left_semi_or_anti(T) {
                 (state_all_data_types_l.len(), 0usize)
@@ -417,9 +406,9 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding>
         let right_input_len = input_r.schema().len();
         let mut l2inequality_index = vec![vec![]; left_input_len];
         let mut r2inequality_index = vec![vec![]; right_input_len];
-        let mut l_state_clean_columns = vec![];
-        let mut r_state_clean_columns = vec![];
-        let inequality_pairs: Vec<(Vec<usize>, InequalityPairInfo)> = inequality_pairs
+        let mut l_inequal_state_clean_columns = vec![];
+        let mut r_inequal_state_clean_columns = vec![];
+        let inequality_pairs = inequality_pairs
             .into_iter()
             .enumerate()
             .map(|(index, pair)| {
@@ -434,10 +423,10 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding>
 
                 // Determine state cleanup columns
                 if pair.clean_left_state {
-                    l_state_clean_columns.push((pair.left_idx, index));
+                    l_inequal_state_clean_columns.push((pair.left_idx, index));
                 }
                 if pair.clean_right_state {
-                    r_state_clean_columns.push((pair.right_idx, index));
+                    r_inequal_state_clean_columns.push((pair.right_idx, index));
                 }
 
                 // Get output indices for watermark emission
@@ -470,15 +459,41 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding>
             .collect_vec();
 
         if append_only_optimize {
-            l_state_clean_columns.clear();
-            r_state_clean_columns.clear();
+            l_inequal_state_clean_columns.clear();
+            r_inequal_state_clean_columns.clear();
             l_non_null_fields.clear();
             r_non_null_fields.clear();
         }
 
+        // Create degree tables with inequality column index for watermark-based cleaning.
+        // The degree_inequality_idx is the column index in the input row that should be
+        // stored in the degree table for inequality-based watermark cleaning.
+        let l_inequality_idx = l_inequal_state_clean_columns
+            .first()
+            .map(|(col_idx, _)| *col_idx);
+        let r_inequality_idx = r_inequal_state_clean_columns
+            .first()
+            .map(|(col_idx, _)| *col_idx);
+
+        let degree_state_l = need_degree_table_l.then(|| {
+            TableInner::new(
+                degree_pk_indices_l,
+                degree_join_key_indices_l,
+                degree_state_table_l,
+                l_inequality_idx,
+            )
+        });
+        let degree_state_r = need_degree_table_r.then(|| {
+            TableInner::new(
+                degree_pk_indices_r,
+                degree_join_key_indices_r,
+                degree_state_table_r,
+                r_inequality_idx,
+            )
+        });
+
         let inequality_watermarks = vec![None; inequality_pairs.len()];
         let watermark_buffers = BTreeMap::new();
-
         Self {
             ctx: ctx.clone(),
             info,
@@ -508,7 +523,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding>
                 i2o_mapping_indexed: l2o_indexed,
                 input2inequality_index: l2inequality_index,
                 non_null_fields: l_non_null_fields,
-                state_clean_columns: l_state_clean_columns,
+                state_clean_columns: l_inequal_state_clean_columns,
                 start_pos: 0,
                 need_degree_table: need_degree_table_l,
                 _marker: PhantomData,
@@ -537,13 +552,14 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding>
                 i2o_mapping_indexed: r2o_indexed,
                 input2inequality_index: r2inequality_index,
                 non_null_fields: r_non_null_fields,
-                state_clean_columns: r_state_clean_columns,
+                state_clean_columns: r_inequal_state_clean_columns,
                 need_degree_table: need_degree_table_r,
                 _marker: PhantomData,
             },
             cond,
             inequality_pairs,
             inequality_watermarks,
+            watermark_indices_in_jk,
             append_only_optimize,
             metrics,
             chunk_size,
@@ -772,12 +788,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding>
             (&mut self.side_r, &mut self.side_l)
         };
 
-        // State cleaning
-        if side_update.join_key_indices[0] == watermark.col_idx {
-            side_match.ht.update_watermark(watermark.val.clone());
-        }
-
-        // Select watermarks to yield.
+        // Process join-key watermarks
         let wm_in_jk = side_update
             .join_key_indices
             .iter()
@@ -789,6 +800,19 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding>
                 .entry(idx)
                 .or_insert_with(|| BufferedWatermarks::with_ids([SideType::Left, SideType::Right]));
             if let Some(selected_watermark) = buffers.handle_watermark(side, watermark.clone()) {
+                if self
+                    .watermark_indices_in_jk
+                    .iter()
+                    .any(|(jk_pos, do_clean)| *jk_pos == idx && *do_clean)
+                {
+                    side_match
+                        .ht
+                        .update_watermark(selected_watermark.val.clone());
+                    side_update
+                        .ht
+                        .update_watermark(selected_watermark.val.clone());
+                }
+
                 let empty_indices = vec![];
                 let output_indices = side_update
                     .i2o_mapping_indexed
@@ -806,6 +830,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding>
                 }
             };
         }
+
         // Process inequality watermarks
         // We can only yield the LARGER side's watermark downstream.
         // For `left >= right`: left is larger, emit for left output columns
@@ -841,13 +866,14 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding>
                     }
                 }
             }
-            // Do state cleaning by update_watermark on the larger side (after the loop to avoid borrow issues)
-            // TODO(yuhao-su): implement state cleaning
-            if let Some(_val) = update_left_watermark {
-                // self.side_l.ht.update_watermark(val);
+            // Do state cleaning on the larger side.
+            // Now that degree tables include the inequality column, we can clean both
+            // state and degree tables using `update_watermark`.
+            if let Some(val) = update_left_watermark {
+                self.side_l.ht.update_watermark(val);
             }
-            if let Some(_val) = update_right_watermark {
-                // self.side_r.ht.update_watermark(val);
+            if let Some(val) = update_right_watermark {
+                self.side_r.ht.update_watermark(val);
             }
         }
         Ok(watermarks_to_emit)
@@ -1173,7 +1199,8 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding>
 
         // watermark state cleaning
         for matched_row in matched_rows_to_clean {
-            side_match.ht.delete_handle_degree(key, matched_row)?;
+            // The committed table watermark is responsible for reclaiming rows in the state table.
+            side_match.ht.delete_row_in_mem(key, &matched_row.row)?;
         }
 
         // apply append_only optimization to clean matched_rows which have been persisted
@@ -1226,7 +1253,6 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding>
     ) -> Option<StreamChunk> {
         let mut need_state_clean = false;
         let mut chunk_opt = None;
-
         // TODO(kwannoel): Instead of evaluating this every loop,
         // we can call this only if there's a non-equi expression.
         // check join cond
@@ -1301,9 +1327,10 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding>
             assert!(append_only_matched_row.is_none());
             *append_only_matched_row = Some(matched_row.map(map_output));
         } else if need_state_clean {
-            // `append_only_optimize` and `need_state_clean` won't both be true.
-            // 'else' here is only to suppress compiler error, otherwise
-            // `matched_row` will be moved twice.
+            debug_assert!(
+                !append_only_optimize,
+                "`append_only_optimize` and `need_state_clean` must not both be true"
+            );
             matched_rows_to_clean.push(matched_row.map(map_output));
         }
 
@@ -1365,25 +1392,69 @@ mod tests {
         pk_indices: &[usize],
         table_id: u32,
     ) -> (StateTable<MemoryStateStore>, StateTable<MemoryStateStore>) {
+        create_in_memory_state_table_with_inequality(
+            mem_state,
+            data_types,
+            order_types,
+            pk_indices,
+            table_id,
+            None,
+        )
+        .await
+    }
+
+    async fn create_in_memory_state_table_with_inequality(
+        mem_state: MemoryStateStore,
+        data_types: &[DataType],
+        order_types: &[OrderType],
+        pk_indices: &[usize],
+        table_id: u32,
+        degree_inequality_type: Option<DataType>,
+    ) -> (StateTable<MemoryStateStore>, StateTable<MemoryStateStore>) {
+        create_in_memory_state_table_with_watermark(
+            mem_state,
+            data_types,
+            order_types,
+            pk_indices,
+            table_id,
+            degree_inequality_type,
+            vec![],
+            vec![],
+        )
+        .await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn create_in_memory_state_table_with_watermark(
+        mem_state: MemoryStateStore,
+        data_types: &[DataType],
+        order_types: &[OrderType],
+        pk_indices: &[usize],
+        table_id: u32,
+        degree_inequality_type: Option<DataType>,
+        state_clean_watermark_indices: Vec<usize>,
+        degree_clean_watermark_indices: Vec<usize>,
+    ) -> (StateTable<MemoryStateStore>, StateTable<MemoryStateStore>) {
         let column_descs = data_types
             .iter()
             .enumerate()
             .map(|(id, data_type)| ColumnDesc::unnamed(ColumnId::new(id as i32), data_type.clone()))
             .collect_vec();
-        let state_table = StateTable::from_table_catalog(
-            &gen_pbtable(
-                TableId::new(table_id),
-                column_descs,
-                order_types.to_vec(),
-                pk_indices.to_vec(),
-                0,
-            ),
-            mem_state.clone(),
-            None,
-        )
-        .await;
+        let mut state_table_catalog = gen_pbtable(
+            TableId::new(table_id),
+            column_descs,
+            order_types.to_vec(),
+            pk_indices.to_vec(),
+            0,
+        );
+        state_table_catalog.clean_watermark_indices = state_clean_watermark_indices
+            .into_iter()
+            .map(|idx| idx as u32)
+            .collect();
+        let state_table =
+            StateTable::from_table_catalog(&state_table_catalog, mem_state.clone(), None).await;
 
-        // Create degree table
+        // Create degree table with schema: [pk..., _degree, inequality?]
         let mut degree_table_column_descs = vec![];
         pk_indices.iter().enumerate().for_each(|(pk_id, idx)| {
             degree_table_column_descs.push(ColumnDesc::unnamed(
@@ -1391,22 +1462,31 @@ mod tests {
                 data_types[*idx].clone(),
             ))
         });
+        // Add _degree column
         degree_table_column_descs.push(ColumnDesc::unnamed(
             ColumnId::new(pk_indices.len() as i32),
             DataType::Int64,
         ));
-        let degree_state_table = StateTable::from_table_catalog(
-            &gen_pbtable(
-                TableId::new(table_id + 1),
-                degree_table_column_descs,
-                order_types.to_vec(),
-                pk_indices.to_vec(),
-                0,
-            ),
-            mem_state,
-            None,
-        )
-        .await;
+        // Add inequality column if present
+        if let Some(ineq_type) = degree_inequality_type {
+            degree_table_column_descs.push(ColumnDesc::unnamed(
+                ColumnId::new((pk_indices.len() + 1) as i32),
+                ineq_type,
+            ));
+        }
+        let mut degree_table_catalog = gen_pbtable(
+            TableId::new(table_id + 1),
+            degree_table_column_descs,
+            order_types.to_vec(),
+            pk_indices.to_vec(),
+            0,
+        );
+        degree_table_catalog.clean_watermark_indices = degree_clean_watermark_indices
+            .into_iter()
+            .map(|idx| idx as u32)
+            .collect();
+        let degree_state_table =
+            StateTable::from_table_catalog(&degree_table_catalog, mem_state, None).await;
         (state_table, degree_state_table)
     }
 
@@ -1440,21 +1520,56 @@ mod tests {
 
         let mem_state = MemoryStateStore::new();
 
-        let (state_l, degree_state_l) = create_in_memory_state_table(
+        // Determine inequality column types for degree tables based on inequality_pairs
+        let l_degree_ineq_type = inequality_pairs
+            .iter()
+            .find(|pair| pair.clean_left_state)
+            .map(|_| DataType::Int64); // Column 1 is Int64
+        let r_degree_ineq_type = inequality_pairs
+            .iter()
+            .find(|pair| pair.clean_right_state)
+            .map(|_| DataType::Int64); // Column 1 is Int64
+        let l_clean_watermark_indices = inequality_pairs
+            .iter()
+            .find(|pair| pair.clean_left_state)
+            .map(|pair| vec![pair.left_idx])
+            .unwrap_or_default();
+        let r_clean_watermark_indices = inequality_pairs
+            .iter()
+            .find(|pair| pair.clean_right_state)
+            .map(|pair| vec![pair.right_idx])
+            .unwrap_or_default();
+        let degree_inequality_column_idx = 3;
+        let l_degree_clean_watermark_indices = l_degree_ineq_type
+            .as_ref()
+            .map(|_| vec![degree_inequality_column_idx])
+            .unwrap_or_default();
+        let r_degree_clean_watermark_indices = r_degree_ineq_type
+            .as_ref()
+            .map(|_| vec![degree_inequality_column_idx])
+            .unwrap_or_default();
+
+        let (state_l, degree_state_l) = create_in_memory_state_table_with_watermark(
             mem_state.clone(),
             &[DataType::Int64, DataType::Int64],
             &[OrderType::ascending(), OrderType::ascending()],
             &[0, 1],
             0,
+            l_degree_ineq_type,
+            l_clean_watermark_indices,
+            l_degree_clean_watermark_indices,
         )
         .await;
 
-        let (state_r, degree_state_r) = create_in_memory_state_table(
+        let (state_r, degree_state_r) = create_in_memory_state_table_with_watermark(
             mem_state,
             &[DataType::Int64, DataType::Int64],
             &[OrderType::ascending(), OrderType::ascending()],
             &[0, 1],
             2,
+            r_degree_ineq_type,
+            r_clean_watermark_indices,
+            r_degree_clean_watermark_indices,
         )
         .await;
 
@@ -1489,6 +1604,7 @@ mod tests {
             Arc::new(StreamingMetrics::unused()),
             1024,
             2048,
+            vec![(0, true)],
         );
         (tx_l, tx_r, executor.boxed().execute())
     }
@@ -1578,6 +1694,7 @@ mod tests {
             Arc::new(StreamingMetrics::unused()),
             1024,
             2048,
+            vec![(0, true)],
         );
         (tx_l, tx_r, executor.boxed().execute())
     }

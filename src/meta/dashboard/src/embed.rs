@@ -22,5 +22,5 @@ struct Assets;
 
 /// Router for embedded assets.
 pub(crate) fn router() -> Router {
-    Router::new().nest_service("/", ServeEmbed::<Assets>::new())
+    Router::new().fallback_service(ServeEmbed::<Assets>::new())
 }

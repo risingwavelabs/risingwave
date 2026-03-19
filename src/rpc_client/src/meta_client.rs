@@ -104,7 +104,6 @@ use risingwave_pb::meta::session_param_service_client::SessionParamServiceClient
 use risingwave_pb::meta::stream_manager_service_client::StreamManagerServiceClient;
 use risingwave_pb::meta::system_params_service_client::SystemParamsServiceClient;
 use risingwave_pb::meta::telemetry_info_service_client::TelemetryInfoServiceClient;
-use risingwave_pb::meta::update_worker_node_schedulability_request::Schedulability;
 use risingwave_pb::meta::{FragmentDistribution, *};
 use risingwave_pb::monitor_service::monitor_service_client::MonitorServiceClient;
 use risingwave_pb::monitor_service::stack_trace_request::ActorTracesFormat;
@@ -294,9 +293,6 @@ impl MetaClient {
             true,
         );
 
-        if property.is_unschedulable {
-            tracing::warn!("worker {:?} registered as unschedulable", addr.clone());
-        }
         let init_result: Result<_> = tokio_retry::RetryIf::spawn(
             retry_strategy,
             || async {
@@ -1076,22 +1072,6 @@ impl MetaClient {
                 );
             }
         }
-    }
-
-    pub async fn update_schedulability(
-        &self,
-        worker_ids: &[WorkerId],
-        schedulability: Schedulability,
-    ) -> Result<UpdateWorkerNodeSchedulabilityResponse> {
-        let request = UpdateWorkerNodeSchedulabilityRequest {
-            worker_ids: worker_ids.to_vec(),
-            schedulability: schedulability.into(),
-        };
-        let resp = self
-            .inner
-            .update_worker_node_schedulability(request)
-            .await?;
-        Ok(resp)
     }
 
     pub async fn list_worker_nodes(
@@ -1980,6 +1960,14 @@ impl MetaClient {
         Ok(resp.states)
     }
 
+    pub async fn list_iceberg_compaction_status(
+        &self,
+    ) -> Result<Vec<list_iceberg_compaction_status_response::IcebergCompactionStatus>> {
+        let request = ListIcebergCompactionStatusRequest {};
+        let resp = self.inner.list_iceberg_compaction_status(request).await?;
+        Ok(resp.statuses)
+    }
+
     pub async fn list_sink_log_store_tables(
         &self,
     ) -> Result<Vec<list_sink_log_store_tables_response::SinkLogStoreTable>> {
@@ -2002,7 +1990,7 @@ impl MetaClient {
             if_not_exists,
         };
 
-        let resp = self.inner.create_iceberg_table(request).await?;
+        let resp = Box::pin(self.inner.create_iceberg_table(request)).await?;
         Ok(resp
             .version
             .ok_or_else(|| anyhow!("wait version not set"))?)
@@ -2093,7 +2081,8 @@ impl HummockMetaClient for MetaClient {
         table_id: JobId,
         level: u32,
         sst_ids: Vec<HummockSstableId>,
-    ) -> Result<()> {
+        exclusive: bool,
+    ) -> Result<bool> {
         // TODO: support key_range parameter
         let req = TriggerManualCompactionRequest {
             compaction_group_id,
@@ -2102,11 +2091,12 @@ impl HummockMetaClient for MetaClient {
             // without check internal_table_id
             level,
             sst_ids,
+            exclusive: Some(exclusive),
             ..Default::default()
         };
 
-        self.inner.trigger_manual_compaction(req).await?;
-        Ok(())
+        let resp = self.inner.trigger_manual_compaction(req).await?;
+        Ok(resp.should_retry.unwrap_or(false))
     }
 
     async fn trigger_full_gc(
@@ -2639,7 +2629,6 @@ macro_rules! for_all_meta_rpc {
              { cluster_client, add_worker_node, AddWorkerNodeRequest, AddWorkerNodeResponse }
             ,{ cluster_client, activate_worker_node, ActivateWorkerNodeRequest, ActivateWorkerNodeResponse }
             ,{ cluster_client, delete_worker_node, DeleteWorkerNodeRequest, DeleteWorkerNodeResponse }
-            ,{ cluster_client, update_worker_node_schedulability, UpdateWorkerNodeSchedulabilityRequest, UpdateWorkerNodeSchedulabilityResponse }
             ,{ cluster_client, list_all_nodes, ListAllNodesRequest, ListAllNodesResponse }
             ,{ cluster_client, get_cluster_recovery_status, GetClusterRecoveryStatusRequest, GetClusterRecoveryStatusResponse }
             ,{ cluster_client, get_meta_store_info, GetMetaStoreInfoRequest, GetMetaStoreInfoResponse }
@@ -2660,6 +2649,7 @@ macro_rules! for_all_meta_rpc {
             ,{ stream_client, list_rate_limits, ListRateLimitsRequest, ListRateLimitsResponse }
             ,{ stream_client, list_cdc_progress, ListCdcProgressRequest, ListCdcProgressResponse }
             ,{ stream_client, list_refresh_table_states, ListRefreshTableStatesRequest, ListRefreshTableStatesResponse }
+            ,{ stream_client, list_iceberg_compaction_status, ListIcebergCompactionStatusRequest, ListIcebergCompactionStatusResponse }
             ,{ stream_client, alter_connector_props, AlterConnectorPropsRequest, AlterConnectorPropsResponse }
             ,{ stream_client, alter_source_properties_safe, AlterSourcePropertiesSafeRequest, AlterSourcePropertiesSafeResponse }
             ,{ stream_client, reset_source_splits, ResetSourceSplitsRequest, ResetSourceSplitsResponse }

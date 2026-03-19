@@ -1422,7 +1422,7 @@ impl SessionImpl {
             );
         }
         let stmt = stmts.swap_remove(0);
-        let rsp = handle(self, stmt, sql.clone(), formats).await?;
+        let rsp = Box::pin(handle(self, stmt, sql.clone(), formats)).await?;
         Ok(rsp)
     }
 
@@ -1794,7 +1794,7 @@ impl Session for SessionImpl {
         let sql: Arc<str> = Arc::from(sql_str);
         // The handle can be slow. Release potential large String early.
         drop(string);
-        let rsp = handle(self, stmt, sql, vec![format]).await?;
+        let rsp = Box::pin(handle(self, stmt, sql, vec![format])).await?;
         Ok(rsp)
     }
 
@@ -1829,7 +1829,7 @@ impl Session for SessionImpl {
     }
 
     async fn execute(self: Arc<Self>, portal: Portal) -> Result<PgResponse<PgResponseStream>> {
-        let rsp = handle_execute(self, portal).await?;
+        let rsp = Box::pin(handle_execute(self, portal)).await?;
         Ok(rsp)
     }
 

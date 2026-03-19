@@ -443,7 +443,7 @@ pub async fn handle_explain(
     }
 
     let mut blocks = Vec::new();
-    let result = do_handle_explain(handler_args, options, stmt, &mut blocks).await;
+    let result = Box::pin(do_handle_explain(handler_args, options, stmt, &mut blocks)).await;
 
     if let Err(e) = result {
         if options.trace {

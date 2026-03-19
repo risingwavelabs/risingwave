@@ -302,15 +302,16 @@ impl HummockManager {
         let mut versioning = self.versioning.write().await;
         let version = &mut versioning.current_version;
 
-        let is_nonempty_meta_store = risingwave_meta_model::hummock_table_change_log::Entity::find()
-            .select_only()
-            .columns([
-                hummock_table_change_log::Column::TableId,
-                hummock_table_change_log::Column::CheckpointEpoch,
-            ])
-            .one(&self.env.meta_store_ref().conn)
-            .await?
-            .is_some();
+        let is_nonempty_meta_store =
+            risingwave_meta_model::hummock_table_change_log::Entity::find()
+                .select_only()
+                .columns([
+                    hummock_table_change_log::Column::TableId,
+                    hummock_table_change_log::Column::CheckpointEpoch,
+                ])
+                .one(&self.env.meta_store_ref().conn)
+                .await?
+                .is_some();
         #[expect(deprecated)]
         if version.table_change_log.is_empty() || is_nonempty_meta_store {
             // Either there are no table change logs to commit to the metastore, or the operation has already been completed.

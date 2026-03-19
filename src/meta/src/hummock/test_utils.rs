@@ -96,7 +96,7 @@ pub async fn add_test_tables(
     )
     .await;
     let mut compact_task = hummock_manager
-        .get_compact_task(compaction_group_id, &mut default_compaction_selector())
+        .get_compact_task(compaction_group_id, &mut *default_compaction_selector())
         .await
         .unwrap()
         .unwrap();
@@ -350,7 +350,6 @@ pub async fn setup_compute_env_with_metric(
             Property {
                 is_streaming: true,
                 is_serving: true,
-                is_unschedulable: false,
                 parallelism: fake_parallelism as _,
                 ..Default::default()
             },

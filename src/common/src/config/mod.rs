@@ -24,7 +24,10 @@ pub use frontend::FrontendConfig;
 pub mod hba;
 pub use hba::{AddressPattern, AuthMethod, ConnectionType, HbaConfig, HbaEntry};
 pub mod meta;
-pub use meta::{CompactionConfig, DefaultParallelism, MetaBackend, MetaConfig, MetaStoreConfig};
+pub use meta::{
+    CheckpointCompression, CompactionConfig, DefaultParallelism, MetaBackend, MetaConfig,
+    MetaStoreConfig,
+};
 pub mod streaming;
 pub use streaming::{AsyncStackTraceOption, StreamingConfig};
 pub mod server;
@@ -122,6 +125,10 @@ pub struct RwConfig {
 pub struct RpcClientConfig {
     #[serde(default = "default::developer::rpc_client_connect_timeout_secs")]
     pub connect_timeout_secs: u64,
+    /// Maximum concurrency when setting up an RPC client pool.
+    /// Set to 0 to keep the previous unlimited behavior.
+    #[serde(default = "default::developer::rpc_client_pool_setup_concurrency")]
+    pub pool_setup_concurrency: usize,
 }
 
 pub use risingwave_common_metrics::MetricLevel;
@@ -387,6 +394,10 @@ pub mod default {
 
         pub fn rpc_client_connect_timeout_secs() -> u64 {
             5
+        }
+
+        pub fn rpc_client_pool_setup_concurrency() -> usize {
+            0
         }
 
         pub fn iceberg_list_interval_sec() -> u64 {
@@ -682,6 +693,7 @@ pub mod tests {
 
             [streaming.developer.stream_compute_client_config]
             connect_timeout_secs = 42
+            pool_setup_concurrency = 10
             ",
         )
         .unwrap();
@@ -694,6 +706,14 @@ pub mod tests {
                 .compute_client_config
                 .connect_timeout_secs,
             42
+        );
+        assert_eq!(
+            config
+                .streaming
+                .developer
+                .compute_client_config
+                .pool_setup_concurrency,
+            10
         );
     }
 

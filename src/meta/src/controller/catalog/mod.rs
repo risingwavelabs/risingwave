@@ -40,8 +40,8 @@ use risingwave_meta_model::object::ObjectType;
 use risingwave_meta_model::prelude::*;
 use risingwave_meta_model::table::TableType;
 use risingwave_meta_model::{
-    ActorId, ColumnCatalogArray, ConnectionId, CreateType, DatabaseId, FragmentId, I32Array,
-    IndexId, JobStatus, ObjectId, Property, SchemaId, SecretId, SinkFormatDesc, SinkId, SourceId,
+    ColumnCatalogArray, ConnectionId, CreateType, DatabaseId, FragmentId, I32Array, IndexId,
+    JobStatus, ObjectId, Property, SchemaId, SecretId, SinkFormatDesc, SinkId, SourceId,
     StreamNode, StreamSourceInfo, StreamingParallelism, SubscriptionId, TableId, TableIdArray,
     UserId, ViewId, connection, database, fragment, function, index, object, object_dependency,
     pending_sink_state, schema, secret, sink, source, streaming_job, subscription, table,
@@ -135,7 +135,6 @@ pub struct ReleaseContext {
     /// need to unregister from source manager.
     pub(crate) removed_source_fragments: HashMap<SourceId, BTreeSet<FragmentId>>,
 
-    pub(crate) removed_actors: HashSet<ActorId>,
     pub(crate) removed_fragments: HashSet<FragmentId>,
 
     /// Removed sink fragment by target fragment.

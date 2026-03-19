@@ -24,7 +24,6 @@ use risingwave_hummock_sdk::{HummockEpoch, HummockVersionId};
 use risingwave_meta::backup_restore::RestoreOpts;
 use risingwave_pb::hummock::rise_ctl_update_compaction_config_request::CompressionAlgorithm;
 use risingwave_pb::id::{CompactionGroupId, FragmentId, HummockSstableId, JobId, TableId};
-use risingwave_pb::meta::update_worker_node_schedulability_request::Schedulability;
 use thiserror_ext::AsReport;
 
 use crate::cmd_impl::hummock::{
@@ -67,9 +66,6 @@ enum Commands {
     /// Commands for Meta
     #[clap(subcommand)]
     Meta(MetaCommands),
-    /// Commands for Scaling
-    #[clap(subcommand)]
-    Scale(ScaleCommands),
     /// Commands for Benchmarks
     #[clap(subcommand)]
     Bench(BenchCommands),
@@ -138,11 +134,17 @@ enum HummockCommands {
         #[clap(short, long = "table-id", default_value_t = 0)]
         table_id: u32,
 
-        #[clap(short, long = "level", default_value_t = 1)]
-        level: u32,
+        #[clap(short, long = "level", value_delimiter = ',', default_values_t = vec![1u32])]
+        levels: Vec<u32>,
 
         #[clap(short, long = "sst-ids", value_delimiter = ',')]
         sst_ids: Vec<HummockSstableId>,
+
+        #[clap(long = "exclusive", default_value_t = false)]
+        exclusive: bool,
+
+        #[clap(long = "retry-interval-ms", default_value_t = 1000)]
+        retry_interval_ms: u64,
     },
     /// Trigger a full GC for SSTs that is not pinned, with timestamp <= now -
     /// `sst_retention_time_sec`, and with `prefix` in path.
@@ -215,9 +217,9 @@ enum HummockCommands {
         #[clap(long)]
         enable_optimize_l0_interval_selection: Option<bool>,
         #[clap(long)]
-        vnode_aligned_level_size_threshold: Option<u64>,
-        #[clap(long)]
         max_kv_count_for_xor16: Option<u64>,
+        #[clap(long)]
+        max_vnode_key_range_bytes: Option<u64>,
     },
     /// Split given compaction group into two. Moves the given tables to the new group.
     SplitCompactionGroup {
@@ -335,33 +337,6 @@ enum TableCommands {
     },
     /// list all state tables
     List,
-}
-
-#[derive(Subcommand, Debug)]
-enum ScaleCommands {
-    /// Mark a compute node as unschedulable
-    #[clap(verbatim_doc_comment)]
-    Cordon {
-        /// Workers that need to be cordoned, both id and host are supported.
-        #[clap(
-            long,
-            required = true,
-            value_delimiter = ',',
-            value_name = "id or host,..."
-        )]
-        workers: Vec<String>,
-    },
-    /// mark a compute node as schedulable. Nodes are schedulable unless they are cordoned
-    Uncordon {
-        /// Workers that need to be uncordoned, both id and host are supported.
-        #[clap(
-            long,
-            required = true,
-            value_delimiter = ',',
-            value_name = "id or host,..."
-        )]
-        workers: Vec<String>,
-    },
 }
 
 #[derive(Subcommand)]
@@ -680,15 +655,19 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
         Commands::Hummock(HummockCommands::TriggerManualCompaction {
             compaction_group_id,
             table_id,
-            level,
+            levels,
             sst_ids,
+            exclusive,
+            retry_interval_ms,
         }) => {
             cmd_impl::hummock::trigger_manual_compaction(
                 context,
                 compaction_group_id,
                 table_id.into(),
-                level,
+                levels,
                 sst_ids,
+                exclusive,
+                retry_interval_ms,
             )
             .await?
         }
@@ -731,8 +710,8 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
             level0_stop_write_threshold_max_sst_count,
             level0_stop_write_threshold_max_size,
             enable_optimize_l0_interval_selection,
-            vnode_aligned_level_size_threshold,
             max_kv_count_for_xor16,
+            max_vnode_key_range_bytes,
         }) => {
             cmd_impl::hummock::update_compaction_config(
                 context,
@@ -772,8 +751,8 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
                     level0_stop_write_threshold_max_sst_count,
                     level0_stop_write_threshold_max_size,
                     enable_optimize_l0_interval_selection,
-                    vnode_aligned_level_size_threshold,
                     max_kv_count_for_xor16,
+                    max_vnode_key_range_bytes,
                 ),
             )
             .await?
@@ -980,14 +959,6 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
         }) => cmd_impl::profile::cpu_profile(context, sleep, worker_types).await?,
         Commands::Profile(ProfileCommands::Heap { dir, worker_types }) => {
             cmd_impl::profile::heap_profile(context, dir, worker_types).await?
-        }
-        Commands::Scale(ScaleCommands::Cordon { workers }) => {
-            cmd_impl::scale::update_schedulability(context, workers, Schedulability::Unschedulable)
-                .await?
-        }
-        Commands::Scale(ScaleCommands::Uncordon { workers }) => {
-            cmd_impl::scale::update_schedulability(context, workers, Schedulability::Schedulable)
-                .await?
         }
         Commands::Throttle(ThrottleCommands::Source(args)) => {
             apply_throttle(context, risingwave_pb::meta::PbThrottleTarget::Source, args).await?

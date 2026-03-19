@@ -52,7 +52,7 @@ use crate::barrier::{
     BarrierManagerRequest, BarrierManagerStatus, BarrierWorkerRuntimeInfoSnapshot, Command,
     RecoveryReason, RescheduleContext, UpdateDatabaseBarrierRequest, schedule,
 };
-use crate::controller::scale::render_actor_assignments;
+use crate::controller::scale::{materialize_actor_assignments, preview_actor_assignments};
 use crate::error::MetaErrorInner;
 use crate::hummock::HummockManagerRef;
 use crate::manager::sink_coordination::SinkCoordinatorManager;
@@ -63,6 +63,7 @@ use crate::manager::{
 use crate::rpc::metrics::GLOBAL_META_METRICS;
 use crate::stream::{
     GlobalRefreshManagerRef, ScaleControllerRef, SourceManagerRef, build_reschedule_commands,
+    rendered_layout_matches_current,
 };
 use crate::{MetaError, MetaResult};
 
@@ -282,22 +283,31 @@ fn build_reschedule_from_context(
         return Err(anyhow!("no active streaming workers for reschedule").into());
     }
 
-    let actor_id_counter = env.actor_id_generator();
     if context.is_empty() {
         return Ok(None);
     }
 
-    let rendered = render_actor_assignments(
-        actor_id_counter,
+    // Barrier worker resolves this intent against a stable in-flight snapshot.
+    // Reuse the same fragment view for preview comparison and command building.
+    let all_prev_fragments = database_info
+        .fragment_infos()
+        .map(|fragment| (fragment.fragment_id, fragment))
+        .collect();
+
+    let previewed = preview_actor_assignments(
         &worker_nodes,
         adaptive_parallelism_strategy,
         &context.loaded,
     )?;
 
-    let all_prev_fragments = database_info
-        .fragment_infos()
-        .map(|fragment| (fragment.fragment_id, fragment))
-        .collect();
+    if rendered_layout_matches_current(&previewed.fragments, &all_prev_fragments)? {
+        return Ok(None);
+    }
+
+    let actor_id_counter = env.actor_id_generator();
+    // Materialization only replaces preview actor ids with real ids. Worker
+    // placement, vnode ownership, and split assignment remain unchanged.
+    let rendered = materialize_actor_assignments(actor_id_counter, previewed);
     let mut commands = build_reschedule_commands(rendered.fragments, context, all_prev_fragments)?;
     Ok(commands.remove(&database_id))
 }
@@ -414,7 +424,7 @@ impl GlobalBarrierWorker<GlobalBarrierWorkerContextImpl> {
                 .await;
         }
 
-        self.run_inner(shutdown_rx).await
+        Box::pin(self.run_inner(shutdown_rx)).await
     }
 }
 
@@ -738,7 +748,12 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                     } else {
                         new_barrier
                     };
-                    if let Err(e) = self.checkpoint_control.handle_new_barrier(new_barrier, &mut self.partial_graph_manager) {
+                    if let Err(e) = self.checkpoint_control.handle_new_barrier(
+                        new_barrier,
+                        &mut self.partial_graph_manager,
+                        self.adaptive_parallelism_strategy,
+                        self.active_streaming_nodes.current()
+                    ) {
                         if !self.enable_recovery {
                             panic!(
                                 "failed to inject barrier to some databases but recovery not enabled: {:?}", (

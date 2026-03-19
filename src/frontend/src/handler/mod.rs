@@ -67,6 +67,7 @@ pub mod alter_table_props;
 mod alter_table_with_sr;
 pub mod alter_user;
 mod alter_utils;
+mod backup;
 pub mod cancel_job;
 pub mod close_cursor;
 mod comment;
@@ -87,6 +88,7 @@ pub mod create_table_as;
 pub mod create_user;
 pub mod create_view;
 pub mod declare_cursor;
+mod delete_meta_snapshot;
 pub mod describe;
 pub mod discard;
 mod drop_connection;
@@ -265,6 +267,7 @@ impl HandlerArgs {
     }
 }
 
+#[allow(clippy::large_stack_frames)]
 pub async fn handle(
     session: Arc<SessionImpl>,
     stmt: Statement,
@@ -282,7 +285,15 @@ pub async fn handle(
             statement,
             analyze,
             options,
-        } => explain::handle_explain(handler_args, *statement, options, analyze).await,
+        } => {
+            Box::pin(explain::handle_explain(
+                handler_args,
+                *statement,
+                options,
+                analyze,
+            ))
+            .await
+        }
         Statement::ExplainAnalyzeStreamJob {
             target,
             duration_secs,
@@ -420,7 +431,7 @@ pub async fn handle(
                 .await;
             }
             let format_encode = format_encode.map(|s| s.into_v2_with_warning());
-            create_table::handle_create_table(
+            Box::pin(create_table::handle_create_table(
                 handler_args,
                 name,
                 columns,
@@ -439,7 +450,7 @@ pub async fn handle(
                 include_column_options,
                 webhook_info,
                 engine,
-            )
+            ))
             .await
         }
         Statement::CreateDatabase {
@@ -647,6 +658,10 @@ pub async fn handle(
         }
         Statement::Flush => flush::handle_flush(handler_args).await,
         Statement::Wait => wait::handle_wait(handler_args).await,
+        Statement::Backup => backup::handle_backup(handler_args).await,
+        Statement::DeleteMetaSnapshots { snapshot_ids } => {
+            delete_meta_snapshot::handle_delete_meta_snapshots(handler_args, snapshot_ids).await
+        }
         Statement::Recover => recover::handle_recover(handler_args).await,
         Statement::SetVariable {
             local: _,
@@ -812,7 +827,12 @@ pub async fn handle(
             AlterTableOperation::AddColumn { .. }
             | AlterTableOperation::DropColumn { .. }
             | AlterTableOperation::AlterColumn { .. } => {
-                alter_table_column::handle_alter_table_column(handler_args, name, operation).await
+                Box::pin(alter_table_column::handle_alter_table_column(
+                    handler_args,
+                    name,
+                    operation,
+                ))
+                .await
             }
             AlterTableOperation::RenameTable { table_name } => {
                 alter_rename::handle_rename_table(handler_args, TableType::Table, name, table_name)
@@ -865,7 +885,11 @@ pub async fn handle(
                 .await
             }
             AlterTableOperation::RefreshSchema => {
-                alter_table_with_sr::handle_refresh_schema(handler_args, name).await
+                Box::pin(alter_table_with_sr::handle_refresh_schema(
+                    handler_args,
+                    name,
+                ))
+                .await
             }
             AlterTableOperation::SetSourceRateLimit { rate_limit } => {
                 alter_streaming_rate_limit::handle_alter_streaming_rate_limit(
@@ -878,8 +902,13 @@ pub async fn handle(
                 .await
             }
             AlterTableOperation::DropConnector => {
-                alter_table_drop_connector::handle_alter_table_drop_connector(handler_args, name)
-                    .await
+                Box::pin(
+                    alter_table_drop_connector::handle_alter_table_drop_connector(
+                        handler_args,
+                        name,
+                    ),
+                )
+                .await
             }
             AlterTableOperation::SetDmlRateLimit { rate_limit } => {
                 alter_streaming_rate_limit::handle_alter_streaming_rate_limit(

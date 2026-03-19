@@ -95,11 +95,12 @@ mod col_id_gen;
 pub use col_id_gen::*;
 use risingwave_connector::sink::SinkParam;
 use risingwave_connector::sink::iceberg::{
-    COMPACTION_DELETE_FILES_COUNT_THRESHOLD, COMPACTION_INTERVAL_SEC, COMPACTION_MAX_SNAPSHOTS_NUM,
-    COMPACTION_SMALL_FILES_THRESHOLD_MB, COMPACTION_TARGET_FILE_SIZE_MB,
-    COMPACTION_TRIGGER_SNAPSHOT_COUNT, COMPACTION_TYPE, COMPACTION_WRITE_PARQUET_COMPRESSION,
-    COMPACTION_WRITE_PARQUET_MAX_ROW_GROUP_ROWS, CompactionType, ENABLE_COMPACTION,
-    ENABLE_SNAPSHOT_EXPIRATION, FORMAT_VERSION, ICEBERG_WRITE_MODE_COPY_ON_WRITE,
+    COMMIT_CHECKPOINT_SIZE_THRESHOLD_MB, COMPACTION_DELETE_FILES_COUNT_THRESHOLD,
+    COMPACTION_INTERVAL_SEC, COMPACTION_MAX_SNAPSHOTS_NUM, COMPACTION_SMALL_FILES_THRESHOLD_MB,
+    COMPACTION_TARGET_FILE_SIZE_MB, COMPACTION_TRIGGER_SNAPSHOT_COUNT, COMPACTION_TYPE,
+    COMPACTION_WRITE_PARQUET_COMPRESSION, COMPACTION_WRITE_PARQUET_MAX_ROW_GROUP_ROWS,
+    CompactionType, ENABLE_COMPACTION, ENABLE_SNAPSHOT_EXPIRATION, FORMAT_VERSION,
+    ICEBERG_DEFAULT_COMMIT_CHECKPOINT_SIZE_THRESHOLD_MB, ICEBERG_WRITE_MODE_COPY_ON_WRITE,
     ICEBERG_WRITE_MODE_MERGE_ON_READ, IcebergSink, IcebergWriteMode,
     SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_FILES, SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_META_DATA,
     SNAPSHOT_EXPIRATION_MAX_AGE_MILLIS, SNAPSHOT_EXPIRATION_RETAIN_LAST, WRITE_MODE,
@@ -829,6 +830,7 @@ pub(crate) fn gen_create_table_plan_for_cdc_table(
     source: Arc<SourceCatalog>,
     external_table_name: String,
     column_defs: Vec<ColumnDef>,
+    source_watermarks: Vec<SourceWatermark>,
     mut columns: Vec<ColumnCatalog>,
     pk_names: Vec<String>,
     cdc_with_options: WithOptionsSecResolved,
@@ -860,6 +862,13 @@ pub(crate) fn gen_create_table_plan_for_cdc_table(
 
     let (mut columns, pk_column_ids, _row_id_index) =
         bind_pk_and_row_id_on_relation(columns, pk_names, true)?;
+
+    let watermark_descs = bind_source_watermark(
+        context.session_ctx(),
+        table_name.real_value(),
+        source_watermarks,
+        &columns,
+    )?;
 
     // NOTES: In auto schema change, default value is not provided in column definition.
     bind_sql_column_constraints(
@@ -938,7 +947,7 @@ pub(crate) fn gen_create_table_plan_for_cdc_table(
             columns,
             pk_column_ids,
             row_id_index: None,
-            watermark_descs: vec![],
+            watermark_descs,
             source_catalog: Some((*source).clone()),
             version: col_id_gen.into_version(),
         },
@@ -1250,6 +1259,7 @@ pub(super) async fn handle_create_table_plan(
                 source,
                 normalized_external_table_name,
                 column_defs,
+                source_watermarks,
                 columns,
                 pk_names,
                 cdc_with_options,
@@ -1380,10 +1390,14 @@ fn sanity_check_for_table_on_cdc_source(
         .into());
     }
 
-    if !source_watermarks.is_empty() {
+    if !source_watermarks.is_empty()
+        && source_watermarks
+            .iter()
+            .any(|watermark| !watermark.with_ttl)
+    {
         return Err(ErrorCode::NotSupported(
-            "watermark defined on the table created from a CDC source".into(),
-            "Remove the Watermark definitions".into(),
+            "non-TTL watermark defined on the table created from a CDC source".into(),
+            "Use `WATERMARK ... WITH TTL` instead.".into(),
         )
         .into());
     }
@@ -1531,7 +1545,7 @@ pub async fn handle_create_table(
         Engine::Iceberg => {
             let hummock_table_name = hummock_table.name.clone();
             session.create_staging_table(hummock_table.clone());
-            let res = create_iceberg_engine_table(
+            let res = Box::pin(create_iceberg_engine_table(
                 session.clone(),
                 handler_args,
                 source.map(|s| s.to_prost()),
@@ -1540,7 +1554,7 @@ pub async fn handle_create_table(
                 table_name,
                 job_type,
                 if_not_exists,
-            )
+            ))
             .await;
             session.drop_staging_table(&hummock_table_name);
             res?
@@ -1814,6 +1828,33 @@ pub async fn create_iceberg_engine_table(
     sink_with.insert(
         COMMIT_CHECKPOINT_INTERVAL.to_owned(),
         commit_checkpoint_interval.to_string(),
+    );
+
+    let commit_checkpoint_size_threshold_mb = handler_args
+        .with_options
+        .get(COMMIT_CHECKPOINT_SIZE_THRESHOLD_MB)
+        .map(|v| v.to_owned())
+        .unwrap_or_else(|| ICEBERG_DEFAULT_COMMIT_CHECKPOINT_SIZE_THRESHOLD_MB.to_string());
+    let commit_checkpoint_size_threshold_mb = commit_checkpoint_size_threshold_mb
+        .parse::<u64>()
+        .map_err(|_| {
+            ErrorCode::InvalidInputSyntax(format!(
+                "{} must be greater than 0: {}",
+                COMMIT_CHECKPOINT_SIZE_THRESHOLD_MB, commit_checkpoint_size_threshold_mb
+            ))
+        })?;
+    if commit_checkpoint_size_threshold_mb == 0 {
+        bail!("{COMMIT_CHECKPOINT_SIZE_THRESHOLD_MB} must be greater than 0");
+    }
+
+    // remove commit_checkpoint_size_threshold_mb from source options, otherwise it will be considered as an unknown field.
+    source.as_mut().map(|x| {
+        x.with_properties
+            .remove(COMMIT_CHECKPOINT_SIZE_THRESHOLD_MB)
+    });
+    sink_with.insert(
+        COMMIT_CHECKPOINT_SIZE_THRESHOLD_MB.to_owned(),
+        commit_checkpoint_size_threshold_mb.to_string(),
     );
     sink_with.insert("create_table_if_not_exists".to_owned(), "true".to_owned());
 
@@ -2527,6 +2568,14 @@ pub async fn generate_stream_graph_for_replace_table(
             ((plan, None, table), TableJobType::General)
         }
         (None, Some(cdc_table)) => {
+            sanity_check_for_table_on_cdc_source(
+                append_only,
+                &columns,
+                &wildcard_idx,
+                &constraints,
+                &source_watermarks,
+            )?;
+
             let session = &handler_args.session;
             let (source, resolved_table_name) =
                 get_source_and_resolved_table_name(session, cdc_table.clone(), table_name.clone())?;
@@ -2546,6 +2595,7 @@ pub async fn generate_stream_graph_for_replace_table(
                 source,
                 normalized_external_table_name,
                 columns,
+                source_watermarks,
                 column_catalogs,
                 pk_names,
                 cdc_with_options,
