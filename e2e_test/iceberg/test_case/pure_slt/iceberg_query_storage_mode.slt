@@ -1,0 +1,200 @@
+# Test iceberg_query_storage_mode session variable and storage selection behavior.
+# Iceberg engine tables have both Hummock (row) and Iceberg (columnar) storage.
+# This test verifies that the session config correctly controls which storage is used.
+
+statement ok
+create secret my_secret with (
+  backend = 'meta'
+) as 'hummockadmin';
+
+statement ok
+create connection my_conn
+with (
+    type = 'iceberg',
+    warehouse.path = 's3://hummock001/iceberg_query_storage_mode',
+    s3.access.key = secret my_secret,
+    s3.secret.key = secret my_secret,
+    s3.endpoint = 'http://127.0.0.1:9301',
+    s3.region = 'us-west-2',
+    catalog.type = 'storage',
+);
+
+statement ok
+set iceberg_engine_connection = 'public.my_conn';
+
+# ---------- setup table ----------
+statement ok
+create table t_mode(
+  id int primary key,
+  name varchar,
+  val int
+) with(commit_checkpoint_interval = 1) engine = iceberg;
+
+statement ok
+insert into t_mode values(1, 'alice', 10), (2, 'bob', 20), (3, 'carol', 30);
+
+statement ok
+FLUSH;
+
+sleep 5s
+
+# Wait for data visible through Iceberg storage
+query ??? rowsort retry 6 backoff 1s
+select * from t_mode;
+----
+1 alice 10
+2 bob 20
+3 carol 30
+
+# ---------- 1. Test session config parse / show ----------
+
+# Default is iceberg
+query T
+show iceberg_query_storage_mode;
+----
+iceberg
+
+statement ok
+set iceberg_query_storage_mode = 'auto';
+
+query T
+show iceberg_query_storage_mode;
+----
+auto
+
+statement ok
+set iceberg_query_storage_mode = 'hummock';
+
+query T
+show iceberg_query_storage_mode;
+----
+hummock
+
+# Invalid values should error
+statement error
+set iceberg_query_storage_mode = 'invalid';
+
+# ---------- 2. iceberg_query_storage_mode = hummock ----------
+# When set to hummock, batch SELECT should use BatchScan (Hummock row store).
+
+statement ok
+set iceberg_query_storage_mode = 'hummock';
+
+query T
+explain select name from t_mode where id = 1;
+----
+BatchExchange { order: [], dist: Single }
+└─BatchScan { table: t_mode, columns: [name], scan_ranges: [id = Int32(1)] }
+
+query ???
+select name from t_mode where id = 1;
+----
+alice
+
+query T
+explain select * from t_mode;
+----
+BatchExchange { order: [], dist: Single }
+└─BatchScan { table: t_mode, columns: [id, name, val] }
+
+query ??? rowsort
+select * from t_mode;
+----
+1 alice 10
+2 bob 20
+3 carol 30
+
+# ---------- 3. iceberg_query_storage_mode = iceberg ----------
+# When set to iceberg (default), batch SELECT should use BatchIcebergScan.
+
+statement ok
+set iceberg_query_storage_mode = 'iceberg';
+
+query T
+explain select name from t_mode where id = 1;
+----
+BatchExchange { order: [], dist: Single }
+└─BatchIcebergScan { source: __iceberg_source_t_mode, columns: [name], iceberg_scan_type: DataScan, predicate: id = 1 }
+
+query ???
+select name from t_mode where id = 1;
+----
+alice
+
+query T
+explain select * from t_mode;
+----
+BatchExchange { order: [], dist: Single }
+└─BatchIcebergScan { source: __iceberg_source_t_mode, columns: [id, name, val], iceberg_scan_type: DataScan }
+
+query ??? rowsort
+select * from t_mode;
+----
+1 alice 10
+2 bob 20
+3 carol 30
+
+# ---------- 4. iceberg_query_storage_mode = auto ----------
+# In auto mode the optimizer decides based on heuristics.
+
+statement ok
+set iceberg_query_storage_mode = 'auto';
+
+# 4a. Point lookup should prefer Hummock row store for lower latency.
+query T
+explain select name from t_mode where id = 1;
+----
+BatchExchange { order: [], dist: Single }
+└─BatchScan { table: t_mode, columns: [name], scan_ranges: [id = Int32(1)] }
+
+# ---------- 5. Test with aggregate queries ----------
+
+statement ok
+set iceberg_query_storage_mode = 'hummock';
+
+query I
+select sum(val) from t_mode;
+----
+60
+
+statement ok
+set iceberg_query_storage_mode = 'iceberg';
+
+query I
+select sum(val) from t_mode;
+----
+60
+
+# ---------- 7. Test with filter + projection ----------
+# Verify predicate pushdown works with both modes
+
+statement ok
+set iceberg_query_storage_mode = 'hummock';
+
+query ? rowsort
+select name from t_mode where val > 15;
+----
+bob
+carol
+
+statement ok
+set iceberg_query_storage_mode = 'iceberg';
+
+query ? rowsort
+select name from t_mode where val > 15;
+----
+bob
+carol
+
+# ---------- cleanup ----------
+statement ok
+set iceberg_query_storage_mode = 'iceberg';
+
+statement ok
+DROP TABLE t_mode;
+
+statement ok
+DROP CONNECTION my_conn;
+
+statement ok
+DROP SECRET my_secret;
