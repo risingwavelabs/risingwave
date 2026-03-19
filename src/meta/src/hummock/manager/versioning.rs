@@ -31,7 +31,7 @@ use risingwave_hummock_sdk::{
     CompactionGroupId, HummockContextId, HummockObjectId, HummockSstableId, HummockSstableObjectId,
     HummockVersionId, get_stale_object_ids,
 };
-use risingwave_meta_model::hummock_table_change_log;
+use risingwave_meta_model::{Epoch, hummock_table_change_log};
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::hummock::write_limits::WriteLimit;
 use risingwave_pb::hummock::{HummockPinnedVersion, HummockVersionStats};
@@ -309,6 +309,7 @@ impl HummockManager {
                     hummock_table_change_log::Column::TableId,
                     hummock_table_change_log::Column::CheckpointEpoch,
                 ])
+                .into_tuple::<(TableId, Epoch)>()
                 .one(&self.env.meta_store_ref().conn)
                 .await?
                 .is_some();
