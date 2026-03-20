@@ -47,8 +47,8 @@ use crate::executor::prelude::*;
 use crate::executor::{StopMutation, StreamConsumer};
 use crate::task::{DispatcherId, NewOutputRequest};
 
-mod output_mapping;
 mod dispatch_sync_log_store;
+mod output_mapping;
 
 pub use dispatch_sync_log_store::SyncLogStoreDispatchExecutor;
 pub use output_mapping::DispatchOutputMapping;
@@ -570,7 +570,9 @@ impl StreamConsumer for DispatchExecutor {
                     // end_of_stream
                     break;
                 };
-                if let Some(barrier_batch) = dispatch_message_batch(&mut self.inner, message).await? {
+                if let Some(barrier_batch) =
+                    dispatch_message_batch(&mut self.inner, message).await?
+                {
                     for barrier in barrier_batch {
                         yield barrier;
                     }

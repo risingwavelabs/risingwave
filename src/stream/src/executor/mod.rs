@@ -146,7 +146,6 @@ pub use batch_query::BatchQueryExecutor;
 pub use chain::ChainExecutor;
 pub use changelog::ChangeLogExecutor;
 pub use dedup::AppendOnlyDedupExecutor;
-pub(crate) use sync_log_store_impl::SyncKvLogStoreContext;
 pub use dispatch::{DispatchExecutor, SyncLogStoreDispatchExecutor};
 pub use dynamic_filter::DynamicFilterExecutor;
 pub use error::{StreamExecutorError, StreamExecutorResult};
@@ -173,6 +172,7 @@ pub use row_merge::RowMergeExecutor;
 pub use sink::SinkExecutor;
 pub use sync_kv_log_store::SyncedKvLogStoreExecutor;
 pub use sync_kv_log_store::metrics::SyncedKvLogStoreMetrics;
+pub(crate) use sync_log_store_impl::SyncKvLogStoreContext;
 pub use temporal_join::TemporalJoinExecutor;
 pub use top_n::{
     AppendOnlyGroupTopNExecutor, AppendOnlyTopNExecutor, GroupTopNExecutor, TopNExecutor,

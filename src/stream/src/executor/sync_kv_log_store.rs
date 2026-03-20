@@ -62,17 +62,17 @@
 use std::future::pending;
 
 use anyhow::anyhow;
-use futures::StreamExt;
 use futures::future::{Either, select};
-use futures::pin_mut;
+use futures::{StreamExt, pin_mut};
 use risingwave_common::catalog::TableId;
 use risingwave_storage::StateStore;
 use rw_futures_util::drop_either_future;
 use tokio::time::{Duration, Instant};
 
 use crate::common::log_store_impl::kv_log_store::reader::LogStoreReadStateStreamRangeStart;
-use crate::common::log_store_impl::kv_log_store::{FIRST_SEQ_ID, LogStoreVnodeProgress};
 use crate::common::log_store_impl::kv_log_store::serde::LogStoreRowSerde;
+use crate::common::log_store_impl::kv_log_store::{FIRST_SEQ_ID, LogStoreVnodeProgress};
+use crate::executor::expect_first_barrier;
 use crate::executor::prelude::*;
 use crate::executor::sync_kv_log_store::metrics::SyncedKvLogStoreMetrics;
 use crate::executor::sync_log_store_impl::{
@@ -80,7 +80,6 @@ use crate::executor::sync_log_store_impl::{
     aligned_message_stream, apply_pause_resume_mutation, init_local_log_store_state,
     process_chunk_flushed, process_upstream_chunk, write_barrier,
 };
-use crate::executor::expect_first_barrier;
 
 pub mod metrics {
     use risingwave_common::id::FragmentId;
@@ -461,16 +460,15 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
                                     context.metrics.unclean_state.inc();
                                 } else {
                                     apply_pause_resume_mutation(&barrier, &mut pause_stream);
-                                    let write_state_post_write_barrier =
-                                        write_barrier(
-                                            actor_context.id,
-                                            &mut write_state,
-                                            barrier.clone(),
-                                            &context.metrics,
-                                            progress.take(),
-                                            &mut buffer,
-                                        )
-                                        .await?;
+                                    let write_state_post_write_barrier = write_barrier(
+                                        actor_context.id,
+                                        &mut write_state,
+                                        barrier.clone(),
+                                        &context.metrics,
+                                        progress.take(),
+                                        &mut buffer,
+                                    )
+                                    .await?;
                                     seq_id = FIRST_SEQ_ID;
                                     let update_vnode_bitmap =
                                         barrier.as_update_vnode_bitmap(actor_context.id);
@@ -482,14 +480,21 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
                                     }
                                     yield Message::Barrier(barrier);
 
-                                    write_state_post_write_barrier.post_yield_barrier(None).await?;
+                                    write_state_post_write_barrier
+                                        .post_yield_barrier(None)
+                                        .await?;
                                     write_future_state =
                                         WriteFuture::receive_from_upstream(stream, write_state);
                                 }
                             }
                             Message::Chunk(chunk) => {
-                                let (new_seq_id, next_write_future) =
-                                    process_upstream_chunk(seq_id, stream, write_state, chunk, &mut buffer);
+                                let (new_seq_id, next_write_future) = process_upstream_chunk(
+                                    seq_id,
+                                    stream,
+                                    write_state,
+                                    chunk,
+                                    &mut buffer,
+                                );
                                 seq_id = new_seq_id;
                                 write_future_state = next_write_future;
                             }
@@ -501,8 +506,13 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
                             }
                         },
                         WriteFutureEvent::ChunkFlushed(info) => {
-                            write_future_state =
-                                process_chunk_flushed(stream, write_state, info, &mut buffer, &context.metrics);
+                            write_future_state = process_chunk_flushed(
+                                stream,
+                                write_state,
+                                info,
+                                &mut buffer,
+                                &context.metrics,
+                            );
                         }
                     }
                 }

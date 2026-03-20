@@ -48,7 +48,7 @@ use crate::executor::monitor::StreamingMetrics;
 use crate::executor::subtask::SubtaskHandle;
 use crate::executor::{
     Actor, ActorContext, ActorContextRef, DispatchExecutor, Execute, Executor, ExecutorInfo,
-    SnapshotBackfillExecutor, SyncLogStoreDispatchExecutor, SyncKvLogStoreContext,
+    SnapshotBackfillExecutor, SyncKvLogStoreContext, SyncLogStoreDispatchExecutor,
     SyncedKvLogStoreMetrics, TroublemakerExecutor, WrapperExecutor,
 };
 use crate::from_proto::{MergeExecutorBuilder, create_executor};

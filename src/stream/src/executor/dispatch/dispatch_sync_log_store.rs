@@ -58,13 +58,8 @@ impl<S: StateStore> SyncLogStoreDispatchExecutor<S> {
         actor_context: &ActorContextRef,
         log_store_context: SyncKvLogStoreContext<S>,
     ) -> StreamResult<Self> {
-        let DispatchExecutor { input, inner } = DispatchExecutor::new(
-            input,
-            new_output_request_rx,
-            dispatchers,
-            actor_context,
-        )
-        .await?;
+        let DispatchExecutor { input, inner } =
+            DispatchExecutor::new(input, new_output_request_rx, dispatchers, actor_context).await?;
 
         tracing::info!(
             actor_id = %actor_context.id,
@@ -116,11 +111,13 @@ impl<S: StateStoreRead> ConsumerFuture<S> {
         };
         let batch = message.into_batch();
         let fut = async move {
-            let r = dispatch_message_batch(&mut inner, batch).await.map(|barrier_batch| {
-                if let Some(barrier_batch) = barrier_batch {
-                    debug_assert_eq!(barrier_batch.len(), 1);
-                }
-            });
+            let r = dispatch_message_batch(&mut inner, batch)
+                .await
+                .map(|barrier_batch| {
+                    if let Some(barrier_batch) = barrier_batch {
+                        debug_assert_eq!(barrier_batch.len(), 1);
+                    }
+                });
             (inner, r)
         }
         .boxed();
@@ -208,7 +205,12 @@ impl<S: StateStore> StreamConsumer for SyncLogStoreDispatchExecutor<S> {
                 Message::Barrier(first_barrier.clone()).into_batch(),
             )
             .await?;
-            debug_assert_eq!(first_barrier_batch.as_ref().map(|barrier_batch| barrier_batch.len()), Some(1));
+            debug_assert_eq!(
+                first_barrier_batch
+                    .as_ref()
+                    .map(|barrier_batch| barrier_batch.len()),
+                Some(1)
+            );
 
             let (read_state, initial_write_state) =
                 init_local_log_store_state(&log_store_config, first_write_epoch).await?;
@@ -341,16 +343,15 @@ impl<S: StateStore> StreamConsumer for SyncLogStoreDispatchExecutor<S> {
                                         log_store_config.metrics.unclean_state.inc();
                                     } else {
                                         apply_pause_resume_mutation(&barrier, &mut pause_stream);
-                                        let write_state_post_write_barrier =
-                                            write_barrier(
-                                                actor_id,
-                                                &mut write_state,
-                                                barrier.clone(),
-                                                &log_store_config.metrics,
-                                                progress.take(),
-                                                &mut buffer,
-                                            )
-                                            .await?;
+                                        let write_state_post_write_barrier = write_barrier(
+                                            actor_id,
+                                            &mut write_state,
+                                            barrier.clone(),
+                                            &log_store_config.metrics,
+                                            progress.take(),
+                                            &mut buffer,
+                                        )
+                                        .await?;
                                         seq_id = FIRST_SEQ_ID;
                                         let update_vnode_bitmap =
                                             barrier.as_update_vnode_bitmap(actor_id);

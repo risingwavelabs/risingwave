@@ -31,10 +31,10 @@ use risingwave_common::must_match;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_connector::sink::log_store::{ChunkId, LogStoreResult};
 use risingwave_storage::StateStore;
+use risingwave_storage::store::timeout_auto_rebuild::TimeoutAutoRebuildIter;
 use risingwave_storage::store::{
     LocalStateStore, NewLocalOptions, OpConsistencyLevel, StateStoreRead,
 };
-use risingwave_storage::store::timeout_auto_rebuild::TimeoutAutoRebuildIter;
 use tokio::time::{Duration, Instant, Sleep, sleep_until};
 use tokio_stream::adapters::Peekable;
 
@@ -47,9 +47,7 @@ use crate::common::log_store_impl::kv_log_store::state::{
     LogStorePostSealCurrentEpoch, LogStoreReadState, LogStoreStateWriteChunkFuture,
     LogStoreWriteState, new_log_store_state,
 };
-use crate::common::log_store_impl::kv_log_store::{
-    Epoch, FlushInfo, LogStoreVnodeProgress, SeqId,
-};
+use crate::common::log_store_impl::kv_log_store::{Epoch, FlushInfo, LogStoreVnodeProgress, SeqId};
 use crate::executor::sync_kv_log_store::metrics::SyncedKvLogStoreMetrics;
 use crate::executor::{
     Barrier, BoxedMessageStream, Message, Mutation, StreamExecutorError, StreamExecutorResult,
@@ -352,8 +350,10 @@ pub(crate) async fn aligned_message_stream<S: StateStore>(
                     initial_write_state.seal_current_epoch(barrier.epoch.curr, progress.take());
                 let update_vnode_bitmap = barrier.as_update_vnode_bitmap(actor_id);
                 if update_vnode_bitmap.is_some() {
-                    return Err(anyhow!("updating vnode bitmap in place is not supported any more!")
-                        .into());
+                    return Err(anyhow!(
+                        "updating vnode bitmap in place is not supported any more!"
+                    )
+                    .into());
                 }
                 yield Message::Barrier(barrier);
                 post_seal.post_yield_barrier(None).await?;
@@ -417,20 +417,20 @@ pub(crate) fn process_upstream_chunk<LS: LocalStateStore>(
         cardinality,
         "received chunk"
     );
-    let next_write_future =
-        if let Some(chunk_to_flush) = buffer.add_or_flush_chunk(start_seq_id, end_seq_id, chunk, epoch)
-        {
-            WriteFuture::flush_chunk(
-                stream,
-                write_state,
-                chunk_to_flush,
-                epoch,
-                start_seq_id,
-                end_seq_id,
-            )
-        } else {
-            WriteFuture::receive_from_upstream(stream, write_state)
-        };
+    let next_write_future = if let Some(chunk_to_flush) =
+        buffer.add_or_flush_chunk(start_seq_id, end_seq_id, chunk, epoch)
+    {
+        WriteFuture::flush_chunk(
+            stream,
+            write_state,
+            chunk_to_flush,
+            epoch,
+            start_seq_id,
+            end_seq_id,
+        )
+    } else {
+        WriteFuture::receive_from_upstream(stream, write_state)
+    };
     (new_seq_id, next_write_future)
 }
 
