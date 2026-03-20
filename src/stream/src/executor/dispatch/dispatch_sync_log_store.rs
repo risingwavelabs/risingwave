@@ -463,9 +463,7 @@ mod tests {
     };
     use crate::executor::exchange::permit::channel_for_test;
     use crate::executor::receiver::ReceiverExecutor;
-    use crate::executor::{
-        ActorContext, BarrierInner as Barrier, MessageInner as Message, Mutation, StopMutation,
-    };
+    use crate::executor::{ActorContext, BarrierInner as Barrier, MessageInner as Message};
     use crate::task::barrier_test_utils::LocalBarrierTestEnv;
 
     fn init_logger() {
