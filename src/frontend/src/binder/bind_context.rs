@@ -33,15 +33,27 @@ use crate::binder::{BoundQuery, COLUMN_GROUP_PREFIX, ShareId};
 #[derive(Debug, Clone)]
 pub struct ColumnBinding {
     pub table_name: String,
+    pub schema_name: Option<String>,
+    /// if the table has table alias, `table_alias` store the original table name
+    pub table_alias: Option<String>,
     pub index: usize,
     pub is_hidden: bool,
     pub field: Field,
 }
 
 impl ColumnBinding {
-    pub fn new(table_name: String, index: usize, is_hidden: bool, field: Field) -> Self {
+    pub fn new(
+        table_name: String,
+        schema_name: Option<String>,
+        table_alias: Option<String>,
+        index: usize,
+        is_hidden: bool,
+        field: Field,
+    ) -> Self {
         ColumnBinding {
             table_name,
+            schema_name,
+            table_alias,
             index,
             is_hidden,
             field,
@@ -95,8 +107,8 @@ pub struct BindContext {
     pub columns: Vec<ColumnBinding>,
     // Mapping column name to indices in `columns`.
     pub indices_of: HashMap<String, Vec<usize>>,
-    // Mapping table name to [begin, end) of its columns.
-    pub range_of: HashMap<String, (usize, usize)>,
+    // Mapping (schema name, table name) to [begin, end) of its columns.
+    pub range_of: HashMap<(Option<String>, String), (usize, usize)>,
     // `clause` identifies in what clause we are binding.
     pub clause: Option<Clause>,
     // The `BindContext`'s data on its column groups
@@ -144,10 +156,11 @@ pub struct ColumnGroup {
 impl BindContext {
     pub fn get_column_binding_index(
         &self,
+        schema_name: &Option<String>,
         table_name: &Option<String>,
         column_name: &String,
     ) -> LiteResult<usize> {
-        match &self.get_column_binding_indices(table_name, column_name)?[..] {
+        match &self.get_column_binding_indices(schema_name, table_name, column_name)?[..] {
             [] => unreachable!(),
             [idx] => Ok(*idx),
             _ => Err(ErrorCode::InternalError(format!(
@@ -162,6 +175,7 @@ impl BindContext {
     /// handled in downstream as a `COALESCE` expression
     pub fn get_column_binding_indices(
         &self,
+        schema_name: &Option<String>,
         table_name: &Option<String>,
         column_name: &String,
     ) -> LiteResult<Vec<usize>> {
@@ -172,13 +186,37 @@ impl BindContext {
                         format!("Could not parse {:?} as virtual table name `{COLUMN_GROUP_PREFIX}[group_id]`", table_name)))?;
                     self.get_indices_with_group_id(group_id, column_name)
                 } else {
-                    Ok(vec![
-                        self.get_index_with_table_name(column_name, table_name)?,
-                    ])
+                    Ok(vec![self.get_index_with_table_name(
+                        column_name,
+                        table_name,
+                        schema_name,
+                    )?])
                 }
             }
             None => self.get_unqualified_indices(column_name),
         }
+    }
+
+    pub fn get_table_alias(
+        &self,
+        schema_name: &String,
+        table_name: &String,
+        column_name: &String,
+    ) -> LiteResult<Option<usize>> {
+        let column_indexes = self
+            .indices_of
+            .get(column_name)
+            .ok_or_else(|| ErrorCode::ItemNotFound(format!("Invalid column: {}", column_name)))?;
+        for index in column_indexes {
+            let column = &self.columns[*index];
+            if let (Some(schema), Some(table_alias)) = (&column.schema_name, &column.table_alias)
+                && schema == schema_name
+                && table_alias == table_name
+            {
+                return Ok(Some(*index));
+            }
+        }
+        Ok(None)
     }
 
     fn get_indices_with_group_id(
@@ -300,22 +338,90 @@ impl BindContext {
         }
     }
 
+    /// Resolve a qualified column reference (`table.column` or `schema.table.column`)
+    /// to one concrete column index in the current bind scope.
+    ///
+    /// This function intentionally uses a two-step strategy:
+    /// 1. Resolve relation first (`resolve_relation_range`), including ambiguity checks.
+    /// 2. Resolve column inside that unique relation range (`resolve_column_in_range`).
     fn get_index_with_table_name(
         &self,
         column_name: &String,
         table_name: &String,
+        schema_name: &Option<String>,
     ) -> LiteResult<usize> {
-        let column_indexes = self
+        let chosen_range = self.resolve_relation_range(table_name, schema_name)?;
+        self.resolve_column_in_range(column_name, table_name, chosen_range)
+    }
+
+    /// Resolve the relation range for a `table_name` in the current bind scope.
+    ///
+    /// Alias matches are prioritized over base relation name matches.
+    fn resolve_relation_range(
+        &self,
+        table_name: &String,
+        schema_name: &Option<String>,
+    ) -> LiteResult<(usize, usize)> {
+        let mut alias_ranges = Vec::new();
+        let mut base_ranges = Vec::new();
+
+        for ((_, _), range) in self.range_of.iter().filter(|((rel_schema, rel_name), _)| {
+            rel_name == table_name
+                && schema_name
+                    .as_deref()
+                    .is_none_or(|s| rel_schema.as_deref() == Some(s))
+        }) {
+            match self.columns[range.0].table_alias {
+                Some(_) => alias_ranges.push(*range),
+                None => base_ranges.push(*range),
+            }
+        }
+
+        let chosen_ranges = if alias_ranges.is_empty() {
+            base_ranges
+        } else {
+            alias_ranges
+        };
+
+        match chosen_ranges.as_slice() {
+            [] => Err(ErrorCode::ItemNotFound(format!(
+                "missing FROM-clause entry for table \"{}\"",
+                table_name
+            ))),
+            [range] => Ok(*range),
+            _ => Err(ErrorCode::InvalidReference(format!(
+                "table reference \"{}\" is ambiguous",
+                table_name
+            ))),
+        }
+    }
+
+    /// Resolve `column_name` inside a pre-resolved relation range.
+    fn resolve_column_in_range(
+        &self,
+        column_name: &String,
+        table_name: &String,
+        range: (usize, usize),
+    ) -> LiteResult<usize> {
+        let idxs = self
             .indices_of
             .get(column_name)
             .ok_or_else(|| ErrorCode::ItemNotFound(format!("Invalid column: {}", column_name)))?;
-        match column_indexes
+
+        let matched: Vec<_> = idxs
             .iter()
-            .find(|column_index| self.columns[**column_index].table_name == *table_name)
-        {
-            Some(column_index) => Ok(*column_index),
-            None => Err(ErrorCode::ItemNotFound(format!(
+            .copied()
+            .filter(|index| (range.0..range.1).contains(index))
+            .collect();
+
+        match matched.as_slice() {
+            [] => Err(ErrorCode::ItemNotFound(format!(
                 "missing FROM-clause entry for table \"{}\"",
+                table_name
+            ))),
+            [column_index] => Ok(*column_index),
+            _ => Err(ErrorCode::InvalidReference(format!(
+                "table reference \"{}\" is ambiguous",
                 table_name
             ))),
         }
@@ -338,7 +444,7 @@ impl BindContext {
                 Entry::Occupied(e) => {
                     return Err(ErrorCode::InternalError(format!(
                         "Duplicated table name while merging adjacent contexts: {}",
-                        e.key()
+                        e.key().1
                     ))
                     .into());
                 }

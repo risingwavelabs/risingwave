@@ -20,6 +20,8 @@ use anyhow::anyhow;
 use itertools::Itertools;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{FragmentTypeFlag, FragmentTypeMask, TableId};
+#[cfg(debug_assertions)]
+use risingwave_common::hash::VnodeBitmapExt;
 use risingwave_common::id::JobId;
 use risingwave_common::system_param::AdaptiveParallelismStrategy;
 use risingwave_common::util::worker_util::DEFAULT_RESOURCE_GROUP;
@@ -43,6 +45,7 @@ use sea_orm::{
 
 use crate::MetaResult;
 use crate::controller::fragment::{InflightActorInfo, InflightFragmentInfo};
+use crate::controller::utils::resolve_no_shuffle_actor_mapping;
 use crate::manager::ActiveStreamingWorkerNodes;
 use crate::model::{ActorId, StreamActor, StreamingJobModelContextExt};
 use crate::stream::{AssignerBuilder, SplitDiffOptions};
@@ -593,6 +596,174 @@ pub(crate) fn render_actor_assignments(
     adaptive_parallelism_strategy: AdaptiveParallelismStrategy,
     loaded: &LoadedFragmentContext,
 ) -> MetaResult<RenderedGraph> {
+    let mut actor_id_allocator = RenderActorIdAllocator::Persistent(actor_id_counter);
+    render_actor_assignments_with_allocator(
+        &mut actor_id_allocator,
+        worker_map,
+        adaptive_parallelism_strategy,
+        loaded,
+    )
+}
+
+/// Render a graph with preview-only actor ids so callers can compare layouts
+/// without consuming the global actor id generator.
+pub(crate) fn preview_actor_assignments(
+    worker_map: &HashMap<WorkerId, WorkerNode>,
+    adaptive_parallelism_strategy: AdaptiveParallelismStrategy,
+    loaded: &LoadedFragmentContext,
+) -> MetaResult<RenderedGraph> {
+    let mut actor_id_allocator = RenderActorIdAllocator::Preview { next_actor_id: 0 };
+    render_actor_assignments_with_allocator(
+        &mut actor_id_allocator,
+        worker_map,
+        adaptive_parallelism_strategy,
+        loaded,
+    )
+}
+
+/// Replace preview actor ids with real actor ids after the caller has decided
+/// the rendered layout is not a no-op.
+pub(crate) fn materialize_actor_assignments(
+    actor_id_counter: &AtomicU32,
+    rendered: RenderedGraph,
+) -> RenderedGraph {
+    let RenderedGraph {
+        fragments,
+        ensembles,
+    } = rendered;
+    #[cfg(debug_assertions)]
+    let preview_slots = collect_relative_actor_slots_by_fragment(&fragments);
+
+    let mut ordered_fragments = fragments
+        .into_iter()
+        .flat_map(|(database_id, jobs)| {
+            jobs.into_iter().flat_map(move |(job_id, fragments)| {
+                fragments.into_iter().map(move |(fragment_id, fragment)| {
+                    (database_id, job_id, fragment_id, fragment)
+                })
+            })
+        })
+        .collect_vec();
+    // Preserve preview order when remapping ids so fragments from the same
+    // no-shuffle ensemble keep their relative slot alignment.
+    //
+    // This works because the preview allocator assigns actor ids with a single
+    // monotonically-increasing counter, so `min(actor_id)` per fragment faithfully
+    // reproduces the original allocation order. If the preview allocator ever
+    // changes to a non-monotonic scheme this sort key must be revisited.
+    //
+    // Empty fragments should not appear, but fragment_id keeps the ordering
+    // deterministic if they do.
+    ordered_fragments.sort_by_key(|(_, _, fragment_id, fragment)| {
+        (
+            fragment
+                .actors
+                .keys()
+                .copied()
+                .min()
+                .map(|actor_id| actor_id.as_raw_id())
+                .unwrap_or(u32::MAX),
+            *fragment_id,
+        )
+    });
+
+    let mut materialized = FragmentRenderMap::new();
+    for (database_id, job_id, fragment_id, fragment) in ordered_fragments {
+        materialized
+            .entry(database_id)
+            .or_default()
+            .entry(job_id)
+            .or_default()
+            .insert(
+                fragment_id,
+                materialize_fragment(fragment, actor_id_counter),
+            );
+    }
+
+    #[cfg(debug_assertions)]
+    assert_materialization_preserves_preview_slots(&preview_slots, &materialized);
+
+    RenderedGraph {
+        fragments: materialized,
+        ensembles,
+    }
+}
+
+#[cfg(debug_assertions)]
+type RelativeActorSlot = (u32, WorkerId, Option<Vec<usize>>, Vec<SplitId>);
+
+#[cfg(debug_assertions)]
+fn collect_relative_actor_slots(fragment: &InflightFragmentInfo) -> Vec<RelativeActorSlot> {
+    let base = fragment
+        .actors
+        .keys()
+        .copied()
+        .min()
+        .map(|actor_id| actor_id.as_raw_id())
+        .unwrap_or_default();
+
+    let mut entries = fragment
+        .actors
+        .iter()
+        .map(|(&actor_id, info)| {
+            let idx = actor_id.as_raw_id() - base;
+            let vnode_bitmap = info.vnode_bitmap.as_ref().map(|bitmap| {
+                bitmap
+                    .iter_vnodes()
+                    .map(|vnode| vnode.to_index())
+                    .collect_vec()
+            });
+            let mut splits = info.splits.iter().map(SplitMetaData::id).collect_vec();
+            splits.sort_unstable();
+            (idx, info.worker_id, vnode_bitmap, splits)
+        })
+        .collect_vec();
+    entries.sort_unstable_by_key(|(idx, ..)| *idx);
+    entries
+}
+
+#[cfg(debug_assertions)]
+fn collect_relative_actor_slots_by_fragment(
+    fragments: &FragmentRenderMap,
+) -> HashMap<FragmentId, Vec<RelativeActorSlot>> {
+    fragments
+        .values()
+        .flat_map(|jobs| jobs.values())
+        .flatten()
+        .map(|(fragment_id, fragment)| (*fragment_id, collect_relative_actor_slots(fragment)))
+        .collect()
+}
+
+#[cfg(debug_assertions)]
+fn assert_materialization_preserves_preview_slots(
+    preview_slots: &HashMap<FragmentId, Vec<RelativeActorSlot>>,
+    materialized_fragments: &FragmentRenderMap,
+) {
+    for (database_id, jobs) in materialized_fragments {
+        for (job_id, fragments) in jobs {
+            for (fragment_id, fragment) in fragments {
+                let expected_slots = preview_slots.get(fragment_id).unwrap_or_else(|| {
+                    panic!(
+                        "preview fragment {fragment_id} for database {database_id}, job {job_id} not found"
+                    )
+                });
+
+                assert_eq!(
+                    collect_relative_actor_slots(fragment),
+                    *expected_slots,
+                    "materialization changed preview slot ordering for database {database_id}, job {job_id}, fragment {fragment_id}"
+                );
+            }
+        }
+    }
+}
+
+fn render_actor_assignments_with_allocator(
+    actor_id_allocator: &mut RenderActorIdAllocator<'_>,
+    worker_map: &HashMap<WorkerId, WorkerNode>,
+    adaptive_parallelism_strategy: AdaptiveParallelismStrategy,
+    loaded: &LoadedFragmentContext,
+) -> MetaResult<RenderedGraph> {
     if loaded.is_empty() {
         return Ok(RenderedGraph::empty());
     }
@@ -604,8 +775,8 @@ pub(crate) fn render_actor_assignments(
         database_map: &loaded.database_map,
     };
 
-    let fragments = render_actors(
-        actor_id_counter,
+    let fragments = render_actors_with_allocator(
+        actor_id_allocator,
         &loaded.ensembles,
         &loaded.job_fragments,
         &loaded.job_map,
@@ -618,6 +789,30 @@ pub(crate) fn render_actor_assignments(
         fragments,
         ensembles: loaded.ensembles.clone(),
     })
+}
+
+fn materialize_fragment(
+    mut fragment: InflightFragmentInfo,
+    actor_id_counter: &AtomicU32,
+) -> InflightFragmentInfo {
+    let actor_count = u32::try_from(fragment.actors.len()).expect("actor count exceeds u32::MAX");
+    let actor_id_base: ActorId = actor_id_counter
+        .fetch_add(actor_count, Ordering::Relaxed)
+        .into();
+
+    let mut actors = fragment.actors.into_iter().collect_vec();
+    actors.sort_by_key(|(actor_id, _)| *actor_id);
+
+    fragment.actors = actors
+        .into_iter()
+        .enumerate()
+        .map(|(idx, (_, info))| {
+            let actor_offset = u32::try_from(idx).expect("actor index exceeds u32::MAX");
+            (actor_id_base + actor_offset, info)
+        })
+        .collect();
+
+    fragment
 }
 
 async fn build_loaded_context<C>(
@@ -695,8 +890,56 @@ struct RenderActorsContext<'a> {
     database_map: &'a HashMap<DatabaseId, database::Model>,
 }
 
+enum RenderActorIdAllocator<'a> {
+    Persistent(&'a AtomicU32),
+    Preview { next_actor_id: u32 },
+}
+
+impl RenderActorIdAllocator<'_> {
+    fn allocate_block(&mut self, actor_count: u32) -> ActorId {
+        match self {
+            Self::Persistent(actor_id_counter) => {
+                let actor_id_base: ActorId = actor_id_counter
+                    .fetch_add(actor_count, Ordering::Relaxed)
+                    .into();
+                actor_id_base
+            }
+            Self::Preview { next_actor_id } => {
+                let actor_id_base = *next_actor_id;
+                *next_actor_id = next_actor_id
+                    .checked_add(actor_count)
+                    .expect("preview actor id overflow");
+                let actor_id_base: ActorId = actor_id_base.into();
+                actor_id_base
+            }
+        }
+    }
+}
+
+#[cfg(test)]
 fn render_actors(
     actor_id_counter: &AtomicU32,
+    ensembles: &[NoShuffleEnsemble],
+    job_fragments: &HashMap<JobId, HashMap<FragmentId, LoadedFragment>>,
+    job_map: &HashMap<JobId, streaming_job::Model>,
+    worker_map: &HashMap<WorkerId, WorkerNode>,
+    adaptive_parallelism_strategy: AdaptiveParallelismStrategy,
+    context: RenderActorsContext<'_>,
+) -> MetaResult<FragmentRenderMap> {
+    let mut actor_id_allocator = RenderActorIdAllocator::Persistent(actor_id_counter);
+    render_actors_with_allocator(
+        &mut actor_id_allocator,
+        ensembles,
+        job_fragments,
+        job_map,
+        worker_map,
+        adaptive_parallelism_strategy,
+        context,
+    )
+}
+
+fn render_actors_with_allocator(
+    actor_id_allocator: &mut RenderActorIdAllocator<'_>,
     ensembles: &[NoShuffleEnsemble],
     job_fragments: &HashMap<JobId, HashMap<FragmentId, LoadedFragment>>,
     job_map: &HashMap<JobId, streaming_job::Model>,
@@ -742,9 +985,9 @@ fn render_actors(
                 )
             })?;
 
-        let (job_id, vnode_count) = entry_fragments
+        let (job_id, distribution_type, vnode_count) = entry_fragments
             .iter()
-            .map(|f| (f.job_id, f.vnode_count))
+            .map(|f| (f.job_id, f.distribution_type, f.vnode_count))
             .dedup()
             .exactly_one()
             .map_err(|_| anyhow!("Multiple jobs found in no-shuffle ensemble"))?;
@@ -774,6 +1017,7 @@ fn render_actors(
             adaptive_parallelism_strategy,
             entry_fragment_parallelism,
             database_resource_group,
+            distribution_type,
             vnode_count,
         )?;
 
@@ -814,7 +1058,7 @@ fn render_actors(
             let vnode_count = fragment.vnode_count;
             let source_id = fragment_source_ids.get(&fragment_id).cloned();
 
-            let aligner = ComponentFragmentAligner::new(&actor_template, actor_id_counter);
+            let aligner = ComponentFragmentAligner::new(&actor_template, actor_id_allocator);
             let actors = aligner.align_component_actor(distribution_type);
             let mut splits = source_id
                 .map(|source_id| {
@@ -865,9 +1109,9 @@ fn render_actors(
 }
 
 pub(crate) struct EnsembleActorTemplate {
-    assignment: BTreeMap<WorkerId, BTreeMap<u32, Vec<usize>>>,
+    assignment: BTreeMap<WorkerId, BTreeMap<u32, Option<Bitmap>>>,
+    distribution_type: DistributionType,
     actor_count: u32,
-    vnode_count: usize,
 }
 
 impl EnsembleActorTemplate {
@@ -877,6 +1121,7 @@ impl EnsembleActorTemplate {
         adaptive_parallelism_strategy: AdaptiveParallelismStrategy,
         entry_fragment_parallelism: Option<StreamingParallelism>,
         database_resource_group: String,
+        distribution_type: DistributionType,
         vnode_count: usize,
     ) -> MetaResult<Self> {
         let job_id = job.job_id;
@@ -951,15 +1196,95 @@ impl EnsembleActorTemplate {
         let actors = (0..(actual_parallelism as u32)).collect_vec();
         let vnodes = (0..vnode_count).collect_vec();
 
-        let assignment = assigner.assign_hierarchical(&available_workers, &actors, &vnodes)?;
+        let raw_assignment = assigner.assign_hierarchical(&available_workers, &actors, &vnodes)?;
+
+        let assignment = raw_assignment
+            .into_iter()
+            .map(|(worker_id, actors)| {
+                let actors = actors
+                    .into_iter()
+                    .map(|(actor_idx, vnodes)| {
+                        let bitmap = match distribution_type {
+                            DistributionType::Single => None,
+                            DistributionType::Hash => {
+                                Some(Bitmap::from_indices(vnode_count, &vnodes))
+                            }
+                        };
+                        (actor_idx, bitmap)
+                    })
+                    .collect();
+                (worker_id, actors)
+            })
+            .collect();
 
         let actor_count = u32::try_from(actors.len()).expect("actor parallelism exceeds u32::MAX");
 
         Ok(Self {
             assignment,
+            distribution_type,
             actor_count,
-            vnode_count,
         })
+    }
+
+    pub(crate) fn from_existing_inflight_fragment(fragment: &InflightFragmentInfo) -> Self {
+        if fragment.actors.is_empty() {
+            return Self {
+                assignment: BTreeMap::new(),
+                distribution_type: fragment.distribution_type,
+                actor_count: 0,
+            };
+        }
+
+        let actor_count = fragment.actors.len() as u32;
+
+        let mut assignment: BTreeMap<WorkerId, BTreeMap<u32, Option<Bitmap>>> = BTreeMap::new();
+        // Enumerate actors starting from 0 index, instead of deriving from actor_id.
+        for (actor_idx, (&_actor_id, actor_info)) in fragment.actors.iter().enumerate() {
+            let actor_idx = actor_idx as u32;
+            assignment
+                .entry(actor_info.worker_id)
+                .or_default()
+                .insert(actor_idx, actor_info.vnode_bitmap.clone());
+        }
+
+        Self {
+            assignment,
+            distribution_type: fragment.distribution_type,
+            actor_count,
+        }
+    }
+
+    /// Assert that two `EnsembleActorTemplate` are aligned: same distribution type,
+    /// same actor count, and same vnode bitmap / worker placement. Used to verify that
+    /// multiple existing fragments within the same no-shuffle ensemble are consistent.
+    ///
+    /// Internally calls [`resolve_no_shuffle_actor_mapping`] which asserts distribution
+    /// type, count, and bitmap equality. Then additionally verifies worker placement.
+    pub(crate) fn assert_aligned_with(
+        &self,
+        other: &Self,
+        self_fragment_id: FragmentId,
+        other_fragment_id: FragmentId,
+    ) {
+        let mapping = resolve_no_shuffle_actor_mapping(
+            self.distribution_type,
+            self.assignment
+                .iter()
+                .flat_map(|(&wid, actors)| actors.iter().map(move |(&idx, bmp)| ((wid, idx), bmp))),
+            other.distribution_type,
+            other
+                .assignment
+                .iter()
+                .flat_map(|(&wid, actors)| actors.iter().map(move |(&idx, bmp)| ((wid, idx), bmp))),
+        );
+
+        for ((self_worker, _self_idx), (other_worker, _other_idx)) in &mapping {
+            assert_eq!(
+                self_worker, other_worker,
+                "fragments {} and {} disagree on worker placement: {:?}",
+                self_fragment_id, other_fragment_id, mapping,
+            );
+        }
     }
 
     fn assign_splits(
@@ -994,17 +1319,23 @@ pub(crate) struct ComponentFragmentAligner<'a> {
 }
 
 impl<'a> ComponentFragmentAligner<'a> {
-    pub(crate) fn new(
+    fn new(
         actor_template: &'a EnsembleActorTemplate,
-        actor_id_counter: &AtomicU32,
+        actor_id_allocator: &mut RenderActorIdAllocator<'_>,
     ) -> Self {
-        let actor_id_base = actor_id_counter
-            .fetch_add(actor_template.actor_count, Ordering::Relaxed)
-            .into();
+        let actor_id_base = actor_id_allocator.allocate_block(actor_template.actor_count);
         Self {
             actor_template,
             actor_id_base,
         }
+    }
+
+    pub(crate) fn new_persistent(
+        actor_template: &'a EnsembleActorTemplate,
+        actor_id_counter: &AtomicU32,
+    ) -> Self {
+        let mut actor_id_allocator = RenderActorIdAllocator::Persistent(actor_id_counter);
+        Self::new(actor_template, &mut actor_id_allocator)
     }
 
     pub(crate) fn align_component_actor(
@@ -1013,31 +1344,26 @@ impl<'a> ComponentFragmentAligner<'a> {
     ) -> HashMap<ActorId, (WorkerId, Option<Bitmap>)> {
         let EnsembleActorTemplate {
             assignment,
-            vnode_count,
             actor_count,
+            distribution_type: _,
         } = &self.actor_template;
         let actor_id_base = self.actor_id_base;
-        let vnode_count = *vnode_count;
         {
             assignment
                 .iter()
                 .flat_map(|(worker_id, actors)| {
                     actors
                         .iter()
-                        .map(move |(actor_id, vnodes)| (worker_id, actor_id, vnodes))
+                        .map(move |(actor_idx, bitmap)| (worker_id, actor_idx, bitmap))
                 })
-                .map(|(&worker_id, &actor_idx, vnodes)| {
-                    let vnode_bitmap = match distribution_type {
-                        DistributionType::Single => {
-                            assert_eq!(*actor_count, 1);
-                            None
-                        }
-                        DistributionType::Hash => Some(Bitmap::from_indices(vnode_count, vnodes)),
-                    };
+                .map(|(&worker_id, &actor_idx, bitmap)| {
+                    if distribution_type == DistributionType::Single {
+                        assert_eq!(*actor_count, 1);
+                    }
 
                     let actor_id = actor_id_base + actor_idx;
 
-                    (actor_id, (worker_id, vnode_bitmap))
+                    (actor_id, (worker_id, bitmap.clone()))
                 })
                 .collect()
         }
@@ -1214,6 +1540,14 @@ pub struct NoShuffleEnsemble {
 }
 
 impl NoShuffleEnsemble {
+    /// Create a single-fragment ensemble (for standalone fragments with no `NoShuffle` edges).
+    pub(crate) fn singleton(fragment_id: FragmentId) -> Self {
+        Self {
+            entries: HashSet::from_iter([fragment_id]),
+            components: HashSet::from_iter([fragment_id]),
+        }
+    }
+
     #[cfg(test)]
     pub fn for_test(
         entries: impl IntoIterator<Item = FragmentId>,
@@ -1941,6 +2275,125 @@ mod tests {
             BTreeSet::from([split_a.id().to_string(), split_b.id().to_string()])
         );
         assert_eq!(actor_id_counter.load(Ordering::Relaxed), 4);
+    }
+
+    #[test]
+    fn preview_actor_assignments_defers_actor_id_allocation() {
+        let actor_id_counter = AtomicU32::new(100);
+        let entry_fragment_id: FragmentId = 11.into();
+        let downstream_fragment_id: FragmentId = 12.into();
+        let job_id: JobId = 30.into();
+        let database_id: DatabaseId = DatabaseId::new(7);
+        let source_id: SourceId = 99.into();
+
+        let source_mask = FragmentTypeFlag::raw_flag([FragmentTypeFlag::Source]) as i32;
+        let source_scan_mask = FragmentTypeFlag::raw_flag([FragmentTypeFlag::SourceScan]) as i32;
+
+        let entry_fragment = build_fragment(
+            entry_fragment_id,
+            job_id,
+            source_mask,
+            DistributionType::Hash,
+            4,
+            StreamingParallelism::Fixed(2),
+        );
+
+        let downstream_fragment = build_fragment(
+            downstream_fragment_id,
+            job_id,
+            source_scan_mask,
+            DistributionType::Hash,
+            4,
+            StreamingParallelism::Fixed(2),
+        );
+
+        let job_model = streaming_job::Model {
+            job_id,
+            job_status: JobStatus::Created,
+            create_type: CreateType::Background,
+            timezone: None,
+            config_override: None,
+            adaptive_parallelism_strategy: None,
+            parallelism: StreamingParallelism::Fixed(2),
+            backfill_parallelism: None,
+            backfill_orders: None,
+            max_parallelism: 2,
+            specific_resource_group: None,
+            is_serverless_backfill: false,
+        };
+
+        let database_model = database::Model {
+            database_id,
+            name: "preview_db".into(),
+            resource_group: "rg-source".into(),
+            barrier_interval_ms: None,
+            checkpoint_frequency: None,
+        };
+
+        let ensembles = vec![NoShuffleEnsemble {
+            entries: HashSet::from([entry_fragment_id]),
+            components: HashSet::from([entry_fragment_id, downstream_fragment_id]),
+        }];
+
+        let fragment_map = HashMap::from([
+            (entry_fragment_id, entry_fragment),
+            (downstream_fragment_id, downstream_fragment),
+        ]);
+        let job_fragments = HashMap::from([(job_id, fragment_map)]);
+        let job_map = HashMap::from([(job_id, job_model)]);
+
+        let worker_map: HashMap<WorkerId, WorkerNode> = HashMap::from([
+            (1.into(), build_worker_node(1, 1, "rg-source")),
+            (2.into(), build_worker_node(2, 1, "rg-source")),
+        ]);
+
+        let split_a = SplitImpl::Test(TestSourceSplit {
+            id: Arc::<str>::from("split-a"),
+            properties: HashMap::new(),
+            offset: "0".into(),
+        });
+        let split_b = SplitImpl::Test(TestSourceSplit {
+            id: Arc::<str>::from("split-b"),
+            properties: HashMap::new(),
+            offset: "0".into(),
+        });
+
+        let loaded = LoadedFragmentContext {
+            ensembles,
+            job_fragments,
+            job_map,
+            streaming_job_databases: HashMap::from([(job_id, database_id)]),
+            database_map: HashMap::from([(database_id, database_model)]),
+            fragment_source_ids: HashMap::from([
+                (entry_fragment_id, source_id),
+                (downstream_fragment_id, source_id),
+            ]),
+            fragment_splits: HashMap::from([(entry_fragment_id, vec![split_a, split_b])]),
+        };
+
+        let preview =
+            preview_actor_assignments(&worker_map, AdaptiveParallelismStrategy::Auto, &loaded)
+                .expect("preview rendering succeeds");
+        assert_eq!(actor_id_counter.load(Ordering::Relaxed), 100);
+
+        let preview_entry_state =
+            collect_actor_state(&preview.fragments[&database_id][&job_id][&entry_fragment_id]);
+        let preview_downstream_state =
+            collect_actor_state(&preview.fragments[&database_id][&job_id][&downstream_fragment_id]);
+        assert_eq!(preview_entry_state, preview_downstream_state);
+
+        let materialized = materialize_actor_assignments(&actor_id_counter, preview);
+
+        let materialized_entry_state =
+            collect_actor_state(&materialized.fragments[&database_id][&job_id][&entry_fragment_id]);
+        let materialized_downstream_state = collect_actor_state(
+            &materialized.fragments[&database_id][&job_id][&downstream_fragment_id],
+        );
+
+        assert_eq!(materialized_entry_state, materialized_downstream_state);
+        assert_eq!(materialized_entry_state, preview_entry_state);
+        assert_eq!(materialized_downstream_state, preview_downstream_state);
+        assert_eq!(actor_id_counter.load(Ordering::Relaxed), 104);
     }
 
     /// Test that job-level strategy overrides global strategy for Adaptive parallelism.
