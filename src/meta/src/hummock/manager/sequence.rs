@@ -480,9 +480,7 @@ mod tests {
 
         // Second call: refill succeeds → caller gets a valid value, proving retry works.
         let val = seq
-            .next(4, |count| async move {
-                Ok(200u64 + u64::from(count) - u64::from(count))
-            })
+            .next(4, |_count| async move { Ok(200u64) })
             .await
             .unwrap();
         assert_eq!(val, 200);
