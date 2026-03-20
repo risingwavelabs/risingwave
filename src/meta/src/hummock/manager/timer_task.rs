@@ -608,11 +608,6 @@ impl HummockManager {
         }
     }
 
-    #[cfg(test)]
-    pub async fn schedule_group_split_for_test(&self) {
-        self.on_handle_schedule_group_split().await;
-    }
-
     async fn on_handle_trigger_multi_group(&self, task_type: compact_task::TaskType) {
         for cg_id in self.compaction_group_ids().await {
             self.compaction_state.try_sched_compaction(

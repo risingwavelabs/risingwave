@@ -195,7 +195,8 @@ pub struct MetaOpts {
 
     /// Schedule `periodic_scheduling_compaction_group_split_interval_sec` for all compaction groups with this interval.
     pub periodic_scheduling_compaction_group_split_interval_sec: u64,
-    /// Whether to enable compaction group normalize in the split scheduler.
+    /// When enabled, automatically splits compaction groups whose table-id ranges
+    /// overlap into non-overlapping groups before the regular split/merge scheduling.
     pub enable_compaction_group_normalize: bool,
 
     /// Whether config object storage bucket lifecycle to purge stale data.

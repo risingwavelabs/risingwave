@@ -2701,11 +2701,114 @@ async fn test_try_merge_compaction_group_error_propagation() {
     );
 }
 
+/// Collect the raw table-id u32s that belong to `group_id` in the given version.
+fn member_table_ids(version: &HummockVersion, group_id: CompactionGroupId) -> Vec<u32> {
+    version
+        .state_table_info
+        .compaction_group_member_table_ids(group_id)
+        .iter()
+        .map(|t| t.as_raw_id())
+        .collect_vec()
+}
+
+/// Assert that no two compaction groups in `version` have overlapping table-id ranges
+/// (i.e. after sorting by min table-id, every group's max < next group's min).
+fn assert_no_group_overlap(version: &HummockVersion) {
+    let mut ranges: Vec<(u32, u32)> = version
+        .levels
+        .keys()
+        .filter_map(|gid| {
+            let m = member_table_ids(version, *gid);
+            (!m.is_empty()).then(|| (*m.first().unwrap(), *m.last().unwrap()))
+        })
+        .collect_vec();
+    ranges.sort_by_key(|(min, _)| *min);
+    assert!(
+        ranges.windows(2).all(|w| w[0].1 < w[1].0),
+        "groups still overlap: {ranges:?}",
+    );
+}
+
+/// Covers three cases where `normalize_overlapping_compaction_groups` should
+/// return 0 splits: non-overlapping input, single-table left group, and
+/// disabled scheduling config.
 #[tokio::test]
-async fn test_normalize_overlapping_compaction_groups_cascading() {
+async fn test_normalize_noop_cases() {
+    // --- (a) non-overlapping: [10,11] vs [20,21] → 0 splits ---
+    let (_env, hummock_manager, _, _worker_id) = setup_compute_env(80).await;
+    hummock_manager
+        .register_table_ids_for_test(&[(10, 2.into()), (11, 2.into())])
+        .await
+        .unwrap();
+    hummock_manager
+        .register_table_ids_for_test(&[(20, 3.into()), (21, 3.into())])
+        .await
+        .unwrap();
+    assert_eq!(
+        hummock_manager
+            .normalize_overlapping_compaction_groups()
+            .await
+            .unwrap(),
+        0,
+        "(a) non-overlapping groups must not be split"
+    );
+
+    // --- (b) single-table left group: [64] vs [65,81] → 0 splits ---
+    let (_env, hummock_manager, _, _worker_id) = setup_compute_env(80).await;
+    hummock_manager
+        .register_table_ids_for_test(&[(64, 2.into())])
+        .await
+        .unwrap();
+    hummock_manager
+        .register_table_ids_for_test(&[(65, 3.into()), (81, 3.into())])
+        .await
+        .unwrap();
+    assert_eq!(
+        hummock_manager
+            .normalize_overlapping_compaction_groups()
+            .await
+            .unwrap(),
+        0,
+        "(b) single-table left group must not be split"
+    );
+
+    // --- (c) disable_auto_group_scheduling on left group → 0 splits ---
+    let (_env, hummock_manager, _, _worker_id) = setup_compute_env(80).await;
+    hummock_manager
+        .register_table_ids_for_test(&[(64, 2.into()), (80, 2.into())])
+        .await
+        .unwrap();
+    hummock_manager
+        .register_table_ids_for_test(&[(65, 3.into()), (81, 3.into())])
+        .await
+        .unwrap();
+    let cg_64 = get_compaction_group_id_by_table_id(hummock_manager.clone(), 64).await;
+    hummock_manager
+        .update_compaction_config(&[cg_64], &[MutableConfig::DisableAutoGroupScheduling(true)])
+        .await
+        .unwrap();
+    assert_eq!(
+        hummock_manager
+            .normalize_overlapping_compaction_groups()
+            .await
+            .unwrap(),
+        0,
+        "(c) disabled scheduling must prevent splits"
+    );
+    assert_eq!(
+        member_table_ids(&hummock_manager.get_current_version().await, cg_64),
+        vec![64, 80]
+    );
+}
+
+/// Overlapping groups require cascading splits.
+/// StateDefault(2): [64,80], MaterializedView(3): [65,81,83]
+/// Expected: 2 splits, afterwards every group range is disjoint, and the
+/// original groups keep only their first table each.
+#[tokio::test]
+async fn test_normalize_cascading_splits() {
     let (_env, hummock_manager, _, _worker_id) = setup_compute_env(80).await;
 
-    // StateDefault(2): [64,80], MaterializedView(3): [65,81,83]
     hummock_manager
         .register_table_ids_for_test(&[(64, 2.into()), (80, 2.into())])
         .await
@@ -2722,46 +2825,25 @@ async fn test_normalize_overlapping_compaction_groups_cascading() {
         .normalize_overlapping_compaction_groups()
         .await
         .unwrap();
-    assert_eq!(split_count, 2);
+    assert_eq!(split_count, 2, "two splits needed to untangle the ranges");
 
-    let current_version = hummock_manager.get_current_version().await;
-
-    let members_64 = current_version
-        .state_table_info
-        .compaction_group_member_table_ids(cg_64)
-        .iter()
-        .map(|table_id| table_id.as_raw_id())
-        .collect_vec();
-    let members_65 = current_version
-        .state_table_info
-        .compaction_group_member_table_ids(cg_65)
-        .iter()
-        .map(|table_id| table_id.as_raw_id())
-        .collect_vec();
-    assert_eq!(members_64, vec![64]);
-    assert_eq!(members_65, vec![65]);
-
-    let mut ranges = current_version
-        .levels
-        .keys()
-        .filter_map(|group_id| {
-            let members = current_version
-                .state_table_info
-                .compaction_group_member_table_ids(*group_id)
-                .iter()
-                .map(|table_id| table_id.as_raw_id())
-                .collect_vec();
-            (!members.is_empty()).then(|| (*members.first().unwrap(), *members.last().unwrap()))
-        })
-        .collect_vec();
-    ranges.sort_by_key(|(min_table_id, _)| *min_table_id);
-    assert!(ranges.windows(2).all(|window| window[0].1 < window[1].0));
+    let v = hummock_manager.get_current_version().await;
+    assert_eq!(member_table_ids(&v, cg_64), vec![64]);
+    assert_eq!(member_table_ids(&v, cg_65), vec![65]);
+    assert_no_group_overlap(&v);
 }
 
+/// After normalize splits a parent group, any in-flight compaction tasks whose
+/// `compaction_group_version_id` is now stale must be auto-cancelled.
 #[tokio::test]
-async fn test_normalize_overlapping_compaction_groups_respects_disable_auto_group_scheduling() {
-    let (_env, hummock_manager, _, _worker_id) = setup_compute_env(80).await;
+async fn test_normalize_cancels_expired_compact_tasks() {
+    let (_env, hummock_manager, _, worker_id) = setup_compute_env(80).await;
+    let hummock_meta_client: Arc<dyn HummockMetaClient> = Arc::new(MockHummockMetaClient::new(
+        hummock_manager.clone(),
+        worker_id as _,
+    ));
 
+    // Register overlapping groups:  group 2: [64,80],  group 3: [65,81]
     hummock_manager
         .register_table_ids_for_test(&[(64, 2.into()), (80, 2.into())])
         .await
@@ -2772,43 +2854,61 @@ async fn test_normalize_overlapping_compaction_groups_respects_disable_auto_grou
         .unwrap();
 
     let cg_64 = get_compaction_group_id_by_table_id(hummock_manager.clone(), 64).await;
-    hummock_manager
-        .update_compaction_config(&[cg_64], &[MutableConfig::DisableAutoGroupScheduling(true)])
+
+    // Commit an epoch so that L0 has data and a compaction task can be generated.
+    let epoch = test_epoch(1);
+    hummock_meta_client
+        .commit_epoch(
+            epoch,
+            SyncResult {
+                uncommitted_ssts: vec![gen_local_sstable_info(1, vec![64, 80], epoch)],
+                ..Default::default()
+            },
+        )
         .await
         .unwrap();
 
+    // Grab a compaction task for group cg_64 — this records a version_id snapshot.
+    let task = hummock_manager
+        .get_compact_task(cg_64, &mut default_compaction_selector())
+        .await
+        .unwrap()
+        .expect("should produce a compaction task");
+    let task_id = task.task_id;
+
+    // Sanity: the task is assigned.
+    assert!(
+        !hummock_manager
+            .compaction
+            .read()
+            .await
+            .get_compact_task_assignments_by_group_id(cg_64)
+            .is_empty(),
+        "task should be assigned before normalize"
+    );
+
+    // Run normalize — this bumps the group's version_id via split.
     let split_count = hummock_manager
         .normalize_overlapping_compaction_groups()
         .await
         .unwrap();
-    assert_eq!(split_count, 0);
+    assert!(split_count > 0, "must have split at least once");
 
-    let current_version = hummock_manager.get_current_version().await;
-    let members = current_version
-        .state_table_info
-        .compaction_group_member_table_ids(cg_64)
-        .iter()
-        .map(|table_id| table_id.as_raw_id())
-        .collect_vec();
-    assert_eq!(members, vec![64, 80]);
-}
-
-#[tokio::test]
-async fn test_normalize_overlapping_compaction_groups_noop_on_non_overlapping_input() {
-    let (_env, hummock_manager, _, _worker_id) = setup_compute_env(80).await;
-
-    hummock_manager
-        .register_table_ids_for_test(&[(10, 2.into()), (11, 2.into())])
+    // The task should now be auto-cancelled (expired) by Block 2 of normalize.
+    // Attempting to report it as Success should fail (return false) because it
+    // was already cancelled.
+    let report_ok = hummock_manager
+        .report_compact_task(
+            task_id,
+            TaskStatus::Success,
+            vec![],
+            None,
+            HashMap::default(),
+        )
         .await
         .unwrap();
-    hummock_manager
-        .register_table_ids_for_test(&[(20, 3.into()), (21, 3.into())])
-        .await
-        .unwrap();
-
-    let split_count = hummock_manager
-        .normalize_overlapping_compaction_groups()
-        .await
-        .unwrap();
-    assert_eq!(split_count, 0);
+    assert!(
+        !report_ok,
+        "expired task must have been cancelled by normalize, so late report should return false"
+    );
 }
