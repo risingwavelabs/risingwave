@@ -739,7 +739,13 @@ impl CreatingStreamingJobControl {
         Ok(())
     }
 
-    pub(crate) fn collect(&mut self, collected_barrier: CollectedBarrier) -> bool {
+    pub(crate) fn collect(&mut self, collected_barrier: CollectedBarrier<'_>) -> bool {
+        self.status.update_progress(
+            collected_barrier
+                .resps
+                .values()
+                .flat_map(|resp| &resp.create_mview_progress),
+        );
         self.barrier_control.collect(collected_barrier);
         self.should_merge_to_upstream()
     }
@@ -805,11 +811,7 @@ impl CreatingStreamingJobControl {
         };
         self.barrier_control
             .start_completing(epoch_end_bound, |epoch| {
-                let (resps, info) =
-                    partial_graph_manager.take_collected_barrier(self.partial_graph_id, epoch);
-                self.status
-                    .update_progress(resps.iter().flat_map(|resp| &resp.create_mview_progress));
-                (resps, info)
+                partial_graph_manager.take_collected_barrier(self.partial_graph_id, epoch)
             })
             .map(|(epoch, resps, info)| {
                 let is_finish_epoch = if let Some(finish_at_epoch) = finished_at_epoch {

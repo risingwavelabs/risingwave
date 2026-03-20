@@ -147,7 +147,7 @@ impl CheckpointControl {
     pub(crate) fn barrier_collected(
         &mut self,
         partial_graph_id: PartialGraphId,
-        collected_barrier: CollectedBarrier,
+        collected_barrier: CollectedBarrier<'_>,
         periodic_barriers: &mut PeriodicBarriers,
     ) -> MetaResult<()> {
         let (database_id, _) = from_partial_graph_id(partial_graph_id);
@@ -705,7 +705,7 @@ impl DatabaseCheckpointControl {
     fn barrier_collected(
         &mut self,
         partial_graph_id: PartialGraphId,
-        collected_barrier: CollectedBarrier,
+        collected_barrier: CollectedBarrier<'_>,
         periodic_barriers: &mut PeriodicBarriers,
     ) -> MetaResult<()> {
         let prev_epoch = collected_barrier.epoch.prev;

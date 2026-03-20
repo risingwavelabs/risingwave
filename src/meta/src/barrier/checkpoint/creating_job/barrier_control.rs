@@ -109,19 +109,13 @@ impl CreatingStreamingJobBarrierControl {
             .set(self.inflight_barrier_queue.len() as _);
     }
 
-    pub(super) fn collect(&mut self, collected_barrier: CollectedBarrier) {
+    pub(super) fn collect(&mut self, collected_barrier: CollectedBarrier<'_>) {
         let epoch = self
             .inflight_barrier_queue
             .pop_back()
             .expect("non-empty when collected");
         assert_eq!(epoch, collected_barrier.epoch.prev);
-        let barrier_latency_metrics = if collected_barrier.epoch.prev < self.snapshot_epoch {
-            &self.consuming_snapshot_barrier_latency
-        } else {
-            &self.consuming_log_store_barrier_latency
-        };
-        barrier_latency_metrics.observe(collected_barrier.barrier_latency_secs);
-        self.add_collected(epoch);
+        self.add_collected(collected_barrier);
 
         self.inflight_barrier_num
             .set(self.inflight_barrier_queue.len() as _);
@@ -173,7 +167,8 @@ impl CreatingStreamingJobBarrierControl {
         }
     }
 
-    fn add_collected(&mut self, epoch: u64) {
+    fn add_collected(&mut self, collected_barrier: CollectedBarrier<'_>) {
+        let epoch = collected_barrier.epoch.prev;
         if let Some(prev_epoch) = self.pending_barriers_to_complete.front() {
             assert!(*prev_epoch < epoch);
         }
@@ -181,6 +176,13 @@ impl CreatingStreamingJobBarrierControl {
             assert!(epoch > max_collected_epoch);
         }
         self.max_collected_epoch = Some(epoch);
+        let barrier_latency = collected_barrier.barrier_latency_secs;
+        let barrier_latency_metrics = if epoch < self.snapshot_epoch {
+            &self.consuming_snapshot_barrier_latency
+        } else {
+            &self.consuming_log_store_barrier_latency
+        };
+        barrier_latency_metrics.observe(barrier_latency);
         self.pending_barriers_to_complete.push_front(epoch);
     }
 }
