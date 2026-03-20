@@ -346,6 +346,33 @@ mod tests {
     }
 
     #[test]
+    fn test_backfill_parallelism_parse_bounded() {
+        let parallelism: ConfigBackfillParallelism = "Bounded(4)".parse().unwrap();
+        assert_eq!(
+            parallelism,
+            ConfigBackfillParallelism::Bounded(NonZeroU64::new(4).unwrap())
+        );
+        assert_eq!(parallelism.to_string(), "bounded(4)");
+        assert_eq!(
+            parallelism.adaptive_strategy(),
+            Some(AdaptiveParallelismStrategy::Bounded(
+                NonZeroUsize::new(4).unwrap()
+            ))
+        );
+    }
+
+    #[test]
+    fn test_backfill_parallelism_parse_ratio() {
+        let parallelism: ConfigBackfillParallelism = "ratio(0.5)".parse().unwrap();
+        assert_eq!(parallelism, ConfigBackfillParallelism::Ratio(0.5));
+        assert_eq!(parallelism.to_string(), "ratio(0.5)");
+        assert_eq!(
+            parallelism.adaptive_strategy(),
+            Some(AdaptiveParallelismStrategy::Ratio(0.5))
+        );
+    }
+
+    #[test]
     fn test_strategy_parse_default() {
         assert_eq!(
             "default"
