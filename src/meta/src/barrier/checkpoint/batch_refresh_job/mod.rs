@@ -826,7 +826,7 @@ impl BatchRefreshJobCheckpointControl {
         Ok(())
     }
 
-    pub(crate) fn collect(&mut self, collected_barrier: CollectedBarrier) {
+    pub(crate) fn collect(&mut self, collected_barrier: CollectedBarrier<'_>) {
         self.barrier_control.collect(collected_barrier);
     }
 }

@@ -127,7 +127,7 @@ impl BatchRefreshBarrierControl {
             .set(self.inflight_barrier_queue.len() as _);
     }
 
-    pub(super) fn collect(&mut self, collected_barrier: CollectedBarrier) {
+    pub(super) fn collect(&mut self, collected_barrier: CollectedBarrier<'_>) {
         let state = self
             .inflight_barrier_queue
             .pop_back()
