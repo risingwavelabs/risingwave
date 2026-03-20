@@ -330,6 +330,7 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
     ) -> Self {
         let context = SyncKvLogStoreContext {
             table_id,
+            fragment_id: actor_context.fragment_id,
             metrics,
             serde,
             state_store,

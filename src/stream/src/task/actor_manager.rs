@@ -551,6 +551,7 @@ impl StreamActorManager {
 
         let log_store_config = SyncKvLogStoreContext {
             table_id: table.id,
+            fragment_id,
             serde: serde.clone(),
             state_store: state_store.clone(),
             max_buffer_size,

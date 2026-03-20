@@ -12,6 +12,7 @@ use futures_async_stream::{for_await, try_stream};
 use risingwave_common::array::StreamChunk;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{TableId, TableOption};
+use risingwave_common::id::FragmentId;
 use risingwave_common::must_match;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_connector::sink::log_store::{ChunkId, LogStoreResult};
@@ -19,12 +20,12 @@ use risingwave_storage::StateStore;
 use risingwave_storage::store::{
     LocalStateStore, NewLocalOptions, OpConsistencyLevel, StateStoreRead,
 };
+use risingwave_storage::store::timeout_auto_rebuild::TimeoutAutoRebuildIter;
 use tokio::time::{Duration, Instant, Sleep, sleep_until};
 use tokio_stream::adapters::Peekable;
 
 use crate::common::log_store_impl::kv_log_store::buffer::LogStoreBufferItem;
 use crate::common::log_store_impl::kv_log_store::reader::LogStoreReadStateStreamRangeStart;
-use crate::common::log_store_impl::kv_log_store::reader::timeout_auto_rebuild::TimeoutAutoRebuildIter;
 use crate::common::log_store_impl::kv_log_store::serde::{
     KvLogStoreItem, LogStoreItemMergeStream, LogStoreRowSerde,
 };
@@ -54,6 +55,7 @@ pub(crate) struct FlushedChunkInfo {
 
 pub(crate) struct SyncKvLogStoreContext<S: StateStore> {
     pub(crate) table_id: TableId,
+    pub(crate) fragment_id: FragmentId,
     pub(crate) metrics: SyncedKvLogStoreMetrics,
     pub(crate) serde: LogStoreRowSerde,
     pub(crate) state_store: S,
@@ -266,6 +268,7 @@ pub(crate) async fn init_local_log_store_state<S: StateStore>(
         .state_store
         .new_local(NewLocalOptions {
             table_id: context.table_id,
+            fragment_id: context.fragment_id,
             op_consistency_level: OpConsistencyLevel::Inconsistent,
             table_option: TableOption {
                 retention_seconds: None,
@@ -376,8 +379,20 @@ pub(crate) fn process_upstream_chunk<LS: LocalStateStore>(
     chunk: StreamChunk,
     buffer: &mut SyncedLogStoreBuffer,
 ) -> (SeqId, WriteFuture<LS>) {
+    let cardinality = chunk.cardinality();
+    if cardinality == 0 {
+        tracing::warn!(
+            epoch = write_state.epoch().curr,
+            "received empty chunk (cardinality=0), skipping"
+        );
+        return (
+            seq_id,
+            WriteFuture::receive_from_upstream(stream, write_state),
+        );
+    }
+
     let start_seq_id = seq_id;
-    let new_seq_id = seq_id + chunk.cardinality() as SeqId;
+    let new_seq_id = seq_id + cardinality as SeqId;
     let end_seq_id = new_seq_id - 1;
     let epoch = write_state.epoch().curr;
     tracing::trace!(
@@ -385,7 +400,7 @@ pub(crate) fn process_upstream_chunk<LS: LocalStateStore>(
         end_seq_id,
         new_seq_id,
         epoch,
-        cardinality = chunk.cardinality(),
+        cardinality,
         "received chunk"
     );
     let next_write_future =
