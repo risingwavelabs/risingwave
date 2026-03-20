@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#[allow(clippy::module_inception)]
 mod sync_log_store_impl;
 
 pub(crate) use sync_log_store_impl::{
