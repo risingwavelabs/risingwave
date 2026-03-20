@@ -1384,6 +1384,31 @@ impl GlobalStreamManager {
 
         let mut should_trigger = false;
 
+        if !worker_cache.is_empty() {
+            // Recovery may have rendered actors against a smaller worker snapshot before the
+            // automatic parallelism monitor starts. Run one reconciliation pass after the
+            // initial delay so the current worker set is always considered at least once.
+            tracing::info!(
+                worker_ids = ?worker_cache.keys().copied().collect_vec(),
+                "run initial parallelism control after startup"
+            );
+
+            match self.trigger_parallelism_control().await {
+                Ok(cont) => {
+                    should_trigger = cont;
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        error = %e.as_report(),
+                        "initial parallelism control after startup failed, waiting for next tick to retry after {}s",
+                        ticker.period().as_secs()
+                    );
+                    should_trigger = true;
+                    ticker.reset();
+                }
+            }
+        }
+
         loop {
             tokio::select! {
                 biased;
