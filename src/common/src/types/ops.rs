@@ -60,7 +60,7 @@ impl<T: num_traits::CheckedNeg> CheckedNeg for T {
 /// A simplified version of [`num_traits::Signed`].
 /// Unlike `Signed::is_negative` or `f64::is_sign_negative`, this returns `false` for `-0.0` to keep
 /// consistency among integers, decimals and floats.
-pub trait IsNegative: Zero + Ord {
+pub trait IsNegative {
     fn is_negative(&self) -> bool;
 }
 

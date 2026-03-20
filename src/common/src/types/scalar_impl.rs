@@ -153,7 +153,7 @@ impl Scalar for Decimal {
     type ScalarRefType<'a> = DeciRef<'a>;
 
     fn as_scalar_ref(&self) -> DeciRef<'_> {
-        self
+        self.dxx()
     }
 }
 
@@ -162,7 +162,7 @@ impl<'a> ScalarRef<'a> for DeciRef<'a> {
     type ScalarType = Decimal;
 
     fn to_owned_scalar(&self) -> Decimal {
-        **self
+        self.xxd()
     }
 
     fn hash_scalar<H: std::hash::Hasher>(&self, state: &mut H) {

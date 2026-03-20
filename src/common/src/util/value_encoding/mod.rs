@@ -336,7 +336,7 @@ fn estimate_serialize_time_size() -> usize {
     4 + 4
 }
 
-fn serialize_decimal(decimal: &Decimal, buf: &mut impl BufMut) {
+fn serialize_decimal(decimal: DeciRef<'_>, buf: &mut impl BufMut) {
     buf.put_slice(&decimal.unordered_serialize());
 }
 

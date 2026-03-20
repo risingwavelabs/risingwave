@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use chrono_tz::Tz;
-use num_traits::One;
+use num_traits::{One, Zero};
 use risingwave_common::types::{CheckedAdd, Interval, IsNegative, Timestamptz};
 use risingwave_expr::expr_context::TIME_ZONE;
 use risingwave_expr::{ExprError, Result, capture_context, function};
@@ -22,7 +22,7 @@ use risingwave_expr::{ExprError, Result, capture_context, function};
 #[function("generate_series(int8, int8) -> setof int8")]
 fn generate_series<T>(start: T, stop: T) -> Result<impl Iterator<Item = T>>
 where
-    T: CheckedAdd<Output = T> + PartialOrd + Copy + One + IsNegative,
+    T: CheckedAdd<Output = T> + PartialOrd + Copy + One + IsNegative + Zero,
 {
     range_generic::<_, _, _, true>(start, stop, T::one(), ())
 }
@@ -41,7 +41,7 @@ where
 fn generate_series_step<T, S>(start: T, stop: T, step: S) -> Result<impl Iterator<Item = T>>
 where
     T: CheckedAdd<S, Output = T> + PartialOrd + Copy,
-    S: IsNegative + Copy,
+    S: IsNegative + Copy + Zero,
 {
     range_generic::<_, _, _, true>(start, stop, step, ())
 }
@@ -91,7 +91,7 @@ fn generate_series_timestamptz_impl(
 #[function("range(int8, int8) -> setof int8")]
 fn range<T>(start: T, stop: T) -> Result<impl Iterator<Item = T>>
 where
-    T: CheckedAdd<Output = T> + PartialOrd + Copy + One + IsNegative,
+    T: CheckedAdd<Output = T> + PartialOrd + Copy + One + IsNegative + Zero,
 {
     range_generic::<_, _, _, false>(start, stop, T::one(), ())
 }
@@ -110,7 +110,7 @@ where
 fn range_step<T, S>(start: T, stop: T, step: S) -> Result<impl Iterator<Item = T>>
 where
     T: CheckedAdd<S, Output = T> + PartialOrd + Copy,
-    S: IsNegative + Copy,
+    S: IsNegative + Copy + Zero,
 {
     range_generic::<_, _, _, false>(start, stop, step, ())
 }
@@ -158,7 +158,7 @@ fn range_generic<T, S, E, const INCLUSIVE: bool>(
 ) -> Result<impl Iterator<Item = T>>
 where
     T: CheckedAddWithExtra<S, E, Output = T> + PartialOrd + Copy,
-    S: IsNegative + Copy,
+    S: IsNegative + Zero + Copy,
     E: Copy,
 {
     if step.is_zero() {

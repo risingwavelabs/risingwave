@@ -583,9 +583,9 @@ fn bind_params(
                 ScalarRefImpl::Float64(v) => query.bind(v.into_inner()),
                 ScalarRefImpl::Utf8(v) => query.bind(v.to_owned()),
                 ScalarRefImpl::Bool(v) => query.bind(v),
-                ScalarRefImpl::Decimal(v) => match v {
+                ScalarRefImpl::Decimal(v) => match v.xxd() {
                     Decimal::Normalized(d) => {
-                        query.bind(decimal_to_sql(d));
+                        query.bind(decimal_to_sql(&d));
                     }
                     Decimal::NaN | Decimal::PositiveInf | Decimal::NegativeInf => {
                         tracing::warn!(

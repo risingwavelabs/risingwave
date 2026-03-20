@@ -73,11 +73,13 @@ pub fn round_decimal(input: DeciRef<'_>) -> Decimal {
 mod tests {
     use std::str::FromStr;
 
+    use risingwave_common::types::Scalar as _;
+
     use crate::scalar::round::*;
 
     fn do_test(input: &str, digits: i32, expected_output: Option<&str>) {
         let v = Decimal::from_str(input).unwrap();
-        let rounded_value = round_digits(&v, digits).ok();
+        let rounded_value = round_digits(v.as_scalar_ref(), digits).ok();
         assert_eq!(
             expected_output,
             rounded_value.as_ref().map(ToString::to_string).as_deref()
@@ -129,15 +131,15 @@ mod tests {
 
     #[test]
     fn test_round_decimal() {
-        assert_eq!(ceil_decimal(&dec(42.2)), dec(43.0));
-        assert_eq!(ceil_decimal(&dec(-42.8)), dec(-42.0));
+        assert_eq!(ceil_decimal(dec(42.2).as_scalar_ref()), dec(43.0));
+        assert_eq!(ceil_decimal(dec(-42.8).as_scalar_ref()), dec(-42.0));
 
-        assert_eq!(floor_decimal(&dec(42.2)), dec(42.0));
-        assert_eq!(floor_decimal(&dec(-42.8)), dec(-43.0));
+        assert_eq!(floor_decimal(dec(42.2).as_scalar_ref()), dec(42.0));
+        assert_eq!(floor_decimal(dec(-42.8).as_scalar_ref()), dec(-43.0));
 
-        assert_eq!(round_decimal(&dec(42.4)), dec(42.0));
-        assert_eq!(round_decimal(&dec(42.5)), dec(43.0));
-        assert_eq!(round_decimal(&dec(-6.5)), dec(-7.0));
+        assert_eq!(round_decimal(dec(42.4).as_scalar_ref()), dec(42.0));
+        assert_eq!(round_decimal(dec(42.5).as_scalar_ref()), dec(43.0));
+        assert_eq!(round_decimal(dec(-6.5).as_scalar_ref()), dec(-7.0));
     }
 
     fn dec(f: f64) -> Decimal {

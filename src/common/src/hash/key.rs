@@ -530,7 +530,7 @@ impl HashKeyDe for F64 {
 
 impl<'a> HashKeySer<'a> for DeciRef<'a> {
     fn serialize_into(self, mut buf: impl BufMut) {
-        let b = Decimal::unordered_serialize(&self.normalize());
+        let b = self.normalize().dxx().unordered_serialize();
         buf.put_slice(b.as_ref());
     }
 

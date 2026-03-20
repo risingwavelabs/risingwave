@@ -101,7 +101,7 @@ impl FrameBoundsImpl for SessionFrameBounds {
             ScalarRefImpl::Int64(val) => validate_non_negative(val)?,
             ScalarRefImpl::Float32(val) => validate_non_negative(val)?,
             ScalarRefImpl::Float64(val) => validate_non_negative(val)?,
-            ScalarRefImpl::Decimal(val) => validate_non_negative(*val)?,
+            ScalarRefImpl::Decimal(val) => validate_non_negative(val)?,
             ScalarRefImpl::Interval(val) => {
                 if !val.is_never_negative() {
                     bail!(

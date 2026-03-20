@@ -35,7 +35,7 @@ impl FromIterator<Option<Decimal>> for DecimalArray {
         let iter = iter.into_iter();
         let mut builder = <Self as Array>::Builder::new(iter.size_hint().0);
         for i in iter {
-            builder.append(i.as_ref());
+            builder.append(i.as_ref().map(|d| d.dxx()));
         }
         builder.finish()
     }
@@ -63,11 +63,11 @@ impl Array for DecimalArray {
     type RefItem<'a> = DeciRef<'a>;
 
     unsafe fn raw_value_at_unchecked(&self, idx: usize) -> Self::RefItem<'_> {
-        unsafe { self.data.get_unchecked(idx) }
+        unsafe { self.data.get_unchecked(idx) }.dxx()
     }
 
     fn raw_iter(&self) -> impl ExactSizeIterator<Item = Self::RefItem<'_>> {
-        self.data.iter()
+        self.data.iter().map(|d| d.dxx())
     }
 
     fn len(&self) -> usize {
@@ -78,7 +78,7 @@ impl Array for DecimalArray {
         let mut output_buffer = Vec::<u8>::with_capacity(self.len() * size_of::<Decimal>());
 
         for v in self.iter() {
-            v.map(|node| node.to_protobuf(&mut output_buffer));
+            v.map(|node| node.xxd().to_protobuf(&mut output_buffer));
         }
 
         let buffer = Buffer {
@@ -137,6 +137,7 @@ impl ArrayBuilder for DecimalArrayBuilder {
     fn append_n(&mut self, n: usize, value: Option<DeciRef<'_>>) {
         match value {
             Some(x) => {
+                let x = x.xxd();
                 self.bitmap.append_n(n, true);
                 self.data.extend(std::iter::repeat_n(x, n));
             }
@@ -186,10 +187,13 @@ mod tests {
         let v = (0..1000).map(Decimal::from).collect_vec();
         let mut builder = DecimalArrayBuilder::new(0);
         for i in &v {
-            builder.append(Some(i));
+            builder.append(Some(i.dxx()));
         }
         let a = builder.finish();
-        let res = v.iter().zip_eq_fast(a.iter()).all(|(a, b)| Some(a) == b);
+        let res = v
+            .iter()
+            .zip_eq_fast(a.iter())
+            .all(|(a, b)| Some(a.dxx()) == b);
         assert!(res);
     }
 
@@ -262,7 +266,7 @@ mod tests {
             .map(|v| {
                 let mut builder = DecimalArrayBuilder::new(0);
                 for i in v {
-                    builder.append(i.as_ref());
+                    builder.append(i.as_ref().map(|d| d.dxx()));
                 }
                 builder.finish()
             })

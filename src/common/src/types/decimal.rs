@@ -28,6 +28,7 @@ use super::to_text::ToText;
 use super::{CheckedNeg, DataType};
 use crate::array::ArrayResult;
 use crate::types::Decimal::Normalized;
+use crate::types::IsNegative;
 use crate::types::ordered_float::OrderedFloat;
 
 #[derive(Debug, Copy, parse_display::Display, Clone, PartialEq, Hash, Eq, Ord, PartialOrd)]
@@ -42,11 +43,30 @@ pub enum Decimal {
     NaN,
 }
 
-pub type DeciRef<'a> = &'a Decimal;
+#[derive(Copy, parse_display::Display, Clone, PartialEq, Eq, Hash, Ord, PartialOrd)]
+#[display("{0}")]
+pub struct DeciRef<'a>(&'a Decimal);
+
+impl Debug for DeciRef<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(f)
+    }
+}
 
 impl From<DeciRef<'_>> for Decimal {
     fn from(d: DeciRef<'_>) -> Self {
-        *d
+        d.xxd()
+    }
+}
+
+impl DeciRef<'_> {
+    pub fn xxd(self) -> Decimal {
+        *self.0
+    }
+}
+impl Decimal {
+    pub fn dxx(&self) -> DeciRef<'_> {
+        DeciRef(self)
     }
 }
 
@@ -54,7 +74,7 @@ impl ZeroHeapSize for Decimal {}
 
 impl ToText for DeciRef<'_> {
     fn write<W: std::fmt::Write>(&self, f: &mut W) -> std::fmt::Result {
-        write!(f, "{self}")
+        write!(f, "{}", self.xxd())
     }
 
     fn write_with_type<W: std::fmt::Write>(&self, ty: &DataType, f: &mut W) -> std::fmt::Result {
@@ -68,7 +88,7 @@ impl ToText for DeciRef<'_> {
 impl Decimal {
     /// Used by `PrimitiveArray` to serialize the array to protobuf.
     pub fn to_protobuf(self, output: &mut impl Write) -> ArrayResult<usize> {
-        let buf = self.unordered_serialize();
+        let buf = self.dxx().unordered_serialize();
         output.write_all(&buf)?;
         Ok(buf.len())
     }
@@ -95,7 +115,7 @@ impl Decimal {
     }
 }
 
-impl ToSql for Decimal {
+impl ToSql for DeciRef<'_> {
     accepts!(NUMERIC);
 
     to_sql_checked!();
@@ -108,7 +128,7 @@ impl ToSql for Decimal {
     where
         Self: Sized,
     {
-        match self {
+        match self.0 {
             Decimal::Normalized(d) => {
                 return d.to_sql(ty, out);
             }
@@ -174,7 +194,7 @@ macro_rules! impl_convert_int {
 
             #[inline]
             fn try_from(d: Decimal) -> Result<Self, Self::Error> {
-                match d.round_dp_ties_away(0) {
+                match d.dxx().round_dp_ties_away(0) {
                     Decimal::Normalized(d) => d.try_into(),
                     _ => Err(Error::ConversionTo(std::any::type_name::<$T>().into())),
                 }
@@ -239,7 +259,7 @@ macro_rules! impl_convert_float {
             type Error = Error;
 
             fn try_from(d: DeciRef<'_>) -> Result<Self, Self::Error> {
-                (*d).try_into().map(Self)
+                d.xxd().try_into().map(Self)
             }
         }
     };
@@ -315,7 +335,7 @@ impl CheckedNeg for DeciRef<'_> {
     type Output = Decimal;
 
     fn checked_neg(self) -> Option<Self::Output> {
-        match self {
+        match self.xxd() {
             Decimal::Normalized(d) => Some(Decimal::Normalized(-d)),
             Decimal::NaN => Some(Decimal::NaN),
             Decimal::PositiveInf => Some(Decimal::NegativeInf),
@@ -469,26 +489,32 @@ impl Sub for Decimal {
 impl Decimal {
     const MAX_I128_REPR: i128 = 0x0000_0000_FFFF_FFFF_FFFF_FFFF_FFFF_FFFF;
     pub const MAX_PRECISION: u8 = 28;
+}
 
-    pub fn scale(&self) -> Option<i32> {
-        let Decimal::Normalized(d) = self else {
+impl DeciRef<'_> {
+    pub fn scale(self) -> Option<i32> {
+        let Decimal::Normalized(d) = self.0 else {
             return None;
         };
         Some(d.scale() as _)
     }
 
-    pub fn rescale(&mut self, scale: u32) {
-        if let Normalized(a) = self {
+    pub fn rescale(self, scale: u32) -> Decimal {
+        if let Normalized(a) = self.0 {
+            let mut a = *a;
             a.rescale(scale);
+            Normalized(a)
+        } else {
+            self.xxd()
         }
     }
 
     #[must_use]
-    pub fn round_dp_ties_away(&self, dp: u32) -> Self {
-        match self {
-            Self::Normalized(d) => {
+    pub fn round_dp_ties_away(self, dp: u32) -> Decimal {
+        match self.0 {
+            Decimal::Normalized(d) => {
                 let new_d = d.round_dp_with_strategy(dp, RoundingStrategy::MidpointAwayFromZero);
-                Self::Normalized(new_d)
+                Decimal::Normalized(new_d)
             }
             d => *d,
         }
@@ -496,9 +522,9 @@ impl Decimal {
 
     /// Round to the left of the decimal point, for example `31.5` -> `30`.
     #[must_use]
-    pub fn round_left_ties_away(&self, left: u32) -> Option<Self> {
-        let &Self::Normalized(mut d) = self else {
-            return Some(*self);
+    pub fn round_left_ties_away(self, left: u32) -> Option<Decimal> {
+        let &Decimal::Normalized(mut d) = self.0 else {
+            return Some(self.xxd());
         };
 
         // First, move the decimal point to the left so that we can reuse `round`. This is more
@@ -506,7 +532,7 @@ impl Decimal {
         let old_scale = d.scale();
         let new_scale = old_scale.saturating_add(left);
         const MANTISSA_UP: i128 = 5 * 10i128.pow(Decimal::MAX_PRECISION as _);
-        let d = match new_scale.cmp(&Self::MAX_PRECISION.add(1).into()) {
+        let d = match new_scale.cmp(&Decimal::MAX_PRECISION.add(1).into()) {
             // trivial within 28 digits
             std::cmp::Ordering::Less => {
                 d.set_scale(new_scale).unwrap();
@@ -524,54 +550,56 @@ impl Decimal {
             true => d.is_zero().then(|| 0.into()),
             false => d
                 .checked_mul(RustDecimal::from_i128_with_scale(10i128.pow(left), 0))
-                .map(Self::Normalized),
+                .map(Decimal::Normalized),
         }
     }
 
     #[must_use]
-    pub fn ceil(&self) -> Self {
-        match self {
-            Self::Normalized(d) => {
+    pub fn ceil(self) -> Decimal {
+        match self.0 {
+            Decimal::Normalized(d) => {
                 let mut d = d.ceil();
                 if d.is_zero() {
                     d.set_sign_positive(true);
                 }
-                Self::Normalized(d)
+                Decimal::Normalized(d)
             }
             d => *d,
         }
     }
 
     #[must_use]
-    pub fn floor(&self) -> Self {
-        match self {
-            Self::Normalized(d) => Self::Normalized(d.floor()),
+    pub fn floor(self) -> Decimal {
+        match self.0 {
+            Decimal::Normalized(d) => Decimal::Normalized(d.floor()),
             d => *d,
         }
     }
 
     #[must_use]
-    pub fn trunc(&self) -> Self {
-        match self {
-            Self::Normalized(d) => {
+    pub fn trunc(self) -> Decimal {
+        match self.0 {
+            Decimal::Normalized(d) => {
                 let mut d = d.trunc();
                 if d.is_zero() {
                     d.set_sign_positive(true);
                 }
-                Self::Normalized(d)
+                Decimal::Normalized(d)
             }
             d => *d,
         }
     }
 
     #[must_use]
-    pub fn round_ties_even(&self) -> Self {
-        match self {
-            Self::Normalized(d) => Self::Normalized(d.round()),
+    pub fn round_ties_even(self) -> Decimal {
+        match self.0 {
+            Decimal::Normalized(d) => Decimal::Normalized(d.round()),
             d => *d,
         }
     }
+}
 
+impl Decimal {
     pub fn from_i128_with_scale(num: i128, scale: u32) -> Self {
         Decimal::Normalized(RustDecimal::from_i128_with_scale(num, scale))
     }
@@ -598,25 +626,6 @@ impl Decimal {
         ))
     }
 
-    #[must_use]
-    pub fn normalize(&self) -> Self {
-        match self {
-            Self::Normalized(d) => Self::Normalized(d.normalize()),
-            d => *d,
-        }
-    }
-
-    pub fn unordered_serialize(&self) -> [u8; 16] {
-        // according to https://docs.rs/rust_decimal/1.18.0/src/rust_decimal/decimal.rs.html#665-684
-        // the lower 15 bits is not used, so we can use first byte to distinguish nan and inf
-        match self {
-            Self::Normalized(d) => d.serialize(),
-            Self::NaN => [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-            Self::PositiveInf => [2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-            Self::NegativeInf => [3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-        }
-    }
-
     pub fn unordered_deserialize(bytes: [u8; 16]) -> Self {
         match bytes[0] {
             0u8 => Self::Normalized(RustDecimal::deserialize(bytes)),
@@ -626,26 +635,47 @@ impl Decimal {
             _ => unreachable!(),
         }
     }
+}
 
-    pub fn abs(&self) -> Self {
-        match self {
-            Self::Normalized(d) => {
-                if d.is_sign_negative() {
-                    Self::Normalized(-d)
-                } else {
-                    Self::Normalized(*d)
-                }
-            }
-            Self::NaN => Self::NaN,
-            Self::PositiveInf => Self::PositiveInf,
-            Self::NegativeInf => Self::PositiveInf,
+impl DeciRef<'_> {
+    pub fn unordered_serialize(self) -> [u8; 16] {
+        // according to https://docs.rs/rust_decimal/1.18.0/src/rust_decimal/decimal.rs.html#665-684
+        // the lower 15 bits is not used, so we can use first byte to distinguish nan and inf
+        match self.0 {
+            Decimal::Normalized(d) => d.serialize(),
+            Decimal::NaN => [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+            Decimal::PositiveInf => [2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+            Decimal::NegativeInf => [3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
         }
     }
 
-    pub fn sign(&self) -> Self {
-        match self {
-            Self::NaN => Self::NaN,
-            _ => match self.cmp(&0.into()) {
+    #[must_use]
+    pub fn normalize(self) -> Decimal {
+        match self.0 {
+            Decimal::Normalized(d) => Decimal::Normalized(d.normalize()),
+            d => *d,
+        }
+    }
+
+    pub fn abs(self) -> Decimal {
+        match self.0 {
+            Decimal::Normalized(d) => {
+                if d.is_sign_negative() {
+                    Decimal::Normalized(-d)
+                } else {
+                    Decimal::Normalized(*d)
+                }
+            }
+            Decimal::NaN => Decimal::NaN,
+            Decimal::PositiveInf => Decimal::PositiveInf,
+            Decimal::NegativeInf => Decimal::PositiveInf,
+        }
+    }
+
+    pub fn sign(self) -> Decimal {
+        match self.0 {
+            Decimal::NaN => Decimal::NaN,
+            _ => match self.0.cmp(&0.into()) {
                 std::cmp::Ordering::Less => (-1).into(),
                 std::cmp::Ordering::Equal => 0.into(),
                 std::cmp::Ordering::Greater => 1.into(),
@@ -653,62 +683,62 @@ impl Decimal {
         }
     }
 
-    pub fn checked_exp(&self) -> Option<Decimal> {
-        match self {
-            Self::Normalized(d) => d.checked_exp().map(Self::Normalized),
-            Self::NaN => Some(Self::NaN),
-            Self::PositiveInf => Some(Self::PositiveInf),
-            Self::NegativeInf => Some(Self::zero()),
+    pub fn checked_exp(self) -> Option<Decimal> {
+        match self.0 {
+            Decimal::Normalized(d) => d.checked_exp().map(Decimal::Normalized),
+            Decimal::NaN => Some(Decimal::NaN),
+            Decimal::PositiveInf => Some(Decimal::PositiveInf),
+            Decimal::NegativeInf => Some(Decimal::zero()),
         }
     }
 
-    pub fn checked_ln(&self) -> Option<Decimal> {
-        match self {
-            Self::Normalized(d) => d.checked_ln().map(Self::Normalized),
-            Self::NaN => Some(Self::NaN),
-            Self::PositiveInf => Some(Self::PositiveInf),
-            Self::NegativeInf => None,
+    pub fn checked_ln(self) -> Option<Decimal> {
+        match self.0 {
+            Decimal::Normalized(d) => d.checked_ln().map(Decimal::Normalized),
+            Decimal::NaN => Some(Decimal::NaN),
+            Decimal::PositiveInf => Some(Decimal::PositiveInf),
+            Decimal::NegativeInf => None,
         }
     }
 
-    pub fn checked_log10(&self) -> Option<Decimal> {
-        match self {
-            Self::Normalized(d) => d.checked_log10().map(Self::Normalized),
-            Self::NaN => Some(Self::NaN),
-            Self::PositiveInf => Some(Self::PositiveInf),
-            Self::NegativeInf => None,
+    pub fn checked_log10(self) -> Option<Decimal> {
+        match self.0 {
+            Decimal::Normalized(d) => d.checked_log10().map(Decimal::Normalized),
+            Decimal::NaN => Some(Decimal::NaN),
+            Decimal::PositiveInf => Some(Decimal::PositiveInf),
+            Decimal::NegativeInf => None,
         }
     }
 
-    pub fn checked_powd(&self, rhs: &Self) -> Result<Self, PowError> {
+    pub fn checked_powd(self, rhs: Self) -> Result<Decimal, PowError> {
         use std::cmp::Ordering;
 
-        match (self, rhs) {
+        match (self.0, rhs.0) {
             // A. Handle `nan`, where `1 ^ nan == 1` and `nan ^ 0 == 1`
             (Decimal::NaN, Decimal::NaN)
             | (Decimal::PositiveInf, Decimal::NaN)
             | (Decimal::NegativeInf, Decimal::NaN)
             | (Decimal::NaN, Decimal::PositiveInf)
-            | (Decimal::NaN, Decimal::NegativeInf) => Ok(Self::NaN),
+            | (Decimal::NaN, Decimal::NegativeInf) => Ok(Decimal::NaN),
             (Normalized(lhs), Decimal::NaN) => match lhs.is_one() {
                 true => Ok(1.into()),
-                false => Ok(Self::NaN),
+                false => Ok(Decimal::NaN),
             },
             (Decimal::NaN, Normalized(rhs)) => match rhs.is_zero() {
                 true => Ok(1.into()),
-                false => Ok(Self::NaN),
+                false => Ok(Decimal::NaN),
             },
 
             // B. Handle `b ^ inf`
             (Normalized(lhs), Decimal::PositiveInf) => match lhs.abs().cmp(&1.into()) {
-                Ordering::Greater => Ok(Self::PositiveInf),
+                Ordering::Greater => Ok(Decimal::PositiveInf),
                 Ordering::Equal => Ok(1.into()),
                 Ordering::Less => Ok(0.into()),
             },
             // Simply special case of `abs(b) > 1`.
             // Also consistent with `inf ^ p` and `-inf ^ p` below where p is not fractional or odd.
             (Decimal::PositiveInf, Decimal::PositiveInf)
-            | (Decimal::NegativeInf, Decimal::PositiveInf) => Ok(Self::PositiveInf),
+            | (Decimal::NegativeInf, Decimal::PositiveInf) => Ok(Decimal::PositiveInf),
 
             // C. Handle `b ^ -inf`, which is `(1/b) ^ inf`
             (Normalized(lhs), Decimal::NegativeInf) => match lhs.abs().cmp(&1.into()) {
@@ -717,7 +747,7 @@ impl Decimal {
                 Ordering::Less => match lhs.is_zero() {
                     // Fun fact: ISO 9899 is removing this error to follow IEEE 754 2008.
                     true => Err(PowError::ZeroNegative),
-                    false => Ok(Self::PositiveInf),
+                    false => Ok(Decimal::PositiveInf),
                 },
             },
             (Decimal::PositiveInf, Decimal::NegativeInf)
@@ -725,7 +755,7 @@ impl Decimal {
 
             // D. Handle `inf ^ p`
             (Decimal::PositiveInf, Normalized(rhs)) => match rhs.cmp(&0.into()) {
-                Ordering::Greater => Ok(Self::PositiveInf),
+                Ordering::Greater => Ok(Decimal::PositiveInf),
                 Ordering::Equal => Ok(1.into()),
                 Ordering::Less => Ok(0.into()),
             },
@@ -735,8 +765,8 @@ impl Decimal {
                 // Err in PostgreSQL. No err in ISO 9899 which treats fractional as non-odd below.
                 true => Err(PowError::NegativeFract),
                 false => match (rhs.cmp(&0.into()), rhs.rem(&2.into()).abs().is_one()) {
-                    (Ordering::Greater, true) => Ok(Self::NegativeInf),
-                    (Ordering::Greater, false) => Ok(Self::PositiveInf),
+                    (Ordering::Greater, true) => Ok(Decimal::NegativeInf),
+                    (Ordering::Greater, false) => Ok(Decimal::PositiveInf),
                     (Ordering::Equal, true) => unreachable!(),
                     (Ordering::Equal, false) => Ok(1.into()),
                     (Ordering::Less, true) => Ok(0.into()), // no `-0` in PostgreSQL decimal
@@ -753,7 +783,7 @@ impl Decimal {
                     return Err(PowError::NegativeFract);
                 }
                 match lhs.checked_powd(*rhs) {
-                    Some(d) => Ok(Self::Normalized(d)),
+                    Some(d) => Ok(Decimal::Normalized(d)),
                     None => Err(PowError::Overflow),
                 }
             }
@@ -767,10 +797,10 @@ pub enum PowError {
     Overflow,
 }
 
-impl From<Decimal> for memcomparable::Decimal {
-    fn from(d: Decimal) -> Self {
-        match d {
-            Decimal::Normalized(d) => Self::Normalized(d),
+impl From<DeciRef<'_>> for memcomparable::Decimal {
+    fn from(d: DeciRef<'_>) -> Self {
+        match d.0 {
+            Decimal::Normalized(d) => Self::Normalized(*d),
             Decimal::PositiveInf => Self::Inf,
             Decimal::NegativeInf => Self::NegInf,
             Decimal::NaN => Self::NaN,
@@ -806,6 +836,17 @@ impl FromStr for Decimal {
             s => RustDecimal::from_str(s)
                 .or_else(|_| RustDecimal::from_scientific(s))
                 .map(Decimal::Normalized),
+        }
+    }
+}
+
+impl IsNegative for DeciRef<'_> {
+    fn is_negative(&self) -> bool {
+        match self.0 {
+            Decimal::Normalized(d) => *d < RustDecimal::ZERO,
+            Decimal::NaN => false,
+            Decimal::PositiveInf => false,
+            Decimal::NegativeInf => true,
         }
     }
 }
@@ -858,6 +899,7 @@ mod tests {
     use risingwave_common_estimate_size::EstimateSize;
 
     use super::*;
+    use crate::types::Scalar as _;
     use crate::util::iter_util::ZipEqFast;
 
     fn check(lhs: f32, rhs: f32) -> bool {
@@ -960,36 +1002,56 @@ mod tests {
             Decimal::PositiveInf
         );
         assert_eq!(
-            Decimal::unordered_deserialize(Decimal::try_from(1.234).unwrap().unordered_serialize()),
+            Decimal::unordered_deserialize(
+                Decimal::try_from(1.234)
+                    .unwrap()
+                    .as_scalar_ref()
+                    .unordered_serialize()
+            ),
             Decimal::try_from(1.234).unwrap(),
         );
         assert_eq!(
-            Decimal::unordered_deserialize(Decimal::from(1u8).unordered_serialize()),
+            Decimal::unordered_deserialize(
+                Decimal::from(1u8).as_scalar_ref().unordered_serialize()
+            ),
             Decimal::from(1u8),
         );
         assert_eq!(
-            Decimal::unordered_deserialize(Decimal::from(1i8).unordered_serialize()),
+            Decimal::unordered_deserialize(
+                Decimal::from(1i8).as_scalar_ref().unordered_serialize()
+            ),
             Decimal::from(1i8),
         );
         assert_eq!(
-            Decimal::unordered_deserialize(Decimal::from(1u16).unordered_serialize()),
+            Decimal::unordered_deserialize(
+                Decimal::from(1u16).as_scalar_ref().unordered_serialize()
+            ),
             Decimal::from(1u16),
         );
         assert_eq!(
-            Decimal::unordered_deserialize(Decimal::from(1i16).unordered_serialize()),
+            Decimal::unordered_deserialize(
+                Decimal::from(1i16).as_scalar_ref().unordered_serialize()
+            ),
             Decimal::from(1i16),
         );
         assert_eq!(
-            Decimal::unordered_deserialize(Decimal::from(1u32).unordered_serialize()),
+            Decimal::unordered_deserialize(
+                Decimal::from(1u32).as_scalar_ref().unordered_serialize()
+            ),
             Decimal::from(1u32),
         );
         assert_eq!(
-            Decimal::unordered_deserialize(Decimal::from(1i32).unordered_serialize()),
+            Decimal::unordered_deserialize(
+                Decimal::from(1i32).as_scalar_ref().unordered_serialize()
+            ),
             Decimal::from(1i32),
         );
         assert_eq!(
             Decimal::unordered_deserialize(
-                Decimal::try_from(f64::NAN).unwrap().unordered_serialize()
+                Decimal::try_from(f64::NAN)
+                    .unwrap()
+                    .as_scalar_ref()
+                    .unordered_serialize()
             ),
             Decimal::try_from(f64::NAN).unwrap(),
         );
@@ -997,6 +1059,7 @@ mod tests {
             Decimal::unordered_deserialize(
                 Decimal::try_from(f64::INFINITY)
                     .unwrap()
+                    .as_scalar_ref()
                     .unordered_serialize()
             ),
             Decimal::try_from(f64::INFINITY).unwrap(),
@@ -1020,8 +1083,8 @@ mod tests {
         for i in 1..ordered.len() {
             assert!(ordered[i - 1] < ordered[i]);
             assert!(
-                memcomparable::Decimal::from(ordered[i - 1])
-                    < memcomparable::Decimal::from(ordered[i])
+                memcomparable::Decimal::from(ordered[i - 1].as_scalar_ref())
+                    < memcomparable::Decimal::from(ordered[i].as_scalar_ref())
             );
         }
     }

@@ -50,7 +50,7 @@ use risingwave_common::array::{ArrayError, StreamChunk};
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::test_prelude::StreamChunkTestExt;
-use risingwave_common::types::{Decimal, ScalarRefImpl};
+use risingwave_common::types::{Decimal, ScalarRef as _, ScalarRefImpl};
 use risingwave_common::util::panic::rw_catch_unwind;
 use risingwave_pb::connector_service::{
     GetEventStreamResponse, SinkCoordinatorStreamRequest, SinkCoordinatorStreamResponse,
@@ -794,7 +794,8 @@ extern "system" fn Java_com_risingwave_java_binding_Binding_iteratorGetDecimalVa
             .as_ref()
             .datum_at(idx as usize)
             .unwrap()
-            .into_decimal();
+            .into_decimal()
+            .to_owned_scalar();
 
         match decimal_value {
             Decimal::NaN | Decimal::NegativeInf | Decimal::PositiveInf => {

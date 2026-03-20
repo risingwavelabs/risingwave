@@ -36,7 +36,7 @@ impl ToSql for ScalarImpl {
             ScalarImpl::Float64(v) => v.to_sql(ty, out),
             ScalarImpl::Utf8(v) => v.to_sql(ty, out),
             ScalarImpl::Bool(v) => v.to_sql(ty, out),
-            ScalarImpl::Decimal(v) => v.to_sql(ty, out),
+            ScalarImpl::Decimal(v) => v.dxx().to_sql(ty, out),
             ScalarImpl::Interval(v) => v.to_sql(ty, out),
             ScalarImpl::Date(v) => v.to_sql(ty, out),
             ScalarImpl::Timestamp(v) => v.to_sql(ty, out),

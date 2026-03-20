@@ -1199,7 +1199,7 @@ impl ScalarRefImpl<'_> {
             Self::Utf8(v) => v.serialize(ser)?,
             Self::Bytea(v) => ser.serialize_bytes(v)?,
             Self::Bool(v) => v.serialize(ser)?,
-            Self::Decimal(v) => ser.serialize_decimal((**v).into())?,
+            Self::Decimal(v) => ser.serialize_decimal((*v).into())?,
             Self::Interval(v) => v.serialize(ser)?,
             Self::Date(v) => v.0.num_days_from_ce().serialize(ser)?,
             Self::Timestamp(v) => {

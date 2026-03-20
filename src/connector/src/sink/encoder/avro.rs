@@ -567,7 +567,7 @@ fn on_field<D: MaybeData>(
         DataType::Decimal => match inner {
             AvroSchema::Decimal(decimal_schema) => {
                 maybe.on_base(|s| {
-                    match s.into_decimal() {
+                    match s.into_decimal().xxd() {
                         risingwave_common::types::Decimal::Normalized(decimal) => {
                             // convert to bigint with scale
                             // rescale the rust_decimal to the scale of the avro decimal
@@ -576,7 +576,7 @@ fn on_field<D: MaybeData>(
                             // If the new_scale is lower than the current value (indicating a larger
                             // power of 10), digits will be dropped (as precision is lower)
                             let signed_bigint_bytes =
-                                rust_decimal_to_scaled_bigint(*decimal, decimal_schema.scale)
+                                rust_decimal_to_scaled_bigint(decimal, decimal_schema.scale)
                                     .map_err(FieldEncodeError::new)?;
                             Ok(Value::Decimal(apache_avro::Decimal::from(
                                 &signed_bigint_bytes,
