@@ -460,7 +460,7 @@ impl<L: Clone> HummockVersionCommon<SstableInfo, L> {
     pub fn apply_version_delta(
         &mut self,
         version_delta: &HummockVersionDeltaCommon<SstableInfo, L>,
-    ) {
+    ) -> HashMap<TableId, Option<StateTableInfo>> {
         assert_eq!(self.id, version_delta.prev_id);
 
         let (changed_table_info, mut is_commit_epoch) = self.state_table_info.apply_delta(
@@ -687,30 +687,19 @@ impl<L: Clone> HummockVersionCommon<SstableInfo, L> {
                 self.table_watermarks.remove(&table_id);
             }
         }
-
-        // apply to table change log
-        Self::apply_change_log_delta(
-            &mut self.table_change_log,
-            &version_delta.change_log_delta,
-            &version_delta.removed_table_ids,
-            &version_delta.state_table_info_delta,
-            &changed_table_info,
-        );
-
         // apply to vector index
         apply_vector_index_delta(
             &mut self.vector_indexes,
             &version_delta.vector_index_delta,
             &version_delta.removed_table_ids,
         );
+
+        changed_table_info
     }
 
     pub fn apply_change_log_delta<T: Clone>(
         table_change_log: &mut HashMap<TableId, TableChangeLogCommon<T>>,
         change_log_delta: &HashMap<TableId, ChangeLogDeltaCommon<T>>,
-        removed_table_ids: &HashSet<TableId>,
-        state_table_info_delta: &HashMap<TableId, StateTableInfoDelta>,
-        changed_table_info: &HashMap<TableId, Option<StateTableInfo>>,
     ) {
         for (table_id, change_log_delta) in change_log_delta {
             let new_change_log = &change_log_delta.new_log;
@@ -725,22 +714,43 @@ impl<L: Clone> HummockVersionCommon<SstableInfo, L> {
             };
         }
 
+        // truncate the remaining table change log
+        for (table_id, change_log_delta) in change_log_delta {
+            if let Some(change_log) = table_change_log.get_mut(table_id) {
+                change_log.truncate(change_log_delta.truncate_epoch);
+            }
+        }
+    }
+
+    /// Returns the log deltas required to truncate the entire change log for a table.
+    pub fn collect_gc_change_log_delta<'a, T: Clone>(
+        current_change_log_table_ids: impl Iterator<Item = &'a TableId>,
+        change_log_delta: &HashMap<TableId, ChangeLogDeltaCommon<T>>,
+        removed_table_ids: &HashSet<TableId>,
+        state_table_info_delta: &HashMap<TableId, StateTableInfoDelta>,
+        changed_table_info: &HashMap<TableId, Option<StateTableInfo>>,
+    ) -> HashSet<TableId> {
+        let mut gc_change_log_delta = HashSet::new();
         // If a table has no new change log entry (even an empty one), it means we have stopped maintained
         // the change log for the table, and then we will remove the table change log.
         // The table change log will also be removed when the table id is removed.
-        table_change_log.retain(|table_id, _| {
+        for table_id in current_change_log_table_ids {
             if removed_table_ids.contains(table_id) {
-                return false;
+                gc_change_log_delta.insert(*table_id);
+                continue;
             }
             if let Some(table_info_delta) = state_table_info_delta.get(table_id)
-                && let Some(Some(prev_table_info)) = changed_table_info.get(table_id) && table_info_delta.committed_epoch > prev_table_info.committed_epoch {
+                && let Some(Some(prev_table_info)) = changed_table_info.get(table_id)
+                && table_info_delta.committed_epoch > prev_table_info.committed_epoch
+            {
                 // the table exists previously, and its committed epoch has progressed.
             } else {
                 // otherwise, the table change log should be kept anyway
-                return true;
+                continue;
             }
             let contains = change_log_delta.contains_key(table_id);
             if !contains {
+                gc_change_log_delta.insert(*table_id);
                 static LOG_SUPPRESSOR: LazyLock<LogSuppressor> =
                     LazyLock::new(|| LogSuppressor::per_second(1));
                 if let Ok(suppressed_count) = LOG_SUPPRESSOR.check() {
@@ -751,15 +761,8 @@ impl<L: Clone> HummockVersionCommon<SstableInfo, L> {
                     );
                 }
             }
-            contains
-        });
-
-        // truncate the remaining table change log
-        for (table_id, change_log_delta) in change_log_delta {
-            if let Some(change_log) = table_change_log.get_mut(table_id) {
-                change_log.truncate(change_log_delta.truncate_epoch);
-            }
         }
+        gc_change_log_delta
     }
 
     pub fn build_branched_sst_info(&self) -> BTreeMap<HummockSstableObjectId, BranchedSstInfo> {
@@ -952,16 +955,7 @@ impl<T> HummockVersionCommon<T>
 where
     T: SstableIdReader + ObjectIdReader,
 {
-    pub fn get_sst_object_ids(&self, exclude_change_log: bool) -> HashSet<HummockSstableObjectId> {
-        self.get_sst_infos(exclude_change_log)
-            .map(|s| s.object_id())
-            .collect()
-    }
-
-    pub fn get_object_ids(
-        &self,
-        exclude_change_log: bool,
-    ) -> impl Iterator<Item = HummockObjectId> + '_ {
+    pub fn get_object_ids(&self) -> impl Iterator<Item = HummockObjectId> + '_ {
         // DO NOT REMOVE THIS LINE
         // This is to ensure that when adding new variant to `HummockObjectId`,
         // the compiler will warn us if we forget to handle it here.
@@ -970,7 +964,7 @@ where
             HummockObjectId::VectorFile(_) => {}
             HummockObjectId::HnswGraphFile(_) => {}
         };
-        self.get_sst_infos(exclude_change_log)
+        self.get_sst_infos()
             .map(|s| HummockObjectId::Sstable(s.object_id()))
             .chain(
                 self.vector_indexes
@@ -979,35 +973,13 @@ where
             )
     }
 
-    pub fn get_sst_ids(&self, exclude_change_log: bool) -> HashSet<HummockSstableId> {
-        self.get_sst_infos(exclude_change_log)
-            .map(|s| s.sst_id())
-            .collect()
+    pub fn get_sst_ids(&self) -> HashSet<HummockSstableId> {
+        self.get_sst_infos().map(|s| s.sst_id()).collect()
     }
 
-    pub fn get_sst_infos(&self, exclude_change_log: bool) -> impl Iterator<Item = &T> {
-        let may_table_change_log = if exclude_change_log {
-            None
-        } else {
-            Some(self.table_change_log.values())
-        };
+    pub fn get_sst_infos(&self) -> impl Iterator<Item = &T> {
         self.get_combined_levels()
             .flat_map(|level| level.table_infos.iter())
-            .chain(
-                may_table_change_log
-                    .map(|v| {
-                        v.flat_map(|table_change_log| {
-                            table_change_log.iter().flat_map(|epoch_change_log| {
-                                epoch_change_log
-                                    .old_value
-                                    .iter()
-                                    .chain(epoch_change_log.new_value.iter())
-                            })
-                        })
-                    })
-                    .into_iter()
-                    .flatten(),
-            )
     }
 }
 
@@ -1471,7 +1443,7 @@ fn level_insert_ssts(operand: &mut Level, insert_table_infos: &Vec<SstableInfo>)
     }
 }
 
-pub fn object_size_map(version: &HummockVersion) -> HashMap<HummockObjectId, u64> {
+pub fn version_object_size_map(version: &HummockVersion) -> HashMap<HummockObjectId, u64> {
     // DO NOT REMOVE THIS LINE
     // This is to ensure that when adding new variant to `HummockObjectId`,
     // the compiler will warn us if we forget to handle it here.
@@ -1490,14 +1462,6 @@ pub fn object_size_map(version: &HummockVersion) -> HashMap<HummockObjectId, u64
                 .chain(cg.levels.iter())
                 .flat_map(|level| level.table_infos.iter().map(|t| (t.object_id, t.file_size)))
         })
-        .chain(version.table_change_log.values().flat_map(|c| {
-            c.iter().flat_map(|l| {
-                l.old_value
-                    .iter()
-                    .chain(l.new_value.iter())
-                    .map(|t| (t.object_id, t.file_size))
-            })
-        }))
         .map(|(object_id, size)| (HummockObjectId::Sstable(object_id), size))
         .chain(
             version
@@ -1673,7 +1637,7 @@ mod tests {
             )]),
             ..Default::default()
         };
-        assert_eq!(version.get_object_ids(false).count(), 0);
+        assert_eq!(version.get_object_ids().count(), 0);
 
         // Add to sub level
         version
@@ -1693,7 +1657,7 @@ mod tests {
                 ],
                 ..Default::default()
             });
-        assert_eq!(version.get_object_ids(false).count(), 1);
+        assert_eq!(version.get_object_ids().count(), 1);
 
         // Add to non sub level
         version.levels.get_mut(&0).unwrap().levels.push(Level {
@@ -1707,7 +1671,7 @@ mod tests {
             ],
             ..Default::default()
         });
-        assert_eq!(version.get_object_ids(false).count(), 2);
+        assert_eq!(version.get_object_ids().count(), 2);
     }
 
     #[test]
