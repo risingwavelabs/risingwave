@@ -24,6 +24,7 @@ use parking_lot::lock_api::RwLock;
 use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_common::monitor::MonitoredRwLock;
 use risingwave_common::system_param::reader::SystemParamsRead;
+use risingwave_hummock_sdk::change_log::TableChangeLog;
 use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
 use risingwave_hummock_sdk::{
     CompactionGroupId, HummockCompactionTaskId, HummockContextId, HummockVersionId,
@@ -50,6 +51,7 @@ use crate::hummock::error::Result;
 use crate::hummock::manager::checkpoint::HummockVersionCheckpoint;
 use crate::hummock::manager::context::ContextInfo;
 use crate::hummock::manager::gc::{FullGcState, GcManager};
+use crate::hummock::model::ext::to_table_change_log;
 use crate::manager::{MetaSrvEnv, MetadataManager};
 use crate::model::{ClusterId, MetadataModelError};
 use crate::rpc::metrics::MetaMetrics;
@@ -387,6 +389,8 @@ impl HummockManager {
         };
         let instance = Arc::new(instance);
         instance.init_time_travel_state().await?;
+        instance.may_fill_backward_table_change_logs().await?;
+
         instance.start_worker(rx);
         instance.load_meta_store_state().await?;
         instance.release_invalid_contexts().await?;
@@ -518,6 +522,26 @@ impl HummockManager {
 
         versioning_guard.current_version = redo_state;
         versioning_guard.hummock_version_deltas = hummock_version_deltas;
+        versioning_guard.table_change_log =
+            risingwave_meta_model::hummock_table_change_log::Entity::find()
+                .all(&self.env.meta_store_ref().conn)
+                .await
+                .map_err(MetadataModelError::from)?
+                .into_iter()
+                .map(|m| (m.table_id, to_table_change_log(m)))
+                .into_group_map()
+                .into_iter()
+                .map(|(table_id, unordered_change_logs)| {
+                    (
+                        table_id,
+                        TableChangeLog::new(
+                            unordered_change_logs
+                                .into_iter()
+                                .sorted_by_key(|l| l.checkpoint_epoch),
+                        ),
+                    )
+                })
+                .collect();
 
         context_info.pinned_versions = hummock_pinned_version::Entity::find()
             .all(&meta_store.conn)
