@@ -27,9 +27,9 @@ const KEYWORD_DEFAULT_STRATEGY: &str = "default";
 
 #[derive(Copy, Debug, Clone, PartialEq, Default)]
 pub enum ConfigParallelism {
+    #[default]
     Default,
     Fixed(NonZeroU64),
-    #[default]
     Adaptive,
     Bounded(NonZeroU64),
     Ratio(f32),
@@ -338,6 +338,11 @@ mod tests {
     fn test_parallelism_parse_ratio() {
         let parallelism: ConfigParallelism = "ratio(0.5)".parse().unwrap();
         assert_eq!(parallelism, ConfigParallelism::Ratio(0.5));
+    }
+
+    #[test]
+    fn test_parallelism_default_variant() {
+        assert_eq!(ConfigParallelism::default(), ConfigParallelism::Default);
     }
 
     #[test]
