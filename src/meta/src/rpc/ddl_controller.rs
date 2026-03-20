@@ -2344,16 +2344,20 @@ impl DdlController {
             .await
     }
 
-    pub async fn wait(&self) -> MetaResult<WaitVersion> {
-        let timeout_ms = 30 * 60 * 1000;
-        for _ in 0..timeout_ms {
-            if self
+    pub async fn wait(&self, job_id: Option<JobId>) -> MetaResult<WaitVersion> {
+        let timeout_ms = 2 * 60 * 60 * 1000;
+        let poll_interval = Duration::from_millis(100);
+        for _ in 0..(timeout_ms / poll_interval.as_millis() as usize) {
+            let background_jobs = self
                 .metadata_manager
                 .catalog_controller
                 .list_background_creating_jobs(true, None)
-                .await?
-                .is_empty()
-            {
+                .await?;
+            let wait_done = match job_id {
+                Some(job_id) => !background_jobs.contains(&job_id),
+                None => background_jobs.is_empty(),
+            };
+            if wait_done {
                 let catalog_version = self
                     .metadata_manager
                     .catalog_controller
@@ -2366,7 +2370,7 @@ impl DdlController {
                 });
             }
 
-            sleep(Duration::from_millis(1)).await;
+            sleep(poll_interval).await;
         }
         Err(MetaError::cancelled(format!(
             "timeout after {timeout_ms}ms"

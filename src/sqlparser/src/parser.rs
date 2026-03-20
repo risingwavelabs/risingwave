@@ -344,7 +344,7 @@ impl Parser<'_> {
                 Keyword::PREPARE => Ok(self.parse_prepare()?),
                 Keyword::COMMENT => Ok(self.parse_comment()?),
                 Keyword::FLUSH => Ok(Statement::Flush),
-                Keyword::WAIT => Ok(Statement::Wait),
+                Keyword::WAIT => Ok(self.parse_wait()?),
                 Keyword::BACKUP => Ok(Statement::Backup),
                 Keyword::RECOVER => Ok(Statement::Recover),
                 Keyword::USE => Ok(self.parse_use()?),
@@ -6269,6 +6269,23 @@ impl Parser<'_> {
             order_by,
             window_frame,
         })
+    }
+
+    pub fn parse_wait(&mut self) -> ModalResult<Statement> {
+        let target = if self.parse_keyword(Keyword::TABLE) {
+            WaitTarget::Table(self.parse_object_name()?)
+        } else if self.parse_keyword(Keyword::MATERIALIZED) {
+            self.expect_keyword(Keyword::VIEW)?;
+            WaitTarget::MaterializedView(self.parse_object_name()?)
+        } else if self.parse_keyword(Keyword::SINK) {
+            WaitTarget::Sink(self.parse_object_name()?)
+        } else if self.parse_keyword(Keyword::INDEX) {
+            WaitTarget::Index(self.parse_object_name()?)
+        } else {
+            WaitTarget::All
+        };
+
+        Ok(Statement::Wait(target))
     }
 }
 

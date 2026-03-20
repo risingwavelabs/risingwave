@@ -334,7 +334,7 @@ impl StatementType {
             Statement::FetchCursor { .. } => Ok(StatementType::FETCH_CURSOR),
             Statement::CloseCursor { .. } => Ok(StatementType::CLOSE_CURSOR),
             Statement::Flush => Ok(StatementType::FLUSH),
-            Statement::Wait => Ok(StatementType::WAIT),
+            Statement::Wait(_) => Ok(StatementType::WAIT),
             Statement::Backup => Ok(StatementType::BACKUP),
             Statement::DeleteMetaSnapshots { .. } => Ok(StatementType::DELETE_META_SNAPSHOTS),
             Statement::Recover => Ok(StatementType::RECOVER),

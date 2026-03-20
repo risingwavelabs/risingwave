@@ -4198,3 +4198,12 @@ fn parse_alter_fragment_set_parallelism() {
         _ => panic!("unexpected statement kind"),
     }
 }
+
+#[test]
+fn parse_wait_target() {
+    one_statement_parses_to("WAIT", "WAIT");
+    one_statement_parses_to("WAIT TABLE t", "WAIT TABLE t");
+    one_statement_parses_to("WAIT MATERIALIZED VIEW mv1", "WAIT MATERIALIZED VIEW mv1");
+    one_statement_parses_to("WAIT SINK snk1", "WAIT SINK snk1");
+    one_statement_parses_to("WAIT INDEX idx1", "WAIT INDEX idx1");
+}

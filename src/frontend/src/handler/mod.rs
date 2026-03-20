@@ -657,7 +657,7 @@ pub async fn handle(
             }
         }
         Statement::Flush => flush::handle_flush(handler_args).await,
-        Statement::Wait => wait::handle_wait(handler_args).await,
+        Statement::Wait(target) => wait::handle_wait(handler_args, target).await,
         Statement::Backup => backup::handle_backup(handler_args).await,
         Statement::DeleteMetaSnapshots { snapshot_ids } => {
             delete_meta_snapshot::handle_delete_meta_snapshots(handler_args, snapshot_ids).await

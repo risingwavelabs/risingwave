@@ -1246,6 +1246,15 @@ pub enum CopyTarget {
     Stdout,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum WaitTarget {
+    All,
+    Table(ObjectName),
+    MaterializedView(ObjectName),
+    Sink(ObjectName),
+    Index(ObjectName),
+}
+
 /// A top-level statement (SELECT, INSERT, CREATE, etc.)
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -1685,9 +1694,9 @@ pub enum Statement {
     ///
     /// Note: RisingWave specific statement.
     Flush,
-    /// WAIT for ALL running stream jobs to finish.
-    /// It will block the current session the condition is met.
-    Wait,
+    /// WAIT for background stream jobs to finish.
+    /// It will block the current session until the condition is met.
+    Wait(WaitTarget),
     /// Trigger meta backup.
     Backup,
     /// Trigger stream job recover
@@ -2454,9 +2463,15 @@ impl Statement {
             Statement::Flush => {
                 write!(f, "FLUSH")
             }
-            Statement::Wait => {
-                write!(f, "WAIT")
-            }
+            Statement::Wait(target) => match target {
+                WaitTarget::All => write!(f, "WAIT"),
+                WaitTarget::Table(name) => write!(f, "WAIT TABLE {name}"),
+                WaitTarget::MaterializedView(name) => {
+                    write!(f, "WAIT MATERIALIZED VIEW {name}")
+                }
+                WaitTarget::Sink(name) => write!(f, "WAIT SINK {name}"),
+                WaitTarget::Index(name) => write!(f, "WAIT INDEX {name}"),
+            },
             Statement::Backup => {
                 write!(f, "BACKUP")?;
                 Ok(())
