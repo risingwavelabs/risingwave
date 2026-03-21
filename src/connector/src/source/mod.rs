@@ -60,6 +60,7 @@ pub mod pulsar;
 
 mod util;
 use std::future::IntoFuture;
+use std::time::Duration;
 
 pub use base::{UPSTREAM_SOURCE_KEY, WEBHOOK_CONNECTOR, *};
 pub use batch::BatchSourceSplitImpl;
@@ -125,6 +126,22 @@ pub enum WaitCheckpointTask {
 }
 
 impl WaitCheckpointTask {
+    /// Create a fresh task for the next epoch, reusing expensive-to-create clients
+    /// (e.g. `PubSub` `Subscription`, NATS `JetStreamContext`) from the current task.
+    /// This avoids re-establishing gRPC/network connections on every checkpoint.
+    pub fn reset_for_next_epoch(&self) -> Self {
+        match self {
+            WaitCheckpointTask::CommitCdcOffset(_) => WaitCheckpointTask::CommitCdcOffset(None),
+            WaitCheckpointTask::AckPubsubMessage(subscription, _) => {
+                WaitCheckpointTask::AckPubsubMessage(subscription.clone(), vec![])
+            }
+            WaitCheckpointTask::AckNatsJetStream(context, _, ack_policy) => {
+                WaitCheckpointTask::AckNatsJetStream(context.clone(), vec![], *ack_policy)
+            }
+            WaitCheckpointTask::AckPulsarMessage(_) => WaitCheckpointTask::AckPulsarMessage(vec![]),
+        }
+    }
+
     pub async fn run(self) {
         self.run_with_on_commit_success(|_source_id, _offset| {
             // Default implementation: no action on commit success
@@ -171,15 +188,27 @@ impl WaitCheckpointTask {
                 }
             }
             WaitCheckpointTask::AckPubsubMessage(subscription, ack_id_arrs) => {
+                const ACK_RPC_TIMEOUT: Duration = Duration::from_secs(30);
                 async fn ack(subscription: &Subscription, ack_ids: Vec<String>) {
                     tracing::trace!("acking pubsub messages {:?}", ack_ids);
-                    match subscription.ack(ack_ids).await {
-                        Ok(()) => {}
-                        Err(e) => {
+                    match tokio::time::timeout(ACK_RPC_TIMEOUT, subscription.ack(ack_ids)).await {
+                        Ok(Ok(())) => {}
+                        Ok(Err(e)) => {
+                            crate::source::monitor::GLOBAL_SOURCE_METRICS
+                                .connector_ack_failure_count
+                                .with_label_values(&["pubsub", "error"])
+                                .inc();
                             tracing::error!(
                                 error = %e.as_report(),
                                 "failed to ack pubsub messages",
                             )
+                        }
+                        Err(_) => {
+                            crate::source::monitor::GLOBAL_SOURCE_METRICS
+                                .connector_ack_failure_count
+                                .with_label_values(&["pubsub", "timeout"])
+                                .inc();
+                            tracing::error!("pubsub ack timed out after {ACK_RPC_TIMEOUT:?}",)
                         }
                     }
                 }
@@ -200,13 +229,31 @@ impl WaitCheckpointTask {
                 reply_subjects_arrs,
                 ref ack_policy,
             ) => {
+                const ACK_RPC_TIMEOUT: Duration = Duration::from_secs(30);
                 async fn ack(context: &JetStreamContext, reply_subject: String) {
-                    match context.publish(reply_subject.clone(), "+ACK".into()).await {
-                        Err(e) => {
-                            tracing::error!(error = %e.as_report(), subject = ?reply_subject, "failed to ack NATS JetStream message");
+                    let fut = async {
+                        let ack_future = context
+                            .publish(reply_subject.clone(), "+ACK".into())
+                            .await
+                            .map_err(|e| e.to_string())?;
+                        ack_future.into_future().await.map_err(|e| e.to_string())?;
+                        Ok::<(), String>(())
+                    };
+                    match tokio::time::timeout(ACK_RPC_TIMEOUT, fut).await {
+                        Ok(Ok(())) => {}
+                        Ok(Err(e)) => {
+                            crate::source::monitor::GLOBAL_SOURCE_METRICS
+                                .connector_ack_failure_count
+                                .with_label_values(&["nats_jetstream", "error"])
+                                .inc();
+                            tracing::error!(error = %e, subject = ?reply_subject, "failed to ack NATS JetStream message");
                         }
-                        Ok(ack_future) => {
-                            let _ = ack_future.into_future().await;
+                        Err(_) => {
+                            crate::source::monitor::GLOBAL_SOURCE_METRICS
+                                .connector_ack_failure_count
+                                .with_label_values(&["nats_jetstream", "timeout"])
+                                .inc();
+                            tracing::error!(subject = ?reply_subject, "NATS JetStream ack timed out after {ACK_RPC_TIMEOUT:?}");
                         }
                     }
                 }

@@ -14,7 +14,10 @@
 
 use std::sync::{Arc, LazyLock};
 
-use prometheus::{Registry, exponential_buckets, histogram_opts};
+use prometheus::{
+    IntCounterVec, Registry, exponential_buckets, histogram_opts,
+    register_int_counter_vec_with_registry,
+};
 use risingwave_common::metrics::{
     LabelGuardedHistogramVec, LabelGuardedIntCounterVec, LabelGuardedIntGaugeVec,
 };
@@ -93,6 +96,9 @@ pub struct SourceMetrics {
     pub kinesis_rebuild_shard_iter_count: LabelGuardedIntCounterVec,
     pub kinesis_early_terminate_shard_count: LabelGuardedIntCounterVec,
     pub kinesis_lag_latency_ms: LabelGuardedHistogramVec,
+
+    /// Total ack failures (RPC errors and timeouts) during checkpoint for source connectors.
+    pub connector_ack_failure_count: IntCounterVec,
 }
 
 pub static GLOBAL_SOURCE_METRICS: LazyLock<SourceMetrics> =
@@ -201,6 +207,14 @@ impl SourceMetrics {
         )
         .unwrap();
 
+        let connector_ack_failure_count = register_int_counter_vec_with_registry!(
+            "source_connector_ack_failure_count",
+            "Total number of ack failures during checkpoint for source connectors",
+            &["connector_type", "error_type"],
+            registry
+        )
+        .unwrap();
+
         SourceMetrics {
             partition_input_count,
             partition_input_bytes,
@@ -215,6 +229,8 @@ impl SourceMetrics {
             kinesis_rebuild_shard_iter_count,
             kinesis_early_terminate_shard_count,
             kinesis_lag_latency_ms,
+
+            connector_ack_failure_count,
         }
     }
 }
