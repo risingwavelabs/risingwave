@@ -107,6 +107,16 @@ def _(outer_panels: Panels):
                         )
                     ],
                 ),
+                panels.timeseries_ops(
+                    "Source Connector Ack Failures",
+                    "Rate of ack failures (RPC errors and timeouts) during checkpoint by connector type.",
+                    [
+                        panels.target(
+                            f"sum(rate({metric('source_connector_ack_failure_count')}[$__rate_interval])) by (connector_type, error_type)",
+                            "{{connector_type}} {{error_type}}",
+                        ),
+                    ],
+                ),
                 panels.timeseries_count(
                     "Kafka Consumer Lag Size",
                     "Kafka Consumer Lag Size by source_id, partition and actor_id",
