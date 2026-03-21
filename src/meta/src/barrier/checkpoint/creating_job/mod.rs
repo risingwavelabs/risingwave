@@ -41,6 +41,7 @@ use tracing::{debug, info};
 use super::state::RenderResult;
 use crate::MetaResult;
 use crate::barrier::backfill_order_control::get_nodes_with_backfill_dependencies;
+use crate::barrier::checkpoint::creating_job::barrier_control::CreatingStreamingJobBarrierStats;
 use crate::barrier::checkpoint::creating_job::status::CreateMviewLogStoreProgressTracker;
 use crate::barrier::command::PostCollectCommand;
 use crate::barrier::context::CreateSnapshotBackfillJobCommandInfo;
@@ -168,7 +169,7 @@ impl CreatingStreamingJobControl {
             &actors.actor_location,
         );
 
-        let barrier_control = CreatingStreamingJobBarrierControl::new(job_id, snapshot_epoch, None);
+        let barrier_control = CreatingStreamingJobBarrierControl::new(job_id, None);
 
         let mut prev_epoch_fake_physical_time = 0;
         let mut pending_non_checkpoint_barriers = vec![];
@@ -228,7 +229,10 @@ impl CreatingStreamingJobControl {
             state_table_ids,
         });
 
-        let mut graph_adder = partial_graph_manager.add_partial_graph(partial_graph_id);
+        let mut graph_adder = partial_graph_manager.add_partial_graph(
+            partial_graph_id,
+            CreatingStreamingJobBarrierStats::new(job_id, snapshot_epoch),
+        );
 
         if let Err(e) = Self::inject_barrier(
             partial_graph_id,
@@ -457,7 +461,7 @@ impl CreatingStreamingJobControl {
             "recovered creating snapshot backfill job"
         );
         let barrier_control =
-            CreatingStreamingJobBarrierControl::new(job_id, snapshot_epoch, Some(committed_epoch));
+            CreatingStreamingJobBarrierControl::new(job_id, Some(committed_epoch));
 
         let node_actors = InflightFragmentInfo::actor_ids_to_collect(fragment_infos.values());
         let state_table_ids: HashSet<_> =
@@ -540,6 +544,7 @@ impl CreatingStreamingJobControl {
             &node_actors,
             state_table_ids.iter().copied(),
             new_actors,
+            CreatingStreamingJobBarrierStats::new(job_id, snapshot_epoch),
         )?;
 
         Ok(Self {

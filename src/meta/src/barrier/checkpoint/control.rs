@@ -23,6 +23,7 @@ use risingwave_common::catalog::{DatabaseId, TableId};
 use risingwave_common::id::JobId;
 use risingwave_common::metrics::{LabelGuardedHistogram, LabelGuardedIntGauge};
 use risingwave_common::system_param::AdaptiveParallelismStrategy;
+use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::stream_graph_visitor::visit_stream_node_cont;
 use risingwave_meta_model::WorkerId;
 use risingwave_pb::common::WorkerNode;
@@ -44,7 +45,7 @@ use crate::barrier::checkpoint::state::{ApplyCommandInfo, BarrierWorkerState};
 use crate::barrier::complete_task::{BarrierCompleteOutput, CompleteBarrierTask};
 use crate::barrier::info::{InflightDatabaseInfo, SharedActorInfos};
 use crate::barrier::notifier::Notifier;
-use crate::barrier::partial_graph::{CollectedBarrier, PartialGraphManager};
+use crate::barrier::partial_graph::{CollectedBarrier, PartialGraphManager, PartialGraphStat};
 use crate::barrier::progress::TrackingJob;
 use crate::barrier::rpc::{from_partial_graph_id, to_partial_graph_id};
 use crate::barrier::schedule::{NewBarrier, PeriodicBarriers};
@@ -272,8 +273,10 @@ impl CheckpointControl {
                             database_id,
                             self.env.shared_actor_infos().clone(),
                         );
-                        let adder = partial_graph_manager
-                            .add_partial_graph(to_partial_graph_id(database_id, None));
+                        let adder = partial_graph_manager.add_partial_graph(
+                            to_partial_graph_id(database_id, None),
+                            DatabaseCheckpointControlMetrics::new(database_id),
+                        );
                         adder.added();
                         entry
                             .insert(DatabaseCheckpointControlStatus::Running(new_database))
@@ -356,13 +359,6 @@ impl CheckpointControl {
                 worker_nodes,
             )
         }
-    }
-
-    pub(crate) fn update_barrier_nums_metrics(&self) {
-        self.databases
-            .values()
-            .flat_map(|database| database.running_state())
-            .for_each(|database| database.update_barrier_nums_metrics());
     }
 
     pub(crate) fn gen_backfill_progress(&self) -> HashMap<JobId, BackfillProgress> {
@@ -576,14 +572,14 @@ impl DatabaseCheckpointControlStatus {
     }
 }
 
-struct DatabaseCheckpointControlMetrics {
+pub(in crate::barrier) struct DatabaseCheckpointControlMetrics {
     barrier_latency: LabelGuardedHistogram,
     in_flight_barrier_nums: LabelGuardedIntGauge,
     all_barrier_nums: LabelGuardedIntGauge,
 }
 
 impl DatabaseCheckpointControlMetrics {
-    fn new(database_id: DatabaseId) -> Self {
+    pub(in crate::barrier) fn new(database_id: DatabaseId) -> Self {
         let database_id_str = database_id.to_string();
         let barrier_latency = GLOBAL_META_METRICS
             .barrier_latency
@@ -599,6 +595,18 @@ impl DatabaseCheckpointControlMetrics {
             in_flight_barrier_nums,
             all_barrier_nums,
         }
+    }
+}
+
+impl PartialGraphStat for DatabaseCheckpointControlMetrics {
+    fn observe_barrier_latency(&self, _epoch: EpochPair, barrier_latency_secs: f64) {
+        self.barrier_latency.observe(barrier_latency_secs);
+    }
+
+    fn observe_barrier_num(&self, inflight_barrier_num: usize, collected_barrier_num: usize) {
+        self.in_flight_barrier_nums.set(inflight_barrier_num as _);
+        self.all_barrier_nums
+            .set((inflight_barrier_num + collected_barrier_num) as _);
     }
 }
 
@@ -619,8 +627,6 @@ pub(in crate::barrier) struct DatabaseCheckpointControl {
 
     pub(super) database_info: InflightDatabaseInfo,
     pub creating_streaming_job_controls: HashMap<JobId, CreatingStreamingJobControl>,
-
-    metrics: DatabaseCheckpointControlMetrics,
 }
 
 impl DatabaseCheckpointControl {
@@ -634,7 +640,6 @@ impl DatabaseCheckpointControl {
             committed_epoch: None,
             database_info: InflightDatabaseInfo::empty(database_id, shared_actor_infos),
             creating_streaming_job_controls: Default::default(),
-            metrics: DatabaseCheckpointControlMetrics::new(database_id),
         }
     }
 
@@ -654,7 +659,6 @@ impl DatabaseCheckpointControl {
             committed_epoch: Some(committed_epoch),
             database_info,
             creating_streaming_job_controls,
-            metrics: DatabaseCheckpointControlMetrics::new(database_id),
         }
     }
 
@@ -664,27 +668,6 @@ impl DatabaseCheckpointControl {
                 .creating_streaming_job_controls
                 .values()
                 .all(|job| job.is_valid_after_worker_err(worker_id))
-    }
-
-    fn total_command_num(&self) -> usize {
-        self.command_ctx_queue.len()
-            + match &self.completing_barrier {
-                Some(_) => 1,
-                None => 0,
-            }
-    }
-
-    /// Update the metrics of barrier nums.
-    fn update_barrier_nums_metrics(&self) {
-        self.metrics.in_flight_barrier_nums.set(
-            self.command_ctx_queue
-                .values()
-                .filter(|state| state.is_inflight())
-                .count() as i64,
-        );
-        self.metrics
-            .all_barrier_nums
-            .set(self.total_command_num() as i64);
     }
 
     /// Enqueue a barrier command
@@ -720,9 +703,6 @@ impl DatabaseCheckpointControl {
             None => {
                 if let Some(state) = self.command_ctx_queue.get_mut(&prev_epoch) {
                     assert!(!state.is_collected);
-                    self.metrics
-                        .barrier_latency
-                        .observe(collected_barrier.barrier_latency_secs);
                     state.is_collected = true;
                 } else {
                     panic!(

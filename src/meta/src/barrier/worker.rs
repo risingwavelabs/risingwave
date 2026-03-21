@@ -780,7 +780,6 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                     }
                 }
             }
-            self.checkpoint_control.update_barrier_nums_metrics();
         }
     }
 }

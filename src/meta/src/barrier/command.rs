@@ -720,8 +720,9 @@ impl PostCollectCommand {
             | PostCollectCommand::ReplaceStreamJob { .. }
             | PostCollectCommand::SourceChangeSplit { .. }
             | PostCollectCommand::CreateSubscription { .. }
-            | PostCollectCommand::ConnectorPropsChange(_) => true,
-            PostCollectCommand::Command(_) | PostCollectCommand::ResumeBackfill { .. } => false,
+            | PostCollectCommand::ConnectorPropsChange(_)
+            | PostCollectCommand::ResumeBackfill { .. } => true,
+            PostCollectCommand::Command(_) => false,
         }
     }
 
