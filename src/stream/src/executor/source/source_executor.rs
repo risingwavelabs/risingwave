@@ -140,7 +140,6 @@ impl<S: StateStore> SourceExecutor<S> {
         tokio::spawn(wait_checkpoint_worker.run());
         Ok(Some(WaitCheckpointTaskBuilder {
             wait_checkpoint_tx,
-            source_reader,
             building_task: initial_task,
         }))
     }
@@ -1039,7 +1038,7 @@ impl<S: StateStore> SourceExecutor<S> {
                         task_builder.update_task_on_checkpoint(updated_splits);
 
                         tracing::debug!("epoch to wait {:?}", epoch);
-                        task_builder.send(Epoch(epoch.prev)).await?
+                        task_builder.send(Epoch(epoch.prev));
                     }
 
                     let barrier_epoch = barrier.epoch;
@@ -1166,7 +1165,6 @@ impl<S: StateStore> Debug for SourceExecutor<S> {
 
 struct WaitCheckpointTaskBuilder {
     wait_checkpoint_tx: UnboundedSender<(Epoch, WaitCheckpointTask)>,
-    source_reader: SourceReader,
     building_task: WaitCheckpointTask,
 }
 
@@ -1214,17 +1212,14 @@ impl WaitCheckpointTaskBuilder {
         }
     }
 
-    /// Send and reset the building task to a new one.
-    async fn send(&mut self, epoch: Epoch) -> Result<(), anyhow::Error> {
-        let new_task = self
-            .source_reader
-            .create_wait_checkpoint_task()
-            .await?
-            .expect("wait checkpoint task should be created");
+    /// Send the current task and reset to an empty one for the next epoch.
+    /// Uses `reset_for_next_epoch()` to clone the client handle (e.g. `PubSub` `Subscription`)
+    /// from the current task, avoiding network I/O on the checkpoint hot path.
+    fn send(&mut self, epoch: Epoch) {
+        let new_task = self.building_task.reset_for_next_epoch();
         self.wait_checkpoint_tx
             .send((epoch, std::mem::replace(&mut self.building_task, new_task)))
             .expect("wait_checkpoint_tx send should succeed");
-        Ok(())
     }
 }
 
