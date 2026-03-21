@@ -281,9 +281,8 @@ fn timestamptz_to_char3(
     tmpl: &ChronoPattern,
     writer: &mut impl std::fmt::Write,
 ) -> Result<()> {
-    let local_datetime = data
-        .to_datetime_in_zone(Timestamptz::lookup_time_zone(zone).map_err(time_zone_err)?)
-        .naive_local();
+    let local_datetime =
+        data.to_datetime_in_zone(Timestamptz::lookup_time_zone(zone).map_err(time_zone_err)?);
     let format = local_datetime.format_with_items(tmpl.borrow_dependent().iter());
     let output = rewrite_bce_fields(format.to_string(), local_datetime.year_ce());
     write!(writer, "{}", output).unwrap();
@@ -504,5 +503,23 @@ fn format_inner(w: &mut impl std::fmt::Write, interval: Interval, item: &Item<'_
             }
         }
         Item::Error => Err(invalid_pattern_err()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::str::FromStr;
+
+    use risingwave_common::types::Timestamptz;
+
+    use super::{ChronoPattern, timestamptz_to_char3};
+
+    #[test]
+    fn test_timestamptz_to_char_with_timezone_offset_tokens() {
+        let tsz = Timestamptz::from_str("2023-07-12 03:01:00Z").unwrap();
+        let pattern = ChronoPattern::compile_for_timestamp("Mon DD, YYYY HH12:MI:SS am TZH:TZM");
+        let mut out = String::new();
+        timestamptz_to_char3(tsz, "US/Pacific", &pattern, &mut out).unwrap();
+        assert_eq!(out, "Jul 11, 2023 08:01:00 pm -07:00");
     }
 }
